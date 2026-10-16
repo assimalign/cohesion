@@ -276,7 +276,192 @@ with non-format requirements marked inapplicable only for an explicit reason.
    record before marking this gate passed. Until G2 exists this gate is pending, shown as `n/a`
    below; it does not silently become a pass or impose an invented budget.
 
-### Base snapshot
+### Final implementation snapshot — `17e58c2a1`
+
+Re-verified on 2026-10-16 at the integrated base `17e58c2a1`, before the close-out
+documentation edits. All thirteen retained packages are implemented, built, tested and listed
+for release. This is **not an all-gates-pass declaration**. `fail` includes missing acceptance
+evidence even when the implementation and its existing tests succeed. `n/a` has the explicit
+scope explanations below; gate 9 is **pending** [#1549](https://github.com/assimalign/cohesion/issues/1549).
+The historical `f7197e97f` table and its evidence are preserved below this snapshot.
+
+| Package | 1 CI/release | 2 Failures | 3 Spec tests | 4 Round trip | 5 Malformed | 6 Streaming | 7 Docs | 8 AOT | 9 Perf |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `Content` | pass | pass | n/a | n/a | n/a | n/a | fail | pass | pending |
+| `Content.Binary` | pass | pass | n/a | n/a | n/a | n/a | fail | pass | pending |
+| `Content.Media` | pass | pass | n/a | n/a | n/a | n/a | fail | pass | pending |
+| `Content.Bmff` | pass | pass | pass | pass | pass | fail | fail | pass | pending |
+| `Content.Mpeg` | pass | pass | pass | pass | pass | fail | fail | pass | pending |
+| `Content.Heif` | pass | pass | pass | pass | pass | fail | fail | pass | pending |
+| `Content.Ebml` | pass | pass | pass | pass | pass | fail | fail | pass | pending |
+| `Content.Mkv` | pass | pass | pass | pass | pass | fail | fail | pass | pending |
+| `Content.Pdf` | pass | pass | pass | pass | pass | fail | fail | pass | pending |
+| `Content.Exe` | pass | pass | pass | n/a | pass | n/a | fail | pass | pending |
+| `Content.Text` | pass | pass | pass | n/a | pass | n/a | fail | pass | pending |
+| `Content.Markdown` | pass | pass | pass | pass | pass | n/a | fail | pass | pending |
+| `Content.Yaml` | pass | pass | pass | pass | pass | n/a | fail | pass | pending |
+
+Content, Binary and Media have no independent format grammar: gates 3–6 are inapplicable,
+but their actual contract, primitive and media-model tests establish gates 1–2. Text has no
+format writer or lazy document (gates 4 and 6). YAML and Markdown retain whole-input text
+models, outside the container triad (gate 6); depth/alias/fallback tests do not claim a total
+input-memory budget. Exe is explicitly an inspector, not an executable writer or editable
+container: gates 4 and 6 are inapplicable. This corrects the baseline's gate-4 failure against
+a surface that the delivered, documented inspection scope does not promise. Exe invocation
+is separately covered by `ExecutableInvocationTests`, including timeout/cancellation and
+descendant cleanup; format inspection never invokes the inspected file.
+
+#### Executed commands and counts
+
+From the repository root, `P` was each exact `Assimalign.Cohesion.`-prefixed package in the
+table below. Each build/test invocation named its csproj, used Debug, and ran without a test
+filter or added skip. SDK: `10.0.401`. Logs and the review-only Roslyn inventory were kept in
+`%TEMP%/content-s7-closeout`, outside the committed tree. No pack/install command ran.
+
+```powershell
+git log -1 --oneline
+dotnet --version
+dotnet build libraries/Content/<P>/src/<P>.csproj
+dotnet test libraries/Content/<P>/tests/<P>.Tests.csproj
+dotnet msbuild libraries/Content/<P>/src/<P>.csproj -getProperty:IsAotCompatible,EnableAotAnalyzer,EnableTrimAnalyzer,GenerateDocumentationFile,NoWarn,RunAnalyzersDuringBuild
+dotnet build libraries/Content/<P>/src/<P>.csproj -p:GenerateDocumentationFile=true -p:EmitCompilerGeneratedFiles=true "-p:CompilerGeneratedFilesOutputPath=$taskScratch/generated/<Package>"
+pwsh -NoProfile -Command "Import-Module ./installer/scripts/modules/CohesionPackaging.psm1 -Force; Assert-CohesionReleaseInventory"
+rg -n 'NotImplementedException' libraries/Content -g '*.cs' -g '!**/obj/**' -g '!**/bin/**'
+rg -n 'throw new (IndexOutOfRangeException|ArgumentOutOfRangeException|OverflowException|EndOfStreamException|InvalidCastException|ArgumentException|InvalidOperationException|FormatException|DecoderFallbackException)|(?:ArgumentNullException|ArgumentOutOfRangeException)\.ThrowIf' libraries/Content -g '**/src/**/*.cs' -g '!**/obj/**' -g '!**/bin/**'
+rg -n 'ReadExactly|checked\(|catch .*Exception' libraries/Content -g '**/src/**/*.cs' -g '!**/obj/**' -g '!**/bin/**'
+rg -n 'ContentFormatErrorCode|MaxDepth|DepthLimit|LimitExceeded' libraries/Content -g '*.cs' -g '!**/obj/**' -g '!**/bin/**'
+rg -n 'IL[23][0-9]{3}|NoWarn|SuppressMessage' libraries/Content -g '*.cs' -g '*.csproj' -g '*.props' -g '!**/obj/**' -g '!**/bin/**'
+```
+
+For the XML builds, `$taskScratch` was `Join-Path $env:TEMP 'content-s7-closeout'`, and
+`<Package>` was the short package name in this table. XML generation was enabled only on
+the command line. No project settings or suppressions changed.
+
+| Package | Ordinary build warnings / errors | Tests passed / failed / skipped | XML build warnings / errors | BCL-search lines |
+| --- | --- | --- | --- | --- |
+| `Content` | 0 / 0 | 22 / 0 / 0 | 0 / 0 | 3 |
+| `Content.Binary` | 0 / 0 | 201 / 0 / 0 | 0 / 0 | 72 |
+| `Content.Media` | 0 / 0 | 93 / 0 / 0 | 0 / 0 | 17 |
+| `Content.Bmff` | 0 / 0 | 413 / 0 / 0 | 81 / 0 | 81 |
+| `Content.Mpeg` | 0 / 0 | 104 / 0 / 0 | 0 / 0 | 11 |
+| `Content.Heif` | 0 / 0 | 85 / 0 / 0 | 0 / 0 | 16 |
+| `Content.Ebml` | 0 / 0 | 267 / 0 / 0 | 1 / 0 | 104 |
+| `Content.Mkv` | 0 / 0 | 77 / 0 / 0 | 0 / 0 | 35 |
+| `Content.Pdf` | 0 / 0 | 256 / 0 / 0 | 0 / 0 | 37 |
+| `Content.Exe` | 0 / 0 | 107 / 0 / 0 | 0 / 0 | 20 |
+| `Content.Text` | 0 / 0 | 505 / 0 / 0 | 0 / 0 | 10 |
+| `Content.Markdown` | 0 / 0 | 1,536 / 0 / 0 | 0 / 0 | 20 |
+| `Content.Yaml` | 0 / 0 | 480 / 0 / 0 | 0 / 0 | 19 |
+
+All 26 ordinary build/test commands and all thirteen XML builds exit 0: **4,146 passed,
+0 failed, 0 skipped**. The inventory guard exits 0: 231 libraries/resources, 21 SDK packs,
+19 framework families × 7 RIDs. Its four source-less CI exclusions are Amqp and the three
+Dns.Client transports, not Content. All thirteen Content entries appear in both
+`.github/workflows/library-content.yml` and `CohesionPackaging.psm1`; every package has a
+test csproj discovered by the shared CI action. This is local verification plus configuration
+inspection, not a claim that a new remote CI run or publication occurred.
+
+#### Gates 2 and 5 — reachable failures and resource limits
+
+The `NotImplementedException` search exits 1 with **zero matches**, including tests. The BCL
+search exits 0 with **445 matching source lines** (counts above), not 445 parser defects.
+Review distinguishes caller guards, state/capability errors, model-edit errors and transport
+failures from malformed wire paths. Binary span reads check remaining bytes; container readers
+check counts/ranges before constructing slices and segments. MP4 checked timestamp/fragment
+arithmetic is translated to classified failures; Matroska uses checked wide intermediates and
+classified timestamp errors. EBML strict text decoding and Content.Text's decoder adapter
+translate decoder failures; PDF translates invalid compressed data. No raw malformed-input
+escape was identified in these reviewed paths or exercised corpora. This evidence is bounded
+to the retained operations and tested mutations, not a proof for every possible byte string.
+
+| Package / format | Executed failure and boundary evidence |
+| --- | --- |
+| Content / Binary / Media | Root ownership/reopen tests; `BinaryContentReaderTests`, `ContentStreamExtensionsTests`, `ContentSliceStreamTests`, `BinarySegmentTests`; `MediaTimestampTests` and `MediaSampleIndexTests` cover argument, overflow, capability and cancellation contracts. Media is not a parser; its arithmetic exceptions must be translated by profiles. |
+| BMFF | `BmffMalformedTests.Load_TruncatedStrategicHeader_ReportsAbsolutePosition`, `Load_CountBeyondPayload_RejectsBeforeAllocation`, `Load_NestedSubsamples_EnforcesCumulativeBudget`; `BmffComplianceTests` covers depth and buffered-payload limits. Unsupported deferred boxes remain opaque in lenient mode and fail with `Unsupported` in strict mode. |
+| MP4 | `Mp4MalformedTests.Load_TruncatedVisualPrefix_ShouldReportAbsoluteEnd`, `Load_DeepSampleEntryChildren_ShouldRetainBmffDepthLimit`, `Load_ExceededLimits_ShouldRejectBeforeExpansion`, count/range disagreements and unsupported edit programs. |
+| HEIF/AVIF | `HeifComplianceTests` and the malformed cases in `HeifDocumentTests`/`HeifBoxTests` cover truncated headers, extent arithmetic, item/property/reference caps and invalid derived images; fixture mutations are in `HeifMalformedFixtures`. Inherited BMFF depth/buffer checks also run. |
+| EBML | `EbmlMalformedElementTests.ReadBinary_OversizedDeclaration_ReportsTruncationOrLimit`, `Skip_RecursiveDepthBomb_ReportsLimit`, `ReadNext_NestedSlice_ReportsSourcePosition`, and `ReadNext_DeterministicHostileInputs_ReportsOnlyFormatFailures`; schema-defined `0x80` and raw payload truncation regressions run. |
+| Matroska/WebM | `MkvMalformedTests.Parse_TruncatedBlockHeaders_ReportsAbsoluteTruncation`, `Read_TruncatedEbmlHeaders_UsesSharedCorpus`, `Load_RecursiveTagBomb_ReportsDepthLimit`, `Load_MetadataCaps_ReportsLimit`, `ReadSamples_TimestampOverflow_ReportsInvalidValue`; frame-reader tests add streamed truncation and ownership. |
+| PDF | `PdfMalformedCorpusTests.ReadIndirect_TruncatedStreamPrefixes_ReportsTruncated`, `Resolve_ObjectStreamCountBomb_ReportsLimitExceeded`, `Resolve_DepthBomb_ReportsLimitExceeded`, `Read_SlicedSource_ReportsAbsolutePosition`; filter and structure boundary suites cover decoding, cycles and deterministic corruptions. |
+| PE/ELF/Mach-O | `ExecutableCorpusTests` applies every-prefix truncation to seven complete authored fixtures, sync and async; `ExecutableMalformedInputTests.Read_MalformedCorpus_ReportsCodeAndAbsolutePosition`, `Read_ReaderLimit_ReportsLimitExceeded`, `Read_MutatedHeaders_UsesFormatExceptionVocabulary`. No recursive executable-member descent is claimed. |
+| Text | `UnicodeCorpusTests`, `TextDecodingFailureTests.OpenText_InvalidUtf8_ReportsContentFailureAsync`, `OpenText_ReaderEntryPoint_TranslatesFailureAsync`, `TextLineReaderLimitTests.TryReadLine_EndlessInput_BoundsWorkAndAllocation`. Line-limit positions are decoded UTF-16 offsets; decoder positions are byte offsets. |
+| Markdown | `MarkdownMalformedCorpusTests`, `MarkdownParserOptionsTests.Parse_ContainerLimit_DegradesExcessMarkers`, `Parse_DestinationDepthBoundary_DegradesOnlyExcess`, child-process `ParserResourceLimitTests`, and strict-decoder regressions. Excess syntax degrades to text rather than inventing a syntax exception. |
+| YAML | `YamlResourceLimitTests.Parse_DefaultDepthBoundary_Accepts`, `Parse_AliasBudgetBoundary_ChargesExpandedNodes`, `Parse_AliasBomb_UsesBoundedTimeAndAllocation`, child-process `ParserResourceLimitTests`, and decoding/error-position regressions. Syntax/limit errors carry shared codes and original decoded-character positions. |
+
+#### Gates 3 and 4 — mapped corpora and writer round trips
+
+The standards table names the area baselines. These tests establish the **documented retained
+subsets**, including explicit exclusions; no row asserts full codec or specification certification.
+No fixture was downloaded during close-out. Existing YAML and CommonMark vendoring keeps its
+recorded provenance and licenses; other binary fixtures are authored bytes or writer output.
+
+| Format | Specification mapping and corpus | Writer evidence |
+| --- | --- | --- |
+| BMFF | `BmffModelTests` / `BmffFlagVersionTests` map ISO/IEC 14496-12 box clauses; `BmffGoldenFixtures` builds progressive, fast-start, fragmented and HEIF-shaped structures. Deferred boxes are listed in package DESIGN. | `BmffGoldenTests.Save_GoldenFile_IsByteIdentical`; `BmffMutationTests` checks metadata growth, chunk/fragment/item relocation and repeated saves; `BmffIndexRelocationTests` covers sidx/saio. |
+| MP4/CMAF subset | `Mp4GoldenTests`, `Mp4RegistryTests`, `Mp4SampleTests`, `Mp4BoundaryTests` map ISO/IEC 14496-14, 14496-12 and retained 23000-19 clauses; `Mp4GoldenFixtures` produces five structural goldens with placeholder codec bytes. | `Save_CheckedInGolden_ShouldMatchWriterAndRoundTrip`; fast-start, sample and auxiliary-offset preservation tests. External muxer interoperability and full CMAF certification remain outside the evidence. |
+| HEIF/AVIF | [Corpus provenance](../../../libraries/Content/Assimalign.Cohesion.Content.Heif/tests/TestObjects/Corpus/PROVENANCE.md): ISO/IEC 23008-12 clause titles, BMFF item clauses, AVIF v1.2.0 sections; four writer-produced fixtures. | `HeifCorpusTests.Load_CheckedFixture_MatchesWriterAndRoundTrips`; `HeifDocumentTests` metadata edits; `HeifErasureTests.Save_RemovedMetadata_ContainsNoMarkersAndPreservesImages` covers physical erasure and retained images. |
+| EBML | `Rfc8794Corpus`, `EbmlComplianceTests` and `EbmlSchemaIdentifierTests`: RFC 8794 §§5–8, 11, 15, explicit schema authority and retained width limits. | `EbmlDocumentTests.Save_ConstructedDocument_PreservesBytesAndLazyUnknowns`, `Save_EditedMetadata_UpdatesSizesAndCopiesBinary`, and CRC/async round trips. |
+| Matroska/WebM | `MkvSchema`, `MkvGoldenCorpusTests`, `MkvChapterTests` and `MkvFrameReaderTests`: RFC 9559 / RFC 8794 sections and the documented 2026-10-16 element-table snapshot; four `MkvFixtures.Create` goldens. | `Save_GoldenFile_PreservesEveryByte`, `Save_RepeatedGrowthAndShrink_PreservesWholeClustersAndPositions`, typed chapter edits and all lace modes. |
+| PDF | `PdfCorpusTests`, `PdfParserTests`, `PdfCrossReferenceTests`, filter/boundary suites and the package DESIGN clause table map ISO 32000-2:2020 §7. Authored reader goldens and six `PdfWriterGoldenBuilder` files cover table/stream/hybrid revisions. | `PdfWriterComplianceTests.Read_WriterGolden_PreservesGraphsAcrossSaves`, `Write_RepeatedSaves_AreByteIdentical`, full/incremental save suites, nested mutation and four successive revisions. |
+| PE/COFF, ELF, Mach-O | `ExecutableMetadataTests` / `ExecutableCorpusTests`: PE File/Optional/Section headers, gABI ELF headers/sections/program headers, Apple thin/fat headers and load commands; authored fixtures plus the test runtime's file-backed PE. | n/a — inspection snapshots have no executable serializer. |
+| Text | `UnicodeCorpus` / `UnicodeCorpusTests`: Unicode 17.0 §§3.9/3.10/5.8 and RFC 3629 §§3/4/6; exact scalar boundaries, BOMs, malformed subparts and line semantics. | n/a — decoding/line/token primitives, not a format writer. |
+| Markdown | [CommonMark 0.31.2 provenance](../../../libraries/Content/Assimalign.Cohesion.Content.Markdown/tests/TestObjects/CommonMark/PROVENANCE.md): all 652 official examples, 406 retained and 246 pinned degradations, plus the construct corpus. | All 652 canonical structural round trips plus `MarkdownRoundTripTests`; exclusions stay explicit rather than becoming test skips. |
+| YAML | [Versioned official-suite subset](../../../libraries/Content/Assimalign.Cohesion.Content.Yaml/tests/TestData/yaml-test-suite/README.md), commit `6ad3d2c62885d82fc349026c136ef560838fdf3d`: 223 vendored cases from 333 runnable cases at vendoring, 110 explicitly excluded; YAML 1.2.2 core-schema and boundary tests. | `YamlEmitterTests.Write_RoundTrip_IsStable`, facade seams and anchor/tag shared-node regressions. Comments and original presentation are not preserved. |
+
+#### Gate 6 — evidence gaps, not inferred passes
+
+All named tests below ran in the full suites above. A sparse **load** test, a tiny round trip
+or a save that fails before reaching the payload does not establish a bounded successful
+large-payload save. The five media/container rows need a completed save above the buffering
+cap, with instrumented input/output and a buffering/allocation bound plus payload equality.
+No acceptance test was added or weakened in this documentation-only review.
+
+| Package | Forward-only and lazy evidence present | Why gate 6 still fails |
+| --- | --- | --- |
+| BMFF | `BmffComplianceTests.Read_NonSeekableSource_ReachesFinalBoxWithBoundedTransfers`, `Skip_NonSeekableMedia_DrainsWithoutMaterialization`, `ReadChildren_NonSeekableContainers_ReachesSibling`; `BmffLazyLeafTests.SaveAsync_ProfileLeafAboveCap_CopiesIdenticalBytes`; `BmffWriterTests.WriteAsync_RootContract_PreservesBytes`. | The lazy-save test copies five bytes above a four-byte cap with a probed output, but no save-time source/allocation bound. The 40 GiB source is exercised on load/relocation, not a completed bounded save. |
+| MP4 | `Mp4BoundaryTests.Read_NonSeekablePartialDelivery_ShouldSkipWithoutBufferingMedia`, sparse load/fast-start and million-sample tests; golden saves use the BMFF writer. | No instrumented completed profile-document save proves unchanged large media/configuration payloads stay bounded. Generic BMFF support and small goldens do not establish that regression gate. |
+| HEIF | `HeifStreamingTests.Read_NonSeekableInput_DescendsIntoMeta`, `Save_NonSeekableOutput_CopiesUnchangedImages`, `Load_FortyGiBIdat_DoesNotReadImagePayload`; physical-erasure regressions. | The completed probed save uses small image bytes. `HeifErasureTests.Save_SparseImage_CompactsUsingBorrowedSlicesOnly` deliberately throws on output before copying the 40 GiB image; it proves lazy planning, not successful bounded copy-through. |
+| EBML | `EbmlReaderTests.ReadNext_UnknownMasterOnNonSeekableInput_PreservesSibling`, `EbmlPayloadStreamTests.OpenPayloadStream_NonSeekablePayload_StopsAtBoundary`, `EbmlWriterTests.WriteElement_ForwardOnlyOutput_RoundTrips`, `EbmlDocumentTests.ReadAsync_AsyncOnlyStreams_RoundTripsWithoutSyncIo`. | Sparse 40 GiB coverage is load/measurement only. `WriteAsync_NestedCrcMasters_KeepsCopyPassesBounded` bounds passes over eight payload bytes, not buffering during a completed large save. |
+| Matroska | `MkvStreamingTests.Read_LivePartialReads_DoesNotBufferBlocks`, `Write_ForwardOnlyOutput_RoundTripsLiveMasters`, `Load_FortyGiBBlock_ReadsOnlyFraming`; `MkvFrameReaderTests.ReadAsync_LargeFrame_StreamsWithoutMaterializing`; repeated metadata saves preserve complete cluster bytes. | The large-block tests cover load/frame access. Metadata-save tests compare small cluster bytes without a save-time source/allocation bound. EBML raw-copy support alone does not establish the document's complete save regression. |
+| PDF | `PdfFullSaveTests.WriteAsync_NonSeekableDestination_EmitsReadablePdf`; `PdfIncrementalSaveTests.Write_UntouchedOpaqueStream_CopiesWithoutDecodingOrMaterialization` measures one bounded copy of a 2 MiB opaque payload in both save modes. | `PdfMalformedCorpusTests.Read_StreamCapabilities_RejectsNonSeekableAndHandlesShortReads` explicitly rejects non-seekable input. Package DESIGN specializes the reader for random-access xrefs, but the area gate/plan D1 still requires a forward-only reader. The owner must resolve that contract conflict; this review grants no waiver. |
+
+#### Gates 7–9 — documentation, analyzers and pending measurements
+
+Gate 7 is measured before repairs. Review covered the source declarations, inherited contracts,
+public collection accessors, helper-propagated guards/failures, and the two generated YAML value
+types. Compiler XML warnings are only one signal. Concrete findings include:
+
+| Package | Documentation finding at `17e58c2a1` |
+| --- | --- |
+| Content | Async cancellation/read-only-write exceptions omitted from inherited contracts; root DESIGN still describes completed error/dependency migrations as future work. |
+| Binary | Slice `Remaining`/`Flush` disposal and span-write failure docs incomplete; DESIGN still describes EBML/PDF references as migrations. |
+| Media | DESIGN's dashed Stage 4 profile dependencies and planned-adapter table are stale; public XML contracts are reviewed separately from this status failure. |
+| BMFF | Missing/empty enum and deferred-box summaries, undocumented explicit content seams, guard/cancellation exceptions omitted on several stream/writer members. |
+| MPEG | `Mp4File.Load` omits null/options guards and inherited async read omits cancellation; profile setter and inherited box exceptions require review. |
+| HEIF | Inherited BMFF box contracts omit guards; item-view and edit operations need the propagated failure contracts checked, including source lifetime and save failures. |
+| EBML | `EbmlElementType.None` has no summary; save null guard and reader/writer disposal/state failure documentation is incomplete. |
+| MKV | Async open-read cancellation and delegated collection/edit/source failure contracts are incomplete. |
+| PDF | Explicit nongeneric enumeration and delegated collection/lazy resolution/source failures require documentation; ordinary zero XML warnings do not cover them. |
+| Exe | Invocation documents unexpected cleanup failures only in remarks, without exception elements for the propagated I/O/process errors. |
+| Text | Detection/open-text can propagate source disposal, reopen/capability and I/O failures; async cancellation must be documented through the inherited contract. |
+| Markdown | Explicit nongeneric enumeration and stream/text-content failure contracts are incomplete. |
+| YAML | Null guards on writes/scalar construction and helper-propagated parse guards are undocumented; generated operators inherit parameter names different from `a`/`b`, and generated JSON writer exception contracts require generator-owned repairs. |
+
+Gate 8 passes **for each shipped library's analyzer build**: evaluated `IsAotCompatible`,
+`EnableAotAnalyzer` and `EnableTrimAnalyzer` are all `true`; `NoWarn` is `1701;1702`,
+`GenerateDocumentationFile` is initially `false`, and `RunAnalyzersDuringBuild` has no false
+override. Ordinary and XML-enabled build logs have **0 IL2xxx / 0 IL3xxx diagnostics per
+package**, with no library AOT/trim suppression. The sole Content source suppression is
+test-only `IL3000` on `ExecutableCorpusTests`' file-backed runtime-PE fixture, whose comment
+explicitly excludes single-file test publication. It does not waive a library warning. No
+native executable publication or cross-platform benchmark run is claimed.
+
+Gate 9 remains pending for all thirteen packages. Local allocation assertions in the media
+and parser tests are useful regressions, but are not the pinned, machine/runtime/corpus
+benchmark record and budgets required by #1549.
+
+
+### f7197e97f baseline (original snapshot)
 
 This table is a snapshot of base commit `f7197e97f` (2026-10-16); the program's close-out re-verifies
 every gate against the integrated implementation.
