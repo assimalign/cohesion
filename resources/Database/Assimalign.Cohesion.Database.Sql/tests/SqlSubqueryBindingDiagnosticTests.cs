@@ -2,8 +2,8 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Execution;
-using Assimalign.Cohesion.Database.Language;
 using Assimalign.Cohesion.Database.Sql.Language;
+using Assimalign.Cohesion.Database.Types;
 
 using Shouldly;
 using Xunit;

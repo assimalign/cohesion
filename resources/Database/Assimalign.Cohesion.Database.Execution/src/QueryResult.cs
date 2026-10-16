@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 
-using Assimalign.Cohesion.Database.Language;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Execution;
 
@@ -27,7 +27,7 @@ public abstract class QueryResult
     /// Gets any diagnostic messages produced during parsing or execution.
     /// </summary>
     /// <remarks>
-    /// Uses the <see cref="Diagnostic"/> type from <c>Database.Language</c> which carries
+    /// Uses the <see cref="Diagnostic"/> type from <c>Database.Types</c> which carries
     /// source location information (start, end, line) in addition to code, message, and severity.
     /// </remarks>
     public abstract IReadOnlyList<Diagnostic>? Diagnostics { get; }

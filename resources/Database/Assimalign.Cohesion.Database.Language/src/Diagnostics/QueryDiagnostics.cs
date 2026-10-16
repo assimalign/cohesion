@@ -1,5 +1,7 @@
 using System;
 
+using Assimalign.Cohesion.Database.Types;
+
 namespace Assimalign.Cohesion.Database.Language;
 
 /// <summary>

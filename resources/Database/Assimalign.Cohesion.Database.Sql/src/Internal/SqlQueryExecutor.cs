@@ -6,11 +6,11 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Indexing;
-using Assimalign.Cohesion.Database.Language;
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Sql.Storage;
 using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Types;
 
 /// <summary>
 /// Executes SQL statements: the planner binds the parsed AST against the catalog,

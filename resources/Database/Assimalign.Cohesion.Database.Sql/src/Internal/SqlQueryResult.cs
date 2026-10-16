@@ -3,7 +3,7 @@ using System.Collections.Generic;
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 using Assimalign.Cohesion.Database.Execution;
-using Assimalign.Cohesion.Database.Language;
+using Assimalign.Cohesion.Database.Types;
 
 /// <summary>
 /// Represents the result of a SQL DML operation (INSERT, UPDATE, DELETE).

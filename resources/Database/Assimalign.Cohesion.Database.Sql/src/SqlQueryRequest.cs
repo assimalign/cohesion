@@ -5,9 +5,9 @@ using System.Linq;
 namespace Assimalign.Cohesion.Database.Sql;
 
 using Assimalign.Cohesion.Database.Execution;
-using Assimalign.Cohesion.Database.Language;
 using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Sql.Language;
+using Assimalign.Cohesion.Database.Types;
 
 /// <summary>
 /// Represents a SQL query request: a parsed SQL statement plus optional named

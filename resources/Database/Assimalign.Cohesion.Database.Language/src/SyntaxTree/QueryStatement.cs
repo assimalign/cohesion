@@ -3,6 +3,8 @@ using System.Linq;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 
+using Assimalign.Cohesion.Database.Types;
+
 namespace Assimalign.Cohesion.Database.Language;
 
 public abstract class QueryStatement

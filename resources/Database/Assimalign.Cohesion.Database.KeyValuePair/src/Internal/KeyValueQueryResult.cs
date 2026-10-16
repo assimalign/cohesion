@@ -3,7 +3,7 @@ using System.Collections.Generic;
 namespace Assimalign.Cohesion.Database.KeyValuePair.Internal;
 
 using Assimalign.Cohesion.Database.Execution;
-using Assimalign.Cohesion.Database.Language;
+using Assimalign.Cohesion.Database.Types;
 
 /// <summary>
 /// The result of a non-row-returning key-value command (DELETE): a status and

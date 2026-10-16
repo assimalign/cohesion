@@ -33,7 +33,7 @@ not an edge.
 | Shipped library/resource projects | 249 |
 | Library areas | 21 |
 | Resource areas | 18 |
-| Declared project references | 734 |
+| Declared project references | 735 |
 | Declared shared-source links | 31 |
 
 ## Ambiguous project names
@@ -695,7 +695,7 @@ _More than twelve projects: the table below is the area's graph (see the node ce
 | `Assimalign.Cohesion.Database.KeyValuePair.Client` | `Assimalign.Cohesion.Connections`<br>`Assimalign.Cohesion.Database`<br>`Assimalign.Cohesion.Database.Client`<br>`Assimalign.Cohesion.Database.KeyValuePair`<br>`Assimalign.Cohesion.Database.Types` | — | — | — |
 | `Assimalign.Cohesion.Database.KeyValuePair.Security` | — | — | — | — |
 | `Assimalign.Cohesion.Database.KeyValuePair.Storage` | `Assimalign.Cohesion.Database.Storage` | — | — | — |
-| `Assimalign.Cohesion.Database.Language` | — | — | — | — |
+| `Assimalign.Cohesion.Database.Language` | `Assimalign.Cohesion.Database.Types` | — | — | — |
 | `Assimalign.Cohesion.Database.Memory` | — | — | — | — |
 | `Assimalign.Cohesion.Database.Protocol` | — | — | — | — |
 | `Assimalign.Cohesion.Database.Security` | — | — | — | — |
@@ -1090,7 +1090,7 @@ warning, not a problem in itself: these are the assemblies whose contracts cost 
 | `Assimalign.Cohesion.IdentityModel` | 19 | Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane, Assimalign.Cohesion.ConfigurationStore.ApplicationModel.Orchestration.Tests, Assimalign.Cohesion.ConfigurationStore.Hosting.Tests, Assimalign.Cohesion.IdentityHub, … |
 | `Assimalign.Cohesion.Database.Storage` | 17 | Assimalign.Cohesion.Database, Assimalign.Cohesion.Database.Blob, Assimalign.Cohesion.Database.Blob.Catalog, Assimalign.Cohesion.Database.Blob.Storage, … |
 | `Assimalign.Cohesion.FileSystem` | 17 | Assimalign.Cohesion.Configuration.FileSystem, Assimalign.Cohesion.Configuration.FileSystem.Tests, Assimalign.Cohesion.Configuration.Ini.Tests, Assimalign.Cohesion.Configuration.Json.Tests, … |
-| `Assimalign.Cohesion.Database.Types` | 15 | Assimalign.Cohesion.Database, Assimalign.Cohesion.Database.Documents.Catalog, Assimalign.Cohesion.Database.Execution, Assimalign.Cohesion.Database.Graph.Catalog, … |
+| `Assimalign.Cohesion.Database.Types` | 16 | Assimalign.Cohesion.Database, Assimalign.Cohesion.Database.Documents.Catalog, Assimalign.Cohesion.Database.Execution, Assimalign.Cohesion.Database.Graph.Catalog, … |
 
 ## Harnesses
 

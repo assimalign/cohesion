@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Runtime.CompilerServices;
 using Assimalign.Cohesion.Database.Graph.Language.Internal;
 using Assimalign.Cohesion.Database.Language;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Graph.Language;
 
