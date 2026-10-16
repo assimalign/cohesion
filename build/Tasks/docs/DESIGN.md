@@ -30,8 +30,21 @@ boolean parser and `COHVT005` diagnostic. Non-string formatted overloads, explic
 and JSON still expose the underlying runtime value. The option is additive relative to
 10.0.0-preview.1; existing metadata produces unchanged display behavior.
 
+Generated XML documentation names every parameter as declared. A member inherits its docs with
+`<inheritdoc/>` only when its parameter names match the BCL contract it implements. Otherwise it
+carries explicit tags. That covers the operators (`a`/`b` against `left`/`right`) and the provider
+`Parse`/`TryParse` overloads (`value`/`span` against `s`). Two alternatives were rejected. Renaming
+the parameters would let `<inheritdoc/>` resolve, but it changes the public metadata of every value
+type in the repository. Keeping `<inheritdoc/>` leaves the mismatch invisible, because the
+compiler never checks it, while explicit tags fail with CS1572/CS1573 under
+`GenerateDocumentationFile`. Exception tags list only what the member can throw or propagate for
+its runtime type, so no Ulid formatting or Guid parse overflow is documented.
+
 Core's test assembly owns conformance fixtures and direct task tests. A compiled redacted partial
 proves the generator leaves both members to handwritten code without runtime reflection. Direct
 generation tests cover struct/class and string/numeric kinds, omitted/false behavior, and invalid
-metadata. See the [metadata contract](../../../docs/build/MSBUILD_COHESION_PROPS.md#value-types)
+metadata. Documentation tests read every public member of every runtime type, kind, and
+validation combination. They require a `<param>` tag for each declared parameter and no stale tag.
+They allow `<inheritdoc/>` only on the name-matching contracts, and they pin the exception tags per
+runtime type. See the [metadata contract](../../../docs/build/MSBUILD_COHESION_PROPS.md#value-types)
 for the complete generated surface and compatibility policy.

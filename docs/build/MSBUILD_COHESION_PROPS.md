@@ -104,6 +104,19 @@ The target supplies `ObjectFilePath` and `ObjectRelativePath` for compilation an
 are derived metadata, not configuration knobs. The generated file has an auto-generated header,
 nullable annotations and XML documentation, without nullable-warning suppression.
 
+**Generated documentation.** Every public member documents each parameter under its declared name
+and the exceptions it throws or propagates. `<inheritdoc/>` is used only where the generated
+parameter names match the inherited BCL contract: `Equals`, `CompareTo`, `GetHashCode`, and the
+formatted `ToString` and `TryFormat`. The operators (`a`, `b`) and the provider `Parse`/`TryParse`
+overloads (`value`, `span`) differ from their interfaces (`left`/`right`, `s`), so they carry
+explicit tags. The compiler checks those when `GenerateDocumentationFile` is on (CS1572, CS1573),
+but it never checks an `<inheritdoc/>` name against the inherited one. Exception tags cover
+unsupported format strings (numeric and Guid; Ulid ignores the format), numeric overflow in
+`Parse` (integral and decimal types; `double` saturates to infinity), and the `Utf8JsonWriter`
+failures the converter's `Write` and `WriteAsPropertyName` propagate. Those are
+`InvalidOperationException` for an invalid writer position, and `ArgumentException` for an
+oversized string or a NaN or infinite `double`.
+
 **Generated contract.** Structs are `readonly partial struct`; classes are `sealed partial class`.
 Both expose a constructor, a get-only `Value`, `IEquatable<T>`, `IComparable<T>`,
 `IEqualityOperators<T,T,bool>`, `IComparisonOperators<T,T,bool>`, equality and comparison operators,
