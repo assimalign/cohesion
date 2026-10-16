@@ -123,6 +123,7 @@ public sealed class SqlBindingConcurrencyTests
             // Arrange
             using var gate = new SqlBindingGate();
             using var cancellation = new CancellationTokenSource();
+            using var waiterCancellation = new CancellationTokenSource();
             var builder = SqlDatabaseEngine.CreateBuilder("binding-retry");
             var function = SqlScalarFunction.Create<int, int>("review_gate", gate.Invoke, SqlFunctionVolatility.Immutable);
             builder.Functions.Add(function);
@@ -130,6 +131,7 @@ public sealed class SqlBindingConcurrencyTests
             var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
             await using var first = await database.CreateSessionAsync(CancellationToken.None);
             await using var second = await database.CreateSessionAsync(CancellationToken.None);
+            await using var third = await database.CreateSessionAsync(CancellationToken.None);
             await QueryAsync(first, "CREATE FUNCTION review_sql(p TEXT) RETURNS INTEGER IMMUTABLE RETURN review_gate(1)");
             await CreateUnboundTableAsync(database, "cold", function);
             string sql = binding switch
@@ -148,6 +150,7 @@ public sealed class SqlBindingConcurrencyTests
             var computing = new SqlBindingCaller(() => QueryAsync(first, binding == "refresh"
                 ? "CREATE FUNCTION another_sql(p INT) RETURNS INT RETURN p" : sql, cancellation.Token));
             SqlBindingCaller? waiter = null;
+            SqlBindingCaller? canceledWaiter = null;
             try
             {
                 gate.WaitUntilEntered().ShouldBeTrue();
@@ -155,6 +158,25 @@ public sealed class SqlBindingConcurrencyTests
                 waiter.WaitUntilBlocked().ShouldBeTrue();
                 waiter.Completion.IsCompleted.ShouldBeFalse();
                 gate.Calls.ShouldBe(1);
+
+                if (failureMode is "cancel" or "throw")
+                {
+                    canceledWaiter = new SqlBindingCaller(() => QueryAsync(third, sql, waiterCancellation.Token));
+                    canceledWaiter.WaitUntilBlocked().ShouldBeTrue();
+                    canceledWaiter.Completion.IsCompleted.ShouldBeFalse();
+
+                    // Act
+                    waiterCancellation.Cancel();
+                    var waiterFailure = await canceledWaiter.Completion.WaitAsync(TimeSpan.FromSeconds(3));
+
+                    // Assert: cancellation must finish while the producer is still gated.
+                    waiterFailure.ShouldBeAssignableTo<OperationCanceledException>()!
+                        .CancellationToken.ShouldBe(waiterCancellation.Token);
+                    cancellation.IsCancellationRequested.ShouldBeFalse();
+                    computing.Completion.IsCompleted.ShouldBeFalse();
+                    waiter.Completion.IsCompleted.ShouldBeFalse();
+                    gate.Calls.ShouldBe(1);
+                }
 
                 // Act
                 if (failureMode != "throw") { cancellation.Cancel(); }
@@ -177,6 +199,7 @@ public sealed class SqlBindingConcurrencyTests
                 gate.Release();
                 await computing.JoinAsync();
                 if (waiter is not null) { await waiter.JoinAsync(); }
+                if (canceledWaiter is not null) { await canceledWaiter.JoinAsync(); }
             }
             await QueryAsync(second, sql);
             gate.Calls.ShouldBe(2);
