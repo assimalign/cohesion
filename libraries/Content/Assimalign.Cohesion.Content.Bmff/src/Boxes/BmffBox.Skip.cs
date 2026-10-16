@@ -1,9 +1,9 @@
-﻿using Assimalign.Cohesion.Files.Bmff.Internal;
+﻿using Assimalign.Cohesion.Content.Bmff.Internal;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 
-namespace Assimalign.Cohesion.Files.Bmff;
+namespace Assimalign.Cohesion.Content.Bmff;
 
 [DebuggerDisplay("Bmff Box: Skip (skip)")]
 public sealed class SkipBox : BmffBoxComposite

@@ -3,9 +3,8 @@ using System.Diagnostics;
 using static System.Buffers.Binary.BinaryPrimitives;
 
 using Assimalign.Cohesion.Content.Media;
-using Assimalign.IO;
 
-namespace Assimalign.Cohesion.Files.Bmff;
+namespace Assimalign.Cohesion.Content.Bmff;
 
 [DebuggerDisplay("Bmff Box: Movie Header (mvhd)")]
 public sealed class MovieHeaderBox : BmffBox

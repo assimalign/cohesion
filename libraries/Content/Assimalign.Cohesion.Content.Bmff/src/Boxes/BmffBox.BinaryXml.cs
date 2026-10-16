@@ -5,7 +5,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.Files.Bmff;
+namespace Assimalign.Cohesion.Content.Bmff;
 
 [DebuggerDisplay("Bmff Box: Binary Xml (bxml)")]
 public sealed class BinaryXmlBox : BmffBox

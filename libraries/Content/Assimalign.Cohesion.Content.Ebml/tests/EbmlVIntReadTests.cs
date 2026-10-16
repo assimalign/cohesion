@@ -3,9 +3,9 @@ using System.IO;
 using Shouldly;
 using Xunit;
 
-using Assimalign.IO.Ebml.Tests.TestObjects;
+using Assimalign.Cohesion.Content.Ebml.Tests.TestObjects;
 
-namespace Assimalign.IO.Ebml.Tests;
+namespace Assimalign.Cohesion.Content.Ebml.Tests;
 
 public class EbmlVIntReadTests
 {

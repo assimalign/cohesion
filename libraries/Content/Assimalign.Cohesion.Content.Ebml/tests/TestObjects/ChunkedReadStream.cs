@@ -1,7 +1,7 @@
 using System;
 using System.IO;
 
-namespace Assimalign.IO.Ebml.Tests.TestObjects;
+namespace Assimalign.Cohesion.Content.Ebml.Tests.TestObjects;
 
 /// <summary>
 /// A read-only stream that yields at most a fixed number of bytes per <see cref="Read(byte[], int, int)"/>

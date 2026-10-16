@@ -4,7 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Assimalign.IO.Ebml;
+namespace Assimalign.Cohesion.Content.Ebml;
 
 public class EbmlDocument
 {

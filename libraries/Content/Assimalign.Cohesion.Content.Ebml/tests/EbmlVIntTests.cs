@@ -3,7 +3,7 @@ using System;
 using Shouldly;
 using Xunit;
 
-namespace Assimalign.IO.Ebml.Tests;
+namespace Assimalign.Cohesion.Content.Ebml.Tests;
 
 public class EbmlVIntTests
 {

@@ -1,4 +1,4 @@
-﻿namespace Assimalign.Cohesion.Files.Binary.Tests;
+﻿namespace Assimalign.Cohesion.Content.Binary.Tests;
 
 public class UnitTest1
 {

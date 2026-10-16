@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Content.Binary;
 
-namespace Assimalign.Cohesion.Files;
+namespace Assimalign.Cohesion.Content.Exe;
 
 public interface IExecutableFile : IBinaryFile
 {

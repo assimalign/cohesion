@@ -3,63 +3,62 @@ using System.IO;
 using System.IO.Compression;
 using System.Net.Http;
 
-namespace Assimalign.IO.Mkv.Tests
+namespace Assimalign.Cohesion.Content.Mkv.Tests;
+
+public class TestFiles
 {
-    public class TestFiles
+
+
+
+    public void Download()
     {
 
+        var zipPath         = "C:\\Users\\c.crawford\\Downloads\\Test.zip";
+        var zipExtractPath  = "C:\\Users\\c.crawford\\Downloads\\Test";
+        var downloadUri     = "https://sourceforge.net/projects/matroska/files/test_files/matroska_test_w1_1.zip/download";
 
-
-        public void Download()
+        using var client = new HttpClient()
         {
+            Timeout = TimeSpan.FromMinutes(5),
+        };
+        using var request = new HttpRequestMessage()
+        {
+            Method      = HttpMethod.Get,
+            RequestUri  = new Uri(downloadUri)
+        };
 
-            var zipPath         = "C:\\Users\\c.crawford\\Downloads\\Test.zip";
-            var zipExtractPath  = "C:\\Users\\c.crawford\\Downloads\\Test";
-            var downloadUri     = "https://sourceforge.net/projects/matroska/files/test_files/matroska_test_w1_1.zip/download";
+        using var response = client.Send(request);
 
-            using var client = new HttpClient()
+        if (response.IsSuccessStatusCode)
+        {
+            using var responseStream = response.Content.ReadAsStream();
+            using var fileStream = new FileStream(zipPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.Read);
+
+            while (responseStream.Position < responseStream.Length)
             {
-                Timeout = TimeSpan.FromMinutes(5),
-            };
-            using var request = new HttpRequestMessage()
-            {
-                Method      = HttpMethod.Get,
-                RequestUri  = new Uri(downloadUri)
-            };
+                var size = 4096;
+                var buffer = new byte[size];
+                var remaining = (responseStream.Length - responseStream.Position);
+                var length = remaining > size ? size : (int)remaining;
 
-            using var response = client.Send(request);
+                responseStream.Read(buffer, 0, length);
 
-            if (response.IsSuccessStatusCode)
-            {
-                using var responseStream = response.Content.ReadAsStream();
-                using var fileStream = new FileStream(zipPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.Read);
-
-                while (responseStream.Position < responseStream.Length)
-                {
-                    var size = 4096;
-                    var buffer = new byte[size];
-                    var remaining = (responseStream.Length - responseStream.Position);
-                    var length = remaining > size ? size : (int)remaining;
-
-                    responseStream.Read(buffer, 0, length);
-
-                    fileStream.Write(buffer, 0, length);
-                }
-
-                fileStream.Flush();
-                fileStream.Close();
-
-                ZipFile.ExtractToDirectory(zipPath, zipExtractPath);
+                fileStream.Write(buffer, 0, length);
             }
+
+            fileStream.Flush();
+            fileStream.Close();
+
+            ZipFile.ExtractToDirectory(zipPath, zipExtractPath);
         }
+    }
 
 
 
-        [Fact(DisplayName = "Cohesion Test [Content.Mkv] - Read the Matroska archive fixture",
-            Skip = "requires a local media fixture: the Matroska matroska_test_w1_1.zip test-file archive")]
-        public void Test1()
-        {
-            Download();
-        }
+    [Fact(DisplayName = "Cohesion Test [Content.Mkv] - Read the Matroska archive fixture",
+        Skip = "requires a local media fixture: the Matroska matroska_test_w1_1.zip test-file archive")]
+    public void Test1()
+    {
+        Download();
     }
 }

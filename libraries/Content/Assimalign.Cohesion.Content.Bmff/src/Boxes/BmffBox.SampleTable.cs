@@ -5,9 +5,9 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.Files.Bmff;
+namespace Assimalign.Cohesion.Content.Bmff;
 
-using Assimalign.Cohesion.Files.Bmff.Internal;
+using Assimalign.Cohesion.Content.Bmff.Internal;
 
 [DebuggerDisplay("Bmff Box: Sample Table (stbl)")]
 public sealed class SampleTableBox : BmffBoxComposite

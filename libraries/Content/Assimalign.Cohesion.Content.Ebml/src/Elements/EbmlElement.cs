@@ -5,7 +5,7 @@ using System.Text;
 using System.Threading.Tasks;
 using System.Xml.Linq;
 
-namespace Assimalign.IO.Ebml;
+namespace Assimalign.Cohesion.Content.Ebml;
 
 public class EbmlElement
 {

@@ -1,7 +1,7 @@
 ﻿using System;
 using System.IO;
 
-namespace Assimalign.Cohesion.Files.Bmff;
+namespace Assimalign.Cohesion.Content.Bmff;
 
 
 /// <summary>

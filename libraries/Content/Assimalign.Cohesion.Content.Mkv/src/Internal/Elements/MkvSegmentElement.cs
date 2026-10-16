@@ -4,9 +4,8 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Assimalign.IO.Mkv.Internal
+namespace Assimalign.Cohesion.Content.Mkv.Internal;
+
+internal class MkvSegmentElement
 {
-    internal class MkvSegmentElement
-    {
-    }
 }

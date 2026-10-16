@@ -5,7 +5,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.Files.Bmff.Internal;
+namespace Assimalign.Cohesion.Content.Bmff.Internal;
 
 internal sealed partial class BmffReaderDefault
 {

@@ -1,4 +1,4 @@
-﻿using Assimalign.Cohesion.Files.Bmff.Internal;
+﻿using Assimalign.Cohesion.Content.Bmff.Internal;
 using System;
 using System.Buffers.Binary;
 using System.Collections;
@@ -9,7 +9,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.Files.Bmff;
+namespace Assimalign.Cohesion.Content.Bmff;
 
 [DebuggerDisplay("Bmff Box: Track (trak)")]
 public sealed class TrackBox : BmffBoxComposite

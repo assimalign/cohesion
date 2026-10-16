@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
-		<RootNamespace>Assimalign.IO.Mkv.Tests</RootNamespace>
+		<RootNamespace>Assimalign.Cohesion.Content.Mkv.Tests</RootNamespace>
 	</PropertyGroup>
   <ItemGroup>
 		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />

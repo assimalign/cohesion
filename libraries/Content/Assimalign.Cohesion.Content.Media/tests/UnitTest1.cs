@@ -1,4 +1,4 @@
-﻿namespace Assimalign.Cohesion.MediaFile.Tests;
+﻿namespace Assimalign.Cohesion.Content.Media.Tests;
 
 public class UnitTest1
 {

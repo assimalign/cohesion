@@ -1,6 +1,6 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
-		<RootNamespace>Assimalign.Cohesion.Files.Binary.Tests</RootNamespace>
+		<RootNamespace>Assimalign.Cohesion.Content.Binary.Tests</RootNamespace>
 	</PropertyGroup>
   <ItemGroup>
 		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />

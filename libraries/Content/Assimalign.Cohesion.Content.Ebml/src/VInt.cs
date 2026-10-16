@@ -2,7 +2,7 @@
 using System.IO;
 using System.Diagnostics;
 
-namespace Assimalign.IO.Ebml;
+namespace Assimalign.Cohesion.Content.Ebml;
 
 public readonly struct VInt
 {

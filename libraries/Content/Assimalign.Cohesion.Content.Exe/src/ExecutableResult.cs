@@ -1,4 +1,4 @@
-﻿namespace Assimalign.Cohesion.Files;
+﻿namespace Assimalign.Cohesion.Content.Exe;
 
 public class ExecutableResult
 {

@@ -1,4 +1,4 @@
-﻿namespace Assimalign.Cohesion.Files.Bmff;
+﻿namespace Assimalign.Cohesion.Content.Bmff;
 
 public enum BmffBoxType : uint
 {

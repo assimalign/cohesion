@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
-		<RootNamespace>Assimalign.IO.Ebml.Tests</RootNamespace>
+		<RootNamespace>Assimalign.Cohesion.Content.Ebml.Tests</RootNamespace>
 	</PropertyGroup>
 
   <ItemGroup>

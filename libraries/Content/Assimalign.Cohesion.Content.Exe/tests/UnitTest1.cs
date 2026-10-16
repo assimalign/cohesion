@@ -1,4 +1,4 @@
-﻿namespace Assimalign.Cohesion.Files.Exe.Tests;
+﻿namespace Assimalign.Cohesion.Content.Exe.Tests;
 
 public class UnitTest1
 {

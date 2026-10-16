@@ -4,9 +4,8 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Assimalign.IO.Ebml.Internal
+namespace Assimalign.Cohesion.Content.Ebml.Internal;
+
+internal class EbmlReader
 {
-    internal class EbmlReader
-    {
-    }
 }

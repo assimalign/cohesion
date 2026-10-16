@@ -1,6 +1,6 @@
 ﻿using System;
 
-namespace Assimalign.IO;
+namespace Assimalign.Cohesion.Content.Media;
 
 public readonly struct FPoint
 {

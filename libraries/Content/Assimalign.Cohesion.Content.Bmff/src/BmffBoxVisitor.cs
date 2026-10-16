@@ -1,6 +1,6 @@
 ﻿using System;
 
-namespace Assimalign.Cohesion.Files.Bmff;
+namespace Assimalign.Cohesion.Content.Bmff;
 
 public abstract class BmffBoxVisitor<T> : IBmffBoxVisitor<T>
 {

@@ -7,9 +7,9 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Files.Bmff.Internal;
+using Assimalign.Cohesion.Content.Bmff.Internal;
 
-namespace Assimalign.Cohesion.Files.Bmff;
+namespace Assimalign.Cohesion.Content.Bmff;
 
 [DebuggerDisplay("Bmff Box: Media Information (minf)")]
 public sealed class MediaInfoBox : BmffBoxComposite
