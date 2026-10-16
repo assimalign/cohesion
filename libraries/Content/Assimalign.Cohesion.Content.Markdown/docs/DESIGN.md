@@ -117,7 +117,8 @@ destinations percent-encode over the reference implementation's safe set and ent
 attributes — including percent-encoding square brackets in destinations while preserving display
 text — so spec-derived expectations assert byte-for-byte.
 
-**Canonical Markdown** (`MarkdownWriter`) normalizes on output: `-` bullets, `N.` ordered markers,
+**Canonical Markdown** (`MarkdownWriter`) normalizes on output: `-` bullets, `N.` ordered markers (alternating `+` / `N)` for adjacent
+same-kind lists, preserving their boundaries),
 ATX headings, backtick fences (tilde when the info string carries a backtick), `---` breaks
 (`***` after an item marker, where dashes could swallow the item),
 emphasis delimiters alternating `*`/`_` by nesting depth (so nested emphasis never fuses into

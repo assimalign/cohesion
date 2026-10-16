@@ -125,7 +125,7 @@ internal sealed class MarkdownWriter
                 break;
 
             case MarkdownList list:
-                PushList(list);
+                PushList(list, op.ListMarker);
                 break;
         }
     }
@@ -133,9 +133,27 @@ internal sealed class MarkdownWriter
     /// <summary>Pushes sibling blocks; loose contexts separate them with blank lines.</summary>
     private void PushBlocks(IList<MarkdownBlock> blocks, bool tight)
     {
+        var runStart = blocks.Count;
         for (var index = blocks.Count - 1; index >= 0; index--)
         {
-            _ops.Push(Op.ForNode(blocks[index]));
+            var marker = '\0';
+            if (blocks[index] is MarkdownList list)
+            {
+                if (index < runStart)
+                {
+                    runStart = index;
+                    while (runStart > 0 && blocks[runStart - 1] is MarkdownList previous
+                        && previous.IsOrdered == list.IsOrdered)
+                    {
+                        runStart--;
+                    }
+                }
+
+                var alternate = (index - runStart) % 2 != 0;
+                marker = list.IsOrdered ? (alternate ? ')' : '.') : (alternate ? '+' : '-');
+            }
+
+            _ops.Push(Op.ForNode(blocks[index], marker));
             if (index > 0 && !tight)
             {
                 _ops.Push(Op.BlankLineOp);
@@ -143,14 +161,14 @@ internal sealed class MarkdownWriter
         }
     }
 
-    private void PushList(MarkdownList list)
+    private void PushList(MarkdownList list, char listMarker)
     {
         for (var index = list.Items.Count - 1; index >= 0; index--)
         {
             var item = list.Items[index];
             var marker = list.IsOrdered
-                ? (list.Start + index).ToString() + ". "
-                : "- ";
+                ? (list.Start + index).ToString(System.Globalization.CultureInfo.InvariantCulture) + listMarker + " "
+                : listMarker + " ";
 
             _ops.Push(Op.PopPrefixOp);
             if (item.Blocks.Count == 0)
@@ -468,6 +486,7 @@ internal sealed class MarkdownWriter
         public OpKind Kind { get; private init; }
 
         public MarkdownNode? Node { get; private init; }
+        public char ListMarker { get; private init; }
 
         public string? Text { get; private init; }
 
@@ -487,7 +506,7 @@ internal sealed class MarkdownWriter
 
         public static Op PopPrefixOp { get; } = new() { Kind = OpKind.PopPrefix };
 
-        public static Op ForNode(MarkdownNode node) => new() { Kind = OpKind.Node, Node = node };
+        public static Op ForNode(MarkdownNode node, char listMarker = '\0') => new() { Kind = OpKind.Node, Node = node, ListMarker = listMarker };
 
         public static Op Raw(string text) => new() { Kind = OpKind.Raw, Text = text };
 

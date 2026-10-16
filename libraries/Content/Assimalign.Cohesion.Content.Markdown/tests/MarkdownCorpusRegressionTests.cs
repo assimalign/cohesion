@@ -131,4 +131,21 @@ public class MarkdownCorpusRegressionTests
         // Assert
         MarkdownModelComparison.ShouldEqual(expected, MarkdownText.Parse(written), source);
     }
+    [Theory(DisplayName = "Cohesion Test [Content.Markdown] - Writer: adjacent lists remain separate models")]
+    [InlineData("- foo\n- bar\n+ baz")]
+    [InlineData("1. foo\n2. bar\n3) baz")]
+    [InlineData("+ one\n- two\n* three")]
+    public void Write_AdjacentLists_PreservesBoundaries(string source)
+    {
+        // Arrange. Authored variants of CommonMark 301/302 exercise two and three adjacent lists.
+        var expected = MarkdownText.Parse(source);
+
+        // Act
+        var written = MarkdownText.Write(expected);
+        var actual = MarkdownText.Parse(written);
+
+        // Assert
+        MarkdownModelComparison.ShouldEqual(expected, actual, source);
+        MarkdownText.Write(actual).ShouldBe(written);
+    }
 }
