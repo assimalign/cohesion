@@ -170,10 +170,10 @@ public class ContentStreamExtensionsTests
         }
     }
 
-    [Theory(DisplayName = "Cohesion Test [Content.Binary] - Exact stream errors: slices supply tracked window positions")]
+    [Theory(DisplayName = "Cohesion Test [Content.Binary] - Exact stream errors: slices report absolute source positions")]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task ReadContentExactly_SliceShortfall_ReportsTrackedPosition(bool forwardOnly)
+    public async Task ReadContentExactly_SliceShortfall_ReportsAbsolutePosition(bool forwardOnly)
     {
         // Arrange
         using var source = new MemoryStream(PrimitiveBytes.Sequence(12));
@@ -185,9 +185,27 @@ public class ContentStreamExtensionsTests
 
         // Assert
         error.ErrorCode.ShouldBe(ContentFormatErrorCode.Truncated);
-        error.Position.ShouldBe(3);
+        error.Position.ShouldBe(8);
         slice.SourceOffset.ShouldBe(5);
         slice.Position.ShouldBe(3);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Content.Binary] - Exact stream errors: nested slices report the outermost source position")]
+    public void ReadContentExactly_NestedSliceShortfall_ReportsOutermostPosition()
+    {
+        // Arrange
+        using var source = new MemoryStream(PrimitiveBytes.Sequence(32));
+        using var outer = ContentSliceStream.Create(source, 4, 20);
+        using var inner = outer.CreateSlice(6, 5);
+        inner.Position = 2;
+
+        // Act
+        var error = Should.Throw<ContentFormatException>(() => inner.ReadContentExactly(new byte[4]));
+
+        // Assert
+        error.ErrorCode.ShouldBe(ContentFormatErrorCode.Truncated);
+        inner.SourceOffset.ShouldBe(10);
+        error.Position.ShouldBe(15);
     }
 
     [Theory(DisplayName = "Cohesion Test [Content.Binary] - Exact skips and copies: huge shortfalls are truncation without overflow")]

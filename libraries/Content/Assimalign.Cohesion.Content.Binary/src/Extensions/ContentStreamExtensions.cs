@@ -8,8 +8,9 @@ namespace Assimalign.Cohesion.Content.Binary;
 
 /// <summary>Exact-count stream operations for binary parsers.</summary>
 /// <remarks>Zero-length operations succeed without accessing the stream. Shortfalls report Truncated at
-/// the stream's current Position, or a forward-only slice's tracked Position; other non-seekable sources
-/// have no position. These are the supplied stream's coordinates (window-relative for slices).</remarks>
+/// an absolute position: a <see cref="ContentSliceStream"/> reports its <see cref="ContentSliceStream.SourceOffset"/>
+/// plus its Position (so nested windows name the byte in the outermost source), any other seekable
+/// stream reports its Position, and other non-seekable sources have no position.</remarks>
 public static class ContentStreamExtensions
 {
     extension(Stream stream)
@@ -261,6 +262,12 @@ public static class ContentStreamExtensions
 
     }
 
-    private static long? GetPosition(Stream stream) =>
-        stream.CanSeek || stream is ContentSliceStream ? stream.Position : null;
+    // A slice reports its absolute source offset (its origin, accumulated through enclosing slices, plus
+    // its own position) so a truncation inside a nested container names the byte in the outermost source.
+    private static long? GetPosition(Stream stream) => stream switch
+    {
+        ContentSliceStream slice => slice.SourceOffset + slice.Position,
+        { CanSeek: true } => stream.Position,
+        _ => null
+    };
 }

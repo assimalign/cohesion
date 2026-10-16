@@ -66,11 +66,14 @@ operations succeed without accessing a stream, even with a canceled token. SkipE
 only when its target fits within the stream length; otherwise it reads and discards. Copies
 and discard paths rent bounded buffers and return them in finally, including cancellation.
 
-Stream shortfalls report the stream's Position at detection when seekable, the tracked Position
-for a forward-only ContentSliceStream, or no position for other non-seekable streams. Per the
-stream-helper contract these coordinates belong to the supplied stream: slice positions are
-window-relative. A format reader requiring a root byte offset combines its window origin and
-position when translating diagnostics. Span readers take the absolute base explicitly.
+Stream shortfalls report an absolute position at detection. A ContentSliceStream reports its
+SourceOffset plus its Position, seekable or forward-only; because SourceOffset accumulates through
+enclosing slices, a truncation inside a nested container names the byte in the outermost source
+without the format reader doing the arithmetic. Any other seekable stream reports its Position;
+other non-seekable streams report no position. Span readers take the absolute base explicitly, so
+both paths speak the same coordinates (the family error model, plan D3). An earlier draft reported
+window-relative positions for slices; it was rejected because every container reader would have had
+to translate them back, and one that forgot would report offsets nobody could locate in the file.
 
 Range checks use subtraction before addition, rejecting negative and overflowing declared
 ranges without allocating. Slice and segment creation report caller misuse as argument errors;
