@@ -98,6 +98,7 @@ $script:CohesionReleaseLibrary = @(
     'libraries/Content/Assimalign.Cohesion.Content.Text'
     'libraries/Content/Assimalign.Cohesion.Content.Ebml'
     'libraries/Content/Assimalign.Cohesion.Content.Markdown'
+    'libraries/Content/Assimalign.Cohesion.Content.Pdf'
     'libraries/Content/Assimalign.Cohesion.Content.Yaml'
 
     # libraries/Core
