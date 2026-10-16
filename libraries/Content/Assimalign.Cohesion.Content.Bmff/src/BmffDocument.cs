@@ -14,6 +14,7 @@ namespace Assimalign.Cohesion.Content.Bmff;
 public sealed class BmffDocument : IDisposable
 {
     private BmffLayout? _layout;
+    private BmffBoxRegistry _registry = BmffBoxRegistry.Default;
     private bool _ownsSource;
     private bool _disposed;
     /// <summary>Gets the mutable ordered top-level boxes.</summary>
@@ -52,7 +53,7 @@ public sealed class BmffDocument : IDisposable
         {
             throw new ArgumentException(ErrorMessages.DocumentSource, nameof(source));
         }
-        var document = new BmffDocument { Source = source, _ownsSource = !leaveOpen };
+        var document = new BmffDocument { Source = source, _ownsSource = !leaveOpen, _registry = registry ?? BmffBoxRegistry.Default };
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -113,7 +114,7 @@ public sealed class BmffDocument : IDisposable
 
     /// <summary>Relocates supported media references to the current ordered tree and checkpoints its layout.</summary>
     /// <remarks>Also called by Save. Updates stco/co64, local file-based iloc, explicit tfhd bases,
-    /// moof-relative trun data offsets, tfra moof offsets and resized mfro. Promotes encodings as needed.
+    /// moof-relative trun data offsets, tfra moof offsets, resized mfro, sidx and saio, and registry rules. Promotes encodings as needed.
     /// Repeated calls are idempotent. New documents establish their first layout without shifting references.
     /// Unknown references and implicit bases after the first traf require a profile; see DESIGN.md.</remarks>
     /// <param name="outputOffset">The absolute start of the planned output, normally zero.</param>
@@ -127,11 +128,31 @@ public sealed class BmffDocument : IDisposable
         RelocateCore(outputOffset, 64);
     }
 
+    /// <summary>Relocates references after a profile has compacted payload bytes.</summary>
+    /// <param name="mapPayloadOffset">Maps a box's checkpoint payload-relative offset to its edited payload.
+    /// The Boolean is true for an exclusive end boundary. Return a negative value for a deleted target;
+    /// return the input offset for unaffected boxes. The callback must be pure across planning retries.</param>
+    /// <param name="outputOffset">The absolute start of the planned output.</param>
+    /// <remarks>The caller replaces payloads before calling and restores them if planning fails.
+    /// Reference changes remain transactional. Local method-1 iloc extents also use the enclosing idat map.</remarks>
+    /// <exception cref="ArgumentNullException">The mapper is null.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">The output offset is negative.</exception>
+    /// <exception cref="ContentFormatException">A reference cannot be mapped or represented.</exception>
+    /// <exception cref="ObjectDisposedException">The document is disposed.</exception>
+    public void RelocateMediaOffsets(Func<BmffBox, long, bool, long> mapPayloadOffset, long outputOffset = 0)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentNullException.ThrowIfNull(mapPayloadOffset);
+        ArgumentOutOfRangeException.ThrowIfNegative(outputOffset);
+        _layout = _layout is null ? BmffLayout.Measure(Boxes, outputOffset, 64) :
+            BmffOffsetRelocator.Relocate(Boxes, _layout, outputOffset, 64, _registry, mapPayloadOffset);
+    }
+
     private void RelocateCore(long outputOffset, int maxDepth)
     {
         _layout = _layout is null
             ? BmffLayout.Measure(Boxes, outputOffset, maxDepth)
-            : BmffOffsetRelocator.Relocate(Boxes, _layout, outputOffset, maxDepth);
+            : BmffOffsetRelocator.Relocate(Boxes, _layout, outputOffset, maxDepth, _registry);
     }
 
     private void ValidateOutput(Stream output)

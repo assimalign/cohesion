@@ -122,7 +122,7 @@ public sealed partial class HeifDocument : IDisposable
     /// <exception cref="ContentFormatException">The edit cannot be relocated safely.</exception>
     /// <exception cref="InvalidOperationException">The output is the original source.</exception>
     /// <exception cref="ObjectDisposedException">The view is disposed.</exception>
-    public void Save(Stream output) { ValidateSave(); Document.Save(output); }
+    public void Save(Stream output) { ValidateSave(); CompactDeletedData(output); Document.Save(output); }
 
     /// <summary>Saves with BMFF asynchronous output; external profile box writes remain synchronous.</summary>
     /// <param name="output">A separate borrowed output.</param>
@@ -133,7 +133,7 @@ public sealed partial class HeifDocument : IDisposable
     /// <exception cref="OperationCanceledException">Cancellation was requested.</exception>
     /// <exception cref="ObjectDisposedException">The view is disposed.</exception>
     public ValueTask SaveAsync(Stream output, CancellationToken cancellationToken = default)
-    { ValidateSave(); return Document.SaveAsync(output, cancellationToken); }
+    { cancellationToken.ThrowIfCancellationRequested(); ValidateSave(); CompactDeletedData(output); return Document.SaveAsync(output, cancellationToken); }
 
     /// <summary>Releases local segment views and the document/source only when this view loaded it.</summary>
     public void Dispose()

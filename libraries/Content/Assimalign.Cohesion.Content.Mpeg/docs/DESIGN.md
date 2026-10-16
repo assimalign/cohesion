@@ -3,8 +3,8 @@
 MP4 (ISO/IEC 14496-14) is a profile over ISO/IEC 14496-12. This package owns sample-entry
 grammars, MP4RA brand interpretation and timed-track semantics. BMFF owns headers, bounds,
 generic boxes, the composite tree, unknown preservation, writers and offset relocation.
-A future HEIF package would compose the same registry with image-item semantics, independently
-of Mpeg. Owner decision O-C3 on HEIF/AVIF remains open; CMAF stays inside Mpeg.
+Content.Heif composes the same registry with still-image item semantics independently of Mpeg,
+per owner decision O-C3. CMAF stays inside Mpeg.
 
 The arrows show direct references; neither shared package references this profile.
 
@@ -17,38 +17,30 @@ flowchart LR
     Binary --> Root["Content"]
 ```
 
-## Extension seam
+## Extension seams
 
-CreateRegistry copies BmffBoxRegistry defaults and registers explicit factories. LoadDocument
-uses the BMFF reader and re-enters it at validated stsd entry headers because BMFF deliberately
-preserves all stsd children. No header parser or container writer is duplicated. Unrecognized
-sample entries remain UnknownBox. The default registry is unchanged.
+CreateRegistry copies BmffBoxRegistry defaults and uses RegisterSampleEntry for entry factories
+and Register for configuration factories. LoadDocument
+uses the BMFF reader, which resolves stsd entries through the active registry with the enclosing
+depth budget. Unrecognized sample entries remain UnknownBox. The default registry is unchanged.
 
 Sample entries are sealed composites with preserved prefixes. The retained types are avc1, avc3,
 hvc1, hev1, av01, vp09, mp4a, Opus, ac-3, ec-3, wvtt, stpp and tx3g. Visual dimensions and
 compressor labels, audio channels/rate and data-reference indices are editable. Other prefix
 bytes and child order survive saves. Decoder boxes avcC/hvcC/av1C/vpcC/esds/dOps/dac3/dec3 and
-pasp/colr/btrt preserve opaque BinarySegments, including full-box prefixes where applicable.
+pasp/colr/btrt derive from BmffBoxLazyLeaf and preserve opaque BinarySegments, including full-box
+prefixes where applicable. Data aliases Payload. The former empty Children member is removed.
 
 The public BMFF forward-only reader/writer are the streaming surfaces; supply the profile
-registry. For stsd streaming, consume the full-box/count prefix and process bounded entry
-payloads, or use LoadDocument for a seekable, editable tree. Codec decoding is out of scope.
+registry. For stsd streaming, ReadChildren consumes the full-box/count prefix and exposes bounded
+entry payloads; Current uses the entry registration. LoadDocument produces the same typed tree.
+Codec decoding is out of scope.
 
-## Escalations
+## Visitor and model contracts
 
-- BMFF always bypasses registry dispatch inside stsd. Local workaround: a second bounded
-  reader pass over entry headers, with the remaining nesting budget. A contextual registry
-  seam belongs in BMFF if the owner wants to remove this pass.
-- BMFF buffers third-party leaves and does not expose stable segment capture. Opaque profile
-  nodes use childless composite inheritance to reach its unbuffered path and reuse MediaDataBox.Read
-  for stable lazy segment capture. IsLeaf is true, IsComposite false, and Children is immutable
-  empty. This avoids holding disposed windows or pooled buffers. A public lazy-leaf seam would
-  remove this implementation compromise.
 - BMFF's typed visitor rule conflicts with the prohibition on changing its interfaces. New
   profile boxes use inherited Visit(BmffBox) dispatch; no visitor interface is widened.
 - Sealed box classes follow the explicit brief's composite model exception to interface-first.
-- BMFF does not relocate sidx/saio. FastStart refuses files carrying these boxes before moving
-  moov; arbitrary unknown private offsets remain outside the relocation guarantee.
 
 ## Media interpretation
 
@@ -104,8 +96,13 @@ the selected media edit. Repeats, dwell and non-unit rates report Unsupported in
 flattening an ambiguous program. Track duration includes empty edits.
 
 FastStart moves moov before the first mdat and calls BmffDocument.RelocateMediaOffsets. It requires
-progressive local data and rolls back the reordering if relocation fails. Offset promotion and
-transactional reference restoration remain BMFF responsibilities. Progressive-to-fragmented
+progressive local data and rolls back the reordering if relocation fails. BMFF updates sidx's
+end-relative first offset and indexed spans, and absolute saio auxiliary addresses. Its fragment
+base rules apply to ordinary document relocation too. Version-zero offsets promote as needed.
+Transactional reference restoration and repeated-save checkpointing remain BMFF responsibilities.
+An extension with private references registers a capture/apply/restore rule through RegisterRelocation;
+IBmffRelocationContext supplies checkpoint-to-output address mapping. Unknown private offsets
+without a rule remain outside the guarantee. Progressive-to-fragmented
 remuxing is out of scope.
 
 Strict profile mode rejects contradictory brands with InvalidStructure; lenient mode collects
@@ -192,7 +189,5 @@ No existing shipped interface changes. The package's public surface is `Mp4Profi
 box; the complete per-member inventory was recorded in the integration pull request for name review.
 No public track implementation or index class was added: consumers use the existing Media contracts.
 
-O-C3 remains the owner's decision: retain HEIF/AVIF in a separate profile package in Stage 5, if
-desired. It must use the BMFF seams independently rather than take a dependency on Mpeg's track
-interpretation. The local seam workarounds above can be removed only through a separately owned
-BMFF API change; this package adds no reference back or shipped InternalsVisibleTo grant.
+Content.Heif uses these BMFF seams independently of Mpeg's track interpretation. Neither profile
+adds a reverse reference or a shipped InternalsVisibleTo grant.

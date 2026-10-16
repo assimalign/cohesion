@@ -55,13 +55,14 @@ await document.SaveAsync(output, cancellationToken);
 ```
 
 The example assumes an ftyp-first progressive file with its moov after mdat. Save recomputes sizes
-and relocates in-file chunk/item/fragment references. It promotes stco to co64 when needed and plans
+and relocates in-file chunk/item/fragment, sidx and saio references. It promotes stco to co64 when
+needed and plans
 again until the layout stabilizes. Repeated saves do not apply the shift twice. The exact supported
 references and fragment-base restrictions are in [DESIGN](DESIGN.md#relocation-and-mutation).
 
 Load requires seekable input and borrows it by default; leaveOpen: false transfers disposal to the
 document. Keep that source open and byte-stable through save. Use a separate output. Media, codec
-sample entries and unknown payloads copy through without loading them. Calls on shared sources,
+configuration and unknown payloads copy through without loading them. Calls on shared sources,
 readers, writers and models are sequential. A new document's first save establishes its layout;
 its caller supplies initial offsets.
 
@@ -69,8 +70,9 @@ its caller supplies initial offsets.
 
 Every standard box remains its own sealed model. Containers expose ordered Children. For example,
 SampleDescriptionBox and DataReferenceBox expose EntryCount through that collection. stsd entries
-are opaque children even when their FourCC matches a registered box elsewhere; codec entry parsing
-belongs to the MP4 profile.
+resolve through RegisterSampleEntry factories in the active registry. Ordinary box registrations
+do not apply in that context; unregistered entries remain lazy and opaque, including in strict mode.
+The MP4 profile supplies the codec entry grammars.
 
 MovieHeaderBox, TrackHeaderBox and MediaHeaderBox own their timing fields. CreationTime and
 ModificationTime are raw unsigned seconds since 1904-01-01 UTC. Version zero selects 32-bit time
@@ -110,6 +112,31 @@ headers; registry snapshots are immutable. Composite extension bytes precede ord
 and their size is included in relocation. New standard models use the existing Visit(BmffBox)
 fallback so visitor interfaces remain unchanged.
 
+## The three profile seams
+
+| Need | Profile uses | Contract |
+| --- | --- | --- |
+| Opaque configuration or item data | Derive a sealed box from BmffBoxLazyLeaf and register its factory | Payload is a borrowed BinarySegment. ReadPayloadBytes is the protected, capped materialization path. Typed accessors belong to the subclass. |
+| Typed stsd entries | RegisterSampleEntry(type, factory) | The same bounded reader materializes entries and descendants with the enclosing depth budget. Unknown entries remain preserved. |
+| Private offset-bearing boxes | RegisterRelocation(type, capture) | Capture returns apply/restore callbacks; apply uses IBmffRelocationContext to map checkpoint offsets and box positions. Failed planning restores fields. |
+
+Load the document with the completed registry so its relocation rules also apply on Save.
+A rule captures its original fields once and uses those same values on every planning pass.
+It must restore every field it changes. This includes version/width promotion if the profile
+format needs it. A registered rule replaces the built-in rule for its FourCC.
+
+sidx relocates the end-relative first offset and referenced spans, including references to other
+indexes. saio relocates absolute sample-table addresses and supported tfhd-relative fragment
+addresses, including auxiliary bytes in opaque senc boxes. Version-zero fields promote when
+necessary. These two field implementations are internal; inspect their generic box identity
+or emitted bytes. Existing public visitor interfaces are unchanged.
+
+Profiles compacting a payload call RelocateMediaOffsets(mapPayloadOffset, outputOffset) after
+replacing it. The pure mapper translates payload-relative byte addresses and exclusive ends;
+a negative result rejects a deleted target. HEIF uses this to erase removed metadata while
+relocating retained iloc extents and other supported references. See the complete
+[relocation contract](DESIGN.md#relocation-and-mutation) for rollback and unsupported bases.
+
 ## Limits and scope
 
 Defaults are a 16 MiB buffered/decoded leaf budget, 1,000,000 table entries and depth 64.
@@ -122,8 +149,8 @@ The strategic set covers movie, track/media, sample-table, fragment, item metada
 signalling fields. The [design table](DESIGN.md#field-encodings-and-validation) records versions and
 flags, the [preserved set](DESIGN.md#strategic-field-models) names deferred models, and the
 [byte-preservation rule](DESIGN.md#parsed-byte-preservation) defines round-trip behavior.
-Codec interpretation, decryption, sample indexing and profile-specific references remain outside
-this layer.
+Codec interpretation, decryption and sample indexing remain outside this layer. Profile-specific
+references require explicit registered relocation rules.
 
 ## Stage 3 public surface inventory
 

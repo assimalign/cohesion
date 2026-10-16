@@ -2,6 +2,8 @@ using System;
 using System.Collections.Frozen;
 using System.Collections.Generic;
 
+using Assimalign.Cohesion.Content.Bmff.Internal;
+
 namespace Assimalign.Cohesion.Content.Bmff;
 
 /// <summary>An immutable registry of explicit BMFF box factories.</summary>
@@ -9,10 +11,16 @@ public sealed class BmffBoxRegistry
 {
     private readonly FrozenDictionary<BmffBoxType, Func<BmffBoxHeader, BmffBox>> _factories;
     private readonly FrozenSet<BmffBoxType> _unsupported;
-    internal BmffBoxRegistry(Dictionary<BmffBoxType, Func<BmffBoxHeader, BmffBox>> factories, HashSet<BmffBoxType> unsupported)
+    private readonly FrozenDictionary<BmffBoxType, Func<BmffBoxHeader, BmffBox>> _sampleEntries;
+    internal FrozenDictionary<BmffBoxType, Func<BmffBox, (Action<IBmffRelocationContext> Apply, Action Restore)>> Relocations { get; }
+    internal BmffBoxRegistry(Dictionary<BmffBoxType, Func<BmffBoxHeader, BmffBox>> factories, HashSet<BmffBoxType> unsupported,
+        Dictionary<BmffBoxType, Func<BmffBoxHeader, BmffBox>> sampleEntries,
+        Dictionary<BmffBoxType, Func<BmffBox, (Action<IBmffRelocationContext> Apply, Action Restore)>> relocations)
     {
         _factories = factories.ToFrozenDictionary();
         _unsupported = unsupported.ToFrozenSet();
+        _sampleEntries = sampleEntries.ToFrozenDictionary();
+        Relocations = relocations.ToFrozenDictionary();
     }
     /// <summary>Gets the shared registry with every package box class registered.</summary>
     public static BmffBoxRegistry Default { get; } = BuildDefault();
@@ -32,10 +40,11 @@ public sealed class BmffBoxRegistry
         }
         return builder;
     }
-    internal bool CanParse(BmffBoxType type) => _factories.ContainsKey(type) && !_unsupported.Contains(type);
-    internal BmffBox? Create(BmffBoxHeader header)
+    internal bool CanParse(BmffBoxType type, bool sampleEntry = false) => sampleEntry
+        ? _sampleEntries.ContainsKey(type) : _factories.ContainsKey(type) && !_unsupported.Contains(type);
+    internal BmffBox? Create(BmffBoxHeader header, bool sampleEntry = false)
     {
-        if (!_factories.TryGetValue(header.BoxType, out var factory))
+        if (!(sampleEntry ? _sampleEntries : _factories).TryGetValue(header.BoxType, out var factory))
         {
             return null;
         }
@@ -50,6 +59,8 @@ public sealed class BmffBoxRegistry
     private static BmffBoxRegistry BuildDefault()
     {
         var builder = new BmffBoxRegistryBuilder();
+        builder.Register((BmffBoxType)0x73696478, _ => new BmffSegmentIndexBox());
+        builder.Register((BmffBoxType)0x7361696f, _ => new BmffAuxiliaryOffsetsBox());
         builder.Register(BmffBoxType.AdditionalMeta, header => new AdditionalMetaBox(offset: header.Offset, limit: header.TotalSize ?? 0));
         builder.Register(BmffBoxType.BinaryXml, header => new BinaryXmlBox(offset: header.Offset, limit: header.TotalSize ?? 0));
         builder.Register(BmffBoxType.ChunkOffset, header => new ChunkOffsetBox(offset: header.Offset, limit: header.TotalSize ?? 0));

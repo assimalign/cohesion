@@ -13,15 +13,22 @@ public sealed partial class HeifDocument
     /// <returns>The number of items removed.</returns>
     /// <exception cref="ContentFormatException">An item is the primary item or the structure cannot be edited.</exception>
     /// <exception cref="ObjectDisposedException">The view is disposed.</exception>
-    /// <remarks>Unreferenced bytes in shared data boxes are retained; this is not secure erasure.</remarks>
+    /// <remarks>Save physically removes deleted extents, retaining every byte shared with a retained item.</remarks>
     public int RemoveExif() => RemoveMetadata(false);
 
     /// <summary>Removes all XMP item descriptors, locations and understood references.</summary>
     /// <returns>The number of items removed.</returns>
     /// <exception cref="ContentFormatException">An item is the primary item or the structure cannot be edited.</exception>
     /// <exception cref="ObjectDisposedException">The view is disposed.</exception>
-    /// <remarks>Unreferenced bytes in shared data boxes are retained; this is not secure erasure.</remarks>
+    /// <remarks>Save physically removes deleted extents, retaining every byte shared with a retained item.</remarks>
     public int RemoveXmp() => RemoveMetadata(true);
+
+    /// <summary>Removes an item and its understood relationships, physically compacting its data on save.</summary>
+    /// <param name="itemId">The item to remove.</param>
+    /// <remarks>Bytes shared with retained items are kept. Primary items and inputs of retained derived images cannot be removed.</remarks>
+    /// <exception cref="ContentFormatException">The item cannot be removed or its local extents cannot be resolved safely.</exception>
+    /// <exception cref="ObjectDisposedException">The view is disposed.</exception>
+    public void RemoveItem(uint itemId) => RemoveItem(Editable(itemId));
 
     /// <summary>Replaces an Exif item's entire encoded payload, including its four-byte TIFF-header offset.</summary>
     /// <param name="itemId">An existing Exif item.</param>
@@ -268,6 +275,9 @@ public sealed partial class HeifDocument
             }
         }
 
+        CheckRemovalRanges(item);
+        _deletedRanges.AddRange(_itemRanges[item.Id]);
+        _itemRanges.Remove(item.Id);
         _info!.Children.Remove(item.Info);
         var locations = new List<ItemLocationBox.Entry>();
         foreach (var entry in _locations!.Entries)
@@ -346,19 +356,18 @@ public sealed partial class HeifDocument
     private void ReplaceData(HeifItem item, BinarySegment payload)
     {
         CheckAppend(payload.Length);
+        if (_itemRanges.ContainsKey(item.Id))
+        {
+            CheckRemovalRanges(item);
+            _deletedRanges.AddRange(_itemRanges[item.Id]);
+        }
         _idat ??= AddMeta(new ItemDataBox());
         var offset = _idat.Payload.Length;
         _appendedData.Add(payload);
         var all = new List<BinarySegment>(_appendedData.Count + 1) { _originalIdat };
         all.AddRange(_appendedData);
         var stream = new HeifSegmentStream(all);
-        // No item segment references these concatenation views: each retains its own source.
-        foreach (var old in _ownedStreams)
-        {
-            old.Dispose();
-        }
-
-        _ownedStreams.Clear();
+        // Compacted payloads may borrow earlier views; retain them until the document is disposed.
         _ownedStreams.Add(stream);
         _idat.Payload = BinarySegment.Create(stream, 0, stream.Length);
         var entries = new List<ItemLocationBox.Entry>(_locations!.Entries.Length + 1);
@@ -381,6 +390,7 @@ public sealed partial class HeifDocument
         _locations.LengthSize = 8;
         item.Data = Array.AsReadOnly(new[] { payload });
         item.DataPositions = [_idat.Offset + _idat.Header.HeaderSize + offset];
+        _itemRanges[item.Id] = [new HeifDataRange(_idat, offset, payload.Length)];
         _unrelocatable.Remove(item.Id);
         _edited = true;
     }

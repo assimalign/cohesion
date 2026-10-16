@@ -93,7 +93,7 @@ EndContainer for every start; Dispose releases unfinished buffers without emitti
 
 SaveAsync and WriteAsync use asynchronous output and BinarySegment copy-through for package boxes.
 The retained per-box Read/Write signatures are synchronous: LoadAsync performs synchronous parsing
-with cancellation checkpoints, and third-party composite Write overrides run synchronously even
+with cancellation checkpoints, and profile composite/lazy-leaf Write overrides run synchronously even
 when invoked by SaveAsync. Calls on a reader, writer, document, model or shared source are sequential.
 
 ### Document and ownership
@@ -136,18 +136,26 @@ Track-reference type children use their enclosing tref context; they are not glo
 BmffBoxRegistry.CreateBuilder copies the defaults; new BmffBoxRegistryBuilder starts empty.
 Register adds or replaces a factory; Build freezes a snapshot unaffected by later builder changes.
 Registering a default deferred type opts into the replacement parser.
+RegisterSampleEntry registers an explicit stsd factory as well as a standalone entry factory.
+Ordinary default registrations never interpret coincident sample-entry FourCCs.
 
 Factories receive the validated BmffBoxHeader and must return a matching BoxType. They do not
 receive arbitrary wire sizes before header validation. There is no reflection or assembly scanning.
 The reader propagates the chosen registry into nested containers.
 
-A profile leaf implements Read, Write and GetPayloadSize and may derive from BmffFullBox.
+A buffered profile leaf implements Read, Write and GetPayloadSize and may derive from BmffFullBox.
 It reads only its bounded payload and must consume all buffered bytes. Report unsupported versions
 or flags with ContentFormatException(Unsupported), and malformed fields with the appropriate
 format code and absolute offset. A profile composite can parse/write its own prefix and then call
 the base child traversal. For header-only streaming of a profile-specific prefix, consume that
 prefix from Payload and call BmffStream.ReadChildren; the built-in reader's ReadChildren knows the
 prefix grammar of the package's own containers.
+
+A profile with opaque bytes derives from BmffBoxLazyLeaf. Its Read captures Payload as a borrowed
+BinarySegment over the seekable source, with no payload-sized allocation. Write copies it through.
+ReadPayloadBytes is a protected opt-in materializer; it checks the originating reader's buffer cap
+before allocation. Typed accessors and small-prefix parsing belong to the subclass. Lazy leaf
+Write overrides run synchronously during SaveAsync with bounded streaming and cancellation checks.
 
 ## Unknown and deferred preservation
 
@@ -196,14 +204,17 @@ dref with url / urn entries, stsd, stts, ctts, stss, stsz, stz2, stsc, stco, co6
 subs, mfhd, tfhd, tfdt, trun, tfra, mfro, cprt, xml / bxml, pitm, iloc, iinf / infe, pdin, frma
 and schm. Existing structural containers, including full-box meta, remain composites.
 dref, stsd and iinf now also derive from BmffBoxComposite; their entry count comes from Children.
-stsd always preserves its children as opaque sample entries, including in strict mode.
+stsd resolves registered entries through the active registry, preserving the reader's limits and
+depth. Unregistered sample entries stay opaque even in strict mode; registered unsupported
+versions follow the usual strict/lenient policy. No second reader pass is required.
 
 Track-reference lists for hint, cdsc, hind, dpnd, ipir, mpod and sync are interpreted only inside
-tref. Other reference types remain opaque. Every box class has its own overload on both visitor
-interfaces and on `BmffBoxVisitor<T>` (one `Visit` per box is part of the composite design), so
+tref. Other reference types remain opaque. The original public field models have overloads on both visitor
+interfaces and on `BmffBoxVisitor<T>` (one `Visit` per public field model is part of the composite design), so
 `TrackReferenceTypeBox`, `TrackFragmentDecodeTimeBox`, `DataEntryUrlBox`, `DataEntryUrnBox` and
-`ItemInfoEntryBox` dispatch to typed overloads rather than to `Visit(BmffBox)`. A box class added
-later follows the same rule: add its overload to both interfaces and the base visitor.
+`ItemInfoEntryBox` dispatch to typed overloads rather than to `Visit(BmffBox)`. This follow-up keeps those
+interfaces unchanged: profile boxes and the internal sidx/saio implementations use the existing
+generic fallback.
 
 All mutable leaf models retain bytes following the defined fields. Counted containers retain the
 suffix after their declared children; uncounted containers must contain complete child boxes.
@@ -293,6 +304,11 @@ The operation updates:
   base-plus-extent addresses move. A zero base with absolute extent offsets is supported.
   Widths grow from zero to four or eight bytes as necessary. Methods 1/2 and external entries
   stay unchanged.
+- sidx first_offset relative to the end of the index and every 31-bit referenced span, including
+  index-to-index references; version zero promotes when its first offset exceeds UInt32.
+- saio v0/v1 offsets: absolute in sample tables; relative to the tfhd base in fragments. Explicit,
+  default-moof and first-traf implicit bases are supported. Auxiliary bytes may live in mdat or
+  a retained opaque box such as senc. Version zero promotes when an offset exceeds UInt32.
 - Explicit tfhd base_data_offset values inside moved mdat or at retained moof starts.
 - trun data_offset relative to an explicit tfhd base, default-base-is-moof, or the first traf's
   implicit moof base. Moving a moof/mdat pair together leaves the relative offset unchanged;
@@ -306,15 +322,46 @@ Successful calls checkpoint the new layout, so repeated saves do not apply delta
 Failures restore reference arrays, widths, versions and promoted child replacements. The caller's
 structural edits remain in place. Source segments and original Header/Offset/Limit never change.
 
-Removing or shortening a referenced mdat fails with InvalidStructure. Relative offsets outside
-Int32 fail with InvalidValue. Opaque offset-bearing standard boxes and implicit previous-traf
+Removing or shortening a referenced mdat without a payload map fails with InvalidStructure.
+A profile that compacts data first replaces the payload and calls the RelocateMediaOffsets overload
+with a pure payload-relative mapping callback. The callback distinguishes byte addresses from
+exclusive end boundaries and returns a negative value for erased targets. All supported reference
+rules share this map; method-1 iloc offsets also use their sibling idat map. The caller restores
+payloads if planning fails; BMFF restores reference fields. HEIF uses this seam for physical erasure.
+Relative offsets outside Int32 fail with InvalidValue. Opaque offset-bearing standard boxes and
+implicit previous-traf
 bases after the first traf fail with Unsupported if the layout changes. The operation does not
-interpret codec/sample-entry fields, arbitrary unknown references, sidx, saio or profile-specific
-indexes. Such profiles must implement their reference rules before changing those layouts.
+interpret codec/sample-entry fields or arbitrary unknown references. Unregistered profile-specific
+indexes require explicit reference rules before changing those layouts.
+
+RegisterRelocation contributes one capture callback per FourCC. A loaded document retains the
+immutable registry. Capture reads checkpoint fields without mutation and returns apply and restore
+callbacks. Apply receives IBmffRelocationContext for absolute mapping and old/new box positions;
+it may run repeatedly and must always calculate from captured values. Restore undoes every mutation
+if any rule or layout pass fails. Rules also run inside registered sample entries, and an explicit
+rule replaces the built-in rule for that FourCC. The new sidx/saio field implementations are internal
+sealed boxes using generic visitor dispatch; no shipped visitor interface is widened.
 
 Reordering, adding and removing children preserves list order and recomputes every ancestor size.
 The existing writer switches any oversized ancestor to a large-size header without reading media.
 
+
+## Profile usage and compatibility
+
+MP4 registers thirteen sample-entry factories with RegisterSampleEntry and eleven opaque
+configuration factories with Register. HEIF registers lazy hvcC/av1C/idat and a colr leaf that
+reads its small prefix while retaining ICC bytes as a segment. Neither profile needs an empty
+composite or a second reader pass. Typed prefix fields remain the profile's responsibility.
+
+RegisterRelocation and the new IBmffRelocationContext are the reference-extension contract.
+A profile may contribute rules for its own sealed box types without changing visitors or using
+inter-assembly internals. Context instances belong to one apply callback and must not be retained.
+All operations and shared-source access remain sequential.
+
+Changing the configuration boxes' base class intentionally removes their former empty Children
+property. Existing Data/Payload access and leaf semantics are retained. No existing public
+interface acquires a member. The abstract lazy base follows the owner's composite-model
+exception; the relocation context uses the repository's interface-first convention.
 
 ## Verification
 
@@ -336,3 +383,9 @@ Portable xUnit/Shouldly fixtures are authored in tests/TestObjects without downl
 The Stage 2 corpus covers bounded streaming, headers, registry extension, ownership and lazy
 40 GiB media. BmffModelTests exercises every strategic field model and labels each case with its
 ISO/IEC 14496-12 clause, including independent composition-offset and packed-language checks.
+
+The extension tests cover lazy 40 GiB profile payloads, deferred materialization caps, contextual
+sample-entry dispatch, inherited depth limits, sidx/saio v0/v1 preservation, nested index sizes,
+width promotion, absolute and fragment-relative auxiliary addresses, and transactional custom
+rules. MP4 fixtures verify fast-start sample and auxiliary bytes; HEIF fixtures exercise payload
+compaction, partial sharing and rollback. These are container checks, not codec certification.

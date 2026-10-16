@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 
@@ -20,19 +19,19 @@ public static partial class Mp4Profile
         var limits = options ?? new BmffReaderOptions();
         ArgumentOutOfRangeException.ThrowIfNegative(limits.MaxBufferedPayloadSize);
         var builder = BmffBoxRegistry.CreateBuilder();
-        builder.Register((BmffBoxType)FourCC.Parse("avc1").Value, header => new Avc1SampleEntryBox(header, limits.MaxBufferedPayloadSize));
-        builder.Register((BmffBoxType)FourCC.Parse("avc3").Value, header => new Avc3SampleEntryBox(header, limits.MaxBufferedPayloadSize));
-        builder.Register((BmffBoxType)FourCC.Parse("hvc1").Value, header => new Hvc1SampleEntryBox(header, limits.MaxBufferedPayloadSize));
-        builder.Register((BmffBoxType)FourCC.Parse("hev1").Value, header => new Hev1SampleEntryBox(header, limits.MaxBufferedPayloadSize));
-        builder.Register((BmffBoxType)FourCC.Parse("av01").Value, header => new Av01SampleEntryBox(header, limits.MaxBufferedPayloadSize));
-        builder.Register((BmffBoxType)FourCC.Parse("vp09").Value, header => new Vp09SampleEntryBox(header, limits.MaxBufferedPayloadSize));
-        builder.Register((BmffBoxType)FourCC.Parse("mp4a").Value, header => new Mp4aSampleEntryBox(header, limits.MaxBufferedPayloadSize));
-        builder.Register((BmffBoxType)FourCC.Parse("Opus").Value, header => new OpusSampleEntryBox(header, limits.MaxBufferedPayloadSize));
-        builder.Register((BmffBoxType)FourCC.Parse("ac-3").Value, header => new Ac3SampleEntryBox(header, limits.MaxBufferedPayloadSize));
-        builder.Register((BmffBoxType)FourCC.Parse("ec-3").Value, header => new Ec3SampleEntryBox(header, limits.MaxBufferedPayloadSize));
-        builder.Register((BmffBoxType)FourCC.Parse("wvtt").Value, header => new WvttSampleEntryBox(header, limits.MaxBufferedPayloadSize));
-        builder.Register((BmffBoxType)FourCC.Parse("stpp").Value, header => new StppSampleEntryBox(header, limits.MaxBufferedPayloadSize));
-        builder.Register((BmffBoxType)FourCC.Parse("tx3g").Value, header => new Tx3gSampleEntryBox(header, limits.MaxBufferedPayloadSize));
+        builder.RegisterSampleEntry((BmffBoxType)FourCC.Parse("avc1").Value, header => new Avc1SampleEntryBox(header, limits.MaxBufferedPayloadSize));
+        builder.RegisterSampleEntry((BmffBoxType)FourCC.Parse("avc3").Value, header => new Avc3SampleEntryBox(header, limits.MaxBufferedPayloadSize));
+        builder.RegisterSampleEntry((BmffBoxType)FourCC.Parse("hvc1").Value, header => new Hvc1SampleEntryBox(header, limits.MaxBufferedPayloadSize));
+        builder.RegisterSampleEntry((BmffBoxType)FourCC.Parse("hev1").Value, header => new Hev1SampleEntryBox(header, limits.MaxBufferedPayloadSize));
+        builder.RegisterSampleEntry((BmffBoxType)FourCC.Parse("av01").Value, header => new Av01SampleEntryBox(header, limits.MaxBufferedPayloadSize));
+        builder.RegisterSampleEntry((BmffBoxType)FourCC.Parse("vp09").Value, header => new Vp09SampleEntryBox(header, limits.MaxBufferedPayloadSize));
+        builder.RegisterSampleEntry((BmffBoxType)FourCC.Parse("mp4a").Value, header => new Mp4aSampleEntryBox(header, limits.MaxBufferedPayloadSize));
+        builder.RegisterSampleEntry((BmffBoxType)FourCC.Parse("Opus").Value, header => new OpusSampleEntryBox(header, limits.MaxBufferedPayloadSize));
+        builder.RegisterSampleEntry((BmffBoxType)FourCC.Parse("ac-3").Value, header => new Ac3SampleEntryBox(header, limits.MaxBufferedPayloadSize));
+        builder.RegisterSampleEntry((BmffBoxType)FourCC.Parse("ec-3").Value, header => new Ec3SampleEntryBox(header, limits.MaxBufferedPayloadSize));
+        builder.RegisterSampleEntry((BmffBoxType)FourCC.Parse("wvtt").Value, header => new WvttSampleEntryBox(header, limits.MaxBufferedPayloadSize));
+        builder.RegisterSampleEntry((BmffBoxType)FourCC.Parse("stpp").Value, header => new StppSampleEntryBox(header, limits.MaxBufferedPayloadSize));
+        builder.RegisterSampleEntry((BmffBoxType)FourCC.Parse("tx3g").Value, header => new Tx3gSampleEntryBox(header, limits.MaxBufferedPayloadSize));
         builder.Register((BmffBoxType)FourCC.Parse("avcC").Value, header => new AvcConfigurationBox(header));
         builder.Register((BmffBoxType)FourCC.Parse("hvcC").Value, header => new HevcConfigurationBox(header));
         builder.Register((BmffBoxType)FourCC.Parse("av1C").Value, header => new Av1ConfigurationBox(header));
@@ -79,48 +78,6 @@ public static partial class Mp4Profile
     {
         var limits = options ?? new BmffReaderOptions();
         var registry = CreateRegistry(limits);
-        var document = BmffDocument.LoadAsync(source, limits, registry, leaveOpen, cancellationToken).GetAwaiter().GetResult();
-        try
-        {
-            BindEntries(document.Boxes, source, limits, registry, 0, cancellationToken);
-            return document;
-        }
-        catch { document.Dispose(); throw; }
-    }
-
-    private static void BindEntries(IList<BmffBox> boxes, Stream source, BmffReaderOptions limits, BmffBoxRegistry registry, int depth, CancellationToken cancellationToken)
-    {
-        foreach (var box in boxes)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (box is SampleDescriptionBox description)
-            {
-                for (var index = 0; index < description.Children.Count; index++)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    var entry = description.Children[index];
-                    if (entry.BoxType.ToFourCC().ToString() is not ("avc1" or "avc3" or "hvc1" or "hev1" or "av01" or "vp09" or "mp4a" or "Opus" or "ac-3" or "ec-3" or "wvtt" or "stpp" or "tx3g"))
-                    {
-                        continue;
-                    }
-                    // The core deliberately preserves every stsd child. Re-enter its public reader
-                    // at that already validated header so the profile registration takes effect.
-                    source.Position = entry.Offset;
-                    var nestedLimits = new BmffReaderOptions
-                    {
-                        MaxBufferedPayloadSize = limits.MaxBufferedPayloadSize,
-                        MaxTableEntryCount = limits.MaxTableEntryCount,
-                        MaxDepth = Math.Max(0, limits.MaxDepth - depth - 1),
-                        Strict = false
-                    };
-                    using var reader = BmffReader.Create(source, nestedLimits, registry);
-                    if (reader.Read()) { description.Children[index] = reader.Current; }
-                }
-            }
-            else if (box is BmffBoxComposite composite)
-            {
-                BindEntries(composite.Children, source, limits, registry, depth + 1, cancellationToken);
-            }
-        }
+        return BmffDocument.LoadAsync(source, limits, registry, leaveOpen, cancellationToken).GetAwaiter().GetResult();
     }
 }

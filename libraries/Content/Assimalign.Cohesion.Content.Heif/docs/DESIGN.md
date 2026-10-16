@@ -42,21 +42,26 @@ truncated parsing always fail; semantic leniency belongs to the item view, not u
 Unknown children and unsupported versions survive through BMFF preservation. No reflection,
 dynamic generation, codecs, storage adapters or inter-assembly internal access are required.
 
-## BMFF extension constraints and local workarounds
+## BMFF extension seams
 
-BMFF buffers external leaf models before calling Read and has no public lazy-range accessor.
-The colr, hvcC, av1C and idat models therefore inherit BmffBoxComposite solely to select its
-unbuffered read/write path, override IsLeaf/IsComposite, and expose an immutable empty Children
-list. They remain wire leaves. Internally, MediaDataBox.Read obtains the borrowed BinarySegment
-through the existing public seam; no payload is copied or lifetime tied to a disposed window.
-This is the smallest local streaming adapter that keeps BMFF unchanged. A future BMFF public
-lazy-leaf seam would let these classes derive directly from BmffBox.
-BMFF SaveAsync invokes these external Write overrides synchronously, with bounded streaming
-and cancellation checks. It does not promise asynchronous-only I/O for profile boxes.
+The colr, hvcC, av1C and idat models derive from BmffBoxLazyLeaf. BMFF captures their payloads
+as borrowed BinarySegments over the seekable source without buffering. colr parses its small
+colour prefix and retains the ICC profile or suffix as a slice. No child collection is exposed.
+The protected ReadPayloadBytes helper checks the reader cap before materializing bytes.
+BMFF SaveAsync invokes profile Write overrides synchronously with bounded streaming and
+cancellation checks; it does not promise asynchronous-only I/O for profile boxes.
 
 BMFF ReadChildren cannot consume an external full-container prefix. For header-only traversal
 of iref, read its four prefix bytes from Payload before calling ((BmffStream)Payload).ReadChildren().
 Normal Current materialization handles that prefix. No BMFF interface or visitor changes are made.
+
+HEIF shares the other BMFF extension contracts without owning their implementations.
+RegisterSampleEntry supplies contextual stsd dispatch when composing a profile with timed
+entries; this still-image view does not interpret those tracks. RegisterRelocation contributes
+transactional private-box rules using IBmffRelocationContext. Built-in relocation covers
+stco/co64, local iloc, tfhd/trun, tfra/mfro, sidx and saio. See the
+[complete rules](../../Assimalign.Cohesion.Content.Bmff/docs/DESIGN.md#relocation-and-mutation)
+for width promotion, supported bases and unknown-reference limits.
 
 ## Item view, validation and editing
 
@@ -80,10 +85,24 @@ Exif, XMP and ICC payload contents are not parsed.
 Rotation/mirror edits append a new property and replace only the selected item association;
 they do not mutate another image sharing the original property. Replacements and thumbnails
 append borrowed segments to idat through a seekable concatenation view. No unchanged image data
-is copied into managed buffers. Metadata removal deletes descriptors, locations, associations
-and understood references. Unreferenced bytes in shared mdat/idat remain: these operations are
-logical metadata removal, not a secure-erasure or byte-scrubbing API. Applications requiring
-physical removal of residual metadata need a future data-compaction feature.
+is copied into managed buffers. RemoveItem, RemoveExif, RemoveXmp and RemoveThumbnail delete
+descriptors, locations, associations and understood references. Save physically compacts the
+deleted extents out of mdat/idat. Replacement also retires the previous payload. There is no
+structural-only removal mode.
+
+Compaction removes the union of deleted ranges minus the union of retained item ranges. A byte
+shared with any retained item is kept, including partial overlaps; the remaining unshared bytes
+of the deleted extent are removed. Unrelated unreferenced bytes are preserved. This is a saved-file
+contract, not an overwrite of the original source or a guarantee about copies elsewhere.
+
+Surviving slices are concatenated without buffering image data. Every retained iloc extent is
+relocated; zero lengths are resolved before compaction and base-relative entries are normalized.
+BMFF's payload-map relocation overload also updates supported chunk, auxiliary, fragment and
+index references into moved data. References into erased bytes fail before output. Failed planning
+restores payloads and location fields; successful planning checkpoints once, even if output later
+fails. Subsequent saves and edits use that checkpoint while item data retains borrowed source slices.
+Unresolved, external or method-2 extents prevent removal because their sharing cannot be established.
+Primary items and inputs still needed by derived images cannot be removed.
 
 Save delegates to BmffDocument.Save/SaveAsync, which relocates method-0 mdat references when meta
 grows or shrinks. Resolved item segments retain original source coordinates across repeated saves.
@@ -115,3 +134,9 @@ Streaming tests reject seeking on network-style input/output and prove a 40 GiB 
 without reading its payload. Metadata edits before mdat preserve image bytes after reload, and
 repeated saves do not apply relocation twice. No codec conformance or complete HEIF/AVIF profile
 certification is implied by these structural tests.
+
+Erasure fixtures place a distinctive synthetic marker in Exif and assert its complete absence
+after saving. They compare every retained image, exercise mdat and idat, multiple media boxes,
+fragmented and zero-length extents, partial/complete sharing, replacement and repeated removal,
+saio references and failed-planning retry. A sparse 40 GiB idat is compacted without reading its
+image bytes. Shared marker bytes intentionally remain when a retained image references them.
