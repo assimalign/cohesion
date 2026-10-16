@@ -69,8 +69,10 @@ public sealed partial class PdfDocument
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentOutOfRangeException.ThrowIfZero(identifier.Number);
+        // Exception filters run before ResolveCore finally unwinds its recursion guard.
+        var isOutermost = _resolving.Count == 0;
         try { return ResolveCore(identifier); }
-        catch (ContentFormatException error) when (_options.IsLenient && !_recovered && _resolving.Count == 0 && error.ErrorCode == ContentFormatErrorCode.InvalidStructure)
+        catch (ContentFormatException error) when (_options.IsLenient && !_recovered && isOutermost && error.ErrorCode == ContentFormatErrorCode.InvalidStructure)
         {
             _recovered = true;
             var (entries, trailer) = new PdfFileLoader(_source, SourceOffset, _options, _loadCancellationToken, _security).Rebuild();

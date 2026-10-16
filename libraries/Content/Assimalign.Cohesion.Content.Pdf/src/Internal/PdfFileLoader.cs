@@ -64,6 +64,10 @@ internal sealed class PdfFileLoader
     {
         var length = (int)Math.Min(_options.StartXrefSearchBytes, _source.Length - _origin);
         var start = _source.Length - length;
+        if (length > _options.MaxBufferedBytes)
+        {
+            throw new ContentFormatException(ErrorMessages.ReaderLimit, ContentFormatErrorCode.LimitExceeded, Absolute(start));
+        }
         var bytes = BinarySegment.Create(_source, start, length).ToArray(_options.MaxBufferedBytes);
         for (var i = length - 9; i >= 0; i--)
         {
@@ -99,7 +103,14 @@ internal sealed class PdfFileLoader
             {
                 Visit(hybrid, visited);
                 var (supplement, _) = ReadSection(hybrid, true);
-                foreach (var pair in supplement) { section[pair.Key] = pair.Value; }
+                foreach (var pair in supplement)
+                {
+                    if (!section.ContainsKey(pair.Key) && section.Count >= _options.MaxObjects)
+                    {
+                        throw new ContentFormatException(ErrorMessages.ReaderLimit, ContentFormatErrorCode.LimitExceeded, Absolute(_origin + hybrid));
+                    }
+                    section[pair.Key] = pair.Value;
+                }
             }
             foreach (var pair in section)
             {
@@ -234,7 +245,7 @@ internal sealed class PdfFileLoader
             ranges.Add(((int)first, (int)count)); total += count; previousEnd = first + count;
         }
         if (total * rowLength > _options.MaxDecodedBytes) { throw new ContentFormatException(ErrorMessages.ReaderLimit, ContentFormatErrorCode.LimitExceeded, position); }
-        // Xref stream entries, including filter parameters, must be direct (ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§7.5.8.2).
+        // Xref stream entries, including filter parameters, must be direct (§7.5.8.2).
         RequireDirect(dictionary.Get("Filter"), position, 0);
         RequireDirect(dictionary.Get("DecodeParms"), position, 0);
         var decoded = stream.Decode(_options);
@@ -276,6 +287,7 @@ internal sealed class PdfFileLoader
         var entries = new Dictionary<int, PdfCrossReferenceEntry>();
         var trailer = new PdfDictionary();
         PdfIndirectReference? catalog = null;
+        var objectStreams = new List<(PdfObjectIdentifier Identifier, PdfStream Stream)>();
         using var input = new PdfInput(_source, _origin, cancellationToken: _cancellationToken);
         while (input.Position < input.End)
         {
@@ -304,16 +316,11 @@ internal sealed class PdfFileLoader
                     }
                     if (value is PdfStream objectStream && IsName(objectStream.Dictionary.Get("Type"), "ObjStm"))
                     {
-                        var index = new PdfObjectStream(objectStream, _options);
-                        for (var i = 0; i < index.Count; i++)
+                        if (objectStreams.Count >= _options.MaxObjects)
                         {
-                            var number = index.Number(i);
-                            if (!entries.ContainsKey(number) && entries.Count >= _options.MaxObjects)
-                            {
-                                throw new ContentFormatException(ErrorMessages.ReaderLimit, ContentFormatErrorCode.LimitExceeded, input.AbsolutePosition);
-                            }
-                            entries[number] = new(PdfObjectIdentifier.Create(number), PdfCrossReferenceKind.Compressed, 0, id.Number, i, 0);
+                            throw new ContentFormatException(ErrorMessages.ReaderLimit, ContentFormatErrorCode.LimitExceeded, input.AbsolutePosition);
                         }
+                        objectStreams.Add((id, objectStream));
                     }
                     continue; // Skip complete objects, especially payloads that contain apparent object headers.
                 }
@@ -324,6 +331,27 @@ internal sealed class PdfFileLoader
             }
             catch (ContentFormatException error) when (error.ErrorCode is ContentFormatErrorCode.InvalidStructure or ContentFormatErrorCode.InvalidValue or ContentFormatErrorCode.Truncated) { }
             input.Position = Math.Min(start + 1, input.End);
+        }
+        _security.IsEncrypted = trailer.Get("Encrypt") is not (null or PdfNull);
+        if (!_security.IsEncrypted)
+        {
+            // Delay extraction until the trailer is known: encrypted object streams must never
+            // be offered to a plaintext decoder. Later uncompressed revisions still win.
+            foreach (var container in objectStreams)
+            {
+                if (!entries.TryGetValue(container.Identifier.Number, out var owner) || owner.Identifier != container.Identifier) { continue; }
+                var index = new PdfObjectStream(container.Stream, _options);
+                for (var i = 0; i < index.Count; i++)
+                {
+                    var number = index.Number(i);
+                    if (entries.TryGetValue(number, out var existing) && existing.Kind == PdfCrossReferenceKind.Uncompressed && existing.Offset > owner.Offset) { continue; }
+                    if (!entries.ContainsKey(number) && entries.Count >= _options.MaxObjects)
+                    {
+                        throw new ContentFormatException(ErrorMessages.ReaderLimit, ContentFormatErrorCode.LimitExceeded, container.Stream.Position);
+                    }
+                    entries[number] = new(PdfObjectIdentifier.Create(number), PdfCrossReferenceKind.Compressed, 0, container.Identifier.Number, i, 0);
+                }
+            }
         }
         if ((trailer.Get("Root") is not PdfIndirectReference root || !entries.ContainsKey(root.Identifier.Number)) && catalog is not null) { trailer[PdfName.Create("Root"u8)] = catalog; }
         if (trailer.Get("Root") is not PdfIndirectReference || entries.Count == 0) { throw new ContentFormatException(ErrorMessages.XrefInvalid, ContentFormatErrorCode.InvalidStructure, Absolute(_origin)); }

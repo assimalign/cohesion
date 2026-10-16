@@ -7,7 +7,7 @@ using Assimalign.Cohesion.Content.Pdf.Internal;
 
 namespace Assimalign.Cohesion.Content.Pdf;
 
-/// <summary>Loads PDF structure through IContentReader with random access (Â§7.5).</summary>
+/// <summary>Loads PDF structure through IContentReader with random access (§7.5).</summary>
 /// <remarks>Read begins at the current position, treated as the PDF origin. The source is borrowed by default.
 /// ReadAsync performs bounded synchronous random-access parsing and observes cancellation between reads.</remarks>
 public sealed class PdfReader : IContentReader<PdfDocument>

@@ -3,7 +3,7 @@ using System.Text;
 
 namespace Assimalign.Cohesion.Content.Pdf;
 
-/// <summary>A case-sensitive byte name with equality after #xx unescaping (Â§7.3.5).</summary>
+/// <summary>A case-sensitive byte name with equality after #xx unescaping (§7.3.5).</summary>
 /// <remarks>Names are byte sequences. Empty names are valid; NUL is forbidden.</remarks>
 public sealed class PdfName : IPdfObject, IEquatable<PdfName>
 {

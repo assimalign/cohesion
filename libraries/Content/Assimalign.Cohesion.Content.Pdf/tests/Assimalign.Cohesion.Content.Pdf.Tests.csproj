@@ -12,4 +12,8 @@
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Content.Pdf" />
 	</ItemGroup>
+	<ItemGroup>
+		<Compile Include="$(CohesionRepositoryDirectory)libraries\Content\Assimalign.Cohesion.Content.Binary\tests\Shared\TruncationCorpus.cs" Link="Shared\Binary\TruncationCorpus.cs" />
+		<None Update="TestObjects\Golden\*.pdf" CopyToOutputDirectory="PreserveNewest" />
+	</ItemGroup>
 </Project>

@@ -5,7 +5,7 @@ using System.IO;
 
 namespace Assimalign.Cohesion.Content.Pdf;
 
-/// <summary>A random-access PDF model retaining identities, trailer and lazy source data (Â§7.5).</summary>
+/// <summary>A random-access PDF model retaining identities, trailer and lazy source data (§7.5).</summary>
 /// <remarks>Load through PdfReader. Sequential use only; keep the source open and unchanged.</remarks>
 public sealed partial class PdfDocument : IDisposable
 {

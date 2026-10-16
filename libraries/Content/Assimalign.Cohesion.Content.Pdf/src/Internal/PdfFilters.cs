@@ -57,7 +57,12 @@ internal static class PdfFilters
             }
             names[i] = text;
         }
-        var bytes = data.ToArray(count == 0 ? Math.Min(options.MaxBufferedBytes, options.MaxDecodedBytes) : options.MaxBufferedBytes);
+        var materializationLimit = count == 0 ? Math.Min(options.MaxBufferedBytes, options.MaxDecodedBytes) : options.MaxBufferedBytes;
+        if (data.Length > materializationLimit)
+        {
+            throw new ContentFormatException(ErrorMessages.ReaderLimit, ContentFormatErrorCode.LimitExceeded, position);
+        }
+        var bytes = data.ToArray(materializationLimit);
         for (var i = 0; i < count; i++)
         {
             var parameter = Resolve(parameters is PdfArray array ? array[i] : parameters);
