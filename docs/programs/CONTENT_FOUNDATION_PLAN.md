@@ -26,7 +26,7 @@ stage).
 | `Content.Mkv` | Empty; references `Content.Bmff` instead of `Content.Ebml`; its test project downloads a zip from SourceForge to a developer path. | Strategic |
 | `Content.Mpeg` | Empty; references nothing. | Strategic |
 | `Content.Pdf` | Empty project, no tests. | Strategic |
-| `Content.Exe` | Placeholder interface with `InvokeAsync()`. | Experimental until owner decision O-C1 |
+| `Content.Exe` | Placeholder interface with `InvokeAsync()`. | Strategic (O-C1: inspection and invocation, separated) |
 
 Only `Content`, `Text`, `Ebml`, `Markdown` and `Yaml` are in the CI matrix and the release
 inventory; the other seven sit in `$script:CohesionCiMatrixExclusion`. A package leaves that list in
@@ -150,7 +150,7 @@ stage run in parallel, each in its own worktree; the orchestrator integrates, ve
 | 2 | s2-bmff-core — stream repair, reader/writer lifecycle, box registry, unknown and large boxes | #443, #444, #445 (feature #442) | Stage 1 |
 | 2 | s2-ebml-core — VInt/reader/writer/document, schema and element registry, RFC 8794 fixtures | #459, #460, #461 (feature #458) | Stage 1 |
 | 2 | s2-pdf — object/document/xref model, tokenizer and parser, corpora | #471, #472, #473 (feature #470) | Stage 1 |
-| 2 | s2-exe — format scope, PE/ELF inspection, corpora | #476, #477, #478 (feature #474) | Stage 1, O-C1 |
+| 2 | s2-exe — format scope, PE/ELF/Mach-O inspection, process invocation, corpora | #476, #477, #478 (feature #474) | Stage 1 |
 | 3 | s3-bmff-boxes — standard boxes, unknown-box preservation, round-trip mutation, golden files | #447, #448, #449 (feature #446) | s2-bmff-core |
 | 3 | s3-media — shared track, sample and timeline model | new feature (§5, G3) | Stage 1 |
 | 3 | s3-text-corpus — Unicode, UTF-8 and Markdown corpora | #469 | — |
@@ -163,7 +163,7 @@ stage run in parallel, each in its own worktree; the orchestrator integrates, ve
 
 | # | Question | Recommendation | Status |
 |---|---|---|---|
-| O-C1 | Does process **invocation** belong in a Content package? | No. Inspection of PE/COFF, ELF and Mach-O headers is content; launching a process is a runtime concern with security and lifecycle obligations no other Content package has. Ship `Content.Exe` as inspection only and move invocation to its own package outside the family (or drop it) when a consumer exists. | Open |
+| O-C1 | Does process **invocation** belong in a Content package? | Orchestrator recommended inspection only. | **Decided 2026-10-16 (owner):** "Keep process invocation in Content.Exe, separated from inspection, with timeout, cancellation and process-tree cleanup." Inspection types never start a process; invocation types never parse a file format. |
 | O-C2 | Root API changes: `ContentFormatErrorCode` on `ContentFormatException`; `ContentFactory` replaced by public `MemoryContent`/`StreamContent`/`CompositeContent` with `Create` methods | Both follow existing rules (error codes over exception sprawl; decision 59). No consumer outside Content calls `ContentFactory`. | In this PR, flagged for review |
 | O-C3 | Which BMFF-derived formats are retained beyond MP4? | HEIF/AVIF (still images, an `ftyp`/`meta`/`iloc`/`iprp` model that diverges from MP4's track model) as `Content.Heif`; CMAF stays a profile inside `Content.Mpeg` because it is constrained fragmented MP4. Decide before Stage 5. | Open |
 | O-C4 | Gap packages (§5) | File as Backlog features; build none without a decision. | Open |
@@ -194,3 +194,4 @@ Filed as features under #14 (numbers in the Progress Log once filed):
 | Date | Change |
 |---|---|
 | 2026-10-16 | Survey; namespace correction `5ac7bce98`; plan written. |
+| 2026-10-16 | O-C1 decided by the owner: `Content.Exe` keeps invocation, separated from inspection. Stage 1 sessions s1-binary and s1-docs started. |
