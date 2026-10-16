@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -167,6 +168,15 @@ public sealed class SqlTransactionRollbackTests
         droppedBeforeTheUndo.ShouldBeFalse();
         rowsBeforeTheUndo.Select(row => Convert.ToInt64(row[0])).ShouldBe([1L]);
         database.Coordinator.VersionStore.PendingAbortedPurges.ShouldBeEmpty();
+        // The DROP above leaves pages for the reclamation worker (#1443), which brackets its own
+        // storage transaction outside the coordinator's gate. Wait for that work rather than
+        // checkpointing into it, which is what the assertion below is actually about.
+        var reclamationDeadline = Stopwatch.StartNew();
+        while (database.TableReclamation.HasWork && reclamationDeadline.Elapsed < TimeSpan.FromSeconds(10))
+        {
+            await Task.Delay(5);
+        }
+        database.TableReclamation.HasWork.ShouldBeFalse();
         database.Coordinator.Checkpoint();
     }
 
