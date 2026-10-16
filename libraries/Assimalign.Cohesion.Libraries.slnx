@@ -511,7 +511,13 @@
 	<Folder Name="/libraries/Content/Assimalign.Cohesion.Content.Mpeg/src/">
 		<Project Path="Content/Assimalign.Cohesion.Content.Mpeg/src/Assimalign.Cohesion.Content.Mpeg.csproj" />
 	</Folder>
-	<Folder Name="/libraries/Content/Assimalign.Cohesion.Content.Pdf/" />
+	<Folder Name="/libraries/Content/Assimalign.Cohesion.Content.Pdf/">
+		<File Path="Content/Assimalign.Cohesion.Content.Pdf/README.md" />
+	</Folder>
+	<Folder Name="/libraries/Content/Assimalign.Cohesion.Content.Pdf/docs/">
+		<File Path="Content/Assimalign.Cohesion.Content.Pdf/docs/DESIGN.md" />
+		<File Path="Content/Assimalign.Cohesion.Content.Pdf/docs/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/libraries/Content/Assimalign.Cohesion.Content.Pdf/src/">
 		<Project Path="Content/Assimalign.Cohesion.Content.Pdf/src/Assimalign.Cohesion.Content.Pdf.csproj" />
 	</Folder>
