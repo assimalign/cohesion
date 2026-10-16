@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 
 using Shouldly;
 using Xunit;
+using Xunit.Abstractions;
 
 using Assimalign.Cohesion.Connections;
 using Assimalign.Cohesion.Database.Protocol;
@@ -13,6 +14,10 @@ namespace Assimalign.Cohesion.Database.Documents.Client.Tests;
 [Collection(nameof(DocumentClientEventSourceCollection))]
 public sealed class DocumentResponseStreamingTests
 {
+    private readonly ITestOutputHelper _output;
+
+    public DocumentResponseStreamingTests(ITestOutputHelper output) => _output = output;
+
     [Fact(DisplayName = "Cohesion Test [Documents.Client] - Put preflights a reply that is one byte too large before committing")]
     public async Task PutAsync_ResponseExceedsFrame_ShouldRefuseBeforeMutation()
     {
@@ -72,6 +77,7 @@ public sealed class DocumentResponseStreamingTests
         (await channel.Reader.ReadFrameAsync(harness.Token)).ShouldNotBeNull().Type.ShouldBe(ProtocolMessageType.Pong);
 
         // Assert: counts prove the entire large result was exercised; no elapsed-time assertion.
+        _output.WriteLine($"Rows={buffers.RowCount}; frames={buffers.FrameCount}; peak frame={buffers.PeakFrameBytes}; peak additional buffer={buffers.PeakBufferBytes} bytes.");
         DocumentProtocolCompleteMessage.Decode(complete.Payload.Span).ResultCount.ShouldBe(rowCount);
         buffers.BaselineCount.ShouldBe(1);
         buffers.FrameCount.ShouldBe(rowCount + 2);
