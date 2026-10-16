@@ -100,6 +100,9 @@ Marker-only quotes and list items contain no synthetic empty paragraph. An empty
 with one blank marker line; a second blank closes it. Blank separators after empty items still
 participate in list looseness. CommonMark examples 239–241, 279–280 and 315 protect this boundary.
 
+List continuation indentation is measured relative to the current parent prefix, not the absolute
+column on the opening line. Quotes may vary their leading spaces without moving list content.
+
 ## Renderers
 
 **HTML** (`MarkdownHtmlRenderer`) emits the shapes the spec's examples use — tight list items

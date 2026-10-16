@@ -23,4 +23,19 @@ public class MarkdownCorpusRegressionTests
         actual.ShouldBe(expected);
         MarkdownModelComparison.ShouldEqual(document, MarkdownText.Parse(MarkdownText.Write(document)), source);
     }
+    [Theory(DisplayName = "Cohesion Test [Content.Markdown] - Lists: indentation is relative to current parent prefixes")]
+    [InlineData("   > > 1.  one\n>>\n>>     two\n", "<blockquote>\n<blockquote>\n<ol>\n<li>\n<p>one</p>\n<p>two</p>\n</li>\n</ol>\n</blockquote>\n</blockquote>\n")]
+    [InlineData(">>- one\n>>\n  >  > two\n", "<blockquote>\n<blockquote>\n<ul>\n<li>one</li>\n</ul>\n<p>two</p>\n</blockquote>\n</blockquote>\n")]
+    public void Parse_VariableQuotePrefixes_PreservesListIndentation(string source, string expected)
+    {
+        // Arrange. CommonMark 259/260 isolate parent prefix width from item indentation.
+        var document = MarkdownText.Parse(source);
+
+        // Act
+        var actual = MarkdownText.ToHtml(document);
+
+        // Assert
+        actual.ShouldBe(expected);
+        MarkdownModelComparison.ShouldEqual(document, MarkdownText.Parse(MarkdownText.Write(document)), source);
+    }
 }

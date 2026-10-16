@@ -244,8 +244,8 @@ internal sealed class MarkdownBlockParser
                     }
 
                     var probe = cursor;
-                    probe.SkipWhitespace(maxColumns: container.ContentColumn - probe.Column);
-                    if (probe.Column < container.ContentColumn)
+                    probe.SkipWhitespace(maxColumns: container.ContentIndent);
+                    if (probe.Column - cursor.Column < container.ContentIndent)
                     {
                         return matched;
                     }
@@ -508,7 +508,7 @@ internal sealed class MarkdownBlockParser
         var itemContainer = new Container(ContainerKind.ListItem, item.Blocks)
         {
             List = listContainer.List,
-            ContentColumn = contentColumn,
+            ContentIndent = contentColumn - cursor.Column,
             BlankPending = startsBlank,
         };
         OpenContainer(itemContainer);
@@ -617,7 +617,7 @@ internal sealed class MarkdownBlockParser
         public IList<MarkdownBlock>? Blocks { get; }
         public MarkdownList? List { get; init; }
         public char ListMarker { get; init; }
-        public int ContentColumn { get; init; }
+        public int ContentIndent { get; init; }
         public bool BlankPending { get; set; }
         public bool HasContent { get; set; }
     }
