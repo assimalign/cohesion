@@ -11,6 +11,7 @@ using Assimalign.Cohesion.Content.Media;
 
 namespace Assimalign.Cohesion.Content.Mpeg.Tests;
 
+[Collection("MP4 allocation")]
 public sealed class Mp4SampleTests
 {
     [Theory(DisplayName = "Cohesion Test [Content.Mpeg] - Progressive table walk (ISO/IEC 14496-12 8.6.1, 8.7.3-8.7.5)")]
@@ -94,11 +95,10 @@ public sealed class Mp4SampleTests
     public async Task Seek_ReorderedPresentation_ShouldCoverIntermediateSamples()
     {
         // Arrange
-        using var source = new MemoryStream(Mp4MediaFixtures.Progressive(reorder: true));
+        var bytes = Mp4Fixtures.Mutate(Mp4MediaFixtures.Progressive(reorder: true), document =>
+            Mp4MediaFixtures.Find<SyncSampleTableBox>((MovieBox)document.Boxes[2]).Entries = [1]);
+        using var source = new MemoryStream(bytes);
         using var file = Mp4File.Load(source);
-        var movie = (MovieBox)file.Document.Boxes[2];
-        // Remove the second sync indication to require decoding through the reordered interval.
-        Mp4MediaFixtures.Find<SyncSampleTableBox>(movie).Entries = [1];
         // Act
         var result = (await file.Tracks[0].Samples.SeekAsync(new MediaTimestamp(1, 1), CancellationToken.None)).ShouldNotBeNull();
         // Assert
@@ -170,4 +170,3 @@ public sealed class Mp4SampleTests
         source.CanRead.ShouldBeTrue();
     }
 }
-

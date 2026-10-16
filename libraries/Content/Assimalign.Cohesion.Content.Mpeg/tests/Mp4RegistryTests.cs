@@ -12,6 +12,26 @@ namespace Assimalign.Cohesion.Content.Mpeg.Tests;
 
 public sealed class Mp4RegistryTests
 {
+    [Theory(DisplayName = "Cohesion Test [Content.Mpeg] - Opaque sample-entry child records (ISO/IEC 14496-12 8.5.2; ISO/IEC 14496-14 5)")]
+    [InlineData("avcC")][InlineData("hvcC")][InlineData("av1C")][InlineData("vpcC")]
+    [InlineData("pasp")][InlineData("colr")][InlineData("btrt")][InlineData("esds")]
+    [InlineData("dOps")][InlineData("dac3")][InlineData("dec3")]
+    public void Read_RetainedOpaqueRecord_ShouldPreservePayload(string code)
+    {
+        // Arrange
+        var bytes = Mp4Fixtures.Write(Mp4Fixtures.Opaque(code, [0, 0, 0, 0]));
+        using var source = new MemoryStream(bytes);
+        using var reader = BmffReader.Create(source, null, Mp4Profile.CreateRegistry());
+        // Act
+        reader.Read().ShouldBeTrue();
+        var box = reader.Current.ShouldBeAssignableTo<BmffBoxComposite>();
+        // Assert
+        box.IsLeaf.ShouldBeTrue();
+        box.IsComposite.ShouldBeFalse();
+        box.Children.ShouldBeEmpty();
+        Mp4Fixtures.Write(box).ShouldBe(bytes);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Content.Mpeg] - Registry isolation (ISO/IEC 14496-12 8.5.2)")]
     public void CreateRegistry_ProfileEntry_ShouldLeaveDefaultUntouched()
     {
@@ -128,4 +148,3 @@ public sealed class Mp4RegistryTests
         mpeg.ShouldContain("Content.Media", Case.Sensitive);
     }
 }
-

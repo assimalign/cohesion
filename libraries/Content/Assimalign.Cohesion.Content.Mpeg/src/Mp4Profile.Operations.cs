@@ -34,6 +34,11 @@ public static partial class Mp4Profile
         {
             throw new ContentFormatException(ErrorMessages.FastStartUnsupported, ContentFormatErrorCode.Unsupported, 0);
         }
+        var reference = Mp4Tree.UnhandledOffset(document.Boxes);
+        if (reference is not null)
+        {
+            throw new ContentFormatException(ErrorMessages.FastStartUnsupported, ContentFormatErrorCode.Unsupported, reference.Offset);
+        }
         var movie = Mp4Tree.Child<MovieBox>(document.Boxes) ??
             throw new ContentFormatException(ErrorMessages.RequiredBoxMissing, ContentFormatErrorCode.InvalidStructure, 0);
         var movieIndex = document.Boxes.IndexOf(movie);
@@ -69,4 +74,3 @@ public static partial class Mp4Profile
         }
     }
 }
-

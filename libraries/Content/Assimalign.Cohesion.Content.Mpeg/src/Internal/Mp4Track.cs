@@ -61,7 +61,7 @@ internal class Mp4Track : IMediaTrack
     public long Timescale { get; }
     public MediaTimestamp? Duration => Index.Edits.Duration ??
         (_header.Duration != 0 && _header.Duration != (_header.Version == 0 ? uint.MaxValue : ulong.MaxValue) ?
-            Timestamp(_header.Duration, _movieScale, _header.Offset) : new MediaTimestamp(Index.DecodeEnd, Timescale));
+            Timestamp(_header.Duration, _movieScale, _header.Offset) : new MediaTimestamp(Index.PresentationEnd, Timescale));
     public bool IsEnabled => (_header.Flags & 1) != 0;
     public bool? IsDefault => null;
     public IMediaSampleIndex Samples => Index;
@@ -115,4 +115,3 @@ internal class Mp4Track : IMediaTrack
         return width == 0 || height == 0 ? null : (width, height);
     }
 }
-

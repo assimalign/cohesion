@@ -19,9 +19,19 @@ internal static class Mp4Conformance
         if ((features & Mp4BrandFeatures.Fragmented) != 0 && !file.IsFragmented) { Report(diagnostics, strict, brands.Offset); }
         var cmaf = (features & (Mp4BrandFeatures.Cmaf | Mp4BrandFeatures.CmafVersion2 | Mp4BrandFeatures.CmafSegment | Mp4BrandFeatures.CmafChunk)) != 0;
         if (!cmaf) { return diagnostics.AsReadOnly(); }
-        if (file.Tracks.Count != 1 || Mp4Tree.Child<MovieExtensionBox>(movie.Children) is null) { Report(diagnostics, strict, movie.Offset); }
+        var extension = Mp4Tree.Child<MovieExtensionBox>(movie.Children);
+        if (file.Tracks.Count != 1 || extension is null) { Report(diagnostics, strict, movie.Offset); }
         foreach (var track in file.Tracks)
         {
+            var hasDefaults = false;
+            if (extension is not null)
+            {
+                foreach (var box in extension.Children)
+                {
+                    if (box is TrackExtensionBox trex && trex.TrackId == track.Id) { hasDefaults = true; }
+                }
+            }
+            if (!hasDefaults) { Report(diagnostics, strict, movie.Offset); }
             if (track is Mp4Track native && (!native.IsLocal || native.Index.ProgressiveCount != 0 || native.DescriptionCount != 1))
             {
                 Report(diagnostics, strict, movie.Offset);
@@ -78,4 +88,3 @@ internal static class Mp4Conformance
         diagnostics.Add(error);
     }
 }
-

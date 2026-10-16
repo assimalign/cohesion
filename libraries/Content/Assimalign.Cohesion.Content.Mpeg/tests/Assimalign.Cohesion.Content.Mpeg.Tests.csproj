@@ -10,5 +10,7 @@
     <CohesionPackageReference Include="Shouldly" />
     <CohesionProjectReference Include="Assimalign.Cohesion.Content.Mpeg" />
   </ItemGroup>
+  <ItemGroup>
+    <None Update="TestObjects/Goldens/*" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>
-

@@ -34,7 +34,7 @@ internal sealed class Mp4SampleIndex : MediaSampleIndex
         _position = table.Offset;
         _edits = edits;
         _local = local;
-        _safeSeek = local && !Mp4Tree.Contains(table.Children, 0x73677064) && !Mp4Tree.Contains(table.Children, 0x73626770);
+        _safeSeek = local && !Mp4Tree.HasDependencies(table.Children);
         _times = Mp4Tree.Required<SampleDecodingTimeBox>(table);
         _composition = Mp4Tree.Child<SampleCompositionTimeBox>(table.Children);
         _sizes = Mp4Tree.Child<SampleSizeBox>(table.Children);
@@ -64,17 +64,19 @@ internal sealed class Mp4SampleIndex : MediaSampleIndex
     internal long ProgressiveCount { get; }
     internal long TotalCount { get; private set; }
     internal long DecodeEnd { get; private set; }
+    internal long PresentationEnd { get; private set; }
     internal Mp4EditMap Edits => _edits;
     internal uint Scale => _scale;
     internal IReadOnlyList<Mp4FragmentRun> Runs => _runs;
     internal long ChunkCount => _offsets?.Entries.LongLength ?? _wideOffsets!.Entries.LongLength;
     internal uint InitialDescription => _chunks.Entries.Length == 0 ? 1 : _chunks.Entries[0].SampleDescriptionIndex;
 
-    internal void AddRun(Mp4FragmentRun run, long decodeEnd, bool safeSeek)
+    internal void AddRun(Mp4FragmentRun run, long decodeEnd, long presentationEnd, bool safeSeek)
     {
         _runs.Add(run);
         TotalCount = checked(TotalCount + run.Box.Entries.LongLength);
         DecodeEnd = decodeEnd;
+        PresentationEnd = Math.Max(PresentationEnd, presentationEnd);
         _safeSeek &= safeSeek;
     }
 
@@ -124,6 +126,29 @@ internal sealed class Mp4SampleIndex : MediaSampleIndex
             {
                 token.ThrowIfCancellationRequested();
                 if (number == 0 || number > ProgressiveCount) { throw new ContentFormatException(ErrorMessages.SampleTablesInvalid, ContentFormatErrorCode.InvalidStructure, _sync.Offset); }
+            }
+        }
+        // Intersect timing runs without expanding samples. Durations are nonnegative, so
+        // the final sample in each intersection has the largest presentation end there.
+        var compositionRun = 0;
+        long compositionRemaining = _composition is { Entries.Length: > 0 } ? _composition.Entries[0].SampleCount : ProgressiveCount;
+        long decode = 0;
+        foreach (var timing in _times.Entries)
+        {
+            long remaining = timing.SampleCount;
+            while (remaining > 0)
+            {
+                token.ThrowIfCancellationRequested();
+                var take = Math.Min(remaining, compositionRemaining);
+                var displacement = _composition is null ? 0 : _composition.Entries[compositionRun].SampleOffset;
+                decode = checked(decode + take * timing.SampleDelta);
+                PresentationEnd = Math.Max(PresentationEnd, checked(decode + displacement));
+                remaining -= take;
+                compositionRemaining -= take;
+                if (compositionRemaining == 0 && _composition is not null && ++compositionRun < _composition.Entries.Length)
+                {
+                    compositionRemaining = _composition.Entries[compositionRun].SampleCount;
+                }
             }
         }
         if (ChunkCount == 0)
@@ -401,4 +426,3 @@ internal sealed class Mp4SampleIndex : MediaSampleIndex
         }
     }
 }
-

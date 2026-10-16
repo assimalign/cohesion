@@ -50,5 +50,22 @@ internal static class Mp4Tree
         }
         return false;
     }
-}
 
+    internal static BmffBox? UnhandledOffset(IList<BmffBox> boxes)
+    {
+        foreach (var box in boxes)
+        {
+            if ((uint)box.BoxType is 0x73696478 or 0x7361696f) { return box; } // sidx / saio
+            if (box is BmffBoxComposite composite)
+            {
+                var found = UnhandledOffset(composite.Children);
+                if (found is not null) { return found; }
+            }
+        }
+        return null;
+    }
+
+    internal static bool HasDependencies(IList<BmffBox> boxes) =>
+        Contains(boxes, 0x73677064) || Contains(boxes, 0x73626770) ||
+        Contains(boxes, 0x7361696f) || Contains(boxes, 0x7361697a) || Contains(boxes, 0x73656e63);
+}

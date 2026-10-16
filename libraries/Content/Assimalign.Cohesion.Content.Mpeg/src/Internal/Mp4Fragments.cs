@@ -89,19 +89,21 @@ internal static class Mp4Fragments
                             tfhd.DefaultSampleFlags ?? trex.DefaultSampleFlags,
                             moof.Offset, checked(moof.Offset + moof.Limit));
                         long size = 0;
+                        var presentationEnd = track.Index.PresentationEnd;
                         for (var i = 0; i < trun.Entries.Length; i++)
                         {
                             token.ThrowIfCancellationRequested();
                             size = checked(size + run.SampleSize(i));
                             dts = checked(dts + run.SampleDuration(i));
+                            presentationEnd = Math.Max(presentationEnd, checked(dts + run.CompositionOffset(i)));
                         }
                         dataEnd = checked(offset + size);
                         if (trun.Entries.Length != 0 && track.IsLocal && !Mp4Tree.InMedia(boxes, offset, size, moof.Offset, upper))
                         {
                             throw new ContentFormatException(ErrorMessages.SampleRangeInvalid, ContentFormatErrorCode.InvalidStructure, trun.Offset);
                         }
-                        track.Index.AddRun(run, dts, description == track.DescriptionIndex &&
-                            !Mp4Tree.Contains(traf.Children, 0x73677064) && !Mp4Tree.Contains(traf.Children, 0x73626770));
+                        track.Index.AddRun(run, dts, presentationEnd, description == track.DescriptionIndex &&
+                            !Mp4Tree.HasDependencies(traf.Children));
                     }
                     catch (OverflowException error)
                     {
@@ -115,4 +117,3 @@ internal static class Mp4Fragments
         }
     }
 }
-

@@ -32,5 +32,16 @@ internal static class Mp4Fixtures
         MajorBrand = FourCC.Parse(code).Value,
         CompatibleBrands = [FourCC.Parse("isom").Value, FourCC.Parse(code).Value]
     };
-}
 
+    internal static byte[] Mutate(byte[] bytes, Action<BmffDocument> mutate)
+    {
+        using var source = new MemoryStream(bytes);
+        using var document = Mp4Profile.LoadDocument(source);
+        mutate(document);
+        using var output = new MemoryStream();
+        using var writer = BmffWriter.Create(output);
+        // Intentionally bypass document relocation to emit independently malformed references.
+        foreach (var box in document.Boxes) { writer.Write(box); }
+        return output.ToArray();
+    }
+}
