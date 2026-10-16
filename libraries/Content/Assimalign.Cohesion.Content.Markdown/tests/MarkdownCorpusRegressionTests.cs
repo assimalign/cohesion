@@ -148,4 +148,19 @@ public class MarkdownCorpusRegressionTests
         MarkdownModelComparison.ShouldEqual(expected, actual, source);
         MarkdownText.Write(actual).ShouldBe(written);
     }
+    [Theory(DisplayName = "Cohesion Test [Content.Markdown] - Fences: blank payload lines remove only item indentation")]
+    [InlineData("- ```\n  x\n  \n  ```", "x\n\n")]
+    [InlineData("- ```\n  x\n    \n  ```", "x\n  \n")]
+    public void Parse_BlankFenceLine_PreservesPayloadWhitespace(string source, string payload)
+    {
+        // Arrange. Authored variants of CommonMark 318 distinguish prefix from payload spaces.
+        var expected = MarkdownText.Parse(source);
+
+        // Act
+        var code = expected.Blocks[0].ShouldBeOfType<MarkdownList>().Items[0].Blocks[0].ShouldBeOfType<MarkdownCodeBlock>();
+
+        // Assert
+        code.Literal.ShouldBe(payload);
+        MarkdownModelComparison.ShouldEqual(expected, MarkdownText.Parse(MarkdownText.Write(expected)), source);
+    }
 }

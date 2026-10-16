@@ -109,6 +109,9 @@ does not loosen the outer list; a trailing blank propagates when the nested list
 Tabs expand at four-column stops even when a container consumes only part of one. Unconsumed
 columns remain available to nested markers and become literal spaces in fenced code payloads.
 
+Blank fenced-code lines consume their list-item prefix exactly as nonblank lines do; additional
+payload spaces are preserved. Canonical re-indentation therefore cannot inflate blank code lines.
+
 ## Renderers
 
 **HTML** (`MarkdownHtmlRenderer`) emits the shapes the spec's examples use — tight list items

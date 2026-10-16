@@ -240,6 +240,8 @@ internal sealed class MarkdownBlockParser
                             return matched;
                         }
 
+                        // A blank still carries container indentation, especially inside a fence.
+                        cursor.SkipWhitespace(maxColumns: container.ContentIndent);
                         break;
                     }
 
