@@ -12,7 +12,7 @@ namespace Assimalign.Cohesion.Database.Types;
 /// </summary>
 /// <remarks>
 /// It lives in <c>Database.Types</c>, below both <c>Database.Language</c> and
-/// <c>Database.Execution</c>, so a result's diagnostics (<c>QueryResult.Diagnostics</c>) reach no
+/// <c>Database.Execution</c>, so a result's diagnostics (<c>DatabaseResult.Diagnostics</c>) reach no
 /// language assembly. A language model's parser sets the position members; a diagnostic with no
 /// statement position (an execution warning, or a typed request's refusal) leaves
 /// <see cref="Start"/> and <see cref="End"/> null, while <see cref="Line"/> keeps its default of 1.

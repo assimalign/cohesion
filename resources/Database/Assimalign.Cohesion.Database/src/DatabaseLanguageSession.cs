@@ -61,7 +61,7 @@ public abstract class DatabaseLanguageSession<TRequest> : DatabaseExecutionSessi
     /// <exception cref="ArgumentNullException"><paramref name="request"/> is null.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the core ran.</exception>
     /// <exception cref="DatabaseException">The session is closed, or the request failed.</exception>
-    public new ValueTask<QueryResult> ExecuteAsync(TRequest request, CancellationToken cancellationToken = default)
+    public new ValueTask<DatabaseResult> ExecuteAsync(TRequest request, CancellationToken cancellationToken = default)
         => base.ExecuteAsync(request, cancellationToken);
 
     /// <summary>
@@ -76,7 +76,7 @@ public abstract class DatabaseLanguageSession<TRequest> : DatabaseExecutionSessi
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the core ran.</exception>
     /// <exception cref="DatabaseParseException">The statement text failed to parse in the session's language.</exception>
     /// <exception cref="DatabaseException">The session is closed, or the statement failed.</exception>
-    public ValueTask<QueryResult> ExecuteAsync(string statement, IReadOnlyDictionary<string, object?>? parameters = null, CancellationToken cancellationToken = default)
+    public ValueTask<DatabaseResult> ExecuteAsync(string statement, IReadOnlyDictionary<string, object?>? parameters = null, CancellationToken cancellationToken = default)
     {
         ThrowIfClosed();
         ArgumentException.ThrowIfNullOrWhiteSpace(statement);
@@ -96,17 +96,17 @@ public abstract class DatabaseLanguageSession<TRequest> : DatabaseExecutionSessi
     /// <param name="parameters">Parameter values keyed by bare parameter name, or null.</param>
     /// <param name="cancellationToken">Not canceled when the call starts.</param>
     /// <returns>The query result.</returns>
-    protected abstract ValueTask<QueryResult> ExecuteCoreAsync(string statement, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken);
+    protected abstract ValueTask<DatabaseResult> ExecuteCoreAsync(string statement, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken);
 
     // The traced statement text: the typed level's prologue (DatabaseExecutionSession<TRequest>)
     // around the text core, with a null request, so the trace reports the Text request kind. The
     // two copies stay in step; DatabaseEventSourceTests pins both paths' allocations against their
     // cores.
-    private ValueTask<QueryResult> ExecuteTraced(string statement, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
+    private ValueTask<DatabaseResult> ExecuteTraced(string statement, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
     {
         long started = Stopwatch.GetTimestamp();
         _tracingStatement = true;
-        ValueTask<QueryResult> pending;
+        ValueTask<DatabaseResult> pending;
         Exception? thrown = null;
         bool startWritten = false;
         try

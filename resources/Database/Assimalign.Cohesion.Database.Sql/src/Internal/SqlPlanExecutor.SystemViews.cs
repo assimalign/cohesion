@@ -14,7 +14,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 internal sealed partial class SqlPlanExecutor
 {
-    private QueryResult ExecuteSystemView(SqlSystemViewPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
+    private DatabaseResult ExecuteSystemView(SqlSystemViewPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
         var matches = new List<object?[]>();
@@ -53,10 +53,10 @@ internal sealed partial class SqlPlanExecutor
             window = window.Take((int)limit);
         }
 
-        var columns = new QueryColumn[plan.Projections.Count];
+        var columns = new DatabaseColumn[plan.Projections.Count];
         for (int i = 0; i < plan.Projections.Count; i++)
         {
-            columns[i] = new QueryColumn
+            columns[i] = new DatabaseColumn
             {
                 Name = plan.Projections[i].Name, Ordinal = i, Type = plan.Projections[i].Type,
                 MaxLength = plan.Projections[i].MaxLength,

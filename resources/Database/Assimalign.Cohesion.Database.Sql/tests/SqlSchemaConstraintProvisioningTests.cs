@@ -118,7 +118,7 @@ public sealed class SqlSchemaConstraintProvisioningTests : IDisposable
     private static async Task<long> CountAsync(SqlDatabaseSession session, string table)
     {
         await using var result = (await session.ExecuteAsync($"SELECT COUNT(*) FROM {table}"))
-            .ShouldBeAssignableTo<QueryResultSet>();
+            .ShouldBeAssignableTo<DatabaseResultSet>();
         await foreach (var row in result.GetRowsAsync())
         {
             return row.GetValue(0).ShouldBeOfType<long>();

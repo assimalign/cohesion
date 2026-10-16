@@ -213,7 +213,7 @@ public sealed class SqlLockWaitTests
 
     private static async Task<List<string>> RowsAsync(SqlDatabaseSession session, string sql)
     {
-        await using var set = (await session.ExecuteAsync(sql, cancellationToken: TestTimeout.Token())).ShouldBeAssignableTo<QueryResultSet>().ShouldNotBeNull();
+        await using var set = (await session.ExecuteAsync(sql, cancellationToken: TestTimeout.Token())).ShouldBeAssignableTo<DatabaseResultSet>().ShouldNotBeNull();
         var rows = new List<string>();
         await foreach (var row in set.GetRowsAsync(TestTimeout.Token()))
         {

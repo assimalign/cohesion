@@ -155,7 +155,7 @@ public sealed class SqlUniqueViolationRollbackRaceTests
     {
         var result = await session.ExecuteAsync(sql, cancellationToken: TestTimeout.Token());
         var values = new List<int>();
-        await foreach (var row in result.ShouldBeAssignableTo<QueryResultSet>()!.GetRowsAsync())
+        await foreach (var row in result.ShouldBeAssignableTo<DatabaseResultSet>()!.GetRowsAsync())
         {
             values.Add(Convert.ToInt32(row.GetValue(0)));
         }

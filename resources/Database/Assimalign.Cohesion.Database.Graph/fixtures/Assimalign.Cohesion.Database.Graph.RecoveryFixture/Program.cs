@@ -34,7 +34,7 @@ else if (args[0] == "verify")
 {
     var db = await engine.OpenDatabaseAsync("crash");
     await using var session = await db.CreateSessionAsync();
-    await using var result = (QueryResultSet)await session.ExecuteAsync("MATCH (a:Person {name:'a'})-[r:LINK]->(b) RETURN a,r,b");
+    await using var result = (DatabaseResultSet)await session.ExecuteAsync("MATCH (a:Person {name:'a'})-[r:LINK]->(b) RETURN a,r,b");
     int count = 0;
     await foreach (var row in result.GetRowsAsync())
     {
@@ -44,7 +44,7 @@ else if (args[0] == "verify")
         { throw new InvalidOperationException("Committed path was not recovered."); }
     }
     if (count != 1) { throw new InvalidOperationException("Expected one committed path."); }
-    await using var all = (QueryResultSet)await session.ExecuteAsync("MATCH (a:Person) RETURN a");
+    await using var all = (DatabaseResultSet)await session.ExecuteAsync("MATCH (a:Person) RETURN a");
     count = 0;
     await foreach (var row in all.GetRowsAsync()) { count++; }
     if (count != 2) { throw new InvalidOperationException("Partial nodes survived recovery."); }

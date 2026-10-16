@@ -91,20 +91,20 @@ internal sealed class TestSession : DatabaseLanguageSession<TestRequest>
     /// <summary>
     /// Gets or sets the result the execute cores return.
     /// </summary>
-    public QueryResult Result { get; set; } = TestResult.Instance;
+    public DatabaseResult Result { get; set; } = TestResult.Instance;
 
     /// <summary>
     /// Calls the typed execute core directly, past the base's public member: the baseline the
     /// event source's allocation check compares the public member with.
     /// </summary>
-    public ValueTask<QueryResult> ExecuteCoreDirectly(TestRequest request, CancellationToken cancellationToken = default)
+    public ValueTask<DatabaseResult> ExecuteCoreDirectly(TestRequest request, CancellationToken cancellationToken = default)
         => ExecuteCoreAsync(request, cancellationToken);
 
     /// <summary>
     /// Calls the text execute core directly, past the language base's public member: the baseline
     /// the event source's allocation check compares the text member with.
     /// </summary>
-    public ValueTask<QueryResult> ExecuteTextCoreDirectly(string statement, IReadOnlyDictionary<string, object?>? parameters = null, CancellationToken cancellationToken = default)
+    public ValueTask<DatabaseResult> ExecuteTextCoreDirectly(string statement, IReadOnlyDictionary<string, object?>? parameters = null, CancellationToken cancellationToken = default)
         => ExecuteCoreAsync(statement, parameters, cancellationToken);
 
     public bool EnterOperation() => TryEnterOperation();
@@ -134,14 +134,14 @@ internal sealed class TestSession : DatabaseLanguageSession<TestRequest>
         return transaction;
     }
 
-    protected override ValueTask<QueryResult> ExecuteCoreAsync(TestRequest request, CancellationToken cancellationToken)
+    protected override ValueTask<DatabaseResult> ExecuteCoreAsync(TestRequest request, CancellationToken cancellationToken)
     {
         Interlocked.Increment(ref _executions);
         LastRequest = request;
         return Complete();
     }
 
-    protected override ValueTask<QueryResult> ExecuteCoreAsync(string statement, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
+    protected override ValueTask<DatabaseResult> ExecuteCoreAsync(string statement, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
     {
         Interlocked.Increment(ref _executions);
         LastStatement = statement;
@@ -164,7 +164,7 @@ internal sealed class TestSession : DatabaseLanguageSession<TestRequest>
 
     // The execute cores' outcome: Result, or ExecuteFailure thrown under ExecuteGate's lock or
     // returned faulted; after ExecuteBarrier when one is set.
-    private ValueTask<QueryResult> Complete()
+    private ValueTask<DatabaseResult> Complete()
     {
         if (ExecuteBarrier is { } barrier)
         {
@@ -175,7 +175,7 @@ internal sealed class TestSession : DatabaseLanguageSession<TestRequest>
         {
             if (ExecuteFailureAsynchronously)
             {
-                return ValueTask.FromException<QueryResult>(failure);
+                return ValueTask.FromException<DatabaseResult>(failure);
             }
 
             lock (ExecuteGate)
@@ -184,10 +184,10 @@ internal sealed class TestSession : DatabaseLanguageSession<TestRequest>
             }
         }
 
-        return new ValueTask<QueryResult>(Result);
+        return new ValueTask<DatabaseResult>(Result);
     }
 
-    private async ValueTask<QueryResult> CompleteAfterAsync(Task barrier, Exception? failure)
+    private async ValueTask<DatabaseResult> CompleteAfterAsync(Task barrier, Exception? failure)
     {
         await barrier.ConfigureAwait(false);
         if (failure is not null)

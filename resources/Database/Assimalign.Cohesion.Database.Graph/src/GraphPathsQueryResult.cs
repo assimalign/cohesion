@@ -6,7 +6,7 @@ namespace Assimalign.Cohesion.Database.Graph;
 
 /// <summary>The materialized paths projected by a graph MATCH statement.</summary>
 /// <remarks>All entities are captured from the same statement snapshot; this result owns no active operation.</remarks>
-public sealed class GraphPathsQueryResult : QueryResult
+public sealed class GraphPathsQueryResult : DatabaseResult
 {
     private readonly IReadOnlyList<Diagnostic> _warnings;
 
@@ -20,7 +20,7 @@ public sealed class GraphPathsQueryResult : QueryResult
     public IReadOnlyList<GraphPath> Paths { get; }
 
     /// <inheritdoc />
-    public override QueryResultStatus Status => QueryResultStatus.Success;
+    public override DatabaseResultStatus Status => DatabaseResultStatus.Success;
 
     /// <inheritdoc />
     public override long AffectedCount => -1;

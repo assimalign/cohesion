@@ -385,7 +385,7 @@ public abstract class DatabaseSession : IAsyncDisposable
     // successfully is awaited, in a pooled wrapper. The events of a core that returned are written
     // once the flag is cleared. The tail is non-generic, so every model shares one pooled async box
     // type, as before the capability split.
-    private protected ValueTask<QueryResult> CompleteTraced(ValueTask<QueryResult> pending, DatabaseRequest? request, bool startWritten, long started)
+    private protected ValueTask<DatabaseResult> CompleteTraced(ValueTask<DatabaseResult> pending, DatabaseRequest? request, bool startWritten, long started)
     {
         if (!pending.IsCompletedSuccessfully)
         {
@@ -397,14 +397,14 @@ public abstract class DatabaseSession : IAsyncDisposable
         var result = pending.Result;
         _tracingStatement = false;
         DatabaseEventSource.Log.StatementCompleted(this, request, result, startWritten, started);
-        return new ValueTask<QueryResult>(result);
+        return new ValueTask<DatabaseResult>(result);
     }
 
     // The rest of a traced statement whose core did not complete successfully at once.
     [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
-    private async ValueTask<QueryResult> AwaitTracedAsync(ValueTask<QueryResult> pending, DatabaseRequest? request, bool startWritten, long started)
+    private async ValueTask<DatabaseResult> AwaitTracedAsync(ValueTask<DatabaseResult> pending, DatabaseRequest? request, bool startWritten, long started)
     {
-        QueryResult result;
+        DatabaseResult result;
         Exception? thrown = null;
         try
         {

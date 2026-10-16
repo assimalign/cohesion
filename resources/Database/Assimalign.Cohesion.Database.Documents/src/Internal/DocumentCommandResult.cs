@@ -4,13 +4,13 @@ using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Documents.Internal;
 
-internal sealed class DocumentCommandResult : QueryResult
+internal sealed class DocumentCommandResult : DatabaseResult
 {
     internal static DocumentCommandResult Success { get; } = new();
 
     private DocumentCommandResult() { }
 
-    public override QueryResultStatus Status => QueryResultStatus.Success;
+    public override DatabaseResultStatus Status => DatabaseResultStatus.Success;
     public override long AffectedCount => 0;
     public override IReadOnlyList<Diagnostic>? Diagnostics => null;
 }

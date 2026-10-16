@@ -60,7 +60,7 @@ public sealed class OqlParseStrictnessExecutionTests
 
     private static async Task<List<object?[]>> RowsAsync(DocumentDatabaseSession session, string oql)
     {
-        await using var result = (await session.ExecuteAsync(oql, cancellationToken: CancellationToken.None)).ShouldBeAssignableTo<QueryResultSet>();
+        await using var result = (await session.ExecuteAsync(oql, cancellationToken: CancellationToken.None)).ShouldBeAssignableTo<DatabaseResultSet>();
         var rows = new List<object?[]>();
         await foreach (var row in result.GetRowsAsync(CancellationToken.None))
         {

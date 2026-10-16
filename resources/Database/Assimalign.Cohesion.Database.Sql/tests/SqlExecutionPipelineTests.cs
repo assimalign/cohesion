@@ -48,13 +48,13 @@ public class SqlExecutionPipelineTests : IDisposable
         return engine;
     }
 
-    private static Task<QueryResult> Sql(SqlDatabaseSession session, string sql, IReadOnlyDictionary<string, object?>? parameters = null)
+    private static Task<DatabaseResult> Sql(SqlDatabaseSession session, string sql, IReadOnlyDictionary<string, object?>? parameters = null)
         => session.ExecuteAsync(SqlQueryRequest.FromSql(sql, parameters)).AsTask();
 
     private static async Task<List<object?[]>> Rows(SqlDatabaseSession session, string sql, IReadOnlyDictionary<string, object?>? parameters = null)
     {
         var result = await Sql(session, sql, parameters);
-        var resultSet = result.ShouldBeAssignableTo<QueryResultSet>();
+        var resultSet = result.ShouldBeAssignableTo<DatabaseResultSet>();
 
         var rows = new List<object?[]>();
         await foreach (var row in resultSet!.GetRowsAsync())
@@ -401,7 +401,7 @@ public class SqlExecutionPipelineTests : IDisposable
 
         // Assert
         insert.AffectedCount.ShouldBe(1);
-        var resultSet = result.ShouldBeAssignableTo<QueryResultSet>();
+        var resultSet = result.ShouldBeAssignableTo<DatabaseResultSet>();
         await foreach (var row in resultSet!.GetRowsAsync())
         {
             row.GetString(0).ShouldBe("five");

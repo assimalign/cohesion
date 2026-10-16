@@ -3,9 +3,9 @@ using Assimalign.Cohesion.Database.Types;
 namespace Assimalign.Cohesion.Database.Execution;
 
 /// <summary>
-/// Describes a column within a query result set.
+/// Describes a column within a database result set.
 /// </summary>
-public sealed class QueryColumn
+public sealed class DatabaseColumn
 {
     /// <summary>
     /// Gets the column name.

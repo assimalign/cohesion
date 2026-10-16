@@ -30,14 +30,14 @@ public class KeyValueCommandTests
         return parameters;
     }
 
-    private static async Task<List<object?[]>> MaterializeAsync(QueryResult result)
+    private static async Task<List<object?[]>> MaterializeAsync(DatabaseResult result)
     {
         var rows = new List<object?[]>();
-        var set = (QueryResultSet)result;
+        var set = (DatabaseResultSet)result;
 
         await using (set)
         {
-            await foreach (QueryRow row in set.GetRowsAsync(TestTimeout.Token()))
+            await foreach (DatabaseRow row in set.GetRowsAsync(TestTimeout.Token()))
             {
                 var values = new object?[row.FieldCount];
                 for (int ordinal = 0; ordinal < row.FieldCount; ordinal++)

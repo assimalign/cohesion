@@ -18,10 +18,10 @@ internal sealed partial class SqlPlanExecutor
     /// Consumes a filtered relation, accumulates one state per group, then applies
     /// HAVING, ordering, projection and pagination to completed groups.
     /// </summary>
-    private async Task<QueryResult> ExecuteGroupAsync(SqlGroupPlan plan, SqlStatementContext statement,
+    private async Task<DatabaseResult> ExecuteGroupAsync(SqlGroupPlan plan, SqlStatementContext statement,
         CancellationToken cancellationToken)
     {
-        await using var input = (QueryResultSet)await ExecuteAsync(plan.Input, statement, cancellationToken).ConfigureAwait(false);
+        await using var input = (DatabaseResultSet)await ExecuteAsync(plan.Input, statement, cancellationToken).ConfigureAwait(false);
         var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
         var keys = plan.Keys;
         var aggregates = plan.Aggregates;
@@ -110,7 +110,7 @@ internal sealed partial class SqlPlanExecutor
         {
             window = window.Take((int)take);
         }
-        var columns = plan.Projections.Select((projection, ordinal) => new QueryColumn
+        var columns = plan.Projections.Select((projection, ordinal) => new DatabaseColumn
         {
             Name = projection.Name,
             Ordinal = ordinal,

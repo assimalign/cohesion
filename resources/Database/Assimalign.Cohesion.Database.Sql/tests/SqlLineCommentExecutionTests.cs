@@ -46,7 +46,7 @@ public sealed class SqlLineCommentExecutionTests
 
             // Assert
             string context = $"{terminator} (typed: {typed})";
-            result.Status.ShouldBe(QueryResultStatus.Success, context);
+            result.Status.ShouldBe(DatabaseResultStatus.Success, context);
             result.AffectedCount.ShouldBe(1, context);
             (await SnapshotAsync(session)).ShouldBe(["2,20", "3,30"], context);
         }
@@ -75,7 +75,7 @@ public sealed class SqlLineCommentExecutionTests
 
             // Assert
             string context = $"{terminator} (typed: {typed})";
-            result.Status.ShouldBe(QueryResultStatus.Success, context);
+            result.Status.ShouldBe(DatabaseResultStatus.Success, context);
             result.AffectedCount.ShouldBe(1, context);
             (await SnapshotAsync(session)).ShouldBe(["1,1", "2,20", "3,30"], context);
         }
@@ -106,7 +106,7 @@ public sealed class SqlLineCommentExecutionTests
 
         // Assert
         error.Message.ShouldStartWith("SQL parse error SQL0003: ", Case.Sensitive);
-        typed.Status.ShouldBe(QueryResultStatus.Error);
+        typed.Status.ShouldBe(DatabaseResultStatus.Error);
         (await SnapshotAsync(session)).ShouldBe(["1,10", "2,20", "3,30"]);
     }
 
@@ -114,20 +114,20 @@ public sealed class SqlLineCommentExecutionTests
     {
         var database = await engine.CreateDatabaseAsync("comments");
         var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
-        (await RunAsync(session, Schema, typed: false)).Status.ShouldBe(QueryResultStatus.Success);
+        (await RunAsync(session, Schema, typed: false)).Status.ShouldBe(DatabaseResultStatus.Success);
         (await RunAsync(session, Rows, typed: false)).AffectedCount.ShouldBe(3);
         return session;
     }
 
     /// <summary>Runs <paramref name="sql"/> through the text seam, or parsed through the typed-request seam.</summary>
-    private static Task<QueryResult> RunAsync(SqlDatabaseSession session, string sql, bool typed)
+    private static Task<DatabaseResult> RunAsync(SqlDatabaseSession session, string sql, bool typed)
         => typed
             ? session.ExecuteAsync(new SqlQueryRequest((SqlQueryStatement)new SqlQueryParser().Parse(sql)), CancellationToken.None).AsTask()
             : session.ExecuteAsync(sql, cancellationToken: CancellationToken.None).AsTask();
 
     private static async Task<string[]> SnapshotAsync(SqlDatabaseSession session)
     {
-        await using var result = (await RunAsync(session, "SELECT id, a FROM t ORDER BY id;", typed: false)).ShouldBeAssignableTo<QueryResultSet>();
+        await using var result = (await RunAsync(session, "SELECT id, a FROM t ORDER BY id;", typed: false)).ShouldBeAssignableTo<DatabaseResultSet>();
         var rows = new List<string>();
         await foreach (var row in result.GetRowsAsync(CancellationToken.None))
         {

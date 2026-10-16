@@ -35,7 +35,7 @@ public sealed class SqlJoinExecutionTests
         await SeedUsersAsync(session);
 
         // Act
-        await using var result = (await ExecuteAsync(session, MotivatingQuery)).ShouldBeAssignableTo<QueryResultSet>();
+        await using var result = (await ExecuteAsync(session, MotivatingQuery)).ShouldBeAssignableTo<DatabaseResultSet>();
         var rows = await ReadRowsAsync(result);
 
         // Assert: no ORDER BY means the result is compared as a collection of pairs.
@@ -62,7 +62,7 @@ public sealed class SqlJoinExecutionTests
 
         // Act
         await using var result = (await ExecuteAsync(session, "SELECT a.id, b.id FROM a INNER JOIN b ON a.id = b.id;"))
-            .ShouldBeAssignableTo<QueryResultSet>();
+            .ShouldBeAssignableTo<DatabaseResultSet>();
 
         // Assert
         (await ReadRowsAsync(result)).ShouldBeEmpty();
@@ -260,10 +260,10 @@ public sealed class SqlJoinExecutionTests
             await ExecuteAsync(writer, "UPDATE b SET id = 2, value = 'new-b';");
             await update.CommitAsync(CancellationToken.None);
             await using var oldResult = (await executor.ExecuteAsync(request, captured, CancellationToken.None))
-                .ShouldBeAssignableTo<QueryResultSet>();
+                .ShouldBeAssignableTo<DatabaseResultSet>();
             await using var newResult = (await executor.ExecuteAsync(request,
                 new SqlStatementContext(transaction, database.Coordinator), CancellationToken.None))
-                .ShouldBeAssignableTo<QueryResultSet>();
+                .ShouldBeAssignableTo<DatabaseResultSet>();
 
             // Assert: recapturing Transaction.Snapshot inside either input would violate the old result.
             (await ReadRowsAsync(oldResult)).ShouldHaveSingleItem().ShouldBe(new object?[] { "old-a", "old-b" });
@@ -382,18 +382,18 @@ public sealed class SqlJoinExecutionTests
     private static SqlStatementMetrics MetricsOf(SqlDatabaseSession session)
         => session.LastStatementMetrics.ShouldNotBeNull();
 
-    private static Task<QueryResult> ExecuteAsync(SqlDatabaseSession session, string sql, IReadOnlyDictionary<string, object?>? parameters = null)
+    private static Task<DatabaseResult> ExecuteAsync(SqlDatabaseSession session, string sql, IReadOnlyDictionary<string, object?>? parameters = null)
         => session.ExecuteAsync(sql, parameters, CancellationToken.None).AsTask();
 
     private static async Task<List<object?[]>> RowsAsync(SqlDatabaseSession session, string sql, IReadOnlyDictionary<string, object?>? parameters = null)
     {
-        await using var result = (await ExecuteAsync(session, sql, parameters)).ShouldBeAssignableTo<QueryResultSet>();
+        await using var result = (await ExecuteAsync(session, sql, parameters)).ShouldBeAssignableTo<DatabaseResultSet>();
         return await ReadRowsAsync(result);
     }
 
-    private static async Task<List<object?[]>> ReadRowsAsync(QueryResultSet result)
+    private static async Task<List<object?[]>> ReadRowsAsync(DatabaseResultSet result)
     {
-        result.Status.ShouldBe(QueryResultStatus.Success);
+        result.Status.ShouldBe(DatabaseResultStatus.Success);
         var rows = new List<object?[]>();
         await foreach (var row in result.GetRowsAsync(CancellationToken.None))
         {

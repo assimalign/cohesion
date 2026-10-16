@@ -370,7 +370,7 @@ public sealed class GqlUnknownTokenWarningTests
 
     private static async Task<(List<object?[]> Rows, IReadOnlyList<Diagnostic>? Diagnostics)> ReadAsync(GraphDatabaseSession session, string gql)
     {
-        await using var result = (QueryResultSet)await session.ExecuteAsync(gql, cancellationToken: CancellationToken.None);
+        await using var result = (DatabaseResultSet)await session.ExecuteAsync(gql, cancellationToken: CancellationToken.None);
         var rows = new List<object?[]>();
         await foreach (var row in result.GetRowsAsync(CancellationToken.None))
         {

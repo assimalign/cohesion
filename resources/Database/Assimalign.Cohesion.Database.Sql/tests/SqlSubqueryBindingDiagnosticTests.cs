@@ -43,9 +43,9 @@ public sealed class SqlSubqueryBindingDiagnosticTests
         var result = await session.ExecuteAsync(new SqlQueryRequest(statement), CancellationToken.None);
 
         // Assert
-        result.Status.ShouldBe(QueryResultStatus.Error);
+        result.Status.ShouldBe(DatabaseResultStatus.Error);
         result.AffectedCount.ShouldBe(0);
-        (result is QueryResultSet).ShouldBeFalse();
+        (result is DatabaseResultSet).ShouldBeFalse();
         var diagnostic = result.Diagnostics.ShouldNotBeNull().ShouldHaveSingleItem();
         diagnostic.Code.ShouldBe("COHDBL001");
         diagnostic.Severity.ShouldBe(DiagnosticSeverity.Error);

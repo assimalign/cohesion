@@ -53,11 +53,11 @@ public abstract class DatabaseExecutionSession<TRequest> : DatabaseSession
     /// </summary>
     /// <param name="request">The request to execute.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
-    /// <returns>The query result.</returns>
+    /// <returns>The request's result.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="request"/> is null.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the core ran.</exception>
     /// <exception cref="DatabaseException">The session is closed, or the request failed.</exception>
-    public ValueTask<QueryResult> ExecuteAsync(TRequest request, CancellationToken cancellationToken = default)
+    public ValueTask<DatabaseResult> ExecuteAsync(TRequest request, CancellationToken cancellationToken = default)
     {
         ThrowIfClosed();
         ArgumentNullException.ThrowIfNull(request);
@@ -78,8 +78,8 @@ public abstract class DatabaseExecutionSession<TRequest> : DatabaseSession
     /// </summary>
     /// <param name="request">The request; never null.</param>
     /// <param name="cancellationToken">Not canceled when the call starts.</param>
-    /// <returns>The query result.</returns>
-    protected abstract ValueTask<QueryResult> ExecuteCoreAsync(TRequest request, CancellationToken cancellationToken);
+    /// <returns>The request's result.</returns>
+    protected abstract ValueTask<DatabaseResult> ExecuteCoreAsync(TRequest request, CancellationToken cancellationToken);
 
     // The traced typed request (event-sources plan, D5 a and §4.1 "Re-entry"): entered only while
     // the source is enabled, for the outermost statement on the session; its timestamp costs nothing
@@ -89,11 +89,11 @@ public abstract class DatabaseExecutionSession<TRequest> : DatabaseSession
     // finally, once the core's own finally blocks released what they held. The request is handed to
     // the event source and to the shared tail as a DatabaseRequest, so the prologue needs no
     // generic-dictionary lookup. DatabaseLanguageSession<TRequest> carries the text prologue's copy.
-    private ValueTask<QueryResult> ExecuteTraced(TRequest request, CancellationToken cancellationToken)
+    private ValueTask<DatabaseResult> ExecuteTraced(TRequest request, CancellationToken cancellationToken)
     {
         long started = Stopwatch.GetTimestamp();
         _tracingStatement = true;
-        ValueTask<QueryResult> pending;
+        ValueTask<DatabaseResult> pending;
         Exception? thrown = null;
         bool startWritten = false;
         try

@@ -60,7 +60,7 @@ public sealed class SqlDomainTests
         insertViolation.Message.ShouldBe("DOMAIN constraint 'email' on 'dbo.contacts' was violated.");
         updateViolation.ConstraintName.ShouldBe("email");
         selectViolation.ConstraintName.ShouldBe("email");
-        await using var result = (await ExecuteAsync(session, "SELECT email, backup FROM contacts ORDER BY id")).ShouldBeAssignableTo<QueryResultSet>();
+        await using var result = (await ExecuteAsync(session, "SELECT email, backup FROM contacts ORDER BY id")).ShouldBeAssignableTo<DatabaseResultSet>();
         result.Columns[0].Type.ShouldBe(DatabaseType.String);
         (await ReadAsync(result)).ShouldBe([["ann@example.com", "ann@backup.example"], ["bob@example.com", null]]);
         database.Catalog.TryGetTable("dbo", "contacts", out var table).ShouldBeTrue();
@@ -134,7 +134,7 @@ public sealed class SqlDomainTests
         var converted = await RowsAsync(session, "SELECT CAST('ann@example.com' AS email), CAST(NULL AS email), CAST(id AS code) FROM t");
         var refused = await Should.ThrowAsync<SqlConstraintViolationException>(() => RowsAsync(session, "SELECT CAST('nobody' AS email) FROM t"));
         var truncated = await RowsAsync(session, "SELECT CAST(id * 1000 AS code) FROM t");
-        await using var typed = (await ExecuteAsync(session, "SELECT CAST(id AS code) FROM t")).ShouldBeAssignableTo<QueryResultSet>();
+        await using var typed = (await ExecuteAsync(session, "SELECT CAST(id AS code) FROM t")).ShouldBeAssignableTo<DatabaseResultSet>();
 
         // Assert: the check's refusal is the one error kind a write to the domain raises.
         converted.ShouldBe([["ann@example.com", null, "12"]]);
@@ -720,7 +720,7 @@ public sealed class SqlDomainTests
         var bad = await Should.ThrowAsync<DatabaseException>(() => RowsAsync(session, "SELECT CAST('bad' AS points) FROM t"));
         var canceled = await Should.ThrowAsync<OperationCanceledException>(async () =>
         {
-            await using var result = (QueryResultSet)await session.ExecuteAsync("SELECT CAST('cancel' AS points) FROM t", null, cancel.Token);
+            await using var result = (DatabaseResultSet)await session.ExecuteAsync("SELECT CAST('cancel' AS points) FROM t", null, cancel.Token);
             await ReadAsync(result);
         });
         var after = await RowsAsync(session, "SELECT CAST('7' AS points) FROM t");
@@ -753,16 +753,16 @@ public sealed class SqlDomainTests
         return await builder.BuildAsync();
     }
 
-    private static Task<QueryResult> ExecuteAsync(SqlDatabaseSession session, string sql, IReadOnlyDictionary<string, object?>? parameters = null)
+    private static Task<DatabaseResult> ExecuteAsync(SqlDatabaseSession session, string sql, IReadOnlyDictionary<string, object?>? parameters = null)
         => session.ExecuteAsync(sql, parameters, CancellationToken.None).AsTask();
 
     private static async Task<List<object?[]>> RowsAsync(SqlDatabaseSession session, string sql)
     {
-        await using var result = (await ExecuteAsync(session, sql)).ShouldBeAssignableTo<QueryResultSet>();
+        await using var result = (await ExecuteAsync(session, sql)).ShouldBeAssignableTo<DatabaseResultSet>();
         return await ReadAsync(result);
     }
 
-    private static async Task<List<object?[]>> ReadAsync(QueryResultSet result)
+    private static async Task<List<object?[]>> ReadAsync(DatabaseResultSet result)
     {
         var rows = new List<object?[]>();
         await foreach (var row in result.GetRowsAsync(CancellationToken.None))

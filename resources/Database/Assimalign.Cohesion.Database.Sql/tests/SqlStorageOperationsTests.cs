@@ -900,7 +900,7 @@ public sealed class SqlStorageOperationsTests
     private static async Task<long> Scalar(SqlDatabaseSession session, string query)
     {
         var result = await session.ExecuteAsync(query);
-        var set = result.ShouldBeAssignableTo<QueryResultSet>().ShouldNotBeNull();
+        var set = result.ShouldBeAssignableTo<DatabaseResultSet>().ShouldNotBeNull();
         await using (set)
         {
             await foreach (var row in set.GetRowsAsync())
@@ -916,7 +916,7 @@ public sealed class SqlStorageOperationsTests
     {
         var ids = new List<long>();
         var result = await session.ExecuteAsync("SELECT id FROM users ORDER BY id");
-        if (result is QueryResultSet set)
+        if (result is DatabaseResultSet set)
         {
             await using (set)
             {

@@ -124,7 +124,7 @@ public sealed class GraphDatabaseSession : DatabaseLanguageSession<GraphRequest>
     /// <param name="parse">Parses and validates the statement text into its request.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>The statement's result.</returns>
-    internal async ValueTask<QueryResult> ExecuteStatementAsync(Func<GraphRequest> parse, CancellationToken cancellationToken)
+    internal async ValueTask<DatabaseResult> ExecuteStatementAsync(Func<GraphRequest> parse, CancellationToken cancellationToken)
     {
         ThrowIfNotOpen();
         _database.ThrowIfOffline();
@@ -290,7 +290,7 @@ public sealed class GraphDatabaseSession : DatabaseLanguageSession<GraphRequest>
     /// The leaf chooses the result shape, never whether the request runs:
     /// <see cref="GraphPathsQueryRequest"/> returns paths and <see cref="GraphQueryRequest"/> rows.
     /// </remarks>
-    protected override ValueTask<QueryResult> ExecuteCoreAsync(GraphRequest request, CancellationToken cancellationToken)
+    protected override ValueTask<DatabaseResult> ExecuteCoreAsync(GraphRequest request, CancellationToken cancellationToken)
     {
         _database.EnsureNotDisposed();
         _database.ThrowIfOffline();
@@ -306,7 +306,7 @@ public sealed class GraphDatabaseSession : DatabaseLanguageSession<GraphRequest>
     /// The wire server parses its statements itself and runs them through
     /// <see cref="ExecuteStatementAsync"/>.
     /// </remarks>
-    protected override ValueTask<QueryResult> ExecuteCoreAsync(string statement, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
+    protected override ValueTask<DatabaseResult> ExecuteCoreAsync(string statement, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
         => ExecuteStatementAsync(() => GraphQueryRequest.FromGql(statement, parameters), cancellationToken);
 
     /// <inheritdoc />

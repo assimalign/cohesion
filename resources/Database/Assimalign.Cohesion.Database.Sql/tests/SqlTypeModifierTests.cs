@@ -38,7 +38,7 @@ public sealed class SqlTypeModifierTests
                 continue;
             }
             var result = await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None);
-            if (result is QueryResultSet rows) { await rows.DisposeAsync(); }
+            if (result is DatabaseResultSet rows) { await rows.DisposeAsync(); }
         }
         database.Catalog.TryGetTable("dbo", "created", out var table).ShouldBeTrue();
         table.FindColumn("value").ShouldNotBeNull().DomainName.ShouldBe("INTERVAL DAY");
@@ -99,7 +99,7 @@ public sealed class SqlTypeModifierTests
         foreach (var (sql, _) in SqlTypeModifierCases.Statements(type))
         {
             var result = await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None);
-            if (result is QueryResultSet rows) { await rows.DisposeAsync(); }
+            if (result is DatabaseResultSet rows) { await rows.DisposeAsync(); }
         }
 
         // Assert
@@ -118,7 +118,7 @@ public sealed class SqlTypeModifierTests
         database.Catalog.Functions.Single(function => function.Name == "result_function").ReturnType.ShouldBe(resolved);
         await session.ExecuteAsync("INSERT INTO added (id) VALUES (1)", cancellationToken: CancellationToken.None);
         await using var casts = (await session.ExecuteAsync($"SELECT CAST(1.25 AS {type}) FROM added",
-            cancellationToken: CancellationToken.None)).ShouldBeAssignableTo<QueryResultSet>();
+            cancellationToken: CancellationToken.None)).ShouldBeAssignableTo<DatabaseResultSet>();
         await foreach (var row in casts.GetRowsAsync(CancellationToken.None))
         {
             if (expected == DatabaseType.Float32) { row.GetValue(0).ShouldBeOfType<float>().ShouldBe(1.25f); }
@@ -186,7 +186,7 @@ public sealed class SqlTypeModifierTests
             if (valid)
             {
                 var result = await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None);
-                if (result is QueryResultSet rows) { await rows.DisposeAsync(); }
+                if (result is DatabaseResultSet rows) { await rows.DisposeAsync(); }
             }
             else
             {

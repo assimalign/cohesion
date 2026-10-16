@@ -527,8 +527,8 @@ internal sealed class SmokeRunner
                     await using (session.ConfigureAwait(false))
                     {
                         var outcome = new StatementOutcome { Statement = $"CREATE TABLE {StudioSqlExtensions.NotesTable} (Id BIGINT PRIMARY KEY, Title TEXT NOT NULL);" };
-                        QueryResult result = await session.ExecuteAsync(outcome.Statement, null).ConfigureAwait(false);
-                        await QueryResultReader.FillAsync(outcome, result, CancellationToken.None).ConfigureAwait(false);
+                        DatabaseResult result = await session.ExecuteAsync(outcome.Statement, null).ConfigureAwait(false);
+                        await DatabaseResultReader.FillAsync(outcome, result, CancellationToken.None).ConfigureAwait(false);
                         Require(!outcome.Failed, $"the conflicting table was not created: {Describe(outcome)}");
                     }
                 }

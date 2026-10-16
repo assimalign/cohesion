@@ -132,7 +132,7 @@ public sealed class DatabaseEventSourceTests
             await session.ExecuteAsync("CREATE TABLE items (name TEXT)", cancellationToken: CancellationToken.None);
             await session.ExecuteAsync("INSERT INTO items VALUES ('A')", cancellationToken: CancellationToken.None);
             var result = await session.ExecuteAsync("SELECT name FROM items WHERE name = 'a'", cancellationToken: CancellationToken.None);
-            await using var rows = result.ShouldBeAssignableTo<QueryResultSet>();
+            await using var rows = result.ShouldBeAssignableTo<DatabaseResultSet>();
             long count = 0;
             await foreach (var row in rows.GetRowsAsync(CancellationToken.None))
             {
@@ -192,10 +192,10 @@ public sealed class DatabaseEventSourceTests
         nested.ShouldNotBeNull();
         engine.TryGetDatabase("cancelled", out _).ShouldBeFalse();
         await using var session = await nested.CreateSessionAsync(CancellationToken.None);
-        (await session.ExecuteAsync("CREATE TABLE items (name TEXT)", cancellationToken: CancellationToken.None)).Status.ShouldBe(QueryResultStatus.Success);
-        (await session.ExecuteAsync("INSERT INTO items VALUES ('A')", cancellationToken: CancellationToken.None)).Status.ShouldBe(QueryResultStatus.Success);
+        (await session.ExecuteAsync("CREATE TABLE items (name TEXT)", cancellationToken: CancellationToken.None)).Status.ShouldBe(DatabaseResultStatus.Success);
+        (await session.ExecuteAsync("INSERT INTO items VALUES ('A')", cancellationToken: CancellationToken.None)).Status.ShouldBe(DatabaseResultStatus.Success);
         var result = await session.ExecuteAsync("SELECT name FROM items WHERE name = 'a'", cancellationToken: CancellationToken.None);
-        await using var rows = result.ShouldBeAssignableTo<QueryResultSet>();
+        await using var rows = result.ShouldBeAssignableTo<DatabaseResultSet>();
         int matches = 0;
         await foreach (var row in rows.GetRowsAsync(CancellationToken.None))
         {
@@ -442,7 +442,7 @@ public sealed class DatabaseEventSourceTests
         disposeStop.EventId.ShouldBe(7);
         disposeStop.Opcode.ShouldBe(EventOpcode.Stop);
         disposeStop.PayloadNames.ShouldBe(["engineName", "model", "status", "failureCount", "durationMilliseconds"]);
-        Payload(disposeStop, "status").ShouldBe(nameof(QueryResultStatus.Success));
+        Payload(disposeStop, "status").ShouldBe(nameof(DatabaseResultStatus.Success));
         Payload(disposeStop, "failureCount").ShouldBe(0);
     }
 
@@ -473,9 +473,9 @@ public sealed class DatabaseEventSourceTests
         await session.DisposeAsync();
 
         // Assert
-        succeeded.Status.ShouldBe(QueryResultStatus.Success);
+        succeeded.Status.ShouldBe(DatabaseResultStatus.Success);
         parseFailure.ShouldBeOfType<DatabaseParseException>();
-        failed.Status.ShouldBe(QueryResultStatus.Error);
+        failed.Status.ShouldBe(DatabaseResultStatus.Error);
         refusal.ShouldNotBeNull();
         recorder.Events.ShouldNotContain(e => e.EventId == 0, "EventSource reported an instrumentation error.");
 
@@ -512,14 +512,14 @@ public sealed class DatabaseEventSourceTests
         slow.PayloadNames.ShouldBe(["engineName", "model", "database", "sessionNumber", "requestKind", "status", "durationMilliseconds", "thresholdMilliseconds"]);
         Payload(slow, "engineName").ShouldBe(engineName);
         Payload(slow, "model").ShouldBe(nameof(EngineModel.Sql));
-        Payload(slow, "status").ShouldBe(nameof(QueryResultStatus.Success));
+        Payload(slow, "status").ShouldBe(nameof(DatabaseResultStatus.Success));
         Payload(slow, "thresholdMilliseconds").ShouldBe(0d);
 
         var stop = sessionEvents[3];
         stop.EventId.ShouldBe(26);
         stop.Opcode.ShouldBe(EventOpcode.Stop);
         stop.PayloadNames.ShouldBe(["database", "sessionNumber", "status", "affectedCount", "durationMilliseconds"]);
-        Payload(stop, "status").ShouldBe(nameof(QueryResultStatus.Success));
+        Payload(stop, "status").ShouldBe(nameof(DatabaseResultStatus.Success));
         Payload(stop, "affectedCount").ShouldBe(succeeded.AffectedCount);
 
         // The parse failure the session threw: its type, and not its message, which can quote the
@@ -531,7 +531,7 @@ public sealed class DatabaseEventSourceTests
         Payload(thrown, "exceptionType").ShouldBe(typeof(DatabaseParseException).FullName);
         Payload(thrown, "code").ShouldBe(string.Empty);
         Payload(thrown, "requestKind").ShouldBe(DatabaseEventSource.TextRequestKind);
-        Payload(sessionEvents[7], "status").ShouldBe(nameof(QueryResultStatus.Error));
+        Payload(sessionEvents[7], "status").ShouldBe(nameof(DatabaseResultStatus.Error));
         Payload(sessionEvents[7], "affectedCount").ShouldBe(-1L);
 
         // The coded result the session returned: its error diagnostic's code.
@@ -541,7 +541,7 @@ public sealed class DatabaseEventSourceTests
         diagnostic.Code.ShouldBe("COHSQLT002");
         Payload(coded, "code").ShouldBe(diagnostic.Code);
         Payload(coded, "exceptionType").ShouldBe(string.Empty);
-        Payload(sessionEvents[11], "status").ShouldBe(nameof(QueryResultStatus.Error));
+        Payload(sessionEvents[11], "status").ShouldBe(nameof(DatabaseResultStatus.Error));
 
         var begun = sessionEvents[12];
         begun.EventId.ShouldBe(29);
@@ -603,10 +603,10 @@ public sealed class DatabaseEventSourceTests
         Payload(events[1], "requestKind").ShouldBe(nameof(TestRequest));
         Payload(events[1], "exceptionType").ShouldBe(typeof(DatabaseException).FullName);
         events[1].Payload!.ShouldNotContain("the statement failed");
-        Payload(events[2], "status").ShouldBe(nameof(QueryResultStatus.Error));
+        Payload(events[2], "status").ShouldBe(nameof(DatabaseResultStatus.Error));
         Payload(events[2], "affectedCount").ShouldBe(-1L);
         Payload(events[3], "requestKind").ShouldBe(DatabaseEventSource.TextRequestKind);
-        Payload(events[4], "status").ShouldBe(nameof(QueryResultStatus.Cancelled));
+        Payload(events[4], "status").ShouldBe(nameof(DatabaseResultStatus.Cancelled));
     }
 
     [Fact(DisplayName = "Cohesion Test [Database] - DatabaseEventSource: Should write a failed result's first error diagnostic code, or an empty code when it has none")]
@@ -987,9 +987,9 @@ public sealed class DatabaseEventSourceTests
         events[1].Payload.ShouldBe([name, nameof(DatabaseEngineWorkerKind.Checkpoint), "a"]);
         events[2].EventId.ShouldBe(15);
         events[2].PayloadNames.ShouldBe(["workerName", "workerKind", "pass", "status", "durationMilliseconds"]);
-        Payload(events[2], "status").ShouldBe(nameof(QueryResultStatus.Success));
+        Payload(events[2], "status").ShouldBe(nameof(DatabaseResultStatus.Success));
         Payload(events[5], "pass").ShouldBe(2L);
-        Payload(events[5], "status").ShouldBe(nameof(QueryResultStatus.Error));
+        Payload(events[5], "status").ShouldBe(nameof(DatabaseResultStatus.Error));
 
         var giveUpFailed = recorder.Events.Where(e => e.EventId == 17 && Equals(e.Payload?[0], engineName + "/checkpoint")).ShouldHaveSingleItem();
         giveUpFailed.EventName.ShouldBe("WorkerGiveUpFailed");
@@ -1078,7 +1078,7 @@ public sealed class DatabaseEventSourceTests
         recorder.Events.ShouldNotContain(e => e.EventId == 0, "EventSource reported an instrumentation error.");
         var events = recorder.Events.Where(e => Equals(e.Payload?[0], name)).ToArray();
         events.Select(e => e.EventName).ShouldBe(["WorkerPassStart", "WorkerPassStop"]);
-        Payload(events[1], "status").ShouldBe(nameof(QueryResultStatus.Cancelled));
+        Payload(events[1], "status").ShouldBe(nameof(DatabaseResultStatus.Cancelled));
     }
 
     [Fact(DisplayName = "Cohesion Test [Database] - DatabaseEventSource: Should end a pass that saw the engine's stop and returned with a Cancelled stop, and no failure")]
@@ -1099,7 +1099,7 @@ public sealed class DatabaseEventSourceTests
         recorder.Events.ShouldNotContain(e => e.EventId == 0, "EventSource reported an instrumentation error.");
         var events = recorder.Events.Where(e => Equals(e.Payload?[0], name)).ToArray();
         events.Select(e => e.EventName).ShouldBe(["WorkerPassStart", "WorkerPassStop"]);
-        Payload(events[1], "status").ShouldBe(nameof(QueryResultStatus.Cancelled));
+        Payload(events[1], "status").ShouldBe(nameof(DatabaseResultStatus.Cancelled));
     }
 
     [Fact(DisplayName = "Cohesion Test [Database] - DatabaseEventSource: Should write no StatementStop for a statement whose start was not written")]
@@ -1185,7 +1185,7 @@ public sealed class DatabaseEventSourceTests
         events[1].PayloadNames.ShouldBe(["engineName", "model", "failureCount", "exceptionType", "exceptionMessage"]);
         events[1].Payload.ShouldBe([engineName, nameof(EngineModel.Sql), 1, typeof(InvalidOperationException).FullName, "the databases failed to close"]);
         Payload(events[2], "failureCount").ShouldBe(1);
-        Payload(events[2], "status").ShouldBe(nameof(QueryResultStatus.Error));
+        Payload(events[2], "status").ShouldBe(nameof(DatabaseResultStatus.Error));
     }
 
     [Fact(DisplayName = "Cohesion Test [Database] - DatabaseEventSource: Should set the slow-statement threshold from each enabling session")]
@@ -1350,7 +1350,7 @@ public sealed class DatabaseEventSourceTests
     // Measures the call three rounds over and returns the fewest bytes a round allocated. A call that
     // allocates does so in every round, while the runtime can now and then charge an allocation of
     // its own to this thread.
-    private static long FewestBytes(Func<ValueTask<QueryResult>> execute, int iterations)
+    private static long FewestBytes(Func<ValueTask<DatabaseResult>> execute, int iterations)
     {
         long fewest = long.MaxValue;
         for (int round = 0; round < 3; round++)
@@ -1362,7 +1362,7 @@ public sealed class DatabaseEventSourceTests
     }
 
     // Runs the call the given number of times on this thread and returns the bytes it allocated.
-    private static long Measure(Func<ValueTask<QueryResult>> execute, int iterations)
+    private static long Measure(Func<ValueTask<DatabaseResult>> execute, int iterations)
     {
         long before = GC.GetAllocatedBytesForCurrentThread();
         for (int index = 0; index < iterations; index++)
@@ -1386,16 +1386,16 @@ public sealed class DatabaseEventSourceTests
     }
 
     /// <summary>
-    /// A result a session refused with diagnostics: <see cref="QueryResultStatus.Error"/>.
+    /// A result a session refused with diagnostics: <see cref="DatabaseResultStatus.Error"/>.
     /// </summary>
-    private sealed class DiagnosedResult : QueryResult
+    private sealed class DiagnosedResult : DatabaseResult
     {
         public DiagnosedResult(params Diagnostic[] diagnostics)
         {
             Diagnostics = diagnostics;
         }
 
-        public override QueryResultStatus Status => QueryResultStatus.Error;
+        public override DatabaseResultStatus Status => DatabaseResultStatus.Error;
 
         public override long AffectedCount => 0;
 

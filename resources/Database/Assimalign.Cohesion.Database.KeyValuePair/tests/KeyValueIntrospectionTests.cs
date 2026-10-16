@@ -26,7 +26,7 @@ public sealed class KeyValueIntrospectionTests
         await using var session = await database.CreateSessionAsync();
 
         var result = (await session.ExecuteCommandTextAsync("keyspaces", cancellationToken: TestTimeout.Token()))
-            .ShouldBeAssignableTo<QueryResultSet>();
+            .ShouldBeAssignableTo<DatabaseResultSet>();
         result.Columns.Select(column => column.Name).ShouldBe(new[]
         {
             "database_name", "keyspace_id", "entry_space_format_version", "primary_index_name", "index_kind", "is_unique",
@@ -158,9 +158,9 @@ public sealed class KeyValueIntrospectionTests
         await client.ExpectAsync(ProtocolMessageType.ResultComplete);
     }
 
-    private static async Task<List<object?[]>> MaterializeAsync(QueryResult result)
+    private static async Task<List<object?[]>> MaterializeAsync(DatabaseResult result)
     {
-        await using var set = result.ShouldBeAssignableTo<QueryResultSet>();
+        await using var set = result.ShouldBeAssignableTo<DatabaseResultSet>();
         var rows = new List<object?[]>();
         await foreach (var row in set.GetRowsAsync(TestTimeout.Token()))
         {

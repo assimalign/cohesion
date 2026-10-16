@@ -8,12 +8,12 @@ namespace Assimalign.Cohesion.Database.Execution;
 /// Represents the result of executing a request: its status, the records it changed, and the
 /// diagnostics the model reported.
 /// </summary>
-public abstract class QueryResult
+public abstract class DatabaseResult
 {
     /// <summary>
     /// Gets the outcome status of the execution.
     /// </summary>
-    public abstract QueryResultStatus Status { get; }
+    public abstract DatabaseResultStatus Status { get; }
 
     /// <summary>
     /// Gets the number of records the request changed, or -1 when the model reports no count.

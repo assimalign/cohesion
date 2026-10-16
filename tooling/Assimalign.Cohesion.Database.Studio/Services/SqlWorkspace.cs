@@ -115,8 +115,8 @@ internal sealed class SqlWorkspace : LanguageWorkspace
     {
         if (Mode == ConnectionMode.Embedded)
         {
-            QueryResult result = await SqlSession.ExecuteAsync(outcome.Statement, null, cancellationToken).ConfigureAwait(false);
-            await FillFromQueryResultAsync(outcome, result, cancellationToken).ConfigureAwait(false);
+            DatabaseResult result = await SqlSession.ExecuteAsync(outcome.Statement, null, cancellationToken).ConfigureAwait(false);
+            await FillFromDatabaseResultAsync(outcome, result, cancellationToken).ConfigureAwait(false);
             return;
         }
 

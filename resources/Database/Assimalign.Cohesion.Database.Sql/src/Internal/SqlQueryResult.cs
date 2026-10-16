@@ -8,9 +8,9 @@ using Assimalign.Cohesion.Database.Types;
 /// <summary>
 /// Represents the result of a SQL DML operation (INSERT, UPDATE, DELETE).
 /// </summary>
-internal sealed class SqlQueryResult : QueryResult
+internal sealed class SqlQueryResult : DatabaseResult
 {
-    internal SqlQueryResult(QueryResultStatus status, long affectedCount, IReadOnlyList<Diagnostic>? diagnostics = null)
+    internal SqlQueryResult(DatabaseResultStatus status, long affectedCount, IReadOnlyList<Diagnostic>? diagnostics = null)
     {
         Status = status;
         AffectedCount = affectedCount;
@@ -18,7 +18,7 @@ internal sealed class SqlQueryResult : QueryResult
     }
 
     /// <inheritdoc />
-    public override QueryResultStatus Status { get; }
+    public override DatabaseResultStatus Status { get; }
 
     /// <inheritdoc />
     public override long AffectedCount { get; }

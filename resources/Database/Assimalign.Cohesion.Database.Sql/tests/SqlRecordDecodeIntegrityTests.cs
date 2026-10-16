@@ -364,7 +364,7 @@ public sealed class SqlRecordDecodeIntegrityTests
     private static async Task<int[]> Ids(SqlDatabaseSession session, string sql)
     {
         var result = await session.ExecuteAsync(sql, cancellationToken: TestTimeout.Token());
-        var resultSet = result.ShouldBeAssignableTo<QueryResultSet>();
+        var resultSet = result.ShouldBeAssignableTo<DatabaseResultSet>();
         var ids = new List<int>();
         await foreach (var row in resultSet!.GetRowsAsync())
         {

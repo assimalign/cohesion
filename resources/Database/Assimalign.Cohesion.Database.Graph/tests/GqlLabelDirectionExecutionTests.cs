@@ -282,7 +282,7 @@ public sealed class GqlLabelDirectionExecutionTests
         await using var session = await SeedAsync(engine, labelSeed);
 
         // Act
-        await using var result = (QueryResultSet)await session.ExecuteAsync(gql, cancellationToken: CancellationToken.None);
+        await using var result = (DatabaseResultSet)await session.ExecuteAsync(gql, cancellationToken: CancellationToken.None);
         var names = new List<string?>();
         await foreach (var row in result.GetRowsAsync(CancellationToken.None)) { names.Add(row.GetString(0)); }
 
@@ -424,7 +424,7 @@ public sealed class GqlLabelDirectionExecutionTests
 
     private static async Task<List<object?[]>> RowsAsync(GraphDatabaseSession session, string gql)
     {
-        await using var result = (QueryResultSet)await session.ExecuteAsync(gql, cancellationToken: CancellationToken.None);
+        await using var result = (DatabaseResultSet)await session.ExecuteAsync(gql, cancellationToken: CancellationToken.None);
         var rows = new List<object?[]>();
         await foreach (var row in result.GetRowsAsync(CancellationToken.None))
         {

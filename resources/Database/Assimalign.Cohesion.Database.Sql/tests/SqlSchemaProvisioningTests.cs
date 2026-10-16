@@ -534,7 +534,7 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
         await session.ExecuteAsync("DROP TABLE orders;");
     }
 
-    private static Task<QueryResult> ExecuteDdlForLockTestAsync(
+    private static Task<DatabaseResult> ExecuteDdlForLockTestAsync(
         SqlDatabase database, SqlDatabaseTransaction transaction, string statement)
     {
         var instance = database;

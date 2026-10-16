@@ -163,7 +163,7 @@ public sealed class KeyValueDatabaseSession : DatabaseExecutionSession<KeyValueR
     /// The session is closed; its transaction refuses commands (<c>COHDBK001</c>); or the command
     /// failed.
     /// </exception>
-    internal ValueTask<QueryResult> ExecuteCommandTextAsync(string commandText, IReadOnlyDictionary<string, object?>? parameters = null, CancellationToken cancellationToken = default)
+    internal ValueTask<DatabaseResult> ExecuteCommandTextAsync(string commandText, IReadOnlyDictionary<string, object?>? parameters = null, CancellationToken cancellationToken = default)
     {
         ThrowIfClosed();
         ArgumentException.ThrowIfNullOrWhiteSpace(commandText);
@@ -176,10 +176,10 @@ public sealed class KeyValueDatabaseSession : DatabaseExecutionSession<KeyValueR
     }
 
     /// <inheritdoc />
-    protected override ValueTask<QueryResult> ExecuteCoreAsync(KeyValueRequest request, CancellationToken cancellationToken)
+    protected override ValueTask<DatabaseResult> ExecuteCoreAsync(KeyValueRequest request, CancellationToken cancellationToken)
         => ExecuteRequestAsync(request, cancellationToken);
 
-    private async ValueTask<QueryResult> ExecuteRequestAsync(KeyValueRequest request, CancellationToken cancellationToken)
+    private async ValueTask<DatabaseResult> ExecuteRequestAsync(KeyValueRequest request, CancellationToken cancellationToken)
     {
         _database.ThrowIfOffline();
 
@@ -197,7 +197,7 @@ public sealed class KeyValueDatabaseSession : DatabaseExecutionSession<KeyValueR
         }
     }
 
-    private async ValueTask<QueryResult> ExecuteCommandAsync(KeyValueRequest request, CancellationToken cancellationToken)
+    private async ValueTask<DatabaseResult> ExecuteCommandAsync(KeyValueRequest request, CancellationToken cancellationToken)
     {
         // Inside an explicit transaction, the command rides its context. A command is
         // statement-atomic: its writes share one physical bracket that a failure rolls back, so a

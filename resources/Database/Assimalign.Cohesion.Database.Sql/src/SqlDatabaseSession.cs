@@ -187,7 +187,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
     }
 
     /// <inheritdoc />
-    protected override ValueTask<QueryResult> ExecuteCoreAsync(SqlQueryRequest request, CancellationToken cancellationToken)
+    protected override ValueTask<DatabaseResult> ExecuteCoreAsync(SqlQueryRequest request, CancellationToken cancellationToken)
         => ExecuteRequestAsync(request, cancellationToken);
 
     /// <inheritdoc />
@@ -198,14 +198,14 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
     /// its typed session. A parse that runs out of stack fails with <c>COHSQLE004</c>, as any other
     /// walk over the statement does.
     /// </remarks>
-    protected override ValueTask<QueryResult> ExecuteCoreAsync(string statement, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
+    protected override ValueTask<DatabaseResult> ExecuteCoreAsync(string statement, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
         => ExecuteRequestAsync(SqlQueryRequest.FromSql(statement, parameters, _parserOptions, _database.Name), cancellationToken);
 
     /// <summary>Executes one request with a receipt that cannot attach to any later session request.</summary>
-    internal ValueTask<QueryResult> ExecuteScriptAsync(SqlQueryRequest request, SqlCatalogScriptPublication receipt, CancellationToken cancellationToken)
+    internal ValueTask<DatabaseResult> ExecuteScriptAsync(SqlQueryRequest request, SqlCatalogScriptPublication receipt, CancellationToken cancellationToken)
         => ExecuteRequestAsync(request, cancellationToken, receipt);
 
-    private async ValueTask<QueryResult> ExecuteRequestAsync(SqlQueryRequest request, CancellationToken cancellationToken, SqlCatalogScriptPublication? scriptReceipt = null)
+    private async ValueTask<DatabaseResult> ExecuteRequestAsync(SqlQueryRequest request, CancellationToken cancellationToken, SqlCatalogScriptPublication? scriptReceipt = null)
     {
         _database.ThrowIfOffline();
         // The statement's own metrics are the ones set after this point; a statement that fails
@@ -314,17 +314,17 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
             && _lastStatementMetrics is { SelfCommits: > 0 } metrics
             && !ReferenceEquals(metrics, previousMetrics);
 
-    private ValueTask<QueryResult> ExecuteStatementAsync(SqlQueryRequest request, CancellationToken cancellationToken, SqlCatalogScriptPublication? scriptReceipt)
+    private ValueTask<DatabaseResult> ExecuteStatementAsync(SqlQueryRequest request, CancellationToken cancellationToken, SqlCatalogScriptPublication? scriptReceipt)
         => IsSelfCommitting(request) ? ExecuteMetadataStatementAsync(request, cancellationToken, scriptReceipt) : ExecuteStatementCoreAsync(request, cancellationToken, scriptReceipt);
 
-    private async ValueTask<QueryResult> ExecuteMetadataStatementAsync(SqlQueryRequest request, CancellationToken cancellationToken, SqlCatalogScriptPublication? scriptReceipt)
+    private async ValueTask<DatabaseResult> ExecuteMetadataStatementAsync(SqlQueryRequest request, CancellationToken cancellationToken, SqlCatalogScriptPublication? scriptReceipt)
     {
         using var metadata = _database.DdlInterlock.EnterMetadata(_database.Name.ToString(), request.Statement.SqlExpression
             is SqlCreateFunctionExpression or SqlDropFunctionExpression or SqlCreateDomainExpression or SqlDropDomainExpression);
         return await ExecuteStatementCoreAsync(request, cancellationToken, scriptReceipt).ConfigureAwait(false);
     }
 
-    private async ValueTask<QueryResult> ExecuteStatementCoreAsync(SqlQueryRequest request, CancellationToken cancellationToken, SqlCatalogScriptPublication? scriptReceipt)
+    private async ValueTask<DatabaseResult> ExecuteStatementCoreAsync(SqlQueryRequest request, CancellationToken cancellationToken, SqlCatalogScriptPublication? scriptReceipt)
     {
         // Typed requests may be constructed directly from a parser result rather
         // than FromSql. Never execute an error-recovery AST (notably ROLLBACK TO
@@ -337,7 +337,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
                 {
                     SqlDatabaseEventSource.Log.StatementTooComplex(_database.Name, request.Statement.ExpressionNestingDepth);
                 }
-                return new SqlQueryResult(QueryResultStatus.Error, affectedCount: 0,
+                return new SqlQueryResult(DatabaseResultStatus.Error, affectedCount: 0,
                     [.. request.Statement.Diagnostics]);
             }
         }
@@ -350,7 +350,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         if (request.Statement.ExpressionNestingDepth > _parserOptions.ExpressionNestingLimit)
         {
             SqlDatabaseEventSource.Log.StatementTooComplex(_database.Name, request.Statement.ExpressionNestingDepth);
-            return new SqlQueryResult(QueryResultStatus.Error, affectedCount: 0,
+            return new SqlQueryResult(DatabaseResultStatus.Error, affectedCount: 0,
                 [NestingLimitDiagnostic(request.Statement.ExpressionNestingDepth)]);
         }
 
@@ -444,7 +444,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
                 _database.Name.ToString(), CaptureSystemViewSnapshot(request), _ddlLockOwner, ProvisioningProgress, scriptReceipt);
             _lastStatementMetrics = scope.Metrics;
             var result = await _executor.ExecuteAsync(request, scope, cancellationToken).ConfigureAwait(false);
-            if (scriptReceipt is { } receipt && !IsSelfCommitting(request) && result.Status == QueryResultStatus.Success)
+            if (scriptReceipt is { } receipt && !IsSelfCommitting(request) && result.Status == DatabaseResultStatus.Success)
             {
                 await CompleteScriptStatementAsync(result, context, receipt, cancellationToken).ConfigureAwait(false);
             }
@@ -473,9 +473,9 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         }
     }
 
-    private async ValueTask CompleteScriptStatementAsync(QueryResult result, TransactionContext transaction, SqlCatalogScriptPublication receipt, CancellationToken cancellationToken)
+    private async ValueTask CompleteScriptStatementAsync(DatabaseResult result, TransactionContext transaction, SqlCatalogScriptPublication receipt, CancellationToken cancellationToken)
     {
-        if (result is QueryResultSet rows)
+        if (result is DatabaseResultSet rows)
         {
             await foreach (var row in rows.GetRowsAsync(cancellationToken).ConfigureAwait(false)) { _ = row; }
         }
@@ -557,7 +557,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         Location = DiagnosticLocation.Absolute,
     };
 
-    private async ValueTask<QueryResult> ExecuteTransactionControlAsync(
+    private async ValueTask<DatabaseResult> ExecuteTransactionControlAsync(
         SqlTransactionExpression control, CancellationToken cancellationToken)
     {
         var transaction = CurrentTransaction;
@@ -592,11 +592,11 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
             }
         }
 
-        return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
+        return new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0);
     }
 
-    private static QueryResult TransactionDiagnostic(string code, string message)
-        => new SqlQueryResult(QueryResultStatus.Error, affectedCount: 0,
+    private static DatabaseResult TransactionDiagnostic(string code, string message)
+        => new SqlQueryResult(DatabaseResultStatus.Error, affectedCount: 0,
             [new Diagnostic { Code = code, Message = message, Severity = DiagnosticSeverity.Error }]);
 
     // Ordinary DML does not enumerate the catalog just to construct a context.

@@ -225,13 +225,13 @@ public sealed class SqlBoundExpressionTests
     private static async Task ExecuteAsync(SqlDatabaseSession session, string statement)
     {
         var result = await session.ExecuteAsync(statement, cancellationToken: CancellationToken.None);
-        result.Status.ShouldBe(QueryResultStatus.Success, statement);
+        result.Status.ShouldBe(DatabaseResultStatus.Success, statement);
     }
 
     private static async Task<List<object?[]>> RowsAsync(SqlDatabaseSession session, string statement,
         IReadOnlyDictionary<string, object?>? parameters = null)
     {
-        await using var result = (await session.ExecuteAsync(statement, parameters, CancellationToken.None)).ShouldBeAssignableTo<QueryResultSet>();
+        await using var result = (await session.ExecuteAsync(statement, parameters, CancellationToken.None)).ShouldBeAssignableTo<DatabaseResultSet>();
         var rows = new List<object?[]>();
         await foreach (var row in result.GetRowsAsync(CancellationToken.None))
         {

@@ -184,7 +184,7 @@ public sealed class SqlProvisioningAdmissionTests
 
     private static async Task AssertRowAsync(SqlDatabaseSession session, string table, CancellationToken cancellationToken)
     {
-        await using var result = (QueryResultSet)await session.ExecuteAsync($"SELECT id FROM {table}", cancellationToken: cancellationToken);
+        await using var result = (DatabaseResultSet)await session.ExecuteAsync($"SELECT id FROM {table}", cancellationToken: cancellationToken);
         int rows = 0;
         await foreach (var row in result.GetRowsAsync(cancellationToken))
         {

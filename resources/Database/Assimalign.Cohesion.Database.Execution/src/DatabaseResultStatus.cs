@@ -3,7 +3,7 @@ namespace Assimalign.Cohesion.Database.Execution;
 /// <summary>
 /// Represents the outcome status of executing a request.
 /// </summary>
-public enum QueryResultStatus : byte
+public enum DatabaseResultStatus : byte
 {
     /// <summary>The request completed successfully.</summary>
     Success = 0,

@@ -243,7 +243,7 @@ internal static class Program
         long count = 0;
         var (elapsed, cpu, threadBytes, processBytes, hopped) = await TimeAsync(async () =>
         {
-            await using var result = (QueryResultSet)await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None);
+            await using var result = (DatabaseResultSet)await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None);
             await foreach (var row in result.GetRowsAsync(CancellationToken.None))
             {
                 for (int field = 0; field < row.FieldCount; field++)
@@ -295,7 +295,7 @@ internal static class Program
                 parameters["name"] = names[i];
                 parameters["v"] = values[i];
                 var result = await session.ExecuteAsync(sql, parameters, CancellationToken.None);
-                if (result.Status != QueryResultStatus.Success)
+                if (result.Status != DatabaseResultStatus.Success)
                 {
                     throw new InvalidOperationException($"INSERT {i} failed.");
                 }
@@ -382,11 +382,11 @@ internal static class Program
     private static async Task ExecuteAsync(SqlDatabaseSession session, string sql)
     {
         var result = await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None);
-        if (result is QueryResultSet set)
+        if (result is DatabaseResultSet set)
         {
             await set.DisposeAsync();
         }
-        else if (result.Status != QueryResultStatus.Success)
+        else if (result.Status != DatabaseResultStatus.Success)
         {
             throw new InvalidOperationException($"'{sql}' failed: {string.Join("; ", result.Diagnostics?.Select(diagnostic => diagnostic.Message) ?? [])}");
         }

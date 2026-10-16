@@ -164,7 +164,7 @@ public sealed class GraphTransactionFailureWireTests
         transaction.State.ShouldBe(TransactionState.RolledBack);
         await using var observer = await harness.Database.CreateSessionAsync(harness.Token);
         var labels = new List<string?>();
-        var result = (QueryResultSet)await observer.ExecuteAsync("SHOW LABELS", cancellationToken: harness.Token);
+        var result = (DatabaseResultSet)await observer.ExecuteAsync("SHOW LABELS", cancellationToken: harness.Token);
         await using (result)
         {
             await foreach (var row in result.GetRowsAsync(harness.Token)) { labels.Add(row.GetString(2)); }

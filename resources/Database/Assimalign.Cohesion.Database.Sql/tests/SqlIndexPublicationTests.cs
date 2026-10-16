@@ -229,7 +229,7 @@ public sealed class SqlIndexPublicationTests
 
     private static async Task<int> CountRowsAsync(SqlDatabaseSession session, string sql, CancellationToken cancellationToken)
     {
-        await using var result = (QueryResultSet)await session.ExecuteAsync(sql, cancellationToken: cancellationToken);
+        await using var result = (DatabaseResultSet)await session.ExecuteAsync(sql, cancellationToken: cancellationToken);
         int count = 0;
         await foreach (var row in result.GetRowsAsync(cancellationToken))
         {

@@ -443,7 +443,7 @@ public sealed class SqlPersistedDefinitionTests : IDisposable
         // Assert
         failure.Message.ShouldContain($"Column '{column}': DEFAULT value cannot be stored as", Case.Sensitive);
         database.Catalog.TryGetTable("dbo", "t", out _).ShouldBeFalse();
-        (await session.ExecuteAsync("CREATE TABLE t (id INT, amount INT DEFAULT '7')")).Status.ShouldBe(QueryResultStatus.Success);
+        (await session.ExecuteAsync("CREATE TABLE t (id INT, amount INT DEFAULT '7')")).Status.ShouldBe(DatabaseResultStatus.Success);
     }
 
     /// <summary>
@@ -500,7 +500,7 @@ public sealed class SqlPersistedDefinitionTests : IDisposable
 
     private static async Task<List<object?[]>> RowsAsync(SqlDatabaseSession session, string sql)
     {
-        await using var result = (await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None)).ShouldBeAssignableTo<QueryResultSet>();
+        await using var result = (await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None)).ShouldBeAssignableTo<DatabaseResultSet>();
         var rows = new List<object?[]>();
         await foreach (var row in result.GetRowsAsync(CancellationToken.None))
         {

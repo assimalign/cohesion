@@ -225,7 +225,7 @@ public sealed class DocumentDatabaseSession : DatabaseLanguageSession<DocumentQu
     /// <param name="parse">Parses the statement text into its request.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>The statement's result.</returns>
-    private async ValueTask<QueryResult> ExecuteStatementAsync(Func<DocumentQueryRequest> parse, CancellationToken cancellationToken)
+    private async ValueTask<DatabaseResult> ExecuteStatementAsync(Func<DocumentQueryRequest> parse, CancellationToken cancellationToken)
     {
         ThrowIfNotOpen();
         _database.ThrowIfOffline();
@@ -386,7 +386,7 @@ public sealed class DocumentDatabaseSession : DatabaseLanguageSession<DocumentQu
     }
 
     /// <inheritdoc />
-    protected override ValueTask<QueryResult> ExecuteCoreAsync(DocumentQueryRequest request, CancellationToken cancellationToken)
+    protected override ValueTask<DatabaseResult> ExecuteCoreAsync(DocumentQueryRequest request, CancellationToken cancellationToken)
     {
         _database.EnsureNotDisposed();
         _database.ThrowIfOffline();
@@ -400,7 +400,7 @@ public sealed class DocumentDatabaseSession : DatabaseLanguageSession<DocumentQu
     /// (<see cref="DocumentQueryRequest.FromOql"/>) into the request the typed member takes, and a
     /// statement that fails to parse aborts an explicit transaction as an execution failure does.
     /// </remarks>
-    protected override ValueTask<QueryResult> ExecuteCoreAsync(string statement, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
+    protected override ValueTask<DatabaseResult> ExecuteCoreAsync(string statement, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
         => ExecuteStatementAsync(() => DocumentQueryRequest.FromOql(statement, parameters), cancellationToken);
 
     /// <inheritdoc />

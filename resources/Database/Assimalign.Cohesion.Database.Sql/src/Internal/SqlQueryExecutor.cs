@@ -39,7 +39,7 @@ internal sealed class SqlQueryExecutor
     /// context (write stamps, visibility snapshot) and the paired storage bracket
     /// the mutations ride.
     /// </summary>
-    internal Task<QueryResult> ExecuteAsync(SqlQueryRequest request, SqlStatementContext statement, CancellationToken cancellationToken = default)
+    internal Task<DatabaseResult> ExecuteAsync(SqlQueryRequest request, SqlStatementContext statement, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
         cancellationToken.ThrowIfCancellationRequested();
@@ -53,7 +53,7 @@ internal sealed class SqlQueryExecutor
         }
         catch (SqlUnsupportedQueryException exception)
         {
-            return Task.FromResult<QueryResult>(new SqlQueryResult(QueryResultStatus.Error, affectedCount: 0,
+            return Task.FromResult<DatabaseResult>(new SqlQueryResult(DatabaseResultStatus.Error, affectedCount: 0,
                 [new Diagnostic { Code = "COHDBL001", Message = exception.Message, Severity = DiagnosticSeverity.Error }]));
         }
 

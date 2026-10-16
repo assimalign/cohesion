@@ -615,7 +615,7 @@ public sealed class SqlDataStorageFormatTests : IDisposable
     private static async Task<int[]> IdsAsync(SqlDatabaseSession session, string sql, object parameter)
     {
         await using var result = (await session.ExecuteAsync(sql, new Dictionary<string, object?> { ["p"] = parameter }))
-            .ShouldBeAssignableTo<QueryResultSet>();
+            .ShouldBeAssignableTo<DatabaseResultSet>();
         var ids = new List<int>();
         await foreach (var row in result!.GetRowsAsync())
         {

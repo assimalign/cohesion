@@ -213,15 +213,15 @@ public sealed class GqlProfileExecutionTests
     {
         string context = $"{clause}: {executionCase.Statement}";
         var result = await session.ExecuteAsync(executionCase.Statement, cancellationToken: cancellationToken);
-        result.Status.ShouldBe(QueryResultStatus.Success, context);
+        result.Status.ShouldBe(DatabaseResultStatus.Success, context);
         if (executionCase.AffectedCount is { } affected)
         {
             result.AffectedCount.ShouldBe(affected, context);
         }
         else
         {
-            (result is QueryResultSet).ShouldBeTrue(context);
-            await using var rowset = (QueryResultSet)result;
+            (result is DatabaseResultSet).ShouldBeTrue(context);
+            await using var rowset = (DatabaseResultSet)result;
             var rows = new List<object?[]>();
             await foreach (var row in rowset.GetRowsAsync(cancellationToken))
             {

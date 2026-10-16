@@ -67,7 +67,7 @@ namespace Assimalign.Cohesion.Database.Internal;
 /// <see cref="MaxNameLength"/> characters, as the model servers cut it.
 /// </para>
 /// <para>
-/// <b>Endings.</b> Every <c>…Stop</c> carries <c>status</c>, a <see cref="QueryResultStatus"/> name:
+/// <b>Endings.</b> Every <c>…Stop</c> carries <c>status</c>, a <see cref="DatabaseResultStatus"/> name:
 /// <c>Success</c>, <c>Error</c> (written after the pair's <c>…Failed</c> event, where one is
 /// catalogued) or <c>Cancelled</c>, and is written on every path that leaves the work.
 /// </para>
@@ -263,11 +263,11 @@ internal sealed class DatabaseEventSource : EventSource
     /// Writes the end of an engine's disposal that <see cref="EngineDisposeStart"/> reported.
     /// </summary>
     /// <param name="engine">The engine.</param>
-    /// <param name="status"><see cref="QueryResultStatus.Success"/>, or <see cref="QueryResultStatus.Error"/> when a component failed to close or the disposal escaped.</param>
+    /// <param name="status"><see cref="DatabaseResultStatus.Success"/>, or <see cref="DatabaseResultStatus.Error"/> when a component failed to close or the disposal escaped.</param>
     /// <param name="failureCount">How many components failed to close.</param>
     /// <param name="startTimestamp">What <see cref="EngineDisposeStart"/> returned.</param>
     [NonEvent]
-    public void EngineDisposeStop(DatabaseEngine engine, QueryResultStatus status, int failureCount, long startTimestamp)
+    public void EngineDisposeStop(DatabaseEngine engine, DatabaseResultStatus status, int failureCount, long startTimestamp)
     {
         if (startTimestamp != 0 && IsEnabled(EventLevel.Informational, EventKeywords.None))
         {
@@ -408,13 +408,13 @@ internal sealed class DatabaseEventSource : EventSource
     /// <param name="worker">The worker.</param>
     /// <param name="pass">The pass's number.</param>
     /// <param name="status">
-    /// <see cref="QueryResultStatus.Success"/>; <see cref="QueryResultStatus.Error"/> when the pass threw,
-    /// reported a failure or escaped; <see cref="QueryResultStatus.Cancelled"/> when the engine's stop
+    /// <see cref="DatabaseResultStatus.Success"/>; <see cref="DatabaseResultStatus.Error"/> when the pass threw,
+    /// reported a failure or escaped; <see cref="DatabaseResultStatus.Cancelled"/> when the engine's stop
     /// cancelled it.
     /// </param>
     /// <param name="startTimestamp">What <see cref="WorkerPassStart"/> returned.</param>
     [NonEvent]
-    public void WorkerPassStop(DatabaseEngineWorker worker, long pass, QueryResultStatus status, long startTimestamp)
+    public void WorkerPassStop(DatabaseEngineWorker worker, long pass, DatabaseResultStatus status, long startTimestamp)
     {
         if (startTimestamp != 0 && IsEnabled(EventLevel.Verbose, Keywords.Workers))
         {
@@ -585,7 +585,7 @@ internal sealed class DatabaseEventSource : EventSource
 
     /// <summary>
     /// Writes the end of a statement whose core returned a result: <c>StatementFailed</c> when the
-    /// result's status is <see cref="QueryResultStatus.Error"/>, <c>SlowStatement</c> when it ran at
+    /// result's status is <see cref="DatabaseResultStatus.Error"/>, <c>SlowStatement</c> when it ran at
     /// least the threshold, and <c>StatementStop</c> when its start was written.
     /// </summary>
     /// <param name="session">The session.</param>
@@ -594,13 +594,13 @@ internal sealed class DatabaseEventSource : EventSource
     /// <param name="startWritten">What <see cref="StatementStart(DatabaseSession, DatabaseRequest?)"/> returned.</param>
     /// <param name="startTimestamp">When the statement started.</param>
     [NonEvent]
-    public void StatementCompleted(DatabaseSession session, DatabaseRequest? request, QueryResult? result, bool startWritten, long startTimestamp)
+    public void StatementCompleted(DatabaseSession session, DatabaseRequest? request, DatabaseResult? result, bool startWritten, long startTimestamp)
     {
         // A null result is the leaf's contract violation; its caller receives it as it is, and the
         // trace reads it as a success with no count.
-        var status = result?.Status ?? QueryResultStatus.Success;
+        var status = result?.Status ?? DatabaseResultStatus.Success;
         double duration = Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds;
-        if (status == QueryResultStatus.Error && IsEnabled(EventLevel.Error, EventKeywords.None))
+        if (status == DatabaseResultStatus.Error && IsEnabled(EventLevel.Error, EventKeywords.None))
         {
             // The code only: a diagnostic's message can quote the statement (owner question Q3). A
             // returned result threw nothing, so its exception type is empty.
@@ -631,10 +631,10 @@ internal sealed class DatabaseEventSource : EventSource
     public void StatementThrew(DatabaseSession session, DatabaseRequest? request, Exception exception, bool startWritten, long startTimestamp)
     {
         double duration = Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds;
-        var status = QueryResultStatus.Cancelled;
+        var status = DatabaseResultStatus.Cancelled;
         if (exception is not OperationCanceledException)
         {
-            status = QueryResultStatus.Error;
+            status = DatabaseResultStatus.Error;
             if (IsEnabled(EventLevel.Error, EventKeywords.None))
             {
                 // The code and the type only: a parse error quotes the token it stopped at (owner
@@ -909,7 +909,7 @@ internal sealed class DatabaseEventSource : EventSource
     }
 
     [NonEvent]
-    private void WriteStatementEnd(DatabaseSession session, DatabaseRequest? request, QueryResultStatus status, long affectedCount, double duration, bool startWritten)
+    private void WriteStatementEnd(DatabaseSession session, DatabaseRequest? request, DatabaseResultStatus status, long affectedCount, double duration, bool startWritten)
     {
         double threshold = Volatile.Read(ref _slowStatementThresholdMilliseconds);
         if (duration >= threshold && IsEnabled(EventLevel.Warning, EventKeywords.None))

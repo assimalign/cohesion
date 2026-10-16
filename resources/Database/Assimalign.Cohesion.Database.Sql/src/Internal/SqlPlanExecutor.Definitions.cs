@@ -12,7 +12,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 internal sealed partial class SqlPlanExecutor
 {
-    private async Task<QueryResult> ExecuteDefinitionAsync(SqlDefinitionPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
+    private async Task<DatabaseResult> ExecuteDefinitionAsync(SqlDefinitionPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         var environment = _definitions.Functions;
         switch (plan.Expression)
@@ -68,7 +68,7 @@ internal sealed partial class SqlPlanExecutor
             }
         }
         _definitions.RefreshDefinitions(cancellationToken);
-        return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
+        return new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0);
     }
 
     private static void CheckDefinitionOwner(string name, DatabaseObjectOwner owner, string? schema, SqlStatementContext statement)

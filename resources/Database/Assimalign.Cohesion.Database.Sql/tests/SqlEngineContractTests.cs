@@ -362,7 +362,7 @@ public sealed class SqlEngineContractTests
     {
         await using var session = await database.CreateSessionAsync(TestTimeout.Token());
         var result = await session.ExecuteAsync("SELECT COUNT(*) FROM t", cancellationToken: TestTimeout.Token());
-        var set = result.ShouldBeAssignableTo<QueryResultSet>().ShouldNotBeNull();
+        var set = result.ShouldBeAssignableTo<DatabaseResultSet>().ShouldNotBeNull();
         await using (set)
         {
             await foreach (var row in set.GetRowsAsync())

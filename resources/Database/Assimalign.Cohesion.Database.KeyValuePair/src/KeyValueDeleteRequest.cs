@@ -4,7 +4,7 @@ namespace Assimalign.Cohesion.Database.KeyValuePair;
 
 /// <summary>
 /// A delete, optionally conditional. The result is a plain
-/// <see cref="Assimalign.Cohesion.Database.Execution.QueryResult"/> whose
+/// <see cref="Assimalign.Cohesion.Database.Execution.DatabaseResult"/> whose
 /// <c>AffectedCount</c> is 1 when an entry was deleted and 0 otherwise (no
 /// visible entry, or the compare-and-swap condition did not hold — a first-class
 /// outcome, never an exception).

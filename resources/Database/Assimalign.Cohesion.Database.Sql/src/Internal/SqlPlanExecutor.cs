@@ -79,7 +79,7 @@ internal sealed partial class SqlPlanExecutor
         internal BTreeRecordVersionIndex Versions { get; } = BTreeRecordVersionIndex.Create(Index);
     }
 
-    internal async Task<QueryResult> ExecuteAsync(SqlPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
+    internal async Task<DatabaseResult> ExecuteAsync(SqlPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         switch (plan)
         {
@@ -128,7 +128,7 @@ internal sealed partial class SqlPlanExecutor
 
     // ── SELECT ─────────────────────────────────────────────────────────
 
-    private QueryResult ExecuteSelect(SqlSelectPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
+    private DatabaseResult ExecuteSelect(SqlSelectPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
         var matches = new List<object?[]>();
@@ -149,7 +149,7 @@ internal sealed partial class SqlPlanExecutor
     }
 
     /// <summary>Applies the common SELECT projection, ordering, distinctness and window.</summary>
-    private static QueryResult MaterializeSelect(List<object?[]> matches, IReadOnlyList<SqlProjection> projections,
+    private static DatabaseResult MaterializeSelect(List<object?[]> matches, IReadOnlyList<SqlProjection> projections,
         IReadOnlyList<SqlBoundOrdering> orderBy, long? limit, long? offset,
         bool isDistinct, SqlExpressionEvaluator evaluator,
         IReadOnlyDictionary<SqlExpression, int>? orderByProjections)
@@ -172,10 +172,10 @@ internal sealed partial class SqlPlanExecutor
             window = window.Take((int)take);
         }
 
-        var columns = new QueryColumn[projections.Count];
+        var columns = new DatabaseColumn[projections.Count];
         for (int i = 0; i < projections.Count; i++)
         {
-            columns[i] = new QueryColumn
+            columns[i] = new DatabaseColumn
             {
                 Name = projections[i].Name, Ordinal = i, Type = projections[i].Type,
                 MaxLength = projections[i].MaxLength,
@@ -327,7 +327,7 @@ internal sealed partial class SqlPlanExecutor
     //   deleter, and every effect is recorded in the version-store ledger so
     //   rollback can undo it logically.
 
-    private async Task<QueryResult> ExecuteInsertAsync(SqlInsertPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
+    private async Task<DatabaseResult> ExecuteInsertAsync(SqlInsertPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         // A VALUES row has no columns in scope: the planner rejects column references (#1165) and
         // binds the values with no columns in scope, so no reference can resolve to an ordinal the
@@ -347,7 +347,7 @@ internal sealed partial class SqlPlanExecutor
         return await ExecuteInsertRowsAsync(plan.Table, plan.TargetOrdinals, values, statement, cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task<QueryResult> ExecuteUpdateAsync(SqlUpdatePlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
+    private async Task<DatabaseResult> ExecuteUpdateAsync(SqlUpdatePlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         await AcquireOutgoingReferenceIntentLocksAsync(plan.Table, statement, cancellationToken).ConfigureAwait(false);
         await AcquireIncomingReferenceIntentLocksAsync(plan.Table, statement, cancellationToken).ConfigureAwait(false);
@@ -454,7 +454,7 @@ internal sealed partial class SqlPlanExecutor
                         statement, indexes, plan.Table, newValues, SqlRecordLocation.Pack(location.PageId, location.SlotIndex), cancellationToken).ConfigureAwait(false);
                 }
 
-                return (QueryResult)new SqlQueryResult(QueryResultStatus.Success, replacements.Count);
+                return (DatabaseResult)new SqlQueryResult(DatabaseResultStatus.Success, replacements.Count);
             }, durable: false, cancellationToken).ConfigureAwait(false);
         }
         catch (IndexUniqueViolationException exception)
@@ -463,7 +463,7 @@ internal sealed partial class SqlPlanExecutor
         }
     }
 
-    private async Task<QueryResult> ExecuteDeleteAsync(SqlDeletePlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
+    private async Task<DatabaseResult> ExecuteDeleteAsync(SqlDeletePlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         await AcquireIncomingReferenceIntentLocksAsync(plan.Table, statement, cancellationToken).ConfigureAwait(false);
         await statement.Coordinator.LockManager.AcquireAsync(statement.Transaction.Sequence, LockResource.Object(plan.Table.ObjectId),
@@ -505,7 +505,7 @@ internal sealed partial class SqlPlanExecutor
                 await TombstoneIndexEntriesAsync(statement, GetLiveIndexes(deletion.Table), deletion.Table, deletion.Values,
                     SqlRecordLocation.Pack(deletion.Location.PageId, deletion.Location.SlotIndex), cancellationToken).ConfigureAwait(false);
             }
-            return (QueryResult)new SqlQueryResult(QueryResultStatus.Success, targets.Count);
+            return (DatabaseResult)new SqlQueryResult(DatabaseResultStatus.Success, targets.Count);
         }, durable: false, cancellationToken).ConfigureAwait(false);
     }
 
@@ -833,7 +833,7 @@ internal sealed partial class SqlPlanExecutor
         return result;
     }
 
-    private async Task<QueryResult> ExecuteCreateTableAsync(SqlCreateTablePlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
+    private async Task<DatabaseResult> ExecuteCreateTableAsync(SqlCreateTablePlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         if (plan.IfNotExists && _catalog.TryGetTable(plan.Schema, plan.Name, out _))
         {
@@ -844,11 +844,11 @@ internal sealed partial class SqlPlanExecutor
                 throw new DatabaseException($"Table '{plan.Schema}.{plan.Name}' already exists; schema provisioning cannot adopt it.");
             }
 
-            return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
+            return new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0);
         }
 
         await CreateConstrainedTableAsync(plan, statement, cancellationToken).ConfigureAwait(false);
-        return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
+        return new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0);
     }
 
     /// <summary>
@@ -881,7 +881,7 @@ internal sealed partial class SqlPlanExecutor
     /// this statement's Exclusive lock.
     /// </para>
     /// </remarks>
-    private async Task<QueryResult> ExecuteDropColumnAsync(SqlDropColumnPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
+    private async Task<DatabaseResult> ExecuteDropColumnAsync(SqlDropColumnPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         if (!_catalog.TryGetTable(plan.Schema, plan.Name, out var before))
         {
@@ -901,10 +901,10 @@ internal sealed partial class SqlPlanExecutor
         // every DDL does, so no later write parses its definitions.
         var updated = await SelfCommitAsync(statement, (statement.ScriptReceipt is null ? _catalog.DropColumnAsync(plan.Schema, plan.Name, plan.ColumnName, cancellationToken) : _catalog.DropColumnAsync(plan.Schema, plan.Name, plan.ColumnName, statement.ScriptReceipt, cancellationToken))).ConfigureAwait(false);
         _definitions.Get(updated, cancellationToken);
-        return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
+        return new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0);
     }
 
-    private async Task<QueryResult> ExecuteDropTableAsync(SqlDropTablePlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
+    private async Task<DatabaseResult> ExecuteDropTableAsync(SqlDropTablePlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         if (!_catalog.TryGetTable(plan.Schema, plan.Name, out var table))
         {
@@ -914,7 +914,7 @@ internal sealed partial class SqlPlanExecutor
                 {
                     await SelfCommitAsync(statement, _catalog.DropTableAsync(plan.Schema, plan.Name, publication, cancellationToken)).ConfigureAwait(false);
                 }
-                return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
+                return new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0);
             }
 
             throw new SqlCatalogException($"Table '{plan.Schema}.{plan.Name}' does not exist.");
@@ -954,7 +954,7 @@ internal sealed partial class SqlPlanExecutor
 
         // The catalog committed the retired identity with the unpublication. The
         // version-purge worker reclaims its rows and trees after existing readers finish.
-        return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
+        return new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0);
     }
 
     /// <summary>
@@ -993,7 +993,7 @@ internal sealed partial class SqlPlanExecutor
     /// checked across the live versions during the build (the exclusive lock
     /// excludes concurrent writers, so live state cannot move underneath it).
     /// </summary>
-    private async Task<QueryResult> ExecuteCreateIndexAsync(SqlCreateIndexPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
+    private async Task<DatabaseResult> ExecuteCreateIndexAsync(SqlCreateIndexPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         if (_catalog.TryGetIndex(plan.Table.ObjectId, plan.IndexName, out _))
         {
@@ -1004,7 +1004,7 @@ internal sealed partial class SqlPlanExecutor
 
             if (plan.IfNotExists)
             {
-                return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
+                return new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0);
             }
 
             throw new DatabaseException($"An index named '{plan.IndexName}' already exists on '{plan.Table.Schema}.{plan.Table.Name}'.");
@@ -1088,7 +1088,7 @@ internal sealed partial class SqlPlanExecutor
                 statement.ProvisioningSchema),
             registrations, statement.ScriptReceipt, cancellationToken))).ConfigureAwait(false);
 
-        return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
+        return new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0);
     }
 
     /// <summary>
@@ -1098,7 +1098,7 @@ internal sealed partial class SqlPlanExecutor
     /// directory; its pages await vacuum. The exclusive lock excludes writers
     /// for the whole statement, so no maintenance can race the two steps.
     /// </summary>
-    private async Task<QueryResult> ExecuteDropIndexAsync(SqlDropIndexPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
+    private async Task<DatabaseResult> ExecuteDropIndexAsync(SqlDropIndexPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         if (!_catalog.TryGetIndex(plan.Table.ObjectId, plan.IndexName, out var metadata))
         {
@@ -1108,7 +1108,7 @@ internal sealed partial class SqlPlanExecutor
                 {
                     await SelfCommitAsync(statement, _catalog.DropIndexAsync(plan.Table.ObjectId, plan.IndexName, [], publication, cancellationToken)).ConfigureAwait(false);
                 }
-                return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
+                return new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0);
             }
 
             throw new DatabaseException($"No index named '{plan.IndexName}' exists on '{plan.Table.Schema}.{plan.Table.Name}'.");
@@ -1127,7 +1127,7 @@ internal sealed partial class SqlPlanExecutor
                 {
                     await SelfCommitAsync(statement, _catalog.DropIndexAsync(plan.Table.ObjectId, plan.IndexName, [], publication, cancellationToken)).ConfigureAwait(false);
                 }
-                return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
+                return new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0);
             }
 
             throw new DatabaseException($"No index named '{plan.IndexName}' exists on '{currentTable.Schema}.{currentTable.Name}'.");
@@ -1157,7 +1157,7 @@ internal sealed partial class SqlPlanExecutor
             await _indexManager.DropIndexAsync(statement.Transaction, plan.Table.ObjectId, metadata.Name, cancellationToken).ConfigureAwait(false);
         }
 
-        return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
+        return new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0);
     }
 
     private static void EnsureCanChange(

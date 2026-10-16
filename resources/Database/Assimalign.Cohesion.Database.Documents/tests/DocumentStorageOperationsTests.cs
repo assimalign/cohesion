@@ -348,7 +348,7 @@ public sealed class DocumentStorageOperationsTests
     {
         var ids = new List<string>();
         var result = await session.ExecuteAsync("SELECT id FROM items");
-        if (result is not QueryResultSet set) { return ids; }
+        if (result is not DatabaseResultSet set) { return ids; }
         await using (set)
         {
             await foreach (var row in set.GetRowsAsync()) { ids.Add(row.GetString(0) ?? "<null>"); }

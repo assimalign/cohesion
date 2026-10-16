@@ -25,7 +25,7 @@ internal sealed class SqlStatementAllocationBaseline
         _session = session;
     }
 
-    public ValueTask<QueryResult> ExecuteAsync(string statement, CancellationToken cancellationToken = default)
+    public ValueTask<DatabaseResult> ExecuteAsync(string statement, CancellationToken cancellationToken = default)
         => ExecuteRequestAsync(SqlQueryRequest.FromSql(statement, null, ParserOptions(_session), _session.Database.Name), cancellationToken);
 
     // Invoke every binding outside an exception filter. The CLR ignores a filter's
@@ -36,13 +36,13 @@ internal sealed class SqlStatementAllocationBaseline
         var previousMetrics = _session.LastStatementMetrics;
         _ = ProvisioningSchema(_session);
         _ = IsSelfCommitting(null, request);
-        await using var result = (QueryResultSet)await ExecuteStatementAsync(_session, request, cancellationToken, null).ConfigureAwait(false);
+        await using var result = (DatabaseResultSet)await ExecuteStatementAsync(_session, request, cancellationToken, null).ConfigureAwait(false);
         return SelfCommitted(_session, request, previousMetrics);
     }
 
     // Mirrors SqlDatabaseSession.ExecuteRequestAsync without its tracing: the same checks and the
     // same receipt parameter and async locals, so Debug's hoisted state machine is the same size.
-    private async ValueTask<QueryResult> ExecuteRequestAsync(SqlQueryRequest request, CancellationToken cancellationToken, SqlCatalogScriptPublication? scriptReceipt = null)
+    private async ValueTask<DatabaseResult> ExecuteRequestAsync(SqlQueryRequest request, CancellationToken cancellationToken, SqlCatalogScriptPublication? scriptReceipt = null)
     {
         _session.Database.ThrowIfOffline();
         var previousMetrics = _session.LastStatementMetrics;
@@ -80,7 +80,7 @@ internal sealed class SqlStatementAllocationBaseline
     private static extern ref SqlQueryParserOptions ParserOptions(SqlDatabaseSession session);
 
     [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "ExecuteStatementAsync")]
-    private static extern ValueTask<QueryResult> ExecuteStatementAsync(SqlDatabaseSession session, SqlQueryRequest request, CancellationToken cancellationToken, SqlCatalogScriptPublication? scriptReceipt);
+    private static extern ValueTask<DatabaseResult> ExecuteStatementAsync(SqlDatabaseSession session, SqlQueryRequest request, CancellationToken cancellationToken, SqlCatalogScriptPublication? scriptReceipt);
 
     [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "SelfCommitted")]
     private static extern bool SelfCommitted(SqlDatabaseSession session, SqlQueryRequest request, SqlStatementMetrics? previousMetrics);

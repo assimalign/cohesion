@@ -73,7 +73,7 @@ public sealed class GraphEngineDeclarationTests : IDisposable
         // Assert: opened, not created again.
         second.TryGetDatabase("sales", out GraphDatabase? opened).ShouldBeTrue();
         await using var reader = await opened!.CreateSessionAsync();
-        await using var result = (QueryResultSet)await reader.ExecuteAsync("MATCH (n:Kept) RETURN n.name", cancellationToken: TestTimeout.Token());
+        await using var result = (DatabaseResultSet)await reader.ExecuteAsync("MATCH (n:Kept) RETURN n.name", cancellationToken: TestTimeout.Token());
         var names = new List<object?>();
         await foreach (var row in result.GetRowsAsync(TestTimeout.Token()))
         {

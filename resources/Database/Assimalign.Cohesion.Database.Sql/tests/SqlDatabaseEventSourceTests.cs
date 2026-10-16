@@ -60,7 +60,7 @@ public sealed partial class SqlDatabaseEventSourceTests
         var result = await session.ExecuteAsync("SELECT id FROM items WHERE id = 2", cancellationToken: CancellationToken.None);
 
         // Assert
-        result.Status.ShouldBe(QueryResultStatus.Success);
+        result.Status.ShouldBe(DatabaseResultStatus.Success);
         var planned = NewEvent(recorder, 10, "StatementPlanned", "database", "accessPath", "recordsExamined");
         var metrics = session.LastStatementMetrics.ShouldNotBeNull();
         planned.Payload.ShouldBe(["plans", metrics.AccessPath, metrics.RecordsExamined]);
@@ -109,7 +109,7 @@ public sealed partial class SqlDatabaseEventSourceTests
         // Act
         if (request is not null)
         {
-            (await session.ExecuteAsync(request, CancellationToken.None)).Status.ShouldBe(QueryResultStatus.Error);
+            (await session.ExecuteAsync(request, CancellationToken.None)).Status.ShouldBe(DatabaseResultStatus.Error);
         }
         else
         {
@@ -322,7 +322,7 @@ public sealed partial class SqlDatabaseEventSourceTests
                 }
 
                 var result = pending.Result;
-                if (result is not QueryResultSet rows || result.Status != QueryResultStatus.Success)
+                if (result is not DatabaseResultSet rows || result.Status != DatabaseResultStatus.Success)
                 {
                     throw new InvalidOperationException("The measured statement did not produce its result set.");
                 }

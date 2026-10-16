@@ -312,7 +312,7 @@ public sealed class SqlTableReclamationTests
             await FillAsync(replacement, "t", 140, timeout.Token);
             recovered.DataStorage.PageManager.PageCount.ShouldBeLessThanOrEqualTo(pages + 2);
             (await CountAsync(replacement, "t", timeout.Token)).ShouldBe(140);
-            var seek = (await replacement.ExecuteAsync("SELECT payload FROM t WHERE id = 139", cancellationToken: timeout.Token)).ShouldBeAssignableTo<QueryResultSet>();
+            var seek = (await replacement.ExecuteAsync("SELECT payload FROM t WHERE id = 139", cancellationToken: timeout.Token)).ShouldBeAssignableTo<DatabaseResultSet>();
             int found = 0;
             await foreach (var row in seek.GetRowsAsync(timeout.Token)) { row.GetValue(0).ShouldBe(new string('x', 1800)); found++; }
             found.ShouldBe(1);
@@ -350,7 +350,7 @@ public sealed class SqlTableReclamationTests
         await using var dropper = sameTable ? database.CreateSchemaSession("db", timeout.Token) : await database.CreateSessionAsync(timeout.Token);
 
         // Act: the reserved table waits in the lock manager; an unrelated drop unpublishes immediately.
-        Task<QueryResult> dropping = dropper.ExecuteAsync(sameTable ? "DROP TABLE items" : "DROP TABLE retired", cancellationToken: timeout.Token).AsTask();
+        Task<DatabaseResult> dropping = dropper.ExecuteAsync(sameTable ? "DROP TABLE items" : "DROP TABLE retired", cancellationToken: timeout.Token).AsTask();
         int writes = 0;
         var elapsed = Stopwatch.StartNew();
         try
@@ -533,7 +533,7 @@ public sealed class SqlTableReclamationTests
             database.TableReclamation.ReclaimedPages.ShouldBe(0);
         }
         finally { release.Set(); }
-        var result = (await scan).ShouldBeAssignableTo<QueryResultSet>();
+        var result = (await scan).ShouldBeAssignableTo<DatabaseResultSet>();
         int read = 0;
         await foreach (var row in result.GetRowsAsync(timeout.Token)) { row.GetValue(0).ShouldNotBeNull(); read++; }
         read.ShouldBe(100);
@@ -644,7 +644,7 @@ public sealed class SqlTableReclamationTests
 
     private static async Task<long> CountAsync(SqlDatabaseSession session, string table, CancellationToken cancellationToken)
     {
-        var result = (await session.ExecuteAsync($"SELECT COUNT(*) FROM {table}", cancellationToken: cancellationToken)).ShouldBeAssignableTo<QueryResultSet>();
+        var result = (await session.ExecuteAsync($"SELECT COUNT(*) FROM {table}", cancellationToken: cancellationToken)).ShouldBeAssignableTo<DatabaseResultSet>();
         await foreach (var row in result.GetRowsAsync(cancellationToken)) { return (long)row.GetValue(0)!; }
         throw new InvalidOperationException();
     }

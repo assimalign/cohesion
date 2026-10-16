@@ -65,7 +65,7 @@ public sealed partial class SqlDeferredProvisioningTests
             database.Provisioning.ShouldNotBeNull().IsRunning.ShouldBeTrue();
             await using var blocked = await database.CreateSessionAsync(timeout.Token);
             await using var other = await database.CreateSessionAsync(timeout.Token);
-            Task<QueryResult> waiting = blocked.ExecuteAsync("INSERT INTO items (Id, Value) VALUES (1000, NULL)", cancellationToken: timeout.Token).AsTask();
+            Task<DatabaseResult> waiting = blocked.ExecuteAsync("INSERT INTO items (Id, Value) VALUES (1000, NULL)", cancellationToken: timeout.Token).AsTask();
             int writes = 0;
             var elapsed = Stopwatch.StartNew();
             try
@@ -194,7 +194,7 @@ public sealed partial class SqlDeferredProvisioningTests
         recovered.Catalog.PendingMigration.ShouldBeNull();
         recovered.Catalog.SchemaState.ShouldNotBeNull().ContentHash.ShouldBe(desired.Compile().Hash);
         await using var reader = await recovered.CreateSessionAsync(timeout.Token);
-        await using var result = (QueryResultSet)await reader.ExecuteAsync("SELECT Id FROM items WHERE Value = 65", cancellationToken: timeout.Token);
+        await using var result = (DatabaseResultSet)await reader.ExecuteAsync("SELECT Id FROM items WHERE Value = 65", cancellationToken: timeout.Token);
         int rows = 0;
         await foreach (var row in result.GetRowsAsync(timeout.Token))
         {
@@ -203,7 +203,7 @@ public sealed partial class SqlDeferredProvisioningTests
         }
         rows.ShouldBe(1);
         reader.LastStatementMetrics.ShouldNotBeNull().AccessPath.ShouldStartWith("seek:");
-        await using var otherResult = (QueryResultSet)await reader.ExecuteAsync("SELECT Id FROM other WHERE Id = 999", cancellationToken: timeout.Token);
+        await using var otherResult = (DatabaseResultSet)await reader.ExecuteAsync("SELECT Id FROM other WHERE Id = 999", cancellationToken: timeout.Token);
         int otherRows = 0;
         await foreach (var row in otherResult.GetRowsAsync(timeout.Token))
         {
@@ -382,7 +382,7 @@ public sealed partial class SqlDeferredProvisioningTests
 
         // Assert: no abandoned row was mistaken for committed after the interrupted scrub.
         await using var reader = await recovered.CreateSessionAsync(timeout.Token);
-        await using var result = (QueryResultSet)await reader.ExecuteAsync("SELECT COUNT(*) FROM items", cancellationToken: timeout.Token);
+        await using var result = (DatabaseResultSet)await reader.ExecuteAsync("SELECT COUNT(*) FROM items", cancellationToken: timeout.Token);
         int rows = 0;
         await foreach (var row in result.GetRowsAsync(timeout.Token))
         {

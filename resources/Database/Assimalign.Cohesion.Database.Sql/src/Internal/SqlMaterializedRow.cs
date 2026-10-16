@@ -8,7 +8,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// <summary>
 /// A row over evaluated values with converting typed accessors.
 /// </summary>
-internal sealed class SqlMaterializedRow : QueryRow
+internal sealed class SqlMaterializedRow : DatabaseRow
 {
     private readonly object?[] _values;
 

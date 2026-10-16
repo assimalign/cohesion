@@ -36,7 +36,7 @@ public sealed class SqlStorageDurabilityPolicyTests : IDisposable
 
         await session.ExecuteAsync("CREATE TABLE items (id INT NOT NULL)");
         await session.ExecuteAsync("INSERT INTO items (id) VALUES (7)");
-        var result = (await session.ExecuteAsync("SELECT id FROM items")).ShouldBeAssignableTo<QueryResultSet>();
+        var result = (await session.ExecuteAsync("SELECT id FROM items")).ShouldBeAssignableTo<DatabaseResultSet>();
         var values = new List<int>();
         await foreach (var row in result!.GetRowsAsync())
         {

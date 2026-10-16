@@ -166,7 +166,7 @@ public sealed class SqlCollationIndexTests
 
     private static async Task<string[]> Names(SqlDatabaseSession session, string sql)
     {
-        await using var result = (QueryResultSet)await session.ExecuteAsync(SqlQueryRequest.FromSql(sql), CancellationToken.None);
+        await using var result = (DatabaseResultSet)await session.ExecuteAsync(SqlQueryRequest.FromSql(sql), CancellationToken.None);
         var values = new List<string>();
         await foreach (var row in result.GetRowsAsync(CancellationToken.None))
         {

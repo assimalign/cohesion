@@ -68,32 +68,32 @@ internal sealed class KeyValueOperationExecutor
     // decode; it stops sooner when two reads agree.
     private const int confirmingReads = 2;
 
-    private static readonly IReadOnlyList<QueryColumn> _entryColumns =
+    private static readonly IReadOnlyList<DatabaseColumn> _entryColumns =
     [
-        new QueryColumn { Name = "key", Ordinal = 0, Type = DatabaseType.Binary },
-        new QueryColumn { Name = "value", Ordinal = 1, Type = DatabaseType.Binary },
-        new QueryColumn { Name = "etag", Ordinal = 2, Type = DatabaseType.Int64 },
+        new DatabaseColumn { Name = "key", Ordinal = 0, Type = DatabaseType.Binary },
+        new DatabaseColumn { Name = "value", Ordinal = 1, Type = DatabaseType.Binary },
+        new DatabaseColumn { Name = "etag", Ordinal = 2, Type = DatabaseType.Int64 },
     ];
 
-    private static readonly IReadOnlyList<QueryColumn> _putColumns =
+    private static readonly IReadOnlyList<DatabaseColumn> _putColumns =
     [
-        new QueryColumn { Name = "applied", Ordinal = 0, Type = DatabaseType.Boolean },
-        new QueryColumn { Name = "etag", Ordinal = 1, Type = DatabaseType.Int64, IsNullable = true },
+        new DatabaseColumn { Name = "applied", Ordinal = 0, Type = DatabaseType.Boolean },
+        new DatabaseColumn { Name = "etag", Ordinal = 1, Type = DatabaseType.Int64, IsNullable = true },
     ];
 
-    private static readonly IReadOnlyList<QueryColumn> _existsColumns =
+    private static readonly IReadOnlyList<DatabaseColumn> _existsColumns =
     [
-        new QueryColumn { Name = "exists", Ordinal = 0, Type = DatabaseType.Boolean },
+        new DatabaseColumn { Name = "exists", Ordinal = 0, Type = DatabaseType.Boolean },
     ];
 
-    private static readonly IReadOnlyList<QueryColumn> _keySpaceColumns =
+    private static readonly IReadOnlyList<DatabaseColumn> _keySpaceColumns =
     [
-        new QueryColumn { Name = "database_name", Ordinal = 0, Type = DatabaseType.String },
-        new QueryColumn { Name = "keyspace_id", Ordinal = 1, Type = DatabaseType.Int64 },
-        new QueryColumn { Name = "entry_space_format_version", Ordinal = 2, Type = DatabaseType.Int32 },
-        new QueryColumn { Name = "primary_index_name", Ordinal = 3, Type = DatabaseType.String },
-        new QueryColumn { Name = "index_kind", Ordinal = 4, Type = DatabaseType.String },
-        new QueryColumn { Name = "is_unique", Ordinal = 5, Type = DatabaseType.Boolean },
+        new DatabaseColumn { Name = "database_name", Ordinal = 0, Type = DatabaseType.String },
+        new DatabaseColumn { Name = "keyspace_id", Ordinal = 1, Type = DatabaseType.Int64 },
+        new DatabaseColumn { Name = "entry_space_format_version", Ordinal = 2, Type = DatabaseType.Int32 },
+        new DatabaseColumn { Name = "primary_index_name", Ordinal = 3, Type = DatabaseType.String },
+        new DatabaseColumn { Name = "index_kind", Ordinal = 4, Type = DatabaseType.String },
+        new DatabaseColumn { Name = "is_unique", Ordinal = 5, Type = DatabaseType.Boolean },
     ];
 
     private readonly DatabaseName _databaseName;
@@ -114,7 +114,7 @@ internal sealed class KeyValueOperationExecutor
     /// <summary>
     /// Executes one key-value request under the given command context.
     /// </summary>
-    internal async ValueTask<QueryResult> ExecuteAsync(KeyValueRequest request, KeyValueStatementContext context, CancellationToken cancellationToken)
+    internal async ValueTask<DatabaseResult> ExecuteAsync(KeyValueRequest request, KeyValueStatementContext context, CancellationToken cancellationToken)
     {
         return request switch
         {
@@ -130,7 +130,7 @@ internal sealed class KeyValueOperationExecutor
 
     // ── Reads ──────────────────────────────────────────────────────────
 
-    private QueryResult ExecuteKeySpaces(CancellationToken cancellationToken)
+    private DatabaseResult ExecuteKeySpaces(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var catalog = _catalog.CaptureSnapshot();
@@ -153,7 +153,7 @@ internal sealed class KeyValueOperationExecutor
         return new KeyValueMaterializedResultSet(_keySpaceColumns, rows);
     }
 
-    private async ValueTask<QueryResult> ExecuteGetAsync(KeyValueGetRequest request, KeyValueStatementContext context, CancellationToken cancellationToken)
+    private async ValueTask<DatabaseResult> ExecuteGetAsync(KeyValueGetRequest request, KeyValueStatementContext context, CancellationToken cancellationToken)
     {
         var rows = new List<object?[]>(1);
         var current = await ResolveCurrentAsync(request.Key, context, cancellationToken).ConfigureAwait(false);
@@ -166,14 +166,14 @@ internal sealed class KeyValueOperationExecutor
         return new KeyValueMaterializedResultSet(_entryColumns, rows);
     }
 
-    private async ValueTask<QueryResult> ExecuteExistsAsync(KeyValueExistsRequest request, KeyValueStatementContext context, CancellationToken cancellationToken)
+    private async ValueTask<DatabaseResult> ExecuteExistsAsync(KeyValueExistsRequest request, KeyValueStatementContext context, CancellationToken cancellationToken)
     {
         var current = await ResolveCurrentAsync(request.Key, context, cancellationToken).ConfigureAwait(false);
 
         return new KeyValueMaterializedResultSet(_existsColumns, [[current is not null]]);
     }
 
-    private async ValueTask<QueryResult> ExecuteScanAsync(KeyValueScanRequest request, KeyValueStatementContext context, CancellationToken cancellationToken)
+    private async ValueTask<DatabaseResult> ExecuteScanAsync(KeyValueScanRequest request, KeyValueStatementContext context, CancellationToken cancellationToken)
     {
         IndexKeyRange range = BuildScanRange(request);
         var rows = new List<object?[]>();
@@ -206,7 +206,7 @@ internal sealed class KeyValueOperationExecutor
 
     // ── Writes ─────────────────────────────────────────────────────────
 
-    private async ValueTask<QueryResult> ExecutePutAsync(KeyValuePutRequest request, KeyValueStatementContext context, CancellationToken cancellationToken)
+    private async ValueTask<DatabaseResult> ExecutePutAsync(KeyValuePutRequest request, KeyValueStatementContext context, CancellationToken cancellationToken)
     {
         var indexKey = new IndexKey(request.Key);
 
@@ -271,7 +271,7 @@ internal sealed class KeyValueOperationExecutor
         return new KeyValueMaterializedResultSet(_putColumns, [[true, (long)context.Transaction.Sequence.Value]], affectedCount: 1);
     }
 
-    private async ValueTask<QueryResult> ExecuteDeleteAsync(KeyValueDeleteRequest request, KeyValueStatementContext context, CancellationToken cancellationToken)
+    private async ValueTask<DatabaseResult> ExecuteDeleteAsync(KeyValueDeleteRequest request, KeyValueStatementContext context, CancellationToken cancellationToken)
     {
         var indexKey = new IndexKey(request.Key);
 
@@ -281,7 +281,7 @@ internal sealed class KeyValueOperationExecutor
 
         if (current is null)
         {
-            return new KeyValueQueryResult(QueryResultStatus.Success, affectedCount: 0);
+            return new KeyValueResult(DatabaseResultStatus.Success, affectedCount: 0);
         }
 
         EnsureLatestVersion(current.Value.Location, context.Transaction.Sequence);
@@ -289,7 +289,7 @@ internal sealed class KeyValueOperationExecutor
         if (request.ExpectedETag is { } expected && expected != (long)current.Value.Writer.Value)
         {
             // Compare-and-swap miss: a first-class no-delete outcome.
-            return new KeyValueQueryResult(QueryResultStatus.Success, affectedCount: 0);
+            return new KeyValueResult(DatabaseResultStatus.Success, affectedCount: 0);
         }
 
         await context.Coordinator.ApplyStatementAsync<bool>(context.Transaction, async bracket =>
@@ -299,7 +299,7 @@ internal sealed class KeyValueOperationExecutor
             return true;
         }, durable: false, cancellationToken).ConfigureAwait(false);
 
-        return new KeyValueQueryResult(QueryResultStatus.Success, affectedCount: 1);
+        return new KeyValueResult(DatabaseResultStatus.Success, affectedCount: 1);
     }
 
     /// <summary>

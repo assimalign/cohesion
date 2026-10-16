@@ -324,7 +324,7 @@ public sealed class GraphStorageOperationsTests
     {
         var names = new List<string>();
         var result = await session.ExecuteAsync("MATCH (n:Item) RETURN n.name");
-        if (result is QueryResultSet set)
+        if (result is DatabaseResultSet set)
         {
             await using (set)
             {

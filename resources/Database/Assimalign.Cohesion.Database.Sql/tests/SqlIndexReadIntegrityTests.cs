@@ -147,7 +147,7 @@ public sealed class SqlIndexReadIntegrityTests
     private static async Task<int[]> Ids(SqlDatabaseSession session, string sql)
     {
         var result = await session.ExecuteAsync(sql);
-        var resultSet = result.ShouldBeAssignableTo<QueryResultSet>();
+        var resultSet = result.ShouldBeAssignableTo<DatabaseResultSet>();
         var ids = new List<int>();
         await foreach (var row in resultSet!.GetRowsAsync())
         {

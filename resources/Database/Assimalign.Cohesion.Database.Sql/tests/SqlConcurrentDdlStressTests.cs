@@ -473,7 +473,7 @@ public sealed class SqlConcurrentDdlStressTests : IDisposable
         try
         {
             var result = await session.ExecuteAsync(sql);
-            if (result is QueryResultSet set)
+            if (result is DatabaseResultSet set)
             {
                 await set.DisposeAsync();
             }
@@ -518,7 +518,7 @@ public sealed class SqlConcurrentDdlStressTests : IDisposable
 
     private static async Task<List<object?[]>> RowsAsync(SqlDatabaseSession session, string sql)
     {
-        var result = (await session.ExecuteAsync(sql)).ShouldBeAssignableTo<QueryResultSet>();
+        var result = (await session.ExecuteAsync(sql)).ShouldBeAssignableTo<DatabaseResultSet>();
         var rows = new List<object?[]>();
         await foreach (var row in result!.GetRowsAsync())
         {

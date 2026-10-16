@@ -289,7 +289,7 @@ public sealed class SqlDatabaseNameTests : IDisposable
     {
         await using var session = await database.CreateSessionAsync(TestTimeout.Token());
         var set = (await session.ExecuteAsync("SELECT id FROM notes", cancellationToken: TestTimeout.Token()))
-            .ShouldBeAssignableTo<QueryResultSet>().ShouldNotBeNull();
+            .ShouldBeAssignableTo<DatabaseResultSet>().ShouldNotBeNull();
         var ids = new List<int>();
         await using (set)
         {

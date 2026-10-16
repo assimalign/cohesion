@@ -383,7 +383,7 @@ internal sealed class KeyValueDatabaseServerSession : DatabaseServerSession
             }
         }
 
-        QueryResult result;
+        DatabaseResult result;
 
         try
         {
@@ -412,20 +412,20 @@ internal sealed class KeyValueDatabaseServerSession : DatabaseServerSession
             return;
         }
 
-        if (result is QueryResultSet resultSet)
+        if (result is DatabaseResultSet resultSet)
         {
             await using (resultSet.ConfigureAwait(false))
             {
                 var columns = new List<(string Name, byte Type)>(resultSet.Columns.Count);
 
-                foreach (QueryColumn column in resultSet.Columns)
+                foreach (DatabaseColumn column in resultSet.Columns)
                 {
                     columns.Add((column.Name, (byte)column.Type));
                 }
 
                 await WriteFrameAsync((ProtocolMessageType)KeyValueProtocolMessageType.ResultHeader, new ProtocolResultHeaderMessage(columns).Encode(), cancellationToken).ConfigureAwait(false);
 
-                await foreach (QueryRow row in resultSet.GetRowsAsync(cancellationToken).ConfigureAwait(false))
+                await foreach (DatabaseRow row in resultSet.GetRowsAsync(cancellationToken).ConfigureAwait(false))
                 {
                     rowWriter.Reset();
 
@@ -446,7 +446,7 @@ internal sealed class KeyValueDatabaseServerSession : DatabaseServerSession
             return;
         }
 
-        if (result.Status != QueryResultStatus.Success)
+        if (result.Status != DatabaseResultStatus.Success)
         {
             string detail = result.Diagnostics is { Count: > 0 } diagnostics && diagnostics[0].Message is { } diagnosticMessage
                 ? diagnosticMessage

@@ -89,7 +89,7 @@ public sealed class SqlTransactionContractTests
         // Assert: the text BEGIN keeps its state-misuse diagnostic.
         again.Message.ShouldBe(AlreadyActive);
         serializable.Message.ShouldBe(AlreadyActive);
-        text.Status.ShouldBe(QueryResultStatus.Error);
+        text.Status.ShouldBe(DatabaseResultStatus.Error);
         text.Diagnostics.ShouldNotBeNull().ShouldHaveSingleItem().Code.ShouldBe("COHSQLT001");
         unsupported.Message.ShouldStartWith("IsolationLevel.Serializable is not supported by the SQL engine yet", Case.Sensitive);
         session.CurrentTransaction.ShouldBeNull();
@@ -401,7 +401,7 @@ public sealed class SqlTransactionContractTests
     private static async Task<List<int>> ColumnAsync(SqlDatabaseSession session, string sql)
     {
         var values = new List<int>();
-        var result = (await session.ExecuteAsync(sql, cancellationToken: TestTimeout.Token())).ShouldBeAssignableTo<QueryResultSet>().ShouldNotBeNull();
+        var result = (await session.ExecuteAsync(sql, cancellationToken: TestTimeout.Token())).ShouldBeAssignableTo<DatabaseResultSet>().ShouldNotBeNull();
         await using (result)
         {
             await foreach (var row in result.GetRowsAsync(TestTimeout.Token()))

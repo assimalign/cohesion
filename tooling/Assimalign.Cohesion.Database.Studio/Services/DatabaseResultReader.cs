@@ -11,13 +11,13 @@ using Assimalign.Cohesion.Database.Types;
 namespace Assimalign.Cohesion.Database.Studio;
 
 /// <summary>Materializes engine/client results and diagnostics into display types.</summary>
-internal static class QueryResultReader
+internal static class DatabaseResultReader
 {
-    /// <summary>Copies an in-process <see cref="QueryResult"/> into an outcome (status, count, diagnostics, rows).</summary>
-    public static async Task FillAsync(StatementOutcome outcome, QueryResult result, CancellationToken cancellationToken)
+    /// <summary>Copies an in-process <see cref="DatabaseResult"/> into an outcome (status, count, diagnostics, rows).</summary>
+    public static async Task FillAsync(StatementOutcome outcome, DatabaseResult result, CancellationToken cancellationToken)
     {
         outcome.Status = result.Status.ToString();
-        outcome.Failed = result.Status != QueryResultStatus.Success;
+        outcome.Failed = result.Status != DatabaseResultStatus.Success;
         outcome.AffectedCount = result.AffectedCount;
 
         if (result.Diagnostics is { } diagnostics)
@@ -28,7 +28,7 @@ internal static class QueryResultReader
             }
         }
 
-        if (result is QueryResultSet set)
+        if (result is DatabaseResultSet set)
         {
             await using (set.ConfigureAwait(false))
             {
@@ -38,7 +38,7 @@ internal static class QueryResultReader
                     ColumnTypes = [.. set.Columns.Select(column => $"{column.Type}{(column.IsNullable ? "?" : string.Empty)}")],
                 };
 
-                await foreach (QueryRow row in set.GetRowsAsync(cancellationToken).ConfigureAwait(false))
+                await foreach (DatabaseRow row in set.GetRowsAsync(cancellationToken).ConfigureAwait(false))
                 {
                     if (table.Rows.Count >= StatementOutcome.MaxRows)
                     {

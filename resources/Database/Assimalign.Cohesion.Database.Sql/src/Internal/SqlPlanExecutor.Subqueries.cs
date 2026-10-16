@@ -13,7 +13,7 @@ internal sealed partial class SqlPlanExecutor
     /// materialized values in their slots before executing the enclosing relation plan.
     /// No child session, transaction, or read view is opened.
     /// </summary>
-    private async Task<QueryResult> ExecuteSubqueryAsync(SqlSubqueryPlan plan, SqlStatementContext statement,
+    private async Task<DatabaseResult> ExecuteSubqueryAsync(SqlSubqueryPlan plan, SqlStatementContext statement,
         CancellationToken cancellationToken)
     {
         var values = new object?[plan.Queries.Count][];
@@ -21,7 +21,7 @@ internal sealed partial class SqlPlanExecutor
         {
             var query = plan.Queries[index];
             cancellationToken.ThrowIfCancellationRequested();
-            await using var result = (QueryResultSet)await ExecuteAsync(query.Query, statement, cancellationToken).ConfigureAwait(false);
+            await using var result = (DatabaseResultSet)await ExecuteAsync(query.Query, statement, cancellationToken).ConfigureAwait(false);
             var rows = new List<object?>();
             bool found = false;
             await foreach (var row in result.GetRowsAsync(cancellationToken).ConfigureAwait(false))

@@ -27,7 +27,7 @@ public sealed class GraphPathsQueryTests
 
         var result = (await session.ExecuteAsync(GraphPathsQueryRequest.FromGql(statement), token)).ShouldBeOfType<GraphPathsQueryResult>();
 
-        result.Status.ShouldBe(QueryResultStatus.Success);
+        result.Status.ShouldBe(DatabaseResultStatus.Success);
         result.AffectedCount.ShouldBe(-1);
         result.Diagnostics.ShouldBeNull();
         var path = result.Paths.Single();

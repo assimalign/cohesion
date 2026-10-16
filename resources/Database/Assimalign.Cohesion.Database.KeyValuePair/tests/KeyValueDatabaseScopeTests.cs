@@ -50,7 +50,7 @@ public sealed class KeyValueDatabaseScopeTests
 
         // Typed requests have no database selector: execution remains bound to
         // the receiving session even when another database has the same key.
-        var result = (await session.ExecuteAsync(new KeyValueGetRequest(key))).ShouldBeAssignableTo<QueryResultSet>();
+        var result = (await session.ExecuteAsync(new KeyValueGetRequest(key))).ShouldBeAssignableTo<DatabaseResultSet>();
         int count = 0;
         await foreach (var row in result.GetRowsAsync())
         {

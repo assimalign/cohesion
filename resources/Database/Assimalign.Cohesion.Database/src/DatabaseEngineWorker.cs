@@ -755,7 +755,7 @@ public abstract class DatabaseEngineWorker
             long started = DatabaseEventSource.Log.WorkerPassStart(this, pass);
 
             // Error until the pass settles, so a pass that escapes still closes its activity.
-            var status = QueryResultStatus.Error;
+            var status = DatabaseResultStatus.Error;
             try
             {
                 Exception? thrown = null;
@@ -768,7 +768,7 @@ public abstract class DatabaseEngineWorker
                     AbandonPass();
 
                     // A pass cancelled at shutdown is not a failure (event-sources plan, D9).
-                    status = QueryResultStatus.Cancelled;
+                    status = DatabaseResultStatus.Cancelled;
                     throw;
                 }
                 catch (Exception exception) when (exception is not OutOfMemoryException)
@@ -787,9 +787,9 @@ public abstract class DatabaseEngineWorker
 
                 // A pass that saw the engine's stop and returned stopped early, as SettlePass reads
                 // it: what it did not visit is not done, so it ends Cancelled, not Success.
-                status = !succeeded ? QueryResultStatus.Error
-                    : cancelled ? QueryResultStatus.Cancelled
-                    : QueryResultStatus.Success;
+                status = !succeeded ? DatabaseResultStatus.Error
+                    : cancelled ? DatabaseResultStatus.Cancelled
+                    : DatabaseResultStatus.Success;
                 return succeeded;
             }
             finally

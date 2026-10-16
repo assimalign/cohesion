@@ -108,13 +108,13 @@ public sealed class SqlDatabaseApplicationBuilderTests : IDisposable
 
         await session.ExecuteAsync("CREATE TABLE items (id INT PRIMARY KEY, label VARCHAR(50));", cancellationToken: TestContextToken());
         await session.ExecuteAsync("INSERT INTO items (id, label) VALUES (1, 'one'), (2, 'two');", cancellationToken: TestContextToken());
-        QueryResult result = await session.ExecuteAsync("SELECT label FROM items ORDER BY id;", cancellationToken: TestContextToken());
+        DatabaseResult result = await session.ExecuteAsync("SELECT label FROM items ORDER BY id;", cancellationToken: TestContextToken());
 
         // Assert
-        var resultSet = result.ShouldBeAssignableTo<QueryResultSet>();
+        var resultSet = result.ShouldBeAssignableTo<DatabaseResultSet>();
         var labels = new List<object?>();
 
-        await foreach (QueryRow row in resultSet!.GetRowsAsync(TestContextToken()))
+        await foreach (DatabaseRow row in resultSet!.GetRowsAsync(TestContextToken()))
         {
             labels.Add(row.GetValue(0));
         }

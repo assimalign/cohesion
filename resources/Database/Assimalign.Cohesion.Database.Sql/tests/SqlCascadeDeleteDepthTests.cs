@@ -435,7 +435,7 @@ public sealed class SqlCascadeDeleteDepthTests
 
     private static async Task<object?> ScalarAsync(SqlDatabaseSession session, string sql)
     {
-        await using var rows = (await session.ExecuteAsync(sql, cancellationToken: Timeout())).ShouldBeAssignableTo<QueryResultSet>();
+        await using var rows = (await session.ExecuteAsync(sql, cancellationToken: Timeout())).ShouldBeAssignableTo<DatabaseResultSet>();
         object? value = null;
         int count = 0;
         await foreach (var row in rows.GetRowsAsync(CancellationToken.None))
