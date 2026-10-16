@@ -133,6 +133,8 @@ Literal CR/LF/tab and edge spaces use numeric references when raw whitespace wou
 model; literal hashes are escaped so heading text cannot become a closing ATX sequence.
 All-space code spans emit exactly their space count; padding is only added when code-span
 normalization will remove it (or to separate literal backticks from the fence).
+Destinations and titles escape backslashes and ampersands and encode control characters as
+numeric references, preserving decoded values without a second entity/escape interpretation.
 The guarantee covers parser-produced trees; hand-built trees can express forms with no Markdown
 spelling (emphasis around whitespace) and round-trip only when they stay inside what the parser
 can produce.

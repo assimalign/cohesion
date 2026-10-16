@@ -411,21 +411,32 @@ internal sealed class MarkdownWriter
         if (needsAngle)
         {
             builder.Append('<');
-            foreach (var character in destination)
+        }
+
+        foreach (var character in destination)
+        {
+            if (character == '&')
             {
-                if (character is '<' or '>' or '\\')
+                builder.Append("&amp;");
+            }
+            else if (char.IsControl(character))
+            {
+                builder.Append("&#").Append(((int)character).ToString(System.Globalization.CultureInfo.InvariantCulture)).Append(';');
+            }
+            else
+            {
+                if (character == '\\' || (needsAngle && character is '<' or '>'))
                 {
                     builder.Append('\\');
                 }
 
-                builder.Append(character == '\n' ? ' ' : character);
+                builder.Append(character);
             }
-
-            builder.Append('>');
         }
-        else
+
+        if (needsAngle)
         {
-            builder.Append(destination);
+            builder.Append('>');
         }
 
         if (title is not null)
@@ -433,6 +444,16 @@ internal sealed class MarkdownWriter
             builder.Append(" \"");
             foreach (var character in title)
             {
+                if (character == '&')
+                {
+                    builder.Append("&amp;");
+                    continue;
+                }
+                if (char.IsControl(character))
+                {
+                    builder.Append("&#").Append(((int)character).ToString(System.Globalization.CultureInfo.InvariantCulture)).Append(';');
+                    continue;
+                }
                 if (character is '"' or '\\')
                 {
                     builder.Append('\\');

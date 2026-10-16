@@ -163,4 +163,22 @@ public class MarkdownCorpusRegressionTests
         code.Literal.ShouldBe(payload);
         MarkdownModelComparison.ShouldEqual(expected, MarkdownText.Parse(MarkdownText.Write(expected)), source);
     }
+    [Theory(DisplayName = "Cohesion Test [Content.Markdown] - Writer: link destinations and titles decode only once")]
+    [InlineData("<https://example.test?find=\\*>")]
+    [InlineData("<https://example.test/\\[\\>")]
+    [InlineData("[x](foo&amp;amp; \"&amp;quot;\")")]
+    [InlineData("[x](foo&#10;bar \"a&#10;&#10;b\")")]
+    public void Write_LinkEscapes_PreservesDecodedValues(string source)
+    {
+        // Arrange. Authored reductions of CommonMark 20/603 plus entity and newline edge cases.
+        var expected = MarkdownText.Parse(source);
+
+        // Act
+        var written = MarkdownText.Write(expected);
+        var actual = MarkdownText.Parse(written);
+
+        // Assert
+        MarkdownModelComparison.ShouldEqual(expected, actual, source);
+        MarkdownText.Write(actual).ShouldBe(written);
+    }
 }
