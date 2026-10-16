@@ -1,5 +1,4 @@
 ﻿using System.Collections.Generic;
-using System.Diagnostics;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -10,7 +9,6 @@ using System;
 namespace Assimalign.Cohesion.Content.Bmff;
 
 /// <summary>Retains the ipmp control box identity; typed payload reading and writing are unsupported.</summary>
-[DebuggerDisplay("Bmff Box: IPMP Control (ipmc)")]
 public sealed class IpmpControlBox : BmffFullBox
 {
     /// <summary>Creates a IpmpControlBox at its original location.</summary>

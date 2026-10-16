@@ -429,3 +429,11 @@ Hooks must not read payloads or mutate the tree. Numbers use invariant culture; 
 are escaped to keep one physical line per box. MP4 opaque full-box prefixes (esds/vpcC) are labeled
 lazy rather than decoded for display. HEIF reference descriptions inspect the retained memory prefix
 without triggering array decoding; ICC profiles and configuration records remain untouched.
+
+## Debugger inspection
+
+One inherited DebuggerDisplay on BmffBox uses the raw FourCC, source offset and original header
+size, with a child count for composites or a lazy marker for opaque payloads. Large totals are
+shown in GiB; other totals use invariant digit grouping. Unloaded and preserved models are marked.
+The composite debugger proxy exposes the existing Children list without copying or enumerating it.
+Neither display evaluates field descriptions, writer size plans or payload accessors.

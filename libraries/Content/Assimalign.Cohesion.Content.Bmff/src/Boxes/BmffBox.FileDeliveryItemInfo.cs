@@ -1,5 +1,4 @@
 ﻿using System.Collections.Generic;
-using System.Diagnostics;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -10,7 +9,6 @@ using Assimalign.Cohesion.Content.Bmff.Internal;
 namespace Assimalign.Cohesion.Content.Bmff;
 
 /// <summary>Retains the file delivery item info box identity; typed payload reading and writing are unsupported.</summary>
-[DebuggerDisplay("Bmff Box: File Delivery Item Information (fiin)")]
 public sealed class FileDeliveryItemInfoBox : BmffBoxComposite
 {
     private readonly IList<BmffBox> _children = new List<BmffBox>();

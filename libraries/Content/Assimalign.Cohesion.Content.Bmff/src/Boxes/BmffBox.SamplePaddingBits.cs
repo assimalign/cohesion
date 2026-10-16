@@ -1,5 +1,4 @@
 ﻿using System.Collections.Generic;
-using System.Diagnostics;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -10,7 +9,6 @@ using System;
 namespace Assimalign.Cohesion.Content.Bmff;
 
 /// <summary>Retains the sample padding bits box identity; typed payload reading and writing are unsupported.</summary>
-[DebuggerDisplay("Bmff Box: Sample Padding Bits (padb)")]
 public sealed class SamplePaddingBitsBox : BmffFullBox
 {
     /// <summary>Creates a SamplePaddingBitsBox at its original location.</summary>

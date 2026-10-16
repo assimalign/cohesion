@@ -1,14 +1,21 @@
 ﻿using System;
+using System.Diagnostics;
 using System.IO;
+
+using Assimalign.Cohesion.Content.Bmff.Internal;
 
 namespace Assimalign.Cohesion.Content.Bmff;
 
 /// <summary>A node in the BMFF composite tree, with payload I/O and visitor dispatch.</summary>
 // Deviates from the repo interface-first rule per the owner's Stage 2 composite-design requirement.
+[DebuggerDisplay("{DebuggerDisplay,nq}")]
 public abstract class BmffBox
 {
     private long _initialOffset;
     private long _initialLimit;
+
+    [DebuggerBrowsable(DebuggerBrowsableState.Never)]
+    internal string DebuggerDisplay => BmffInspection.GetDebuggerDisplay(this);
 
     /// <summary>Gets whether this node is a leaf rather than a composite, even when a composite is empty.</summary>
     public virtual bool IsLeaf => this is not BmffBoxComposite;

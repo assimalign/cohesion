@@ -1,5 +1,4 @@
 ﻿using System.Collections.Generic;
-using System.Diagnostics;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -10,7 +9,6 @@ using System;
 namespace Assimalign.Cohesion.Content.Bmff;
 
 /// <summary>Retains the ipmp info box identity; typed payload reading and writing are unsupported.</summary>
-[DebuggerDisplay("Bmff Box: IPMP Information (imif)")]
 public sealed class IpmpInfoBox : BmffFullBox
 {
     /// <summary>Creates a IpmpInfoBox at its original location.</summary>

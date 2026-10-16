@@ -1,11 +1,13 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 
 using Assimalign.Cohesion.Content.Bmff.Internal;
 
 namespace Assimalign.Cohesion.Content.Bmff;
 
 /// <summary>A BMFF node with an editable ordered list of children.</summary>
+[DebuggerTypeProxy(typeof(BmffBoxCompositeDebugView))]
 public abstract class BmffBoxComposite : BmffBox
 {
     /// <summary>Creates an empty composite box.</summary>

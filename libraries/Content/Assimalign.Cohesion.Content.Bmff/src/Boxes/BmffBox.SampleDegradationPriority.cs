@@ -1,5 +1,4 @@
 ﻿using System.Collections.Generic;
-using System.Diagnostics;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -10,7 +9,6 @@ using System;
 namespace Assimalign.Cohesion.Content.Bmff;
 
 /// <summary>Retains the sample degradation priority box identity; typed payload reading and writing are unsupported.</summary>
-[DebuggerDisplay("Bmff Box: Sample Degradation Priority (stdp)")]
 public sealed class SampleDegradationPriorityBox : BmffFullBox
 {
     /// <summary>Creates a SampleDegradationPriorityBox at its original location.</summary>

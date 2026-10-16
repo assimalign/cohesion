@@ -1,5 +1,4 @@
 ﻿using System.Collections.Generic;
-using System.Diagnostics;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -10,7 +9,6 @@ using System;
 namespace Assimalign.Cohesion.Content.Bmff;
 
 /// <summary>Retains the file partition box identity; typed payload reading and writing are unsupported.</summary>
-[DebuggerDisplay("Bmff Box: File Partition (fpar)")]
 public sealed class FilePartitionBox : BmffFullBox
 {
     /// <summary>Creates a FilePartitionBox at its original location.</summary>
