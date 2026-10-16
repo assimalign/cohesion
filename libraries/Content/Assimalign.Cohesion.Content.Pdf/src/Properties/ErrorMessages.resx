@@ -23,4 +23,9 @@
   <data name="OutputForwardOnly" xml:space="preserve"><value>The PDF output supports forward-only writing.</value></data>
   <data name="DirectCycle" xml:space="preserve"><value>A direct PDF container cycle cannot be serialized.</value></data>
   <data name="ObjectUnsupported" xml:space="preserve"><value>The PDF object implementation or placement is unsupported.</value></data>
+  <data name="PackingNeedsStream" xml:space="preserve"><value>PDF object packing requires cross-reference streams.</value></data>
+  <data name="DestinationInvalid" xml:space="preserve"><value>The PDF destination must be writable, separate from the source, and have no trailing bytes.</value></data>
+  <data name="SourceChanged" xml:space="preserve"><value>The PDF backing source has changed since loading.</value></data>
+  <data name="VersionUnsupported" xml:space="preserve"><value>PDF cross-reference and object streams require version 1.5 or later.</value></data>
+  <data name="TableOffsetLimit" xml:space="preserve"><value>The PDF offset cannot fit a classic cross-reference table; use cross-reference streams.</value></data>
 </root>

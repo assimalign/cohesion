@@ -230,3 +230,30 @@ is disabled once edits exist, because rebuilding the cache would lose them.
 ReplaceData borrows unencoded BinarySegment bytes, removes old filters/external-file entries, updates
 Length and exposes the replacement immediately. Its memory/source must stay unchanged and open.
 The existing interfaces and immutable object types need no new public members.
+## Stage 3 full save
+
+PdfWriter implements IContentWriter<PdfDocument> and borrows the destination. Full saves emit the
+current effective version, a binary marker, every live object in number order (or deterministic
+bounded packing batches), a fresh table or xref stream, and EOF. No output seek is required. Stream
+xref/packing options require version 1.5 or later; the writer does not silently change the version.
+Full-save Size is capped before filling gaps; free entries are linked in ascending order. Packing
+uses at most 100 generation-zero non-stream objects per group and excludes indirect-reference
+values, the catalog, and indirect stream Length identities. Encryption is rejected before output,
+even if the caller removed Encrypt from a document originally loaded as encrypted.
+
+Unchanged payloads use BinarySegment and CopyExactlyTo with original Filter/DecodeParms. Replaced
+payloads are Flate encoded by default, or stored unfiltered by option. A counting compression pass
+computes a direct Length, then a second pass emits to the forward-only destination. These passes
+use fixed pooled copy buffers, not payload-sized allocations. Object-stream units and encoded xref
+units are capped by MaxBufferedBytes; xref rows are emitted through Content.Binary's writer with
+PNG Up predictor 12 and Flate. The xref layout uses W [1 8 4], including offsets above 4 GiB.
+Classic table offsets exceeding ten digits fail with LimitExceeded; choose xref streams for them.
+
+Existing ID array entries are kept, including both identifiers. When ID is absent, both entries are
+the first 16 bytes of SHA-256 over the emitted header/body, accumulated during writing. No clock,
+randomness, destination name, current culture, or process hash ordering affects the bytes. This is
+reproducibility for identical model/order, options and compression runtime, not a cross-runtime zlib
+bitstream promise. Save does not change the model's trailer, stream dictionaries or dirty baseline;
+reload the output to make it the source of a subsequent revision. Partial output after I/O failure
+or cancellation must be discarded. WriteAsync currently follows the synchronous I/O path with
+cancellation checks between bounded reads/writes, matching the reader's execution model.

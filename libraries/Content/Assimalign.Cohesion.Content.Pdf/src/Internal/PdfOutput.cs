@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 
@@ -11,10 +12,11 @@ internal sealed class PdfOutput : Stream
     private readonly Stream _destination;
     private readonly CancellationToken _cancellationToken;
     private readonly long _limit;
+    private readonly IncrementalHash? _hash;
     internal long Count { get; private set; }
-    internal PdfOutput(Stream destination, CancellationToken cancellationToken = default, long limit = long.MaxValue)
+    internal PdfOutput(Stream destination, CancellationToken cancellationToken = default, long limit = long.MaxValue, IncrementalHash? hash = null)
     {
-        _destination = destination; _cancellationToken = cancellationToken; _limit = limit;
+        _destination = destination; _cancellationToken = cancellationToken; _limit = limit; _hash = hash;
     }
     internal void Text(string text)
     {
@@ -33,7 +35,7 @@ internal sealed class PdfOutput : Stream
         {
             throw new ContentFormatException(ErrorMessages.WriterLimit, ContentFormatErrorCode.LimitExceeded, Count);
         }
-        _destination.Write(buffer); Count += buffer.Length;
+        _destination.Write(buffer); _hash?.AppendData(buffer); Count += buffer.Length;
     }
     public override void Write(byte[] buffer, int offset, int count) => Write(buffer.AsSpan(offset, count));
     public override void WriteByte(byte value) { Span<byte> one = stackalloc byte[1]; one[0] = value; Write(one); }

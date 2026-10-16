@@ -1,6 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
+using System.IO.Compression;
+using System.Threading;
+
+using Assimalign.Cohesion.Content.Binary;
 
 namespace Assimalign.Cohesion.Content.Pdf.Internal;
 
@@ -11,9 +16,14 @@ internal sealed class PdfObjectSerializer
     private readonly int _maxObjects;
     private readonly HashSet<IPdfObject> _active = new(ReferenceEqualityComparer.Instance);
     private int _nodes;
-    internal PdfObjectSerializer(PdfOutput output, int maxDepth = 128, int maxObjects = 1_000_000)
+    private readonly bool _compressModifiedStreams;
+    private readonly bool _copyPayloads;
+    private readonly CancellationToken _cancellationToken;
+    internal PdfObjectSerializer(PdfOutput output, int maxDepth = 128, int maxObjects = 1_000_000,
+        bool compressModifiedStreams = false, bool copyPayloads = true, CancellationToken cancellationToken = default)
     {
         _output = output; _maxDepth = maxDepth; _maxObjects = maxObjects;
+        _compressModifiedStreams = compressModifiedStreams; _copyPayloads = copyPayloads; _cancellationToken = cancellationToken;
     }
     internal void Write(IPdfObject value) { _nodes = 0; WriteValue(value, 0); }
     private void WriteValue(IPdfObject value, int depth)
@@ -48,15 +58,54 @@ internal sealed class PdfObjectSerializer
                     _output.Text("]"); break;
                 case PdfDictionary dictionary: WriteDictionary(dictionary, depth); break;
                 case PdfStream stream when depth == 0:
-                    var copy = CopyDictionary(stream.Dictionary);
-                    copy[PdfName.Create("Length"u8)] = PdfInteger.Create(stream.Data.Length);
-                    WriteDictionary(copy, depth);
-                    _output.Text("\nstream\n"); stream.Data.CopyTo(_output); _output.Text("\nendstream"); break;
+                    WriteStream(stream); break;
                 default:
                     throw new ContentFormatException(ErrorMessages.ObjectUnsupported, ContentFormatErrorCode.Unsupported, _output.Count);
             }
         }
         finally { _active.Remove(value); }
+    }
+    private void WriteStream(PdfStream stream)
+    {
+        var copy = CopyDictionary(stream.Dictionary);
+        var data = stream.Data;
+        var compress = stream.IsDataReplaced && _compressModifiedStreams;
+        var length = data.Length;
+        if (stream.IsDataReplaced)
+        {
+            // Dictionary mutations cannot accidentally apply an old filter to replacement raw bytes.
+            foreach (var key in new[] { "Filter", "DecodeParms", "F", "FFilter", "FDecodeParms", "DL" })
+            {
+                copy.Remove(PdfName.Create(System.Text.Encoding.ASCII.GetBytes(key)));
+            }
+        }
+        if (compress)
+        {
+            copy[PdfName.Create("Filter"u8)] = PdfName.Create("FlateDecode"u8);
+            if (_copyPayloads)
+            {
+                using var counter = new PdfOutput(Stream.Null, _cancellationToken);
+                Compress(data, counter); length = counter.Count;
+            }
+        }
+        copy[PdfName.Create("Length"u8)] = PdfInteger.Create(length);
+        WriteDictionary(copy, 0); _output.Text("\nstream\n");
+        if (_copyPayloads)
+        {
+            if (compress) { Compress(data, _output); }
+            else { Copy(data, _output); }
+        }
+        _output.Text("\nendstream");
+    }
+    private void Compress(BinarySegment data, Stream destination)
+    {
+        using var encoder = new ZLibStream(destination, CompressionLevel.SmallestSize, true);
+        using var guarded = new PdfOutput(encoder, _cancellationToken);
+        Copy(data, guarded);
+    }
+    private static void Copy(BinarySegment data, Stream destination)
+    {
+        using var source = data.OpenRead(); source.CopyExactlyTo(destination, data.Length);
     }
     private void WriteDictionary(PdfDictionary dictionary, int depth)
     {
