@@ -157,7 +157,7 @@ stage run in parallel, each in its own worktree; the orchestrator integrates, ve
 | 3 | s3-pdf-writer — PDF full save and incremental update | #1555 | s2-pdf |
 | 4 | s4-mkv — Matroska element model, segment/track/cluster/cue behavior, harness replacement | #463, #464, #465 (feature #462) | s2-ebml-core, s3-media |
 | 4 | s4-mp4 — BMFF profile model, MP4 brands/tracks/samples, golden files | #451, #452, #453 (feature #450) | s3-bmff-boxes, s3-media |
-| 5 | s5-bmff-profiles — retained BMFF-derived formats and their packages | #455, #456, #457 (feature #454) | s4-mp4, O-C3 |
+| 5 | s5-heif — `Content.Heif` (HEIF/AVIF still images over BMFF), per O-C3 | #455, #456, #457 (feature #454) | s3-bmff-boxes |
 | 5 | close-out — gates applied to every retained package, CI and inventory complete, fuzzing harness, #16 closed | #16, #1554 | all above |
 
 ## 4. Owner decisions
@@ -166,7 +166,7 @@ stage run in parallel, each in its own worktree; the orchestrator integrates, ve
 |---|---|---|---|
 | O-C1 | Does process **invocation** belong in a Content package? | Orchestrator recommended inspection only. | **Decided 2026-10-16 (owner):** "Keep process invocation in Content.Exe, separated from inspection, with timeout, cancellation and process-tree cleanup." Inspection types never start a process; invocation types never parse a file format. |
 | O-C2 | Root API changes: `ContentFormatErrorCode` on `ContentFormatException`; `ContentFactory` replaced by public `MemoryContent`/`StreamContent`/`CompositeContent` with `Create` methods | Both follow existing rules (error codes over exception sprawl; decision 59). No consumer outside Content calls `ContentFactory`. | In this PR, flagged for review |
-| O-C3 | Which BMFF-derived formats are retained beyond MP4? | HEIF/AVIF (still images, an `ftyp`/`meta`/`iloc`/`iprp` model that diverges from MP4's track model) as `Content.Heif`; CMAF stays a profile inside `Content.Mpeg` because it is constrained fragmented MP4. Decide before Stage 5. | Open |
+| O-C3 | Which BMFF-derived formats are retained beyond MP4? | HEIF/AVIF as `Content.Heif`; CMAF as a profile inside `Content.Mpeg`. | **Decided 2026-10-16 (owner):** "retain HEIF/AVIF as Content.Heif (still images: ftyp/meta/iloc/iprp model), and keep CMAF as a profile inside Content.Mpeg." |
 | O-C4 | Gap packages (§5) | File as Backlog features; build none without a decision. | Open |
 
 ## 5. Gaps found during the survey
@@ -206,3 +206,4 @@ Filed 2026-10-16 as Backlog features under #14 (G7 as a task under #16):
 | 2026-10-16 | s3-bmff-boxes and s3-media started on `b5a950f4a`. s3-pdf-writer integrated (`4503cab26`): canonical serialization, tracked document mutation (`Add`/`Replace`/`Free`, container edits tracked), full save (tables, xref streams, object packing), byte-preserving incremental update with `/Prev` chains; 256 PDF tests. PDF feature #470 complete. |
 | 2026-10-16 | s3-media integrated (`5e5fb107c`): `IMediaTrack`/`IMediaVideoTrack`/`IMediaAudioTrack`, lazy `IMediaSampleIndex` with guided `MediaSampleIndex` base, exact rational `MediaTimestamp`, `MediaSample`, `MediaSeekResult`; `MediaFileKind` and `IMediaFileComponent` removed; 93 tests (million-sample index allocates 136 bytes). Area README refreshed to Stage 3 references. s4-mkv started. |
 | 2026-10-16 | s3-bmff-boxes integrated (`3e5e4e375`): strategic movie/track/sample-table/fragment/metadata box field models with bounded tables, byte-preserving parse/write of parsed boxes, transactional `BmffDocument.RelocateMediaOffsets` (stco/co64 incl. promotion, iloc, tfhd) applied on save, writer-generated progressive/fast-start/fragmented/HEIF-shaped goldens; `CompatableBrands` renamed, misplaced `TrackBox` fields removed. Follow-up `8b56e1e04` gives the five new box classes typed visitor overloads (composite design rule). 397 BMFF tests. Stage 3 complete. s4-mp4 started. |
+| 2026-10-16 | O-C3 decided by the owner: HEIF/AVIF retained as `Content.Heif`; CMAF stays a profile inside `Content.Mpeg`. s5-heif started (it needs only the BMFF box models, so it runs beside Stage 4). |
