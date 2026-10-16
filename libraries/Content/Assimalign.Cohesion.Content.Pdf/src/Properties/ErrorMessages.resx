@@ -30,4 +30,7 @@
   <data name="TableOffsetLimit" xml:space="preserve"><value>The PDF offset cannot fit a classic cross-reference table; use cross-reference streams.</value></data>
   <data name="RepairedIncremental" xml:space="preserve"><value>A recovered PDF requires a full save before incremental updates.</value></data>
   <data name="ObjectStreamEdited" xml:space="preserve"><value>Edit compressed members individually before replacing or freeing their object stream container.</value></data>
+  <data name="IdentifierInvalid" xml:space="preserve"><value>The PDF file identifier must contain exactly two byte strings.</value></data>
+  <data name="IdentifierChanged" xml:space="preserve"><value>The original first PDF file identifier must be retained when saving.</value></data>
+  <data name="VersionReduced" xml:space="preserve"><value>An incremental PDF update cannot reduce the effective document version.</value></data>
 </root>

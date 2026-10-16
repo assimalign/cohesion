@@ -215,7 +215,8 @@ Names use uppercase #xx escapes outside ASCII 33–126 and for delimiters and #.
 escape every parenthesis, backslash, standard control and other non-printable byte (three octal digits).
 Hexadecimal syntax is used when requested by the source or when more than half the bytes fall outside
 ASCII 32–126. Ordered containers preserve insertion order. Streams retain encoded bytes and receive
-a direct Length matching the emitted extent. Direct cycles and excessive nesting fail loudly.
+a Length matching the emitted extent. Valid indirect Length references are retained; missing or
+incorrect lengths are written directly. Direct cycles and excessive nesting fail loudly.
 
 Add allocates above Size and every known identity, without reusing free numbers; Replace preserves
 the current generation; Free increments it up to 65535. Trailer remains directly editable. Automatic
@@ -288,3 +289,23 @@ An instrumented source measures the save after metadata resolution, rejects payl
 and proves a 2 MiB unsupported-codec payload is copied once without decode or materialization in
 both save modes. Parser setup can read ahead into a payload; that is separate from the measured
 copy operation. Cancellation and I/O failures leave the source untouched and the destination partial.
+## Writer compliance and golden provenance
+
+Six writer-produced files in tests/TestObjects/Golden cover full tables, xref streams, object
+streams, and incremental table/stream/hybrid updates. PdfWriterGoldenBuilder.Build names the
+exact setup; every file includes a PdfWriter comment naming its save layout. Tests only read
+these goldens. Regeneration explicitly invokes that helper and reviews the resulting binary diff.
+Compliance tests name ISO 32000-2 clauses and cover exact table records, binary markers, predictor
+12, self-indexed xref streams, batching, nonzero/free generations, encrypted rejection before any
+output (including removal of Encrypt), deterministic repeated saves, source origins, and failures.
+
+Saving validates ID as two strings and retains the loaded first identifier. Attempting to change
+or remove that identifier fails with InvalidValue before output instead of silently discarding
+the caller's edit or changing document identity. The second identifier is kept as supplied. Direct
+stream dictionaries occupy the same depth in mutation snapshots as in the parser, so tracking
+does not tighten an existing reader depth limit. Serializer node limits include dictionary keys.
+
+Incremental xref-stream objects count toward MaxObjects along with existing retained entries.
+Removing or lowering a catalog Version that upgraded the unchanged source header would reduce the
+effective version; incremental saving rejects that edit with InvalidValue. A full save still writes
+the document's effective version in its new header, so removing the redundant catalog entry is safe.

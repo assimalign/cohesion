@@ -38,9 +38,11 @@ public sealed class PdfFullSaveTests
         }
     }
     [Theory(DisplayName = "Cohesion Test [Content.Pdf] - ISO 32000-2 §7.3.8 and §7.4.4: Replaced streams are encoded or stored explicitly")]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void Write_ReplacedStream_ReloadsEditedPayload(bool compress)
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public void Write_ReplacedStream_ReloadsEditedPayload(bool compress, bool incremental)
     {
         // Arrange
         using var source = new MemoryStream(PdfFixtureBuilder.IndirectLength());
@@ -49,7 +51,7 @@ public sealed class PdfFullSaveTests
         stream.ReplaceData(BinarySegment.Create("new payload"u8.ToArray()));
         using var output = new MemoryStream();
         // Act
-        PdfWriter.Create(new() { CompressModifiedStreams = compress }).Write(output, document); output.Position = 0;
+        PdfWriter.Create(new() { CompressModifiedStreams = compress, Incremental = incremental }).Write(output, document); output.Position = 0;
         using var saved = new PdfReader().Read(output);
         // Assert
         var written = saved.Resolve(PdfObjectIdentifier.Create(4)).ShouldBeOfType<PdfStream>();
@@ -106,6 +108,8 @@ public sealed class PdfFullSaveTests
         // Assert
         saved.CrossReferences[4].Kind.ShouldBe(PdfCrossReferenceKind.Uncompressed);
         saved.CrossReferences[5].Kind.ShouldBe(PdfCrossReferenceKind.Uncompressed);
+        saved.Resolve(PdfObjectIdentifier.Create(4)).ShouldBeOfType<PdfStream>().Dictionary.Get("Length")
+            .ShouldBeOfType<PdfIndirectReference>().Identifier.ShouldBe(PdfObjectIdentifier.Create(5));
         saved.CrossReferences[3].Kind.ShouldBe(PdfCrossReferenceKind.Compressed);
     }
 }

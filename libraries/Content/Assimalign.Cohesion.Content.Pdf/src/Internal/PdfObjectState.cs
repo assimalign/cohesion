@@ -6,8 +6,10 @@ namespace Assimalign.Cohesion.Content.Pdf.Internal;
 internal sealed class PdfObjectState
 {
     private readonly List<(IPdfObject Value, long Revision)> _containers = new();
-    internal PdfObjectState(IPdfObject value, int maxDepth, int maxObjects)
+    private readonly long _position;
+    internal PdfObjectState(IPdfObject value, int maxDepth, int maxObjects, long position)
     {
+        _position = position;
         var visited = new HashSet<IPdfObject>(System.Collections.Generic.ReferenceEqualityComparer.Instance);
         Capture(value, 0, maxDepth, maxObjects, visited);
     }
@@ -25,12 +27,14 @@ internal sealed class PdfObjectState
     }
     private void Capture(IPdfObject value, int depth, int maxDepth, int maxObjects, HashSet<IPdfObject> visited)
     {
+        // The parser counts a stream's dictionary as its root, not as an extra nested node.
+        if (value is PdfStream stream) { value = stream.Dictionary; }
+        if (visited.Contains(value)) { return; }
         if (depth > maxDepth || visited.Count >= maxObjects)
         {
-            throw new ContentFormatException(ErrorMessages.ReaderLimit, ContentFormatErrorCode.LimitExceeded);
+            throw new ContentFormatException(ErrorMessages.ReaderLimit, ContentFormatErrorCode.LimitExceeded, _position);
         }
-        if (!visited.Add(value)) { return; }
-        if (value is PdfStream stream) { Capture(stream.Dictionary, depth + 1, maxDepth, maxObjects, visited); }
+        visited.Add(value);
         if (value is PdfArray array)
         {
             _containers.Add((array, array.Revision));

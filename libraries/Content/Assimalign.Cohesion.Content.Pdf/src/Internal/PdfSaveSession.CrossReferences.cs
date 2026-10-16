@@ -52,7 +52,10 @@ internal sealed partial class PdfSaveSession
         var identifier = Allocate();
         var start = _output.Count;
         _entries[identifier.Number] = new(identifier, PdfCrossReferenceKind.Uncompressed, start, 0, 0, 0);
-        if ((long)_entries.Count * 14 > _options.MaxBufferedBytes) { Limit(); }
+        if ((long)_entries.Count * 14 > _options.MaxBufferedBytes)
+        {
+            throw new ContentFormatException(ErrorMessages.WriterLimit, ContentFormatErrorCode.LimitExceeded, _document.SourceOffset);
+        }
         var dictionary = PdfObjectSerializer.CopyDictionary(trailer);
         dictionary[PdfName.Create("Size"u8)] = PdfInteger.Create(_next);
         dictionary[PdfName.Create("Type"u8)] = PdfName.Create("XRef"u8);

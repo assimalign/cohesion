@@ -19,7 +19,7 @@ public sealed partial class PdfDocument : IDisposable
         _source = source; SourceOffset = sourceOffset; Version = version; Trailer = trailer;
         _entries = entries; CrossReferences = new ReadOnlyDictionary<int, PdfCrossReferenceEntry>(entries);
         StartXref = startXref; _leaveOpen = leaveOpen;
-        SourceLength = source.Length;
+        SourceLength = source.Length; HeaderVersion = version;
     }
     /// <summary>Gets the effective version (header, upgraded by the catalog when present).</summary>
     public Version Version { get; internal set; }

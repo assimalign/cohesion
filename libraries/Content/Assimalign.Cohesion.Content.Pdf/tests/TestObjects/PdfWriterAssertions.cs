@@ -51,18 +51,16 @@ internal static class PdfWriterAssertions
             case PdfDictionary value: Dictionary(value, actual.ShouldBeOfType<PdfDictionary>()); break;
             case PdfStream value:
                 var stream = actual.ShouldBeOfType<PdfStream>();
-                Dictionary(value.Dictionary, stream.Dictionary, stream: true);
+                Dictionary(value.Dictionary, stream.Dictionary);
                 stream.Data.ToArray(16 * 1024 * 1024).ShouldBe(value.Data.ToArray(16 * 1024 * 1024)); break;
             default: throw new InvalidOperationException();
         }
     }
-    private static void Dictionary(PdfDictionary expected, PdfDictionary actual, bool stream = false)
+    private static void Dictionary(PdfDictionary expected, PdfDictionary actual)
     {
         actual.Count.ShouldBe(expected.Count);
         foreach (var pair in expected)
         {
-            // /Length becomes the actual direct encoded length; all other graph edges are preserved.
-            if (stream && pair.Key.Equals(PdfName.Create("Length"u8))) { continue; }
             actual.ContainsKey(pair.Key).ShouldBeTrue(); Object(pair.Value, actual[pair.Key]);
         }
     }

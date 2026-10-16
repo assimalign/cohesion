@@ -19,11 +19,14 @@ internal sealed class PdfObjectSerializer
     private readonly bool _compressModifiedStreams;
     private readonly bool _copyPayloads;
     private readonly CancellationToken _cancellationToken;
+    private readonly Func<IPdfObject, IPdfObject>? _resolve;
     internal PdfObjectSerializer(PdfOutput output, int maxDepth = 128, int maxObjects = 1_000_000,
-        bool compressModifiedStreams = false, bool copyPayloads = true, CancellationToken cancellationToken = default)
+        bool compressModifiedStreams = false, bool copyPayloads = true, CancellationToken cancellationToken = default,
+        Func<IPdfObject, IPdfObject>? resolve = null)
     {
         _output = output; _maxDepth = maxDepth; _maxObjects = maxObjects;
         _compressModifiedStreams = compressModifiedStreams; _copyPayloads = copyPayloads; _cancellationToken = cancellationToken;
+        _resolve = resolve;
     }
     internal void Write(IPdfObject value) { _nodes = 0; WriteValue(value, 0); }
     private void WriteValue(IPdfObject value, int depth)
@@ -88,7 +91,13 @@ internal sealed class PdfObjectSerializer
                 Compress(data, counter); length = counter.Count;
             }
         }
-        copy[PdfName.Create("Length"u8)] = PdfInteger.Create(length);
+        IPdfObject lengthValue = PdfInteger.Create(length);
+        if (!stream.IsDataReplaced && stream.Dictionary.Get("Length") is PdfIndirectReference reference &&
+            _resolve?.Invoke(reference) is PdfInteger retainedLength && retainedLength.Value == length)
+        {
+            lengthValue = reference;
+        }
+        copy[PdfName.Create("Length"u8)] = lengthValue;
         WriteDictionary(copy, 0); _output.Text("\nstream\n");
         if (_copyPayloads)
         {
@@ -113,7 +122,7 @@ internal sealed class PdfObjectSerializer
         _output.Text("<<");
         foreach (var pair in dictionary)
         {
-            _output.Text(" "); WriteName(pair.Key); _output.Text(" "); WriteValue(pair.Value, depth + 1);
+            _output.Text(" "); WriteValue(pair.Key, depth + 1); _output.Text(" "); WriteValue(pair.Value, depth + 1);
         }
         _output.Text(" >>");
     }

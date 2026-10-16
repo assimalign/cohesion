@@ -27,8 +27,9 @@ public sealed partial class PdfDocument
         {
             // Encrypted object streams may contain the catalog; xrefs/trailer must still load.
             if (!IsEncrypted) { UpdateVersion(); }
-            _trailerState = new PdfObjectState(Trailer, _options.MaxDepth, _options.MaxObjects);
+            _trailerState = new PdfObjectState(Trailer, _options.MaxDepth, _options.MaxObjects, AbsoluteOrigin);
             foreach (var key in Trailer.Keys) { _originalTrailerKeys.Add(key); }
+            if (Trailer.Get("ID") is PdfArray ids && ids.Count > 0) { OriginalFirstIdentifier = ids[0] as PdfString; }
         }
         finally { _loadCancellationToken = default; }
     }
@@ -117,7 +118,7 @@ public sealed partial class PdfDocument
                 value = _objectStream.Extract(entry.ObjectStreamIndex, identifier.Number, _options, () => _security.IsEncrypted);
             }
             _cache.Add(identifier, value);
-            _originalStates.Add(identifier, new PdfObjectState(value, _options.MaxDepth, _options.MaxObjects));
+            _originalStates.Add(identifier, new PdfObjectState(value, _options.MaxDepth, _options.MaxObjects, AbsoluteOrigin + entry.Offset));
             return value;
         }
         finally { _resolving.Remove(identifier); }
