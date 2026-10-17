@@ -14,11 +14,11 @@ internal static class ParameterBindings
     {
         var name = reference.AsSpan(1);
         if (name.IsEmpty) { return false; }
-        bool numeric = char.IsDigit(name[0]);
+        bool numeric = char.IsAsciiDigit(name[0]);
         if (!numeric && !char.IsLetter(name[0]) && name[0] != '_') { return false; }
         foreach (char character in name)
         {
-            if (numeric ? !char.IsDigit(character) : !char.IsLetterOrDigit(character) && character != '_') { return false; }
+            if (numeric ? !char.IsAsciiDigit(character) : !char.IsLetterOrDigit(character) && character != '_') { return false; }
         }
         return true;
     }

@@ -13,6 +13,32 @@ namespace Assimalign.Cohesion.Database.Documents.Tests;
 
 public sealed class ParameterBindingTests
 {
+    [Theory(DisplayName = "Cohesion Test [Documents] - Parameters: Unicode numeric names never bind matching map keys")]
+    [InlineData("$\u0661")]
+    [InlineData("@\u0661")]
+    [InlineData("$1\u0661")]
+    public async Task Execute_UnicodeNumericParameter_ShouldRejectBeforeBindingAsync(string reference)
+    {
+        // Arrange
+        await using var engine = DocumentDatabaseEngine.Create("parameters", new());
+        var database = await engine.CreateDatabaseAsync("parameters", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        var collection = await session.CreateCollectionAsync("t", CancellationToken.None);
+        await collection.PutAsync(session, "one", "{}"u8.ToArray(), cancellationToken: CancellationToken.None);
+        string query = $"SELECT {reference} AS value FROM t";
+        var parameters = new Dictionary<string, object?> { [reference[1..]] = 7 };
+
+        // Act
+        var failure = await Should.ThrowAsync<DatabaseParseException>(async () =>
+            await session.ExecuteAsync(query, parameters, CancellationToken.None));
+
+        // Assert
+        var diagnostic = failure.Diagnostics.ShouldHaveSingleItem();
+        diagnostic.Code.ShouldBe("OQL0002");
+        diagnostic.Start.ShouldBe(7);
+        diagnostic.End.ShouldBe(7 + reference.Length);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Documents] - Parameters: a malformed typed request keeps its parse diagnostic")]
     public async Task Execute_MalformedTypedParameter_ShouldRejectParsingBeforeBindingAsync()
     {

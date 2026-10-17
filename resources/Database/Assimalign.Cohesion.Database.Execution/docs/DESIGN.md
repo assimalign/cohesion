@@ -8,7 +8,7 @@ This package references `Database.Types` only. It has no direct or transitive de
 ## Parameter normalization shared source (#1102, D15)
 
 The default for open decision D15 is `shared/ParameterBindings.cs`: stateless internal
-name grammar, one-sigil removal and ordinal dictionary-copy rules. SQL, Documents and
+name grammar (numeric names use ASCII digits only), one-sigil removal and ordinal dictionary-copy rules. SQL, Documents and
 their parsers link it through explicit `CohesionSharedSource` items. No public bind API
 or visibility grant is added. Execution itself still references only Types and does
 not compile or reference Language. Each engine supplies its own coded collision

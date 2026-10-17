@@ -10,6 +10,8 @@ names. Transaction control bypasses planning, so the session applies the same
 normalization before BEGIN, COMMIT or ROLLBACK can change state. A collision leaves
 that state unchanged. The [shared parameter contract](../../Assimalign.Cohesion.Database.Language/docs/DESIGN.md#parameter-contract-1102)
 and SQL language DIALECT define syntax, key matching and the unchanged AST shapes.
+Numeric names use ASCII digits only; Unicode numeric references fail parsing before a
+matching map key can bind. `$0`, `$01` and names beyond Int64 remain exact string keys.
 
 
 ## Fixed-length character identity (#1437)

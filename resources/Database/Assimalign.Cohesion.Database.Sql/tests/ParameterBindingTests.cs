@@ -12,6 +12,32 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed class ParameterBindingTests
 {
+    [Theory(DisplayName = "Cohesion Test [Sql] - Parameters: Unicode numeric names never bind matching map keys")]
+    [InlineData("$\u0661")]
+    [InlineData("@\u0661")]
+    [InlineData("$1\u0661")]
+    public async Task Execute_UnicodeNumericParameter_ShouldRejectBeforeBindingAsync(string reference)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("parameters", new());
+        var database = await engine.CreateDatabaseAsync("parameters", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE t (a INT)", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT INTO t VALUES (1)", cancellationToken: CancellationToken.None);
+        string query = $"SELECT {reference} AS value FROM t;";
+        var parameters = new Dictionary<string, object?> { [reference[1..]] = 7 };
+
+        // Act
+        var failure = await Should.ThrowAsync<DatabaseParseException>(async () =>
+            await session.ExecuteAsync(query, parameters, CancellationToken.None));
+
+        // Assert
+        var diagnostic = failure.Diagnostics.ShouldHaveSingleItem();
+        diagnostic.Code.ShouldBe("SQL0003");
+        diagnostic.Start.ShouldBe(7);
+        diagnostic.End.ShouldBe(7 + reference.Length);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sql] - Parameters: control requests reject collisions without changing transaction state")]
     [InlineData("BEGIN")]
     [InlineData("COMMIT")]

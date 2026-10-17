@@ -8,6 +8,8 @@ behavior. It validates every parameter reference before planning/executing data 
 including projections, filters, grouping, HAVING and ordering over empty collections.
 Missing names carry COHDOC005 and their reference span; normalized-key collisions carry
 COHDOC009. The evaluator reads the ordinal bare-name snapshot. Unused keys are ignored.
+Numeric names use ASCII digits only; Unicode numeric references fail parsing before a
+matching map key can bind. `$0`, `$01` and names beyond Int64 remain exact string keys.
 See the [shared parameter contract](../../Assimalign.Cohesion.Database.Language/docs/DESIGN.md#parameter-contract-1102).
 
 

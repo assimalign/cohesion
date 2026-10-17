@@ -241,7 +241,11 @@ element is `GQL0008`, which "Label expressions and edge directions" below descri
 
 A character GQL does not use lexes as `TokenType.Unrecognized`. It reports
 `Unexpected character '<c>'; it is not part of GQL.` (`GQL0002`) at its span during
-tokenization, and the statement is not parsed, so nothing is bound. Every statement form
+tokenization, and the statement is not parsed, so nothing is bound. `?` defers rejection to
+syntax parsing: an operand gets the shared supported-form message, while a trailing stray
+`?` keeps the generic character message. Keyword-shaped host parameters such as `:union`
+receive one GQL0002 at the whole reference, without a capability diagnostic for the name.
+Every statement form
 (`MATCH ... RETURN`, `INSERT`, `CREATE`, `DELETE`, `DETACH DELETE`, `SHOW`) rejects leftover
 tokens with `GQL0002`, with or without a separating `;`, and `GqlParseStrictnessTests` pins each.
 

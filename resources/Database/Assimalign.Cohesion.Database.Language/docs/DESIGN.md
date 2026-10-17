@@ -14,7 +14,7 @@ SQL, OQL and GQL share this contract. Sigils are presentation: `$name` and `@nam
 refer to the same bare name. `@name` is a Cohesion extension in every language,
 including GQL; it is not an ISO GQL or openCypher spelling.
 
-1. A name is an identifier (a letter or `_`, then letters, digits or `_`) or digits
+1. A name is an identifier (a letter or `_`, then letters, digits or `_`) or ASCII digits
    only. `$`, `@`, `$1a` and `@1a` are syntax errors at the complete parameter span.
 2. `$n` binds the key spelled by its digits, not an offset into a positional list.
    `$01` binds `01`, distinct from `1`. The request carries only a name-keyed map.
@@ -43,8 +43,8 @@ SQL uses `SQL0003`, OQL `OQL0002` and GQL `GQL0002` for unsupported forms.
 parameters carry `COHSQLE020`, normalized-key collisions `COHSQLE023`; OQL uses
 `COHDOC005` and `COHDOC009` respectively, through `DatabaseException.Diagnostics`.
 The wire protocol is unchanged. PostgreSQL's scanner separately recognizes `$` plus
-Decimal digits and rejects numeric-name junk (`src/backend/parser/scan.l:397-420`,
-`:969-983`, local reference clone); Cohesion extends that grammar to named sigils and
+ASCII digits (`decdigit`, `src/backend/parser/scan.l:377`, `:398`) and rejects numeric-name
+junk (`:415-420`, `:969-983`, local reference clone); Cohesion extends that grammar to named sigils and
 uses the request map's exact digit spelling rather than PostgreSQL's positional array.
 
 D15 remains open. The implemented default is the stateless, link-compiled internal
@@ -127,12 +127,14 @@ language's syntax code. The rules, shared by SQL, OQL and GQL:
   after `Eof`, so every existing member keeps its value. Each parser reports the character with its own
   syntax code at the character's span: `SQL0003`, `OQL0002` or `GQL0002`. The message is
   `Unexpected character '<c>'`, or `U+<hex>` for an invisible or supplementary character. The
-  statement then binds nothing. OQL and GQL stop before syntax parsing. SQL parses on so that it
-  can still report its other errors, then keeps only the command type; a stray character before
-  the statement, such as an unstripped byte order mark, does not become its command, so it is
-  the only error, as in OQL and GQL. `?` is a stray character
-  like any other here; the message that names the supported parameter forms is
-  shared-parameters'.
+  statement then binds nothing. OQL and GQL stop before syntax parsing for these characters,
+  except `?`: they defer its rejection until syntax parsing can distinguish an operand from a
+  trailing stray character. Operand `?` gets `QueryDiagnostics.UnsupportedParameterForm`'s
+  shared supported-form message; a trailing stray `?` gets the generic character message.
+  SQL parses on so that it can still report its other errors, replacing the generic message
+  for an operand `?`, then keeps only the command type. A stray character before the statement,
+  such as an unstripped byte order mark, does not become its command, so it is the only error,
+  as in OQL and GQL.
 - **`--` stays a line comment in every language.** It is SQL's comment and ISO/IEC 39075's
   `<simple comment>`, so there is no per-language lexer switch. A Cypher arrow written with `--`
   directly after a GQL node's `)` or edge's `]` reads as a comment; the GQL parser reports it as

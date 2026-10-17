@@ -176,7 +176,10 @@ public sealed partial class OqlQueryParser : QueryParser
                 continue;
             }
 
-            if (index > 0 && _tokens[index - 1].Type == TokenType.Dot)
+            // A keyword-shaped name in adjacent :name is part of the rejected operand,
+            // not a clause, subquery or unsupported operation. Syntax parsing owns it.
+            if (index > 0 && (_tokens[index - 1].Type == TokenType.Dot ||
+                _tokens[index - 1].Type == TokenType.Colon && _tokens[index - 1].End == token.Start))
             {
                 continue;
             }

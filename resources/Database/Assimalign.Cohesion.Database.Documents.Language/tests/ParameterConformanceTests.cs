@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
 
+using Assimalign.Cohesion.Database.Language;
 using Assimalign.Cohesion.Database.Types;
 
 using Shouldly;
@@ -14,6 +15,9 @@ public sealed class ParameterConformanceTests
     [InlineData("?")]
     [InlineData(":id")]
     [InlineData(":count")]
+    [InlineData(":union")]
+    [InlineData(":like")]
+    [InlineData(":select")]
     public void Parse_UnsupportedParameterForm_ShouldReportOneLocatedDiagnostic(string form)
     {
         // Arrange
@@ -30,6 +34,9 @@ public sealed class ParameterConformanceTests
         diagnostic.Message!.ShouldContain("$name");
         diagnostic.Message!.ShouldContain("@name");
         diagnostic.Message!.ShouldContain("$1");
+        diagnostic.Message.ShouldBe(QueryDiagnostics.UnsupportedParameterForm(diagnostic.Code!,
+            Location.Create(1, 1, diagnostic.Start!.Value, diagnostic.End!.Value)).Message);
+        statement.Diagnostics.ShouldNotContain(item => item.Code == "COHDBL001");
     }
 
     [Fact(DisplayName = "Cohesion Test [Documents.Language] - Parameters: a trailing stray question mark keeps the generic message")]
@@ -73,6 +80,9 @@ public sealed class ParameterConformanceTests
     [InlineData("@")]
     [InlineData("$1a")]
     [InlineData("@1a")]
+    [InlineData("$\u0661")]
+    [InlineData("@\u0661")]
+    [InlineData("$1\u0661")]
     public void Parse_InvalidParameterName_ShouldReportOneGrammarDiagnostic(string form)
     {
         // Arrange
