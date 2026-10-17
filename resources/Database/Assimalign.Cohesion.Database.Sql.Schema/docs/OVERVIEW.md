@@ -26,7 +26,7 @@ it builds; the migration planner plans `AddDomain` and `DropDomain`.
 numeric, char, enum, date/time, Guid and binary values, using invariant SQL literals.
 `table.DefaultSql(selector, "'pending'")` supplies raw SQL literal text as an escape hatch.
 The compiled column keeps the rendered text in `DefaultLiteral`, so equivalent typed and raw
-declarations have identical documents and hashes; the format remains v4. The SDK uses the same
+declarations have identical documents and hashes in the [current schema format](DESIGN.md#fixed-length-schema-columns-1437). The SDK uses the same
 renderer for C# compile-time constants and directs nonconstant declarations to `DefaultSql`.
 The SQL engine validates defaults before provisioning, and they survive canonical documents
 and catalog reconstruction after an interrupted migration.

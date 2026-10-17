@@ -19,7 +19,7 @@ The parser supplies length one for bare CHAR, and explicit lengths reuse the exi
 SqlTypeModifiers rule in every declaration and CAST. SQL0005 and the common length ceiling remain
 unchanged. The runtime owns padding, trimming casts and comparison; DIALECT.md specifies their
 PostgreSQL anchors and the dialect differences. Schema and SDK normalization share this identity
-in the v6 canonical document.
+in the [current canonical document](../../Assimalign.Cohesion.Database.Sql.Schema/docs/DESIGN.md#fixed-length-schema-columns-1437).
 
 The SQL front-end (area architecture: [resources/Database/DESIGN.md](../../../../docs/resources/Database/DESIGN.md)
 §3.3). The dialect is deliberately fundamental — basic SQL, declared precisely —
@@ -236,8 +236,8 @@ lands.
 and `COMMIT WORK` map to Commit, and `ROLLBACK WORK` maps to Rollback (#1125).
 `WORK` is the ISO synonym of the optional `TRANSACTION` noise word after
 `BEGIN`, `COMMIT`, and `ROLLBACK`; START requires TRANSACTION and END takes no
-suffix. These are spellings of existing clauses, so the profile remains 33/49
-(+0): no `SqlClauses` constant or profile entry is added. START and WORK match
+suffix. These are spellings of existing clauses (+0): no `SqlClauses` constant or
+profile entry is added. START and WORK match
 contextually with ordinal, case-insensitive comparisons, keeping unquoted columns
 named start/work bindable and keeping the schema renderer from quoting them.
 END was already a keyword; its statement dispatch leaves CASE ... END unchanged.

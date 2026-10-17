@@ -452,7 +452,7 @@ The sender retains one reusable 65,536-byte array; the receiver materializes and
 bounded frame at a time. Incoming framing still enforces the shared 16 MiB ceiling before
 allocation, and Blob decoding rejects a content frame larger than its stricter 65,536-byte bound.
 
-Version 1.0 defines the following complete payload layouts. Integers are big-endian. A `text`
+The Blob family defines the following complete payload layouts. Integers are big-endian. A `text`
 field is an Int32 UTF-8 byte length followed by exactly that many UTF-8 bytes, without a
 terminator. Each text field is limited to 65,535 bytes, and invalid UTF-8, negative lengths,
 missing bytes, and trailing bytes are protocol violations. Container and object names must

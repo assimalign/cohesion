@@ -324,8 +324,8 @@ typed literals use its strict readers directly. No session zone or assembly acce
 
 No catalog record changes. SqlCatalogColumn.DefaultLiteral still contains canonical SQL;
 previously accepted string and signed numeric defaults resolve identically, including after reopen.
-New typed spellings were previously unparseable, so no existing persisted text changes meaning
-and the record-space format remains 13. There is no upgrade path.
+New typed spellings were previously unparseable, so no existing persisted text changes meaning.
+Typed literals require no record-space format change. There is no upgrade path.
 
 ## Bound expressions (E1)
 
@@ -863,9 +863,8 @@ whose `table.Check` calls one; runs the same statements in process and over the 
 refusal, `COHSQLE007`, `COHESION_SCHEMA.FUNCTIONS` and a folded parameterized call); and
 exits 1 when a check fails. E3 added a domain with a check (`email`, a declared column of
 it, and its refusal), a domain with application casts to and from it (`cents`, under
-`CAST(CAST(Score AS cents) AS TEXT)`), a built-in cast from text to DATE, an application's
-cast between two built-in types the standard library does not convert (UUID to TEXT), and a
-`CAST` no cast performs refused while planning (`COHSQLE011`), in process and over the wire. It promotes the trim and AOT analyzer diagnostics to errors and
+`CAST(CAST(Score AS cents) AS TEXT)`), a built-in cast from text to DATE, UUID-to-TEXT
+conversion (built-in since #1119), and a `CAST` no cast performs refused while planning (`COHSQLE011`), in process and over the wire. It promotes the trim and AOT analyzer diagnostics to errors and
 has ILC treat every warning of its whole-program analysis as an error, reported at its
 source (`IlcTreatWarningsAsErrors`, `TrimmerSingleWarn=false`); it is published for
 win-arm64 by hand and for linux-x64 in CI (`resource-database.yml`), which runs the binary,
@@ -877,7 +876,7 @@ statement-context track owns that change); the `FunctionCatalogFrozen`,
 `PersistedDefinitionUnresolved` and `FunctionFailed` events (§8 of the design, the
 EventSource track's); an uncast string literal for a DATE, TIME, TIMESTAMP, INTERVAL or UUID
 parameter (E3's cast registry converts text to those types under `CAST`, so
-`day_of_year(CAST('2026-02-01' AS DATE))` resolves, but literal typing is unchanged: see
+`day_of_year(CAST('2026-02-01' AS DATE))` resolves, or a [typed literal](#typed-literals-1110) supplies the matching temporal type: see
 [Types, domains and casts (E3)](#types-domains-and-casts-e3)); a widening
 to REAL (a decimal or integer argument for a REAL parameter loses digits, so it stays an
 owner decision); a typed shorthand of no or two arguments for an aggregate, and an empty
@@ -1108,8 +1107,8 @@ flowchart LR
   `COHSQLE010` (SQLSTATE 42704) while planning, in DDL and in `CAST`.
 - **Storage.** A column of a domain stores its base type: the row codec, key encoding and
   on-disk format do not change. The catalog's column record keeps the domain's name
-  (`SqlCatalogColumn.DomainName`, table-record extension version 4), which is the reason the
-  data-storage format is 7 and the format gate refuses an older database.
+  (`SqlCatalogColumn.DomainName`, table-record extension version 4), which introduced
+  data-storage format 7. The [current format gate](#execution-model) refuses earlier databases.
 - **Checks on write.** A table version binds each domain column once (`SqlBoundTableCache`,
   `SqlBoundDomain`): its check as a `SqlBoundCall` over the column's value. A write evaluates it
   where the value is assigned, as PostgreSQL's `ExecEvalConstraintCheck` does
@@ -1259,7 +1258,7 @@ SqlSchemaValidationException (InvalidDocument, schema.format), naming both forma
 rebuild/recreate remedy. SQL checks applied markers and pending targets before opening the data
 file set, and checks a replacement document before Apply/Verify compares hashes or plans work.
 The gate reads only the format; it never validates a pre-normalization hash or reconciles an old
-identity. Both catalog records retain a versioned document; the current record-space format 13
+identity. Both catalog records retain a versioned document; the current record-space format 14
 gates Character identity and its index keys, without changing these document envelopes.
 
 FLOAT(p) selects Float32 for 1..24 bits and Float64 for 25..53 bits; bare FLOAT stays Float64.
@@ -2017,8 +2016,8 @@ declared dialect and retain their existing unsupported-clause diagnostics.
 
 - **Rule-based planning, plan/execute split.** `SqlPlanner` binds the AST against
   the catalog into a small `SqlPlan` IR and rejects everything outside the
-  executor's surface *at plan time with precise messages* (JOIN, GROUP BY,
-  subqueries, aggregates beyond a lone `COUNT(*)`, `INSERT ... SELECT`). The IR
+  [declared dialect](../../Assimalign.Cohesion.Database.Sql.Language/docs/DIALECT.md)
+  *at plan time with precise messages*. The IR
   is deliberately thin — a cost-based planner replaces the binding internals
   later without changing the executor seam (#178's plan-stage requirement, MVP
   shape). That promise paid out with index adoption: the IR gained exactly one
@@ -2115,7 +2114,7 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   proof surface — the planner suite asserts an indexed equality seek examines
   O(matches) records while the equivalent scan examines O(table).
 - **Row format: MVCC stamps + object-id-prefixed tuple, in per-object page
-  chains (since record-space format version 3; the current format is 9).**
+  chains (since record-space format version 3; the current format is 14).**
   Every data record is `[writer u64][deleter u64]` — a fixed 16-byte version-stamp header, the
   B+Tree leaf-entry design adopted for the record space — followed by the
   shared tuple codec payload (#854): the owning table's object id, then one
@@ -2153,7 +2152,7 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   format, no upgrade path.** The catalog stores the format version of the whole
   data file set, rows and the index trees that ride it (a kind-4 record for
   versions 1–3, a kind-8 record from version 4). The engine reads and writes
-  format 13 only: format 6's stamped rows in per-object page chains whose index keys use the
+  format 14 only: format 6's stamped rows in per-object page chains whose index keys use the
   temporal identity encoding (#1099, below), in index trees of B-tree page format
   2, which order entries by key, entry reference and writer (#1194,
   `Database.Indexing` DESIGN), decoded through each table's physical column
@@ -3987,7 +3986,7 @@ and add it again" as the only remedy.
   TEXT default, even for old rows that lack the field), `+5` as `5`, and `abc` as
   a column reference reported as catalog damage. The format gate
   (`ThrowIfFormatIsNotCurrent`, see "Format rule") refuses every database not on
-  the current format (5; canonical since 4) before `BindCatalog` runs, so no
+  the current format (14; canonical since 4) before `BindCatalog` runs, so no
   pre-canonical definition is ever bound.
   `BindCatalog` runs after that gate on open and after the format marker is written
   on create; keep that order.
@@ -4062,13 +4061,14 @@ first-error Message and carry every diagnostic on `DatabaseParseException`. A se
 the same parsed typed statement with the identical exception contract; no error AST executes.
 The documented SQL/GQL parser-out-of-stack translations remain engine complexity failures.
 Planner rejections carry stable codes and AST offsets where available; codes are separate from
-the in-process message. SQL and Graph protocol 2.0 compose `CODE: message` for ExecutionFailure.
+the in-process message. SQL and Graph compose `CODE: message` for ExecutionFailure;
+[negotiated diagnostics](../../Assimalign.Cohesion.Database.Protocol/docs/DESIGN.md#negotiated-statement-diagnostics-1105) add structured delivery.
 
 `QueryLanguageProfile.Functions` is the executable built-in set. Recognized non-executing
 functions live in each language's unsupported vocabulary and report COHDBL001 at parse time.
 The single function guard in each engine's execution-conformance suite requires live evidence
-for every declared name and rejects evidence for undeclared names. OQL temporarily exempts
-exactly ELEMENT, FLATTEN, FIRST, LAST, LISTTOSET and UNIQUE, each pinned to COHDBL001 until #1126.
+for every declared name and rejects evidence for undeclared names. OQL's
+[temporary exemptions were removed by #1126](../../Assimalign.Cohesion.Database.Documents.Language/docs/DESIGN.md#function-declaration-and-diagnostic-delivery-1103).
 
 ## Error model
 

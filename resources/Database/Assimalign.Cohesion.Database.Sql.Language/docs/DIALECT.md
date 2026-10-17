@@ -53,7 +53,7 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `DROP INDEX` | Supported | `DROP INDEX [IF EXISTS] <name> ON <table>` — the `ON <table>` qualifier is required: index names are scoped per table |
 | `CASE` | Supported, measured | Simple and searched forms, multiple branches, `ELSE`, implicit null result, and row expressions; branch expressions remain limited to the executable scalar subset. |
 | `ORDER BY` | Supported subset, measured | Multiple source-column/scalar-expression keys, projection aliases (bare or nested in expressions), and one-based select-list ordinals execute with ASC/DESC. Unqualified aliases take precedence over same-named source columns; qualified references bind to the source. Composes with DISTINCT, LIMIT/OFFSET, supported joins, grouped/aggregate queries, and system relations. Zero, negative, out-of-range, and non-integer numeric ordinals error; `1 + 1` remains a constant expression. Explicit NULLS FIRST/LAST, derived-table output ordering, and GROUP BY ordinals report `COHDBL001`. See the ordering contract below (#1024). |
-| `CAST` | Supported subset, measured | Exact signed integer, decimal, boolean, and string conversions, text to the date, time, UUID and binary floating-point types, and an application's casts, to and from its domains and between built-in types the engine does not convert (E3's cast registry), in projections, predicates, ordering, and DML expressions, including the SQL server/client. See the exact pair and error contract below. CAST in DEFAULT or CHECK remains rejected. |
+| `CAST` | Supported subset, measured | Built-in conversions across all 19 shared types according to the [conversion matrix](#explicit-conversion-cast-1022-e3), plus application-registered casts (E3's cast registry), in projections, predicates, ordering, and DML expressions, including the SQL server/client. See the exact pair and error contract below. CAST in DEFAULT or CHECK remains rejected. |
 | `COLLATE` | Supported subset, measured | Column and expression overrides: `binary`, `case_insensitive`, `case_accent_insensitive`, plus compatibility `invariant` with scan execution only. Effective collation governs comparisons, `LIKE`, ordering, grouping, `DISTINCT`, and unique keys. See the collation contract below. |
 | `JOIN` / `USING` | Supported subset, measured | N-way INNER (or bare JOIN), LEFT [OUTER], CROSS and comma joins over stored/system sources. INNER/LEFT require ON or USING; CROSS accepts neither. RIGHT/FULL, NATURAL, LATERAL and qualified wildcards remain excluded. See the precise contract below. |
 | `GROUP BY` / `HAVING` | Supported subset, measured | One or more grouping expressions; `WHERE` filters input rows and `HAVING` filters groups after aggregation. Composes with supported N-way joins, `ORDER BY`, `LIMIT`, and `OFFSET`, including server/client execution. Ungrouped, unaggregated projected columns are errors. `DISTINCT`/`ALL` aggregate modifiers, grouping extensions, windows, and ordered-set aggregates report `COHDBL001`. |
@@ -68,7 +68,7 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `CONSTRAINT` / `FOREIGN KEY` / `REFERENCES` / `CHECK` / `UNIQUE` constraints | Supported subset, measured | Column and table declarations normalize into constraint definitions; UNIQUE lowers to a unique catalog index. NULL is an equal index key: a second NULL violates a single-column UNIQUE constraint. Foreign-key NULL values are allowed; CHECK accepts UNKNOWN and rejects FALSE. CHECK expressions must be deterministic Boolean row expressions with the engine's scalar functions (built-in or registered, `IMMUTABLE` only), each called with arguments its signature accepts (`COHSQLE006` otherwise); parameters and aggregates are excluded. CHECK predicates and DEFAULT literals are stored as canonical text and parsed once per table version; see [Persisted definitions are canonical](#persisted-definitions-are-canonical). |
 | `ON DELETE CASCADE` / `ON DELETE RESTRICT` | Supported | omitted deletion action defaults to `RESTRICT`; a cascade deletes its whole transitive closure with no depth limit, so a self-referencing chain deletes however long it is (#1164), and a cycle deletes each row once; `DROP TABLE ... CASCADE` is not supported |
 | `ON UPDATE` | Recognized, not supported | absent from the profile; rejected with `COHDBL001` |
-| `START TRANSACTION` / `BEGIN [WORK\|TRANSACTION]` / `COMMIT [WORK\|TRANSACTION]` / `END` / `ROLLBACK [WORK\|TRANSACTION]` | Supported | Spellings map to the existing BEGIN/COMMIT/ROLLBACK session commands (+0 clauses; 33/49 unchanged). Like every SQL statement, a valid spelling without `;` receives informational SQL0100, with no error or warning; with `;` it has no parser diagnostics. START and WORK are contextual, so columns named start/work remain valid. END takes no suffix; without a transaction its COHSQLT002 message names COMMIT. END WORK/TRANSACTION, AND [NO] CHAIN, modes, ROLLBACK [WORK] TO [SAVEPOINT], BEGIN TRAN/named transactions and COMMIT PREPARED stay SQL0003. ABORT [WORK\|TRANSACTION], SAVEPOINT, RELEASE, SET TRANSACTION and PREPARE TRANSACTION stay SQL0002 (#1012); TRANSACTION alone is not a statement. |
+| `START TRANSACTION` / `BEGIN [WORK\|TRANSACTION]` / `COMMIT [WORK\|TRANSACTION]` / `END` / `ROLLBACK [WORK\|TRANSACTION]` | Supported | Spellings map to the existing BEGIN/COMMIT/ROLLBACK session commands (+0 clauses). Like every SQL statement, a valid spelling without `;` receives informational SQL0100, with no error or warning; with `;` it has no parser diagnostics. START and WORK are contextual, so columns named start/work remain valid. END takes no suffix; without a transaction its COHSQLT002 message names COMMIT. END WORK/TRANSACTION, AND [NO] CHAIN, modes, ROLLBACK [WORK] TO [SAVEPOINT], BEGIN TRAN/named transactions and COMMIT PREPARED stay SQL0003. ABORT [WORK\|TRANSACTION], SAVEPOINT, RELEASE, SET TRANSACTION and PREPARE TRANSACTION stay SQL0002 (#1012); TRANSACTION alone is not a statement. |
 | `MERGE`, `TRUNCATE`, `GRANT` | Not in the dialect | `SQL0002` |
 
 ## Plan descriptions (#1104)
@@ -940,7 +940,7 @@ PostgreSQL represents the keyword as `SetToDefault`
 UPDATE sources (`src/backend/parser/parse_target.c:85-92,263-272`); DEFAULT VALUES
 has no SELECT source (`gram.y:12559-12565`). Its optional-column-list grammar does
 not include DEFAULT VALUES; accepting that combination here follows #1193's explicit
-column-list requirement. The named-clause count remains 33/49 (+0).
+column-list requirement. These DEFAULT forms add no named clause (+0); see the [statement matrix](#statement-matrix).
 
 `CURRENT_DATE`, `CURRENT_TIME` and `CURRENT_TIMESTAMP` take no parentheses, so the
 parser reads each as a name. In these clauses an unqualified name spelled as one of
@@ -1325,7 +1325,7 @@ GROUP BY compares parameter references by bare name. Operand `?` and `:name`
 report one SQL0003 at their complete span and name the supported forms; a trailing
 stray `?` keeps its generic message. SQL `::` keeps its existing diagnostic.
 ParameterConformanceTests, ParameterBindingTests and SqlParameterWireTests cover
-these rules without changing protocol 1.0.
+these rules without changing SQL request payloads.
 
 Precedence, low to high: `OR` < `AND` < `NOT` < comparison (`=`, `<>`, `<`, `>`,
 `<=`, `>=`, `IS [NOT] NULL`, `[NOT] BETWEEN`, `[NOT] IN`, `[NOT] LIKE`) < additive
@@ -1411,8 +1411,10 @@ TimeSpan exactly at 100 ns resolution; fractions have at most seven digits. Cano
 text is optional minus, PT, total seconds and S. Year/month fields in every spelling
 (including YEAR TO MONTH, year/yr/mon/mons, quarter/decade/century/millennium units, 1-2,
 P1Y2M, P0001-02-03T04:05:06 and the basic P00010203T040506) report COHDBL001;
-PT1M is one minute. Field precision, temporal precision, TIME WITH TIME ZONE,
+PT1M is one minute. Field precision, temporal precision,
 numeric/UUID/JSON/BYTEA typed strings and B/E/U& string prefixes also report COHDBL001.
+TIME WITH TIME ZONE is recognized but refused: SQL0005 in declarations and CAST
+(see [Type names](#type-names-the-sqltypenames-table)), COHDBL001 as a typed literal.
 INTERVAL arithmetic and unary minus on INTERVAL remain owned by sql-functions (#1120).
 
 Unqualified PostgreSQL clock forms accept `1 day 02:03:04`, `1 02:03:04` and
@@ -1676,8 +1678,8 @@ lengths can compare equal under the index's collation.
   to #1447; both rewrite refusals name the column and direct callers to an explicit table-copy
   migration. Code-first validation on populated tables runs on the provisioning worker.
   Branch string literals retain this dialect's TEXT identity, unlike PostgreSQL's unknown literals.
-  CHARACTER VARYING, bpchar, :: casts and typed string prefixes are not accepted spellings; use
-  VARCHAR and CAST.
+  CHARACTER VARYING is accepted as VARCHAR; bpchar, :: casts and character typed-string prefixes
+  remain excluded. See [Type names](#type-names-the-sqltypenames-table) and [Literals](#literals).
   The overflow code is COHSQLE012/22001; its shared message still names character varying(n).
   PostgreSQL anchors: varchar.c:130 (input), :219 (padded output), :271 (explicit coercion),
   :673-712 (trimmed LENGTH versus padded octet length), :746, :912, :933, :991 (comparison,
@@ -1862,8 +1864,8 @@ supply a floating operand, cast text to REAL or DOUBLE first.
 - **Strings:** CHAR/CHARACTER and VARCHAR/TEXT permit an optional length
   n from 1 through 10485760; bare CHAR is CHAR(1), while bare VARCHAR/TEXT have no CAST length limit.
   Length counts Unicode scalar values. Longer results truncate at a character boundary; CHAR pads shorter results. The
-  binary aliases permit the same optional length in bytes. Every other built-in
-  target, and a domain, takes no parameters.
+  binary aliases permit the same optional length in bytes. Other targets follow the
+  shared [type-modifier rules](#type-modifiers-at-declaration-1438); domains take no parameters.
 - **Diagnostics and metadata:** a name that is not a built-in type and that the
   engine does not register as a domain fails while planning with `COHSQLE010`
   (`SQL0004` is retired: the parser no longer knows which names exist); invalid
@@ -2079,8 +2081,8 @@ when an entry's diagnostic does not name the construct the table records for it.
 
 Every planner rejection carries structured `DatabaseException.Diagnostics`: a stable code,
 severity, message and the offending AST location where available. The in-process message
-contains no code prefix. SQL protocol 1.0 composes `CODE: message` from the structured code
-for `ExecutionFailure`; its error text stays unchanged for existing coded errors.
+contains no code prefix. SQL composes `CODE: message` from the structured code
+for `ExecutionFailure`; [negotiated diagnostics](#wire-diagnostics-1105) add structured delivery.
 Text factories and sessions throw `DatabaseParseException` containing every statement
 diagnostic, ordered by start offset. A parsed typed request with errors throws the same
 exception with the same complete list; no recovery AST executes. The first-error message
@@ -2096,7 +2098,7 @@ to residual evaluation if the value fails the destination's declared bounds.
 
 The `COHSQLE` codes are engine diagnostics, not parser diagnostics. They are structured
 in process, with source offsets when planning has an offending AST location; a runtime
-failure without a source location leaves its offsets null. Only the protocol 1.0
+failure without a source location leaves its offsets null. The wire's
 `ExecutionFailure` text leads with the code. The arithmetic fault contract above
 defines when each of `COHSQLE001`–`COHSQLE003` is raised, the expression
 nesting limit when `COHSQLE004` is, the column-scope rule for VALUES and
@@ -2129,7 +2131,7 @@ hexadecimal digits, for example `DEFAULT '\x007FFF'`; no whitespace or octal esc
 and the column's length bounds still apply. The typed `byte[]` renderer emits uppercase digits.
 The ISO `DEFAULT X'007FFF'` spelling also works. Quoted backslash-x defaults keep
 resolving after reopen; COLUMN_DEFAULT reports the resolved value as X hex.
-This does not add a general string-to-binary cast.
+General text-to-BYTEA conversion is separately defined by the [CAST contract](#explicit-conversion-cast-1022-e3).
 
 While a compiled-schema apply runs, ordinary session DDL is refused with
 `DatabaseObjectLockedException`. Writers to tables the apply creates or alters wait until the

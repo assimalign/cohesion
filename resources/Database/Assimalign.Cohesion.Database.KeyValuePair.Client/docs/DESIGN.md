@@ -30,7 +30,8 @@ flowchart LR
 encodes parameters, writes the command, and materializes the complete response
 before returning its private result to the typed connection.
 The model's [command specification](../../Assimalign.Cohesion.Database.KeyValuePair/docs/COMMANDS.md)
-defines command grammar and operation result shapes. Protocol 1.0 bytes are unchanged.
+defines command grammar and operation result shapes. Payload layouts are unchanged; see
+[coded command failures](#coded-command-failures-1105) for negotiation and error text.
 
 The model assembly reference supplies codecs; this client does not construct an
 engine or parse commands. The transitive closure is an accepted packaging

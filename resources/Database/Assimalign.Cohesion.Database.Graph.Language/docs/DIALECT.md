@@ -97,8 +97,8 @@ Arithmetic promotion selects Double for any floating operand, otherwise Decimal 
 otherwise checked Int64. Integer division truncates toward zero. Integral remainder by -1
 is 0, including Int64.MinValue; Int64.MinValue / -1 raises COHDBG013. Zero divisors, overflow,
 non-finite results and invalid arithmetic types raise COHDBG013; concatenation requires two
-strings. Structured engine diagnostics carry code-free messages; protocol 1.0 sends
-ExecutionFailure `COHDBG013: message` before ResultHeader.
+strings. Structured engine diagnostics carry code-free messages; ExecutionFailure text is
+`COHDBG013: message`, with [negotiated diagnostics](#wire-diagnostics-1105) before Error.
 
 Expressions have no count limit. Recursive depth follows the thread's stack: GQL0009 during
 parsing, COHDBG008 in the engine. See [DESIGN.md](DESIGN.md#scalar-where-expressions-1140)

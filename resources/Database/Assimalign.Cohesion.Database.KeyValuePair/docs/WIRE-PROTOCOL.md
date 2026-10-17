@@ -106,7 +106,7 @@ byte after the sign, including the terminator (FF). This is System.Decimal's
 Golden payload examples (hex): Execute("X", no parameters) =
 `00 00 00 01 58 00 00 00 00`; one header column ("id", Int64) =
 `00 00 00 01 00 00 00 02 69 64 05`; completion(42) =
-`00 00 00 00 00 00 00 2A`. The existing server tests exercise the 1.0 wire unchanged;
+`00 00 00 00 00 00 00 2A`. The existing server tests exercise these model payloads;
 ProtocolMessageTests additionally fixes these payload bytes.
 
 ## Negotiation and coded errors (#1105)
