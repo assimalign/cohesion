@@ -81,13 +81,20 @@ public sealed class SqlBoundExpressionTests
         var parameters = new Dictionary<string, object?>();
 
         // Act
+        if (term.StartsWith("NULLIF", StringComparison.Ordinal))
+        {
+            var rejected = await Should.ThrowAsync<DatabaseParseException>(() => RowsAsync(session, $"SELECT id FROM t WHERE id < 0 AND {term}", parameters));
+            rejected.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHDBL001" && diagnostic.Message!.Contains("NULLIF", StringComparison.Ordinal));
+            (await RowsAsync(session, "SELECT COUNT(*) FROM t")).ShouldBe([[2L]]);
+            return;
+        }
         var skipped = await RowsAsync(session, $"SELECT id FROM t WHERE id < 0 AND {term}", parameters);
         await ExecuteAsync(session, "INSERT INTO t VALUES (-1)");
         var reached = await Should.ThrowAsync<DatabaseException>(() => RowsAsync(session, $"SELECT id FROM t WHERE id < 0 AND {term}", parameters));
 
         // Assert
         skipped.ShouldBeEmpty();
-        reached.Message.ShouldStartWith(failure, Case.Sensitive);
+        reached.ShouldStartWithMessage(failure, Case.Sensitive);
     }
 
     /// <summary>

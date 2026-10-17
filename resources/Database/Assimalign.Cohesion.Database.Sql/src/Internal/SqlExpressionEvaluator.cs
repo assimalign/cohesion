@@ -253,7 +253,7 @@ internal sealed partial class SqlExpressionEvaluator
             case SqlBoundExpressionKind.Failure:
                 return ((SqlBoundFailure)expression).Raise();
             default:
-                throw new DatabaseException($"Bound expression '{expression.Kind}' is not supported by the executor yet.");
+                throw new SqlPlanningException("COHSQLE013", $"Bound expression '{expression.Kind}' is not supported by the executor yet.");
         }
     }
 
@@ -298,14 +298,14 @@ internal sealed partial class SqlExpressionEvaluator
 
                     if (resolved >= 0)
                     {
-                        throw new DatabaseException($"Ambiguous column '{ColumnName(column)}'; qualify it with a table name or alias.");
+                        throw new SqlPlanningException("COHSQLE015", $"Ambiguous column '{ColumnName(column)}'; qualify it with a table name or alias.", column.Location);
                     }
 
                     resolved = binding.Offset + i;
                 }
             }
 
-            return resolved >= 0 ? resolved : throw new DatabaseException($"Unknown column '{ColumnName(column)}'.");
+            return resolved >= 0 ? resolved : throw new SqlPlanningException("COHSQLE015", $"Unknown column '{ColumnName(column)}'.", column.Location);
         }
 
         for (int i = 0; i < _columns.Count; i++)
@@ -316,7 +316,7 @@ internal sealed partial class SqlExpressionEvaluator
             }
         }
 
-        throw new DatabaseException($"Unknown column '{column.ColumnName}'.");
+        throw new SqlPlanningException("COHSQLE015", $"Unknown column '{column.ColumnName}'.", column.Location);
     }
 
     /// <summary>
@@ -532,7 +532,7 @@ internal sealed partial class SqlExpressionEvaluator
             SqlLiteralType.Boolean => Box(literal.Value.Equals("TRUE", StringComparison.OrdinalIgnoreCase)),
             SqlLiteralType.Integer => ParseIntegerLiteral(literal.Value),
             SqlLiteralType.Float => ParseFractionalLiteral(literal.Value),
-            _ => throw new DatabaseException($"Literal type {literal.LiteralType} is not supported."),
+            _ => throw new SqlPlanningException("COHSQLE013", $"Literal type {literal.LiteralType} is not supported.", literal.Location),
         };
     }
 
@@ -574,10 +574,21 @@ internal sealed partial class SqlExpressionEvaluator
         }
         catch (Exception exception) when (exception is FormatException or OverflowException)
         {
-            throw new DatabaseException($"CAST to {cast.TargetText} failed: operand cannot be represented exactly.", exception);
+            throw SqlEvaluationException.CastValueFailed($"CAST to {cast.TargetText} failed: operand cannot be represented exactly.", exception).At(cast.Location);
         }
 
-        return SqlCastConverter.Convert(value, cast, _cancellationToken);
+        try
+        {
+            return SqlCastConverter.Convert(value, cast, _cancellationToken);
+        }
+        catch (SqlEvaluationException exception) when (exception.Diagnostics[0].Start is null && cast.Location is not null)
+        {
+            throw exception.At(cast.Location);
+        }
+        catch (SqlPlanningException exception) when (exception.Diagnostics[0].Start is null && cast.Location is not null)
+        {
+            throw exception.At(cast.Location);
+        }
     }
 
     /// <summary>
@@ -655,19 +666,34 @@ internal sealed partial class SqlExpressionEvaluator
 
         var collation = binary.Collation.Resolve(_subqueryValues);
 
-        return binary.Operator switch
+        try
         {
-            SqlBinaryOperator.Equal => Box(Compare(leftValue, rightValue, collation) == 0),
-            SqlBinaryOperator.NotEqual => Box(Compare(leftValue, rightValue, collation) != 0),
-            SqlBinaryOperator.LessThan => Box(Compare(leftValue, rightValue, collation) < 0),
-            SqlBinaryOperator.GreaterThan => Box(Compare(leftValue, rightValue, collation) > 0),
-            SqlBinaryOperator.LessOrEqual => Box(Compare(leftValue, rightValue, collation) <= 0),
-            SqlBinaryOperator.GreaterOrEqual => Box(Compare(leftValue, rightValue, collation) >= 0),
-            SqlBinaryOperator.Add or SqlBinaryOperator.Subtract or SqlBinaryOperator.Multiply
-                or SqlBinaryOperator.Divide or SqlBinaryOperator.Modulo => Arithmetic(binary.Operator, leftValue, rightValue),
-            SqlBinaryOperator.Concat => Convert.ToString(leftValue, CultureInfo.InvariantCulture) + Convert.ToString(rightValue, CultureInfo.InvariantCulture),
-            _ => throw new DatabaseException($"Operator {binary.Operator} is not supported by the executor yet."),
-        };
+            return binary.Operator switch
+            {
+                SqlBinaryOperator.Equal => Box(Compare(leftValue, rightValue, collation) == 0),
+                SqlBinaryOperator.NotEqual => Box(Compare(leftValue, rightValue, collation) != 0),
+                SqlBinaryOperator.LessThan => Box(Compare(leftValue, rightValue, collation) < 0),
+                SqlBinaryOperator.GreaterThan => Box(Compare(leftValue, rightValue, collation) > 0),
+                SqlBinaryOperator.LessOrEqual => Box(Compare(leftValue, rightValue, collation) <= 0),
+                SqlBinaryOperator.GreaterOrEqual => Box(Compare(leftValue, rightValue, collation) >= 0),
+                SqlBinaryOperator.Add or SqlBinaryOperator.Subtract or SqlBinaryOperator.Multiply
+                    or SqlBinaryOperator.Divide or SqlBinaryOperator.Modulo => Arithmetic(binary.Operator, leftValue, rightValue),
+                SqlBinaryOperator.Concat => Convert.ToString(leftValue, CultureInfo.InvariantCulture) + Convert.ToString(rightValue, CultureInfo.InvariantCulture),
+                _ => throw new SqlPlanningException("COHSQLE013", $"Operator {binary.Operator} is not supported by the executor yet.", binary.Location),
+            };
+        }
+        catch (SqlEvaluationException exception) when (exception.Diagnostics[0].Start is null && binary.Location is not null)
+        {
+            throw exception.At(binary.Location);
+        }
+        catch (SqlPlanningException exception) when (exception.Diagnostics[0].Start is null && binary.Location is not null)
+        {
+            throw exception.At(binary.Location);
+        }
+        catch (ArithmeticException exception)
+        {
+            throw SqlEvaluationException.FromArithmetic(exception).At(binary.Location);
+        }
     }
 
     private object? EvaluateUnary(SqlBoundUnary unary, object?[] row)
@@ -679,29 +705,44 @@ internal sealed partial class SqlExpressionEvaluator
             return null;
         }
 
-        return unary.Operator switch
+        try
         {
-            SqlUnaryOperator.Negate => operand switch
+            return unary.Operator switch
             {
-                sbyte value => -(long)value,
-                short value => -(long)value,
-                int value => -(long)value,
-                // Two's complement has no positive counterpart for the minimum BIGINT.
-                long value => value == long.MinValue
-                    ? throw SqlEvaluationException.NumericValueOutOfRange($"negating BIGINT {value.ToString(CultureInfo.InvariantCulture)} overflowed.")
-                    : -value,
-                double value => -value,
-                float value => -(double)value,
-                decimal value => -value,
-                _ => throw SqlEvaluationException.InvalidOperandType("-", OperandTypeName(operand)),
-            },
-            // ISO unary plus: a number passes through with its type unchanged.
-            SqlUnaryOperator.Plus => IsSignOperand(SqlUnaryOperator.Plus, operand)
-                ? operand
-                : throw SqlEvaluationException.InvalidOperandType("+", OperandTypeName(operand)),
-            SqlUnaryOperator.Not => operand is bool flag ? Box(!flag) : throw new DatabaseException("NOT requires a boolean operand."),
-            _ => throw new DatabaseException($"Unary operator {unary.Operator} is not supported."),
-        };
+                SqlUnaryOperator.Negate => operand switch
+                {
+                    sbyte value => -(long)value,
+                    short value => -(long)value,
+                    int value => -(long)value,
+                    // Two's complement has no positive counterpart for the minimum BIGINT.
+                    long value => value == long.MinValue
+                        ? throw SqlEvaluationException.NumericValueOutOfRange($"negating BIGINT {value.ToString(CultureInfo.InvariantCulture)} overflowed.")
+                        : -value,
+                    double value => -value,
+                    float value => -(double)value,
+                    decimal value => -value,
+                    _ => throw SqlEvaluationException.InvalidOperandType("-", OperandTypeName(operand)),
+                },
+                // ISO unary plus: a number passes through with its type unchanged.
+                SqlUnaryOperator.Plus => IsSignOperand(SqlUnaryOperator.Plus, operand)
+                    ? operand
+                    : throw SqlEvaluationException.InvalidOperandType("+", OperandTypeName(operand)),
+                SqlUnaryOperator.Not => operand is bool flag ? Box(!flag) : throw new SqlPlanningException("COHSQLE003", "NOT requires a boolean operand.", unary.Location),
+                _ => throw new SqlPlanningException("COHSQLE013", $"Unary operator {unary.Operator} is not supported.", unary.Location),
+            };
+        }
+        catch (SqlEvaluationException exception) when (exception.Diagnostics[0].Start is null && unary.Location is not null)
+        {
+            throw exception.At(unary.Location);
+        }
+        catch (SqlPlanningException exception) when (exception.Diagnostics[0].Start is null && unary.Location is not null)
+        {
+            throw exception.At(unary.Location);
+        }
+        catch (ArithmeticException exception)
+        {
+            throw SqlEvaluationException.FromArithmetic(exception).At(unary.Location);
+        }
     }
 
     /// <summary>Names a runtime value's type the way the dialect's types are named.</summary>
@@ -1056,7 +1097,7 @@ internal sealed partial class SqlExpressionEvaluator
                 float v => Convert.ToDecimal(v),
                 double v => Convert.ToDecimal(v),
                 decimal v => v,
-                _ => throw new DatabaseException("Arithmetic requires numeric operands."),
+                _ => throw new SqlPlanningException("COHSQLE003", "Arithmetic requires numeric operands."),
             };
         }
         catch (OverflowException exception)
@@ -1086,7 +1127,7 @@ internal sealed partial class SqlExpressionEvaluator
     {
         if (!IsArithmeticNumber(left) || !IsArithmeticNumber(right))
         {
-            throw new DatabaseException("Arithmetic requires numeric operands.");
+            throw new SqlPlanningException("COHSQLE003", "Arithmetic requires numeric operands.");
         }
 
         if (IsExactInteger(left) && IsExactInteger(right))

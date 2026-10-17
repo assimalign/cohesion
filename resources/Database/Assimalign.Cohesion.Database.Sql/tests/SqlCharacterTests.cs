@@ -91,8 +91,8 @@ public sealed class SqlCharacterTests
 
                 async Task Reject(string sql, string code)
                 {
-                    if (wire) { (await Should.ThrowAsync<SqlClientException>(() => Execute(sql))).Message.ShouldContain(code); }
-                    else { (await Should.ThrowAsync<DatabaseException>(() => Execute(sql))).Message.ShouldContain(code); }
+                    if (wire) { (await Should.ThrowAsync<SqlClientException>(() => Execute(sql))).ShouldContainMessage(code); }
+                    else { (await Should.ThrowAsync<DatabaseException>(() => Execute(sql))).ShouldContainMessage(code); }
                 }
 
                 if (opening == 0)

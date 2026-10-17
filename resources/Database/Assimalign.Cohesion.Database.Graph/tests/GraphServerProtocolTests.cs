@@ -85,7 +85,7 @@ public sealed class GraphServerProtocolTests
                 GraphProtocolExecuteMessage.Create("MATCH (a)-->(b) RETURN a").Encode(), token);
             var error = await ReadErrorAsync(channel, token);
             error.Code.ShouldBe(ProtocolErrorCode.ParseFailure);
-            error.Message.ShouldContain("GQL0008", Case.Sensitive);
+            error.Message.Split("GQL0008", StringSplitOptions.None).Length.ShouldBe(2);
             await WriteAsync(channel, ProtocolMessageType.Ping, [], token);
             (await ReadAsync(channel, token)).Type.ShouldBe(ProtocolMessageType.Pong);
         });

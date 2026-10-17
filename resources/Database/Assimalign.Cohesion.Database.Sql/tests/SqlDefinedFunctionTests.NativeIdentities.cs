@@ -56,9 +56,9 @@ public sealed partial class SqlDefinedFunctionTests
         else
         {
             (await RowsAsync(reader, "SELECT v FROM defaults")).ShouldBe([[false]]);
-            (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(reader, "INSERT INTO defaults(id) VALUES(1)"))).Message.ShouldContain("COHSQLE009");
-            (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(reader, "INSERT INTO checked VALUES(1)"))).Message.ShouldContain("COHSQLE009");
-            (await Should.ThrowAsync<DatabaseException>(() => RowsAsync(reader, "SELECT body(id) FROM defaults"))).Message.ShouldContain("COHSQLE009");
+            (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(reader, "INSERT INTO defaults(id) VALUES(1)"))).Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE009");
+            (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(reader, "INSERT INTO checked VALUES(1)"))).Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE009");
+            (await Should.ThrowAsync<DatabaseException>(() => RowsAsync(reader, "SELECT body(id) FROM defaults"))).Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE009");
         }
     }
 
@@ -75,7 +75,7 @@ public sealed partial class SqlDefinedFunctionTests
         var failure = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "DROP FUNCTION native_gate(BIGINT)"));
 
         // Assert
-        failure.Message.ShouldContain("COHSQLD001");
+        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLD001");
         failure.Message.ShouldNotContain("COHSQLD003");
     }
 
@@ -111,9 +111,9 @@ public sealed partial class SqlDefinedFunctionTests
 
         // Assert
         (await RowsAsync(reader, "SELECT v FROM defaults")).ShouldBe([[false]]);
-        (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(reader, "INSERT INTO checked VALUES(-1)"))).Message.ShouldContain("COHSQLE009");
-        (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(reader, "INSERT INTO defaults(id) VALUES(1)"))).Message.ShouldContain("COHSQLE009");
-        (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(reader, "INSERT INTO domained VALUES(-1)"))).Message.ShouldContain("COHSQLE009");
-        (await Should.ThrowAsync<DatabaseException>(() => RowsAsync(reader, "SELECT body(id) FROM defaults"))).Message.ShouldContain("COHSQLE009");
+        (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(reader, "INSERT INTO checked VALUES(-1)"))).Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE009");
+        (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(reader, "INSERT INTO defaults(id) VALUES(1)"))).Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE009");
+        (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(reader, "INSERT INTO domained VALUES(-1)"))).Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE009");
+        (await Should.ThrowAsync<DatabaseException>(() => RowsAsync(reader, "SELECT body(id) FROM defaults"))).Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE009");
     }
 }

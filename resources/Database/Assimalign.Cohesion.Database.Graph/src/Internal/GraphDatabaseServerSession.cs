@@ -1,12 +1,14 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Connections;
 using Assimalign.Cohesion.Database.Execution;
+using Assimalign.Cohesion.Database.Language;
 using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Security;
 using Assimalign.Cohesion.Database.Types;
@@ -39,6 +41,7 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
     private ProtocolFrameReader? _reader;
     private ProtocolFrameWriter? _writer;
     private GraphDatabaseSession? _databaseSession;
+    private Location? _statementLocation;
     private Task _completion = Task.CompletedTask;
     private string _closeReason = GraphDatabaseEventSource.CloseReason.Unknown;
 
@@ -359,6 +362,8 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
     private async Task ExecuteAsync(ProtocolFrame frame, DatabaseKeyWriter rowWriter, CancellationToken cancellationToken)
     {
         GraphProtocolExecuteMessage message = GraphProtocolExecuteMessage.Decode(frame.Payload.Span);
+        // Result-shape validation has no AST of its own; retain this exchange's complete text span.
+        _statementLocation = Location.Create(1, 1 + message.Statement.Count(character => character == '\n'), 0, message.Statement.Length);
         Dictionary<string, object?>? parameters = null;
 
         if (message.Parameters.Count > 0)
@@ -387,7 +392,16 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
             {
                 // The root never sees an empty wire statement either, so it is reported as a
                 // parse failure, as the parse delegates below report theirs.
-                var empty = new DatabaseParseException("A graph statement must not be empty.");
+                var empty = new DatabaseParseException("A graph statement must not be empty.", [new Diagnostic
+                {
+                    Code = "GQL0001",
+                    Message = "A graph statement must not be empty.",
+                    Severity = DiagnosticSeverity.Error,
+                    Location = DiagnosticLocation.Absolute,
+                    Start = _statementLocation.Start,
+                    End = _statementLocation.End,
+                    Line = 1,
+                }]);
                 GraphDatabaseEventSource.Log.StatementParseFailed(this, _databaseSession!.Database.Name, empty);
                 throw empty;
             }
@@ -426,7 +440,10 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
         catch (DatabaseParseException exception)
         {
             // Statement-level failures keep the session in the ready state.
-            await WriteErrorAsync(ProtocolErrorCode.ParseFailure, exception.Message, cancellationToken).ConfigureAwait(false);
+            var diagnostic = exception.Diagnostics.FirstOrDefault(item => item.Severity == DiagnosticSeverity.Error);
+            string errorText = diagnostic?.Code is { } code && !exception.Message.Contains(code + ":", StringComparison.Ordinal)
+                ? $"{code}: {exception.Message}" : exception.Message;
+            await WriteErrorAsync(ProtocolErrorCode.ParseFailure, errorText, cancellationToken).ConfigureAwait(false);
             return;
         }
         catch (DatabaseOfflineException exception)
@@ -438,7 +455,9 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
         }
         catch (DatabaseException exception)
         {
-            await WriteErrorAsync(ProtocolErrorCode.ExecutionFailure, exception.Message, cancellationToken).ConfigureAwait(false);
+            var diagnostic = exception.Diagnostics.FirstOrDefault(item => item.Severity == DiagnosticSeverity.Error);
+            string errorText = diagnostic?.Code is { } code ? $"{code}: {exception.Message}" : exception.Message;
+            await WriteErrorAsync(ProtocolErrorCode.ExecutionFailure, errorText, cancellationToken).ConfigureAwait(false);
             return;
         }
         catch (DatabaseTypeException exception)
@@ -460,7 +479,7 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
             {
                 if (projection.Property is null)
                 {
-                    throw new DatabaseException("Execute accepts scalar property projections. Use ExecutePaths with a read-only MATCH to return a node, relationship, or path.");
+                    throw new GraphPlanningException("COHDBG001", "Execute accepts scalar property projections. Use ExecutePaths with a read-only MATCH to return a node, relationship, or path.", request.Statement.GqlExpression.Location);
                 }
             }
             return request;
@@ -491,7 +510,7 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
     {
         if (result is not GraphPathsQueryResult paths)
         {
-            throw new DatabaseException("A path request did not produce a graph path result.");
+            throw new GraphPlanningException("COHDBG001", "A path request did not produce a graph path result.", _statementLocation);
         }
         foreach (GraphPath path in paths.Paths)
         {
@@ -537,12 +556,13 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
 
         if (result.Status != DatabaseResultStatus.Success)
         {
-            string detail = result.Diagnostics is { Count: > 0 } diagnostics && diagnostics[0].Message is { } diagnosticMessage
-                ? $"{diagnostics[0].Code}: {diagnosticMessage}"
-                : $"The statement completed with status {result.Status}.";
+            var diagnostics = result.Diagnostics ?? [];
+            string detail = diagnostics.FirstOrDefault(item => item.Severity == DiagnosticSeverity.Error)?.Message
+                ?? diagnostics.FirstOrDefault()?.Message
+                ?? $"The statement completed with status {result.Status}.";
 
             // Reported as an ExecutionFailure by the caller, which aborts an explicit transaction first.
-            throw new DatabaseException(detail);
+            throw new DatabaseException(detail, diagnostics);
         }
 
         await WriteFrameAsync((ProtocolMessageType)GraphProtocolMessageType.ResultComplete, new GraphProtocolResultCompleteMessage(result.AffectedCount).Encode(), cancellationToken).ConfigureAwait(false);

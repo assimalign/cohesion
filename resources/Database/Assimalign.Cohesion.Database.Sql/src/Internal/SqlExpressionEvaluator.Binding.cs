@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Runtime.CompilerServices;
 
 using Assimalign.Cohesion.Database.Sql.Language;
+using Assimalign.Cohesion.Database.Language;
 using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
@@ -127,7 +128,7 @@ internal sealed partial class SqlExpressionEvaluator
                 collation = CollationOf(expression, []);
                 return _subquerySlots is not null && _subquerySlots.TryGetValue(expression, out var slot)
                     ? new SqlBoundSubquery(slot.Id)
-                    : NotMaterialized();
+                    : NotMaterialized(expression.Location);
             case SqlLiteralExpression literal:
                 collation = CollationOf(expression, []);
                 return BindLiteral(literal);
@@ -139,7 +140,7 @@ internal sealed partial class SqlExpressionEvaluator
                 return BindParameter(parameter);
             default:
                 collation = CollationOf(expression, ChildCollations(expression));
-                return Unsupported(expression.GetType().Name);
+                return Unsupported(expression.GetType().Name, expression.Location);
         }
     }
 
@@ -156,7 +157,7 @@ internal sealed partial class SqlExpressionEvaluator
         }
         collation = CollationOf(binary, [leftCollation, rightCollation]);
         return new SqlBoundBinary(binary.Operator, left, right,
-            SqlBoundCollation.Of(leftCollation, rightCollation, _defaultCollation));
+            SqlBoundCollation.Of(leftCollation, rightCollation, _defaultCollation), binary.Location);
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
@@ -244,7 +245,7 @@ internal sealed partial class SqlExpressionEvaluator
         }
 
         return new SqlBoundCast(operand, cast.TargetType, target, _functions.Types.ResolveCasts(SourceDomain(cast.Operand), target),
-            _functions.Database, _defaultCollation);
+            _functions.Database, _defaultCollation, cast.Location);
     }
 
     /// <summary>
@@ -347,7 +348,7 @@ internal sealed partial class SqlExpressionEvaluator
     private SqlBoundExpression BindParameter(SqlParameterExpression parameter)
         => TryGetParameterValue(parameter, out object? value)
             ? new SqlBoundParameter(parameter.ParameterName, value)
-            : MissingParameter(parameter.ParameterName);
+            : MissingParameter(parameter.ParameterName, parameter.Location);
 
     [MethodImpl(MethodImplOptions.NoInlining)]
     private SqlBoundExpression BindLogical(SqlLogicalExpression logical, out SqlCollationCandidate collation)
@@ -381,7 +382,7 @@ internal sealed partial class SqlExpressionEvaluator
 
         var operand = Bind(unary.Operand, out SqlCollationCandidate operandCollation);
         collation = CollationOf(unary, [operandCollation]);
-        var bound = new SqlBoundUnary(unary.Operator, operand);
+        var bound = new SqlBoundUnary(unary.Operator, operand, unary.Location);
 
         // A sign over a constant is a constant, as PostgreSQL's grammar reads "-5" as the constant
         // -5 (doNegate, src/backend/parser/gram.y): computed once here, so an immutable call over it
@@ -424,7 +425,7 @@ internal sealed partial class SqlExpressionEvaluator
             collation = CollationOf(membership, collations);
             if (_subquerySlots is null || !_subquerySlots.TryGetValue(membership, out var slot))
             {
-                return NotMaterialized();
+                return NotMaterialized(membership.Location);
             }
 
             operand = BindCharacterComparand(membership.Operand, operand, slot.Type);
@@ -437,7 +438,7 @@ internal sealed partial class SqlExpressionEvaluator
         if (values is null)
         {
             collation = CollationOf(membership, collations);
-            return MissingInValues();
+            return MissingInValues(membership.Location);
         }
 
         var candidates = new SqlBoundExpression[values.Count];
@@ -580,7 +581,7 @@ internal sealed partial class SqlExpressionEvaluator
             // or an unknown name in a tree that was never planned), or an aggregate outside the
             // grouping plan that binds it to a slot.
             collation = CollationOf(call, ChildCollations(call));
-            return UnsupportedFunction(call.FunctionName);
+            return UnsupportedFunction(call.FunctionName, call.Location);
         }
 
         var arguments = new SqlBoundExpression[call.Arguments.Count];
@@ -713,26 +714,26 @@ internal sealed partial class SqlExpressionEvaluator
     // The failures below are built only where binding defers one, never on the success path: each
     // closure captures its factory's argument, so it is allocated when the factory runs.
 
-    private static SqlBoundFailure NotMaterialized()
-        => new(() => throw new DatabaseException("A subquery must be materialized by its plan before scalar evaluation."));
+    private static SqlBoundFailure NotMaterialized(Location? location)
+        => new(() => throw new SqlPlanningException("COHSQLE013", "A subquery must be materialized by its plan before scalar evaluation.", location));
 
-    private static SqlBoundFailure MissingInValues()
-        => new(() => throw new DatabaseException("An IN query requires a value list or a subquery."));
+    private static SqlBoundFailure MissingInValues(Location? location)
+        => new(() => throw new SqlPlanningException("COHSQLE013", "An IN query requires a value list or a subquery.", location));
 
-    private static SqlBoundFailure Unsupported(string type)
-        => new(() => throw new DatabaseException($"Expression '{type}' is not supported by the executor yet."));
+    private static SqlBoundFailure Unsupported(string type, Location? location)
+        => new(() => throw new SqlPlanningException("COHSQLE013", $"Expression '{type}' is not supported by the executor yet.", location));
 
     private static SqlBoundFailure LiteralFailure(SqlLiteralExpression literal) => new(() => EvaluateLiteral(literal));
 
     private SqlBoundFailure ColumnFailure(SqlColumnReferenceExpression column) => new(() => ResolveColumn(column));
 
-    private static SqlBoundFailure MissingParameter(string parameterName)
-        => new(() => throw new DatabaseException($"No value was supplied for parameter '{parameterName.TrimStart('@', '$')}'."));
+    private static SqlBoundFailure MissingParameter(string parameterName, Location? location)
+        => new(() => throw new SqlPlanningException("COHSQLE020", $"No value was supplied for parameter '{parameterName.TrimStart('@', '$')}'.", location));
 
     private static SqlBoundFailure ResolutionFailure(SqlEvaluationException exception) => new(() => throw exception.Duplicate());
 
-    private static SqlBoundFailure UnsupportedFunction(string name)
-        => new(() => throw new DatabaseException($"Function '{name}' is not supported by the executor yet."));
+    private static SqlBoundFailure UnsupportedFunction(string name, Location? location)
+        => new(() => throw new SqlPlanningException("COHDBL001", $"Function '{name}' is not supported by the executor yet.", location));
 
     private static SqlBoundFailure CastTargetFailure(SqlCastExpression cast, SqlTypeCatalog types)
         => new(() => SqlPlanner.ResolveCastTarget(cast, types));

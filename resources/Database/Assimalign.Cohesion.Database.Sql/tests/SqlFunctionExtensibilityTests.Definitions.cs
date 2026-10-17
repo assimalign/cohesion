@@ -118,6 +118,12 @@ public sealed partial class SqlFunctionExtensibilityTests
             var failure = await Should.ThrowAsync<SqlSchemaMigrationException>(async () => await builder.BuildAsync());
 
             // Assert
+            if (reason.StartsWith("COHSQLE006: ", StringComparison.Ordinal))
+            {
+                failure.ShouldHaveDiagnostic("COHSQLE006");
+                reason = reason["COHSQLE006: ".Length..];
+            }
+
             failure.Message.ShouldStartWith(
                 "COHSQLP001: SQL engine 'sql-functions' cannot provision database 'shop': CHECK constraint 'ck_email' on table " +
                 $"'customers' does not bind: {reason}", Case.Sensitive);
@@ -185,8 +191,8 @@ public sealed partial class SqlFunctionExtensibilityTests
                 $"{reason}, so the constraint cannot be evaluated and the write is refused. Register the function on the engine's builder " +
                 "(SqlDatabaseEngineBuilder.Functions), or drop the constraint.";
             rows.ShouldBe([[1L, "ann@example.com"]]);
-            insert.Message.ShouldBe(expected);
-            update.Message.ShouldBe(expected);
+            insert.ShouldHaveMessage(expected);
+            update.ShouldHaveMessage(expected);
             (await RowsAsync(session, "SELECT id, email FROM customers")).ShouldBe([[3L, "nobody"]]);
         }
         finally
@@ -240,7 +246,7 @@ public sealed partial class SqlFunctionExtensibilityTests
 
             // Assert
             rows.ShouldBe([[1L, "ann@example.com"]]);
-            insert.Message.ShouldBe(
+            insert.ShouldHaveMessage(
                 $"{UnregisteredFunction}: CHECK constraint 'ck_email' on table 'dbo.customers' calls function '{signature}', {reason}, so the " +
                 "constraint cannot be evaluated and the write is refused. Register the function on the engine's builder " +
                 "(SqlDatabaseEngineBuilder.Functions), or drop the constraint.");
@@ -273,7 +279,7 @@ public sealed partial class SqlFunctionExtensibilityTests
             var failure = await Should.ThrowAsync<SqlSchemaMigrationException>(async () => await builder.BuildAsync());
 
             // Assert
-            failure.Message.ShouldStartWith(
+            failure.ShouldStartWithMessage(
                 $"{UnregisteredFunction}: SQL engine 'sql-functions', database 'shop': CHECK constraint 'ck_email' on table 'dbo.customers' " +
                 "calls function 'is_email(TEXT)', which this engine registers returning TEXT, where the CHECK needs BOOLEAN.", Case.Sensitive);
         }
@@ -340,7 +346,7 @@ public sealed partial class SqlFunctionExtensibilityTests
 
             // Assert
             rows.ShouldBe([[1L]]);
-            insert.Message.ShouldBe(
+            insert.ShouldHaveMessage(
                 $"{UnregisteredFunction}: CHECK constraint 'ck_email' on table 'dbo.customers' calls function '{signature}', which no overload " +
                 $"this engine registers accepts ({mismatch}), so the constraint cannot be evaluated and the write is refused. Register the " +
                 "function on the engine's builder (SqlDatabaseEngineBuilder.Functions), or drop the constraint.");
@@ -404,12 +410,12 @@ public sealed partial class SqlFunctionExtensibilityTests
             await using var repaired = await BuildAsync(RegisterIsEmail, root, declare: "shop");
 
             // Assert
-            failure.Message.ShouldBe(
+            failure.ShouldHaveMessage(
                 $"{UnregisteredFunction}: SQL engine 'sql-functions', database 'shop': CHECK constraint 'ck_email' on table 'dbo.customers' " +
                 "calls function 'is_email(TEXT)', which this engine does not register. The engine declares this database, so its build " +
                 "fails before the engine accepts work: register the function on the engine's builder (SqlDatabaseEngineBuilder.Functions), " +
                 "or drop the constraint through an engine that does not declare the database.");
-            failure.InnerException.ShouldNotBeNull().Message.ShouldStartWith($"{UnregisteredFunction}: CHECK constraint 'ck_email'", Case.Sensitive);
+            failure.InnerException.ShouldNotBeNull().ShouldStartWithMessage($"{UnregisteredFunction}: CHECK constraint 'ck_email'", Case.Sensitive);
             product.ShouldNotBeNull().State.ShouldBe(EngineState.Disposed);
             repaired.TryGetDatabase("shop", out SqlDatabase? shop).ShouldBeTrue();
             await using var session = await shop!.CreateSessionAsync(CancellationToken.None);
@@ -517,7 +523,7 @@ public sealed partial class SqlFunctionExtensibilityTests
         folded.ShouldBe([[-42L, 5L, 7L], [-42L, 5L, 7L], [-42L, 5L, 7L]]);
         doubled.Calls.ShouldBe(1);
         overEmpty.ShouldBeEmpty();
-        overflow.Message.ShouldStartWith("COHSQLE002", Case.Sensitive);
+        overflow.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE002");
     }
 
     // A database 'shop' whose ad-hoc CHECK calls is_email, holding one row, written by an engine that

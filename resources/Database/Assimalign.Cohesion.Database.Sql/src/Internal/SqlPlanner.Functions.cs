@@ -164,8 +164,8 @@ internal sealed partial class SqlPlanner
                 !SqlStandardLibrary.IsDeclaredName(call.FunctionName))
             {
                 // The likeliest cause in a declared schema: the function was not registered on this engine.
-                throw new DatabaseException(
-                    $"Unknown function '{call.FunctionName}'. Register it on the engine's builder (SqlDatabaseEngineBuilder.Functions) before Build.");
+                throw new SqlPlanningException("COHSQLE016",
+                    $"Unknown function '{call.FunctionName}'. Register it on the engine's builder (SqlDatabaseEngineBuilder.Functions) before Build.", call.Location);
             }
 
             CheckCall(call, catalog);
@@ -180,6 +180,18 @@ internal sealed partial class SqlPlanner
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static void CheckCall(SqlFunctionCallExpression call, SqlFunctionCatalog catalog)
     {
+        try
+        {
+            CheckCallCore(call, catalog);
+        }
+        catch (SqlEvaluationException exception) when (exception.Diagnostics[0].Start is null && call.Location is not null)
+        {
+            throw exception.At(call.Location);
+        }
+    }
+
+    private static void CheckCallCore(SqlFunctionCallExpression call, SqlFunctionCatalog catalog)
+    {
         if (SqlStandardLibrary.IsCoalesce(call.FunctionName))
         {
             SqlExpressionEvaluator.CheckCoalesce(call);
@@ -190,7 +202,7 @@ internal sealed partial class SqlPlanner
         }
         else if (!SqlStandardLibrary.IsDeclaredName(call.FunctionName))
         {
-            throw new DatabaseException($"Unknown function '{call.FunctionName}'.");
+            throw new SqlPlanningException("COHSQLE016", $"Unknown function '{call.FunctionName}'.", call.Location);
         }
     }
 }

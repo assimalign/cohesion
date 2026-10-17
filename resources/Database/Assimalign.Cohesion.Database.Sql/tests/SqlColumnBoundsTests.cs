@@ -129,7 +129,7 @@ public sealed class SqlColumnBoundsTests
 
         // Assert
         error.ShouldBeOfType<SqlEvaluationException>().Code.ShouldBe(code);
-        error.Message.ShouldStartWith(code + ":", Case.Sensitive);
+        error.ShouldStartWithMessage(code + ":", Case.Sensitive);
         (await RowsAsync(session, "SELECT * FROM bounded_values")).ShouldHaveSingleItem()
             .ShouldBe(path == "add-column" ? new object?[] { 1 } : new object?[] { 1, null });
     }
@@ -178,7 +178,7 @@ public sealed class SqlColumnBoundsTests
         // Assert
         error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
         error.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
-        error.Message.ShouldStartWith(code + ":", Case.Sensitive);
+        error.ShouldStartWithMessage(code + ":", Case.Sensitive);
         error.ConnectionUsable.ShouldBeTrue();
         (await connection.QueryAsync("SELECT id FROM bounded_values", cancellationToken: TestTimeout.Token()))
             .ShouldHaveSingleItem()["id"].ShouldBe(1);
@@ -203,7 +203,7 @@ public sealed class SqlColumnBoundsTests
         await ExecuteAsync(session, $"INSERT INTO bounded_values VALUES (1, CAST('😀abc' AS {type}))");
 
         // Assert
-        error.Message.ShouldStartWith(stringTooLong + ":", Case.Sensitive);
+        error.ShouldStartWithMessage(stringTooLong + ":", Case.Sensitive);
         (await RowsAsync(session, "SELECT v FROM bounded_values")).ShouldHaveSingleItem()[0].ShouldBe("😀ab");
     }
 
@@ -226,7 +226,7 @@ public sealed class SqlColumnBoundsTests
         // Assert
         rounded.ShouldHaveSingleItem().ShouldBe(new object?[] { 12.35m, -12.35m });
         error.ShouldBeOfType<SqlEvaluationException>().Code.ShouldBe(numericOverflow);
-        error.Message.ShouldStartWith(numericOverflow + ":", Case.Sensitive);
+        error.ShouldStartWithMessage(numericOverflow + ":", Case.Sensitive);
     }
 
     /// <summary>Rounding and trimming a predicate's comparand must never narrow an index seek past qualifying rows.</summary>
@@ -282,7 +282,7 @@ public sealed class SqlColumnBoundsTests
         await ExecuteAsync(session, "COMMIT");
 
         // Assert
-        error.Message.ShouldStartWith(numericOverflow + ":", Case.Sensitive);
+        error.ShouldStartWithMessage(numericOverflow + ":", Case.Sensitive);
         (await RowsAsync(session, "SELECT id, v FROM bounded_values")).ShouldHaveSingleItem()
             .ShouldBe(new object?[] { 1, 1.24m });
     }
@@ -410,7 +410,7 @@ public sealed class SqlColumnBoundsTests
             $"ALTER TABLE bounded_values ADD COLUMN refused {type} DEFAULT {overflow}"));
 
         // Assert
-        error.Message.ShouldStartWith(numericOverflow + ":", Case.Sensitive);
+        error.ShouldStartWithMessage(numericOverflow + ":", Case.Sensitive);
         (await RowsAsync(session, "SELECT * FROM bounded_values")).ShouldHaveSingleItem()
             .ShouldBe(new object?[] { 1, 0.1m, 0.1m });
     }
@@ -526,7 +526,7 @@ public sealed class SqlColumnBoundsTests
 
         // Assert
         error.ShouldBeOfType<SqlEvaluationException>().Code.ShouldBe(numericOverflow);
-        error.Message.ShouldStartWith(numericOverflow + ":", Case.Sensitive);
+        error.ShouldStartWithMessage(numericOverflow + ":", Case.Sensitive);
         if (path == "default") { database.Catalog.TryGetTable("dbo", "bounded_values", out _).ShouldBeFalse(); }
         else
         {

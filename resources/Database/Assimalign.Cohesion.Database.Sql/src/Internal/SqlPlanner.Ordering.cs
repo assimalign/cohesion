@@ -49,16 +49,16 @@ internal sealed partial class SqlPlanner
                 string text = negative ? $"-{literal.Value}" : literal.Value;
                 if (literal.LiteralType != SqlLiteralType.Integer)
                 {
-                    throw new DatabaseException($"ORDER BY ordinal '{text}' must be an integer.");
+                    throw new SqlPlanningException("COHSQLE018", $"ORDER BY ordinal '{text}' must be an integer.", order.Expression.Location);
                 }
                 if (negative || literal.Value.TrimStart('0').Length == 0)
                 {
-                    throw new DatabaseException($"ORDER BY ordinal '{text}' must be a positive integer.");
+                    throw new SqlPlanningException("COHSQLE018", $"ORDER BY ordinal '{text}' must be a positive integer.", order.Expression.Location);
                 }
                 if (!int.TryParse(literal.Value, NumberStyles.None, CultureInfo.InvariantCulture, out int ordinal)
                     || ordinal > projections.Count)
                 {
-                    throw new DatabaseException($"ORDER BY ordinal '{text}' is out of range for {projections.Count} output columns.");
+                    throw new SqlPlanningException("COHSQLE018", $"ORDER BY ordinal '{text}' is out of range for {projections.Count} output columns.", order.Expression.Location);
                 }
                 slots.Add(order.Expression, ordinal - 1);
             }
@@ -77,7 +77,7 @@ internal sealed partial class SqlPlanner
             {
                 if (index < 0)
                 {
-                    throw new DatabaseException($"Ambiguous ORDER BY alias '{reference.ColumnName}'.");
+                    throw new SqlPlanningException("COHSQLE019", $"Ambiguous ORDER BY alias '{reference.ColumnName}'.", reference.Location);
                 }
                 slots.Add(expression, index);
                 return;

@@ -60,7 +60,7 @@ internal sealed partial class SqlPlanner
         {
             if (_subqueryDepth >= 32)
             {
-                throw new SqlUnsupportedQueryException("Subquery nesting exceeds the supported maximum depth of 32.");
+                throw new SqlUnsupportedQueryException("Subquery nesting exceeds the supported maximum depth of 32.", location: source.Location);
             }
             SqlPlan child;
             _subqueryDepth++;
@@ -70,7 +70,7 @@ internal sealed partial class SqlPlanner
             }
             catch (DatabaseException exception) when (exception.Message.StartsWith("Unknown column '", StringComparison.Ordinal))
             {
-                throw new SqlUnsupportedQueryException($"Correlated subqueries are not supported; a subquery column must resolve in its local FROM/JOIN scope. {exception.Message}", exception);
+                throw new SqlUnsupportedQueryException($"Correlated subqueries are not supported; a subquery column must resolve in its local FROM/JOIN scope. {exception.Message}", exception, source.Location);
             }
             finally
             {
@@ -79,7 +79,7 @@ internal sealed partial class SqlPlanner
             var projections = SubqueryProjections(child);
             if (kind != SqlSubqueryKind.Exists && projections.Count != 1)
             {
-                throw new DatabaseException($"{(kind == SqlSubqueryKind.Scalar ? "Scalar" : "IN")} subquery requires exactly one output column; found {projections.Count}.");
+                throw new SqlPlanningException("COHSQLE013", $"{(kind == SqlSubqueryKind.Scalar ? "Scalar" : "IN")} subquery requires exactly one output column; found {projections.Count}.", source.Location);
             }
             var type = kind == SqlSubqueryKind.Exists ? DatabaseType.Boolean : projections[0].Type;
             var collation = kind == SqlSubqueryKind.Exists ? _catalog.DefaultCollation : SubqueryCollation(child);
@@ -170,7 +170,7 @@ internal sealed partial class SqlPlanner
         SqlJoinPlan join => join.Projections,
         SqlGroupPlan group => group.Projections,
         SqlSystemViewPlan view => view.Projections,
-        _ => throw new DatabaseException("A subquery requires a SELECT result."),
+        _ => throw new SqlPlanningException("COHSQLE013", "A subquery requires a SELECT result."),
     };
 
     /// <summary>Preserves the child column's comparison collation across materialization.</summary>
@@ -186,7 +186,7 @@ internal sealed partial class SqlPlanner
             SqlJoinPlan join => join.Columns,
             SqlGroupPlan group => group.SourceColumns,
             SqlSystemViewPlan view => view.View.Columns,
-            _ => throw new DatabaseException("A subquery requires a SELECT result."),
+            _ => throw new SqlPlanningException("COHSQLE013", "A subquery requires a SELECT result."),
         };
         var bindings = plan switch { SqlJoinPlan join => join.Bindings, SqlGroupPlan group => group.Bindings, _ => null };
         var projection = SubqueryProjections(plan)[0];

@@ -73,7 +73,7 @@ public sealed class SqlInsertValuesValidationTests
         foreach (var failure in new[] { text, typed })
         {
             failure.ShouldBeOfType<SqlEvaluationException>().Code.ShouldBe(ColumnReferenceNotAllowed);
-            failure.Message.ShouldBe(expected);
+            failure.ShouldHaveMessage(expected);
         }
         session.State.ShouldBe(SessionState.Open);
         (await RowsAsync(session, "SELECT id, a, name, flag FROM v")).ShouldHaveSingleItem().ShouldBe(new object?[] { 1, 10, "ada", true });
@@ -94,7 +94,7 @@ public sealed class SqlInsertValuesValidationTests
         var failure = await Should.ThrowAsync<DatabaseException>(() => session.ExecuteAsync("INSERT INTO u (id, a) VALUES (id, 1)").AsTask());
 
         // Assert
-        failure.Message.ShouldStartWith($"{ColumnReferenceNotAllowed}: Column reference 'id' is not allowed in INSERT ... VALUES", Case.Sensitive);
+        failure.ShouldStartWithMessage($"{ColumnReferenceNotAllowed}: Column reference 'id' is not allowed in INSERT ... VALUES", Case.Sensitive);
         (await RowsAsync(session, "SELECT COUNT(*) FROM u")).ShouldHaveSingleItem().ShouldBe(new object?[] { 0L });
     }
 
@@ -173,7 +173,7 @@ public sealed class SqlInsertValuesValidationTests
         var failure = await Should.ThrowAsync<DatabaseException>(() => session.ExecuteAsync(sql).AsTask());
 
         // Assert
-        failure.Message.ShouldBe(message);
+        failure.ShouldHaveMessage(message);
         (await RowsAsync(session, "SELECT COUNT(*) FROM v")).ShouldHaveSingleItem().ShouldBe(new object?[] { 1L });
     }
 
@@ -229,7 +229,7 @@ public sealed class SqlInsertValuesValidationTests
 
         // Assert
         failure.ShouldBeOfType<SqlEvaluationException>().Code.ShouldBe(ColumnReferenceNotAllowed);
-        failure.Message.ShouldBe($"{ColumnReferenceNotAllowed}: Column reference '{reference}' is not allowed in {clause}, " +
+        failure.ShouldHaveMessage($"{ColumnReferenceNotAllowed}: Column reference '{reference}' is not allowed in {clause}, " +
             "which has no columns in scope. Use literals, parameters and expressions over them.");
         (await RowsAsync(session, "SELECT a FROM v LIMIT @n OFFSET 1 - 1", new Dictionary<string, object?> { ["n"] = 1 }))
             .ShouldHaveSingleItem().ShouldBe(new object?[] { 10 });
@@ -252,7 +252,7 @@ public sealed class SqlInsertValuesValidationTests
         var failure = await Should.ThrowAsync<DatabaseException>(() => session.ExecuteAsync(sql).AsTask());
 
         // Assert
-        failure.Message.ShouldBe(message);
+        failure.ShouldHaveMessage(message);
         session.State.ShouldBe(SessionState.Open);
     }
 
@@ -279,8 +279,9 @@ public sealed class SqlInsertValuesValidationTests
         var failure = await Should.ThrowAsync<DatabaseException>(() => session.ExecuteAsync(sql).AsTask());
 
         // Assert
-        failure.ShouldNotBeOfType<SqlEvaluationException>();
-        failure.Message.ShouldBe($"Function '{function}' is not supported by the executor yet.");
+        failure.ShouldBeOfType<DatabaseParseException>();
+        failure.Diagnostics.Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error).ShouldHaveSingleItem().Code.ShouldBe("COHDBL001");
+        failure.Message.ShouldContain(function.ToUpperInvariant(), Case.Sensitive);
         session.State.ShouldBe(SessionState.Open);
         (await RowsAsync(session, "SELECT COUNT(*) FROM v")).ShouldHaveSingleItem().ShouldBe(new object?[] { 1L });
     }
@@ -308,7 +309,7 @@ public sealed class SqlInsertValuesValidationTests
 
         // Assert
         error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-        error.Message.ShouldStartWith($"{ColumnReferenceNotAllowed}: Column reference '", Case.Sensitive);
+        error.ShouldStartWithMessage($"{ColumnReferenceNotAllowed}: Column reference '", Case.Sensitive);
         error.Message.ShouldEndWith(" is not allowed in INSERT ... VALUES, which has no columns in scope. " +
             "Use literals, parameters and expressions over them, or INSERT ... SELECT to read values from a table.", Case.Sensitive);
         harness.Server.Sessions.Count.ShouldBe(1);

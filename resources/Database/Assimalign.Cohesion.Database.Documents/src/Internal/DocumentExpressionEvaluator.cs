@@ -24,17 +24,30 @@ internal sealed class DocumentExpressionEvaluator
     }
 
     internal object? Evaluate(OqlExpression expression, JsonElement document, IReadOnlyList<JsonElement>? group = null)
-        => expression switch
+    {
+        try
         {
-            OqlLiteralExpression literal => Normalize(literal.Value),
-            OqlParameterExpression parameter => Parameter(parameter.Name),
-            OqlStarExpression => Normalize(document),
-            OqlPathExpression path => ReadPath(path, document),
-            OqlUnaryExpression unary => Unary(unary.Operator, Evaluate(unary.Operand, document, group)),
-            OqlBinaryExpression binary => Binary(binary, document, group),
-            OqlCallExpression call => Aggregate(call, group ?? throw new DatabaseException("An aggregate requires a grouping context.")),
-            _ => throw new DatabaseException("The OQL expression is not executable."),
-        };
+            return expression switch
+            {
+                OqlLiteralExpression literal => Normalize(literal.Value),
+                OqlParameterExpression parameter => Parameter(parameter.Name),
+                OqlStarExpression => Normalize(document),
+                OqlPathExpression path => ReadPath(path, document),
+                OqlUnaryExpression unary => Unary(unary.Operator, Evaluate(unary.Operand, document, group)),
+                OqlBinaryExpression binary => Binary(binary, document, group),
+                OqlCallExpression call => Aggregate(call, group ?? throw new DocumentPlanningException("COHDOC001", "An aggregate requires a grouping context.")),
+                _ => throw new DocumentPlanningException("COHDOC001", "The OQL expression is not executable."),
+            };
+        }
+        catch (DocumentPlanningException exception) when (exception.Diagnostics[0].Start is null && expression.Location is not null)
+        {
+            throw exception.At(expression.Location);
+        }
+        catch (OverflowException exception)
+        {
+            throw new DocumentPlanningException("COHDOC007", "OQL numbers must fit the decimal scalar domain.", expression.Location, exception);
+        }
+    }
 
     internal bool Matches(OqlExpression? expression, JsonElement document, IReadOnlyList<JsonElement>? group = null)
         => expression is null || Evaluate(expression, document, group) is true;
@@ -43,7 +56,7 @@ internal sealed class DocumentExpressionEvaluator
     {
         if (_parameters is null || !_parameters.TryGetValue(name, out var value))
         {
-            throw new DatabaseException($"OQL parameter '{name}' has no value.");
+            throw new DocumentPlanningException("COHDOC005", $"OQL parameter '{name}' has no value.");
         }
         return Normalize(value);
     }
@@ -69,7 +82,19 @@ internal sealed class DocumentExpressionEvaluator
         return Normalize(current);
     }
 
-    internal static object? Normalize(object? value) => value switch
+    internal static object? Normalize(object? value)
+    {
+        try
+        {
+            return NormalizeCore(value);
+        }
+        catch (OverflowException exception)
+        {
+            throw new DocumentPlanningException("COHDOC007", "OQL numbers must fit the decimal scalar domain.", innerException: exception);
+        }
+    }
+
+    private static object? NormalizeCore(object? value) => value switch
     {
         null => null,
         JsonElement json => json.ValueKind switch
@@ -79,14 +104,14 @@ internal sealed class DocumentExpressionEvaluator
             JsonValueKind.False => false,
             JsonValueKind.String => json.GetString(),
             JsonValueKind.Number => json.TryGetDecimal(out var number) ? number :
-                throw new DatabaseException("OQL numbers must fit the decimal scalar domain."),
+                throw new DocumentPlanningException("COHDOC007", "OQL numbers must fit the decimal scalar domain."),
             _ => json,
         },
         byte or sbyte or short or ushort or int or uint or long or ulong or decimal => Convert.ToDecimal(value, CultureInfo.InvariantCulture),
         float number when float.IsFinite(number) => Convert.ToDecimal(number, CultureInfo.InvariantCulture),
         double number when double.IsFinite(number) => Convert.ToDecimal(number, CultureInfo.InvariantCulture),
         bool or string => value,
-        _ => throw new DatabaseException("OQL parameters must be JSON scalars or JsonElement values."),
+        _ => throw new DocumentPlanningException("COHDOC008", "OQL parameters must be JSON scalars or JsonElement values."),
     };
 
     private object? Binary(OqlBinaryExpression expression, JsonElement document, IReadOnlyList<JsonElement>? group)
@@ -109,9 +134,9 @@ internal sealed class DocumentExpressionEvaluator
             "+" => Number(left) + Number(right),
             "-" => Number(left) - Number(right),
             "*" => Number(left) * Number(right),
-            "/" => Number(right) == 0 ? throw new DatabaseException("OQL division by zero.") : Number(left) / Number(right),
-            "%" => Number(right) == 0 ? throw new DatabaseException("OQL remainder by zero.") : Number(left) % Number(right),
-            _ => throw new DatabaseException($"OQL operator '{expression.Operator}' is not executable."),
+            "/" => Number(right) == 0 ? throw new DocumentPlanningException("COHDOC006", "OQL division by zero.") : Number(left) / Number(right),
+            "%" => Number(right) == 0 ? throw new DocumentPlanningException("COHDOC006", "OQL remainder by zero.") : Number(left) % Number(right),
+            _ => throw new DocumentPlanningException("COHDOC001", $"OQL operator '{expression.Operator}' is not executable."),
         };
     }
 
@@ -122,12 +147,12 @@ internal sealed class DocumentExpressionEvaluator
         "NOT" => value is bool boolean ? !boolean : null,
         "+" => value is null ? null : Number(value),
         "-" => value is null ? null : -Number(value),
-        _ => throw new DatabaseException($"OQL operator '{operation}' is not executable."),
+        _ => throw new DocumentPlanningException("COHDOC001", $"OQL operator '{operation}' is not executable."),
     };
 
     private object? Aggregate(OqlCallExpression call, IReadOnlyList<JsonElement> group)
     {
-        if (call.Arguments.Count != 1) { throw new DatabaseException($"OQL aggregate '{call.Name}' requires one argument."); }
+        if (call.Arguments.Count != 1) { throw new DocumentPlanningException("COHDOC001", $"OQL aggregate '{call.Name}' requires one argument."); }
         if (call.Name == "COUNT" && call.Arguments[0] is OqlStarExpression) { return (decimal)group.Count; }
         var values = group.Select(document => Evaluate(call.Arguments[0], document)).Where(value => value is not null).ToArray();
         if (call.Name == "COUNT") { return (decimal)values.Length; }
@@ -138,11 +163,11 @@ internal sealed class DocumentExpressionEvaluator
             "AVG" => values.Average(value => Number(value!)),
             "MIN" => values.MinBy(value => value, ValueComparer.Instance),
             "MAX" => values.MaxBy(value => value, ValueComparer.Instance),
-            _ => throw new DatabaseException($"OQL aggregate '{call.Name}' is not executable."),
+            _ => throw new DocumentPlanningException("COHDOC001", $"OQL aggregate '{call.Name}' is not executable."),
         };
     }
 
-    private static decimal Number(object value) => value is decimal number ? number : throw new DatabaseException("OQL arithmetic requires numeric operands.");
+    private static decimal Number(object value) => value is decimal number ? number : throw new DocumentPlanningException("COHDOC008", "OQL arithmetic requires numeric operands.");
     private static bool SameScalarKind(object left, object right) => Kind(left) == Kind(right) && Kind(left) is >= 1 and <= 3;
 
     // Total order for grouping and sorting. Predicates only compare ranges within
@@ -172,7 +197,7 @@ internal sealed class DocumentExpressionEvaluator
         string => 3,
         JsonElement { ValueKind: JsonValueKind.Array } => 4,
         JsonElement { ValueKind: JsonValueKind.Object } => 5,
-        _ => throw new DatabaseException("Unsupported OQL value."),
+        _ => throw new DocumentPlanningException("COHDOC008", "Unsupported OQL value."),
     };
 
     private static int CompareComposite(JsonElement left, JsonElement right)

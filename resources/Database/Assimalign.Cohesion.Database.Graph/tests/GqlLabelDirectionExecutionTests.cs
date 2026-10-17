@@ -212,7 +212,7 @@ public sealed class GqlLabelDirectionExecutionTests
             await session.ExecuteAsync(gql, cancellationToken: CancellationToken.None));
 
         // Assert
-        error.Message.ShouldStartWith("COHDBG001", Case.Sensitive);
+        error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHDBG001");
         (await RowsAsync(session, "MATCH (n) RETURN n")).Count.ShouldBe(2);
         (await RowsAsync(session, "MATCH ()-[r]->() RETURN r")).ShouldBeEmpty();
     }
@@ -244,7 +244,7 @@ public sealed class GqlLabelDirectionExecutionTests
             await session.ExecuteAsync(gql, cancellationToken: CancellationToken.None));
 
         // Assert
-        error.Message.ShouldStartWith("COHDBG001", Case.Sensitive);
+        error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHDBG001");
         error.Message.ShouldContain("only whitespace", Case.Sensitive);
         (await RowsAsync(session, "MATCH (n) RETURN n")).Count.ShouldBe(2);
         (await RowsAsync(session, "MATCH ()-[r]->() RETURN r")).ShouldBeEmpty();
@@ -338,7 +338,7 @@ public sealed class GqlLabelDirectionExecutionTests
             await session.ExecuteAsync(gql, cancellationToken: CancellationToken.None));
 
         // Assert
-        error.Message.ShouldStartWith(code, Case.Sensitive);
+        error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == code);
     }
 
     /// <summary>

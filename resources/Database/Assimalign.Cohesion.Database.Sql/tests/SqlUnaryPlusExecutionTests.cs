@@ -98,7 +98,7 @@ public sealed class SqlUnaryPlusExecutionTests
 
         // Assert
         failure.ShouldBeOfType<SqlEvaluationException>().Code.ShouldBe(InvalidOperandType);
-        failure.Message.ShouldStartWith(InvalidOperandType + ": Invalid operand type: unary", Case.Sensitive);
+        failure.ShouldStartWithMessage(InvalidOperandType + ": Invalid operand type: unary", Case.Sensitive);
         session.State.ShouldBe(SessionState.Open);
     }
 
@@ -127,7 +127,7 @@ public sealed class SqlUnaryPlusExecutionTests
 
         // Assert
         failure.ShouldBeOfType<SqlEvaluationException>().Code.ShouldBe(InvalidOperandType);
-        failure.Message.ShouldBe($"{InvalidOperandType}: Invalid operand type: unary '{sign}' requires a numeric operand, but the operand is String.");
+        failure.ShouldHaveMessage($"{InvalidOperandType}: Invalid operand type: unary '{sign}' requires a numeric operand, but the operand is String.");
         (await RowsAsync(session, "SELECT COUNT(*) FROM v")).ShouldHaveSingleItem().ShouldBe(new object?[] { withRow ? 1L : 0L });
         (await RowsAsync(session, $"SELECT {sign}@p FROM v", new Dictionary<string, object?> { ["p"] = null }))
             .Select(row => row[0]).ShouldAllBe(value => value == null);
@@ -147,7 +147,7 @@ public sealed class SqlUnaryPlusExecutionTests
             await session.ExecuteAsync("CREATE TABLE c (name TEXT, CHECK (+name = 'a'))", cancellationToken: CancellationToken.None));
 
         // Assert
-        failure.Message.ShouldStartWith(InvalidOperandType, Case.Sensitive);
+        failure.ShouldStartWithMessage(InvalidOperandType, Case.Sensitive);
         database.Catalog.TryGetTable("dbo", "c", out _).ShouldBeFalse();
     }
 
@@ -174,7 +174,7 @@ public sealed class SqlUnaryPlusExecutionTests
         header.Columns.Select(column => column.Item2).ShouldBe([(byte)DatabaseType.Int32, (byte)DatabaseType.Int64, (byte)DatabaseType.Int64]);
         DecodeRow(row.Payload.ToArray()).ShouldBe(new object?[] { 2, 4L, -2L });
         error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-        error.Message.ShouldStartWith(InvalidOperandType + ":", Case.Sensitive);
+        error.ShouldStartWithMessage(InvalidOperandType + ":", Case.Sensitive);
         harness.Server.Sessions.Count.ShouldBe(1);
     }
 

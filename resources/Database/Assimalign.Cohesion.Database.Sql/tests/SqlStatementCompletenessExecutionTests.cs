@@ -82,11 +82,10 @@ public sealed class SqlStatementCompletenessExecutionTests
         // Act
         var textError = await Should.ThrowAsync<DatabaseParseException>(() => ExecuteAsync(session, sql));
         var parsed = (SqlQueryStatement)new SqlQueryParser().Parse(sql);
-        var typed = await session.ExecuteAsync(new SqlQueryRequest(parsed), CancellationToken.None);
+        var typed = await Should.ThrowAsync<DatabaseParseException>(() => session.ExecuteAsync(new SqlQueryRequest(parsed), CancellationToken.None).AsTask());
 
         // Assert
         textError.Message.ShouldContain("SQL0003", Case.Sensitive);
-        typed.Status.ShouldBe(DatabaseResultStatus.Error);
         typed.Diagnostics.ShouldNotBeNull().ShouldContain(diagnostic => diagnostic.Code == "SQL0003" && diagnostic.Severity == DiagnosticSeverity.Error);
         session.CurrentTransaction.ShouldBeNull();
         (await SnapshotAsync(session)).ShouldBe(before);
@@ -113,7 +112,7 @@ public sealed class SqlStatementCompletenessExecutionTests
 
         // Assert
         error.Message.ShouldContain("SQL0003", Case.Sensitive);
-        error.Message.ShouldContain(action, Case.Sensitive);
+        error.ShouldContainMessage(action, Case.Sensitive);
         (await SnapshotAsync(session)).ShouldBe(before);
         (await RowsAsync(session, "SELECT name, age FROM t WHERE id = 1;")).ShouldHaveSingleItem().ShouldBe(new object?[] { "ann", 36 });
     }
@@ -153,7 +152,7 @@ public sealed class SqlStatementCompletenessExecutionTests
         var error = await Should.ThrowAsync<DatabaseParseException>(() => ExecuteAsync(session, sql));
 
         // Assert
-        error.Message.ShouldContain(code, Case.Sensitive);
+        error.ShouldContainMessage(code, Case.Sensitive);
         (await SchemaSnapshotAsync(session)).ShouldBe(before);
     }
 
@@ -247,7 +246,7 @@ public sealed class SqlStatementCompletenessExecutionTests
 
     /// <summary>
     /// Pins the boundary with #1103: a declared name is not unknown, so this check leaves
-    /// it to evaluation. #1103 rejects declared-but-non-executing names at parse time
+    /// it to the parse-time recognized-unsupported guard. #1103 rejects these names
     /// with COHDBL001 and flips this pin in the same change.
     /// </summary>
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Functions: a declared name that does not execute is not an unknown function")]
@@ -260,13 +259,17 @@ public sealed class SqlStatementCompletenessExecutionTests
         await SeedAsync(session, withRows: false);
 
         // Act
-        var rows = await RowsAsync(session, "SELECT NULLIF(id, 1) FROM t;");
+        var empty = await Should.ThrowAsync<DatabaseParseException>(() => RowsAsync(session, "SELECT NULLIF(id, 1) FROM t;"));
+        await ExecuteAsync(session, _rows[0]);
+        var populated = await Should.ThrowAsync<DatabaseParseException>(() => RowsAsync(session, "SELECT NULLIF(id, 1) FROM t;"));
 
         // Assert
-        rows.ShouldBeEmpty();
-        await ExecuteAsync(session, _rows[0]);
-        (await Should.ThrowAsync<DatabaseException>(() => RowsAsync(session, "SELECT NULLIF(id, 1) FROM t;")))
-            .Message.ShouldNotContain("Unknown function", Case.Sensitive);
+        foreach (var failure in new[] { empty, populated })
+        {
+            failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBL001");
+            failure.Message.ShouldContain("NULLIF", Case.Sensitive);
+            failure.Message.ShouldNotContain("Unknown function", Case.Sensitive);
+        }
     }
 
     private static async Task SeedAsync(SqlDatabaseSession session, bool withRows)

@@ -42,7 +42,7 @@ internal static class OqlUnsupportedVocabulary
         new("LISTTOSET", "LISTTOSET", OqlWordPosition.Anywhere),
         new("TYPEOF", "TYPEOF", OqlWordPosition.Anywhere),
         new("UNDEFINED", "UNDEFINED", OqlWordPosition.Anywhere),
-        new("ABS", "ABS", OqlWordPosition.Anywhere),
+        new("ABS", "ABS", OqlWordPosition.Function),
         // CREATE and DROP other than CREATE INDEX and DROP INDEX.
         new("CREATE", "CREATE", OqlWordPosition.Anywhere),
         new("DROP", "DROP", OqlWordPosition.Anywhere),
@@ -116,6 +116,9 @@ internal enum OqlWordPosition
     /// is a name.
     /// </summary>
     Statement,
+
+    /// <summary>Only before a function call's opening parenthesis; otherwise an identifier.</summary>
+    Function,
 
     /// <summary>
     /// Only as part of a quantified predicate, <c>EVERY x IN ... SATISFIES ... END</c>, which the

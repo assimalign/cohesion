@@ -26,14 +26,14 @@ internal static class GraphExpressionEvaluator
         GqlBinaryExpression binary => Binary(binary, bindings),
         GqlLogicalExpression logical => Logical(logical, bindings),
         GqlLabeledPredicate labeled => Labeled(labeled, bindings),
-        _ => throw new DatabaseException("COHDBG001: Unsupported graph expression."),
+        _ => throw new GraphPlanningException("COHDBG001", "Unsupported graph expression."),
     };
 
     // ISO three-valued AND over the whole chain, first to last: false as soon as an operand is
     // false, otherwise unknown when any operand was not true, otherwise true. WHERE keeps only true.
     private static object? Logical(GqlLogicalExpression logical, IReadOnlyDictionary<string, object> bindings)
     {
-        if (logical.Operator != GqlLogicalOperator.And) { throw new DatabaseException("COHDBG001: Unsupported logical operator."); }
+        if (logical.Operator != GqlLogicalOperator.And) { throw new GraphPlanningException("COHDBG001", "Unsupported logical operator."); }
         RuntimeHelpers.EnsureSufficientExecutionStack();
         bool unknown = false;
         foreach (var operand in logical.Operands)
@@ -62,7 +62,7 @@ internal static class GraphExpressionEvaluator
         {
             GraphNode node => GraphLabelEvaluator.Matches(labeled.LabelExpression, node.Labels),
             GraphRelationship relationship => GraphLabelEvaluator.Matches(labeled.LabelExpression, relationship.Type),
-            _ => throw new DatabaseException("COHDBG003: A labeled predicate requires a node or relationship."),
+            _ => throw new GraphPlanningException("COHDBG003", "A labeled predicate requires a node or relationship."),
         };
         return matches != labeled.IsNegated;
     }
@@ -70,7 +70,7 @@ internal static class GraphExpressionEvaluator
     {
         GraphNode node => node.Properties.TryGetValue(name, out var value) ? value : null,
         GraphRelationship relationship => relationship.Properties.TryGetValue(name, out var value) ? value : null,
-        _ => throw new DatabaseException("COHDBG003: Property access requires a node or relationship."),
+        _ => throw new GraphPlanningException("COHDBG003", "Property access requires a node or relationship."),
     };
     private static object? Binary(GqlBinaryExpression binary, IReadOnlyDictionary<string, object> bindings)
     {
@@ -83,7 +83,7 @@ internal static class GraphExpressionEvaluator
         {
             "=" => order == 0, "!=" or "<>" => order != 0,
             "<" => order < 0, "<=" => order <= 0, ">" => order > 0, ">=" => order >= 0,
-            _ => throw new DatabaseException("COHDBG001: Unsupported graph operator."),
+            _ => throw new GraphPlanningException("COHDBG001", "Unsupported graph operator."),
         };
     }
     internal static bool Equal(object? left, object? right) => left is null ? right is null : right is not null && Compare(left, right) == 0;

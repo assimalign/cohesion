@@ -82,6 +82,15 @@ exceptions do not promise that a failed COMMIT left no writes. The SQL mapper
 documents and enforces this boundary by faulting its scope/store and refusing replay;
 see its [reconciliation contract](../../Assimalign.Cohesion.Database.Sql.Mapping/docs/DESIGN.md#commit-outcome-and-reconciliation).
 
+In-process sessions carry engine codes in `DatabaseException.Diagnostics` (#1103).
+The SQL server composes the existing protocol 1.0 `CODE: message` text from that carrier;
+client wire exceptions retain that text. Cancellation tests that execute sessions directly
+assert structured codes, while their wire counterparts keep their original text assertions.
+CAST value failures follow the same contract: invalid text carries COHSQLE022 (PostgreSQL
+22P02), numeric overflow COHSQLE002 (22003), and division by zero COHSQLE001 (22012).
+Protocol 1.0 clients retain the composed code prefix and ExecutionFailure category; a value
+failure keeps the connection usable. In-process regression tests assert code and source span.
+
 `SqlClientException : DatabaseException` maps stable wire codes to SQL error kinds
 and retains the original code. The shared pool invalidates incomplete exchanges,
 including cancellation and decoder failure. Completed parse/execution failures

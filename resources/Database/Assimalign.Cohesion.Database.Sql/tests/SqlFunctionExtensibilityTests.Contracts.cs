@@ -84,7 +84,7 @@ public sealed partial class SqlFunctionExtensibilityTests
         var failure = Should.Throw<ArgumentException>(() => functions.Add(SqlScalarFunction.Create(name, static (long value) => value)));
 
         // Assert
-        failure.Message.ShouldContain(reason, Case.Sensitive);
+        failure.ShouldContainMessage(reason, Case.Sensitive);
         functions.Contains(name).ShouldBeFalse();
     }
 
@@ -193,13 +193,13 @@ public sealed partial class SqlFunctionExtensibilityTests
 
         // Assert
         widened.ShouldBe([[7L, 8L]]);
-        lying.Message.ShouldBe($"{FunctionFailed}: Function 'lying' failed: The function returned TEXT, but it declares BIGINT.");
+        lying.ShouldHaveMessage($"{FunctionFailed}: Function 'lying' failed: The function returned TEXT, but it declares BIGINT.");
         lying.InnerException.ShouldBeOfType<InvalidCastException>();
-        fractional.Message.ShouldBe($"{FunctionFailed}: Function 'fractional' failed: The function returned DOUBLE, but it declares BIGINT.");
-        nullResult.Message.ShouldBe($"{FunctionFailed}: Function 'never_null' failed: The function returned NULL, but it declares that it never returns NULL.");
-        element.Message.ShouldBe($"{FunctionFailed}: Function 'element_of' failed: The function returned TEXT, but its ANYELEMENT arguments are BIGINT.");
-        aggregate.Message.ShouldBe($"{FunctionFailed}: Function 'lying_sum' failed: The function returned TEXT, but it declares BIGINT.");
-        direct.Message.ShouldStartWith($"{FunctionFailed}: Function 'lying' failed:", Case.Sensitive);
+        fractional.ShouldHaveMessage($"{FunctionFailed}: Function 'fractional' failed: The function returned DOUBLE, but it declares BIGINT.");
+        nullResult.ShouldHaveMessage($"{FunctionFailed}: Function 'never_null' failed: The function returned NULL, but it declares that it never returns NULL.");
+        element.ShouldHaveMessage($"{FunctionFailed}: Function 'element_of' failed: The function returned TEXT, but its ANYELEMENT arguments are BIGINT.");
+        aggregate.ShouldHaveMessage($"{FunctionFailed}: Function 'lying_sum' failed: The function returned TEXT, but it declares BIGINT.");
+        direct.ShouldStartWithMessage($"{FunctionFailed}: Function 'lying' failed:", Case.Sensitive);
         (await RowsAsync(session, "SELECT COUNT(*) FROM t")).ShouldBe([[1L]]);
     }
 
@@ -287,7 +287,7 @@ public sealed partial class SqlFunctionExtensibilityTests
 
         // Assert
         twice.ShouldBe([[3.0, 0.75f]]);
-        literal.Message.ShouldStartWith($"{FunctionSignatureMismatch}: Function 'half' has no overload that accepts argument types (NUMERIC).", Case.Sensitive);
+        literal.ShouldStartWithMessage($"{FunctionSignatureMismatch}: Function 'half' has no overload that accepts argument types (NUMERIC).", Case.Sensitive);
     }
 
     /// <summary>
@@ -400,13 +400,13 @@ public sealed partial class SqlFunctionExtensibilityTests
         scalarOverflow.Message.ShouldBe("BIGINT 40000 does not fit argument 1 of function 'small_echo', which is SMALLINT.");
         scalarMismatch.ShouldBeOfType<DatabaseException>();
         scalarMismatch.Message.ShouldBe("Function 'small_echo' takes SMALLINT for argument 1, but the value is TEXT.");
-        scalarFailure.Message.ShouldBe($"{FunctionFailed}: Function 'small_failing' failed: no echo");
-        aggregateOverflow.Message.ShouldBe(
+        scalarFailure.ShouldHaveMessage($"{FunctionFailed}: Function 'small_failing' failed: no echo");
+        aggregateOverflow.ShouldHaveMessage(
             "COHSQLE002: Numeric value out of range: BIGINT 40000 does not fit argument 1 of function 'small_sum', which is SMALLINT.");
         aggregateOverflow.InnerException.ShouldBeOfType<OverflowException>();
         aggregateMismatch.ShouldBeOfType<DatabaseException>();
         aggregateMismatch.Message.ShouldBe("Function 'small_sum' takes SMALLINT for argument 1, but the value is TEXT.");
-        aggregateFailure.Message.ShouldBe($"{FunctionFailed}: Function 'small_failing_sum' failed: no sum");
+        aggregateFailure.ShouldHaveMessage($"{FunctionFailed}: Function 'small_failing_sum' failed: no sum");
         accumulator.Finish().ShouldBe(SqlValue.FromInt64(7));
     }
 
@@ -446,8 +446,8 @@ public sealed partial class SqlFunctionExtensibilityTests
         numbered.ShouldBe(3);
         answers.ShouldBe([[42L], [42L], [42L]]);
         answered.ShouldBe(1);
-        wrong.Message.ShouldBe($"{FunctionFailed}: Function 'wrong_answer' failed: The function returned TEXT, but it declares BIGINT.");
-        failed.Message.ShouldBe($"{FunctionFailed}: Function 'no_answer' failed: nothing to say");
+        wrong.ShouldHaveMessage($"{FunctionFailed}: Function 'wrong_answer' failed: The function returned TEXT, but it declares BIGINT.");
+        failed.ShouldHaveMessage($"{FunctionFailed}: Function 'no_answer' failed: nothing to say");
     }
 
     // A test of a function that reads its context builds the context itself.

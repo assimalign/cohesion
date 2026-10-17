@@ -13,6 +13,19 @@ The SQL front-end (area architecture: [resources/Database/DESIGN.md](../../../..
 §3.3). The dialect is deliberately fundamental — basic SQL, declared precisely —
 and structured to be extended without churning what exists (open/closed).
 
+## Executable functions and vocabulary (#1103)
+
+The profile's Functions list contains only executable built-ins, including the CAST special
+form. Non-executing recognized functions live in SqlUnsupportedVocabulary, with call,
+niladic datetime and window positions. Each call reports one named COHDBL001; the five ISO
+niladic datetime forms also reject without parentheses and cannot bind unquoted columns.
+The engine's single function-coverage guard requires a passing live case for every declaration.
+
+`SqlLanguageProfile.RecognizedUnsupportedVocabulary` exposes a read-only snapshot of spellings
+for identifier rendering and unknown-function classification. The internal position/construct
+table stays internal. There is no shipped-to-shipped InternalsVisibleTo grant to reuse, so this
+is the issue's approved public-profile option; no visibility grant or public internal type is added.
+
 ## Design intent
 
 Decision 49a adds `SqlAlterColumnAction`, a full column-definition action:
@@ -428,3 +441,18 @@ Every valid qualifier reports one COHDBL001 naming the declaration and complete 
 forms without precision. Invalid ranges remain SQL0003; malformed arguments remain SQL0005 and
 suppress a secondary unsupported diagnostic. Case and token trivia do not change admission.
 Delimited names retain their lexical identity so a domain named `"INTERVAL DAY"` is still a domain.
+
+## Quoted function recognition (#1103 review)
+
+The function-call branch checks quoted names against the same recognized unsupported table
+as unquoted calls. Quoted names must match the lowercase lookup spelling exactly; unquoted
+names match without regard to case. Parentheses distinguish calls from quoted columns.
+DIALECT documents the PostgreSQL scanner and function-lookup references and examples.
+
+Rendering preserves accepted quoted uppercase and mixed-case window-like names with delimiters.
+A lowercase quoted unsupported call retains its diagnostic and NULL recovery expression; the
+renderer round-trip guarantee continues to apply to error-free parser trees. Renderer tests
+cover both accepted spellings and the coded recovery of rejected spellings.
+
+Definition-binding diagnostics remain engine-owned. DIALECT.md records COHSQLD001 for invalid
+CHECK predicates and absent DROP definitions, including the structured carrier and span fallback.

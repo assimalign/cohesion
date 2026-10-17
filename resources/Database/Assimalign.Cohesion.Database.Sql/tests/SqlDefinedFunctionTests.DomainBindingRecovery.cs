@@ -52,10 +52,10 @@ public sealed partial class SqlDefinedFunctionTests
             var failure = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "INSERT INTO t VALUES(0)"));
 
             // Assert
-            failure.Message.ShouldContain("COHSQLE009");
+            failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE009");
             (await RowsAsync(session, "SELECT v FROM t")).ShouldBe([[1]]);
-            (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "UPDATE t SET v = 0"))).Message.ShouldContain("COHSQLE009");
-            (await Should.ThrowAsync<DatabaseException>(() => RowsAsync(session, "SELECT use_domain(0) FROM t"))).Message.ShouldContain("COHSQLE009");
+            (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "UPDATE t SET v = 0"))).Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE009");
+            (await Should.ThrowAsync<DatabaseException>(() => RowsAsync(session, "SELECT use_domain(0) FROM t"))).Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE009");
             await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session,
                 $"CREATE FUNCTION invalid_parameter(p {domain}) RETURNS INT IMMUTABLE RETURN p"));
             await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session,

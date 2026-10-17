@@ -63,19 +63,19 @@ internal static class GraphLabelEvaluator
                     PushOperands(pending, disjunction.Operands, "disjunction");
                     break;
                 case null:
-                    throw new DatabaseException("COHDBG001: A label expression has a missing operand.");
+                    throw new GraphPlanningException("COHDBG001", "A label expression has a missing operand.");
                 case GqlLabelName:
-                    throw new DatabaseException("COHDBG001: A label name cannot be null.");
+                    throw new GraphPlanningException("COHDBG001", "A label name cannot be null.");
                 default:
-                    throw new DatabaseException("COHDBG001: Unsupported label expression; use a name, %, !, & or |.");
+                    throw new GraphPlanningException("COHDBG001", "Unsupported label expression; use a name, %, !, & or |.");
             }
         }
         return names;
 
         static void PushOperands(Stack<GqlLabelExpression?> pending, IReadOnlyList<GqlLabelExpression>? operands, string kind)
         {
-            if (operands is null) { throw new DatabaseException($"COHDBG001: A label {kind} has no operand list."); }
-            if (operands.Count < 2) { throw new DatabaseException($"COHDBG001: A label {kind} needs at least two operands."); }
+            if (operands is null) { throw new GraphPlanningException("COHDBG001", $"A label {kind} has no operand list."); }
+            if (operands.Count < 2) { throw new GraphPlanningException("COHDBG001", $"A label {kind} needs at least two operands."); }
             // Pushed last to first, so names list in source order.
             for (int i = operands.Count - 1; i >= 0; i--) { pending.Push(operands[i]); }
         }
@@ -152,7 +152,7 @@ internal static class GraphLabelEvaluator
                 }
                 return false;
             default:
-                throw new DatabaseException("COHDBG001: Unsupported label expression.");
+                throw new GraphPlanningException("COHDBG001", "Unsupported label expression.");
         }
     }
 
@@ -258,7 +258,7 @@ internal static class GraphLabelEvaluator
                 }
                 return false;
             default:
-                throw new DatabaseException("COHDBG001: Unsupported label expression.");
+                throw new GraphPlanningException("COHDBG001", "Unsupported label expression.");
         }
     }
 

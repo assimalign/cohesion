@@ -1,4 +1,7 @@
 using System;
+using System.Collections.Generic;
+
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database;
 
@@ -15,6 +18,8 @@ namespace Assimalign.Cohesion.Database;
 /// (<c>FromSql</c>, <c>FromOql</c>, <c>FromGql</c>). The key-value model has no statement
 /// language: its wire server parses each command of its grammar into a typed request and
 /// reports a command that fails to parse with this exception.
+/// A parsed typed statement with error diagnostics has the same contract: the exception
+/// carries the complete diagnostic list and an error-recovery tree is never executed.
 /// </remarks>
 public class DatabaseParseException : DatabaseException
 {
@@ -32,4 +37,12 @@ public class DatabaseParseException : DatabaseException
     /// <param name="innerException">The underlying cause.</param>
     public DatabaseParseException(string message, Exception? innerException)
         : base(message, innerException) { }
+
+    /// <summary>Initializes a parse failure carrying every diagnostic from the rejected statement.</summary>
+    /// <param name="message">The existing first-error text.</param>
+    /// <param name="diagnostics">The statement's complete diagnostics.</param>
+    /// <param name="innerException">The underlying cause, or null.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="diagnostics"/> is null.</exception>
+    public DatabaseParseException(string message, IEnumerable<Diagnostic> diagnostics, Exception? innerException = null)
+        : base(message, diagnostics, innerException) { }
 }

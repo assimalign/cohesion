@@ -291,7 +291,7 @@ public sealed class SqlPersistedDefinitionTests : IDisposable
 
         // Assert
         failure.Message.ShouldStartWith("Database 'shop' cannot be opened.", Case.Sensitive);
-        failure.Message.ShouldContain(named, Case.Sensitive);
+        failure.ShouldContainMessage(named, Case.Sensitive);
         failure.Message.ShouldContain("cannot be loaded", Case.Sensitive);
         failure.Message.ShouldContain("restore the database from a backup", Case.Sensitive);
     }
@@ -350,7 +350,7 @@ public sealed class SqlPersistedDefinitionTests : IDisposable
             await using var session = await database.CreateSessionAsync(CancellationToken.None);
             await session.ExecuteAsync("CREATE TABLE t (id INT, label TEXT, qty INT, extra INT)");
             (await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("ALTER TABLE t ADD CONSTRAINT signed CHECK (-label IS NULL)")))
-                .Message.ShouldStartWith("COHSQLE003", Case.Sensitive);
+                .Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE003");
             (await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("ALTER TABLE t ADD CONSTRAINT via_cast CHECK (CAST(qty AS VARCHAR(5)) <> '13')")))
                 .Message.ShouldContain("casts", Case.Sensitive);
 
@@ -374,7 +374,7 @@ public sealed class SqlPersistedDefinitionTests : IDisposable
         await WriteFailsAsync(reopened, reopenedSession, "INSERT INTO t (id, qty) VALUES (2, 13)");
         var typeError = await Should.ThrowAsync<DatabaseException>(async () =>
             await reopenedSession.ExecuteAsync("INSERT INTO t (id, label) VALUES (3, 'x')"));
-        typeError.Message.ShouldStartWith("COHSQLE003", Case.Sensitive);
+        typeError.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE003");
         await DdlAsync(reopened, reopenedSession, "ALTER TABLE t DROP COLUMN extra");
         (await RowsAsync(reopenedSession, "SELECT id, label, qty FROM t")).ShouldHaveSingleItem().ShouldBe(new object?[] { 1, null, 1 });
     }

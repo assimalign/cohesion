@@ -217,7 +217,7 @@ public sealed class GraphQueryTests
         var database = await engine.CreateDatabaseAsync("diagnostics");
         await using var session = await database.CreateSessionAsync();
         var exception = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(query));
-        exception.Message.ShouldContain(code);
+        exception.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == code);
         (await Rows(session, "MATCH (a) RETURN a")).ShouldBeEmpty();
     }
 
@@ -277,7 +277,7 @@ public sealed class GraphQueryTests
         GqlRelationshipPattern edge = new("r", null, (GqlPatternDirection)99, new Dictionary<string, object?>());
         var malformed = new GqlQueryStatement(new GqlQueryExpression([new GqlPathPattern([node, node], [edge])], null, [], [], false, [new GqlProjection("a")]));
         var invalid = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(new GraphQueryRequest(malformed)));
-        invalid.Message.ShouldContain("COHDBG001");
+        invalid.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHDBG001");
 
         // Predicates (#1139 follow-up): AND is one n-ary GqlLogicalExpression, so a binary AND,
         // an undefined operator, a missing operand or list, and a chain of fewer than two operands
@@ -296,7 +296,7 @@ public sealed class GraphQueryTests
         {
             var statement = new GqlQueryStatement(new GqlQueryExpression([new GqlPathPattern([node], [])], badChain, [], [], false, [new GqlProjection("a")]));
             (await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(new GraphQueryRequest(statement))))
-                .Message.ShouldStartWith("COHDBG001", Case.Sensitive);
+                .Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHDBG001");
         }
 
         // Label expressions (#1139): a null operand, name or operand list, a chain of fewer than
@@ -320,7 +320,7 @@ public sealed class GraphQueryTests
         {
             var statement = new GqlQueryStatement(new GqlQueryExpression([new GqlPathPattern([badNode], [])], null, [], [], false, [new GqlProjection("a")]));
             (await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(new GraphQueryRequest(statement))))
-                .Message.ShouldStartWith("COHDBG001", Case.Sensitive);
+                .Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHDBG001");
         }
         GqlRelationshipPattern[] edges =
         [
@@ -335,7 +335,7 @@ public sealed class GraphQueryTests
         {
             var statement = new GqlQueryStatement(new GqlQueryExpression([new GqlPathPattern([node, new("b", [], empty)], [badEdge])], null, [], [], false, [new GqlProjection("a")]));
             (await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(new GraphQueryRequest(statement))))
-                .Message.ShouldStartWith("COHDBG001", Case.Sensitive);
+                .Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHDBG001");
         }
         GqlExpression[] predicates =
         [
@@ -348,7 +348,7 @@ public sealed class GraphQueryTests
         {
             var statement = new GqlQueryStatement(new GqlQueryExpression([new GqlPathPattern([node], [])], badPredicate, [], [], false, [new GqlProjection("a")]));
             (await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(new GraphQueryRequest(statement))))
-                .Message.ShouldStartWith("COHDBG001", Case.Sensitive);
+                .Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHDBG001");
         }
 
         // Storage cannot hold an empty label, type or property key, so a hand-built insertion
@@ -366,7 +366,7 @@ public sealed class GraphQueryTests
         {
             var statement = new GqlQueryStatement(new GqlQueryExpression([], null, [insertion], [], false, []));
             (await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(new GraphQueryRequest(statement))))
-                .Message.ShouldStartWith("COHDBG001", Case.Sensitive);
+                .Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHDBG001");
         }
         (await Rows(session, "MATCH (n) RETURN n")).Count.ShouldBe(2);
 

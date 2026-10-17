@@ -112,11 +112,10 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
 
         // Act
         var text = await Should.ThrowAsync<DatabaseParseException>(() => session.ExecuteAsync(sql).AsTask());
-        var typed = await session.ExecuteAsync(new SqlQueryRequest((SqlQueryStatement)new SqlQueryParser().Parse(sql)));
+        var typed = await Should.ThrowAsync<DatabaseParseException>(() => session.ExecuteAsync(new SqlQueryRequest((SqlQueryStatement)new SqlQueryParser().Parse(sql))).AsTask());
 
         // Assert
         text.Message.ShouldStartWith("SQL parse error SQL0006: Expression nesting exceeds the supported limit of 256 levels.", Case.Sensitive);
-        typed.Status.ShouldBe(DatabaseResultStatus.Error);
         typed.Diagnostics.ShouldNotBeNull().ShouldContain(diagnostic => diagnostic.Code == "SQL0006");
         (await ScalarAsync(session, "SELECT COUNT(*) FROM t")).ShouldBe(1L);
     }
@@ -262,7 +261,7 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
         guardedOr.ShouldBe(2L);
         foreach (var fault in new[] { guardAfter, unknownAnd, unknownOr, faultFirst })
         {
-            fault.Message.ShouldStartWith("COHSQLE001:", Case.Sensitive);
+            fault.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE001");
         }
     }
 
@@ -318,8 +317,8 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
         var atLimit = await ScalarAsync(session, $"SELECT {Chain("1", " + ", 32)} FROM t");
         var pastLimit = await Should.ThrowAsync<DatabaseParseException>(() => session.ExecuteAsync($"SELECT {Chain("1", " + ", 33)} FROM t").AsTask());
         var typedAtLimit = await ReadScalarAsync(await session.ExecuteAsync(Request($"SELECT {Chain("1", " + ", 32)} FROM t")));
-        var typedPastLimit = await session.ExecuteAsync(Request($"SELECT {Chain("1", " + ", 40)} FROM t"));
-        var typedParentheses = await session.ExecuteAsync(Request($"SELECT {Open(33)}id{Close(33)} FROM t"));
+        var typedPastLimit = await Should.ThrowAsync<DatabaseParseException>(() => session.ExecuteAsync(Request($"SELECT {Chain("1", " + ", 40)} FROM t")).AsTask());
+        var typedParentheses = await Should.ThrowAsync<DatabaseParseException>(() => session.ExecuteAsync(Request($"SELECT {Open(33)}id{Close(33)} FROM t")).AsTask());
         var flat = await ScalarAsync(session, $"SELECT COUNT(*) FROM t WHERE {Chain("id = 1", " OR ", 1_000)}");
 
         // Assert
@@ -328,7 +327,6 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
         typedAtLimit.ShouldBe(32L);
         foreach (var (result, depth) in new[] { (typedPastLimit, 40), (typedParentheses, 33) })
         {
-            result.Status.ShouldBe(DatabaseResultStatus.Error);
             var diagnostic = result.Diagnostics.ShouldNotBeNull().ShouldHaveSingleItem();
             diagnostic.Code.ShouldBe("SQL0006");
             diagnostic.Message.ShouldBe($"Expression nesting of {Number(depth)} levels exceeds this engine's limit of 32 levels.");
@@ -354,14 +352,13 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
             .ShouldBeOfType<SqlSelectExpression>().Where.ShouldBeOfType<SqlInExpression>().Subquery.ShouldNotBeNull()));
 
         // Act
-        var whole = await session.ExecuteAsync(deep);
-        var extracted = await session.ExecuteAsync(Extract(deep));
+        var whole = await Should.ThrowAsync<DatabaseParseException>(() => session.ExecuteAsync(deep).AsTask());
+        var extracted = await Should.ThrowAsync<DatabaseParseException>(() => session.ExecuteAsync(Extract(deep)).AsTask());
         var withinLimit = await ReadScalarAsync(await session.ExecuteAsync(Extract(shallow)));
 
         // Assert: the IN node is a level over its subquery.
         foreach (var (result, depth) in new[] { (whole, 42), (extracted, 41) })
         {
-            result.Status.ShouldBe(DatabaseResultStatus.Error);
             var diagnostic = result.Diagnostics.ShouldNotBeNull().ShouldHaveSingleItem();
             diagnostic.Code.ShouldBe("SQL0006");
             diagnostic.Message.ShouldBe($"Expression nesting of {Number(depth)} levels exceeds this engine's limit of 32 levels.");
@@ -551,14 +548,13 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
         await using var session = await SeedAsync(engine);
         var atLimit = await ScalarAsync(session, $"SELECT {Chain("1", " + ", 40)} FROM t");
         var pastLimit = await Should.ThrowAsync<DatabaseParseException>(() => session.ExecuteAsync($"SELECT {Chain("1", " + ", 41)} FROM t").AsTask());
-        var typedPastLimit = await session.ExecuteAsync(Request($"SELECT {Chain("1", " + ", 41)} FROM t"));
+        var typedPastLimit = await Should.ThrowAsync<DatabaseParseException>(() => session.ExecuteAsync(Request($"SELECT {Chain("1", " + ", 41)} FROM t")).AsTask());
 
         // Assert
         unset.ShouldBe(Limit);
         builder.Options.ExpressionNestingLimit.ShouldBe(40);
         atLimit.ShouldBe(40L);
         pastLimit.Message.ShouldBe("SQL parse error SQL0006: Expression nesting exceeds the supported limit of 40 levels.");
-        typedPastLimit.Status.ShouldBe(DatabaseResultStatus.Error);
         var diagnostic = typedPastLimit.Diagnostics.ShouldNotBeNull().ShouldHaveSingleItem();
         diagnostic.Code.ShouldBe("SQL0006");
         diagnostic.Message.ShouldBe($"Expression nesting of {Number(41)} levels exceeds this engine's limit of 40 levels.");
@@ -842,7 +838,7 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
 
         // Assert
         var failure = small.Failure.ShouldBeOfType<InsufficientExecutionStackException>();
-        failure.Message.ShouldStartWith(subject + " cannot be loaded on this thread", Case.Sensitive);
+        failure.ShouldStartWithMessage(subject + " cannot be loaded on this thread", Case.Sensitive);
         failure.Message.ShouldContain("The catalog is not damaged", Case.Sensitive);
         failure.Message.ShouldNotContain("backup");
         large.Failure.ShouldBeNull();
@@ -1013,7 +1009,7 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
         else
         {
             error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-            error.Message.ShouldStartWith(StatementTooComplex + ":", Case.Sensitive);
+            error.ShouldStartWithMessage(StatementTooComplex + ":", Case.Sensitive);
         }
         harness.Server.Sessions.Count.ShouldBe(1);
         (await ScalarAsync(client, "SELECT 1 FROM users WHERE id = 1")).ShouldBe(1L);
@@ -1067,7 +1063,7 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
         {
             var error = ProtocolErrorMessage.Decode(reply.Payload.Span);
             error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-            error.Message.ShouldStartWith(StatementTooComplex + ": Statement too complex", Case.Sensitive);
+            error.ShouldStartWithMessage(StatementTooComplex + ": Statement too complex", Case.Sensitive);
         }
         else
         {
@@ -1099,7 +1095,7 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
 
         // Assert
         error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-        error.Message.ShouldStartWith(StatementTooComplex + ":", Case.Sensitive);
+        error.ShouldStartWithMessage(StatementTooComplex + ":", Case.Sensitive);
         harness.Server.Sessions.Count.ShouldBe(1);
         (await ScalarAsync(client, "SELECT COUNT(*) FROM users")).ShouldBe(2L);
     }
@@ -1199,7 +1195,7 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
     private static void AssertStatementTooComplex(DatabaseException failure)
     {
         failure.ShouldBeOfType<SqlEvaluationException>().Code.ShouldBe(StatementTooComplex);
-        failure.Message.ShouldStartWith(StatementTooComplex + ": Statement too complex", Case.Sensitive);
+        failure.DiagnosticDetail(StatementTooComplex).ShouldStartWith("Statement too complex", Case.Sensitive);
         failure.InnerException.ShouldBeOfType<InsufficientExecutionStackException>();
     }
 

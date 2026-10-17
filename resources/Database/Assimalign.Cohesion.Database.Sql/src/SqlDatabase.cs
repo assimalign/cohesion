@@ -152,7 +152,7 @@ public sealed class SqlDatabase : DatabaseInstance
         }
         catch (DatabaseException exception)
         {
-            throw new DatabaseException($"Database '{name}' cannot be opened. {exception.Message}", exception);
+            throw new DatabaseException($"Database '{name}' cannot be opened. {exception.Message}", exception.Diagnostics, exception);
         }
 
         _coordinator = new TransactionCoordinator(storage, storage.WriteAheadJournal, new SqlTransactionRecordSpace(storage))

@@ -76,8 +76,8 @@ public sealed partial class SqlDefinedFunctionTests
         await using var engine = await builder.BuildAsync();
         await using var session = await SessionAsync(engine);
         // Act + Assert
-        (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "CREATE FUNCTION native_echo(p BIGINT) RETURNS BIGINT RETURN p"))).Message.ShouldContain("COHSQLD001");
-        (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "CREATE DOMAIN native_domain AS BIGINT"))).Message.ShouldContain("COHSQLD001");
+        (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "CREATE FUNCTION native_echo(p BIGINT) RETURNS BIGINT RETURN p"))).Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLD001");
+        (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "CREATE DOMAIN native_domain AS BIGINT"))).Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLD001");
         (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "DROP FUNCTION native_echo(BIGINT)"))).Message.ShouldContain("COHSQLD003");
         (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "DROP DOMAIN native_domain"))).Message.ShouldContain("COHSQLD003");
     }

@@ -219,9 +219,8 @@ public sealed class SqlTransactionControlTests
         var transaction = session.CurrentTransaction.ShouldNotBeNull();
         var invalid = (SqlQueryStatement)new SqlQueryParser().Parse("ROLLBACK TO marker");
 
-        var result = await session.ExecuteAsync(new SqlQueryRequest(invalid));
-        result.Status.ShouldBe(DatabaseResultStatus.Error);
-        result.Diagnostics.ShouldNotBeNull().ShouldNotBeEmpty();
+        var result = await Should.ThrowAsync<DatabaseParseException>(() => session.ExecuteAsync(new SqlQueryRequest(invalid)).AsTask());
+        result.Diagnostics.ShouldNotBeEmpty();
         transaction.State.ShouldBe(TransactionState.Active);
         session.CurrentTransaction.ShouldBeSameAs(transaction);
         await session.ExecuteAsync("ROLLBACK");
@@ -313,7 +312,7 @@ public sealed class SqlTransactionControlTests
         var frame = await client.ExpectAsync(ProtocolMessageType.Error);
         var error = ProtocolErrorMessage.Decode(frame.Payload.Span);
         error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-        error.Message.ShouldContain(code);
+        error.ShouldContainMessage(code);
     }
 
     private static async Task<long> CountAsync(ProtocolTestClient client, string? predicate = null)

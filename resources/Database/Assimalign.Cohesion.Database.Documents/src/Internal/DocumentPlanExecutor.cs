@@ -21,7 +21,7 @@ internal static class DocumentPlanExecutor
         operation.EnsureActive();
         cancellationToken.ThrowIfCancellationRequested();
         var error = statement.Diagnostics.FirstOrDefault(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
-        if (error is not null) { throw new DatabaseParseException($"OQL parse error {error.Code}: {error.Message}"); }
+        if (error is not null) { throw new DatabaseParseException($"OQL parse error {error.Code}: {error.Message}", statement.Diagnostics); }
         var plan = new DocumentPlanner(database.Catalog, operation.Context.Snapshot, parameters).Plan(statement.OqlExpression);
         return plan switch
         {
@@ -29,7 +29,7 @@ internal static class DocumentPlanExecutor
             DocumentPlan select => await ExecuteSelectAsync(database, operation, select, parameters, cancellationToken).ConfigureAwait(false),
             DocumentCreateIndexPlan createIndex => await ExecuteCreateIndexAsync(database, operation, createIndex, cancellationToken).ConfigureAwait(false),
             DocumentDropIndexPlan dropIndex => await ExecuteDropIndexAsync(database, operation, dropIndex, cancellationToken).ConfigureAwait(false),
-            _ => throw new DatabaseException("The document plan is not executable."),
+            _ => throw new DocumentPlanningException("COHDOC001", "The document plan is not executable.", statement.OqlExpression.Location),
         };
     }
 

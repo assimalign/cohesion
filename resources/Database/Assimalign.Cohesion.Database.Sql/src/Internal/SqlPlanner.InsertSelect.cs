@@ -21,8 +21,8 @@ internal sealed partial class SqlPlanner
         var projections = InsertSourceProjections(plan);
         if (projections.Count != targetOrdinals.Count)
         {
-            throw new DatabaseException(
-                $"INSERT SELECT has {projections.Count} source columns but {targetOrdinals.Count} target columns.");
+            throw new SqlPlanningException("COHSQLE013",
+                $"INSERT SELECT has {projections.Count} source columns but {targetOrdinals.Count} target columns.", source.Location);
         }
         for (int i = 0; i < projections.Count; i++)
         {
@@ -30,8 +30,8 @@ internal sealed partial class SqlPlanner
             var sourceType = projections[i].Type;
             if (!CanAssignInsertType(sourceType, target.Type.Type))
             {
-                throw new DatabaseException(
-                    $"INSERT SELECT source column {i + 1} of type {sourceType} is incompatible with target column '{target.Name}' of type {target.Type.Type}.");
+                throw new SqlPlanningException("COHSQLE013",
+                    $"INSERT SELECT source column {i + 1} of type {sourceType} is incompatible with target column '{target.Name}' of type {target.Type.Type}.", source.Location);
             }
         }
         return new SqlInsertSelectPlan(table, targetOrdinals, plan);
@@ -48,7 +48,7 @@ internal sealed partial class SqlPlanner
             SqlJoinPlan join => (join.Projections, join.Columns, join.Bindings),
             SqlSystemViewPlan view => (view.Projections, view.View.Columns, null),
             SqlGroupPlan group => (group.Projections, group.SourceColumns, group.Bindings),
-            _ => throw new DatabaseException("INSERT SELECT requires a query source."),
+            _ => throw new SqlPlanningException("COHSQLE013", "INSERT SELECT requires a query source."),
         };
         if (columns is null)
         {

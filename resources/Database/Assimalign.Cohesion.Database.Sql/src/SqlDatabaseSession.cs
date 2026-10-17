@@ -337,8 +337,12 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
                 {
                     SqlDatabaseEventSource.Log.StatementTooComplex(_database.Name, request.Statement.ExpressionNestingDepth);
                 }
-                return new SqlQueryResult(DatabaseResultStatus.Error, affectedCount: 0,
-                    [.. request.Statement.Diagnostics]);
+                if (diagnostic.Code == "SQL0007")
+                {
+                    throw SqlEvaluationException.StatementTooComplex(new InsufficientExecutionStackException(
+                        $"SQL parse error {diagnostic.Code}: {diagnostic.Message}"));
+                }
+                throw new DatabaseParseException($"SQL parse error {diagnostic.Code}: {diagnostic.Message}", request.Statement.Diagnostics);
             }
         }
 
@@ -350,8 +354,8 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         if (request.Statement.ExpressionNestingDepth > _parserOptions.ExpressionNestingLimit)
         {
             SqlDatabaseEventSource.Log.StatementTooComplex(_database.Name, request.Statement.ExpressionNestingDepth);
-            return new SqlQueryResult(DatabaseResultStatus.Error, affectedCount: 0,
-                [NestingLimitDiagnostic(request.Statement.ExpressionNestingDepth)]);
+            var diagnostic = NestingLimitDiagnostic(request.Statement.ExpressionNestingDepth);
+            throw new DatabaseParseException($"SQL parse error {diagnostic.Code}: {diagnostic.Message}", [diagnostic]);
         }
 
         SqlSystemViews.EnsureReadOnly(request.Statement.SqlExpression);

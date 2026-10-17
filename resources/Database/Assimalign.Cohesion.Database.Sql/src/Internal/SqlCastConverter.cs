@@ -75,7 +75,7 @@ internal static class SqlCastConverter
             catch (Exception exception) when (exception is FormatException or OverflowException or InvalidCastException)
             {
                 // The value's fault, the built-ins' only failures: the conversion contract's message.
-                throw new DatabaseException($"CAST from {value.GetType().Name} to {cast.TargetText} failed: {exception.Message}", exception);
+                throw SqlEvaluationException.CastValueFailed($"CAST from {value.GetType().Name} to {cast.TargetText} failed: {exception.Message}", exception);
             }
             catch (Exception exception) when (registered is not null && SqlEvaluationException.IsCastFailure(exception, cancellationToken))
             {
@@ -240,7 +240,7 @@ internal static class SqlCastConverter
         int? scale = target.Scale ?? (target.Precision is null ? null : 0);
         if (target.Precision is < 1 || scale is < 0 || scale > target.Precision)
         {
-            throw new DatabaseException("Invalid decimal precision or scale.");
+            throw new SqlPlanningException("COHSQLE018", "Invalid decimal precision or scale.");
         }
         return scale;
     }

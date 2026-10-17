@@ -597,7 +597,13 @@ to exercise that enforcement path; compiled provisioning is not included.
 | `COHDBI001` | `Database.Indexing`'s code, carried unchanged: opening a database whose property-index pages are in a B-tree page format this engine does not read (format 1, written before #1194) fails with "Database 'x' cannot be opened. COHDBI001: …", checked before recovery's scrub, so a cleanly closed database's files stay as they were (a crashed one has had only the storage layer's journal redo and undo, and keeps its journal) |
 | `COHDBS001` | `Database.Storage`'s code, carried unchanged: opening a database whose file set is in another storage format (#1251) fails with "Database 'x' cannot be opened. COHDBS001: …", the storage's `StorageFormatException` as its inner exception, refused before its journal is read, so the files stay as they were |
 
-Planner/data errors use stable code prefixes on `DatabaseException`. Warnings are never exceptions
+Planner rejections carry stable codes in `DatabaseException.Diagnostics`, with Error severity
+and source offsets wherever the AST has a location. Their Message has no code prefix; the
+Graph protocol 1.0 server composes `CODE: message` for ExecutionFailure from that carrier.
+Text and parsed typed requests with error diagnostics throw `DatabaseParseException` with
+every diagnostic in source-offset order and the existing first-error Message. Graph path
+factories use the same contract. Unknown labels in reads retain #1228's empty-result/warning
+semantics; this change does not turn them into failures. Warnings are never exceptions
 or message prefixes: they are `Diagnostic` objects with a `Code` and `DiagnosticSeverity.Warning` on
 a successful result. Kernel aborts cross the engine
 boundary as `DatabaseTransactionAbortedException`; deadlocks retain their specialized subtype.
@@ -1229,3 +1235,21 @@ and text execution; a foreign-model request fails compilation. `GraphRequest` ow
 `Statement` and optional `Parameters` over the memberless `DatabaseRequest` root. Results
 use the model-neutral `DatabaseResult` family. Lifecycle and explicit transactions remain
 on `DatabaseSession`.
+
+## Diagnostic completion (#1103 review)
+
+Typed catalog mutations carry GQL0007 with the query location and an unprefixed message;
+the protocol server composes CODE: message once. Invalid GraphPaths projections and SHOW
+compositions carry COHDBG001 with query.Location, including early executor rejections
+before GraphPlanner runs.
+
+### Wire request rejection carriers (second #1103 review)
+
+Empty wire text retains ParseFailure and leaves an explicit transaction active. Its
+DatabaseParseException carries GQL0001 over the complete empty/whitespace text span. Entity or
+path projections sent through Execute carry COHDBG001 on GraphPlanningException with the query
+span. An unexpected ExecutePaths result uses the same invalid-request code and the current
+exchange's complete text span, retained by the serial session pump because results have no AST.
+Rejected scalar results preserve their complete diagnostic list on DatabaseException; the first
+error supplies the unprefixed message. Error frames compose CODE: message once; parser messages
+already containing their code retain their existing format. No codes are added.

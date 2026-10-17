@@ -320,3 +320,9 @@ CustomType metadata alike. Invalid FLOAT precision retains SQL0005 in the valida
 INTERVAL field qualifiers use the shared PostgreSQL field/range grammar, including SECOND(p).
 Builders and raw CustomType metadata report UnsupportedType with COHDBL001 naming table/column
 and the full qualifier, with or without precision. Field restrictions and rounding do not execute.
+
+## Migration diagnostics (#1103)
+
+A migration exception with a coded DatabaseException cause preserves that cause's complete
+structured Diagnostics list. The migration message adds application context; callers read
+the stable code and source span from the carrier.

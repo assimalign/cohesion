@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Sql.Internal;
+using Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Database.Types;
 
@@ -64,7 +65,7 @@ public sealed class SqlArithmeticFaultTests
 
         // Assert: a coded statement failure, not DivideByZeroException, and the session runs on.
         AssertCode(failure, DivisionByZero);
-        failure.Message.ShouldStartWith("COHSQLE001: Division by zero", Case.Sensitive);
+        failure.DiagnosticDetail("COHSQLE001").ShouldStartWith("Division by zero", Case.Sensitive);
         session.State.ShouldBe(SessionState.Open);
         (await ScalarAsync(session, "SELECT COUNT(*) FROM numbers")).ShouldBe(2L);
     }
@@ -204,11 +205,13 @@ public sealed class SqlArithmeticFaultTests
         (await ScalarAsync(session, "SELECT COUNT(*) FROM numbers")).ShouldBe(2L);
     }
 
-    /// <summary>Oversized literals name themselves; the BIGINT minimum is writable as a literal; CAST keeps its contract.</summary>
+    /// <summary>Oversized literals name themselves; CAST carries its range code and span; the BIGINT minimum is writable as a literal.</summary>
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Arithmetic: numeric literals outside their type report the literal, and the BIGINT minimum is a literal")]
     public async Task Literal_OutsideItsType_ShouldNameTheLiteral()
     {
         // Arrange
+        const string castSql = "SELECT CAST(9223372036854775808 AS DECIMAL) FROM numbers WHERE id = 1";
+        var castLocation = ((SqlSelectExpression)SqlQueryRequest.FromSql(castSql).Statement.SqlExpression).Columns[0].Expression.Location!;
         await using var engine = CreateEngine();
         await using var session = await SeedAsync(engine);
 
@@ -218,12 +221,16 @@ public sealed class SqlArithmeticFaultTests
         var fractional = await Should.ThrowAsync<DatabaseException>(() =>
             ExecuteAsync(session, "SELECT 1e-30 FROM numbers WHERE id = 1"));
         var cast = await Should.ThrowAsync<DatabaseException>(() =>
-            ExecuteAsync(session, "SELECT CAST(9223372036854775808 AS DECIMAL) FROM numbers WHERE id = 1"));
+            ExecuteAsync(session, castSql));
 
         // Assert
-        integer.Message.ShouldBe("COHSQLE002: Numeric value out of range: integer literal 9223372036854775808 exceeds BIGINT.");
-        fractional.Message.ShouldBe("COHSQLE002: Numeric value out of range: numeric literal 1e-30 cannot be represented exactly as DECIMAL.");
-        cast.ShouldNotBeOfType<SqlEvaluationException>();
+        integer.DiagnosticDetail("COHSQLE002").ShouldBe("Numeric value out of range: integer literal 9223372036854775808 exceeds BIGINT.");
+        fractional.DiagnosticDetail("COHSQLE002").ShouldBe("Numeric value out of range: numeric literal 1e-30 cannot be represented exactly as DECIMAL.");
+        cast.ShouldBeOfType<SqlEvaluationException>();
+        var diagnostic = cast.Diagnostics.ShouldHaveSingleItem();
+        diagnostic.Code.ShouldBe(OutOfRange);
+        diagnostic.Start.ShouldBe(castLocation.Start);
+        diagnostic.End.ShouldBe(castLocation.End);
         cast.Message.ShouldStartWith("CAST to", Case.Sensitive);
         (await ScalarAsync(session, "SELECT -9223372036854775808 FROM numbers WHERE id = 1")).ShouldBe(long.MinValue);
         (await RowsAsync(session, "SELECT id FROM numbers WHERE big_value > -9223372036854775808 ORDER BY id"))
@@ -357,7 +364,7 @@ public sealed class SqlArithmeticFaultTests
 
         // Assert
         AssertCode(failure, OutOfRange);
-        failure.Message.ShouldStartWith("COHSQLE002: Numeric value out of range", Case.Sensitive);
+        failure.DiagnosticDetail("COHSQLE002").ShouldStartWith("Numeric value out of range", Case.Sensitive);
         (await ScalarAsync(session, "SELECT big_value FROM numbers WHERE id = 2")).ShouldBe(long.MaxValue);
     }
 
@@ -488,7 +495,7 @@ public sealed class SqlArithmeticFaultTests
             var failure = await Should.ThrowAsync<DatabaseException>(() =>
                 ExecuteAsync(session, $"SELECT {aggregate}({column}) FROM totals"));
             AssertCode(failure, OutOfRange);
-            failure.Message.ShouldContain(aggregate, Case.Sensitive);
+            failure.ShouldContainMessage(aggregate, Case.Sensitive);
         }
     }
 
@@ -519,7 +526,7 @@ public sealed class SqlArithmeticFaultTests
         // Assert: the statement failed; the session did not terminate and runs the next one.
         var error = ProtocolErrorMessage.Decode(frame.Payload.Span);
         error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-        error.Message.ShouldStartWith(code + ":", Case.Sensitive);
+        error.ShouldStartWithMessage(code + ":", Case.Sensitive);
         harness.Server.Sessions.Count.ShouldBe(1);
         (await CountAsync(client)).ShouldBe(2L);
         (await CountAsync(client, "id = 2")).ShouldBe(1L);
@@ -566,7 +573,7 @@ public sealed class SqlArithmeticFaultTests
 
         // Assert
         error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-        error.Message.ShouldStartWith(DivisionByZero + ":", Case.Sensitive);
+        error.ShouldStartWithMessage(DivisionByZero + ":", Case.Sensitive);
         (await CountAsync(writer)).ShouldBe(3L);
         (await CountAsync(observer)).ShouldBe(2L);
         await ExecuteAsync(writer, "COMMIT");
@@ -579,7 +586,7 @@ public sealed class SqlArithmeticFaultTests
     private static void AssertCode(DatabaseException failure, string code)
     {
         failure.ShouldBeOfType<SqlEvaluationException>().Code.ShouldBe(code);
-        failure.Message.ShouldStartWith(code + ": ", Case.Sensitive);
+        failure.ShouldStartWithMessage(code + ": ", Case.Sensitive);
     }
 
     private static SqlDatabaseEngine CreateEngine()

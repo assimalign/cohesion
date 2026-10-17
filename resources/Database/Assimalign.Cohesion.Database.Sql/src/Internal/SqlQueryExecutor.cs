@@ -54,7 +54,7 @@ internal sealed class SqlQueryExecutor
         catch (SqlUnsupportedQueryException exception)
         {
             return Task.FromResult<DatabaseResult>(new SqlQueryResult(DatabaseResultStatus.Error, affectedCount: 0,
-                [new Diagnostic { Code = "COHDBL001", Message = exception.Message, Severity = DiagnosticSeverity.Error }]));
+                [.. exception.Diagnostics]));
         }
 
         statement.Metrics.IsPlanned = true;

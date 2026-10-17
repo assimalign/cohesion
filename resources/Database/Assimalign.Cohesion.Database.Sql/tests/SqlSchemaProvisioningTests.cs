@@ -326,9 +326,9 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
         exception.ObjectName.ShouldBe(objectName);
         exception.OwningSchema.ShouldBe("orders");
         exception.Operation.ShouldBe(operation);
-        exception.Message.ShouldContain(objectName);
+        exception.ShouldContainMessage(objectName);
         exception.Message.ShouldContain("orders");
-        exception.Message.ShouldContain(operation);
+        exception.ShouldContainMessage(operation);
         var catalog = database.ShouldBeOfType<SqlDatabase>().Catalog;
         catalog.TryGetTable("dbo", "orders", out var table).ShouldBeTrue();
         table.Owner.ShouldBe(DatabaseObjectOwner.Schema);

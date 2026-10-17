@@ -178,7 +178,7 @@ public sealed class SqlCastTests
         await using var infinite = (await ExecuteAsync(session, "SELECT CAST(@value AS REAL) FROM t;",
             new Dictionary<string, object?> { ["value"] = double.PositiveInfinity })).ShouldBeAssignableTo<DatabaseResultSet>();
 
-        missing.Message.ShouldBe("COHSQLE011: Cannot CAST type INTEGER to DATE: no cast from INTEGER to DATE is registered. " +
+        missing.DiagnosticDetail("COHSQLE011").ShouldBe("Cannot CAST type INTEGER to DATE: no cast from INTEGER to DATE is registered. " +
             "Register one on the engine's builder (SqlDatabaseEngineBuilder.Types.AddCast) before Build.");
         overflow.Message.ShouldContain("is out of range for REAL", Case.Sensitive);
         underflow.Message.ShouldContain("underflows REAL", Case.Sensitive);
@@ -215,7 +215,7 @@ public sealed class SqlCastTests
         var populated = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, $"SELECT {expression} FROM t;"));
         var written = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, $"UPDATE t SET id = 2 WHERE {expression} IS NULL;"));
 
-        empty.Message.ShouldStartWith($"COHSQLE011: Cannot CAST type {pair}: ", Case.Sensitive);
+        empty.DiagnosticDetail("COHSQLE011").ShouldStartWith($"Cannot CAST type {pair}: ", Case.Sensitive);
         populated.Message.ShouldBe(empty.Message);
         written.Message.ShouldBe(empty.Message);
         (await RowsAsync(session, "SELECT id FROM t;")).ShouldHaveSingleItem()[0].ShouldBe(1);
@@ -259,7 +259,7 @@ public sealed class SqlCastTests
         (await ReadRowsAsync(empty)).ShouldBeEmpty();
         var populated = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "SELECT CAST(@value AS DATE) FROM t;", parameters));
 
-        populated.Message.ShouldStartWith("COHSQLE011: Cannot CAST type INTEGER to DATE: ", Case.Sensitive);
+        populated.DiagnosticDetail("COHSQLE011").ShouldStartWith("Cannot CAST type INTEGER to DATE: ", Case.Sensitive);
     }
 
     /// <summary>
@@ -368,7 +368,7 @@ public sealed class SqlCastTests
         else
         {
             error.ShouldNotBeOfType<DatabaseParseException>();
-            error.Message.ShouldStartWith("COHSQLE010: CAST target: type '" + target + "' does not exist", Case.Sensitive);
+            error.DiagnosticDetail("COHSQLE010").ShouldStartWith("CAST target: type '" + target + "' does not exist", Case.Sensitive);
             error.Message.ShouldContain("SqlDatabaseEngineBuilder.Types", Case.Sensitive);
         }
     }

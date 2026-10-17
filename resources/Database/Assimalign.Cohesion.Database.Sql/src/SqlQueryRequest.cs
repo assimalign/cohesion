@@ -133,7 +133,7 @@ public sealed class SqlQueryRequest : DatabaseRequest
                     $"SQL parse error {error.Code}: {error.Message}"));
             }
 
-            throw new DatabaseParseException($"SQL parse error {error.Code}: {error.Message}");
+            throw new DatabaseParseException($"SQL parse error {error.Code}: {error.Message}", statement.Diagnostics);
         }
 
         return parameters is null
