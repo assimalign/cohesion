@@ -1072,4 +1072,4 @@ Model statement, parameter-name and result-header strings use that same shared s
 
 ## Shared startup negotiation (#1105)
 
-The endpoint participates in protocol 2.1: Startup may carry capability names and Ready returns the agreed version with an empty capability list. Negotiated 2.0 still sends empty Ready. Different majors are refused. This model does not register the core Diagnostics capability and its channel rejects that frame in both directions. Structured Diagnostics adoption can register the core capability in a follow-up.
+The endpoint participates in protocol 2.1: Startup may carry capability names and Ready returns the agreed version with an empty capability list. Negotiated 2.0 still sends empty Ready. Different majors are refused. This model does not register the core Diagnostics capability and its channel rejects that frame in both directions. ParseFailure and ExecutionFailure keep the existing Error layout, with CODE: message text. Parser codes COHKV001–018 and fallback COHKV019 are published in COMMANDS.md. Structured Diagnostics adoption can register the core capability in a follow-up.

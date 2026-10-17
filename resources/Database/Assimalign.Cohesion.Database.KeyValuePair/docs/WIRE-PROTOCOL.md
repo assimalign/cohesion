@@ -6,7 +6,7 @@
 owns `KeyValueProtocolMessageType`, ProtocolExecuteMessage, ProtocolResultHeaderMessage,
 and ProtocolResultCompleteMessage. The frame, startup, error, and lifecycle formats
 come from [Database.Protocol](../../Assimalign.Cohesion.Database.Protocol/docs/DESIGN.md).
-The shared startup version is **2.0** since #1126's Documents projection change;
+The shared startup version is **2.1** since #1105's additive negotiation change;
 incompatible majors are refused before authentication. Key-value identifiers, payload bytes,
 order, authentication and error codes are unchanged by that bump. The model's Client package owns
 parameter encoding and result materialization; the shared Client only runs exchanges.
@@ -108,3 +108,7 @@ Golden payload examples (hex): Execute("X", no parameters) =
 `00 00 00 01 00 00 00 02 69 64 05`; completion(42) =
 `00 00 00 00 00 00 00 2A`. The existing server tests exercise the 1.0 wire unchanged;
 ProtocolMessageTests additionally fixes these payload bytes.
+
+## Negotiation and coded errors (#1105)
+
+All endpoints negotiate 2.1 through Startup capabilities and a Ready agreement. Key-Value advertises no capabilities and neither sends nor accepts Diagnostics. A negotiated 2.0 session sends empty Ready. ParseFailure and ExecutionFailure retain u16 category + string text, now CODE: message for every command refusal. COMMANDS.md lists COHKV001–019; engine-carried codes take precedence over COHKV019.

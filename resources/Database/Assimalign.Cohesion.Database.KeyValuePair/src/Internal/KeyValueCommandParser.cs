@@ -1,5 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
+
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.KeyValuePair.Internal;
 
@@ -34,7 +37,7 @@ internal static class KeyValueCommandParser
 
         if (tokens.Length == 0)
         {
-            throw new DatabaseParseException("The command is empty.");
+            throw Error("COHKV001", ErrorMessages.CommandEmpty);
         }
 
         // KEYSPACES is a virtual command result, never an entry address. A
@@ -42,7 +45,7 @@ internal static class KeyValueCommandParser
         if (tokens.Length > 1 && IsKeyword(tokens[1], "KEYSPACES") &&
             (IsKeyword(tokens[0], "PUT") || IsKeyword(tokens[0], "DELETE")))
         {
-            throw new DatabaseParseException("The KEYSPACES catalog surface is read-only.");
+            throw Error("COHKV002", ErrorMessages.CatalogReadOnly);
         }
 
         try
@@ -55,15 +58,14 @@ internal static class KeyValueCommandParser
                 "EXISTS" => ParseExists(tokens, parameters),
                 "SCAN" => ParseScan(tokens, parameters),
                 "KEYSPACES" => ParseKeySpaces(tokens),
-                var verb => throw new DatabaseParseException(
-                    $"Unknown command '{verb}'. The key-value grammar is GET, PUT, DELETE, EXISTS, SCAN, and KEYSPACES (docs/COMMANDS.md)."),
+                var verb => throw Error("COHKV003", string.Format(CultureInfo.CurrentCulture, ErrorMessages.CommandUnknown, verb)),
             };
         }
         catch (ArgumentException exception)
         {
             // Request-constructor validation (empty key, contradictory
             // conditions) is a command error at this boundary.
-            throw new DatabaseParseException(exception.Message);
+            throw Error("COHKV004", exception.Message);
         }
     }
 
@@ -89,7 +91,7 @@ internal static class KeyValueCommandParser
     {
         if (tokens.Length is not (3 or 5))
         {
-            throw new DatabaseParseException("PUT takes the form: PUT @key @value [IF ABSENT | IF @etag].");
+            throw Error("COHKV005", ErrorMessages.PutFormInvalid);
         }
 
         var key = BindBytes(tokens[1], parameters);
@@ -100,7 +102,7 @@ internal static class KeyValueCommandParser
         {
             if (!IsKeyword(tokens[3], "IF"))
             {
-                throw new DatabaseParseException($"Expected IF but found '{tokens[3]}'. PUT takes the form: PUT @key @value [IF ABSENT | IF @etag].");
+                throw Error("COHKV006", string.Format(CultureInfo.CurrentCulture, ErrorMessages.PutIfExpected, tokens[3]));
             }
 
             options = IsKeyword(tokens[4], "ABSENT")
@@ -115,7 +117,7 @@ internal static class KeyValueCommandParser
     {
         if (tokens.Length is not (2 or 4))
         {
-            throw new DatabaseParseException("DELETE takes the form: DELETE @key [IF @etag].");
+            throw Error("COHKV007", ErrorMessages.DeleteFormInvalid);
         }
 
         var key = BindBytes(tokens[1], parameters);
@@ -125,7 +127,7 @@ internal static class KeyValueCommandParser
         {
             if (!IsKeyword(tokens[2], "IF"))
             {
-                throw new DatabaseParseException($"Expected IF but found '{tokens[2]}'. DELETE takes the form: DELETE @key [IF @etag].");
+                throw Error("COHKV008", string.Format(CultureInfo.CurrentCulture, ErrorMessages.DeleteIfExpected, tokens[2]));
             }
 
             expectedETag = BindETag(tokens[3], parameters);
@@ -145,7 +147,7 @@ internal static class KeyValueCommandParser
 
             if (index + 1 >= tokens.Length)
             {
-                throw new DatabaseParseException($"The {clause} clause is missing its operand. SCAN takes the form: SCAN [FROM @start] [TO @end] [PREFIX @prefix] [LIMIT n].");
+                throw Error("COHKV009", string.Format(CultureInfo.CurrentCulture, ErrorMessages.ScanOperandMissing, clause));
             }
 
             string operand = tokens[index + 1];
@@ -169,10 +171,10 @@ internal static class KeyValueCommandParser
                     break;
 
                 case "FROM" or "TO" or "PREFIX" or "LIMIT":
-                    throw new DatabaseParseException($"The {clause} clause appears more than once.");
+                    throw Error("COHKV010", string.Format(CultureInfo.CurrentCulture, ErrorMessages.ScanClauseRepeated, clause));
 
                 default:
-                    throw new DatabaseParseException($"Unknown SCAN clause '{tokens[index]}'. SCAN takes the form: SCAN [FROM @start] [TO @end] [PREFIX @prefix] [LIMIT n].");
+                    throw Error("COHKV011", string.Format(CultureInfo.CurrentCulture, ErrorMessages.ScanClauseUnknown, tokens[index]));
             }
 
             index += 2;
@@ -190,8 +192,7 @@ internal static class KeyValueCommandParser
         return value switch
         {
             byte[] bytes => bytes,
-            _ => throw new DatabaseParseException(
-                $"Parameter '{token}' must bind a byte[] operand, but carries {value?.GetType().Name ?? "null"}."),
+            _ => throw Error("COHKV012", string.Format(CultureInfo.CurrentCulture, ErrorMessages.BytesOperandInvalid, token, value?.GetType().Name ?? "null")),
         };
     }
 
@@ -203,8 +204,7 @@ internal static class KeyValueCommandParser
         {
             long etag => etag,
             int etag => etag,
-            _ => throw new DatabaseParseException(
-                $"Parameter '{token}' must bind an integer etag, but carries {value?.GetType().Name ?? "null"}."),
+            _ => throw Error("COHKV013", string.Format(CultureInfo.CurrentCulture, ErrorMessages.ETagOperandInvalid, token, value?.GetType().Name ?? "null")),
         };
     }
 
@@ -215,7 +215,7 @@ internal static class KeyValueCommandParser
         {
             if (!int.TryParse(token, out int literal) || literal < 0)
             {
-                throw new DatabaseParseException($"LIMIT requires a non-negative integer, but found '{token}'.");
+                throw Error("COHKV014", string.Format(CultureInfo.CurrentCulture, ErrorMessages.LimitLiteralInvalid, token));
             }
 
             return literal;
@@ -227,8 +227,7 @@ internal static class KeyValueCommandParser
         {
             int limit when limit >= 0 => limit,
             long limit when limit is >= 0 and <= int.MaxValue => (int)limit,
-            _ => throw new DatabaseParseException(
-                $"Parameter '{token}' must bind a non-negative integer limit, but carries {value?.GetType().Name ?? "null"}."),
+            _ => throw Error("COHKV015", string.Format(CultureInfo.CurrentCulture, ErrorMessages.LimitOperandInvalid, token, value?.GetType().Name ?? "null")),
         };
     }
 
@@ -236,18 +235,21 @@ internal static class KeyValueCommandParser
     {
         if (token.Length < 2 || token[0] != '@')
         {
-            throw new DatabaseParseException($"Expected a parameter reference (@name) but found '{token}'.");
+            throw Error("COHKV016", string.Format(CultureInfo.CurrentCulture, ErrorMessages.ParameterReferenceExpected, token));
         }
 
         string name = token[1..];
 
         if (parameters is null || !parameters.TryGetValue(name, out object? value))
         {
-            throw new DatabaseParseException($"The command references parameter '@{name}' but no value was bound for it.");
+            throw Error("COHKV017", string.Format(CultureInfo.CurrentCulture, ErrorMessages.ParameterMissing, name));
         }
 
         return value;
     }
+
+    private static DatabaseParseException Error(string code, string message)
+        => new(message, [new Diagnostic { Code = code, Message = message, Severity = DiagnosticSeverity.Error }]);
 
     private static bool IsKeyword(string token, string keyword)
         => string.Equals(token, keyword, StringComparison.OrdinalIgnoreCase);
@@ -256,7 +258,7 @@ internal static class KeyValueCommandParser
     {
         if (tokens.Length != count)
         {
-            throw new DatabaseParseException($"{tokens[0].ToUpperInvariant()} takes the form: {form}.");
+            throw Error("COHKV018", string.Format(CultureInfo.CurrentCulture, ErrorMessages.CommandArityInvalid, tokens[0].ToUpperInvariant(), form));
         }
     }
 }
