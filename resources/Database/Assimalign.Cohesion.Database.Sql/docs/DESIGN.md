@@ -252,14 +252,13 @@ failure carries one error diagnostic naming the column and no source span, becau
 these execution paths have no source location. PostgreSQL raises this category at
 `src/backend/executor/execMain.c:2268-2274`. NOT NULL is complete for #1653.
 
-`SqlPlanner.Subqueries.cs` binds each uncorrelated child SELECT in its own local
-scope and lowers its use sites to typed slots, numbered from zero across the
+`SqlPlanner.Subqueries.cs` binds each child SELECT in a lexical scope chain and lowers its use sites to typed slots, numbered from zero across the
 statement (`SqlSubquerySlot`); the enclosing expressions bind each use site to a
 read of its slot (`SqlBoundSubquery`, `SqlBoundInSubquery`). `SqlSubqueryPlan` owns
 those child plans and the enclosing relation plan. `SqlPlanExecutor.Subqueries.cs`
 executes each child with the enclosing `SqlStatementContext`, materializes its
 results, and stores a scalar's value (a NULL when it returned no row), an EXISTS's
-Boolean or an IN's value list in the statement's `SqlSubqueryValues` under the slot
+Boolean or an IN's value list in the execution frame's `SqlSubqueryValues` under the slot
 while the enclosing plan runs, as PostgreSQL stores an init plan's output in a
 `PARAM_EXEC` parameter. Expression evaluation never opens a query, session,
 transaction, or read view. Grouping's expression-ordinal bindings hold for
@@ -280,10 +279,27 @@ sources; value conversions use the literal insert rules. Both insert forms call
 the same preparation, default/nullability/CHECK/FK/UNIQUE validation, locking,
 index maintenance and transactional apply path.
 
-Correlation is deliberately excluded: qualified outer references in ordinary subqueries receive
-`COHDBL001` in language validation. Derived references wait for catalog binding:
-only references that actually bind to sibling FROM items name LATERAL; enclosing-query
-references keep the correlation refusal and unknown names retain COHSQLE015.
+`SqlCorrelatedSubqueryPlan` registers children that consume an enclosing scope.
+The binder resolves local names before walking lexical parents, preserving local
+ambiguity and alias shadowing. Bound outer references retain a frame identifier,
+typed row expression and source metadata. SELECT/ON, grouping and DML loops await
+child execution before synchronous scalar evaluation; each frame owns row-local
+slots, and a statement cache retains only independent child results. CASE,
+COALESCE and Boolean preparation follows lazy branches and retains condition values
+within that evaluation frame so volatile calls are not repeated. Projection and
+ordering freeze child values per outer row before sorting. Grouped references bind
+to grouping slots; ungrouped outer columns fail with COHSQLE017 naming the column.
+Outer-only aggregates remain COHDBL001. Access-path selection uses the bound scope,
+so an outer-only predicate cannot narrow an inner index. No correlation-value memoization, child
+execution metric, per-row child seek or semi/anti-join rewrite is introduced.
+EXPLAIN maps CorrelatedSubqueries and retains each complete child subtree.
+Derived siblings still require LATERAL; references to enclosing query scopes execute.
+Independent derived relations share statement materialization, and each body has
+its own frame so it cannot replace the enclosing row. All children receive the exact
+SqlStatementContext; they open no transaction or read view. Binary delivery copies
+retained values on every use. The ordinary stored-only SELECT keeps its original
+evaluator layout and synchronous execution path, preserving its allocation budget.
+PostgreSQL's source references and SQL-visible errors are recorded in DIALECT.md.
 Parsing and planning enforce at most 32
 subquery levels, counting derived bodies too. UPDATE SET, VALUES, CHECK/DEFAULT and LIMIT/OFFSET expression
 subqueries, quantified comparisons, CTEs and lateral joins remain
@@ -325,11 +341,11 @@ COHSQLE013, before row reads, preserving wire sessions and open transactions.
 Admission visits derived bodies and waits for deferred table/index publication
 before binding, including when EXPLAIN wraps the query.
 
-UPDATE/DELETE WHERE use the same pre-execution subquery bindings as SELECT;
+UPDATE/DELETE WHERE use the same independent and correlated subquery bindings as SELECT;
 their existing mutation plans consume typed slots. Children read the pre-statement
 snapshot and session writes, and failure occurs before mutations. The existing
 FK/cascade and transaction paths remain responsible for mutation atomicity.
-Correlation is still refused; no partly correlated evaluator ships in this commit.
+Correlated predicates evaluate for each candidate row before target mutations begin.
 The #1112 ordering and #1114 set-operation shared pins remain in place. There is
 no catalog representation change, so no format bump or upgrade path is needed.
 
@@ -356,6 +372,7 @@ SQL's combined operators, not a shared or independently executable algebra:
 | `SystemView` | A qualified virtual relation; no fabricated stored-table access |
 | `DerivedTable` | Aliased materialized query source with its complete child plan; a single source has a Select parent |
 | `Subqueries` | Uncorrelated child plans in execution order, followed by the enclosing input |
+| `CorrelatedSubqueries` | Frame-local child plans evaluated for outer rows, followed by the enclosing input |
 | `Insert`, `InsertSelect`, `Update`, `Delete` | Intended mutation and target; a source query or target scan is a child, never executed by EXPLAIN |
 | `CreateTable`, `DropTable`, `AddColumn`, `AlterColumn`, `DropColumn`, `AddConstraint`, `DropConstraint`, `CreateIndex`, `DropIndex`, `Definition` | Complete internal DDL mappings, including SQL function/domain definitions; EXPLAIN DDL remains refused at parse time |
 
@@ -1924,9 +1941,9 @@ the engine continues to authorize session operations against schema-owned object
 UPDATE SET values and UPDATE/DELETE predicates bind against the target relation, just as
 SELECT expressions do. An alias hides the base name; an unknown or hidden qualifier fails
 planning with located COHSQLE015 before any row changes, leaving an explicit transaction
-active. This follows PostgreSQL `src/backend/parser/parse_relation.c:3759`. Uncorrelated
+active. This follows PostgreSQL `src/backend/parser/parse_relation.c:3759`. Correlated and uncorrelated
 UPDATE/DELETE WHERE subqueries execute, including aggregates inside child queries;
-aggregates outside children remain rejected. UPDATE SET subqueries and correlation
+aggregates outside children remain rejected. UPDATE SET subqueries
 retain COHDBL001.
 
 ## Virtual system relations (C1)
@@ -4469,7 +4486,7 @@ RESTART, generation-mode changes and identity backfill on populated tables remai
 (#1123). Compiled typed schemas cannot declare identity metadata; SQL scripts can create
 identity tables through the ordinary SQL executor.
 
-RIGHT/FULL OUTER, NATURAL and LATERAL joins, qualified wildcards, correlated
+RIGHT/FULL OUTER, NATURAL and LATERAL joins, qualified wildcards, UPDATE SET
 subqueries, outer ordering keys bound to derived outputs, explicit NULL placement, `Serializable`
 isolation (rejected at begin), cost-based optimization (selection stays
 rule-based), index seeks for UPDATE/DELETE target collection, and index-only

@@ -11,6 +11,14 @@ UPDATE/DELETE predicate-subquery affected counts. Server materialization preserv
 the existing column metadata and error taxonomy; no wire format changes. The
 subquery wire corpus covers a renamed derived join and both DML statement kinds.
 
+## Correlated children (#1113, part a)
+
+Existing exchanges carry per-outer-row EXISTS, IN and scalar results and correlated
+DML affected counts without a protocol change. A later outer row's scalar cardinality
+failure arrives as ExecutionFailure with ConnectionUsable true; the next query on
+the same connection succeeds. NativeAOT checks exercise correlation in process and
+through the client.
+
 ## Parameter contract (#1102)
 
 SqlParameterCollection strips one leading sigil and keeps ordinal case-sensitive bare

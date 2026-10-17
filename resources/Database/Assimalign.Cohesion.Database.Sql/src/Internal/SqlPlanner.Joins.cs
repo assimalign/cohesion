@@ -14,7 +14,7 @@ internal sealed partial class SqlPlanner
     /// <summary>Binds every step before execution, with ON visibility limited to its comma item.</summary>
     private IReadOnlyList<SqlRelationBinding> BindJoin(SqlSelectExpression select, SqlRelationSource first,
         out IReadOnlyList<SqlCatalogColumn> columns, out IReadOnlyList<SqlJoinStep> steps,
-        out IReadOnlyList<int> outputOrdinals)
+        out IReadOnlyList<int> outputOrdinals, bool metadataOnly = false)
     {
         var bindings = new List<SqlRelationBinding>();
         var allColumns = new List<SqlCatalogColumn>();
@@ -33,18 +33,26 @@ internal sealed partial class SqlPlanner
                 var right = bindings[rightIndex];
                 var scope = new SqlExpressionEvaluator(allColumns, _parameters, bindings.Skip(start).ToArray(),
                     defaultCollation: _catalog.DefaultCollation, subquerySlots: _subquerySlots,
-                    functions: _functions, cancellationToken: _cancellationToken);
+                    functions: _functions, cancellationToken: _cancellationToken,
+                    outerScope: OuterScope, outerDependencies: OuterDependencies);
                 var equalities = new List<(int Left, int Right, Collation Collation)>();
                 SqlBoundExpression? condition = null;
                 if (join.Condition is { } on)
                 {
                     if (ContainsAggregate(on))
                     {
+                        if (OuterScope is not null)
+                        {
+                            foreach (var expression in WalkSubqueries(on)) { RejectOuterOnlyAggregate(expression, scope); }
+                        }
                         throw new SqlPlanningException("COHSQLE017", "Aggregate functions are not allowed in JOIN ON.", on.Location);
                     }
-                    ValidateExpression(on, scope, _subqueryTypes);
-                    condition = scope.Bind(on);
-                    CollectJoinEqualities(on, scope, equalities);
+                    if (!metadataOnly)
+                    {
+                        ValidateExpression(on, scope, _subqueryTypes);
+                        condition = scope.Bind(on);
+                        CollectJoinEqualities(on, scope, equalities);
+                    }
                 }
                 else if (join.UsingColumns.Count > 0)
                 {
@@ -96,9 +104,9 @@ internal sealed partial class SqlPlanner
                     condition = predicates.Count == 1 ? predicates[0] : new SqlBoundLogical(false, predicates.ToArray());
                     visible = merged.Concat(visible.Except(merged)).ToList();
                 }
-                if (!SqlLanguageProfile.SupportsJoin(join.JoinType) ||
+                if (!metadataOnly && (!SqlLanguageProfile.SupportsJoin(join.JoinType) ||
                     (join.JoinType != SqlJoinType.Cross && condition is null) ||
-                    (join.JoinType == SqlJoinType.Cross && condition is not null))
+                    (join.JoinType == SqlJoinType.Cross && condition is not null)))
                 {
                     throw new SqlPlanningException("COHSQLE013", "INNER and LEFT JOIN require ON or USING; CROSS JOIN accepts neither.", select.Location);
                 }

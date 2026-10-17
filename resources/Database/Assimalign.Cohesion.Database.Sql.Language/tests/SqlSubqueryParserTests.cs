@@ -34,21 +34,24 @@ public sealed class SqlSubqueryParserTests
         statement.Diagnostics.ShouldNotContain(item => item.Severity == DiagnosticSeverity.Error);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Database.Sql.Language] - Subquery: Rejects outer qualifiers explicitly")]
+    [Theory(DisplayName = "Cohesion Test [Database.Sql.Language] - Subquery: Accepts qualified and unqualified outer references")]
     [InlineData("SELECT (SELECT outer_row.id FROM u) FROM t outer_row;", "outer_row.id")]
     [InlineData("SELECT id FROM t WHERE EXISTS (SELECT u.id FROM u WHERE u.id = t.id);", "t.id")]
     [InlineData("SELECT id FROM t WHERE id IN (SELECT t.id FROM u);", "t.id")]
     [InlineData("SELECT (SELECT (SELECT t.id FROM v) FROM u) FROM t;", "t.id")]
     [InlineData("SELECT id FROM t WHERE EXISTS (SELECT 1 FROM u GROUP BY u.id HAVING u.id = t.id);", "t.id")]
     [InlineData("SELECT (SELECT dbo.t.id FROM dbo.u) FROM dbo.t;", "dbo.t.id")]
-    public void Parse_CorrelatedSubquery_ReportsPreciseDiagnostic(string sql, string reference)
+    [InlineData("SELECT id FROM t WHERE EXISTS (SELECT inner_id FROM u WHERE inner_id = outer_id);", "outer_id")]
+    [InlineData("SELECT t.id FROM t JOIN u ON EXISTS (SELECT v.id FROM v WHERE v.id = t.id);", "t.id")]
+    [InlineData("SELECT t.id FROM t GROUP BY t.id HAVING EXISTS (SELECT u.id FROM u WHERE u.id = t.id);", "t.id")]
+    [InlineData("UPDATE t SET id = 2 WHERE EXISTS (SELECT u.id FROM u WHERE u.id = t.id);", "t.id")]
+    [InlineData("DELETE FROM t WHERE id IN (SELECT u.id FROM u WHERE u.id = t.id);", "t.id")]
+    public void Parse_CorrelatedSubquery_ReportsNoError(string sql, string reference)
     {
         var statement = new SqlQueryParser().Parse(sql);
 
-        var diagnostic = statement.Diagnostics.Single(item => item.Code == "COHDBL001");
-        diagnostic.Message!.ShouldContain("Correlated SQL subqueries are not supported");
-        diagnostic.Message!.ShouldContain(reference);
-        diagnostic.Message!.ShouldContain("local FROM/JOIN scope");
+        reference.ShouldNotBeNullOrEmpty();
+        statement.Diagnostics.ShouldNotContain(item => item.Severity == DiagnosticSeverity.Error);
     }
 
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Language] - Subquery: Excludes unsupported forms")]

@@ -12,6 +12,21 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 internal sealed partial class SqlPlanner
 {
     private int _subqueryDepth;
+    // Use the existing optional query-scope reference: stored-only planning must not
+    // grow its allocation footprint just because correlated queries are available.
+    private SqlCorrelationScope? OuterScope
+    {
+        get => _queryScopes?.OuterScope;
+        set => (_queryScopes ??= new()).OuterScope = value;
+    }
+
+    private HashSet<int>? OuterDependencies
+    {
+        get => _queryScopes?.OuterDependencies;
+        set => (_queryScopes ??= new()).OuterDependencies = value;
+    }
+
+    private int NextCorrelationScope() => (_queryScopes ??= new()).NextScopeId++;
 
     /// <summary>
     /// The result type of every subquery bound while planning this statement, keyed by
@@ -31,14 +46,15 @@ internal sealed partial class SqlPlanner
     private int _subquerySlotCount;
 
     /// <summary>
-    /// Binds each uncorrelated child independently, then binds the ordinary
-    /// relational operators over typed slots. Scalar evaluation never runs a query.
+    /// Binds children through lexical scopes, then binds the ordinary relational operators over
+    /// typed slots. The executor awaits correlated children; scalar evaluation never runs a query.
     /// </summary>
     private SqlPlan PlanSubqueries(SqlSelectExpression select)
     {
+        if (select.From.Count == 0) { return PlanSelectCore(select); }
         var queries = BindSubqueries(SubquerySources(select), select);
         var input = PlanSelectCore(select);
-        return queries.Count == 0 ? input : new SqlSubqueryPlan(input, queries);
+        return WrapSubqueries(input, queries);
     }
 
     private IReadOnlyList<SqlSubqueryBinding> BindSubqueries(IEnumerable<SqlExpression> sources,
@@ -46,18 +62,19 @@ internal sealed partial class SqlPlanner
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
         var queries = new List<SqlSubqueryBinding>();
+        SqlCorrelationScope? scope = null;
         foreach (var expression in sources)
         {
             switch (expression)
             {
                 case SqlSubqueryExpression scalar:
-                    BindSubquery(scalar, scalar.Select, SqlSubqueryKind.Scalar, false, queries, owner, dml);
+                    BindSubquery(scalar, scalar.Select, SqlSubqueryKind.Scalar, false, queries, owner, dml, ref scope);
                     break;
                 case SqlExistsExpression exists:
-                    BindSubquery(exists, exists.Subquery, SqlSubqueryKind.Exists, exists.IsNegated, queries, owner, dml);
+                    BindSubquery(exists, exists.Subquery, SqlSubqueryKind.Exists, exists.IsNegated, queries, owner, dml, ref scope);
                     break;
                 case SqlInExpression { Subquery: not null } member:
-                    BindSubquery(member, member.Subquery, SqlSubqueryKind.Set, false, queries, owner, dml);
+                    BindSubquery(member, member.Subquery, SqlSubqueryKind.Set, false, queries, owner, dml, ref scope);
                     break;
             }
         }
@@ -67,29 +84,33 @@ internal sealed partial class SqlPlanner
 
     // Keep child binding out of a closure: a stored-only query allocates no scope state.
     private void BindSubquery(SqlExpression source, SqlSelectExpression query, SqlSubqueryKind kind, bool negated,
-        List<SqlSubqueryBinding> queries, SqlSelectExpression? owner, SqlTableReference? dml)
+        List<SqlSubqueryBinding> queries, SqlSelectExpression? owner, SqlTableReference? dml,
+        ref SqlCorrelationScope? scope)
     {
         if (_subqueryDepth >= 32)
         {
             throw new SqlUnsupportedQueryException(ErrorMessages.SubqueryNestingDepth, location: source.Location);
         }
+        scope ??= CreateCorrelationScope(owner, dml);
+        var parent = OuterScope;
+        var parentDependencies = OuterDependencies;
+        var dependencies = new HashSet<int>();
+        OuterScope = SubqueryScope(scope, owner, source);
+        OuterDependencies = dependencies;
         SqlPlan child;
-        (_queryScopes ??= new()).Push((owner, dml, null));
+        (_queryScopes ??= new()).Scopes.Push((owner, dml, null));
         _subqueryDepth++;
-        try
-        {
-            child = PlanSelect(query);
-        }
-        catch (SqlPlanningException exception) when (!exception.HasLocalQualifier && exception.UnresolvedColumn is { } column &&
-            _queryScopes.ToArray().Any(scope => ReferenceBindsInScope(scope.Select, scope.Dml, column)))
-        {
-            throw new SqlUnsupportedQueryException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.CorrelatedSubquery, exception.Message),
-                exception, exception.UnresolvedColumn!.Location);
-        }
+        try { child = PlanSelect(query); }
         finally
         {
             _subqueryDepth--;
-            _queryScopes.Pop();
+            _queryScopes.Scopes.Pop();
+            OuterScope = parent;
+            OuterDependencies = parentDependencies;
+        }
+        foreach (int dependency in dependencies)
+        {
+            if (dependency != scope.Id) { parentDependencies?.Add(dependency); }
         }
         var projections = SubqueryProjections(child);
         if (kind != SqlSubqueryKind.Exists && projections.Count != 1)
@@ -103,7 +124,8 @@ internal sealed partial class SqlPlanner
         // The slot keeps the membership element type; the predicate itself produces BOOLEAN.
         _subqueryTypes[source] = kind == SqlSubqueryKind.Scalar ? type : DatabaseType.Boolean;
         _subquerySlots[source] = slot;
-        queries.Add(new SqlSubqueryBinding(child, slot.Id, type, collation, kind, negated));
+        queries.Add(new SqlSubqueryBinding(child, slot.Id, type, collation, kind, negated,
+            scope.Id, dependencies.Count > 0));
     }
 
     /// <summary>

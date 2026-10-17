@@ -87,4 +87,8 @@
   <data name="TableMissing" xml:space="preserve">
     <value>Table '{0}.{1}' does not exist.</value>
   </data>
+  <data name="CorrelatedUngroupedColumn" xml:space="preserve"><value>Outer column '{0}' must appear in GROUP BY before it can be referenced by a grouped query's subquery.</value></data>
+  <data name="OuterOnlyAggregate" xml:space="preserve"><value>An aggregate whose column references all belong to outer query scopes is not supported.</value></data>
+  <data name="ScalarSubqueryCardinality" xml:space="preserve"><value>Scalar subquery returned more than one row; at most one row is allowed.</value></data>
+  <data name="SubqueryFrameMissing" xml:space="preserve"><value>Internal invariant: the subquery evaluation frame is unavailable.</value></data>
 </root>

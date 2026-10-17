@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Execution;
+using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Transactions;
 
 using Shouldly;
@@ -111,11 +112,11 @@ public sealed class SqlDmlQualifierTests
         (await ReadAsync(session)).ShouldBe(new[] { 3 });
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql] - DML qualifiers: subqueries retain the existing grammar refusal")]
-    [InlineData("UPDATE t AS x SET a = (SELECT t.a FROM t AS x)")]
-    [InlineData("UPDATE t AS x SET a = 2 WHERE a IN (SELECT bogus.a FROM t)")]
-    [InlineData("DELETE FROM t AS x WHERE EXISTS (SELECT t.a FROM t AS x)")]
-    public async Task Execute_DmlSubquery_ShouldRetainGrammarRefusalAsync(string statement)
+    [Theory(DisplayName = "Cohesion Test [Sql] - DML qualifiers: SET retains its refusal and predicates validate names during binding")]
+    [InlineData("UPDATE t AS x SET a = (SELECT t.a FROM t AS x)", true)]
+    [InlineData("UPDATE t AS x SET a = 2 WHERE a IN (SELECT bogus.a FROM t)", false)]
+    [InlineData("DELETE FROM t AS x WHERE EXISTS (SELECT t.a FROM t AS x)", false)]
+    public async Task Execute_DmlSubquery_ShouldValidatePositionAndQualifierAsync(string statement, bool assignment)
     {
         // Arrange
         await using var engine = SqlDatabaseEngine.Create("dml-subquery", new());
@@ -126,11 +127,12 @@ public sealed class SqlDmlQualifierTests
         await using var transaction = await session.BeginTransactionAsync(CancellationToken.None);
 
         // Act
-        var failure = await Should.ThrowAsync<DatabaseParseException>(async () =>
-            await session.ExecuteAsync(statement, cancellationToken: CancellationToken.None));
+        DatabaseException failure = assignment
+            ? await Should.ThrowAsync<DatabaseParseException>(() => session.ExecuteAsync(statement, cancellationToken: CancellationToken.None).AsTask())
+            : await Should.ThrowAsync<SqlPlanningException>(() => session.ExecuteAsync(statement, cancellationToken: CancellationToken.None).AsTask());
 
         // Assert
-        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHDBL001" && diagnostic.Start.HasValue);
+        failure.Diagnostics.ShouldNotBeNull().ShouldContain(diagnostic => diagnostic.Code == (assignment ? "COHDBL001" : "COHSQLE015") && diagnostic.Start.HasValue);
         transaction.State.ShouldBe(TransactionState.Active);
         (await ReadAsync(session)).ShouldBe(new[] { 1 });
     }

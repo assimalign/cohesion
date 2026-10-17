@@ -15,7 +15,7 @@ using Xunit;
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 /// <summary>Proves subquery truth semantics, cardinality, composition, snapshot visibility and constrained inserts.</summary>
-public sealed class SqlSubqueryExecutionTests
+public sealed partial class SqlSubqueryExecutionTests
 {
     /// <summary>Membership distinguishes matching, nonmatching, null-containing and empty sets.</summary>
     /// <param name="predicate">The membership predicate.</param>
@@ -227,13 +227,13 @@ public sealed class SqlSubqueryExecutionTests
         error.Message.ShouldContain("32", Case.Sensitive);
     }
 
-    /// <summary>Outer references have a capability diagnostic, including when the outer table is empty.</summary>
+    /// <summary>Outer references execute correctly with empty and populated outer tables.</summary>
     /// <param name="statement">The correlated expression.</param>
-    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Subquery: correlated references are precisely rejected")]
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Subquery: correlated references execute over empty and populated inputs")]
     [InlineData("SELECT c.id FROM candidates c WHERE EXISTS (SELECT x.id FROM choices x WHERE x.id = c.id);")]
     [InlineData("SELECT (SELECT x.id FROM choices x WHERE x.id = c.id) FROM candidates c;")]
     [InlineData("SELECT c.id FROM candidates c WHERE c.id IN (SELECT x.id FROM choices x WHERE x.id = c.id);")]
-    public async Task Subquery_CorrelatedReference_ShouldReportCapabilityDiagnostic(string statement)
+    public async Task Subquery_CorrelatedReference_ShouldEvaluatePerOuterRow(string statement)
     {
         // Arrange
         await using var engine = CreateEngine();
@@ -243,16 +243,18 @@ public sealed class SqlSubqueryExecutionTests
         await ExecuteAsync(session, "CREATE TABLE choices (id INT);");
 
         // Act / Assert
-        var error = await Should.ThrowAsync<DatabaseException>(() => RowsAsync(session, statement));
-        error.Message.ShouldContain("COHDBL001", Case.Sensitive);
-        error.Message.ShouldContain("correlat");
+        (await RowsAsync(session, statement)).ShouldBeEmpty();
+        await ExecuteAsync(session, "INSERT INTO candidates VALUES (2);");
+        await ExecuteAsync(session, "INSERT INTO choices VALUES (2);");
+        (await RowsAsync(session, statement)).ShouldHaveSingleItem()[0].ShouldBe(2);
     }
 
     /// <summary>ReadCommitted inner and outer plans consume the statement's captured view after concurrent changes.</summary>
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Subquery: all forms share the captured MVCC statement snapshot")]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task Subquery_ConcurrentCommit_ShouldKeepCapturedSnapshot(bool derived)
+    [InlineData(false, true)]
+    public async Task Subquery_ConcurrentCommit_ShouldKeepCapturedSnapshot(bool derived, bool correlated = false)
     {
         // Arrange
         await using var engine = CreateEngine();
@@ -268,7 +270,8 @@ public sealed class SqlSubqueryExecutionTests
             var captured = new SqlStatementContext(transaction, database.Coordinator);
             var request = SqlQueryRequest.FromSql(derived
                 ? "SELECT d.id, c.id FROM (SELECT id FROM candidates) d JOIN choices c ON d.id = c.id;"
-                :
+                : correlated ? "SELECT c.id, (SELECT x.id FROM choices x WHERE x.id = c.id) FROM candidates c " +
+                    "WHERE EXISTS (SELECT x.id FROM choices x WHERE x.id = c.id);" :
                 "SELECT id, (SELECT id FROM choices) FROM candidates WHERE id IN (SELECT id FROM choices) " +
                 "AND EXISTS (SELECT id FROM choices WHERE id IN (SELECT id FROM candidates));");
             var executor = new SqlQueryExecutor(database.DataStorage, database.Catalog, database.IndexManager, database.Definitions);

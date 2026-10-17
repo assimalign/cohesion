@@ -310,7 +310,7 @@ public sealed partial class SqlQueryParser
             AddSyntaxDiagnostic(ref lexer, "Expected SELECT in a derived table.");
             return new SqlTableReference("?", null, null);
         }
-        var query = ParseSubquery(ref lexer, derived: true);
+        var query = ParseSubquery(ref lexer);
         if (lexer.Current.Type == TokenType.RightParen) { Advance(ref lexer); }
         else { AddSyntaxDiagnostic(ref lexer, "Expected ')' after the derived query."); }
         if (IsKeyword(ref lexer, "AS")) { Advance(ref lexer); }
