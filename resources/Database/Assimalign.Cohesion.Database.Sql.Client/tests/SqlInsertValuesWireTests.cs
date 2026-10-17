@@ -20,6 +20,42 @@ public sealed class SqlInsertValuesWireTests
 {
     private const string ColumnReferenceNotAllowed = "COHSQLE005";
 
+    [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - DEFAULT: VALUES, DEFAULT VALUES and UPDATE share defaults over the wire")]
+    public async Task ExecuteAsync_DefaultAssignments_ShouldResolveDefaultsOverWire()
+    {
+        // Arrange
+        await using var harness = await SqlClientTestHarness.StartAsync();
+        await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
+        await connection.ExecuteAsync("CREATE TABLE defaults (id INT DEFAULT 7 NOT NULL, label TEXT DEFAULT 'seed', note INT)",
+            cancellationToken: SqlClientTestHarness.Timeout());
+
+        // Act
+        long inserted = await connection.ExecuteAsync("INSERT INTO defaults (label, id) VALUES (DEFAULT, 1), (NULL, 2)",
+            cancellationToken: SqlClientTestHarness.Timeout());
+        long allDefaults = await connection.ExecuteAsync("INSERT INTO defaults (label) DEFAULT VALUES",
+            cancellationToken: SqlClientTestHarness.Timeout());
+        long updated = await connection.ExecuteAsync("UPDATE defaults SET label = DEFAULT, note = DEFAULT WHERE id = 2",
+            cancellationToken: SqlClientTestHarness.Timeout());
+        var failure = await Should.ThrowAsync<SqlClientException>(async () =>
+            await connection.ExecuteAsync("INSERT INTO defaults VALUES (3, 'ok', 3), (NULL, DEFAULT, DEFAULT)",
+                cancellationToken: SqlClientTestHarness.Timeout()));
+        var invalid = await Should.ThrowAsync<SqlClientException>(async () =>
+            await connection.ExecuteAsync("INSERT INTO defaults VALUES (4, COALESCE(DEFAULT, 'x'), DEFAULT)",
+                cancellationToken: SqlClientTestHarness.Timeout()));
+
+        // Assert
+        inserted.ShouldBe(2);
+        allDefaults.ShouldBe(1);
+        updated.ShouldBe(1);
+        failure.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
+        failure.ConnectionUsable.ShouldBeTrue();
+        invalid.Kind.ShouldBe(SqlClientErrorKind.ParseFailure);
+        invalid.ConnectionUsable.ShouldBeTrue();
+        var rows = await connection.QueryAsync("SELECT id, label, note FROM defaults ORDER BY id",
+            cancellationToken: SqlClientTestHarness.Timeout());
+        rows.Select(row => (row["id"], row["label"], row["note"])).ShouldBe([(1, "seed", null), (2, "seed", null), (7, "seed", null)]);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - INSERT VALUES: a column reference is a coded failure on a usable connection")]
     [InlineData("INSERT INTO users (id, name, score) VALUES (id, 'lin', 1)", "id")]
     [InlineData("INSERT INTO users (id, name, score) VALUES (3, 'lin', score + 1)", "score")]

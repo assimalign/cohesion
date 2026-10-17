@@ -16,6 +16,7 @@ public sealed class SqlInsertExpression : SqlQueryExpression
     /// <param name="columns">The column list, if specified.</param>
     /// <param name="values">The VALUES rows, if using value lists.</param>
     /// <param name="selectSource">The SELECT source, if using INSERT...SELECT.</param>
+    /// <param name="isDefaultValues">Whether the statement inserts one row of defaults.</param>
     /// <param name="text">The raw statement text.</param>
     /// <param name="location">The source location.</param>
     internal SqlInsertExpression(
@@ -23,6 +24,7 @@ public sealed class SqlInsertExpression : SqlQueryExpression
         IReadOnlyList<string>? columns,
         IReadOnlyList<IReadOnlyList<SqlExpression>>? values,
         SqlSelectExpression? selectSource,
+        bool isDefaultValues,
         string? text,
         Location? location)
         : base(SqlQueryCommandType.Insert, text, location)
@@ -31,6 +33,7 @@ public sealed class SqlInsertExpression : SqlQueryExpression
         Columns = columns;
         Values = values;
         SelectSource = selectSource;
+        IsDefaultValues = isDefaultValues;
     }
 
     /// <summary>
@@ -52,4 +55,10 @@ public sealed class SqlInsertExpression : SqlQueryExpression
     /// Gets the SELECT source for INSERT...SELECT, if applicable.
     /// </summary>
     public SqlSelectExpression? SelectSource { get; }
+
+    /// <summary>
+    /// Gets whether DEFAULT VALUES inserts one row with every column omitted.
+    /// </summary>
+    /// <remarks>Both <see cref="Values"/> and <see cref="SelectSource"/> are null for this form.</remarks>
+    public bool IsDefaultValues { get; }
 }

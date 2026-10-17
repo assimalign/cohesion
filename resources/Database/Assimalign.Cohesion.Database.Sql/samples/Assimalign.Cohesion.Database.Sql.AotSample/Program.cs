@@ -162,6 +162,13 @@ internal static class Program
         await session.ExecuteAsync("CREATE TABLE fixed_codes (c CHAR(3) PRIMARY KEY)");
         await session.ExecuteAsync("INSERT INTO fixed_codes VALUES ('a')");
         Check("in process: CHAR storage, cast, length, concat, LIKE and seek", await RowsAsync(session, Characters), _characters);
+        await session.ExecuteAsync("CREATE TABLE default_guard (id INT DEFAULT 7 NOT NULL, label TEXT DEFAULT 'seed', note INT)");
+        await session.ExecuteAsync("INSERT INTO default_guard (label, id) VALUES (DEFAULT, 1), (NULL, 2)");
+        await session.ExecuteAsync("INSERT INTO default_guard DEFAULT VALUES");
+        await session.ExecuteAsync("UPDATE default_guard SET label = DEFAULT, note = DEFAULT WHERE id = 2");
+        Check("in process: DEFAULT items, DEFAULT VALUES and UPDATE DEFAULT",
+            await RowsAsync(session, "SELECT id, label, note FROM default_guard ORDER BY id"),
+            [[1, "seed", null], [2, "seed", null], [7, "seed", null]]);
         Check("in process: SQL function and domain", await RowsAsync(session, "SELECT sql_increment(n) FROM sql_defined"), [[5]]);
         Check("in process: scalars of every arity, strict and non-strict", await RowsAsync(session, Projection), _projection);
         Check("in process: typed and hand-written aggregates", await RowsAsync(session, Aggregates), _aggregates);
@@ -201,6 +208,14 @@ internal static class Program
         });
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         await using SqlConnection connection = await client.ConnectAsync(timeout.Token);
+
+        await connection.ExecuteAsync("CREATE TABLE default_wire (id INT DEFAULT 7 NOT NULL, label TEXT DEFAULT 'seed', note INT)", cancellationToken: timeout.Token);
+        await connection.ExecuteAsync("INSERT INTO default_wire (label, id) VALUES (DEFAULT, 1), (NULL, 2)", cancellationToken: timeout.Token);
+        await connection.ExecuteAsync("INSERT INTO default_wire (label) DEFAULT VALUES", cancellationToken: timeout.Token);
+        await connection.ExecuteAsync("UPDATE default_wire SET label = DEFAULT, note = DEFAULT WHERE id = 2", cancellationToken: timeout.Token);
+        Check("over the wire: DEFAULT items, DEFAULT VALUES and UPDATE DEFAULT",
+            await RowsAsync(connection, "SELECT id, label, note FROM default_wire ORDER BY id", timeout.Token),
+            [[1, "seed", null], [2, "seed", null], [7, "seed", null]]);
 
         Check("over the wire: CHAR storage, cast, length, concat, LIKE and seek", await RowsAsync(connection, Characters, timeout.Token), _characters);
         var fixedCodes = await connection.QueryAsync(Characters, cancellationToken: timeout.Token);

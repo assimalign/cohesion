@@ -339,11 +339,14 @@ internal sealed partial class SqlPlanExecutor
             var row = new object?[valueRow.Length];
             for (int i = 0; i < row.Length; i++)
             {
-                row[i] = evaluator.Evaluate(valueRow[i], Array.Empty<object?>());
+                if (valueRow[i].Kind != SqlBoundExpressionKind.DefaultItem)
+                {
+                    row[i] = evaluator.Evaluate(valueRow[i], Array.Empty<object?>());
+                }
             }
             values.Add(row);
         }
-        return await ExecuteInsertRowsAsync(plan.Table, plan.TargetOrdinals, values, statement, cancellationToken).ConfigureAwait(false);
+        return await ExecuteInsertRowsAsync(plan.Table, plan.TargetOrdinals, values, statement, cancellationToken, plan.Rows).ConfigureAwait(false);
     }
 
     private async Task<DatabaseResult> ExecuteUpdateAsync(SqlUpdatePlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
@@ -377,7 +380,9 @@ internal sealed partial class SqlPlanExecutor
             foreach (var (ordinal, expression) in plan.Assignments)
             {
                 // Assignments evaluate against the ORIGINAL row (SQL semantics).
-                updated[ordinal] = CoerceForColumn(evaluator.Evaluate(expression, values), plan.Table.Columns[ordinal]);
+                updated[ordinal] = expression.Kind == SqlBoundExpressionKind.DefaultItem
+                    ? ResolveColumnDefault(plan.Table.Columns[ordinal], bound.DefaultValues[ordinal], cancellationToken)
+                    : CoerceForColumn(evaluator.Evaluate(expression, values), plan.Table.Columns[ordinal]);
             }
 
             if (assigned is not null)

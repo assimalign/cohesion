@@ -861,6 +861,7 @@ public sealed partial class SqlQueryParser : QueryParser
         return value.Equals("WHERE", StringComparison.OrdinalIgnoreCase) ||
                value.Equals("SET", StringComparison.OrdinalIgnoreCase) ||
                value.Equals("VALUES", StringComparison.OrdinalIgnoreCase) ||
+               value.Equals("DEFAULT", StringComparison.OrdinalIgnoreCase) ||
                value.Equals("SELECT", StringComparison.OrdinalIgnoreCase) ||
                value.Equals("FROM", StringComparison.OrdinalIgnoreCase) ||
                value.Equals("JOIN", StringComparison.OrdinalIgnoreCase) ||

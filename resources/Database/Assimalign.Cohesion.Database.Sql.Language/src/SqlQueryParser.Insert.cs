@@ -29,14 +29,20 @@ public sealed partial class SqlQueryParser
             columns = ParseInsertColumnList(ref lexer);
         }
 
-        // VALUES or SELECT
+        // VALUES, DEFAULT VALUES or SELECT
         List<IReadOnlyList<SqlExpression>>? values = null;
         SqlSelectExpression? selectSource = null;
+        bool isDefaultValues = false;
 
         if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "VALUES"))
         {
             Advance(ref lexer);
             values = ParseValuesList(ref lexer);
+        }
+        else if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "DEFAULT"))
+        {
+            Advance(ref lexer);
+            isDefaultValues = ExpectKeyword(ref lexer, "VALUES", "VALUES after DEFAULT");
         }
         else if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "SELECT"))
         {
@@ -44,10 +50,10 @@ public sealed partial class SqlQueryParser
         }
         else
         {
-            AddExpectedDiagnostic(ref lexer, "VALUES or SELECT");
+            AddExpectedDiagnostic(ref lexer, "VALUES, DEFAULT VALUES or SELECT");
         }
 
-        return new SqlInsertExpression(table, columns, values, selectSource, null,
+        return new SqlInsertExpression(table, columns, values, selectSource, isDefaultValues, null,
             Location.Create(1, 1, pos, _lastTokenEnd));
     }
 
@@ -115,15 +121,49 @@ public sealed partial class SqlQueryParser
         }
         else
         {
-            values.Add(ParseExpression(ref lexer));
+            values.Add(ParseDefaultableValue(ref lexer));
             while (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.Comma)
             {
                 Advance(ref lexer);
-                values.Add(ParseExpression(ref lexer));
+                values.Add(ParseDefaultableValue(ref lexer));
             }
         }
 
         Expect(ref lexer, TokenType.RightParen, "')' after the VALUES row");
         return values;
+    }
+
+    /// <summary>
+    /// DEFAULT is a whole assignment value, never an operand. The expression parser is shared
+    /// with other value positions; inspect only the tokens it consumed to reject nested DEFAULT
+    /// without treating a quoted identifier or string containing that word as the keyword.
+    /// </summary>
+    private SqlExpression ParseDefaultableValue(ref TokenLexer lexer)
+    {
+        if (IsKeyword(ref lexer, "DEFAULT"))
+        {
+            int start = lexer.Current.Position;
+            int end = start + lexer.Current.Value.Length;
+            EnterLeaf();
+            Advance(ref lexer);
+            return new SqlDefaultExpression(Location.Create(1, 1, start, end));
+        }
+
+        var tokens = lexer;
+        var expression = ParseExpression(ref lexer);
+        int expressionEnd = lexer.Current.Position;
+        do
+        {
+            if (tokens.Current.Position >= expressionEnd)
+            {
+                break;
+            }
+            if (IsKeyword(ref tokens, "DEFAULT") && !HasErrorAt(tokens.Current.Position))
+            {
+                AddSyntaxDiagnostic(ref tokens, "DEFAULT must be a whole VALUES item or SET value, not part of an expression.");
+            }
+        }
+        while (tokens.MoveNext());
+        return expression;
     }
 }

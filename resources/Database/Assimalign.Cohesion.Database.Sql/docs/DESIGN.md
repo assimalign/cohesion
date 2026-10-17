@@ -120,6 +120,20 @@ and execution evidence are in
 
 ## Subquery and insert-source operators (#1021)
 
+DEFAULT assignment (#1193) uses this same insertion path. The planner binds a whole
+`SqlDefaultExpression` to an internal `SqlBoundDefaultItem` at its target ordinal;
+the executor skips that source slot so the ordinary omitted-column pass supplies
+the cached catalog default, NULL, or the NOT NULL failure. Explicit NULL remains an
+assigned slot. `INSERT ... DEFAULT VALUES` lowers to exactly one empty bound row with
+no target ordinals, after validating an optional target list. UPDATE consumes the
+same instruction through the same column-default resolver for each matching row.
+These markers never reach scalar evaluation. Cached literal and function-call defaults
+keep their existing binding, coercion and per-assignment evaluation, without parsing
+catalog text during statement planning or execution. All row constraints and statement
+atomicity remain on the shared INSERT/UPDATE paths; identity allocation (#1123) should
+extend the omitted-column resolver so these forms inherit it. No format, protocol,
+project-reference or visibility boundary changes.
+
 `SqlPlanner.Subqueries.cs` binds each uncorrelated child SELECT in its own local
 scope and lowers its use sites to typed slots, numbered from zero across the
 statement (`SqlSubquerySlot`); the enclosing expressions bind each use site to a
@@ -2346,9 +2360,8 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   reaches. (An explicit outer qualifier is still the parser's `COHDBL001`.) A `*` in
   a count now reports `'*' is not allowed in LIMIT.` (or `OFFSET`) instead of the
   evaluator's `Expression 'SqlStarExpression' is not supported by the executor yet.`
-  The unqualified
-  `DEFAULT` keyword in VALUES is not in the dialect and parses as a column reference
-  named `DEFAULT`, so it reports `COHSQLE005` too. The niladic datetime functions
+  A whole `DEFAULT` item instead maps to the target column's omitted-value path (#1193);
+  it is not a column reference or scalar operand. The niladic datetime functions
   `CURRENT_DATE`, `CURRENT_TIME` and `CURRENT_TIMESTAMP` also parse as names, because
   they take no parentheses; `RejectColumnReferences` reports an unqualified name
   spelled as one of them as the unsupported function (`Function '<name>' is not

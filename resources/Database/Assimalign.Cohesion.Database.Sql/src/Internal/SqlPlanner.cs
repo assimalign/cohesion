@@ -577,9 +577,9 @@ internal sealed partial class SqlPlanner
 
     private SqlPlan PlanInsert(SqlInsertExpression insert)
     {
-        if (insert.SelectSource is null && (insert.Values is null || insert.Values.Count == 0))
+        if (!insert.IsDefaultValues && insert.SelectSource is null && (insert.Values is null || insert.Values.Count == 0))
         {
-            throw new SqlPlanningException("COHSQLE013", "INSERT requires a VALUES list or SELECT source.", insert.Location);
+            throw new SqlPlanningException("COHSQLE013", "INSERT requires a VALUES list, DEFAULT VALUES or SELECT source.", insert.Location);
         }
 
         var table = ResolveTable(insert.Table);
@@ -610,6 +610,12 @@ internal sealed partial class SqlPlanner
             return PlanInsertSelect(table, targetOrdinals, insert.SelectSource);
         }
 
+        if (insert.IsDefaultValues)
+        {
+            // Validate any column list above, then omit every column through the shared INSERT path.
+            return new SqlInsertPlan(table, [], [Array.Empty<SqlBoundExpression>()]);
+        }
+
         foreach (var row in insert.Values!)
         {
             if (row.Count != targetOrdinals.Count)
@@ -626,7 +632,10 @@ internal sealed partial class SqlPlanner
         {
             foreach (var value in row)
             {
-                ValidateScopelessExpression(value, insertValuesClause, "INSERT ... SELECT to read values from a table");
+                if (value is not SqlDefaultExpression)
+                {
+                    ValidateScopelessExpression(value, insertValuesClause, "INSERT ... SELECT to read values from a table");
+                }
             }
         }
 
@@ -639,7 +648,8 @@ internal sealed partial class SqlPlanner
             var bound = new SqlBoundExpression[row.Count];
             for (int ordinal = 0; ordinal < bound.Length; ordinal++)
             {
-                bound[ordinal] = ScopelessEvaluator.Bind(row[ordinal]);
+                bound[ordinal] = row[ordinal] is SqlDefaultExpression
+                    ? SqlBoundDefaultItem.Instance : ScopelessEvaluator.Bind(row[ordinal]);
             }
 
             rows[index] = bound;
@@ -744,6 +754,11 @@ internal sealed partial class SqlPlanner
         foreach (var assignment in update.Assignments)
         {
             int ordinal = FindColumnOrdinal(table, assignment.ColumnName);
+            if (assignment.Value is SqlDefaultExpression)
+            {
+                assignments.Add((ordinal, SqlBoundDefaultItem.Instance));
+                continue;
+            }
             if (ContainsAggregate(assignment.Value))
             {
                 throw new SqlPlanningException("COHSQLE017", "Aggregate functions are not allowed in UPDATE SET.", assignment.Value.Location ?? update.Location);

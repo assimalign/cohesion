@@ -40,8 +40,8 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | Statement | Status | Notes |
 |---|---|---|
 | `SELECT` | Supported subset, measured | One stored table or virtual system relation, or a two stored-table `INNER JOIN ... ON`; `DISTINCT`, projections and aliases, scalar expressions, `WHERE`, grouping, multi-expression `ORDER BY ASC/DESC`, nonnegative integer `LIMIT`/`OFFSET`. `COUNT(*)`, `COUNT(expr)`, `SUM`, `AVG`, `MIN`, and `MAX` execute in grouped and ungrouped queries. See the aggregate contract below. `SELECT` without `FROM` is rejected by the planner. |
-| `INSERT` / `VALUES` | Supported subset, measured | Optional column list, multi-row literal/scalar `VALUES`, and transactional `INSERT ... SELECT` with the same destination coercion, defaults, and constraints. `VALUES` expressions have no columns in scope: a column reference reports `COHSQLE005` before anything executes (see [VALUES and counts have no column scope](#values-and-counts-have-no-column-scope-1165)). Subqueries inside `VALUES` are excluded; use `INSERT ... SELECT`. |
-| `UPDATE` | Supported | multi-column `SET`, `WHERE`; no aggregate in either (see [Grouping and aggregate functions](#grouping-and-aggregate-functions-1020)) |
+| `INSERT` / `VALUES` | Supported subset, measured | Optional column list, multi-row literal/scalar `VALUES` including whole-item `DEFAULT`, `INSERT ... DEFAULT VALUES` (one row of defaults, with an optional column list), and transactional `INSERT ... SELECT` with the same destination coercion, defaults, and constraints. `VALUES` expressions have no columns in scope: a column reference reports `COHSQLE005` before anything executes (see [VALUES and counts have no column scope](#values-and-counts-have-no-column-scope-1165)). Subqueries inside `VALUES` are excluded; use `INSERT ... SELECT`. |
+| `UPDATE` | Supported | multi-column `SET`, including `c = DEFAULT`, and `WHERE`; no aggregate in either (see [Grouping and aggregate functions](#grouping-and-aggregate-functions-1020)) |
 | `DELETE` | Supported | optional `WHERE`, without an aggregate |
 | `CREATE TABLE` | Supported | `IF NOT EXISTS`, column definitions with parameterized types, `COLLATE <name>`, `NOT NULL`/`NULL`, `DEFAULT <literal>`, column and table `PRIMARY KEY`, `REFERENCES`/`FOREIGN KEY`, `CHECK`, and `UNIQUE`; optional `CONSTRAINT <name>` |
 | `ALTER TABLE` | Supported subset, measured | ADD/DROP COLUMN and ADD/DROP CONSTRAINT execute. Full-definition `ALTER COLUMN c TYPE [NULL | NOT NULL] [DEFAULT literal]` accepts nullability, length and precision changes that preserve storage type, scale, collation, domain and DEFAULT; tightening and every CHAR length change check existing live values and refuse changes requiring a rewrite. PostgreSQL `TYPE ... USING`, `SET` and `DROP` variants remain unsupported (49a). ADD COLUMN literal defaults backfill old-row reads and apply to subsequent inserts that omit the column; explicit NULL follows nullability. Nullable additions without a default read NULL. NOT NULL additions to populated tables require a non-null default. Invalid defaults and nonliteral expressions reject before mutation. Column COLLATE persists and governs default comparisons. See the default, atomicity and MVCC contract below (#1023). DROP COLUMN changes only the catalog: it rewrites no row, survives a crash at any point on one definition, and SELECTs running beside it read every value in its own column; see the DROP COLUMN contract below (#1241). |
@@ -857,9 +857,29 @@ not allowed in INSERT ... VALUES.`, likewise for `LIMIT` and `OFFSET`, where it 
 to report `Expression 'SqlStarExpression' is not supported by the executor yet.`)
 while planning, and a sign over an operand the plan already knows is not a number
 reports `COHSQLE003` there too. A column reference is reported first, so
-`VALUES (SUM(a))` and `VALUES (-a)` name the column. `DEFAULT` as a VALUES item is
-not in the dialect: it parses as a column reference named `DEFAULT` and reports
-`COHSQLE005`. Omit the column from the column list to store its default.
+`VALUES (SUM(a))` and `VALUES (-a)` name the column.
+
+`DEFAULT` as a whole VALUES item uses the target column's catalog default, exactly
+like omitting that column. Without a default it supplies NULL, subject to NOT NULL.
+Explicit NULL remains NULL even when the column has a default. Reordered column lists
+and mixed multi-row lists map each DEFAULT to its own target column.
+`INSERT INTO t DEFAULT VALUES` inserts exactly one row with every column omitted.
+The optional column-list form, `INSERT INTO t (a) DEFAULT VALUES`, has the same effect;
+listed columns must still exist and must not repeat. `UPDATE t SET c = DEFAULT`
+uses the same column-default path for each matching row. All constraints apply before
+the statement publishes any writes, and both session requests and the SQL wire use
+these rules. Existing stored function-call defaults retain their per-assignment
+evaluation; this feature adds no new default-declaration expressions (#1121).
+
+DEFAULT is contextually typed syntax, not a scalar operand: `VALUES (DEFAULT + 1)`,
+`VALUES (COALESCE(DEFAULT, 1))`, `VALUES ((DEFAULT))` and `SET c = 1 + DEFAULT`
+report SQL0003. Quoted identifiers, string literals and comments containing the word
+are unaffected. PostgreSQL represents the keyword as `SetToDefault`
+(`src/backend/parser/gram.y:15788-15804`) and allows it directly in INSERT values and
+UPDATE sources (`src/backend/parser/parse_target.c:85-92,263-272`); DEFAULT VALUES
+has no SELECT source (`gram.y:12559-12565`). Its optional-column-list grammar does
+not include DEFAULT VALUES; accepting that combination here follows #1193's explicit
+column-list requirement. The named-clause count remains 33/49 (+0).
 
 `CURRENT_DATE`, `CURRENT_TIME` and `CURRENT_TIMESTAMP` take no parentheses, so the
 parser reads each as a name. In these clauses an unqualified name spelled as one of
