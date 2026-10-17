@@ -107,6 +107,10 @@ public sealed partial class OqlQueryParser : QueryParser
             {
                 expression = new OqlExplainExpression(ParseInsert(), Span(start, Previous));
             }
+            else if (Is("DELETE"))
+            {
+                expression = new OqlExplainExpression(ParseDelete(), Span(start, Previous));
+            }
             else
             {
                 _diagnostics.Add(QueryDiagnostics.UnsupportedClause($"EXPLAIN {Current.Text}", Profile.Language, Span(start, Current)));
@@ -120,6 +124,10 @@ public sealed partial class OqlQueryParser : QueryParser
         else if (Is("INSERT"))
         {
             expression = ParseInsert();
+        }
+        else if (Is("DELETE"))
+        {
+            expression = ParseDelete();
         }
         else if (IsIndexStatement("CREATE"))
         {
@@ -139,7 +147,7 @@ public sealed partial class OqlQueryParser : QueryParser
         }
         else
         {
-            Error("OQL0002", "Expected SELECT, INSERT, CREATE INDEX, DROP INDEX, CREATE COLLECTION, or DROP COLLECTION.", Current);
+            Error("OQL0002", "Expected SELECT, INSERT, DELETE, CREATE INDEX, DROP INDEX, CREATE COLLECTION, or DROP COLLECTION.", Current);
             expression = EmptyExpression();
         }
 

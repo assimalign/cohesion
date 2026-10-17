@@ -28,6 +28,7 @@ public sealed class DocumentLikeTests
     [Theory(DisplayName = "Cohesion Test [Documents] - LIKE: long literal suffix observes statement cancellation within 500 ms")]
     [InlineData("SELECT @input LIKE @pattern FROM items")]
     [InlineData("SELECT 1 FROM items WHERE @input LIKE @pattern")]
+    [InlineData("DELETE FROM items WHERE @input LIKE @pattern")]
     [InlineData("SELECT COUNT(*) FROM items HAVING @input LIKE @pattern")]
     [InlineData("SELECT 1 FROM items ORDER BY @input LIKE @pattern")]
     [InlineData("SELECT COUNT(*) FROM items GROUP BY @input LIKE @pattern")]

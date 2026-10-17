@@ -384,9 +384,6 @@ public sealed partial class DocumentQueryTests
     // Plans in a statement of a session of its own: every statement has a session (owner decision 32).
     private static async ValueTask<DocumentPlan> PlanAsync(DocumentDatabase database, string query, IReadOnlyDictionary<string, object?>? parameters = null)
     {
-        await using var session = await database.CreateSessionAsync();
-        return await database.RunAsync(session, operation => new ValueTask<DocumentPlan>(new DocumentPlanner(database.Catalog,
-            operation.Context.Snapshot, parameters).Plan(
-                (OqlSelectExpression)DocumentQueryRequest.FromOql(query).Statement.OqlExpression)), CancellationToken.None);
+        return (DocumentPlan)await DocumentPlanTestHelper.PlanAsync(database, query, parameters, CancellationToken.None);
     }
 }

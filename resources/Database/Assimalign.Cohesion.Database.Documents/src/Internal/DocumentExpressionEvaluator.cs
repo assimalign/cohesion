@@ -105,6 +105,9 @@ internal sealed partial class DocumentExpressionEvaluator
                 }
                 if (value is JsonElement) { _ = Evaluate(parameter, default); }
                 break;
+            case OqlDeleteExpression delete:
+                ValidateInputs(delete.Predicate);
+                break;
             case OqlInsertExpression insert:
                 foreach (var pair in insert.Values) { ValidateInputs(pair.Key); ValidateInputs(pair.Value); }
                 ValidateInputs(insert.Select);

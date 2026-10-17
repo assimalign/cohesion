@@ -8,6 +8,54 @@ namespace Assimalign.Cohesion.Database.Documents.Language.Tests;
 
 public sealed class OqlDmlParserTests
 {
+    [Theory(DisplayName = "Cohesion Test [Documents.Language] - DELETE: source, alias, predicate and spans are retained")]
+    [InlineData("DELETE FROM items", null, false)]
+    [InlineData("DELETE FROM items WHERE amount > 3", null, true)]
+    [InlineData("DELETE FROM items AS d WHERE d.details.score IS NULL", "d", true)]
+    [InlineData("DELETE FROM items d WHERE META(d).id = $id", "d", true)]
+    public void Parse_DeleteForms_ShouldRetainStructureAndSpans(string query, string? alias, bool filtered)
+    {
+        // Arrange / Act
+        var statement = (OqlQueryStatement)new OqlQueryParser().Parse(query);
+        // Assert
+        statement.Diagnostics.ShouldBeEmpty();
+        var delete = statement.OqlExpression.ShouldBeOfType<OqlDeleteExpression>();
+        delete.Collection.ShouldBe("items");
+        delete.Alias.ShouldBe(alias);
+        (delete.Predicate is not null).ShouldBe(filtered);
+        delete.Location!.Start.ShouldBe(0);
+        delete.Location.End.ShouldBe(query.Length);
+        delete.Location.StartLine.ShouldBe(1);
+        delete.Text.ShouldBe(query);
+        if (delete.Predicate is { } predicate)
+        {
+            predicate.Location!.Start.ShouldBe(query.IndexOf("WHERE", StringComparison.Ordinal) + 6);
+            predicate.Location.End.ShouldBe(query.Length);
+        }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Documents.Language] - DELETE: invalid and deferred forms have exact diagnostics")]
+    [InlineData("DELETE items", "OQL0002", "items")]
+    [InlineData("DELETE FROM other.items", "OQL0002", ".")]
+    [InlineData("DELETE FROM items d garbage", "OQL0002", "garbage")]
+    [InlineData("DELETE FROM items WHERE amount > 3 garbage", "OQL0002", "garbage")]
+    [InlineData("DELETE FROM items; garbage", "OQL0002", "garbage")]
+    [InlineData("DELETE FROM items WHERE amount > 3 RETURNING amount", "COHDBL001", "RETURNING")]
+    [InlineData("DELETE FROM items WHERE amount > 3 LIMIT 1", "COHDBL001", "LIMIT")]
+    [InlineData("DELETE FROM items LIMIT 1", "COHDBL001", "LIMIT")]
+    [InlineData("DELETE FROM items USE KEYS 'a'", "COHDBL001", "USE")]
+    public void Parse_InvalidDelete_ShouldLocateFailure(string query, string code, string token)
+    {
+        // Arrange / Act
+        var statement = new OqlQueryParser().Parse(query);
+        // Assert
+        var diagnostic = statement.Diagnostics.ShouldHaveSingleItem();
+        diagnostic.Code.ShouldBe(code);
+        diagnostic.Start.ShouldBe(query.IndexOf(token, StringComparison.Ordinal));
+        diagnostic.End.ShouldBe(diagnostic.Start + token.Length);
+        diagnostic.Line.ShouldBe(1);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Documents.Language] - INSERT: KEY/VALUE forms retain complete spans")]
     [InlineData("INSERT INTO items (KEY, VALUE) VALUES ('e', $doc)", 1, null, null, null)]
     [InlineData("INSERT INTO items (KEY, VALUE) VALUES ('e', $d1), ('f', $d2)", 2, null, null, null)]
@@ -66,6 +114,10 @@ public sealed class OqlDmlParserTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Documents.Language] - META: function vocabulary preserves paths and aliases")]
+    [InlineData("DELETE FROM returning")]
+    [InlineData("DELETE FROM items returning WHERE returning.n = 1")]
+    [InlineData("DELETE FROM items AS returning WHERE returning.n = 1")]
+    [InlineData("EXPLAIN DELETE FROM items d WHERE META(d).id = 'a'")]
     [InlineData("SELECT key FROM items WHERE key = 'x'")]
     [InlineData("SELECT values, into FROM items")]
     [InlineData("SELECT meta FROM items")]
@@ -94,6 +146,9 @@ public sealed class OqlDmlParserTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Documents.Language] - RETURNING: actual trailing clauses remain unsupported after ordinary names")]
+    [InlineData("DELETE FROM returning RETURNING *")]
+    [InlineData("DELETE FROM items returning RETURNING *")]
+    [InlineData("DELETE FROM items WHERE n = 1 RETURNING returning")]
     [InlineData("INSERT INTO returning (KEY, VALUE) VALUES ('a', 1) RETURNING *")]
     [InlineData("INSERT INTO items (KEY returning) SELECT META().id AS returning FROM source RETURNING *")]
     [InlineData("INSERT INTO items (KEY k, VALUE returning) SELECT META().id AS k, n AS returning FROM source RETURNING returning")]

@@ -46,8 +46,9 @@ Lexical recognition preserves the established vocabulary so rejected constructs 
 | `SELECT VALUE` | Yes | One bare expression; RAW is a synonym |
 | `OBJECT CONSTRUCTOR` | Yes | Named members in braces; last non-MISSING member wins |
 | `ARRAY CONSTRUCTOR` | Yes | Expressions in brackets; MISSING elements become NULL |
-| `EXPLAIN` | Yes | `EXPLAIN SELECT` or `EXPLAIN INSERT` describes the plan without reading document data or writing |
+| `EXPLAIN` | Yes | `EXPLAIN SELECT`, `EXPLAIN INSERT` or `EXPLAIN DELETE` describes the plan without reading document data or writing |
 | `INSERT` | Yes | Explicit KEY/VALUE pairs, or KEY and optional VALUE bindings to SELECT output names |
+| `DELETE` | Yes | `DELETE FROM collection [AS? alias] [WHERE expression]`; keeps the collection and indexes |
 | `VALUES` | Yes | One or more parenthesized key/value pairs for INSERT |
 | `FROM` | Yes | Exactly one unqualified collection or reserved `COHESION_SCHEMA` source and optional iteration variable, with or without `AS` |
 | `WHERE` | Yes | Scalar comparison and Boolean document filtering |
@@ -223,7 +224,7 @@ Composite/UNIQUE index keys belong to oql-index-ddl.
 ## Grammar, statement, and expression trees
 
 ```text
-statement    := (query | insert | EXPLAIN (query | insert) | create-collection | drop-collection | create-index | drop-index) [';']
+statement    := (query | insert | delete | EXPLAIN (query | insert | delete) | create-collection | drop-collection | create-index | drop-index) [';']
 query        := SELECT [ALL | DISTINCT] select-kind FROM collection [AS? identifier]
                 [WHERE expression] [GROUP BY expression (',' expression)*]
                 [HAVING expression] [ORDER BY ordering (',' ordering)*]
@@ -231,6 +232,7 @@ select-kind  := projection (',' projection)* | (VALUE | RAW) expression
 insert       := INSERT INTO collection [AS identifier] '(' KEY ',' VALUE ')'
                 VALUES '(' expression ',' expression ')' (',' '(' expression ',' expression ')')*
               | INSERT INTO collection [AS identifier] '(' KEY identifier [',' VALUE identifier] ')' query
+delete       := DELETE FROM collection [AS? identifier] [WHERE expression]
 object       := '{' [(string | identifier) ':' expression (',' (string | identifier) ':' expression)*] '}'
 metadata     := META '(' [identifier] ')' '.' (id | version)
 create-collection := CREATE COLLECTION [IF NOT EXISTS] collection
@@ -258,7 +260,7 @@ there is no iteration alias in an index statement. Index and collection names fo
 identifier quoting and case-preservation rules as query collection names.
 
 `OqlQueryStatement` wraps one top-level `OqlExpression`: `OqlSelectExpression`,
-`OqlExplainExpression` (one SELECT or INSERT), `OqlInsertExpression`,
+`OqlExplainExpression` (one SELECT, INSERT or DELETE), `OqlInsertExpression`, `OqlDeleteExpression`,
 `OqlCreateCollectionExpression`, `OqlDropCollectionExpression`, `OqlCreateIndexExpression`, or
 `OqlDropIndexExpression`. Collection nodes retain `Name` and `IfNotExists`/`IfExists`.
 Index creation retains its target as an `OqlPathExpression`, rather than flattening the path during
@@ -344,7 +346,7 @@ disposable resources beyond those used by the shared analyzer pipeline.
 
 ## EXPLAIN (#1104)
 
-SQL++'s `EXPLAIN SELECT` and `EXPLAIN INSERT` spellings produces the shared plan-description columns documented by
+SQL++'s `EXPLAIN SELECT`, `EXPLAIN INSERT` and `EXPLAIN DELETE` spellings produce the shared plan-description columns documented by
 [Execution](../../Assimalign.Cohesion.Database.Execution/docs/DESIGN.md#plan-descriptions-1104).
 `OqlExplainExpression.Statement` retains the query for ordinary parameter validation and
 planning. The parser rejects DDL, transaction control, nested EXPLAIN and EXPLAIN ANALYZE with
@@ -431,6 +433,23 @@ The engine design documents the field shapes, snapshot visibility, and read-only
 `DROP DATABASE`, `USE`, and other SQL data-mutation/transaction commands are unsupported.
 Multiple statements per parse are rejected. Logical database creation and deletion remain
 engine-side C# operations.
+
+### DELETE (#1132)
+
+DELETE accepts one database-local collection, an optional explicit or implicit source alias,
+and an optional WHERE expression. It uses the same metadata, parameter, numeric and Boolean
+validation as SELECT filters; aggregates are invalid. WHERE retains SQL++ Truth: a nonzero
+number such as 1 selects every document, while NULL and MISSING select none. Without WHERE,
+all documents are deleted and the collection and its index definitions remain.
+
+The public OqlDeleteExpression retains Collection, Alias, Predicate and source spans. The
+engine chooses the existing scan or index seek, reapplies the full predicate to the statement
+snapshot, then deletes the collected identities atomically. META predicates remain residual
+filters with no key lookup in T1. USE KEYS, RETURNING and DELETE LIMIT remain COHDBL001 at
+their clause token; DELETE's parser refuses LIMIT independently of SELECT's eventual support.
+System collections are read-only; Schema-owned stored collections permit content deletion.
+Commands report the deleted-document count, including zero, through the existing completion
+affected count and emit no Document frames. EXPLAIN DELETE describes the access without writing.
 
 ### INSERT and metadata (#1131)
 

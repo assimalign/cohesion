@@ -20,6 +20,8 @@ public sealed class DocumentExplainTests
     [Theory(DisplayName = "Cohesion Test [Documents] - EXPLAIN: scans, seeks and system collections use the chosen plan")]
     [InlineData("INSERT INTO items (KEY, VALUE) VALUES ('fresh', 1)", "Insert")]
     [InlineData("INSERT INTO items (KEY k) SELECT META().id AS k FROM items", "InsertSelect")]
+    [InlineData("DELETE FROM items", "Delete")]
+    [InlineData("DELETE FROM items WHERE score >= @minimum", "Delete")]
     [InlineData("SELECT name FROM items", "CollectionScan")]
     [InlineData("SELECT name FROM items WHERE score >= @minimum AND score < 10", "IndexSeek")]
     [InlineData("SELECT INDEX_NAME FROM COHESION_SCHEMA.INDEXES", "SystemCollection")]
@@ -42,6 +44,15 @@ public sealed class DocumentExplainTests
         await transaction.CommitAsync(CancellationToken.None);
         // Assert
         rows.ShouldContain(row => Equals(row[2], expected));
+        if (expected == "Delete")
+        {
+            string access = query.Contains("WHERE", StringComparison.Ordinal) ? "IndexSeek" : "CollectionScan";
+            rows.Count.ShouldBe(2);
+            rows[0][5].ShouldBe($"filter={access == "IndexSeek"}; access={access}");
+            rows[1][1].ShouldBe(0);
+            rows[1][2].ShouldBe(access);
+            rows[1][4].ShouldBe(access == "IndexSeek" ? "by_score" : null);
+        }
         if (expected == "IndexSeek")
         {
             rows[2][3].ShouldBe("items");

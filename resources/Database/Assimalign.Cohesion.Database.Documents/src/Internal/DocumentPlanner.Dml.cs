@@ -7,6 +7,19 @@ namespace Assimalign.Cohesion.Database.Documents.Internal;
 
 internal sealed partial class DocumentPlanner
 {
+    private DocumentDeletePlan PlanDelete(OqlDeleteExpression delete)
+    {
+        DocumentSystemCollections.EnsureReadOnly(delete.Collection, delete.Location);
+        var collection = ResolveCollection(delete.Collection, delete.Location);
+        if (delete.Predicate is { } predicate)
+        {
+            ValidateMetadata(predicate, delete.Alias, storedSource: true);
+            Validate(predicate, allowAggregate: false);
+        }
+        return new DocumentDeletePlan(collection, delete,
+            ChooseAccess(delete.Predicate, delete.Alias, _catalog.GetIndexes(collection.Id, _snapshot)));
+    }
+
     private DocumentStatementPlan PlanInsert(OqlInsertExpression insert)
     {
         DocumentSystemCollections.EnsureReadOnly(insert.Collection, insert.Location);

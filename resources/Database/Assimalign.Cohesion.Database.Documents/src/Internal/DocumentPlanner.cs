@@ -36,6 +36,7 @@ internal sealed partial class DocumentPlanner
     internal DocumentStatementPlan Plan(OqlExpression expression) => expression switch
     {
         OqlInsertExpression insert => PlanInsert(insert),
+        OqlDeleteExpression delete => PlanDelete(delete),
         OqlSelectExpression select when DocumentSystemCollections.Find(select.Collection) is string name =>
             new DocumentSystemCollectionPlan(CreateLogicalPlan(select), name),
         OqlSelectExpression select => Plan(select),
@@ -50,7 +51,7 @@ internal sealed partial class DocumentPlanner
     {
         var logical = CreateLogicalPlan(query);
         var collection = ResolveCollection(query.Collection, query.Location);
-        return new DocumentPlan(logical, collection, ChooseAccess(query, _catalog.GetIndexes(collection.Id, _snapshot)));
+        return new DocumentPlan(logical, collection, ChooseAccess(query.Predicate, query.Alias, _catalog.GetIndexes(collection.Id, _snapshot)));
     }
 
     private static DocumentCreateCollectionPlan PlanCreateCollection(OqlCreateCollectionExpression create)
@@ -188,18 +189,18 @@ internal sealed partial class DocumentPlanner
         return new DocumentLogicalPlan(query, projections, grouped);
     }
 
-    private DocumentAccessPath ChooseAccess(OqlSelectExpression query, IReadOnlyList<DocumentIndexMetadata> indexes)
+    private DocumentAccessPath ChooseAccess(OqlExpression? predicate, string? alias, IReadOnlyList<DocumentIndexMetadata> indexes)
     {
         var predicates = new List<(string Path, string? LegacyPath, string Operator, object Value)>();
-        if (query.Predicate is not null) { Collect(query.Predicate); }
+        if (predicate is not null) { Collect(predicate); }
         DocumentIndexPath? best = null;
         bool bestEquality = false;
         foreach (var index in indexes.OrderBy(index => index.Name, StringComparer.Ordinal))
         {
-            var usable = predicates.Where(predicate =>
-                string.Equals(predicate.Path, index.Path, StringComparison.Ordinal) ||
-                predicate.LegacyPath is not null && string.Equals(predicate.LegacyPath, index.Path, StringComparison.Ordinal)).ToArray();
-            var equality = usable.FirstOrDefault(predicate => predicate.Operator == "=");
+            var usable = predicates.Where(term =>
+                string.Equals(term.Path, index.Path, StringComparison.Ordinal) ||
+                term.LegacyPath is not null && string.Equals(term.LegacyPath, index.Path, StringComparison.Ordinal)).ToArray();
+            var equality = usable.FirstOrDefault(term => term.Operator == "=");
             bool hasEquality = equality.Value is not null;
             DocumentSeekBound? lower = null;
             DocumentSeekBound? upper = null;
@@ -209,15 +210,15 @@ internal sealed partial class DocumentPlanner
             }
             else
             {
-                foreach (var predicate in usable)
+                foreach (var term in usable)
                 {
-                    if (predicate.Operator is ">" or ">=")
+                    if (term.Operator is ">" or ">=")
                     {
-                        lower = Tighter(lower, new DocumentSeekBound(predicate.Value, predicate.Operator == ">="), isLower: true);
+                        lower = Tighter(lower, new DocumentSeekBound(term.Value, term.Operator == ">="), isLower: true);
                     }
-                    if (predicate.Operator is "<" or "<=")
+                    if (term.Operator is "<" or "<=")
                     {
-                        upper = Tighter(upper, new DocumentSeekBound(predicate.Value, predicate.Operator == "<="), isLower: false);
+                        upper = Tighter(upper, new DocumentSeekBound(term.Value, term.Operator == "<="), isLower: false);
                     }
                 }
             }
@@ -234,13 +235,13 @@ internal sealed partial class DocumentPlanner
             if (expression is OqlBetweenExpression { Negated: false, Operand: OqlPathExpression rangePath } between &&
                 IsConstant(between.Lower) && IsConstant(between.Upper))
             {
-                var rangeEvaluator = new DocumentExpressionEvaluator(query.Alias, _parameters, _cancellationToken);
+                var rangeEvaluator = new DocumentExpressionEvaluator(alias, _parameters, _cancellationToken);
                 var lower = rangeEvaluator.Evaluate(between.Lower, default);
                 var upper = rangeEvaluator.Evaluate(between.Upper, default);
-                string? name = IndexPath(rangePath, query.Alias);
+                string? name = IndexPath(rangePath, alias);
                 if (name is not null && lower is bool or decimal or string && upper is bool or decimal or string)
                 {
-                    var legacy = LegacyIndexPath(rangePath, query.Alias);
+                    var legacy = LegacyIndexPath(rangePath, alias);
                     predicates.Add((name, legacy, ">=", lower));
                     predicates.Add((name, legacy, "<=", upper));
                 }
@@ -259,12 +260,12 @@ internal sealed partial class DocumentPlanner
                 operation = operation switch { ">" => "<", ">=" => "<=", "<" => ">", "<=" => ">=", _ => operation };
             }
             if (path is null || !IsConstant(constant)) { return; }
-            var evaluator = new DocumentExpressionEvaluator(query.Alias, _parameters, _cancellationToken);
+            var evaluator = new DocumentExpressionEvaluator(alias, _parameters, _cancellationToken);
             var value = evaluator.Evaluate(constant, default);
-            string? pathName = IndexPath(path, query.Alias);
+            string? pathName = IndexPath(path, alias);
             if (pathName is not null && value is bool or decimal or string)
             {
-                predicates.Add((pathName, LegacyIndexPath(path, query.Alias), operation, value));
+                predicates.Add((pathName, LegacyIndexPath(path, alias), operation, value));
             }
         }
     }

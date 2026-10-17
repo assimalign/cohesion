@@ -30,6 +30,18 @@ including simple CASE on MISSING, gives ELSE or NULL when ELSE is absent. The en
 record these rules. CASE, WHEN, THEN, ELSE, END and ESCAPE are reserved; `"end"` and `d.end`
 remain valid field references.
 
+DELETE FROM collection [AS alias | alias] [WHERE expression] executes through the existing
+scan and equality/range index seeks. The complete predicate selects matching ids from the
+statement snapshot before any deletion; META().id remains a residual filter in T1. Omitting
+WHERE deletes all content while retaining the collection and index definitions. WHERE 1
+matches every document; NULL/MISSING match none. A successful command reports its affected
+count through Complete with no Document frames. Conflicts or cancellation roll back the
+statement; failure inside an explicit transaction aborts the whole transaction. System
+collections remain read-only and Schema-owned collection contents remain mutable.
+EXPLAIN DELETE reports Delete plus CollectionScan or IndexSeek without writing. USE KEYS,
+RETURNING and DELETE LIMIT remain COHDBL001 at their tokens. DocumentDeleteTests and the
+advertised-clause corpus cover embedded execution; wire and NativeAOT checks cover completion.
+
 Conformance lives in OqlSqlppBasisTests, OqlKeywordDispositionTests, DocumentMissingTests,
 OqlExecutionConformanceTests, DocumentQueryTests and DocumentMissingWireTests. The wire tests
 exercise both InMemory and TCP; the recovery fixture also executes IS MISSING under NativeAOT.

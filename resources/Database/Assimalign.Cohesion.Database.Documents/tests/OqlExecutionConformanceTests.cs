@@ -35,6 +35,14 @@ public sealed class OqlExecutionConformanceTests
                     VerificationStatement: "SELECT absent IS MISSING AS absent_value, null_value IS NULL AS null_value FROM items WHERE META().id = 'object'",
                     ExpectedAffectedCount: 1),
             ],
+            [OqlClauses.Delete] =
+            [
+                new("DELETE FROM items WHERE category = 'a'", [["gamma"]],
+                    VerificationStatement: "SELECT name FROM items", ExpectedAffectedCount: 3),
+                new("DELETE FROM items", [], VerificationStatement: "SELECT name FROM items", ExpectedAffectedCount: 4),
+                new("DELETE FROM items", [["by_score"]], ["CREATE INDEX by_score ON items (details.score)"],
+                    "SELECT INDEX_NAME FROM COHESION_SCHEMA.INDEXES", ExpectedAffectedCount: 4),
+            ],
             [OqlClauses.Values] =
             [
                 InsertCase(),
@@ -299,6 +307,7 @@ public sealed class OqlExecutionConformanceTests
     {
         OqlClauses.Explain => expression is OqlExplainExpression,
         OqlClauses.Insert => expression is OqlInsertExpression,
+        OqlClauses.Delete => expression is OqlDeleteExpression,
         OqlClauses.Values => expression is OqlInsertExpression { Values.Count: > 0 },
         OqlClauses.Select => expression is OqlSelectExpression { Projections.Count: > 0 },
         OqlClauses.Distinct => expression is OqlSelectExpression { IsDistinct: true },

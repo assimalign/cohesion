@@ -114,7 +114,7 @@ public sealed class DocumentIntrospectionTests
         var database = await engine.CreateDatabaseAsync("inventory");
         await using var session = await database.CreateSessionAsync();
         string expected = $"System collection '{name}' is read-only.";
-        foreach (string command in new[] { $"INSERT INTO {name} (KEY, VALUE) VALUES ('k', 1)", $"CREATE INDEX injected ON {name.ToLowerInvariant()} (x)", $"DROP INDEX absent ON \"{name}\"" })
+        foreach (string command in new[] { $"INSERT INTO {name} (KEY, VALUE) VALUES ('k', 1)", $"DELETE FROM {name}", $"CREATE INDEX injected ON {name.ToLowerInvariant()} (x)", $"DROP INDEX absent ON \"{name}\"" })
         {
             var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(command));
             error.Message.ShouldBe(expected);
@@ -127,7 +127,6 @@ public sealed class DocumentIntrospectionTests
 
     [Theory]
     [InlineData("UPDATE COHESION_SCHEMA.OBJECT_OWNERSHIP SET OWNER = 'Adhoc'")]
-    [InlineData("DELETE FROM COHESION_SCHEMA.INDEXES")]
     public async Task Unsupported_document_data_mutations_keep_the_language_capability_diagnostic(string query)
     {
         await using var engine = DocumentDatabaseEngine.Create("document-engine", new());

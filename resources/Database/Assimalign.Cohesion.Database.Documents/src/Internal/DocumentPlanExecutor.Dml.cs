@@ -14,6 +14,37 @@ namespace Assimalign.Cohesion.Database.Documents.Internal;
 
 internal static partial class DocumentPlanExecutor
 {
+    private static async ValueTask<DatabaseResult> ExecuteDeleteAsync(DocumentDatabase database, DocumentOperation operation,
+        DocumentDeletePlan plan, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
+    {
+        var evaluator = new DocumentExpressionEvaluator(plan.Statement.Alias, parameters, cancellationToken);
+        var candidates = await ReadCandidatesAsync(database, operation, plan.Collection, plan.Access, cancellationToken).ConfigureAwait(false);
+        var pending = new List<DocumentId>();
+        // Finish reading and evaluating the statement snapshot before changing any content
+        // or index entry. A seek supplies candidates; the complete predicate decides membership.
+        foreach (var entry in candidates.OrderBy(entry => entry.Id, StringComparer.Ordinal))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            operation.EnsureActive();
+            var document = database.ReadDocument(entry);
+            using var json = JsonDocument.Parse(document.Content, new JsonDocumentOptions { MaxDepth = 128 });
+            if (evaluator.Matches(plan.Statement.Predicate, new DocumentEvaluationContext(json.RootElement, entry.Id, entry.Version)))
+            {
+                pending.Add(document.Id);
+            }
+        }
+        var collection = new DocumentCollection(database, plan.Collection, operation.Session);
+        long affected = 0;
+        foreach (var id in pending)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            operation.EnsureActive();
+            if (await collection.DeleteAsync(operation.Context, id, null, cancellationToken).ConfigureAwait(false)) { affected++; }
+        }
+        cancellationToken.ThrowIfCancellationRequested();
+        return new DocumentCommandResult(affected);
+    }
+
     private static async ValueTask<DatabaseResult> ExecuteInsertAsync(DocumentDatabase database, DocumentOperation operation,
         DocumentCollectionMetadata metadata, OqlInsertExpression statement, DocumentInsertSelectPlan? select,
         IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)

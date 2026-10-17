@@ -25,10 +25,16 @@ if (args[0] == "seed")
     await session.ExecuteAsync("CREATE COLLECTION items", cancellationToken: CancellationToken.None);
     var collection = await session.GetCollectionAsync("items", CancellationToken.None);
     await collection.PutAsync(session, "committed", Encoding.UTF8.GetBytes(original));
+    await collection.PutAsync(session, "deleted", "{\"rank\":2}"u8.ToArray());
+    await collection.PutAsync(session, "restored", "{\"rank\":3}"u8.ToArray());
     await session.ExecuteAsync("CREATE INDEX by_rank ON items (rank)");
+    if ((await session.ExecuteAsync("DELETE FROM items WHERE rank = 2")).AffectedCount != 1)
+    { throw new InvalidOperationException("Committed DELETE did not affect one document."); }
     await session.BeginTransactionAsync();
     await collection.PutAsync(session, "committed", "{\"rank\":99}"u8.ToArray());
     await collection.PutAsync(session, "partial", Encoding.UTF8.GetBytes(original));
+    if ((await session.ExecuteAsync("DELETE FROM items WHERE rank = 3")).AffectedCount != 1)
+    { throw new InvalidOperationException("Uncommitted DELETE did not affect one document."); }
     foreach (var worker in engine.Workers)
     {
         // A pass records its failure instead of throwing it (#1268); the fixture fails fast.
@@ -62,7 +68,18 @@ else if (args[0] == "verify")
     {
         throw new InvalidOperationException("Recovered index does not match committed documents.");
     }
-    await using var missing = (DatabaseResultSet)await session.ExecuteAsync("SELECT nested.absent AS absent FROM items WHERE nested.absent IS MISSING", cancellationToken: CancellationToken.None);
+    if (await collection.GetAsync(session, "deleted") is not null || await collection.GetAsync(session, "restored") is null)
+    { throw new InvalidOperationException("Recovered DELETE content visibility is incorrect."); }
+    foreach (var (rank, expected) in new[] { (2, 0m), (3, 1m) })
+    {
+        await using var deletion = (DatabaseResultSet)await session.ExecuteAsync("SELECT COUNT(*) FROM items WHERE rank = @rank",
+            new Dictionary<string, object?> { ["rank"] = rank }, CancellationToken.None);
+        await using var deletionCursor = deletion.GetRowsAsync(CancellationToken.None).GetAsyncEnumerator();
+        if (!await deletionCursor.MoveNextAsync() || !Equals(deletionCursor.Current.GetValue(0), expected) ||
+            await deletionCursor.MoveNextAsync())
+        { throw new InvalidOperationException("Recovered DELETE index visibility is incorrect."); }
+    }
+    await using var missing = (DatabaseResultSet)await session.ExecuteAsync("SELECT nested.absent AS absent FROM items WHERE rank = 1 AND nested.absent IS MISSING", cancellationToken: CancellationToken.None);
     await using var missingCursor = missing.GetRowsAsync(CancellationToken.None).GetAsyncEnumerator();
     if (!await missingCursor.MoveNextAsync() || !missingCursor.Current.SupportsMissing ||
         !missingCursor.Current.IsMissing(0) || missingCursor.Current.IsNull(0) || missingCursor.Current.GetValue(0) is not null ||
