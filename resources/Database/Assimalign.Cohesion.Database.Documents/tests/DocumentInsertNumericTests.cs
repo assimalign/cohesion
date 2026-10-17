@@ -23,7 +23,7 @@ public sealed class DocumentInsertNumericTests
             var cases = new TheoryData<string, string, bool>();
             foreach (string number in new[] { "1e-29", "1.00000000000000000000000000001", "1e29" })
             {
-                foreach (string source in new[] { "literal", "parameter", "nested", "select-literal", "select-parameter" })
+                foreach (string source in new[] { "literal", "parameter", "nested", "select-literal", "select-parameter", "grouped", "empty", "empty-parameter" })
                 {
                     foreach (bool transaction in new[] { false, true })
                     { cases.Add(number, source, transaction); }
@@ -46,10 +46,14 @@ public sealed class DocumentInsertNumericTests
         await session.ExecuteAsync("CREATE INDEX by_n ON items (n)", cancellationToken: CancellationToken.None);
         using var json = JsonDocument.Parse(source == "nested" ? "{\"n\":[" + number + "]}" : number);
         var parameters = new Dictionary<string, object?> { ["n"] = json.RootElement };
-        string operand = source is "parameter" or "nested" or "select-parameter" ? "$n" : number;
-        string statement = source.StartsWith("select-", StringComparison.Ordinal)
-            ? $"INSERT INTO items (KEY k, VALUE v) SELECT 'bad' AS k, {operand} + n AS v FROM items"
-            : $"INSERT INTO items (KEY, VALUE) VALUES ('first', 1), ('bad', {operand})";
+        string operand = source is "parameter" or "nested" or "select-parameter" or "empty-parameter" ? "$n" : number;
+        string statement = source switch
+        {
+            "select-literal" or "select-parameter" => $"INSERT INTO items (KEY k, VALUE v) SELECT 'bad' AS k, {operand} + n AS v FROM items",
+            "grouped" => $"INSERT INTO items (KEY k, VALUE v) SELECT 'bad' AS k, {operand} AS v FROM items GROUP BY {operand}",
+            "empty" or "empty-parameter" => $"INSERT INTO items (KEY k, VALUE v) SELECT 'bad' AS k, {operand} + n AS v FROM items WHERE FALSE",
+            _ => $"INSERT INTO items (KEY, VALUE) VALUES ('first', 1), ('bad', {operand})",
+        };
         await using var transaction = explicitTransaction ? await session.BeginTransactionAsync(CancellationToken.None) : null;
         if (transaction is not null)
         { await session.ExecuteAsync("INSERT INTO items (KEY, VALUE) VALUES ('prior', 1)", cancellationToken: CancellationToken.None); }

@@ -492,6 +492,9 @@ representability to `DocumentStorage.ValidateContent`. Rounding, underflow and o
 COHDOC007 (SQLSTATE 22003), with the offending literal or parameter span. This also applies to
 computed INSERT SELECT inputs. Final document validation precedes all writes; other invalid
 INSERT JSON carries COHDOC008. PutAsync keeps its existing storage validation and write order.
+The input walk validates numeric literals and referenced JsonElement parameters before planning,
+so grouped-expression matching and empty sources retain the same located numeric refusal.
+Unused parameter-map entries remain ignored.
 
 INSERT and PutAsync share one internal write primitive inside the existing statement operation:
 writer lock, collection/index snapshot checks, current-key check, content write/tombstone,
