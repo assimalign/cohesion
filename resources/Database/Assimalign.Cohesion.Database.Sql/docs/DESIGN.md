@@ -15,7 +15,9 @@ step tests its own residual before deciding whether to extend an unmatched row w
 WHERE filters after the complete join. Catalog inputs use #1106's one captured image and
 never take object locks or index paths. Stored inputs lock once each in ObjectId order.
 Metrics retain ordered JoinAccessPaths (AccessPath renders them separated by semicolons),
-even when empty inputs skip enumeration. EXPLAIN emits a JoinStep child for every step,
+even when empty inputs skip enumeration. A single backing slot holds a scalar or join paths,
+and stored-only planning creates no join output map or flattened-walker enumerators, preserving
+the existing ReadCommitted allocation budget. EXPLAIN emits a JoinStep child for every step,
 with its scan or correlated seek. Grouping and subqueries use this same input plan.
 
 Pass-through projections carry source nullability, including all LEFT right columns.

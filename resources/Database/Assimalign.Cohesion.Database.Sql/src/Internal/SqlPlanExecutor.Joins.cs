@@ -75,7 +75,6 @@ internal sealed partial class SqlPlanExecutor
             paths[i] = accesses[i] is { } chosen ? $"join-seek:{chosen.Index.Name}" : "join-scan";
         }
         statement.Metrics.JoinAccessPaths = paths;
-        statement.Metrics.AccessPath = string.Join("; ", paths);
         if (accesses[^1] is { } last)
         {
             var fresh = plan.Bindings[last.InnerBinding];

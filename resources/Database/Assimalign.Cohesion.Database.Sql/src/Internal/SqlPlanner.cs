@@ -108,7 +108,7 @@ internal sealed partial class SqlPlanner
         IReadOnlyList<SqlRelationBinding>? bindings = null;
         IReadOnlyList<SqlCatalogColumn> columns = source.Columns;
         IReadOnlyList<SqlJoinStep> steps = [];
-        IReadOnlyList<int> outputOrdinals = Enumerable.Range(0, columns.Count).ToArray();
+        IReadOnlyList<int>? outputOrdinals = null;
         if (select.From.Count > 1 || select.From[0].Joins.Count > 0)
         {
             bindings = BindJoin(select, out columns, out steps, out outputOrdinals);
@@ -130,9 +130,10 @@ internal sealed partial class SqlPlanner
         {
             if (column.Expression is SqlStarExpression)
             {
-                foreach (int i in outputOrdinals)
+                for (int i = 0; i < (outputOrdinals?.Count ?? columns.Count); i++)
                 {
-                    projections.Add(PassThrough(columns[i].Name, i, columns, evaluator));
+                    int ordinal = outputOrdinals is null ? i : outputOrdinals[i];
+                    projections.Add(PassThrough(columns[ordinal].Name, ordinal, columns, evaluator));
                 }
             }
             else if (column.Expression is SqlColumnReferenceExpression reference)
