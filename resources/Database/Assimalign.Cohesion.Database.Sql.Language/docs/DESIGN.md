@@ -125,13 +125,18 @@ the parser implements today. Recognized clauses outside that set produce the sha
 
 ## ISO names and lexical aliases (#1108)
 
+All three national names accept optional VARYING: NATIONAL CHAR VARYING, NATIONAL CHARACTER
+VARYING and NCHAR VARYING resolve to unpadded String, like VARCHAR. Without VARYING they
+resolve to padded Character, like CHAR; bare padded names default to length one, while
+bare varying names are unbounded. This follows PostgreSQL src/backend/parser/gram.y:15130-15140.
+
 CAST delegates its target grammar and validation to ParseDefinitionType, shared by column,
 domain and function declarations. The grammar consumes only defined contextual continuations
 (PRECISION, VARYING and time-zone suffixes), without enlarging the reserved list. The stateless
 SqlTypeModifiers mapping supplies ISO names and D1 SQL Server lexical aliases to SQL, typed
 schemas and SDK extraction. No reflection, Regex, new public type, interface or grant is needed.
 
-MAX means unbounded only on VARCHAR, NVARCHAR and VARBINARY. NCHAR and NATIONAL CHARACTER
+MAX means unbounded only on VARCHAR, NVARCHAR and VARBINARY. NCHAR, NATIONAL CHAR and NATIONAL CHARACTER
 retain #1437's padded Character identity. Every temporal precision, including 7, and INTERVAL
 field qualifiers retain #1438's COHDBL001, because their semantics are not enforced. SQL0004
 stays retired for domains. BIT, SMALLDATETIME and TIME WITH TIME ZONE have SQL0005 reasons

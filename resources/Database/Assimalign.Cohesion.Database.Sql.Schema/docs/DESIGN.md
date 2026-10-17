@@ -2,9 +2,14 @@
 
 ## SQL type aliases (#1108)
 
+All three national names accept optional VARYING: NATIONAL CHAR VARYING, NATIONAL CHARACTER
+VARYING and NCHAR VARYING resolve to unpadded String, like VARCHAR. Without VARYING they
+resolve to padded Character, like CHAR; bare padded names default to length one, while
+bare varying names are unbounded. This follows PostgreSQL src/backend/parser/gram.y:15130-15140.
+
 Shared SqlTypeModifiers admits the closed ISO multi-word name set and SQL Server lexical
 aliases in typed column declarations and SDK extraction. VARCHAR(MAX), NVARCHAR(MAX) and
-VARBINARY(MAX) are unbounded; NCHAR and NATIONAL CHARACTER normalize to padded Character
+VARBINARY(MAX) are unbounded; NCHAR, NATIONAL CHAR and NATIONAL CHARACTER normalize to padded Character
 like CHAR. Every temporal precision remains unsupported (COHDBL001 detail). The canonical
 format advances v6 -> v7: an earlier NCHAR CustomType could mean a domain stored as String,
 whereas it now normalizes to Character. Earlier artifacts are refused without normalization

@@ -33,8 +33,9 @@ internal static class SqlTypeModifiers
             "REAL" or "FLOAT4" => DatabaseType.Float32,
             "FLOAT" or "FLOAT8" or "DOUBLE" or "DOUBLE PRECISION" => DatabaseType.Float64,
             "DECIMAL" or "NUMERIC" => DatabaseType.Decimal,
-            "CHAR" or "CHARACTER" or "NCHAR" or "NATIONAL CHARACTER" => DatabaseType.Character,
-            "VARCHAR" or "TEXT" or "NVARCHAR" or "CHARACTER VARYING" or "CHAR VARYING" or "NATIONAL CHARACTER VARYING" => DatabaseType.String,
+            "CHAR" or "CHARACTER" or "NCHAR" or "NATIONAL CHAR" or "NATIONAL CHARACTER" => DatabaseType.Character,
+            "VARCHAR" or "TEXT" or "NVARCHAR" or "CHARACTER VARYING" or "CHAR VARYING" or
+                "NCHAR VARYING" or "NATIONAL CHAR VARYING" or "NATIONAL CHARACTER VARYING" => DatabaseType.String,
             "BINARY" or "VARBINARY" or "BLOB" or "BYTEA" or "BINARY VARYING" => DatabaseType.Binary,
             "DATE" => DatabaseType.Date,
             "TIME" or "TIME WITHOUT TIME ZONE" => DatabaseType.Time,

@@ -78,12 +78,16 @@ public sealed partial class SqlQueryParser
         {
             return AppendTypeWord(ref lexer, type);
         }
-        if (type.Equals("NATIONAL", StringComparison.OrdinalIgnoreCase) && IsWord(ref lexer, "CHARACTER"))
+        // PostgreSQL src/backend/parser/gram.y:15130-15140 gives every national name opt_varying.
+        if (type.Equals("NATIONAL", StringComparison.OrdinalIgnoreCase) &&
+            (IsWord(ref lexer, "CHAR") || IsWord(ref lexer, "CHARACTER")))
         {
             type = AppendTypeWord(ref lexer, type);
         }
         if ((type.Equals("CHAR", StringComparison.OrdinalIgnoreCase) ||
              type.Equals("CHARACTER", StringComparison.OrdinalIgnoreCase) ||
+             type.Equals("NCHAR", StringComparison.OrdinalIgnoreCase) ||
+             type.Equals("NATIONAL CHAR", StringComparison.OrdinalIgnoreCase) ||
              type.Equals("NATIONAL CHARACTER", StringComparison.OrdinalIgnoreCase) ||
              type.Equals("BINARY", StringComparison.OrdinalIgnoreCase)) && IsWord(ref lexer, "VARYING"))
         {

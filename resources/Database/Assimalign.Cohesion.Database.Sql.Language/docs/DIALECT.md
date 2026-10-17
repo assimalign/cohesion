@@ -1282,8 +1282,8 @@ minimum. Inside `CAST` an unrepresentable literal stays a CAST failure.
 | `FLOAT[(p)]` | `Float32` for p = 1..24; `Float64` for p = 25..53 or no argument |
 | `FLOAT8`, `DOUBLE`, `DOUBLE PRECISION` | `Float64` |
 | `DECIMAL[(p[,s])]`, `NUMERIC[(p[,s])]` | `Decimal` (single argument = precision) |
-| `CHAR[(n)]`, `CHARACTER[(n)]`, `NCHAR[(n)]`, `NATIONAL CHARACTER[(n)]` | `Character` (bare forms have length one) |
-| `VARCHAR[(n)]`, `TEXT[(n)]`, `NVARCHAR[(n)]`, `CHARACTER VARYING[(n)]`, `CHAR VARYING[(n)]`, `NATIONAL CHARACTER VARYING[(n)]` | `String` |
+| `CHAR[(n)]`, `CHARACTER[(n)]`, `NCHAR[(n)]`, `NATIONAL CHAR[(n)]`, `NATIONAL CHARACTER[(n)]` | `Character` (bare forms have length one) |
+| `VARCHAR[(n)]`, `TEXT[(n)]`, `NVARCHAR[(n)]`, `CHARACTER VARYING[(n)]`, `CHAR VARYING[(n)]`, `NCHAR VARYING[(n)]`, `NATIONAL CHAR VARYING[(n)]`, `NATIONAL CHARACTER VARYING[(n)]` | `String` |
 | `BINARY[(n)]`, `VARBINARY[(n)]`, `BLOB[(n)]`, `BYTEA[(n)]`, `BINARY VARYING[(n)]` | `Binary` |
 | `DATE` | `Date` |
 | `TIME`, `TIME WITHOUT TIME ZONE` | `Time` |
@@ -1301,9 +1301,11 @@ All 19 current INFORMATION_SCHEMA DATA_TYPE spellings parse back to the same sha
 including CHARACTER added by #1437. The catalog stores type identity and modifiers, not aliases.
 
 `VARCHAR(MAX)`, `NVARCHAR(MAX)` and `VARBINARY(MAX)` mean unbounded String or Binary;
-MAX is accepted only on these three spellings. NCHAR and NATIONAL CHARACTER are padded
-Character exactly like CHAR, including DATA_TYPE CHARACTER. UNIQUEIDENTIFIER is UUID/Guid
-and takes no arguments. DATETIME and DATETIME2 are lexical TIMESTAMP aliases: SQL Server's
+MAX is accepted only on these three spellings. NCHAR, NATIONAL CHAR and NATIONAL CHARACTER
+are padded Character exactly like CHAR, including DATA_TYPE CHARACTER. Adding VARYING to any
+of those three names selects unpadded String exactly like VARCHAR; bare varying forms are
+unbounded. NATIONAL and VARYING remain usable as unquoted table and column names.
+UNIQUEIDENTIFIER is UUID/Guid and takes no arguments. DATETIME and DATETIME2 are lexical TIMESTAMP aliases: SQL Server's
 DATETIME 1753 lower bound and 1/300-second rounding are not emulated. DATETIMEOFFSET is
 TIMESTAMPTZ. These aliases add no Unicode storage distinction: all character spellings store Unicode.
 
@@ -1316,7 +1318,8 @@ TIMESTAMPTZ. These aliases add no Unicode storage distinction: all character spe
 | INTERVAL field qualifiers | COHDBL001: field restrictions are not enforced; use bare INTERVAL |
 
 PostgreSQL's grammar anchors the numeric, character and temporal spellings
-(`src/backend/parser/gram.y:14923-15016,15081-15181`, local reference clone).
+(`src/backend/parser/gram.y:14923-15016,15081-15181`, local reference clone). Every national
+character spelling has optional VARYING (`gram.y:15130-15140`).
 
 Coercion rules are an engine concern (planner/executor); the language layer
 guarantees only that declared names resolve to shared type identities so every
@@ -1348,7 +1351,7 @@ CAST, declared scripts, and typed schemas (including SDK extraction).
 | Type names | Accepted arguments | No arguments |
 | --- | --- | --- |
 | NUMERIC, DECIMAL | Precision p = 1..28; optional scale s = 0..p; omitted scale is zero | No declared precision or scale; values must still fit System.Decimal |
-| CHAR, CHARACTER, NCHAR, NATIONAL CHARACTER | One length n = 1..10485760 Unicode scalar values | CHAR(1) |
+| CHAR, CHARACTER, NCHAR, NATIONAL CHAR, NATIONAL CHARACTER | One length n = 1..10485760 Unicode scalar values | CHAR(1) |
 | VARCHAR, TEXT, NVARCHAR and varying character spellings | One length n = 1..10485760 Unicode scalar values; MAX on VARCHAR/NVARCHAR | No declared length limit |
 | BINARY, VARBINARY, BLOB, BYTEA, BINARY VARYING | One length n = 1..10485760 bytes; MAX on VARBINARY | No declared length limit |
 | FLOAT | One binary precision p = 1..53: 1..24 resolves to REAL (Float32), 25..53 to DOUBLE PRECISION (Float64) | Float64 |

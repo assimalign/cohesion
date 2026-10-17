@@ -10,6 +10,23 @@ namespace Assimalign.Cohesion.Database.Sql.Schema.Tests;
 
 public sealed class SqlTypeModifierTests
 {
+    [Theory(DisplayName = "Cohesion Test [Sql.Schema] - National character forms: typed columns retain padding identity and length")]
+    [MemberData(nameof(SqlTypeModifierCases.NationalCharacters), MemberType = typeof(SqlTypeModifierCases))]
+    public void Compile_NationalCharacters_ShouldPreserveIdentity(string type, DatabaseType expected, int? length)
+    {
+        // Arrange / Act
+        var compiled = SqlSchema.Compile("app", schema => schema.Table<SqlTypeModifierCases.Row>("items", table =>
+            table.Column(row => row.Text, type)));
+
+        // Assert
+        var column = compiled.Tables.ShouldHaveSingleItem().Columns.ShouldHaveSingleItem();
+        column.Type.ShouldBe(expected);
+        column.CustomType.ShouldBe(type);
+        // String bounds stay in CustomType; padded Character also stores its normalized length.
+        column.MaxLength.ShouldBe(expected == DatabaseType.Character ? length : null);
+        SqlCompiledSchemaSerializer.Deserialize(compiled.CanonicalDocument).Hash.ShouldBe(compiled.Hash);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sql.Schema] - Temporal modifiers: typed and raw declarations report unsupported modifiers")]
     [MemberData(nameof(SqlTypeModifierCases.UnsupportedTemporal), MemberType = typeof(SqlTypeModifierCases))]
     public void Compile_TemporalModifiers_ShouldNameUnsupportedModifier(string type, string member)

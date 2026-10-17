@@ -17,6 +17,20 @@ public static class SqlTypeModifierCases
         Statements((string)row[0]).Append(($"DROP FUNCTION parameter_function({row[0]})", "parameter type"))
             .Select(statement => new object[] { row[0], statement.Item1, statement.Item2 }));
 
+    public static IEnumerable<object[]> NationalCharacters
+    {
+        get
+        {
+            foreach (string name in new[] { "NATIONAL CHAR", "NATIONAL CHARACTER", "NCHAR" })
+            {
+                yield return [name, DatabaseType.Character, 1];
+                yield return [name + "(10)", DatabaseType.Character, 10];
+                yield return [name + " VARYING", DatabaseType.String, null!];
+                yield return [name + " VARYING(10)", DatabaseType.String, 10];
+            }
+        }
+    }
+
     public static IEnumerable<object[]> Floating
     {
         get
@@ -93,11 +107,15 @@ public static class SqlTypeModifierCases
             }
             foreach (string type in new[] { "DOUBLE PRECISION", "CHARACTER VARYING(20)", "CHAR VARYING(20)",
                 "NATIONAL CHARACTER VARYING(20)", "NVARCHAR(20)", "VARCHAR(MAX)", "NVARCHAR(MAX)",
-                "BINARY VARYING(20)", "VARBINARY(MAX)", "NCHAR(10)", "NATIONAL CHARACTER(10)" })
+                "BINARY VARYING(20)", "VARBINARY(MAX)" })
             {
                 bool binary = type.StartsWith("BINARY", StringComparison.Ordinal) || type.StartsWith("VARBINARY", StringComparison.Ordinal);
                 bool floating = type == "DOUBLE PRECISION";
                 yield return [type, true, floating ? "DOUBLE" : binary ? "BINARY" : "TEXT", floating ? "Double" : binary ? "Bytes" : "Text"];
+            }
+            foreach (object[] national in NationalCharacters)
+            {
+                yield return [national[0], true, "TEXT", "Text"];
             }
             yield return ["INT", true, "INT", "Number"];
             yield return ["INT(5)", false, "INT", "Number"];

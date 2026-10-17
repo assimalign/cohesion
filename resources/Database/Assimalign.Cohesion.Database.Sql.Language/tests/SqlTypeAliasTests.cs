@@ -11,11 +11,14 @@ namespace Assimalign.Cohesion.Database.Sql.Language.Tests;
 public sealed class SqlTypeAliasTests
 {
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Type aliases: every declaration and CAST resolves the same built-in")]
+    [MemberData(nameof(SqlTypeModifierCases.NationalCharacters), MemberType = typeof(SqlTypeModifierCases))]
     [InlineData("DOUBLE PRECISION", DatabaseType.Float64, null)]
     [InlineData("double /*x*/ precision", DatabaseType.Float64, null)]
     [InlineData("CHARACTER VARYING(20)", DatabaseType.String, 20)]
     [InlineData("char\n varying /*n*/ (20)", DatabaseType.String, 20)]
     [InlineData("NATIONAL CHARACTER VARYING(20)", DatabaseType.String, 20)]
+    [InlineData("national /*x*/ char\n varying(10)", DatabaseType.String, 10)]
+    [InlineData("nchar /*x*/ varying(10)", DatabaseType.String, 10)]
     [InlineData("BINARY VARYING(20)", DatabaseType.Binary, 20)]
     [InlineData("TIME WITHOUT TIME ZONE", DatabaseType.Time, null)]
     [InlineData("TIMESTAMP WITHOUT TIME ZONE", DatabaseType.DateTime, null)]
@@ -25,10 +28,6 @@ public sealed class SqlTypeAliasTests
     [InlineData("NVARCHAR(MAX)", DatabaseType.String, null)]
     [InlineData("varchar ( /*x*/ max )", DatabaseType.String, null)]
     [InlineData("VARBINARY(MAX)", DatabaseType.Binary, null)]
-    [InlineData("NCHAR", DatabaseType.Character, 1)]
-    [InlineData("NCHAR(10)", DatabaseType.Character, 10)]
-    [InlineData("NATIONAL CHARACTER", DatabaseType.Character, 1)]
-    [InlineData("NATIONAL CHARACTER(10)", DatabaseType.Character, 10)]
     [InlineData("DATETIME", DatabaseType.DateTime, null)]
     [InlineData("DATETIME2", DatabaseType.DateTime, null)]
     [InlineData("DATETIMEOFFSET", DatabaseType.DateTimeOffset, null)]
@@ -70,6 +69,29 @@ public sealed class SqlTypeAliasTests
                 target.MaxLength.ShouldBe(length);
                 SqlExpressionRenderer.Render(reparsed.Expression.ShouldBeOfType<SqlSelectExpression>()).ShouldBe(rendered);
             }
+        }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - National character words: unquoted table and column names remain usable")]
+    [InlineData("national", "varying")]
+    [InlineData("varying", "national")]
+    public void Parse_NationalCharacterWords_ShouldRemainIdentifiers(string table, string column)
+    {
+        // Arrange
+        var parser = new SqlQueryParser();
+        string[] statements = [
+            $"CREATE TABLE {table} ({column} NATIONAL CHAR VARYING(10), precision NCHAR(10));",
+            $"INSERT INTO {table} ({column}, precision) VALUES ('ab', 'cd');",
+            $"SELECT {column}, precision, CAST({column} AS NCHAR VARYING(10)) FROM {table};",
+        ];
+
+        foreach (string sql in statements)
+        {
+            // Act
+            var statement = parser.Parse(sql);
+
+            // Assert
+            statement.Diagnostics.ShouldBeEmpty(sql);
         }
     }
 
