@@ -161,17 +161,6 @@ internal sealed partial class SqlPlanExecutor
             projected = Deduplicate(projected, projections, evaluator);
         }
 
-        // OFFSET / LIMIT.
-        IEnumerable<object?[]> window = projected;
-        if (offset is long skip)
-        {
-            window = window.Skip((int)skip);
-        }
-        if (limit is long take)
-        {
-            window = window.Take((int)take);
-        }
-
         var columns = new DatabaseColumn[projections.Count];
         for (int i = 0; i < projections.Count; i++)
         {
@@ -183,7 +172,17 @@ internal sealed partial class SqlPlanExecutor
             };
         }
 
-        return new SqlMaterializedResultSet(columns, window.ToList());
+        return new SqlMaterializedResultSet(columns, ApplyRowWindow(projected, limit, offset));
+    }
+
+    /// <summary>Bounds nonnegative Int64 counts by the materialized rows before narrowing.</summary>
+    private static List<object?[]> ApplyRowWindow(List<object?[]> rows, long? limit, long? offset)
+    {
+        // Planning rejects negative counts. The collection bounds make both checked casts safe,
+        // even at Int64.MaxValue, without adding the requested offset and limit.
+        int start = checked((int)Math.Min(offset ?? 0, rows.Count));
+        int count = checked((int)Math.Min(limit ?? rows.Count, rows.Count - start));
+        return rows.GetRange(start, count);
     }
 
     /// <summary>

@@ -134,6 +134,81 @@ public sealed class SqlLanguageConformanceTests
         (await RowsAsync(session, sql)).ShouldHaveSingleItem()[0].ShouldBe(expected);
     }
 
+    /// <summary>Applies the full Int64 count range consistently to every materialized SELECT shape.</summary>
+    /// <param name="query">The ordered query producing three rows.</param>
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - LIMIT/OFFSET: Int64 counts preserve the row window for every plan shape")]
+    [InlineData("SELECT id FROM window_rows ORDER BY id")]
+    [InlineData("SELECT w.id FROM window_rows w INNER JOIN window_peers p ON w.id = p.id ORDER BY w.id")]
+    [InlineData("SELECT ORDINAL_POSITION FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'window_rows' ORDER BY ORDINAL_POSITION")]
+    [InlineData("SELECT id FROM window_rows GROUP BY id ORDER BY id")]
+    public async Task Select_Int64RowWindow_ShouldReturnExpectedRows(string query)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("sql-profile-window", new SqlDatabaseEngineOptions());
+        var database = await engine.CreateDatabaseAsync("audit");
+        await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
+        await ExecuteAsync(session, "CREATE TABLE window_rows (id INT, category INT, label TEXT)");
+        await ExecuteAsync(session, "INSERT INTO window_rows VALUES (3, 1, 'c'), (1, 1, 'a'), (2, 2, 'b')");
+        await ExecuteAsync(session, "CREATE TABLE window_peers (id INT)");
+        await ExecuteAsync(session, "INSERT INTO window_peers VALUES (1), (2), (3)");
+        (string Clause, long[] Expected)[] windows =
+        [
+            ("", [1, 2, 3]),
+            ("LIMIT 0", []),
+            ("LIMIT 1", [1]),
+            ("LIMIT 2 OFFSET 1", [2, 3]),
+            ("LIMIT 2147483647", [1, 2, 3]),
+            ("LIMIT 2147483648", [1, 2, 3]),
+            ("LIMIT 4294967295", [1, 2, 3]),
+            ("LIMIT 4294967296", [1, 2, 3]),
+            ("LIMIT 4294967297", [1, 2, 3]),
+            ("LIMIT 9223372036854775807", [1, 2, 3]),
+            ("OFFSET 0", [1, 2, 3]),
+            ("OFFSET 3", []),
+            ("OFFSET 2147483647", []),
+            ("OFFSET 2147483648", []),
+            ("OFFSET 4294967295", []),
+            ("OFFSET 4294967296", []),
+            ("OFFSET 4294967297", []),
+            ("OFFSET 9223372036854775807", []),
+            ("LIMIT 9223372036854775807 OFFSET 1", [2, 3]),
+            ("LIMIT 1 OFFSET 4294967297", []),
+            ("LIMIT 9223372036854775807 OFFSET 9223372036854775807", []),
+        ];
+
+        foreach (var (clause, expected) in windows)
+        {
+            // Act
+            var rows = await RowsAsync(session, $"{query} {clause}");
+
+            // Assert
+            rows.Select(row => Convert.ToInt64(row[0])).ShouldBe(expected, clause);
+        }
+    }
+
+    /// <summary>Keeps invalid count diagnostics unchanged before a row window executes.</summary>
+    /// <param name="clause">The count clause.</param>
+    /// <param name="count">The invalid count.</param>
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - LIMIT/OFFSET: negative and fractional counts retain their diagnostics")]
+    [InlineData("LIMIT", "-1")]
+    [InlineData("LIMIT", "1.5")]
+    [InlineData("OFFSET", "-1")]
+    [InlineData("OFFSET", "1.5")]
+    public async Task Select_InvalidRowWindow_ShouldRetainDiagnostic(string clause, string count)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("sql-profile-window-invalid", new SqlDatabaseEngineOptions());
+        var database = await engine.CreateDatabaseAsync("audit");
+        await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
+        foreach (string setup in _seed) { await ExecuteAsync(session, setup); }
+
+        // Act
+        var error = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, $"SELECT id FROM t {clause} {count}"));
+
+        // Assert
+        error.Message.ShouldBe($"{clause} requires a non-negative integer.");
+    }
+
     private static void RequireExecutionCases(IEnumerable<string> clauses, IReadOnlyDictionary<string, ExecutionCase> cases)
         => clauses.Where(clause => !cases.ContainsKey(clause)).ShouldBeEmpty("Every advertised clause needs a live execution case.");
 

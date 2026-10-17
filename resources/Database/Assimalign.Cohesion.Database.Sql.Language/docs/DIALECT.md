@@ -810,6 +810,16 @@ the value order cannot compare (`Cannot compare values of types ...`).
 
 ## VALUES and counts have no column scope (#1165)
 
+`LIMIT` and `OFFSET` accept nonnegative integer counts through
+`9223372036854775807` (`Int64.MaxValue`). After ordering and `DISTINCT`, `OFFSET`
+discards that many rows and `LIMIT` keeps at most that many of the remaining rows.
+A limit greater than the result size keeps every remaining row; an offset at or
+beyond the result size returns no rows. These rules apply to stored tables,
+two-table joins, virtual system relations and grouped queries, in process and
+over the SQL wire protocol (#1100). Negative and non-integer counts retain the
+`LIMIT requires a non-negative integer.` / `OFFSET requires a non-negative integer.`
+diagnostics.
+
 A row of `INSERT ... VALUES` is evaluated once, against no table row: ISO SQL
 forbids a column reference in an INSERT's table value constructor. `LIMIT` and
 `OFFSET` counts are evaluated once too, while planning. Their expressions are
