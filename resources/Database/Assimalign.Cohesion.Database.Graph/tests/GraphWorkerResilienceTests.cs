@@ -29,6 +29,7 @@ namespace Assimalign.Cohesion.Database.Graph.Tests;
 /// failed header slot write take only their database offline, and every later operation on it is
 /// refused with COHDBG012 while nothing more is written to it.
 /// </summary>
+[Collection(nameof(GraphWorkerResilienceCollection))]
 public sealed class GraphWorkerResilienceTests
 {
     private const string Failing = "failing";
@@ -369,18 +370,22 @@ public sealed class GraphWorkerResilienceTests
     {
         // Arrange
         var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
-        await using var engine = GraphDatabaseEngine.Create("graph-engine", Options(strategy, checkpoint: TimeSpan.FromMilliseconds(100)));
+        var options = Options(strategy);
+        options.CheckpointJournalSize = 0;
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", options);
         var failing = await engine.CreateDatabaseAsync(Failing);
         var healthy = await engine.CreateDatabaseAsync(Healthy);
         await InsertAsync(failing, 0, 10);
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
         var faults = strategy.Faults(Failing);
         await using var session = await failing.CreateSessionAsync();
-
-        // Act: the next checkpoint's header slot write fails.
-        faults.FailHeaderWrites = true;
         await session.ExecuteAsync("INSERT (:Item {name: 'k10'})");
-        bool offline = await Eventually(() => engine.OfflineDatabases.Contains((DatabaseName)Failing));
+
+        // Act: all writes have committed before the worker can reach the injected header fault.
+        // The hour-long time trigger stays out of this test; enabling the size trigger wakes it.
+        faults.FailHeaderWrites = true;
+        failing.DataStorage.CheckpointJournalSize = 1;
+        bool offline = await Eventually(() => faults.HeaderWriteFailures == 1 && engine.OfflineDatabases.Contains((DatabaseName)Failing));
         long journalAtTheFault = failing.DataStorage.JournalLength;
         var atTheFault = strategy.Capture(Failing);
 
@@ -394,6 +399,7 @@ public sealed class GraphWorkerResilienceTests
         // The checkpoint worker keeps visiting the engine: the healthy database is checkpointed.
         await InsertAsync(healthy, 0, 10);
         long healthyWritten = healthy.DataStorage.JournalLength;
+        healthy.DataStorage.CheckpointJournalSize = 1;
         bool healthyCheckpointed = await Eventually(() => healthy.DataStorage.JournalLength < healthyWritten);
         var after = strategy.Capture(Failing);
 
