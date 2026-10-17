@@ -48,9 +48,8 @@ public static class SqlExpressionRenderer
     // in some position: the LIKE escape clause, IS UNKNOWN, and NULLS FIRST/LAST.
     private static readonly string[] _positionalWords = ["ESCAPE", "UNKNOWN", "NULLS"];
 
-    // Builtin window functions. The parser rejects a bare call to one as an unsupported window
-    // function, so a call that parsed without error named a user function delimited, and is
-    // rendered delimited.
+    // Builtin window functions. An accepted quoted uppercase or mixed-case spelling is a
+    // distinct name: keep it delimited so rendering cannot turn it into an unquoted built-in.
     private static readonly string[] _windowFunctions =
         ["ROW_NUMBER", "RANK", "DENSE_RANK", "LEAD", "LAG", "FIRST_VALUE", "LAST_VALUE", "NTH_VALUE", "NTILE"];
 

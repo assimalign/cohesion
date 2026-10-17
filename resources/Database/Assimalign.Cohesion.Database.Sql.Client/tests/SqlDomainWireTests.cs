@@ -134,17 +134,17 @@ public sealed class SqlDomainWireTests
     }
 
     /// <summary>
-    /// An application cast that throws is a coded statement failure over the wire, a cancellation it
-    /// throws while the statement was not cancelled included: the connection stays usable (COHSQLE007,
-    /// as for a function), where a raw cancellation would have closed it.
+    /// An application cast that throws is a coded statement failure over the wire: invalid text is
+    /// COHSQLE022, and implementation faults or unrelated cancellation are COHSQLE007. The connection
+    /// stays usable, where a raw cancellation would have closed it.
     /// </summary>
     /// <param name="input">The text the cast is given.</param>
     /// <param name="message">The failure the client receives.</param>
     /// <returns>The asynchronous test operation.</returns>
-    [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - Domains: a throwing application cast is COHSQLE007 over the wire and the connection stays usable")]
+    [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - Domains: application cast failures keep their wire code and the connection stays usable")]
     [InlineData("npe", "COHSQLE007: Cast TEXT AS points failed: npe!")]
     [InlineData("oce", "COHSQLE007: Cast TEXT AS points failed: not this statement")]
-    [InlineData("bad", "CAST from String to points failed: not a number of points")]
+    [InlineData("bad", "COHSQLE022: CAST from String to points failed: not a number of points")]
     public async Task QueryAsync_ThrowingApplicationCast_ShouldBeCodedAndKeepTheConnection(string input, string message)
     {
         // Arrange
@@ -170,6 +170,7 @@ public sealed class SqlDomainWireTests
 
         // Assert
         failure.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
+        failure.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
         failure.ConnectionUsable.ShouldBeTrue();
         failure.Message.ShouldBe(message);
         after.ShouldHaveSingleItem()["p"].ShouldBe(7L);

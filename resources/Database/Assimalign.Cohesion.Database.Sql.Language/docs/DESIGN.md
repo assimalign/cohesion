@@ -425,3 +425,8 @@ The function-call branch checks quoted names against the same recognized unsuppo
 as unquoted calls. Quoted names must match the lowercase lookup spelling exactly; unquoted
 names match without regard to case. Parentheses distinguish calls from quoted columns.
 DIALECT documents the PostgreSQL scanner and function-lookup references and examples.
+
+Rendering preserves accepted quoted uppercase and mixed-case window-like names with delimiters.
+A lowercase quoted unsupported call retains its diagnostic and NULL recovery expression; the
+renderer round-trip guarantee continues to apply to error-free parser trees. Renderer tests
+cover both accepted spellings and the coded recovery of rejected spellings.
