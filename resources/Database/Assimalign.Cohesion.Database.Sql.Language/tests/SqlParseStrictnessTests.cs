@@ -26,19 +26,19 @@ public sealed class SqlParseStrictnessTests
     [InlineData("SELECT * FROM t «^»")]
     [InlineData("SELECT * FROM t «§»;")]
     [InlineData("SELECT a «#» b FROM t")]
-    [InlineData("SELECT a FROM t WHERE b = «?»")]
-    [InlineData("SELECT «?» FROM t;")]
+    [InlineData("SELECT a FROM t WHERE b = «?»", true)]
+    [InlineData("SELECT «?» FROM t;", true)]
     [InlineData("SELECT a «?» FROM t;")]
     [InlineData("DELETE FROM t «?»;")]
-    [InlineData("UPDATE t SET a = «?» WHERE id = 1;")]
-    [InlineData("INSERT INTO t VALUES («?»);")]
+    [InlineData("UPDATE t SET a = «?» WHERE id = 1;", true)]
+    [InlineData("INSERT INTO t VALUES («?»);", true)]
     [InlineData("SELECT * FROM t «\U0001F643»;")]
     [InlineData("«?» SELECT * FROM t;")]
     [InlineData("«﻿»SELECT a FROM t;")]
     [InlineData("SELECT «٣» FROM t;")]
     [InlineData("SELECT a FROM t WHERE a = «１»;")]
     [InlineData("DELETE FROM t WHERE id = «١»;")]
-    public void Parse_StrayCharacter_ShouldReportOneSyntaxErrorAndBindNothing(string marked)
+    public void Parse_StrayCharacter_ShouldReportOneSyntaxErrorAndBindNothing(string marked, bool parameterForm = false)
     {
         // Arrange
         var (sql, start, end) = Unmark(marked);
@@ -51,7 +51,7 @@ public sealed class SqlParseStrictnessTests
         error.Code.ShouldBe("SQL0003");
         error.Start.ShouldBe(start);
         error.End.ShouldBe(end);
-        if (sql.Contains("SELECT ?", StringComparison.Ordinal) || sql.Contains("= ?", StringComparison.Ordinal))
+        if (parameterForm)
         {
             error.Message!.ShouldContain("use $name, @name, or $1");
         }
