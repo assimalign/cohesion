@@ -1,5 +1,6 @@
 using System;
 using System.Text;
+using System.Text.Json;
 using System.Threading.Tasks;
 
 using Shouldly;
@@ -39,7 +40,7 @@ public sealed class DocumentResponseStreamingTests
 
     [Theory(DisplayName = "Cohesion Test [Documents.Client] - Large query responses use bounded additional server buffers")]
     [InlineData("SELECT * FROM items", DocumentProtocolMessageType.Document)]
-    [InlineData("SELECT text FROM items", DocumentProtocolMessageType.ResultRow)]
+    [InlineData("SELECT text, marker FROM items", DocumentProtocolMessageType.ResultRow)]
     public async Task QueryAsync_LargeResult_ShouldStreamWithinBufferBudget(string statement, DocumentProtocolMessageType rowType)
     {
         // Arrange: 32 MiB of encoded rows exceeds the 8 MiB additional-buffer budget.
@@ -50,9 +51,10 @@ public sealed class DocumentResponseStreamingTests
         {
             var collection = await session.CreateCollectionAsync("items", harness.Token);
             await using var transaction = await session.BeginTransactionAsync(harness.Token);
-            byte[] content = Encoding.UTF8.GetBytes("{\"text\":\"" + new string('x', 256 * 1024) + "\"}");
+            string text = new('x', 256 * 1024);
             for (int index = 0; index < rowCount; index++)
             {
+                byte[] content = Encoding.UTF8.GetBytes("{\"text\":\"" + text + "\",\"marker\":" + index + "}");
                 await collection.PutAsync(session, index.ToString("D4"), content, cancellationToken: harness.Token);
             }
             await transaction.CommitAsync(harness.Token);
@@ -70,7 +72,9 @@ public sealed class DocumentResponseStreamingTests
         (await channel.Reader.ReadFrameAsync(harness.Token)).ShouldNotBeNull().Type.ShouldBe((ProtocolMessageType)DocumentProtocolMessageType.ResultHeader);
         for (int index = 0; index < rowCount; index++)
         {
-            (await channel.Reader.ReadFrameAsync(harness.Token)).ShouldNotBeNull().Type.ShouldBe((ProtocolMessageType)rowType);
+            var frame = (await channel.Reader.ReadFrameAsync(harness.Token)).ShouldNotBeNull();
+            frame.Type.ShouldBe((ProtocolMessageType)rowType);
+            ReadMarker(frame.Payload.Span, rowType == DocumentProtocolMessageType.Document).ShouldBe(index);
         }
         var complete = (await channel.Reader.ReadFrameAsync(harness.Token)).ShouldNotBeNull();
         await WriteAsync(ProtocolMessageType.Ping, []);
@@ -90,6 +94,27 @@ public sealed class DocumentResponseStreamingTests
             await channel.Writer.WriteFrameAsync(new(type, payload), harness.Token);
             await channel.Writer.FlushAsync(harness.Token);
         }
+    }
+
+    private static int ReadMarker(ReadOnlySpan<byte> payload, bool wholeDocument)
+    {
+        var reader = new Utf8JsonReader(payload, new JsonReaderOptions { MaxDepth = 256 });
+        if (!wholeDocument)
+        {
+            reader.Read(); // Array.
+            reader.Read(); // Text.
+            reader.Read(); // Marker.
+            return reader.GetInt32();
+        }
+        while (reader.Read())
+        {
+            if (reader.TokenType == JsonTokenType.PropertyName && reader.ValueTextEquals("marker"))
+            {
+                reader.Read();
+                return reader.GetInt32();
+            }
+        }
+        return -1;
     }
 
     [Fact(DisplayName = "Cohesion Test [Documents.Client] - Failure after partial rows discards the result and preserves the session")]

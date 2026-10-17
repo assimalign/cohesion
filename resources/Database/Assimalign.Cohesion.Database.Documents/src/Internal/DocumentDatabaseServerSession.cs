@@ -459,6 +459,7 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
         {
             await using (set.ConfigureAwait(false))
             {
+                using var json = new DocumentJsonValues();
                 await WriteResultFrameAsync(DocumentProtocolMessageType.ResultHeader,
                     new DocumentProtocolResultHeaderMessage(set.Columns.Select(column => (column.Name, (byte)column.Type)).ToArray(), wholeDocuments).Encode(), cancellationToken).ConfigureAwait(false);
                 await foreach (DatabaseRow row in set.GetRowsAsync(cancellationToken).ConfigureAwait(false))
@@ -466,7 +467,7 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
                     var values = new object?[row.FieldCount];
                     for (int index = 0; index < values.Length; index++) { values[index] = row.GetValue(index); }
                     await WriteResultFrameAsync(wholeDocuments ? DocumentProtocolMessageType.Document : DocumentProtocolMessageType.ResultRow,
-                        DocumentJsonValues.Result(values, wholeDocuments), cancellationToken).ConfigureAwait(false);
+                        json.Result(values, wholeDocuments), cancellationToken).ConfigureAwait(false);
                     count++;
                 }
             }
@@ -542,13 +543,13 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
         await WriteResultFrameAsync(DocumentProtocolMessageType.Complete, new DocumentProtocolCompleteMessage(count, affected).Encode(), cancellationToken).ConfigureAwait(false);
     }
 
-    private async ValueTask WriteResultFrameAsync(DocumentProtocolMessageType type, byte[] payload, CancellationToken cancellationToken)
+    private async ValueTask WriteResultFrameAsync(DocumentProtocolMessageType type, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
     {
         var frame = ResultFrame(type, payload);
         await WriteFrameAsync(frame.Type, frame.Payload, cancellationToken).ConfigureAwait(false);
     }
 
-    private static ProtocolFrame ResultFrame(DocumentProtocolMessageType type, byte[] payload)
+    private static ProtocolFrame ResultFrame(DocumentProtocolMessageType type, ReadOnlyMemory<byte> payload)
     {
         if ((uint)payload.Length > ProtocolFrameHeader.MaxPayloadLength)
         {

@@ -6,18 +6,25 @@ using System.Text.Json;
 
 namespace Assimalign.Cohesion.Database.Documents.Internal;
 
-internal static class DocumentJsonValues
+internal sealed class DocumentJsonValues : IDisposable
 {
-    internal static byte[] Result(IReadOnlyList<object?> values, bool wholeDocument)
+    private readonly DocumentJsonBuffer _buffer = new();
+    private readonly Utf8JsonWriter _writer;
+
+    internal DocumentJsonValues() => _writer = new(_buffer, new JsonWriterOptions { MaxDepth = 256 });
+
+    internal ReadOnlyMemory<byte> Result(IReadOnlyList<object?> values, bool wholeDocument)
     {
-        var buffer = new DocumentJsonBuffer();
-        using var writer = new Utf8JsonWriter(buffer, new JsonWriterOptions { MaxDepth = 256 });
-        if (!wholeDocument) { writer.WriteStartArray(); }
-        foreach (object? value in values) { Write(writer, value); }
-        if (!wholeDocument) { writer.WriteEndArray(); }
-        writer.Flush();
-        return buffer.ToArray();
+        _buffer.Clear();
+        _writer.Reset(_buffer);
+        if (!wholeDocument) { _writer.WriteStartArray(); }
+        foreach (object? value in values) { Write(_writer, value); }
+        if (!wholeDocument) { _writer.WriteEndArray(); }
+        _writer.Flush();
+        return _buffer.WrittenMemory;
     }
+
+    public void Dispose() => _writer.Dispose();
 
     private static void Write(Utf8JsonWriter writer, object? value)
     {

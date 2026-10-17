@@ -752,7 +752,8 @@ Shared Error terminates the session. The client rejects wrong ordering, row widt
 collection ordering, count or affected-count semantics before accepting completion.
 
 The server streams the header and each row/document frame directly, then Complete. It retains
-one encoded frame at a time; its serialization buffer accepts at most 16 MiB of committed JSON
+one encoded frame at a time and reuses one JSON writer/buffer for the result, resetting it only
+after the preceding frame write and flush complete. Its buffer accepts at most 16 MiB of committed JSON
 and bounds scratch capacity to six frame lengths plus 4096 bytes (the JSON writer may request
 six bytes per UTF-16 character before escaping). Thus response buffering is independent of row
 count, beyond the engine's materialized result. Collection listings also stream per name.

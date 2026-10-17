@@ -15,7 +15,8 @@ internal sealed class DocumentJsonBuffer : IBufferWriter<byte>
     private byte[] _buffer = [];
     private int _written;
 
-    internal byte[] ToArray() => _buffer.AsSpan(0, _written).ToArray();
+    internal ReadOnlyMemory<byte> WrittenMemory => _buffer.AsMemory(0, _written);
+    internal void Clear() => _written = 0;
 
     public void Advance(int count)
     {
