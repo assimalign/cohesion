@@ -157,7 +157,7 @@ internal sealed partial class SqlExpressionEvaluator
         }
         collation = CollationOf(binary, [leftCollation, rightCollation]);
         return new SqlBoundBinary(binary.Operator, left, right,
-            SqlBoundCollation.Of(leftCollation, rightCollation, _defaultCollation));
+            SqlBoundCollation.Of(leftCollation, rightCollation, _defaultCollation), binary.Location);
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
@@ -245,7 +245,7 @@ internal sealed partial class SqlExpressionEvaluator
         }
 
         return new SqlBoundCast(operand, cast.TargetType, target, _functions.Types.ResolveCasts(SourceDomain(cast.Operand), target),
-            _functions.Database, _defaultCollation);
+            _functions.Database, _defaultCollation, cast.Location);
     }
 
     /// <summary>
@@ -382,7 +382,7 @@ internal sealed partial class SqlExpressionEvaluator
 
         var operand = Bind(unary.Operand, out SqlCollationCandidate operandCollation);
         collation = CollationOf(unary, [operandCollation]);
-        var bound = new SqlBoundUnary(unary.Operator, operand);
+        var bound = new SqlBoundUnary(unary.Operator, operand, unary.Location);
 
         // A sign over a constant is a constant, as PostgreSQL's grammar reads "-5" as the constant
         // -5 (doNegate, src/backend/parser/gram.y): computed once here, so an immutable call over it

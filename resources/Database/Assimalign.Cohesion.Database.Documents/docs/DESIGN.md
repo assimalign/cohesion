@@ -943,3 +943,14 @@ and text execution; a foreign-model request fails compilation. `DocumentQueryReq
 `Statement` and optional `Parameters` over the memberless `DatabaseRequest` root. Results
 use the model-neutral `DatabaseResult` family. Lifecycle and explicit transactions remain
 on `DatabaseSession`.
+
+## Diagnostic completion (#1103 review)
+
+Catalog-write helpers use COHDOC004 and accept an optional source location: OQL index DDL
+passes its location; direct collection APIs have none. Evaluator and executor rejections
+carry COHDOC001 for unsupported contexts/operators, COHDOC005 for missing parameters,
+COHDOC006 for division/remainder by zero (PostgreSQL SQLSTATE 22012), COHDOC007 for numbers
+outside the decimal domain or arithmetic overflow (22003), and COHDOC008 for invalid
+operand/parameter/value types. The innermost evaluator expression supplies its span before
+a failure propagates; outer expressions preserve it. Numeric normalization also codes
+conversion overflow outside expression evaluation. No message embeds its code.

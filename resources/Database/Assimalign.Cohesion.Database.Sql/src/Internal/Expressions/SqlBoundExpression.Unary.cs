@@ -1,3 +1,4 @@
+using Assimalign.Cohesion.Database.Language;
 using Assimalign.Cohesion.Database.Sql.Language;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
@@ -12,9 +13,11 @@ internal sealed class SqlBoundUnary : SqlBoundExpression
     /// <summary>Initializes a bound unary operator.</summary>
     /// <param name="operator">The operator.</param>
     /// <param name="operand">The bound operand.</param>
-    internal SqlBoundUnary(SqlUnaryOperator @operator, SqlBoundExpression operand)
+    /// <param name="location">The source expression span, if available.</param>
+    internal SqlBoundUnary(SqlUnaryOperator @operator, SqlBoundExpression operand, Location? location = null)
         : base(SqlBoundExpressionKind.Unary)
     {
+        Location = location;
         Operator = @operator;
         Operand = operand;
     }
@@ -24,4 +27,7 @@ internal sealed class SqlBoundUnary : SqlBoundExpression
 
     /// <summary>Gets the bound operand.</summary>
     internal SqlBoundExpression Operand { get; }
+
+    /// <summary>Gets the source expression span.</summary>
+    internal Location? Location { get; }
 }

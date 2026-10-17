@@ -29,7 +29,7 @@ internal static class DocumentPlanExecutor
             DocumentPlan select => await ExecuteSelectAsync(database, operation, select, parameters, cancellationToken).ConfigureAwait(false),
             DocumentCreateIndexPlan createIndex => await ExecuteCreateIndexAsync(database, operation, createIndex, cancellationToken).ConfigureAwait(false),
             DocumentDropIndexPlan dropIndex => await ExecuteDropIndexAsync(database, operation, dropIndex, cancellationToken).ConfigureAwait(false),
-            _ => throw new DatabaseException("The document plan is not executable."),
+            _ => throw new DocumentPlanningException("COHDOC001", "The document plan is not executable.", statement.OqlExpression.Location),
         };
     }
 

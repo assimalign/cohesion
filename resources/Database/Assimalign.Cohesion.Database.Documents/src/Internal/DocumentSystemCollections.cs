@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Threading;
 
 using Assimalign.Cohesion.Database.Documents.Catalog;
+using Assimalign.Cohesion.Database.Language;
 using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Documents.Internal;
@@ -19,11 +20,11 @@ internal static class DocumentSystemCollections
         => string.Equals(name, Indexes, StringComparison.OrdinalIgnoreCase) ? Indexes :
             string.Equals(name, Ownership, StringComparison.OrdinalIgnoreCase) ? Ownership : null;
 
-    internal static void EnsureReadOnly(string name)
+    internal static void EnsureReadOnly(string name, Location? location = null)
     {
         if (Find(name) is string systemName)
         {
-            throw new DatabaseException($"System collection '{systemName}' is read-only.");
+            throw new DocumentPlanningException("COHDOC004", $"System collection '{systemName}' is read-only.", location);
         }
     }
 

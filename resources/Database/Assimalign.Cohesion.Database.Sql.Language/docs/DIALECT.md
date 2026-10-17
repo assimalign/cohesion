@@ -1961,3 +1961,18 @@ unquoted identifiers at `scan.l:1067`, and looks up that name through
 `src/backend/parser/parse_func.c:1608` and `src/backend/catalog/namespace.c:1237`.
 This is the reference for the quoted unsupported-vocabulary comparison; it must not fold
 quoted names to match uppercase vocabulary entries.
+
+## Diagnostic completion (#1103 review)
+
+| Code | Meaning | PostgreSQL SQLSTATE |
+| --- | --- | --- |
+| `COHSQLE021` | A mutation targets a read-only system relation | 25006 (read-only SQL transaction, analogous restriction) |
+| `COHSQLE022` | A CAST input has invalid text representation | 22P02 |
+
+CAST range/precision faults use existing `COHSQLE002` (22003), division/remainder by zero
+uses `COHSQLE001` (22012), and operand-type errors including NOT and binary arithmetic
+use `COHSQLE003` (42804). Unsupported evaluator nodes/operators use `COHSQLE013`.
+The carrier retains an available expression span at runtime and during LIMIT/OFFSET
+planning. Column-scope failures use the offending column span, including INSERT VALUES.
+PostgreSQL's corresponding data exception codes are declared in
+`src/backend/utils/errcodes.txt:168,206,197` (22012, 22P02, 22003).

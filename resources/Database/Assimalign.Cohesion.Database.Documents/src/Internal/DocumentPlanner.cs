@@ -47,7 +47,7 @@ internal sealed class DocumentPlanner
 
     private DocumentCreateIndexPlan PlanCreateIndex(OqlCreateIndexExpression create)
     {
-        DocumentSystemCollections.EnsureReadOnly(create.Collection);
+        DocumentSystemCollections.EnsureReadOnly(create.Collection, create.Location);
         if (string.IsNullOrWhiteSpace(create.IndexName))
         {
             throw new DocumentPlanningException("COHDOC001", "CREATE INDEX requires an index name.", create.Location);
@@ -60,7 +60,7 @@ internal sealed class DocumentPlanner
 
     private DocumentDropIndexPlan PlanDropIndex(OqlDropIndexExpression drop)
     {
-        DocumentSystemCollections.EnsureReadOnly(drop.Collection);
+        DocumentSystemCollections.EnsureReadOnly(drop.Collection, drop.Location);
         if (string.IsNullOrWhiteSpace(drop.IndexName))
         {
             throw new DocumentPlanningException("COHDOC001", "DROP INDEX requires an index name.", drop.Location);

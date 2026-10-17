@@ -1235,3 +1235,10 @@ and text execution; a foreign-model request fails compilation. `GraphRequest` ow
 `Statement` and optional `Parameters` over the memberless `DatabaseRequest` root. Results
 use the model-neutral `DatabaseResult` family. Lifecycle and explicit transactions remain
 on `DatabaseSession`.
+
+## Diagnostic completion (#1103 review)
+
+Typed catalog mutations carry GQL0007 with the query location and an unprefixed message;
+the protocol server composes CODE: message once. Invalid GraphPaths projections and SHOW
+compositions carry COHDBG001 with query.Location, including early executor rejections
+before GraphPlanner runs.

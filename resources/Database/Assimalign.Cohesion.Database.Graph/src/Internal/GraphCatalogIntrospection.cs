@@ -16,11 +16,11 @@ internal static class GraphCatalogIntrospection
         // A hand-built AST must obey the same read-only rule as a parsed SHOW statement.
         if (query.Creates.Count != 0 || query.DeleteVariables.Count != 0 || query.DetachDelete)
         {
-            throw new DatabaseException("GQL0007: Graph catalog introspection is read-only.");
+            throw new GraphPlanningException("GQL0007", "Graph catalog introspection is read-only.", query.Location);
         }
         if (query.Matches.Count != 0 || query.Predicate is not null || query.Projections.Count != 0)
         {
-            throw new GraphPlanningException("COHDBG001", "SHOW cannot be composed with graph clauses.");
+            throw new GraphPlanningException("COHDBG001", "SHOW cannot be composed with graph clauses.", query.Location);
         }
 
         var columns = Columns(surface);

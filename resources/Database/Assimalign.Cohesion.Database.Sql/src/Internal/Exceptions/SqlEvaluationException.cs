@@ -32,8 +32,9 @@ internal sealed class SqlEvaluationException : DatabaseException
     internal const string NumericValueOutOfRangeCode = "COHSQLE002";
 
     /// <summary>
-    /// A unary <c>+</c> or <c>-</c> operand is not a number (ISO SQLSTATE 42804, datatype
-    /// mismatch). Raised during planning when the operand's type is known there, and during
+    /// An operand has the wrong type: unary signs and binary arithmetic require numbers,
+    /// and NOT requires a Boolean (ISO SQLSTATE 42804, datatype mismatch).
+    /// Raised during planning when the operand's type is known there, and during
     /// evaluation when only the value reveals it.
     /// </summary>
     internal const string InvalidOperandTypeCode = "COHSQLE003";
@@ -117,6 +118,14 @@ internal sealed class SqlEvaluationException : DatabaseException
 
     /// <summary>A character assignment exceeds its declared length (ISO SQLSTATE 22001).</summary>
     internal const string StringDataRightTruncationCode = "COHSQLE012";
+
+    /// <summary>A CAST input has invalid text representation (PostgreSQL SQLSTATE 22P02).</summary>
+    internal const string InvalidTextRepresentationCode = "COHSQLE022";
+
+    /// <summary>Codes a CAST value fault using PostgreSQL's 22003, 22P02 or 42846.</summary>
+    internal static SqlEvaluationException CastValueFailed(string detail, Exception exception)
+        => new(exception is OverflowException ? NumericValueOutOfRangeCode
+            : exception is FormatException ? InvalidTextRepresentationCode : CannotCastCode, detail, exception);
 
     private readonly string _detail;
     private readonly Location? _location;

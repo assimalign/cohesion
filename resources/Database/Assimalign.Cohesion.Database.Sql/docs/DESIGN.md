@@ -4663,3 +4663,17 @@ and text execution; a foreign-model request fails compilation. `SqlQueryRequest`
 `Statement` and optional `Parameters` over the memberless `DatabaseRequest` root. Results
 use the model-neutral `DatabaseResult` family. Lifecycle and explicit transactions remain
 on `DatabaseSession`.
+
+## Diagnostic completion (#1103 review)
+
+System-relation mutations use COHSQLE021 with the statement's available location, before
+lookup or IF EXISTS shortcuts. VALUES/LIMIT/OFFSET column-scope failures retain the
+column's own location. SQL operator and CAST bound nodes retain their immutable source
+locations so runtime failures and planning-time count evaluation preserve the expression
+span. Definitions without a separately located column or type token use the statement
+fallback; a DEFAULT span must not be used for an unrelated COLLATE failure.
+
+Evaluator unsupported nodes/operators use COHSQLE013, operand-type failures use COHSQLE003,
+and CAST range failures use COHSQLE002 (PostgreSQL 22003). CAST invalid text uses the new
+COHSQLE022 (22P02); division/remainder by zero keeps COHSQLE001 (22012). The dialect records
+the complete code mapping. Messages remain unprefixed; servers compose the code once.

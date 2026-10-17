@@ -30,7 +30,7 @@ internal static class GraphPlanExecutor
             var query = statement.GqlExpression;
             if (query.CatalogSurface is not null || query.Matches.Count == 0 || query.Creates.Count != 0 ||
                 query.DeleteVariables.Count != 0 || query.DetachDelete || query.Projections.Count != 1 || query.Projections[0].Property is not null)
-            { throw new GraphPlanningException("COHDBG001", "Path execution requires a read-only MATCH with exactly one path or bound entity projection."); }
+            { throw new GraphPlanningException("COHDBG001", "Path execution requires a read-only MATCH with exactly one path or bound entity projection.", query.Location); }
         }
         if (statement.GqlExpression.CatalogSurface is { } surface)
         {
@@ -66,7 +66,7 @@ internal static class GraphPlanExecutor
                     GraphPath path => path,
                     GraphNode node => new GraphPath([node], []),
                     GraphRelationship relationship => ProjectRelationship(database, operation, relationship),
-                    _ => throw new GraphPlanningException("COHDBG001", "Path execution requires a path or bound entity projection."),
+                    _ => throw new GraphPlanningException("COHDBG001", "Path execution requires a path or bound entity projection.", plan.Query.Location),
                 });
             }
             return new GraphPathsQueryResult(results.AsReadOnly(), plan.Warnings);
