@@ -33,6 +33,10 @@ entity projections. ExecutePaths accepts one bound variable, DISTINCT included, 
 named binding. Computed/multiple columns or star over several bindings are COHDBG001. The
 GraphPathResult and negotiated completion diagnostics keep their existing wire 2.1 shape.
 
+Final column names, both implicit and explicit, must be unique ordinally and case-sensitively.
+Duplicates raise planning diagnostic COHDBG015 before reads or mutations, even under EXPLAIN
+or on empty matches. Path-request shape errors retain precedence. Thus `RETURN 1 AS x, 2 AS x`
+fails, while `RETURN 1 AS x, 2 AS X` succeeds.
 Unbound projection variables/parameters are COHDBG001; `p.name` on a path is COHDBG003.
 `RETURN a {.name}` is COHDBL001 naming MAP PROJECTION. NEXT, WITH (including WITH DISTINCT)
 and return-after-delete remain COHDBL001. Collections and CASE remain outside this item.

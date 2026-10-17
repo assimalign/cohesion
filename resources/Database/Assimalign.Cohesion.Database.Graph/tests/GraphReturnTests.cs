@@ -201,9 +201,59 @@ public sealed class GraphReturnTests
         result.ShouldBeOfType<GraphPathsQueryResult>().Paths.Count.ShouldBe(count);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Graph] - RETURN: duplicate final column names fail planning even without input rows")]
+    [InlineData("RETURN 1 AS x, 2 AS x")]
+    [InlineData("MATCH (a) RETURN a, a")]
+    [InlineData("MATCH (a) RETURN a.x, a.x")]
+    [InlineData("MATCH (a) RETURN a.x, 1 AS `a.x`")]
+    [InlineData("RETURN 1, 2 AS `1`")]
+    [InlineData("RETURN 1 + 2, 3 AS `1 + 2`")]
+    [InlineData("EXPLAIN RETURN 1 AS x, 2 AS x")]
+    public async Task Execute_DuplicateColumnNames_ShouldRejectBeforeExecutionAsync(string source)
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create("duplicate-return", new());
+        var database = await engine.CreateDatabaseAsync("graph", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+
+        // Act
+        var error = await Should.ThrowAsync<DatabaseException>(async () =>
+            await session.ExecuteAsync(source, cancellationToken: CancellationToken.None));
+
+        // Assert
+        var diagnostic = error.Diagnostics.ShouldHaveSingleItem();
+        diagnostic.Code.ShouldBe("COHDBG015");
+        diagnostic.Start.ShouldNotBeNull();
+        error.Message.ShouldContain("is declared more than once", Case.Sensitive);
+        error.Message.ShouldNotContain("COHDBG015", Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Graph] - RETURN: duplicate names prevent mutation and names compare ordinally")]
+    public async Task Execute_DuplicateMutationColumns_ShouldRejectAndKeepSessionUsableAsync()
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create("duplicate-mutation", new());
+        var database = await engine.CreateDatabaseAsync("graph", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+
+        // Act
+        var error = await Should.ThrowAsync<DatabaseException>(async () =>
+            await session.ExecuteAsync("INSERT (:Unwritten) RETURN 1 AS x, 2 AS x", cancellationToken: CancellationToken.None));
+        var result = await RowsAsync(session, "RETURN 1 AS x, 2 AS X");
+
+        // Assert
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG015");
+        (await RowsAsync(session, "SHOW LABELS")).Rows.ShouldBeEmpty();
+        result.Names.ShouldBe(["x", "X"]);
+        result.Rows.ShouldHaveSingleItem().ShouldBe(new object?[] { 1L, 2L });
+    }
+
     [Theory(DisplayName = "Cohesion Test [Graph] - Paths: computed, multiple and multi-binding star projections are rejected")]
     [InlineData("MATCH (a) RETURN a.age + 1")]
     [InlineData("MATCH (a) RETURN a, a")]
+    [InlineData("MATCH (a) RETURN a AS x, a AS x")]
+    [InlineData("MATCH (a) RETURN a.x, a.x")]
+    [InlineData("INSERT (:Unwritten) RETURN 1 AS x, 2 AS x")]
     [InlineData("MATCH (a)-[r]->(b) RETURN *")]
     [InlineData("MATCH (a) RETURN a IS NULL")]
     [InlineData("RETURN 1")]

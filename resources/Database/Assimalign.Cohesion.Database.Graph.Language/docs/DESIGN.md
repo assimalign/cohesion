@@ -265,6 +265,11 @@ elements, and skips anonymous elements and repeated references. `(a)-[r]->(b)` y
 No named binding (`MATCH () RETURN *` or standalone `RETURN *`) is GQL0002. The planner validates
 equivalent hand-built shapes with COHDBG001. Aliases do not bind variables for neighboring items.
 Unbound variables/parameters remain COHDBG001; a path property reference remains COHDBG003.
+Final column names must be unique under ordinal case-sensitive comparison. Duplicate implicit
+names, explicit aliases, or collisions between them raise COHDBG015 at the second expression
+before execution, even for empty matches and EXPLAIN. Path-request shape errors retain precedence.
+Behavior consulted, no code copied: Neo4j `community/cypher/front-end/frontend/src/main/scala/org/neo4j/cypher/internal/frontend/phases/parserTransformers/scoping/VariableCheckerUtil.scala:434-444`
+(relative to C:/Source/repos/neo4j/neo4j) diagnoses the second duplicate result column.
 
 DISTINCT compares the complete projected tuple: NULLs are equal, strings compare ordinally,
 numbers compare by exact mathematical value across runtime numeric types, and nodes and

@@ -33,8 +33,10 @@ response, so the exchange calls MarkResponseComplete and the pool may reuse that
 cancellation, or error after result output cannot certify completion.
 
 Rows require exactly the advertised number of scalar components. Columns preserve wire names
-and shared DatabaseType identities; duplicate names resolve to the first column, with ordinals
-available for unambiguous access. Scalar statements fully materialize before returning.
+and shared DatabaseType identities. The engine rejects duplicate final result column names
+ordinally with COHDBG015 before any result output or mutation, including implicit/explicit
+collisions. The result container retains first-column lookup for manually constructed duplicate
+metadata. Scalar statements fully materialize before returning.
 MATCH projection metadata remains the engine's DatabaseType.Null (unknown), because graph
 properties may have heterogeneous types. The tuple codec preserves each actual value's runtime
 type. SHOW metadata retains its precisely declared catalog types.

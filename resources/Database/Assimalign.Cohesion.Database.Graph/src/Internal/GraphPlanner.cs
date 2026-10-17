@@ -73,15 +73,16 @@ internal sealed partial class GraphPlanner
     /// </summary>
     /// <param name="query">The statement to plan.</param>
     /// <param name="parameters">The named bindings; normalization and validation precede execution.</param>
+    /// <param name="paths">Whether path-request projection shape takes precedence over duplicate column names.</param>
     /// <returns>The plan.</returns>
-    /// <exception cref="DatabaseException">The statement is invalid (<c>COHDBG001</c>, <c>COHDBG003</c>).</exception>
-    internal GraphPlan Plan(GqlQueryExpression query, IReadOnlyDictionary<string, object?>? parameters = null)
+    /// <exception cref="DatabaseException">The statement is invalid (<c>COHDBG001</c>, <c>COHDBG003</c>, <c>COHDBG015</c>).</exception>
+    internal GraphPlan Plan(GqlQueryExpression query, IReadOnlyDictionary<string, object?>? parameters = null, bool paths = false)
     {
         try
         {
             _parameters = ParameterBindings.Normalize(parameters, name => new GraphPlanningException(
                 "COHDBG014", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ParameterCollision, name), query.Location));
-            return PlanCore(query);
+            return PlanCore(query, paths);
         }
         catch (GraphPlanningException exception) when (exception.Diagnostics[0].Start is null && query.Location is not null)
         {
@@ -89,7 +90,7 @@ internal sealed partial class GraphPlanner
         }
     }
 
-    private GraphPlan PlanCore(GqlQueryExpression query)
+    private GraphPlan PlanCore(GqlQueryExpression query, bool pathsRequest)
     {
         var variables = new Dictionary<string, BindingKind>(StringComparer.Ordinal);
         var declarations = new List<string>();
@@ -128,6 +129,18 @@ internal sealed partial class GraphPlanner
         { throw new GraphPlanningException("COHDBG001", "Insertion and deletion cannot share a statement.", query.Location); }
         if (query.DeleteVariables.Count != 0 && projections.Count != 0)
         { throw new GraphPlanningException("COHDBG001", "Deletion cannot be followed by projection in this subset.", query.Location); }
+        if (pathsRequest && (projections.Count != 1 || projections[0].Kind == GraphProjectionKind.Scalar ||
+            projections[0].Expression is not GqlVariableExpression))
+        { throw new GraphPlanningException("COHDBG001", ErrorMessages.PathProjectionRequired, query.Location); }
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var projection in projections)
+        {
+            if (!names.Add(projection.Name))
+            {
+                throw new GraphPlanningException("COHDBG015", string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                    ErrorMessages.DuplicateResultColumn, projection.Name), projection.Expression.Location ?? query.Location);
+            }
+        }
         bool readOnly = query.Creates.Count == 0 && query.DeleteVariables.Count == 0;
         return new GraphPlan(query, paths)
         {

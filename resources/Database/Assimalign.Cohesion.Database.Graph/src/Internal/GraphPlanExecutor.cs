@@ -31,7 +31,7 @@ internal static class GraphPlanExecutor
             var query = statement.GqlExpression;
             if (query.CatalogSurface is not null || query.Matches.Count == 0 || query.Creates.Count != 0 ||
                 query.DeleteVariables.Count != 0 || query.DetachDelete)
-            { throw new GraphPlanningException("COHDBG001", "Path execution requires a read-only MATCH with exactly one path or bound entity projection.", query.Location); }
+            { throw new GraphPlanningException("COHDBG001", ErrorMessages.PathProjectionRequired, query.Location); }
         }
         if (statement.GqlExpression.CatalogSurface is { } surface)
         {
@@ -41,14 +41,11 @@ internal static class GraphPlanExecutor
                 string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ParameterCollision, name), statement.GqlExpression.Location));
             return GraphCatalogIntrospection.Execute(database, operation, statement.GqlExpression, surface, token);
         }
-        var plan = new GraphPlanner(database, operation.Context.Snapshot).Plan(statement.GqlExpression, parameters);
+        var plan = new GraphPlanner(database, operation.Context.Snapshot).Plan(statement.GqlExpression, parameters, paths);
         parameters = plan.Parameters;
         // Validate result shape before locking a writer, expanding a MATCH or applying mutations.
         if (scalarsOnly && plan.Projections.Any(projection => projection.Kind != GraphProjectionKind.Scalar))
         { throw new GraphPlanningException("COHDBG001", ErrorMessages.ExecuteScalarRequired, plan.Query.Location); }
-        if (paths && (plan.Projections.Count != 1 || plan.Projections[0].Kind == GraphProjectionKind.Scalar ||
-            plan.Projections[0].Expression is not GqlVariableExpression))
-        { throw new GraphPlanningException("COHDBG001", "Path execution requires a read-only MATCH with exactly one path or bound entity projection.", plan.Query.Location); }
         if (plan.Query.Creates.Count > 0 || plan.Query.DeleteVariables.Count > 0)
         { await database.LockWriterAsync(operation.Context, token).ConfigureAwait(false); }
         // A pattern that requires a label or relationship type the database does not have matches

@@ -91,6 +91,9 @@ public sealed class GraphReturnWireTests
     [Theory(DisplayName = "Cohesion Test [Graph.Client] - Paths: complete projection rejection preserves the connection")]
     [InlineData("MATCH (a) RETURN a.age + 1")]
     [InlineData("MATCH (a) RETURN a, a")]
+    [InlineData("MATCH (a) RETURN a AS x, a AS x")]
+    [InlineData("MATCH (a) RETURN a.x, a.x")]
+    [InlineData("INSERT (:Unwritten) RETURN 1 AS x, 2 AS x")]
     [InlineData("MATCH (a)-[r]->(b) RETURN *")]
     public async Task QueryPathsAsync_InvalidShape_ShouldRejectAndKeepSessionReadyAsync(string source)
     {
@@ -108,6 +111,36 @@ public sealed class GraphReturnWireTests
         error.Message.ShouldContain("COHDBG001", Case.Sensitive);
         error.Message.ShouldContain("exactly one path or bound entity projection", Case.Sensitive);
         (await connection.QueryAsync("RETURN 1 AS one", cancellationToken: harness.Token)).ShouldHaveSingleItem()[0].ShouldBe(1L);
+        harness.Server.Sessions.ShouldHaveSingleItem().Id.ShouldBe(sessionId);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Graph.Client] - RETURN: duplicate column diagnostics complete rejection and preserve the connection")]
+    [InlineData("RETURN 1 AS x, 2 AS x")]
+    [InlineData("MATCH (a) RETURN a, a")]
+    [InlineData("MATCH (a) RETURN a.x, a.x")]
+    [InlineData("MATCH (a) RETURN a.x, 1 AS `a.x`")]
+    [InlineData("RETURN 1, 2 AS `1`")]
+    [InlineData("EXPLAIN RETURN 1 AS x, 2 AS x")]
+    [InlineData("INSERT (:Unwritten) RETURN 1 AS x, 2 AS x")]
+    public async Task QueryAsync_DuplicateColumnNames_ShouldRejectBeforeOutputAndKeepSessionReadyAsync(string source)
+    {
+        // Arrange
+        await using var harness = await GraphClientTestHarness.StartAsync();
+        await using var connection = await harness.Client.ConnectAsync(harness.Token);
+        Guid sessionId = harness.Server.Sessions.ShouldHaveSingleItem().Id;
+
+        // Act
+        var error = await Should.ThrowAsync<GraphClientException>(async () =>
+            await connection.QueryAsync(source, cancellationToken: harness.Token));
+
+        // Assert
+        error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
+        error.Message.ShouldContain("COHDBG015", Case.Sensitive);
+        error.Message.ShouldContain("is declared more than once", Case.Sensitive);
+        var result = await connection.QueryAsync("RETURN 1 AS x, 2 AS X", cancellationToken: harness.Token);
+        result.Columns.Select(column => column.Name).ShouldBe(["x", "X"]);
+        result.ShouldHaveSingleItem().ToArray().ShouldBe(new object?[] { 1L, 2L });
+        (await connection.QueryAsync("SHOW LABELS", cancellationToken: harness.Token)).ShouldBeEmpty();
         harness.Server.Sessions.ShouldHaveSingleItem().Id.ShouldBe(sessionId);
     }
 }

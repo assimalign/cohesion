@@ -20,5 +20,7 @@
   <data name="ProjectionExpressionRequired" xml:space="preserve"><value>A projection requires an expression.</value></data>
   <data name="PatternOrReturnRequired" xml:space="preserve"><value>A graph statement requires a pattern or RETURN items.</value></data>
   <data name="ProjectionUnsupported" xml:space="preserve"><value>Unsupported graph projection.</value></data>
+  <data name="DuplicateResultColumn" xml:space="preserve"><value>Result column '{0}' is declared more than once.</value></data>
+  <data name="PathProjectionRequired" xml:space="preserve"><value>Path execution requires a read-only MATCH with exactly one path or bound entity projection.</value></data>
   <data name="ExecuteScalarRequired" xml:space="preserve"><value>Execute accepts scalar projections. Use ExecutePaths with a read-only MATCH to return a node, relationship, or path.</value></data>
 </root>

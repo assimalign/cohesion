@@ -312,7 +312,12 @@ parameter before data access, expands star in first-declaration order (path assi
 interleaved nodes/relationships), and records each expression's name and static result kind.
 Aliases name columns exactly; unaliased parsed expressions use normalized source text. The
 [language design](../../Assimalign.Cohesion.Database.Graph.Language/docs/DESIGN.md#return-expressions-and-duplicate-elimination-1141)
-records the owner's naming default and the limits of the ISO 14.11 check.
+records the owner's naming default and the limits of the ISO 14.11 check. Final names, implicit
+and explicit, must be unique under ordinal case-sensitive comparison; the second occurrence
+raises located planning error COHDBG015 before reads or mutations, including EXPLAIN and empty
+matches. Path-request shape diagnostics retain precedence over duplicate names. Behavior consulted,
+no code copied: Neo4j `community/cypher/front-end/frontend/src/main/scala/org/neo4j/cypher/internal/frontend/phases/parserTransformers/scoping/VariableCheckerUtil.scala:434-444`
+(relative to C:/Source/repos/neo4j/neo4j) reports the second duplicate result column.
 
 DISTINCT runs on projected tuples, after writes have completed for every input binding. It uses
 NULL equality, ordinal strings, exact numeric value equality across CLR tags, entity IDs and
@@ -727,6 +732,7 @@ to exercise that enforcement path; compiled provisioning is not included.
 | `COHDBG012` | The database is offline (#1243): a durable flush of its journal or data file failed. Every operation is refused with `DatabaseOfflineException` until `OpenDatabaseAsync` reopens it; `Unavailable` on the wire. The storage's `StorageOfflineException` (`COHDBS002`) is the inner exception ("Storage operations") |
 | `COHDBG013` | Scalar value error (#1140): non-Boolean WHERE/logical value, invalid arithmetic or concatenation types, zero divisor, overflow or non-finite result. Reused by #1146, #1147 and #1148; structured Diagnostic, code-free Message, composed as CODE: message on protocol 2.0 |
 | `COHDBG014` | Multiple map keys normalize to the same bare parameter name |
+| `COHDBG015` | Duplicate final result column name, implicit or explicit, under ordinal case-sensitive comparison; rejected during planning before execution |
 | `COHDBI001` | `Database.Indexing`'s code, carried unchanged: opening a database whose property-index pages are in a B-tree page format this engine does not read (format 1, written before #1194) fails with "Database 'x' cannot be opened. COHDBI001: …", checked before recovery's scrub, so a cleanly closed database's files stay as they were (a crashed one has had only the storage layer's journal redo and undo, and keeps its journal) |
 | `COHDBS001` | `Database.Storage`'s code, carried unchanged: opening a database whose file set is in another storage format (#1251) fails with "Database 'x' cannot be opened. COHDBS001: …", the storage's `StorageFormatException` as its inner exception, refused before its journal is read, so the files stay as they were |
 
