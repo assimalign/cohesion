@@ -96,6 +96,8 @@ public sealed class OqlProjectionParserTests
     [Theory(DisplayName = "Cohesion Test [Documents.Language] - Misplaced quantifiers stay one capability refusal")]
     [InlineData("SELECT COUNT(DISTINCT x) FROM items", "COUNT(DISTINCT)")]
     [InlineData("SELECT x FROM items WHERE DISTINCT x", "DISTINCT")]
+    [InlineData("SELECT {a:DISTINCT} FROM items", "DISTINCT")]
+    [InlineData("SELECT {'a':ALL} FROM items", "ALL")]
     [InlineData("CREATE INDEX ix ON items (ALL tags)", "ALL")]
     [InlineData("CREATE INDEX ix ON items (DISTINCT ARRAY t FOR t IN tags END)", "DISTINCT")]
     public void Parse_MisplacedQuantifier_ShouldRejectOnce(string text, string construct)
@@ -105,6 +107,18 @@ public sealed class OqlProjectionParserTests
         // Assert
         diagnostic.Code.ShouldBe("COHDBL001");
         diagnostic.Message.ShouldNotBeNull().ShouldContain(construct, Case.Sensitive);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Documents.Language] - Reserved words in rejected parameter forms keep parameter diagnostics")]
+    [InlineData("SELECT :distinct FROM items")]
+    [InlineData("SELECT {a: :distinct} FROM items")]
+    public void Parse_AdjacentParameter_ShouldKeepSyntaxDiagnostic(string text)
+    {
+        // Arrange / Act
+        var diagnostic = new OqlQueryParser().Parse(text).Diagnostics.ShouldHaveSingleItem();
+        // Assert
+        diagnostic.Code.ShouldBe("OQL0002");
+        diagnostic.Message.ShouldNotBeNull().ShouldContain("parameter", Case.Insensitive);
     }
 
     [Theory(DisplayName = "Cohesion Test [Documents.Language] - Constructor nesting is bounded without throwing")]

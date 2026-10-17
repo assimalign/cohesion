@@ -87,6 +87,8 @@ After AS, a projection label accepts reserved words, following PostgreSQL ColLab
 their positional capability refusal everywhere except directly after SELECT (and after a dot).
 COUNT(DISTINCT x) remains one COHDBL001 naming COUNT(DISTINCT). ARRAY comprehensions, computed
 member names, IN's array form and path access on constructor results remain deferred.
+Member colons remain delimiters even without whitespace: `{a:DISTINCT}` receives the positional
+capability refusal, while `:distinct` in an operand keeps the parameter-form syntax diagnostic.
 
 Object and array constructors are primary expressions and participate in input validation,
 constant evaluation, predicates, grouping and aggregates. Objects retain #1131's last-member-wins
