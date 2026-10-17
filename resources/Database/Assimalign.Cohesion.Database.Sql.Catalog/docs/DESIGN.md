@@ -234,10 +234,10 @@ codec, the key encoding and every comparison read, so they do not consult the do
   the table records' physical layout, #1241) is a property of these records
   themselves — so the database-grain marker is catalog
   metadata. (`Database.Indexing` also stamps and checks its own page format on
-  each tree, behind this marker.) The engine writes its version (11) when it
+  each tree, behind this marker.) The engine writes its version (15) when it
   creates a database and refuses to open one whose marker reads anything else; it
   has no upgrade path (owner decisions of 2026-10-01 and 2026-10-02; upgrades are
-  #1152). Versions 5 through 11 are stored as a kind-8 record like version 4. Absent marker
+  #1152). Versions 5 through 15 are stored as a kind-8 record like version 4. Absent marker
   reads as version 1 (pre-marker databases, or a creation interrupted before the
   engine stamped the marker).
 - **From version 4 the marker is a kind-8 record (downgrade fence, #1099).**
