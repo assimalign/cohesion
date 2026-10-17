@@ -770,7 +770,8 @@ System.Decimal, as in embedded operations; a numeric-domain refusal is a reusabl
 The wire permits depth at most 256, without comments, trailing
 commas, malformed UTF-8 or multiple roots. Stored document codecs preserve exact bytes, including
 whitespace and Unicode spelling. Projected numbers become decimals; objects/arrays remain owned
-JsonElement values. Whole-document results retain raw JSON in `DocumentResultSet.Documents`.
+JsonElement values. Whole-document results retain JSON values in `DocumentResultSet.Documents`;
+OQL serialization may change whitespace and escape spelling. Put/Get retain exact stored bytes.
 The [client design](../../Assimalign.Cohesion.Database.Documents.Client/docs/DESIGN.md) shows the
 full exchange diagram, API ownership, pool evidence and telemetry. Real server/client tests run
 all advertised clauses and commands on both InMemory and TCP; the NativeAOT consumer and Studio

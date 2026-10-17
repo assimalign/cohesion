@@ -249,7 +249,8 @@ ProtocolException is this child root's independent exception type. Servers trans
 it to the shared wire taxonomy; the client core translates it to DatabaseClientException.
 Transports remain outside this package and outside engine packages.
 
-All model endpoints reject invalid wire strings; no codec relies on replacement decoding.
-SQL, Graph, KeyValuePair and Documents use the shared strict reader for model strings.
+All model endpoints reject invalid shared payload strings; no model intentionally relies on
+replacement decoding in ProtocolPayload.
+SQL, Graph, KeyValuePair and Documents use it for model statement text and protocol identifiers.
 Blob already uses a strict bounded metadata reader and uses this reader in its shared handshake.
 Decoder failures become ProtocolException and the server sends fatal ProtocolViolation, then closes.
