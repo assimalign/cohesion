@@ -722,7 +722,7 @@ internal sealed partial class SqlExpressionEvaluator
                 SqlBinaryOperator.GreaterOrEqual => Box(Compare(leftValue, rightValue, collation) >= 0),
                 SqlBinaryOperator.Add or SqlBinaryOperator.Subtract or SqlBinaryOperator.Multiply
                     or SqlBinaryOperator.Divide or SqlBinaryOperator.Modulo => Arithmetic(binary.Operator, leftValue, rightValue),
-                SqlBinaryOperator.Concat => Convert.ToString(leftValue, CultureInfo.InvariantCulture) + Convert.ToString(rightValue, CultureInfo.InvariantCulture),
+                SqlBinaryOperator.Concat => SqlCastText.Format(leftValue) + SqlCastText.Format(rightValue),
                 _ => throw new SqlPlanningException("COHSQLE013", $"Operator {binary.Operator} is not supported by the executor yet.", binary.Location),
             };
         }

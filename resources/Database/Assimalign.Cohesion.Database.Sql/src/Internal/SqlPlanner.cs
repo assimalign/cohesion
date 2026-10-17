@@ -1244,14 +1244,7 @@ internal sealed partial class SqlPlanner
             return;
         }
 
-        // The value the evaluator converts is the row's: a JSON value is text and a JSONB value bytes,
-        // so the cast is chosen as SqlCastConverter chooses it for that value.
-        var source = declared switch
-        {
-            DatabaseType.Json => DatabaseType.String,
-            DatabaseType.JsonBinary => DatabaseType.Binary,
-            _ => declared,
-        };
+        var source = declared;
         if (source == target.Storage.Type)
         {
             return;

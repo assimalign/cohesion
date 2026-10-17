@@ -7,7 +7,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// <c>CAST</c> over a bound operand, with what binding resolved once: the target type (a built-in
 /// type with its length, precision and scale, or a domain of the engine's type catalog) and the
 /// casts of the engine's registry it may apply, one per storage type of the value it converts
-/// (phase E3). The evaluator picks the cast by the value's storage type, applies the target's
+/// (phase E3). JSON/JSONB retain the declared SQL identity despite their shared CLR storage.
+/// The evaluator picks the cast by that identity or the value's storage type, applies the target's
 /// length, precision and scale, and a domain target's check (<see cref="SqlCastConverter.Convert"/>).
 /// </summary>
 internal sealed class SqlBoundCast : SqlBoundExpression
@@ -20,10 +21,12 @@ internal sealed class SqlBoundCast : SqlBoundExpression
     /// <param name="database">The database whose statement makes the CAST, for a domain check's context.</param>
     /// <param name="collation">The collation a domain check's input compares under.</param>
     /// <param name="location">The source expression span, if available.</param>
+    /// <param name="sourceType">The source SQL identity when known, retaining JSON and JSONB.</param>
     internal SqlBoundCast(SqlBoundExpression operand, string targetText, SqlType target, SqlCast?[] casts, DatabaseName database,
-        Collation collation, Location? location = null)
+        Collation collation, Location? location = null, DatabaseType sourceType = DatabaseType.Null)
         : base(SqlBoundExpressionKind.Cast)
     {
+        SourceType = sourceType;
         Location = location;
         Operand = operand;
         TargetText = targetText;
@@ -35,6 +38,9 @@ internal sealed class SqlBoundCast : SqlBoundExpression
             ? targets[0]
             : DatabaseType.Null;
     }
+
+    /// <summary>Gets the source identity, retaining JSON and JSONB despite their shared CLR representation.</summary>
+    internal DatabaseType SourceType { get; }
 
     /// <summary>Gets the bound operand.</summary>
     internal SqlBoundExpression Operand { get; }

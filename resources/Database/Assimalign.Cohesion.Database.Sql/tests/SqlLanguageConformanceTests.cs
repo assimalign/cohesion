@@ -102,6 +102,7 @@ public sealed class SqlLanguageConformanceTests
     /// <param name="expected">The expected value, whose runtime type differs from the operand.</param>
     /// <param name="type">The expected target metadata.</param>
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - CAST: audited valid conversions execute with target types")]
+    [MemberData(nameof(SqlCastMatrixTests.FamilyConversions), MemberType = typeof(SqlCastMatrixTests))]
     [InlineData("SELECT CAST('42' AS INT) FROM t WHERE id = 1;", 42, DatabaseType.Int32)]
     [InlineData("SELECT CAST(42 AS TEXT) FROM t WHERE id = 1;", "42", DatabaseType.String)]
     public async Task Cast_AuditedValidConversion_ShouldReturnTargetValueAndMetadata(string sql, object expected, DatabaseType type)

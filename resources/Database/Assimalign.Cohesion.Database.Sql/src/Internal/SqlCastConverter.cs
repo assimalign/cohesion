@@ -35,7 +35,7 @@ internal static class SqlCastConverter
         object? converted = null;
         if (value is not null)
         {
-            var source = StorageTypeOf(value);
+            var source = cast.SourceType is DatabaseType.Json or DatabaseType.JsonBinary ? cast.SourceType : StorageTypeOf(value);
             SqlCast? registered = source == DatabaseType.Null ? null : cast.Casts[(int)source];
             if (registered is null && source != DatabaseType.Null && source != cast.Target.Storage.Type)
             {
@@ -72,12 +72,12 @@ internal static class SqlCastConverter
             }
             catch (SqlEvaluationException exception)
             {
-                throw exception.WithContext($"CAST from {value.GetType().Name} to {cast.TargetText} failed");
+                throw exception.WithContext($"CAST from {SqlType.NameOf(source)} to {cast.TargetText} failed");
             }
             catch (Exception exception) when (exception is FormatException or OverflowException or InvalidCastException)
             {
                 // The value's fault, the built-ins' only failures: the conversion contract's message.
-                throw SqlEvaluationException.CastValueFailed($"CAST from {value.GetType().Name} to {cast.TargetText} failed: {exception.Message}", exception);
+                throw SqlEvaluationException.CastValueFailed($"CAST from {SqlType.NameOf(source)} to {cast.TargetText} failed: {exception.Message}", exception);
             }
             catch (Exception exception) when (registered is not null && SqlEvaluationException.IsCastFailure(exception, cancellationToken))
             {

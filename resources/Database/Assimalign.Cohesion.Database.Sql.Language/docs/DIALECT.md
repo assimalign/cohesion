@@ -1727,35 +1727,42 @@ when the plan knows it (a column of a domain, or a `CAST` to one, under any
 domain before one to its base type; a value that already has the target's storage
 type needs no entry, and a value of a domain cast to that same domain takes none.
 Then the target's length, precision and scale apply, then a domain target's check.
-The built-in non-null source/target pairs are:
+The built-in non-null conversions form the following 19×19 matrix. Y permits the pair;
+– rejects it unless an application registers a cast. CHAR has its own identity;
+TEXT covers VARCHAR and the varying national character spellings, and BYTEA covers
+BINARY/VARBINARY. The shared type-name grammar owns all aliases and modifiers.
 
-| Evaluated source | Allowed targets |
-|---|---|
-| Signed `sbyte`, `short`, `int`, `long`, or `decimal` | Any signed integer width, Decimal, String, REAL, DOUBLE |
-| String | Any signed integer width, Decimal, Boolean, String, REAL, DOUBLE, DATE, TIME, TIMESTAMP, TIMESTAMPTZ, INTERVAL, UUID |
-| Boolean | Boolean, String |
-| REAL | REAL, DOUBLE |
-| DOUBLE | DOUBLE, REAL |
-| TIMESTAMP | TIMESTAMP, DATE |
-| DATE, TIME, TIMESTAMPTZ, INTERVAL, UUID, BINARY, JSON, JSONB | the same type only |
+| Source \ target | BOOLEAN | TINYINT | SMALLINT | INTEGER | BIGINT | REAL | DOUBLE | NUMERIC | TEXT | BYTEA | DATE | TIME | TIMESTAMP | TIMESTAMPTZ | INTERVAL | UUID | JSON | JSONB | CHAR |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| BOOLEAN | Y | – | – | – | – | – | – | – | Y | – | – | – | – | – | – | – | – | – | Y |
+| TINYINT | – | Y | Y | Y | Y | Y | Y | Y | Y | – | – | – | – | – | – | – | – | – | Y |
+| SMALLINT | – | Y | Y | Y | Y | Y | Y | Y | Y | – | – | – | – | – | – | – | – | – | Y |
+| INTEGER | – | Y | Y | Y | Y | Y | Y | Y | Y | – | – | – | – | – | – | – | – | – | Y |
+| BIGINT | – | Y | Y | Y | Y | Y | Y | Y | Y | – | – | – | – | – | – | – | – | – | Y |
+| REAL | – | Y | Y | Y | Y | Y | Y | Y | Y | – | – | – | – | – | – | – | – | – | Y |
+| DOUBLE | – | Y | Y | Y | Y | Y | Y | Y | Y | – | – | – | – | – | – | – | – | – | Y |
+| NUMERIC | – | Y | Y | Y | Y | Y | Y | Y | Y | – | – | – | – | – | – | – | – | – | Y |
+| TEXT | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| BYTEA | – | – | – | – | – | – | – | – | Y | Y | – | – | – | – | – | – | – | – | Y |
+| DATE | – | – | – | – | – | – | – | – | Y | – | Y | – | Y | Y | – | – | – | – | Y |
+| TIME | – | – | – | – | – | – | – | – | Y | – | – | Y | – | – | Y | – | – | – | Y |
+| TIMESTAMP | – | – | – | – | – | – | – | – | Y | – | Y | Y | Y | Y | – | – | – | – | Y |
+| TIMESTAMPTZ | – | – | – | – | – | – | – | – | Y | – | Y | Y | Y | Y | – | – | – | – | Y |
+| INTERVAL | – | – | – | – | – | – | – | – | Y | – | – | Y | – | – | Y | – | – | – | Y |
+| UUID | – | – | – | – | – | – | – | – | Y | – | – | – | – | – | – | Y | – | – | Y |
+| JSON | – | – | – | – | – | – | – | – | Y | – | – | – | – | – | – | – | Y | Y | Y |
+| JSONB | – | – | – | – | – | – | – | – | Y | – | – | – | – | – | – | – | Y | Y | Y |
+| CHAR | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
 
-All other pairs are rejected unless an application registers a cast for them
-(`COHSQLE011: Cannot CAST type INTEGER to DATE: no cast from INTEGER to DATE is
-registered. ...`), including floating-point sources to exact numbers and text,
-temporal, GUID and binary sources to text, and every conversion to JSON, JSONB and
-binary. Numeric/boolean conversion is not supported. The refusal is raised while
-planning whenever the plan knows the operand's type (a literal, a column, a `CAST`,
-a predicate, a scalar call's result, a scalar subquery), the same over an empty
-table as over a populated one; a parameter's type only its value reveals, so it is
-refused with the same code when evaluated. Unsigned integers and other CLR parameter
-types the codec does not store fail as conversion failures (`CAST from Byte to TEXT
-failed: Unsupported source/target pair.`). Sources are evaluated values: SQL
-integer literals are Int64 and SQL fractional literals are Decimal; parameters and
-columns retain their runtime types. SQL fractional literals permit exponent and
-leading decimal point syntax (such as `1e2` and `.5`) but must also fit Decimal
-exactly; literal underflow/rounding is rejected before conversion. Insignificant
-zeros may be normalized. Identity conversions in the table still enforce target
-bounds.
+Identity conversions still apply target bounds. A pair without a conversion fails
+with COHSQLE011, naming CAST and both SQL types. When the source is static (a
+column, typed literal, nested CAST, predicate, resolved scalar call or scalar
+subquery), planning rejects the pair before reading any rows, including empty
+input and NULL-valued columns. Parameter operands are checked when evaluated.
+A NULL operand returns NULL with target metadata; it does not bypass a statically
+unsupported pair or invalid target. SQL integer literals are Int64 and fractional
+literals are Decimal, including exponent and leading decimal-point forms. To
+supply a floating operand, cast text to REAL or DOUBLE first.
 
 - **Contexts.** Each built-in entry carries PostgreSQL's context for the same pair
   (`src/include/catalog/pg_cast.dat`): widenings among the numbers implicit,
@@ -1763,28 +1770,56 @@ bounds.
   this iteration only `CAST` consults the registry; assignment coercion and overload
   resolution keep their own rules, so a literal string still does not reach a DATE
   function parameter without a `CAST` (`day_of_year(CAST('2026-02-01' AS DATE))`).
-- **Temporal, UUID and binary floating-point text** parses as INSERT parses text for
-  a column of the type, in the invariant culture and independent of the host's clock
-  and time zone. DATE, TIMESTAMP and TIMESTAMPTZ text starts with an ISO 8601 date,
-  `yyyy-mm-dd` (`'1.5'` is refused rather than given the current year), optionally
-  followed by a time of day and an offset. `TIMESTAMP` keeps the clock time as
-  written and ignores an offset, as PostgreSQL's `timestamp_in` does; `TIMESTAMPTZ`
-  keeps a written offset and takes UTC when none is written (the engine has no
-  session time zone). TIME text is a time of day (`13:45`, `13:45:30.5`); INTERVAL text is .NET's
-  constant form `[-][d.]hh:mm[:ss[.fffffff]]`, so `'12'` is twelve days, not
-  PostgreSQL's twelve seconds. REAL and DOUBLE text is `NumberStyles.Float`: no
-  grouping; `NaN` and `Infinity` are accepted. A finite value REAL overflows or
-  underflows to zero is an error, as in PostgreSQL.
-
-- **Text:** surrounding whitespace is trimmed when reading numbers or booleans.
-  Numeric text must match `[+-]?[0-9]+(\.[0-9]+)?`; grouping, exponent notation,
-  empty strings, and invalid text (including `'abc' AS INT`) are errors. Numeric
-  text converted to an integer or an unscaled NUMERIC must be exactly representable
-  as `System.Decimal` before narrowing. A NUMERIC target with a declared scale
-  rounds the text's digits to that scale first; only that result must fit Decimal.
-  Boolean text accepts case-insensitive `TRUE`/`FALSE` only. String output uses
-  invariant numeric formatting and uppercase `TRUE`/`FALSE`; string-to-string
-  preserves the original text, including whitespace, before target-length coercion.
+- **Temporal input** calls the public strict literal readers in `SqlLiteralText`,
+  trimming surrounding whitespace. DATE, TIME, TIMESTAMP, TIMESTAMPTZ and INTERVAL
+  use the [typed-literal grammar](#literals); a TIMESTAMP input containing an offset
+  is rejected. INTERVAL input is day-time only; year-month fields and bare numbers
+  such as '12' fail. INSERT's plain-string assignment acceptance is unchanged.
+  All zone-dependent temporal conversions follow the
+  [timestamp normalization rule](#timestamp-normalization-1110).
+  TIMESTAMP to DATE/TIME extracts fields. INTERVAL to TIME requires
+  `0 <= interval < 24 hours`; it never wraps. UUID input uses invariant Guid parsing.
+- **Floating input and exact targets:** REAL/DOUBLE text accepts invariant
+  `NumberStyles.Float` syntax without grouping, including NaN, Infinity and
+  -Infinity. Finite text that overflows to infinity or nonzero text that underflows
+  to zero fails. DOUBLE to REAL applies the same finite overflow and nonzero
+  underflow checks; exact numeric to float rounds to the represented binary value.
+  Float to integer requires a finite whole number in range, without rounding or
+  truncation. Float to NUMERIC parses its shortest round-trip text (including an
+  exponent when present) exactly as Decimal before applying declared scale/precision;
+  non-finite values and values Decimal cannot represent fail.
+- **Character input:** surrounding whitespace is trimmed for numeric, Boolean,
+  temporal, interval, UUID and BYTEA input. Exact numeric text uses
+  `[+-]?[0-9]+(\.[0-9]+)?`; grouping, exponent notation, empty and invalid text fail.
+  Integer and unscaled NUMERIC input must fit Decimal exactly; a declared NUMERIC
+  scale rounds the original digits first, as described below. Boolean input is
+  case-insensitive TRUE/FALSE. TEXT identity preserves whitespace; CHAR-to-TEXT
+  removes trailing ASCII spaces before conversion. JSON text preserves whitespace.
+- **Canonical character output:** Boolean is TRUE/FALSE; exact numbers use invariant
+  decimal formatting. REAL/DOUBLE use shortest round-trip formatting, including
+  NaN, Infinity, -Infinity and -0 (the zero sign is preserved). DATE is yyyy-MM-dd;
+  TIME is HH:mm:ss[.f]; TIMESTAMP is yyyy-MM-dd HH:mm:ss[.f]; TIMESTAMPTZ appends
+  a +/-HH:mm offset. Fractions retain up to seven significant fractional digits,
+  omitting trailing zeros. INTERVAL is a signed HH:mm:ss[.f] clock, preceded by
+  signed d days when nonzero; negative durations give both day and clock negative
+  signs. These forms round-trip even at the temporal and interval extrema.
+  UUID is lowercase hyphenated; BYTEA is `\x` followed by lowercase hex digits,
+  including `\x` for empty bytes. `||` renders each non-null operand with this
+  built-in CAST-to-TEXT formatting, so `TRUE || ''` is TRUE and
+  `DATE '2024-01-01' || ''` is 2024-01-01. NULL still propagates.
+- **BYTEA input:** accepts `\x` plus an even number of hex digits, or the UTF-8
+  bytes of backslash-free text. Invalid hex, an unpaired Unicode surrogate, any
+  other backslash form and a binary length overflow fail; bytes never truncate.
+- **JSON and JSONB:** casts into either validate one JSON value using
+  System.Text.Json JsonDocument with MaxDepth 128; comments, trailing commas,
+  extra values and malformed JSON fail. JSON retains its original text; JSONB
+  stores its validated UTF-8 bytes without normalization. JSON ↔ JSONB validates
+  and preserves the original spelling, property order, duplicates and whitespace.
+  JSONB equality is byte equality, unlike PostgreSQL's normalized JSONB equality;
+  another binary encoding would require a data migration. JSONB-to-text validates
+  the stored UTF-8 JSON before decoding. JSON columns may still accept unvalidated
+  text on INSERT; that assignment behavior is outside CAST. JSON-to-scalar casts
+  remain outside Tier 1.
 - **NULL:** returns NULL for every supported target, with the target's result
   type metadata even when every row is null or the result has no rows. Invalid
   target names/modifiers are still errors with a NULL operand.
@@ -1826,11 +1861,12 @@ bounds.
   retains full `DatabaseTypeInfo`; in-process result columns expose the base
   `DatabaseType` and conservative nullability. The existing wire/client contract
   exposes the base type, with a matching boxed runtime value. Neither result
-  contract has length/precision/scale fields; the client has no nullability field.
+  contract exposes precision/scale fields; CHAR result metadata includes its length,
+  and the client has no nullability field.
 
 This is a deliberate ISO/IEC 9075 subset: integer conversion requires an exact
 value, declared numeric scale rounds, explicit character conversion truncates,
-and fixed character padding is not implemented. CAST in DEFAULT and CHECK is
+and CHAR pads shorter results. CAST in DEFAULT and CHECK is
 rejected by planning.
 CAST values in INSERT/UPDATE are converted before the existing destination-column
 storage coercion; nested arithmetic therefore sees the converted numeric value.

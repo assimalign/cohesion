@@ -50,17 +50,24 @@ internal static class Program
         [["clamp"], ["describe"], ["in_range"], ["is_missing"], ["join_names"], ["median"], ["or_none"], ["product"], ["scaled"], ["slugify"], ["sql_increment"]];
 
     // E3: a domain column, an application's casts to and from the cents domain (the inner CAST tells
-    // the outer one its source is cents), a built-in cast from text to DATE, and an application's cast
-    // between two built-in types the standard library does not convert (UUID to TEXT).
+    // the outer one its source is cents), built-in casts from text to DATE and from UUID to canonical TEXT.
     private const string Domains =
         "SELECT Email, CAST(CAST(Score AS cents) AS TEXT) AS shown, CAST('$4.56' AS cents) AS parsed, " +
         "CAST('2026-02-01' AS DATE) AS day, CAST(Token AS TEXT) AS token FROM customers ORDER BY Id";
 
     private static readonly object?[][] _domains =
     [
-        ["ada@example.com", "$1.00", 456L, new DateOnly(2026, 2, 1), "00000001000000000000000000000000"],
-        ["grace@example.com", "$2.00", 456L, new DateOnly(2026, 2, 1), "00000002000000000000000000000000"],
+        ["ada@example.com", "$1.00", 456L, new DateOnly(2026, 2, 1), "00000001-0000-0000-0000-000000000000"],
+        ["grace@example.com", "$2.00", 456L, new DateOnly(2026, 2, 1), "00000002-0000-0000-0000-000000000000"],
     ];
+
+    private const string allCasts = "SELECT CAST(CAST('0.8455124082255701' AS DOUBLE PRECISION) AS NUMERIC), " +
+        "CAST(DATE '2024-01-01' AS TIMESTAMP), CAST(TIMESTAMPTZ '2024-01-01 01:00:00+02:00' AS TIME), " +
+        "CAST(TIME '01:02:03' AS INTERVAL), CAST(CAST('\\x00ff' AS BYTEA) AS TEXT), " +
+        "CAST(CAST('{\"雪\":1}' AS JSONB) AS JSON), TRUE || '', " +
+        "CAST(CAST('1.0000000596046448' AS REAL) AS TEXT) FROM customers WHERE Id = 1";
+    private static readonly object?[][] _allCasts =
+        [[0.8455124082255701m, new DateTime(2024, 1, 1), new TimeOnly(23, 0), new TimeSpan(1, 2, 3), "\\x00ff", "{\"雪\":1}", "TRUE", "1.0000001"]];
 
     private const string Characters = "SELECT c, CAST(c AS TEXT), LENGTH(c), c || 'b', c LIKE 'a' FROM fixed_codes WHERE c = 'a'";
     private static readonly object?[][] _characters = [["a  ", "a", 1L, "ab", false]];
@@ -136,8 +143,7 @@ internal static class Program
             .AddCast(SqlCast.Create<string, long>(SqlType.Text, cents,
                 static text => (long)(decimal.Parse(text.TrimStart('$'), CultureInfo.InvariantCulture) * 100), SqlCastContext.Explicit))
             .AddCast(SqlCast.Create<long, string>(cents, SqlType.Text,
-                static value => "$" + (value / 100m).ToString("0.00", CultureInfo.InvariantCulture), SqlCastContext.Assignment))
-            .AddCast(SqlCast.Create<Guid, string>(SqlType.Uuid, SqlType.Text, static token => token.ToString("N"), SqlCastContext.Assignment));
+                static value => "$" + (value / 100m).ToString("0.00", CultureInfo.InvariantCulture), SqlCastContext.Assignment));
         sql.AddDatabase(DatabaseName, database => database.Schema(schema => schema.Table<Customer>("customers", table =>
         {
             table.Key(customer => customer.Id);
@@ -175,6 +181,7 @@ internal static class Program
         await session.ExecuteAsync("INSERT INTO fixed_codes VALUES ('a')");
         await session.ExecuteAsync("CREATE TABLE type_aliases (n NCHAR(3), s NVARCHAR(MAX), f DOUBLE PRECISION, d TIMESTAMP WITH TIME ZONE)");
         await session.ExecuteAsync("INSERT INTO type_aliases (n, s, f) VALUES ('ab', 'text', 1.5)");
+        Check("in process: all CAST families", await RowsAsync(session, allCasts), _allCasts);
         Check("in process: strict typed literals", await RowsAsync(session, typedLiterals), _typedLiterals);
         Check("in process: ISO type names and SQL Server lexical aliases", await RowsAsync(session, typeAliases), _typeAliases);
         Check("in process: CHAR storage, cast, length, concat, LIKE and seek", await RowsAsync(session, Characters), _characters);
@@ -253,6 +260,7 @@ internal static class Program
         Check("over the wire: CHAR storage, cast, length, concat, LIKE and seek", await RowsAsync(connection, Characters, timeout.Token), _characters);
         var explained = await RowsAsync(connection, "EXPLAIN SELECT c FROM fixed_codes WHERE c = 'a'", timeout.Token);
         Check("over the wire: EXPLAIN uses existing result rows", explained.Any(row => Equals(row[2], "IndexSeek") && row[4] is string && row.Length == 8), true);
+        Check("over the wire: all CAST families", await RowsAsync(connection, allCasts, timeout.Token), _allCasts);
         Check("over the wire: strict typed literals", await RowsAsync(connection, typedLiterals, timeout.Token), _typedLiterals);
         Check("over the wire: ISO type names and SQL Server lexical aliases", await RowsAsync(connection, typeAliases, timeout.Token), _typeAliases);
         var fixedCodes = await connection.QueryAsync(Characters, cancellationToken: timeout.Token);
