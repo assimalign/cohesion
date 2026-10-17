@@ -111,6 +111,11 @@ return the parser's `OQL0002`. Both preserve the connection. The typed command A
 names locally with its existing argument guard. A peer sending one through Command (69) receives
 an unlocated `COHDOC001` Failure and can continue using the same server session.
 
+Collection refusals preserve `COHDOC002` (missing DROP), `COHDOC010` (duplicate CREATE), and
+`COHDOC011` (schema-owned DROP) through both OQL and Command exchanges. Their OQL diagnostics
+carry the statement span; command diagnostics have no source location. All are ExecutionFailure
+and preserve the session, including conditional schema-owned drops.
+
 `DocumentClientException` is a sealed `DatabaseException` leaf, like Graph's model exception.
 It uses the inherited diagnostic carrier, so callers catching the area root see the same diagnostics.
 Before #1103 it derived from `DatabaseClientException` and owned a separate diagnostic list; keeping

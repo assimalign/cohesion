@@ -11,6 +11,7 @@ using Assimalign.Cohesion.Database.Documents.Internal;
 using Assimalign.Cohesion.Database.Documents.Language;
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Transactions;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Documents.Tests;
 
@@ -28,20 +29,20 @@ public sealed class DocumentCollectionDdlTests
         Success(await session.ExecuteAsync("CREATE COLLECTION x", cancellationToken: CancellationToken.None));
         var metadata = await CollectionsAsync(session);
         (await session.GetCollectionAsync("x", CancellationToken.None)).Name.ShouldBe("x");
-        (await Should.ThrowAsync<DatabaseException>(async () =>
-            await session.ExecuteAsync("CREATE COLLECTION x", cancellationToken: CancellationToken.None)))
-            .Message.ShouldBe("Collection 'x' already exists.");
-        (await Should.ThrowAsync<DatabaseException>(async () =>
-            await session.CreateCollectionAsync("x", CancellationToken.None))).Message.ShouldBe("Collection 'x' already exists.");
+        Refusal(await Should.ThrowAsync<DatabaseException>(async () =>
+            await session.ExecuteAsync("CREATE COLLECTION x", cancellationToken: CancellationToken.None)),
+            "COHDOC010", "Collection 'x' already exists.", "CREATE COLLECTION x");
+        Refusal(await Should.ThrowAsync<DatabaseException>(async () =>
+            await session.CreateCollectionAsync("x", CancellationToken.None)), "COHDOC010", "Collection 'x' already exists.");
         Success(await session.ExecuteAsync("CREATE COLLECTION IF NOT EXISTS x", cancellationToken: CancellationToken.None));
         Success(await session.ExecuteAsync("DROP COLLECTION IF EXISTS absent", cancellationToken: CancellationToken.None));
         (await CollectionsAsync(session)).ShouldBe(metadata);
         await session.DropCollectionAsync("x", CancellationToken.None);
-        (await Should.ThrowAsync<DatabaseException>(async () =>
-            await session.ExecuteAsync("DROP COLLECTION x", cancellationToken: CancellationToken.None)))
-            .Message.ShouldBe("Collection 'x' does not exist.");
-        (await Should.ThrowAsync<DatabaseException>(async () =>
-            await session.DropCollectionAsync("x", CancellationToken.None))).Message.ShouldBe("Collection 'x' does not exist.");
+        Refusal(await Should.ThrowAsync<DatabaseException>(async () =>
+            await session.ExecuteAsync("DROP COLLECTION x", cancellationToken: CancellationToken.None)),
+            "COHDOC002", "Collection 'x' does not exist.", "DROP COLLECTION x");
+        Refusal(await Should.ThrowAsync<DatabaseException>(async () =>
+            await session.DropCollectionAsync("x", CancellationToken.None)), "COHDOC002", "Collection 'x' does not exist.");
         await session.CreateCollectionAsync("x", CancellationToken.None);
         Success(await session.ExecuteAsync("DROP COLLECTION x", cancellationToken: CancellationToken.None));
         (await CollectionsAsync(session)).ShouldBeEmpty();
@@ -95,7 +96,11 @@ public sealed class DocumentCollectionDdlTests
                 await session.ExecuteAsync(statement, cancellationToken: CancellationToken.None));
             error.Operation.ShouldBe("DROP COLLECTION");
             error.OwningSchema.ShouldBe("Sales");
+            Refusal(error, "COHDOC011", "Object 'owned' is owned by schema 'Sales' and cannot be changed by DROP COLLECTION. Alter the schema and redeploy it.", statement);
         }
+        Refusal(await Should.ThrowAsync<DatabaseObjectLockedException>(async () =>
+            await session.DropCollectionAsync("owned", CancellationToken.None)), "COHDOC011",
+            "Object 'owned' is owned by schema 'Sales' and cannot be changed by DROP COLLECTION. Alter the schema and redeploy it.");
         (await CollectionsAsync(session)).ShouldBe(before);
     }
 
@@ -240,6 +245,20 @@ public sealed class DocumentCollectionDdlTests
     {
         result.Status.ShouldBe(DatabaseResultStatus.Success);
         result.AffectedCount.ShouldBe(0);
+    }
+
+    private static void Refusal(DatabaseException failure, string code, string message, string? statement = null)
+    {
+        failure.GetType().ShouldBe(code == "COHDOC011" ? typeof(DatabaseObjectLockedException) : typeof(DatabaseException));
+        failure.Message.ShouldBe(message);
+        var diagnostic = failure.Diagnostics.ShouldHaveSingleItem();
+        diagnostic.Code.ShouldBe(code);
+        diagnostic.Message.ShouldBe(message);
+        diagnostic.Severity.ShouldBe(DiagnosticSeverity.Error);
+        diagnostic.Location.ShouldBe(statement is null ? null : DiagnosticLocation.Absolute);
+        diagnostic.Start.ShouldBe(statement is null ? null : 0);
+        diagnostic.End.ShouldBe(statement?.Length);
+        diagnostic.Line.ShouldBe(1);
     }
 
     private static async Task<string[]> CollectionsAsync(DocumentDatabaseSession session) =>

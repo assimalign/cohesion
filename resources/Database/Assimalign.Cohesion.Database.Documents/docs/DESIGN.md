@@ -237,6 +237,8 @@ Message contains no code prefix. The Documents family is `COHDOCnnn`:
 | `COHDOC001` | Invalid statement, index definition, expression or grouping context |
 | `COHDOC002` | Collection does not exist |
 | `COHDOC003` | Duplicate projection name; use unique aliases |
+| `COHDOC010` | Collection already exists (PostgreSQL SQLSTATE 42P07) |
+| `COHDOC011` | Collection is owned by the declared schema and cannot be dropped through a session |
 
 `DocumentQueryRequest.FromOql` and a directly constructed typed query with parse errors
 throw `DatabaseParseException` carrying the complete, ordered parser diagnostics and the
@@ -368,6 +370,13 @@ supplied location. Empty quoted identifiers are already syntax errors (`OQL0002`
 leave an autocommit session usable. Command 69 validates collection names inside the statement
 failure boundary and returns the same unlocated `COHDOC001`, including empty names; malformed
 payload encodings still terminate the session with a protocol error.
+
+The shared collection cores attach `COHDOC002` to an unconditional missing DROP, `COHDOC010`
+to an unconditional duplicate CREATE, and `COHDOC011` to any schema-owned DROP. OQL refusals
+carry the statement span; session APIs carry no source location. Exception types and messages
+are unchanged, including `DatabaseObjectLockedException` for ownership. `COHDOC009` is reserved
+for #1102. PostgreSQL's duplicate-relation refusal supplies the 42P07 precedent
+(`src/backend/catalog/heap.c:1194-1198`, `src/backend/utils/errcodes.txt:383`).
 
 Under the database writer lock, snapshot conflicts are checked before either conditional no-op.
 A collection committed after a Snapshot transaction began therefore aborts conditional creation.

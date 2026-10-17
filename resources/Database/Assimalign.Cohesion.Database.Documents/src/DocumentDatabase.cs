@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading;
@@ -235,7 +236,8 @@ public sealed class DocumentDatabase : DatabaseInstance
         if (previous is not null)
         {
             if (ifNotExists) { return previous.Value; }
-            throw new DatabaseException($"Collection '{name}' already exists.");
+            string message = string.Format(CultureInfo.CurrentCulture, ErrorMessages.CollectionAlreadyExists, name);
+            throw new DatabaseException(message, [DocumentPlanningException.CreateDiagnostic("COHDOC010", message, location)]);
         }
 
         var metadata = new DocumentCollectionMetadata(Guid.NewGuid(), name);
@@ -275,12 +277,14 @@ public sealed class DocumentDatabase : DatabaseInstance
         if (previous is not { } collection)
         {
             if (ifExists) { return; }
-            throw new DatabaseException($"Collection '{name}' does not exist.");
+            string message = string.Format(CultureInfo.CurrentCulture, ErrorMessages.CollectionDoesNotExist, name);
+            throw new DatabaseException(message, [DocumentPlanningException.CreateDiagnostic("COHDOC002", message, location)]);
         }
         // Documents has no provisioning authority, so every schema-owned drop is locked.
         if (collection.Owner == DatabaseObjectOwner.Schema)
         {
-            throw new DatabaseObjectLockedException(collection.Name, collection.OwningSchema!, "DROP COLLECTION");
+            throw new DatabaseObjectLockedException(collection.Name, collection.OwningSchema!, "DROP COLLECTION",
+                diagnostic: DocumentPlanningException.CreateDiagnostic("COHDOC011", null, location));
         }
 
         var visible = Catalog.GetDocuments(collection.Id, null, operation.Context.Snapshot);

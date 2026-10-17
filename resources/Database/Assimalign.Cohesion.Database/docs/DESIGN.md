@@ -799,6 +799,12 @@ list, ordered stably by start offset (unlocated entries follow located entries).
 constructors supply an empty list. `Diagnostic`, its severity and location enum remain plain
 data in `Database.Types`; no reflection or runtime discovery is involved.
 
+The existing `DatabaseObjectLockedException` constructors accept optional diagnostic metadata.
+They snapshot it through the same carrier, supplying the refusal's text and Error severity when
+those fields are absent. Models can therefore code ownership refusals with their own vocabulary
+and source locations while preserving the sealed ownership exception and its message. No new
+exception subtype, public method, interface, reference or visibility grant is needed.
+
 SQL, OQL and GQL text factories, including `GraphPathsQueryRequest.FromGql`, retain their
 first-error Message and carry every diagnostic on `DatabaseParseException`. A session rejects
 the same parsed typed statement with the identical exception contract; no error AST executes.
