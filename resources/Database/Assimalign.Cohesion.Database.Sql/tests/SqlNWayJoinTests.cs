@@ -16,6 +16,36 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed class SqlNWayJoinTests
 {
+    [Theory(DisplayName = "Cohesion Test [Sql] - USING: ORDER BY aliases after wildcards use visible output positions")]
+    [InlineData("JOIN")]
+    [InlineData("LEFT JOIN")]
+    public async Task Join_UsingWildcardOrdering_ShouldBindVisibleOutputSlots(string join)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("using-order", new());
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecAsync(session, "CREATE TABLE a (id INT NOT NULL);");
+        await ExecAsync(session, "CREATE TABLE b (id INT NOT NULL);");
+        await ExecAsync(session, "INSERT INTO a VALUES (2), (1);");
+        await ExecAsync(session, "INSERT INTO b VALUES (1), (2);");
+        string from = $" FROM a {join} b USING (id) ";
+
+        // Act / Assert
+        Check(await RowsAsync(session, "SELECT *, a.id AS sort, -a.id AS tail" + from + "ORDER BY sort;"),
+            [[1, 1, -1L], [2, 2, -2L]]);
+        Check(await RowsAsync(session, "SELECT *, a.id AS sort" + from + "ORDER BY sort;"), [[1, 1], [2, 2]]);
+        Check(await RowsAsync(session, "SELECT *, -a.id AS sort" + from + "ORDER BY 2;"), [[2, -2L], [1, -1L]]);
+        Check(await RowsAsync(session, "SELECT *, a.id AS sort, *, -a.id AS tail" + from + "ORDER BY tail;"),
+            [[2, 2, 2, -2L], [1, 1, 1, -1L]]);
+        var error = await Should.ThrowAsync<DatabaseException>(async () =>
+            await session.ExecuteAsync("SELECT *, a.id AS sort" + from + "ORDER BY 3;", cancellationToken: CancellationToken.None));
+        error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE018");
+        var qualified = await Should.ThrowAsync<DatabaseException>(async () =>
+            await session.ExecuteAsync("SELECT a.*, a.id AS sort" + from + "ORDER BY sort;", cancellationToken: CancellationToken.None));
+        qualified.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHDBL001");
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sql] - LEFT: UNKNOWN, ON filters and WHERE filters retain SQL semantics")]
     [InlineData(false)]
     [InlineData(true)]

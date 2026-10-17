@@ -15,7 +15,7 @@ internal sealed partial class SqlPlanner
     /// numeric expressions remain expressions: ORDER BY 1 + 1 is not ordinal 2.
     /// </summary>
     private Dictionary<SqlExpression, int> BindOrderByProjections(
-        SqlSelectExpression select, IReadOnlyList<SqlProjection> projections, int sourceColumnCount)
+        SqlSelectExpression select, IReadOnlyList<SqlProjection> projections, int wildcardColumnCount)
     {
         var aliases = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         int projectionIndex = 0;
@@ -29,7 +29,7 @@ internal sealed partial class SqlPlanner
                     aliases[alias] = -1;
                 }
             }
-            projectionIndex += column.Expression is SqlStarExpression ? sourceColumnCount : 1;
+            projectionIndex += column.Expression is SqlStarExpression ? wildcardColumnCount : 1;
         }
 
         var slots = new Dictionary<SqlExpression, int>();

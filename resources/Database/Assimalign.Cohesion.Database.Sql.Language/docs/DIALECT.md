@@ -638,7 +638,8 @@ rule is the declared subset's merged-type rule, including differing numeric type
 Unqualified merged names are unambiguous; qualified left.id and right.id still bind.
 SELECT * orders merged columns once, in USING order, then remaining left columns,
 then remaining right columns. A later USING applies this rule to its accumulated
-left output; comma items concatenate their outputs. PostgreSQL performs the same
+left output; comma items concatenate their outputs. ORDER BY aliases after `*` and
+numeric ordinals count these visible output columns. PostgreSQL performs the same
 USING name validation and output ordering at parse_clause.c:1322-1399,1460-1510;
 its wider common-type synthesis is not implemented by this subset.
 

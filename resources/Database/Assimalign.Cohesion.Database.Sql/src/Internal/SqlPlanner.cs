@@ -158,7 +158,7 @@ internal sealed partial class SqlPlanner
             where = evaluator.Bind(select.Where);
         }
 
-        var orderByProjections = BindOrderByProjections(select, projections, columns.Count);
+        var orderByProjections = BindOrderByProjections(select, projections, outputOrdinals?.Count ?? columns.Count);
         foreach (var orderBy in select.OrderBy)
         {
             ValidateExpression(orderBy.Expression, evaluator, _subqueryTypes, orderByProjections);

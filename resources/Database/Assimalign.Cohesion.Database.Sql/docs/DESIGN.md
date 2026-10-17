@@ -2,6 +2,9 @@
 
 ## N-way joins (#1109)
 
+ORDER BY aliases following a wildcard count its visible output columns after USING merges;
+ordering execution slots still begin after the full physical source row.
+
 FROM binds each comma item's join tree separately before any row is read. ON scopes contain
 only that item's inputs through the current step. SqlJoinPlan retains stable physical slots,
 an ordered SqlJoinStep list and one access path per step; USING hides right names only from
