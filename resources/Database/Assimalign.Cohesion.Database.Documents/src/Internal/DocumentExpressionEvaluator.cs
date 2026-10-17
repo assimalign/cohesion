@@ -234,8 +234,8 @@ internal sealed partial class DocumentExpressionEvaluator
         if (left is null || right is null) { return null; }
         return expression.Operator switch
         {
-            "=" => Compare(left, right) == 0,
-            "!=" or "<>" => Compare(left, right) != 0,
+            "=" => Equal(left, right),
+            "!=" or "<>" => Unary("NOT", Equal(left, right)),
             "<" => SameScalarKind(left, right) && Compare(left, right) < 0,
             "<=" => SameScalarKind(left, right) && Compare(left, right) <= 0,
             ">" => SameScalarKind(left, right) && Compare(left, right) > 0,

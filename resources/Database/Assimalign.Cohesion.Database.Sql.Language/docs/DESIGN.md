@@ -554,3 +554,6 @@ cover both accepted spellings and the coded recovery of rejected spellings.
 
 Definition-binding diagnostics remain engine-owned. DIALECT.md records COHSQLD001 for invalid
 CHECK predicates and absent DROP definitions, including the structured carrier and span fallback.
+
+DIALECT.md cross-links OQL's SQL++ structural-equality contract (#1127 review);
+those Documents semantics do not alter this parser or SQL's Boolean rules.

@@ -271,7 +271,9 @@ whole array as one structural item. The unparenthesized array form `x IN d.tags`
 COHDBL001 naming `IN array form` until oql-arrays. A nested SELECT still names SUBQUERY;
 quantified predicates retain one diagnostic at EVERY/ANY/SOME, without reporting their IN.
 The other public nodes are OqlBetweenExpression, OqlLikeExpression and OqlCaseExpression.
-Negated predicates preserve unknown results. The engine design records their truth tables.
+Negated predicates preserve unknown results. Structural equality returns NULL for otherwise equal
+arrays/objects containing NULL, so IN and simple CASE do not match them. A definite structural
+mismatch returns FALSE. The engine design records their truth tables and source anchors.
 
 LIKE is ordinal and case-sensitive. `%` matches zero or more Unicode scalars; `_` matches
 exactly one, including a supplementary character or a newline. The default escape is

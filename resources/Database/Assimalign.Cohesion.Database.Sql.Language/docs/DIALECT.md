@@ -2205,3 +2205,11 @@ The carrier retains an available expression span at runtime and during LIMIT/OFF
 planning. Column-scope failures use the offending column span, including INSERT VALUES.
 PostgreSQL's corresponding data exception codes are declared in
 `src/backend/utils/errcodes.txt:168,206,197` (22012, 22P02, 22003).
+
+## OQL predicate semantics (#1127 review)
+
+The Documents OQL dialect uses SQL++ value equality for `=`, `!=`, IN and simple CASE.
+Otherwise equal objects/arrays containing NULL have NULL equality, so they do not match
+an IN item or a simple WHEN. See the [OQL contract](../../Assimalign.Cohesion.Database.Documents.Language/docs/DESIGN.md#predicates-and-case-1127)
+and the [engine truth tables](../../Assimalign.Cohesion.Database.Documents/docs/DESIGN.md#predicate-truth-tables-1127)
+for the Couchbase source anchors. SQL's own predicate rules are unchanged.

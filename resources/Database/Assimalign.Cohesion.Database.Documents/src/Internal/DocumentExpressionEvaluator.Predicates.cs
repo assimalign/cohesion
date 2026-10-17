@@ -20,7 +20,7 @@ internal sealed partial class DocumentExpressionEvaluator
             var value = Evaluate(item, document, group);
             if (value is DocumentMissing) { missing = true; }
             else if (value is null) { nullItem = true; }
-            else if (operand is not null and not DocumentMissing && Compare(operand, value) == 0) { matched = true; }
+            else if (operand is not null and not DocumentMissing && Equal(operand, value) is true) { matched = true; }
         }
         if (operand is DocumentMissing) { return DocumentMissing.Instance; }
         if (operand is null) { return null; }
@@ -51,7 +51,7 @@ internal sealed partial class DocumentExpressionEvaluator
         {
             var condition = Evaluate(branch.Key, document, group);
             bool matches = expression.Operand is null ? condition is true :
-                operand is not null and not DocumentMissing && condition is not null and not DocumentMissing && Compare(operand, condition) == 0;
+                operand is not null and not DocumentMissing && condition is not null and not DocumentMissing && Equal(operand, condition) is true;
             if (matches) { return Evaluate(branch.Value, document, group); }
         }
         // Couchbase expression/case_simple.go:83-108 and case_searched.go:73-98:

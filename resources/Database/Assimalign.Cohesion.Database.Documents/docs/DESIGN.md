@@ -396,6 +396,12 @@ T/F/N/M mean TRUE/FALSE/NULL/MISSING. NOT maps T/F/N/M to F/T/N/M.
 These priorities follow [couchbase/query expression/coll_in.go:58-159](https://github.com/couchbase/query/blob/master/expression/coll_in.go#L58-L159).
 List expressions evaluate in source order before membership is selected, including when
 the left operand is unknown, matching [array construction](https://github.com/couchbase/query/blob/master/expression/cons_array.go#L43-L59).
+Equality follows [value/object.go:770-799](https://github.com/couchbase/query/blob/master/value/object.go#L770-L799)
+and [value/array.go:751-779](https://github.com/couchbase/query/blob/master/value/array.go#L751-L779):
+a definite structural mismatch is FALSE; otherwise a nested NULL yields NULL.
+IN and simple CASE select only TRUE equality, so `{'a':NULL} IN ({'a':NULL})` is FALSE,
+as is its array equivalent. Ordinary `=` and `!=` preserve that nested NULL.
+Total ordering remains separate for grouping, ordering and index bounds.
 No scalar coercion occurs: `1 IN ('1')` is FALSE. A single JsonElement array parameter in
 `tags IN (@expected)` is one structural item. Empty value lists are syntax errors.
 

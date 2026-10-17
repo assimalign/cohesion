@@ -15,6 +15,23 @@ namespace Assimalign.Cohesion.Database.Documents.Tests;
 public sealed partial class DocumentQueryTests
 {
     [Theory(DisplayName = "Cohesion Test [Documents] - Predicates: SQL++ NULL and MISSING truth tables")]
+    [InlineData("{'a':NULL} IN ({'a':NULL})", "F")]
+    [InlineData("CASE {'a':NULL} WHEN {'a':NULL} THEN TRUE ELSE FALSE END", "F")]
+    [InlineData("@nullArray IN (@nullArray)", "F")]
+    [InlineData("CASE @nullArray WHEN @nullArray THEN TRUE ELSE FALSE END", "F")]
+    [InlineData("{'a':NULL} NOT IN ({'a':NULL})", "T")]
+    [InlineData("@nullArray NOT IN (@nullArray)", "T")]
+    [InlineData("{'a':NULL} IN ({'a':NULL}, NULL)", "N")]
+    [InlineData("@nullArray IN (@nullArray, NULL)", "N")]
+    [InlineData("{'a':NULL} = {'a':NULL}", "N")]
+    [InlineData("@nullArray = @nullArray", "N")]
+    [InlineData("{'a':NULL} != {'a':NULL}", "N")]
+    [InlineData("@nullArray != @nullArray", "N")]
+    [InlineData("{'a':NULL,'b':1} = {'b':2,'a':NULL}", "F")]
+    [InlineData("@nullArray = @longerArray", "F")]
+    [InlineData("{'a':{'b':NULL}} IN ({'a':{'b':NULL}})", "F")]
+    [InlineData("{'b':2,'a':1} IN ({'a':1,'b':2})", "T")]
+    [InlineData("@array IN (@array)", "T")]
     [InlineData("NULL IN (1)", "N")]
     [InlineData("MISSING IN (1, NULL)", "M")]
     [InlineData("NULL IN (MISSING)", "N")]
@@ -72,13 +89,20 @@ public sealed partial class DocumentQueryTests
         var collection = await session.CreateCollectionAsync("items", CancellationToken.None);
         await PutAsync(collection, session, "one", "{}");
         // Act
-        var row = (await RowsAsync(session, $"SELECT {expression} AS result FROM items")).Single();
-        var filtered = await RowsAsync(session, $"SELECT 1 FROM items WHERE {expression}");
+        var parameters = PredicateParameters();
+        var row = (await RowsAsync(session, $"SELECT {expression} AS result FROM items", parameters)).Single();
+        var filtered = await RowsAsync(session, $"SELECT 1 FROM items WHERE {expression}", parameters);
         // Assert
         row.IsMissing(0).ShouldBe(expected == "M");
         row.IsNull(0).ShouldBe(expected == "N");
         row.GetValue(0).ShouldBe(expected == "T" ? true : expected == "F" ? false : null);
         filtered.Count.ShouldBe(expected == "T" ? 1 : 0);
+    }
+
+    private static Dictionary<string, object?> PredicateParameters()
+    {
+        using var json = JsonDocument.Parse("""{"nullArray":[null],"longerArray":[null,1],"array":[1,{"a":2}],"emptyArray":[]}""");
+        return json.RootElement.EnumerateObject().ToDictionary(property => property.Name, property => (object?)property.Value.Clone());
     }
 
     [Fact(DisplayName = "Cohesion Test [Documents] - IN: a parenthesized array parameter remains one structural item")]
@@ -172,6 +196,38 @@ public sealed partial class DocumentQueryTests
             index.Upper.Value.Value.ShouldBe(predicate.Contains("BETWEEN 2", StringComparison.Ordinal) ? 3m : 2m);
         }
         else { plan.Access.ShouldBeOfType<DocumentScanPath>(); }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Documents] - IN: structural residuals agree across scans and index seeks")]
+    [InlineData("value IN ({'a':NULL})", 0)]
+    [InlineData("value IN (@nullArray)", 0)]
+    [InlineData("value IN (@array, {'a':1})", 2)]
+    [InlineData("value NOT IN (@nullArray, {'a':NULL})", 4)]
+    [InlineData("score IN (1, 2, 3, NULL, MISSING)", 3)]
+    public async Task Execute_IndexedMembership_ShouldEqualScanAsync(string predicate, int expected)
+    {
+        // Arrange
+        await using var engine = DocumentDatabaseEngine.Create("predicates", new());
+        var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        var collection = await session.CreateCollectionAsync("items", CancellationToken.None);
+        await PutAsync(collection, session, "a", """{"score":1,"value":{"a":null}}""");
+        await PutAsync(collection, session, "b", """{"score":2,"value":[null]}""");
+        await PutAsync(collection, session, "c", """{"score":3,"value":{"a":1}}""");
+        await PutAsync(collection, session, "d", """{"score":4,"value":[1,{"a":2}]}""");
+        await PutAsync(collection, session, "e", """{"score":null,"value":{"a":1}}""");
+        await PutAsync(collection, session, "f", """{"value":{"a":1}}""");
+        var parameters = PredicateParameters();
+        string query = $"SELECT META().id FROM items WHERE score BETWEEN 1 AND 4 AND ({predicate})";
+        var before = await RowsAsync(session, query, parameters);
+        await session.ExecuteAsync("CREATE INDEX by_score ON items (score)", cancellationToken: CancellationToken.None);
+        // Act
+        var plan = await PlanAsync(database, query, parameters);
+        var after = await RowsAsync(session, query, parameters);
+        // Assert
+        plan.Access.ShouldBeOfType<DocumentIndexPath>();
+        after.Count.ShouldBe(expected);
+        after.Select(row => row.GetString(0)).ShouldBe(before.Select(row => row.GetString(0)));
     }
 
     [Theory(DisplayName = "Cohesion Test [Documents] - Predicates: nested inputs are validated even over an empty source")]
