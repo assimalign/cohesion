@@ -348,12 +348,24 @@ public sealed class SqlDerivedTableExecutionTests
         var joined = await RowsAsync(session, "SELECT * FROM a JOIN (SELECT id FROM b) d USING (id)");
         var twoDerived = await RowsAsync(session, "SELECT * FROM (SELECT id FROM a) l JOIN (SELECT id FROM b) r USING (id)");
 
+        // COLLATE changes comparison metadata, while the projected column keeps its domain and modifiers.
+        await session.ExecuteAsync("CREATE DOMAIN label_text AS VARCHAR(12);", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE labels (name label_text COLLATE case_insensitive);", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT INTO labels VALUES ('Ada');", cancellationToken: CancellationToken.None);
+        const string collatedSql = "SELECT * FROM (SELECT l.name COLLATE binary AS name FROM labels l GROUP BY l.name COLLATE binary) d";
+        var collated = new SqlPlanner(database.Catalog, null).Plan(SqlQueryRequest.FromSql(collatedSql).Statement.SqlExpression).ShouldBeOfType<SqlJoinPlan>();
+        var collatedRows = await RowsAsync(session, collatedSql);
+
         // Assert
         plan.Bindings[0].Source.Columns.ShouldHaveSingleItem().DomainName.ShouldBe("units");
         plan.Bindings[0].Source.Columns[0].Type.Type.ShouldBe(DatabaseType.Int32);
         body.ShouldHaveSingleItem().ShouldBe([1]);
         joined.ShouldHaveSingleItem().ShouldBe([1]);
         twoDerived.ShouldHaveSingleItem().ShouldBe([1]);
+        collated.Bindings[0].Source.Columns[0].DomainName.ShouldBe("label_text");
+        collated.Bindings[0].Source.Columns[0].Type.MaxLength.ShouldBe(12);
+        collated.Bindings[0].Source.Columns[0].Collation.ShouldBe(Collation.Binary);
+        collatedRows.ShouldHaveSingleItem().ShouldBe(["Ada"]);
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Derived tables: merged default collation keeps inherited strength")]

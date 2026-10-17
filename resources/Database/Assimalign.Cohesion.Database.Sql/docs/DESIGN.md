@@ -275,6 +275,7 @@ Their EXPLAIN root is Select with a DerivedTable child; only multiple relations
 emit NestedLoopJoin and JoinStep. Output metadata follows the projected expression
 (PostgreSQL `parse_relation.c:1715-1721`): qualified USING references keep physical
 types; unqualified merged outputs keep their common type and shared domain.
+COLLATE over a column keeps that column's domain and type modifiers as well.
 Projection collation candidates retain provenance, so default-only computed text
 does not become a declared override. Declared source columns and explicit inner
 COLLATE become declared strength (2); ties between declared collations keep the

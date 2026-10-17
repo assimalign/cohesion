@@ -63,7 +63,8 @@ internal sealed partial class SqlPlanner
         {
             var projection = projections[i];
             var inherited = projection.Metadata?.SourceColumn ?? (projection.ColumnOrdinal is int ordinal ? output.Columns[ordinal] : null);
-            if (inherited is null && projection.Expression is SqlColumnReferenceExpression reference)
+            if (inherited is null && projection.Expression is { } expression &&
+                UnwrapCollation(expression) is SqlColumnReferenceExpression reference)
             {
                 scope ??= new SqlExpressionEvaluator(output.Columns, _parameters, output.Bindings,
                     defaultCollation: _catalog.DefaultCollation, subquerySlots: _subquerySlots,
