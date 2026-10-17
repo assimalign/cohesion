@@ -148,8 +148,8 @@ public sealed class GqlProfileExecutionTests
         {
             foreach (var executionCase in _cases[clause])
             {
-                // Each isolated case has the same deadline as before; extending the corpus
-                // must not consume the following case's execution budget.
+                // Isolate each case's parsing, seeding and execution deadline: repeated engine
+                // setup must not consume the following case's budget (timings in DESIGN.md).
                 using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(30));
                 var token = cancellation.Token;
                 var statement = new GqlQueryParser().Parse(executionCase.Statement).ShouldBeOfType<GqlQueryStatement>();

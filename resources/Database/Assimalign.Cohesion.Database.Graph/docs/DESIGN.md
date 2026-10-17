@@ -322,8 +322,6 @@ item. A match still wins over NULL; without a match, a NULL operand or item yiel
 (the empty list is always FALSE). This follows Neo4j's `ListLiteral.scala:36-45` and
 `CachedIn.scala:38-49` under `community/cypher/interpreted-runtime/src/main/scala/org/neo4j/cypher/internal/runtime/interpreted/commands/`.
 
-
-
 `GqlQueryParser` builds `GqlQueryStatement`; `GraphPlanner` resolves labels, relationship types,
 variable kinds and access paths; `GraphPlanExecutor` applies that plan. The planner considers
 literal inline properties and equality predicates joined by `AND` for every node position in a
@@ -435,6 +433,46 @@ extension), DELETE, DETACH DELETE, SHOW (catalog extension) and LABEL EXPRESSION
 ordering, graph selection and language DDL are not advertised. Label/type/index management is the
 session-bound C# schema API. The ISO decision and conformance corpus are documented alongside the
 parser; this is a bounded ISO subset, not a full conformance claim.
+
+### Conformance corpus timing (#1140 fix pass)
+
+Measured on Windows ARM64, Snapdragon X2 Elite (12 logical processors), .NET SDK 10.0.401,
+in Release. Base `194faa5e9` was extracted inside the worktree and built from source without
+switching branches. The fixed branch has 73 isolated cases; the base has 27. Temporary
+Stopwatch instrumentation separated parsing, engine creation, database/session creation and
+seeding, query execution plus assertions (including mutation verification), and disposal.
+Each process ran only `Profile_AdvertisedClauses_AllHavePassingExecutionCasesAsync`, with
+`--no-build --no-restore`. Four alternating base/branch pairs passed. The first pair overlapped
+the end of the Debug suite and is reported separately; the table uses independent medians of
+the remaining three measurements for each case. All temporary instrumentation was removed.
+
+The slowest case medians, including setup and teardown, were:
+
+| Revision | Case | Complete case (ms) | Query and assertions (ms) |
+| --- | --- | ---: | ---: |
+| Base | First Alice-to-Bob `KNOWS` match returning name and weight | 249.51 | 26.51 |
+| Base | `SHOW LABELS` | 242.78 | 2.11 |
+| Base | Delete Isolated and verify | 147.35 | 9.39 |
+| Fixed | First Alice-to-Bob `KNOWS` match returning name and weight | 613.31 | 31.49 |
+| Fixed | `WHERE a.age * 2 = 84` | 433.11 | 0.17 |
+| Fixed | `WHERE a.name + 'x' = 'Bobx'` | 289.33 | 0.39 |
+
+Complete corpus times (s) were base 2.281 / 1.585 / 3.425 and fixed 1.023 / 4.072 / 12.387;
+the initial pair was 12.257 / 13.604, with maximum individual cases 5.166 / 6.405.
+The complete-case variation comes from engine lifecycle and host scheduling: the two engine
+construction/disposal implementations are unchanged from the base. For example, the fixed
+12.387 s run spent 7.802 s constructing engines, 3.947 s disposing, 0.435 s creating/seeding
+databases, 0.117 s parsing and 0.086 s executing/verifying queries. Each case creates an engine
+with four dedicated worker threads and seeds a new graph. The first query also pays first-use
+compilation costs. Its median execution increased by 4.98 ms; every other common case's median
+execution increase was at most 0.331 ms. These measurements show no material query regression
+requiring an evaluator change for performance.
+
+The old 30-second cancellation source surrounded the entire corpus, including every fresh
+engine, seed and teardown; #1140 expanded that work from 27 to 68 cases before this fix added
+five more. Its budget was therefore spent chiefly on repeated fixture lifecycle and first-use
+work, sensitive to host load. The per-case 30-second budget isolates parsing, setup and execution;
+no individual case approached it in these measurements.
 
 ### Unknown labels and relationship types in reads (#1228)
 
