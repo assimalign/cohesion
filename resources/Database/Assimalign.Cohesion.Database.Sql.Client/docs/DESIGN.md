@@ -241,6 +241,11 @@ The package has no public interface left and no `Abstractions/` folder
 
 ## E4 SQL definitions
 
+Typed-literal wire theories run over both InMemory and loopback TCP. Temporal, interval,
+binary and national-string values retain the same runtime types and metadata. Malformed
+literals (SQL0008), year-month forms (COHDBL001) and interval overflow retain their parse
+diagnostics and permit a subsequent query on the same connection.
+
 Function/domain DDL and calls use the existing statement transport and server environment without
 client ABI or wire-format changes. Dependency/admission refusals retain leading COHSQLD codes in
 execution-failure messages and leave connections usable. SqlDomainWireTests exercises SQL-defined
