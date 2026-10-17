@@ -10,12 +10,52 @@ using Xunit;
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Graph.Catalog;
 using Assimalign.Cohesion.Database.Graph.Internal;
+using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Graph.Tests;
 
 public sealed class GraphParameterTests
 {
+    [Theory(DisplayName = "Cohesion Test [Graph] - Parameters: unbound execution and EXPLAIN abort an explicit transaction until rollback")]
+    [InlineData("INSERT (:P {k: $missing})")]
+    [InlineData("INSERT (:P {k: @missing})")]
+    [InlineData("EXPLAIN INSERT (:P {k: $missing})")]
+    [InlineData("EXPLAIN INSERT (:P {k: @missing})")]
+    public async Task Execute_UnboundParameterInTransaction_ShouldAbortUntilRollback(string source)
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create("parameters", new());
+        var database = await engine.CreateDatabaseAsync("graph", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await using var transaction = await session.BeginTransactionAsync(CancellationToken.None);
+        await session.ExecuteAsync("INSERT (:Earlier)", cancellationToken: CancellationToken.None);
+
+        // Act
+        var failure = await Should.ThrowAsync<DatabaseException>(async () =>
+            await session.ExecuteAsync(source, cancellationToken: CancellationToken.None));
+        var refused = await Should.ThrowAsync<DatabaseException>(async () =>
+            await session.ExecuteAsync("INSERT (:Later)", cancellationToken: CancellationToken.None));
+
+        // Assert
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG001");
+        failure.Message.ShouldContain("missing", Case.Sensitive);
+        transaction.State.ShouldBe(TransactionState.Faulted);
+        session.CurrentTransaction.ShouldBeSameAs(transaction);
+        refused.Message.ShouldStartWith("COHDBG007", Case.Sensitive);
+        refused.Message.ShouldContain(failure.Message, Case.Sensitive);
+        refused.InnerException.ShouldBeSameAs(failure);
+        await using var observer = await database.CreateSessionAsync(CancellationToken.None);
+        (await RowsAsync(observer, "MATCH (n) RETURN n")).ShouldBeEmpty();
+        (await RowsAsync(observer, "SHOW LABELS")).ShouldBeEmpty();
+
+        await transaction.RollbackAsync(CancellationToken.None);
+        transaction.State.ShouldBe(TransactionState.RolledBack);
+        session.CurrentTransaction.ShouldBeNull();
+        (await session.ExecuteAsync("INSERT (:After)", cancellationToken: CancellationToken.None)).AffectedCount.ShouldBe(1);
+        (await RowsAsync(observer, "SHOW LABELS")).ShouldHaveSingleItem()[2].ShouldBe("After");
+    }
+
     [Fact(DisplayName = "Cohesion Test [Graph] - Parameters: missing bindings fail before waiting for another writer")]
     public async Task Execute_UnboundWrite_ShouldFailBeforeWriterLock()
     {

@@ -218,7 +218,9 @@ nothing and the transaction stays active, is therefore unavailable, and the sess
    path carried the kernel's message alone.
 5. Every failure of a statement that started counts: parse diagnostics, planning and execution
    errors, ownership refusals, kernel aborts such as conflicts and deadlocks, cancellation while
-   the statement runs, and (on the wire) a result the server cannot encode or deliver. Failures
+   the statement runs, and (on the wire) a result the server cannot encode or deliver.
+   Pre-execution planning failures such as an unbound parameter follow the same rule, in
+   ordinary execution and EXPLAIN alike. Failures
    that come before a statement starts leave the transaction unchanged: argument validation (null
    or whitespace text; a null label list, or a null, empty or whitespace label or relationship
    type, on the typed `GraphDatabase` writes; an invalid traversal specification, reported as
