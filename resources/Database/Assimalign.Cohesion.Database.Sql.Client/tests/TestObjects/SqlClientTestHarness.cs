@@ -1,20 +1,23 @@
 using System;
+using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Connections;
 using Assimalign.Cohesion.Connections.InMemory;
+using Assimalign.Cohesion.Connections.Tcp;
 using Assimalign.Cohesion.Database.Client;
 using Assimalign.Cohesion.Database.Sql;
 
 namespace Assimalign.Cohesion.Database.Sql.Client.Tests;
 
 /// <summary>
-/// A live SQL engine + in-memory listener + running server + typed SQL client, with
-/// a seeded <c>users</c> table, for typed-client end-to-end tests without sockets.
+/// A live SQL engine, InMemory or loopback TCP listener, running server and typed SQL client,
+/// with a seeded <c>users</c> table for typed-client end-to-end tests.
 /// </summary>
 internal sealed class SqlClientTestHarness : IAsyncDisposable
 {
-    private SqlClientTestHarness(SqlDatabaseEngine engine, InMemoryConnectionListener listener, SqlDatabaseServer server, SqlClient client)
+    private SqlClientTestHarness(SqlDatabaseEngine engine, IDuplexConnectionListener listener, SqlDatabaseServer server, SqlClient client)
     {
         Engine = engine;
         Listener = listener;
@@ -24,7 +27,7 @@ internal sealed class SqlClientTestHarness : IAsyncDisposable
 
     public SqlDatabaseEngine Engine { get; }
 
-    public InMemoryConnectionListener Listener { get; }
+    public IDuplexConnectionListener Listener { get; }
 
     public SqlDatabaseServer Server { get; }
 
@@ -37,7 +40,8 @@ internal sealed class SqlClientTestHarness : IAsyncDisposable
         Action<DatabaseConnectionSettings>? configureSettings = null,
         SqlClientObserver? observer = null,
         Action<SqlDatabaseEngineOptions>? configureEngine = null,
-        bool reopen = false)
+        bool reopen = false,
+        bool tcp = false)
     {
         var engineOptions = new SqlDatabaseEngineOptions();
         configureEngine?.Invoke(engineOptions);
@@ -52,7 +56,9 @@ internal sealed class SqlClientTestHarness : IAsyncDisposable
             await session.ExecuteAsync("INSERT INTO users (id, name, score) VALUES (1, 'ada', 100), (2, 'grace', 200)");
         }
 
-        var listener = new InMemoryConnectionListener();
+        IDuplexConnectionListener listener = tcp
+            ? TcpConnectionListener.Create(options => options.EndPoint = new IPEndPoint(IPAddress.Loopback, 0))
+            : new InMemoryConnectionListener();
         var serverOptions = new SqlDatabaseServerOptions { Listener = listener };
 
         configureServer?.Invoke(serverOptions);
@@ -72,7 +78,7 @@ internal sealed class SqlClientTestHarness : IAsyncDisposable
         var client = SqlClient.Create(new SqlClientOptions
         {
             Settings = settings,
-            ConnectionFactory = listener.CreateFactory(),
+            ConnectionFactory = tcp ? new TcpConnectionFactory() : ((InMemoryConnectionListener)listener).CreateFactory(),
             Observer = observer,
         });
 

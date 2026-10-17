@@ -91,6 +91,12 @@ CAST value failures follow the same contract: invalid text carries COHSQLE022 (P
 Protocol 1.0 clients retain the composed code prefix and ExecutionFailure category; a value
 failure keeps the connection usable. In-process regression tests assert code and source span.
 
+NOT NULL failures retain COHSQLE024 (SQLSTATE 23502) in the composed wire message,
+with the unchanged column-specific missing-default or explicit-NULL detail. DEFAULT
+VALUES, DEFAULT items and UPDATE DEFAULT use that same contract. SqlInsertValuesWireTests
+covers success, syntax rejection and constraint rejection over InMemory and loopback TCP,
+then queries and writes on the same connection to verify it remains usable.
+
 `SqlClientException : DatabaseException` maps stable wire codes to SQL error kinds
 and retains the original code. The shared pool invalidates incomplete exchanges,
 including cancellation and decoder failure. Completed parse/execution failures
