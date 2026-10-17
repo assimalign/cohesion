@@ -309,8 +309,11 @@ rejected before it reaches the session and changes nothing. Each refusal is an `
 MATCH and OPTIONAL MATCH execute as source-ordered joins over a nullable binding table. Each
 `GraphMatchClausePlan` records its paths, clause-local predicate, optional flag, newly declared
 variables and unsatisfiable flag. The planner validates WHERE immediately after that clause's
-declarations and chooses anchors from that clause's predicate only. Each input row runs all paths
-of a clause, then its WHERE; mandatory joins discard failures and optional joins preserve exactly
+declarations and chooses fresh anchors from that clause's predicate only. Nodes bound by earlier
+paths or clauses take precedence over every label scan or index seek at any pattern position;
+otherwise a bound relationship supplies its adjacent endpoint, trying both orientations for an
+undirected pattern. Each input row runs all paths of a clause, then its WHERE; mandatory joins
+discard failures and optional joins preserve exactly
 one row with explicit NULL entries for all new variables when none survives. The initial table has
 one empty row, including for a leading OPTIONAL MATCH. Earlier variables are preserved, and
 trail uniqueness resets for every path. Both the 100,000 materialized-binding limit and the shared
@@ -331,6 +334,9 @@ Behavior consulted, no code copied, relative to `C:/Source/repos/neo4j/neo4j`:
 `community/cypher/interpreted-runtime/src/main/scala/org/neo4j/cypher/internal/runtime/interpreted/pipes/OptionalExpandAllPipe.scala:54-68`
 null-extends an empty expansion or null source, and `:174` filters candidates before fallback;
 `OptionalPipe.scala:30-42` returns one row with explicit null bindings on empty input.
+`community/cypher/cypher-planner/src/main/scala/org/neo4j/cypher/internal/compiler/planner/logical/steps/leafplanner/argumentLeafPlanner.scala:33-37`
+plans from existing node or relationship arguments before a fresh scan, and
+`OptionalExpandAllPipe.scala:51-56` expands from the source node in the input row.
 
 RETURN (#1141) evaluates the same expressions as WHERE after matching and mutation. A standalone
 RETURN starts with the executor's one empty binding. The planner validates every projection and
@@ -393,8 +399,9 @@ item. A match still wins over NULL; without a match, a NULL operand or item yiel
 variable kinds and access paths; `GraphPlanExecutor` applies that plan. The planner considers
 scalar literal/parameter inline properties and equality predicates joined by `AND` for every node position in a
 pattern. It can anchor at the middle or end, expanding right and then left with appropriately
-reversed directions. Bound variables from earlier comma-separated patterns take precedence over
-a fresh scan. Every selected candidate still passes labels, property predicates and bindings.
+reversed directions. Bound variables from earlier comma-separated paths or earlier MATCH and
+OPTIONAL MATCH clauses take precedence over a fresh scan or index seek. Every selected candidate
+still passes labels, property predicates and bindings.
 
 Named scalar parameters (#1138) bind through #1102's shared `ParameterBindings` helper.
 Each execution copies the request map and matches normalized bare names ordinally, before any
@@ -444,13 +451,15 @@ A conjunction or disjunction of labels, and an AND, OR or XOR chain of predicate
 engine evaluates it with a loop that stops at the first operand that decides it, under three-valued
 logic for `AND` (false, otherwise unknown, otherwise true). Validation, name collection and the
 anchor's equality search walk with an explicit stack. Anchor selection reads the visible indexes
-once per plan (`GraphStore.GetIndexes`, grouped by label) and the `WHERE` chain's equalities once,
-keeping each variable's first non-null value per key; each node then tries, for each distinct label
-in order, only the keys that label has an index on. A plan therefore costs time linear in its `E`
+at most once per clause (`GraphStore.GetIndexes`, grouped by label) and that clause's `WHERE`
+chain's equalities once, keeping each variable's first non-null value per key; each node then tries,
+for each distinct label in order, only the keys that label has an index on. Planning each clause
+therefore costs time linear in its `E`
 equalities, its `D` pattern labels and properties and its `I` visible indexes, plus for each node the
-indexes its own labels carry, never the product of labels, equalities and indexes (Neo4j's leaf
-planner likewise groups predicates once and visits only each label's own index descriptors,
-`NodeIndexLeafPlanner.scala`:184, :201, :248-296), and it chooses as a per-pair search would: the
+indexes its own labels carry, never the product of labels, equalities and indexes. Across `C`
+clauses, listing and grouping visible indexes costs at most `C` times `I`. Neo4j's leaf
+planner likewise groups predicates once and visits only each label's own index descriptors
+(`NodeIndexLeafPlanner.scala`:184, :201, :248-296). Selection agrees with a per-pair search: the
 first label with an index on a key the node has a value for, then that label's key whose value comes
 first, inline properties before `WHERE` equalities. A node carrying more than 16 labels is tested
 through a hash set built once per evaluation. Only label and predicate evaluation recurse, where the
@@ -511,12 +520,12 @@ and a named path (`MATCH p = (a)-[r:KNOWS]->(b) RETURN p`) preserves traversal o
 reverse traversal and legal cycles. Properties, labels, types and database-local identities are
 the actual engine values. DISTINCT deduplicates the projected binding by entity/path identity
 before conversion to GraphPath; star is accepted when exactly one named binding is in scope.
-Computed projections, multiple projections, multi-binding star, mutations and catalog queries
-are rejected as path requests before execution. This new request/result pair adds no members to
+Optional-only bindings, computed projections, multiple projections, multi-binding star, mutations
+and catalog queries are rejected as path requests before execution. This new request/result pair adds no members to
 existing public interfaces and does not infer paths from scalar rows.
 
 The [supported-clause matrix](../../Assimalign.Cohesion.Database.Graph.Language/docs/DESIGN.md#supported-clause-matrix)
-is the single executable-language inventory: MATCH, WHERE, RETURN, INSERT, CREATE (compatibility
+is the single executable-language inventory: MATCH, OPTIONAL MATCH, WHERE, RETURN, INSERT, CREATE (compatibility
 extension), DELETE, DETACH DELETE, SHOW (catalog extension) and LABEL EXPRESSION. Functions, variable-length paths, aggregations,
 ordering, graph selection and language DDL are not advertised. Label/type/index management is the
 session-bound C# schema API. The ISO decision and conformance corpus are documented alongside the

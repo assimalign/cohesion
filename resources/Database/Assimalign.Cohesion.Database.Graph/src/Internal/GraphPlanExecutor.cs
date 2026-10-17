@@ -169,10 +169,24 @@ internal static class GraphPlanExecutor
         {
             candidates = database.Store.FindNode(bound.Id.Value, operation.Context.Snapshot) is { } node ? [node] : [];
         }
+        else if (anchor.NodeIndex < path.Relationships.Count &&
+            path.Relationships[anchor.NodeIndex] is { Variable: { } edgeVariable } edgePattern &&
+            input.TryGetValue(edgeVariable, out var edgeBinding) && edgeBinding is GraphRelationship boundEdge)
+        {
+            // This anchor is the left endpoint of an already-bound relationship. Direction fixes
+            // that endpoint; an undirected pattern tries both, once each even for a self-loop.
+            ulong left = edgePattern.Direction == GqlPatternDirection.Incoming ? boundEdge.To.Value : boundEdge.From.Value;
+            var endpoints = new List<StoredGraphNode>(2);
+            if (database.Store.FindNode(left, operation.Context.Snapshot) is { } node) { endpoints.Add(node); }
+            if (edgePattern.Direction is GqlPatternDirection.Undirected or GqlPatternDirection.LeftOrRight &&
+                boundEdge.From != boundEdge.To && database.Store.FindNode(boundEdge.To.Value, operation.Context.Snapshot) is { } other)
+            { endpoints.Add(other); }
+            candidates = endpoints;
+        }
         else if (anchor.Property is { } property)
         { candidates = await database.Store.SearchIndexAsync(anchor.Label!, property, anchor.Value!, operation.Context.Snapshot, token).ConfigureAwait(false); }
         else { candidates = database.Store.GetNodes(anchor.Label, operation.Context.Snapshot); }
-        // Expand right of an arbitrary indexed anchor, then left, preserving source positions.
+        // Expand right of an arbitrary bound or indexed anchor, then left, preserving source positions.
         var steps = Enumerable.Range(anchor.NodeIndex, path.Relationships.Count - anchor.NodeIndex)
             .Select(index => (Edge: index, From: index, To: index + 1))
             .Concat(Enumerable.Range(0, anchor.NodeIndex).Reverse().Select(index => (Edge: index, From: index + 1, To: index))).ToArray();

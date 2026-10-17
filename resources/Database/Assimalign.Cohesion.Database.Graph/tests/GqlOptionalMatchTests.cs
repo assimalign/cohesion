@@ -235,6 +235,136 @@ public sealed class GqlOptionalMatchTests
         (await RowsAsync(result)).ShouldHaveSingleItem().ShouldBe(new object?[] { null });
     }
 
+    [Theory(DisplayName = "Cohesion Test [Graph] - MATCH: earlier node bindings precede scans in either pattern spelling")]
+    [InlineData("OPTIONAL MATCH (b)<-(a)", true)]
+    [InlineData("OPTIONAL MATCH (b:N)->(a)", true)]
+    [InlineData("OPTIONAL MATCH (b)->(a)->(c)", true)]
+    [InlineData("MATCH (b)<-(a)", false)]
+    [InlineData("MATCH (b:N)->(a)", false)]
+    [InlineData(", (b)<-(a)", false)]
+    [InlineData(", (b:N)->(a)", false)]
+    public async Task Execute_BoundNodeOnRight_ShouldExpandLinearlyAsync(string later, bool optional)
+    {
+        // Arrange
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromMinutes(2));
+        await using var engine = GraphDatabaseEngine.Create("bound-node-anchor", new());
+        var database = await engine.CreateDatabaseAsync("optional", cancellation.Token);
+        await using var session = await database.CreateSessionAsync(cancellation.Token);
+        await session.ExecuteAsync("INSERT " + string.Join(",", Enumerable.Repeat("(:N)", 1001)), cancellationToken: cancellation.Token);
+        string source = "MATCH (a:N) " + later + " RETURN a, b";
+        var plan = await PlanAsync(database, session, source);
+        // Act
+        int expansions = await CountCandidatesAsync(database, session, plan, cancellation.Token);
+        // Assert
+        expansions.ShouldBe(2002);
+        plan.MatchClauses.SelectMany(clause => clause.Paths).Last().Anchor.NodeIndex.ShouldBe(1);
+        var rows = await QueryAsync(session, source);
+        rows.Count.ShouldBe(optional ? 1001 : 0);
+        rows.ShouldAllBe(row => row[0] is GraphNode && row[1] == null);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Graph] - MATCH: a bound node precedes a less selective property index")]
+    [InlineData("OPTIONAL MATCH", "(b:N {k:1})->(a)", 1, true)]
+    [InlineData("MATCH", "(b:N {k:1})->(a)", 1, false)]
+    [InlineData("OPTIONAL MATCH", "(a)->(b:N {k:1})", 0, true)]
+    [InlineData("MATCH", "(a)->(b:N {k:1})", 0, false)]
+    public async Task Execute_BoundNodeWithIndex_ShouldAvoidRepeatedSeeksAsync(string clause, string pattern, int position, bool optional)
+    {
+        // Arrange
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromMinutes(2));
+        await using var engine = GraphDatabaseEngine.Create("bound-index-anchor", new());
+        var database = await engine.CreateDatabaseAsync("optional", cancellation.Token);
+        await using var session = await database.CreateSessionAsync(cancellation.Token);
+        await session.ExecuteAsync("INSERT " + string.Join(",", Enumerable.Repeat("(:N {k:1})", 1001)), cancellationToken: cancellation.Token);
+        await GraphSchema.Open(database, session).CreateIndexAsync("N", "by_k", "k", cancellation.Token);
+        string source = "MATCH (a:N) " + clause + " " + pattern + " RETURN a, b";
+        var plan = await PlanAsync(database, session, source);
+        // Act
+        int expansions = await CountCandidatesAsync(database, session, plan, cancellation.Token);
+        var rows = await QueryAsync(session, source);
+        // Assert
+        expansions.ShouldBe(2002);
+        var anchor = plan.MatchClauses[1].Paths[0].Anchor;
+        anchor.NodeIndex.ShouldBe(position);
+        anchor.Property.ShouldBeNull();
+        rows.Count.ShouldBe(optional ? 1001 : 0);
+        rows.ShouldAllBe(row => row[0] is GraphNode && row[1] == null);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Graph] - OPTIONAL MATCH: an indexed WHERE on outer variables preserves every outer row")]
+    [InlineData("(a)-[:KNOWS]->(b)")]
+    [InlineData("(b:Person {name:'Bob'})")]
+    public async Task Execute_OptionalOuterPredicate_ShouldKeepOuterRowsAsync(string pattern)
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create("optional-outer-filter", new());
+        var database = await engine.CreateDatabaseAsync("optional", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync(seed, cancellationToken: CancellationToken.None);
+        await GraphSchema.Open(database, session).CreateIndexAsync("Person", "by_name", "name", CancellationToken.None);
+        string source = "MATCH (a:Person) OPTIONAL MATCH " + pattern + " WHERE a.name = 'Alice' RETURN a.name, b.name";
+        // Act
+        var plan = await PlanAsync(database, session, source);
+        var rows = await QueryAsync(session, source);
+        // Assert
+        plan.MatchClauses[0].Paths[0].Anchor.Property.ShouldBeNull();
+        if (pattern.StartsWith("(a)", StringComparison.Ordinal))
+        { plan.MatchClauses[1].Paths[0].Anchor.Property.ShouldBeNull(); }
+        rows.Select(row => row[0]).ShouldBe(new object?[] { "Alice", "Bob", "Isolated" });
+        rows.Select(row => row[1]).ShouldBe(new object?[] { "Bob", null, null });
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Graph] - MATCH: a bound relationship supplies adjacent endpoints before scans or seeks")]
+    [InlineData("KNOWS", "MATCH (x:Person {name:'Alice'})-[r]->(y)", "Alice,Bob", 0)]
+    [InlineData("KNOWS", "MATCH (x)<-[r]-(y)", "Bob,Alice", 0)]
+    [InlineData("KNOWS", "MATCH (x)-[r]-(y)", "Alice,Bob;Bob,Alice", 0)]
+    [InlineData("KNOWS", "MATCH (x)<-[r]->(y)", "Alice,Bob;Bob,Alice", 0)]
+    [InlineData("KNOWS", "MATCH (x)-[:LINK]->()-[r]->(y)", "Before,Bob", 1)]
+    [InlineData("KNOWS", ", (x)-[:LINK]->()-[r]->(y)", "Before,Bob", 1)]
+    [InlineData("KNOWS", "OPTIONAL MATCH (x)-[:LINK]->()-[r]->(y)", "Before,Bob", 1)]
+    [InlineData("LOOP", "MATCH (x)-[r]-(y)", "Self,Self", 0)]
+    public async Task Execute_BoundRelationship_ShouldAnchorAtEndpointAsync(string type, string later, string expected, int position)
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create("bound-edge-anchor", new());
+        var database = await engine.CreateDatabaseAsync("optional", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync(seed, cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("MATCH (a:Person {name:'Alice'}) INSERT (:Person {name:'Before'})-[:LINK]->(a)", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT (s:Person {name:'Self'})-[:LOOP]->(s)", cancellationToken: CancellationToken.None);
+        await GraphSchema.Open(database, session).CreateIndexAsync("Person", "by_name", "name", CancellationToken.None);
+        string source = "MATCH ()-[r:" + type + "]->() " + later + " RETURN x.name, y.name";
+        // Act
+        var plan = await PlanAsync(database, session, source);
+        int expansions = await CountCandidatesAsync(database, session, plan, CancellationToken.None);
+        var rows = await QueryAsync(session, source);
+        // Assert
+        var anchor = plan.MatchClauses.SelectMany(clause => clause.Paths).Last().Anchor;
+        anchor.NodeIndex.ShouldBe(position);
+        anchor.Property.ShouldBeNull();
+        expansions.ShouldBeLessThanOrEqualTo(15);
+        rows.Select(row => string.Join(",", row)).ShouldBe(expected.Split(';'));
+    }
+
+    // Measure each input separately so a regression reports its full candidate count, even when
+    // the statement's shared budget would stop execution before all 1,001 inputs were visited.
+    private static ValueTask<int> CountCandidatesAsync(GraphDatabase database, GraphDatabaseSession session, GraphPlan plan, CancellationToken token)
+        => database.RunAsync(session, async operation =>
+        {
+            var paths = plan.MatchClauses.SelectMany(clause => clause.Paths).ToArray();
+            var input = new List<Dictionary<string, object?>>();
+            var first = new GraphPlanExecutor.ExpansionBudget();
+            await GraphPlanExecutor.MatchAsync(database, operation, paths[0], new(StringComparer.Ordinal), input, first, null, token);
+            int consumed = first.Consumed;
+            foreach (var binding in input)
+            {
+                var budget = new GraphPlanExecutor.ExpansionBudget();
+                await GraphPlanExecutor.MatchAsync(database, operation, paths[1], binding, [], budget, null, token);
+                consumed += budget.Consumed;
+            }
+            return consumed;
+        }, token);
+
     private static ValueTask<GraphPlan> PlanAsync(GraphDatabase database, GraphDatabaseSession session, string source, bool paths = false)
         => database.RunAsync(session, operation => ValueTask.FromResult(
             new GraphPlanner(database, operation.Context.Snapshot).Plan(GraphQueryRequest.FromGql(source).Statement.GqlExpression, paths: paths)), CancellationToken.None);

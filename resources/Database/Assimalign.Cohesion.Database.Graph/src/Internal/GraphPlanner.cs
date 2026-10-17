@@ -94,6 +94,7 @@ internal sealed partial class GraphPlanner
         var variables = new Dictionary<string, BindingKind>(StringComparer.Ordinal);
         var declarations = new List<string>();
         var mandatoryVariables = new HashSet<string>(StringComparer.Ordinal);
+        var boundVariables = new HashSet<string>(StringComparer.Ordinal);
         var clauses = new List<GraphMatchClausePlan>();
         var tokens = new GraphTokenResolver(_database.Catalog, _snapshot);
         bool matchesNothing = false;
@@ -112,7 +113,15 @@ internal sealed partial class GraphPlanner
             ValidateExpression(clause.Predicate);
             clauseMatchesNothing |= RequiresUnknownName(clause.Predicate);
             var anchors = new AnchorSources(_database, _snapshot, clause.Predicate, _parameters);
-            var paths = clause.Paths.Select(path => new GraphPathPlan(path, ChooseAnchor(path, anchors))).ToArray();
+            var paths = new List<GraphPathPlan>();
+            foreach (var path in clause.Paths)
+            {
+                paths.Add(new GraphPathPlan(path, ChooseAnchor(path, anchors, boundVariables)));
+                foreach (var node in path.Nodes)
+                { if (node.Variable is { } variable) { boundVariables.Add(variable); } }
+                foreach (var relationship in path.Relationships)
+                { if (relationship.Variable is { } variable) { boundVariables.Add(variable); } }
+            }
             clauses.Add(new GraphMatchClausePlan(paths, clause.Predicate, optional,
                 declarations.Skip(firstDeclaration).ToArray(), clauseMatchesNothing));
             matchesNothing |= !optional && clauseMatchesNothing;
@@ -477,7 +486,10 @@ internal sealed partial class GraphPlanner
 
     private enum BindingKind { Node, Relationship, Path }
 
-    // Anchors come from Labels only, which holds a node's labels only when every match must carry
+    // Earlier paths and clauses supply argument bindings before any scan or seek, as Neo4j's
+    // argumentLeafPlanner.scala:33-37 does (community/cypher/cypher-planner/.../steps/leafplanner).
+    // A bound relationship supplies its adjacent endpoint when no node is already bound.
+    // Fresh anchors come from Labels only, which holds a node's labels only when every match must carry
     // them all: a pure conjunction. A disjunction, negation or wildcard leaves Labels empty, and a
     // labeled predicate is never an equality, so neither can narrow the candidates and drop rows;
     // such a node scans every node and the executor evaluates the expression on each.
@@ -488,8 +500,18 @@ internal sealed partial class GraphPlanner
     // plus the indexes its labels own, never their product: Neo4j's leaf planner likewise groups the
     // predicates once and visits only each label's own index descriptors
     // (cypher-planner .../leafplanner/index/NodeIndexLeafPlanner.scala:184, :201, :248-261, :279-296).
-    private GraphAnchor ChooseAnchor(GqlPathPattern path, AnchorSources sources)
+    private GraphAnchor ChooseAnchor(GqlPathPattern path, AnchorSources sources, IReadOnlySet<string> boundVariables)
     {
+        for (int i = 0; i < path.Nodes.Count; i++)
+        {
+            if (path.Nodes[i].Variable is { } variable && boundVariables.Contains(variable))
+            { return new GraphAnchor(i, path.Nodes[i].Labels.FirstOrDefault(), null, null); }
+        }
+        for (int i = 0; i < path.Relationships.Count; i++)
+        {
+            if (path.Relationships[i].Variable is { } variable && boundVariables.Contains(variable))
+            { return new GraphAnchor(i, path.Nodes[i].Labels.FirstOrDefault(), null, null); }
+        }
         for (int i = 0; i < path.Nodes.Count; i++)
         {
             var node = path.Nodes[i];
@@ -537,7 +559,7 @@ internal sealed partial class GraphPlanner
     private readonly record struct FirstValue(int Position, object Value);
 
     /// <summary>
-    /// What anchor selection reads from outside the pattern, each read at most once per plan: the
+    /// What anchor selection reads from outside the pattern, each read at most once per clause: the
     /// visible indexes grouped by label, and every variable's <c>variable.key = literal-or-parameter</c>
     /// equalities from the <c>WHERE</c> chain.
     /// </summary>
@@ -554,7 +576,7 @@ internal sealed partial class GraphPlanner
         /// <summary>Initializes a new instance of the <see cref="AnchorSources"/> class.</summary>
         /// <param name="database">The database whose store lists the visible indexes.</param>
         /// <param name="snapshot">The snapshot the index list observes.</param>
-        /// <param name="predicate">The statement's <c>WHERE</c> predicate, if any.</param>
+        /// <param name="predicate">The clause's <c>WHERE</c> predicate, if any.</param>
         /// <param name="parameters">The normalized bindings used for scalar equality values.</param>
         public AnchorSources(GraphDatabase database, TransactionSnapshot snapshot, GqlExpression? predicate, IReadOnlyDictionary<string, object?>? parameters)
         {
