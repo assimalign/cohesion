@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using Shouldly;
 using Xunit;
 
 namespace  Assimalign.Cohesion.ObjectValidation.Tests;
@@ -115,12 +116,15 @@ public class RuleGreaterThanTests : RuleBaseTest
     [Fact]
     public override void GuidSuccessTest()
     {
-#if IS_WINDOWS
-        var guid1 = SequentialGuid.New();
-        var guid2 = SequentialGuid.New();
-        var context = this.RunGreaterThanTest(guid2, guid1);
-        Assert.Empty(context.Errors);
-#endif
+        // Arrange: fixed values that Guid.CompareTo orders by their last byte.
+        var lower = Guid.Parse("00000000-0000-0000-0000-000000000001");
+        var higher = Guid.Parse("00000000-0000-0000-0000-000000000002");
+
+        // Act
+        var context = this.RunGreaterThanTest(higher, lower);
+
+        // Assert
+        context.Errors.ShouldBeEmpty();
     }
 
     [Fact]
