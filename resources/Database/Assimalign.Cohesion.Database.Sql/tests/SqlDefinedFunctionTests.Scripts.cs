@@ -214,12 +214,12 @@ public sealed partial class SqlDefinedFunctionTests
             await using var session = await database.CreateSessionAsync();
             // Assert
             (await RowsAsync(session, "SELECT n FROM t")).ShouldBe([[2L]]);
-            (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "INSERT INTO t (id) VALUES (2)"))).Message.ShouldContain("COHSQLE009");
+            (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "INSERT INTO t (id) VALUES (2)"))).Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE009");
         }
         var declared = SqlDatabaseEngine.CreateBuilder("native-missing");
         declared.Options.StorageStrategy = images.CaptureDurableImages();
         declared.AddDatabase("functions");
-        (await Should.ThrowAsync<SqlSchemaMigrationException>(async () => await declared.BuildAsync())).Message.ShouldContain("COHSQLE009");
+        (await Should.ThrowAsync<SqlSchemaMigrationException>(async () => await declared.BuildAsync())).Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE009");
     }
 
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Persisted SQL function domain signatures enforce argument and result constraints")]

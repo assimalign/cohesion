@@ -447,7 +447,7 @@ internal sealed partial class SqlSchemaProvisioner
                 }
                 catch (DatabaseException exception)
                 {
-                    throw new DatabaseException($"Table '{table.Name}': {exception.Message}", exception);
+                    throw new DatabaseException($"Table '{table.Name}': {exception.Message}", exception.Diagnostics, exception);
                 }
             }
         }
@@ -489,7 +489,7 @@ internal sealed partial class SqlSchemaProvisioner
                 }
                 catch (DatabaseException exception)
                 {
-                    throw new DatabaseException($"DEFAULT on column '{table.Name}.{column.Name}' does not bind: {exception.Message}", exception);
+                    throw new DatabaseException($"DEFAULT on column '{table.Name}.{column.Name}' does not bind: {exception.Message}", exception.Diagnostics, exception);
                 }
             }
 
@@ -516,7 +516,7 @@ internal sealed partial class SqlSchemaProvisioner
                 catch (DatabaseException exception)
                 {
                     string reason = exception.Message.EndsWith('.') ? exception.Message : exception.Message + ".";
-                    throw new DatabaseException($"CHECK constraint '{constraint.Name}' on table '{table.Name}' does not bind: {reason}", exception);
+                    throw new DatabaseException($"CHECK constraint '{constraint.Name}' on table '{table.Name}' does not bind: {reason}", exception.Diagnostics, exception);
                 }
             }
         }

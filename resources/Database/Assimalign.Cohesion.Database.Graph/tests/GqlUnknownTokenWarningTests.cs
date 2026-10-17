@@ -119,7 +119,7 @@ public sealed class GqlUnknownTokenWarningTests
         // Assert
         rows.Select(row => row[0]).ShouldBe(["l"]);
         diagnostics.ShouldBeNull();
-        invalid.Message.ShouldStartWith("COHDBG001", Case.Sensitive);
+        invalid.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHDBG001");
     }
 
     /// <summary>

@@ -394,7 +394,7 @@ public sealed class SqlDataStorageFormatTests : IDisposable
         {
             message = (await Should.ThrowAsync<DatabaseException>(async () => await refusingEngine.OpenDatabaseAsync(TestDatabase))).Message;
             (await Should.ThrowAsync<DatabaseException>(async () => await refusingEngine.OpenDatabaseAsync(TestDatabase)))
-                .Message.ShouldBe(message);
+                .ShouldHaveMessage(message);
         }
 
         // Assert: refused on the catalog alone. The data file set was never

@@ -423,13 +423,13 @@ internal sealed class SqlBoundTableCache
             throw new DatabaseException(
                 $"{subject} cannot be loaded: its persisted definition '{constraint.CheckExpression}' calls a function with " +
                 $"arguments the function does not accept ({failure.Message}). {SqlPersistedExpression.UncheckedCallHint}",
-                failure);
+                failure.Diagnostics, failure);
         }
 
         throw new DatabaseException(
             $"{subject} cannot be loaded: its persisted definition '{constraint.CheckExpression}' does not bind to the table " +
             $"({failure.Message}). {SqlPersistedExpression.DamagedCatalogHint}",
-            failure);
+            failure.Diagnostics, failure);
     }
 
     /// <summary>

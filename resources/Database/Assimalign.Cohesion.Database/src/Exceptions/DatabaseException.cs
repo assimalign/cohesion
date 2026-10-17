@@ -1,4 +1,8 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
+
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database;
 
@@ -7,6 +11,9 @@ namespace Assimalign.Cohesion.Database;
 /// </summary>
 public class DatabaseException : Exception
 {
+    /// <summary>Gets the complete diagnostics, ordered by source offset; empty when none were supplied.</summary>
+    public IReadOnlyList<Diagnostic> Diagnostics { get; } = Array.Empty<Diagnostic>();
+
     /// <summary>
     /// Initializes a new instance of <see cref="DatabaseException"/>.
     /// </summary>
@@ -26,4 +33,16 @@ public class DatabaseException : Exception
     /// <param name="innerException">The underlying cause.</param>
     public DatabaseException(string message, Exception? innerException)
         : base(message, innerException) { }
+
+    /// <summary>Initializes a database failure with its complete structured diagnostics.</summary>
+    /// <param name="message">The error message, without a diagnostic code prefix.</param>
+    /// <param name="diagnostics">The diagnostics, copied and ordered by start offset; unlocated diagnostics follow located ones.</param>
+    /// <param name="innerException">The underlying cause, or null.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="diagnostics"/> is null.</exception>
+    public DatabaseException(string message, IEnumerable<Diagnostic> diagnostics, Exception? innerException = null)
+        : base(message, innerException)
+    {
+        ArgumentNullException.ThrowIfNull(diagnostics);
+        Diagnostics = Array.AsReadOnly(diagnostics.OrderBy(diagnostic => diagnostic.Start ?? int.MaxValue).ToArray());
+    }
 }

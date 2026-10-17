@@ -49,7 +49,7 @@ public sealed partial class SqlDefinedFunctionTests
 
         // Assert
         failure.Message.ShouldContain("COHSQLS005");
-        failure.Message.ShouldContain(objectName);
+        failure.ShouldContainMessage(objectName);
         failure.Message.ShouldContain("declare the change in the typed schema");
         var afterCatalog = images.GetDurableImage("functions", catalog: true);
         var afterData = images.GetDurableImage("functions");

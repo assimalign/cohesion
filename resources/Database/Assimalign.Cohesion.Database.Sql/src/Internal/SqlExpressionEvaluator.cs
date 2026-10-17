@@ -298,14 +298,14 @@ internal sealed partial class SqlExpressionEvaluator
 
                     if (resolved >= 0)
                     {
-                        throw new DatabaseException($"Ambiguous column '{ColumnName(column)}'; qualify it with a table name or alias.");
+                        throw new SqlPlanningException("COHSQLE015", $"Ambiguous column '{ColumnName(column)}'; qualify it with a table name or alias.", column.Location);
                     }
 
                     resolved = binding.Offset + i;
                 }
             }
 
-            return resolved >= 0 ? resolved : throw new DatabaseException($"Unknown column '{ColumnName(column)}'.");
+            return resolved >= 0 ? resolved : throw new SqlPlanningException("COHSQLE015", $"Unknown column '{ColumnName(column)}'.", column.Location);
         }
 
         for (int i = 0; i < _columns.Count; i++)
@@ -316,7 +316,7 @@ internal sealed partial class SqlExpressionEvaluator
             }
         }
 
-        throw new DatabaseException($"Unknown column '{column.ColumnName}'.");
+        throw new SqlPlanningException("COHSQLE015", $"Unknown column '{column.ColumnName}'.", column.Location);
     }
 
     /// <summary>

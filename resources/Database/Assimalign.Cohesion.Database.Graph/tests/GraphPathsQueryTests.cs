@@ -114,7 +114,7 @@ public sealed class GraphPathsQueryTests
         var failure = await Should.ThrowAsync<DatabaseException>(async () =>
             await session.ExecuteAsync(GraphPathsQueryRequest.FromGql(statement), token));
 
-        failure.Message.ShouldContain("COHDBG001", Case.Sensitive);
+        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHDBG001");
         var after = (await session.ExecuteAsync(GraphPathsQueryRequest.FromGql("MATCH (a:Vertex) RETURN a"), token)).ShouldBeOfType<GraphPathsQueryResult>();
         after.Paths.Single().Nodes.Single().Properties["name"].ShouldBe("Original");
     }
@@ -135,7 +135,7 @@ public sealed class GraphPathsQueryTests
         var error = await Should.ThrowAsync<DatabaseException>(async () =>
             await session.ExecuteAsync(statement, cancellationToken: CancellationToken.None));
 
-        error.Message.ShouldContain("COHDBG003", Case.Sensitive);
+        error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHDBG003");
     }
 
     [Fact(DisplayName = "Cohesion Test [Graph] - Materialized paths release the operation and retain their snapshot")]

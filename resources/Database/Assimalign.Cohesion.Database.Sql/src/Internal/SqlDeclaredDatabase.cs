@@ -202,7 +202,7 @@ internal sealed partial class SqlDeclaredDatabase
         if (database.Definitions.FindUnresolved(cancellationToken) is { } unresolved)
         {
             throw new SqlSchemaMigrationException(
-                $"{SqlEvaluationException.UnregisteredFunctionCode}: SQL engine '{engine.Name}', database '{Name}': {unresolved.Describe()}. " +
+                $"SQL engine '{engine.Name}', database '{Name}': {unresolved.Describe()}. " +
                 "The engine declares this database, so its build fails before the engine accepts work: register the function on the " +
                 "engine's builder (SqlDatabaseEngineBuilder.Functions), or drop the constraint through an engine that does not declare " +
                 "the database.",
@@ -214,7 +214,7 @@ internal sealed partial class SqlDeclaredDatabase
         if (database.Definitions.FindUnresolvedDomain(cancellationToken) is { } domain)
         {
             throw new SqlSchemaMigrationException(
-                $"{SqlEvaluationException.UnregisteredTypeCode}: SQL engine '{engine.Name}', database '{Name}': {domain.Describe()}. " +
+                $"SQL engine '{engine.Name}', database '{Name}': {domain.Describe()}. " +
                 "The engine declares this database, so its build fails before the engine accepts work: register the domain on the " +
                 "engine's builder (SqlDatabaseEngineBuilder.Types), or drop the column through an engine that does not declare the database.",
                 SqlEvaluationException.UnregisteredDomain(domain));

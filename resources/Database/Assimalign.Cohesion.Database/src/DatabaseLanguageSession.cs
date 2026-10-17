@@ -60,6 +60,9 @@ public abstract class DatabaseLanguageSession<TRequest> : DatabaseExecutionSessi
     /// <returns>The request's result.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="request"/> is null.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the core ran.</exception>
+    /// <exception cref="DatabaseParseException">The typed statement contains error diagnostics. Its complete
+    /// diagnostics are carried by the exception, exactly as when the same statement is submitted as text;
+    /// an error-recovery syntax tree is never executed.</exception>
     /// <exception cref="DatabaseException">The session is closed, or the request failed.</exception>
     public new ValueTask<DatabaseResult> ExecuteAsync(TRequest request, CancellationToken cancellationToken = default)
         => base.ExecuteAsync(request, cancellationToken);
@@ -74,7 +77,7 @@ public abstract class DatabaseLanguageSession<TRequest> : DatabaseExecutionSessi
     /// <returns>The query result.</returns>
     /// <exception cref="ArgumentException"><paramref name="statement"/> is null, empty or white space.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the core ran.</exception>
-    /// <exception cref="DatabaseParseException">The statement text failed to parse in the session's language.</exception>
+    /// <exception cref="DatabaseParseException">The statement text failed to parse in the session's language. The exception carries the complete statement diagnostics, ordered by source offset, as on the typed seam.</exception>
     /// <exception cref="DatabaseException">The session is closed, or the statement failed.</exception>
     public ValueTask<DatabaseResult> ExecuteAsync(string statement, IReadOnlyDictionary<string, object?>? parameters = null, CancellationToken cancellationToken = default)
     {

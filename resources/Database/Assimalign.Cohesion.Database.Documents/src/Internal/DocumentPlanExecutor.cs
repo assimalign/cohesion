@@ -21,7 +21,7 @@ internal static class DocumentPlanExecutor
         operation.EnsureActive();
         cancellationToken.ThrowIfCancellationRequested();
         var error = statement.Diagnostics.FirstOrDefault(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
-        if (error is not null) { throw new DatabaseParseException($"OQL parse error {error.Code}: {error.Message}"); }
+        if (error is not null) { throw new DatabaseParseException($"OQL parse error {error.Code}: {error.Message}", statement.Diagnostics); }
         var plan = new DocumentPlanner(database.Catalog, operation.Context.Snapshot, parameters).Plan(statement.OqlExpression);
         return plan switch
         {

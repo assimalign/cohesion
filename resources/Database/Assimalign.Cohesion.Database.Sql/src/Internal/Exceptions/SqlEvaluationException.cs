@@ -1,6 +1,9 @@
 using System;
 using System.Threading;
 
+using Assimalign.Cohesion.Database.Types;
+using Assimalign.Cohesion.Database.Language;
+
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 /// <summary>
@@ -14,10 +17,10 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// its function does not accept, are raised while planning, before anything executes.
 /// </summary>
 /// <remarks>
-/// The code leads the message (<c>COHSQLE001: ...</c>), the engine-code convention
-/// <see cref="DatabaseException"/> carries until the area root grows a structured
-/// diagnostics carrier. The wire server forwards the message unchanged as an
-/// <c>ExecutionFailure</c>. The codes and the ISO SQLSTATE each corresponds to are
+/// The code is structured in <see cref="DatabaseException.Diagnostics"/>; Message is the
+/// unprefixed detail. Planning attaches the offending node's location when available.
+/// The wire server composes <c>CODE: message</c> for protocol 1.0 ExecutionFailure.
+/// The codes and the ISO SQLSTATE each corresponds to are
 /// published in the dialect's diagnostics table.
 /// </remarks>
 internal sealed class SqlEvaluationException : DatabaseException
@@ -116,12 +119,23 @@ internal sealed class SqlEvaluationException : DatabaseException
     internal const string StringDataRightTruncationCode = "COHSQLE012";
 
     private readonly string _detail;
+    private readonly Location? _location;
 
-    private SqlEvaluationException(string code, string detail, Exception? innerException)
-        : base($"{code}: {detail}", innerException)
+    private SqlEvaluationException(string code, string detail, Exception? innerException, Location? location = null)
+        : base(detail, [new Diagnostic
+        {
+            Code = code,
+            Message = detail,
+            Severity = DiagnosticSeverity.Error,
+            Start = location?.Start,
+            End = location?.End,
+            Line = location?.StartLine ?? 1,
+            Location = location is null ? null : DiagnosticLocation.Absolute,
+        }], innerException)
     {
         Code = code;
         _detail = detail;
+        _location = location;
     }
 
     /// <summary>Gets the stable engine diagnostic code.</summary>
@@ -133,10 +147,14 @@ internal sealed class SqlEvaluationException : DatabaseException
     /// on two threads.
     /// </summary>
     /// <returns>The copy.</returns>
-    internal SqlEvaluationException Duplicate() => new(Code, _detail, InnerException);
+    internal SqlEvaluationException Duplicate() => new(Code, _detail, InnerException, _location);
+
+    /// <summary>Attaches the offending node's location to a planning failure.</summary>
+    internal SqlEvaluationException At(Location? location) => _location is not null || location is null
+        ? this : new(Code, _detail, InnerException, location);
 
     /// <summary>Adds assignment context while preserving the diagnostic code and original failure.</summary>
-    internal SqlEvaluationException WithContext(string context) => new(Code, $"{context}: {_detail}", this);
+    internal SqlEvaluationException WithContext(string context) => new(Code, $"{context}: {_detail}", this, _location);
 
     /// <summary>Creates the failure for a character assignment that would lose non-space content.</summary>
     internal static SqlEvaluationException StringDataRightTruncation(int length)

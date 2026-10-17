@@ -196,16 +196,16 @@ after `ALTER TABLE` is a missing table name. `TABLE` is required: `ALTER INDEX`,
 
 **Unknown functions.** A call to a name outside the engine's function catalog (the
 standard library and the functions the application registered on the engine, see
-[Builtin functions](#builtin-functions)) and outside the profile's function list fails
-at plan time with `Unknown function '<name>'.`, a `DatabaseException`
+[Builtin functions](#builtin-functions)), the executable profile and the recognized-unsupported
+vocabulary fails at plan time with `COHSQLE016` and `Unknown function '<name>'.`, a `DatabaseException`
 (`ExecutionFailure` on the wire). The planner checks every expression position
 before it binds the statement or reads a row: projections, predicates, joins,
 grouping, ordering, `LIMIT`/`OFFSET`, subqueries, DML values and `CHECK`. The
 statement therefore fails the same way over an empty table as over a populated
 one; the evaluator used to find the name per row, so an empty table succeeded.
-Declared names that do not execute yet, such as `NULLIF` and `TRIM` (see
-[Builtin functions](#builtin-functions)), are not unknown. They still fail during
-evaluation; #1103 rejects them at parse time with `COHDBL001`.
+Recognized names that do not execute yet, such as `NULLIF` and `TRIM` (see
+[Builtin functions](#builtin-functions)), are not unknown. They reject at parse time
+with one named `COHDBL001` and are absent from the executable profile (#1103).
 
 **Function arguments (#1189).** A call to an executable function must pass a number
 of arguments its signature accepts (the table under
@@ -253,7 +253,7 @@ only when a call had exactly one, so `SELECT ABS(1, 2), UPPER(), COALESCE() FROM
 returned three NULLs, `CHECK (ABS(c, 1) > 0)` was stored and admitted every row, and
 an aggregate with no argument outside a projection (`UPDATE t SET a = SUM()`)
 succeeded over an empty table. A wrong aggregate count in a projection failed while
-planning already, without a code. A declared name that does not execute has no
+planning already, without a code. A recognized name that does not execute has no
 signature, and fails as described above. A database whose catalog stores a CHECK
 with such a call does not open; see [Persisted definitions are
 canonical](#persisted-definitions-are-canonical).
@@ -444,7 +444,8 @@ Only literal defaults execute. `DEFAULT (1 + 2)`, function calls, parameters,
 CAST, and other expressions are rejected during planning, before schema or data
 mutation, using CREATE TABLE's diagnostic:
 `Column 'extra': only literal DEFAULT values are supported.` A call to a name
-outside the profile's function list fails first, with `Unknown function '<name>'.`,
+outside the engine's catalog, executable profile and recognized-unsupported vocabulary fails
+first, with `COHSQLE016` and `Unknown function '<name>'.`,
 and so does a call whose arguments its function does not accept, with `COHSQLE006`
 (`DEFAULT ABS(1, 2)`; see [Statement completeness](#statement-completeness-1068)),
 and a parameter such as `:x` is a parse error. Defaults must
@@ -1623,9 +1624,10 @@ storage coercion; nested arithmetic therefore sees the converted numeric value.
 
 ## Builtin functions
 
-The profile's function list is lexical vocabulary, not an execution claim and
-not part of the 49-clause denominator. What executes is the engine's function catalog
-(E2): the standard library below, and the functions the application registered on the
+The profile's function list is the executable built-in set: `COUNT`, `SUM`, `AVG`,
+`MIN`, `MAX`, `ABS`, `LENGTH`, `UPPER`, `LOWER`, `COALESCE` and `CAST`. It is
+not part of the 49-clause denominator. The engine's function catalog (E2) also runs
+the functions the application registered on the
 engine builder (`SqlDatabaseEngineBuilder.Functions`), which every database of the engine
 calls exactly as it calls the built-ins. Executable built-in scalars are `UPPER`, `LOWER`,
 `LENGTH` and `ABS`, beside the special form `COALESCE`; built-in aggregates are `COUNT`,
@@ -1664,8 +1666,7 @@ keyword.
 types, a result type, a volatility and a NULL rule. A name and parameter-type list is
 registered once, and a name is either scalar or aggregate. A built-in cannot be replaced: an
 overload of a built-in's name is accepted only for a number of arguments the built-in does
-not take (`upper(TEXT, BIGINT)` beside `UPPER(value)`). A name the profile lists above but
-that does not execute yet (`TRIM`, `NOW`, `ROUND`, ...), a type name (`INT`, `DATE`), `ANY`,
+not take (`upper(TEXT, BIGINT)` beside `UPPER(value)`). A name in the recognized-unsupported vocabulary (`TRIM`, `NOW`, `ROUND`, ...), a type name (`INT`, `DATE`), `ANY`,
 `SOME`, `LOCALTIME` and `LOCALTIMESTAMP` cannot be registered. An argument converts to its
 parameter's type along INT8 → INT16 → INT32 → INT64 → NUMERIC → DOUBLE, or REAL → DOUBLE;
 nothing converts from text, so a DATE or UUID parameter takes a column or a parameter of
@@ -1718,22 +1719,36 @@ Native, built-in and SQL calls all reload by recorded identity. Special forms su
 [Persisted definitions are canonical](#persisted-definitions-are-canonical), which still
 fails the open.
 
-A call to a name outside the catalog and the recognized list fails at plan time with
-`Unknown function '<name>'.`, before any row is read (#1068). A recognized name
-outside the executable set still parses and plans, then fails during evaluation,
-so it fails only when a row reaches it; #1103 rejects those names at parse time.
-Do not infer that a call works from a supported `SELECT`. Recognized names include aggregates `COUNT`,
-`SUM`, `AVG`, `MIN`, `MAX`; null handling `COALESCE`, `NULLIF`; strings `TRIM`,
-`LTRIM`, `RTRIM`, `UPPER`, `LOWER`, `SUBSTRING`, `LENGTH`, `REPLACE`, `CONCAT`;
-numeric `ABS`, `CEILING`, `FLOOR`, `ROUND`, `POWER`, `SQRT`, `MOD`; date/time
-`NOW`, `CURRENT_DATE`, `CURRENT_TIME`, `CURRENT_TIMESTAMP`, `EXTRACT`. Window
-function names are lexed but not supported (see the statement matrix).
+A call found in neither the engine catalog nor the profile's executable and recognized-
+unsupported lists fails at plan time with `COHSQLE016`, `Unknown function '<name>'.`
+before any row is read (#1068). Recognized unsupported functions fail at parse time with
+exactly one `COHDBL001` naming the function, even over an empty table (#1103):
+`NULLIF`, `TRIM`, `LTRIM`, `RTRIM`, `SUBSTRING`, `REPLACE`, `CONCAT`, `CEILING`,
+`FLOOR`, `ROUND`, `POWER`, `SQRT`, `MOD`, `NOW`, `CURRENT_DATE`, `CURRENT_TIME`,
+`CURRENT_TIMESTAMP`, `LOCALTIME`, `LOCALTIMESTAMP`, `EXTRACT`, and the nine window
+functions `ROW_NUMBER`, `RANK`, `DENSE_RANK`, `LEAD`, `LAG`, `FIRST_VALUE`,
+`LAST_VALUE`, `NTH_VALUE` and `NTILE`. Window rejection also works when these names
+lex as identifiers. An OVER clause keeps its existing clause diagnostic.
+
+The ISO datetime value functions `CURRENT_DATE`, `CURRENT_TIME`, `CURRENT_TIMESTAMP`,
+`LOCALTIME` and `LOCALTIMESTAMP` receive that diagnostic with or without parentheses.
+An unqualified, unquoted name in that set never binds a column; quote the identifier to read a
+same-named column. PostgreSQL likewise parses these value functions separately from column
+references (`src/backend/parser/gram.y:16180-16214`, `17315-17329`, `18019-18049` in the local
+reference clone). Schema rendering quotes both executable function names and the
+recognized-unsupported vocabulary, including `rank`, `current_date` and `localtime`.
+Reapplying the same compiled schema remains a no-op; quoting does not change its identity.
+
+`SqlLanguageConformanceTests` is the single function-coverage guard: every declared
+function needs a passing live case, and a case for a retired name fails too. A feature
+that starts executing a function adds its name and live case and flips its `COHDBL001`
+pin in the same change.
 
 ## Diagnostics
 
 | Code | Severity | Meaning |
 |---|---|---|
-| `COHDBL001` | Error | Recognized clause, keyword, operator or type modifier is not supported by the SQL model surface, including prefix and infix `~` (#1101), temporal precision and INTERVAL field qualifiers in declarations and CAST (#1438); the message names the construct and, for a modifier, its declaration |
+| `COHDBL001` | Error | Recognized clause, keyword, function, operator or type modifier is not supported by the SQL model surface, including prefix and infix `~` (#1101), temporal precision and INTERVAL field qualifiers in declarations and CAST (#1438); the message names the construct and, for a modifier, its declaration |
 | `SQL0001` | Error | Empty query text |
 | `SQL0002` | Error | Unknown command (recognized unsupported clauses use `COHDBL001`) |
 | `SQL0003` | Error | Malformed syntax: text after a complete statement or after its terminating `;`; a missing expression, closing token, keyword, name or `VALUES` row; an unterminated string, quoted identifier or block comment; a character outside the dialect, such as `?`, `#`, `^` or a non-ASCII digit, which binds no alias or column (#1101); a numeric literal whose exponent has no digits; an `IS` form other than `[NOT] NULL`; `NOT` after an operand without `BETWEEN`, `IN` or `LIKE`; `LIKE ... ESCAPE`; `LIMIT` after `OFFSET`; an incomplete `IF [NOT] EXISTS`; `ALTER` without `TABLE`; an unsupported or incomplete `ALTER TABLE` action; and malformed transaction-control, JOIN, GROUP BY, HAVING, CAST, COLLATE, or constraint/DDL syntax |
@@ -1754,6 +1769,14 @@ function names are lexed but not supported (see the statement matrix).
 | `COHSQLE010` | Error | A type name that is neither a built-in type nor a domain in the merged engine/SQL type environment: a column type in DDL or a `CAST` target, raised while planning; or a write that assigns a stored column whose domain the opening engine cannot resolve, or resolves over another storage type, length, precision or scale than the column stores. The database opens and its reads, and writes that do not assign the column, proceed; an engine build that declares the database fails with it (ISO SQLSTATE 42704, undefined object, PostgreSQL's "type ... does not exist"; E3, decision 65's rule applied to domains). The one code names both causes, an unknown name while planning and a stored column's unregistered domain, where E2 split a function's two (`COHSQLE006`, `COHSQLE009`); whether to split it is an open owner question |
 | `COHSQLE011` | Error | A `CAST` whose operand's type no registered cast converts to the target, nor is of its storage type: raised while planning when the plan knows the operand's type, the same over an empty table as over a populated one, and while evaluating for a parameter, whose type only its value reveals (ISO SQLSTATE 42846, cannot coerce, PostgreSQL's "cannot cast type ... to ..."; E3) |
 | `COHSQLE012` | Error | Character value exceeds its destination's declared length and the excess is not entirely ASCII spaces: INSERT, INSERT ... SELECT, UPDATE, DEFAULT or ADD COLUMN backfill, for plain columns and domain base types. Explicit CAST truncates instead (ISO SQLSTATE 22001, string data right truncation; #1418) |
+| `COHSQLE013` | Error | Invalid statement, expression, DDL or query shape for the executor |
+| `COHSQLE014` | Error | Table does not exist |
+| `COHSQLE015` | Error | Unknown or ambiguous column |
+| `COHSQLE016` | Error | Unknown function, absent from executable and recognized-unsupported vocabulary |
+| `COHSQLE017` | Error | Invalid aggregate placement or grouping expression |
+| `COHSQLE018` | Error | Invalid ordering ordinal, row count or CAST target declaration |
+| `COHSQLE019` | Error | Duplicate target column, table binding or ambiguous output alias |
+| `COHSQLE020` | Error | No value supplied for a named parameter |
 
 Positions are absolute character offsets into the statement text; line/column
 presentation is computed by tooling from the source (offset → line mapping), not
@@ -1769,9 +1792,9 @@ rejects with `COHDBL001`: `WITH`, `SELECT ALL`, `CREATE`/`DROP VIEW`,
 `CREATE COLLATION`, `CREATE FULLTEXT`, `NULLS FIRST`/`LAST`, `GROUPING SETS` and
 the `GROUPING`, `ROLLUP`, `CUBE` and `GROUPING_ID` calls, `FILTER (...)` and
 `WITHIN GROUP` after a call, the `ANY`/`SOME` (and `ALL`) quantified comparisons,
-`LATERAL`, and `~`. Profile keywords that start an unsupported form by another
-rule, such as `LEFT` or `CROSS`, need no entry, and function names such as the
-window functions are not entries: shared-diagnostics extends the table with them.
+`LATERAL`, and `~`. It also holds the recognized non-executing functions listed
+above, including the window and niladic datetime names (#1103). Profile keywords
+that start an unsupported form by another rule, such as `LEFT` or `CROSS`, need no entry.
 A recognized construct is skipped once it is reported, so the text after it adds
 no second diagnostic: `= ANY (SELECT ...)` no longer parses as a call to a
 function named `ANY`, `LATERAL` is no longer bound as a table name, and `WITHIN`
@@ -1780,9 +1803,14 @@ holds one case per word. It fails when a keyword or table entry is added without
 one, so the item that adds a word adds its case in the same change. It also fails
 when an entry's diagnostic does not name the construct the table records for it.
 
-Plan-time rejections, such as `Unknown column '<name>'.` and
-`Unknown function '<name>'.`, are `DatabaseException` messages without a code
-(`ExecutionFailure` on the wire). #1103 gives planner rejections structured codes.
+Every planner rejection carries structured `DatabaseException.Diagnostics`: a stable code,
+severity, message and the offending AST location where available. The in-process message
+contains no code prefix. SQL protocol 1.0 composes `CODE: message` from the structured code
+for `ExecutionFailure`; its error text stays unchanged for existing coded errors.
+Text factories and sessions throw `DatabaseParseException` containing every statement
+diagnostic, ordered by start offset. A parsed typed request with errors throws the same
+exception with the same complete list; no recovery AST executes. The first-error message
+retains its existing `SQL parse error CODE: message` spelling.
 While planning, the engine raises `COHSQLE003` for a sign over an operand it knows
 is not a number, `COHSQLE005` for a column reference where no columns are in
 scope, `COHSQLE006` for a function call whose arguments no overload of its function
@@ -1792,9 +1820,10 @@ faults (`COHSQLE001`, `COHSQLE002`) surface there too, and `COHSQLE004` can come
 from any planner walk. Comparison-literal coercion for an access path falls back
 to residual evaluation if the value fails the destination's declared bounds.
 
-The `COHSQLE` codes are engine execution diagnostics, not parser diagnostics, and
-carry no position. They lead the `DatabaseException` message in process and the
-`ExecutionFailure` message on the wire; the arithmetic fault contract above
+The `COHSQLE` codes are engine diagnostics, not parser diagnostics. They are structured
+in process, with source offsets when planning has an offending AST location; a runtime
+failure without a source location leaves its offsets null. Only the protocol 1.0
+`ExecutionFailure` text leads with the code. The arithmetic fault contract above
 defines when each of `COHSQLE001`–`COHSQLE003` is raised, the expression
 nesting limit when `COHSQLE004` is, the column-scope rule for VALUES and
 counts when `COHSQLE005` is, the function-argument and overload rules under Statement

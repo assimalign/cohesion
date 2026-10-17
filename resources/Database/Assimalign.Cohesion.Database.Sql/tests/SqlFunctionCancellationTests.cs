@@ -101,7 +101,7 @@ public sealed class SqlFunctionCancellationTests
         var failure = Should.Throw<DatabaseException>(() => accumulator.Finish());
 
         // Assert
-        failure.Message.ShouldStartWith("COHSQLE007: Function 'direct_finish' failed:", Case.Sensitive);
+        failure.DiagnosticDetail("COHSQLE007").ShouldStartWith("Function 'direct_finish' failed:", Case.Sensitive);
         failure.InnerException.ShouldBeSameAs(original);
     }
 
@@ -116,7 +116,7 @@ public sealed class SqlFunctionCancellationTests
         var failure = Should.Throw<DatabaseException>(() => function.Invoke(new SqlArguments([SqlValue.FromInt32(1)])));
 
         // Assert
-        failure.Message.ShouldStartWith("COHSQLE007: Function 'direct_cancel' failed:", Case.Sensitive);
+        failure.DiagnosticDetail("COHSQLE007").ShouldStartWith("Function 'direct_cancel' failed:", Case.Sensitive);
         failure.InnerException.ShouldBeSameAs(original);
     }
 

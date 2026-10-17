@@ -87,8 +87,8 @@ public sealed class SqlTransactionContractTests
         var unsupported = await Should.ThrowAsync<DatabaseException>(async () => await session.BeginTransactionAsync(IsolationLevel.Serializable, TestTimeout.Token()));
 
         // Assert: the text BEGIN keeps its state-misuse diagnostic.
-        again.Message.ShouldBe(AlreadyActive);
-        serializable.Message.ShouldBe(AlreadyActive);
+        again.ShouldHaveMessage(AlreadyActive);
+        serializable.ShouldHaveMessage(AlreadyActive);
         text.Status.ShouldBe(DatabaseResultStatus.Error);
         text.Diagnostics.ShouldNotBeNull().ShouldHaveSingleItem().Code.ShouldBe("COHSQLT001");
         unsupported.Message.ShouldStartWith("IsolationLevel.Serializable is not supported by the SQL engine yet", Case.Sensitive);
@@ -360,7 +360,7 @@ public sealed class SqlTransactionContractTests
         var commit = await Should.ThrowAsync<DatabaseOfflineException>(async () => await open.CommitAsync(TestTimeout.Token()));
 
         // Assert
-        beginOnHolder.Message.ShouldBe(AlreadyActive);
+        beginOnHolder.ShouldHaveMessage(AlreadyActive);
         canceledSession.CancellationToken.ShouldBe(canceled.Token);
         canceledBegin.CancellationToken.ShouldBe(canceled.Token);
         canceledText.CancellationToken.ShouldBe(canceled.Token);

@@ -542,7 +542,7 @@ public sealed class SqlDropColumnTests : IDisposable
         var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync($"ALTER TABLE {tableName} DROP COLUMN {column}"));
 
         // Assert: the same published definition, and every version as it was.
-        failure.Message.ShouldBe(message);
+        failure.ShouldHaveMessage(message);
         instance.Catalog.TryGetTable("dbo", tableName, out var table).ShouldBeTrue();
         table.ShouldBeSameAs(target);
         AssertUnchanged(before, StoredVersions(instance, target.ObjectId));

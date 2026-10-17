@@ -10,8 +10,8 @@ namespace Assimalign.Cohesion.Database.Sql.Language.Internal;
 /// <para>
 /// Profile keywords that start an unsupported construct by another rule, such as <c>LEFT</c> or
 /// <c>CROSS</c>, have no entry; the keyword-disposition corpus covers them through the profile.
-/// Function names, such as the window functions, are not entries either: shared-diagnostics
-/// extends the table with them.
+/// Non-executing function names, including window and niladic datetime names, have entries
+/// whose positions distinguish calls and ISO niladic forms (#1103).
 /// </para>
 /// <para>
 /// The preflight clause scan matches the <see cref="SqlWordPosition.Clause"/> entries wherever
@@ -54,8 +54,53 @@ internal static class SqlUnsupportedVocabulary
         new("ANY", "ANY quantified comparison", SqlWordPosition.Rule),
         new("SOME", "SOME quantified comparison", SqlWordPosition.Rule),
         new("LATERAL", "LATERAL subquery", SqlWordPosition.Rule),
+        // Recognized functions awaiting execution; each is a parse-time COHDBL001 pin.
+        new("NULLIF", "NULLIF", SqlWordPosition.Function),
+        new("TRIM", "TRIM", SqlWordPosition.Function),
+        new("LTRIM", "LTRIM", SqlWordPosition.Function),
+        new("RTRIM", "RTRIM", SqlWordPosition.Function),
+        new("SUBSTRING", "SUBSTRING", SqlWordPosition.Function),
+        new("REPLACE", "REPLACE", SqlWordPosition.Function),
+        new("CONCAT", "CONCAT", SqlWordPosition.Function),
+        new("CEILING", "CEILING", SqlWordPosition.Function),
+        new("FLOOR", "FLOOR", SqlWordPosition.Function),
+        new("ROUND", "ROUND", SqlWordPosition.Function),
+        new("POWER", "POWER", SqlWordPosition.Function),
+        new("SQRT", "SQRT", SqlWordPosition.Function),
+        new("MOD", "MOD", SqlWordPosition.Function),
+        new("NOW", "NOW", SqlWordPosition.Function),
+        new("CURRENT_DATE", "CURRENT_DATE", SqlWordPosition.NiladicFunction),
+        new("CURRENT_TIME", "CURRENT_TIME", SqlWordPosition.NiladicFunction),
+        new("CURRENT_TIMESTAMP", "CURRENT_TIMESTAMP", SqlWordPosition.NiladicFunction),
+        new("LOCALTIME", "LOCALTIME", SqlWordPosition.NiladicFunction),
+        new("LOCALTIMESTAMP", "LOCALTIMESTAMP", SqlWordPosition.NiladicFunction),
+        new("EXTRACT", "EXTRACT", SqlWordPosition.Function),
+        new("ROW_NUMBER", "ROW_NUMBER", SqlWordPosition.WindowFunction),
+        new("RANK", "RANK", SqlWordPosition.WindowFunction),
+        new("DENSE_RANK", "DENSE_RANK", SqlWordPosition.WindowFunction),
+        new("LEAD", "LEAD", SqlWordPosition.WindowFunction),
+        new("LAG", "LAG", SqlWordPosition.WindowFunction),
+        new("FIRST_VALUE", "FIRST_VALUE", SqlWordPosition.WindowFunction),
+        new("LAST_VALUE", "LAST_VALUE", SqlWordPosition.WindowFunction),
+        new("NTH_VALUE", "NTH_VALUE", SqlWordPosition.WindowFunction),
+        new("NTILE", "NTILE", SqlWordPosition.WindowFunction),
         new("~", "~ operator", SqlWordPosition.Rule),
     ];
+
+    /// <summary>Whether a name is a recognized function that does not execute.</summary>
+    internal static bool IsFunction(string name) => System.Array.Exists(Words, word =>
+        word.Position is SqlWordPosition.Function or SqlWordPosition.NiladicFunction or SqlWordPosition.WindowFunction &&
+        string.Equals(word.Spelling, name, System.StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>Whether a name is a window function awaiting execution.</summary>
+    internal static bool IsWindowFunction(string name) => System.Array.Exists(Words, word =>
+        word.Position == SqlWordPosition.WindowFunction &&
+        string.Equals(word.Spelling, name, System.StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>Whether a name has the ISO niladic datetime spelling.</summary>
+    internal static bool IsNiladicFunction(string name) => System.Array.Exists(Words, word =>
+        word.Position == SqlWordPosition.NiladicFunction &&
+        string.Equals(word.Spelling, name, System.StringComparison.OrdinalIgnoreCase));
 
     /// <summary>Finds the clause a <see cref="SqlWordPosition.Clause"/> keyword names.</summary>
     /// <param name="keyword">The keyword as written.</param>
@@ -104,4 +149,13 @@ internal enum SqlWordPosition
     /// <c>FROM</c> or <c>JOIN</c>; and <c>~</c> in prefix or infix position.
     /// </summary>
     Rule,
+
+    /// <summary>Before a function's opening parenthesis.</summary>
+    Function,
+
+    /// <summary>A window function, owned by the clause preflight.</summary>
+    WindowFunction,
+
+    /// <summary>A datetime value function, with or without parentheses.</summary>
+    NiladicFunction,
 }

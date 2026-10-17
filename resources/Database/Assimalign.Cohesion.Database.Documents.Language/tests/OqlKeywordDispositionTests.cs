@@ -155,6 +155,17 @@ public sealed class OqlKeywordDispositionTests
         failures.ShouldBeEmpty();
     }
 
+    [Fact(DisplayName = "Cohesion Test [Documents.Language] - Functions: ABS is rejected as a call and remains a field identifier")]
+    public void Parse_AbsIdentifier_ShouldRemainAPath()
+    {
+        // Arrange / Act
+        var statement = (OqlQueryStatement)new OqlQueryParser().Parse("SELECT abs FROM c");
+
+        // Assert
+        statement.Diagnostics.ShouldBeEmpty();
+        ((OqlSelectExpression)statement.OqlExpression).Projections[0].Expression.ShouldBeOfType<OqlPathExpression>();
+    }
+
     [Fact(DisplayName = "Cohesion Test [Documents.Language] - Keyword disposition: words matched anywhere are lexer keywords or functions")]
     public void Table_AnywhereEntries_ShouldBeKeywordsOrFunctions()
     {

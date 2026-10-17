@@ -53,6 +53,22 @@ internal sealed partial class SqlPlanner
 
     internal SqlPlan Plan(SqlQueryExpression expression)
     {
+        try
+        {
+            return PlanCore(expression);
+        }
+        catch (SqlEvaluationException exception) when (exception.Diagnostics[0].Start is null && expression.Location is not null)
+        {
+            throw exception.At(expression.Location);
+        }
+        catch (SqlPlanningException exception) when (exception.Diagnostics[0].Start is null && expression.Location is not null)
+        {
+            throw exception.At(expression.Location);
+        }
+    }
+
+    private SqlPlan PlanCore(SqlQueryExpression expression)
+    {
         SqlSystemViews.EnsureReadOnly(expression);
         ValidateFunctionCalls(expression);
         return expression switch
@@ -68,7 +84,7 @@ internal sealed partial class SqlPlanner
             SqlAlterTableExpression alter => PlanAlterTable(alter),
             SqlCreateIndexExpression createIndex => PlanCreateIndex(createIndex),
             SqlDropIndexExpression dropIndex => PlanDropIndex(dropIndex),
-            _ => throw new DatabaseException($"Statement type {expression.CommandType} is not supported by the executor yet."),
+            _ => throw new SqlPlanningException("COHSQLE013", $"Statement type {expression.CommandType} is not supported by the executor yet.", expression.Location),
         };
     }
 
@@ -80,7 +96,7 @@ internal sealed partial class SqlPlanner
     {
         if (select.From is null)
         {
-            throw new DatabaseException("SELECT requires a FROM table.");
+            throw new SqlPlanningException("COHSQLE013", "SELECT requires a FROM table.", select.Location);
         }
 
         // A virtual relation has column metadata, but no stored table or access path.
@@ -101,11 +117,11 @@ internal sealed partial class SqlPlanner
 
         if (select.Where is not null && ContainsAggregate(select.Where))
         {
-            throw new DatabaseException("Aggregate functions are not allowed in WHERE; use HAVING to filter groups.");
+            throw new SqlPlanningException("COHSQLE017", "Aggregate functions are not allowed in WHERE; use HAVING to filter groups.", select.Where?.Location);
         }
         if (bindings is not null && ContainsAggregate(select.Joins[0].Condition!))
         {
-            throw new DatabaseException("Aggregate functions are not allowed in JOIN ON.");
+            throw new SqlPlanningException("COHSQLE017", "Aggregate functions are not allowed in JOIN ON.", select.Joins[0].Condition?.Location);
         }
 
         if (select.GroupBy.Count > 0 || select.Having is not null || ProjectsOrOrdersByAggregate(select))
@@ -563,7 +579,7 @@ internal sealed partial class SqlPlanner
     {
         if (insert.SelectSource is null && (insert.Values is null || insert.Values.Count == 0))
         {
-            throw new DatabaseException("INSERT requires a VALUES list or SELECT source.");
+            throw new SqlPlanningException("COHSQLE013", "INSERT requires a VALUES list or SELECT source.", insert.Location);
         }
 
         var table = ResolveTable(insert.Table);
@@ -582,7 +598,7 @@ internal sealed partial class SqlPlanner
                 int ordinal = FindColumnOrdinal(table, name);
                 if (ordinals.Contains(ordinal))
                 {
-                    throw new DatabaseException($"INSERT target column '{name}' is specified more than once.");
+                    throw new SqlPlanningException("COHSQLE019", $"INSERT target column '{name}' is specified more than once.", insert.Location);
                 }
                 ordinals.Add(ordinal);
             }
@@ -598,8 +614,8 @@ internal sealed partial class SqlPlanner
         {
             if (row.Count != targetOrdinals.Count)
             {
-                throw new DatabaseException(
-                    $"INSERT row has {row.Count} values but {targetOrdinals.Count} target columns.");
+                throw new SqlPlanningException("COHSQLE013",
+                    $"INSERT row has {row.Count} values but {targetOrdinals.Count} target columns.", insert.Location);
             }
         }
 
@@ -660,11 +676,11 @@ internal sealed partial class SqlPlanner
         RejectColumnReferences(expression, clause, alternative);
         if (ContainsAggregate(expression))
         {
-            throw new DatabaseException($"Aggregate functions are not allowed in {clause}.");
+            throw new SqlPlanningException("COHSQLE017", $"Aggregate functions are not allowed in {clause}.", expression.Location);
         }
         if (ContainsStar(expression))
         {
-            throw new DatabaseException($"'*' is not allowed in {clause}.");
+            throw new SqlPlanningException("COHSQLE013", $"'*' is not allowed in {clause}.", expression.Location);
         }
 
         ValidateExpression(expression, ScopelessEvaluator);
@@ -706,7 +722,7 @@ internal sealed partial class SqlPlanner
         {
             if (column is { TableAlias: null, SchemaName: null } && IsNiladicDateTimeFunction(column.ColumnName))
             {
-                throw new DatabaseException($"Function '{column.ColumnName}' is not supported by the executor yet.");
+                throw new SqlPlanningException("COHSQLE013", $"Function '{column.ColumnName}' is not supported by the executor yet.", column.Location);
             }
 
             string name = string.Join('.', new[] { column.SchemaName, column.TableAlias, column.ColumnName }
@@ -754,7 +770,7 @@ internal sealed partial class SqlPlanner
             int ordinal = FindColumnOrdinal(table, assignment.ColumnName);
             if (ContainsAggregate(assignment.Value))
             {
-                throw new DatabaseException("Aggregate functions are not allowed in UPDATE SET.");
+                throw new SqlPlanningException("COHSQLE017", "Aggregate functions are not allowed in UPDATE SET.", update.Location);
             }
             ValidateExpression(assignment.Value, evaluator);
             assignments.Add((ordinal, evaluator.Bind(assignment.Value)));
@@ -800,7 +816,7 @@ internal sealed partial class SqlPlanner
     {
         if (ContainsAggregate(where))
         {
-            throw new DatabaseException("Aggregate functions are not allowed in WHERE.");
+            throw new SqlPlanningException("COHSQLE017", "Aggregate functions are not allowed in WHERE.", where.Location);
         }
     }
 
@@ -872,7 +888,7 @@ internal sealed partial class SqlPlanner
         {
             if (!allowFunction || expression is not SqlFunctionCallExpression)
             {
-                throw new DatabaseException($"Column '{definition.ColumnName}': only literal DEFAULT values are supported.");
+                throw new SqlPlanningException("COHSQLE013", $"Column '{definition.ColumnName}': only literal DEFAULT values are supported.", definition.DefaultValue?.Location);
             }
             var scope = new SqlExpressionEvaluator([], null, defaultCollation: _catalog.DefaultCollation, functions: _functions, cancellationToken: _cancellationToken);
             SqlPersistedExpression.Bind(expression, scope);
@@ -898,7 +914,7 @@ internal sealed partial class SqlPlanner
         }
         if (type.Type is not (DatabaseType.String or DatabaseType.Character))
         {
-            throw new DatabaseException($"COLLATE requires a string column; '{definition.ColumnName}' is {type.Type}.");
+            throw new SqlPlanningException("COHSQLE013", $"COLLATE requires a string column; '{definition.ColumnName}' is {type.Type}.", definition.DefaultValue?.Location);
         }
         return Collation.FromName(definition.CollationName);
     }
@@ -910,12 +926,12 @@ internal sealed partial class SqlPlanner
     {
         if (string.IsNullOrWhiteSpace(create.IndexName) || create.IndexName == "?")
         {
-            throw new DatabaseException("CREATE INDEX requires an index name.");
+            throw new SqlPlanningException("COHSQLE013", "CREATE INDEX requires an index name.", create.Location);
         }
 
         if (create.Columns.Count == 0)
         {
-            throw new DatabaseException($"CREATE INDEX '{create.IndexName}' requires at least one key column.");
+            throw new SqlPlanningException("COHSQLE013", $"CREATE INDEX '{create.IndexName}' requires at least one key column.", create.Location);
         }
 
         var table = ResolveTable(create.Table);
@@ -926,7 +942,7 @@ internal sealed partial class SqlPlanner
             if (table.Columns[ordinal].Type.Type is DatabaseType.String or DatabaseType.Character or DatabaseType.Json
                 && !(table.Columns[ordinal].Collation ?? _catalog.DefaultCollation).IsIndexBacked)
             {
-                throw new DatabaseException($"Collation 'invariant' is not index-backed; column '{column}' cannot have an index or indexed constraint.");
+                throw new SqlPlanningException("COHSQLE013", $"Collation 'invariant' is not index-backed; column '{column}' cannot have an index or indexed constraint.", create.Location);
             }
         }
 
@@ -937,12 +953,12 @@ internal sealed partial class SqlPlanner
     {
         if (string.IsNullOrWhiteSpace(drop.IndexName) || drop.IndexName == "?")
         {
-            throw new DatabaseException("DROP INDEX requires an index name.");
+            throw new SqlPlanningException("COHSQLE013", "DROP INDEX requires an index name.", drop.Location);
         }
 
         if (drop.Table.TableName == "?")
         {
-            throw new DatabaseException("DROP INDEX requires the table-qualified form: DROP INDEX <name> ON <table>.");
+            throw new SqlPlanningException("COHSQLE013", "DROP INDEX requires the table-qualified form: DROP INDEX <name> ON <table>.", drop.Location);
         }
 
         return new SqlDropIndexPlan(ResolveTable(drop.Table), drop.IndexName, drop.IfExists);
@@ -959,7 +975,7 @@ internal sealed partial class SqlPlanner
             SqlAlterAddConstraintAction add => new SqlAddConstraintPlan(ResolveTable(alter.Table), add.Constraint),
             SqlAlterDropConstraintAction drop => new SqlDropConstraintPlan(ResolveTable(alter.Table), drop.ConstraintName),
             SqlAlterColumnAction change => PlanAlterColumn(alter.Table, change),
-            _ => throw new DatabaseException("This ALTER TABLE action is not supported by the executor yet."),
+            _ => throw new SqlPlanningException("COHSQLE013", "This ALTER TABLE action is not supported by the executor yet.", alter.Location),
         };
     }
 
@@ -968,7 +984,7 @@ internal sealed partial class SqlPlanner
         var table = ResolveTable(reference);
         if (change.Column.Constraints.Count != 0 || change.Column.IsPrimaryKey)
         {
-            throw new DatabaseException("ALTER COLUMN does not change constraints or primary keys.");
+            throw new SqlPlanningException("COHSQLE013", "ALTER COLUMN does not change constraints or primary keys.");
         }
         var type = ResolveTypeName(change.Column.DataType, change.Column.ColumnName);
         return new SqlAlterColumnPlan(table, new SqlCatalogColumn(change.Column.ColumnName, type.Storage,
@@ -999,7 +1015,7 @@ internal sealed partial class SqlPlanner
 
         if (!_catalog.TryGetTable(schema, reference.TableName, out var table))
         {
-            throw new DatabaseException($"Table '{schema}.{reference.TableName}' does not exist.");
+            throw new SqlPlanningException("COHSQLE014", $"Table '{schema}.{reference.TableName}' does not exist.");
         }
 
         return table;
@@ -1015,7 +1031,7 @@ internal sealed partial class SqlPlanner
             }
         }
 
-        throw new DatabaseException($"Table '{table.Schema}.{table.Name}' has no column named '{columnName}'.");
+        throw new SqlPlanningException("COHSQLE015", $"Table '{table.Schema}.{table.Name}' has no column named '{columnName}'.");
     }
 
     /// <summary>
@@ -1036,7 +1052,7 @@ internal sealed partial class SqlPlanner
 
         if (error is not null)
         {
-            throw new DatabaseException($"Column '{columnName}': {error}.");
+            throw new SqlPlanningException("COHSQLE013", $"Column '{columnName}': {error}.");
         }
 
         throw SqlEvaluationException.UnknownType(dataType, $"Column '{columnName}'");
@@ -1066,7 +1082,7 @@ internal sealed partial class SqlPlanner
 
         if (error is not null)
         {
-            throw new DatabaseException($"CAST target '{cast.TargetType}': {error}.");
+            throw new SqlPlanningException("COHSQLE018", $"CAST target '{cast.TargetType}': {error}.", cast.Location);
         }
 
         throw SqlEvaluationException.UnknownType(cast.TargetType, "CAST target");
@@ -1089,7 +1105,7 @@ internal sealed partial class SqlPlanner
             short number when number >= 0 => number,
             long number when number >= 0 => number,
             int number when number >= 0 => number,
-            _ => throw new DatabaseException($"{clause} requires a non-negative integer."),
+            _ => throw new SqlPlanningException("COHSQLE018", $"{clause} requires a non-negative integer.", expression.Location),
         };
     }
 
@@ -1110,6 +1126,20 @@ internal sealed partial class SqlPlanner
         IReadOnlyDictionary<SqlExpression, DatabaseType>? boundSubqueries = null,
         IReadOnlyDictionary<SqlExpression, int>? boundValues = null)
     {
+        try
+        {
+            ValidateExpressionCore(expression, evaluator, boundSubqueries, boundValues);
+        }
+        catch (SqlEvaluationException exception) when (exception.Diagnostics[0].Start is null && expression.Location is not null)
+        {
+            throw exception.At(expression.Location);
+        }
+    }
+
+    private static void ValidateExpressionCore(SqlExpression expression, SqlExpressionEvaluator evaluator,
+        IReadOnlyDictionary<SqlExpression, DatabaseType>? boundSubqueries,
+        IReadOnlyDictionary<SqlExpression, int>? boundValues)
+    {
         RuntimeHelpers.EnsureSufficientExecutionStack();
         if (boundValues is not null && boundValues.ContainsKey(expression))
         {
@@ -1125,12 +1155,12 @@ internal sealed partial class SqlPlanner
                 ValidateCast(cast, evaluator, boundSubqueries, boundValues);
                 break;
             case SqlSubqueryExpression or SqlExistsExpression when !isBound:
-                throw new DatabaseException("COHDBL001: Subqueries are supported only in SELECT expressions and INSERT ... SELECT.");
+                throw new SqlPlanningException("COHDBL001", "Subqueries are supported only in SELECT expressions and INSERT ... SELECT.", expression.Location);
             case SqlColumnReferenceExpression reference:
                 evaluator.ResolveColumn(reference); // throws for unknown columns at plan time
                 break;
             case SqlInExpression { Values: null } when !isBound:
-                throw new DatabaseException("COHDBL001: IN subqueries are supported only in SELECT expressions and INSERT ... SELECT.");
+                throw new SqlPlanningException("COHDBL001", "IN subqueries are supported only in SELECT expressions and INSERT ... SELECT.", expression.Location);
             case SqlUnaryExpression { Operator: SqlUnaryOperator.Negate or SqlUnaryOperator.Plus } sign
                 when StaticOperandType(sign.Operand, evaluator, boundSubqueries, boundValues) is { } type && !IsNumeric(type):
                 // A sign over a value the plan already knows is not a number fails here, the same

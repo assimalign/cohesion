@@ -188,7 +188,7 @@ public sealed class SqlBindingConcurrencyTests
                 if (failureMode == "throw")
                 {
                     failure.ShouldBeAssignableTo<DatabaseException>();
-                    failure!.Message.ShouldContain("COHSQLE004", Case.Sensitive);
+                    failure.ShouldBeAssignableTo<DatabaseException>().ShouldNotBeNull().Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE004");
                 }
                 else { failure.ShouldBeAssignableTo<OperationCanceledException>(); }
                 retryFailure.ShouldBeNull();

@@ -66,6 +66,18 @@ internal sealed class GraphPlanner
     /// <exception cref="DatabaseException">The statement is invalid (<c>COHDBG001</c>, <c>COHDBG003</c>).</exception>
     internal GraphPlan Plan(GqlQueryExpression query)
     {
+        try
+        {
+            return PlanCore(query);
+        }
+        catch (GraphPlanningException exception) when (exception.Diagnostics[0].Start is null && query.Location is not null)
+        {
+            throw exception.At(query.Location);
+        }
+    }
+
+    private GraphPlan PlanCore(GqlQueryExpression query)
+    {
         var variables = new Dictionary<string, BindingKind>(StringComparer.Ordinal);
         var paths = new List<GraphPathPlan>();
         var anchors = new AnchorSources(_database, _snapshot, query.Predicate);
@@ -82,11 +94,11 @@ internal sealed class GraphPlanner
         foreach (var variable in query.DeleteVariables) { RequireVariable(variable, entity: true); }
         foreach (var projection in query.Projections) { RequireVariable(projection.Variable, entity: projection.Property is not null); }
         if (query.Matches.Count == 0 && query.Creates.Count == 0)
-        { throw new DatabaseException("COHDBG001: A graph statement requires a match or insertion pattern."); }
+        { throw new GraphPlanningException("COHDBG001", "A graph statement requires a match or insertion pattern.", query.Location); }
         if (query.Creates.Count != 0 && query.DeleteVariables.Count != 0)
-        { throw new DatabaseException("COHDBG001: Insertion and deletion cannot share a statement."); }
+        { throw new GraphPlanningException("COHDBG001", "Insertion and deletion cannot share a statement.", query.Location); }
         if (query.DeleteVariables.Count != 0 && query.Projections.Count != 0)
-        { throw new DatabaseException("COHDBG001: Deletion cannot be followed by projection in this subset."); }
+        { throw new GraphPlanningException("COHDBG001", "Deletion cannot be followed by projection in this subset.", query.Location); }
         bool readOnly = query.Creates.Count == 0 && query.DeleteVariables.Count == 0;
         return new GraphPlan(query, paths)
         {
@@ -98,7 +110,7 @@ internal sealed class GraphPlanner
         bool Validate(GqlPathPattern path, bool creating)
         {
             if (path.Nodes.Count == 0 || path.Relationships.Count != path.Nodes.Count - 1 || path.Relationships.Count > 64)
-            { throw new DatabaseException("COHDBG001: A finite path requires one more node than relationships and at most 64 hops."); }
+            { throw new GraphPlanningException("COHDBG001", "A finite path requires one more node than relationships and at most 64 hops.", query.Location); }
             bool satisfiable = true;
             foreach (var node in path.Nodes)
             {
@@ -115,7 +127,7 @@ internal sealed class GraphPlanner
             if (path.Variable is { } variable)
             {
                 if (creating || !variables.TryAdd(variable, BindingKind.Path))
-                { throw new DatabaseException($"COHDBG003: Path variable '{variable}' must be a new MATCH binding."); }
+                { throw new GraphPlanningException("COHDBG003", $"Path variable '{variable}' must be a new MATCH binding.", query.Location); }
             }
             return satisfiable;
         }
@@ -123,14 +135,14 @@ internal sealed class GraphPlanner
         {
             if (variable is null) { return; }
             if (variables.TryGetValue(variable, out var previous) && previous != kind)
-            { throw new DatabaseException($"COHDBG003: Variable '{variable}' has incompatible graph bindings."); }
+            { throw new GraphPlanningException("COHDBG003", $"Variable '{variable}' has incompatible graph bindings.", query.Location); }
             variables[variable] = kind;
         }
         BindingKind RequireVariable(string variable, bool entity = false)
         {
-            if (!variables.TryGetValue(variable, out var kind)) { throw new DatabaseException($"COHDBG001: Variable '{variable}' is not bound."); }
+            if (!variables.TryGetValue(variable, out var kind)) { throw new GraphPlanningException("COHDBG001", $"Variable '{variable}' is not bound.", query.Location); }
             if (entity && kind == BindingKind.Path)
-            { throw new DatabaseException($"COHDBG003: Path variable '{variable}' cannot be deleted or used as a property owner."); }
+            { throw new GraphPlanningException("COHDBG003", $"Path variable '{variable}' cannot be deleted or used as a property owner.", query.Location); }
             return kind;
         }
         // Walks the predicate with an explicit stack, in source order: an AND chain of any length
@@ -155,21 +167,21 @@ internal sealed class GraphPlanner
                         pending.Push(binary.Left);
                         break;
                     case GqlBinaryExpression { Operator: "AND" }:
-                        throw new DatabaseException("COHDBG001: AND joins predicates in a GqlLogicalExpression; a GqlBinaryExpression holds one comparison.");
+                        throw new GraphPlanningException("COHDBG001", "AND joins predicates in a GqlLogicalExpression; a GqlBinaryExpression holds one comparison.", expression?.Location);
                     case GqlLogicalExpression logical:
                         if (!Enum.IsDefined(logical.Operator))
-                        { throw new DatabaseException($"COHDBG001: Logical operator {(int)logical.Operator} is not defined."); }
+                        { throw new GraphPlanningException("COHDBG001", $"Logical operator {(int)logical.Operator} is not defined.", expression?.Location); }
                         if (logical.Operands is null || logical.Operands.Count < 2)
-                        { throw new DatabaseException("COHDBG001: A logical predicate needs at least two operands."); }
+                        { throw new GraphPlanningException("COHDBG001", "A logical predicate needs at least two operands.", expression?.Location); }
                         for (int i = logical.Operands.Count - 1; i >= 0; i--) { pending.Push(logical.Operands[i]); }
                         break;
                     case GqlLabeledPredicate labeled:
                         ValidateLabeledPredicate(labeled);
                         break;
                     case null:
-                        throw new DatabaseException("COHDBG001: A predicate has a missing operand.");
+                        throw new GraphPlanningException("COHDBG001", "A predicate has a missing operand.", expression?.Location);
                     default:
-                        throw new DatabaseException("COHDBG001: Unsupported graph predicate.");
+                        throw new GraphPlanningException("COHDBG001", "Unsupported graph predicate.", expression?.Location);
                 }
             }
         }
@@ -179,11 +191,11 @@ internal sealed class GraphPlanner
         // so an unknown name never empties the plan; it evaluates as a label no node carries.
         void ValidateLabeledPredicate(GqlLabeledPredicate labeled)
         {
-            if (labeled.Variable is null) { throw new DatabaseException("COHDBG001: A labeled predicate requires a variable."); }
+            if (labeled.Variable is null) { throw new GraphPlanningException("COHDBG001", "A labeled predicate requires a variable.", labeled.Location); }
             var kind = RequireVariable(labeled.Variable);
             if (kind == BindingKind.Path)
-            { throw new DatabaseException($"COHDBG003: Path variable '{labeled.Variable}' has no labels; a labeled predicate tests a node or relationship."); }
-            if (labeled.LabelExpression is null) { throw new DatabaseException("COHDBG001: A labeled predicate requires a label expression."); }
+            { throw new GraphPlanningException("COHDBG003", $"Path variable '{labeled.Variable}' has no labels; a labeled predicate tests a node or relationship.", labeled.Location); }
+            if (labeled.LabelExpression is null) { throw new GraphPlanningException("COHDBG001", "A labeled predicate requires a label expression.", labeled.Location); }
             foreach (string name in GraphLabelEvaluator.Distinct(GraphLabelEvaluator.Names(labeled.LabelExpression)))
             {
                 if (kind == BindingKind.Node) { tokens.HasLabel(name, labeled.Location); }
@@ -244,7 +256,7 @@ internal sealed class GraphPlanner
     /// </returns>
     private static bool ValidateNodeLabels(GqlNodePattern node, bool creating, GraphTokenResolver tokens)
     {
-        if (node.Labels is null) { throw new DatabaseException("COHDBG001: A node pattern requires a label list."); }
+        if (node.Labels is null) { throw new GraphPlanningException("COHDBG001", "A node pattern requires a label list.", null); }
         IReadOnlyList<string> names = node.Labels;
         // The labels every match carries: a pure conjunction's, or Labels for a pattern built without an expression.
         IReadOnlyList<string> required = node.Labels;
@@ -255,22 +267,22 @@ internal sealed class GraphPlanner
             if (node.Labels.Count != 0 && (conjunction is null ||
                 !new HashSet<string>(node.Labels, StringComparer.Ordinal).SetEquals(conjunction)))
             {
-                throw new DatabaseException($"COHDBG001: A node pattern's labels must be empty or name exactly the conjunction of its label expression '{GraphLabelEvaluator.Describe(expression)}'.");
+                throw new GraphPlanningException("COHDBG001", $"A node pattern's labels must be empty or name exactly the conjunction of its label expression '{GraphLabelEvaluator.Describe(expression)}'.", null);
             }
             if (creating && conjunction is null)
             {
-                throw new DatabaseException($"COHDBG001: An inserted node takes a label conjunction such as :A&B; '{GraphLabelEvaluator.Describe(expression)}' selects nodes and cannot label a new one.");
+                throw new GraphPlanningException("COHDBG001", $"An inserted node takes a label conjunction such as :A&B; '{GraphLabelEvaluator.Describe(expression)}' selects nodes and cannot label a new one.", null);
             }
             required = conjunction ?? [];
         }
         // A chain may name a label many times; each is resolved once.
         foreach (string label in GraphLabelEvaluator.Distinct(names))
         {
-            if (label is null) { throw new DatabaseException("COHDBG001: A label name cannot be null."); }
+            if (label is null) { throw new GraphPlanningException("COHDBG001", "A label name cannot be null.", null); }
             if (!creating) { tokens.HasLabel(label); }
             else if (string.IsNullOrWhiteSpace(label))
             {
-                throw new DatabaseException("COHDBG001: An inserted label cannot be empty or only whitespace.");
+                throw new GraphPlanningException("COHDBG001", "An inserted label cannot be empty or only whitespace.", null);
             }
         }
         if (creating) { return true; }
@@ -289,13 +301,13 @@ internal sealed class GraphPlanner
     /// </summary>
     private static void ValidateProperties(IReadOnlyDictionary<string, object?>? properties, bool creating)
     {
-        if (properties is null) { throw new DatabaseException("COHDBG001: A pattern requires a property map."); }
+        if (properties is null) { throw new GraphPlanningException("COHDBG001", "A pattern requires a property map.", null); }
         if (!creating) { return; }
         foreach (string key in properties.Keys)
         {
             if (string.IsNullOrWhiteSpace(key))
             {
-                throw new DatabaseException("COHDBG001: An inserted property key cannot be empty or only whitespace.");
+                throw new GraphPlanningException("COHDBG001", "An inserted property key cannot be empty or only whitespace.", null);
             }
         }
     }
@@ -317,7 +329,7 @@ internal sealed class GraphPlanner
     private static bool ValidateRelationship(GqlRelationshipPattern relationship, bool creating, GraphTokenResolver tokens)
     {
         if (!Enum.IsDefined(relationship.Direction))
-        { throw new DatabaseException($"COHDBG001: Relationship direction {(int)relationship.Direction} is not defined."); }
+        { throw new GraphPlanningException("COHDBG001", $"Relationship direction {(int)relationship.Direction} is not defined.", null); }
         string? type = relationship.Type;
         IReadOnlyList<string> names = type is null ? [] : [type];
         // The types a match must have: Type, or a conjunction's names (one name is a conjunction).
@@ -328,7 +340,7 @@ internal sealed class GraphPlanner
             string? single = (expression as GqlLabelName)?.Name;
             if (type is not null && !string.Equals(type, single, StringComparison.Ordinal))
             {
-                throw new DatabaseException($"COHDBG001: A relationship pattern's type '{type}' must equal its label expression '{GraphLabelEvaluator.Describe(expression)}'.");
+                throw new GraphPlanningException("COHDBG001", $"A relationship pattern's type '{type}' must equal its label expression '{GraphLabelEvaluator.Describe(expression)}'.", null);
             }
             type = single;
             required = GraphLabelEvaluator.Conjunction(expression) ?? [];
@@ -336,9 +348,9 @@ internal sealed class GraphPlanner
         if (creating)
         {
             if (type is null || relationship.Direction is not (GqlPatternDirection.Outgoing or GqlPatternDirection.Incoming))
-            { throw new DatabaseException("COHDBG001: Inserted relationships require a type and a directed pattern."); }
+            { throw new GraphPlanningException("COHDBG001", "Inserted relationships require a type and a directed pattern.", null); }
             if (string.IsNullOrWhiteSpace(type))
-            { throw new DatabaseException("COHDBG001: An inserted relationship type cannot be empty or only whitespace."); }
+            { throw new GraphPlanningException("COHDBG001", "An inserted relationship type cannot be empty or only whitespace.", null); }
             return true;
         }
         foreach (string name in GraphLabelEvaluator.Distinct(names)) { tokens.HasRelationshipType(name); }

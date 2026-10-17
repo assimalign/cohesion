@@ -93,15 +93,14 @@ public sealed class SqlParseStrictnessExecutionTests
             // Act
             var textError = await Should.ThrowAsync<DatabaseParseException>(() => ExecuteAsync(session, sql));
             var parsed = (SqlQueryStatement)new SqlQueryParser().Parse(sql);
-            var typed = await session.ExecuteAsync(new SqlQueryRequest(parsed), CancellationToken.None);
+            var typed = await Should.ThrowAsync<DatabaseParseException>(() => session.ExecuteAsync(new SqlQueryRequest(parsed), CancellationToken.None).AsTask());
 
             // Assert
             string context = $"{sql} (withRows: {withRows})";
             textError.Message.ShouldStartWith($"SQL parse error {code}: ", Case.Sensitive, context);
             parsed.Diagnostics.Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
                 .ShouldHaveSingleItem(context).Code.ShouldBe(code, context);
-            typed.Status.ShouldBe(DatabaseResultStatus.Error, context);
-            typed.ShouldNotBeAssignableTo<DatabaseResultSet>(context);
+            typed.Diagnostics.Select(diagnostic => (diagnostic.Code, diagnostic.Message, diagnostic.Start, diagnostic.End)).ShouldBe(textError.Diagnostics.Select(diagnostic => (diagnostic.Code, diagnostic.Message, diagnostic.Start, diagnostic.End)), context);
             session.CurrentTransaction.ShouldBeNull(context);
             (await SnapshotAsync(session)).ShouldBe(before, context);
         }

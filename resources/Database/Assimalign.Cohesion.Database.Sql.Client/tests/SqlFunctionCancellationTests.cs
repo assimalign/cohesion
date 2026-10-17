@@ -42,7 +42,8 @@ public sealed class SqlFunctionCancellationTests
         var failure = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, sql, statement.Token));
 
         // Assert
-        failure.Message.ShouldStartWith($"COHSQLE007: Function '{function}' failed:", Case.Sensitive);
+        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE007");
+        failure.Message.ShouldStartWith($"Function '{function}' failed:", Case.Sensitive);
         failure.InnerException.ShouldBeSameAs(functions.Failure);
         functions.Calls.ShouldBeGreaterThan(0);
         functions.LastToken.ShouldBe(statement.Token);
@@ -250,7 +251,8 @@ public sealed class SqlFunctionCancellationTests
         var failure = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, sql, statement.Token));
 
         // Assert
-        failure.Message.ShouldStartWith($"COHSQLE007: Function '{function}' failed:", Case.Sensitive);
+        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE007");
+        failure.Message.ShouldStartWith($"Function '{function}' failed:", Case.Sensitive);
         functions.Calls.ShouldBeGreaterThan(0);
         functions.Tokens.ShouldAllBe(token => token == statement.Token);
     }
@@ -354,7 +356,8 @@ public sealed class SqlFunctionCancellationTests
         var failure = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, sql, second.Token));
 
         // Assert
-        failure.Message.ShouldStartWith($"COHSQLE007: Function '{function}' failed:", Case.Sensitive);
+        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE007");
+        failure.Message.ShouldStartWith($"Function '{function}' failed:", Case.Sensitive);
         functions.Calls.ShouldBeGreaterThan(0);
         functions.Tokens.ShouldAllBe(token => token == second.Token);
     }
@@ -384,7 +387,8 @@ public sealed class SqlFunctionCancellationTests
         var failure = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, sql, statement.Token));
 
         // Assert
-        failure.Message.ShouldStartWith($"COHSQLE007: Function '{function}' failed:", Case.Sensitive);
+        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE007");
+        failure.Message.ShouldStartWith($"Function '{function}' failed:", Case.Sensitive);
         functions.Calls.ShouldBeGreaterThan(0);
         functions.Tokens.ShouldAllBe(token => token == statement.Token);
     }

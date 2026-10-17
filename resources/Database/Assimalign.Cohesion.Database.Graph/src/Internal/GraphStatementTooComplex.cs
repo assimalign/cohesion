@@ -28,8 +28,12 @@ internal static class GraphStatementTooComplex
     /// <param name="innerException">The exhausted-stack signal.</param>
     /// <returns>The coded failure.</returns>
     internal static DatabaseException Create(InsufficientExecutionStackException innerException)
-        => new($"{Code}: Statement too complex: running it needs more stack than the executing thread has left. " +
-            "Reduce the nesting of its parentheses and negations, or run it on a thread with a larger stack.", innerException);
+    {
+        const string message = "Statement too complex: running it needs more stack than the executing thread has left. " +
+            "Reduce the nesting of its parentheses and negations, or run it on a thread with a larger stack.";
+        return new DatabaseException(message,
+            [new Diagnostic { Code = Code, Message = message, Severity = DiagnosticSeverity.Error }], innerException);
+    }
 
     /// <summary>Creates the failure for a parse that ran out of stack.</summary>
     /// <param name="diagnostic">The parser's <see cref="ParserCode"/> diagnostic.</param>

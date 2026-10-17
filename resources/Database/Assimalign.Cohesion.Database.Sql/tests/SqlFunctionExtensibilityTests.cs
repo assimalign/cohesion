@@ -152,7 +152,7 @@ public sealed partial class SqlFunctionExtensibilityTests
 
             // Assert
             failure.ShouldBeOfType<SqlEvaluationException>().Code.ShouldBe(code, $"withRows: {withRows}");
-            failure.Message.ShouldStartWith(message, Case.Sensitive, $"withRows: {withRows}");
+            failure.ShouldStartWithMessage(message, Case.Sensitive, $"withRows: {withRows}");
             session.State.ShouldBe(SessionState.Open);
         }
     }
@@ -312,7 +312,7 @@ public sealed partial class SqlFunctionExtensibilityTests
         // Assert
         var coded = failed.ShouldBeOfType<SqlEvaluationException>();
         coded.Code.ShouldBe(FunctionFailed);
-        coded.Message.ShouldStartWith("COHSQLE007: Function 'clamp' failed: ", Case.Sensitive);
+        coded.DiagnosticDetail("COHSQLE007").ShouldStartWith("Function 'clamp' failed: ", Case.Sensitive);
         coded.InnerException.ShouldBeOfType<ArgumentException>();
         passedThrough.ShouldNotBeOfType<SqlEvaluationException>();
         passedThrough.Message.ShouldBe("refuse: negative input");
@@ -410,7 +410,7 @@ public sealed partial class SqlFunctionExtensibilityTests
 
         // Assert
         failure.ShouldBeOfType<SqlEvaluationException>().Code.ShouldBe(FunctionFailed);
-        failure.Message.ShouldStartWith("COHSQLE007: Function 'product' failed: ", Case.Sensitive);
+        failure.DiagnosticDetail("COHSQLE007").ShouldStartWith("Function 'product' failed: ", Case.Sensitive);
         failure.InnerException.ShouldBeOfType<OverflowException>();
     }
 

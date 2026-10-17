@@ -226,6 +226,24 @@ with `DatabaseObjectLockedException` naming the collection, owning schema, and r
 operation. Document contents remain mutable. There is no
 compiled-schema provisioning authority in this engine.
 
+## Documents engine diagnostic codes (#1103)
+
+Planner failures are `DatabaseException` instances with structured `Diagnostics`, an Error
+severity and the offending expression's Start/End/Line when its AST has a location. Their
+Message contains no code prefix. The Documents family is `COHDOCnnn`:
+
+| Code | Meaning |
+| --- | --- |
+| `COHDOC001` | Invalid statement, index definition, expression or grouping context |
+| `COHDOC002` | Collection does not exist |
+| `COHDOC003` | Duplicate projection name; use unique aliases |
+
+`DocumentQueryRequest.FromOql` and a directly constructed typed query with parse errors
+throw `DatabaseParseException` carrying the complete, ordered parser diagnostics and the
+existing first-error Message. No recovery AST reaches the planner. Protocol 1.0's Documents
+server, when supplied by #190, must compose `CODE: message` for ExecutionFailure from this
+carrier, as the SQL and Graph servers do.
+
 ## OQL query and DDL semantics
 
 ### Catalog introspection

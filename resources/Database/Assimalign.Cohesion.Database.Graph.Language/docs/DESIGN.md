@@ -426,3 +426,17 @@ and BCL scalar values with no reflection, Regex, runtime discovery, or `Microsof
 dependencies; `GqlLabelExpression.ToString` renders GQL text with a type switch. Adding a
 clause requires the parser, planner, executor, conformance cases, and this matrix in the same change;
 keyword recognition alone never enables it.
+
+## Function declaration and diagnostic delivery (#1103)
+
+Profile.Functions is the executable built-in set, checked by the engine's one function-
+coverage guard: every declared name has a passing live case and every live case has a
+declared name. GQL currently declares none. OQL removes ABS (already recognized by its
+unsupported table), and its parser/planner membership checks read the profile. The six
+temporary ODMG declarations ELEMENT, FLATTEN, FIRST, LAST, LISTTOSET and UNIQUE retain
+explicit COHDBL001 exemptions until #1126 deletes that exact exemption list.
+
+The root DatabaseException.Diagnostics carrier preserves the complete parser list at text
+factories and session boundaries, including parsed typed requests. DatabaseParseException
+retains the existing first-error message and no error-recovery AST executes. Graph's path
+request factory shares this contract. Diagnostics remain plain Database.Types data.

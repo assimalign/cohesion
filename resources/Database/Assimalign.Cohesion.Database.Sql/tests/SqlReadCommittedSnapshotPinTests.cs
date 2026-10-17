@@ -215,7 +215,7 @@ public sealed class SqlReadCommittedSnapshotPinTests
                 failure.ShouldBeNull();
                 break;
             case "fails":
-                failure.ShouldBeAssignableTo<DatabaseException>().ShouldNotBeNull().Message.ShouldStartWith("COHSQLE001", Case.Sensitive);
+                failure.ShouldBeAssignableTo<DatabaseException>().ShouldNotBeNull().Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE001");
                 break;
             default:
                 failure.ShouldBeAssignableTo<OperationCanceledException>();

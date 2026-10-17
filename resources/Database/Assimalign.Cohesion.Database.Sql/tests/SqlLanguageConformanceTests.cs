@@ -232,8 +232,67 @@ public sealed class SqlLanguageConformanceTests
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         foreach (string setup in _orderingSeed) { await ExecuteAsync(session, setup); }
 
-        (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, query))).Message.ShouldBe(message);
+        (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, query))).ShouldHaveMessage(message);
     }
+
+    // The single function guard: add execution evidence here whenever the profile gains a name.
+    private static readonly IReadOnlyDictionary<string, FunctionCase> _functionCases =
+        new Dictionary<string, FunctionCase>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["COUNT"] = new("COUNT(*)", 3L),
+            ["SUM"] = new("SUM(age)", 122m),
+            ["AVG"] = new("AVG(age)", 122m / 3m),
+            ["MIN"] = new("MIN(age)", 36),
+            ["MAX"] = new("MAX(age)", 45),
+            ["COALESCE"] = new("COALESCE(NULL, 7)", 7L),
+            ["CAST"] = new("CAST('42' AS INT)", 42),
+            ["UPPER"] = new("UPPER('Ada')", "ADA"),
+            ["LOWER"] = new("LOWER('Ada')", "ada"),
+            ["LENGTH"] = new("LENGTH('Ada')", 3L),
+            ["ABS"] = new("ABS(-2)", 2L),
+        };
+
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Functions: every declared function has passing live evidence")]
+    public async Task Profile_DeclaredFunctions_ShouldExecuteEveryCase()
+    {
+        // Arrange
+        RequireFunctionCoverage(SqlLanguageProfile.Instance.Functions.ToArray(), _functionCases.Keys);
+        await using var engine = SqlDatabaseEngine.Create("sql-functions", new());
+        var database = await engine.CreateDatabaseAsync("functions", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        foreach (string setup in _seed) { await ExecuteAsync(session, setup); }
+
+        // Act / Assert
+        foreach (string name in SqlLanguageProfile.Instance.Functions.ToArray())
+        {
+            var execution = _functionCases[name];
+            var rows = await RowsAsync(session, $"SELECT {execution.Expression} FROM t");
+            rows.ShouldNotBeEmpty(name);
+            foreach (var row in rows) { row[0].ShouldBe(execution.Expected, name); }
+        }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Functions: coverage fails for an unmeasured declaration or a retired case")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Profile_FunctionCoverageMismatch_ShouldFail(bool addedDeclaration)
+    {
+        // Arrange
+        var declarations = SqlLanguageProfile.Instance.Functions.ToArray();
+        var cases = _functionCases.Keys;
+        // Act / Assert
+        Should.Throw<ShouldAssertException>(() => RequireFunctionCoverage(
+            addedDeclaration ? declarations.Append("FUTURE") : declarations,
+            addedDeclaration ? cases : cases.Append("RETIRED")));
+    }
+
+    private static void RequireFunctionCoverage(IEnumerable<string> declarations, IEnumerable<string> cases)
+    {
+        declarations.Except(cases, StringComparer.OrdinalIgnoreCase).ShouldBeEmpty("Declared functions need live cases.");
+        cases.Except(declarations, StringComparer.OrdinalIgnoreCase).ShouldBeEmpty("Retired functions cannot retain positive cases.");
+    }
+
+    private sealed record FunctionCase(string Expression, object Expected);
 
     private static Dictionary<string, ExecutionCase> CreateCases() => new(StringComparer.Ordinal)
     {

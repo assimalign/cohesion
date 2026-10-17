@@ -245,6 +245,7 @@ public sealed partial class OqlQueryParser : QueryParser
                 OqlWordPosition.Anywhere => true,
                 OqlWordPosition.Clause => index == 0 || EndsOperand(index - 1),
                 OqlWordPosition.Statement => index == 0,
+                OqlWordPosition.Function => index + 1 < _tokens.Count && _tokens[index + 1].Type == TokenType.LeftParen,
                 _ => false,
             };
             if (!constructPosition)

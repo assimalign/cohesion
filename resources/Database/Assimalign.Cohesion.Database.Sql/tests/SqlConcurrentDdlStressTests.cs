@@ -431,7 +431,7 @@ public sealed class SqlConcurrentDdlStressTests : IDisposable
     private static void AssertCatalogRecordTooLarge(DatabaseException? failure, string subject)
     {
         failure.ShouldNotBeNull();
-        failure.Message.ShouldContain(subject, Case.Sensitive);
+        failure.ShouldContainMessage(subject, Case.Sensitive);
         failure.Message.ShouldContain("catalog record", Case.Sensitive);
         for (Exception? inner = failure; inner is not null; inner = inner.InnerException)
         {

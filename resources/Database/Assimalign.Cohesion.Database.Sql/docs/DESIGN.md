@@ -211,7 +211,7 @@ flowchart TD
   once, for what the planner computes before any row exists (a LIMIT count, a seek
   bound, a parameter's type).
 - **Binding raises nothing evaluation raised only when it reached a node.** An
-  unsupported construct, a declared function that does not execute yet (`NULLIF`), an
+  unsupported typed construct (text rejects recognized non-executing functions at parse time), an
   aggregate outside a grouping plan, a call whose arguments its signature refuses, a
   parameter with no supplied value, a column that does not resolve in a scope planning
   did not validate, and a literal its type cannot hold each bind as a `SqlBoundFailure`
@@ -1823,7 +1823,7 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   (`ValidateFunctionCalls`), subqueries, DML values, `CHECK` predicates and
   `DEFAULT`s included, and checks every call before it binds the catalog or
   reads a row: a name outside the engine's function catalog and outside
-  `SqlLanguageProfile.Instance.Functions` is `Unknown function '<name>'.`, and a
+  `SqlLanguageProfile.Instance.Functions` and the recognized-unsupported vocabulary is `COHSQLE016`, `Unknown function '<name>'.`, and a
   call whose argument count no overload of its function accepts fails with
   `SqlEvaluationException` `COHSQLE006` (the overload by type is chosen once a scope
   types the arguments, [Functions (E2)](#functions-e2)). The
@@ -1834,9 +1834,9 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   arguments before the call itself, as PostgreSQL's parse analysis does
   (`transformFuncCall` transforms the arguments and then `ParseFuncOrColumn`
   resolves the function, `src/backend/parser/parse_expr.c`), so the innermost bad
-  call is the one reported. A declared name that does not execute yet (`NULLIF`,
-  `TRIM`, ...) passes this check and still fails during evaluation; #1103 rejects
-  those at parse time and gives planner rejections structured codes.
+  call is the one reported. A recognized name that does not execute yet (`NULLIF`,
+  `TRIM`, ...) is absent from the executable profile and rejects at parse time with
+  `COHDBL001`; it is not also reported as an unknown function (#1103).
 - **One catalog of functions (#1189, E2).** The engine's `SqlFunctionCatalog` holds
   every executable function, the standard library's and the application's alike
   ([Functions (E2)](#functions-e2)). Its readers are the planner walk above; the
@@ -3821,6 +3821,26 @@ production code consumed `IDatabaseEngineBuilder`, and the owner's 2026-10-04 de
 made every model builder sealed, which supersedes the 2026-10-02 ruling, its 2026-10-03
 narrowing and #1232. A hosting-aware factory configures the same sealed builder through
 `AddSql`; the model still sees no DI or configuration contract.
+
+## Diagnostics carrier and executable functions (#1103)
+
+`DatabaseException.Diagnostics` is a non-null, read-only snapshot of the complete diagnostic
+list, ordered stably by start offset (unlocated entries follow located entries). Legacy
+constructors supply an empty list. `Diagnostic`, its severity and location enum remain plain
+data in `Database.Types`; no reflection or runtime discovery is involved.
+
+SQL, OQL and GQL text factories, including `GraphPathsQueryRequest.FromGql`, retain their
+first-error Message and carry every diagnostic on `DatabaseParseException`. A session rejects
+the same parsed typed statement with the identical exception contract; no error AST executes.
+The documented SQL/GQL parser-out-of-stack translations remain engine complexity failures.
+Planner rejections carry stable codes and AST offsets where available; codes are separate from
+the in-process message. SQL and Graph protocol 1.0 compose `CODE: message` for ExecutionFailure.
+
+`QueryLanguageProfile.Functions` is the executable built-in set. Recognized non-executing
+functions live in each language's unsupported vocabulary and report COHDBL001 at parse time.
+The single function guard in each engine's execution-conformance suite requires live evidence
+for every declared name and rejects evidence for undeclared names. OQL temporarily exempts
+exactly ELEMENT, FLATTEN, FIRST, LAST, LISTTOSET and UNIQUE, each pinned to COHDBL001 until #1126.
 
 ## Error model
 

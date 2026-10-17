@@ -82,6 +82,11 @@ exceptions do not promise that a failed COMMIT left no writes. The SQL mapper
 documents and enforces this boundary by faulting its scope/store and refusing replay;
 see its [reconciliation contract](../../Assimalign.Cohesion.Database.Sql.Mapping/docs/DESIGN.md#commit-outcome-and-reconciliation).
 
+In-process sessions carry engine codes in `DatabaseException.Diagnostics` (#1103).
+The SQL server composes the existing protocol 1.0 `CODE: message` text from that carrier;
+client wire exceptions retain that text. Cancellation tests that execute sessions directly
+assert structured codes, while their wire counterparts keep their original text assertions.
+
 `SqlClientException : DatabaseException` maps stable wire codes to SQL error kinds
 and retains the original code. The shared pool invalidates incomplete exchanges,
 including cancellation and decoder failure. Completed parse/execution failures

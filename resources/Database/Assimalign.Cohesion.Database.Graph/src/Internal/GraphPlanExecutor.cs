@@ -23,14 +23,14 @@ internal static class GraphPlanExecutor
         if (error is not null)
         {
             if (error.Code == GraphStatementTooComplex.ParserCode) { throw GraphStatementTooComplex.FromParse(error); }
-            throw new DatabaseParseException($"GQL parse error {error.Code}: {error.Message}");
+            throw new DatabaseParseException($"GQL parse error {error.Code}: {error.Message}", statement.Diagnostics);
         }
         if (paths)
         {
             var query = statement.GqlExpression;
             if (query.CatalogSurface is not null || query.Matches.Count == 0 || query.Creates.Count != 0 ||
                 query.DeleteVariables.Count != 0 || query.DetachDelete || query.Projections.Count != 1 || query.Projections[0].Property is not null)
-            { throw new DatabaseException("COHDBG001: Path execution requires a read-only MATCH with exactly one path or bound entity projection."); }
+            { throw new GraphPlanningException("COHDBG001", "Path execution requires a read-only MATCH with exactly one path or bound entity projection."); }
         }
         if (statement.GqlExpression.CatalogSurface is { } surface)
         {
@@ -66,7 +66,7 @@ internal static class GraphPlanExecutor
                     GraphPath path => path,
                     GraphNode node => new GraphPath([node], []),
                     GraphRelationship relationship => ProjectRelationship(database, operation, relationship),
-                    _ => throw new DatabaseException("COHDBG001: Path execution requires a path or bound entity projection."),
+                    _ => throw new GraphPlanningException("COHDBG001", "Path execution requires a path or bound entity projection."),
                 });
             }
             return new GraphPathsQueryResult(results.AsReadOnly(), plan.Warnings);
@@ -141,7 +141,7 @@ internal static class GraphPlanExecutor
             operation.EnsureActive();
             if (step == steps.Length)
             {
-                if (output.Count >= MaximumMatches) { throw new DatabaseException("COHDBG004: The query exceeded 100000 path matches."); }
+                if (output.Count >= MaximumMatches) { throw new GraphPlanningException("COHDBG004", "The query exceeded 100000 path matches."); }
                 if (path.Variable is { } pathVariable)
                 { bindings.Add(pathVariable, new GraphPath(Array.AsReadOnly(positions), Array.AsReadOnly(relationships))); }
                 output.Add(bindings);
@@ -185,7 +185,7 @@ internal static class GraphPlanExecutor
         var snapshot = operation.Context.Snapshot;
         if (database.Store.FindNode(relationship.From.Value, snapshot) is not { } from ||
             database.Store.FindNode(relationship.To.Value, snapshot) is not { } to)
-        { throw new DatabaseException("COHDBG003: A matched relationship has a missing endpoint."); }
+        { throw new GraphPlanningException("COHDBG003", "A matched relationship has a missing endpoint."); }
         return new GraphPath([GraphDatabase.Materialize(from), GraphDatabase.Materialize(to)], [relationship]);
     }
 
@@ -216,7 +216,7 @@ internal static class GraphPlanExecutor
             if (pattern.Variable is { } variable && bindings.TryGetValue(variable, out var bound))
             {
                 nodes[i] = (GraphNode)bound;
-                if (!AcceptNode(pattern, nodes[i], bindings)) { throw new DatabaseException("COHDBG003: An inserted endpoint conflicts with its existing binding."); }
+                if (!AcceptNode(pattern, nodes[i], bindings)) { throw new GraphPlanningException("COHDBG003", "An inserted endpoint conflicts with its existing binding."); }
             }
             else
             {
@@ -229,7 +229,7 @@ internal static class GraphPlanExecutor
         {
             var pattern = path.Relationships[i];
             if (pattern.Variable is { } variable && bindings.ContainsKey(variable))
-            { throw new DatabaseException("COHDBG001: An inserted relationship variable must be new."); }
+            { throw new GraphPlanningException("COHDBG001", "An inserted relationship variable must be new."); }
             // The planner admits only Outgoing and Incoming here.
             bool outgoing = pattern.Direction == GqlPatternDirection.Outgoing;
             var relationship = await database.CreateRelationshipCoreAsync(operation, nodes[outgoing ? i : i + 1].Id,
@@ -245,7 +245,7 @@ internal static class GraphPlanExecutor
         private int _remaining = 1_000_000;
         internal void Consume()
         {
-            if (--_remaining < 0) { throw new DatabaseException("COHDBG004: The query exceeded 1000000 candidate expansions."); }
+            if (--_remaining < 0) { throw new GraphPlanningException("COHDBG004", "The query exceeded 1000000 candidate expansions."); }
         }
     }
 }

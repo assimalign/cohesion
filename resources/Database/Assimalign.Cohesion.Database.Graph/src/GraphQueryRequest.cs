@@ -45,7 +45,7 @@ public sealed class GraphQueryRequest : GraphRequest
             // The text is within the language; the thread is too small for it. That is the
             // statement-too-complex failure a planner or evaluator walk out of stack reports.
             if (error.Code == GraphStatementTooComplex.ParserCode) { throw GraphStatementTooComplex.FromParse(error); }
-            throw new DatabaseParseException($"GQL parse error {error.Code}: {error.Message}");
+            throw new DatabaseParseException($"GQL parse error {error.Code}: {error.Message}", statement.Diagnostics);
         }
         return new GraphQueryRequest(statement, parameters);
     }
