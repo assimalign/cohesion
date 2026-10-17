@@ -142,7 +142,9 @@ field qualifiers retain #1438's COHDBL001, because their semantics are not enfor
 stays retired for domains. BIT, SMALLDATETIME and TIME WITH TIME ZONE have SQL0005 reasons
 and replacements; arrays use COHDBL001. The planner consumes resolved column types directly.
 The preflight scan skips complete temporal WITH TIME ZONE suffixes so they cannot become CTE
-diagnostics. Canonical CAST rendering retains spaces between type-name words; parser/renderer
+diagnostics. It walks the whole parenthesized modifier list, including malformed arguments and
+nested parentheses, without validating it. Shared declaration/CAST parsing alone reports SQL0005
+for malformed lists; a well-formed temporal precision keeps COHDBL001. Canonical CAST rendering retains spaces between type-name words; parser/renderer
 fixed points and persisted SQL function bodies cover these targets through reopen and the wire.
 
 ## Namespace note

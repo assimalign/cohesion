@@ -124,14 +124,16 @@ public sealed partial class SqlQueryParser
         if (!MoveTypeLookahead(ref lookahead)) { return false; }
         if (lookahead.Current.Type == TokenType.LeftParen)
         {
-            if (!MoveTypeLookahead(ref lookahead) || lookahead.Current.Type != TokenType.Integer ||
-                !MoveTypeLookahead(ref lookahead)) { return false; }
-            if (lookahead.Current.Type == TokenType.Comma)
+            // Only locate the suffix here; ParseTypeArguments owns modifier validation.
+            int depth = 1;
+            do
             {
-                if (!MoveTypeLookahead(ref lookahead) || lookahead.Current.Type != TokenType.Integer ||
-                    !MoveTypeLookahead(ref lookahead)) { return false; }
+                if (!MoveTypeLookahead(ref lookahead) || lookahead.Current.Type == TokenType.Semicolon) { return false; }
+                if (lookahead.Current.Type == TokenType.LeftParen) { depth++; }
+                else if (lookahead.Current.Type == TokenType.RightParen) { depth--; }
             }
-            if (lookahead.Current.Type != TokenType.RightParen || !MoveTypeLookahead(ref lookahead)) { return false; }
+            while (depth > 0);
+            if (!MoveTypeLookahead(ref lookahead)) { return false; }
         }
         if (!IsWord(ref lookahead, "WITH") || !MoveTypeLookahead(ref lookahead) ||
             !IsWord(ref lookahead, "TIME") || !MoveTypeLookahead(ref lookahead) ||

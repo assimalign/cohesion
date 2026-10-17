@@ -1383,7 +1383,10 @@ object and precision modifier, including in CAST and declared scripts. The engin
 implement fractional-second rounding and never silently ignores a precision. PostgreSQL admits
 these modifiers (gram.y:15146-15181 and timestamp.c:1051-1110), and reduces precision above six
 with a warning (date.c:57-81; timestamp.c:110-132). A single unsigned Int32 precision above six
-is therefore also unsupported here. Malformed argument lists remain SQL0005. Typed declarations
+is therefore also unsupported here. Malformed argument lists remain SQL0005, including empty,
+negative, nonnumeric and excess arguments before WITH TIME ZONE. Declarations and CAST report
+only the modifier error for those lists; the temporal suffix never adds an unsupported-WITH
+diagnostic. A well-formed precision still reports COHDBL001 with or without that suffix. Typed declarations
 retain UnsupportedType and SDK diagnostics retain COHDBSDK106, with COHDBL001 in their detail.
 Every temporal precision, including 7, remains COHDBL001; #1509 is the rounding follow-up.
 
