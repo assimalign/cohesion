@@ -42,7 +42,9 @@ Lexical recognition preserves the established vocabulary so rejected constructs 
 | Clause | Supported | Shape or reason |
 | --- | --- | --- |
 | `SELECT` | Yes | One or more projected expressions, optional `AS` output names; `*` returns the source document |
-| `EXPLAIN` | Yes | `EXPLAIN SELECT` describes the chosen query plan without reading document data or writing |
+| `EXPLAIN` | Yes | `EXPLAIN SELECT` or `EXPLAIN INSERT` describes the plan without reading document data or writing |
+| `INSERT` | Yes | Explicit KEY/VALUE pairs, or KEY and optional VALUE bindings to SELECT output names |
+| `VALUES` | Yes | One or more parenthesized key/value pairs for INSERT |
 | `FROM` | Yes | Exactly one unqualified collection or reserved `COHESION_SCHEMA` source and optional iteration variable, with or without `AS` |
 | `WHERE` | Yes | Scalar comparison and Boolean document filtering |
 | `GROUP BY` | Yes | One or more grouping expressions |
@@ -59,7 +61,7 @@ Lexical recognition preserves the established vocabulary so rejected constructs 
 | `UNNEST` | No (pin) | SQL++ array expansion in `FROM`; oql-arrays flips the pin |
 | `EVERY ... SATISFIES` | No (pin) | SQL++ quantified predicate, also opened by `ANY` and `SOME`; oql-arrays flips the pin |
 
-Only `COUNT`, `SUM`, `AVG`, `MIN`, and `MAX` are callable. Each takes one expression;
+Callable functions are `META` and the aggregates `COUNT`, `SUM`, `AVG`, `MIN`, and `MAX`. Each aggregate takes one expression;
 `COUNT(*)` also counts documents. Aggregate placement, grouping consistency, and value semantics
 are validated by the Documents planner/executor. `DISTINCT`, `ALL`, `IN`, `EXISTS`, `LIKE`,
 `BETWEEN`, collection constructors/quantifiers, `ABS`, and other reserved but unimplemented
@@ -174,16 +176,21 @@ Total ascending order is MISSING < NULL < FALSE < TRUE < number < ordinal string
 object. Descending reverses it; ties retain document identity order. GROUP BY retains
 separate MISSING and NULL keys. COUNT(expr), SUM, AVG, MIN and MAX skip both; COUNT(*)
 counts documents. A MISSING value does not obscure a column's one observed scalar type.
-Result projections omit MISSING members and retain explicit null. Constructor handling
-belongs to oql-projection; composite/UNIQUE index keys belong to oql-index-ddl.
+Result projections and object constructors omit MISSING members and retain explicit null.
+Composite/UNIQUE index keys belong to oql-index-ddl.
 
 ## Grammar, statement, and expression trees
 
 ```text
-statement    := (query | EXPLAIN query | create-collection | drop-collection | create-index | drop-index) [';']
+statement    := (query | insert | EXPLAIN (query | insert) | create-collection | drop-collection | create-index | drop-index) [';']
 query        := SELECT projection (',' projection)* FROM collection [AS? identifier]
                 [WHERE expression] [GROUP BY expression (',' expression)*]
                 [HAVING expression] [ORDER BY ordering (',' ordering)*]
+insert       := INSERT INTO collection [AS identifier] '(' KEY ',' VALUE ')'
+                VALUES '(' expression ',' expression ')' (',' '(' expression ',' expression ')')*
+              | INSERT INTO collection [AS identifier] '(' KEY identifier [',' VALUE identifier] ')' query
+object       := '{' [(string | identifier) ':' expression (',' (string | identifier) ':' expression)*] '}'
+metadata     := META '(' [identifier] ')' '.' (id | version)
 create-collection := CREATE COLLECTION [IF NOT EXISTS] collection
 drop-collection   := DROP COLLECTION [IF EXISTS] collection
 create-index := CREATE INDEX identifier ON collection '(' path ')'
@@ -203,7 +210,7 @@ there is no iteration alias in an index statement. Index and collection names fo
 identifier quoting and case-preservation rules as query collection names.
 
 `OqlQueryStatement` wraps one top-level `OqlExpression`: `OqlSelectExpression`,
-`OqlExplainExpression` (one SELECT),
+`OqlExplainExpression` (one SELECT or INSERT), `OqlInsertExpression`,
 `OqlCreateCollectionExpression`, `OqlDropCollectionExpression`, `OqlCreateIndexExpression`, or
 `OqlDropIndexExpression`. Collection nodes retain `Name` and `IfNotExists`/`IfExists`.
 Index creation retains its target as an `OqlPathExpression`, rather than flattening the path during
@@ -237,7 +244,7 @@ and `>=`; the AST normalizes `<>` to `!=`. Presence tests are unary `IS [NOT] NU
 `IS [NOT] MISSING` and `IS [NOT] VALUED` nodes with distinct operator strings.
 Arithmetic supports `+`, `-`, `*`, `/`, and `%`.
 
-The parser is a partial class, split into dispatch/token handling, SELECT clauses, DDL, and
+The parser is a partial class, split into dispatch/token handling, SELECT clauses, DDL, DML, and
 expression parsing, following `SqlQueryParser`. Parser-produced list properties are read-only
 snapshots; AST nodes retain source spans and the top-level expression retains the original
 statement text.
@@ -248,7 +255,7 @@ disposable resources beyond those used by the shared analyzer pipeline.
 
 ## EXPLAIN (#1104)
 
-SQL++'s `EXPLAIN SELECT` spelling produces the shared plan-description columns documented by
+SQL++'s `EXPLAIN SELECT` and `EXPLAIN INSERT` spellings produces the shared plan-description columns documented by
 [Execution](../../Assimalign.Cohesion.Database.Execution/docs/DESIGN.md#plan-descriptions-1104).
 `OqlExplainExpression.Statement` retains the query for ordinary parameter validation and
 planning. The parser rejects DDL, transaction control, nested EXPLAIN and EXPLAIN ANALYZE with
@@ -336,11 +343,28 @@ The engine design documents the field shapes, snapshot visibility, and read-only
 Multiple statements per parse are rejected. Logical database creation and deletion remain
 engine-side C# operations.
 
-OQL still has no document data-mutation syntax. Document insert/replacement and delete use the
-`DocumentCollection.PutAsync` and `DeleteAsync` operations, including their transaction and
-expected-version semantics. No public surface was widened for index management or a
-second data-mutation language. The Documents engine design states query ordering, mixed-shape
-behavior, index-DDL ownership, and aggregate/mutation semantics.
+### INSERT and metadata (#1131)
+
+Document keys are external: collections declare no key field and never generate ids. The
+SQL++ KEY/VALUE forms above are the T1 mutation grammar. Id-less VALUE/VALUES forms report
+OQL0002 asking for KEY. KEY, VALUES and INTO remain non-reserved; the header reads KEY and
+VALUE by position, independently of SELECT VALUE's eventual reservation. OPTIONS in the
+header reports COHDBL001 because Documents has no TTL. RETURNING is recognized but deferred,
+including after literal and parameter operands. General database-qualified destinations remain invalid.
+
+VALUES expressions accept constants, parameters, operators and object constructors; document
+paths, aggregates and META require a source and fail planning here. INSERT SELECT binds KEY
+and optional VALUE to exact output names. Without VALUE, the complete projected row becomes
+the JSON object. A MISSING key or top-level VALUE fails the statement; MISSING members are
+omitted and explicit NULL members are stored. Object construction has an OqlObjectExpression
+node so the required INSERT member rule uses the ordinary evaluator, without a second JSON parser.
+
+META is a declared function with its own OqlMetaExpression. It exposes id and the engine's
+monotonic version for stored rows, even when their content has absent members. An optional
+argument must be the source alias. Bare META, other members and virtual system sources fail
+planning. The name meta remains usable as a property or an implicit FROM alias. Metadata
+predicates remain residual filters; a content index on id cannot become a metadata lookup.
+The engine design records atomicity, serialization and duplicate/conflict behavior.
 
 ## Verification and extension
 
@@ -361,7 +385,7 @@ NativeAOT compatible.
 
 Profile.Functions is the executable built-in set, checked by the engine's one function-
 coverage guard: every declared name has a passing live case and every live case has a
-declared name. OQL starts from COUNT, SUM, AVG, MIN and MAX; the retired ODMG declarations
+declared name. OQL declares META, COUNT, SUM, AVG, MIN and MAX; the retired ODMG declarations
 and their temporary guard exemptions are gone. ABS remains recognized by its unsupported
 table, and parser/planner membership checks read the profile.
 

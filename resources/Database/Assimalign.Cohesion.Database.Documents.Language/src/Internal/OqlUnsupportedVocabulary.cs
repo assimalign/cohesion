@@ -51,6 +51,7 @@ internal static class OqlUnsupportedVocabulary
         // Statements and clauses of other languages.
         new("ALTER", "ALTER", OqlWordPosition.Clause),
         new("INSERT", "INSERT", OqlWordPosition.Clause),
+        new("RETURNING", "RETURNING", OqlWordPosition.Clause),
         new("UPDATE", "UPDATE", OqlWordPosition.Clause),
         new("DELETE", "DELETE", OqlWordPosition.Clause),
         new("USE", "USE", OqlWordPosition.Clause),

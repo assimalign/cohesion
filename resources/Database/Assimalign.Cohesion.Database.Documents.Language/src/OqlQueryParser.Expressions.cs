@@ -86,6 +86,23 @@ public sealed partial class OqlQueryParser
             return new OqlUnaryExpression("-", ParseExpression(6), Span(start, Previous));
         }
 
+        if (Take(TokenType.LeftBrace))
+        {
+            List<KeyValuePair<string, OqlExpression>> members = [];
+            if (Current.Type != TokenType.RightBrace)
+            {
+                do
+                {
+                    string name;
+                    if (Current.Type == TokenType.String) { name = Unquote(Current.Text); Advance(); }
+                    else { name = Identifier(allowKeyword: true); }
+                    Expect(TokenType.Colon, "':'");
+                    members.Add(new(name, ParseExpression()));
+                } while (!Failed && Take(TokenType.Comma));
+            }
+            Expect(TokenType.RightBrace, "'}'");
+            return new OqlObjectExpression(members.AsReadOnly(), Span(start, Previous));
+        }
         if (Take(TokenType.LeftParen))
         {
             var expression = ParseExpression();
@@ -159,6 +176,11 @@ public sealed partial class OqlQueryParser
                 }
 
                 Expect(TokenType.RightParen, "')'");
+                if (function == "META")
+                {
+                    string? member = Take(TokenType.Dot) ? Identifier(allowKeyword: true) : null;
+                    return new OqlMetaExpression(arguments.AsReadOnly(), member, Span(start, Previous));
+                }
                 if (arguments.Count != 1 || function != "COUNT" && arguments[0] is OqlStarExpression)
                 {
                     Error("OQL0006", "Aggregates require one expression; only COUNT accepts '*'.", start);

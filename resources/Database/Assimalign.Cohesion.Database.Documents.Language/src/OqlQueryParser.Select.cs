@@ -23,7 +23,7 @@ public sealed partial class OqlQueryParser
         {
             alias = Identifier();
         }
-        else if (Current.Type is TokenType.Identifier or TokenType.QuotedIdentifier)
+        else if (Current.Type is TokenType.Identifier or TokenType.QuotedIdentifier or TokenType.Function)
         {
             alias = Identifier();
         }

@@ -103,6 +103,10 @@ public sealed partial class OqlQueryParser : QueryParser
             {
                 expression = new OqlExplainExpression(ParseSelect(), Span(start, _tokens[_position - 1]));
             }
+            else if (Is("INSERT"))
+            {
+                expression = new OqlExplainExpression(ParseInsert(), Span(start, Previous));
+            }
             else
             {
                 _diagnostics.Add(QueryDiagnostics.UnsupportedClause($"EXPLAIN {Current.Text}", Profile.Language, Span(start, Current)));
@@ -112,6 +116,10 @@ public sealed partial class OqlQueryParser : QueryParser
         else if (Is("SELECT"))
         {
             expression = ParseSelect();
+        }
+        else if (Is("INSERT"))
+        {
+            expression = ParseInsert();
         }
         else if (IsIndexStatement("CREATE"))
         {
@@ -131,7 +139,7 @@ public sealed partial class OqlQueryParser : QueryParser
         }
         else
         {
-            Error("OQL0002", "Expected SELECT, CREATE INDEX, DROP INDEX, CREATE COLLECTION, or DROP COLLECTION.", Current);
+            Error("OQL0002", "Expected SELECT, INSERT, CREATE INDEX, DROP INDEX, CREATE COLLECTION, or DROP COLLECTION.", Current);
             expression = EmptyExpression();
         }
 
@@ -363,7 +371,7 @@ public sealed partial class OqlQueryParser : QueryParser
         return token.Type switch
         {
             TokenType.Identifier or TokenType.QuotedIdentifier or TokenType.Function or
-            TokenType.RightParen or TokenType.RightBracket or TokenType.Parameter or
+            TokenType.RightParen or TokenType.RightBracket or TokenType.RightBrace or TokenType.Parameter or
             TokenType.Integer or TokenType.Float or TokenType.String => true,
             TokenType.Keyword => index > 0 && _tokens[index - 1].Type == TokenType.Dot ||
                 token.Text.ToUpperInvariant() is "NULL" or "MISSING" or "NIL" or "TRUE" or "FALSE" or "VALUED" or "ASC" or "DESC",

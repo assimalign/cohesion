@@ -13,7 +13,7 @@ using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Documents.Internal;
 
-internal static class DocumentPlanExecutor
+internal static partial class DocumentPlanExecutor
 {
     internal static async ValueTask<DatabaseResult> ExecuteAsync(DocumentDatabase database, DocumentOperation operation,
         OqlQueryStatement statement, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
@@ -25,6 +25,8 @@ internal static class DocumentPlanExecutor
         var plan = new DocumentPlanner(database.Catalog, operation.Context.Snapshot, parameters).Plan(statement.OqlExpression);
         return plan switch
         {
+            DocumentInsertPlan insert => await ExecuteInsertAsync(database, operation, insert.Collection, insert.Statement, null, parameters, cancellationToken).ConfigureAwait(false),
+            DocumentInsertSelectPlan insert => await ExecuteInsertAsync(database, operation, insert.Collection, insert.Statement, insert, parameters, cancellationToken).ConfigureAwait(false),
             DocumentSystemCollectionPlan system => ExecuteSystemCollection(database, operation, system, parameters, cancellationToken),
             DocumentPlan select => await ExecuteSelectAsync(database, operation, select, parameters, cancellationToken).ConfigureAwait(false),
             DocumentCreateCollectionPlan createCollection => await ExecuteCreateCollectionAsync(database, operation, createCollection, cancellationToken).ConfigureAwait(false),
@@ -46,7 +48,7 @@ internal static class DocumentPlanExecutor
                 operation.Context.Snapshot, cancellationToken).ConfigureAwait(false)
             : database.Catalog.GetDocuments(plan.Collection.Id, null, operation.Context.Snapshot);
 
-        var matches = new List<JsonElement>();
+        var matches = new List<DocumentEvaluationContext>();
         // Index and scan order are deliberately erased. Identity order is the
         // baseline for row output and the tie break of every subsequent sort.
         foreach (var entry in candidates.OrderBy(entry => entry.Id, StringComparer.Ordinal))
@@ -55,7 +57,8 @@ internal static class DocumentPlanExecutor
             operation.EnsureActive();
             var document = database.ReadDocument(entry);
             using var json = JsonDocument.Parse(document.Content, new JsonDocumentOptions { MaxDepth = 128 });
-            if (evaluator.Matches(query.Predicate, json.RootElement)) { matches.Add(json.RootElement.Clone()); }
+            var context = new DocumentEvaluationContext(json.RootElement, entry.Id, entry.Version);
+            if (evaluator.Matches(query.Predicate, context)) { matches.Add(context with { Content = json.RootElement.Clone() }); }
         }
 
         return ExecuteRows(plan.Logical, matches, evaluator, cancellationToken);
@@ -65,23 +68,23 @@ internal static class DocumentPlanExecutor
         DocumentSystemCollectionPlan plan, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
     {
         var evaluator = new DocumentExpressionEvaluator(plan.Logical.Query.Alias, parameters);
-        var matches = new List<JsonElement>();
+        var matches = new List<DocumentEvaluationContext>();
         foreach (var document in DocumentSystemCollections.Enumerate(database, operation.Context.Snapshot, plan.Name, cancellationToken))
         {
             operation.EnsureActive();
-            if (evaluator.Matches(plan.Logical.Query.Predicate, document)) { matches.Add(document); }
+            if (evaluator.Matches(plan.Logical.Query.Predicate, new DocumentEvaluationContext(document))) { matches.Add(new DocumentEvaluationContext(document)); }
         }
         return ExecuteRows(plan.Logical, matches, evaluator, cancellationToken);
     }
 
-    private static DatabaseResult ExecuteRows(DocumentLogicalPlan logical, List<JsonElement> matches,
+    private static DatabaseResult ExecuteRows(DocumentLogicalPlan logical, List<DocumentEvaluationContext> matches,
         DocumentExpressionEvaluator evaluator, CancellationToken cancellationToken)
     {
         var query = logical.Query;
         var output = new List<EvaluatedRow>();
         if (logical.IsGrouped)
         {
-            var groups = new SortedDictionary<object?[], List<JsonElement>>(TupleComparer.Instance);
+            var groups = new SortedDictionary<object?[], List<DocumentEvaluationContext>>(TupleComparer.Instance);
             if (query.GroupBy.Count == 0) { groups.Add([], matches); }
             else
             {
@@ -124,7 +127,7 @@ internal static class DocumentPlanExecutor
         }
         return new DocumentQueryResult(columns, output.Select(row => row.Values).ToList());
 
-        void Project(JsonElement document, IReadOnlyList<JsonElement>? group)
+        void Project(DocumentEvaluationContext document, IReadOnlyList<DocumentEvaluationContext>? group)
         {
             var values = logical.Projections.Select(projection => evaluator.Evaluate(projection.Expression, document, group)).ToArray();
             var orderKeys = query.OrderBy.Select(order => evaluator.Evaluate(order.Expression, document, group)).ToArray();

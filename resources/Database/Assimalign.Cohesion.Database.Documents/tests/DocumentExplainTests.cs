@@ -18,6 +18,8 @@ namespace Assimalign.Cohesion.Database.Documents.Tests;
 public sealed class DocumentExplainTests
 {
     [Theory(DisplayName = "Cohesion Test [Documents] - EXPLAIN: scans, seeks and system collections use the chosen plan")]
+    [InlineData("INSERT INTO items (KEY, VALUE) VALUES ('fresh', 1)", "Insert")]
+    [InlineData("INSERT INTO items (KEY k) SELECT META().id AS k FROM items", "InsertSelect")]
     [InlineData("SELECT name FROM items", "CollectionScan")]
     [InlineData("SELECT name FROM items WHERE score >= @minimum AND score < 10", "IndexSeek")]
     [InlineData("SELECT INDEX_NAME FROM COHESION_SCHEMA.INDEXES", "SystemCollection")]

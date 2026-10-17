@@ -111,23 +111,30 @@ public sealed class DocumentCollection
         ValidateId(id);
         // Capture caller memory before any await; subsequent mutations cannot alter stored bytes.
         var bytes = content.ToArray();
-        return _database.RunAsync(ValidateSession(session), async operation =>
+        return _database.RunAsync(ValidateSession(session), operation =>
+            WriteAsync(operation.Context, id, bytes, expectedVersion, insertOnly: false, cancellationToken), cancellationToken);
+    }
+
+    // The caller already owns its session operation. All writes share the lock, conflict,
+    // version, content and index-maintenance path without entering a second operation.
+    internal async ValueTask<Document> WriteAsync(TransactionContext context, DocumentId id, byte[] bytes,
+        DocumentVersion? expectedVersion, bool insertOnly, CancellationToken cancellationToken)
+    {
+        await _database.LockWriterAsync(context, cancellationToken).ConfigureAwait(false);
+        EnsureCollection(context, writing: true);
+        var previous = _database.Catalog.FindDocument(_collection.Id, id.Value, context.Snapshot);
+        EnsureCurrent(context, id, previous, expectedVersion);
+        if (insertOnly && previous is not null) { throw new DocumentDuplicateKeyException(Name, id); }
+        var reference = await _database.DataStorage.WriteContentAsync(_database.Coordinator, context, bytes, cancellationToken).ConfigureAwait(false);
+        if (previous is not null)
         {
-            await _database.LockWriterAsync(operation.Context, cancellationToken).ConfigureAwait(false);
-            EnsureCollection(operation.Context, writing: true);
-            var previous = _database.Catalog.FindDocument(_collection.Id, id.Value, operation.Context.Snapshot);
-            EnsureCurrent(operation.Context, id, previous, expectedVersion);
-            var reference = await _database.DataStorage.WriteContentAsync(_database.Coordinator, operation.Context, bytes, cancellationToken).ConfigureAwait(false);
-            if (previous is not null)
-            {
-                await _database.DataStorage.TombstoneContentAsync(_database.Coordinator, operation.Context, DocumentDatabase.Content(previous.Value), cancellationToken).ConfigureAwait(false);
-            }
-            // Use the durable kernel allocator: versions never repeat, even after delete/reinsert or restart.
-            ulong version = (ulong)_database.DataStorage.ReserveTransactionSequence();
-            var entry = new DocumentCatalogEntry(_collection.Id, id.Value, version, reference.Head, reference.Length, reference.Checksum);
-            await _database.Catalog.SaveDocumentAsync(entry, operation.Context, cancellationToken).ConfigureAwait(false);
-            return new Document(id, new DocumentVersion(version), bytes);
-        }, cancellationToken);
+            await _database.DataStorage.TombstoneContentAsync(_database.Coordinator, context, DocumentDatabase.Content(previous.Value), cancellationToken).ConfigureAwait(false);
+        }
+        // Use the durable kernel allocator: versions never repeat, even after delete/reinsert or restart.
+        ulong version = (ulong)_database.DataStorage.ReserveTransactionSequence();
+        var entry = new DocumentCatalogEntry(_collection.Id, id.Value, version, reference.Head, reference.Length, reference.Checksum);
+        await _database.Catalog.SaveDocumentAsync(entry, context, cancellationToken).ConfigureAwait(false);
+        return new Document(id, new DocumentVersion(version), bytes);
     }
 
     /// <summary>

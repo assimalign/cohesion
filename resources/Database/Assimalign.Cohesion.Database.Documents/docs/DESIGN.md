@@ -34,7 +34,7 @@ belong to the shared kernel. No kernel contract was widened. The engine, its dat
 first four leaves of the area root's bases ([Concrete types](#concrete-types-concrete-types-plan-phase-4-1260)),
 while the planner, executor, workers and storage strategy are internal.
 
-Every OQL statement flows through these stages. Catalog metadata informs query access-path
+SELECT and index-DDL statements flow through these stages; INSERT uses the same pipeline. Catalog metadata informs query access-path
 selection and index-DDL planning; `SELECT`, `CREATE INDEX`, and `DROP INDEX` all reach the same
 plan executor rather than an index-management side channel.
 
@@ -252,6 +252,7 @@ Message contains no code prefix. The Documents family is `COHDOCnnn`:
 | `COHDOC003` | Duplicate projection name; use unique aliases |
 | `COHDOC010` | Collection already exists (PostgreSQL SQLSTATE 42P07) |
 | `COHDOC011` | Collection is owned by the declared schema and cannot be dropped through a session |
+| `COHDOC012` | INSERT found a duplicate document key visible in its transaction |
 
 `DocumentQueryRequest.FromOql` and a directly constructed typed query with parse errors
 throw `DatabaseParseException` carrying the complete, ordered parser diagnostics and the
@@ -308,21 +309,20 @@ uncommitted catalog writes are visible. Subsequent statements observe committed
 catalog changes according to their isolation level. No metadata copy, content record,
 or synthetic collection is stored, and existing collection listing stays unchanged.
 
-The sources are read-only. `CREATE COLLECTION`, `DROP COLLECTION`, `CREATE INDEX`, and `DROP INDEX` targeting either source,
+The sources are read-only. `INSERT`, `CREATE COLLECTION`, `DROP COLLECTION`, `CREATE INDEX`, and `DROP INDEX` targeting either source,
 and `CreateCollectionAsync` or `DropCollectionAsync` using either reserved name,
 throw `DatabaseException` with `System collection '<canonical source>' is read-only.`
-before ordinary catalog lookup or mutation. OQL document `INSERT`, `UPDATE`, and
-`DELETE` remain unsupported everywhere and return the existing `COHDBL001` parse
-diagnostic. Virtual sources do not provide mutable `DocumentCollection` handles.
+before ordinary catalog lookup or mutation. OQL document `UPDATE` and `DELETE`
+remain unsupported and return the existing `COHDBL001` parse diagnostic. Virtual sources do not provide mutable `DocumentCollection` handles.
 
 ### Stored document queries
 
 The supported clause matrix lives in the language package's
 [DESIGN.md](../../Assimalign.Cohesion.Database.Documents.Language/docs/DESIGN.md).
 SELECT, FROM, WHERE, GROUP BY, HAVING, ORDER BY, CREATE COLLECTION, DROP COLLECTION,
-CREATE INDEX, and DROP INDEX are executed. OQL retains its name with a SQL++ basis.
-Retired ODMG constructs are rejected positionally; nested queries, document data-mutation
-statements, and server statements are rejected with `COHDBL001`. The parser advertises only clauses this executor
+CREATE INDEX, DROP INDEX, INSERT and VALUES are executed. OQL retains its name with a SQL++ basis.
+Retired ODMG constructs are rejected positionally; nested queries, deferred document mutations
+and server statements are rejected with `COHDBL001`. The parser advertises only clauses this executor
 supports.
 AST diagnostics are checked both for text requests and directly constructed requests.
 
@@ -419,7 +419,7 @@ Put/Get works on the new collection. A schema-owned DROP returns ExecutionFailur
 
 ## EXPLAIN operator vocabulary and wire shape (#1104)
 
-`EXPLAIN SELECT` performs ordinary parameter validation and snapshot-visible planning, then
+`EXPLAIN SELECT` and `EXPLAIN INSERT` perform ordinary parameter validation and snapshot-visible planning, then
 materializes a `DatabasePlanDescription` before reading document content or invoking the plan
 executor. Its columns and nullable count fields follow
 [Execution](../../Assimalign.Cohesion.Database.Execution/docs/DESIGN.md#plan-descriptions-1104).
@@ -430,6 +430,7 @@ It changes no documents or catalog entries, including when its explicit transact
 | `Select`, `Project`, `Group` | The physical query and its logical projection or grouping stage; details include filters and ordering |
 | `CollectionScan` | Candidate retrieval from the named collection |
 | `IndexSeek` | The chosen catalog index name, collection and inclusive/exclusive path bounds |
+| `Insert`, `InsertSelect` | Document creation from VALUES or a fully materialized query; SELECT children describe the source access |
 | `SystemCollection` | A virtual `COHESION_SCHEMA` collection without stored-document access |
 | `CreateCollection`, `DropCollection`, `CreateIndex`, `DropIndex` | Internal DDL mappings; EXPLAIN DDL is refused by the parser |
 
@@ -479,8 +480,43 @@ for supported scalar keys, visibility filtering, and restart recovery.
 
 ## Data mutation and serialization semantics
 
-OQL includes collection and index DDL but no document data-mutation clauses. The existing collection API
-provides deterministic mutation semantics: Put replaces the complete JSON value
+OQL INSERT creates externally keyed documents using the [SQL++ KEY/VALUE forms](https://docs.couchbase.com/server/current/n1ql/n1ql-language-reference/insert.html).
+A collection declares no key field. Id-less AsterixDB/PartiQL forms are refused and ids are never
+generated. SELECT output names supply KEY and optional VALUE; omitting VALUE stores the entire
+row in projection order. All source rows and VALUES inputs are materialized and validated before
+the first write. JSON uses only Utf8JsonWriter and JsonElement with the 128-level storage limit.
+
+INSERT and PutAsync share one internal write primitive inside the existing statement operation:
+writer lock, collection/index snapshot checks, current-key check, content write/tombstone,
+durable version allocation and catalog/index maintenance. A statement is atomic, including its
+index changes. A failure in an explicit transaction rolls back all of that transaction's work
+and leaves it Faulted until rollback, as described above. Schema ownership restricts DDL only:
+INSERT accepts Schema-owned collections. Missing collections are never created implicitly.
+
+An existing or repeated key raises DocumentDuplicateKeyException with CollectionName,
+DocumentId and diagnostic COHDOC012. Its message deliberately names the key because document
+identity is an explicit caller-supplied address, matching the CRUD expected-version diagnostic;
+this differs from SQL constraint diagnostics that omit key values. A same-key insert committed
+after the snapshot instead raises DatabaseTransactionAbortedException: current-state conflict
+checks precede duplicate detection. Successful inserts allocate strictly increasing versions;
+rollback may leave sequence gaps. A successful command reports its inserted-document count.
+The existing wire Complete carries that affected count with zero Document frames; duplicates
+are ExecutionFailure and preserve the wire session. No protocol or catalog format changes occur.
+
+A top-level MISSING KEY or VALUE fails the whole statement; KEY must be a nonblank string.
+MISSING object members are omitted, while explicit NULL members are stored as JSON null, both
+in object constructors and in INSERT SELECT without VALUE. This follows Couchbase INSERT's
+NULL and MISSING object examples (examples 7 and 8 in the linked reference). For example,
+{'score': MISSING, 'amount': NULL} stores only amount:null. NULL itself is also a valid VALUE.
+
+[META](https://docs.couchbase.com/server/current/n1ql/n1ql-language-reference/metafun.html) reads
+metadata attached to the source document, so missing content fields never erase its identity.
+META([alias]).id returns that external key; .version exposes Cohesion's durable version rather
+than Couchbase's cas property. These values travel with rows through filtering, grouping and
+projection. Bare calls, unsupported members, mismatched aliases, VALUES use and system sources
+are planning errors. Metadata is never resolved as a content path or a key-lookup access path.
+
+The existing collection API provides deterministic mutation semantics: Put replaces the complete JSON value
 by ordinal identity, Delete removes that identity, and each operation either
 completes in its transaction or rolls back. Put captures caller memory before
 awaiting and returns a new version. An optional expected version must match an

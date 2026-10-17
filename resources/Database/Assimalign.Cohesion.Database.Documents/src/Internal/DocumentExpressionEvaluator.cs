@@ -25,7 +25,7 @@ internal sealed class DocumentExpressionEvaluator
         _parameters = parameters;
     }
 
-    internal object? Evaluate(OqlExpression expression, JsonElement document, IReadOnlyList<JsonElement>? group = null)
+    internal object? Evaluate(OqlExpression expression, DocumentEvaluationContext document, IReadOnlyList<DocumentEvaluationContext>? group = null)
     {
         try
         {
@@ -34,8 +34,11 @@ internal sealed class DocumentExpressionEvaluator
                 OqlLiteralExpression literal => Normalize(literal.Value),
                 OqlMissingExpression => DocumentMissing.Instance,
                 OqlParameterExpression parameter => Parameter(parameter.Name),
-                OqlStarExpression => Normalize(document),
-                OqlPathExpression path => ReadPath(path, document),
+                OqlStarExpression => Normalize(document.Content),
+                OqlMetaExpression meta => meta.Member == "id" ? document.Id : (decimal)document.Version,
+                OqlObjectExpression obj => DocumentJsonValue.Object(obj.Members.Select(member =>
+                    new KeyValuePair<string, object?>(member.Key, Evaluate(member.Value, document, group)))),
+                OqlPathExpression path => ReadPath(path, document.Content),
                 OqlUnaryExpression unary => Unary(unary.Operator, Evaluate(unary.Operand, document, group)),
                 OqlBinaryExpression binary => Binary(binary, document, group),
                 OqlCallExpression call => Aggregate(call, group ?? throw new DocumentPlanningException("COHDOC001", "An aggregate requires a grouping context.")),
@@ -52,7 +55,7 @@ internal sealed class DocumentExpressionEvaluator
         }
     }
 
-    internal bool Matches(OqlExpression? expression, JsonElement document, IReadOnlyList<JsonElement>? group = null)
+    internal bool Matches(OqlExpression? expression, DocumentEvaluationContext document, IReadOnlyList<DocumentEvaluationContext>? group = null)
         => expression is null || Evaluate(expression, document, group) is true;
 
     // Check every use, including skipped Boolean branches and expressions over empty inputs.
@@ -66,6 +69,16 @@ internal sealed class DocumentExpressionEvaluator
                 {
                     throw new DocumentPlanningException("COHDOC005", $"OQL parameter '{parameter.Name}' has no value.", parameter.Location);
                 }
+                break;
+            case OqlInsertExpression insert:
+                foreach (var pair in insert.Values) { ValidateParameters(pair.Key); ValidateParameters(pair.Value); }
+                ValidateParameters(insert.Select);
+                break;
+            case OqlMetaExpression meta:
+                foreach (var argument in meta.Arguments) { ValidateParameters(argument); }
+                break;
+            case OqlObjectExpression obj:
+                foreach (var member in obj.Members) { ValidateParameters(member.Value); }
                 break;
             case OqlSelectExpression select:
                 foreach (var projection in select.Projections) { ValidateParameters(projection.Expression); }
@@ -151,7 +164,7 @@ internal sealed class DocumentExpressionEvaluator
         _ => throw new DocumentPlanningException("COHDOC008", "OQL parameters must be JSON scalars or JsonElement values."),
     };
 
-    private object? Binary(OqlBinaryExpression expression, JsonElement document, IReadOnlyList<JsonElement>? group)
+    private object? Binary(OqlBinaryExpression expression, DocumentEvaluationContext document, IReadOnlyList<DocumentEvaluationContext>? group)
     {
         var left = Evaluate(expression.Left, document, group);
         if (expression.Operator == "AND" && left is false) { return false; }
@@ -204,7 +217,7 @@ internal sealed class DocumentExpressionEvaluator
         _ => throw new DocumentPlanningException("COHDOC001", $"OQL operator '{operation}' is not executable."),
     };
 
-    private object? Aggregate(OqlCallExpression call, IReadOnlyList<JsonElement> group)
+    private object? Aggregate(OqlCallExpression call, IReadOnlyList<DocumentEvaluationContext> group)
     {
         if (call.Arguments.Count != 1) { throw new DocumentPlanningException("COHDOC001", $"OQL aggregate '{call.Name}' requires one argument."); }
         if (call.Name == "COUNT" && call.Arguments[0] is OqlStarExpression) { return (decimal)group.Count; }
