@@ -364,6 +364,8 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         // opened. Their result follows the ordinary query/wire diagnostic path.
         if (request.Statement.SqlExpression is SqlTransactionExpression control)
         {
+            // Control requests bypass the executor, but their maps obey the same contract.
+            _ = SqlQueryExecutor.NormalizeParameters(request.Parameters);
             _lastStatementMetrics = null;
             return await ExecuteTransactionControlAsync(control, cancellationToken).ConfigureAwait(false);
         }

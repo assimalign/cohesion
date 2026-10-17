@@ -1,5 +1,17 @@
 # Assimalign.Cohesion.Database.Sql.Language — Design
 
+## Parameters (#1102)
+
+SQL follows the [shared parameter contract](../../Assimalign.Cohesion.Database.Language/docs/DESIGN.md#parameter-contract-1102).
+The parser retains sigils in SqlParameterExpression. It links Execution's stateless
+name check, with no Execution assembly dependency. Numeric names use ASCII digits only;
+Unicode numeric spellings such as `$١` and `$1١` report SQL0003 at the whole reference.
+Malformed names report SQL0003; operand `?` and `:name` use the shared supported-form message.
+Trailing `?` keeps the lexical generic error. Adjacent host names in operand position bypass the
+clause/capability scan even when they spell keywords such as `:union`, `:like` and `:select`; syntax parsing
+reports the whole reference once. DIALECT.md and ParameterConformanceTests measure these forms.
+
+
 ## Fixed-length character declarations (#1437)
 
 CHAR and CHARACTER resolve to DatabaseType.Character, distinct from VARCHAR/TEXT (String).

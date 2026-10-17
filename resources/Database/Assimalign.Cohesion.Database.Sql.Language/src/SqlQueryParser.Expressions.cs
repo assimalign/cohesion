@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 
+using Assimalign.Cohesion.Database.Execution.Internal;
+
 namespace Assimalign.Cohesion.Database.Sql.Language;
 
 using Assimalign.Cohesion.Database.Language;
@@ -608,10 +610,35 @@ public sealed partial class SqlQueryParser
                 Location.Create(1, 1, pos, pos + text.Length));
         }
 
+        if (lexer.Current.Type == TokenType.Unrecognized && lexer.Current.Value.SequenceEqual("?"))
+        {
+            // Lexical preflight owns stray '?'; an operand replaces that generic diagnostic.
+            _parseDiagnostics.RemoveAll(diagnostic => diagnostic.Start == pos && diagnostic.Code == "SQL0003");
+            _parseDiagnostics.Add(QueryDiagnostics.UnsupportedParameterForm("SQL0003", Location.Create(1, 1, pos, pos + 1)));
+            Advance(ref lexer);
+            return new SqlLiteralExpression("NULL", SqlLiteralType.Null, Location.Create(1, 1, pos, pos + 1));
+        }
+        if (lexer.Current.Type == TokenType.Colon)
+        {
+            int end = pos + 1;
+            Advance(ref lexer);
+            if (lexer.Current.Position == end && lexer.Current.Type is TokenType.Identifier or TokenType.Keyword or TokenType.Function)
+            {
+                end += lexer.Current.Value.Length;
+                Advance(ref lexer);
+            }
+            _parseDiagnostics.Add(QueryDiagnostics.UnsupportedParameterForm("SQL0003", Location.Create(1, 1, pos, end)));
+            return new SqlLiteralExpression("NULL", SqlLiteralType.Null, Location.Create(1, 1, pos, end));
+        }
+
         // Parameter
         if (lexer.Current.Type == TokenType.Parameter)
         {
             var name = CurrentText(ref lexer);
+            if (!ParameterBindings.IsValidReference(name))
+            {
+                AddSyntaxDiagnostic(ref lexer, "A parameter name must be an identifier (a letter or _, then letters, digits or _) or digits only; use $name, @name, or $1.");
+            }
             Advance(ref lexer);
             return new SqlParameterExpression(name, Location.Create(1, 1, pos, pos + name.Length));
         }

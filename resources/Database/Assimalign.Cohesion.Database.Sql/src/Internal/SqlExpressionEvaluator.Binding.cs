@@ -7,6 +7,8 @@ using Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Language;
 using Assimalign.Cohesion.Database.Types;
 
+using Assimalign.Cohesion.Database.Execution.Internal;
+
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 internal sealed partial class SqlExpressionEvaluator
@@ -22,6 +24,8 @@ internal sealed partial class SqlExpressionEvaluator
     /// Binding raises nothing the unbound evaluator raised only when it reached a node: such a node
     /// binds as a <see cref="SqlBoundFailure"/> that raises the same failure when evaluated, so a
     /// statement over an empty table, or one whose short-circuit skips the node, still succeeds.
+    /// Missing parameters are the exception: the request contract rejects them during planning
+    /// and binding, before a data row is read or written (#1102).
     /// The walk checks the stack before it descends (#1151), as every expression walker does, so a
     /// tree the thread cannot walk fails the statement with <c>COHSQLE004</c>.
     /// </para>
@@ -727,8 +731,8 @@ internal sealed partial class SqlExpressionEvaluator
 
     private SqlBoundFailure ColumnFailure(SqlColumnReferenceExpression column) => new(() => ResolveColumn(column));
 
-    private static SqlBoundFailure MissingParameter(string parameterName, Location? location)
-        => new(() => throw new SqlPlanningException("COHSQLE020", $"No value was supplied for parameter '{parameterName.TrimStart('@', '$')}'.", location));
+    private static SqlBoundExpression MissingParameter(string parameterName, Location? location)
+        => throw new SqlPlanningException("COHSQLE020", $"No value was supplied for parameter '{ParameterBindings.BareName(parameterName)}'.", location);
 
     private static SqlBoundFailure ResolutionFailure(SqlEvaluationException exception) => new(() => throw exception.Duplicate());
 

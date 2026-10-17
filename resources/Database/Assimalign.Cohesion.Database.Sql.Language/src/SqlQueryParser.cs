@@ -928,6 +928,13 @@ public sealed partial class SqlQueryParser : QueryParser
 
             string token = CurrentText(ref lexer);
             firstToken ??= token;
+            // An adjacent :name in an operand is one rejected parameter form. Its name
+            // belongs to syntax parsing even when it spells a clause or function keyword.
+            if (previousToken == ":" && lexer.Current.Position == previousPosition + 1 &&
+                lexer.Current.Type is TokenType.Identifier or TokenType.Keyword or TokenType.Function)
+            {
+                continue;
+            }
             var tokenLocation = Location.Create(
                 1,
                 1,

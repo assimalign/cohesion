@@ -10,6 +10,8 @@ using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Types;
 
+using Assimalign.Cohesion.Database.Execution.Internal;
+
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 /// <summary>
@@ -601,10 +603,10 @@ internal sealed partial class SqlExpressionEvaluator
     internal bool TryGetParameterValue(SqlParameterExpression parameter, out object? value)
     {
         // The AST keeps the sigil ('@name' / '$1'); callers bind by bare name.
-        string name = parameter.ParameterName.TrimStart('@', '$');
+        string name = ParameterBindings.BareName(parameter.ParameterName);
         value = null;
         return _parameters is not null &&
-            (_parameters.TryGetValue(name, out value) || _parameters.TryGetValue(parameter.ParameterName, out value));
+            _parameters.TryGetValue(name, out value);
     }
 
     /// <summary>

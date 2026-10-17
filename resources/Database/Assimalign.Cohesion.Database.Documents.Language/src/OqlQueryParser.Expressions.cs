@@ -4,6 +4,8 @@ using System.Globalization;
 using System.Linq;
 using Assimalign.Cohesion.Database.Language;
 
+using Assimalign.Cohesion.Database.Execution.Internal;
+
 namespace Assimalign.Cohesion.Database.Documents.Language;
 
 public sealed partial class OqlQueryParser
@@ -54,6 +56,19 @@ public sealed partial class OqlQueryParser
     private OqlExpression ParsePrimary()
     {
         var start = Current;
+        if (Current.Type == TokenType.Colon || Current.Text == "?")
+        {
+            Advance();
+            var end = start;
+            if (start.Type == TokenType.Colon && Current.Start == start.End && Current.Type is TokenType.Identifier or TokenType.Keyword or TokenType.Function)
+            {
+                end = Current;
+                Advance();
+            }
+            _parameterFormPositions.Add(start.Start);
+            _diagnostics.Add(QueryDiagnostics.UnsupportedParameterForm("OQL0002", Span(start, end)));
+            return new OqlLiteralExpression(null, Span(start, end));
+        }
         if (Take("NOT"))
         {
             return new OqlUnaryExpression("NOT", ParseExpression(3), Span(start, Previous));
@@ -97,9 +112,9 @@ public sealed partial class OqlQueryParser
 
         if (Take(TokenType.Parameter))
         {
-            if (start.Text.Length < 2)
+            if (!ParameterBindings.IsValidReference(start.Text))
             {
-                Error("OQL0002", "A parameter needs a name or number.", start);
+                Error("OQL0002", "A parameter name must be an identifier (a letter or _, then letters, digits or _) or digits only; use $name, @name, or $1.", start);
             }
 
             return new OqlParameterExpression(start.Text[1..], Span(start, start));

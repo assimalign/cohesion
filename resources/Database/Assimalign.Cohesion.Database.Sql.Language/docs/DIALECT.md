@@ -109,9 +109,10 @@ lexes as `TokenType.Unrecognized` and reports one `SQL0003` at the character
 (#1101). It used to lex as a one-character identifier, so `SELECT * FROM t ?` bound
 `?` as an alias and ran, and `SELECT ? FROM t` returned a column named `?`. The
 statement now keeps only its command type: no alias, column or `NULL` placeholder
-is built around the character. The message that names the supported parameter
-forms for `?` and `:name` belongs to shared-parameters. A non-ASCII decimal digit,
-such as Arabic-Indic `٣` or fullwidth `１`, is a character outside the dialect too:
+is built around the character. An operand `?` receives the shared supported-form
+message, as does `:name`; a trailing stray `?` retains the generic character message.
+A non-ASCII decimal digit, such as Arabic-Indic `٣` or fullwidth `１`, is a character
+outside the dialect too:
 only ASCII digits make a numeric literal. It used to lex as an integer, parse
 cleanly and then fail at execution with an uncoded `FormatException`. A stray
 character before the statement, such as a byte order mark that was not stripped,
@@ -1206,10 +1207,25 @@ extension views are recorded in the
 
 ## Expressions
 
+Parameters follow the [shared parameter contract](../../Assimalign.Cohesion.Database.Language/docs/DESIGN.md#parameter-contract-1102).
+`$name`, `@name`, `$_x`, `$1` and `@1` are accepted. The name is an identifier or
+only ASCII digits; a bare sigil, `$1a`, `$١`, `@١` or `$1١` is SQL0003 at the whole
+reference. Sigils are interchangeable and caller
+keys may have one leading sigil. Matching is ordinal and case-sensitive, regardless
+of the caller dictionary's comparer. `$01` binds key `01`, not key `1`. Unused keys
+are ignored; normalized duplicates fail with COHSQLE023, including on BEGIN, COMMIT
+and ROLLBACK, before transaction state changes. Unbound references fail
+with COHSQLE020 before any row is read or written, including empty inputs. SQL
+GROUP BY compares parameter references by bare name. Operand `?` and `:name`
+report one SQL0003 at their complete span and name the supported forms; a trailing
+stray `?` keeps its generic message. SQL `::` keeps its existing diagnostic.
+ParameterConformanceTests, ParameterBindingTests and SqlParameterWireTests cover
+these rules without changing protocol 1.0.
+
 Precedence, low to high: `OR` < `AND` < `NOT` < comparison (`=`, `<>`, `<`, `>`,
 `<=`, `>=`, `IS [NOT] NULL`, `[NOT] BETWEEN`, `[NOT] IN`, `[NOT] LIKE`) < additive
 (`+`, `-`, `||`) < multiplicative (`*`, `/`, `%`) < unary signs (`-`, `+`) <
-`COLLATE` < primary. Executable primary forms include literals, parameters (`@name`, `$1`),
+`COLLATE` < primary. Executable primary forms include literals, parameters (`$name`, `@name`, `$1`),
 column references, supported function calls, simple/searched `CASE`, and
 parenthesized expressions and `CAST` within the conversion contract below.
 Uncorrelated scalar subqueries and subquery predicates execute within the contract above.
@@ -1821,7 +1837,8 @@ pin in the same change.
 | `COHSQLE017` | Error | Invalid aggregate placement or grouping expression |
 | `COHSQLE018` | Error | Invalid ordering ordinal, row count or CAST target declaration |
 | `COHSQLE019` | Error | Duplicate target column, table binding or ambiguous output alias |
-| `COHSQLE020` | Error | No value supplied for a named parameter |
+| `COHSQLE020` | Error | No value supplied for a parameter; rejected before rows are read or written |
+| `COHSQLE023` | Error | Caller parameter keys collide after one leading sigil is stripped |
 
 Positions are absolute character offsets into the statement text; line/column
 presentation is computed by tooling from the source (offset → line mapping), not

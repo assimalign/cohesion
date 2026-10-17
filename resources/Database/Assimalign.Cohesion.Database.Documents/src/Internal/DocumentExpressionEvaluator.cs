@@ -5,6 +5,8 @@ using System.Linq;
 using System.Text.Json;
 using Assimalign.Cohesion.Database.Documents.Language;
 
+using Assimalign.Cohesion.Database.Execution.Internal;
+
 namespace Assimalign.Cohesion.Database.Documents.Internal;
 
 internal sealed class DocumentExpressionEvaluator
@@ -52,9 +54,41 @@ internal sealed class DocumentExpressionEvaluator
     internal bool Matches(OqlExpression? expression, JsonElement document, IReadOnlyList<JsonElement>? group = null)
         => expression is null || Evaluate(expression, document, group) is true;
 
+    // Check every use, including skipped Boolean branches and expressions over empty inputs.
+    internal void ValidateParameters(OqlExpression? expression)
+    {
+        System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
+        switch (expression)
+        {
+            case OqlParameterExpression parameter:
+                if (_parameters is null || !_parameters.ContainsKey(ParameterBindings.BareName(parameter.Name)))
+                {
+                    throw new DocumentPlanningException("COHDOC005", $"OQL parameter '{parameter.Name}' has no value.", parameter.Location);
+                }
+                break;
+            case OqlSelectExpression select:
+                foreach (var projection in select.Projections) { ValidateParameters(projection.Expression); }
+                ValidateParameters(select.Predicate);
+                foreach (var key in select.GroupBy) { ValidateParameters(key); }
+                ValidateParameters(select.Having);
+                foreach (var order in select.OrderBy) { ValidateParameters(order.Expression); }
+                break;
+            case OqlUnaryExpression unary:
+                ValidateParameters(unary.Operand);
+                break;
+            case OqlBinaryExpression binary:
+                ValidateParameters(binary.Left);
+                ValidateParameters(binary.Right);
+                break;
+            case OqlCallExpression call:
+                foreach (var argument in call.Arguments) { ValidateParameters(argument); }
+                break;
+        }
+    }
+
     internal object? Parameter(string name)
     {
-        if (_parameters is null || !_parameters.TryGetValue(name, out var value))
+        if (_parameters is null || !_parameters.TryGetValue(ParameterBindings.BareName(name), out var value))
         {
             throw new DocumentPlanningException("COHDOC005", $"OQL parameter '{name}' has no value.");
         }

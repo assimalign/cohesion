@@ -19,14 +19,14 @@ public sealed class OqlParseStrictnessTests
     [Theory(DisplayName = "Cohesion Test [Documents.Language] - Strictness: a stray character is one OQL0002 at its span and binds nothing")]
     [InlineData("SELECT * FROM people «^»")]
     [InlineData("SELECT * FROM people «#»;")]
-    [InlineData("SELECT * FROM c WHERE c.a = «?»")]
-    [InlineData("SELECT «?» FROM people")]
+    [InlineData("SELECT * FROM c WHERE c.a = «?»", true)]
+    [InlineData("SELECT «?» FROM people", true)]
     [InlineData("SELECT a «§» b FROM people")]
     [InlineData("CREATE INDEX ix ON people («?»)")]
     [InlineData("SELECT * FROM people «\U0001F643»")]
     [InlineData("SELECT * FROM c WHERE c.a = «٣»")]
     [InlineData("«﻿»SELECT * FROM c")]
-    public void Parse_StrayCharacter_ShouldReportOneSyntaxErrorAndBindNothing(string marked)
+    public void Parse_StrayCharacter_ShouldReportOneSyntaxErrorAndBindNothing(string marked, bool parameterForm = false)
     {
         // Arrange
         var (oql, start, end) = Unmark(marked);
@@ -39,7 +39,7 @@ public sealed class OqlParseStrictnessTests
         error.Code.ShouldBe("OQL0002");
         error.Start.ShouldBe(start);
         error.End.ShouldBe(end);
-        error.Message!.ShouldStartWith("Unexpected character ", Case.Sensitive);
+        error.Message!.ShouldStartWith(parameterForm ? "Unsupported parameter form;" : "Unexpected character ", Case.Sensitive);
         var select = statement.OqlExpression.ShouldBeOfType<OqlSelectExpression>();
         select.Collection.ShouldBeEmpty();
         select.Alias.ShouldBeNull();
@@ -54,7 +54,7 @@ public sealed class OqlParseStrictnessTests
         var statement = Parse("SELECT * FROM c WHERE c.a = ?");
 
         // Assert
-        statement.Diagnostics.ShouldHaveSingleItem().Message.ShouldBe("Unexpected character '?'; it is not part of OQL.");
+        statement.Diagnostics.ShouldHaveSingleItem().Message!.ShouldContain("use $name, @name, or $1");
         statement.OqlExpression.ShouldBeOfType<OqlSelectExpression>().Predicate.ShouldBeNull();
     }
 

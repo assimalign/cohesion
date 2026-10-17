@@ -5,6 +5,17 @@ The model-neutral request/result vocabulary (area architecture:
 This package references `Database.Types` only. It has no direct or transitive dependency on
 `Database.Language`, and it owns no planner, executor, parser or transaction pipeline.
 
+## Parameter normalization shared source (#1102, D15)
+
+The default for open decision D15 is `shared/ParameterBindings.cs`: stateless internal
+name grammar (numeric names use ASCII digits only), one-sigil removal and ordinal dictionary-copy rules. SQL, Documents and
+their parsers link it through explicit `CohesionSharedSource` items. No public bind API
+or visibility grant is added. Execution itself still references only Types and does
+not compile or reference Language. Each engine supplies its own coded collision
+exception. Graph binding remains #1138's hand-off. The canonical contract is in
+[Language DESIGN](../../Assimalign.Cohesion.Database.Language/docs/DESIGN.md#parameter-contract-1102).
+
+
 ## Request and result families
 
 `DatabaseRequest` is a memberless abstract root. A model defines the operations it accepts:

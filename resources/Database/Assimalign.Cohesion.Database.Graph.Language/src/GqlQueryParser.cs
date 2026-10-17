@@ -15,6 +15,7 @@ public sealed partial class GqlQueryParser : QueryParser
     private readonly object _gate = new();
     private readonly List<Lexeme> _tokens = [];
     private readonly List<Diagnostic> _diagnostics = [];
+    private readonly HashSet<int> _parameterFormPositions = [];
     // Each '--' comment by its start offset, so a pattern element can tell whether one begins
     // exactly where its ')' or ']' ends (GQL0008).
     private readonly Dictionary<int, Lexeme> _lineComments = new();
@@ -49,6 +50,7 @@ public sealed partial class GqlQueryParser : QueryParser
     {
         _tokens.Clear();
         _diagnostics.Clear();
+        _parameterFormPositions.Clear();
         _lineComments.Clear();
         _position = 0;
         int line = 1;
@@ -74,7 +76,7 @@ public sealed partial class GqlQueryParser : QueryParser
                 {
                     Error("GQL0003", "Unterminated quoted text.", lexeme);
                 }
-                else if (token.Type == TokenType.Unrecognized)
+                else if (token.Type == TokenType.Unrecognized && token.Value[0] != '?')
                 {
                     // A character GQL does not use is never a name or an expression, so the
                     // statement is not parsed and nothing is bound (#1101).
@@ -116,6 +118,18 @@ public sealed partial class GqlQueryParser : QueryParser
             {
                 Error("GQL0002", "Unexpected token; exactly one statement is accepted.", Current);
             }
+        }
+        // '?' still binds nothing. Only an operand receives the parameter-form message;
+        // names, paths and trailing positions keep lexical strictness's generic message.
+        foreach (var token in _tokens)
+        {
+            if (token.Type != TokenType.Unrecognized || token.Text != "?") { continue; }
+            if (!_parameterFormPositions.Contains(token.Start))
+            {
+                _diagnostics.RemoveAll(diagnostic => diagnostic.Start == token.Start);
+                Error("GQL0002", "Unexpected character '?'; it is not part of GQL.", token);
+            }
+            expression = EmptyExpression();
         }
         expression.SetStatementText(_source);
         var statement = new GqlQueryStatement(expression);

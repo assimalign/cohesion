@@ -1127,6 +1127,8 @@ internal sealed partial class SqlPlanner
         bool isBound = boundSubqueries is not null && boundSubqueries.ContainsKey(expression);
         switch (expression)
         {
+            case SqlParameterExpression parameter when !evaluator.TryGetParameterValue(parameter, out _):
+                throw new SqlPlanningException("COHSQLE020", $"No value was supplied for parameter '{parameter.ParameterName[1..]}'.", parameter.Location);
             case SqlCollateExpression collate:
                 Collation.FromName(collate.CollationName);
                 break;

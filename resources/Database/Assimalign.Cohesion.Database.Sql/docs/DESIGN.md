@@ -16,6 +16,20 @@ Character and length, following #1437. DATETIME,
 DATETIME2 and DATETIMEOFFSET add no SQL Server range/rounding behavior; every temporal
 precision, 7 included, and INTERVAL field restrictions stay unsupported under #1438.
 
+## Request parameters (#1102)
+
+Each execution copies request parameters into an ordinal, bare-name dictionary using
+Execution's stateless shared source. Missing parameters fail while validating/binding
+expressions, before data rows are read or written, with COHSQLE020 and the reference's
+span. Collisions after one-sigil removal carry COHSQLE023. Group keys compare bare
+names. Transaction control bypasses planning, so the session applies the same
+normalization before BEGIN, COMMIT or ROLLBACK can change state. A collision leaves
+that state unchanged. The [shared parameter contract](../../Assimalign.Cohesion.Database.Language/docs/DESIGN.md#parameter-contract-1102)
+and SQL language DIALECT define syntax, key matching and the unchanged AST shapes.
+Numeric names use ASCII digits only; Unicode numeric references fail parsing before a
+matching map key can bind. `$0`, `$01` and names beyond Int64 remain exact string keys.
+
+
 ## Fixed-length character identity (#1437)
 
 `DatabaseType.Character` (19) is CHAR/CHARACTER, distinct from String (VARCHAR/TEXT).

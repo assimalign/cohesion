@@ -19,13 +19,13 @@ public sealed class GqlParseStrictnessTests
     [Theory(DisplayName = "Cohesion Test [Graph.Language] - Strictness: a stray character is one GQL0002 at its span and binds nothing")]
     [InlineData("MATCH (a) RETURN a.x «?»")]
     [InlineData("MATCH (a) RETURN a «#»;")]
-    [InlineData("MATCH (a) WHERE a.x = «?» RETURN a")]
+    [InlineData("MATCH (a) WHERE a.x = «?» RETURN a", true)]
     [InlineData("MATCH («^») RETURN a")]
     [InlineData("INSERT (a:Person {name: «§»})")]
     [InlineData("MATCH (a) RETURN a «\U0001F643»")]
     [InlineData("INSERT (a:Person {age: «٣»})")]
     [InlineData("«﻿»MATCH (a) RETURN a")]
-    public void Parse_StrayCharacter_ShouldReportOneSyntaxErrorAndBindNothing(string marked)
+    public void Parse_StrayCharacter_ShouldReportOneSyntaxErrorAndBindNothing(string marked, bool parameterForm = false)
     {
         // Arrange
         var (gql, start, end) = Unmark(marked);
@@ -38,7 +38,7 @@ public sealed class GqlParseStrictnessTests
         error.Code.ShouldBe("GQL0002");
         error.Start.ShouldBe(start);
         error.End.ShouldBe(end);
-        error.Message!.ShouldStartWith("Unexpected character ", Case.Sensitive);
+        error.Message!.ShouldStartWith(parameterForm ? "Unsupported parameter form;" : "Unexpected character ", Case.Sensitive);
         var query = statement.GqlExpression;
         query.Matches.ShouldBeEmpty();
         query.Creates.ShouldBeEmpty();

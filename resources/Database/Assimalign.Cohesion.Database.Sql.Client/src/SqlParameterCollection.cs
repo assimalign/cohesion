@@ -10,7 +10,10 @@ namespace Assimalign.Cohesion.Database.Sql.Client;
 /// Parameters bind by bare name — the SQL dialect's <c>@</c>/<c>$</c> sigil is
 /// presentation only. Names are normalized on add (a leading <c>@</c> or <c>$</c>
 /// is stripped) so callers may write <c>Add("@id", 1)</c> or <c>Add("id", 1)</c>
-/// interchangeably and both bind the <c>@id</c> placeholder.
+/// interchangeably and both bind <c>@id</c> or <c>$id</c>. Matching is ordinal and
+/// case-sensitive. Numeric names such as <c>1</c> bind <c>$1</c>; unused keys are ignored.
+/// Add and the indexer replace an existing bare name. The server rejects collisions in
+/// raw request maps and unbound references before any data row is read or written.
 /// </remarks>
 public sealed class SqlParameterCollection
 {
