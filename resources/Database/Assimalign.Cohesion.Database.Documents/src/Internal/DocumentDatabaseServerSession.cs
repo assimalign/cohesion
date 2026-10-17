@@ -46,6 +46,7 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
     private ProtocolFrameReader? _reader;
     private ProtocolFrameWriter? _writer;
     private DocumentDatabaseSession? _databaseSession;
+    private bool _terminalResponseWritten;
     private Task _completion = Task.CompletedTask;
     private string _closeReason = DocumentDatabaseEventSource.CloseReason.Unknown;
 
@@ -179,6 +180,7 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
             // Detach from the abort signal before the lifetime source is disposed
             // so a late hard abort cannot race a disposed token source.
             await abortRegistration.DisposeAsync().ConfigureAwait(false);
+            await DrainTerminalResponseAsync(softStop).ConfigureAwait(false);
             await CleanupAsync().ConfigureAwait(false);
         }
     }
@@ -603,6 +605,7 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
         try
         {
             await WriteErrorAsync(code, message, CancellationToken.None).ConfigureAwait(false);
+            _terminalResponseWritten = true;
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
@@ -667,6 +670,26 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
         IOException { InnerException: SocketException or ConnectionException } => DocumentDatabaseEventSource.CloseReason.TransportFailed,
         _ => null,
     };
+
+    private async ValueTask DrainTerminalResponseAsync(CancellationToken softStop)
+    {
+        if (!_terminalResponseWritten) { return; }
+        try
+        {
+            // Flush queues bytes in a transport pipe. Completing output lets its send pump
+            // drain them before disposal can abort it. A peer that keeps its half open is
+            // bounded by the existing shutdown drain budget; shutdown/abort can end it early.
+            using var drain = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeSource.Token, softStop);
+            drain.CancelAfter(_options.ShutdownDrainTimeout);
+            await _connection.Output.CompleteAsync().ConfigureAwait(false);
+            await Task.Delay(Timeout.InfiniteTimeSpan, drain.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            DocumentDatabaseEventSource.Log.SessionCleanupFailed(this, exception);
+        }
+    }
 
     private async ValueTask CleanupAsync()
     {

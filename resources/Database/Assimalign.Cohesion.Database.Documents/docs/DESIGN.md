@@ -1002,3 +1002,10 @@ JSON result and parameter writers use `JsonElement.WriteTo` so the configured wr
 of 256 applies, including values deeper than 64 levels. The other wire readers explicitly set
 256. Embedded stored-document validation and query reads explicitly use 128; system-collection
 JSON uses fixed, one-level objects and cannot carry arbitrary nested content.
+
+Before disposing after a terminal shared Error, the server completes transport output and waits
+for connection closure, bounded by ShutdownDrainTimeout and interrupted by shutdown or abort.
+A flush only queues pipe bytes; immediate TCP disposal can discard a queued fatal frame. This
+local drain uses the existing connection contract and adds no public transport member. A deferred
+send fixture deterministically verifies error delivery before disposal; TCP unknown-database
+coverage verifies the real transport path.

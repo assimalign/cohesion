@@ -15,6 +15,34 @@ namespace Assimalign.Cohesion.Database.Documents.Client.Tests;
 
 public sealed class DocumentClientProtocolTests
 {
+    [Theory(DisplayName = "Cohesion Test [Documents.Client] - Malformed UTF-8 receives a fatal error and creates nothing on both transports")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Server_MalformedUtf8_ShouldDeliverFatalErrorAndCreateNothing(bool tcp)
+    {
+        // Arrange
+        await using var harness = await DocumentClientTestHarness.StartAsync(tcp);
+        await using (var transport = await harness.Factory.ConnectAsync(harness.Listener.EndPoint, harness.Token))
+        await using (var channel = new ProtocolChannel(transport.AsStream(), DocumentProtocol.Family, leaveOpen: true))
+        {
+            await WriteAsync(channel, (byte)ProtocolMessageType.Startup, new ProtocolStartupMessage(ProtocolVersion.Current, "documents", "tester").Encode(), harness.Token);
+            (await channel.Reader.ReadFrameAsync(harness.Token)).ShouldNotBeNull().Type.ShouldBe(ProtocolMessageType.Authenticate);
+            await WriteAsync(channel, (byte)ProtocolMessageType.AuthenticateResponse, [], harness.Token);
+            (await channel.Reader.ReadFrameAsync(harness.Token)).ShouldNotBeNull().Type.ShouldBe(ProtocolMessageType.Ready);
+
+            // Act: the reviewer's exact CreateCollection payload.
+            await WriteAsync(channel, (byte)DocumentProtocolMessageType.Command, [4, 0, 0, 0, 1, 0xFF], harness.Token);
+            var error = (await channel.Reader.ReadFrameAsync(harness.Token)).ShouldNotBeNull();
+
+            // Assert
+            error.Type.ShouldBe(ProtocolMessageType.Error);
+            ProtocolErrorMessage.Decode(error.Payload.Span).Code.ShouldBe(ProtocolErrorCode.ProtocolViolation);
+            (await channel.Reader.ReadFrameAsync(harness.Token)).ShouldBeNull();
+        }
+        await using var connection = await harness.Client.ConnectAsync(harness.Token);
+        (await connection.GetCollectionsAsync(harness.Token)).ShouldBeEmpty();
+    }
+
     [Theory(DisplayName = "Cohesion Test [Documents.Client] - Malformed responses invalidate the pooled session")]
     [InlineData("row-before-header")]
     [InlineData("row-width")]

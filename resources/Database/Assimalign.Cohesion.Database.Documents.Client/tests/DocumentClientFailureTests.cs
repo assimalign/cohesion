@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 
 using Shouldly;
@@ -12,6 +13,31 @@ namespace Assimalign.Cohesion.Database.Documents.Client.Tests;
 
 public sealed class DocumentClientFailureTests
 {
+    [Fact(DisplayName = "Cohesion Test [Documents.Client] - A terminal error drains queued transport bytes before disposal")]
+    public async Task ConnectAsync_DeferredErrorSend_ShouldDeliverTypedFailureBeforeClosing()
+    {
+        // Arrange: the transport accepts flushes but defers delivery until output completes.
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var token = timeout.Token;
+        await using var listener = new DeferredOutputListener();
+        await using var engine = await DocumentDatabaseEngine.CreateBuilder("drain").AddDatabase("documents")
+            .AddServer(options => options.Listener = listener).BuildAsync(token);
+        await engine.Servers.Single().StartAsync(token);
+        await using var client = DocumentClient.Create(new()
+        {
+            Settings = new DatabaseConnectionSettings { Database = "absent", EndPoint = listener.EndPoint },
+            ConnectionFactory = listener.Factory,
+        });
+
+        // Act
+        var failure = await Should.ThrowAsync<DocumentClientException>(async () => await client.ConnectAsync(token));
+
+        // Assert
+        failure.Code.ShouldBe(ProtocolErrorCode.DatabaseNotFound);
+        listener.CompletedOutputs.ShouldBe(1);
+        listener.DiscardedBytes.ShouldBe(0);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Documents.Client] - A near-frame-sized missing identifier fails without closing the session")]
     public async Task GetCollectionAsync_LargeMissingName_ShouldBoundErrorAndKeepSession()
     {
