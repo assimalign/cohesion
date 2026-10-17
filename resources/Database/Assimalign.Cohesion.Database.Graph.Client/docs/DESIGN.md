@@ -54,6 +54,15 @@ before ResultHeader. GraphClientWireTests pins division by zero, overflow and in
 then reuse of the exact authenticated pooled session followed by SHOW LABELS. A combined
 OR/IN/string/arithmetic case compares wire rows with in-process rows. No wire fields change.
 
+## Named scalar parameters (#1138)
+
+QueryAsync, ExecuteAsync and QueryPathsAsync send the existing named scalar map unchanged.
+The server now binds `$name` and `@name` in node/relationship property maps and WHERE operands
+using exact bare names after removing one sigil. Values keep their runtime scalar types.
+An unbound parameter returns ExecutionFailure carrying COHDBG001; materialized statement
+rejections complete the exchange and allow reuse of that authenticated session. Path failures
+retain the streaming lifetime rules below. No frame or codec change is needed on wire 2.0.
+
 ## Path lifetime
 
 GraphPathsExchange derives from DatabaseStreamingExchange. OpenCoreAsync sends ExecutePaths and

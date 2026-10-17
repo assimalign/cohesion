@@ -273,8 +273,8 @@ public sealed class GraphQueryTests
         await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var database = await engine.CreateDatabaseAsync("ast-bounds");
         await using var session = await database.CreateSessionAsync();
-        GqlNodePattern node = new("a", [], new Dictionary<string, object?>());
-        GqlRelationshipPattern edge = new("r", null, (GqlPatternDirection)99, new Dictionary<string, object?>());
+        GqlNodePattern node = new("a", [], new Dictionary<string, GqlExpression>());
+        GqlRelationshipPattern edge = new("r", null, (GqlPatternDirection)99, new Dictionary<string, GqlExpression>());
         var malformed = new GqlQueryStatement(new GqlQueryExpression([new GqlPathPattern([node, node], [edge])], null, [], [], false, [new GqlProjection("a")]));
         var invalid = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(new GraphQueryRequest(malformed)));
         invalid.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHDBG001");
@@ -303,7 +303,7 @@ public sealed class GraphQueryTests
         // two operands, a labeled predicate without an expression, and Labels or Type that
         // disagree with the expression.
         await session.ExecuteAsync("INSERT (:A {k: 1})-[:T]->(:B)");
-        var empty = new Dictionary<string, object?>();
+        var empty = new Dictionary<string, GqlExpression>();
         GqlNodePattern[] nodes =
         [
             new("a", [], empty) { LabelExpression = new GqlLabelNegation(null!) },
@@ -357,10 +357,10 @@ public sealed class GraphQueryTests
         [
             new([new(null, [""], empty)], []),
             new([new(null, [], empty) { LabelExpression = new GqlLabelConjunction([new GqlLabelName("A"), new GqlLabelName(" ")]) }], []),
-            new([new(null, ["A"], new Dictionary<string, object?> { [""] = 1L })], []),
+            new([new(null, ["A"], new Dictionary<string, GqlExpression> { [""] = new GqlLiteralExpression(1L) })], []),
             new([new(null, ["A"], empty), new(null, ["B"], empty)], [new(null, "", GqlPatternDirection.Outgoing, empty)]),
             new([new(null, ["A"], empty), new(null, ["B"], empty)],
-                [new(null, "T", GqlPatternDirection.Incoming, new Dictionary<string, object?> { ["\t"] = 1L })]),
+                [new(null, "T", GqlPatternDirection.Incoming, new Dictionary<string, GqlExpression> { ["\t"] = new GqlLiteralExpression(1L) })]),
         ];
         foreach (var insertion in unstorable)
         {

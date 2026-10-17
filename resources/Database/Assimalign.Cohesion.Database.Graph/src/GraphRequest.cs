@@ -56,8 +56,11 @@ public abstract class GraphRequest : DatabaseRequest
     internal bool Paths => _paths;
 
     /// <summary>
-    /// Gets the parameter values, or null when the request binds none. The current executable subset
-    /// has no parameter expressions, so a statement that uses one reports <c>COHDBL001</c>.
+    /// Gets the named scalar bindings for $name and @name references, or null for none.
+    /// Lookup strips one leading sigil from map keys and uses ordinal, case-sensitive bare names.
+    /// Unbound references fail planning with COHDBG001; duplicate normalized keys use COHDBG014.
+    /// Referenced values retain their runtime scalar types; unsupported values use COHDBG003.
+    /// Unused entries are ignored.
     /// </summary>
     public IReadOnlyDictionary<string, object?>? Parameters => _parameters;
 }

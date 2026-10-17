@@ -227,9 +227,10 @@ public sealed partial class GqlQueryParser : QueryParser
                 Unsupported("NESTED PROPERTY ACCESS", token);
                 continue;
             }
-            if (token.Type == TokenType.Parameter)
+            if (token.Type == TokenType.Parameter && token.Text == "$" &&
+                i + 1 < _tokens.Count && _tokens[i + 1].Type == TokenType.Parameter && Adjacent(i, i + 1))
             {
-                Unsupported("PARAMETER", token);
+                UnsupportedConstruct("SUBSTITUTED PARAMETER REFERENCE", token, _tokens[++i]);
                 continue;
             }
             if (token.Type is not (TokenType.Keyword or TokenType.Identifier or TokenType.Function)) { continue; }

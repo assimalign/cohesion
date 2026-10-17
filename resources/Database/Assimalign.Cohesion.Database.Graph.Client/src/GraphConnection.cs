@@ -37,7 +37,7 @@ public sealed class GraphConnection : IAsyncDisposable
 
     /// <summary>Executes a scalar projection or catalog statement and materializes its rows.</summary>
     /// <param name="statement">The GQL statement.</param>
-    /// <param name="parameters">Named scalar parameters, when supported by the server language.</param>
+    /// <param name="parameters">Scalar bindings for $name and @name. Bare names match case-sensitively; one leading sigil on a map key is ignored.</param>
     /// <param name="cancellationToken">Cancellation token for the exchange.</param>
     /// <returns>The columns, rows, and affected count.</returns>
     /// <exception cref="ArgumentException">The statement is empty.</exception>
@@ -51,7 +51,7 @@ public sealed class GraphConnection : IAsyncDisposable
 
     /// <summary>Executes a graph mutation and returns its affected entity count.</summary>
     /// <param name="statement">The GQL statement.</param>
-    /// <param name="parameters">Named scalar parameters, when supported by the server language.</param>
+    /// <param name="parameters">Scalar bindings for $name and @name. Bare names match case-sensitively; one leading sigil on a map key is ignored.</param>
     /// <param name="cancellationToken">Cancellation token for the exchange.</param>
     /// <returns>The affected count, or -1 for a row-returning statement.</returns>
     /// <exception cref="ArgumentException">The statement is empty.</exception>
@@ -65,7 +65,7 @@ public sealed class GraphConnection : IAsyncDisposable
 
     /// <summary>Streams paths selected by a single bound path, node, or relationship variable.</summary>
     /// <param name="statement">A MATCH statement returning one bound path or entity variable.</param>
-    /// <param name="parameters">Named scalar parameters, when supported by the server language.</param>
+    /// <param name="parameters">Scalar bindings for $name and @name. Bare names match case-sensitively; one leading sigil on a map key is ignored.</param>
     /// <param name="cancellationToken">Cancellation token for the full enumeration.</param>
     /// <returns>Paths retaining node and relationship identities, labels, types, and properties.</returns>
     /// <exception cref="ArgumentException">The statement is empty.</exception>

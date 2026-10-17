@@ -34,6 +34,8 @@ public sealed class GqlProfileExecutionTests
             ],
             [GqlClauses.Match] =
             [
+                new("MATCH (a:Person {name: $name}) RETURN a.name", [["Alice"]],
+                    Parameters: new Dictionary<string, object?> { ["name"] = "Alice" }),
                 new("MATCH (a:Person {name: 'Alice'})-[r:KNOWS]->(b) RETURN b.name, r.weight", [["Bob", 2L]]),
                 new("MATCH (b:Person {name: 'Bob'})<-[r:KNOWS]-(a) RETURN a.name", [["Alice"]]),
                 new("MATCH (b:Person {name: 'Bob'})-[r:KNOWS]-(a) RETURN a.name", [["Alice"]]),
@@ -50,6 +52,9 @@ public sealed class GqlProfileExecutionTests
             ],
             [GqlClauses.Create] =
             [
+                new("CREATE (:Person {name: $name})", [], 1,
+                    [new("MATCH (a:Person {name: 'Cara'}) RETURN a.name", [["Cara"]])],
+                    new Dictionary<string, object?> { ["name"] = "Cara" }),
                 Mutation("CREATE (:Person {name: 'Cara'})", 1,
                     new ExecutionCase("MATCH (a:Person {name: 'Cara'}) RETURN a.name", [["Cara"]])),
                 Mutation("MATCH (a:Person {name: 'Bob'}), (b:Person {name: 'Isolated'}) CREATE (a)-[:KNOWS {weight: 3}]->(b)", 1,
@@ -57,6 +62,9 @@ public sealed class GqlProfileExecutionTests
             ],
             [GqlClauses.Insert] =
             [
+                new("INSERT (:Person {name: $name})", [], 1,
+                    [new("MATCH (a:Person {name: 'Cara'}) RETURN a.name", [["Cara"]])],
+                    new Dictionary<string, object?> { ["name"] = "Cara" }),
                 Mutation("INSERT (:Person {name: 'Cara'})", 1,
                     new ExecutionCase("MATCH (a:Person {name: 'Cara'}) RETURN a.name", [["Cara"]])),
                 Mutation("MATCH (a:Person {name: 'Bob'}), (b:Person {name: 'Isolated'}) INSERT (a)<-[:KNOWS {weight: 3}]-(b)", 1,
@@ -80,6 +88,8 @@ public sealed class GqlProfileExecutionTests
             ],
             [GqlClauses.Where] =
             [
+                new("MATCH (a:Person) WHERE a.age = @age RETURN a.name", [["Alice"]],
+                    Parameters: new Dictionary<string, object?> { ["age"] = 42 }),
                 new("MATCH (a:Person) WHERE (a.age >= 18 AND a.age <= 42) AND a.age > 17 AND a.age < 43 AND a.name <> 'Isolated' AND a.active = TRUE RETURN a.name", [["Alice"]]),
                 new("MATCH (a:Person) WHERE a.absent = NULL RETURN a.name", []),
                 new("MATCH (a:Person) WHERE UNKNOWN RETURN a.name", []),
@@ -188,7 +198,6 @@ public sealed class GqlProfileExecutionTests
     [InlineData("MATCH (a)-[r*1..3]->(b) RETURN a")]
     [InlineData("MATCH (a) RETURN count(a)")]
     [InlineData("MATCH (a) RETURN *")]
-    [InlineData("MATCH (a) WHERE a.age = $age RETURN a")]
     [InlineData("INSERT (:Person {tags: [1, 2]})")]
     [InlineData("MATCH (a) DELETE a RETURN a")]
     [InlineData("SHOW DATABASES")]
@@ -308,7 +317,7 @@ public sealed class GqlProfileExecutionTests
         string clause, CancellationToken cancellationToken)
     {
         string context = $"{clause}: {executionCase.Statement}";
-        var result = await session.ExecuteAsync(executionCase.Statement, cancellationToken: cancellationToken);
+        var result = await session.ExecuteAsync(executionCase.Statement, executionCase.Parameters, cancellationToken);
         result.Status.ShouldBe(DatabaseResultStatus.Success, context);
         if (executionCase.AffectedCount is { } affected)
         {
@@ -333,5 +342,5 @@ public sealed class GqlProfileExecutionTests
     }
 
     private sealed record ExecutionCase(string Statement, object?[][] Rows, long? AffectedCount = null,
-        ExecutionCase[]? Verification = null);
+        ExecutionCase[]? Verification = null, IReadOnlyDictionary<string, object?>? Parameters = null);
 }

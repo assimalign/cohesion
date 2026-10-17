@@ -207,7 +207,7 @@ public sealed class GqlUnknownTokenWarningTests
         // Arrange
         await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         await using var session = await SeedAsync(engine);
-        var node = new GqlNodePattern("n", ["Missing"], new Dictionary<string, object?>());
+        var node = new GqlNodePattern("n", ["Missing"], new Dictionary<string, GqlExpression>());
         var statement = new GqlQueryStatement(
             new GqlQueryExpression([new GqlPathPattern([node], [])], null, [], [], false, []));
         var transaction = await session.BeginTransactionAsync(CancellationToken.None);

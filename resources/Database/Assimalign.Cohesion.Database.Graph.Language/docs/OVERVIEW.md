@@ -28,5 +28,9 @@ Named path assignment is supported only in `MATCH`. The engine's path request AP
 bound node, relationship or named path; deleting a path variable or accessing a path property is
 rejected by binding. Path results retain the actual traversal entities rather than scalar rows.
 
+Property maps and WHERE scalar operands accept `$name` and the Cohesion spelling `@name`.
+Both produce `GqlParameterExpression` with a bare name and source span; property-map values
+are literal or parameter expressions. See [DIALECT.md](DIALECT.md#named-scalar-parameters) for binding rules.
+
 Read [DESIGN.md](DESIGN.md) for the standard decision, exact clause matrix, AST model, bounds,
 diagnostic codes, and the conformance corpus's relationship to ISO GQL.

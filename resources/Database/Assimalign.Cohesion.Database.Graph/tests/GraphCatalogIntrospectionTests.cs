@@ -151,7 +151,7 @@ public sealed class GraphCatalogIntrospectionTests
 
         // Arrange
         var expression = new GqlQueryExpression([], null,
-            [new GqlPathPattern([new GqlNodePattern("n", ["Injected"], new Dictionary<string, object?>())], [])], [], false, [])
+            [new GqlPathPattern([new GqlNodePattern("n", ["Injected"], new Dictionary<string, GqlExpression>())], [])], [], false, [])
             { CatalogSurface = GqlCatalogSurface.Labels };
 
         // Act
