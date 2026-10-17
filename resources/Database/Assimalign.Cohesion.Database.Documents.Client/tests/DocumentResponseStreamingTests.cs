@@ -38,14 +38,15 @@ public sealed class DocumentResponseStreamingTests
         (await connection.GetAsync("a", "x", harness.Token)).ShouldBeNull();
     }
 
-    [Theory(DisplayName = "Cohesion Test [Documents.Client] - Large query responses use bounded additional server buffers")]
+    [Theory(DisplayName = "Cohesion Test [Documents.Client] - Large query responses bound formatter allocations before the header")]
     [InlineData("SELECT * FROM items", DocumentProtocolMessageType.Document)]
     [InlineData("SELECT text, marker FROM items", DocumentProtocolMessageType.ResultRow)]
-    public async Task QueryAsync_LargeResult_ShouldStreamWithinBufferBudget(string statement, DocumentProtocolMessageType rowType)
+    public async Task QueryAsync_LargeResult_ShouldBoundFormatterAllocationsBeforeHeader(string statement, DocumentProtocolMessageType rowType)
     {
         // Arrange: 32 MiB of encoded rows exceeds the 8 MiB pre-header allocation budget.
         // DocumentJsonValuesTests separately measures peak backing-buffer capacity directly.
         // This raw peer discards rows while verifying every frame and its distinct marker.
+        // Neither check bounds InMemory transport queues when a peer stops reading.
         const int rowCount = 128;
         await using var harness = await DocumentClientTestHarness.StartAsync();
         await using (var session = await harness.Database.CreateSessionAsync(harness.Token))

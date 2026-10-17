@@ -33,8 +33,13 @@ Every rental supports one active exchange. Requests capture parameter and conten
 their first await. The server enters `DocumentDatabaseSession.ExecuteStatementAsync` internally;
 its typed execution traces through the root exactly once. Queries materialize both in the engine
 and in the client. The server writes a header, then one bounded row or document at a time,
-then Complete, without retaining a serialized copy of the whole result. Each value must fit
-the shared 16 MiB frame limit; engine and client materialization still depend on query size.
+then Complete; its formatter retains one encoded frame. Each value must fit the shared 16 MiB
+frame limit; engine and client materialization still depend on query size. Additional server
+response memory is bounded only when the transport applies backpressure, as default TCP does.
+InMemory disables output-pipe backpressure: queued bytes grow with the result if its reader
+stops reading. Bounded InMemory output is a Connections follow-up; the
+[server streaming design](../../Assimalign.Cohesion.Database.Documents/docs/DESIGN.md#exchange-boundaries-and-json)
+records the formatter's bound and this transport constraint.
 
 The following exchange shows the common lifecycle and both OQL result shapes. Commands share
 the same ready loop and terminal completion/error rules.

@@ -755,8 +755,14 @@ The server streams the header and each row/document frame directly, then Complet
 one encoded frame at a time and reuses one JSON writer/buffer for the result, resetting it only
 after the preceding frame write and flush complete. Its buffer accepts at most 16 MiB of committed JSON
 and bounds scratch capacity to six frame lengths plus 4096 bytes (the JSON writer may request
-six bytes per UTF-16 character before escaping). Thus response buffering is independent of row
-count, beyond the engine's materialized result. Collection listings also stream per name.
+six bytes per UTF-16 character before escaping). The formatter's storage is independent of row
+count; an end-to-end response-memory bound also requires transport backpressure. Default TCP
+applies backpressure, so additional server response memory stays bounded beyond the engine's
+materialized result. InMemory disables output-pipe backpressure
+(`libraries/Connections/Assimalign.Cohesion.Connections.InMemory/src/Internal/InMemoryConnection.cs:63`).
+With InMemory and a reader that stops reading, queued transport bytes grow with the result.
+Providing bounded InMemory output is a Connections follow-up. Collection listings also stream
+per name under the same transport constraint.
 Put preflights its complete response size before mutation, preserving refusal before commit.
 Every individual value must fit one frame. Transport failure or cancellation after mutation
 may leave its outcome unknown.
@@ -1023,3 +1029,5 @@ each row. They limit allocations before the first header to 8 MiB, which detects
 a 32 MiB result. Separate encoder tests measure peak backing-array capacity directly under
 the same 8 MiB budget. Whole-process live-heap deltas are not used as a buffer metric because
 they include the loopback client's frame arrays and the engine's storage and runtime pools.
+These checks cover formatter storage and allocations before the header, not transport queue
+growth when a reader stalls; they do not establish an end-to-end InMemory memory bound.
