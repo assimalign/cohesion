@@ -52,7 +52,8 @@ internal static class SqlRowCodec
     /// <summary>
     /// The format version of the database's data storage (rows and the index
     /// trees that share its file set) this engine reads and writes, persisted in
-    /// the catalog: 14 gates the FROM join-tree canonical definition shape (#1109); 13 gates the expanded built-in type-name vocabulary (#1108), which
+    /// the catalog: 15 adds identity metadata and durable identity counter records (#1123);
+    /// 14 gates the FROM join-tree canonical definition shape (#1109); 13 gates the expanded built-in type-name vocabulary (#1108), which
     /// takes precedence over same-named domains; 12 gives CHAR its own catalog identity and trims its index keys;
     /// 11 added durable table reclamation intents and owner-tagged index pages;
     /// 10 adds SQL definitions and script receipts; 9 adds durable pending migration intents (49a) to generation-stamped format 8, with
@@ -73,7 +74,7 @@ internal static class SqlRowCodec
     /// There is no upgrade path (owner decisions of 2026-10-01 and 2026-10-02;
     /// upgrades are #1152).
     /// </summary>
-    internal const int RecordSpaceFormatVersion = 14;
+    internal const int RecordSpaceFormatVersion = 15;
 
     /// <summary>
     /// The size of the fixed version-stamp header preceding the tuple payload.

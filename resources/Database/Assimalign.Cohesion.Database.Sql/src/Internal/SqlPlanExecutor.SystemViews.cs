@@ -92,6 +92,13 @@ internal sealed partial class SqlPlanExecutor
                             null, // No character-set byte bound is stored in the catalog.
                             SystemNumericPrecision(column.Type), SystemNumericRadix(column.Type.Type), SystemNumericScale(column.Type),
                             SystemDateTimePrecision(column.Type.Type),
+                            column.Identity is null ? "NO" : "YES",
+                            column.Identity is { } identity ? identity.IsAlways ? "ALWAYS" : "BY DEFAULT" : null,
+                            column.Identity?.Start.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                            column.Identity?.Increment.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                            column.Identity is null ? null : SqlPlanner.IdentityTypeBounds(column.Type.Type, column.Identity.Increment).Maximum.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                            column.Identity is null ? null : SqlPlanner.IdentityTypeBounds(column.Type.Type, column.Identity.Increment).Minimum.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                            column.Identity is null ? null : "NO",
                         ];
                     }
                     break;

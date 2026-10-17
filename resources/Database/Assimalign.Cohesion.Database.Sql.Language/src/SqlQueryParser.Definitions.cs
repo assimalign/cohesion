@@ -275,6 +275,11 @@ public sealed partial class SqlQueryParser
     {
         Advance(ref lexer);
         string name = ParseDefinitionName(ref lexer, "a domain name");
+        if (name.ToUpperInvariant() is "SERIAL" or "BIGSERIAL" or "SMALLSERIAL")
+        {
+            string? error = SqlTypeModifiers.GetError(name, null, null, out string code);
+            AddTypeModifierDiagnostic($"Domain '{name}'", error!, pos, _lastTokenEnd, code);
+        }
         ExpectKeyword(ref lexer, "AS", "AS and a base type");
         string type = ParseDefinitionType(ref lexer, $"Domain '{name}'");
         SqlExpression? defaultValue = null, check = null;

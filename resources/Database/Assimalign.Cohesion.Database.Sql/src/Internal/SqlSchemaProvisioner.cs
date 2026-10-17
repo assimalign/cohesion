@@ -641,6 +641,11 @@ internal sealed partial class SqlSchemaProvisioner
     /// </summary>
     private CompiledSchemaColumn SnapshotColumn(SqlCatalogColumn column, CompiledSchemaTable? desiredTable)
     {
+        if (column.Identity is not null)
+        {
+            throw new SqlSchemaMigrationException(string.Format(CultureInfo.CurrentCulture,
+                ErrorMessages.IdentitySchemaOwnedForbidden, SqlProvisioningCodes.PolicyRefused, Describe(), column.Name));
+        }
         CompiledSchemaColumn? declared = desiredTable?.Columns.FirstOrDefault(candidate =>
             string.Equals(candidate.Name, column.Name, StringComparison.OrdinalIgnoreCase));
         string? defaultLiteral = declared is not null &&
@@ -806,6 +811,11 @@ internal sealed partial class SqlSchemaProvisioner
             {
                 return $"table '{expected.Name}': column '{expectedColumn.Name}' is " +
                     $"{(actualColumn.IsNullable ? "nullable" : "not nullable")}, declared {(expectedIsNullable ? "nullable" : "not nullable")}";
+            }
+
+            if (actualColumn.Identity is not null)
+            {
+                return $"table '{expected.Name}': column '{expectedColumn.Name}' has identity metadata absent from its declaration";
             }
 
             if (!string.Equals(actualColumn.DefaultLiteral, CanonicalDefault(expectedColumn.DefaultLiteral), StringComparison.Ordinal))

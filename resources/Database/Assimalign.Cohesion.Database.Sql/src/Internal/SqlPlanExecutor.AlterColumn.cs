@@ -19,6 +19,10 @@ internal sealed partial class SqlPlanExecutor
         int ordinal = FindColumnOrdinal(plan.Table, plan.Column.Name);
         SqlCatalogColumn previous = plan.Table.Columns[ordinal];
         var column = plan.Column;
+        if (previous.Identity is not null && previous.Type.Type != column.Type.Type)
+        {
+            throw SqlPlanningException.IdentityViolation(column.Name, ErrorMessages.IdentityTypeChangeForbidden);
+        }
         if (previous.Type.Type != column.Type.Type || previous.Type.Scale != column.Type.Scale ||
             !string.Equals(previous.DomainName, column.DomainName, StringComparison.OrdinalIgnoreCase) ||
             (previous.Collation ?? _catalog.DefaultCollation).Id != (column.Collation ?? _catalog.DefaultCollation).Id ||

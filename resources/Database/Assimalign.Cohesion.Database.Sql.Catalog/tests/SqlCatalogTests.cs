@@ -19,7 +19,7 @@ namespace Assimalign.Cohesion.Database.Sql.Catalog.Tests;
 /// across reopen, object-id stability, constraint validation, and index
 /// registration round-trips.
 /// </summary>
-public class SqlCatalogTests
+public partial class SqlCatalogTests
 {
     private static SqlCatalogColumn Column(string name, DatabaseType type, bool nullable = true, string? defaultLiteral = null)
         => new(name, new DatabaseTypeInfo(type), nullable, defaultLiteral);

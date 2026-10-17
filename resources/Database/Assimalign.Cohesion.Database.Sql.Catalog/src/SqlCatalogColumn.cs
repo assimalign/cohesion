@@ -29,13 +29,14 @@ public sealed class SqlCatalogColumn
     /// built-in type. <paramref name="type"/> is then the domain's base type, which the row codec
     /// stores; the name lets an engine that opens the database bind the domain again.
     /// </param>
+    /// <param name="identity">The immutable identity metadata, when declared; an identity column is always nonnullable.</param>
     /// <param name="defaultFunctionCalls">Resolved normalized function signatures in expression preorder, retaining repeated calls.</param>
     /// <exception cref="ArgumentException">
     /// <paramref name="name"/> is empty or white space, a collation is declared for a non-string
     /// column, <paramref name="domainName"/> is empty or white space, or a supplied function identity is blank.
     /// </exception>
     public SqlCatalogColumn(string name, DatabaseTypeInfo type, bool isNullable = true, string? defaultLiteral = null,
-        Collation? collation = null, string? domainName = null, IReadOnlyList<string>? defaultFunctionCalls = null)
+        Collation? collation = null, string? domainName = null, IReadOnlyList<string>? defaultFunctionCalls = null, SqlCatalogIdentity? identity = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentNullException.ThrowIfNull(type);
@@ -48,9 +49,10 @@ public sealed class SqlCatalogColumn
             throw new ArgumentException("A column's domain name cannot be empty or white space.", nameof(domainName));
         }
 
+        Identity = identity;
         Name = name;
         Type = type;
-        IsNullable = isNullable;
+        IsNullable = isNullable && identity is null;
         DefaultLiteral = defaultLiteral;
         Collation = collation;
         DomainName = domainName;
@@ -60,6 +62,9 @@ public sealed class SqlCatalogColumn
             throw new ArgumentException("A default function identity cannot be blank.", nameof(defaultFunctionCalls));
         }
     }
+
+    /// <summary>Gets the identity facet, or null for an ordinary column.</summary>
+    public SqlCatalogIdentity? Identity { get; }
 
     /// <summary>
     /// Gets the column name.

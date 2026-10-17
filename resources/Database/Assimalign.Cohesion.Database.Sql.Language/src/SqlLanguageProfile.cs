@@ -71,6 +71,7 @@ public static class SqlLanguageProfile
         SqlClauses.Update,
         SqlClauses.Delete,
         SqlClauses.CreateTable,
+        SqlClauses.Identity,
         SqlClauses.CreateIndex,
         SqlClauses.AlterTable,
         SqlClauses.DropTable,

@@ -52,6 +52,10 @@ internal static class SqlTypeRules
     internal static void ValidateSqlDomainName(string name)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        if (name.ToUpperInvariant() is "SERIAL" or "BIGSERIAL" or "SMALLSERIAL")
+        {
+            throw new ArgumentException(SqlTypeModifiers.GetError(name, null, null), nameof(name));
+        }
         foreach (string keyword in SqlLanguageProfile.Instance.Keywords)
         {
             if (string.Equals(keyword, name, StringComparison.OrdinalIgnoreCase))

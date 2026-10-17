@@ -80,9 +80,9 @@ public sealed partial class SqlCatalog
     private const int schemaStateChunkSize = 3 * 1024;
 
     // The version of a table record's trailing extension this catalog writes; it reads
-    // every version up to it. Version 3 adds the dropped columns' physical ordinals (#1241),
+    // only the current version. Version 5 adds identity facets; version 3 adds the dropped columns' physical ordinals (#1241),
     // version 4 (data-storage format 7, phase E3) each column's domain name.
-    private const int tableExtensionVersion = 4;
+    private const int tableExtensionVersion = 5;
 
     private static readonly Encoding _strictUtf8 = new UTF8Encoding(
         encoderShouldEmitUTF8Identifier: false,
@@ -571,6 +571,7 @@ public sealed partial class SqlCatalog
                 var reclamationLocation = _storage.InsertRow(transaction, slot.Table.ObjectId,
                     SqlReclamationRecord.Encode(slot.Table.ObjectId, schema, name));
                 _storage.DeleteRow(transaction, slot.Location.PageId, slot.Location.SlotIndex);
+                DeleteIdentityCounter(transaction, slot.Table.ObjectId);
 
                 foreach (var indexSlot in droppedIndexes)
                 {
@@ -589,6 +590,7 @@ public sealed partial class SqlCatalog
             }
 
             _tables.Remove((schema, name));
+            _identityCounters.Remove(slot.Table.ObjectId);
 
             foreach (var indexSlot in droppedIndexes)
             {
@@ -1295,6 +1297,9 @@ public sealed partial class SqlCatalog
                     if (!_pendingReclamations.TryAdd(intent.ObjectId, (unit.PageId, unit.SlotIndex))) { throw new System.IO.InvalidDataException(); }
                     _nextObjectId = Math.Max(_nextObjectId, intent.ObjectId + 1);
                     break;
+                case identityCounterRecordKind:
+                    LoadIdentityCounter(ref reader, unit.PageId, unit.SlotIndex);
+                    break;
                 case tableRecordKind:
                     var table = DecodeTable(ref reader);
                     _tables[(table.Schema, table.Name)] = new TableSlot(table, (unit.PageId, unit.SlotIndex));
@@ -1408,6 +1413,9 @@ public sealed partial class SqlCatalog
             }
         }
 
+        var tablesById = _tables.Values.ToDictionary(slot => slot.Table.ObjectId, slot => slot.Table);
+        ValidateIdentityCounters(tablesById);
+
         if (_tables.Values.Any(slot => _pendingReclamations.ContainsKey(slot.Table.ObjectId)))
         {
             throw new System.IO.InvalidDataException();
@@ -1473,13 +1481,18 @@ public sealed partial class SqlCatalog
 
     private void ReplaceTable(TableSlot slot, SqlCatalogTable updated, SqlCatalogScriptPublication? publication)
     {
+        ValidateColumns(updated.Schema, updated.Name, updated.Columns, updated.PrimaryKeyColumns);
+        EnsureIdentityKept(slot.Table, updated);
         byte[] record = EncodeTable(updated);
 
         using (var transaction = _storage.BeginTransaction())
         {
             var location = UpsertRecord(transaction, slot.Location, record);
+            bool removedIdentity = !updated.Columns.Any(column => column.Identity is not null);
+            if (removedIdentity) { DeleteIdentityCounter(transaction, updated.ObjectId); }
             CommitCatalogChange(transaction, publication: publication, actualObject: SqlObjectIdentity.Table(updated.Schema, updated.Name));
             _tables[(updated.Schema, updated.Name)] = new TableSlot(updated, location);
+            if (removedIdentity) { _identityCounters.Remove(updated.ObjectId); }
         }
     }
 
@@ -1560,8 +1573,23 @@ public sealed partial class SqlCatalog
         ArgumentNullException.ThrowIfNull(columns);
 
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        bool hasIdentity = false;
         foreach (var column in columns)
         {
+            if (column.Identity is { } identity)
+            {
+                if (column.Type.Type is not (DatabaseType.Int8 or DatabaseType.Int16 or DatabaseType.Int32 or DatabaseType.Int64))
+                {
+                    throw new SqlCatalogException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.IdentityMetadataInvalid, column.Name));
+                }
+                var (minimum, maximum) = IdentityBounds(column.Type.Type, identity.Increment);
+                if (hasIdentity || column.IsNullable || column.DefaultLiteral is not null || column.DomainName is not null ||
+                    identity.Start < minimum || identity.Start > maximum)
+                {
+                    throw new SqlCatalogException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.IdentityMetadataInvalid, column.Name));
+                }
+                hasIdentity = true;
+            }
             if (!seen.Add(column.Name))
             {
                 throw new SqlCatalogException($"Table '{schema}.{name}' declares column '{column.Name}' more than once.");
@@ -1698,6 +1726,14 @@ public sealed partial class SqlCatalog
         {
             AppendFunctionCalls(ref writer, constraint.CheckFunctionCalls, constraint.CheckExpression?.Length ?? 0);
         }
+        foreach (var column in table.Columns)
+        {
+            writer.AppendBoolean(column.Identity is not null);
+            if (column.Identity is { } identity)
+            {
+                writer.AppendBoolean(identity.IsAlways).AppendInt64(identity.Start).AppendInt64(identity.Increment);
+            }
+        }
         return writer.ToArray();
     }
 
@@ -1800,7 +1836,7 @@ public sealed partial class SqlCatalog
             // The historical extension labels describe the fields below. Format 10 also
             // requires the call vectors after them; an older record cannot load successfully.
             int version = reader.ReadInt32();
-            if (version is < 1 or > tableExtensionVersion)
+            if (version != tableExtensionVersion)
             {
                 throw new SqlCatalogException($"Unsupported table-constraint metadata version {version}.");
             }
@@ -1895,6 +1931,24 @@ public sealed partial class SqlCatalog
                 constraint.ReferencedSchema, constraint.ReferencedTable, constraint.ReferencedColumns,
                 constraint.CheckExpression, constraint.OnDelete, ReadFunctionCalls(ref reader, constraint.CheckExpression?.Length ?? 0));
         }
+        for (int index = 0; index < columns.Count; index++)
+        {
+            if (reader.ReadBoolean())
+            {
+                bool always = reader.ReadBoolean();
+                long start = reader.ReadInt64();
+                long increment = reader.ReadInt64();
+                var column = columns[index];
+                if (increment == 0 || column.IsNullable)
+                {
+                    throw new SqlCatalogException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.IdentityMetadataInvalid, column.Name));
+                }
+                var identity = new SqlCatalogIdentity(always, start, increment);
+                columns[index] = new SqlCatalogColumn(column.Name, column.Type, column.IsNullable,
+                    column.DefaultLiteral, column.Collation, column.DomainName, column.DefaultFunctionCalls, identity);
+            }
+        }
+        ValidateColumns(schema, name, columns, primaryKey);
         if (!reader.IsAtEnd)
         {
             throw new SqlCatalogException("The persisted table constraint metadata contains trailing values.");
@@ -2242,6 +2296,7 @@ public sealed partial class SqlCatalog
                 throw new SqlCatalogException($"Table '{table.Schema}.{table.Name}' has an unexpected catalog identity.");
             }
             EnsurePhysicalLayoutKept(existing?.Table, table);
+            if (existing is not null) { EnsureIdentityKept(existing.Table, table); }
             ValidateColumns(table.Schema, table.Name, table.Columns, table.PrimaryKeyColumns);
             ValidateConstraints(table);
             var names = new HashSet<string>(table.Constraints.Select(constraint => constraint.Name), StringComparer.OrdinalIgnoreCase);

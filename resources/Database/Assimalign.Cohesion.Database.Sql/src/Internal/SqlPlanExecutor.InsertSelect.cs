@@ -59,6 +59,19 @@ internal sealed partial class SqlPlanExecutor
         var defaults = bound.DefaultValues;
         var domainEvaluator = bound.Domains.Count == 0 ? null : ExecutionEvaluator(null, cancellationToken);
         var rows = new List<(byte[] Record, object?[] Values)>(sourceRows.Count);
+        int identityOrdinal = -1;
+        int identityTargetIndex = -1;
+        for (int ordinal = 0; ordinal < table.Columns.Count; ordinal++)
+        {
+            if (table.Columns[ordinal].Identity is not null) { identityOrdinal = ordinal; break; }
+        }
+        if (identityOrdinal >= 0)
+        {
+            for (int index = 0; index < targetOrdinals.Count; index++)
+            {
+                if (targetOrdinals[index] == identityOrdinal) { identityTargetIndex = index; break; }
+            }
+        }
         for (int rowIndex = 0; rowIndex < sourceRows.Count; rowIndex++)
         {
             var sourceRow = sourceRows[rowIndex];
@@ -70,6 +83,15 @@ internal sealed partial class SqlPlanExecutor
             }
             var values = new object?[table.Columns.Count];
             var assigned = new bool[table.Columns.Count];
+            // Reserve a requested identity before any column's NOT NULL/default validation,
+            // including when ALTER appended it after another required column. A failed row
+            // consumes its generated value; explicit BY DEFAULT assignments never allocate.
+            if (identityOrdinal >= 0 && (identityTargetIndex < 0 || valueRows is not null &&
+                valueRows[rowIndex][identityTargetIndex].Kind == SqlBoundExpressionKind.DefaultItem))
+            {
+                values[identityOrdinal] = ResolveColumnDefault(table, identityOrdinal, defaults[identityOrdinal], cancellationToken);
+                assigned[identityOrdinal] = true;
+            }
             for (int i = 0; i < targetOrdinals.Count; i++)
             {
                 if (valueRows is not null && valueRows[rowIndex][i].Kind == SqlBoundExpressionKind.DefaultItem)
@@ -77,6 +99,10 @@ internal sealed partial class SqlPlanExecutor
                     continue;
                 }
                 int ordinal = targetOrdinals[i];
+                if (table.Columns[ordinal].Identity is { IsAlways: true })
+                {
+                    throw SqlPlanningException.IdentityViolation(table.Columns[ordinal].Name, ErrorMessages.IdentityInsertForbidden);
+                }
                 values[ordinal] = CoerceForColumn(sourceRow[i], table.Columns[ordinal]);
                 assigned[ordinal] = true;
             }
@@ -85,7 +111,7 @@ internal sealed partial class SqlPlanExecutor
                 if (!assigned[ordinal])
                 {
                     // The bound DEFAULT's value, or NULL, or the NOT NULL failure, for a column without one.
-                    values[ordinal] = ResolveColumnDefault(table.Columns[ordinal], defaults[ordinal], cancellationToken);
+                    values[ordinal] = ResolveColumnDefault(table, ordinal, defaults[ordinal], cancellationToken);
                 }
             }
 
@@ -131,6 +157,20 @@ internal sealed partial class SqlPlanExecutor
     }
 
     /// <summary>One default-resolution path for omitted INSERT columns and explicit DEFAULT assignments.</summary>
-    private static object? ResolveColumnDefault(SqlCatalogColumn column, SqlBoundExpression? boundDefault, CancellationToken cancellationToken)
-        => boundDefault is not null ? DefaultValue(boundDefault, cancellationToken) : ResolveDefault(column, null);
+    private object? ResolveColumnDefault(SqlCatalogTable table, int ordinal, SqlBoundExpression? boundDefault, CancellationToken cancellationToken)
+    {
+        var column = table.Columns[ordinal];
+        if (column.Identity is not null)
+        {
+            try
+            {
+                return CoerceForColumn(_catalog.AllocateIdentity(table), column);
+            }
+            catch (SqlCatalogException failure)
+            {
+                throw new SqlPlanningException("COHSQLE025", failure.Message, innerException: failure);
+            }
+        }
+        return boundDefault is not null ? DefaultValue(boundDefault, cancellationToken) : ResolveDefault(column, null);
+    }
 }

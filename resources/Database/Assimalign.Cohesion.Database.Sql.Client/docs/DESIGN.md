@@ -69,6 +69,12 @@ types and cleared character lengths use the same production frames and materiali
 Stored/system, system/system and grouped catalog joins use the existing SQL exchange.
 Wire tests pin exact rows and String/Int64 metadata; there is no protocol format change.
 
+## Identity values (#1123)
+
+Identity DDL, omitted-column INSERT and typed generated results use the existing execute
+exchange and integer codec. ALWAYS violations carry COHSQLE025 as ExecutionFailure and leave
+the connection usable. No client API or protocol shape changes.
+
 ## SQL-owned exchange
 
 `SqlClient.Create` binds the pool to `SqlProtocol.Family`.
