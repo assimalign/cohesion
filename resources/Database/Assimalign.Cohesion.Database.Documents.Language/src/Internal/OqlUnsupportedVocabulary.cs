@@ -51,7 +51,7 @@ internal static class OqlUnsupportedVocabulary
         // Statements and clauses of other languages.
         new("ALTER", "ALTER", OqlWordPosition.Clause),
         new("INSERT", "INSERT", OqlWordPosition.Clause),
-        new("RETURNING", "RETURNING", OqlWordPosition.Clause),
+        new("RETURNING", "RETURNING", OqlWordPosition.Trailing),
         new("UPDATE", "UPDATE", OqlWordPosition.Clause),
         new("DELETE", "DELETE", OqlWordPosition.Clause),
         new("USE", "USE", OqlWordPosition.Clause),
@@ -112,6 +112,12 @@ internal enum OqlWordPosition
     /// a name.
     /// </summary>
     Clause,
+
+    /// <summary>
+    /// After a parsed statement, so destination, binding and other identifier positions
+    /// are consumed as names first. The capability scan still rejects a statement prefix.
+    /// </summary>
+    Trailing,
 
     /// <summary>
     /// Only as the first word of the statement, where it is a statement verb of another

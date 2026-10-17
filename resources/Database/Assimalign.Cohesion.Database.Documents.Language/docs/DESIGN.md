@@ -89,6 +89,12 @@ a name:
 - **Statement** (`DEFINE` and the SQL++ statement verbs `UPSERT` and `MERGE`): only the first word of the
   statement. Elsewhere they are names, so an AS-less alias such as `FROM c merge` still parses,
   as it did before #1101.
+- **Trailing** (`RETURNING`): rejected after the parser consumes a complete statement, or at
+  the statement prefix. Destinations, KEY/VALUE output binding names, properties, object keys,
+  index names and aliases named `returning` are ordinary identifiers. An implicit FROM alias
+  uses that name when followed by the end or a following clause; `FROM c RETURNING *` leaves
+  RETURNING for the capability rejection. This positional check keeps a real trailing clause
+  at COHDBL001 without treating non-reserved INTO, KEY or VALUE as preceding operands.
 - **Function** (`ELEMENT`, `FLATTEN`, `LISTTOSET`, `STRUCT`, `LIST`, `BAG`, `TYPEOF`, and `ABS`):
   only immediately before `(`. Elsewhere these spellings are ordinary identifiers.
 - **Quantifier**: `EVERY`, `ANY` or `SOME` followed by `name IN` opens a quantified predicate.
@@ -351,8 +357,8 @@ Document keys are external: collections declare no key field and never generate 
 SQL++ KEY/VALUE forms above are the T1 mutation grammar. Id-less VALUE/VALUES forms report
 OQL0002 asking for KEY. KEY, VALUES and INTO remain non-reserved; the header reads KEY and
 VALUE by position, independently of SELECT VALUE's eventual reservation. OPTIONS in the
-header reports COHDBL001 because Documents has no TTL. RETURNING is recognized but deferred,
-including after literal and parameter operands. General database-qualified destinations remain invalid.
+header reports COHDBL001 because Documents has no TTL. A trailing RETURNING clause is recognized
+but deferred; identifier positions keep `returning` as a name. General database-qualified destinations remain invalid.
 
 VALUES expressions accept constants, parameters, operators and object constructors; document
 paths, aggregates and META require a source and fail planning here. INSERT SELECT binds KEY

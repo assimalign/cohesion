@@ -145,7 +145,11 @@ public sealed partial class OqlQueryParser : QueryParser
 
         if (unsupported.Count == 0 && _diagnostics.Count == 0)
         {
-            if (Take(TokenType.Semicolon) && Current.Type != TokenType.Eof)
+            if (Is("RETURNING"))
+            {
+                _diagnostics.Add(QueryDiagnostics.UnsupportedClause("RETURNING", Profile.Language, Span(Current, Current)));
+            }
+            else if (Take(TokenType.Semicolon) && Current.Type != TokenType.Eof)
             {
                 Error("OQL0002", "Only one statement is accepted per query.", Current);
             }
@@ -307,6 +311,7 @@ public sealed partial class OqlQueryParser : QueryParser
                 OqlWordPosition.Anywhere => true,
                 OqlWordPosition.Clause => index == 0 || EndsOperand(index - 1),
                 OqlWordPosition.Statement => index == 0,
+                OqlWordPosition.Trailing => index == 0,
                 OqlWordPosition.Function => index + 1 < _tokens.Count && _tokens[index + 1].Type == TokenType.LeftParen,
                 _ => false,
             };

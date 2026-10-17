@@ -18,6 +18,32 @@ namespace Assimalign.Cohesion.Database.Documents.Tests;
 
 public sealed class DocumentInsertTests
 {
+    [Theory(DisplayName = "Cohesion Test [Documents] - INSERT: returning remains a destination or output binding name")]
+    [InlineData("INSERT INTO returning (KEY, VALUE) VALUES ('a', 1)", "1")]
+    [InlineData("INSERT INTO returning (KEY returning) SELECT 'a' AS returning FROM items", "{\"returning\":\"a\"}")]
+    [InlineData("INSERT INTO returning (KEY k, VALUE returning) SELECT 'a' AS k, n AS returning FROM items", "2")]
+    public async Task Execute_ReturningIdentifier_ShouldBindAndRejectOnlyATrailingClauseAsync(string statement, string expected)
+    {
+        // Arrange
+        await using var engine = DocumentDatabaseEngine.Create("returning", new());
+        var database = await engine.CreateDatabaseAsync("returning", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        var items = await session.CreateCollectionAsync("items", CancellationToken.None);
+        var destination = await session.CreateCollectionAsync("returning", CancellationToken.None);
+        await items.PutAsync(session, "seed", "{\"n\":2}"u8.ToArray(), cancellationToken: CancellationToken.None);
+
+        // Act
+        var inserted = await session.ExecuteAsync(statement, cancellationToken: CancellationToken.None);
+
+        // Assert
+        inserted.AffectedCount.ShouldBe(1);
+        Encoding.UTF8.GetString((await destination.GetAsync(session, "a", CancellationToken.None)).ShouldNotBeNull().Content.Span).ShouldBe(expected);
+        var refused = await Should.ThrowAsync<DatabaseParseException>(async () =>
+            await session.ExecuteAsync(statement + " RETURNING *", cancellationToken: CancellationToken.None));
+        refused.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBL001");
+        (await RowsAsync(session, "SELECT META().id FROM returning")).ShouldHaveSingleItem()[0].ShouldBe("a");
+    }
+
     [Theory(DisplayName = "Cohesion Test [Documents] - Object constructors: SELECT and INSERT resolve repeated names through one keyed object")]
     [InlineData("{'a': 1, 'a': 2}", "{\"a\":2}")]
     [InlineData("{'a': 1, 'a': NULL, 'A': 3}", "{\"a\":null,\"A\":3}")]

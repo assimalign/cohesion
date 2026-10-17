@@ -23,7 +23,7 @@ public sealed partial class OqlQueryParser
         {
             alias = Identifier();
         }
-        else if (Current.Type is TokenType.Identifier or TokenType.QuotedIdentifier or TokenType.Function)
+        else if (Current.Type is TokenType.Identifier or TokenType.QuotedIdentifier or TokenType.Function && !IsReturningClause())
         {
             alias = Identifier();
         }
@@ -54,5 +54,17 @@ public sealed partial class OqlQueryParser
         }
         return new OqlSelectExpression(collection, alias, projections.AsReadOnly(), predicate,
             groups.AsReadOnly(), having, ordering.AsReadOnly(), Span(start, Previous));
+    }
+
+    private bool IsReturningClause()
+    {
+        if (!Is("RETURNING")) { return false; }
+        var next = _tokens[_position + 1];
+        // An implicit source alias must be followed by the end or another clause. Keep
+        // RETURNING as that name there; otherwise leave the trailing clause for rejection.
+        return next.Type is not (TokenType.Eof or TokenType.Semicolon) &&
+            !IsWord(next, "WHERE") && !IsWord(next, "GROUP") && !IsWord(next, "HAVING") &&
+            !IsWord(next, "ORDER") && !(IsWord(next, "RETURNING") &&
+                _tokens[_position + 2].Type is not (TokenType.Eof or TokenType.Semicolon));
     }
 }
