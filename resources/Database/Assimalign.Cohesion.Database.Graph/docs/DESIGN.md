@@ -399,9 +399,9 @@ is part of its statement (#1188), and so is a typed request whose statement alre
 aborts an explicit transaction (`COHDBG007` until the caller rolls back; see
 [Failed statements in explicit transactions](#failed-statements-in-explicit-transactions-1188)).
 The session stays open. Over the wire's `Execute` seam the
-failure is an `ExecutionFailure` that keeps the connection ready; on the `ExecutePaths` seam the
-server session survives too, but the client currently closes its connection after any statement
-error received before the first path (a `Database.Client` follow-up). Planner messages quote at
+failure is an `ExecutionFailure` that keeps the connection ready; on the `ExecutePaths` seam a
+terminal statement rejection before the first path also keeps Graph.Client's connection ready.
+Failures after path output still discard the connection. Planner messages quote at
 most 256 UTF-16 code units of a label expression, cut so that no surrogate pair is split.
 
 Two storage limits remain, recorded here rather than hidden behind the language. A node's labels
@@ -603,8 +603,8 @@ Execute admits EXPLAIN even when the wrapped RETURN projects an entity, such as
 `EXPLAIN MATCH (a:Person) RETURN a`, because the returned values are scalar description rows.
 Existing ResultHeader/ResultRow/ResultComplete frames carry them. ExecutePaths returns the coded
 `COHDBG001` error and keeps the server session ready; raw protocol tests send another request
-on that same session. Graph.Client retains its existing policy of discarding a path stream after
-an opening error. EXPLAIN ANALYZE and PROFILE are deferred and fail at parse time.
+on that same session. Graph.Client also retains the connection after this terminal rejection
+before path output. EXPLAIN ANALYZE and PROFILE are deferred and fail at parse time.
 
 ## Catalog introspection (C2)
 
@@ -696,7 +696,7 @@ to exercise that enforcement path; compiled provisioning is not included.
 | `COHDBG005` | Session/database binding mismatch |
 | `COHDBG006` | Storage failure translated at the engine boundary |
 | `COHDBG007` | The session's explicit transaction is aborted by a failed statement: a statement, BEGIN or COMMIT is refused until a rollback completes; the message and `InnerException` name the original failure |
-| `COHDBG008` | Statement too complex: parsing, planning or evaluating it needs more stack than the executing thread has left (ISO SQLSTATE 54001). The statement fails and the session stays open; on the wire's `ExecutePaths` seam the client currently closes its connection |
+| `COHDBG008` | Statement too complex: parsing, planning or evaluating it needs more stack than the executing thread has left (ISO SQLSTATE 54001). The statement fails and the session stays open; Graph.Client retains the connection after a terminal rejection before path output |
 | `COHDBG009` | Element too large: a node's labels and properties, or a relationship's type and properties, exceed the 8,092-byte graph record, or an indexed property value exceeds the 1,016-byte index key. Nothing is written for the element; the statement fails and the session stays open |
 | `COHDBG010` | **Warning**, not a failure: a read-only statement or `GetIndexesAsync` names a label the database does not have at the statement's snapshot. No node carries it, so the read returns the rows the expression still matches (none for a required label), reports this `DiagnosticSeverity.Warning` diagnostic in `DatabaseResult.Diagnostics` or `GraphSchemaResult<T>.Diagnostics`, and leaves an explicit transaction active. Neo4j's `UnknownLabelWarning`, GQLSTATUS 01N50. Not sent over protocol 1.0 |
 | `COHDBG011` | **Warning**, not a failure: the same for a relationship type the database does not have; no relationship has it. Neo4j's `UnknownRelationshipTypeWarning`, GQLSTATUS 01N51. Not sent over protocol 1.0 |
@@ -1051,7 +1051,8 @@ by one PathsComplete, or a shared Error with no completion. Requests are seriali
 count must match received paths; zero matches requires count zero. Each path fits one frame.
 The client enumerates those frames through a `DatabaseStreamingExchange` and
 `ExecuteStreamingAsync`, keeping the shared connection lease until enumeration completes or is
-disposed. Consuming PathsComplete or a terminal statement Error permits reuse; cancellation or
+disposed. Consuming PathsComplete or a terminal statement Error before any Path permits reuse;
+an Error after path output discards the connection. Cancellation or
 early disposal before terminal consumption leaves the exchange incomplete and discards the
 connection. Engine materialization is bounded by the existing traversal limits; the client does
 not promise unbounded graph traversal. Codecs perform static, explicit encoding and decoding with

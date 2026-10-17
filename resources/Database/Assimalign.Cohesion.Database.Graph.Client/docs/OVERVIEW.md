@@ -27,8 +27,8 @@ properties. Enumerate to completion to verify the terminal count; abandoning an 
 enumeration discards its connection.
 
 Dispose each connection to return a healthy authenticated session to the pool, and dispose the
-client to close the pool. Scalar parse/execution failures retain the session; path-stream
-failures discard it under the shared streaming contract. Explicit transactions are not exposed:
+client to close the pool. Scalar parse/execution failures and terminal path rejections before any
+path output retain the session; later path failures discard it. Explicit transactions are not exposed:
 BEGIN/COMMIT/ROLLBACK and the reserved Transaction message are unsupported.
 
 Parameters use the shared scalar codec and bind `$name` or `@name` in property maps and WHERE

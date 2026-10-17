@@ -72,7 +72,8 @@ public sealed class GraphConnection : IAsyncDisposable
     /// <exception cref="ObjectDisposedException">The connection is disposed.</exception>
     /// <exception cref="InvalidOperationException">Another exchange is active.</exception>
     /// <exception cref="OperationCanceledException">The exchange is canceled, which marks the connection broken.</exception>
-    /// <exception cref="GraphClientException">The query or stream failed; its connection is discarded.</exception>
+    /// <exception cref="GraphClientException">The server rejected the query or the stream failed.
+    /// A terminal statement rejection before path output keeps the connection; other stream failures discard it.</exception>
     /// <remarks>Enumerate to completion to verify the server's terminal path count. Disposing an
     /// unfinished enumeration cancels the exchange and prevents reuse of that session.</remarks>
     public async IAsyncEnumerable<GraphPath> QueryPathsAsync(string statement,
@@ -127,6 +128,11 @@ public sealed class GraphConnection : IAsyncDisposable
                     try
                     {
                         path = await ReadPathAsync(stream, length, cancellationToken).ConfigureAwait(false);
+                        if (path is null && exchange.Rejection is { } rejection)
+                        {
+                            // EOF has joined the shared worker and released the active exchange.
+                            throw new GraphClientException(rejection.Code, rejection.Message, rejection);
+                        }
                     }
                     catch (Exception exception) when (GraphClientEventSource.CaptureFailure(exception, out failure))
                     {

@@ -17,6 +17,34 @@ namespace Assimalign.Cohesion.Database.Graph.Client.Tests;
 /// <summary>Malformed peers must never turn a failed graph exchange into a successful response or reusable lease.</summary>
 public sealed class GraphClientFailureTests
 {
+    [Theory(DisplayName = "Cohesion Test [Graph.Client] - Initial non-statement and malformed errors discard the path connection")]
+    [InlineData(ProtocolErrorCode.ProtocolViolation, false)]
+    [InlineData(ProtocolErrorCode.Unavailable, false)]
+    [InlineData(ProtocolErrorCode.ProtocolViolation, true)]
+    public async Task QueryPathsAsync_InitialFatalError_ShouldThrowAndDiscard(ProtocolErrorCode code, bool malformed)
+    {
+        // Arrange
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await using var listener = new InMemoryConnectionListener();
+        await using var client = CreateClient(listener);
+        Task server = ServeAsync(listener, async channel =>
+        {
+            (await ReadAsync(channel, timeout.Token)).Type.ShouldBe((ProtocolMessageType)GraphProtocolMessageType.ExecutePaths);
+            byte[] payload = malformed ? [0] : new ProtocolErrorMessage(code, "Injected initial failure.").Encode();
+            await WriteAsync(channel, ProtocolMessageType.Error, payload, timeout.Token);
+        }, timeout.Token);
+        await using var connection = await client.ConnectAsync(timeout.Token);
+        await using var paths = connection.QueryPathsAsync("MATCH (n) RETURN n", cancellationToken: timeout.Token).GetAsyncEnumerator();
+
+        // Act
+        var error = await Should.ThrowAsync<GraphClientException>(async () => await paths.MoveNextAsync());
+
+        // Assert
+        error.Code.ShouldBe(code);
+        connection.IsOpen.ShouldBeFalse();
+        await server.WaitAsync(timeout.Token);
+    }
+
     /// <summary>Failure after a delivered path is visible during enumeration and discards the connection.</summary>
     /// <param name="failure">The malformed terminal response.</param>
     [Theory(DisplayName = "Cohesion Test [Graph.Client] - Path errors truncation and wrong completion cannot become EOF")]

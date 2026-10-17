@@ -209,7 +209,7 @@ public sealed class GraphClientWireTests
         await using var otherClient = GraphClient.Create(new()
         {
             Settings = new DatabaseConnectionSettings { Database = "other", EndPoint = harness.Listener.EndPoint },
-            ConnectionFactory = harness.Listener.CreateFactory(),
+            ConnectionFactory = harness.ConnectionFactory,
         });
         await using var otherConnection = await otherClient.ConnectAsync(harness.Token);
         (await otherConnection.QueryAsync("SHOW LABELS", cancellationToken: harness.Token)).ShouldHaveSingleItem()[2].ShouldBe("Hidden");

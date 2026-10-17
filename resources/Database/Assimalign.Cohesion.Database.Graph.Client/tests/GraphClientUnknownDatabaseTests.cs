@@ -26,7 +26,7 @@ public sealed class GraphClientUnknownDatabaseTests
             {
                 Database = "no_such_database", Principal = "tester", EndPoint = harness.Listener.EndPoint, MaxPoolSize = 1,
             },
-            ConnectionFactory = harness.Listener.CreateFactory(),
+            ConnectionFactory = harness.ConnectionFactory,
         });
 
         // Act
