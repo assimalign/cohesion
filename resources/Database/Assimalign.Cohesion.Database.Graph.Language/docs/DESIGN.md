@@ -271,7 +271,17 @@ numbers compare by exact mathematical value across runtime numeric types, and no
 relationships compare by identity. Paths compare their ordered node and relationship identities,
 including traversal direction, independently of materialization. Exact reduced numeric fractions
 keep hashing consistent without merging adjacent Int64 values above 2^53 or rounding subnormals
-to zero. This equality is deliberately separate from WHERE's floating-operand promotion.
+to zero. Numeric comparisons (=, <>, !=, <, <=, >, >=), property matching and IN use the same
+exact fractions: 0.1m = 0.1d is FALSE, 1 = 1.0 is TRUE, and mixed comparisons above 2^53
+retain every integer bit. NULL comparisons remain UNKNOWN, while DISTINCT groups NULLs;
+signed zeros compare equal. Non-finite literals and parameters, including NaN, remain COHDBG003.
+Internal value equality groups NaNs across floating tags and payloads with consistent hashes.
+This owner choice changes #1140's comparison promotion for reuse by #1145/#1147;
+arithmetic still follows the separate promotion table below. Behavior consulted, no code copied,
+relative to C:/Source/repos/neo4j/neo4j: `community/values/src/main/java/org/neo4j/values/storable/Value.java:162`
+connects non-NaN predicate equality to value equality, `IntegralValue.java:77-95` provides exact
+mixed numeric equality/ordering, and `community/cypher/interpreted-runtime/src/main/scala/org/neo4j/cypher/internal/runtime/interpreted/pipes/DistinctPipe.scala:78`
+uses value equality for duplicate elimination.
 The first representative retains its runtime type; ALL retains every row. These implement the
 owner's DISTINCT defaults. Reference behavior consulted, no code copied: local Neo4j
 `community/values/src/main/java/org/neo4j/values/virtual/VirtualNodeValue.java:52-61`,
@@ -595,8 +605,9 @@ tests Boolean/NULL, always returning Boolean, inverted by NOT. Comparisons with 
 UNKNOWN. Incomparable non-null types are unequal (= false, <> true); their ordering is
 UNKNOWN, so NOT does not turn such an ordering into a match.
 
-Numeric promotion is a Cohesion extension for the typed API's stored CLR types.
-The first applicable row selects both conversions and the result type:
+Arithmetic promotion is a Cohesion extension for the typed API's stored CLR types.
+It does not apply to comparisons or IN, which use exact fractions shared with DISTINCT.
+The first applicable row selects arithmetic conversions and the result type:
 
 | Operands | Arithmetic result |
 | --- | --- |

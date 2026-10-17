@@ -5,7 +5,7 @@ using System.Numerics;
 
 namespace Assimalign.Cohesion.Database.Graph.Internal;
 
-/// <summary>RETURN DISTINCT equality, independent of materialization and CLR numeric tags.</summary>
+/// <summary>Graph value equality, independent of materialization and CLR numeric tags.</summary>
 internal sealed class GraphValueComparer : IEqualityComparer<object?>
 {
     internal static readonly GraphValueComparer Instance = new();
@@ -16,7 +16,7 @@ internal sealed class GraphValueComparer : IEqualityComparer<object?>
     {
         if (ReferenceEquals(left, right)) { return true; }
         if (left is null || right is null) { return false; }
-        if (TryNumber(left, out var a) && TryNumber(right, out var b)) { return a == b; }
+        if (IsNumber(left) && IsNumber(right)) { return CompareNumbers(left, right) == 0; }
         return (left, right) switch
         {
             (GraphNode x, GraphNode y) => x.Id == y.Id,
@@ -31,6 +31,7 @@ internal sealed class GraphValueComparer : IEqualityComparer<object?>
     {
         if (value is null) { return 0; }
         if (TryNumber(value, out var number)) { return number.GetHashCode(); }
+        if (value is float or double) { return Convert.ToDouble(value, CultureInfo.InvariantCulture).GetHashCode(); }
         switch (value)
         {
             case GraphNode node: return HashCode.Combine(1, node.Id);
@@ -44,6 +45,17 @@ internal sealed class GraphValueComparer : IEqualityComparer<object?>
             case string text: return StringComparer.Ordinal.GetHashCode(text);
             default: return value.GetHashCode();
         }
+    }
+
+    internal static bool IsNumber(object value) => value is sbyte or short or int or long or byte or ushort or uint or ulong or float or double or decimal;
+
+    internal static int CompareNumbers(object left, object right)
+    {
+        if (TryNumber(left, out var a) && TryNumber(right, out var b))
+        { return (a.Numerator * b.Denominator).CompareTo(b.Numerator * a.Denominator); }
+        // Planning rejects non-finite literals and parameters. Keep internal comparisons and
+        // DISTINCT consistent even for NaNs (including different payloads and floating tags).
+        return Convert.ToDouble(left, CultureInfo.InvariantCulture).CompareTo(Convert.ToDouble(right, CultureInfo.InvariantCulture));
     }
 
     private static bool PathsEqual(GraphPath left, GraphPath right)

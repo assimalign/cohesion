@@ -18,7 +18,10 @@ RETURN * lists named bindings in first-declaration order, omitting anonymous and
 elements; `(a)-[r]->(b)` yields a, r, b. With no named binding, it is GQL0002. DISTINCT removes
 duplicate projected tuples, treating NULLs as equal, numbers by exact value across runtime types,
 strings ordinally, entities by ID and paths by ordered entity identities. The retained row keeps
-its values' runtime types. WHERE retains its documented arithmetic promotion rules.
+its values' runtime types. Comparisons and IN use the same exact numeric values: 0.1m = 0.1d
+is FALSE, 1 = 1.0 is TRUE, and mixed integer/Double comparisons above 2^53 retain every
+integer bit. Signed zeros compare equal; NULL comparisons remain UNKNOWN while DISTINCT
+groups NULLs. NaN and infinities remain COHDBG003 at planning. Arithmetic retains its promotion rules.
 Bare binding references also permit entity equality and IS NULL tests in value expressions;
 entity/path equality compares identity across independent materializations.
 
@@ -86,7 +89,7 @@ The [GQL grammar](https://github.com/opengql/grammar/blob/main/GQL.g4#L2062) def
 OR/XOR level; [Neo4j's GE07 entry](https://neo4j.com/docs/cypher-manual/current/appendix/gql-conformance/supported-optional/)
 documents Cypher's different precedence.
 
-Numeric promotion selects Double for any floating operand, otherwise Decimal for decimal/ulong,
+Arithmetic promotion selects Double for any floating operand, otherwise Decimal for decimal/ulong,
 otherwise checked Int64. Integer division truncates toward zero. Integral remainder by -1
 is 0, including Int64.MinValue; Int64.MinValue / -1 raises COHDBG013. Zero divisors, overflow,
 non-finite results and invalid arithmetic types raise COHDBG013; concatenation requires two

@@ -103,8 +103,8 @@ examines node records and sorts its matches. A property equality anchor instead 
 shared B+Tree in `O(log N + candidates)` after locating index metadata, then sorts its matches.
 Index numeric keys normalize
 integral, decimal and finite floating point values through double conversion. Full scalar comparisons
-filter index candidates, preserving exact integral/decimal comparisons despite key collisions.
-Comparisons involving a floating point operand use double precision, including subnormal values.
+filter index candidates using exact reduced numeric fractions across all numeric types, including
+floating operands, so key collisions cannot change equality or lose adjacent large integers.
 All node creation/deletion paths maintain property indexes. Graph has no property-update verb.
 
 ### Database names and directories
@@ -317,7 +317,18 @@ records the owner's naming default and the limits of the ISO 14.11 check.
 DISTINCT runs on projected tuples, after writes have completed for every input binding. It uses
 NULL equality, ordinal strings, exact numeric value equality across CLR tags, entity IDs and
 ordered path identities. Reduced fractions preserve transitivity and hash consistency for
-large integers, decimals and subnormal floats; WHERE retains floating-operand promotion.
+large integers, decimals and subnormal floats. Comparisons (=, <>, !=, <, <=, >, >=), inline
+property matching and IN use this same exact numeric equality and ordering: 0.1m differs from
+0.1d, 1 equals 1.0, and an Int64 above 2^53 is never rounded to compare with a Double.
+NULL comparisons remain UNKNOWN while DISTINCT groups NULLs. Non-finite inputs, including NaN,
+remain COHDBG003 at planning; internal value equality groups NaNs consistently across float/double
+and hashes, and treats signed zeros as equal. This #1141 owner choice changes #1140 comparison
+promotion; #1145 and #1147 must reuse it. Arithmetic promotion remains unchanged.
+Reference behavior consulted, no code copied, relative to C:/Source/repos/neo4j/neo4j:
+`community/values/src/main/java/org/neo4j/values/storable/Value.java:162` delegates ordinary
+non-NaN predicate equality to value equality, `IntegralValue.java:77-95` shares numeric equality
+and exact mixed ordering, and `community/cypher/interpreted-runtime/src/main/scala/org/neo4j/cypher/internal/runtime/interpreted/pipes/DistinctPipe.scala:78`
+uses value equality for grouping. Cohesion rejects NaN at its public planning boundary.
 First representatives retain their actual values and types. ALL preserves multiplicity. These
 implement the owner's duplicate-equality default; no persistent state or catalog version changes.
 GraphProjectionPlan and GraphDistinctPlan both have EXPLAIN mappings and description rows.
@@ -336,7 +347,7 @@ Only TRUE keeps a binding; evaluated non-Boolean conditions raise COHDBG013. CLR
 faults become that same code in DatabaseException.Diagnostics, with code-free Message.
 Filtering finishes before result materialization or mutations, so the server sends value
 errors as ExecutionFailure before ResultHeader and the pooled scalar session remains usable.
-Promotion is Double for floating operands, otherwise Decimal for ulong/decimal, otherwise
+Arithmetic promotion is Double for floating operands, otherwise Decimal for ulong/decimal, otherwise
 checked Int64 (division truncates toward zero).
 Integral remainder by -1 is always 0, including Int64.MinValue, while its division by -1
 keeps COHDBG013 (PostgreSQL `src/backend/utils/adt/int8.c:584-594`).
