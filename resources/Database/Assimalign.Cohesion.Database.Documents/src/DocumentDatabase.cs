@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading;
@@ -8,6 +9,7 @@ using System.Threading.Tasks;
 using Assimalign.Cohesion.Database.Documents.Catalog;
 using Assimalign.Cohesion.Database.Documents.Internal;
 using Assimalign.Cohesion.Database.Documents.Storage;
+using Assimalign.Cohesion.Database.Language;
 using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Documents;
@@ -214,22 +216,33 @@ public sealed class DocumentDatabase : DatabaseInstance
         DocumentSystemCollections.EnsureReadOnly(name);
         return RunAsync(session, async operation =>
         {
-            await LockWriterAsync(operation.Context, token).ConfigureAwait(false);
-            var previous = Catalog.FindCollection(name, operation.Context.Snapshot);
-            if (previous != Catalog.FindCollection(name, LatestSnapshot(operation.Context)))
-            {
-                ThrowConflict();
-            }
-
-            if (previous is not null)
-            {
-                throw new DatabaseException($"Collection '{name}' already exists.");
-            }
-
-            var metadata = new DocumentCollectionMetadata(Guid.NewGuid(), name);
-            await Catalog.SaveCollectionAsync(metadata, operation.Context, token).ConfigureAwait(false);
+            var metadata = await CreateCollectionCoreAsync(name, false, operation, token).ConfigureAwait(false);
             return new DocumentCollection(this, metadata, session);
         }, token);
+    }
+
+    internal async ValueTask<DocumentCollectionMetadata> CreateCollectionCoreAsync(string name, bool ifNotExists,
+        DocumentOperation operation, CancellationToken token, Location? location = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        DocumentSystemCollections.EnsureReadOnly(name, location);
+        await LockWriterAsync(operation.Context, token).ConfigureAwait(false);
+        var previous = Catalog.FindCollection(name, operation.Context.Snapshot);
+        if (previous != Catalog.FindCollection(name, LatestSnapshot(operation.Context)))
+        {
+            ThrowConflict();
+        }
+
+        if (previous is not null)
+        {
+            if (ifNotExists) { return previous.Value; }
+            string message = string.Format(CultureInfo.CurrentCulture, ErrorMessages.CollectionAlreadyExists, name);
+            throw new DatabaseException(message, [DocumentPlanningException.CreateDiagnostic("COHDOC010", message, location)]);
+        }
+
+        var metadata = new DocumentCollectionMetadata(Guid.NewGuid(), name);
+        await Catalog.SaveCollectionAsync(metadata, operation.Context, token).ConfigureAwait(false);
+        return metadata;
     }
 
     internal ValueTask<DocumentCollection> GetCollectionAsync(string name, DocumentDatabaseSession session, CancellationToken token)
@@ -245,40 +258,53 @@ public sealed class DocumentDatabase : DatabaseInstance
         DocumentSystemCollections.EnsureReadOnly(name);
         await RunAsync(session, async operation =>
         {
-            await LockWriterAsync(operation.Context, token).ConfigureAwait(false);
-            var collection = Catalog.FindCollection(name, operation.Context.Snapshot)
-                ?? throw new DatabaseException($"Collection '{name}' does not exist.");
-            if (collection != Catalog.FindCollection(name, LatestSnapshot(operation.Context)))
-            {
-                ThrowConflict();
-            }
-            // Same authority rule as SqlPlanExecutor.EnsureCanChange. Document has
-            // no provisioning authority, so every schema-owned drop is locked.
-            if (collection.Owner == DatabaseObjectOwner.Schema)
-            {
-                throw new DatabaseObjectLockedException(collection.Name, collection.OwningSchema!, "DROP COLLECTION");
-            }
-
-            var visible = Catalog.GetDocuments(collection.Id, null, operation.Context.Snapshot);
-            if (!visible.SequenceEqual(Catalog.GetDocuments(collection.Id, null, LatestSnapshot(operation.Context))) ||
-                !Catalog.GetIndexes(collection.Id, operation.Context.Snapshot)
-                    .SequenceEqual(Catalog.GetIndexes(collection.Id, LatestSnapshot(operation.Context))))
-            {
-                ThrowConflict();
-            }
-
-            foreach (var document in visible)
-            {
-                await DataStorage.TombstoneContentAsync(Coordinator, operation.Context, Content(document), token).ConfigureAwait(false);
-                await Catalog.DeleteDocumentAsync(collection.Id, document.Id, operation.Context, token).ConfigureAwait(false);
-            }
-            foreach (var index in Catalog.GetIndexes(collection.Id, operation.Context.Snapshot))
-            {
-                await Catalog.DeleteIndexAsync(collection.Id, index.Name, operation.Context, token).ConfigureAwait(false);
-            }
-            await Catalog.DeleteCollectionAsync(collection.Id, operation.Context, token).ConfigureAwait(false);
+            await DropCollectionCoreAsync(name, false, operation, token).ConfigureAwait(false);
             return true;
         }, token).ConfigureAwait(false);
+    }
+
+    internal async ValueTask DropCollectionCoreAsync(string name, bool ifExists, DocumentOperation operation,
+        CancellationToken token, Location? location = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        DocumentSystemCollections.EnsureReadOnly(name, location);
+        await LockWriterAsync(operation.Context, token).ConfigureAwait(false);
+        var previous = Catalog.FindCollection(name, operation.Context.Snapshot);
+        if (previous != Catalog.FindCollection(name, LatestSnapshot(operation.Context)))
+        {
+            ThrowConflict();
+        }
+        if (previous is not { } collection)
+        {
+            if (ifExists) { return; }
+            string message = string.Format(CultureInfo.CurrentCulture, ErrorMessages.CollectionDoesNotExist, name);
+            throw new DatabaseException(message, [DocumentPlanningException.CreateDiagnostic("COHDOC002", message, location)]);
+        }
+        // Documents has no provisioning authority, so every schema-owned drop is locked.
+        if (collection.Owner == DatabaseObjectOwner.Schema)
+        {
+            throw new DatabaseObjectLockedException(collection.Name, collection.OwningSchema!, "DROP COLLECTION",
+                diagnostic: DocumentPlanningException.CreateDiagnostic("COHDOC011", null, location));
+        }
+
+        var visible = Catalog.GetDocuments(collection.Id, null, operation.Context.Snapshot);
+        if (!visible.SequenceEqual(Catalog.GetDocuments(collection.Id, null, LatestSnapshot(operation.Context))) ||
+            !Catalog.GetIndexes(collection.Id, operation.Context.Snapshot)
+                .SequenceEqual(Catalog.GetIndexes(collection.Id, LatestSnapshot(operation.Context))))
+        {
+            ThrowConflict();
+        }
+
+        foreach (var document in visible)
+        {
+            await DataStorage.TombstoneContentAsync(Coordinator, operation.Context, Content(document), token).ConfigureAwait(false);
+            await Catalog.DeleteDocumentAsync(collection.Id, document.Id, operation.Context, token).ConfigureAwait(false);
+        }
+        foreach (var index in Catalog.GetIndexes(collection.Id, operation.Context.Snapshot))
+        {
+            await Catalog.DeleteIndexAsync(collection.Id, index.Name, operation.Context, token).ConfigureAwait(false);
+        }
+        await Catalog.DeleteCollectionAsync(collection.Id, operation.Context, token).ConfigureAwait(false);
     }
 
     internal async IAsyncEnumerable<DocumentCollection> GetCollectionsAsync(DocumentDatabaseSession session, [EnumeratorCancellation] CancellationToken token)

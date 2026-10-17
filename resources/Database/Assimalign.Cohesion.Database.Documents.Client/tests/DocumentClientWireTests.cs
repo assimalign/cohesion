@@ -111,7 +111,7 @@ public sealed class DocumentClientWireTests
         // Arrange
         await using var harness = await DocumentClientTestHarness.StartAsync(tcp);
         await using var connection = await harness.Client.ConnectAsync(harness.Token);
-        await connection.CreateCollectionAsync("items", harness.Token);
+        (await connection.ExecuteAsync("CREATE COLLECTION items", cancellationToken: harness.Token)).ShouldBe(0);
         await connection.PutAsync("items", "a", "{\"name\":\"Ada\",\"group\":\"A\",\"score\":2,\"active\":true,\"nested\":{\"x\":5},\"array\":[9,null]}"u8.ToArray(), cancellationToken: harness.Token);
         await connection.PutAsync("items", "b", "{\"name\":\"Bob\",\"group\":\"A\",\"score\":4,\"active\":false}"u8.ToArray(), cancellationToken: harness.Token);
         await connection.PutAsync("items", "c", "{\"name\":\"Cy\",\"group\":\"B\",\"score\":1,\"active\":true}"u8.ToArray(), cancellationToken: harness.Token);
@@ -160,6 +160,13 @@ public sealed class DocumentClientWireTests
             .ShouldHaveSingleItem().ToArray().ShouldBe(new object?[] { "items", "Adhoc" });
         (await connection.ExecuteAsync("DROP INDEX by_score ON items", cancellationToken: harness.Token)).ShouldBe(0);
         (await connection.QueryAsync("SELECT * FROM COHESION_SCHEMA.INDEXES", cancellationToken: harness.Token)).ShouldBeEmpty();
+        // Collection DDL shares the OQL wire path; CRUD uses the newly created collection.
+        (await connection.ExecuteAsync("CREATE COLLECTION IF NOT EXISTS items", cancellationToken: harness.Token)).ShouldBe(0);
+        Encoding.UTF8.GetString((await connection.GetAsync("items", "a", harness.Token)).ShouldNotBeNull().Content.Span)
+            .ShouldContain("\"name\":\"Ada\"", Case.Sensitive);
+        (await connection.ExecuteAsync("DROP COLLECTION items", cancellationToken: harness.Token)).ShouldBe(0);
+        (await connection.ExecuteAsync("DROP COLLECTION IF EXISTS items", cancellationToken: harness.Token)).ShouldBe(0);
+        (await connection.QueryAsync("SELECT OBJECT_NAME FROM COHESION_SCHEMA.OBJECT_OWNERSHIP", cancellationToken: harness.Token)).ShouldBeEmpty();
     }
 
     [Theory(DisplayName = "Cohesion Test [Documents.Client] - Scalar document roots remain whole JSON values")]

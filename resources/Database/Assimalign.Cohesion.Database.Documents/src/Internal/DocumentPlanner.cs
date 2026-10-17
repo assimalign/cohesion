@@ -5,6 +5,7 @@ using System.Text;
 
 using Assimalign.Cohesion.Database.Documents.Catalog;
 using Assimalign.Cohesion.Database.Documents.Language;
+using Assimalign.Cohesion.Database.Language;
 using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Documents.Internal;
@@ -33,6 +34,8 @@ internal sealed class DocumentPlanner
         OqlSelectExpression select when DocumentSystemCollections.Find(select.Collection) is string name =>
             new DocumentSystemCollectionPlan(CreateLogicalPlan(select), name),
         OqlSelectExpression select => Plan(select),
+        OqlCreateCollectionExpression createCollection => PlanCreateCollection(createCollection),
+        OqlDropCollectionExpression dropCollection => PlanDropCollection(dropCollection),
         OqlCreateIndexExpression createIndex => PlanCreateIndex(createIndex),
         OqlDropIndexExpression dropIndex => PlanDropIndex(dropIndex),
         _ => throw new DocumentPlanningException("COHDOC001", "The OQL statement is not supported by the document executor.", expression.Location),
@@ -43,6 +46,41 @@ internal sealed class DocumentPlanner
         var logical = CreateLogicalPlan(query);
         var collection = ResolveCollection(query.Collection, query.Location);
         return new DocumentPlan(logical, collection, ChooseAccess(query, _catalog.GetIndexes(collection.Id, _snapshot)));
+    }
+
+    private static DocumentCreateCollectionPlan PlanCreateCollection(OqlCreateCollectionExpression create)
+    {
+        ValidateCollectionName(create.Name, create);
+        return new DocumentCreateCollectionPlan(create);
+    }
+
+    private static DocumentDropCollectionPlan PlanDropCollection(OqlDropCollectionExpression drop)
+    {
+        ValidateCollectionName(drop.Name, drop);
+        return new DocumentDropCollectionPlan(drop);
+    }
+
+    private static void ValidateCollectionName(string name, OqlExpression expression)
+    {
+        // Match the session API's ArgumentException.ThrowIfNullOrWhiteSpace rule before either core runs.
+        if (!string.IsNullOrWhiteSpace(name)) { return; }
+        var location = expression.Location;
+        if (expression.Text is { } text && location is not null)
+        {
+            // The last token is the name. Reuse the shared lexer only on this refusal path,
+            // retaining the AST's statement span for other collection failures.
+            foreach (var token in new TokenLexer(text, new TokenLexerOptions { Keywords = [] }))
+            {
+                int end = token.Position + token.Value.Length;
+                if (end == location.End && token.Type == TokenType.QuotedIdentifier)
+                {
+                    location = Location.Create(1 + TokenLexer.CountLineBreaks(text.AsSpan(0, token.Position)),
+                        location.EndLine, token.Position, end);
+                    break;
+                }
+            }
+        }
+        throw new DocumentPlanningException("COHDOC001", ErrorMessages.CollectionNameMissing, location);
     }
 
     private DocumentCreateIndexPlan PlanCreateIndex(OqlCreateIndexExpression create)

@@ -17,6 +17,14 @@ public sealed class DocumentClientDiagnosticTests
     [InlineData(true, "SELECT *\nFROM items LIMIT 1", "COHDBL001", "LIMIT", ProtocolErrorCode.ParseFailure)]
     [InlineData(false, "SELECT *\nFROM absent", "COHDOC002", "SELECT *\nFROM absent", ProtocolErrorCode.ExecutionFailure)]
     [InlineData(true, "SELECT *\nFROM absent", "COHDOC002", "SELECT *\nFROM absent", ProtocolErrorCode.ExecutionFailure)]
+    [InlineData(false, "CREATE COLLECTION \" \"", "COHDOC001", "\" \"", ProtocolErrorCode.ExecutionFailure)]
+    [InlineData(true, "CREATE COLLECTION \" \"", "COHDOC001", "\" \"", ProtocolErrorCode.ExecutionFailure)]
+    [InlineData(false, "DROP COLLECTION IF EXISTS \" \"", "COHDOC001", "\" \"", ProtocolErrorCode.ExecutionFailure)]
+    [InlineData(true, "DROP COLLECTION IF EXISTS \" \"", "COHDOC001", "\" \"", ProtocolErrorCode.ExecutionFailure)]
+    [InlineData(false, "CREATE COLLECTION \"\"", "OQL0002", "\"\"", ProtocolErrorCode.ParseFailure)]
+    [InlineData(true, "CREATE COLLECTION \"\"", "OQL0002", "\"\"", ProtocolErrorCode.ParseFailure)]
+    [InlineData(false, "DROP COLLECTION IF EXISTS \"\"", "OQL0002", "\"\"", ProtocolErrorCode.ParseFailure)]
+    [InlineData(true, "DROP COLLECTION IF EXISTS \"\"", "OQL0002", "\"\"", ProtocolErrorCode.ParseFailure)]
     [InlineData(false, "SELECT\n n / 0 FROM items", "COHDOC006", "n / 0", ProtocolErrorCode.ExecutionFailure)]
     [InlineData(true, "SELECT\n n / 0 FROM items", "COHDOC006", "n / 0", ProtocolErrorCode.ExecutionFailure)]
     [InlineData(false, "SELECT\n $missing FROM items", "COHDOC005", "$missing", ProtocolErrorCode.ExecutionFailure)]
@@ -50,7 +58,7 @@ public sealed class DocumentClientDiagnosticTests
             diagnostic.Code.ShouldBe(code);
             diagnostic.Start.ShouldBe(statement.IndexOf(span, StringComparison.Ordinal));
             diagnostic.End.ShouldBe(diagnostic.Start + span.Length);
-            diagnostic.Line.ShouldBe(span.StartsWith("SELECT", StringComparison.Ordinal) || span.StartsWith("CREATE", StringComparison.Ordinal) ? 1 : 2);
+            diagnostic.Line.ShouldBe(1 + statement[..diagnostic.Start!.Value].Count(character => character == '\n'));
             diagnostic.Severity.ShouldBe(DiagnosticSeverity.Error);
             failure.Message.ShouldBe($"{code}: {diagnostic.Message}");
             connection.IsOpen.ShouldBeTrue();

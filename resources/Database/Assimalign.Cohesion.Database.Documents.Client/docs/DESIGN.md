@@ -75,7 +75,10 @@ sequenceDiagram
 ```
 
 `DocumentResultSet` exposes ordinal/name-indexed rows, columns and `AffectedCount`. Queries use
-`-1`; index DDL uses zero. `IsDocumentQuery` distinguishes `SELECT *` even for an empty result.
+`-1`; collection and index DDL use zero. `CREATE COLLECTION [IF NOT EXISTS]` and
+`DROP COLLECTION [IF EXISTS]` use the existing Execute exchange and retain collection ownership
+and conditional no-op semantics. A schema-owned drop returns ExecutionFailure (6), and the
+connection remains usable. `IsDocumentQuery` distinguishes `SELECT *` even for an empty result.
 `Documents` holds owned `JsonElement` values in that case; positional queries leave it empty.
 Whole-document rows contain the same owned JsonElement as Documents, including scalar roots.
 Projected rows expose JSON numbers as `decimal`, strings, booleans, null, and nested object/array values as
@@ -102,6 +105,16 @@ has an empty list; the client never extracts codes from message text. The server
 text to 4096 UTF-16 characters and diagnostics to 256 (codes to 256 characters), with explicit
 truncation/omission markers. Codes and locations of retained diagnostics are unchanged. This
 keeps even a near-frame-sized failing identifier from turning a statement error into a broken wire.
+
+Blank OQL collection names return `COHDOC001` at the quoted name's span; empty quoted names
+return the parser's `OQL0002`. Both preserve the connection. The typed command API rejects blank
+names locally with its existing argument guard. A peer sending one through Command (69) receives
+an unlocated `COHDOC001` Failure and can continue using the same server session.
+
+Collection refusals preserve `COHDOC002` (missing DROP), `COHDOC010` (duplicate CREATE), and
+`COHDOC011` (schema-owned DROP) through both OQL and Command exchanges. Their OQL diagnostics
+carry the statement span; command diagnostics have no source location. All are ExecutionFailure
+and preserve the session, including conditional schema-owned drops.
 
 `DocumentClientException` is a sealed `DatabaseException` leaf, like Graph's model exception.
 It uses the inherited diagnostic carrier, so callers catching the area root see the same diagnostics.

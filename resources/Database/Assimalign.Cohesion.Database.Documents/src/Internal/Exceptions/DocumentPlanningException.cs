@@ -15,18 +15,20 @@ namespace Assimalign.Cohesion.Database.Documents.Internal;
 internal sealed class DocumentPlanningException : DatabaseException
 {
     internal DocumentPlanningException(string code, string message, Location? location = null, Exception? innerException = null)
-        : base(message, [new Diagnostic
-        {
-            Code = code,
-            Message = message,
-            Severity = DiagnosticSeverity.Error,
-            Location = location is null ? null : DiagnosticLocation.Absolute,
-            Start = location?.Start,
-            End = location?.End,
-            Line = location?.StartLine ?? 1,
-        }], innerException)
+        : base(message, [CreateDiagnostic(code, message, location)], innerException)
     {
     }
+
+    internal static Diagnostic CreateDiagnostic(string code, string? message, Location? location) => new()
+    {
+        Code = code,
+        Message = message,
+        Severity = DiagnosticSeverity.Error,
+        Location = location is null ? null : DiagnosticLocation.Absolute,
+        Start = location?.Start,
+        End = location?.End,
+        Line = location?.StartLine ?? 1,
+    };
 
     internal DocumentPlanningException At(Location? location) => Diagnostics[0].Start is not null || location is null
         ? this : new(Diagnostics[0].Code!, Message, location, InnerException);

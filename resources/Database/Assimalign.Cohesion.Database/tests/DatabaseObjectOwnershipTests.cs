@@ -1,6 +1,8 @@
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Database.Types;
+
 namespace Assimalign.Cohesion.Database.Tests;
 
 /// <summary>
@@ -40,5 +42,31 @@ public class DatabaseObjectOwnershipTests
         exception.Message.ShouldBe("The declaration owns 'sales'.");
         Should.Throw<System.ArgumentException>(() => new DatabaseObjectLockedException("sales", "sales", "DROP DATABASE", " "))
             .ParamName.ShouldBe("message");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database] - Ownership refusals retain diagnostic metadata and supply their own text")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ObjectLocked_WithDiagnostic_ShouldCarryCodeLocationAndMessage(bool customMessage)
+    {
+        // Arrange
+        var metadata = new Diagnostic { Code = "MODEL001", Location = DiagnosticLocation.Absolute, Start = 4, End = 20, Line = 2 };
+
+        // Act
+        var exception = customMessage
+            ? new DatabaseObjectLockedException("items", "Sales", "DROP", "The declaration owns 'items'.", metadata)
+            : new DatabaseObjectLockedException("items", "Sales", "DROP", metadata);
+
+        // Assert
+        var diagnostic = exception.Diagnostics.ShouldHaveSingleItem();
+        diagnostic.ShouldNotBeSameAs(metadata);
+        diagnostic.Code.ShouldBe("MODEL001");
+        diagnostic.Message.ShouldBe(exception.Message);
+        diagnostic.Severity.ShouldBe(DiagnosticSeverity.Error);
+        diagnostic.Location.ShouldBe(DiagnosticLocation.Absolute);
+        diagnostic.Start.ShouldBe(4);
+        diagnostic.End.ShouldBe(20);
+        diagnostic.Line.ShouldBe(2);
+        metadata.Message.ShouldBeNull();
     }
 }

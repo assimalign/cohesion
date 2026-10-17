@@ -64,7 +64,8 @@ internal static class Program
         });
         await using (var connection = await client.ConnectAsync(token))
         {
-            Check(await connection.CreateCollectionAsync("items", token) == "items", "create collection");
+            Check(await connection.ExecuteAsync("CREATE COLLECTION items", cancellationToken: token) == 0, "create collection");
+            Check(await connection.ExecuteAsync("CREATE COLLECTION IF NOT EXISTS items", cancellationToken: token) == 0, "existing collection");
             Check(await connection.GetCollectionAsync("items", token) == "items", "get collection");
             var saved = await connection.PutAsync("items", "one", "{\"name\":\"東京\",\"score\":3,\"nested\":[1,null]}"u8.ToArray(), cancellationToken: token);
             Check(saved.Version.Value > 0, "put version");
@@ -92,7 +93,8 @@ internal static class Program
             Check(updated.Version.Value > saved.Version.Value, "versioned update");
             Check(await connection.DeleteAsync("items", "one", updated.Version, token), "versioned delete");
             Check(await connection.GetAsync("items", "one", token) is null, "missing document");
-            await connection.DropCollectionAsync("items", token);
+            Check(await connection.ExecuteAsync("DROP COLLECTION items", cancellationToken: token) == 0, "OQL drop collection");
+            Check(await connection.ExecuteAsync("DROP COLLECTION IF EXISTS items", cancellationToken: token) == 0, "absent collection");
             Check((await connection.GetCollectionsAsync(token)).Count == 0, "drop collection");
         }
         var sessionId = server.Sessions.Single().Id;

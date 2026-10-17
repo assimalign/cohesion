@@ -22,7 +22,8 @@ if (args[0] == "seed")
 {
     var database = await engine.CreateDatabaseAsync("crash");
     await using var session = await database.CreateSessionAsync();
-    var collection = await session.CreateCollectionAsync("items");
+    await session.ExecuteAsync("CREATE COLLECTION items", cancellationToken: CancellationToken.None);
+    var collection = await session.GetCollectionAsync("items", CancellationToken.None);
     await collection.PutAsync(session, "committed", Encoding.UTF8.GetBytes(original));
     await session.ExecuteAsync("CREATE INDEX by_rank ON items (rank)");
     await session.BeginTransactionAsync();

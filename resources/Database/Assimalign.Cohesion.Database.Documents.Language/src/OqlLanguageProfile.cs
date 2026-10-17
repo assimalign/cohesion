@@ -8,6 +8,8 @@ namespace Assimalign.Cohesion.Database.Documents.Language;
 /// <remarks>
 /// The query vocabulary is based on the ODMG OQL specification. <c>CREATE INDEX</c> and
 /// <c>DROP INDEX</c> are deliberate Cohesion extensions because ODMG specifies no index DDL.
+/// Collection DDL accepts the SQL++ <c>CREATE COLLECTION [IF NOT EXISTS]</c> and
+/// <c>DROP COLLECTION [IF EXISTS]</c> spellings. <c>IF</c> remains positional, not reserved.
 /// </remarks>
 public static class OqlLanguageProfile
 {
@@ -48,6 +50,8 @@ public static class OqlLanguageProfile
 
     private static readonly string[] _clauses =
     [
+        OqlClauses.CreateCollection,
+        OqlClauses.DropCollection,
         OqlClauses.CreateIndex,
         OqlClauses.DropIndex,
         OqlClauses.Select,

@@ -40,7 +40,7 @@ public sealed record DocumentProtocolCommandMessage(DocumentProtocolOperation Op
         return buffer.ToArray();
     }
 
-    /// <summary>Decodes and validates an operation-specific payload.</summary>
+    /// <summary>Decodes and validates an operation-specific payload. The server validates collection names at the statement boundary.</summary>
     /// <param name="payload">The complete frame payload.</param>
     /// <returns>The decoded command with owned content.</returns>
     /// <exception cref="ProtocolException">The payload is invalid, truncated or has trailing bytes.</exception>
@@ -68,16 +68,16 @@ public sealed record DocumentProtocolCommandMessage(DocumentProtocolOperation Op
         }
         DocumentProtocolWire.EnsureEnd(payload, position);
         var command = new DocumentProtocolCommandMessage(operation, collection, id, version, content);
-        command.Validate();
+        command.Validate(validateCollectionName: false);
         return command;
     }
 
-    private void Validate()
+    private void Validate(bool validateCollectionName = true)
     {
         bool document = Operation is DocumentProtocolOperation.Get or DocumentProtocolOperation.Put or DocumentProtocolOperation.Delete;
         bool write = Operation is DocumentProtocolOperation.Put or DocumentProtocolOperation.Delete;
         if (!Enum.IsDefined(Operation) || Collection is null || Id is null ||
-            (Operation == DocumentProtocolOperation.ListCollections ? Collection.Length != 0 : string.IsNullOrWhiteSpace(Collection)) ||
+            (Operation == DocumentProtocolOperation.ListCollections ? Collection.Length != 0 : validateCollectionName && string.IsNullOrWhiteSpace(Collection)) ||
             (document ? string.IsNullOrWhiteSpace(Id) : Id.Length != 0) ||
             (!write && ExpectedVersion.HasValue) || (Operation != DocumentProtocolOperation.Put && !Content.IsEmpty))
         {

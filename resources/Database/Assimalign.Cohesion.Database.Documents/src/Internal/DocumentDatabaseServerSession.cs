@@ -494,6 +494,10 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
 
     private async Task RunCommandAsync(DocumentProtocolCommandMessage command, CancellationToken cancellationToken)
     {
+        if (command.Operation != DocumentProtocolOperation.ListCollections && string.IsNullOrWhiteSpace(command.Collection))
+        {
+            throw new DocumentPlanningException("COHDOC001", ErrorMessages.CollectionNameMissing);
+        }
         var session = _databaseSession!;
         long count = 0;
         long affected = -1;
