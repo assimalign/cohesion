@@ -6,11 +6,45 @@ using Xunit;
 
 using Assimalign.Cohesion.Database.Sql.Language.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Sql.Schema;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Sdk.Database.Tests;
 
 public partial class CompileDatabaseSchemaTaskTests
 {
+    [Theory(DisplayName = "Cohesion Test [Sdk.Database] - National character forms: extraction preserves runtime padding identity and hash")]
+    [MemberData(nameof(SqlTypeModifierCases.NationalCharacters), MemberType = typeof(SqlTypeModifierCases))]
+    public void Execute_NationalCharacters_ShouldMatchRuntime(string type, DatabaseType expected, int? length)
+    {
+        // Arrange
+        using var directory = new TemporaryDirectory();
+        string sourcePath = directory.File("Schema.cs");
+        File.WriteAllText(sourcePath, $$"""
+            using Assimalign.Cohesion.Database.Sql.Schema;
+            using Assimalign.Cohesion.Database.Sql.Language.Tests.TestObjects;
+            var schema = SqlSchema.Create("app", schema => schema.Table<SqlTypeModifierCases.Row>("items", table => table.Column(row => row.Text, "{{type}}")));
+            """);
+        var engine = new RecordingBuildEngine();
+        var task = CreateTask(directory, sourcePath, "Sql", engine);
+        task.ReferencePaths = [.. task.ReferencePaths, new Microsoft.Build.Utilities.TaskItem(
+            Path.Combine(AppContext.BaseDirectory, "Assimalign.Cohesion.Sdk.Database.Tests.dll"))];
+
+        // Act
+        bool success = task.Execute();
+
+        // Assert
+        success.ShouldBeTrue(Errors(engine));
+        var extracted = SqlCompiledSchemaSerializer.Read(SchemaPath(task, "app"));
+        var column = extracted.Tables.ShouldHaveSingleItem().Columns.ShouldHaveSingleItem();
+        column.Type.ShouldBe(expected);
+        column.CustomType.ShouldBe(type);
+        column.MaxLength.ShouldBe(expected == DatabaseType.Character ? length : null);
+        var runtime = SqlSchema.Compile("app", schema => schema.Table<SqlTypeModifierCases.Row>("items", table =>
+            table.Column(row => row.Text, type)));
+        extracted.CanonicalDocument.ShouldBe(runtime.CanonicalDocument);
+        extracted.Hash.ShouldBe(runtime.Hash);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sdk.Database] - Temporal modifiers: extraction names the unsupported modifier and column")]
     [MemberData(nameof(SqlTypeModifierCases.UnsupportedTemporal), MemberType = typeof(SqlTypeModifierCases))]
     public void Execute_TemporalModifiers_ShouldRefuseUnsupportedModifier(string type, string member)

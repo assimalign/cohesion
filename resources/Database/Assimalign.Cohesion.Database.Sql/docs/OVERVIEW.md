@@ -89,7 +89,7 @@ shared storage, with DDL flowing through the relational catalog
   strings, and ignores trailing spaces for comparison, grouping and index keys. CHAR-to-text
   casts and concatenation strip padding; LENGTH ignores it, while LIKE sees padded input.
   Domains and function parameters/results preserve their CHAR lengths. Compiled schemas use
-  format v6; result-header format 2 carries Character identity and the declared length.
+  format v7; result-header format 2 carries Character identity and the declared length.
 - **SQL definitions and declared scripts (E4)** — database-local SQL functions use the same
   bound expression evaluator and scalar ABI as registered functions. SQL domains share type
   resolution and write enforcement with registered domains. Canonical definitions, dependencies,

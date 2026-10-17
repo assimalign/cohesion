@@ -247,7 +247,7 @@ public class SqlSchemaTests
         SqlCompiledSchema reread = SqlCompiledSchemaSerializer.Deserialize(schema.CanonicalDocument);
 
         // Assert
-        schema.Format.ShouldBe("cohesion/database-schema/v6");
+        schema.Format.ShouldBe("cohesion/database-schema/v7");
         CompiledSchemaTable lines = schema.Tables.ShouldHaveSingleItem();
         lines.Constraints.Select(constraint => (constraint.Name, constraint.Kind, constraint.Expression?.CanonicalText, constraint.Columns.Count))
             .ShouldBe([

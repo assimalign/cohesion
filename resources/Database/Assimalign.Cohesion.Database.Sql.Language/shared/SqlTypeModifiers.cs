@@ -31,21 +31,33 @@ internal static class SqlTypeModifiers
             "INT" or "INTEGER" or "INT4" => DatabaseType.Int32,
             "BIGINT" or "INT8" => DatabaseType.Int64,
             "REAL" or "FLOAT4" => DatabaseType.Float32,
-            "FLOAT" or "FLOAT8" or "DOUBLE" => DatabaseType.Float64,
+            "FLOAT" or "FLOAT8" or "DOUBLE" or "DOUBLE PRECISION" => DatabaseType.Float64,
             "DECIMAL" or "NUMERIC" => DatabaseType.Decimal,
-            "CHAR" or "CHARACTER" => DatabaseType.Character,
-            "VARCHAR" or "TEXT" => DatabaseType.String,
-            "BINARY" or "VARBINARY" or "BLOB" or "BYTEA" => DatabaseType.Binary,
+            "CHAR" or "CHARACTER" or "NCHAR" or "NATIONAL CHAR" or "NATIONAL CHARACTER" => DatabaseType.Character,
+            "VARCHAR" or "TEXT" or "NVARCHAR" or "CHARACTER VARYING" or "CHAR VARYING" or
+                "NCHAR VARYING" or "NATIONAL CHAR VARYING" or "NATIONAL CHARACTER VARYING" => DatabaseType.String,
+            "BINARY" or "VARBINARY" or "BLOB" or "BYTEA" or "BINARY VARYING" => DatabaseType.Binary,
             "DATE" => DatabaseType.Date,
-            "TIME" => DatabaseType.Time,
-            "TIMESTAMP" or "DATETIME" => DatabaseType.DateTime,
-            "TIMESTAMPTZ" => DatabaseType.DateTimeOffset,
+            "TIME" or "TIME WITHOUT TIME ZONE" => DatabaseType.Time,
+            "TIMESTAMP" or "DATETIME" or "DATETIME2" or "TIMESTAMP WITHOUT TIME ZONE" => DatabaseType.DateTime,
+            "TIMESTAMPTZ" or "DATETIMEOFFSET" or "TIMESTAMP WITH TIME ZONE" => DatabaseType.DateTimeOffset,
             "INTERVAL" => DatabaseType.TimeSpan,
-            "UUID" or "GUID" => DatabaseType.Guid,
+            "UUID" or "GUID" or "UNIQUEIDENTIFIER" => DatabaseType.Guid,
             "JSON" => DatabaseType.Json,
             "JSONB" => DatabaseType.JsonBinary,
             _ => null,
         };
+
+    internal static bool AllowsMax(string name)
+        => name.ToUpperInvariant() is "VARCHAR" or "NVARCHAR" or "VARBINARY";
+
+    internal static string? Rejection(string name) => name.ToUpperInvariant() switch
+    {
+        "TIME WITH TIME ZONE" => "TIME WITH TIME ZONE has no shared storage type; use TIME WITHOUT TIME ZONE or TIMESTAMP WITH TIME ZONE.",
+        "BIT" => "BIT denotes PostgreSQL bit strings, which are not supported; use BOOLEAN for a truth value.",
+        "SMALLDATETIME" => "SMALLDATETIME range and minute precision cannot be honored; use TIMESTAMP.",
+        _ => null,
+    };
 
     internal static bool IsIdentifier(ReadOnlySpan<char> text)
     {
@@ -64,12 +76,13 @@ internal static class SqlTypeModifiers
     }
 
     // Typed schemas recognize interval qualifiers to diagnose them, but never emit them as DDL.
-    // Other typed names retain identifier-only spelling; SQL separately supports delimiters.
+    // Other typed names are identifiers or entries of the closed built-in name table;
+    // SQL separately supports delimiters.
     internal static bool IsTypeName(string text)
     {
         int open = text.IndexOf('(');
         string name = open < 0 ? text : text[..open].TrimEnd();
-        return (IsIdentifier(name) || IsIntervalQualifiedName(name)) &&
+        return (IsIdentifier(name) || StorageType(name) is not null || Rejection(name) is not null || IsIntervalQualifiedName(name)) &&
             (open < 0 || TrySplit(text, out _, out _, out _));
     }
 
@@ -101,6 +114,7 @@ internal static class SqlTypeModifiers
     internal static string? GetError(string name, int? first, int? second, out string code, bool isDelimited = false)
     {
         code = DiagnosticCode;
+        if (!isDelimited && Rejection(name) is { } rejection) { return rejection; }
         if (!isDelimited && IsIntervalQualifiedName(name))
         {
             if (second is not null || first < 0 ||
@@ -110,7 +124,7 @@ internal static class SqlTypeModifiers
             }
             code = "COHDBL001";
             string modifier = first is null ? name : string.Create(CultureInfo.InvariantCulture, $"{name}({first})");
-            return $"Interval field modifier '{modifier}' is recognized but not supported by the SQL model surface.";
+            return $"Interval field modifier '{modifier}' is recognized but not supported by the SQL model surface; field restrictions are not enforced, so use bare INTERVAL.";
         }
         DatabaseType? type = StorageType(name);
         if (string.Equals(name, "FLOAT", StringComparison.OrdinalIgnoreCase))
@@ -207,6 +221,11 @@ internal static class SqlTypeModifiers
             if (!arguments.EndsWith(')'))
             {
                 return false;
+            }
+
+            if (arguments[..^1].Trim().Equals("MAX", StringComparison.OrdinalIgnoreCase) && AllowsMax(name))
+            {
+                return true;
             }
 
             var parts = arguments[..^1].Split(',', StringSplitOptions.TrimEntries);

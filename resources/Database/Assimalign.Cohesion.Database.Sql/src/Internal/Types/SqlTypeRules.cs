@@ -73,7 +73,7 @@ internal static class SqlTypeRules
                 throw new ArgumentException($"'{name}' is a pseudo-type's name and cannot name a domain.", nameof(name));
             }
         }
-        if (SqlTypeNames.TryResolve(name, out _))
+        if (SqlTypeNames.TryResolve(name, out _) || SqlTypeModifiers.Rejection(name) is not null)
         {
             throw new ArgumentException($"'{name}' is a built-in SQL type name and cannot name a domain.", nameof(name));
         }

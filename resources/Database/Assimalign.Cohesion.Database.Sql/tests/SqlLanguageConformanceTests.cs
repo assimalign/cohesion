@@ -445,12 +445,16 @@ public sealed class SqlLanguageConformanceTests
                 result.AffectedCount.ShouldBe(1);
                 await ExpectRowsAsync(session, "SELECT id FROM t ORDER BY id;", [[1], [3]]);
             }),
-        [SqlClauses.CreateTable] = new("CREATE TABLE created (id INT PRIMARY KEY, label TEXT DEFAULT 'new');", [],
+        [SqlClauses.CreateTable] = new("CREATE TABLE created (id INT PRIMARY KEY, label NVARCHAR(MAX) DEFAULT 'new', f DOUBLE PRECISION, n NATIONAL CHARACTER(3), stamp TIMESTAMP WITH TIME ZONE);", [],
             expression => expression is SqlCreateTableExpression,
             async (session, _) =>
             {
                 await ExecuteAsync(session, "INSERT INTO created (id) VALUES (7);");
                 await ExpectRowsAsync(session, "SELECT id, label FROM created;", [[7, "new"]]);
+                await ExecuteAsync(session, "UPDATE created SET n = 'ab', f = 1.5;");
+                await ExpectRowsAsync(session, "SELECT n, f FROM created;", [["ab ", 1.5d]]);
+                await ExpectRowsAsync(session, "SELECT DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'created' ORDER BY ORDINAL_POSITION;",
+                    [["INTEGER"], ["CHARACTER VARYING"], ["DOUBLE PRECISION"], ["CHARACTER"], ["TIMESTAMP WITH TIME ZONE"]]);
             }),
         [SqlClauses.AlterTable] = new("ALTER TABLE t ADD COLUMN extra INT NOT NULL DEFAULT 7;", _seed,
             expression => expression is SqlAlterTableExpression { Action: SqlAlterAddColumnAction }, VerifyAlterAsync),

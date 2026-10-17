@@ -130,7 +130,7 @@ reports `SQL0003` at the literal; it also used to fail only at execution.
 | `a NOT NULL`, `flag NOT FALSE`, `x NOT y` | `NOT` after an operand must begin `NOT BETWEEN`, `NOT IN` or `NOT LIKE`; it used to parse as `x AND NOT y` | the token after `NOT` |
 | `WHERE id = :id`, `SET a = :a`, `WHERE id = ;`, a statement ending in `WHERE` or `=` | Expected an expression; the NULL literal the parser used to substitute is gone | the token, or the end of the text |
 | `WHERE (id = 1`, `id IN (1, 2`, `id BETWEEN 1 2`, `CASE WHEN c 'a' END`, `ORDER id`, `UPDATE t;`, `DELETE;`, `VALUES (1), ()` | The missing token, keyword, name or value | where it was expected |
-| `VARCHAR(25 5)`, `DECIMAL(10, 2, 5)`, `VARCHAR(-5)`, `VARCHAR(MAX)` | Type arguments must be one or two unsigned integer literals | the first offending token |
+| `VARCHAR(25 5)`, `DECIMAL(10, 2, 5)`, `VARCHAR(-5)`, `CHAR(MAX)` | Type arguments must be one or two unsigned integer literals, except MAX on VARCHAR/NVARCHAR/VARBINARY | the first offending token |
 | `'abc WHERE id = 1`, `"id FROM t`, `/* WHERE id = 1` | Unterminated literal, quoted identifier or comment | the opening delimiter |
 | `SELECT * FROM t ?`, `SELECT a # b FROM t`, `WHERE b = ?`, `WHERE id = ١` | A character outside the dialect; nothing is bound around it | the character |
 | `SELECT 1e FROM t`, `WHERE a = 2.5E-` | A numeric literal whose exponent has no digits | the literal |
@@ -1154,7 +1154,7 @@ conventions, not the complete ISO view layouts. Columns below are listed in
 | Relation | Columns, in order | Rows |
 |---|---|---|
 | `INFORMATION_SCHEMA.TABLES` | `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `TABLE_TYPE` | Stored tables in the current database; `TABLE_TYPE = 'BASE TABLE'` |
-| `INFORMATION_SCHEMA.COLUMNS` | `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `COLUMN_NAME`, `ORDINAL_POSITION`, `COLUMN_DEFAULT`, `IS_NULLABLE`, `DATA_TYPE`, `CHARACTER_MAXIMUM_LENGTH`, `CHARACTER_OCTET_LENGTH`, `NUMERIC_PRECISION`, `NUMERIC_PRECISION_RADIX`, `NUMERIC_SCALE`, `DATETIME_PRECISION` | One row per live table column; ordinals start at one and have no gap where a column was dropped |
+| `INFORMATION_SCHEMA.COLUMNS` | `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `COLUMN_NAME`, `ORDINAL_POSITION`, `COLUMN_DEFAULT`, `IS_NULLABLE`, `DATA_TYPE`, `CHARACTER_MAXIMUM_LENGTH`, `CHARACTER_OCTET_LENGTH`, `NUMERIC_PRECISION`, `NUMERIC_PRECISION_RADIX`, `NUMERIC_SCALE`, `DATETIME_PRECISION` | One row per live table column; ordinals start at one and have no gap where a column was dropped. All 19 DATA_TYPE names parse in DDL and CAST; aliases report canonical identity and modifiers |
 | `INFORMATION_SCHEMA.TABLE_CONSTRAINTS` | `CONSTRAINT_CATALOG`, `CONSTRAINT_SCHEMA`, `CONSTRAINT_NAME`, `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `CONSTRAINT_TYPE`, `IS_DEFERRABLE`, `INITIALLY_DEFERRED` | Primary keys, unique indexes/constraints, foreign keys, and explicit checks; both deferral fields are `NO` |
 | `INFORMATION_SCHEMA.KEY_COLUMN_USAGE` | `CONSTRAINT_CATALOG`, `CONSTRAINT_SCHEMA`, `CONSTRAINT_NAME`, `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `COLUMN_NAME`, `ORDINAL_POSITION` | One row per primary, unique, or foreign-key column, in constraint order |
 | `INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS` | `CONSTRAINT_CATALOG`, `CONSTRAINT_SCHEMA`, `CONSTRAINT_NAME`, `UNIQUE_CONSTRAINT_CATALOG`, `UNIQUE_CONSTRAINT_SCHEMA`, `UNIQUE_CONSTRAINT_NAME`, `MATCH_OPTION`, `UPDATE_RULE`, `DELETE_RULE` | Foreign keys with the referenced key identity; `MATCH_OPTION = 'NONE'`, `UPDATE_RULE = 'RESTRICT'`, delete rule `RESTRICT` or `CASCADE` |
@@ -1280,14 +1280,46 @@ minimum. Inside `CAST` an unrepresentable literal stays a CAST failure.
 | `BIGINT`, `INT8` | `Int64` |
 | `REAL`, `FLOAT4` | `Float32` |
 | `FLOAT[(p)]` | `Float32` for p = 1..24; `Float64` for p = 25..53 or no argument |
-| `FLOAT8`, `DOUBLE` | `Float64` |
+| `FLOAT8`, `DOUBLE`, `DOUBLE PRECISION` | `Float64` |
 | `DECIMAL[(p[,s])]`, `NUMERIC[(p[,s])]` | `Decimal` (single argument = precision) |
-| `CHAR[(n)]`, `CHARACTER[(n)]` | `Character` (bare CHAR is CHAR(1)) |
-| `VARCHAR[(n)]`, `TEXT[(n)]` | `String` |
-| `BINARY[(n)]`, `VARBINARY[(n)]`, `BLOB[(n)]`, `BYTEA[(n)]` | `Binary` |
-| `DATE` / `TIME` / `TIMESTAMP`, `DATETIME` / `TIMESTAMPTZ` / `INTERVAL` | `Date` / `Time` / `DateTime` / `DateTimeOffset` / `TimeSpan` |
-| `UUID`, `GUID` | `Guid` |
+| `CHAR[(n)]`, `CHARACTER[(n)]`, `NCHAR[(n)]`, `NATIONAL CHAR[(n)]`, `NATIONAL CHARACTER[(n)]` | `Character` (bare forms have length one) |
+| `VARCHAR[(n)]`, `TEXT[(n)]`, `NVARCHAR[(n)]`, `CHARACTER VARYING[(n)]`, `CHAR VARYING[(n)]`, `NCHAR VARYING[(n)]`, `NATIONAL CHAR VARYING[(n)]`, `NATIONAL CHARACTER VARYING[(n)]` | `String` |
+| `BINARY[(n)]`, `VARBINARY[(n)]`, `BLOB[(n)]`, `BYTEA[(n)]`, `BINARY VARYING[(n)]` | `Binary` |
+| `DATE` | `Date` |
+| `TIME`, `TIME WITHOUT TIME ZONE` | `Time` |
+| `TIMESTAMP`, `TIMESTAMP WITHOUT TIME ZONE`, `DATETIME`, `DATETIME2` | `DateTime` |
+| `TIMESTAMPTZ`, `TIMESTAMP WITH TIME ZONE`, `DATETIMEOFFSET` | `DateTimeOffset` |
+| `INTERVAL` | `TimeSpan` |
+| `UUID`, `GUID`, `UNIQUEIDENTIFIER` | `Guid` |
 | `JSON` / `JSONB` | `Json` / `JsonBinary` |
+
+DDL and CAST share one contextual type-name grammar, including case, whitespace and comments
+between words (`double /*x*/ precision`). No additional words are reserved. CREATE TABLE,
+both column ALTER forms, function signatures and domain bases resolve built-ins at parse time;
+columns expose `SqlColumnDefinition.ResolvedType`. Unknown names remain engine-resolved domains.
+All 19 current INFORMATION_SCHEMA DATA_TYPE spellings parse back to the same shared type,
+including CHARACTER added by #1437. The catalog stores type identity and modifiers, not aliases.
+
+`VARCHAR(MAX)`, `NVARCHAR(MAX)` and `VARBINARY(MAX)` mean unbounded String or Binary;
+MAX is accepted only on these three spellings. NCHAR, NATIONAL CHAR and NATIONAL CHARACTER
+are padded Character exactly like CHAR, including DATA_TYPE CHARACTER. Adding VARYING to any
+of those three names selects unpadded String exactly like VARCHAR; bare varying forms are
+unbounded. NATIONAL and VARYING remain usable as unquoted table and column names.
+UNIQUEIDENTIFIER is UUID/Guid and takes no arguments. DATETIME and DATETIME2 are lexical TIMESTAMP aliases: SQL Server's
+DATETIME 1753 lower bound and 1/300-second rounding are not emulated. DATETIMEOFFSET is
+TIMESTAMPTZ. These aliases add no Unicode storage distinction: all character spellings store Unicode.
+
+| Rejected spelling | Diagnostic and reason; replacement |
+| --- | --- |
+| TIME WITH TIME ZONE | SQL0005: no shared storage type; use TIME WITHOUT TIME ZONE or TIMESTAMP WITH TIME ZONE |
+| BIT, BIT(n) | SQL0005: PostgreSQL bit-string meaning wins under D1; use BOOLEAN for truth values |
+| SMALLDATETIME | SQL0005: range and minute precision cannot be honored; use TIMESTAMP |
+| INT[], INTEGER ARRAY (and other scalar array forms) | COHDBL001: arrays are unsupported; use a scalar type |
+| INTERVAL field qualifiers | COHDBL001: field restrictions are not enforced; use bare INTERVAL |
+
+PostgreSQL's grammar anchors the numeric, character and temporal spellings
+(`src/backend/parser/gram.y:14923-15016,15081-15181`, local reference clone). Every national
+character spelling has optional VARYING (`gram.y:15130-15140`).
 
 Coercion rules are an engine concern (planner/executor); the language layer
 guarantees only that declared names resolve to shared type identities so every
@@ -1319,15 +1351,15 @@ CAST, declared scripts, and typed schemas (including SDK extraction).
 | Type names | Accepted arguments | No arguments |
 | --- | --- | --- |
 | NUMERIC, DECIMAL | Precision p = 1..28; optional scale s = 0..p; omitted scale is zero | No declared precision or scale; values must still fit System.Decimal |
-| CHAR, CHARACTER | One length n = 1..10485760 Unicode scalar values | CHAR(1) |
-| VARCHAR, TEXT | One length n = 1..10485760 Unicode scalar values | No declared length limit |
-| BINARY, VARBINARY, BLOB, BYTEA | One length n = 1..10485760 bytes | No declared length limit |
+| CHAR, CHARACTER, NCHAR, NATIONAL CHAR, NATIONAL CHARACTER | One length n = 1..10485760 Unicode scalar values | CHAR(1) |
+| VARCHAR, TEXT, NVARCHAR and varying character spellings | One length n = 1..10485760 Unicode scalar values; MAX on VARCHAR/NVARCHAR | No declared length limit |
+| BINARY, VARBINARY, BLOB, BYTEA, BINARY VARYING | One length n = 1..10485760 bytes; MAX on VARBINARY | No declared length limit |
 | FLOAT | One binary precision p = 1..53: 1..24 resolves to REAL (Float32), 25..53 to DOUBLE PRECISION (Float64) | Float64 |
-| TIME, TIMESTAMP, TIMESTAMPTZ, INTERVAL; DATETIME alias | One nonnegative precision is recognized but unsupported (COHDBL001) | The type's normal meaning |
+| TIME, TIMESTAMP, TIMESTAMPTZ, INTERVAL; DATETIME, DATETIME2, DATETIMEOFFSET and time-zone spellings | One nonnegative precision is recognized but unsupported (COHDBL001), including 7 | The type's normal meaning |
 | INTERVAL field qualifiers | YEAR, MONTH, DAY, HOUR, MINUTE, SECOND and the ranges below are recognized but unsupported (COHDBL001); only SECOND accepts `(p)` | Bare INTERVAL keeps its normal meaning |
 | Every other built-in type and every domain | None (INT(5), BOOLEAN(1) and domain(1) are invalid) | The type's normal meaning |
 
-Arguments are one or two unsigned integer literals within Int32; negative, fractional,
+Except for the three MAX aliases, arguments are one or two unsigned integer literals within Int32; negative, fractional,
 overflowing, empty or extra arguments are invalid. CHAR and CHARACTER share the length validator
 with VARCHAR, but have their own padded type identity. The explicit string
 ceiling follows PostgreSQL's anychar_typmodin (src/backend/utils/adt/varchar.c:33-57)
@@ -1346,14 +1378,17 @@ REAL/FLOAT4 and DOUBLE/FLOAT8 do not take arguments. Function overloads use the 
 type, so FLOAT(24) is a REAL signature and FLOAT(53) is a DOUBLE signature.
 
 **PostgreSQL difference: temporal precision is recognized, not supported.** TIME(p), TIMESTAMP(p),
-TIMESTAMPTZ(p), INTERVAL(p), and this dialect's DATETIME(p) alias report COHDBL001, naming both the
+TIMESTAMPTZ(p), INTERVAL(p), DATETIME(p), DATETIME2(p) and DATETIMEOFFSET(p) report COHDBL001, naming both the
 object and precision modifier, including in CAST and declared scripts. The engine does not yet
 implement fractional-second rounding and never silently ignores a precision. PostgreSQL admits
 these modifiers (gram.y:15146-15181 and timestamp.c:1051-1110), and reduces precision above six
 with a warning (date.c:57-81; timestamp.c:110-132). A single unsigned Int32 precision above six
-is therefore also unsupported here. Malformed argument lists remain SQL0005. Typed declarations
+is therefore also unsupported here. Malformed argument lists remain SQL0005, including empty,
+negative, nonnumeric and excess arguments before WITH TIME ZONE. Declarations and CAST report
+only the modifier error for those lists; the temporal suffix never adds an unsupported-WITH
+diagnostic. A well-formed precision still reports COHDBL001 with or without that suffix. Typed declarations
 retain UnsupportedType and SDK diagnostics retain COHDBSDK106, with COHDBL001 in their detail.
-Fractional-second rounding is a separate follow-up.
+Every temporal precision, including 7, remains COHDBL001; #1509 is the rounding follow-up.
 
 **PostgreSQL difference: interval field qualifiers are recognized but unsupported.** The complete
 recognized set is YEAR, MONTH, DAY, HOUR, MINUTE, SECOND, YEAR TO MONTH, DAY TO HOUR,
@@ -1763,7 +1798,7 @@ pin in the same change.
 | `SQL0002` | Error | Unknown command (recognized unsupported clauses use `COHDBL001`) |
 | `SQL0003` | Error | Malformed syntax: text after a complete statement or after its terminating `;`; a missing expression, closing token, keyword, name or `VALUES` row; an unterminated string, quoted identifier or block comment; a character outside the dialect, such as `?`, `#`, `^` or a non-ASCII digit, which binds no alias or column (#1101); a numeric literal whose exponent has no digits; an `IS` form other than `[NOT] NULL`; `NOT` after an operand without `BETWEEN`, `IN` or `LIKE`; `LIKE ... ESCAPE`; `LIMIT` after `OFFSET`; an incomplete `IF [NOT] EXISTS`; `ALTER` without `TABLE`; an unsupported or incomplete `ALTER TABLE` action; and malformed transaction-control, JOIN, GROUP BY, HAVING, CAST, COLLATE, or constraint/DDL syntax |
 | `SQL0004` | — | Retired (E3): an unknown CAST target type was a parse error; a name that is not a built-in type is now resolved by the engine, and one it does not know is `COHSQLE010` |
-| `SQL0005` | Error | Invalid type modifiers at any declaration or CAST: malformed arguments (including VARCHAR(MAX)), out-of-range length/precision/scale (including FLOAT outside 1..53 bits), or arguments a type does not take; names the declaration. Recognized but unsupported temporal precision uses COHDBL001 |
+| `SQL0005` | Error | Invalid type modifiers at any declaration or CAST: malformed arguments (including CHAR(MAX)), out-of-range length/precision/scale (including FLOAT outside 1..53 bits), arguments a type does not take, or a rejected type spelling (BIT, SMALLDATETIME, TIME WITH TIME ZONE); names the declaration and reason. Temporal precision and INTERVAL qualifiers use COHDBL001 |
 | `SQL0006` | Error | Expression nesting exceeds the limit (256 levels by default, configurable within 32..4096), or parentheses nest deeper than the limit; an `AND`/`OR` chain counts one level. The rest of the statement is not parsed. An engine also reports it for a typed request whose statement nests deeper than the engine's limit (#1151) |
 | `SQL0007` | Error | The statement is within the nesting limit, but the thread parsing it has too little stack left to recurse that deep; the same text parses on a thread with more stack. An engine parsing statement text reports this as `COHSQLE004` (#1151) |
 | `SQL0100` | Information | Statement does not end with `;` |
@@ -1853,7 +1888,7 @@ text converted to the column type. Enums use their numeric storage values.
 `table.DefaultSql(selector, sqlLiteral)` is the escape hatch for a raw supported SQL literal,
 for example `DefaultSql(row => row.Placed, "'2026-01-01'")`; the SQL typed prefix
 `DATE '2026-01-01'` remains unsupported. Both declarations store the rendered literal text in the
-`cohesion/database-schema/v6` document, so equal text gives the same hash. This format records CHAR separately from VARCHAR and normalizes
+`cohesion/database-schema/v7` document, so equal text gives the same hash. This format records CHAR separately from VARCHAR and normalizes
 an omitted decimal scale to zero when precision is present. Earlier artifacts, applied markers
 and pending targets are refused before hash comparison (SqlSchemaValidationException,
 InvalidDocument at schema.format; COHDBSDK206 for SDK migration input). Rebuild artifacts and
@@ -1961,7 +1996,7 @@ TABLE against a typed table, and DROP INDEX against a typed index (including its
 are refused before Build opens or changes the database. Scripts may create and later alter their
 own tables, create their own indexes on typed tables, and run DML against typed tables.
 Scripts run inline, including data-scaling DDL, and force preceding typed migrations inline.
-SDK v6 artifacts do not carry scripts; extraction refuses Script calls with COHDBSDK110.
+SDK v7 artifacts do not carry scripts; extraction refuses Script calls with COHDBSDK110.
 
 ## Quoted calls (#1103 review)
 

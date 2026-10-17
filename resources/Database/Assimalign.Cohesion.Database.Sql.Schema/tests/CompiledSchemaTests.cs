@@ -16,7 +16,7 @@ public class CompiledSchemaTests
     {
         SqlCompiledSchema schema = CompileOrders();
 
-        schema.Format.ShouldBe("cohesion/database-schema/v6");
+        schema.Format.ShouldBe("cohesion/database-schema/v7");
         schema.Name.ShouldBe("orders-db");
         schema.Tables.Select(table => table.Name).ShouldBe(["order_lines", "orders"]);
         schema.Tables[1].RowType.ShouldStartWith("Assimalign.Cohesion.Database.Sql.Schema.Tests:");
@@ -83,6 +83,7 @@ public class CompiledSchemaTests
     [InlineData("cohesion/database-schema/v3")]
     [InlineData("cohesion/database-schema/v4")]
     [InlineData("cohesion/database-schema/v5")]
+    [InlineData("cohesion/database-schema/v6")]
     public void Deserialize_EarlierFormatVersion_ShouldBeRefused(string format)
     {
         // v1 carried the engine model; v2 had no domains or named column types; v3 had no defaults.

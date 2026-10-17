@@ -3,6 +3,7 @@ using System.Collections.Generic;
 
 using Assimalign.Cohesion.Database.Language;
 using Assimalign.Cohesion.Database.Sql.Language.Internal;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Language;
 
@@ -21,29 +22,133 @@ public sealed partial class SqlQueryParser
     }
 
     private string ParseDefinitionType(ref TokenLexer lexer, string subject)
+        => ParseDefinitionType(ref lexer, subject, out _);
+
+    private string ParseDefinitionType(ref TokenLexer lexer, string subject, out DatabaseTypeInfo? resolvedType)
     {
+        resolvedType = null;
         if (!IsIdentifierOrKeyword(ref lexer))
         {
             AddExpectedDiagnostic(ref lexer, "a type name");
             return "?";
         }
-        // Type text retains lexical delimiters so a quoted '(' cannot become a type argument.
         int start = lexer.Current.Position;
         int diagnosticsBeforeType = _parseDiagnostics.Count;
         string type = CurrentText(ref lexer);
         Advance(ref lexer);
+        type = ParseTypeNameWords(ref lexer, type);
         type = ParseIntervalQualifier(ref lexer, type, out _);
-        if (lexer.Current.Type == TokenType.LeftParen)
-        {
-            type += ParseTypeArguments(ref lexer, subject);
-        }
+        string arguments = lexer.Current.Type == TokenType.LeftParen
+            ? ParseTypeArguments(ref lexer, subject, type) : string.Empty;
+        // ISO temporal precision precedes the time-zone suffix. Also recognize the suffix
+        // before arguments, so every spelling receives the same modifier diagnostic.
+        type = ParseTimeZoneWords(ref lexer, type);
+        type += arguments;
         if (_parseDiagnostics.Count == diagnosticsBeforeType &&
-            SqlTypeModifiers.TrySplit(type, out string name, out int? first, out int? second) &&
-            SqlTypeModifiers.GetError(name, first, second, out string code, isDelimited: type.StartsWith('"')) is { } error)
+            SqlTypeModifiers.TrySplit(type, out string name, out int? first, out int? second))
         {
-            AddTypeModifierDiagnostic(subject, error, start, _lastTokenEnd, code);
+            if (SqlTypeModifiers.GetError(name, first, second, out string code, isDelimited: type.StartsWith('"')) is { } error)
+            {
+                AddTypeModifierDiagnostic(subject, error, start, _lastTokenEnd, code);
+            }
+            else if (SqlTypeNames.TryResolve(name, first, null, second, out var builtIn))
+            {
+                resolvedType = builtIn;
+            }
+        }
+        if (IsWord(ref lexer, "ARRAY") || CurrentText(ref lexer) == "[")
+        {
+            int arrayStart = lexer.Current.Position;
+            if (IsWord(ref lexer, "ARRAY")) { Advance(ref lexer); }
+            while (CurrentText(ref lexer) == "[")
+            {
+                Advance(ref lexer);
+                Expect(ref lexer, TokenType.RightBracket, "']' after the array type");
+            }
+            AddTypeModifierDiagnostic(subject, "Array types are not supported; use a scalar type.", arrayStart, _lastTokenEnd, "COHDBL001");
+            resolvedType = null;
         }
         return type;
+    }
+
+    // Contextual words: no new keyword reservation and no consumption of column constraints.
+    private string ParseTypeNameWords(ref TokenLexer lexer, string type)
+    {
+        if (type.Equals("DOUBLE", StringComparison.OrdinalIgnoreCase) && IsWord(ref lexer, "PRECISION"))
+        {
+            return AppendTypeWord(ref lexer, type);
+        }
+        // PostgreSQL src/backend/parser/gram.y:15130-15140 gives every national name opt_varying.
+        if (type.Equals("NATIONAL", StringComparison.OrdinalIgnoreCase) &&
+            (IsWord(ref lexer, "CHAR") || IsWord(ref lexer, "CHARACTER")))
+        {
+            type = AppendTypeWord(ref lexer, type);
+        }
+        if ((type.Equals("CHAR", StringComparison.OrdinalIgnoreCase) ||
+             type.Equals("CHARACTER", StringComparison.OrdinalIgnoreCase) ||
+             type.Equals("NCHAR", StringComparison.OrdinalIgnoreCase) ||
+             type.Equals("NATIONAL CHAR", StringComparison.OrdinalIgnoreCase) ||
+             type.Equals("NATIONAL CHARACTER", StringComparison.OrdinalIgnoreCase) ||
+             type.Equals("BINARY", StringComparison.OrdinalIgnoreCase)) && IsWord(ref lexer, "VARYING"))
+        {
+            return AppendTypeWord(ref lexer, type);
+        }
+        return ParseTimeZoneWords(ref lexer, type);
+    }
+
+    private string ParseTimeZoneWords(ref TokenLexer lexer, string type)
+    {
+        if ((type.Equals("TIME", StringComparison.OrdinalIgnoreCase) || type.Equals("TIMESTAMP", StringComparison.OrdinalIgnoreCase)) &&
+            (IsWord(ref lexer, "WITH") || IsWord(ref lexer, "WITHOUT")))
+        {
+            type = AppendTypeWord(ref lexer, type);
+            if (!IsWord(ref lexer, "TIME")) { AddExpectedDiagnostic(ref lexer, "TIME in the time-zone type name"); return type; }
+            type = AppendTypeWord(ref lexer, type);
+            if (!IsWord(ref lexer, "ZONE")) { AddExpectedDiagnostic(ref lexer, "ZONE in the time-zone type name"); return type; }
+            type = AppendTypeWord(ref lexer, type);
+        }
+        return type;
+    }
+
+    private string AppendTypeWord(ref TokenLexer lexer, string type)
+    {
+        type += " " + CurrentText(ref lexer);
+        Advance(ref lexer);
+        return type;
+    }
+
+    private static bool TrySkipTimeZoneType(ref TokenLexer lexer)
+    {
+        if (!IsWord(ref lexer, "TIMESTAMP") && !IsWord(ref lexer, "TIME")) { return false; }
+        var lookahead = lexer;
+        if (!MoveTypeLookahead(ref lookahead)) { return false; }
+        if (lookahead.Current.Type == TokenType.LeftParen)
+        {
+            // Only locate the suffix here; ParseTypeArguments owns modifier validation.
+            int depth = 1;
+            do
+            {
+                if (!MoveTypeLookahead(ref lookahead) || lookahead.Current.Type == TokenType.Semicolon) { return false; }
+                if (lookahead.Current.Type == TokenType.LeftParen) { depth++; }
+                else if (lookahead.Current.Type == TokenType.RightParen) { depth--; }
+            }
+            while (depth > 0);
+            if (!MoveTypeLookahead(ref lookahead)) { return false; }
+        }
+        if (!IsWord(ref lookahead, "WITH") || !MoveTypeLookahead(ref lookahead) ||
+            !IsWord(ref lookahead, "TIME") || !MoveTypeLookahead(ref lookahead) ||
+            !IsWord(ref lookahead, "ZONE")) { return false; }
+        lexer = lookahead;
+        return true;
+    }
+
+    private static bool MoveTypeLookahead(ref TokenLexer lexer)
+    {
+        while (lexer.MoveNext())
+        {
+            if (lexer.Current.Type != TokenType.Comment) { return true; }
+        }
+        return false;
     }
 
     private string ParseIntervalQualifier(ref TokenLexer lexer, string type, out int? end)

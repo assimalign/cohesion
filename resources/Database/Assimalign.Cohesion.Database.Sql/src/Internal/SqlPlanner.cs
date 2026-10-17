@@ -804,7 +804,7 @@ internal sealed partial class SqlPlanner
 
         foreach (var definition in create.Columns)
         {
-            var type = ResolveTypeName(definition.DataType, definition.ColumnName);
+            var type = ResolveColumnType(definition);
             var typeInfo = type.Storage;
 
             string? defaultLiteral = ResolveDefaultLiteral(definition, $"{schema}.{create.Table.TableName}");
@@ -850,7 +850,7 @@ internal sealed partial class SqlPlanner
     /// <returns>The canonical DEFAULT text, or null when the column declares none (or <c>DEFAULT NULL</c>).</returns>
     private string? ResolveDefaultLiteral(SqlColumnDefinition definition, string table, bool allowFunction = true)
     {
-        var type = ResolveTypeName(definition.DataType, definition.ColumnName);
+        var type = ResolveColumnType(definition);
         if (definition.DefaultValue is null)
         {
             return type.DefaultLiteral;
@@ -962,7 +962,7 @@ internal sealed partial class SqlPlanner
         {
             throw new SqlPlanningException("COHSQLE013", "ALTER COLUMN does not change constraints or primary keys.");
         }
-        var type = ResolveTypeName(change.Column.DataType, change.Column.ColumnName);
+        var type = ResolveColumnType(change.Column);
         return new SqlAlterColumnPlan(table, new SqlCatalogColumn(change.Column.ColumnName, type.Storage,
             change.Column.IsNullable, ResolveDefaultLiteral(change.Column, $"{table.Schema}.{table.Name}"),
             ResolveColumnCollation(change.Column, type.Storage), type.IsDomain ? type.Name : null,
@@ -971,7 +971,7 @@ internal sealed partial class SqlPlanner
 
     private SqlAddColumnPlan PlanAddColumn(string schema, string table, SqlAlterAddColumnAction add)
     {
-        var type = ResolveTypeName(add.Column.DataType, add.Column.ColumnName);
+        var type = ResolveColumnType(add.Column);
         return new SqlAddColumnPlan(
             schema,
             table,
@@ -1017,8 +1017,11 @@ internal sealed partial class SqlPlanner
     /// </summary>
     /// <exception cref="DatabaseException">The arguments are malformed, or a domain is given arguments.</exception>
     /// <exception cref="SqlEvaluationException">The name is neither a built-in type nor a registered domain (<c>COHSQLE010</c>).</exception>
-    private SqlType ResolveTypeName(string dataType, string columnName)
+    private SqlType ResolveColumnType(SqlColumnDefinition column)
     {
+        if (column.ResolvedType is { } builtIn) { return SqlType.ForStorage(builtIn); }
+        string dataType = column.DataType;
+        string columnName = column.ColumnName;
         // The parser normalizes the arguments; the catalog guards the planner seam so a malformed
         // argument is a statement error, never a raw FormatException that ends a wire session.
         if (_functions.Types.Resolve(dataType, out string? error) is { } type)

@@ -269,7 +269,7 @@ public sealed class SqlStatementCompletenessTests
     [InlineData("CREATE TABLE z (a VARCHAR(25 ^5));", "5")]
     [InlineData("CREATE TABLE z (b DECIMAL(10, 2^, 5));", ",")]
     [InlineData("CREATE TABLE z (c VARCHAR(^-5));", "-")]
-    [InlineData("CREATE TABLE z (a VARCHAR(^MAX));", "MAX")]
+    [InlineData("CREATE TABLE z (a CHAR(^MAX));", "MAX")]
     [InlineData("CREATE TABLE z (a VARCHAR(^99999999999));", "99999999999")]
     [InlineData("ALTER TABLE t ADD COLUMN c VARCHAR(^1e3);", "1e3")]
     public void Parse_MalformedModifier_ShouldReportOneLocatedModifierError(string marked, string located)

@@ -916,6 +916,16 @@ public sealed partial class SqlQueryParser : QueryParser
                 break;
             }
 
+            // WITH in a temporal type is not a CTE. The declaration/CAST parser validates
+            // the type and modifiers; this scan only skips a complete lexical suffix.
+            if (TrySkipTimeZoneType(ref lexer))
+            {
+                previousPreviousToken = previousToken;
+                previousToken = "ZONE";
+                previousPosition = lexer.Current.Position;
+                continue;
+            }
+
             string token = CurrentText(ref lexer);
             firstToken ??= token;
             var tokenLocation = Location.Create(

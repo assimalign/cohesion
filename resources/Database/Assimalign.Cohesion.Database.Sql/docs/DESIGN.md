@@ -1,5 +1,21 @@
 # Assimalign.Cohesion.Database.Sql — Design
 
+## Type-name resolution (#1108)
+
+Column planning consumes SqlColumnDefinition.ResolvedType for built-ins, as CAST already did;
+only unresolved domain names pass through the engine catalog. Shared SqlTypeModifiers supplies
+ISO multi-word names and the D1 SQL Server lexical aliases to SQL, typed schemas and SDK
+extraction. The schema statement renderer accepts the same closed built-in name set as typed
+declarations and reconstructs arguments from validated parts.
+
+Catalog columns still store DatabaseTypeInfo without lexical aliases or new fields. Per the
+unreleased-format policy data-storage format advances 12 -> 13, refusing older files without
+an upgrade reader. Canonical schemas advance v6 -> v7 too, since an earlier NCHAR CustomType
+could name a domain stored as String and now normalizes to Character. NCHAR stores padded
+Character and length, following #1437. DATETIME,
+DATETIME2 and DATETIMEOFFSET add no SQL Server range/rounding behavior; every temporal
+precision, 7 included, and INTERVAL field restrictions stay unsupported under #1438.
+
 ## Fixed-length character identity (#1437)
 
 `DatabaseType.Character` (19) is CHAR/CHARACTER, distinct from String (VARCHAR/TEXT).
@@ -90,7 +106,8 @@ unchanged.
 
 Historical script function signatures accept storage code 19 (Character) when recovering a dropped
 domain's signature from its receipt. A later catalog generation must not make the same declaration
-unopenable. The existing unreleased formats 12, v6 and result-header 2 remain unchanged.
+unopenable. That review left its unreleased formats 12, v6 and result-header 2 unchanged;
+#1108 advances the current storage/schema formats as recorded above.
 
 The SQL engine (area architecture: [resources/Database/DESIGN.md](../../../../docs/resources/Database/DESIGN.md)
 §3.3): parse (`Sql.Language`) → plan (`SqlPlanner`) → execute (`SqlPlanExecutor`)
@@ -1078,7 +1095,7 @@ SqlSchemaValidationException (InvalidDocument, schema.format), naming both forma
 rebuild/recreate remedy. SQL checks applied markers and pending targets before opening the data
 file set, and checks a replacement document before Apply/Verify compares hashes or plans work.
 The gate reads only the format; it never validates a pre-normalization hash or reconciles an old
-identity. Both catalog records retain a versioned document; the current record-space format 12
+identity. Both catalog records retain a versioned document; the current record-space format 13
 gates Character identity and its index keys, without changing these document envelopes.
 
 FLOAT(p) selects Float32 for 1..24 bits and Float64 for 25..53 bits; bare FLOAT stays Float64.
@@ -1252,7 +1269,7 @@ emit no DDL. Principals/grants and ALTER metadata requiring rewrites remain expl
 renderer; `table.DefaultSql(selector, sqlLiteral)` supplies a raw SQL literal. Strings are values
 on the typed path, so `Default(row => row.Status, "it's pending")` records `'it''s pending'`.
 Both paths store literal text in `CompiledSchemaColumn.DefaultLiteral`; equivalent rendered text
-has the same canonical document and hash. The document now uses `cohesion/database-schema/v6`
+has the same canonical document and hash. The document now uses `cohesion/database-schema/v7`
 for normalized decimal identities; typed defaults keep the shape introduced in B2.
 The engine validates one literal before writing anything and
 resolves its column's effective type, including a domain's base type. Preflight calls the same
@@ -1263,7 +1280,7 @@ Build with `COHSQLP001` before either file set exists; finite and underflow chec
 defaults apply here too. Valid rounding, Unicode character lengths and excess-space trimming
 therefore agree with DDL. The renderer emits canonical SQL; expressions/functions are refused,
 and `DEFAULT NULL` has the same live meaning as absence. The compiled document format is
-`cohesion/database-schema/v6`; B2 introduced `defaultLiteral` in v4. Null defaults
+`cohesion/database-schema/v7`; B2 introduced `defaultLiteral` in v4. Null defaults
 are omitted from canonical JSON. A non-null literal can backfill an added required column, subject to the planner's
 existing destructive-change opt-in. SDK extraction renders C# compile-time constants with the
 same schema renderer and preserves the same text and hash.
@@ -1947,7 +1964,7 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   format, no upgrade path.** The catalog stores the format version of the whole
   data file set, rows and the index trees that ride it (a kind-4 record for
   versions 1–3, a kind-8 record from version 4). The engine reads and writes
-  format 12 only: format 6's stamped rows in per-object page chains whose index keys use the
+  format 13 only: format 6's stamped rows in per-object page chains whose index keys use the
   temporal identity encoding (#1099, below), in index trees of B-tree page format
   2, which order entries by key, entry reference and writer (#1194,
   `Database.Indexing` DESIGN), decoded through each table's physical column
@@ -4649,7 +4666,7 @@ records only typed objects, whose structure scripts cannot change; it is safe to
 generation after script execution or receipt-chain recovery.
 
 Owner-review choices: scripts, and their preceding typed migration, run inline to preserve order;
-data-scaling scripts therefore add Build latency (49a). Scripts remain outside the SDK v6 typed
+data-scaling scripts therefore add Build latency (49a). Scripts remain outside the SDK v7 typed
 artifact; COHDBSDK110 prevents silent omission. Deploy the runtime declarations in Apply mode before
 Verify-mode startup. Informational ScriptApplied event 22 contains engine, database, name and
 SHA-256, never SQL text. COHESION_SCHEMA.FUNCTIONS adds IS_SQL_DEFINED; new TYPES and DOMAINS views

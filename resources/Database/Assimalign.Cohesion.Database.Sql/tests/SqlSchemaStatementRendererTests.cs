@@ -5,12 +5,40 @@ using Xunit;
 
 using Assimalign.Cohesion.Database.Sql.Schema;
 using Assimalign.Cohesion.Database.Sql.Internal;
+using Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public class SqlSchemaStatementRendererTests
 {
+    [Fact(DisplayName = "Cohesion Test [Sql] - Schema statements: every storage type renders and resolves its full modifiers")]
+    public void CreateTable_EveryStorageType_ShouldRoundTripResolvedType()
+    {
+        // Arrange
+        foreach (var type in Enum.GetValues<DatabaseType>())
+        {
+            if (type == DatabaseType.Null) { continue; }
+            int? length = type is DatabaseType.Character or DatabaseType.String or DatabaseType.Binary ? 20 : null;
+            int? precision = type == DatabaseType.Decimal ? 12 : null;
+            int? scale = type == DatabaseType.Decimal ? 3 : null;
+            var table = new CompiledSchemaTable("types", "Row",
+                [new CompiledSchemaColumn("value", type, true, length, precision, scale)], null, [], []);
+
+            // Act
+            string sql = SqlSchemaStatementRenderer.CreateTable(table);
+            var statement = new SqlQueryParser().Parse(sql);
+
+            // Assert
+            statement.Diagnostics.ShouldBeEmpty(sql);
+            var resolved = statement.Expression.ShouldBeOfType<SqlCreateTableExpression>().Columns[0].ResolvedType.ShouldNotBeNull();
+            resolved.Type.ShouldBe(type);
+            resolved.MaxLength.ShouldBe(length);
+            resolved.Precision.ShouldBe(precision);
+            resolved.Scale.ShouldBe(scale);
+        }
+    }
+
     [Fact(DisplayName = "Cohesion Test [Sql] - Schema statements: CREATE TABLE is deterministic and executable")]
     public void CreateTable_CompiledTable_ShouldRenderDeterministicRequestText()
     {

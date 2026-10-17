@@ -120,7 +120,7 @@ public sealed class SqlStatementCompletenessExecutionTests
     /// <summary>
     /// Malformed DDL fails at parse time and leaves the schema as it was. Type arguments
     /// used to be the concatenated text up to ')', so VARCHAR(25 5) created a 255-character
-    /// column and VARCHAR(MAX) threw a raw FormatException from the planner.
+    /// column and CHAR(MAX) threw a raw FormatException from the planner.
     /// </summary>
     /// <param name="sql">The malformed DDL statement.</param>
     /// <param name="code">The diagnostic for type modifiers or surrounding syntax.</param>
@@ -128,11 +128,11 @@ public sealed class SqlStatementCompletenessExecutionTests
     [InlineData("CREATE TABLE z (a VARCHAR(25 5));", "SQL0005")]
     [InlineData("CREATE TABLE z (b DECIMAL(10, 2, 5));", "SQL0005")]
     [InlineData("CREATE TABLE z (c VARCHAR(-5));", "SQL0005")]
-    [InlineData("CREATE TABLE z (a VARCHAR(MAX));", "SQL0005")]
+    [InlineData("CREATE TABLE z (a CHAR(MAX));", "SQL0005")]
     [InlineData("CREATE TABLE z (a VARCHAR(abc));", "SQL0005")]
     [InlineData("CREATE TABLE z (a TEXT NOT);", "SQL0003")]
     [InlineData("CREATE TABLE IF NOT z (a INT);", "SQL0003")]
-    [InlineData("ALTER TABLE t ADD COLUMN c VARCHAR(MAX);", "SQL0005")]
+    [InlineData("ALTER TABLE t ADD COLUMN c CHAR(MAX);", "SQL0005")]
     [InlineData("ALTER TABLE ADD COLUMN c INT;", "SQL0003")]
     [InlineData("ALTER INDEX ix RENAME TO iy;", "SQL0003")]
     [InlineData("CREATE INDEX ON t (name);", "SQL0003")]

@@ -324,13 +324,13 @@ public static class SqlExpressionRenderer
     /// <summary>
     /// Normalizes the CAST target as written, such as <c>decimal( 10 , 2 )</c>, to
     /// <c>DECIMAL(10, 2)</c>: the type name upper case and the arguments comma-separated, with
-    /// comments and other whitespace removed.
+    /// comments removed and one space between type-name words.
     /// </summary>
     private static string CastTarget(string targetType)
     {
         var builder = new StringBuilder();
         var lexer = new TokenLexer(targetType, SqlLanguageProfile.Instance.ToLexerOptions());
-        bool first = true;
+        bool previousWord = false;
         while (lexer.MoveNext())
         {
             if (lexer.Current.Type == TokenType.Comment)
@@ -339,8 +339,10 @@ public static class SqlExpressionRenderer
             }
 
             string token = lexer.Current.Value.ToString();
-            builder.Append(lexer.Current.Type == TokenType.Comma ? ", " : first ? token.ToUpperInvariant() : token);
-            first = false;
+            bool word = lexer.Current.Type is TokenType.Identifier or TokenType.Keyword or TokenType.Function or TokenType.QuotedIdentifier;
+            if (word && previousWord) { builder.Append(' '); }
+            builder.Append(lexer.Current.Type == TokenType.Comma ? ", " : word ? token.ToUpperInvariant() : token);
+            previousWord = word;
         }
         return builder.ToString();
     }
