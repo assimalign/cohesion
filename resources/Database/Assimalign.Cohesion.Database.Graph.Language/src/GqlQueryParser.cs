@@ -102,7 +102,7 @@ public sealed partial class GqlQueryParser : QueryParser
         else if (Is("EXPLAIN"))
         {
             _position++;
-            if (Is("MATCH") || Is("CREATE") || Is("INSERT"))
+            if (Is("MATCH") || Is("CREATE") || Is("INSERT") || Is("RETURN"))
             {
                 expression = ParseQuery();
                 expression.Explain();
@@ -114,15 +114,10 @@ public sealed partial class GqlQueryParser : QueryParser
             }
         }
         else if (catalogStatement) { expression = ParseCatalog(); }
-        else if (Is("MATCH") || Is("CREATE") || Is("INSERT")) { expression = ParseQuery(); }
+        else if (Is("MATCH") || Is("CREATE") || Is("INSERT") || Is("RETURN")) { expression = ParseQuery(); }
         else
         {
-            if (Is("RETURN") && _tokens[_position + 1].Type == TokenType.Parameter)
-            {
-                Advance();
-                RejectUnsupportedParameter("PARAMETER PROJECTION");
-            }
-            else if (Is("DELETE") || Is("DETACH") || Is("WHERE") || Is("RETURN"))
+            if (Is("DELETE") || Is("DETACH") || Is("WHERE"))
             {
                 Error("GQL0002", "Expected MATCH, INSERT, or CREATE before this clause.", Current);
             }
@@ -167,8 +162,7 @@ public sealed partial class GqlQueryParser : QueryParser
     private void FindUnsupported()
     {
         int patternDepth = 0;
-        bool inPredicateOrReturn = false;
-        bool inPredicate = false;
+        bool inValueExpression = false;
         bool sawCall = false;
         var label = LabelScan.None;
         int labelParens = 0;
@@ -183,7 +177,7 @@ public sealed partial class GqlQueryParser : QueryParser
             if (token.Type is TokenType.LeftParen or TokenType.LeftBracket or TokenType.LeftBrace) { patternDepth++; }
             if (token.Type is TokenType.RightParen or TokenType.RightBracket or TokenType.RightBrace) { patternDepth--; }
 
-            // A WHERE label expression (n:A|B, n IS [NOT] LABELED A|B) holds label names exactly
+            // A WHERE/RETURN label expression (n:A|B, n IS [NOT] LABELED A|B) holds label names exactly
             // as a pattern does, so n:A|Order names a label, not ORDER BY.
             if (label != LabelScan.None)
             {
@@ -191,7 +185,7 @@ public sealed partial class GqlQueryParser : QueryParser
                 label = LabelScan.None;
                 labelParens = 0;
             }
-            if (token.Type == TokenType.Colon && inPredicate && i > 0 &&
+            if (token.Type == TokenType.Colon && inValueExpression && i > 0 &&
                 _tokens[i - 1].Type is TokenType.Identifier or TokenType.QuotedIdentifier)
             {
                 label = LabelScan.ExpectPrimary;
@@ -201,7 +195,7 @@ public sealed partial class GqlQueryParser : QueryParser
             // expression on an edge ISO gives no filler. The parser reports that (GQL0002); the
             // scan reads the names that follow as labels, so IS is not the unsupported IS clause
             // and -IS Order-> is not ORDER BY.
-            if (patternDepth == 0 && !inPredicateOrReturn && FollowsEdgeConnector(i) &&
+            if (patternDepth == 0 && !inValueExpression && FollowsEdgeConnector(i) &&
                 (token.Type == TokenType.Colon || IsWordAt(i, "IS")))
             {
                 label = LabelScan.ExpectPrimary;
@@ -210,24 +204,24 @@ public sealed partial class GqlQueryParser : QueryParser
 
             // A tilde edge right after a node pattern is undirected, which the engine cannot
             // store: ~[]~, <~[]~, ~[]~>, ~, <~ and ~> each name one construct.
-            if (token.Type == TokenType.RightParen && patternDepth == 0 && !inPredicateOrReturn &&
+            if (token.Type == TokenType.RightParen && patternDepth == 0 && !inValueExpression &&
                 TryFindUndirectedEdge(i + 1, out int edgeEnd))
             {
                 UnsupportedConstruct(GqlUnsupportedVocabulary.UndirectedEdge, _tokens[i + 1], _tokens[edgeEnd]);
                 continue;
             }
 
-            if (token.Type is TokenType.Asterisk or TokenType.DotDot && !inPredicate)
+            if (token.Type is TokenType.Asterisk or TokenType.DotDot && !inValueExpression)
             {
                 Unsupported("QUANTIFIED PATTERN OR STAR PROJECTION", token);
                 continue;
             }
-            if (token.Type == TokenType.Tilde && inPredicate && i > 0 && _tokens[i - 1].Type == TokenType.Equals && Adjacent(i - 1, i))
+            if (token.Type == TokenType.Tilde && inValueExpression && i > 0 && _tokens[i - 1].Type == TokenType.Equals && Adjacent(i - 1, i))
             {
                 Unsupported("REGULAR EXPRESSION =~", token);
                 continue;
             }
-            if (inPredicateOrReturn && token.Type == TokenType.Dot && i >= 2 && _tokens[i - 2].Type == TokenType.Dot)
+            if (inValueExpression && token.Type == TokenType.Dot && i >= 2 && _tokens[i - 2].Type == TokenType.Dot)
             {
                 Unsupported("NESTED PROPERTY ACCESS", token);
                 continue;
@@ -239,21 +233,19 @@ public sealed partial class GqlQueryParser : QueryParser
                 continue;
             }
             if (token.Type is not (TokenType.Keyword or TokenType.Identifier or TokenType.Function)) { continue; }
+            // Contextual clause words, such as NEXT, remain legal aliases after AS.
+            if (i > 0 && IsWordAt(i - 1, "AS") && token.Type is TokenType.Identifier or TokenType.Function) { continue; }
             if (i > 0 && _tokens[i - 1].Type is TokenType.Dot or TokenType.Colon) { continue; }
             if (i + 1 < _tokens.Count && _tokens[i + 1].Type == TokenType.Colon) { continue; }
             string value = token.Text.ToUpperInvariant();
-            if (patternDepth == 0 && value is "WHERE" or "RETURN") { inPredicateOrReturn = true; }
-            if (patternDepth == 0 && value is "MATCH" or "CREATE" or "INSERT" or "DELETE") { inPredicateOrReturn = false; }
-            if (patternDepth == 0 && value is "WHERE" or "RETURN" or "MATCH" or "CREATE" or "INSERT" or "DELETE")
-            {
-                inPredicate = value == "WHERE";
-            }
+            if (patternDepth == 0 && value is "WHERE" or "RETURN") { inValueExpression = true; }
+            if (patternDepth == 0 && value is "MATCH" or "CREATE" or "INSERT" or "DELETE") { inValueExpression = false; }
 
             // n IS [NOT] LABELED A in WHERE is ISO's <labeled predicate>; IS NULL and truth
-            // tests are scalar predicates (#1140). RETURN has no expressions until #1141.
+            // tests are scalar predicates (#1140), also available in RETURN (#1141).
             // In a pattern, (n IS A) is a label expression and needs no case
             // here: words inside a pattern are names.
-            if (value == "IS" && inPredicate)
+            if (value == "IS" && inValueExpression)
             {
                 int labeled = IsWordAt(i + 1, "NOT") ? i + 2 : i + 1;
                 if (IsWordAt(labeled, GqlLabelVocabulary.Labeled))
@@ -263,15 +255,16 @@ public sealed partial class GqlQueryParser : QueryParser
                     continue;
                 }
             }
-            if (inPredicateOrReturn && token.Type is TokenType.Identifier or TokenType.Function &&
+            if (inValueExpression && token.Type is TokenType.Identifier or TokenType.Function &&
                 i + 1 < _tokens.Count && _tokens[i + 1].Type == TokenType.LeftParen &&
                 !GqlUnsupportedVocabulary.TryFind(value, out _))
             {
                 Unsupported($"FUNCTION {token.Text}", token);
                 continue;
             }
-            if (value == "WITH" && inPredicate && i > 0 && (IsWordAt(i - 1, "STARTS") || IsWordAt(i - 1, "ENDS"))) { continue; }
-            if (patternDepth != 0 && !inPredicateOrReturn) { continue; }
+            if (value == "WITH" && inValueExpression && i > 0 && (IsWordAt(i - 1, "STARTS") || IsWordAt(i - 1, "ENDS"))) { continue; }
+            if (value == "ALL" && i > 0 && IsWordAt(i - 1, "RETURN")) { continue; }
+            if (patternDepth != 0 && !inValueExpression) { continue; }
             if (!GqlUnsupportedVocabulary.TryFind(value, out var word)) { continue; }
 
             bool first = i == 0;
@@ -281,7 +274,7 @@ public sealed partial class GqlQueryParser : QueryParser
             {
                 case GqlWordPosition.PathMode:
                     // TRAIL (a)... is a path mode; trail = (a)... names a path.
-                    if (patternDepth != 0 || inPredicateOrReturn || !StartsPathPattern(i + 1, ref end)) { continue; }
+                    if (patternDepth != 0 || inValueExpression || !StartsPathPattern(i + 1, ref end)) { continue; }
                     break;
                 case GqlWordPosition.BeforeDelete:
                     if (!IsWordAt(i + 1, "DELETE")) { continue; }
@@ -290,7 +283,7 @@ public sealed partial class GqlQueryParser : QueryParser
                 case GqlWordPosition.EdgePattern:
                     continue;
                 default:
-                    if (value is "ALL" or "ANY" or "SHORTEST" && !inPredicateOrReturn &&
+                    if (value is "ALL" or "ANY" or "SHORTEST" && !inValueExpression &&
                         TryPathSearchPrefix(i, out string prefix, out int last))
                     {
                         // One path search prefix, with its path mode and PATH/PATHS, not ALL

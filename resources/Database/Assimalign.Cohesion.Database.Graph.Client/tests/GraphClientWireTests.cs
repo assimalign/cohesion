@@ -242,7 +242,7 @@ public sealed class GraphClientWireTests
     /// <param name="statement">The statement to reject.</param>
     /// <param name="code">The expected stable error code.</param>
     [Theory(DisplayName = "Cohesion Test [Graph.Client] - Statement failures preserve pooled authenticated sessions")]
-    [InlineData("MATCH (a) RETURN *", ProtocolErrorCode.ParseFailure)]
+    [InlineData("MATCH (a) RETURN *", ProtocolErrorCode.ExecutionFailure)]
     [InlineData("MATCH (a) RETURN b.name", ProtocolErrorCode.ExecutionFailure)]
     [InlineData("MATCH (a) RETURN a", ProtocolErrorCode.ExecutionFailure)]
     [InlineData("BEGIN", ProtocolErrorCode.ParseFailure)]
@@ -271,8 +271,11 @@ public sealed class GraphClientWireTests
     }
 
     /// <summary>A mutation with a non-scalar result is rejected before its writes can be applied.</summary>
-    [Fact(DisplayName = "Cohesion Test [Graph.Client] - Entity projection on Execute fails before mutation")]
-    public async Task ExecuteAsync_EntityProjection_ShouldRejectBeforeMutating()
+    [Theory(DisplayName = "Cohesion Test [Graph.Client] - Entity projection on Execute fails before mutation")]
+    [InlineData("CREATE (n:Injected) RETURN n")]
+    [InlineData("INSERT (a:Person {name: 'X'}) RETURN a")]
+    [InlineData("INSERT (a:Person {name: 'X'}) RETURN *")]
+    public async Task ExecuteAsync_EntityProjection_ShouldRejectBeforeMutating(string statement)
     {
         // Arrange
         await using var harness = await GraphClientTestHarness.StartAsync();
@@ -280,10 +283,11 @@ public sealed class GraphClientWireTests
 
         // Act / Assert
         var error = await Should.ThrowAsync<GraphClientException>(async () =>
-            await connection.QueryAsync("CREATE (n:Injected) RETURN n", cancellationToken: harness.Token));
+            await connection.QueryAsync(statement, cancellationToken: harness.Token));
         error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
         error.Message.ShouldContain("ExecutePaths", Case.Sensitive);
         (await connection.QueryAsync("SHOW LABELS", cancellationToken: harness.Token)).ShouldBeEmpty();
+        (await connection.QueryAsync("MATCH (a) WHERE a.name = 'X' RETURN a.name", cancellationToken: harness.Token)).ShouldBeEmpty();
     }
 
     /// <summary>Late teardown on an already returned wrapper cannot abort a newer rental of its pooled session.</summary>

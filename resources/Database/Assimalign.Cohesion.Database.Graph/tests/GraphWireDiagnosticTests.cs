@@ -66,7 +66,7 @@ public sealed class GraphWireDiagnosticTests
     [InlineData("MATCH (n) RETURN n")]
     [InlineData("MATCH (a)-[r]->(b) RETURN r")]
     [InlineData("MATCH p = (a)->(b) RETURN p")]
-    public async Task ParseScalarRequest_EntityProjection_ShouldCarryLocatedRejectionAsync(string text)
+    public async Task Execute_PlannedEntityProjection_ShouldCarryLocatedRejectionAsync(string text)
     {
         // Arrange
         await using var harness = await GraphServerHarness.StartAsync();
@@ -76,7 +76,10 @@ public sealed class GraphWireDiagnosticTests
         var location = GraphQueryRequest.FromGql(text).Statement.GqlExpression.Location!;
 
         // Act
-        var failure = Should.Throw<DatabaseException>(() => ParseScalarRequest(session, text, null));
+        var request = ParseScalarRequest(session, text, null);
+        request.ScalarsOnly.ShouldBeTrue();
+        var failure = await Should.ThrowAsync<DatabaseException>(async () =>
+            await session.DatabaseSession!.ExecuteAsync(request, CancellationToken.None));
         await client.SendAsync(GraphProtocolMessageType.Execute, GraphProtocolExecuteMessage.Create(text).Encode());
         var frame = await client.ExpectAsync(ProtocolMessageType.Error);
         var error = ProtocolErrorMessage.Decode(frame.Payload.Span);

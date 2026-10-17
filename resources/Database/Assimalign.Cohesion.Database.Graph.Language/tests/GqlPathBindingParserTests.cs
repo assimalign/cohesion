@@ -19,7 +19,7 @@ public sealed class GqlPathBindingParserTests
         path.Variable.ShouldBe(variable);
         path.Nodes.Select(node => node.Variable).ShouldBe(["a", "b"]);
         path.Relationships.Single().Variable.ShouldBe("r");
-        parsed.GqlExpression.Projections.Single().Variable.ShouldBe(variable);
+        parsed.GqlExpression.Projections.Single().Expression.ShouldBeOfType<GqlVariableExpression>().Variable.ShouldBe(variable);
     }
 
     [Theory(DisplayName = "Cohesion Test [Graph.Language] - Invalid path binding syntax is rejected")]

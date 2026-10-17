@@ -270,20 +270,19 @@ public sealed class GqlLabelExpressionParserTests
         => Parse(gql).Diagnostics.ShouldBeEmpty();
 
     /// <summary>
-    /// RETURN has no expressions until #1141; IS there remains a syntax error.
+    /// RETURN evaluates the same labeled predicates as WHERE (#1141).
     /// </summary>
     /// <param name="gql">An IS that is not a WHERE labeled predicate.</param>
-    [Theory(DisplayName = "Cohesion Test [Graph.Language] - Labeled predicate: IS in RETURN remains outside the projection grammar")]
+    [Theory(DisplayName = "Cohesion Test [Graph.Language] - Labeled predicate: IS in RETURN is an expression")]
     [InlineData("MATCH (a) RETURN a IS LABELED A")]
-    public void Parse_IsOutsideLabeledPredicate_ShouldStayUnsupported(string gql)
+    public void Parse_IsInReturn_ShouldBuildLabeledPredicate(string gql)
     {
         // Act
-        var diagnostic = Parse(gql).Diagnostics.ShouldHaveSingleItem();
+        var statement = Parse(gql);
 
         // Assert
-        diagnostic.Code.ShouldBe("GQL0002");
-        diagnostic.Message.ShouldBe("Unexpected token; exactly one statement is accepted.");
-        diagnostic.Start.ShouldBe(gql.IndexOf("IS", StringComparison.Ordinal));
+        statement.Diagnostics.ShouldBeEmpty();
+        statement.GqlExpression.Projections.ShouldHaveSingleItem().Expression.ShouldBeOfType<GqlLabeledPredicate>().Variable.ShouldBe("a");
     }
 
     private static GqlLabelName Name(string name) => new(name);

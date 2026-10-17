@@ -10,7 +10,8 @@ namespace Assimalign.Cohesion.Database.Graph;
 /// <see cref="DatabaseExecutionSession{TRequest}.ExecuteAsync(TRequest, System.Threading.CancellationToken)"/>
 /// on a <see cref="GraphDatabaseSession"/>, whose request root is <see cref="GraphRequest"/>.
 /// A named path retains traversal order; a node becomes a one-node path, and a relationship becomes
-/// a path containing its source and target nodes in stored direction. Scalar and multiple projections,
+/// a path containing its source and target nodes in stored direction. DISTINCT compares graph identity;
+/// RETURN * is accepted when exactly one named binding is in scope. Computed and multiple projections,
 /// catalog statements, and mutations are rejected before execution.
 /// </remarks>
 public sealed class GraphPathsQueryRequest : GraphRequest

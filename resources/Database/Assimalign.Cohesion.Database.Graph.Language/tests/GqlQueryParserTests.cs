@@ -12,6 +12,14 @@ public class GqlQueryParserTests
 {
     [Theory]
     [InlineData("MATCH (a:Person) RETURN a")]
+    [InlineData("MATCH (a) RETURN DISTINCT a.name")]
+    [InlineData("MATCH (a) RETURN ALL a.name")]
+    [InlineData("MATCH (a) RETURN *")]
+    [InlineData("MATCH (a) RETURN a.age + 1 AS next, a.name || '!'")]
+    [InlineData("RETURN 1 + 1 AS two")]
+    [InlineData("RETURN DISTINCT 1")]
+    [InlineData("RETURN ALL 1")]
+    [InlineData("MATCH p = (a)-[r]->(b) RETURN p, a.name")]
     [InlineData("MATCH ()-[r:KNOWS]->() RETURN r")]
     [InlineData("MATCH (a)<-[r:KNOWS]-(b) RETURN a, r, b")]
     [InlineData("MATCH (a)-[r]-(b) RETURN a, r, b")]
@@ -57,6 +65,12 @@ public class GqlQueryParserTests
     [InlineData("MATCH (a)-[r]-> RETURN a", "GQL0002")]
     [InlineData("MATCH (a)", "GQL0002")]
     [InlineData("MATCH (a) RETURN", "GQL0002")]
+    [InlineData("MATCH () RETURN *", "GQL0002")]
+    [InlineData("RETURN *", "GQL0002")]
+    [InlineData("RETURN DISTINCT", "GQL0002")]
+    [InlineData("RETURN ALL", "GQL0002")]
+    [InlineData("MATCH (a) RETURN *, a", "GQL0002")]
+    [InlineData("RETURN 1 AS", "GQL0002")]
     [InlineData("MATCH (is) RETURN is", "GQL0002")]
     [InlineData("MATCH (a) WHERE a.age = RETURN a", "GQL0002")]
     [InlineData("MATCH (a) WHERE a.age = 2 = 3 RETURN a", "GQL0002")]
@@ -89,10 +103,9 @@ public class GqlQueryParserTests
     [InlineData("MATCH (a) REMOVE a.age")]
     [InlineData("MERGE (a:Person)")]
     [InlineData("MATCH (a) RETURN a UNION MATCH (b) RETURN b")]
-    [InlineData("MATCH (a) RETURN DISTINCT a")]
     [InlineData("MATCH (a) RETURN count(a)")]
     [InlineData("MATCH (a) WHERE abs(a.age) = 1 RETURN a")]
-    [InlineData("MATCH (a) RETURN *")]
+    [InlineData("MATCH (a) RETURN a {.name}")]
     [InlineData("MATCH (a)-[r*1..3]->(b) RETURN a")]
     [InlineData("MATCH (a)-[r]->{1,3}(b) RETURN a")]
     [InlineData("INSERT (:Person {tags: [1, 2]})")]
@@ -131,7 +144,13 @@ public class GqlQueryParserTests
         path.Relationships[0].LabelExpression.ShouldBe(new GqlLabelName("KNOWS"));
         path.Nodes[1].LabelExpression.ShouldBeNull();
         path.Relationships[1].LabelExpression.ShouldBeNull();
-        query.Projections.ShouldBe([new GqlProjection("a"), new GqlProjection("r"), new GqlProjection("b", "name", "friend")]);
+        query.Projections.Count.ShouldBe(3);
+        query.Projections[0].Expression.ShouldBeOfType<GqlVariableExpression>().Variable.ShouldBe("a");
+        query.Projections[1].Expression.ShouldBeOfType<GqlVariableExpression>().Variable.ShouldBe("r");
+        var projected = query.Projections[2];
+        projected.Expression.ShouldBeOfType<GqlPropertyExpression>().Variable.ShouldBe("b");
+        projected.Expression.ShouldBeOfType<GqlPropertyExpression>().Property.ShouldBe("name");
+        projected.Alias.ShouldBe("friend");
     }
 
     [Fact]

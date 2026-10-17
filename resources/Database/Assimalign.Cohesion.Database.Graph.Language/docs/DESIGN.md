@@ -31,7 +31,7 @@ COHDBG003 in maps, WHERE and indexed anchors, before storage is called. No refle
 runtime code generation is involved.
 
 `$$name` (ISO substituted reference) and whole-map `(n $props)` remain COHDBL001 naming the
-form. `RETURN $p` remains COHDBL001 PARAMETER PROJECTION until #1141; paging parameters
+form. `RETURN $p` is a live value expression since #1141; paging parameters
 belong to #1142. #1146 lifts list/map parameters in value positions; property maps remain scalar.
 `GqlParameterParserTests`, `GraphParameterTests`, the clause execution corpus and client/server
 wire tests pin this boundary. Parameters add no profile clause.
@@ -88,7 +88,7 @@ flowchart LR
 ```
 
 `GqlQueryExpression` carries match paths, an optional predicate, insertion paths, deletion variables,
-a detach flag, projections, and an optional `GqlCatalogSurface` for dedicated metadata statements.
+a detach flag, expression projections, a `GqlSetQuantifier` (ALL by default), `ReturnStar`, and an optional `GqlCatalogSurface` for dedicated metadata statements.
 Catalog statements cannot carry graph clauses. `GqlPathPattern.Variable` optionally names a MATCH
 path; it is null for anonymous paths and insertion paths. Every path holds one more node than relationship. Anonymous nodes
 and relationships have a null variable. Relationship directions are relative to consecutive pattern
@@ -126,7 +126,7 @@ The builtin-function table is empty because the executor implements no functions
 | `MATCH` | Comma-separated finite node/relationship chains; optional `variable =` path assignment, label expressions, scalar literal/parameter property maps; every ISO full and abbreviated edge except the tilde forms | Planner chooses an indexed anchor when available; executor matches bounded relationship-unique trails and binds named paths in traversal order |
 | `WHERE` | Boolean and scalar expressions: comparisons, labels, AND/OR/XOR/NOT, IS null/truth tests, arithmetic, concatenation, IN lists and string predicates | Keeps TRUE only; see [DIALECT.md](DIALECT.md) and scalar expressions below |
 | `EXPLAIN` | One MATCH/RETURN, INSERT/CREATE, or MATCH [DETACH] DELETE statement | Shared description rows without executing any read expansion or write; Cohesion extension |
-| `RETURN` | Bound node/relationship/path variables or scalar properties, optional `AS` aliases | Projects elements or scalar values in source order; the engine path-request API requires exactly one bound entity or path projection |
+| `RETURN` | Optional DISTINCT/ALL, either `*` or value expressions with optional `AS` aliases; also standalone | Projects expressions, expands named bindings in declaration order, then eliminates duplicate tuples for DISTINCT; path requests require one entity or path column |
 | `INSERT` | Scalar literal/parameter node/path insertion, optionally following a match; a node takes a label conjunction (`:A&B`, `:A:B`), a relationship one type and a directed edge (`-[:T]->`, `<-[:T]-`) | Inserts nodes and relationships transactionally |
 | `CREATE` | Same insertion grammar as `INSERT`; compatibility extension | Same transactional insertion path |
 | `DELETE` | Bound node/relationship variables following a match | Refuses deleting a node that still has incident relationships |
@@ -181,10 +181,11 @@ sum          := product (('+' | '-') product)*
 product      := signed (('*' | '/' | '%') signed)*
 signed       := ('+' | '-') signed | operand
 labeled      := variable (IS [NOT] LABELED | ':') label-expr
-operand      := variable '.' property | scalar-literal | parameter | labeled | '(' predicate ')'
+operand      := variable ['.' property] | scalar-literal | parameter | labeled | '(' predicate ')'
 parameter    := ('$' | '@') (identifier | ASCII-digits)
 properties   := '{' [property ':' (scalar-literal | parameter) (',' property ':' (scalar-literal | parameter))*] '}'
-projection   := variable ['.' property] [AS alias]
+projections  := [DISTINCT | ALL] ('*' | projection (',' projection)*)
+projection   := predicate [AS alias]
 catalog      := SHOW (LABELS | RELATIONSHIP TYPES | PROPERTY KEYS | INDEXES | OBJECT OWNERSHIP)
 ```
 
@@ -194,7 +195,8 @@ it introduce a label expression, so it remains usable as a name. `!` negates one
 writes it, so `!!A` is `GQL0002` and `!(!A)` parses. Each `(...)*` repetition in `label-spec`,
 `label-expr`, `label-term` builds one n-ary label node; Boolean runs build n-ary logical nodes. Scalar groups, signs, NOT and IN lists recurse with stack checks.
 
-A mutation can start without `MATCH`; a read or deletion must bind variables through `MATCH`.
+A mutation or RETURN can start without `MATCH`; a deletion must bind variables through `MATCH`.
+Standalone RETURN evaluates against one empty binding, so `RETURN 1 + 1 AS two` returns one row.
 Named assignment is a MATCH-only construct: `INSERT p = (...)` and `CREATE p = (...)` are
 unsupported. `MATCH p = (a)-[r:TYPE]->(b) RETURN p` captures the entire matched trail, including
 the order of nodes and relationships when an indexed anchor starts in the middle or a relationship
@@ -238,11 +240,79 @@ The engine returns the shared
 on Execute, including `EXPLAIN MATCH (a:Person) RETURN a`. ExecutePaths rejects it with
 `COHDBG001` and leaves the server session ready. The Graph engine owns anchor/expansion names.
 
+## RETURN expressions and duplicate elimination (#1141)
+
+**Breaking AST change:** `GqlProjection(GqlExpression Expression, string? Alias)` replaces the
+variable/property tuple. `GqlVariableExpression` represents a bare binding; property access uses
+`GqlPropertyExpression`. Hand-built ASTs construct those nodes explicitly. RETURN uses the same
+value-expression parser and evaluator as WHERE, including parameters, arithmetic, concatenation,
+null/truth tests and labeled predicates. `GqlQueryExpression.SetQuantifier` defaults to ALL;
+`ReturnStar` is separate from the projection list and cannot accompany explicit items.
+Bare references enable entity/path equality by identity across materializations and IS NULL tests
+in either expression context.
+
+An alias names its column exactly. Otherwise the column name is normalized source text: comments
+are removed, token spacing is canonical, and identifier/keyword spelling, quoted text and grouping
+are preserved. Thus `a . age /* comment */ + 1` names `a.age + 1`. A source-free hand-built
+expression receives equivalent rendered syntax, with parentheses around binary expressions.
+This implements the owner's naming default as a Cohesion choice. The [published ISO preview](https://webstore.ansi.org/preview-pages/ISO/preview_ISO%2BIEC%2B39075-2024.pdf)
+locates 14.11 on page 185 but does not expose its naming rules; the [editors' grammar, 14.11](https://github.com/opengql/grammar/blob/main/GQL.g4#L635-L654)
+confirms the optional quantifier, star, expression items and AS alias, without defining implicit
+column names. Normalized computed names are therefore not claimed as verified ISO semantics.
+
+RETURN * expands first declarations, in source order, including a path assignment before its
+elements, and skips anonymous elements and repeated references. `(a)-[r]->(b)` yields a, r, b.
+No named binding (`MATCH () RETURN *` or standalone `RETURN *`) is GQL0002. The planner validates
+equivalent hand-built shapes with COHDBG001. Aliases do not bind variables for neighboring items.
+Unbound variables/parameters remain COHDBG001; a path property reference remains COHDBG003.
+Final column names must be unique under ordinal case-sensitive comparison. Duplicate implicit
+names, explicit aliases, or collisions between them raise COHDBG015 at the second expression
+before execution, even for empty matches and EXPLAIN. Path-request shape errors retain precedence.
+Behavior consulted, no code copied: Neo4j `community/cypher/front-end/frontend/src/main/scala/org/neo4j/cypher/internal/frontend/phases/parserTransformers/scoping/VariableCheckerUtil.scala:434-444`
+(relative to C:/Source/repos/neo4j/neo4j) diagnoses the second duplicate result column.
+
+DISTINCT compares the complete projected tuple: NULLs are equal, strings compare ordinally,
+numbers compare by exact mathematical value across runtime numeric types, and nodes and
+relationships compare by identity. Paths compare their ordered node and relationship identities,
+including traversal direction, independently of materialization. Exact reduced numeric fractions
+keep hashing consistent without merging adjacent Int64 values above 2^53 or rounding subnormals
+to zero. Numeric comparisons (=, <>, !=, <, <=, >, >=), property matching and IN use the same
+exact fractions: 0.1m = 0.1d is FALSE, 1 = 1.0 is TRUE, and mixed comparisons above 2^53
+retain every integer bit. NULL comparisons remain UNKNOWN, while DISTINCT groups NULLs;
+signed zeros compare equal. Non-finite literals and parameters, including NaN, remain COHDBG003.
+Internal value equality groups NaNs across floating tags and payloads with consistent hashes.
+This owner choice changes #1140's comparison promotion for reuse by #1145/#1147;
+arithmetic still follows the separate promotion table below. Behavior consulted, no code copied,
+relative to C:/Source/repos/neo4j/neo4j: `community/values/src/main/java/org/neo4j/values/storable/Value.java:162`
+connects non-NaN predicate equality to value equality, `IntegralValue.java:77-95` provides exact
+mixed numeric equality/ordering, and `community/cypher/interpreted-runtime/src/main/scala/org/neo4j/cypher/internal/runtime/interpreted/pipes/DistinctPipe.scala:78`
+uses value equality for duplicate elimination.
+The first representative retains its runtime type; ALL retains every row. These implement the
+owner's DISTINCT defaults. Reference behavior consulted, no code copied: local Neo4j
+`community/values/src/main/java/org/neo4j/values/virtual/VirtualNodeValue.java:52-61`,
+`VirtualRelationshipValue.java:64-72`, and `VirtualPathValue.java:85-98` compare entity IDs and
+ordered path identities rather than property maps.
+
+The owner default for Execute is static and conservative: planned result kinds are Scalar, Node,
+Relationship and Path. Only statically scalar columns pass Execute, even on empty matches; the
+check precedes reads, writer locking and mutations. Entity columns retain the ExecutePaths error
+and ExecutionFailure. EXPLAIN describes the plan and remains scalar even for an entity RETURN.
+Future collection and CASE planners must propagate possible entity results through the closed
+kind dispatch. Path requests accept one bare bound variable, including DISTINCT, or star over
+one named binding. Computed, multiple and multi-binding star projections use the existing
+COHDBG001 request-shape diagnostic. GraphPathResult completion diagnostics remain unchanged.
+
+Cypher map projection (`a {.name}`) remains COHDBL001 naming MAP PROJECTION. NEXT and WITH
+remain COHDBL001 until #1145; WITH DISTINCT is not activated here. Return-after-delete remains
+COHDBL001. No catalog format or protocol frame changes are involved. `GqlReturnParserTests`,
+the keyword-disposition corpus, `GqlProfileExecutionTests`, `GraphReturnTests` and
+`GraphReturnWireTests` cover this surface and its boundaries.
+
 ## Diagnostics and conformance (#194, #195)
 
 | Code | Meaning |
 | --- | --- |
-| `COHDBL001` | Recognized construct outside the executable profile, reported once at its own span: optional matching, procedures, functions, substituted/whole-map/projection parameters, collection literals, quantifiers, ordering, set operations, server/session scope, undirected (tilde) edges, path mode and path search prefixes, `NODETACH DELETE`, and `MERGE` |
+| `COHDBL001` | Recognized construct outside the executable profile, reported once at its own span: optional matching, procedures, functions, substituted/whole-map parameters, collection literals, map projections, path quantifiers, ordering, set operations, NEXT/WITH, server/session scope, undirected (tilde) edges, path mode and path search prefixes, `NODETACH DELETE`, and `MERGE` |
 | `GQL0001` | Empty statement |
 | `GQL0002` | Malformed supported syntax, invalid statement composition, leftover tokens, or a character GQL does not use (`?`, `#`, `^`, ```, ...) |
 | `GQL0003` | Unterminated string, quoted name, or block comment |
@@ -540,8 +610,9 @@ tests Boolean/NULL, always returning Boolean, inverted by NOT. Comparisons with 
 UNKNOWN. Incomparable non-null types are unequal (= false, <> true); their ordering is
 UNKNOWN, so NOT does not turn such an ordering into a match.
 
-Numeric promotion is a Cohesion extension for the typed API's stored CLR types.
-The first applicable row selects both conversions and the result type:
+Arithmetic promotion is a Cohesion extension for the typed API's stored CLR types.
+It does not apply to comparisons or IN, which use exact fractions shared with DISTINCT.
+The first applicable row selects arithmetic conversions and the result type:
 
 | Operands | Arithmetic result |
 | --- | --- |

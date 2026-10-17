@@ -124,7 +124,7 @@ public sealed partial class GqlQueryParser
         if (Current.Type is TokenType.Identifier or TokenType.QuotedIdentifier)
         {
             string variable = Identifier();
-            Expect(TokenType.Dot, "'.'");
+            if (!Take(TokenType.Dot)) { return new GqlVariableExpression(variable, Span(start, Previous)); }
             string property = Identifier(allowKeyword: true);
             if (!Failed && Current.Type == TokenType.Dot) { Unsupported("NESTED PROPERTY ACCESS", Current); }
             return new GqlPropertyExpression(variable, property, Span(start, Previous));

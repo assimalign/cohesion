@@ -47,8 +47,6 @@ public sealed class GqlParameterParserTests
     [InlineData("MATCH (a)-[r $props]->(b) RETURN r", "WHOLE-MAP PARAMETER")]
     [InlineData("MATCH (a)-[r @props]->(b) RETURN r", "WHOLE-MAP PARAMETER")]
     [InlineData("INSERT (n $props)", "WHOLE-MAP PARAMETER")]
-    [InlineData("MATCH (a) RETURN $p", "PARAMETER PROJECTION")]
-    [InlineData("MATCH (a) RETURN @p", "PARAMETER PROJECTION")]
     public void Parse_UnsupportedPosition_ShouldReportCapability(string source, string form)
     {
         // Act

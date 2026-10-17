@@ -10,12 +10,17 @@ namespace Assimalign.Cohesion.Database.Graph.Internal;
 
 internal sealed record GraphAnchor(int NodeIndex, string? Label, string? Property, object? Value);
 internal sealed record GraphPathPlan(GqlPathPattern Pattern, GraphAnchor Anchor);
+internal enum GraphProjectionKind { Scalar, Node, Relationship, Path }
+internal sealed record GraphProjectionPlan(GqlExpression Expression, string Name, GraphProjectionKind Kind);
+internal sealed record GraphDistinctPlan(IReadOnlyList<GraphProjectionPlan> Keys);
 
 /// <summary>A validated statement with each MATCH pattern's anchor.</summary>
 /// <param name="Query">The validated statement.</param>
 /// <param name="Matches">Each MATCH pattern with the anchor it expands from, in source order.</param>
 internal sealed record GraphPlan(GqlQueryExpression Query, IReadOnlyList<GraphPathPlan> Matches)
 {
+    internal IReadOnlyList<GraphProjectionPlan> Projections { get; init; } = [];
+    internal GraphDistinctPlan? Distinct { get; init; }
     /// <summary>
     /// Gets whether the statement requires a label or relationship type the database does not
     /// have: a MATCH node pattern's conjunction (<c>:A</c>, <c>:A&amp;B</c>), a MATCH relationship
@@ -68,15 +73,16 @@ internal sealed partial class GraphPlanner
     /// </summary>
     /// <param name="query">The statement to plan.</param>
     /// <param name="parameters">The named bindings; normalization and validation precede execution.</param>
+    /// <param name="paths">Whether path-request projection shape takes precedence over duplicate column names.</param>
     /// <returns>The plan.</returns>
-    /// <exception cref="DatabaseException">The statement is invalid (<c>COHDBG001</c>, <c>COHDBG003</c>).</exception>
-    internal GraphPlan Plan(GqlQueryExpression query, IReadOnlyDictionary<string, object?>? parameters = null)
+    /// <exception cref="DatabaseException">The statement is invalid (<c>COHDBG001</c>, <c>COHDBG003</c>, <c>COHDBG015</c>).</exception>
+    internal GraphPlan Plan(GqlQueryExpression query, IReadOnlyDictionary<string, object?>? parameters = null, bool paths = false)
     {
         try
         {
             _parameters = ParameterBindings.Normalize(parameters, name => new GraphPlanningException(
                 "COHDBG014", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ParameterCollision, name), query.Location));
-            return PlanCore(query);
+            return PlanCore(query, paths);
         }
         catch (GraphPlanningException exception) when (exception.Diagnostics[0].Start is null && query.Location is not null)
         {
@@ -84,9 +90,10 @@ internal sealed partial class GraphPlanner
         }
     }
 
-    private GraphPlan PlanCore(GqlQueryExpression query)
+    private GraphPlan PlanCore(GqlQueryExpression query, bool pathsRequest)
     {
         var variables = new Dictionary<string, BindingKind>(StringComparer.Ordinal);
+        var declarations = new List<string>();
         var paths = new List<GraphPathPlan>();
         var anchors = new AnchorSources(_database, _snapshot, query.Predicate, _parameters);
         var tokens = new GraphTokenResolver(_database.Catalog, _snapshot);
@@ -100,19 +107,65 @@ internal sealed partial class GraphPlanner
         matchesNothing |= RequiresUnknownName(query.Predicate);
         foreach (var path in query.Creates) { Validate(path, creating: true); }
         foreach (var variable in query.DeleteVariables) { RequireVariable(variable, entity: true); }
-        foreach (var projection in query.Projections) { RequireVariable(projection.Variable, entity: projection.Property is not null); }
-        if (query.Matches.Count == 0 && query.Creates.Count == 0)
-        { throw new GraphPlanningException("COHDBG001", "A graph statement requires a match or insertion pattern.", query.Location); }
+        if (!Enum.IsDefined(query.SetQuantifier) || query.ReturnStar && (query.Projections.Count != 0 || declarations.Count == 0) ||
+            query.SetQuantifier == GqlSetQuantifier.Distinct && !query.ReturnStar && query.Projections.Count == 0)
+        { throw new GraphPlanningException("COHDBG001", ErrorMessages.ReturnShapeInvalid, query.Location); }
+        var projections = new List<GraphProjectionPlan>();
+        var items = query.ReturnStar
+            ? declarations.Select(variable => new GqlProjection(new GqlVariableExpression(variable)))
+            : query.Projections;
+        foreach (var projection in items)
+        {
+            if (projection?.Expression is null)
+            { throw new GraphPlanningException("COHDBG001", ErrorMessages.ProjectionExpressionRequired, query.Location); }
+            ValidateExpression(projection.Expression);
+            var kind = ProjectionKind(projection.Expression);
+            projections.Add(new GraphProjectionPlan(projection.Expression,
+                projection.Alias ?? GraphProjectionText.Describe(projection.Expression), kind));
+        }
+        if (query.Matches.Count == 0 && query.Creates.Count == 0 && projections.Count == 0)
+        { throw new GraphPlanningException("COHDBG001", ErrorMessages.PatternOrReturnRequired, query.Location); }
         if (query.Creates.Count != 0 && query.DeleteVariables.Count != 0)
         { throw new GraphPlanningException("COHDBG001", "Insertion and deletion cannot share a statement.", query.Location); }
-        if (query.DeleteVariables.Count != 0 && query.Projections.Count != 0)
+        if (query.DeleteVariables.Count != 0 && projections.Count != 0)
         { throw new GraphPlanningException("COHDBG001", "Deletion cannot be followed by projection in this subset.", query.Location); }
+        if (pathsRequest && (projections.Count != 1 || projections[0].Kind == GraphProjectionKind.Scalar ||
+            projections[0].Expression is not GqlVariableExpression))
+        { throw new GraphPlanningException("COHDBG001", ErrorMessages.PathProjectionRequired, query.Location); }
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var projection in projections)
+        {
+            if (!names.Add(projection.Name))
+            {
+                throw new GraphPlanningException("COHDBG015", string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                    ErrorMessages.DuplicateResultColumn, projection.Name), projection.Expression.Location ?? query.Location);
+            }
+        }
         bool readOnly = query.Creates.Count == 0 && query.DeleteVariables.Count == 0;
         return new GraphPlan(query, paths)
         {
             MatchesNothing = matchesNothing,
+            Projections = projections.AsReadOnly(),
+            Distinct = query.SetQuantifier == GqlSetQuantifier.Distinct ? new GraphDistinctPlan(projections.AsReadOnly()) : null,
             Parameters = _parameters,
             Warnings = readOnly ? tokens.Warnings : [],
+        };
+
+        // Closed result-kind dispatch: future collection/CASE expressions must explicitly
+        // propagate any entity-valued result branches before Execute can admit them.
+        GraphProjectionKind ProjectionKind(GqlExpression expression) => expression switch
+        {
+            GqlVariableExpression variable => RequireVariable(variable.Variable) switch
+            {
+                BindingKind.Node => GraphProjectionKind.Node,
+                BindingKind.Relationship => GraphProjectionKind.Relationship,
+                _ => GraphProjectionKind.Path,
+            },
+            GqlLiteralExpression or GqlParameterExpression or GqlPropertyExpression or
+                GqlBinaryExpression or GqlLogicalExpression or GqlUnaryExpression or
+                GqlIsNullExpression or GqlTruthTestExpression or GqlInExpression or
+                GqlStringPredicateExpression or GqlLabeledPredicate => GraphProjectionKind.Scalar,
+            _ => throw new GraphPlanningException("COHDBG001", ErrorMessages.ProjectionUnsupported, expression.Location),
         };
 
         // Returns false when a MATCH pattern requires a name the database does not have.
@@ -121,22 +174,23 @@ internal sealed partial class GraphPlanner
             if (path.Nodes.Count == 0 || path.Relationships.Count != path.Nodes.Count - 1 || path.Relationships.Count > 64)
             { throw new GraphPlanningException("COHDBG001", "A finite path requires one more node than relationships and at most 64 hops.", query.Location); }
             bool satisfiable = true;
-            foreach (var node in path.Nodes)
-            {
-                Bind(node.Variable, BindingKind.Node);
-                satisfiable &= ValidateNodeLabels(node, creating, tokens);
-                ValidateProperties(node.Properties, creating);
-            }
-            foreach (var relationship in path.Relationships)
-            {
-                Bind(relationship.Variable, BindingKind.Relationship);
-                satisfiable &= ValidateRelationship(relationship, creating, tokens);
-                ValidateProperties(relationship.Properties, creating);
-            }
             if (path.Variable is { } variable)
             {
                 if (creating || !variables.TryAdd(variable, BindingKind.Path))
                 { throw new GraphPlanningException("COHDBG003", $"Path variable '{variable}' must be a new MATCH binding.", query.Location); }
+                declarations.Add(variable);
+            }
+            for (int i = 0; i < path.Nodes.Count; i++)
+            {
+                var node = path.Nodes[i];
+                Bind(node.Variable, BindingKind.Node);
+                satisfiable &= ValidateNodeLabels(node, creating, tokens);
+                ValidateProperties(node.Properties, creating);
+                if (i == path.Relationships.Count) { continue; }
+                var relationship = path.Relationships[i];
+                Bind(relationship.Variable, BindingKind.Relationship);
+                satisfiable &= ValidateRelationship(relationship, creating, tokens);
+                ValidateProperties(relationship.Properties, creating);
             }
             return satisfiable;
         }
@@ -145,11 +199,12 @@ internal sealed partial class GraphPlanner
             if (variable is null) { return; }
             if (variables.TryGetValue(variable, out var previous) && previous != kind)
             { throw new GraphPlanningException("COHDBG003", $"Variable '{variable}' has incompatible graph bindings.", query.Location); }
+            if (!variables.ContainsKey(variable)) { declarations.Add(variable); }
             variables[variable] = kind;
         }
         BindingKind RequireVariable(string variable, bool entity = false)
         {
-            if (!variables.TryGetValue(variable, out var kind)) { throw new GraphPlanningException("COHDBG001", $"Variable '{variable}' is not bound.", query.Location); }
+            if (variable is null || !variables.TryGetValue(variable, out var kind)) { throw new GraphPlanningException("COHDBG001", $"Variable '{variable}' is not bound.", query.Location); }
             if (entity && kind == BindingKind.Path)
             { throw new GraphPlanningException("COHDBG003", $"Path variable '{variable}' cannot be deleted or used as a property owner.", query.Location); }
             return kind;
@@ -166,7 +221,15 @@ internal sealed partial class GraphPlanner
             {
                 switch (expression)
                 {
-                    case GqlLiteralExpression:
+                    case GqlLiteralExpression literal:
+                        try { GraphDatabase.TypeOf(literal.Value); }
+                        catch (DatabaseException error)
+                        { throw new GraphPlanningException("COHDBG003", ErrorMessages.LiteralScalarRequired, literal.Location, error); }
+                        if (literal.Value is double number && !double.IsFinite(number) || literal.Value is float single && !float.IsFinite(single))
+                        { throw new GraphPlanningException("COHDBG003", ErrorMessages.LiteralScalarRequired, literal.Location); }
+                        break;
+                    case GqlVariableExpression variable:
+                        RequireVariable(variable.Variable);
                         break;
                     case GqlParameterExpression parameter:
                         GraphExpressionEvaluator.Parameter(parameter, _parameters);

@@ -338,11 +338,11 @@ public sealed class GqlLabelChainExecutionTests
         GqlQueryStatement[] statements =
         [
             new(new GqlQueryExpression([new GqlPathPattern([new GqlNodePattern("n", [], empty) { LabelExpression = negations }], [])],
-                null, [], [], false, [new GqlProjection("n", "name")])),
+                null, [], [], false, [new GqlProjection(new GqlPropertyExpression("n", "name"))])),
             new(new GqlQueryExpression([new GqlPathPattern([new GqlNodePattern("n", [], empty)], [])],
-                new GqlLabeledPredicate("n", negations), [], [], false, [new GqlProjection("n", "name")])),
+                new GqlLabeledPredicate("n", negations), [], [], false, [new GqlProjection(new GqlPropertyExpression("n", "name"))])),
             new(new GqlQueryExpression([new GqlPathPattern([new GqlNodePattern("n", [], empty)], [])],
-                predicate, [], [], false, [new GqlProjection("n", "name")])),
+                predicate, [], [], false, [new GqlProjection(new GqlPropertyExpression("n", "name"))])),
         ];
 
         foreach (var statement in statements)

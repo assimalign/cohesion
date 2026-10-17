@@ -35,7 +35,6 @@ internal static class GqlUnsupportedVocabulary
         new("CALL", "CALL", GqlWordPosition.Clause),
         new("YIELD", "YIELD", GqlWordPosition.Clause),
         new("FILTER", "FILTER", GqlWordPosition.Clause),
-        new("DISTINCT", "DISTINCT", GqlWordPosition.Clause),
         new("ALL", "ALL", GqlWordPosition.Clause),
         new("EXISTS", "EXISTS", GqlWordPosition.Clause),
         new("ANY", "ANY", GqlWordPosition.Clause),

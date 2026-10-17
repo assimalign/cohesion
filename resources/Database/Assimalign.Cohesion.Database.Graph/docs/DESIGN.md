@@ -103,8 +103,8 @@ examines node records and sorts its matches. A property equality anchor instead 
 shared B+Tree in `O(log N + candidates)` after locating index metadata, then sorts its matches.
 Index numeric keys normalize
 integral, decimal and finite floating point values through double conversion. Full scalar comparisons
-filter index candidates, preserving exact integral/decimal comparisons despite key collisions.
-Comparisons involving a floating point operand use double precision, including subnormal values.
+filter index candidates using exact reduced numeric fractions across all numeric types, including
+floating operands, so key collisions cannot change equality or lose adjacent large integers.
 All node creation/deletion paths maintain property indexes. Graph has no property-update verb.
 
 ### Database names and directories
@@ -306,6 +306,45 @@ rejected before it reaches the session and changes nothing. Each refusal is an `
 
 ## Planning, execution and bounds
 
+RETURN (#1141) evaluates the same expressions as WHERE after matching and mutation. A standalone
+RETURN starts with the executor's one empty binding. The planner validates every projection and
+parameter before data access, expands star in first-declaration order (path assignment, then
+interleaved nodes/relationships), and records each expression's name and static result kind.
+Aliases name columns exactly; unaliased parsed expressions use normalized source text. The
+[language design](../../Assimalign.Cohesion.Database.Graph.Language/docs/DESIGN.md#return-expressions-and-duplicate-elimination-1141)
+records the owner's naming default and the limits of the ISO 14.11 check. Final names, implicit
+and explicit, must be unique under ordinal case-sensitive comparison; the second occurrence
+raises located planning error COHDBG015 before reads or mutations, including EXPLAIN and empty
+matches. Path-request shape diagnostics retain precedence over duplicate names. Behavior consulted,
+no code copied: Neo4j `community/cypher/front-end/frontend/src/main/scala/org/neo4j/cypher/internal/frontend/phases/parserTransformers/scoping/VariableCheckerUtil.scala:434-444`
+(relative to C:/Source/repos/neo4j/neo4j) reports the second duplicate result column.
+
+DISTINCT runs on projected tuples, after writes have completed for every input binding. It uses
+NULL equality, ordinal strings, exact numeric value equality across CLR tags, entity IDs and
+ordered path identities. Reduced fractions preserve transitivity and hash consistency for
+large integers, decimals and subnormal floats. Comparisons (=, <>, !=, <, <=, >, >=), inline
+property matching and IN use this same exact numeric equality and ordering: 0.1m differs from
+0.1d, 1 equals 1.0, and an Int64 above 2^53 is never rounded to compare with a Double.
+NULL comparisons remain UNKNOWN while DISTINCT groups NULLs. Non-finite inputs, including NaN,
+remain COHDBG003 at planning; internal value equality groups NaNs consistently across float/double
+and hashes, and treats signed zeros as equal. This #1141 owner choice changes #1140 comparison
+promotion; #1145 and #1147 must reuse it. Arithmetic promotion remains unchanged.
+Reference behavior consulted, no code copied, relative to C:/Source/repos/neo4j/neo4j:
+`community/values/src/main/java/org/neo4j/values/storable/Value.java:162` delegates ordinary
+non-NaN predicate equality to value equality, `IntegralValue.java:77-95` shares numeric equality
+and exact mixed ordering, and `community/cypher/interpreted-runtime/src/main/scala/org/neo4j/cypher/internal/runtime/interpreted/pipes/DistinctPipe.scala:78`
+uses value equality for grouping. Cohesion rejects NaN at its public planning boundary.
+First representatives retain their actual values and types. ALL preserves multiplicity. These
+implement the owner's duplicate-equality default; no persistent state or catalog version changes.
+GraphProjectionPlan and GraphDistinctPlan both have EXPLAIN mappings and description rows.
+
+The owner's Execute default is a conservative static gate over planned column kinds. The wire
+request marks its scalar requirement internally; the executor checks it after binding and planning,
+before writer locking, reads or writes. Node, relationship or path columns fail with COHDBG001
+and the existing ExecutePaths guidance, even for empty matches. Future collection/CASE result
+kinds must explicitly propagate possible entities in the closed planner dispatch. EXPLAIN
+bypasses execution and continues to return scalar description rows for entity projections.
+
 WHERE executes the scalar grammar in
 [Graph.Language](../../Assimalign.Cohesion.Database.Graph.Language/docs/DESIGN.md#scalar-where-expressions-1140):
 OR/XOR/NOT, null/truth tests, arithmetic, concatenation, list membership and string predicates.
@@ -313,7 +352,7 @@ Only TRUE keeps a binding; evaluated non-Boolean conditions raise COHDBG013. CLR
 faults become that same code in DatabaseException.Diagnostics, with code-free Message.
 Filtering finishes before result materialization or mutations, so the server sends value
 errors as ExecutionFailure before ResultHeader and the pooled scalar session remains usable.
-Promotion is Double for floating operands, otherwise Decimal for ulong/decimal, otherwise
+Arithmetic promotion is Double for floating operands, otherwise Decimal for ulong/decimal, otherwise
 checked Int64 (division truncates toward zero).
 Integral remainder by -1 is always 0, including Int64.MinValue, while its division by -1
 keeps COHDBG013 (PostgreSQL `src/backend/utils/adt/int8.c:584-594`).
@@ -444,7 +483,9 @@ the same pinned snapshot as scalar execution. Exactly one projection is required
 produces a singleton path, a relationship variable produces its stored source and target nodes,
 and a named path (`MATCH p = (a)-[r:KNOWS]->(b) RETURN p`) preserves traversal order, including
 reverse traversal and legal cycles. Properties, labels, types and database-local identities are
-the actual engine values. Scalar projections, multiple projections, mutations and catalog queries
+the actual engine values. DISTINCT deduplicates the projected binding by entity/path identity
+before conversion to GraphPath; star is accepted when exactly one named binding is in scope.
+Computed projections, multiple projections, multi-binding star, mutations and catalog queries
 are rejected as path requests before execution. This new request/result pair adds no members to
 existing public interfaces and does not infer paths from scalar rows.
 
@@ -691,6 +732,7 @@ to exercise that enforcement path; compiled provisioning is not included.
 | `COHDBG012` | The database is offline (#1243): a durable flush of its journal or data file failed. Every operation is refused with `DatabaseOfflineException` until `OpenDatabaseAsync` reopens it; `Unavailable` on the wire. The storage's `StorageOfflineException` (`COHDBS002`) is the inner exception ("Storage operations") |
 | `COHDBG013` | Scalar value error (#1140): non-Boolean WHERE/logical value, invalid arithmetic or concatenation types, zero divisor, overflow or non-finite result. Reused by #1146, #1147 and #1148; structured Diagnostic, code-free Message, composed as CODE: message on protocol 2.0 |
 | `COHDBG014` | Multiple map keys normalize to the same bare parameter name |
+| `COHDBG015` | Duplicate final result column name, implicit or explicit, under ordinal case-sensitive comparison; rejected during planning before execution |
 | `COHDBI001` | `Database.Indexing`'s code, carried unchanged: opening a database whose property-index pages are in a B-tree page format this engine does not read (format 1, written before #1194) fails with "Database 'x' cannot be opened. COHDBI001: …", checked before recovery's scrub, so a cleanly closed database's files stay as they were (a crashed one has had only the storage layer's journal redo and undo, and keeps its journal) |
 | `COHDBS001` | `Database.Storage`'s code, carried unchanged: opening a database whose file set is in another storage format (#1251) fails with "Database 'x' cannot be opened. COHDBS001: …", the storage's `StorageFormatException` as its inner exception, refused before its journal is read, so the files stay as they were |
 
@@ -1271,7 +1313,7 @@ root's failed open reports the failure itself.
 `StatementParseFailed` closes the gap the root's statement events leave on the wire path: the
 server parses a statement inside the delegate it hands `ExecuteStatementAsync`, before the root
 session sees a request, so a statement that fails to parse or validate there (a GQL syntax
-error, an empty statement, a non-scalar projection on Execute) is written here once and
+error or an empty statement) is written here once and
 propagates unchanged. The delegates catch only `DatabaseException` and `DatabaseTypeException`,
 the failures the session answers as statement failures; any other exception is an unexpected
 fault, which the pump reports once, as `SessionFaulted`. The in-process text path parses inside
