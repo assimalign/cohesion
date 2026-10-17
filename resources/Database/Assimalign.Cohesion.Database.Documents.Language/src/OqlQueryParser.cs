@@ -204,8 +204,9 @@ public sealed partial class OqlQueryParser : QueryParser
     {
         List<(string, Lexeme)> result = [];
         int statementStart = IsWord(_tokens[0], "EXPLAIN") ? 1 : 0;
-        bool hasQuery = statementStart < _tokens.Count &&
-            (IsWord(_tokens[statementStart], "SELECT") || IsWord(_tokens[statementStart], "INSERT"));
+        bool statementWithoutQuery = statementStart < _tokens.Count &&
+            (IsWord(_tokens[statementStart], "DELETE") || IsWord(_tokens[statementStart], "CREATE") ||
+                IsWord(_tokens[statementStart], "DROP"));
         bool selected = false;
         int parentheses = 0;
         bool inSelectList = false;
@@ -312,7 +313,7 @@ public sealed partial class OqlQueryParser : QueryParser
             {
                 // Only SELECT statements and INSERT SELECT have a query of their own.
                 // A SELECT inside an expression is nested even when it is the first one.
-                if (!hasQuery || selected || parentheses > 0)
+                if (statementWithoutQuery || selected || parentheses > 0)
                 {
                     result.Add((OqlClauses.Subquery, token));
                 }
