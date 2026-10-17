@@ -7,6 +7,8 @@ using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Types;
 
+using Assimalign.Cohesion.Database.Execution.Internal;
+
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 internal sealed partial class SqlPlanner
@@ -195,7 +197,7 @@ internal sealed partial class SqlPlanner
             (SqlExistsExpression a, SqlExistsExpression b) => ReferenceEquals(a, b),
             (SqlColumnReferenceExpression a, SqlColumnReferenceExpression b) => evaluator.ResolveColumn(a) == evaluator.ResolveColumn(b),
             (SqlLiteralExpression a, SqlLiteralExpression b) => a.LiteralType == b.LiteralType && a.Value == b.Value,
-            (SqlParameterExpression a, SqlParameterExpression b) => a.ParameterName == b.ParameterName,
+            (SqlParameterExpression a, SqlParameterExpression b) => ParameterBindings.BareName(a.ParameterName) == ParameterBindings.BareName(b.ParameterName),
             (SqlStarExpression, SqlStarExpression) => true,
             // The child comparison below also requires the same number of terms.
             (SqlLogicalExpression a, SqlLogicalExpression b) => a.Operator == b.Operator,

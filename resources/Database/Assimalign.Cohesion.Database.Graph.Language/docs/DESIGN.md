@@ -1,5 +1,15 @@
 # Assimalign.Cohesion.Database.Graph.Language — Design
 
+## Parameter-form diagnostics (#1102)
+
+The [shared parameter contract](../../Assimalign.Cohesion.Database.Language/docs/DESIGN.md#parameter-contract-1102)
+defines the eventual GQL binding rules; #1138 owns that parsing and execution work.
+Parameter tokens retain COHDBL001 PARAMETER here. Operand `?` and `:name` report one
+GQL0002, with QueryDiagnostics' shared supported-form message and the complete span.
+A trailing stray `?` retains the generic character message. Label predicates, labels
+and property-map colons are unaffected. ParameterConformanceTests measures this boundary.
+
+
 ## Standard decision (#193)
 
 The owner selected **ISO/IEC 39075:2024 GQL** on **2026-09-17**, following

@@ -6,6 +6,9 @@ using System.Threading.Tasks;
 using Assimalign.Cohesion.Database.Documents.Internal;
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Transactions;
+using Assimalign.Cohesion.Database.Types;
+
+using Assimalign.Cohesion.Database.Execution.Internal;
 
 namespace Assimalign.Cohesion.Database.Documents;
 
@@ -390,8 +393,21 @@ public sealed class DocumentDatabaseSession : DatabaseLanguageSession<DocumentQu
     {
         _database.EnsureNotDisposed();
         _database.ThrowIfOffline();
-        return _database.RunAsync(this, operation => DocumentPlanExecutor.ExecuteAsync(_database, operation, request.Statement,
-            request.Parameters, cancellationToken), cancellationToken);
+        return _database.RunAsync(this, operation =>
+        {
+            // Preserve the typed seam's parse diagnostics before touching an error-recovery AST.
+            foreach (var diagnostic in request.Statement.Diagnostics)
+            {
+                if (diagnostic.Severity == DiagnosticSeverity.Error)
+                {
+                    return DocumentPlanExecutor.ExecuteAsync(_database, operation, request.Statement, request.Parameters, cancellationToken);
+                }
+            }
+            var parameters = ParameterBindings.Normalize(request.Parameters, name =>
+                new DocumentPlanningException("COHDOC009", $"More than one parameter key binds the name '{name}'."));
+            new DocumentExpressionEvaluator(null, parameters).ValidateParameters(request.Statement.OqlExpression);
+            return DocumentPlanExecutor.ExecuteAsync(_database, operation, request.Statement, parameters, cancellationToken);
+        }, cancellationToken);
     }
 
     /// <inheritdoc />

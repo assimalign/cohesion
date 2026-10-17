@@ -9,7 +9,8 @@ namespace Assimalign.Cohesion.Database.Documents.Internal;
 /// <remarks>
 /// COHDOC005 identifies a missing parameter, COHDOC006 division or remainder by zero
 /// (PostgreSQL SQLSTATE 22012), COHDOC007 a numeric value out of range (22003), and
-/// COHDOC008 an invalid operand or parameter type. COHDOC001 covers unsupported expressions.
+/// COHDOC008 an invalid operand or parameter type, and COHDOC009 colliding parameter keys.
+/// COHDOC001 covers unsupported expressions.
 /// </remarks>
 internal sealed class DocumentPlanningException : DatabaseException
 {

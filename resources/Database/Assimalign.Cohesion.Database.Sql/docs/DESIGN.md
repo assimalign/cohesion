@@ -1,5 +1,15 @@
 # Assimalign.Cohesion.Database.Sql — Design
 
+## Request parameters (#1102)
+
+Each execution copies request parameters into an ordinal, bare-name dictionary using
+Execution's stateless shared source. Missing parameters fail while validating/binding
+expressions, before data rows are read or written, with COHSQLE020 and the reference's
+span. Collisions after one-sigil removal carry COHSQLE023. Group keys compare bare
+names. The [shared parameter contract](../../Assimalign.Cohesion.Database.Language/docs/DESIGN.md#parameter-contract-1102)
+and SQL language DIALECT define syntax, key matching and the unchanged AST shapes.
+
+
 ## Fixed-length character identity (#1437)
 
 `DatabaseType.Character` (19) is CHAR/CHARACTER, distinct from String (VARCHAR/TEXT).

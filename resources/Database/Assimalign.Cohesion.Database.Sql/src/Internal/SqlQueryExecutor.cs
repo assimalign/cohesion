@@ -2,6 +2,8 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Database.Execution.Internal;
+
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 using Assimalign.Cohesion.Database.Execution;
@@ -44,8 +46,10 @@ internal sealed class SqlQueryExecutor
         ArgumentNullException.ThrowIfNull(request);
         cancellationToken.ThrowIfCancellationRequested();
 
+        var parameters = ParameterBindings.Normalize(request.Parameters, name =>
+            new SqlPlanningException("COHSQLE023", $"More than one parameter key binds the name '{name}'."));
         _definitions.EnsureDefinitions(cancellationToken);
-        var planner = new SqlPlanner(_catalog, request.Parameters, _definitions.Functions, cancellationToken);
+        var planner = new SqlPlanner(_catalog, parameters, _definitions.Functions, cancellationToken);
         SqlPlan plan;
         try
         {

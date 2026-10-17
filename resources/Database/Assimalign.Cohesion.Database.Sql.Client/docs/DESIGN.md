@@ -1,5 +1,16 @@
 # Database.Sql.Client — Design
 
+## Parameter contract (#1102)
+
+SqlParameterCollection strips one leading sigil and keeps ordinal case-sensitive bare
+names; `$name`, `@name` and numeric names such as `$1` follow the
+[shared parameter contract](../../Assimalign.Cohesion.Database.Language/docs/DESIGN.md#parameter-contract-1102).
+Add and the indexer continue to replace a previously normalized name. A raw request
+map containing two keys for one bare name is rejected by the server with COHSQLE023.
+An unbound reference fails with COHSQLE020 before rows are accessed; wire execution
+failures keep the connection usable, including on empty tables. No protocol changes.
+
+
 ## Character metadata (#1437)
 
 SQL result-header format 2 carries name, DatabaseType and nullable MaxLength. Both SqlColumn and

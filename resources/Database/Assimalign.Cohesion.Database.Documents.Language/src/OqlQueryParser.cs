@@ -15,6 +15,7 @@ public sealed partial class OqlQueryParser : QueryParser
     private string _source = string.Empty;
     private readonly List<Lexeme> _tokens = [];
     private readonly List<Diagnostic> _diagnostics = [];
+    private readonly HashSet<int> _parameterFormPositions = [];
     private int _position;
     private int _depth;
 
@@ -40,6 +41,7 @@ public sealed partial class OqlQueryParser : QueryParser
     {
         _tokens.Clear();
         _diagnostics.Clear();
+        _parameterFormPositions.Clear();
         _position = 0;
         _depth = 0;
         int line = 1;
@@ -68,7 +70,7 @@ public sealed partial class OqlQueryParser : QueryParser
                 {
                     Error("OQL0003", "Unterminated quoted text.", item);
                 }
-                else if (token.Type == TokenType.Unrecognized)
+                else if (token.Type == TokenType.Unrecognized && token.Value[0] != '?')
                 {
                     // A character OQL does not use is never a name or an expression, so the
                     // statement is not parsed and nothing is bound (#1101).
@@ -123,6 +125,18 @@ public sealed partial class OqlQueryParser : QueryParser
             }
         }
 
+        // '?' still binds nothing. Only an operand receives the parameter-form message;
+        // names, paths and trailing positions keep lexical strictness's generic message.
+        foreach (var token in _tokens)
+        {
+            if (token.Type != TokenType.Unrecognized || token.Text != "?") { continue; }
+            if (!_parameterFormPositions.Contains(token.Start))
+            {
+                _diagnostics.RemoveAll(diagnostic => diagnostic.Start == token.Start);
+                Error("OQL0002", "Unexpected character '?'; it is not part of OQL.", token);
+            }
+            expression = EmptyExpression();
+        }
         expression.SetStatementText(_source);
         var statement = new OqlQueryStatement(expression);
         foreach (var (clause, token) in unsupported)

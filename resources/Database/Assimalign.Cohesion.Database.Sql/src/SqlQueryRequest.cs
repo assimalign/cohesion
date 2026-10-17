@@ -11,13 +11,16 @@ using Assimalign.Cohesion.Database.Types;
 
 /// <summary>
 /// Represents a SQL query request: a parsed SQL statement plus optional named
-/// parameter values (bound to <c>@name</c> / <c>$n</c> parameters in the statement).
+/// parameter values (bound to <c>$name</c>, <c>@name</c> or digit names such as <c>$1</c>).
 /// </summary>
 /// <remarks>
 /// The SQL model's member of the shared <see cref="DatabaseRequest"/> family, and the request
 /// root of <see cref="SqlDatabaseSession"/> (<c>DatabaseLanguageSession&lt;SqlQueryRequest&gt;</c>):
 /// the session's typed execute member takes this type, so a request of another model does not
 /// compile. The request owns its typed statement; the execution package names no statement type.
+/// Each execution snapshots bare names ordinally, strips one optional key sigil, rejects
+/// normalized collisions and unbound references before data rows are read or written,
+/// and ignores unused keys. Numeric names bind their exact digits; null is a bound value.
 /// </remarks>
 public sealed class SqlQueryRequest : DatabaseRequest
 {
@@ -39,7 +42,7 @@ public sealed class SqlQueryRequest : DatabaseRequest
     /// Initializes a new <see cref="SqlQueryRequest"/> with the specified statement and parameters.
     /// </summary>
     /// <param name="statement">The parsed SQL statement.</param>
-    /// <param name="parameters">The parameter values to bind, keyed by parameter name.</param>
+    /// <param name="parameters">The ordinal, case-sensitive parameter map; keys may have one leading @ or $ sigil.</param>
     /// <exception cref="ArgumentNullException"><paramref name="statement"/> is null.</exception>
     public SqlQueryRequest(SqlQueryStatement statement, IReadOnlyDictionary<string, object?> parameters)
     {
@@ -54,7 +57,7 @@ public sealed class SqlQueryRequest : DatabaseRequest
     public SqlQueryStatement Statement => _statement;
 
     /// <summary>
-    /// Gets the parameter values to bind, keyed by parameter name; null when the request binds none.
+    /// Gets the ordinal, case-sensitive parameter map; keys may carry one leading @ or $; null when none are supplied.
     /// </summary>
     public IReadOnlyDictionary<string, object?>? Parameters => _parameters;
 
@@ -67,7 +70,7 @@ public sealed class SqlQueryRequest : DatabaseRequest
     /// <see cref="FromSql(string, IReadOnlyDictionary{string, object?}?, SqlQueryParserOptions?)"/>.
     /// </summary>
     /// <param name="sql">The SQL statement text.</param>
-    /// <param name="parameters">The parameter values to bind, keyed by parameter name.</param>
+    /// <param name="parameters">The ordinal, case-sensitive parameter map; keys may have one leading @ or $ sigil.</param>
     /// <returns>The parsed request.</returns>
     /// <exception cref="DatabaseParseException">The text failed to parse.</exception>
     /// <exception cref="DatabaseException">
@@ -92,7 +95,7 @@ public sealed class SqlQueryRequest : DatabaseRequest
     /// (<see cref="SqlQueryStatement.ExpressionNestingDepth"/>).
     /// </remarks>
     /// <param name="sql">The SQL statement text.</param>
-    /// <param name="parameters">The parameter values to bind, keyed by parameter name.</param>
+    /// <param name="parameters">The ordinal, case-sensitive parameter map; keys may have one leading @ or $ sigil.</param>
     /// <param name="parserOptions">The parser options, or <see langword="null"/> for the defaults.</param>
     /// <returns>The parsed request.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="sql"/> is null.</exception>

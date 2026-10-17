@@ -8,6 +8,50 @@ languages own their vocabulary and grammar.
 (owner, 2026-10-16; #1577), with their names and members unchanged. Language references
 Types; model-neutral execution results can expose diagnostics without depending on Language.
 
+## Parameter contract (#1102)
+
+SQL, OQL and GQL share this contract. Sigils are presentation: `$name` and `@name`
+refer to the same bare name. `@name` is a Cohesion extension in every language,
+including GQL; it is not an ISO GQL or openCypher spelling.
+
+1. A name is an identifier (a letter or `_`, then letters, digits or `_`) or digits
+   only. `$`, `@`, `$1a` and `@1a` are syntax errors at the complete parameter span.
+2. `$n` binds the key spelled by its digits, not an offset into a positional list.
+   `$01` binds `01`, distinct from `1`. The request carries only a name-keyed map.
+3. Matching is ordinal and case-sensitive. Each execution copies the caller's map
+   once by enumeration into an ordinal dictionary; its comparer has no effect.
+4. Caller keys may have one leading `$` or `@`, which is stripped. Two keys that
+   normalize to the same bare name fail the request, even if unused. Other unused
+   keys are ignored. A supplied null is bound; a missing key is unbound.
+5. Every referenced parameter must be bound before any data row is read or written,
+   including expressions over empty inputs and Boolean branches that would be skipped.
+6. The ISO dynamic `?` and host `:name` forms are rejected in operand position with
+   one syntax diagnostic naming `$name`, `@name` and `$1`. Its span is the `?` or
+   the adjacent `:` plus name. A trailing stray `?` keeps the generic character error.
+   GQL label/property-map colons and SQL `::` retain their existing meaning/diagnostics.
+7. AST shapes stay unchanged: SQL keeps the sigil; OQL stores the bare name.
+   Bindings normalize both. SQL grouping compares parameter names without a sigil.
+
+| Language | Accepted parameter forms | Current implementation |
+| --- | --- | --- |
+| SQL | `$name`, `@name`, `$_x`, `$1`, `@1` | Parsing and execution under this contract |
+| OQL | `$name`, `@name`, `$_x`, `$1`, `@1` | Parsing and execution under this contract |
+| GQL | `$name`, `@name`, `$_x`, `$1`, `@1` (contract) | #1138 owns parsing/binding; parameter tokens remain `COHDBL001 PARAMETER` until it lands |
+
+SQL uses `SQL0003`, OQL `OQL0002` and GQL `GQL0002` for unsupported forms.
+`QueryDiagnostics.UnsupportedParameterForm` owns their shared message. SQL unbound
+parameters carry `COHSQLE020`, normalized-key collisions `COHSQLE023`; OQL uses
+`COHDOC005` and `COHDOC009` respectively, through `DatabaseException.Diagnostics`.
+The wire protocol is unchanged. PostgreSQL's scanner separately recognizes `$` plus
+Decimal digits and rejects numeric-name junk (`src/backend/parser/scan.l:397-420`,
+`:969-983`, local reference clone); Cohesion extends that grammar to named sigils and
+uses the request map's exact digit spelling rather than PostgreSQL's positional array.
+
+D15 remains open. The implemented default is the stateless, link-compiled internal
+`ParameterBindings` source in `Database.Execution/shared/`, consumed explicitly by SQL,
+Documents and their language parsers. #1138 can link the same source for Graph. It
+adds no public bind API or visibility grant, and Execution still references only Types.
+
 ## Design intent
 
 Each model declares one `QueryLanguageProfile`. The profile is the complete boundary between the

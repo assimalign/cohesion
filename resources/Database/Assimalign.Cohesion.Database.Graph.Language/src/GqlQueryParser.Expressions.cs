@@ -42,6 +42,7 @@ public sealed partial class GqlQueryParser
         // n:A and n IS [NOT] LABELED A are Boolean primaries, not comparison operands.
         if (StartsLabeledPredicate()) { return ParseLabeledPredicate(); }
         var left = ParseOperand();
+        if (Failed && (start.Text == "?" || start.Type == TokenType.Colon)) { return left; }
         string op = Current.Text;
         if (Current.Type is not (TokenType.Equals or TokenType.NotEquals or TokenType.LessThan or
             TokenType.LessEqual or TokenType.GreaterThan or TokenType.GreaterEqual))
@@ -69,6 +70,19 @@ public sealed partial class GqlQueryParser
     private GqlLiteralExpression ParseLiteral()
     {
         var start = Current;
+        if (Current.Type == TokenType.Colon || Current.Text == "?")
+        {
+            Advance();
+            var end = start;
+            if (start.Type == TokenType.Colon && Current.Start == start.End && Current.Type is TokenType.Identifier or TokenType.Keyword or TokenType.Function)
+            {
+                end = Current;
+                Advance();
+            }
+            _parameterFormPositions.Add(start.Start);
+            _diagnostics.Add(QueryDiagnostics.UnsupportedParameterForm("GQL0002", Span(start, end)));
+            return new GqlLiteralExpression(null, Span(start, end));
+        }
         object? value = null;
         if (Take("NULL")) { }
         else if (Take("TRUE")) { value = true; }

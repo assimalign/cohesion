@@ -132,8 +132,14 @@ Keywords and function names are case-insensitive. Collection and property names 
 Double quotes delimit identifiers; single quotes delimit strings, with a doubled single quote
 representing one quote. Property names after a dot may use a reserved word; bracket strings
 address arbitrary property names. Array indices are nonnegative, zero-based 32-bit integers.
-Parentheses group expressions. `$name`, `$1`, and `@name` all produce parameter names without
-the prefix. Empty identifiers and empty parameter names are syntax errors.
+Parentheses group expressions. Parameters follow the
+[shared parameter contract](../../Assimalign.Cohesion.Database.Language/docs/DESIGN.md#parameter-contract-1102):
+`$name`, `@name`, `$_x`, `$1` and `@1` produce bare parameter names. Empty sigils and
+mixed numeric/identifier names such as `$1a` report one OQL0002 naming the grammar.
+Operand `?` and `:name` use the shared supported-form message at the complete span;
+a trailing stray `?` keeps its generic character error. Empty identifiers are syntax errors.
+The parser links Execution's stateless name check without an assembly dependency.
+ParameterConformanceTests is the parameter-form conformance corpus.
 
 Literal nodes hold a string, Boolean, decimal, or null; `NIL` is a synonym for null. Decimal
 and scientific notation use invariant culture and reject invalid/out-of-range decimal values.

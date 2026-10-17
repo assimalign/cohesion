@@ -51,8 +51,15 @@ public sealed class SqlParseStrictnessTests
         error.Code.ShouldBe("SQL0003");
         error.Start.ShouldBe(start);
         error.End.ShouldBe(end);
-        error.Message!.ShouldStartWith("Unexpected character ", Case.Sensitive);
-        error.Message.ShouldEndWith("; it is not part of the SQL dialect.", Case.Sensitive);
+        if (sql.Contains("SELECT ?", StringComparison.Ordinal) || sql.Contains("= ?", StringComparison.Ordinal))
+        {
+            error.Message!.ShouldContain("use $name, @name, or $1");
+        }
+        else
+        {
+            error.Message!.ShouldStartWith("Unexpected character ", Case.Sensitive);
+            error.Message.ShouldEndWith("; it is not part of the SQL dialect.", Case.Sensitive);
+        }
         statement.SqlExpression.GetType().ShouldBe(typeof(SqlQueryExpression));
         statement.SqlExpression.CommandType.ShouldNotBe(SqlQueryCommandType.Unknown);
         statement.Diagnostics.ShouldNotContain(diagnostic => diagnostic.Code == "SQL0002");
@@ -109,7 +116,7 @@ public sealed class SqlParseStrictnessTests
         {
             statement.SqlExpression.ShouldNotBeAssignableTo<SqlSelectExpression>();
             statement.SqlExpression.CommandType.ShouldBe(SqlQueryCommandType.Select);
-            Errors(statement).ShouldHaveSingleItem().Message.ShouldBe("Unexpected character '?'; it is not part of the SQL dialect.");
+            Errors(statement).ShouldHaveSingleItem().Message!.ShouldContain("use $name, @name, or $1");
         }
     }
 

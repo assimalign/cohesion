@@ -82,6 +82,10 @@ public sealed class OqlQueryParserTests
         var statement = Parse(query);
 
         statement.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == code);
+        if (query == "SELECT ? FROM people")
+        {
+            statement.Diagnostics.ShouldHaveSingleItem().Message!.ShouldContain("use $name, @name, or $1");
+        }
         foreach (var diagnostic in statement.Diagnostics)
         {
             diagnostic.Severity.ShouldBe(DiagnosticSeverity.Error);

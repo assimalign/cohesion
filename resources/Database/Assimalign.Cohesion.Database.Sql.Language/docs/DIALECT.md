@@ -1206,10 +1206,23 @@ extension views are recorded in the
 
 ## Expressions
 
+Parameters follow the [shared parameter contract](../../Assimalign.Cohesion.Database.Language/docs/DESIGN.md#parameter-contract-1102).
+`$name`, `@name`, `$_x`, `$1` and `@1` are accepted. The name is an identifier or
+only digits; a bare sigil or `$1a` is SQL0003. Sigils are interchangeable and caller
+keys may have one leading sigil. Matching is ordinal and case-sensitive, regardless
+of the caller dictionary's comparer. `$01` binds key `01`, not key `1`. Unused keys
+are ignored; normalized duplicates fail with COHSQLE023. Unbound references fail
+with COHSQLE020 before any row is read or written, including empty inputs. SQL
+GROUP BY compares parameter references by bare name. Operand `?` and `:name`
+report one SQL0003 at their complete span and name the supported forms; a trailing
+stray `?` keeps its generic message. SQL `::` keeps its existing diagnostic.
+ParameterConformanceTests, ParameterBindingTests and SqlParameterWireTests cover
+these rules without changing protocol 1.0.
+
 Precedence, low to high: `OR` < `AND` < `NOT` < comparison (`=`, `<>`, `<`, `>`,
 `<=`, `>=`, `IS [NOT] NULL`, `[NOT] BETWEEN`, `[NOT] IN`, `[NOT] LIKE`) < additive
 (`+`, `-`, `||`) < multiplicative (`*`, `/`, `%`) < unary signs (`-`, `+`) <
-`COLLATE` < primary. Executable primary forms include literals, parameters (`@name`, `$1`),
+`COLLATE` < primary. Executable primary forms include literals, parameters (`$name`, `@name`, `$1`),
 column references, supported function calls, simple/searched `CASE`, and
 parenthesized expressions and `CAST` within the conversion contract below.
 Uncorrelated scalar subqueries and subquery predicates execute within the contract above.
@@ -1786,7 +1799,8 @@ pin in the same change.
 | `COHSQLE017` | Error | Invalid aggregate placement or grouping expression |
 | `COHSQLE018` | Error | Invalid ordering ordinal, row count or CAST target declaration |
 | `COHSQLE019` | Error | Duplicate target column, table binding or ambiguous output alias |
-| `COHSQLE020` | Error | No value supplied for a named parameter |
+| `COHSQLE020` | Error | No value supplied for a parameter; rejected before rows are read or written |
+| `COHSQLE023` | Error | Caller parameter keys collide after one leading sigil is stripped |
 
 Positions are absolute character offsets into the statement text; line/column
 presentation is computed by tooling from the source (offset → line mapping), not

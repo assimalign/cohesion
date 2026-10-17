@@ -20,7 +20,8 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 /// The planner compiles each expression once into an engine-owned bound tree that the evaluator
 /// walks per row (phase E1 of the engine extensibility program): columns as ordinals, calls bound to
 /// their functions, comparisons with their collations, and every failure the unbound evaluator
-/// raised only when it reached a node deferred to that node.
+/// raised only when it reached a node deferred to that node. Missing parameters instead fail
+/// during binding under the shared parameter contract (#1102).
 /// </summary>
 public sealed class SqlBoundExpressionTests
 {
@@ -63,14 +64,15 @@ public sealed class SqlBoundExpressionTests
     /// A term the evaluator cannot compute binds without failing and fails only when evaluated: a
     /// statement whose short circuit never reaches it succeeds over a populated table, as it did
     /// when the evaluator met such a term per row, and fails the same way once a row reaches it.
+    /// Missing parameters are rejected while planning even behind a skipped branch (#1102).
     /// </summary>
     /// <param name="term">A term that fails when evaluated.</param>
     /// <param name="failure">The start of the error it raises.</param>
-    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Bound expressions: a failing term fails only when a row reaches it")]
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Bound expressions: failing terms follow the parameter and evaluation contracts")]
     [InlineData("NULLIF(id, 1) = 1", "Function 'NULLIF' is not supported by the executor yet.")]
     [InlineData("id = @missing", "No value was supplied for parameter 'missing'.")]
     [InlineData("id > 99999999999999999999", "COHSQLE002: Numeric value out of range: integer literal 99999999999999999999 exceeds BIGINT.")]
-    public async Task ExecuteAsync_FailingTermBehindShortCircuit_ShouldFailOnlyWhenReached(string term, string failure)
+    public async Task ExecuteAsync_FailingTermBehindShortCircuit_ShouldFollowBindingContract(string term, string failure)
     {
         // Arrange
         await using var engine = SqlDatabaseEngine.Create("sql-bound-deferred", new SqlDatabaseEngineOptions());
@@ -85,6 +87,15 @@ public sealed class SqlBoundExpressionTests
         {
             var rejected = await Should.ThrowAsync<DatabaseParseException>(() => RowsAsync(session, $"SELECT id FROM t WHERE id < 0 AND {term}", parameters));
             rejected.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHDBL001" && diagnostic.Message!.Contains("NULLIF", StringComparison.Ordinal));
+            (await RowsAsync(session, "SELECT COUNT(*) FROM t")).ShouldBe([[2L]]);
+            return;
+        }
+        if (term == "id = @missing")
+        {
+            var rejected = await Should.ThrowAsync<DatabaseException>(() =>
+                RowsAsync(session, $"SELECT id FROM t WHERE id < 0 AND {term}", parameters));
+            rejected.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE020");
+            rejected.Message.ShouldBe(failure);
             (await RowsAsync(session, "SELECT COUNT(*) FROM t")).ShouldBe([[2L]]);
             return;
         }
