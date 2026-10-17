@@ -302,7 +302,7 @@ internal static class SqlPersistedExpression
         if (statement is not SqlQueryStatement { SqlExpression: SqlSelectExpression select } ||
             select.Where is null || select.IsDistinct || select.Columns.Count != 1 ||
             select.Columns[0] is not { Expression: SqlStarExpression, Alias: null } ||
-            select.From is not [{ Table: { TableName: carrierTable, SchemaName: null, Alias: null }, Joins.Count: 0 }] ||
+            select.From is not [{ Table: SqlTableReference { TableName: carrierTable, SchemaName: null, Alias: null }, Joins.Count: 0 }] ||
             select.GroupBy.Count > 0 || select.Having is not null ||
             select.OrderBy.Count > 0 || select.Limit is not null || select.Offset is not null)
         {
@@ -408,10 +408,15 @@ internal static class SqlPersistedExpression
             AreEquivalent(left.Offset, right.Offset);
     }
 
-    private static bool SameTable(SqlTableReference? left, SqlTableReference? right)
+    private static bool SameTable(SqlRelationReference? left, SqlRelationReference? right)
         => left is null || right is null
             ? left is null && right is null
-            : Same(left.TableName, right.TableName) && Same(left.SchemaName, right.SchemaName) && Same(left.Alias, right.Alias);
+            : Same(left.Alias, right.Alias) && (left, right) switch
+            {
+                (SqlTableReference a, SqlTableReference b) => Same(a.TableName, b.TableName) && Same(a.SchemaName, b.SchemaName),
+                (SqlDerivedTableReference a, SqlDerivedTableReference b) => SameQuery(a.Query, b.Query) && SameList(a.Columns, b.Columns, Same),
+                _ => false,
+            };
 
     private static bool SameList<T>(IReadOnlyList<T> left, IReadOnlyList<T> right, Func<T, T, bool> same)
     {

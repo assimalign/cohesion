@@ -6,7 +6,7 @@ namespace Assimalign.Cohesion.Database.Sql.Language;
 /// <remarks>
 /// Examples: <c>Users</c>, <c>dbo.Users</c>, <c>Users u</c>, <c>dbo.Users AS u</c>.
 /// </remarks>
-public sealed class SqlTableReference
+public sealed class SqlTableReference : SqlRelationReference
 {
     /// <summary>
     /// Initializes a new <see cref="SqlTableReference"/>.
@@ -15,10 +15,10 @@ public sealed class SqlTableReference
     /// <param name="schemaName">The schema qualifier, if any.</param>
     /// <param name="alias">The table alias, if any.</param>
     internal SqlTableReference(string tableName, string? schemaName, string? alias)
+        : base(alias)
     {
         TableName = tableName;
         SchemaName = schemaName;
-        Alias = alias;
     }
 
     /// <summary>
@@ -30,9 +30,4 @@ public sealed class SqlTableReference
     /// Gets the schema qualifier, if present.
     /// </summary>
     public string? SchemaName { get; }
-
-    /// <summary>
-    /// Gets the table alias, if present.
-    /// </summary>
-    public string? Alias { get; }
 }

@@ -137,15 +137,15 @@ public sealed class SqlOrderByParserTests
         statement.Diagnostics.ShouldNotContain(item => item.Severity == DiagnosticSeverity.Error);
     }
 
-    /// <summary>Rejects ordering over a derived table until that relation form executes.</summary>
-    [Theory(DisplayName = "Cohesion Test [Database.Sql.Language] - ORDER BY: Rejects derived-table output ordering")]
+    /// <summary>Retains ordering syntax; the planner's bindings decide the shared #1112 pin.</summary>
+    [Theory(DisplayName = "Cohesion Test [Database.Sql.Language] - ORDER BY: Retains derived output keys for binding")]
     [InlineData("SELECT q.years FROM (SELECT age AS years FROM t) q ORDER BY years;")]
     [InlineData("SELECT q.years FROM (SELECT age AS years FROM t) q ORDER BY 1;")]
-    public void Parse_DerivedTableOutputOrdering_ReportsModelDiagnostic(string sql)
+    public void Parse_DerivedTableOutputOrdering_PreservesOrderingKey(string sql)
     {
         var statement = new SqlQueryParser().Parse(sql);
 
-        statement.Diagnostics.ShouldContain(item => item.Code == "COHDBL001" &&
-            item.Message!.Contains("derived-table SUBQUERY"));
+        statement.Diagnostics.ShouldNotContain(item => item.Severity == DiagnosticSeverity.Error);
+        ((SqlQueryStatement)statement).SqlExpression.ShouldBeOfType<SqlSelectExpression>().OrderBy.ShouldHaveSingleItem();
     }
 }

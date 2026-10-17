@@ -37,10 +37,10 @@ shared storage, with DDL flowing through the relational catalog
   Verify drift is coded and identifies the first difference. The engine refuses to drop a declared
   database or apply a different schema than its declaration.
 - **SQL execution** — the declared dialect (`Database.Sql.Language/docs/DIALECT.md`)
-  planned rule-based and executed against table scans: `SELECT` with `WHERE`,
-  projection, `ORDER BY`, `LIMIT/OFFSET`, `DISTINCT`, lone `COUNT(*)`;
+  planned with rules and executed over stored, system and derived relations: `SELECT` with `WHERE`,
+  projection, aliased derived sources, `ORDER BY`, `LIMIT/OFFSET`, `DISTINCT`, grouping and aggregates;
   `INSERT` (multi-row, whole-item `DEFAULT`, `DEFAULT VALUES`, nullability);
-  `UPDATE` (including `SET c = DEFAULT`)/`DELETE` with accurate
+  `UPDATE` (including `SET c = DEFAULT`)/`DELETE` with uncorrelated WHERE subqueries and accurate
   affected counts; `CREATE/ALTER/DROP TABLE`. DROP unpublishes immediately and the
   version-purge worker reclaims its data/index pages after older readers finish.
   Unsupported dialect features fail

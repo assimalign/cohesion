@@ -21,6 +21,24 @@ internal sealed partial class SqlPlanExecutor
     /// </summary>
     private async Task<DatabaseResult> ExecuteJoinAsync(SqlJoinPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
+        Dictionary<SqlDerivedRelation, List<object?[]>>? derivedRows = null;
+        foreach (var binding in plan.Bindings)
+        {
+            if (binding.Source.Derived is not { } derived) { continue; }
+            await using var result = (DatabaseResultSet)await ExecuteAsync(derived.Query, statement, cancellationToken).ConfigureAwait(false);
+            var rows = new List<object?[]>();
+            await foreach (var row in result.GetRowsAsync(cancellationToken).ConfigureAwait(false))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var values = new object?[row.FieldCount];
+                for (int i = 0; i < values.Length; i++)
+                {
+                    values[i] = SqlCharacter.Input(row.GetValue(i), result.Columns[i].Type);
+                }
+                rows.Add(values);
+            }
+            (derivedRows ??= new(ReferenceEqualityComparer.Instance)).Add(derived, rows);
+        }
         foreach (var table in plan.Bindings.Select(binding => binding.Source.Table).OfType<SqlCatalogTable>().DistinctBy(table => table.ObjectId).OrderBy(table => table.ObjectId))
         {
             await statement.Coordinator.LockManager.AcquireAsync(statement.Transaction.Sequence,
@@ -36,7 +54,7 @@ internal sealed partial class SqlPlanExecutor
         var sharedColumns = new bool[plan.Columns.Count];
         var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken, sharedColumns);
         var matches = new List<object?[]>();
-        foreach (var row in EnumerateJoinRows(plan, statement, sharedColumns, cancellationToken))
+        foreach (var row in EnumerateJoinRows(plan, statement, sharedColumns, cancellationToken, derivedRows))
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (evaluator.Matches(plan.Where, row))
@@ -55,11 +73,17 @@ internal sealed partial class SqlPlanExecutor
     /// stored reads and O(L * R) predicate evaluations, with O(R) buffered rows.
     /// </summary>
     private IEnumerable<object?[]> EnumerateJoinRows(SqlJoinPlan plan, SqlStatementContext statement,
-        bool[] sharedColumns, CancellationToken cancellationToken)
+        bool[] sharedColumns, CancellationToken cancellationToken,
+        IReadOnlyDictionary<SqlDerivedRelation, List<object?[]>>? derivedRows)
     {
         // Every earlier step is retained by a later loop. Only the final index inner
         // is a fresh read for each delivered pair. Delivery detaches selected binary cells only.
         Array.Fill(sharedColumns, true);
+        if (plan.Steps.Count == 0)
+        {
+            foreach (var row in ReadRelation(plan.Bindings[0].Source, statement, cancellationToken, derivedRows)) { yield return row; }
+            yield break;
+        }
         var accesses = new SqlJoinIndexPath?[plan.Steps.Count];
         var indexes = new BTreeIndex?[plan.Steps.Count];
         var paths = new string[plan.Steps.Count];
@@ -90,7 +114,7 @@ internal sealed partial class SqlPlanExecutor
         var rows = new object?[plan.Steps.Count + 1][];
         try
         {
-            foreach (var first in ReadRelation(initial.Source, statement, cancellationToken))
+            foreach (var first in ReadRelation(initial.Source, statement, cancellationToken, derivedRows))
             {
                 rows[0] = new object?[plan.Columns.Count];
                 first.CopyTo(rows[0], initial.Offset);
@@ -120,7 +144,7 @@ internal sealed partial class SqlPlanExecutor
                         IEnumerable<object?[]> candidates;
                         if (accesses[level] is not { } access)
                         {
-                            buffered[level] ??= ReadRelation(inner.Source, statement, cancellationToken).ToList();
+                            buffered[level] ??= ReadRelation(inner.Source, statement, cancellationToken, derivedRows).ToList();
                             candidates = buffered[level]!;
                         }
                         else
@@ -164,11 +188,13 @@ internal sealed partial class SqlPlanExecutor
     }
 
     /// <summary>Reads a bound source without giving virtual rows an object lock or index path.</summary>
-    private IEnumerable<object?[]> ReadRelation(SqlRelationSource source, SqlStatementContext statement, CancellationToken cancellationToken)
+    private IEnumerable<object?[]> ReadRelation(SqlRelationSource source, SqlStatementContext statement, CancellationToken cancellationToken,
+        IReadOnlyDictionary<SqlDerivedRelation, List<object?[]>>? derivedRows)
         => source switch
         {
             { Table: { } table } => Scan(table, statement, cancellationToken).Select(row => row.Values),
             { View: { } view } => ReadSystemRelation(view, statement, cancellationToken),
+            { Derived: { } derived } => derivedRows![derived],
             _ => throw new DatabaseException("Internal invariant: unknown SQL relation source."),
         };
 

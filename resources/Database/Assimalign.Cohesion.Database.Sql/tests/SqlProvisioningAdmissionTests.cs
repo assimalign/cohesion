@@ -149,8 +149,10 @@ public sealed class SqlProvisioningAdmissionTests
         await AssertRowAsync(holder, "z_existing", timeout.Token);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Sql] - EXPLAIN: deferred index admission waits and describes the same seek as SELECT")]
-    public async Task Execute_ExplainDuringDeferredIndex_ShouldWaitAndDescribePublishedPlan()
+    [Theory(DisplayName = "Cohesion Test [Database.Sql] - EXPLAIN: direct and derived deferred index admission waits and describes the published seek")]
+    [InlineData("SELECT id FROM items WHERE id = 1;")]
+    [InlineData("SELECT d.id FROM (SELECT id FROM items WHERE id = 1) d;")]
+    public async Task Execute_ExplainDuringDeferredIndex_ShouldWaitAndDescribePublishedPlan(string query)
     {
         // Arrange: pause the existing worker hook after it reserves a populated table.
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
@@ -182,7 +184,6 @@ public sealed class SqlProvisioningAdmissionTests
                 source.Name == "Assimalign.Cohesion.Database.Transactions"), EventLevel.Verbose);
 
             // Act: both calls synchronously reach a real lock-manager wait before yielding.
-            const string query = "SELECT id FROM items WHERE id = 1;";
             Task<DatabaseResult> reading = reader.ExecuteAsync(query, cancellationToken: timeout.Token).AsTask();
             Task<DatabaseResult> describing = explainer.ExecuteAsync("EXPLAIN " + query, cancellationToken: timeout.Token).AsTask();
             try

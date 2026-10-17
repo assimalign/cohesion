@@ -57,6 +57,7 @@ internal sealed partial class SqlPlanner
         }
 
         var orderByProjections = BindOrderByProjections(select, projections, columns.Count);
+        if (bindings is not null && select.OrderBy.Count > 0) { RejectDerivedOrdering(select, projections, orderByProjections, evaluator, bindings); }
         foreach (var order in select.OrderBy)
         {
             BindSlots(order.Expression, orderByProjections);
@@ -100,8 +101,9 @@ internal sealed partial class SqlPlanner
 
         for (int i = 0; i < projections.Count; i++)
         {
-            var value = groupScope.Bind(projections[i].Expression!, out SqlBoundCollation collation);
-            projections[i] = projections[i] with { Value = value, Collation = collation };
+            var value = groupScope.Bind(projections[i].Expression!, out SqlBoundCollation collation, out var candidate);
+            projections[i] = projections[i] with { Value = value, Collation = collation,
+                Metadata = CaptureProjectionMetadata(candidate) };
         }
 
         var having = select.Having is null ? null : groupScope.Bind(select.Having);

@@ -12,7 +12,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 internal sealed partial class SqlPlanner
 {
     /// <summary>Binds every step before execution, with ON visibility limited to its comma item.</summary>
-    private IReadOnlyList<SqlRelationBinding> BindJoin(SqlSelectExpression select,
+    private IReadOnlyList<SqlRelationBinding> BindJoin(SqlSelectExpression select, SqlRelationSource first,
         out IReadOnlyList<SqlCatalogColumn> columns, out IReadOnlyList<SqlJoinStep> steps,
         out IReadOnlyList<int> outputOrdinals)
     {
@@ -125,9 +125,9 @@ internal sealed partial class SqlPlanner
             return found[0];
         }
 
-        void Add(SqlTableReference reference, bool nullable)
+        void Add(SqlRelationReference reference, bool nullable)
         {
-            var source = ResolveRelation(reference);
+            var source = bindings.Count == 0 ? first : ResolveRelation(reference, select);
             string name = reference.Alias ?? source.Name;
             if (bindings.Any(binding => string.Equals(name, binding.Reference.Alias ?? binding.Source.Name, StringComparison.OrdinalIgnoreCase) &&
                 (reference.Alias is not null || binding.Reference.Alias is not null ||

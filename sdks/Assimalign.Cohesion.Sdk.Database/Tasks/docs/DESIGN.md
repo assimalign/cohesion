@@ -62,7 +62,9 @@ the AOT-compatible `Database.Sql.Schema` package, but the task and Roslyn assemb
 consumer's runtime closure. The task references `Database.Sql.Schema` and `Database.Sql.Language`
 (per the `COHLIB001` same-area rule). Migration DEFAULT validation uses the public SQL parser and
 expression renderer, avoiding a second literal grammar; it does not pull the SQL engine, its storage implementation, or
-`Connections.Tcp` into MSBuild.
+`Connections.Tcp` into MSBuild. With #1113's named/derived FROM variant, the DEFAULT
+carrier check explicitly requires `SqlTableReference`; a derived relation cannot
+be substituted for the fixed carrier. No reference or schema-artifact format changes.
 
 ## Orchestration commands
 

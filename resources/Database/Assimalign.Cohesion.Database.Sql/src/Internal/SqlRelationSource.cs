@@ -14,10 +14,15 @@ internal readonly struct SqlRelationSource
 
     internal SqlRelationSource(SqlCatalogTable table) { _metadata = table; }
     internal SqlRelationSource(SqlSystemViewDefinition view) { _metadata = view; }
+    internal SqlRelationSource(SqlDerivedRelation derived) { _metadata = derived; }
 
     internal SqlCatalogTable? Table => _metadata as SqlCatalogTable;
     internal SqlSystemViewDefinition? View => _metadata as SqlSystemViewDefinition;
-    internal string Schema => Table?.Schema ?? View!.Schema;
-    internal string Name => Table?.Name ?? View!.Name;
-    internal IReadOnlyList<SqlCatalogColumn> Columns => Table?.Columns ?? View!.Columns;
+    internal SqlDerivedRelation? Derived => _metadata as SqlDerivedRelation;
+    internal string Schema => Table?.Schema ?? View?.Schema ?? string.Empty;
+    internal string Name => Table?.Name ?? View?.Name ?? Derived!.Name;
+    internal IReadOnlyList<SqlCatalogColumn> Columns => Table?.Columns ?? View?.Columns ?? Derived!.Columns;
 }
+
+/// <summary>A child query's output schema and plan, without a storage identity.</summary>
+internal sealed record SqlDerivedRelation(string Name, SqlPlan Query, IReadOnlyList<SqlCatalogColumn> Columns);

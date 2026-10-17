@@ -404,9 +404,14 @@ public sealed class SqlLanguageConformanceTests
             [[1, 37L], [2, 46L], [3, 42L]]),
         [SqlClauses.From] = Query("SELECT u.name FROM dbo.t AS u WHERE id = 1;", expression => expression is SqlSelectExpression { From.Count: 1 },
             [["Ada"]]),
-        [SqlClauses.Subquery] = Query("SELECT id, (SELECT MAX(age) FROM t) AS oldest FROM t WHERE id IN (SELECT id FROM t WHERE age > 40) AND EXISTS (SELECT id FROM t WHERE age = 36) ORDER BY id;",
+        [SqlClauses.Subquery] = new("SELECT id, (SELECT MAX(age) FROM t) AS oldest FROM t WHERE id IN (SELECT id FROM t WHERE age > 40) AND EXISTS (SELECT id FROM t WHERE age = 36) ORDER BY id;", _seed,
             expression => expression is SqlSelectExpression select && select.Columns.Any(column => column.Expression is SqlSubqueryExpression),
-            [[2, 45], [3, 45]]),
+            async (session, result) =>
+            {
+                CheckRows(await ReadRowsAsync(result), [[2, 45], [3, 45]]);
+                await ExpectRowsAsync(session, "SELECT d.id FROM (SELECT id FROM t WHERE age > 40 ORDER BY id LIMIT 1) d;", [[2]]);
+                (await session.ExecuteAsync("UPDATE t SET age = age WHERE id IN (SELECT id FROM t WHERE id = 2);", cancellationToken: CancellationToken.None)).AffectedCount.ShouldBe(1);
+            }),
         [SqlClauses.Join] = new("SELECT t.name, p.email FROM t INNER JOIN t copy ON t.id = copy.id LEFT JOIN profiles p ON t.id = p.user_id ORDER BY t.id;",
             [.. _seed, "CREATE TABLE profiles (user_id INT REFERENCES t(id), email TEXT);",
                 "INSERT INTO profiles VALUES (1, 'ada@example.test'), (3, 'alan@example.test');"],

@@ -18,6 +18,7 @@ internal sealed partial class SqlPlanner
     internal static string DescribeOperator(SqlPlan plan) => plan switch
     {
         SqlSelectPlan => "Select",
+        SqlJoinPlan { Steps.Count: 0 } => "Select",
         SqlJoinPlan => "NestedLoopJoin",
         SqlSystemViewPlan => "SystemView",
         SqlGroupPlan => "Group",
@@ -73,6 +74,7 @@ internal sealed partial class SqlPlanner
             };
             string? detail = current switch
             {
+                SqlJoinPlan { Steps.Count: 0 } p => QueryDetail(p.Where is not null, p.OrderBy.Count, p.IsDistinct, p.Limit, p.Offset),
                 SqlSelectPlan p => QueryDetail(p.Where is not null, p.OrderBy.Count, p.IsDistinct, p.Limit, p.Offset),
                 SqlSystemViewPlan p => QueryDetail(p.Where is not null, p.OrderBy.Count, p.IsDistinct, p.Limit, p.Offset),
                 SqlJoinPlan p => string.Join("; ", p.Steps.Select(step => $"{step.Kind}: {(step.Access is null ? "buffered inputs" : "correlated equality-prefix seek")}")) + "; " +
@@ -98,7 +100,7 @@ internal sealed partial class SqlPlanner
                     Access(select.Table, select.Access, id);
                     break;
                 case SqlJoinPlan join:
-                    bool swapped = join.Steps[0].Access?.InnerBinding == 0;
+                    bool swapped = join.Steps.Count > 0 && join.Steps[0].Access?.InnerBinding == 0;
                     RelationScan(join.Bindings[swapped ? 1 : 0].Source, id);
                     foreach (var step in join.Steps)
                     {
@@ -134,7 +136,15 @@ internal sealed partial class SqlPlanner
         }
 
         void RelationScan(SqlRelationSource source, int parent)
-            => Add(source.View is not null ? "SystemView" : "TableScan", parent, Target(source));
+        {
+            if (source.Derived is { } derived)
+            {
+                int id = nodes.Count;
+                Add("DerivedTable", parent, derived.Name);
+                Visit(derived.Query, id);
+            }
+            else { Add(source.View is not null ? "SystemView" : "TableScan", parent, Target(source)); }
+        }
 
         void Access(SqlCatalogTable table, SqlAccessPath access, int parent)
         {
@@ -159,7 +169,7 @@ internal sealed partial class SqlPlanner
         return (binding.Reference.Alias ?? binding.Source.Name) + "." + binding.Source.Columns[ordinal - binding.Offset].Name;
     }
 
-    private static string Target(SqlRelationSource source) => source.Schema + "." + source.Name;
+    private static string Target(SqlRelationSource source) => source.Derived is not null ? source.Name : source.Schema + "." + source.Name;
     private static string Target(SqlCatalogTable table) => table.Schema + "." + table.Name;
     private static string Value(object? value) => value switch
     {

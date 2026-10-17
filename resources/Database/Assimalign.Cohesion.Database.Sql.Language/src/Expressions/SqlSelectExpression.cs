@@ -56,8 +56,16 @@ public sealed class SqlSelectExpression : SqlQueryExpression
         }
         foreach (var item in from)
         {
+            if (item.Table is SqlDerivedTableReference derived)
+            {
+                depth = System.Math.Max(depth, 1 + derived.Query.ExpressionDepth);
+            }
             foreach (var join in item.Joins)
             {
+                if (join.Table is SqlDerivedTableReference joined)
+                {
+                    depth = System.Math.Max(depth, 1 + joined.Query.ExpressionDepth);
+                }
                 depth = System.Math.Max(depth, SqlExpression.DepthOf(join.Condition));
             }
         }

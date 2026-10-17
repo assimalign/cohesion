@@ -17,6 +17,27 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed class SqlExplainTests
 {
+    [Theory(DisplayName = "Cohesion Test [Sql] - EXPLAIN: one derived source has a Select root and multiple sources retain join steps")]
+    [InlineData("SELECT * FROM (SELECT id FROM t) d", "Select", 0)]
+    [InlineData("SELECT * FROM t JOIN (SELECT id FROM t) d ON t.id = d.id", "NestedLoopJoin", 1)]
+    public async Task Execute_DerivedSource_ShouldDescribeRelationShape(string sql, string root, int steps)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("explain-derived", new());
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE t (id INT)", cancellationToken: CancellationToken.None);
+
+        // Act
+        var rows = await RowsAsync(session, "EXPLAIN " + sql);
+
+        // Assert
+        rows[0][2].ShouldBe(root);
+        rows[0][5].ShouldBeOfType<string>().StartsWith("; ", StringComparison.Ordinal).ShouldBeFalse();
+        rows.Count(row => Equals(row[2], "JoinStep")).ShouldBe(steps);
+        rows.Count(row => Equals(row[2], "DerivedTable")).ShouldBe(1);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sql] - EXPLAIN: chosen relational operators and index bounds are described")]
     [InlineData("SELECT id FROM t", "TableScan", false)]
     [InlineData("SELECT id FROM t WHERE age >= 20 AND age < 40", "IndexSeek", true)]

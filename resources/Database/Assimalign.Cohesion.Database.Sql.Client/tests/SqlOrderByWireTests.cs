@@ -310,7 +310,8 @@ public sealed class SqlOrderByWireTests
 
         // Act / Assert
         var error = await Should.ThrowAsync<SqlClientException>(() => QueryAsync(connection, statement));
-        error.Kind.ShouldBe(SqlClientErrorKind.ParseFailure);
+        error.Kind.ShouldBe(statement.Contains("derived.id", System.StringComparison.Ordinal)
+            ? SqlClientErrorKind.ExecutionFailure : SqlClientErrorKind.ParseFailure);
         error.Message.ShouldContain("COHDBL001", Case.Sensitive);
         error.ConnectionUsable.ShouldBeTrue();
         (await QueryAsync(connection, "SELECT name FROM users WHERE id = 1")).ShouldHaveSingleItem()[0].ShouldBe("ada");

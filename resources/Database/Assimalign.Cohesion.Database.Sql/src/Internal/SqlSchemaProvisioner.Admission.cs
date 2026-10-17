@@ -65,11 +65,11 @@ internal sealed partial class SqlSchemaProvisioner
             case SqlSelectExpression select:
                 foreach (var item in select.From)
                 {
-                    yield return item.Table;
+                    foreach (var table in References(item.Table)) { yield return table; }
                 }
                 foreach (var join in select.From.SelectMany(item => item.Joins))
                 {
-                    yield return join.Table;
+                    foreach (var table in References(join.Table)) { yield return table; }
                 }
                 var expressions = select.Columns.Select(value => value.Expression)
                     .Concat(select.From.SelectMany(item => item.Joins).Select(value => value.Condition))
@@ -157,6 +157,15 @@ internal sealed partial class SqlSchemaProvisioner
             case SqlDropTableExpression drop:
                 yield return drop.Table;
                 break;
+        }
+    }
+
+    private static IEnumerable<SqlTableReference> References(SqlRelationReference relation)
+    {
+        if (relation is SqlTableReference table) { yield return table; }
+        else if (relation is SqlDerivedTableReference derived)
+        {
+            foreach (var nested in References(derived.Query)) { yield return nested; }
         }
     }
 

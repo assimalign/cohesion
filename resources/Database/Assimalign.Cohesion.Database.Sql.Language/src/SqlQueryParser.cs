@@ -743,9 +743,8 @@ public sealed partial class SqlQueryParser : QueryParser
     }
 
     /// <summary>
-    /// Skips a derived table, <c>(SELECT ...) [AS] alias</c>, for recovery. The clause scan
-    /// already reports it as <c>COHDBL001</c>; skipping it keeps the statement's other
-    /// clauses in view instead of reporting its opening parenthesis as leftover text.
+    /// Refuses a derived mutation target, then skips it for recovery. FROM/JOIN use
+    /// ParseRelationReference instead. A preflight refusal at the same span is reused.
     /// </summary>
     private bool SkipDerivedTable(ref TokenLexer lexer)
     {
@@ -755,6 +754,8 @@ public sealed partial class SqlQueryParser : QueryParser
             return false;
         }
 
+        RequireSkippedConstruct(next.Current.Position, next.Current.Position + next.Current.Value.Length,
+            "derived-table mutation target; use derived queries only in FROM or JOIN");
         SkipParenthesized(ref lexer);
         SkipTableAlias(ref lexer);
         return true;
@@ -924,6 +925,7 @@ public sealed partial class SqlQueryParser : QueryParser
         string? previousPreviousToken = null;
         string? firstToken = null;
         bool insertValues = false;
+        bool dmlWhere = false;
         bool inFrom = false;
         bool previousFromComma = false;
         bool previousPreviousFromComma = false;
@@ -974,7 +976,7 @@ public sealed partial class SqlQueryParser : QueryParser
                 lexer.Current.Position + lexer.Current.Value.Length);
 
             if (TryFindUnsupportedSubqueryForm(lexer, firstToken, previousToken,
-                previousPreviousToken, insertValues,
+                previousPreviousToken, insertValues, dmlWhere,
                 previousFromComma || previousPreviousFromComma, out clause))
             {
                 location = tokenLocation;
@@ -984,6 +986,9 @@ public sealed partial class SqlQueryParser : QueryParser
             insertValues |= lexer.Current.Type == TokenType.Keyword &&
                 firstToken.Equals("INSERT", StringComparison.OrdinalIgnoreCase) &&
                 token.Equals("VALUES", StringComparison.OrdinalIgnoreCase);
+
+            dmlWhere |= fromScopes.Count == 0 && IsKeyword(ref lexer, "WHERE") &&
+                (firstToken.Equals("UPDATE", StringComparison.OrdinalIgnoreCase) || firstToken.Equals("DELETE", StringComparison.OrdinalIgnoreCase));
 
             if (token.Equals("COLLATION", StringComparison.OrdinalIgnoreCase) &&
                 previousToken?.Equals("CREATE", StringComparison.OrdinalIgnoreCase) == true)

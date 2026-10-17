@@ -42,4 +42,31 @@
   <data name="CastJsonText" xml:space="preserve">
     <value>Invalid JSON text (maximum depth 128).</value>
   </data>
+  <data name="DerivedTableOuterReference" xml:space="preserve">
+    <value>A derived table cannot reference sibling relations without LATERAL. {0}</value>
+  </data>
+  <data name="DerivedColumnCount" xml:space="preserve">
+    <value>Derived table '{0}' has {1} output columns but {2} column names.</value>
+  </data>
+  <data name="QuerySourceRequired" xml:space="preserve">
+    <value>A query source requires a SELECT result.</value>
+  </data>
+  <data name="SubqueryNestingDepth" xml:space="preserve">
+    <value>Subquery nesting exceeds the supported maximum depth of 32.</value>
+  </data>
+  <data name="UnknownColumn" xml:space="preserve">
+    <value>Unknown column '{0}'.</value>
+  </data>
+  <data name="DerivedColumnName" xml:space="preserve">
+    <value>A derived output column name must not be empty or whitespace.</value>
+  </data>
+  <data name="CorrelatedSubquery" xml:space="preserve">
+    <value>Correlated subqueries are not supported; a subquery column must resolve in its local FROM/JOIN scope. {0}</value>
+  </data>
+  <data name="DerivedOutputOrdering" xml:space="preserve">
+    <value>SQL derived-table SUBQUERY output ordering awaits the ordering extension.</value>
+  </data>
+  <data name="SubqueryColumnCount" xml:space="preserve">
+    <value>{0} subquery requires exactly one output column; found {1}.</value>
+  </data>
 </root>

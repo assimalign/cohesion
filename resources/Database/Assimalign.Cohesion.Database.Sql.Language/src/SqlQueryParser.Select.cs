@@ -31,7 +31,7 @@ public sealed partial class SqlQueryParser
             Advance(ref lexer);
             do
             {
-                var table = ParseRequiredTableReference(ref lexer);
+                var table = ParseRelationReference(ref lexer);
                 from.Add(new SqlFromItem(table, ParseJoinClauses(ref lexer)));
                 if (IsAtEnd(ref lexer) || lexer.Current.Type != TokenType.Comma)
                 {
@@ -226,7 +226,7 @@ public sealed partial class SqlQueryParser
             }
 
             // Expect table reference after JOIN keyword
-            var table = ParseRequiredTableReference(ref lexer);
+            var table = ParseRelationReference(ref lexer);
 
             // ON condition
             SqlExpression? condition = null;
@@ -295,6 +295,53 @@ public sealed partial class SqlQueryParser
         }
 
         return joins;
+    }
+
+    private SqlRelationReference ParseRelationReference(ref TokenLexer lexer)
+    {
+        if (lexer.Current.Type != TokenType.LeftParen)
+        {
+            return ParseRequiredTableReference(ref lexer);
+        }
+
+        Advance(ref lexer);
+        if (!IsKeyword(ref lexer, "SELECT"))
+        {
+            AddSyntaxDiagnostic(ref lexer, "Expected SELECT in a derived table.");
+            return new SqlTableReference("?", null, null);
+        }
+        var query = ParseSubquery(ref lexer, derived: true);
+        if (lexer.Current.Type == TokenType.RightParen) { Advance(ref lexer); }
+        else { AddSyntaxDiagnostic(ref lexer, "Expected ')' after the derived query."); }
+        if (IsKeyword(ref lexer, "AS")) { Advance(ref lexer); }
+        string alias = "?";
+        if (IsIdentifierOrKeyword(ref lexer) && !IsStatementBoundaryKeyword(ref lexer))
+        {
+            alias = CurrentIdentifierText(ref lexer);
+            Advance(ref lexer);
+        }
+        else { AddSyntaxDiagnostic(ref lexer, "A derived table requires an alias."); }
+
+        var columns = new List<string>();
+        if (lexer.Current.Type == TokenType.LeftParen)
+        {
+            Advance(ref lexer);
+            while (true)
+            {
+                if (!IsIdentifierOrKeyword(ref lexer) || IsStatementBoundaryKeyword(ref lexer))
+                {
+                    AddSyntaxDiagnostic(ref lexer, "Expected a derived column name.");
+                    break;
+                }
+                columns.Add(CurrentIdentifierText(ref lexer));
+                Advance(ref lexer);
+                if (lexer.Current.Type != TokenType.Comma) { break; }
+                Advance(ref lexer);
+            }
+            if (lexer.Current.Type == TokenType.RightParen) { Advance(ref lexer); }
+            else { AddSyntaxDiagnostic(ref lexer, "Expected ')' after derived column names."); }
+        }
+        return new SqlDerivedTableReference(query, alias, columns.AsReadOnly());
     }
 
     private void AddUnsupportedSurfaceDiagnostic(int start, int end, string message)

@@ -249,8 +249,10 @@ public sealed class SqlSubqueryExecutionTests
     }
 
     /// <summary>ReadCommitted inner and outer plans consume the statement's captured view after concurrent changes.</summary>
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Subquery: all forms share the captured MVCC statement snapshot")]
-    public async Task Subquery_ConcurrentCommit_ShouldKeepCapturedSnapshot()
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Subquery: all forms share the captured MVCC statement snapshot")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Subquery_ConcurrentCommit_ShouldKeepCapturedSnapshot(bool derived)
     {
         // Arrange
         await using var engine = CreateEngine();
@@ -264,7 +266,9 @@ public sealed class SqlSubqueryExecutionTests
         try
         {
             var captured = new SqlStatementContext(transaction, database.Coordinator);
-            var request = SqlQueryRequest.FromSql(
+            var request = SqlQueryRequest.FromSql(derived
+                ? "SELECT d.id, c.id FROM (SELECT id FROM candidates) d JOIN choices c ON d.id = c.id;"
+                :
                 "SELECT id, (SELECT id FROM choices) FROM candidates WHERE id IN (SELECT id FROM choices) " +
                 "AND EXISTS (SELECT id FROM choices WHERE id IN (SELECT id FROM candidates));");
             var executor = new SqlQueryExecutor(database.DataStorage, database.Catalog, database.IndexManager, database.Definitions);

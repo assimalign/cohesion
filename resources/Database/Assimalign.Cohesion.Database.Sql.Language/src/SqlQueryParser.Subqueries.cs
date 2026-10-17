@@ -11,7 +11,7 @@ public sealed partial class SqlQueryParser
     private int _subqueryDepth;
     private int _paginationDepth;
 
-    private SqlSelectExpression ParseSubquery(ref TokenLexer lexer)
+    private SqlSelectExpression ParseSubquery(ref TokenLexer lexer, bool derived = false)
     {
         if (_paginationDepth > 0)
         {
@@ -63,8 +63,8 @@ public sealed partial class SqlQueryParser
         {
             var select = ParseSelect(ref lexer);
 
-            // An abandoned statement keeps none of its tree, so there is nothing to check.
-            if (!NestingExceeded)
+            // Derived references require catalog bindings to distinguish siblings, enclosing scopes and unknown names.
+            if (!NestingExceeded && !derived)
             {
                 ValidateSubqueryReferences(select);
             }
@@ -97,6 +97,7 @@ public sealed partial class SqlQueryParser
         string? previousToken,
         string? previousPreviousToken,
         bool insertValues,
+        bool dmlWhere,
         bool followsFromComma,
         out string clause)
     {
@@ -124,14 +125,8 @@ public sealed partial class SqlQueryParser
         else if (lexer.Current.Type == TokenType.Keyword &&
                  token.Equals("SELECT", StringComparison.OrdinalIgnoreCase) && previousToken is not null)
         {
-            if (previousToken == "(" &&
-                (string.Equals(previousPreviousToken, "FROM", StringComparison.OrdinalIgnoreCase) ||
-                 string.Equals(previousPreviousToken, "JOIN", StringComparison.OrdinalIgnoreCase) || previousPreviousToken == "," && followsFromComma))
-            {
-                clause = "derived-table SUBQUERY in FROM or JOIN";
-            }
-            else if (!firstToken.Equals("SELECT", StringComparison.OrdinalIgnoreCase) &&
-                     !firstToken.Equals("INSERT", StringComparison.OrdinalIgnoreCase))
+            if (!firstToken.Equals("SELECT", StringComparison.OrdinalIgnoreCase) &&
+                !firstToken.Equals("INSERT", StringComparison.OrdinalIgnoreCase) && !dmlWhere)
             {
                 clause = $"SUBQUERY in {firstToken.ToUpperInvariant()}";
             }
@@ -181,18 +176,19 @@ public sealed partial class SqlQueryParser
         ValidateSubqueryReference(select.Offset, qualifiers);
     }
 
-    private static void AddSubqueryQualifier(SqlTableReference? table, HashSet<string> qualifiers)
+    private static void AddSubqueryQualifier(SqlRelationReference? table, HashSet<string> qualifiers)
     {
         if (table is null)
         {
             return;
         }
-        qualifiers.Add(table.Alias ?? table.TableName);
-        if (table.Alias is null)
+        if (table.Alias is { } alias) { qualifiers.Add(alias); }
+        else if (table is SqlTableReference named)
         {
             // An omitted schema is resolved by the catalog. Its eventual fully
             // qualified column reference must not be mistaken for correlation.
-            qualifiers.Add($"{table.SchemaName ?? "*"}.{table.TableName}");
+            qualifiers.Add(named.TableName);
+            qualifiers.Add($"{named.SchemaName ?? "*"}.{named.TableName}");
         }
     }
 

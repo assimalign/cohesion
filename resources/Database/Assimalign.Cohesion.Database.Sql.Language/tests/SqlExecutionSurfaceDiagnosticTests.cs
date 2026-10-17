@@ -111,9 +111,9 @@ public class SqlExecutionSurfaceDiagnosticTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Language] - Subquery: Reports retained execution boundaries")]
-    [InlineData("SELECT * FROM (SELECT id FROM u) derived;", "derived-table SUBQUERY", "SELECT")]
+
     [InlineData("UPDATE t SET id = (SELECT id FROM u);", "SUBQUERY in UPDATE", "SELECT")]
-    [InlineData("DELETE FROM t WHERE id IN (SELECT id FROM u);", "SUBQUERY in DELETE", "SELECT")]
+
     public void Parse_UnsupportedSubquery_ReportsModelDiagnostic(string sql, string form, string locationText)
     {
 

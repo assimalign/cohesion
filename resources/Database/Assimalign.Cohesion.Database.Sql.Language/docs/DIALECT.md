@@ -41,11 +41,11 @@ complete ISO SQL support; the boundaries below are part of the contract.
 
 | Statement | Status | Notes |
 |---|---|---|
-| `SELECT` | Supported subset, measured | One stored table or virtual system relation, or written-order N-way INNER/LEFT/CROSS joins and comma items over either source kind; `DISTINCT`, projections and aliases, scalar expressions, `WHERE`, grouping, multi-expression `ORDER BY ASC/DESC`, nonnegative integer `LIMIT`/`OFFSET`. `COUNT(*)`, `COUNT(expr)`, `SUM`, `AVG`, `MIN`, and `MAX` execute in grouped and ungrouped queries. See the aggregate contract below. `SELECT` without `FROM` is rejected by the planner. |
+| `SELECT` | Supported subset, measured | Stored tables, virtual system relations and aliased derived queries, with written-order N-way INNER/LEFT/CROSS joins and comma items over these source kinds; `DISTINCT`, projections and aliases, scalar expressions, `WHERE`, grouping, multi-expression `ORDER BY ASC/DESC`, nonnegative integer `LIMIT`/`OFFSET`. `COUNT(*)`, `COUNT(expr)`, `SUM`, `AVG`, `MIN`, and `MAX` execute in grouped and ungrouped queries. See the aggregate contract below. `SELECT` without `FROM` is rejected by the planner. |
 | `EXPLAIN` | Supported extension, measured | SELECT, INSERT (including query sources), UPDATE or DELETE returns the chosen plan as ordinary rows without executing it. DDL, transaction control, nested EXPLAIN and EXPLAIN ANALYZE report `COHDBL001`. |
 | `INSERT` / `VALUES` | Supported subset, measured | Optional column list, multi-row literal/scalar `VALUES` including whole-item `DEFAULT`, `INSERT ... DEFAULT VALUES` (one row of defaults, with an optional column list), and transactional `INSERT ... SELECT` with the same destination coercion, defaults, and constraints. `VALUES` expressions have no columns in scope: a column reference reports `COHSQLE005` before anything executes (see [VALUES and counts have no column scope](#values-and-counts-have-no-column-scope-1165)). Subqueries inside `VALUES` are excluded; use `INSERT ... SELECT`. |
-| `UPDATE` | Supported | multi-column `SET`, including `c = DEFAULT`, and `WHERE`; qualified references in both use the target name or its alias, which hides the base name (PostgreSQL `parse_relation.c:3759`); hidden/unknown qualifiers fail with located `COHSQLE015` before any write and leave an explicit transaction active; no aggregate in either (see [Grouping and aggregate functions](#grouping-and-aggregate-functions-1020)) |
-| `DELETE` | Supported | optional `WHERE`, without an aggregate; qualified references use the target name or its alias, which hides the base name (PostgreSQL `parse_relation.c:3759`); hidden/unknown qualifiers fail with located `COHSQLE015` before any write and leave an explicit transaction active |
+| `UPDATE` | Supported | multi-column `SET`, including `c = DEFAULT`, and `WHERE` (including uncorrelated subqueries); qualified references in both use the target name or its alias, which hides the base name (PostgreSQL `parse_relation.c:3759`); hidden/unknown qualifiers fail with located `COHSQLE015` before any write and leave an explicit transaction active; aggregates in SET and outside child queries in WHERE are rejected; aggregates inside WHERE subqueries execute (see [Grouping and aggregate functions](#grouping-and-aggregate-functions-1020)) |
+| `DELETE` | Supported | optional `WHERE`, including uncorrelated subqueries; aggregates outside a child query are rejected; qualified references use the target name or its alias, which hides the base name (PostgreSQL `parse_relation.c:3759`); hidden/unknown qualifiers fail with located `COHSQLE015` before any write and leave an explicit transaction active |
 | `CREATE TABLE` | Supported | `IF NOT EXISTS`, column definitions with parameterized types, `COLLATE <name>`, `NOT NULL`/`NULL`, `DEFAULT <literal>`, column and table `PRIMARY KEY`, `REFERENCES`/`FOREIGN KEY`, `CHECK`, and `UNIQUE`; optional `CONSTRAINT <name>` |
 | `ALTER TABLE` | Supported subset, measured | ADD/DROP COLUMN and ADD/DROP CONSTRAINT execute. Full-definition `ALTER COLUMN c TYPE [NULL | NOT NULL] [DEFAULT literal]` accepts nullability, length and precision changes that preserve storage type, scale, collation, domain and DEFAULT; tightening and every CHAR length change check existing live values and refuse changes requiring a rewrite. PostgreSQL `TYPE ... USING`, `SET` and `DROP` variants remain unsupported (49a). ADD COLUMN literal defaults backfill old-row reads and apply to subsequent inserts that omit the column; explicit NULL follows nullability. Nullable additions without a default read NULL. NOT NULL additions to populated tables require a non-null default. Invalid defaults and nonliteral expressions reject before mutation. Column COLLATE persists and governs default comparisons. See the default, atomicity and MVCC contract below (#1023). DROP COLUMN changes only the catalog: it rewrites no row, survives a crash at any point on one definition, and SELECTs running beside it read every value in its own column; see the DROP COLUMN contract below (#1241). |
 | `DROP TABLE` | Supported | `IF EXISTS`; returns after catalog unpublication, with page reclamation asynchronous after older readers finish; the name may be recreated immediately |
@@ -55,9 +55,9 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `ORDER BY` | Supported subset, measured | Multiple source-column/scalar-expression keys, projection aliases (bare or nested in expressions), and one-based select-list ordinals execute with ASC/DESC. Unqualified aliases take precedence over same-named source columns; qualified references bind to the source. Composes with DISTINCT, LIMIT/OFFSET, supported joins, grouped/aggregate queries, and system relations. Zero, negative, out-of-range, and non-integer numeric ordinals error; `1 + 1` remains a constant expression. Explicit NULLS FIRST/LAST, derived-table output ordering, and GROUP BY ordinals report `COHDBL001`. See the ordering contract below (#1024). |
 | `CAST` | Supported subset, measured | Built-in conversions across all 19 shared types according to the [conversion matrix](#explicit-conversion-cast-1022-e3), plus application-registered casts (E3's cast registry), in projections, predicates, ordering, and DML expressions, including the SQL server/client. See the exact pair and error contract below. CAST in DEFAULT or CHECK remains rejected. |
 | `COLLATE` | Supported subset, measured | Column and expression overrides: `binary`, `case_insensitive`, `case_accent_insensitive`, plus compatibility `invariant` with scan execution only. Effective collation governs comparisons, `LIKE`, ordering, grouping, `DISTINCT`, and unique keys. See the collation contract below. |
-| `JOIN` / `USING` | Supported subset, measured | N-way INNER (or bare JOIN), LEFT [OUTER], CROSS and comma joins over stored/system sources. INNER/LEFT require ON or USING; CROSS accepts neither. RIGHT/FULL, NATURAL, LATERAL and qualified wildcards remain excluded. See the precise contract below. |
+| `JOIN` / `USING` | Supported subset, measured | N-way INNER (or bare JOIN), LEFT [OUTER], CROSS and comma joins over stored/system/derived sources. INNER/LEFT require ON or USING; CROSS accepts neither. RIGHT/FULL, NATURAL, LATERAL and qualified wildcards remain excluded. See the precise contract below. |
 | `GROUP BY` / `HAVING` | Supported subset, measured | One or more grouping expressions; `WHERE` filters input rows and `HAVING` filters groups after aggregation. Composes with supported N-way joins, `ORDER BY`, `LIMIT`, and `OFFSET`, including server/client execution. Ungrouped, unaggregated projected columns are errors. `DISTINCT`/`ALL` aggregate modifiers, grouping extensions, windows, and ordered-set aggregates report `COHDBL001`. |
-| Subqueries / `INSERT ... SELECT` | Supported subset, measured | Uncorrelated scalar, `IN`/`NOT IN`, and `EXISTS`/`NOT EXISTS` queries in supported SELECT expressions, plus transactional insert-source queries. All use the outer statement snapshot; nesting is limited to 32 subquery levels, within the statement's expression nesting limit (256 levels by default, `SQL0006`). Correlated queries, derived tables, quantified comparisons, subqueries in UPDATE/DELETE, VALUES, CHECK/DEFAULT, and LIMIT/OFFSET expressions report `COHDBL001`. See the subquery contract below. |
+| Subqueries / `INSERT ... SELECT` | Supported subset, measured | Uncorrelated scalar, `IN`/`NOT IN`, and `EXISTS`/`NOT EXISTS` queries in supported SELECT expressions and UPDATE/DELETE WHERE predicates, plus aliased derived tables and transactional insert-source queries. All use the outer statement snapshot; nesting is limited to 32 subquery levels, within the statement's expression nesting limit (256 levels by default, `SQL0006`). Correlated queries, quantified comparisons, subqueries in UPDATE SET, VALUES, CHECK/DEFAULT, and LIMIT/OFFSET expressions report `COHDBL001`. See the subquery contract below. |
 | `TOP` / `SELECT ALL` / `FETCH` | Recognized, not supported | row-limit and select modifiers rejected with `COHDBL001` |
 | DML `RETURNING` | Recognized, not supported | rejected with `COHDBL001` |
 | `NATURAL JOIN` | Recognized, not supported | rejected with `COHDBL001` |
@@ -176,7 +176,7 @@ A recognized clause outside the profile keeps its `COHDBL001`, for example
 from that clause on adds no second diagnostic. Text the parser stopped at before
 it reached the clause still reports `SQL0003`: `DELETE FROM t WHRE id = 1
 RETURNING *` reports both, so fixing `RETURNING` does not reveal a new error. A
-derived table, `(SELECT ...) alias`, is skipped as a unit after its `COHDBL001`.
+derived table, `(SELECT ...) alias`, is parsed as a query relation; its alias is required.
 Named `:name` parameters are not part of the dialect; bind `@name` or `$1`.
 
 A syntax error is reported once per position: recovery leaves the offending
@@ -433,8 +433,9 @@ expression. WHERE/HAVING predicates and LIMIT/OFFSET values retain their normal
 expression meanings and never refer to select-list positions.
 
 **Explicit boundaries:** `NULLS FIRST` and `NULLS LAST` report `COHDBL001`.
-Derived tables in FROM/JOIN remain unsupported, so ordering by an output of
-`FROM (SELECT ...)` reports `COHDBL001` too. Supported uncorrelated scalar
+Derived tables execute, while outer ordering over their outputs retains the shared
+#1112/#1113 `COHDBL001` pin until the ordering extension lands. Ordering inside
+a derived body already executes. Supported uncorrelated scalar
 subquery expressions, including projected scalar subquery aliases, and ordering
 inside supported subqueries keep the same ordering rules. Alias names in
 GROUP BY and HAVING remain outside the projection-alias binding scope; repeat
@@ -597,14 +598,13 @@ SQL defaults do not apply to Documents, Graph, Key-Value, or Blob comparisons.
 
 ## Joins (#1019)
 
-FROM is a comma-separated list of join trees. Each item starts with a stored table or
-registered INFORMATION_SCHEMA/COHESION_SCHEMA relation, followed by any number of INNER
+FROM is a comma-separated list of join trees. Each item starts with a stored table,
+registered INFORMATION_SCHEMA/COHESION_SCHEMA relation or aliased derived query, followed by any number of INNER
 (including bare JOIN), LEFT [OUTER], or CROSS joins. INNER and LEFT require exactly one
 ON predicate or USING (column [, column ...]); CROSS accepts neither. Missing ON/USING
 and RIGHT/FULL OUTER remain COHDBL001; malformed joins and CROSS with a condition fail
 with an error and never execute as a product. NATURAL, LATERAL and qualified wildcards
-such as t.* keep COHDBL001. Derived comma inputs, FROM t, (SELECT ...) d, remain excluded
-until #1113.
+such as t.* keep COHDBL001. Derived comma inputs, FROM t, (SELECT ...) d, execute.
 
 JOIN binds more tightly than comma: in FROM a, b JOIN c ON ..., ON can see b and c,
 but cannot see a. It also cannot reference a later input. Unknown/hidden qualifiers
@@ -1063,25 +1063,72 @@ materialized under the statement snapshot before inserts begin, so newly
 inserted rows cannot feed back into the source query.
 
 Correlation is excluded with `COHDBL001`: a nested column must bind to that
-query's local FROM/JOIN scope. The parser diagnoses explicit outer qualifiers;
-catalog binding rejects unresolved local columns, including unqualified outer
-references. A column reference in a subquery's `LIMIT` or `OFFSET` that the parser
+query's local FROM/JOIN scope. The parser diagnoses explicit outer qualifiers in
+ordinary subqueries; derived-body references wait for catalog binding. Binding
+distinguishes unknown names (`COHSQLE015`) from actual unqualified outer references
+(the correlation refusal). A column reference in a subquery's `LIMIT` or `OFFSET` that the parser
 lets through, outer or local, reports `COHSQLE005` instead, because counts have no
 column scope (#1165; see [VALUES and counts have no column scope](#values-and-counts-have-no-column-scope-1165)).
 Local aliases may shadow outer aliases. Query nesting permits at
-most **32 expression-subquery levels** below the top-level SELECT (or INSERT's
+most **32 subquery levels**, including derived bodies, below the top-level SELECT (or INSERT's
 source SELECT); level 33 reports `COHDBL001` before recursive parsing continues.
 Each subquery is also one level of the statement's expression tree, and its
 clauses nest below it, so the [expression nesting limit](#expression-nesting-limit-1151)
 (256 levels by default) bounds the statement as a whole, subqueries included. The
 32-level subquery limit is fixed; it does not follow the configured expression limit.
 
-`ANY`/`ALL`/`SOME` quantified comparisons, derived tables in FROM or JOIN, CTEs,
-lateral joins, and subqueries in UPDATE/DELETE, INSERT VALUES, CHECK/DEFAULT,
+`ANY`/`ALL`/`SOME` quantified comparisons, CTEs, lateral joins,
+and subqueries in UPDATE SET, INSERT VALUES, CHECK/DEFAULT,
 or LIMIT/OFFSET expressions remain excluded with `COHDBL001`. Ordinary numeric
 LIMIT/OFFSET clauses on queries containing subqueries do execute. CHECK remains
 a deterministic row-local expression and still rejects every subquery form.
 These subset boundaries do not add named clauses to the 49-clause denominator.
+
+## Derived tables and DML predicates (#1113, part b)
+
+`FROM (SELECT ...) AS d`, `(SELECT ...) d (a, b)`, JOIN targets and comma items
+are query relations. An alias is required; an optional column list must name
+every output exactly once by position (its length must equal the output width).
+Both shorter and longer lists fail during planning with `COHSQLE013`; unlike
+PostgreSQL, a partial list does not fill remaining names from the target list.
+Empty or whitespace-only output names also fail with `COHSQLE013`, preserving
+the session and any open transaction.
+The alias hides all underlying names; an unknown or hidden qualifier reports
+located `COHSQLE015`. Duplicate output names remain ambiguous when referenced.
+Output storage types, length/precision/scale, nullability, shared domains and collation provenance survive
+materialization, including empty results. WHERE, GROUP BY/HAVING, ORDER BY and
+LIMIT/OFFSET inside the body apply before the enclosing query reads its rows.
+Stored, system and derived sources can join each other, including LEFT null
+extension. A body is executed once under the enclosing statement context.
+
+Uncorrelated scalar, membership and existence subqueries also execute in
+UPDATE/DELETE WHERE. Their children materialize before any target mutation, so a
+self-reading DELETE compares against the pre-statement values. A child sees
+the session's uncommitted changes; rollback restores target rows and cascades.
+System relations in these predicates and in derived bodies request the same one
+statement catalog snapshot as ordinary SELECT children.
+
+Correlation remains excluded in this first part. A derived reference that binds
+to a sibling FROM item receives `COHDBL001` naming LATERAL at that reference.
+Typos and nonexistent or hidden qualifiers retain located `COHSQLE015`.
+An enclosing-query reference from a derived table nested in a subquery receives
+the ordinary correlation refusal, reserved for part (a). Set operations inside derived
+bodies retain #1114's capability pin. Outer ORDER BY keys bound to derived outputs,
+including aliases and ordinals that project them, retain the shared #1112 pin at
+planning. Keys bound to stored inputs execute, as does ordering within derived
+bodies containing further derived inputs. These extensions
+add no named clause, catalog format or wire payload. PostgreSQL's local reference
+uses `RangeSubselect` in `src/backend/parser/gram.y:13938-13956` and isolates its
+namespace in `parse_clause.c:407-457`. The required alias and full-width column
+list are this dialect's explicit subset rules.
+Projected metadata follows `parse_relation.c:1715-1721`; qualified USING columns
+keep physical metadata while the unqualified output keeps merged metadata.
+Projected IN/NOT IN outputs are BOOLEAN regardless of the membership element type.
+Default-only collation on a computed output remains inherited rather than becoming
+a declared override. A declared source column or explicit inner COLLATE supplies
+declared strength (priority 2), including explicit binary; two declared collations
+retain the dialect's existing left-operand tie rule. Missing-reference classification
+follows `parse_relation.c:3759-3789`.
 
 ## Expression nesting limit (#1151)
 
@@ -1237,7 +1284,7 @@ The binder requests one immutable catalog image when it first resolves a system 
 Every child query and INSERT source shares that image; no outer-AST prediction is needed.
 Snapshot transactions supply their BEGIN-time image; ReadCommitted and automatic statements
 capture on first system-relation binding. A stored-only statement needs no catalog capture.
-Future derived tables, CTEs, set operands, view bodies and UPDATE/DELETE subqueries inherit
+Derived tables and UPDATE/DELETE subqueries use this capture; future CTEs, set operands and view bodies inherit
 this binding rule when their syntax becomes executable. Their current admission boundaries
 remain as stated above.
 
