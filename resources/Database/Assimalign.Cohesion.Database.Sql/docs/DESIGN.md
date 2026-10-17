@@ -3203,6 +3203,13 @@ journal's append buffer that carries it, at the rollback or at a later drain suc
 next commit's, which also takes the database offline (`Database.Storage` DESIGN.md,
 "The append buffer").
 
+`SqlTransactionControlTests` drives `START TRANSACTION ... END` and
+`BEGIN WORK ... ROLLBACK WORK` through `ServerTestHarness`, checking observer
+visibility across commit and restoration after rollback. Malformed
+`START TRANSACTION ISOLATION LEVEL SERIALIZABLE` returns wire `ParseFailure`
+carrying `SQL0003`, opens no transaction, and permits the next statement on the
+same connection. Protocol responses synchronize these checks without fixed sleeps.
+
 The session's transaction is the root `DatabaseSession`'s (concrete-types plan §6.4, phase 4):
 the base registers the `SqlDatabaseTransaction` the session's BEGIN core creates and reports it
 as `CurrentTransaction` until the caller ends it, so one transaction at a time is open on a
