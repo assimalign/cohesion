@@ -9,6 +9,7 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Database.Execution;
+using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Storage;
 
@@ -37,7 +38,8 @@ public sealed class SqlIdentityTests
         // Assert
         (await IdsAsync(session)).Order().ShouldBe(Enumerable.Range(1, 6).Select(index => start + index * increment).Order());
         var metadata = await RowsAsync(session, "SELECT COLUMN_DEFAULT, IS_NULLABLE, IS_IDENTITY, IDENTITY_GENERATION, IDENTITY_START, IDENTITY_INCREMENT, IDENTITY_MAXIMUM, IDENTITY_MINIMUM, IDENTITY_CYCLE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'ids' AND COLUMN_NAME = 'id'");
-        metadata.ShouldHaveSingleItem().ShouldBe(new object?[] { null, "NO", "YES", "BY DEFAULT", start.ToString(), increment.ToString(), long.MaxValue.ToString(), long.MinValue.ToString(), "NO" });
+        metadata.ShouldHaveSingleItem().ShouldBe(new object?[] { null, "NO", "YES", "BY DEFAULT", start.ToString(), increment.ToString(),
+            (increment > 0 ? long.MaxValue : -1).ToString(), (increment > 0 ? 1 : long.MinValue).ToString(), "NO" });
     }
 
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Identity: ALWAYS rejects explicit inserts and every update")]
@@ -82,9 +84,10 @@ public sealed class SqlIdentityTests
 
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Identity: exhaustion is checked and inserts no partial rows")]
     [InlineData("TINYINT", 127L, 1L)]
+    [InlineData("TINYINT", -128L, -1L)]
     [InlineData("SMALLINT", 32767L, 1L)][InlineData("INT", 2147483647L, 1L)]
     [InlineData("BIGINT", long.MaxValue, 1L)][InlineData("BIGINT", long.MinValue, -1L)]
-    [InlineData("BIGINT", 0L, long.MinValue)]
+    [InlineData("BIGINT", -1L, long.MinValue)]
     public async Task ExecuteAsync_IdentityExhaustion_ShouldFailAtomically(string type, long start, long increment)
     {
         // Arrange
@@ -98,6 +101,9 @@ public sealed class SqlIdentityTests
 
         // Assert
         failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE025");
+        long limit = increment < 0 ? type == "TINYINT" ? sbyte.MinValue : long.MinValue : start;
+        failure.Message.ShouldBe($"Identity column 'id' has exhausted its {type} range ({limit}).");
+        failure.InnerException.ShouldBeOfType<SqlCatalogException>().Message.ShouldBe(failure.Message);
         (await IdsAsync(session)).ShouldBeEmpty();
         await Should.ThrowAsync<DatabaseException>(() => ExecAsync(session, "INSERT INTO ids DEFAULT VALUES"));
     }
@@ -106,6 +112,8 @@ public sealed class SqlIdentityTests
     [InlineData("id TEXT IDENTITY", "id")][InlineData("id INT IDENTITY(1,0)", "id")]
     [InlineData("id INT IDENTITY DEFAULT 1", "id")][InlineData("id INT DEFAULT NULL IDENTITY", "id")]
     [InlineData("id INT IDENTITY, second INT IDENTITY", "second")][InlineData("id SMALLINT IDENTITY(32768,1)", "id")]
+    [InlineData("id SMALLINT GENERATED ALWAYS AS IDENTITY (START WITH 0)", "id")]
+    [InlineData("id SMALLINT GENERATED ALWAYS AS IDENTITY (START WITH 1 INCREMENT BY -1)", "id")]
     public async Task ExecuteAsync_InvalidDefinition_ShouldLeaveCatalogUnchanged(string definition, string column)
     {
         // Arrange
@@ -133,7 +141,9 @@ public sealed class SqlIdentityTests
         await ExecAsync(session, "INSERT INTO ids VALUES (1)");
 
         // Act / Assert
-        (await Should.ThrowAsync<DatabaseException>(() => ExecAsync(session, "ALTER TABLE ids ADD id INT IDENTITY"))).Message.ShouldContain("id");
+        var failure = await Should.ThrowAsync<DatabaseException>(() => ExecAsync(session, "ALTER TABLE ids ADD id INT IDENTITY"));
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE025");
+        failure.Message.ShouldBe("Identity column 'id': ADD COLUMN IDENTITY requires a table with no live rows.");
         await ExecAsync(session, "DELETE FROM ids");
         await ExecAsync(session, "ALTER TABLE ids ADD id INT IDENTITY(100,5)");
         await ExecAsync(session, "INSERT INTO ids (label) VALUES (2), (3)");
@@ -155,18 +165,19 @@ public sealed class SqlIdentityTests
         await using var engine = SqlDatabaseEngine.Create("identity", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("ids", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
-        await ExecAsync(session, $"CREATE TABLE ids (id INT IDENTITY(10,{increment}), label INT CHECK (label > 0))");
+        long start = 10L * increment;
+        await ExecAsync(session, $"CREATE TABLE ids (id INT IDENTITY({start},{increment}), label INT CHECK (label > 0))");
 
         // Act
         await ExecAsync(session, "BEGIN");
         await ExecAsync(session, "INSERT INTO ids (label) VALUES (1)");
-        (await IdsAsync(session)).ShouldBe([10L]);
+        (await IdsAsync(session)).ShouldBe([start]);
         await ExecAsync(session, "ROLLBACK");
         await Should.ThrowAsync<DatabaseException>(() => ExecAsync(session, "INSERT INTO ids (label) VALUES (-1)"));
         await ExecAsync(session, "INSERT INTO ids (label) VALUES (2)");
 
         // Assert
-        (await IdsAsync(session)).ShouldBe([10L + 2 * increment]);
+        (await IdsAsync(session)).ShouldBe([start + 2 * increment]);
     }
 
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Identity: NOT NULL failures consume defaults at every column position")]
@@ -202,9 +213,10 @@ public sealed class SqlIdentityTests
         {
             var database = await engine.CreateDatabaseAsync("ids", CancellationToken.None);
             await using var session = await database.CreateSessionAsync(CancellationToken.None);
-            await ExecAsync(session, $"CREATE TABLE ids (id BIGINT IDENTITY(10,{increment}))");
+            long start = 10L * increment;
+            await ExecAsync(session, $"CREATE TABLE ids (id BIGINT IDENTITY({start},{increment}))");
             for (int i = 0; i < 35; i++) { await ExecAsync(session, "INSERT INTO ids DEFAULT VALUES"); }
-            long last = 10L + 34 * increment;
+            long last = start + 34 * increment;
             var image = crash ? storage.CaptureDurableImages() : null;
             await session.DisposeAsync();
             await engine.DisposeAsync();
@@ -219,7 +231,7 @@ public sealed class SqlIdentityTests
             var ids = await IdsAsync(next);
             (increment > 0 ? ids.Max() > last : ids.Min() < last).ShouldBeTrue();
             ids.Distinct().Count().ShouldBe(ids.Length);
-            ids.ShouldContain(10L + 64 * increment);
+            ids.ShouldContain(start + 64 * increment);
         }
         finally { await engine.DisposeAsync(); }
     }
@@ -297,6 +309,182 @@ public sealed class SqlIdentityTests
         await using var next = await recovered.CreateSessionAsync(CancellationToken.None);
         await ExecAsync(next, "INSERT INTO ids DEFAULT VALUES");
         (await IdsAsync(next)).ShouldBe([33L]);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - INSERT: explicit OVERRIDING aliases execute")]
+    [InlineData("overriding")][InlineData("\"overriding\"")]
+    public async Task ExecuteAsync_OverridingAlias_ShouldInsertRow(string alias)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("identity", new SqlDatabaseEngineOptions());
+        var database = await engine.CreateDatabaseAsync("ids", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecAsync(session, "CREATE TABLE ids (id INT)");
+
+        // Act
+        await ExecAsync(session, $"INSERT INTO ids AS {alias} VALUES (1)");
+
+        // Assert
+        (await IdsAsync(session)).ShouldBe([1L]);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - DDL: conflicting NULL declarations never publish columns")]
+    [InlineData("NULL PRIMARY KEY")][InlineData("PRIMARY KEY NULL")]
+    [InlineData("NULL NOT NULL")][InlineData("NOT NULL NULL")]
+    [InlineData("NULL IDENTITY")][InlineData("IDENTITY NULL")]
+    public async Task ExecuteAsync_ConflictingNullability_ShouldLeaveCatalogUnchanged(string constraints)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("identity", new SqlDatabaseEngineOptions());
+        var database = await engine.CreateDatabaseAsync("ids", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecAsync(session, "CREATE TABLE ids (id INT)");
+        ulong generation = database.Catalog.DdlGeneration;
+
+        // Act / Assert
+        foreach (string sql in new[] { $"CREATE TABLE refused (id INT {constraints})",
+            $"ALTER TABLE ids ADD COLUMN second INT {constraints}", $"ALTER TABLE ids ALTER COLUMN id INT {constraints}" })
+        {
+            var failure = await Should.ThrowAsync<DatabaseException>(() => ExecAsync(session, sql));
+            failure.Diagnostics.ShouldContain(item => item.Code == "SQL0003");
+            failure.Message.ShouldContain(sql.Contains("second") ? "second" : "id", Case.Sensitive);
+            database.Catalog.DdlGeneration.ShouldBe(generation);
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - DDL: ALTER cannot make an existing primary key explicitly NULL")]
+    public async Task ExecuteAsync_AlterPrimaryKeyNull_ShouldNameColumnAndLeaveCatalogUnchanged()
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("identity", new SqlDatabaseEngineOptions());
+        var database = await engine.CreateDatabaseAsync("ids", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecAsync(session, "CREATE TABLE ids (id INT PRIMARY KEY)");
+        ulong generation = database.Catalog.DdlGeneration;
+
+        // Act
+        var failure = await Should.ThrowAsync<DatabaseException>(() => ExecAsync(session, "ALTER TABLE ids ALTER COLUMN id INT NULL"));
+
+        // Assert
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("SQL0003");
+        failure.Message.ShouldBe("Conflicting NULL/NOT NULL declarations for column 'id'.");
+        database.Catalog.DdlGeneration.ShouldBe(generation);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Identity: ADD definition errors fail before catalog publication")]
+    [InlineData("id INT IDENTITY", "second INT IDENTITY")]
+    [InlineData("label INT", "second TEXT IDENTITY")]
+    [InlineData("label INT", "second INT IDENTITY(1,0)")]
+    [InlineData("label INT", "second INT IDENTITY DEFAULT 1")]
+    public async Task ExecuteAsync_InvalidAddDefinition_ShouldLeaveCatalogUnchanged(string existing, string definition)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("identity", new SqlDatabaseEngineOptions());
+        var database = await engine.CreateDatabaseAsync("ids", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecAsync(session, $"CREATE TABLE ids ({existing})");
+        database.Catalog.TryGetTable("dbo", "ids", out var table).ShouldBeTrue();
+        ulong generation = database.Catalog.DdlGeneration;
+
+        // Act
+        var failure = await Should.ThrowAsync<DatabaseException>(() => ExecAsync(session, $"ALTER TABLE ids ADD COLUMN {definition}"));
+
+        // Assert
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE025");
+        failure.Message.ShouldContain("'second'", Case.Sensitive);
+        database.Catalog.DdlGeneration.ShouldBe(generation);
+        database.Catalog.TryGetTable("dbo", "ids", out var unchanged).ShouldBeTrue();
+        unchanged.ShouldBeSameAs(table);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Identity: ALTER preserves generation only for unchanged type and NOT NULL")]
+    public async Task ExecuteAsync_AlterIdentityColumn_ShouldRefuseChangesAndKeepGeneration()
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("identity", new SqlDatabaseEngineOptions());
+        var database = await engine.CreateDatabaseAsync("ids", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecAsync(session, "CREATE TABLE ids (id INT IDENTITY, label INT)");
+        await ExecAsync(session, "INSERT INTO ids (label) VALUES (1)");
+        ulong generation = database.Catalog.DdlGeneration;
+
+        // Act / Assert
+        foreach (string definition in new[] { "BIGINT NOT NULL", "INT NOT NULL DEFAULT 5", "INT", "INT NULL" })
+        {
+            var failure = await Should.ThrowAsync<DatabaseException>(() => ExecAsync(session, $"ALTER TABLE ids ALTER COLUMN id {definition}"));
+            failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE025");
+            failure.Message.ShouldContain("'id'", Case.Sensitive);
+            database.Catalog.DdlGeneration.ShouldBe(generation);
+        }
+        await ExecAsync(session, "ALTER TABLE ids ALTER COLUMN id INT NOT NULL");
+        await ExecAsync(session, "INSERT INTO ids (label) VALUES (2)");
+        (await IdsAsync(session)).ShouldBe([1L, 2L]);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Identity: ADD CONSTRAINT retains the identity primary key")]
+    public async Task ExecuteAsync_AddConstraint_ShouldPreserveIdentityPrimaryKey()
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("identity", new SqlDatabaseEngineOptions());
+        var database = await engine.CreateDatabaseAsync("ids", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecAsync(session, "CREATE TABLE ids (id INT IDENTITY PRIMARY KEY, label INT)");
+
+        // Act
+        await ExecAsync(session, "ALTER TABLE ids ADD CONSTRAINT ck CHECK (label > 0)");
+        await ExecAsync(session, "INSERT INTO ids (label) VALUES (1)");
+
+        // Assert
+        (await IdsAsync(session)).ShouldBe([1L]);
+        await Should.ThrowAsync<SqlConstraintViolationException>(() => ExecAsync(session, "INSERT INTO ids (label) VALUES (0)"));
+    }
+
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Identity: ALWAYS permits explicit DEFAULT and updates of other columns")]
+    [InlineData("GENERATED ALWAYS AS IDENTITY")][InlineData("IDENTITY")]
+    public async Task ExecuteAsync_AlwaysDefaultAndOtherColumnUpdate_ShouldSucceed(string clause)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("identity", new SqlDatabaseEngineOptions());
+        var database = await engine.CreateDatabaseAsync("ids", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecAsync(session, $"CREATE TABLE ids (id INT {clause} PRIMARY KEY, label INT)");
+
+        // Act
+        await ExecAsync(session, "INSERT INTO ids (id, label) VALUES (DEFAULT, 1)");
+        await ExecAsync(session, "UPDATE ids SET label = 2");
+
+        // Assert
+        (await RowsAsync(session, "SELECT id, label FROM ids")).ShouldHaveSingleItem().ShouldBe(new object?[] { 1, 2 });
+    }
+
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Identity: COLUMNS appends identity fields with directional SMALLINT bounds and NULL ordinary facets")]
+    [InlineData(1, "32767", "1")][InlineData(-1, "-1", "-32768")]
+    public async Task ExecuteAsync_IdentityMetadata_ShouldPreserveOrdinalsAndOrdinaryNulls(int increment, string maximum, string minimum)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("identity", new SqlDatabaseEngineOptions());
+        var database = await engine.CreateDatabaseAsync("ids", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecAsync(session, $"CREATE TABLE ids (id SMALLINT GENERATED ALWAYS AS IDENTITY (INCREMENT BY {increment}), label INT)");
+
+        // Act
+        await using var result = (DatabaseResultSet)await session.ExecuteAsync(
+            "SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'ids' ORDER BY ORDINAL_POSITION", cancellationToken: CancellationToken.None);
+        var rows = new List<object?[]>();
+        await foreach (var row in result.GetRowsAsync(CancellationToken.None))
+        {
+            rows.Add(Enumerable.Range(0, row.FieldCount).Select(row.GetValue).ToArray());
+        }
+
+        // Assert
+        result.Columns.Select(column => column.Name).ShouldBe(new[] { "TABLE_CATALOG", "TABLE_SCHEMA", "TABLE_NAME", "COLUMN_NAME",
+            "ORDINAL_POSITION", "COLUMN_DEFAULT", "IS_NULLABLE", "DATA_TYPE", "CHARACTER_MAXIMUM_LENGTH", "CHARACTER_OCTET_LENGTH",
+            "NUMERIC_PRECISION", "NUMERIC_PRECISION_RADIX", "NUMERIC_SCALE", "DATETIME_PRECISION", "IS_IDENTITY", "IDENTITY_GENERATION",
+            "IDENTITY_START", "IDENTITY_INCREMENT", "IDENTITY_MAXIMUM", "IDENTITY_MINIMUM", "IDENTITY_CYCLE" });
+        rows.Count.ShouldBe(2);
+        rows[0][5].ShouldBeNull();
+        rows[0].Skip(14).ShouldBe(new object?[] { "YES", "ALWAYS", increment.ToString(), increment.ToString(), maximum, minimum, "NO" });
+        rows[1].Skip(14).ShouldBe(new object?[] { "NO", null, null, null, null, null, null });
     }
 
     private static async Task ExecAsync(SqlDatabaseSession session, string sql)
