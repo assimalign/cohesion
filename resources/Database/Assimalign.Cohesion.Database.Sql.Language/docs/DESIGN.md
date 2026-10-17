@@ -430,3 +430,6 @@ Rendering preserves accepted quoted uppercase and mixed-case window-like names w
 A lowercase quoted unsupported call retains its diagnostic and NULL recovery expression; the
 renderer round-trip guarantee continues to apply to error-free parser trees. Renderer tests
 cover both accepted spellings and the coded recovery of rejected spellings.
+
+Definition-binding diagnostics remain engine-owned. DIALECT.md records COHSQLD001 for invalid
+CHECK predicates and absent DROP definitions, including the structured carrier and span fallback.

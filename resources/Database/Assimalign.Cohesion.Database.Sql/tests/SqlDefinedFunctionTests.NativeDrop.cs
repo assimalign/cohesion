@@ -22,6 +22,7 @@ public sealed partial class SqlDefinedFunctionTests
         var failure = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "DROP FUNCTION " + signature));
 
         // Assert
-        failure.ShouldStartWithMessage(code + ":", Case.Sensitive);
+        if (code == "COHSQLD001") { failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == code); }
+        else { failure.ShouldStartWithMessage(code + ":", Case.Sensitive); }
     }
 }

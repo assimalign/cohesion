@@ -43,7 +43,7 @@ internal sealed partial class SqlPlanExecutor
                     {
                         throw new DatabaseException($"{SqlDefinitionBinder.NativeCode}: Function '{signature}' is engine-registered and cannot be dropped through SQL.");
                     }
-                    throw SqlDefinitionBinder.Refuse($"Function '{signature}' does not exist.");
+                    throw SqlDefinitionBinder.Refuse($"Function '{signature}' does not exist.", drop.Location);
                 }
                 CheckDefinitionOwner(definition.Name, definition.Owner, definition.OwningSchema, statement);
                 EnsureNoDependents("F:" + signature);
@@ -59,7 +59,7 @@ internal sealed partial class SqlPlanExecutor
                     {
                         throw new DatabaseException($"{SqlDefinitionBinder.NativeCode}: Type '{drop.Name}' is engine-registered and cannot be dropped through SQL.");
                     }
-                    throw SqlDefinitionBinder.Refuse($"Domain '{drop.Name}' does not exist.");
+                    throw SqlDefinitionBinder.Refuse($"Domain '{drop.Name}' does not exist.", drop.Location);
                 }
                 CheckDefinitionOwner(definition.Name, definition.Owner, definition.OwningSchema, statement);
                 EnsureNoDependents(SqlDefinitionBinder.DomainKey(drop.Name));

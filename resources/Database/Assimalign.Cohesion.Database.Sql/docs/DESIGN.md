@@ -4678,3 +4678,17 @@ Evaluator unsupported nodes/operators use COHSQLE013, operand-type failures use 
 and CAST range failures use COHSQLE002 (PostgreSQL 22003). CAST invalid text uses the new
 COHSQLE022 (22P02); division/remainder by zero keeps COHSQLE001 (22012). The dialect records
 the complete code mapping. Messages remain unprefixed; servers compose the code once.
+
+### Statement rejection carriers (second #1103 review)
+
+SqlDefinitionBinder.Refuse returns the existing SqlPlanningException with COHSQLD001 and an
+unprefixed message. Definition admission uses the offending expression's location, falling back
+to the declaration for type/parameter metadata without separate tokens. Reopened definitions
+locate their retained canonical body or type fragment when no declaration AST survives; expression
+walks retain the parsed node's span. DROP of an absent domain/function locates the DROP statement.
+The existing COHSQLD002/003 executor ownership and dependency checks are unchanged.
+
+A CHECK that is not Boolean is a definition-binding rejection under COHSQLD001, including
+CREATE TABLE c (id INT CHECK (id)). It reports the predicate span before any table is created.
+PostgreSQL likewise rejects a non-Boolean CHECK operand during coercion and reports its expression
+position (src/backend/parser/parse_coerce.c:1163-1191). No runtime row-value failure is converted.

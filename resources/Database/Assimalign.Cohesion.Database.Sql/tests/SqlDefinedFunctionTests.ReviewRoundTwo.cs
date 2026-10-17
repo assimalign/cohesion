@@ -109,7 +109,7 @@ public sealed partial class SqlDefinedFunctionTests
             await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "CREATE TABLE invalid(v INT CHECK(allowed(v)))"));
             await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "CREATE DOMAIN invalid_domain AS INT CHECK(allowed(VALUE))"));
             (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session,
-                "CREATE FUNCTION invalid_wrapper(p INT) RETURNS BOOLEAN IMMUTABLE RETURN allowed(p)"))).Message.ShouldContain("COHSQLD001");
+                "CREATE FUNCTION invalid_wrapper(p INT) RETURNS BOOLEAN IMMUTABLE RETURN allowed(p)"))).Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLD001");
         }
 
         var restored = SqlDatabaseEngine.CreateBuilder("weakened-native");

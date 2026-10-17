@@ -1917,7 +1917,7 @@ expression there would change historical rows on each read. ALTER cannot change 
 
 | Code | Meaning |
 | --- | --- |
-| COHSQLD001 | Invalid, duplicate, recursive or volatility-incompatible SQL definition. |
+| COHSQLD001 | Invalid, duplicate, recursive or volatility-incompatible SQL definition; non-Boolean CHECK predicate; absent function/domain requested by DROP. |
 | COHSQLD002 | A persisted definition or column depends on the object being dropped. |
 | COHSQLD003 | SQL attempted to drop an engine-registered function/type. |
 | COHSQLS001 | A script checksum, identity, completed target or object claim is inconsistent, or publication does not match the actual mutation and exact preceding receipt/generation. |
@@ -1925,6 +1925,13 @@ expression there would change historical rows on each read. ALTER cannot change 
 | COHSQLS003 | Transaction control inside a declared script; the runner owns transactions. |
 | COHSQLS004 | A script statement failed or attempted to adopt an existing table or index. |
 | COHSQLS005 | A script attempts ALTER TABLE, DROP TABLE or DROP INDEX against an object declared by the typed schema; declare the change in the typed schema. |
+
+Definition-binding COHSQLD001 rejections carry the code separately from their message in
+DatabaseException.Diagnostics. The span identifies the offending expression, or the statement
+when a parameter/type has no separate token location. Binding retained catalog metadata uses its
+canonical expression/type fragment when the original declaration is unavailable. In particular,
+CREATE TABLE c (id INT CHECK (id)); locates id in CHECK, and DROP DOMAIN absent; locates DROP.
+The in-process message is unprefixed; the SQL server composes CODE: message.
 
 SqlDatabaseBuilder.Script(name, sql) runs after the typed schema in declaration order. Names are
 case-sensitive, unique and at most 128 characters. Exact UTF-8 bodies are SHA-256 checked;
