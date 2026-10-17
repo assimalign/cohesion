@@ -1,4 +1,6 @@
 using System;
+using System.IO;
+using System.Net;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -8,6 +10,7 @@ using Xunit;
 
 using Assimalign.Cohesion.Connections;
 using Assimalign.Cohesion.Connections.InMemory;
+using Assimalign.Cohesion.Connections.Tcp;
 using Assimalign.Cohesion.Database.Client;
 using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Types;
@@ -16,6 +19,94 @@ namespace Assimalign.Cohesion.Database.Documents.Client.Tests;
 
 public sealed class DocumentClientProtocolTests
 {
+    [Theory(DisplayName = "Cohesion Test [Documents.Client] - Startup rejects an old client before authentication and releases its server slot")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Server_OldStartupVersion_ShouldRefuseAndCloseConnection(bool tcp)
+    {
+        // Arrange
+        await using var harness = await DocumentClientTestHarness.StartAsync(tcp, options => options.MaxSessions = 1);
+        ProtocolVersion.Current.ShouldBe(new ProtocolVersion(2, 0));
+        await using (var transport = await harness.Factory.ConnectAsync(harness.Listener.EndPoint, harness.Token))
+        await using (var channel = new ProtocolChannel(transport.AsStream(), DocumentProtocol.Family, leaveOpen: true))
+        {
+            // Act: a 1.0 client expects ResultRow arrays and must never reach Authenticate.
+            await WriteAsync(channel, (byte)ProtocolMessageType.Startup,
+                new ProtocolStartupMessage(new ProtocolVersion(1, 0), "documents", "tester").Encode(), harness.Token);
+            var response = (await channel.Reader.ReadFrameAsync(harness.Token)).ShouldNotBeNull();
+
+            // Assert
+            response.Type.ShouldBe(ProtocolMessageType.Error);
+            var error = ProtocolErrorMessage.Decode(response.Payload.Span);
+            error.Code.ShouldBe(ProtocolErrorCode.UnsupportedVersion);
+            error.Message.ShouldContain("2.0", Case.Sensitive);
+            (await channel.Reader.ReadFrameAsync(harness.Token)).ShouldBeNull();
+        }
+        while (harness.Server.Sessions.Count != 0) { await Task.Delay(10, harness.Token); }
+        harness.Server.Sessions.ShouldBeEmpty();
+        await using var connection = await harness.Client.ConnectAsync(harness.Token);
+        (await connection.GetCollectionsAsync(harness.Token)).ShouldBeEmpty();
+        harness.Server.Sessions.ShouldHaveSingleItem().ProtocolVersion.ShouldBe(new ProtocolVersion(2, 0));
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Documents.Client] - An old server refuses startup and failed handshakes close both transports and release the pool slot")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ConnectAsync_OldServerVersion_ShouldPreserveRefusalAndReleasePoolSlot(bool tcp)
+    {
+        // Arrange
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var token = timeout.Token;
+        await using IDuplexConnectionListener listener = tcp
+            ? new TcpConnectionListener(new TcpConnectionListenerOptions { EndPoint = new IPEndPoint(IPAddress.Loopback, 0) })
+            : new InMemoryConnectionListener();
+        IDuplexConnectionFactory factory = listener is InMemoryConnectionListener memory
+            ? memory.CreateFactory() : new TcpConnectionFactory();
+        await listener.BindAsync(token);
+        await using var client = DocumentClient.Create(new()
+        {
+            Settings = new DatabaseConnectionSettings { Database = "documents", EndPoint = listener.EndPoint, MaxPoolSize = 1 },
+            ConnectionFactory = factory,
+        });
+        int closedConnections = 0;
+        Task peer = RefuseStartupsAsync();
+
+        // Act: the second dial can happen only after the first failed open releases its pool slot.
+        var first = await Should.ThrowAsync<DocumentClientException>(async () => await client.ConnectAsync(token));
+        var second = await Should.ThrowAsync<DocumentClientException>(async () => await client.ConnectAsync(token));
+        await peer;
+
+        // Assert
+        first.Code.ShouldBe(ProtocolErrorCode.UnsupportedVersion);
+        first.Message.ShouldBe("Protocol major version 2 is not supported; the server speaks 1.0.");
+        second.Code.ShouldBe(first.Code);
+        closedConnections.ShouldBe(2);
+
+        async Task RefuseStartupsAsync()
+        {
+            for (int accepted = 0; accepted < 2; accepted++)
+            {
+                await using var transport = await listener.AcceptAsync(token);
+                await using var channel = new ProtocolChannel(transport.AsStream(), DocumentProtocol.Family, leaveOpen: true);
+                var frame = (await channel.Reader.ReadFrameAsync(token)).ShouldNotBeNull();
+                frame.Type.ShouldBe(ProtocolMessageType.Startup);
+                var startup = ProtocolStartupMessage.Decode(frame.Payload.Span);
+                startup.Version.ShouldBe(new ProtocolVersion(2, 0));
+                // The base peer's 1.0 negotiator rejects this major before its Authenticate frame.
+                (startup.Version.Major == 1).ShouldBeFalse();
+                await WriteAsync(channel, (byte)ProtocolMessageType.Error,
+                    new ProtocolErrorMessage(ProtocolErrorCode.UnsupportedVersion,
+                        "Protocol major version 2 is not supported; the server speaks 1.0.").Encode(), token);
+                try { (await channel.Reader.ReadFrameAsync(token)).ShouldBeNull(); }
+                catch (Exception exception) when (exception is IOException or ConnectionAbortedException or ConnectionResetException)
+                {
+                    // A failed client handshake may abort rather than gracefully close the transport.
+                }
+                closedConnections++;
+            }
+        }
+    }
+
     [Theory(DisplayName = "Cohesion Test [Documents.Client] - Blank collection names in command 69 preserve the wire session")]
     [InlineData(false, " ")]
     [InlineData(true, " ")]
