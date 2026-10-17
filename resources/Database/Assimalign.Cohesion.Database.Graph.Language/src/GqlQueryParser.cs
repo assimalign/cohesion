@@ -221,11 +221,6 @@ public sealed partial class GqlQueryParser : QueryParser
                 Unsupported("REGULAR EXPRESSION =~", token);
                 continue;
             }
-            if (inValueExpression && token.Type == TokenType.Dot && i >= 2 && _tokens[i - 2].Type == TokenType.Dot)
-            {
-                Unsupported("NESTED PROPERTY ACCESS", token);
-                continue;
-            }
             if (token.Type == TokenType.Parameter && token.Text == "$" &&
                 i + 1 < _tokens.Count && _tokens[i + 1].Type == TokenType.Parameter && Adjacent(i, i + 1))
             {

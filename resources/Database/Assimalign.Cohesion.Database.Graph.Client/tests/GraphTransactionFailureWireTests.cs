@@ -2,10 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
-
 using Shouldly;
 using Xunit;
-
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Transactions;
@@ -138,7 +136,7 @@ public sealed class GraphTransactionFailureWireTests
     [Fact(DisplayName = "Cohesion Test [Graph.Client] - A result the server cannot encode aborts the explicit transaction")]
     public async Task QueryAsync_ResultEncodingFailsInsideExplicitTransaction_ShouldAbortTransaction()
     {
-        // Arrange: the typed API stores a UInt32 property, which the wire value codec cannot encode.
+        // Arrange: a conditional expression constructs a value beyond the negotiated codec depth bound.
         await using var harness = await GraphClientTestHarness.StartAsync();
         await using (var typed = await harness.Database.CreateSessionAsync(harness.Token))
         {
@@ -151,17 +149,19 @@ public sealed class GraphTransactionFailureWireTests
 
         // Act
         var failure = await Should.ThrowAsync<GraphClientException>(async () =>
-            await connection.QueryAsync("MATCH (n:Unsigned) RETURN n.p", cancellationToken: harness.Token));
+            await connection.QueryAsync("RETURN " + new string('[', GraphValueCodec.MaxDepth + 1) + "1" + new string(']', GraphValueCodec.MaxDepth + 1), cancellationToken: harness.Token));
         var faultedState = transaction.State;
         var commitError = await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync(harness.Token));
 
         // Assert
         failure.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-        failure.Message.ShouldContain("UInt32", Case.Sensitive);
+        failure.Message.ShouldContain("depth 64", Case.Sensitive);
         faultedState.ShouldBe(TransactionState.Faulted);
         commitError.Message.ShouldStartWith("COHDBG007", Case.Sensitive);
-        commitError.Message.ShouldContain("UInt32", Case.Sensitive);
+        commitError.Message.ShouldContain("depth 64", Case.Sensitive);
         transaction.State.ShouldBe(TransactionState.RolledBack);
+        connection.IsOpen.ShouldBeTrue();
+        (await connection.QueryAsync("SHOW LABELS", cancellationToken: harness.Token)).ShouldHaveSingleItem()[2].ShouldBe("Unsigned");
         await using var observer = await harness.Database.CreateSessionAsync(harness.Token);
         var labels = new List<string?>();
         var result = (DatabaseResultSet)await observer.ExecuteAsync("SHOW LABELS", cancellationToken: harness.Token);

@@ -3,12 +3,11 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-
+using Shouldly;
+using Xunit;
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Graph.Language;
 using Assimalign.Cohesion.Database.Language;
-using Shouldly;
-using Xunit;
 
 namespace Assimalign.Cohesion.Database.Graph.Tests;
 
@@ -73,8 +72,17 @@ public sealed class GqlProfileExecutionTests
                 Mutation("MATCH (a:Person) OPTIONAL MATCH (a)-[r:KNOWS]->(b) DELETE r", 1,
                     new ExecutionCase("MATCH ()-[r:KNOWS]->() RETURN r.weight", [])),
             ],
+            [GqlClauses.Case] =
+            [
+                new("MATCH (a:Person {name: 'Alice'}) RETURN CASE WHEN a.age = 42 THEN a.name ELSE 'other' END", [["Alice"]]),
+                new("RETURN CASE 1 WHEN 1.0 THEN 'match' ELSE 'other' END", [["match"]]),
+                new("RETURN COALESCE(NULL, 5), NULLIF(42, 42)", [[5L, null]]),
+            ],
             [GqlClauses.Return] =
             [
+                new("RETURN [10,20,30][-1], {k:{j:1}}.k.j, [1] IN [[1]], [NULL] = [NULL]", [[30L, 1L, true, null]]),
+                new("MATCH (a:Person) WHERE a.age IN $ages RETURN a.name", [["Alice"], ["Bob"]],
+                    Parameters: new Dictionary<string, object?> { ["ages"] = new List<long> { 17, 42 } }),
                 new("MATCH (a:Person {name: 'Alice'}) RETURN a.name AS person, a.age, a.absent", [["Alice", 42L, null]]),
                 new("MATCH (a:Person), (b:Person) RETURN DISTINCT a.active", [[true], [false], [null]], Columns: ["a.active"]),
                 new("MATCH (a:Person), (b:Person) RETURN ALL a.active",
@@ -310,6 +318,7 @@ public sealed class GqlProfileExecutionTests
         GqlClauses.Explain => query.IsExplain,
         GqlClauses.Match => query.MatchClauses.Any(clause => !clause.Optional),
         GqlClauses.OptionalMatch => query.MatchClauses.Any(clause => clause.Optional),
+        GqlClauses.Case => query.Projections.Any(item => item.Expression is GqlCaseExpression or GqlCoalesceExpression or GqlNullIfExpression),
         GqlClauses.Return => query.Projections.Count != 0 || query.ReturnStar,
         GqlClauses.Create => query.Creates.Count != 0 && HasKeyword(query.Text ?? string.Empty, "CREATE"),
         GqlClauses.Insert => query.Creates.Count != 0 && HasKeyword(query.Text ?? string.Empty, "INSERT"),

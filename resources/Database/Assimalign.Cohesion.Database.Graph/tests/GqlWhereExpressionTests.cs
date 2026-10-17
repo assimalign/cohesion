@@ -3,10 +3,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-
 using Shouldly;
 using Xunit;
-
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Graph.Internal;
 using Assimalign.Cohesion.Database.Graph.Language;
@@ -175,7 +173,15 @@ public sealed class GqlWhereExpressionTests
             new GqlUnaryExpression("NOT", null!),
             new GqlIsNullExpression(null!, false),
             new GqlTruthTestExpression(null!, true, false),
-            new GqlListExpression([literal]),
+            new GqlListExpression(null!),
+            new GqlMapExpression([new KeyValuePair<string, GqlExpression>("k", null!)]),
+            new GqlMapExpression([new KeyValuePair<string, GqlExpression>("k", literal), new KeyValuePair<string, GqlExpression>("k", literal)]),
+            new GqlCaseExpression(null, [], null),
+            new GqlCaseExpression(null, [new GqlCaseAlternative(literal, null!)], null),
+            new GqlCoalesceExpression([literal]),
+            new GqlNullIfExpression(literal, null!),
+            new GqlSubscriptExpression(null!, literal),
+            new GqlMemberExpression(null!, "k"),
             new GqlInExpression(literal, null!),
             new GqlInExpression(literal, new GqlListExpression(null!)),
             new GqlInExpression(literal, new GqlListExpression([null!])),

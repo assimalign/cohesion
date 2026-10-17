@@ -26,8 +26,8 @@ branches or empty matches. Supplied null is bound; unused entries need no value 
 Values retain their CLR runtime scalar type and use `GraphDatabase.TypeOf` promotion for
 schema matching, as the typed API does: Int32 remains Int32 on read-back. Decimal is supported
 through parameters and compares numerically with integers. Only null, Boolean, string, integral,
-Decimal and finite floating values are supported. Other values, including lists/maps, use
-COHDBG003 in maps, WHERE and indexed anchors, before storage is called. No reflection or
+Decimal and finite floating values are supported. List and map parameters are admitted in value positions by #1146 below. Unsupported or
+non-finite leaf values use COHDBG003. Pattern property maps remain scalar-only. No reflection or
 runtime code generation is involved.
 
 `$$name` (ISO substituted reference) and whole-map `(n $props)` remain COHDBL001 naming the
@@ -134,6 +134,7 @@ The builtin-function table is empty because the executor implements no functions
 | `WHERE` | Boolean and scalar expressions: comparisons, labels, AND/OR/XOR/NOT, IS null/truth tests, arithmetic, concatenation, IN lists and string predicates | Keeps TRUE only; see [DIALECT.md](DIALECT.md) and scalar expressions below |
 | `EXPLAIN` | One query with ordered MATCH/OPTIONAL MATCH clauses and RETURN, INSERT/CREATE, or [DETACH] DELETE | Shared description rows without executing any read expansion or write; Cohesion extension |
 | `RETURN` | Optional DISTINCT/ALL, either `*` or value expressions with optional `AS` aliases; also standalone | Projects expressions, expands named bindings in declaration order, then eliminates duplicate tuples for DISTINCT; path requests require one entity or path column |
+| `CASE` | Simple and searched CASE, COALESCE and NULLIF case abbreviations | First matching alternative, lazy selected branch; absent ELSE yields NULL |
 | `INSERT` | Scalar literal/parameter node/path insertion, optionally following a match; a node takes a label conjunction (`:A&B`, `:A:B`), a relationship one type and a directed edge (`-[:T]->`, `<-[:T]-`) | Inserts nodes and relationships transactionally |
 | `CREATE` | Same insertion grammar as `INSERT`; compatibility extension | Same transactional insertion path |
 | `DELETE` | Bound node/relationship variables following a match | Refuses deleting a node that still has incident relationships |
@@ -181,14 +182,20 @@ and-expr     := not-expr ('AND' not-expr)*
 not-expr     := NOT not-expr | test
 test         := comparison [IS [NOT] (NULL | TRUE | FALSE | UNKNOWN)]
 comparison   := concat [comparison-operator concat
-                     | IN '[' [predicate (',' predicate)*] ']'
+                     | IN concat
                      | (STARTS WITH | ENDS WITH | CONTAINS) concat]
 concat       := sum ('||' sum)*
 sum          := product (('+' | '-') product)*
 product      := signed (('*' | '/' | '%') signed)*
 signed       := ('+' | '-') signed | operand
 labeled      := variable (IS [NOT] LABELED | ':') label-expr
-operand      := variable ['.' property] | scalar-literal | parameter | labeled | '(' predicate ')'
+operand      := primary ( '[' predicate ']' | '.' field )*
+primary      := variable ['.' property] | scalar-literal | parameter | labeled | '(' predicate ')'
+              | '[' [predicate (',' predicate)*] ']'
+              | '{' [field ':' predicate (',' field ':' predicate)*] '}'
+              | CASE [predicate] (WHEN predicate THEN predicate)+ [ELSE predicate] END
+              | COALESCE '(' predicate ',' predicate (',' predicate)* ')'
+              | NULLIF '(' predicate ',' predicate ')'
 parameter    := ('$' | '@') (identifier | ASCII-digits)
 properties   := '{' [property ':' (scalar-literal | parameter) (',' property ':' (scalar-literal | parameter))*] '}'
 projections  := [DISTINCT | ALL] ('*' | projection (',' projection)*)
@@ -200,7 +207,7 @@ The repeated-colon form of `label-spec` applies to node patterns only; a relatio
 `LABELED` is positional, like the path mode words: only after `IS` or `IS NOT` in a predicate does
 it introduce a label expression, so it remains usable as a name. `!` negates one primary, as ISO
 writes it, so `!!A` is `GQL0002` and `!(!A)` parses. Each `(...)*` repetition in `label-spec`,
-`label-expr`, `label-term` builds one n-ary label node; Boolean runs build n-ary logical nodes. Scalar groups, signs, NOT and IN lists recurse with stack checks.
+`label-expr`, `label-term` builds one n-ary label node; Boolean runs build n-ary logical nodes. Groups, signs, NOT, CASE and collection constructors recurse with stack checks.
 
 A mutation or RETURN can start without `MATCH`; a deletion must bind variables through MATCH or
 OPTIONAL MATCH. A query may start with OPTIONAL MATCH.
@@ -323,11 +330,11 @@ owner's DISTINCT defaults. Reference behavior consulted, no code copied: local N
 ordered path identities rather than property maps.
 
 The owner default for Execute is static and conservative: planned result kinds are Scalar, Node,
-Relationship and Path. Only statically scalar columns pass Execute, even on empty matches; the
+Relationship, Path and EntityValue (a value that may contain an entity). Only statically scalar columns pass Execute, even on empty matches; the
 check precedes reads, writer locking and mutations. Entity columns retain the ExecutePaths error
 and ExecutionFailure. EXPLAIN describes the plan and remains scalar even for an entity RETURN.
-Future collection and CASE planners must propagate possible entity results through the closed
-kind dispatch. Path requests accept one bare bound variable, including DISTINCT, or star over
+Collection and CASE result branches propagate possible entities through the closed
+kind dispatch, including under list/map constructors and field references (#1146). Path requests accept one bare bound variable, including DISTINCT, or star over
 one named binding. Computed, multiple and multi-binding star projections use the existing
 COHDBG001 request-shape diagnostic. GraphPathResult completion diagnostics remain unchanged.
 
@@ -337,11 +344,80 @@ COHDBL001. No catalog format or protocol frame changes are involved. `GqlReturnP
 the keyword-disposition corpus, `GqlProfileExecutionTests`, `GraphReturnTests` and
 `GraphReturnWireTests` cover this surface and its boundaries.
 
+## Conditional expressions and composite values (#1146)
+
+CASE, WHEN, THEN, ELSE, END, COALESCE and NULLIF sit in Profile.Keywords; the function
+registry stays empty. The keyword-disposition corpus has a live positive parse for each,
+and GqlProfileExecutionTests measures both CASE forms and both abbreviations. CASE is
+advertised as one clause. COALESCE and NULLIF parse into case-abbreviation AST nodes,
+never registry function calls. The public AST also adds GqlCaseExpression and its ordered
+alternatives, GqlMapExpression, GqlSubscriptExpression and GqlMemberExpression. GqlListExpression
+now works in every value position; GqlInExpression.List is a GqlExpression (breaking change).
+
+Searched CASE selects the first TRUE predicate. Simple CASE evaluates its operand once
+and uses three-valued equality: WHEN NULL never matches, including a NULL operand.
+Only the selected result branch evaluates; no matching branch and no ELSE yields NULL.
+COALESCE evaluates left to right until non-NULL; NULLIF evaluates both operands once and
+returns NULL only for TRUE equality, otherwise its first operand. CASE result types are
+the union of possible runtime types, without coercion to a common numeric/string type;
+the selected runtime type is preserved and column metadata remains DatabaseType.Null.
+Planning still validates all referenced bindings and every expression shape in skipped branches.
+
+Lists materialize as object?[]; maps as read-only ordinal IReadOnlyDictionary<string, object?>.
+Parameters accept BCL IList implementations with zero-based one-dimensional arrays (including object?[] and List<long>, excluding
+byte[] binary scalars) and IReadOnlyDictionary<string, object?> implementations, including
+Dictionary<string, object?>. Each referenced value is recursively snapshotted once per
+execution; invalid/non-finite leaves and cycles or parameter bounds fail with COHDBG003
+before reads or writes. Parameters allow depth 64 and 65536 total values including the root.
+INSERT/CREATE and MATCH pattern property maps remain scalar-only (COHDBG003 for composite
+parameters, COHDBL001 naming storage for list/map syntax); whole-map (n $props) stays COHDBL001.
+
+Negative list indexes count from the end. Out-of-range indexes, missing map fields and
+NULL containers/indexes yield NULL. Lists require integral indexes; maps require string
+keys. Invalid accesses, including (a.name).x on a string, use #1140's COHDBG013.
+The parser keeps a.b.c on a stored property as COHDBL001 while {k:{j:1}}.k.j and $m.k
+are field access. Comprehensions, pattern comprehensions and slicing remain named COHDBL001.
+UNWIND/FOR remain #1145's work and their unsupported pins are unchanged.
+
+List equality requires equal lengths and element-wise equality. Map equality requires
+equal ordinal key sets and value equality, independent of entry order. FALSE dominates
+UNKNOWN; otherwise any NULL comparison makes the result UNKNOWN. IN, simple CASE and
+NULLIF use that rule with the owner's exact numeric comparison (0.1m differs from 0.1d).
+DISTINCT uses the same structure and exact numbers but groups corresponding NULLs, with
+matching structural hashes. Ordering comparisons are lexicographic for lists; maps compare
+count, sorted ordinal keys, then corresponding values. An encountered NULL or incomparable
+value yields UNKNOWN. ORDER BY itself remains unsupported until #1142; its future total
+ordering uses the same container rules with NULL after all non-NULL values, rather than
+using predicate UNKNOWN as an order. For the scalar/composite family the ascending type
+order is map, list, string, Boolean, number, NULL; nested sorting uses that total order and
+the owner's exact numeric comparisons. This is the #1142 hand-off, not an advertised ORDER BY.
+
+Behavior consulted, no code copied, relative to C:/Source/repos/neo4j/neo4j:
+community/cypher/interpreted-runtime/src/main/scala/org/neo4j/cypher/internal/runtime/interpreted/commands/expressions/CaseExpression.scala:33-40
+selects the first TRUE branch and defaults to NULL;
+community/values/src/main/java/org/neo4j/values/SequenceValue.java:120-136 and :187-202
+define ternary list equality and lexicographic ordering;
+community/values/src/main/java/org/neo4j/values/virtual/MapValue.java:537-595 and :598-634
+define map ordering and ternary equality;
+community/cypher/runtime-util/src/main/java/org/neo4j/cypher/operations/CypherFunctions.java:3381-3398
+implements integral, negative and out-of-range indexing, and :3414-3421 delegates map lookup.
+MapValue.java:125-126 returns NO_VALUE for absent keys.
+community/cypher/front-end/parser/v25/ast-factory/src/main/scala/org/neo4j/cypher/internal/parser/v25/ast/factory/ExpressionBuilder.scala:532-569
+lowers simple CASE alternatives to Equals, so NULL comparison never selects a branch.
+community/cypher/interpreted-runtime/src/main/scala/org/neo4j/cypher/internal/runtime/interpreted/commands/expressions/ListSlice.scala:34-61
+dispatches omitted bounds to slicing operations, consulted but excluded here.
+community/values/src/main/java/org/neo4j/values/AnyValueComparator.java:87-118 and :146-155
+separates ternary orderability from total sorting (NULL and mixed groups are unordered in predicates).
+Its :44-85 places NULL last and sequences before scalars; virtual/VirtualValueGroup.java:26-32
+orders maps before lists, while storable/ValueGroup.java:62-65 orders text, Boolean and numbers.
+The selected exact numeric rule is the owner
+decision, including within these composites.
+
 ## Diagnostics and conformance (#194, #195)
 
 | Code | Meaning |
 | --- | --- |
-| `COHDBL001` | Recognized construct outside the executable profile, reported once at its own span: OPTIONAL block operands, MANDATORY MATCH, procedures, functions, substituted/whole-map parameters, collection literals, map projections, path quantifiers, ordering, set operations, NEXT/WITH, server/session scope, undirected (tilde) edges, path mode and path search prefixes, `NODETACH DELETE`, and `MERGE` |
+| `COHDBL001` | Recognized construct outside the executable profile, reported once at its own span: OPTIONAL block operands, MANDATORY MATCH, procedures, functions, substituted/whole-map parameters, composite properties, comprehensions, slicing, map projections, path quantifiers, ordering, set operations, NEXT/WITH, server/session scope, undirected (tilde) edges, path mode and path search prefixes, `NODETACH DELETE`, and `MERGE` |
 | `GQL0001` | Empty statement |
 | `GQL0002` | Malformed supported syntax, invalid statement composition, leftover tokens, or a character GQL does not use (`?`, `#`, `^`, ```, ...) |
 | `GQL0003` | Unterminated string, quoted name, or block comment |
@@ -350,7 +426,7 @@ the keyword-disposition corpus, `GqlProfileExecutionTests`, `GraphReturnTests` a
 | `GQL0006` | Duplicate literal property key |
 | `GQL0007` | `Graph catalog introspection is read-only.`: mutation composed with `SHOW` |
 | `GQL0008` | A `--` comment begins exactly where a node pattern's `)` or an edge pattern's `]` ends, in `MATCH`, `INSERT` or `CREATE`: a Cypher arrow (`-->`, `--`) that would hide the rest of the line. Reported at the `--`; the message names `->`, `<-` and `-` |
-| `GQL0009` | The statement nests groups, unary expressions or IN lists deeper than the parsing thread's stack can follow. Reported at the group, unary or list token that could not be entered; the parse stops there and reports nothing else. The same text parses on a thread with more stack, so the engine's `GraphQueryRequest.FromGql` reports it as `COHDBG008`, statement too complex, not as a parse error |
+| `GQL0009` | The statement nests groups, unary expressions, CASE or collection constructors deeper than the parsing thread's stack can follow. Reported at the group, unary or list token that could not be entered; the parse stops there and reports nothing else. The same text parses on a thread with more stack, so the engine's `GraphQueryRequest.FromGql` reports it as `COHDBG008`, statement too complex, not as a parse error |
 
 Locations use zero-based absolute UTF-16 offsets with exclusive ends and one-based line numbers.
 A line breaks at LF, CR, NEL (U+0085), LS (U+2028) or PS (U+2029), and CR LF is one break

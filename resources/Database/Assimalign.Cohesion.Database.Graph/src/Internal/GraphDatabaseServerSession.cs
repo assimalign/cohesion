@@ -374,7 +374,8 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
             {
                 try
                 {
-                    parameters[name] = DatabaseValueCodec.DecodeComponent(encoded);
+                    parameters[name] = _channel!.Capabilities.Contains(GraphProtocol.CompositeValues.Name)
+                        ? GraphValueCodec.Decode(encoded) : DatabaseValueCodec.DecodeComponent(encoded);
                 }
                 catch (DatabaseTypeException exception)
                 {
@@ -531,18 +532,46 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
                     columns.Add((column.Name, (byte)column.Type));
                 }
 
-                await WriteFrameAsync((ProtocolMessageType)GraphProtocolMessageType.ResultHeader, new GraphProtocolResultHeaderMessage(columns).Encode(), cancellationToken).ConfigureAwait(false);
-
+                bool composite = _channel!.Capabilities.Contains(GraphProtocol.CompositeValues.Name);
+                // Graph results own repeatable, already-materialized rows. Preflight every value
+                // before the header, then encode each row again for delivery. This bounds temporary
+                // encoding memory to one row rather than duplicating the full materialized result.
                 await foreach (DatabaseRow row in resultSet.GetRowsAsync(cancellationToken).ConfigureAwait(false))
                 {
+                    _ = EncodeRow(row);
+                }
+                byte[] EncodeRow(DatabaseRow row)
+                {
                     rowWriter.Reset();
-
+                    using var stream = new System.IO.MemoryStream();
+                    using var compositeWriter = new System.IO.BinaryWriter(stream);
                     for (int ordinal = 0; ordinal < row.FieldCount; ordinal++)
                     {
-                        DatabaseValueCodec.Append(rowWriter, row.GetValue(ordinal));
+                        object? value = row.GetValue(ordinal);
+                        if (composite)
+                        {
+                            byte[] encoded = GraphValueCodec.Encode(value);
+                            if (stream.Length + 4 + encoded.Length > GraphValueCodec.MaxPayloadLength)
+                            { throw new DatabaseTypeException(ErrorMessages.CompositeLimit); }
+                            compositeWriter.Write(encoded.Length); compositeWriter.Write(encoded);
+                        }
+                        else
+                        {
+                            if (GraphCompositeValues.IsComposite(value))
+                            { throw new GraphPlanningException("COHDBG016", ErrorMessages.CompositeCapabilityRequired, _statementLocation); }
+                            DatabaseValueCodec.Append(rowWriter, value);
+                        }
                     }
-
-                    await WriteFrameAsync((ProtocolMessageType)GraphProtocolMessageType.ResultRow, rowWriter.ToArray(), cancellationToken).ConfigureAwait(false);
+                    byte[] payload = composite ? stream.ToArray() : rowWriter.ToArray();
+                    if (payload.Length > GraphValueCodec.MaxPayloadLength) { throw new DatabaseTypeException(ErrorMessages.CompositeLimit); }
+                    return payload;
+                }
+                byte[] header = new GraphProtocolResultHeaderMessage(columns).Encode();
+                if (header.Length > GraphValueCodec.MaxPayloadLength) { throw new DatabaseTypeException(ErrorMessages.CompositeLimit); }
+                await WriteFrameAsync((ProtocolMessageType)GraphProtocolMessageType.ResultHeader, header, cancellationToken).ConfigureAwait(false);
+                await foreach (DatabaseRow row in resultSet.GetRowsAsync(cancellationToken).ConfigureAwait(false))
+                {
+                    await WriteFrameAsync((ProtocolMessageType)GraphProtocolMessageType.ResultRow, EncodeRow(row), cancellationToken).ConfigureAwait(false);
                 }
 
                 await WriteDiagnosticsAsync(diagnosticPayload, cancellationToken).ConfigureAwait(false);

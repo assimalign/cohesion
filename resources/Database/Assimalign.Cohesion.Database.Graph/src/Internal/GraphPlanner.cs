@@ -12,7 +12,7 @@ internal sealed record GraphAnchor(int NodeIndex, string? Label, string? Propert
 internal sealed record GraphPathPlan(GqlPathPattern Pattern, GraphAnchor Anchor);
 internal sealed record GraphMatchClausePlan(IReadOnlyList<GraphPathPlan> Paths, GqlExpression? Predicate,
     bool Optional, IReadOnlyList<string> NewVariables, bool MatchesNothing);
-internal enum GraphProjectionKind { Scalar, Node, Relationship, Path }
+internal enum GraphProjectionKind { Scalar, Node, Relationship, Path, EntityValue }
 internal sealed record GraphProjectionPlan(GqlExpression Expression, string Name, GraphProjectionKind Kind);
 internal sealed record GraphDistinctPlan(IReadOnlyList<GraphProjectionPlan> Keys);
 
@@ -91,6 +91,8 @@ internal sealed partial class GraphPlanner
 
     private GraphPlan PlanCore(GqlQueryExpression query, bool pathsRequest)
     {
+        if (_parameters is not null) { _parameters = new Dictionary<string, object?>(_parameters, StringComparer.Ordinal); }
+        var snapshotted = new HashSet<string>(StringComparer.Ordinal);
         var variables = new Dictionary<string, BindingKind>(StringComparer.Ordinal);
         var declarations = new List<string>();
         var mandatoryVariables = new HashSet<string>(StringComparer.Ordinal);
@@ -175,8 +177,8 @@ internal sealed partial class GraphPlanner
             Warnings = readOnly ? tokens.Warnings : [],
         };
 
-        // Closed result-kind dispatch: future collection/CASE expressions must explicitly
-        // propagate any entity-valued result branches before Execute can admit them.
+        // Composite constructors and conditional result branches propagate possible entities
+        // before Execute can admit them, independently of which branch the data would select.
         GraphProjectionKind ProjectionKind(GqlExpression expression) => expression switch
         {
             GqlVariableExpression variable => RequireVariable(variable.Variable) switch
@@ -185,12 +187,25 @@ internal sealed partial class GraphPlanner
                 BindingKind.Relationship => GraphProjectionKind.Relationship,
                 _ => GraphProjectionKind.Path,
             },
+            GqlListExpression or GqlMapExpression or GqlCaseExpression or GqlCoalesceExpression or GqlNullIfExpression or
+                GqlMemberExpression or GqlSubscriptExpression => ContainsEntity(expression) ? GraphProjectionKind.EntityValue : GraphProjectionKind.Scalar,
             GqlLiteralExpression or GqlParameterExpression or GqlPropertyExpression or
                 GqlBinaryExpression or GqlLogicalExpression or GqlUnaryExpression or
                 GqlIsNullExpression or GqlTruthTestExpression or GqlInExpression or
                 GqlStringPredicateExpression or GqlLabeledPredicate => GraphProjectionKind.Scalar,
             _ => throw new GraphPlanningException("COHDBG001", ErrorMessages.ProjectionUnsupported, expression.Location),
         };
+
+        bool ContainsEntity(GqlExpression root)
+        {
+            var pending = new Stack<GqlExpression>(); pending.Push(root);
+            while (pending.TryPop(out var item))
+            {
+                if (item is GqlVariableExpression) { return true; }
+                foreach (var child in GraphValueExpressions.ResultChildren(item)) { pending.Push(child); }
+            }
+            return false;
+        }
 
         // Returns false when a MATCH pattern requires a name the database does not have.
         bool Validate(GqlPathPattern path, bool creating)
@@ -260,7 +275,9 @@ internal sealed partial class GraphPlanner
                         RequireVariable(variable.Variable);
                         break;
                     case GqlParameterExpression parameter:
-                        GraphExpressionEvaluator.Parameter(parameter, _parameters);
+                        object? bound = GraphExpressionEvaluator.Parameter(parameter, _parameters);
+                        if (snapshotted.Add(parameter.Name))
+                        { ((Dictionary<string, object?>)_parameters!)[parameter.Name] = GraphCompositeValues.Snapshot(bound, parameter.Location); }
                         break;
                     case GqlPropertyExpression property:
                         RequireVariable(property.Variable, entity: true);
@@ -288,10 +305,12 @@ internal sealed partial class GraphPlanner
                         pending.Push(test.Operand);
                         break;
                     case GqlInExpression membership:
-                        if (membership.List?.Items is null)
-                        { throw new GraphPlanningException("COHDBG001", ErrorMessages.MembershipListRequired, expression.Location); }
-                        for (int i = membership.List.Items.Count - 1; i >= 0; i--) { pending.Push(membership.List.Items[i]); }
+                        pending.Push(membership.List);
                         pending.Push(membership.Operand);
+                        break;
+                    case GqlListExpression or GqlMapExpression or GqlCaseExpression or GqlCoalesceExpression or
+                        GqlNullIfExpression or GqlMemberExpression or GqlSubscriptExpression:
+                        foreach (var child in GraphValueExpressions.Children(expression).Reverse()) { pending.Push(child); }
                         break;
                     case GqlStringPredicateExpression predicate when Enum.IsDefined(predicate.Operator):
                         pending.Push(predicate.Right);
@@ -424,7 +443,12 @@ internal sealed partial class GraphPlanner
     private void ValidateProperties(IReadOnlyDictionary<string, GqlExpression>? properties, bool creating)
     {
         if (properties is null) { throw new GraphPlanningException("COHDBG001", "A pattern requires a property map.", null); }
-        foreach (var value in properties.Values) { GraphExpressionEvaluator.Scalar(value, _parameters); }
+        foreach (var expression in properties.Values)
+        {
+            if (expression is GqlParameterExpression parameter)
+            { GraphCompositeValues.Snapshot(GraphExpressionEvaluator.Parameter(parameter, _parameters), parameter.Location); }
+            GraphExpressionEvaluator.Scalar(expression, _parameters);
+        }
         if (!creating) { return; }
         foreach (string key in properties.Keys)
         {
@@ -630,15 +654,15 @@ internal sealed partial class GraphPlanner
                 }
                 if (expression is not GqlBinaryExpression { Operator: "=" } binary) { continue; }
                 if (binary.Left is GqlPropertyExpression left && binary.Right is GqlLiteralExpression or GqlParameterExpression)
-                { Add(left, GraphExpressionEvaluator.Scalar(binary.Right, _parameters)); }
+                { Add(left, GraphExpressionEvaluator.ParameterOrLiteral(binary.Right, _parameters)); }
                 else if (binary.Right is GqlPropertyExpression property && binary.Left is GqlLiteralExpression or GqlParameterExpression)
-                { Add(property, GraphExpressionEvaluator.Scalar(binary.Left, _parameters)); }
+                { Add(property, GraphExpressionEvaluator.ParameterOrLiteral(binary.Left, _parameters)); }
             }
             return collected;
 
             void Add(GqlPropertyExpression property, object? value)
             {
-                if (property.Variable is null || property.Property is null || value is null) { return; }
+                if (property.Variable is null || property.Property is null || value is null || GraphCompositeValues.IsComposite(value)) { return; }
                 if (!collected.TryGetValue(property.Variable, out var values))
                 {
                     collected.Add(property.Variable, values = new Dictionary<string, FirstValue>(StringComparer.Ordinal));

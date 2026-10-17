@@ -27,4 +27,9 @@
   <data name="MatchLimitExceeded" xml:space="preserve"><value>The query exceeded 100000 path matches.</value></data>
   <data name="InsertEndpointInvalid" xml:space="preserve"><value>An inserted endpoint must be a non-null node compatible with its existing binding.</value></data>
   <data name="ExecuteScalarRequired" xml:space="preserve"><value>Execute accepts scalar projections. Use ExecutePaths with a read-only MATCH to return a node, relationship, or path.</value></data>
+  <data name="CompositeLimit" xml:space="preserve"><value>Graph values are limited to depth 64, 65536 values and 16777216 encoded bytes.</value></data>
+  <data name="CompositeMalformed" xml:space="preserve"><value>Malformed or oversized Graph composite value.</value></data>
+  <data name="CompositeRequired" xml:space="preserve"><value>This operation requires a list or map with a valid index or field name.</value></data>
+  <data name="CompositeCapabilityRequired" xml:space="preserve"><value>Graph composite values require the graph.composite-values capability.</value></data>
+  <data name="CaseInvalid" xml:space="preserve"><value>A CASE requires alternatives and COALESCE requires at least two operands.</value></data>
 </root>

@@ -2,6 +2,7 @@ using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -12,7 +13,7 @@ using Assimalign.Cohesion.Database.Graph.Client.Internal;
 namespace Assimalign.Cohesion.Database.Graph.Client;
 
 /// <summary>One authenticated graph connection supporting one active exchange at a time.</summary>
-/// <remarks>Scalar results are materialized. Paths stream until enumeration completes or is disposed.
+/// <remarks>Value results are materialized. Paths stream until enumeration completes or is disposed.
 /// An unfinished path exchange is discarded. Explicit graph transactions are not supported.</remarks>
 public sealed class GraphConnection : IAsyncDisposable
 {
@@ -35,9 +36,9 @@ public sealed class GraphConnection : IAsyncDisposable
     /// <summary>Gets whether the connection is open and available for use.</summary>
     public bool IsOpen => Volatile.Read(ref _disposed) == 0 && _connection.IsOpen;
 
-    /// <summary>Executes a scalar projection or catalog statement and materializes its rows.</summary>
+    /// <summary>Executes a value projection or catalog statement and materializes its rows.</summary>
     /// <param name="statement">The GQL statement.</param>
-    /// <param name="parameters">Scalar bindings for $name and @name. Bare names match case-sensitively; one leading sigil on a map key is ignored.</param>
+    /// <param name="parameters">Scalar, list or map bindings for $name and @name. Bare names match case-sensitively; one leading sigil on a map key is ignored.</param>
     /// <param name="cancellationToken">Cancellation token for the exchange.</param>
     /// <returns>The columns, rows, and affected count.</returns>
     /// <exception cref="ArgumentException">The statement is empty.</exception>
@@ -51,7 +52,7 @@ public sealed class GraphConnection : IAsyncDisposable
 
     /// <summary>Executes a graph mutation and returns its affected entity count.</summary>
     /// <param name="statement">The GQL statement.</param>
-    /// <param name="parameters">Scalar bindings for $name and @name. Bare names match case-sensitively; one leading sigil on a map key is ignored.</param>
+    /// <param name="parameters">Scalar, list or map bindings for $name and @name. Bare names match case-sensitively; one leading sigil on a map key is ignored.</param>
     /// <param name="cancellationToken">Cancellation token for the exchange.</param>
     /// <returns>The affected count, or -1 for a row-returning statement.</returns>
     /// <exception cref="ArgumentException">The statement is empty.</exception>
@@ -65,7 +66,7 @@ public sealed class GraphConnection : IAsyncDisposable
 
     /// <summary>Streams paths selected by a single bound path, node, or relationship variable.</summary>
     /// <param name="statement">A MATCH statement returning one bound path or entity variable.</param>
-    /// <param name="parameters">Scalar bindings for $name and @name. Bare names match case-sensitively; one leading sigil on a map key is ignored.</param>
+    /// <param name="parameters">Scalar, list or map bindings for $name and @name. Bare names match case-sensitively; one leading sigil on a map key is ignored.</param>
     /// <param name="cancellationToken">Cancellation token for the full enumeration.</param>
     /// <returns>A path stream retaining node and relationship identities, labels, types, properties, and completion diagnostics.</returns>
     /// <exception cref="ArgumentException">The statement is empty.</exception>
@@ -82,7 +83,7 @@ public sealed class GraphConnection : IAsyncDisposable
         CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
-        var exchange = new GraphPathsExchange(statement, parameters);
+        var exchange = new GraphPathsExchange(statement, parameters, _connection.Capabilities.Contains(GraphProtocol.CompositeValues.Name));
         return new GraphPathResult(exchange, QueryPathsCoreAsync(exchange, cancellationToken));
     }
 
@@ -213,7 +214,7 @@ public sealed class GraphConnection : IAsyncDisposable
         IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
-        var exchange = new GraphExecuteExchange(statement, parameters);
+        var exchange = new GraphExecuteExchange(statement, parameters, _connection.Capabilities.Contains(GraphProtocol.CompositeValues.Name));
         long startTimestamp = GraphClientEventSource.Log.GetTimestamp();
         bool startWritten = GraphClientEventSource.Log.QueryStart(this, operation);
 

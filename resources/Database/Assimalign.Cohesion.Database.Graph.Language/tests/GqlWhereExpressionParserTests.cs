@@ -1,7 +1,6 @@
 using System;
 using System.Linq;
 using System.Threading;
-
 using Shouldly;
 using Xunit;
 
@@ -47,7 +46,7 @@ public sealed class GqlWhereExpressionParserTests
         Predicate("UNKNOWN").ShouldBeOfType<GqlLiteralExpression>().Value.ShouldBeNull();
         Predicate("a.age IS NOT NULL").ShouldBeOfType<GqlIsNullExpression>().IsNegated.ShouldBeTrue();
         Predicate("(a.x = 1) IS UNKNOWN").ShouldBeOfType<GqlTruthTestExpression>().TruthValue.ShouldBeNull();
-        Predicate("a.age IN [17, 42]").ShouldBeOfType<GqlInExpression>().List.Items.Count.ShouldBe(2);
+        Predicate("a.age IN [17, 42]").ShouldBeOfType<GqlInExpression>().List.ShouldBeOfType<GqlListExpression>().Items.Count.ShouldBe(2);
         Predicate("a.name STARTS WITH ('Al')").ShouldBeOfType<GqlStringPredicateExpression>().Operator.ShouldBe(GqlStringPredicateOperator.StartsWith);
         Predicate("a.n || 'x' = 'ax'").ShouldBeOfType<GqlBinaryExpression>().Left.ShouldBeOfType<GqlBinaryExpression>().Operator.ShouldBe("||");
         Predicate("a.age % 5 = 2").ShouldBeOfType<GqlBinaryExpression>().Left.ShouldBeOfType<GqlBinaryExpression>().Operator.ShouldBe("%");
@@ -85,7 +84,6 @@ public sealed class GqlWhereExpressionParserTests
     [InlineData("NONE(x IN [1] WHERE x = 1)", "COHDBL001", "NONE")]
     [InlineData("SINGLE(x IN [1] WHERE x = 1)", "COHDBL001", "SINGLE")]
     [InlineData("a.x IN (1, 2)", "GQL0002", "[...]")]
-    [InlineData("[1, 2] = 1", "COHDBL001", "COLLECTION LITERAL")]
     [InlineData("a.x = 2 = 3", "GQL0002", "chained")]
     public void Parse_ExcludedConstruct_ShouldNameIt(string predicate, string code, string construct)
     {

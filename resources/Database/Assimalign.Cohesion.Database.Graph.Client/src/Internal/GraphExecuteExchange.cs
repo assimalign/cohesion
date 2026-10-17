@@ -13,16 +13,19 @@ internal sealed class GraphExecuteExchange
     : DatabaseProtocolExchange<GraphResultSet>
 {
     private readonly GraphProtocolExecuteMessage _request;
+    private readonly bool _compositeValues;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="GraphExecuteExchange"/> class.
     /// </summary>
     /// <param name="statement">The graph statement to execute.</param>
     /// <param name="parameters">The named statement parameters, or <see langword="null"/> when the statement has none.</param>
-    public GraphExecuteExchange(string statement, IReadOnlyDictionary<string, object?>? parameters)
+    /// <param name="compositeValues">Whether the session negotiated composite value framing.</param>
+    public GraphExecuteExchange(string statement, IReadOnlyDictionary<string, object?>? parameters, bool compositeValues = false)
         : base(GraphProtocol.Family)
     {
-        _request = GraphRequestEncoder.Create(statement, parameters);
+        _compositeValues = compositeValues;
+        _request = GraphRequestEncoder.Create(statement, parameters, compositeValues);
     }
 
     protected override async ValueTask<GraphResultSet> ExecuteCoreAsync(ProtocolFrameReader reader, ProtocolFrameWriter writer,
@@ -85,8 +88,21 @@ internal sealed class GraphExecuteExchange
         }
     }
 
-    private static object?[] DecodeRow(ReadOnlySpan<byte> payload, int columnCount)
+    private object?[] DecodeRow(ReadOnlySpan<byte> payload, int columnCount)
     {
+        if (_compositeValues)
+        {
+            var decoded = new object?[columnCount];
+            for (int i = 0; i < columnCount; i++)
+            {
+                if (payload.Length < 4) { throw new ProtocolException(ErrorMessages.CompositeRowMalformed); }
+                int size = System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(payload); payload = payload[4..];
+                if (size < 0 || size > payload.Length) { throw new ProtocolException(ErrorMessages.CompositeRowMalformed); }
+                decoded[i] = GraphValueCodec.Decode(payload[..size]); payload = payload[size..];
+            }
+            if (!payload.IsEmpty) { throw new ProtocolException(ErrorMessages.CompositeRowMalformed); }
+            return decoded;
+        }
         var reader = new DatabaseKeyReader(payload);
         var values = new object?[columnCount];
         for (int index = 0; index < columnCount; index++)

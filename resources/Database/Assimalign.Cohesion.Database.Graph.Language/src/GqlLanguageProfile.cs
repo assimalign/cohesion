@@ -34,7 +34,7 @@ public static class GqlLanguageProfile
         // Literals / Constants
         "NULL", "TRUE", "FALSE", "UNKNOWN",
         // CASE
-        "CASE", "WHEN", "THEN", "ELSE", "END",
+        "CASE", "WHEN", "THEN", "ELSE", "END", "COALESCE", "NULLIF",
         // Graph elements
         "NODE", "RELATIONSHIP", "EDGE",
         "PATH", "SHORTEST", "GRAPH",
@@ -53,6 +53,7 @@ public static class GqlLanguageProfile
         GqlClauses.OptionalMatch,
         GqlClauses.Explain,
         GqlClauses.Return,
+        GqlClauses.Case,
         GqlClauses.Create,
         GqlClauses.Insert,
         GqlClauses.Delete,
