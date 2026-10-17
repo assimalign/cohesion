@@ -16,7 +16,7 @@ internal sealed class KeyValueExecuteExchange : DatabaseProtocolExchange<KeyValu
     internal KeyValueExecuteExchange(string statement, IReadOnlyDictionary<string, object?>? parameters)
         : base(KeyValueProtocol.Family)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(statement);
+        ArgumentNullException.ThrowIfNull(statement);
         var encoded = new Dictionary<string, byte[]>(parameters?.Count ?? 0);
         var parameterWriter = new DatabaseKeyWriter();
         if (parameters is not null)

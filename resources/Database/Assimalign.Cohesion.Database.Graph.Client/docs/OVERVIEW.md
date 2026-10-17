@@ -20,11 +20,12 @@ flowchart LR
 `ExecuteAsync` sends CREATE, INSERT, DELETE, and DETACH DELETE to the engine and returns its
 affected count. The server retains engine ownership, cycle, and database-scoping enforcement.
 
-`QueryPathsAsync` returns real engine paths for a single bound projection:
+`QueryPathsAsync` returns a `GraphPathResult` streaming real engine paths for a single bound projection:
 `MATCH p = (a)-[r:KNOWS]->(b) RETURN p`, `MATCH (a) RETURN a`, or
 `MATCH (a)-[r]->(b) RETURN r`. Paths retain ids, labels, relationship types, direction, and
 properties. Enumerate to completion to verify the terminal count; abandoning an unfinished
-enumeration discards its connection.
+enumeration discards its connection. After EOF, read the result's `Diagnostics` for
+completion warnings, including COHDBG010 for an unknown label. Each result is enumerated once.
 
 Dispose each connection to return a healthy authenticated session to the pool, and dispose the
 client to close the pool. Scalar parse/execution failures and terminal path rejections before any

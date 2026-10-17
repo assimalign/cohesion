@@ -554,3 +554,7 @@ cover both accepted spellings and the coded recovery of rejected spellings.
 
 Definition-binding diagnostics remain engine-owned. DIALECT.md records COHSQLD001 for invalid
 CHECK predicates and absent DROP definitions, including the structured carrier and span fallback.
+
+Wire diagnostic overflow does not change parser admission or its complete in-process
+carrier. The endpoint bounds delivery with an explicit COHDBP001 prefix/omission notice
+while retaining the original failure and session; DIALECT.md records this wire behavior.

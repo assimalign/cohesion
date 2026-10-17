@@ -182,7 +182,7 @@ Graph.Client. Documents.Security remains deferred. Transactions, remote database
 replication and model-specific security policies are outside this wire slice. OQL INSERT
 returns its affected count through the existing completion field. Wire negotiation remains
 the shared protocol's responsibility, with no model-specific version exchange. The startup major
-is now 2.0 for the incompatible projection contract; old-major peers receive the existing coded
+is now 2.1, retaining the incompatible 2.0 projection contract; old-major peers receive the existing coded
 startup refusal and close before authentication. #1105 (protocol 1.1 capability negotiation,
 wave 4) supersedes per-feature version bumps when implemented.
 
@@ -214,3 +214,7 @@ JSON result and parameter writers use `JsonElement.WriteTo` so the configured wr
 of 256 applies, including values deeper than 64 levels. The other wire readers explicitly set
 256. Embedded stored-document validation and query reads explicitly use 128; system-collection
 JSON uses fixed, one-level objects and cannot carry arbitrary nested content.
+
+## Shared startup 2.1 (#1105)
+
+The shared client reads the negotiated Ready version and capability intersection. Documents agrees 2.1 with an empty list and retains its existing structured Failure payload; it does not adopt the core Diagnostics frame. A negotiated 2.0 peer still sends empty Ready.

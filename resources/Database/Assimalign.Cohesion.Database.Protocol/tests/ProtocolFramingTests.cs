@@ -152,7 +152,10 @@ public class ProtocolFramingTests
     {
         var startup = new ProtocolStartupMessage(ProtocolVersion.Current, "appdb", "svc-user");
         var decodedStartup = ProtocolStartupMessage.Decode(startup.Encode());
-        decodedStartup.ShouldBe(startup);
+        decodedStartup.Version.ShouldBe(startup.Version);
+        decodedStartup.Database.ShouldBe(startup.Database);
+        decodedStartup.Principal.ShouldBe(startup.Principal);
+        decodedStartup.Capabilities.ShouldBeEmpty();
 
         var error = new ProtocolErrorMessage(ProtocolErrorCode.AuthenticationFailed, "bad credentials");
         ProtocolErrorMessage.Decode(error.Encode()).ShouldBe(error);

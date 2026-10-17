@@ -76,6 +76,6 @@ public class ProtocolFamilyTests
     public void TryNegotiate_PeerVersion_ShouldEnforceMajor(ushort major, ushort minor, bool accepted)
     {
         ProtocolVersion.TryNegotiate(new ProtocolVersion(major, minor), out var negotiated).ShouldBe(accepted);
-        negotiated.ShouldBe(accepted ? new ProtocolVersion(2, 0) : default);
+        negotiated.ShouldBe(accepted ? new ProtocolVersion(2, Math.Min(minor, (ushort)1)) : default);
     }
 }

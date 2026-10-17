@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Threading;
@@ -89,6 +91,9 @@ public sealed class DatabaseConnection : IAsyncDisposable
     /// <summary>Gets the message family fixed when the owning pool was created.</summary>
     public ProtocolMessageFamily Family { get; }
 
+    /// <summary>Gets the capabilities agreed during startup.</summary>
+    public IReadOnlyList<string> Capabilities { get; private set; } = Array.Empty<string>();
+
     internal void MarkRented()
     {
         lock (_exchangeLock)
@@ -133,7 +138,8 @@ public sealed class DatabaseConnection : IAsyncDisposable
             _reader = channel.Reader;
             _writer = channel.Writer;
 
-            var startup = new ProtocolStartupMessage(ProtocolVersion.Current, Database, Principal);
+            var startup = new ProtocolStartupMessage(ProtocolVersion.Current, Database, Principal)
+            { Capabilities = Family.Capabilities.Select(capability => capability.Name).ToArray() };
             await WriteFrameAsync(ProtocolMessageType.Startup, startup.Encode(), cancellationToken).ConfigureAwait(false);
 
             ProtocolFrame challenge = await ExpectFrameAsync(cancellationToken).ConfigureAwait(false);
@@ -166,6 +172,17 @@ public sealed class DatabaseConnection : IAsyncDisposable
             {
                 throw MarkBroken(new DatabaseClientException(ProtocolErrorCode.ProtocolViolation, $"Expected a ready frame but received {ready.Type}."));
             }
+            try
+            {
+                var agreement = ProtocolReadyMessage.Decode(ready.Payload.Span);
+                channel.SetAgreement(agreement);
+                ServerVersion = agreement.Version;
+                Capabilities = channel.Capabilities;
+            }
+            catch (ProtocolException exception)
+            {
+                throw MarkBroken(new DatabaseClientException(ProtocolErrorCode.ProtocolViolation, exception.Message, exception));
+            }
         }
         catch (DatabaseClientException exception) when (CaptureOpenFailure(exception, out openFailure))
         {
@@ -181,7 +198,6 @@ public sealed class DatabaseConnection : IAsyncDisposable
             }
         }
 
-        ServerVersion = ProtocolVersion.Current;
         _isOpen = true;
 
         // The flag the first close exchanges: a connection that opened is counted closed once.

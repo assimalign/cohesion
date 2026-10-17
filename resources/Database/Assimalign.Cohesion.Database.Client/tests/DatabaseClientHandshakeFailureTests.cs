@@ -127,6 +127,45 @@ public sealed class DatabaseClientHandshakeFailureTests
         }
     }
 
+    [Theory(DisplayName = "Cohesion Test [Database.Client] - malformed Ready agreements break the handshake and free the pool slot")]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task RentAsync_MalformedReady_ShouldRejectAndFreeSlot(int invalid)
+    {
+        // Arrange
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await using var listener = new InMemoryConnectionListener();
+        await using var client = CreateClient(listener);
+        byte[] payload = invalid switch
+        {
+            0 => [0],
+            1 => new ProtocolReadyMessage(ProtocolVersion.Current, ["unknown"]).Encode(),
+            _ => new ProtocolReadyMessage(new ProtocolVersion(2, 99), []).Encode(),
+        };
+        Task server = Task.Run(async () =>
+        {
+            for (int accepted = 0; accepted < 2; accepted++)
+            {
+                await using IDuplexConnection transport = await listener.AcceptAsync(timeout.Token);
+                await using var channel = new ProtocolChannel(transport.AsStream(), SqlProtocol.Family);
+                var startup = ProtocolStartupMessage.Decode((await ReadAsync(channel.Reader, timeout.Token)).Payload.Span);
+                startup.Capabilities.ShouldContain("diagnostics");
+                await WriteAsync(channel.Writer, ProtocolMessageType.Authenticate, ReadOnlyMemory<byte>.Empty, timeout.Token);
+                await ReadAsync(channel.Reader, timeout.Token);
+                await WriteAsync(channel.Writer, ProtocolMessageType.Ready, payload, timeout.Token);
+                await DrainAsync(channel.Reader, timeout.Token);
+            }
+        });
+        // Act / Assert
+        for (int attempt = 0; attempt < 2; attempt++)
+        {
+            var error = await Should.ThrowAsync<DatabaseClientException>(async () => await client.RentAsync(timeout.Token));
+            error.Code.ShouldBe(ProtocolErrorCode.ProtocolViolation);
+        }
+        await server;
+    }
+
     private static DatabaseClient CreateClient(InMemoryConnectionListener listener)
         => DatabaseClient.Create(new DatabaseClientOptions
         {

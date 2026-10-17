@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -12,6 +14,9 @@ public sealed class ProtocolChannel : IAsyncDisposable
 {
     private readonly Stream _stream;
     private readonly bool _leaveOpen;
+    private bool _agreementSet;
+    private readonly string?[] _requiredCapabilities = new string?[256];
+    private readonly HashSet<string> _capabilities = new(StringComparer.Ordinal);
 
     /// <summary>Binds the stream to its endpoint's family.</summary>
     /// <param name="stream">The connected duplex stream.</param>
@@ -25,8 +30,13 @@ public sealed class ProtocolChannel : IAsyncDisposable
         _stream = stream;
         _leaveOpen = leaveOpen;
         Family = family;
-        Reader = new FamilyReader(ProtocolFrameReader.Create(stream, leaveOpen: true), family);
-        Writer = new FamilyWriter(ProtocolFrameWriter.Create(stream, leaveOpen: true), family);
+        _requiredCapabilities[(byte)ProtocolMessageType.Diagnostics] = ProtocolCapability.Diagnostics.Name;
+        foreach (var capability in family.Capabilities)
+        {
+            foreach (byte type in capability.MessageTypes) { _requiredCapabilities[type] = capability.Name; }
+        }
+        Reader = new FamilyReader(ProtocolFrameReader.Create(stream, leaveOpen: true), this);
+        Writer = new FamilyWriter(ProtocolFrameWriter.Create(stream, leaveOpen: true), this);
     }
 
     /// <summary>Gets the family fixed when the channel was created.</summary>
@@ -37,6 +47,40 @@ public sealed class ProtocolChannel : IAsyncDisposable
 
     /// <summary>Gets the writer that rejects identifiers outside the bound family.</summary>
     public ProtocolFrameWriter Writer { get; }
+
+    /// <summary>Gets the immutable negotiated capability names.</summary>
+    public IReadOnlyList<string> Capabilities { get; private set; } = Array.Empty<string>();
+
+    /// <summary>Selects the server's intersection with the peer's advertised capabilities.</summary>
+    /// <param name="version">The agreed version.</param>
+    /// <param name="peerCapabilities">The peer's advertised names.</param>
+    /// <returns>The Ready agreement.</returns>
+    /// <exception cref="ProtocolException">The agreement is invalid or was already set.</exception>
+    public ProtocolReadyMessage Negotiate(ProtocolVersion version, IReadOnlyList<string> peerCapabilities)
+    {
+        var agreement = new ProtocolReadyMessage(version, version.Minor >= 1
+            ? Array.AsReadOnly(Family.Capabilities.Where(capability => peerCapabilities.Contains(capability.Name, StringComparer.Ordinal)).Select(capability => capability.Name).ToArray())
+            : Array.Empty<string>());
+        SetAgreement(agreement);
+        return agreement;
+    }
+
+    /// <summary>Applies a validated Ready agreement once, enabling gated frames in both directions.</summary>
+    /// <param name="agreement">The server's agreement.</param>
+    /// <exception cref="ProtocolException">The agreement is invalid, unsupported, or was already set.</exception>
+    public void SetAgreement(ProtocolReadyMessage agreement)
+    {
+        if (_agreementSet) { throw new ProtocolException(ErrorMessages.AgreementAlreadySet); }
+        _ = agreement.Encode();
+        if (!ProtocolVersion.TryNegotiate(agreement.Version, out var supported) || supported != agreement.Version ||
+            agreement.Capabilities.Any(name => !Family.Capabilities.Any(capability => capability.Name == name)))
+        {
+            throw new ProtocolException(ErrorMessages.ReadyInvalid);
+        }
+        Capabilities = Array.AsReadOnly(agreement.Capabilities.ToArray());
+        _capabilities.UnionWith(Capabilities);
+        _agreementSet = true;
+    }
 
     /// <inheritdoc />
     public async ValueTask DisposeAsync()
@@ -49,28 +93,37 @@ public sealed class ProtocolChannel : IAsyncDisposable
         }
     }
 
-    private static void Validate(ProtocolMessageFamily family, ProtocolMessageType type)
+    private void Validate(ProtocolMessageType type)
     {
-        if (!family.Supports(type))
+        if (!Family.Supports(type))
         {
-            throw new ProtocolException($"Message identifier {(byte)type} is not defined by endpoint family '{family.Name}'.");
+            throw new ProtocolException($"Message identifier {(byte)type} is not defined by endpoint family '{Family.Name}'.");
+        }
+    }
+
+    private void ValidateCapability(ProtocolMessageType type)
+    {
+        string? required = _requiredCapabilities[(byte)type];
+        if (required is not null && !_capabilities.Contains(required))
+        {
+            throw new ProtocolException(ErrorMessages.CapabilityNotNegotiated);
         }
     }
 
     private sealed class FamilyReader : ProtocolFrameReader
     {
         private readonly ProtocolFrameReader _reader;
-        private readonly ProtocolMessageFamily _family;
+        private readonly ProtocolChannel _channel;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="FamilyReader"/> class.
         /// </summary>
         /// <param name="reader">The framed reader whose frames are validated.</param>
-        /// <param name="family">The family every read identifier must belong to.</param>
-        public FamilyReader(ProtocolFrameReader reader, ProtocolMessageFamily family)
+        /// <param name="channel">The channel whose family every read identifier must belong to.</param>
+        public FamilyReader(ProtocolFrameReader reader, ProtocolChannel channel)
         {
             _reader = reader;
-            _family = family;
+            _channel = channel;
         }
 
         protected override async ValueTask<ProtocolFrame?> ReadFrameCoreAsync(CancellationToken cancellationToken)
@@ -78,7 +131,8 @@ public sealed class ProtocolChannel : IAsyncDisposable
             ProtocolFrame? frame = await _reader.ReadFrameAsync(cancellationToken).ConfigureAwait(false);
             if (frame is { } value)
             {
-                Validate(_family, value.Type);
+                _channel.Validate(value.Type);
+                _channel.ValidateCapability(value.Type);
             }
             return frame;
         }
@@ -89,22 +143,23 @@ public sealed class ProtocolChannel : IAsyncDisposable
     private sealed class FamilyWriter : ProtocolFrameWriter
     {
         private readonly ProtocolFrameWriter _writer;
-        private readonly ProtocolMessageFamily _family;
+        private readonly ProtocolChannel _channel;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="FamilyWriter"/> class.
         /// </summary>
         /// <param name="writer">The framed writer that receives validated frames.</param>
-        /// <param name="family">The family every written identifier must belong to.</param>
-        public FamilyWriter(ProtocolFrameWriter writer, ProtocolMessageFamily family)
+        /// <param name="channel">The channel whose family every written identifier must belong to.</param>
+        public FamilyWriter(ProtocolFrameWriter writer, ProtocolChannel channel)
         {
             _writer = writer;
-            _family = family;
+            _channel = channel;
         }
 
         protected override ValueTask WriteFrameCoreAsync(ProtocolFrame frame, CancellationToken cancellationToken)
         {
-            Validate(_family, frame.Type);
+            _channel.Validate(frame.Type);
+            _channel.ValidateCapability(frame.Type);
             return _writer.WriteFrameAsync(frame, cancellationToken);
         }
 

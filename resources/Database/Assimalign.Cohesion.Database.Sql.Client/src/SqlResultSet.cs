@@ -2,6 +2,8 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 
+using Assimalign.Cohesion.Database.Protocol;
+
 namespace Assimalign.Cohesion.Database.Sql.Client;
 
 /// <summary>
@@ -16,11 +18,15 @@ public sealed class SqlResultSet : IReadOnlyList<SqlRow>
 {
     private readonly IReadOnlyList<SqlRow> _rows;
 
-    private SqlResultSet(IReadOnlyList<SqlColumn> columns, IReadOnlyList<SqlRow> rows)
+    private SqlResultSet(IReadOnlyList<SqlColumn> columns, IReadOnlyList<SqlRow> rows, IReadOnlyList<ProtocolDiagnostic> diagnostics)
     {
         Columns = columns;
         _rows = rows;
+        Diagnostics = diagnostics;
     }
+
+    /// <summary>Gets the negotiated warning and error diagnostics.</summary>
+    public IReadOnlyList<ProtocolDiagnostic> Diagnostics { get; }
 
     /// <summary>
     /// Gets the result columns in ordinal order.
@@ -71,6 +77,6 @@ public sealed class SqlResultSet : IReadOnlyList<SqlRow>
             rows[index] = new SqlRow(result.Rows[index], ordinals);
         }
 
-        return new SqlResultSet(columns, rows);
+        return new SqlResultSet(columns, rows, result.Diagnostics);
     }
 }

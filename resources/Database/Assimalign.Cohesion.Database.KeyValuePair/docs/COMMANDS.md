@@ -68,6 +68,35 @@ A missing parameter, a non-`@` operand token, or a wrong operand type is a
 **parse error** (`DatabaseParseException` → `ParseFailure` on the wire) — the
 command never reaches execution.
 
+## Diagnostic codes (#1105)
+
+Statement Error text is `CODE: message`. In-process DatabaseParseException.Message
+remains code-free and Diagnostics carries the code. These codes are append-only;
+all parser refusals use ParseFailure and keep the session ready. COHKV019 is the
+ExecutionFailure fallback when the engine supplies no structured error code.
+
+| Code | Refusal |
+|---|---|
+| `COHKV001` | Empty command |
+| `COHKV002` | Attempted catalog mutation |
+| `COHKV003` | Unknown command verb |
+| `COHKV004` | Request-constructor validation failed |
+| `COHKV005` | Invalid PUT arity |
+| `COHKV006` | PUT requires IF |
+| `COHKV007` | Invalid DELETE arity |
+| `COHKV008` | DELETE requires IF |
+| `COHKV009` | SCAN clause operand missing |
+| `COHKV010` | Repeated SCAN clause |
+| `COHKV011` | Unknown SCAN clause |
+| `COHKV012` | Byte operand required |
+| `COHKV013` | Integer etag required |
+| `COHKV014` | Nonnegative LIMIT literal required |
+| `COHKV015` | Nonnegative integer LIMIT parameter required |
+| `COHKV016` | Parameter reference required |
+| `COHKV017` | Parameter value missing |
+| `COHKV018` | Command arity mismatch |
+| `COHKV019` | Execution failure without an engine diagnostic |
+
 ## Semantics and result shapes
 
 | Command | Result | Notes |
@@ -118,7 +147,7 @@ not exist in this model, so there are no invented owner/schema columns.
 
 The surface is read-only. `PUT KEYSPACES ...` and `DELETE KEYSPACES ...` fail
 with `DatabaseParseException` (`ParseFailure` over the wire) and the stable
-message `The KEYSPACES catalog surface is read-only.` A parameter-bound key
+wire text `COHKV002: The KEYSPACES catalog surface is read-only.` A parameter-bound key
 whose bytes spell `KEYSPACES` remains ordinary user data. The typed equivalent
 is `KeyValueKeySpacesRequest`, executed through the existing session interface.
 

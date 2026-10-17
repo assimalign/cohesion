@@ -40,6 +40,7 @@ internal sealed class KeyValueDatabaseServerSession : DatabaseServerSession
     private readonly CancellationTokenSource _lifetimeSource;
     private readonly long _acceptedTimestamp;
 
+    private ProtocolChannel? _channel;
     private ProtocolFrameReader? _reader;
     private ProtocolFrameWriter? _writer;
     private KeyValueDatabaseSession? _databaseSession;
@@ -127,6 +128,7 @@ internal sealed class KeyValueDatabaseServerSession : DatabaseServerSession
 
         Stream stream = _connection.AsStream();
         await using var channel = new ProtocolChannel(stream, KeyValueProtocol.Family, leaveOpen: true);
+        _channel = channel;
         _reader = channel.Reader;
         _writer = channel.Writer;
 
@@ -284,7 +286,7 @@ internal sealed class KeyValueDatabaseServerSession : DatabaseServerSession
 
             SetAuthenticatedPrincipal(startup.Principal);
 
-            await WriteFrameAsync(ProtocolMessageType.Ready, ReadOnlyMemory<byte>.Empty, handshakeSource.Token).ConfigureAwait(false);
+            await WriteFrameAsync(ProtocolMessageType.Ready, _channel!.Negotiate(negotiatedVersion, startup.Capabilities).Encode(), handshakeSource.Token).ConfigureAwait(false);
             return true;
         }
         catch (OperationCanceledException) when (handshakeSource.IsCancellationRequested && !_lifetimeSource.IsCancellationRequested && !softStop.IsCancellationRequested)
@@ -387,7 +389,11 @@ internal sealed class KeyValueDatabaseServerSession : DatabaseServerSession
 
         try
         {
-            result = await _databaseSession!.ExecuteCommandTextAsync(message.Statement, parameters, cancellationToken).ConfigureAwait(false);
+            // The wire reports empty text as a coded statement parse failure. The internal text
+            // entry retains its existing argument-validation and cancellation precedence.
+            result = string.IsNullOrWhiteSpace(message.Statement)
+                ? await _databaseSession!.ExecuteAsync(KeyValueCommandParser.Parse(message.Statement, parameters), cancellationToken).ConfigureAwait(false)
+                : await _databaseSession!.ExecuteCommandTextAsync(message.Statement, parameters, cancellationToken).ConfigureAwait(false);
         }
         catch (DatabaseParseException exception)
         {
@@ -396,7 +402,7 @@ internal sealed class KeyValueDatabaseServerSession : DatabaseServerSession
             KeyValueDatabaseEventSource.Log.StatementParseFailed(this, _databaseSession!.Database.Name, exception);
 
             // Statement-level failures keep the session in the ready state.
-            await WriteErrorAsync(ProtocolErrorCode.ParseFailure, exception.Message, cancellationToken).ConfigureAwait(false);
+            await WriteErrorAsync(ProtocolErrorCode.ParseFailure, FormatError(exception.Diagnostics, exception.Message), cancellationToken).ConfigureAwait(false);
             return;
         }
         catch (DatabaseOfflineException exception)
@@ -408,7 +414,7 @@ internal sealed class KeyValueDatabaseServerSession : DatabaseServerSession
         }
         catch (DatabaseException exception)
         {
-            await WriteErrorAsync(ProtocolErrorCode.ExecutionFailure, exception.Message, cancellationToken).ConfigureAwait(false);
+            await WriteErrorAsync(ProtocolErrorCode.ExecutionFailure, FormatError(exception.Diagnostics, exception.Message), cancellationToken).ConfigureAwait(false);
             return;
         }
 
@@ -449,8 +455,8 @@ internal sealed class KeyValueDatabaseServerSession : DatabaseServerSession
         if (result.Status != DatabaseResultStatus.Success)
         {
             string detail = result.Diagnostics is { Count: > 0 } diagnostics && diagnostics[0].Message is { } diagnosticMessage
-                ? diagnosticMessage
-                : $"The statement completed with status {result.Status}.";
+                ? $"{diagnostics[0].Code ?? "COHKV019"}: {diagnosticMessage}"
+                : $"COHKV019: The statement completed with status {result.Status}.";
 
             await WriteErrorAsync(ProtocolErrorCode.ExecutionFailure, detail, cancellationToken).ConfigureAwait(false);
             return;
@@ -493,6 +499,18 @@ internal sealed class KeyValueDatabaseServerSession : DatabaseServerSession
     {
         await _writer!.WriteFrameAsync(new ProtocolFrame(type, payload), cancellationToken).ConfigureAwait(false);
         await _writer.FlushAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private static string FormatError(IReadOnlyList<Diagnostic> diagnostics, string message)
+    {
+        foreach (var diagnostic in diagnostics)
+        {
+            if (diagnostic.Severity == DiagnosticSeverity.Error && diagnostic.Code is { } code)
+            {
+                return message.StartsWith(code + ":", StringComparison.Ordinal) ? message : $"{code}: {message}";
+            }
+        }
+        return $"COHKV019: {message}";
     }
 
     private ValueTask WriteErrorAsync(ProtocolErrorCode code, string message, CancellationToken cancellationToken)

@@ -38,11 +38,17 @@ internal sealed class SqlExecuteExchange : DatabaseProtocolExchange<DatabaseClie
 
         IReadOnlyList<DatabaseClientColumn> columns = [];
         var rows = new List<object?[]>();
+        IReadOnlyList<ProtocolDiagnostic> diagnostics = [];
+        bool hasDiagnostics = false;
         bool hasResultFrames = false;
         while (true)
         {
             ProtocolFrame frame = await reader.ReadFrameAsync(cancellationToken).ConfigureAwait(false)
                 ?? throw new DatabaseClientException(ProtocolErrorCode.Internal, "The server closed the connection mid-exchange.");
+            if (hasDiagnostics && frame.Type != ProtocolMessageType.Error && frame.Type != (ProtocolMessageType)SqlProtocolMessageType.ResultComplete)
+            {
+                throw new ProtocolException(ErrorMessages.DiagnosticsOrderInvalid);
+            }
             switch ((byte)frame.Type)
             {
                 case (byte)SqlProtocolMessageType.ResultHeader:
@@ -64,8 +70,12 @@ internal sealed class SqlExecuteExchange : DatabaseProtocolExchange<DatabaseClie
                 case (byte)SqlProtocolMessageType.ResultComplete:
                 {
                     ProtocolResultCompleteMessage complete = ProtocolResultCompleteMessage.Decode(frame.Payload.Span);
-                    return new DatabaseClientResult(columns, rows, complete.AffectedCount);
+                    return new DatabaseClientResult(columns, rows, complete.AffectedCount, diagnostics);
                 }
+                case (byte)ProtocolMessageType.Diagnostics:
+                    diagnostics = ProtocolDiagnosticsMessage.Decode(frame.Payload.Span).Entries;
+                    hasDiagnostics = true;
+                    break;
                 case (byte)ProtocolMessageType.Error:
                 {
                     ProtocolErrorMessage error = ProtocolErrorMessage.Decode(frame.Payload.Span);
@@ -77,7 +87,7 @@ internal sealed class SqlExecuteExchange : DatabaseProtocolExchange<DatabaseClie
                     {
                         MarkResponseComplete();
                     }
-                    throw new DatabaseClientException(error.Code, error.Message);
+                    throw new DatabaseClientException(error.Code, error.Message, diagnostics, null);
                 }
                 default:
                     throw new DatabaseClientException(ProtocolErrorCode.ProtocolViolation, $"Unexpected {frame.Type} frame in a Sql execute exchange.");

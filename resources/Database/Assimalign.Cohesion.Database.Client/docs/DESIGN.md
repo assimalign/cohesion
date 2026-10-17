@@ -280,7 +280,7 @@ typed `IDuplexConnectionFactory` options, composed statically. Typed endpoints a
 support in-memory transports. The endpoint selects the model; startup carries no
 model discriminator.
 
-The shared startup version is 2.0 since #1126's Documents projection change. SQL and
+The shared startup version is 2.1 since #1105's additive negotiation change. SQL and
 Key-Value model payloads are unchanged by that bump. Moving APIs is a managed API
 migration: direct SQL callers import `Database.Sql.Client` and bind
 `SqlProtocol.Family`, or use the existing typed client. `DatabaseClientResult`
@@ -401,3 +401,21 @@ can derive from `DuplexConnectionFactory`, implement `ConnectCoreAsync` returnin
 `ValueTask<IDuplexConnection>`, and produce a `DuplexConnection` implementation. Built-in TCP,
 InMemory and TLS-layered duplex factories already satisfy the new contract. Database wire
 framing, handshake and model messages are unchanged.
+
+## Negotiated statement diagnostics (#1105)
+
+The shared protocol is 2.1. Startup optionally appends the client's capability names;
+Ready returns the agreed version and the two-sided intersection. A negotiated 2.0
+session retains empty Ready and the existing model and Error bytes. An empty Ready
+from an older endpoint means 2.0 with no capabilities. Different majors are refused.
+Capability names are ordinal and append-only; model names are scoped with the
+lowercase endpoint family followed by a dot. The core owns `diagnostics` and frame 14.
+
+SQL and Graph register `ProtocolCapability.Diagnostics`. When agreed, one Diagnostics
+frame carries the complete Warning/Error list immediately before Error on failure,
+or immediately before ResultComplete (PathsComplete for graph paths) on success.
+Information, including SQL0100, is never sent. Error and result payloads are unchanged.
+Statement failures leave the server session ready. Model clients validate diagnostic
+ordering and preserve every code, severity, message, nullable offset and source line.
+
+DatabaseConnection.ServerVersion and Capabilities expose the actual agreement. An empty Ready reports 2.0 rather than assuming Current. DatabaseClientException retains structured diagnostics through the existing inherited DatabaseException.Diagnostics API.

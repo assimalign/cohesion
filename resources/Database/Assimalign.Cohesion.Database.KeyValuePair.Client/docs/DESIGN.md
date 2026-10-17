@@ -179,3 +179,7 @@ can derive from `DuplexConnectionFactory`, implement `ConnectCoreAsync` returnin
 `ValueTask<IDuplexConnection>`, and produce a `DuplexConnection` implementation. Built-in TCP,
 InMemory and TLS-layered duplex factories already satisfy the new contract. Database wire
 framing, handshake and model messages are unchanged.
+
+## Coded command failures (#1105)
+
+The shared core negotiates protocol 2.1 with no Key-Value capabilities. Empty command text is sent to the server for coded ParseFailure (COHKV001), as other command grammar refusals are. Statement Error text is CODE: message; the client retains that text and its existing terminal-response reuse policy.

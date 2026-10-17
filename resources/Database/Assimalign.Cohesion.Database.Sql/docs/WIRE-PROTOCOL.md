@@ -6,7 +6,7 @@
 owns `SqlProtocolMessageType`, ProtocolExecuteMessage, ProtocolResultHeaderMessage,
 and ProtocolResultCompleteMessage. The frame, startup, error, and lifecycle formats
 come from [Database.Protocol](../../Assimalign.Cohesion.Database.Protocol/docs/DESIGN.md).
-The shared startup version is **2.0** since #1126's Documents projection change;
+The shared startup version is **2.1** since #1105's additive negotiation change;
 incompatible majors are refused before authentication. SQL identifiers, payload bytes,
 order, authentication and error codes are unchanged by that bump. The model's Client package owns
 parameter encoding and result materialization; the shared Client only runs exchanges.
@@ -129,3 +129,38 @@ Golden payload examples (hex): Execute("X", no parameters) =
 `00 00 00 01 00 00 00 02 69 64 05`; completion(42) =
 `00 00 00 00 00 00 00 2A`. The existing server tests exercise the 1.0 wire unchanged;
 ProtocolMessageTests additionally fixes these payload bytes.
+
+## Negotiated statement diagnostics (#1105)
+
+The shared protocol is 2.1. Startup optionally appends the client's capability names;
+Ready returns the agreed version and the two-sided intersection. A negotiated 2.0
+session retains empty Ready and the existing model and Error bytes. An empty Ready
+from an older endpoint means 2.0 with no capabilities. Different majors are refused.
+Capability names are ordinal and append-only; model names are scoped with the
+lowercase endpoint family followed by a dot. The core owns `diagnostics` and frame 14.
+
+SQL and Graph register `ProtocolCapability.Diagnostics`. When agreed, one Diagnostics
+frame carries the bounded Warning/Error list immediately before Error on failure,
+or immediately before ResultComplete (PathsComplete for graph paths) on success.
+Information, including SQL0100, is never sent. Error and result payloads are unchanged.
+Statement failures leave the server session ready. Model clients validate diagnostic
+ordering and preserve every code, severity, message, nullable offset and source line.
+
+Outbound SQL and Graph diagnostics are preflighted before any result or Error output.
+If the filtered Warning/Error list exceeds 4,096 entries or 1,048,576 encoded bytes,
+the endpoint retains the longest leading prefix that fits both limits with a final
+Warning notice, code COHDBP001. The notice counts toward both limits and states the
+retained count, original filtered count and omitted count. Once an entry does not fit,
+it and every following entry are omitted, even if a later entry would fit. Entries
+are never shortened. A 4,097-entry list of small diagnostics therefore keeps the first
+4,095 and the notice; a first entry larger than the byte limit leaves only the notice.
+The original failure still sends exactly one Error with its original error category
+and message. Success still sends its result and normal completion with the bounded
+warning list. Overflow alone never terminates the session or changes transaction state.
+Malformed incoming diagnostic frames remain fatal protocol violations.
+
+Null diagnostic codes and messages encode as zero-length strings; zero-length strings
+decode as null. An empty diagnostic code is never a valid code. Unlocated offsets
+remain null. Ready.Capabilities and Diagnostics.Entries reject null at construction
+and through init/with assignment. Capability-name byte lengths are checked against
+the 128-character ASCII bound before decoding or allocating a name string.

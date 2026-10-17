@@ -2,6 +2,8 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 
+using Assimalign.Cohesion.Database.Protocol;
+
 namespace Assimalign.Cohesion.Database.Graph.Client;
 
 /// <summary>A materialized scalar graph result with column metadata and an affected count.</summary>
@@ -9,10 +11,11 @@ public sealed class GraphResultSet : IReadOnlyList<GraphRow>
 {
     private readonly IReadOnlyList<GraphRow> _rows;
 
-    internal GraphResultSet(IReadOnlyList<GraphColumn> columns, IReadOnlyList<object?[]> rows, long affectedCount)
+    internal GraphResultSet(IReadOnlyList<GraphColumn> columns, IReadOnlyList<object?[]> rows, long affectedCount, IReadOnlyList<ProtocolDiagnostic>? diagnostics = null)
     {
         Columns = columns;
         AffectedCount = affectedCount;
+        Diagnostics = diagnostics ?? [];
         var ordinals = new Dictionary<string, int>(columns.Count, StringComparer.Ordinal);
         foreach (GraphColumn column in columns)
         {
@@ -28,6 +31,9 @@ public sealed class GraphResultSet : IReadOnlyList<GraphRow>
 
     /// <summary>Gets columns in projection order.</summary>
     public IReadOnlyList<GraphColumn> Columns { get; }
+
+    /// <summary>Gets the negotiated warning and error diagnostics.</summary>
+    public IReadOnlyList<ProtocolDiagnostic> Diagnostics { get; }
 
     /// <summary>Gets the mutation count, or -1 for a row-returning statement.</summary>
     public long AffectedCount { get; }

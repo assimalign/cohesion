@@ -298,7 +298,7 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
 
             SetAuthenticatedPrincipal(startup.Principal);
 
-            await WriteFrameAsync(ProtocolMessageType.Ready, ReadOnlyMemory<byte>.Empty, handshakeSource.Token).ConfigureAwait(false);
+            await WriteFrameAsync(ProtocolMessageType.Ready, _channel!.Negotiate(negotiated, startup.Capabilities).Encode(), handshakeSource.Token).ConfigureAwait(false);
             return true;
         }
         catch (OperationCanceledException) when (handshakeSource.IsCancellationRequested && !_lifetimeSource.IsCancellationRequested && !softStop.IsCancellationRequested)

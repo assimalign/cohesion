@@ -5,4 +5,9 @@
 <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
 <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
   <data name="StringUtf8Invalid" xml:space="preserve"><value>Malformed payload: invalid UTF-8 string.</value></data>
+  <data name="CapabilityListInvalid" xml:space="preserve"><value>Malformed or unsupported capability list.</value></data>
+  <data name="ReadyInvalid" xml:space="preserve"><value>Malformed or unsupported Ready agreement.</value></data>
+  <data name="CapabilityNotNegotiated" xml:space="preserve"><value>The frame requires a negotiated capability.</value></data>
+  <data name="AgreementAlreadySet" xml:space="preserve"><value>The channel agreement was already set.</value></data>
+  <data name="DiagnosticPayloadInvalid" xml:space="preserve"><value>Malformed diagnostics payload or diagnostic bounds exceeded.</value></data>
 </root>

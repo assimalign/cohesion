@@ -840,13 +840,7 @@ transactions. No transaction-control member or frame is exposed over this wire.
 
 The shared envelope is unchanged: `u32be payloadLength`, `u8 messageType`, payload bytes. The length
 excludes the five-byte header and is at most 16,777,216. The shared startup handshake used by
-#190 now negotiates **protocol 2.0**, advancing the major from 1.0 because #1126 replaces
-ResultRow (68) projection arrays with Document (65) objects carrying MISSING by omission.
-The startup version is shared by all model endpoints; their clients and servers advance together.
-An incompatible major receives the existing fatal Error(UnsupportedVersion) before authentication,
-then the connection closes; there is no legacy reader. This follows #1437's deliberate versioning
-of the unreleased SQL result header. #1105 (protocol 1.1 capability negotiation, wave 4)
-supersedes per-feature version bumps when that negotiation is implemented.
+#1126 advanced 1.0 to 2.0 because Documents projections changed from ResultRow (68) arrays to Document (65) objects carrying MISSING by omission. The shared handshake now negotiates 2.1 (#1105), with an empty capability list for Documents and its existing structured Failure payload. Different majors are refused before authentication; additive future capabilities use negotiation rather than another minor bump.
 
 All integers below are big-endian. `str(x)` means `i32 byteLength` followed by that many UTF-8
 bytes. `json(x)` means `i32 byteLength` followed by one complete UTF-8 JSON value. Negative lengths,
@@ -1224,3 +1218,7 @@ outside the decimal domain or arithmetic overflow (22003), and COHDOC008 for inv
 operand/parameter/value types. The innermost evaluator expression supplies its span before
 a failure propagates; outer expressions preserve it. Numeric normalization also codes
 conversion overflow outside expression evaluation. No message embeds its code.
+
+## Shared startup negotiation (#1105)
+
+The endpoint participates in protocol 2.1: Startup may carry capability names and Ready returns the agreed version with an empty capability list. Negotiated 2.0 still sends empty Ready. Different majors are refused. This model does not register the core Diagnostics capability and its channel rejects that frame in both directions. Documents keeps the existing structured Failure frame (#190/#1103); no second diagnostics frame is needed.
