@@ -1,4 +1,5 @@
 using System;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -15,6 +16,51 @@ namespace Assimalign.Cohesion.Database.Documents.Client.Tests;
 
 public sealed class DocumentClientProtocolTests
 {
+    [Theory(DisplayName = "Cohesion Test [Documents.Client] - Blank collection names in command 69 preserve the wire session")]
+    [InlineData(false, " ")]
+    [InlineData(true, " ")]
+    [InlineData(false, "")]
+    [InlineData(true, "")]
+    [InlineData(false, "\t\u2003\r\n")]
+    [InlineData(true, "\t\u2003\r\n")]
+    public async Task Server_InvalidCollectionCommandName_ShouldReturnDiagnosticAndKeepSession(bool tcp, string name)
+    {
+        // Arrange: bypass the typed client's argument guard to exercise command 69 itself.
+        await using var harness = await DocumentClientTestHarness.StartAsync(tcp);
+        await using var transport = await harness.Factory.ConnectAsync(harness.Listener.EndPoint, harness.Token);
+        await using var channel = new ProtocolChannel(transport.AsStream(), DocumentProtocol.Family, leaveOpen: true);
+        await WriteAsync(channel, (byte)ProtocolMessageType.Startup, new ProtocolStartupMessage(ProtocolVersion.Current, "documents", "tester").Encode(), harness.Token);
+        (await channel.Reader.ReadFrameAsync(harness.Token)).ShouldNotBeNull().Type.ShouldBe(ProtocolMessageType.Authenticate);
+        await WriteAsync(channel, (byte)ProtocolMessageType.AuthenticateResponse, [], harness.Token);
+        (await channel.Reader.ReadFrameAsync(harness.Token)).ShouldNotBeNull().Type.ShouldBe(ProtocolMessageType.Ready);
+        Guid sessionId = harness.Server.Sessions.ShouldHaveSingleItem().Id;
+        byte[] encodedName = Encoding.UTF8.GetBytes(name);
+
+        foreach (var operation in new[] { DocumentProtocolOperation.CreateCollection, DocumentProtocolOperation.DropCollection, DocumentProtocolOperation.GetCollection })
+        {
+            byte[] payload = [(byte)operation, 0, 0, 0, (byte)encodedName.Length, .. encodedName];
+
+            // Act
+            await WriteAsync(channel, (byte)DocumentProtocolMessageType.Command, payload, harness.Token);
+            var response = (await channel.Reader.ReadFrameAsync(harness.Token)).ShouldNotBeNull();
+
+            // Assert
+            response.Type.ShouldBe((ProtocolMessageType)DocumentProtocolMessageType.Failure);
+            var failure = DocumentProtocolFailureMessage.Decode(response.Payload.Span);
+            failure.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
+            var diagnostic = failure.Diagnostics.ShouldHaveSingleItem();
+            diagnostic.Code.ShouldBe("COHDOC001");
+            diagnostic.Start.ShouldBeNull();
+            diagnostic.End.ShouldBeNull();
+            await WriteAsync(channel, (byte)DocumentProtocolMessageType.Command,
+                new DocumentProtocolCommandMessage(DocumentProtocolOperation.ListCollections).Encode(), harness.Token);
+            var complete = (await channel.Reader.ReadFrameAsync(harness.Token)).ShouldNotBeNull();
+            complete.Type.ShouldBe((ProtocolMessageType)DocumentProtocolMessageType.Complete);
+            DocumentProtocolCompleteMessage.Decode(complete.Payload.Span).ResultCount.ShouldBe(0);
+            harness.Server.Sessions.ShouldHaveSingleItem().Id.ShouldBe(sessionId);
+        }
+    }
+
     [Theory(DisplayName = "Cohesion Test [Documents.Client] - Malformed UTF-8 receives a fatal error and creates nothing on both transports")]
     [InlineData(false)]
     [InlineData(true)]

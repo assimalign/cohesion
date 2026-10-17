@@ -106,6 +106,11 @@ text to 4096 UTF-16 characters and diagnostics to 256 (codes to 256 characters),
 truncation/omission markers. Codes and locations of retained diagnostics are unchanged. This
 keeps even a near-frame-sized failing identifier from turning a statement error into a broken wire.
 
+Blank OQL collection names return `COHDOC001` at the quoted name's span; empty quoted names
+return the parser's `OQL0002`. Both preserve the connection. The typed command API rejects blank
+names locally with its existing argument guard. A peer sending one through Command (69) receives
+an unlocated `COHDOC001` Failure and can continue using the same server session.
+
 `DocumentClientException` is a sealed `DatabaseException` leaf, like Graph's model exception.
 It uses the inherited diagnostic carrier, so callers catching the area root see the same diagnostics.
 Before #1103 it derived from `DatabaseClientException` and owned a separate diagnostic list; keeping

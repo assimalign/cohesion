@@ -206,6 +206,36 @@ public sealed class DocumentCollectionDdlTests
         (await CollectionsAsync(session)).ShouldBe(["items:Adhoc"]);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Documents] - Invalid collection names fail planning without closing the session")]
+    [InlineData("CREATE COLLECTION \" \"", "COHDOC001")]
+    [InlineData("CREATE COLLECTION IF NOT EXISTS \"\t\u2003\"", "COHDOC001")]
+    [InlineData("DROP COLLECTION IF EXISTS \" \"", "COHDOC001")]
+    [InlineData("DROP COLLECTION \"\r\n \"", "COHDOC001")]
+    [InlineData("CREATE COLLECTION \"\"", "OQL0002")]
+    [InlineData("DROP COLLECTION IF EXISTS \"\"", "OQL0002")]
+    public async Task Execute_InvalidCollectionName_ShouldPreserveSessionAsync(string text, string code)
+    {
+        // Arrange: comments and newlines exercise absolute name offsets and lines.
+        string statement = "-- collection DDL\n" + text + "; -- tail";
+        await using var engine = DocumentDatabaseEngine.Create("ddl", new());
+        var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+
+        // Act
+        var failure = await Should.ThrowAsync<DatabaseException>(async () =>
+            await session.ExecuteAsync(statement, cancellationToken: CancellationToken.None));
+
+        // Assert
+        var diagnostic = failure.Diagnostics.ShouldHaveSingleItem();
+        diagnostic.Code.ShouldBe(code);
+        diagnostic.Start.ShouldBe(statement.IndexOf('"'));
+        diagnostic.End.ShouldBe(statement.LastIndexOf('"') + 1);
+        diagnostic.Line.ShouldBe(2);
+        (await CollectionsAsync(session)).ShouldBeEmpty();
+        Success(await session.ExecuteAsync("CREATE COLLECTION usable", cancellationToken: CancellationToken.None));
+        (await CollectionsAsync(session)).ShouldBe(["usable:Adhoc"]);
+    }
+
     private static void Success(DatabaseResult result)
     {
         result.Status.ShouldBe(DatabaseResultStatus.Success);

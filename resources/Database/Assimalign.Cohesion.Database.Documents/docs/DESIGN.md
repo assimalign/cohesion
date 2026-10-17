@@ -361,6 +361,14 @@ collection; a Schema-owned collection still throws `DatabaseObjectLockedExceptio
 `DROP COLLECTION`. System sources remain read-only even with either modifier. Names are local
 to the session's database; `IF` is positional and remains usable as an unquoted name.
 
+Planning rejects null, empty or whitespace-only names with `COHDOC001`, matching the session
+API's name rule before either collection core runs. Parsed quoted names carry the name token's
+span, found with the shared lexer on the refusal path; directly constructed nodes retain their
+supplied location. Empty quoted identifiers are already syntax errors (`OQL0002`). These failures
+leave an autocommit session usable. Command 69 validates collection names inside the statement
+failure boundary and returns the same unlocated `COHDOC001`, including empty names; malformed
+payload encodings still terminate the session with a protocol error.
+
 Under the database writer lock, snapshot conflicts are checked before either conditional no-op.
 A collection committed after a Snapshot transaction began therefore aborts conditional creation.
 DDL is transactional: CREATE is visible to subsequent statements of its transaction; rollback
