@@ -59,17 +59,33 @@ internal sealed partial class SqlPlanner
                         }
                         int leftOrdinal = FindUsing(visible, name, "left");
                         int rightOrdinal = FindUsing(Enumerable.Range(right.Offset, right.Source.Columns.Count), name, "right");
-                        var leftColumn = allColumns[leftOrdinal];
+                        var previous = scope.MergedColumn(leftOrdinal);
+                        var leftColumn = previous?.Column ?? allColumns[leftOrdinal];
                         var rightColumn = allColumns[rightOrdinal];
-                        // USING's merged output retains the left column's type and value. Its
-                        // implicit equality uses exactly the ordinary ON collation precedence.
+                        var common = UsingType(leftColumn.Type, rightColumn.Type, name, select);
+                        var leftValue = previous?.Value ?? new SqlBoundColumn(leftOrdinal);
+                        var rightValue = new SqlBoundColumn(rightOrdinal);
+                        // PostgreSQL parse_clause.c:1676-1709,1718-1733: choose a common type,
+                        // coerce the inputs, prefer an unchanged INNER input, and preserve LEFT.
+                        var value = CoerceUsing(leftValue, leftColumn.Type.Type, common);
+                        if (join.JoinType == SqlJoinType.Inner && leftColumn.Type.Type != common.Type
+                            && rightColumn.Type.Type == common.Type)
+                        {
+                            value = rightValue;
+                        }
                         var collation = SqlBoundCollation.Of(
                             new SqlCollationCandidate(leftColumn.Collation ?? _catalog.DefaultCollation, leftColumn.Collation is null ? 1 : 2),
                             new SqlCollationCandidate(rightColumn.Collation ?? _catalog.DefaultCollation, rightColumn.Collation is null ? 1 : 2),
                             _catalog.DefaultCollation);
-                        predicates.Add(new SqlBoundBinary(SqlBinaryOperator.Equal, new SqlBoundColumn(leftOrdinal),
-                            new SqlBoundColumn(rightOrdinal), collation));
-                        equalities.Add((leftOrdinal, rightOrdinal, collation.Resolve(null)));
+                        predicates.Add(new SqlBoundBinary(SqlBinaryOperator.Equal, leftValue, rightValue, collation));
+                        if (leftValue is SqlBoundColumn physical)
+                        {
+                            equalities.Add((physical.Ordinal, rightOrdinal, collation.Resolve(null)));
+                        }
+                        var owner = bindings.Last(binding => binding.Offset <= leftOrdinal);
+                        owner.UsingColumns ??= [];
+                        owner.UsingColumns[leftOrdinal] = new SqlUsingColumn(
+                            new SqlCatalogColumn(name, common, leftColumn.IsNullable, collation: leftColumn.Collation), value);
                         merged.Add(leftOrdinal);
                         right.HiddenColumns.Add(rightOrdinal - right.Offset);
                     }
@@ -120,6 +136,47 @@ internal sealed partial class SqlPlanner
                 ? new SqlCatalogColumn(column.Name, column.Type, true, column.DefaultLiteral, column.Collation, column.DomainName, column.DefaultFunctionCalls)
                 : column));
         }
+    }
+
+    /// <summary>Selects the common USING type, retaining modifiers only when both inputs agree.</summary>
+    private DatabaseTypeInfo UsingType(DatabaseTypeInfo left, DatabaseTypeInfo right, string name, SqlSelectExpression select)
+    {
+        var common = left.Type;
+        if (left.Type != right.Type)
+        {
+            // PostgreSQL parse_coerce.c:1393-1437: categories must match; switch candidates
+            // only for a one-way implicit conversion. CHAR/VARCHAR both convert implicitly.
+            static int Category(DatabaseType type) => type switch
+            {
+                DatabaseType.Int8 or DatabaseType.Int16 or DatabaseType.Int32 or DatabaseType.Int64
+                    or DatabaseType.Decimal or DatabaseType.Float32 or DatabaseType.Float64 => 1,
+                DatabaseType.Character or DatabaseType.String => 2,
+                DatabaseType.Date or DatabaseType.DateTime or DatabaseType.DateTimeOffset => 3,
+                _ => 0,
+            };
+            bool CanConvert(DatabaseType from, DatabaseType to)
+                => from == to || _functions.Types.ResolveCast(null, from, SqlType.ForStorage(new DatabaseTypeInfo(to)))
+                    is { Context: SqlCastContext.Implicit };
+            if (Category(left.Type) == 0 || Category(left.Type) != Category(right.Type)) { Refuse(); }
+            if (CanConvert(left.Type, right.Type) && !CanConvert(right.Type, left.Type)) { common = right.Type; }
+            if (!CanConvert(left.Type, common) || !CanConvert(right.Type, common)) { Refuse(); }
+        }
+        // PostgreSQL parse_coerce.c:1648-1678: a type or typmod mismatch clears the typmod.
+        return left.Type == right.Type && left.MaxLength == right.MaxLength
+            && left.Precision == right.Precision && left.Scale == right.Scale
+                ? left : new DatabaseTypeInfo(common);
+
+        void Refuse() => throw new SqlPlanningException("COHSQLE015",
+            $"USING column '{name}' requires a common type; found {left.Type} and {right.Type}.", select.Location);
+    }
+
+    /// <summary>Coerces the merged value without changing the physical input or qualified references.</summary>
+    private SqlBoundExpression CoerceUsing(SqlBoundExpression value, DatabaseType source, DatabaseTypeInfo common)
+    {
+        if (source == common.Type) { return value; }
+        var target = SqlType.ForStorage(common);
+        return new SqlBoundCast(value, target.Name, target, _functions.Types.ResolveCasts(null, target),
+            _functions.Database, _catalog.DefaultCollation);
     }
 
     /// <summary>Seeks into the added input; only the first INNER pair may reverse direction.</summary>
@@ -185,7 +242,10 @@ internal sealed partial class SqlPlanner
             && UnwrapCollation(binary.Left) is SqlColumnReferenceExpression left
             && UnwrapCollation(binary.Right) is SqlColumnReferenceExpression right)
         {
-            equalities.Add((evaluator.ResolveColumn(left), evaluator.ResolveColumn(right), evaluator.ResolveCollation(binary.Left, binary.Right)));
+            if (evaluator.Bind(left) is SqlBoundColumn a && evaluator.Bind(right) is SqlBoundColumn b)
+            {
+                equalities.Add((a.Ordinal, b.Ordinal, evaluator.ResolveCollation(binary.Left, binary.Right)));
+            }
         }
     }
 

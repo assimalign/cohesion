@@ -9,8 +9,15 @@ FROM binds each comma item's join tree separately before any row is read. ON sco
 only that item's inputs through the current step. SqlJoinPlan retains stable physical slots,
 an ordered SqlJoinStep list and one access path per step; USING hides right names only from
 unqualified lookup and derives wildcard order independently of physical slots. Its merged
-column retains the left value and metadata; ordinary equality and collation rules match it.
-This deliberately leaves PostgreSQL's common-type synthesis for a later extension.
+column binds a separate common-typed expression for unqualified lookup and wildcard output;
+qualified columns retain their original types. LEFT uses the coerced left value; INNER prefers
+an unchanged common-typed input. Common-type selection follows PostgreSQL parse_clause.c:1676-1733
+and parse_coerce.c:1393-1437. Differing types or modifiers clear length, precision and scale
+(parse_coerce.c:1648-1678); incompatible categories or missing implicit casts fail planning with
+COHSQLE015, including on empty inputs. Later USING and ON steps consume these merged expressions.
+Computed merged keys do not acquire physical index probes. Ordinary equality and collation
+precedence remain unchanged. Grouping compares bound column values so qualified inputs and
+coerced merged names cannot accidentally share a key slot with different types.
 
 Execution is left-deep in written order. Only the first INNER pair may swap for an index;
 later steps seek into the added input, and LEFT always preserves its left side. Each LEFT

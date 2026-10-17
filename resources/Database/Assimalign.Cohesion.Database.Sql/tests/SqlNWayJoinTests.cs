@@ -220,25 +220,121 @@ public sealed class SqlNWayJoinTests
         session.LastStatementMetrics.RecordsExamined.ShouldBe(5);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sql] - USING: differing numeric types retain the merged left column metadata")]
-    public async Task Join_UsingNumericTypes_ShouldRetainLeftValueAndType()
+    [Theory(DisplayName = "Cohesion Test [Sql] - USING: INT and DECIMAL share decimal values in either input order")]
+    [InlineData(false, "JOIN", false)]
+    [InlineData(false, "LEFT JOIN", false)]
+    [InlineData(true, "JOIN", false)]
+    [InlineData(true, "LEFT JOIN", false)]
+    [InlineData(false, "JOIN", true)]
+    [InlineData(false, "LEFT JOIN", true)]
+    [InlineData(true, "JOIN", true)]
+    [InlineData(true, "LEFT JOIN", true)]
+    public async Task Join_UsingDecimalTypes_ShouldCoerceMergedExpressions(bool reverse, string join, bool indexed)
     {
         // Arrange
         await using var engine = SqlDatabaseEngine.Create("using-type", new());
         var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await ExecAsync(session, "CREATE TABLE a (id INT NOT NULL);");
-        await ExecAsync(session, "CREATE TABLE b (id BIGINT NOT NULL);");
-        await ExecAsync(session, "INSERT INTO a VALUES (1), (2);");
+        await ExecAsync(session, "CREATE TABLE b (id DECIMAL NOT NULL);");
+        await ExecAsync(session, "INSERT INTO a VALUES (1);");
         await ExecAsync(session, "INSERT INTO b VALUES (1);");
+        string left = reverse ? "b" : "a", right = reverse ? "a" : "b";
+        await ExecAsync(session, $"INSERT INTO {left} VALUES (3);");
+        if (indexed)
+        {
+            await ExecAsync(session, "CREATE INDEX ix_a ON a(id);");
+            await ExecAsync(session, "CREATE INDEX ix_b ON b(id);");
+        }
+        string from = $" FROM {left} {join} {right} USING (id) ";
 
         // Act
-        await using var result = (await session.ExecuteAsync("SELECT id, a.id, b.id FROM a LEFT JOIN b USING (id) ORDER BY id;",
+        await using var result = (await session.ExecuteAsync("SELECT *, id / 2 AS ratio, a.id, b.id" + from + "ORDER BY ratio;",
             cancellationToken: CancellationToken.None)).ShouldBeAssignableTo<DatabaseResultSet>();
 
         // Assert
-        result.Columns.Select(c => c.Type).ShouldBe([DatabaseType.Int32, DatabaseType.Int32, DatabaseType.Int64]);
-        Check(await ReadAsync(result), [[1, 1, 1L], [2, 2, null]]);
+        result.Columns.Select(c => c.Type).ShouldBe([DatabaseType.Decimal, DatabaseType.Decimal, DatabaseType.Int32, DatabaseType.Decimal]);
+        var expected = new List<object?[]> { new object?[] { 1m, 0.5m, 1, 1m } };
+        if (join == "LEFT JOIN") { expected.Add(reverse ? [3m, 1.5m, null, 3m] : [3m, 1.5m, 3, null]); }
+        Check(await ReadAsync(result), expected.ToArray());
+        Check(await RowsAsync(session, "SELECT id / 2, COUNT(*)" + from + "WHERE id / 2 = 0.5 GROUP BY id ORDER BY id;"), [[0.5m, 1L]]);
+        Check(await RowsAsync(session, "SELECT id / 2" + from + "JOIN a again USING (id) ORDER BY id;"),
+            join == "LEFT JOIN" && !reverse ? [[0.5m], [1.5m]] : [[0.5m]]);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - USING: BIGINT merged names choose the BIGINT overload and preserve qualified types")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Join_UsingBigInt_ShouldSelectCommonOverload(bool reverse)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("using-bigint", new());
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecAsync(session, "CREATE TABLE a (id INT NOT NULL);");
+        await ExecAsync(session, "CREATE TABLE b (id BIGINT NOT NULL);");
+        await ExecAsync(session, "INSERT INTO a VALUES (1), (2);");
+        await ExecAsync(session, "INSERT INTO b VALUES (1), (2);");
+        await ExecAsync(session, "CREATE FUNCTION kind(p INT) RETURNS TEXT IMMUTABLE STRICT RETURN 'int';");
+        await ExecAsync(session, "CREATE FUNCTION kind(p BIGINT) RETURNS TEXT IMMUTABLE STRICT RETURN 'bigint';");
+
+        // Act
+        await using var result = (await session.ExecuteAsync("SELECT *, a.id, b.id, kind(id), kind(a.id), kind(b.id) FROM " +
+            (reverse ? "b LEFT JOIN a" : "a LEFT JOIN b") + " USING (id) ORDER BY 1;",
+            cancellationToken: CancellationToken.None)).ShouldBeAssignableTo<DatabaseResultSet>();
+
+        // Assert
+        result.Columns.Select(c => c.Type).Take(3).ShouldBe([DatabaseType.Int64, DatabaseType.Int32, DatabaseType.Int64]);
+        Check(await ReadAsync(result), [[1L, 1, 1L, "bigint", "int", "bigint"], [2L, 2, 2L, "bigint", "int", "bigint"]]);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - USING: CHAR and VARCHAR clear differing modifiers without altering qualified columns")]
+    [InlineData(false, "JOIN")]
+    [InlineData(true, "JOIN")]
+    [InlineData(false, "LEFT JOIN")]
+    [InlineData(true, "LEFT JOIN")]
+    public async Task Join_UsingCharacterTypes_ShouldClearMergedLength(bool reverse, string join)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("using-character", new());
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecAsync(session, "CREATE TABLE a (id CHAR(3) NOT NULL);");
+        await ExecAsync(session, "CREATE TABLE b (id VARCHAR(10) NOT NULL);");
+        await ExecAsync(session, "INSERT INTO a VALUES ('a');");
+        await ExecAsync(session, "INSERT INTO b VALUES ('a');");
+
+        // Act
+        await using var result = (await session.ExecuteAsync("SELECT *, id, a.id, b.id FROM " +
+            (reverse ? $"b {join} a" : $"a {join} b") + " USING (id);",
+            cancellationToken: CancellationToken.None)).ShouldBeAssignableTo<DatabaseResultSet>();
+
+        // Assert
+        var mergedType = reverse ? DatabaseType.String : DatabaseType.Character;
+        result.Columns.Select(c => c.Type).ShouldBe([mergedType, mergedType, DatabaseType.Character, DatabaseType.String]);
+        result.Columns.Select(c => c.MaxLength).ShouldBe(new int?[] { null, null, 3, 10 });
+        string merged = reverse ? "a" : "a  ";
+        Check(await ReadAsync(result), [[merged, merged, "a  ", "a"]]);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - USING: incompatible types fail planning even on empty inputs")]
+    [InlineData("JOIN")]
+    [InlineData("LEFT JOIN")]
+    public async Task Join_UsingIncompatibleTypes_ShouldRefuseBeforeExecution(string join)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("using-incompatible", new());
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecAsync(session, "CREATE TABLE a (id INT);");
+        await ExecAsync(session, "CREATE TABLE b (id TEXT);");
+
+        // Act
+        var error = await Should.ThrowAsync<DatabaseException>(async () =>
+            await session.ExecuteAsync($"SELECT * FROM a {join} b USING (id);", cancellationToken: CancellationToken.None));
+
+        // Assert
+        error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE015");
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - N-way: many empty and populated inputs do not recurse through the executor stack")]

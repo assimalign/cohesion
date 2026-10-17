@@ -631,17 +631,22 @@ product. Row order without ORDER BY is unspecified.
 
 USING requires each listed name exactly once on each input; missing, repeated or
 ambiguous names fail binding with COHSQLE015. Its equality uses ordinary ON collation
-precedence, including column overrides. The merged output retains the left value,
-declared type, length, collation and nullability (including under LEFT); right qualified
-references retain their own metadata and become nullable under LEFT. This left-type
-rule is the declared subset's merged-type rule, including differing numeric types.
+precedence, including column overrides. The merged output uses PostgreSQL's common-type
+selection through implicit casts within the same type category. INT/DECIMAL produces DECIMAL
+and INT/BIGINT produces BIGINT in either order, including arithmetic and function overloads.
+LEFT preserves the coerced left value and its nullability; INNER prefers an unchanged input
+of the common type when available. Length, precision and scale remain only when both input
+types and modifiers agree; CHAR(3)/VARCHAR(10) clears the length. Qualified references retain
+their own types and modifiers; right qualified references become nullable under LEFT.
+Pairs with no common type fail planning with COHSQLE015, even on empty inputs.
 Unqualified merged names are unambiguous; qualified left.id and right.id still bind.
 SELECT * orders merged columns once, in USING order, then remaining left columns,
 then remaining right columns. A later USING applies this rule to its accumulated
 left output; comma items concatenate their outputs. ORDER BY aliases after `*` and
 numeric ordinals count these visible output columns. PostgreSQL performs the same
-USING name validation and output ordering at parse_clause.c:1322-1399,1460-1510;
-its wider common-type synthesis is not implemented by this subset.
+USING name validation and output ordering at parse_clause.c:1322-1399,1460-1510,
+common-type synthesis at parse_clause.c:1676-1733 and parse_coerce.c:1393-1437,
+and modifier clearing at parse_coerce.c:1648-1678.
 
 In-process pass-through metadata marks every null-supplying LEFT column nullable.
 The existing wire header still carries name, type and length without nullability.

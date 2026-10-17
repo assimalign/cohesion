@@ -91,7 +91,8 @@ UsingColumns separately from ON. The capability pre-scan skips advertised clause
 the first unadvertised construct, so USING cannot mask NATURAL, WINDOW or OVER.
 The renderer, nesting measure and correlation walker traverse every item and condition.
 The engine implements written-order steps; DIALECT.md defines LEFT null extension and the
-left-column merged-type rule for USING. Qualified wildcards keep COHDBL001.
+common-typed merged expressions and modifier clearing for USING. Qualified wildcards keep
+COHDBL001. ORDER BY aliases and ordinals count visible wildcard output after USING merges.
 
 
 - **Recursive descent, hand-written** — over a parser generator. The dialect is

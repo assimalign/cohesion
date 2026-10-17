@@ -133,13 +133,14 @@ internal sealed partial class SqlPlanner
                 for (int i = 0; i < (outputOrdinals?.Count ?? columns.Count); i++)
                 {
                     int ordinal = outputOrdinals is null ? i : outputOrdinals[i];
-                    projections.Add(PassThrough(columns[ordinal].Name, ordinal, columns, evaluator));
+                    projections.Add(PassThrough(columns[ordinal].Name, ordinal, columns, evaluator, merged: true));
                 }
             }
             else if (column.Expression is SqlColumnReferenceExpression reference)
             {
                 int ordinal = evaluator.ResolveColumn(reference);
-                projections.Add(PassThrough(column.Alias ?? columns[ordinal].Name, ordinal, columns, evaluator));
+                projections.Add(PassThrough(column.Alias ?? columns[ordinal].Name, ordinal, columns, evaluator,
+                    merged: reference.TableAlias is null && reference.SchemaName is null));
             }
             else
             {
@@ -206,8 +207,17 @@ internal sealed partial class SqlPlanner
     }
 
     /// <summary>A projection that passes a source column through, with the collation <c>DISTINCT</c> compares it under.</summary>
-    private static SqlProjection PassThrough(string name, int ordinal, IReadOnlyList<SqlCatalogColumn> columns, SqlExpressionEvaluator scope)
-        => new(name, ordinal, null, columns[ordinal].Type.Type) { Collation = new SqlBoundCollation(scope.ResolveColumnCollation(ordinal)), MaxLength = columns[ordinal].Type.MaxLength, IsNullable = columns[ordinal].IsNullable };
+    private static SqlProjection PassThrough(string name, int ordinal, IReadOnlyList<SqlCatalogColumn> columns,
+        SqlExpressionEvaluator scope, bool merged = false)
+    {
+        var output = merged ? scope.MergedColumn(ordinal) : null;
+        var column = output?.Column ?? columns[ordinal];
+        return new(name, output is null ? ordinal : null, null, column.Type.Type)
+        {
+            Value = output?.Value, Collation = new SqlBoundCollation(scope.ResolveColumnCollation(ordinal)),
+            MaxLength = column.Type.MaxLength, IsNullable = column.IsNullable,
+        };
+    }
 
     /// <summary>Binds <c>ORDER BY</c> keys in their ordering scope, each with the collation it sorts under.</summary>
     /// <param name="orderBy">The keys.</param>

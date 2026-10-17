@@ -139,7 +139,13 @@ internal sealed record SqlRelationBinding(SqlRelationSource Source, SqlTableRefe
 {
     // USING hides only unqualified right columns, never their qualified references.
     internal HashSet<int> HiddenColumns { get; } = [];
+
+    /// <summary>Merged USING expressions keyed by their preserved physical column ordinal.</summary>
+    internal Dictionary<int, SqlUsingColumn>? UsingColumns { get; set; }
 }
+
+/// <summary>A USING output's metadata and bound value, independent of qualified physical columns.</summary>
+internal sealed record SqlUsingColumn(SqlCatalogColumn Column, SqlBoundExpression Value);
 
 /// <summary>
 /// A left-deep N-relation join. Physical slots retain FROM-then-JOIN order even

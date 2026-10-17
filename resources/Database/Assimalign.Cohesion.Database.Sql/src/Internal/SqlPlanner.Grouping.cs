@@ -194,7 +194,7 @@ internal sealed partial class SqlPlanner
             // structurally identical children do not make separate queries one key.
             (SqlSubqueryExpression a, SqlSubqueryExpression b) => ReferenceEquals(a, b),
             (SqlExistsExpression a, SqlExistsExpression b) => ReferenceEquals(a, b),
-            (SqlColumnReferenceExpression a, SqlColumnReferenceExpression b) => evaluator.ResolveColumn(a) == evaluator.ResolveColumn(b),
+            (SqlColumnReferenceExpression a, SqlColumnReferenceExpression b) => SameColumn(a, b),
             (SqlLiteralExpression a, SqlLiteralExpression b) => a.LiteralType == b.LiteralType && a.Value == b.Value,
             (SqlParameterExpression a, SqlParameterExpression b) => ParameterBindings.BareName(a.ParameterName) == ParameterBindings.BareName(b.ParameterName),
             (SqlStarExpression, SqlStarExpression) => true,
@@ -219,6 +219,15 @@ internal sealed partial class SqlPlanner
             _ => false,
         };
         return same && Children(left).SequenceEqual(Children(right), new GroupExpressionComparer(this, evaluator));
+
+        bool SameColumn(SqlColumnReferenceExpression a, SqlColumnReferenceExpression b)
+        {
+            var first = evaluator.Bind(a);
+            var second = evaluator.Bind(b);
+            return first is SqlBoundColumn x && second is SqlBoundColumn y
+                ? x.Ordinal == y.Ordinal && evaluator.ColumnMetadata(a).Type.Type == evaluator.ColumnMetadata(b).Type.Type
+                : ReferenceEquals(first, second);
+        }
     }
 
     /// <summary>Structural equality is used for binding only, without expression hashing.</summary>
@@ -252,7 +261,7 @@ internal sealed partial class SqlPlanner
     private DatabaseType GroupExpressionTypeCore(SqlExpression expression, IReadOnlyList<SqlCatalogColumn> columns,
         SqlExpressionEvaluator evaluator) => expression switch
     {
-        SqlColumnReferenceExpression column => columns[evaluator.ResolveColumn(column)].Type.Type,
+        SqlColumnReferenceExpression column => evaluator.ColumnMetadata(column).Type.Type,
         SqlSubqueryExpression or SqlExistsExpression or SqlInExpression { Subquery: not null }
             when _subqueryTypes.TryGetValue(expression, out var subqueryType) => subqueryType,
         SqlCollateExpression collate => GroupExpressionType(collate.Operand, columns, evaluator),

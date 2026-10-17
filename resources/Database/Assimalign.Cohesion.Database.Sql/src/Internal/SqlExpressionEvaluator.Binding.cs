@@ -270,8 +270,7 @@ internal sealed partial class SqlExpressionEvaluator
             case SqlColumnReferenceExpression column:
                 try
                 {
-                    int ordinal = ResolveColumn(column);
-                    return ordinal < _columns.Count && _columns[ordinal].DomainName is { } name && _functions.Types.TryGetDomain(name, out var domain)
+                    return ColumnMetadata(column).DomainName is { } name && _functions.Types.TryGetDomain(name, out var domain)
                         ? domain
                         : null;
                 }
@@ -340,7 +339,9 @@ internal sealed partial class SqlExpressionEvaluator
     {
         try
         {
-            return new SqlBoundColumn(ResolveColumn(column));
+            int ordinal = ResolveColumn(column);
+            return column.TableAlias is null && column.SchemaName is null && MergedColumn(ordinal) is { } merged
+                ? merged.Value : new SqlBoundColumn(ordinal);
         }
         catch (Exception exception) when (IsDeferrable(exception))
         {
