@@ -104,7 +104,7 @@ public sealed class OqlQueryParserTests
     [InlineData("SELECT DISTINCT name FROM people", "DISTINCT", 7)]
     [InlineData("SELECT ABS(age) FROM people", "ABS", 7)]
     [InlineData("SELECT * FROM people LIMIT 10", "LIMIT", 21)]
-    [InlineData("SELECT * FROM people WHERE age BETWEEN 1 AND 2", "BETWEEN", 31)]
+    [InlineData("SELECT 'blue' IN tags FROM people", "IN array form", 14)]
     [InlineData("CREATE DATABASE other", "CREATE", 0)]
     [InlineData("DROP DATABASE other", "DROP", 0)]
     [InlineData("USE other", "USE", 0)]
@@ -114,7 +114,7 @@ public sealed class OqlQueryParserTests
 
         diagnostic.Message!.ShouldContain(clause);
         diagnostic.Start.ShouldBe(start);
-        diagnostic.End.ShouldBe(start + (clause == "SUBQUERY" ? "SELECT".Length : clause.Length));
+        diagnostic.End.ShouldBe(start + (clause == "SUBQUERY" ? "SELECT".Length : clause == "IN array form" ? 2 : clause.Length));
         diagnostic.Line.ShouldBe(1);
     }
 

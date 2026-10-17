@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Linq;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
 
 using Assimalign.Cohesion.Database.Documents.Language;
 using Assimalign.Cohesion.Database.Documents.Storage;
@@ -11,9 +12,11 @@ using Assimalign.Cohesion.Database.Execution.Internal;
 
 namespace Assimalign.Cohesion.Database.Documents.Internal;
 
-internal sealed class DocumentExpressionEvaluator
+internal sealed partial class DocumentExpressionEvaluator
 {
     private readonly string? _alias;
+    private readonly CancellationToken _cancellationToken;
+    private readonly Dictionary<OqlLikeExpression, int[]> _likePatterns = new();
     private readonly IReadOnlyDictionary<string, object?>? _parameters;
 
     /// <summary>
@@ -21,14 +24,17 @@ internal sealed class DocumentExpressionEvaluator
     /// </summary>
     /// <param name="alias">The collection alias that may prefix document paths, or <see langword="null"/> when the query declares none.</param>
     /// <param name="parameters">The OQL parameter values, or <see langword="null"/> when the statement supplies none.</param>
-    public DocumentExpressionEvaluator(string? alias, IReadOnlyDictionary<string, object?>? parameters)
+    /// <param name="cancellationToken">The statement cancellation token.</param>
+    public DocumentExpressionEvaluator(string? alias, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken = default)
     {
         _alias = alias;
+        _cancellationToken = cancellationToken;
         _parameters = parameters;
     }
 
     internal object? Evaluate(OqlExpression expression, DocumentEvaluationContext document, IReadOnlyList<DocumentEvaluationContext>? group = null)
     {
+        _cancellationToken.ThrowIfCancellationRequested();
         try
         {
             return expression switch
@@ -43,6 +49,10 @@ internal sealed class DocumentExpressionEvaluator
                 OqlPathExpression path => ReadPath(path, document.Content),
                 OqlUnaryExpression unary => Unary(unary.Operator, Evaluate(unary.Operand, document, group)),
                 OqlBinaryExpression binary => Binary(binary, document, group),
+                OqlInExpression membership => In(membership, document, group),
+                OqlBetweenExpression between => Between(between, document, group),
+                OqlLikeExpression like => Like(like, document, group),
+                OqlCaseExpression conditional => Case(conditional, document, group),
                 OqlCallExpression call => Aggregate(call, group ?? throw new DocumentPlanningException("COHDOC001", "An aggregate requires a grouping context.")),
                 _ => throw new DocumentPlanningException("COHDOC001", "The OQL expression is not executable."),
             };
@@ -58,15 +68,19 @@ internal sealed class DocumentExpressionEvaluator
     }
 
     internal bool Matches(OqlExpression? expression, DocumentEvaluationContext document, IReadOnlyList<DocumentEvaluationContext>? group = null)
-        => expression is null || Evaluate(expression, document, group) is true;
+        => expression is null || Truth(Evaluate(expression, document, group)) is true;
 
     // Check every reference and original JSON number before planning, including skipped
     // Boolean branches and expressions over empty inputs.
     internal void ValidateInputs(OqlExpression? expression)
     {
+        _cancellationToken.ThrowIfCancellationRequested();
         System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
         switch (expression)
         {
+            case OqlInExpression or OqlBetweenExpression or OqlLikeExpression or OqlCaseExpression:
+                foreach (var child in DocumentPlanner.PredicateChildren(expression)) { ValidateInputs(child); }
+                break;
             case OqlLiteralExpression { Value: JsonElement } literal:
                 _ = Evaluate(literal, default);
                 break;
@@ -207,9 +221,11 @@ internal sealed class DocumentExpressionEvaluator
     private object? Binary(OqlBinaryExpression expression, DocumentEvaluationContext document, IReadOnlyList<DocumentEvaluationContext>? group)
     {
         var left = Evaluate(expression.Left, document, group);
+        if (expression.Operator is "AND" or "OR") { left = Truth(left); }
         if (expression.Operator == "AND" && left is false) { return false; }
         if (expression.Operator == "OR" && left is true) { return true; }
         var right = Evaluate(expression.Right, document, group);
+        if (expression.Operator is "AND" or "OR") { right = Truth(right); }
         if (expression.Operator == "AND")
         {
             if (right is false) { return false; }
@@ -227,8 +243,8 @@ internal sealed class DocumentExpressionEvaluator
         if (left is null || right is null) { return null; }
         return expression.Operator switch
         {
-            "=" => Compare(left, right) == 0,
-            "!=" or "<>" => Compare(left, right) != 0,
+            "=" => Equal(left, right),
+            "!=" or "<>" => Unary("NOT", Equal(left, right)),
             "<" => SameScalarKind(left, right) && Compare(left, right) < 0,
             "<=" => SameScalarKind(left, right) && Compare(left, right) <= 0,
             ">" => SameScalarKind(left, right) && Compare(left, right) > 0,
@@ -251,7 +267,7 @@ internal sealed class DocumentExpressionEvaluator
         _ when value is DocumentMissing => DocumentMissing.Instance,
         "IS NULL" => value is null,
         "IS NOT NULL" => value is not null,
-        "NOT" => value is bool boolean ? !boolean : null,
+        "NOT" => Truth(value) is bool boolean ? !boolean : null,
         "+" => value is null ? null : Number(value),
         "-" => value is null ? null : -Number(value),
         _ => throw new DocumentPlanningException("COHDOC001", $"OQL operator '{operation}' is not executable."),

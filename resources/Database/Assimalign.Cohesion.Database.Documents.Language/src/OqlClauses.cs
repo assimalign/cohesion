@@ -36,6 +36,18 @@ public static class OqlClauses
     /// <summary>Restricts values by a predicate.</summary>
     public const string Where = "WHERE";
 
+    /// <summary>Tests membership in an explicit value list.</summary>
+    public const string In = "IN";
+
+    /// <summary>Tests an inclusive scalar range.</summary>
+    public const string Between = "BETWEEN";
+
+    /// <summary>Matches a string pattern with optional ESCAPE.</summary>
+    public const string Like = "LIKE";
+
+    /// <summary>Evaluates searched or simple conditional branches.</summary>
+    public const string Case = "CASE";
+
     /// <summary>Groups values by one or more expressions.</summary>
     public const string GroupBy = "GROUP BY";
 

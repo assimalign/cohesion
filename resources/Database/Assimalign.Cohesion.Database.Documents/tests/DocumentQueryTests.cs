@@ -15,7 +15,7 @@ using Xunit;
 
 namespace Assimalign.Cohesion.Database.Documents.Tests;
 
-public sealed class DocumentQueryTests
+public sealed partial class DocumentQueryTests
 {
     [Fact]
     public async Task Nested_paths_arrays_and_missing_fields_keep_document_shapes()

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Text;
 using System.Text.Json;
 
 using Assimalign.Cohesion.Database.Execution.Internal;
@@ -23,6 +24,46 @@ public sealed partial class OqlQueryParser
         var left = ParsePrimary();
         while (!Failed)
         {
+            if (minimumPrecedence <= 3 && (Is("IN") || Is("BETWEEN") || Is("LIKE") || Is("NOT")))
+            {
+                bool negated = Take("NOT");
+                if (Take("IN"))
+                {
+                    var values = new List<OqlExpression>();
+                    if (!Take(TokenType.LeftParen))
+                    {
+                        _diagnostics.Add(QueryDiagnostics.UnsupportedClause("IN array form", Profile.Language, Span(Previous, Previous)));
+                        break;
+                    }
+                    do { values.Add(ParseExpression()); } while (!Failed && Take(TokenType.Comma));
+                    Expect(TokenType.RightParen, "')'");
+                    left = new OqlInExpression(left, values.AsReadOnly(), negated, Span(start, Previous));
+                }
+                else if (Take("BETWEEN"))
+                {
+                    var lower = ParseExpression(4);
+                    Expect("AND");
+                    var upper = ParseExpression(4);
+                    left = new OqlBetweenExpression(left, lower, upper, negated, Span(start, Previous));
+                }
+                else if (Take("LIKE"))
+                {
+                    var pattern = ParseExpression(4);
+                    OqlExpression? escape = null;
+                    if (Take("ESCAPE"))
+                    {
+                        var escapeStart = Current;
+                        escape = ParseExpression(4);
+                        if (escape is OqlLiteralExpression { Value: string text } && text.EnumerateRunes().Count() > 1)
+                        {
+                            Error("OQL0002", "LIKE ESCAPE must be empty or one Unicode scalar.", escapeStart);
+                        }
+                    }
+                    left = new OqlLikeExpression(left, pattern, escape, negated, Span(start, Previous));
+                }
+                else { Error("OQL0002", "Expected IN, BETWEEN, or LIKE after NOT.", Current); }
+                continue;
+            }
             if (Is("IS") && minimumPrecedence <= 3)
             {
                 Advance();
@@ -75,6 +116,22 @@ public sealed partial class OqlQueryParser
         if (Take("NOT"))
         {
             return new OqlUnaryExpression("NOT", ParseExpression(3), Span(start, Previous));
+        }
+
+        if (Take("CASE"))
+        {
+            OqlExpression? operand = Is("WHEN") ? null : ParseExpression();
+            var branches = new List<KeyValuePair<OqlExpression, OqlExpression>>();
+            if (!Is("WHEN")) { Error("OQL0002", "CASE requires a WHEN branch.", Current); }
+            while (!Failed && Take("WHEN"))
+            {
+                var condition = ParseExpression();
+                Expect("THEN");
+                branches.Add(new(condition, ParseExpression()));
+            }
+            OqlExpression? otherwise = !Failed && Take("ELSE") ? ParseExpression() : null;
+            Expect("END");
+            return new OqlCaseExpression(operand, branches.AsReadOnly(), otherwise, Span(start, Previous));
         }
 
         if (Take(TokenType.Plus))

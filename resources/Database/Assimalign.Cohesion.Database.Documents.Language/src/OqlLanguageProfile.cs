@@ -25,7 +25,9 @@ public static class OqlLanguageProfile
         // Logical
         "AND", "OR", "NOT",
         // Predicates
-        "IN", "EXISTS", "LIKE", "BETWEEN", "IS", "VALUED", "KNOWN", "UNKNOWN",
+        "IN", "EXISTS", "LIKE", "ESCAPE", "BETWEEN", "IS", "VALUED", "KNOWN", "UNKNOWN",
+        // Conditional expressions
+        "CASE", "WHEN", "THEN", "ELSE", "END",
         // Quantifiers
         "FOR", "SOME", "ANY",
         // Literals / Constants
@@ -55,6 +57,10 @@ public static class OqlLanguageProfile
         OqlClauses.Explain,
         OqlClauses.From,
         OqlClauses.Where,
+        OqlClauses.In,
+        OqlClauses.Between,
+        OqlClauses.Like,
+        OqlClauses.Case,
         OqlClauses.GroupBy,
         OqlClauses.Having,
         OqlClauses.OrderBy,

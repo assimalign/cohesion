@@ -13,6 +13,23 @@ omitted from result objects, while explicit null members remain null. Grouping k
 states separate; ascending order puts MISSING before NULL and descending reverses that order.
 NIL is a NULL synonym; UNDEFINED is reserved and rejected.
 
+`[NOT] IN (a, b)`, `[NOT] BETWEEN a AND b`, `[NOT] LIKE pattern [ESCAPE c]` and searched/simple
+CASE execute in projections, filters, grouping and aggregate arguments. IN compares list
+items structurally; parentheses always mean a value list, even for one array-valued item.
+The array form `x IN d.tags` remains deferred. LIKE is ordinal and case-sensitive, `%`
+matches any number of Unicode scalars and `_` matches one. Backslash is the default escape;
+`ESCAPE ''` disables it. Invalid evaluated escapes and trailing pattern escapes give COHDOC013.
+
+For IN, a match wins over NULL/MISSING items; without a match NULL wins over MISSING.
+A MISSING left operand gives MISSING, and a NULL left operand gives NULL. BETWEEN propagates
+MISSING before NULL from any operand or bound, then applies inclusive same-kind scalar
+comparisons. LIKE propagates MISSING before treating non-string/NULL inputs as NULL.
+Negation preserves both unknown values. CASE skips unknown conditions; an unmatched CASE,
+including simple CASE on MISSING, gives ELSE or NULL when ELSE is absent. The engine
+[truth tables and Couchbase sources](../../Assimalign.Cohesion.Database.Documents/docs/DESIGN.md#predicate-truth-tables-1127)
+record these rules. CASE, WHEN, THEN, ELSE, END and ESCAPE are reserved; `"end"` and `d.end`
+remain valid field references.
+
 Conformance lives in OqlSqlppBasisTests, OqlKeywordDispositionTests, DocumentMissingTests,
 OqlExecutionConformanceTests, DocumentQueryTests and DocumentMissingWireTests. The wire tests
 exercise both InMemory and TCP; the recovery fixture also executes IS MISSING under NativeAOT.
