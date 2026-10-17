@@ -12,6 +12,37 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed class ParameterBindingTests
 {
+    [Theory(DisplayName = "Cohesion Test [Sql] - Parameters: control requests reject collisions without changing transaction state")]
+    [InlineData("BEGIN")]
+    [InlineData("COMMIT")]
+    [InlineData("ROLLBACK")]
+    public async Task Execute_ControlParameterCollision_ShouldPreserveTransactionStateAsync(string command)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("parameters", new());
+        var database = await engine.CreateDatabaseAsync("parameters", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        if (command != "BEGIN")
+        {
+            await session.ExecuteAsync("BEGIN", cancellationToken: CancellationToken.None);
+        }
+        var previous = session.CurrentTransaction;
+        var parameters = new Dictionary<string, object?> { ["id"] = 1, ["@id"] = 2 };
+
+        // Act
+        var failure = await Should.ThrowAsync<DatabaseException>(async () =>
+            await session.ExecuteAsync(command, parameters, CancellationToken.None));
+
+        // Assert
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE023");
+        failure.Message.ShouldContain("id");
+        session.CurrentTransaction.ShouldBe(previous);
+        if (previous is not null)
+        {
+            await session.ExecuteAsync("ROLLBACK", cancellationToken: CancellationToken.None);
+        }
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sql] - Parameters: both sigils bind bare and sigiled ordinal keys")]
     [InlineData("$id", "id")]
     [InlineData("@id", "id")]

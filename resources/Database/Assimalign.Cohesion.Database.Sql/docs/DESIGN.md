@@ -6,7 +6,9 @@ Each execution copies request parameters into an ordinal, bare-name dictionary u
 Execution's stateless shared source. Missing parameters fail while validating/binding
 expressions, before data rows are read or written, with COHSQLE020 and the reference's
 span. Collisions after one-sigil removal carry COHSQLE023. Group keys compare bare
-names. The [shared parameter contract](../../Assimalign.Cohesion.Database.Language/docs/DESIGN.md#parameter-contract-1102)
+names. Transaction control bypasses planning, so the session applies the same
+normalization before BEGIN, COMMIT or ROLLBACK can change state. A collision leaves
+that state unchanged. The [shared parameter contract](../../Assimalign.Cohesion.Database.Language/docs/DESIGN.md#parameter-contract-1102)
 and SQL language DIALECT define syntax, key matching and the unchanged AST shapes.
 
 

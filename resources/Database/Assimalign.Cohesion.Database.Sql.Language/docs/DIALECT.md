@@ -1211,7 +1211,8 @@ Parameters follow the [shared parameter contract](../../Assimalign.Cohesion.Data
 only digits; a bare sigil or `$1a` is SQL0003. Sigils are interchangeable and caller
 keys may have one leading sigil. Matching is ordinal and case-sensitive, regardless
 of the caller dictionary's comparer. `$01` binds key `01`, not key `1`. Unused keys
-are ignored; normalized duplicates fail with COHSQLE023. Unbound references fail
+are ignored; normalized duplicates fail with COHSQLE023, including on BEGIN, COMMIT
+and ROLLBACK, before transaction state changes. Unbound references fail
 with COHSQLE020 before any row is read or written, including empty inputs. SQL
 GROUP BY compares parameter references by bare name. Operand `?` and `:name`
 report one SQL0003 at their complete span and name the supported forms; a trailing
