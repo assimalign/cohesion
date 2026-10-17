@@ -19,9 +19,13 @@ public class OqlLanguageProfileTests
         profile.Keywords.ToArray().ShouldContain("DROP");
         profile.Keywords.ToArray().ShouldContain("ON");
         profile.Functions.ToArray().ShouldContain("COUNT");
+        profile.Functions.ToArray().ShouldContain("META");
+        foreach (string word in new[] { "KEY", "VALUES", "INTO" }) { profile.Keywords.ToArray().ShouldNotContain(word); }
     }
 
     [Theory]
+    [InlineData(OqlClauses.Insert)]
+    [InlineData(OqlClauses.Values)]
     [InlineData(OqlClauses.Select)]
     [InlineData(OqlClauses.Explain)]
     [InlineData(OqlClauses.From)]
@@ -45,6 +49,7 @@ public class OqlLanguageProfileTests
     }
 
     [Theory]
+    [InlineData("RETURNING")]
     [InlineData(OqlClauses.Subquery)]
     public void Instance_UnimplementedClause_IsNotSupported(string clause)
     {

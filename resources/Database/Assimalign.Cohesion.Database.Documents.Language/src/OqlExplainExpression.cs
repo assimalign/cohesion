@@ -2,11 +2,11 @@ using Assimalign.Cohesion.Database.Language;
 
 namespace Assimalign.Cohesion.Database.Documents.Language;
 
-/// <summary>Describes a document query without executing it.</summary>
+/// <summary>Describes a document query or INSERT without executing it.</summary>
 public sealed class OqlExplainExpression : OqlExpression
 {
-    internal OqlExplainExpression(OqlSelectExpression statement, Location? location) : base(location) => Statement = statement;
+    internal OqlExplainExpression(OqlExpression statement, Location? location) : base(location) => Statement = statement;
 
-    /// <summary>Gets the SELECT query to plan.</summary>
-    public OqlSelectExpression Statement { get; }
+    /// <summary>Gets the query or INSERT statement to plan.</summary>
+    public OqlExpression Statement { get; }
 }

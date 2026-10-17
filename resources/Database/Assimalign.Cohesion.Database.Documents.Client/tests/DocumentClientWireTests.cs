@@ -15,6 +15,29 @@ namespace Assimalign.Cohesion.Database.Documents.Client.Tests;
 
 public sealed class DocumentClientWireTests
 {
+    [Theory(DisplayName = "Cohesion Test [Documents.Client] - Object constructors resolve repeated names in SELECT and INSERT over both transports")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExecuteAsync_RepeatedObjectMember_ShouldStoreOneMember(bool tcp)
+    {
+        // Arrange
+        await using var harness = await DocumentClientTestHarness.StartAsync(tcp);
+        await using var connection = await harness.Client.ConnectAsync(harness.Token);
+        await connection.CreateCollectionAsync("items", harness.Token);
+        await connection.PutAsync("items", "seed", "{}"u8.ToArray(), cancellationToken: harness.Token);
+
+        // Act
+        var rows = await connection.QueryAsync("SELECT {'a':1, 'a':2} AS o FROM items", cancellationToken: harness.Token);
+        var affected = await connection.ExecuteAsync("INSERT INTO items (KEY, VALUE) VALUES ('object', {'a':1, 'a':2})", cancellationToken: harness.Token);
+
+        // Assert
+        rows.ShouldHaveSingleItem()[0].ShouldBeOfType<JsonElement>().GetRawText().ShouldBe("{\"a\":2}");
+        affected.ShouldBe(1);
+        var stored = (await connection.GetAsync("items", "object", harness.Token)).ShouldNotBeNull();
+        Encoding.UTF8.GetString(stored.Content.Span).ShouldBe("{\"a\":2}");
+        connection.IsOpen.ShouldBeTrue();
+    }
+
     [Theory(DisplayName = "Cohesion Test [Documents.Client] - Eighty-level documents survive whole and projected results")]
     [InlineData("SELECT * FROM items", true)]
     [InlineData("SELECT nested FROM items", false)]
@@ -164,6 +187,22 @@ public sealed class DocumentClientWireTests
             .ShouldHaveSingleItem().ToArray().ShouldBe(new object?[] { "items", "Adhoc" });
         (await connection.ExecuteAsync("DROP INDEX by_score ON items", cancellationToken: harness.Token)).ShouldBe(0);
         (await connection.QueryAsync("SELECT * FROM COHESION_SCHEMA.INDEXES", cancellationToken: harness.Token)).ShouldBeEmpty();
+        // INSERT and META share the same completion and reusable failure boundary.
+        using var epsilon = JsonDocument.Parse("""{"name":"epsilon","category":"z"}""");
+        using var phi = JsonDocument.Parse("""{"name":"phi","category":"z"}""");
+        (await connection.ExecuteAsync("INSERT INTO items (KEY, VALUE) VALUES ('e', $e), ('f', $f)",
+            new Dictionary<string, object?> { ["e"] = epsilon.RootElement, ["f"] = phi.RootElement }, harness.Token)).ShouldBe(2);
+        using var readE = JsonDocument.Parse((await connection.GetAsync("items", "e", harness.Token)).ShouldNotBeNull().Content);
+        using var readF = JsonDocument.Parse((await connection.GetAsync("items", "f", harness.Token)).ShouldNotBeNull().Content);
+        JsonElement.DeepEquals(epsilon.RootElement, readE.RootElement).ShouldBeTrue();
+        JsonElement.DeepEquals(phi.RootElement, readF.RootElement).ShouldBeTrue();
+        var duplicate = await Should.ThrowAsync<DocumentClientException>(async () => await connection.ExecuteAsync(
+            "INSERT INTO items (KEY, VALUE) VALUES ('e', 1)", cancellationToken: harness.Token));
+        duplicate.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
+        duplicate.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDOC012");
+        (await connection.QueryAsync("SELECT META(d).id AS id, d.name FROM items d WHERE category = 'z' ORDER BY id", cancellationToken: harness.Token))
+            .Select(row => row[0]).ShouldBe(new object?[] { "e", "f" });
+
         // Collection DDL shares the OQL wire path; CRUD uses the newly created collection.
         (await connection.ExecuteAsync("CREATE COLLECTION IF NOT EXISTS items", cancellationToken: harness.Token)).ShouldBe(0);
         Encoding.UTF8.GetString((await connection.GetAsync("items", "a", harness.Token)).ShouldNotBeNull().Content.Span)

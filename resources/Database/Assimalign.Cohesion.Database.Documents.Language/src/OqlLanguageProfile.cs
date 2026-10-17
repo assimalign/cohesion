@@ -38,6 +38,7 @@ public static class OqlLanguageProfile
 
     private static readonly string[] _functions =
     [
+        "META",
         // Aggregate
         "COUNT", "SUM", "AVG", "MIN", "MAX",
     ];
@@ -48,6 +49,8 @@ public static class OqlLanguageProfile
         OqlClauses.DropCollection,
         OqlClauses.CreateIndex,
         OqlClauses.DropIndex,
+        OqlClauses.Insert,
+        OqlClauses.Values,
         OqlClauses.Select,
         OqlClauses.Explain,
         OqlClauses.From,

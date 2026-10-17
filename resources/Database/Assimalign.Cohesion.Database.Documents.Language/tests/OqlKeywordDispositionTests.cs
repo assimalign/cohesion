@@ -77,7 +77,8 @@ public sealed class OqlKeywordDispositionTests
         ["ABS"] = Rejects("SELECT ABS(a) FROM c", "ABS"),
         // Statements and clauses of other languages
         ["ALTER"] = Rejects("ALTER INDEX ix ON c", "ALTER"),
-        ["INSERT"] = Rejects("INSERT INTO c VALUES (1)", "INSERT"),
+        ["INSERT"] = Parses("INSERT INTO c (KEY, VALUE) VALUES ('k', 1)"),
+        ["RETURNING"] = Rejects("INSERT INTO c (KEY, VALUE) VALUES ('k', 1) RETURNING k", "RETURNING"),
         ["UPDATE"] = Rejects("UPDATE c SET a = 1", "UPDATE"),
         ["DELETE"] = Rejects("DELETE FROM c WHERE a IN (1)", "DELETE"),
         ["USE"] = Rejects("USE other", "USE"),

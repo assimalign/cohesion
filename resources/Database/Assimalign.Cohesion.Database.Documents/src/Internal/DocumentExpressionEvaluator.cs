@@ -2,9 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Text;
 using System.Text.Json;
-using Assimalign.Cohesion.Database.Documents.Language;
 
+using Assimalign.Cohesion.Database.Documents.Language;
+using Assimalign.Cohesion.Database.Documents.Storage;
 using Assimalign.Cohesion.Database.Execution.Internal;
 
 namespace Assimalign.Cohesion.Database.Documents.Internal;
@@ -25,7 +27,7 @@ internal sealed class DocumentExpressionEvaluator
         _parameters = parameters;
     }
 
-    internal object? Evaluate(OqlExpression expression, JsonElement document, IReadOnlyList<JsonElement>? group = null)
+    internal object? Evaluate(OqlExpression expression, DocumentEvaluationContext document, IReadOnlyList<DocumentEvaluationContext>? group = null)
     {
         try
         {
@@ -34,8 +36,11 @@ internal sealed class DocumentExpressionEvaluator
                 OqlLiteralExpression literal => Normalize(literal.Value),
                 OqlMissingExpression => DocumentMissing.Instance,
                 OqlParameterExpression parameter => Parameter(parameter.Name),
-                OqlStarExpression => Normalize(document),
-                OqlPathExpression path => ReadPath(path, document),
+                OqlStarExpression => Normalize(document.Content),
+                OqlMetaExpression meta => meta.Member == "id" ? document.Id : (decimal)document.Version,
+                OqlObjectExpression obj => DocumentJsonValue.Object(obj.Members.Select(member =>
+                    new KeyValuePair<string, object?>(member.Key, Evaluate(member.Value, document, group)))),
+                OqlPathExpression path => ReadPath(path, document.Content),
                 OqlUnaryExpression unary => Unary(unary.Operator, Evaluate(unary.Operand, document, group)),
                 OqlBinaryExpression binary => Binary(binary, document, group),
                 OqlCallExpression call => Aggregate(call, group ?? throw new DocumentPlanningException("COHDOC001", "An aggregate requires a grouping context.")),
@@ -52,37 +57,52 @@ internal sealed class DocumentExpressionEvaluator
         }
     }
 
-    internal bool Matches(OqlExpression? expression, JsonElement document, IReadOnlyList<JsonElement>? group = null)
+    internal bool Matches(OqlExpression? expression, DocumentEvaluationContext document, IReadOnlyList<DocumentEvaluationContext>? group = null)
         => expression is null || Evaluate(expression, document, group) is true;
 
-    // Check every use, including skipped Boolean branches and expressions over empty inputs.
-    internal void ValidateParameters(OqlExpression? expression)
+    // Check every reference and original JSON number before planning, including skipped
+    // Boolean branches and expressions over empty inputs.
+    internal void ValidateInputs(OqlExpression? expression)
     {
         System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
         switch (expression)
         {
+            case OqlLiteralExpression { Value: JsonElement } literal:
+                _ = Evaluate(literal, default);
+                break;
             case OqlParameterExpression parameter:
-                if (_parameters is null || !_parameters.ContainsKey(ParameterBindings.BareName(parameter.Name)))
+                if (_parameters is null || !_parameters.TryGetValue(ParameterBindings.BareName(parameter.Name), out var value))
                 {
                     throw new DocumentPlanningException("COHDOC005", $"OQL parameter '{parameter.Name}' has no value.", parameter.Location);
                 }
+                if (value is JsonElement) { _ = Evaluate(parameter, default); }
+                break;
+            case OqlInsertExpression insert:
+                foreach (var pair in insert.Values) { ValidateInputs(pair.Key); ValidateInputs(pair.Value); }
+                ValidateInputs(insert.Select);
+                break;
+            case OqlMetaExpression meta:
+                foreach (var argument in meta.Arguments) { ValidateInputs(argument); }
+                break;
+            case OqlObjectExpression obj:
+                foreach (var member in obj.Members) { ValidateInputs(member.Value); }
                 break;
             case OqlSelectExpression select:
-                foreach (var projection in select.Projections) { ValidateParameters(projection.Expression); }
-                ValidateParameters(select.Predicate);
-                foreach (var key in select.GroupBy) { ValidateParameters(key); }
-                ValidateParameters(select.Having);
-                foreach (var order in select.OrderBy) { ValidateParameters(order.Expression); }
+                foreach (var projection in select.Projections) { ValidateInputs(projection.Expression); }
+                ValidateInputs(select.Predicate);
+                foreach (var key in select.GroupBy) { ValidateInputs(key); }
+                ValidateInputs(select.Having);
+                foreach (var order in select.OrderBy) { ValidateInputs(order.Expression); }
                 break;
             case OqlUnaryExpression unary:
-                ValidateParameters(unary.Operand);
+                ValidateInputs(unary.Operand);
                 break;
             case OqlBinaryExpression binary:
-                ValidateParameters(binary.Left);
-                ValidateParameters(binary.Right);
+                ValidateInputs(binary.Left);
+                ValidateInputs(binary.Right);
                 break;
             case OqlCallExpression call:
-                foreach (var argument in call.Arguments) { ValidateParameters(argument); }
+                foreach (var argument in call.Arguments) { ValidateInputs(argument); }
                 break;
         }
     }
@@ -133,17 +153,7 @@ internal sealed class DocumentExpressionEvaluator
     {
         null => null,
         DocumentMissing => value,
-        JsonElement json => json.ValueKind switch
-        {
-            JsonValueKind.Null => null,
-            JsonValueKind.Undefined => DocumentMissing.Instance,
-            JsonValueKind.True => true,
-            JsonValueKind.False => false,
-            JsonValueKind.String => json.GetString(),
-            JsonValueKind.Number => json.TryGetDecimal(out var number) ? number :
-                throw new DocumentPlanningException("COHDOC007", "OQL numbers must fit the decimal scalar domain."),
-            _ => json,
-        },
+        JsonElement json => NormalizeJson(json),
         byte or sbyte or short or ushort or int or uint or long or ulong or decimal => Convert.ToDecimal(value, CultureInfo.InvariantCulture),
         float number when float.IsFinite(number) => Convert.ToDecimal(number, CultureInfo.InvariantCulture),
         double number when double.IsFinite(number) => Convert.ToDecimal(number, CultureInfo.InvariantCulture),
@@ -151,7 +161,50 @@ internal sealed class DocumentExpressionEvaluator
         _ => throw new DocumentPlanningException("COHDOC008", "OQL parameters must be JSON scalars or JsonElement values."),
     };
 
-    private object? Binary(OqlBinaryExpression expression, JsonElement document, IReadOnlyList<JsonElement>? group)
+    private static object? NormalizeJson(JsonElement json)
+    {
+        ValidateNumbers(json);
+        return json.ValueKind switch
+        {
+            JsonValueKind.Null => null,
+            JsonValueKind.Undefined => DocumentMissing.Instance,
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            JsonValueKind.String => json.GetString(),
+            JsonValueKind.Number => json.GetDecimal(),
+            _ => json,
+        };
+    }
+
+    private static void ValidateNumbers(JsonElement json)
+    {
+        var pending = new Stack<JsonElement>();
+        pending.Push(json);
+        while (pending.TryPop(out var current))
+        {
+            switch (current.ValueKind)
+            {
+                case JsonValueKind.Number:
+                    try
+                    {
+                        DocumentStorage.ValidateContent(Encoding.UTF8.GetBytes(current.GetRawText()));
+                    }
+                    catch (JsonException exception)
+                    {
+                        throw new DocumentPlanningException("COHDOC007", ErrorMessages.NumberOutsideDecimalDomain, innerException: exception);
+                    }
+                    break;
+                case JsonValueKind.Object:
+                    foreach (var property in current.EnumerateObject()) { pending.Push(property.Value); }
+                    break;
+                case JsonValueKind.Array:
+                    foreach (var item in current.EnumerateArray()) { pending.Push(item); }
+                    break;
+            }
+        }
+    }
+
+    private object? Binary(OqlBinaryExpression expression, DocumentEvaluationContext document, IReadOnlyList<DocumentEvaluationContext>? group)
     {
         var left = Evaluate(expression.Left, document, group);
         if (expression.Operator == "AND" && left is false) { return false; }
@@ -204,7 +257,7 @@ internal sealed class DocumentExpressionEvaluator
         _ => throw new DocumentPlanningException("COHDOC001", $"OQL operator '{operation}' is not executable."),
     };
 
-    private object? Aggregate(OqlCallExpression call, IReadOnlyList<JsonElement> group)
+    private object? Aggregate(OqlCallExpression call, IReadOnlyList<DocumentEvaluationContext> group)
     {
         if (call.Arguments.Count != 1) { throw new DocumentPlanningException("COHDOC001", $"OQL aggregate '{call.Name}' requires one argument."); }
         if (call.Name == "COUNT" && call.Arguments[0] is OqlStarExpression) { return (decimal)group.Count; }
