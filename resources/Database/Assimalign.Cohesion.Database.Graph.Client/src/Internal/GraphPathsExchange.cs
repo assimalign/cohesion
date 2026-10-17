@@ -15,6 +15,8 @@ internal sealed class GraphPathsExchange
 {
     private readonly GraphProtocolExecuteMessage _request;
     private ProtocolFrame _initial;
+    private IReadOnlyList<ProtocolDiagnostic> _diagnostics = [];
+    private bool _hasDiagnostics;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="GraphPathsExchange"/> class.
@@ -80,14 +82,26 @@ internal sealed class GraphPathsExchange
         }
     }
 
-    private static async ValueTask<ProtocolFrame> ReadAsync(ProtocolFrameReader reader, CancellationToken cancellationToken)
+    private async ValueTask<ProtocolFrame> ReadAsync(ProtocolFrameReader reader, CancellationToken cancellationToken)
     {
         ProtocolFrame frame = await reader.ReadFrameAsync(cancellationToken).ConfigureAwait(false)
             ?? throw new ProtocolException("The server closed the connection before completing the graph path exchange.");
+        if (frame.Type == ProtocolMessageType.Diagnostics)
+        {
+            if (_hasDiagnostics) { throw new ProtocolException(ErrorMessages.GraphDiagnosticsDuplicate); }
+            _hasDiagnostics = true;
+            _diagnostics = ProtocolDiagnosticsMessage.Decode(frame.Payload.Span).Entries;
+            frame = await reader.ReadFrameAsync(cancellationToken).ConfigureAwait(false)
+                ?? throw new ProtocolException(ErrorMessages.GraphDiagnosticsCompletionMissing);
+            if (frame.Type != ProtocolMessageType.Error && frame.Type != (ProtocolMessageType)GraphProtocolMessageType.PathsComplete)
+            {
+                throw new ProtocolException(ErrorMessages.GraphDiagnosticsOrderInvalid);
+            }
+        }
         if (frame.Type == ProtocolMessageType.Error)
         {
             ProtocolErrorMessage error = ProtocolErrorMessage.Decode(frame.Payload.Span);
-            throw new DatabaseClientException(error.Code, error.Message);
+            throw new DatabaseClientException(error.Code, error.Message, _diagnostics, null);
         }
         return frame;
     }

@@ -26,7 +26,7 @@ public sealed class DocumentClientProtocolTests
     {
         // Arrange
         await using var harness = await DocumentClientTestHarness.StartAsync(tcp, options => options.MaxSessions = 1);
-        ProtocolVersion.Current.ShouldBe(new ProtocolVersion(2, 0));
+        ProtocolVersion.Current.ShouldBe(new ProtocolVersion(2, 1));
         await using (var transport = await harness.Factory.ConnectAsync(harness.Listener.EndPoint, harness.Token))
         await using (var channel = new ProtocolChannel(transport.AsStream(), DocumentProtocol.Family, leaveOpen: true))
         {
@@ -39,14 +39,14 @@ public sealed class DocumentClientProtocolTests
             response.Type.ShouldBe(ProtocolMessageType.Error);
             var error = ProtocolErrorMessage.Decode(response.Payload.Span);
             error.Code.ShouldBe(ProtocolErrorCode.UnsupportedVersion);
-            error.Message.ShouldContain("2.0", Case.Sensitive);
+            error.Message.ShouldContain(ProtocolVersion.Current.ToString(), Case.Sensitive);
             (await channel.Reader.ReadFrameAsync(harness.Token)).ShouldBeNull();
         }
         while (harness.Server.Sessions.Count != 0) { await Task.Delay(10, harness.Token); }
         harness.Server.Sessions.ShouldBeEmpty();
         await using var connection = await harness.Client.ConnectAsync(harness.Token);
         (await connection.GetCollectionsAsync(harness.Token)).ShouldBeEmpty();
-        harness.Server.Sessions.ShouldHaveSingleItem().ProtocolVersion.ShouldBe(new ProtocolVersion(2, 0));
+        harness.Server.Sessions.ShouldHaveSingleItem().ProtocolVersion.ShouldBe(ProtocolVersion.Current);
     }
 
     [Theory(DisplayName = "Cohesion Test [Documents.Client] - An old server refuses startup and failed handshakes close both transports and release the pool slot")]
@@ -91,7 +91,7 @@ public sealed class DocumentClientProtocolTests
                 var frame = (await channel.Reader.ReadFrameAsync(token)).ShouldNotBeNull();
                 frame.Type.ShouldBe(ProtocolMessageType.Startup);
                 var startup = ProtocolStartupMessage.Decode(frame.Payload.Span);
-                startup.Version.ShouldBe(new ProtocolVersion(2, 0));
+                startup.Version.ShouldBe(ProtocolVersion.Current);
                 // The base peer's 1.0 negotiator rejects this major before its Authenticate frame.
                 (startup.Version.Major == 1).ShouldBeFalse();
                 await WriteAsync(channel, (byte)ProtocolMessageType.Error,

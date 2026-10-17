@@ -40,6 +40,7 @@ internal sealed class KeyValueDatabaseServerSession : DatabaseServerSession
     private readonly CancellationTokenSource _lifetimeSource;
     private readonly long _acceptedTimestamp;
 
+    private ProtocolChannel? _channel;
     private ProtocolFrameReader? _reader;
     private ProtocolFrameWriter? _writer;
     private KeyValueDatabaseSession? _databaseSession;
@@ -127,6 +128,7 @@ internal sealed class KeyValueDatabaseServerSession : DatabaseServerSession
 
         Stream stream = _connection.AsStream();
         await using var channel = new ProtocolChannel(stream, KeyValueProtocol.Family, leaveOpen: true);
+        _channel = channel;
         _reader = channel.Reader;
         _writer = channel.Writer;
 
@@ -284,7 +286,7 @@ internal sealed class KeyValueDatabaseServerSession : DatabaseServerSession
 
             SetAuthenticatedPrincipal(startup.Principal);
 
-            await WriteFrameAsync(ProtocolMessageType.Ready, ReadOnlyMemory<byte>.Empty, handshakeSource.Token).ConfigureAwait(false);
+            await WriteFrameAsync(ProtocolMessageType.Ready, _channel!.Negotiate(negotiatedVersion, startup.Capabilities).Encode(), handshakeSource.Token).ConfigureAwait(false);
             return true;
         }
         catch (OperationCanceledException) when (handshakeSource.IsCancellationRequested && !_lifetimeSource.IsCancellationRequested && !softStop.IsCancellationRequested)

@@ -780,7 +780,7 @@ This package owns the KeyValuePair request and tabular result codecs; the shared
 contains only mechanism. [Wire format](WIRE-PROTOCOL.md) specifies every message and
 scalar component for independent clients. The server binds KeyValueProtocol.Family
 once on accept and retains its existing model payloads. The shared startup version advances
-to 2.0 for #1126's Documents projection change and rejects incompatible majors before
+to 2.1 for #1105 negotiation, retaining #1126's major-2 Documents projection contract, and rejects incompatible majors before
 authentication. Result materialization belongs to
 Database.KeyValuePair.Client. Transport listeners remain supplied through generic IDuplexConnectionListener.
 
@@ -1069,3 +1069,7 @@ framing, handshake and model messages are unchanged.
 ProtocolPayload string decoding uses strict UTF-8. The shared startup/error reader refuses invalid
 sequences with ProtocolException; the server reports fatal ProtocolViolation and closes the session.
 Model statement, parameter-name and result-header strings use that same shared strict reader.
+
+## Shared startup negotiation (#1105)
+
+The endpoint participates in protocol 2.1: Startup may carry capability names and Ready returns the agreed version with an empty capability list. Negotiated 2.0 still sends empty Ready. Different majors are refused. This model does not register the core Diagnostics capability and its channel rejects that frame in both directions. Structured Diagnostics adoption can register the core capability in a follow-up.

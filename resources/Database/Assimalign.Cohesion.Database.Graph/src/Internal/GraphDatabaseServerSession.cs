@@ -283,7 +283,7 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
 
             SetAuthenticatedPrincipal(startup.Principal);
 
-            await WriteFrameAsync(ProtocolMessageType.Ready, ReadOnlyMemory<byte>.Empty, handshakeSource.Token).ConfigureAwait(false);
+            await WriteFrameAsync(ProtocolMessageType.Ready, _channel!.Negotiate(negotiated, startup.Capabilities).Encode(), handshakeSource.Token).ConfigureAwait(false);
             return true;
         }
         catch (OperationCanceledException) when (handshakeSource.IsCancellationRequested && !_lifetimeSource.IsCancellationRequested && !softStop.IsCancellationRequested)
@@ -407,9 +407,7 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
             }
             // The engine session parses and validates the statement, so a statement that fails
             // here aborts an explicit transaction exactly as one that fails in process (#1188).
-            // A successful result's warnings (an unknown label or relationship type, #1228) have
-            // no frame in protocol 1.0, so the client receives the rows alone; protocol 1.1 (#1105)
-            // sends them in the core Diagnostics frame before ResultComplete or PathsComplete.
+            // Negotiated warnings precede scalar or path completion.
             // The parse delegates write StatementParseFailed for a statement that fails to parse:
             // it fails before the root session sees it, so the root's statement events do not.
             var result = paths
@@ -443,6 +441,7 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
             var diagnostic = exception.Diagnostics.FirstOrDefault(item => item.Severity == DiagnosticSeverity.Error);
             string errorText = diagnostic?.Code is { } code && !exception.Message.Contains(code + ":", StringComparison.Ordinal)
                 ? $"{code}: {exception.Message}" : exception.Message;
+            await WriteDiagnosticsAsync(exception.Diagnostics, cancellationToken).ConfigureAwait(false);
             await WriteErrorAsync(ProtocolErrorCode.ParseFailure, errorText, cancellationToken).ConfigureAwait(false);
             return;
         }
@@ -450,6 +449,7 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
         {
             // The database is offline (#1243): every statement is refused, with the coded
             // reason, until it is reopened; the session stays ready to report it.
+            await WriteDiagnosticsAsync(exception.Diagnostics, cancellationToken).ConfigureAwait(false);
             await WriteErrorAsync(ProtocolErrorCode.Unavailable, exception.Message, cancellationToken).ConfigureAwait(false);
             return;
         }
@@ -457,6 +457,7 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
         {
             var diagnostic = exception.Diagnostics.FirstOrDefault(item => item.Severity == DiagnosticSeverity.Error);
             string errorText = diagnostic?.Code is { } code ? $"{code}: {exception.Message}" : exception.Message;
+            await WriteDiagnosticsAsync(exception.Diagnostics, cancellationToken).ConfigureAwait(false);
             await WriteErrorAsync(ProtocolErrorCode.ExecutionFailure, errorText, cancellationToken).ConfigureAwait(false);
             return;
         }
@@ -518,6 +519,7 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
             await WriteFrameAsync((ProtocolMessageType)GraphProtocolMessageType.Path,
                 new GraphProtocolPathMessage(path.Nodes, path.Relationships).Encode(), cancellationToken).ConfigureAwait(false);
         }
+        await WriteDiagnosticsAsync(paths.Diagnostics, cancellationToken).ConfigureAwait(false);
         await WriteFrameAsync((ProtocolMessageType)GraphProtocolMessageType.PathsComplete,
             new GraphProtocolPathsCompleteMessage(paths.Paths.Count).Encode(), cancellationToken).ConfigureAwait(false);
     }
@@ -549,6 +551,7 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
                     await WriteFrameAsync((ProtocolMessageType)GraphProtocolMessageType.ResultRow, rowWriter.ToArray(), cancellationToken).ConfigureAwait(false);
                 }
 
+                await WriteDiagnosticsAsync(resultSet.Diagnostics, cancellationToken).ConfigureAwait(false);
                 await WriteFrameAsync((ProtocolMessageType)GraphProtocolMessageType.ResultComplete, new GraphProtocolResultCompleteMessage(resultSet.AffectedCount).Encode(), cancellationToken).ConfigureAwait(false);
             }
 
@@ -566,6 +569,7 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
             throw new DatabaseException(detail, diagnostics);
         }
 
+        await WriteDiagnosticsAsync(result.Diagnostics, cancellationToken).ConfigureAwait(false);
         await WriteFrameAsync((ProtocolMessageType)GraphProtocolMessageType.ResultComplete, new GraphProtocolResultCompleteMessage(result.AffectedCount).Encode(), cancellationToken).ConfigureAwait(false);
     }
 
@@ -597,6 +601,18 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
         }
 
         return null;
+    }
+
+    private async ValueTask WriteDiagnosticsAsync(IReadOnlyList<Diagnostic>? diagnostics, CancellationToken cancellationToken)
+    {
+        if (diagnostics is null || !_channel!.Capabilities.Contains(ProtocolCapability.Diagnostics.Name)) { return; }
+        var entries = diagnostics.Where(item => item.Severity is DiagnosticSeverity.Warning or DiagnosticSeverity.Error)
+            .Select(item => new ProtocolDiagnostic(item.Severity == DiagnosticSeverity.Warning ? ProtocolDiagnosticSeverity.Warning : ProtocolDiagnosticSeverity.Error,
+                item.Code ?? string.Empty, item.Message ?? string.Empty, item.Start, item.End, item.Line)).ToArray();
+        if (entries.Length != 0)
+        {
+            await WriteFrameAsync(ProtocolMessageType.Diagnostics, new ProtocolDiagnosticsMessage(entries).Encode(), cancellationToken).ConfigureAwait(false);
+        }
     }
 
     private async ValueTask WriteFrameAsync(ProtocolMessageType type, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)

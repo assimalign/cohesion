@@ -558,8 +558,7 @@ the server uses it to open storage with the declared content type before accepti
 The caller must retain exclusive access throughout and discard the exchange after failure.
 No concrete transport is referenced here.
 Public codecs use explicit binary operations and strict UTF-8, with no reflection or object
-serialization. The shared startup version is 2.0 since #1126's Documents projection change;
-Blob message identifiers and payloads are unchanged by that bump.
+serialization. The shared startup version is 2.1 with #1105 capability negotiation; Blob advertises no capabilities. Blob message identifiers and payloads retain the 2.0 baseline.
 
 `BlobProtocolTests` use `Connections.InMemory` for authenticated request/transfer exchanges in
 both directions. A generated non-seekable source and validating non-seekable destination move
@@ -1092,3 +1091,7 @@ and inherits no unsupported query-language operation.
 ProtocolPayload string decoding uses strict UTF-8. The shared startup/error reader refuses invalid
 sequences with ProtocolException; the server reports fatal ProtocolViolation and closes the session.
 Blob metadata already uses its own strict, length-bounded reader; content remains opaque bytes.
+
+## Shared startup negotiation (#1105)
+
+The endpoint participates in protocol 2.1: Startup may carry capability names and Ready returns the agreed version with an empty capability list. Negotiated 2.0 still sends empty Ready. Different majors are refused. This model does not register the core Diagnostics capability and its channel rejects that frame in both directions. Blob request/result payloads remain unchanged.

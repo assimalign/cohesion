@@ -543,19 +543,7 @@ yet keeps the caller's transaction and its earlier writes.
 - **Traversal.** `TraverseAsync` filters by `GraphTraversal.RelationshipType` without a catalog
   lookup, so an unknown type visits nothing; its node stream has no diagnostics, so it reports no
   warning.
-- **The wire.** Protocol 1.0 has no frame for a successful statement's diagnostics, and none is added
-  ad hoc. The server sends the read's rows as it sends any result's, so a read of a required unknown
-  name is an empty result: `Execute` sends `ResultHeader`, no `ResultRow` and `ResultComplete` (-1);
-  `ExecutePaths` sends `PathsComplete` with a count of 0. A 1.0 client therefore sees the rows without
-  the warning, and its session and explicit transaction continue (`GraphServerProtocolTests` pins the
-  frames, `GraphTransactionFailureWireTests` the client's view).
-  [#1105](https://github.com/assimalign/cohesion/issues/1105) (protocol 1.1
-  structured diagnostics) carries the warning: a core `Diagnostics` message in the reserved 14–63
-  range, sent only on a session that negotiated its capability, with Warning severity included and
-  Information never sent; Graph.Client then exposes it on its result objects. #1105's decision (2)
-  places the frame before `ResultComplete` on success, which covers `Execute`. It does not yet name
-  `ExecutePaths`; #1228 proposes the same placement there, before `PathsComplete`, for #1105 to
-  record.
+- **The wire.** A negotiated 2.0 client receives successful rows without warnings. In 2.1 with diagnostics agreed, Diagnostics (14) carries Warning/Error entries before ResultComplete or PathsComplete, and before Error on a statement failure. Information is never sent. GraphResultSet exposes scalar warnings; the path enumeration consumes success diagnostics without a metadata API. The server session remains ready after statement failures; the existing path-stream client discards a failed rental.
 
 ## EXPLAIN operator vocabulary (#1104)
 
@@ -677,16 +665,16 @@ to exercise that enforcement path; compiled provisioning is not included.
 | `COHDBG007` | The session's explicit transaction is aborted by a failed statement: a statement, BEGIN or COMMIT is refused until a rollback completes; the message and `InnerException` name the original failure |
 | `COHDBG008` | Statement too complex: parsing, planning or evaluating it needs more stack than the executing thread has left (ISO SQLSTATE 54001). The statement fails and the session stays open; on the wire's `ExecutePaths` seam the client currently closes its connection |
 | `COHDBG009` | Element too large: a node's labels and properties, or a relationship's type and properties, exceed the 8,092-byte graph record, or an indexed property value exceeds the 1,016-byte index key. Nothing is written for the element; the statement fails and the session stays open |
-| `COHDBG010` | **Warning**, not a failure: a read-only statement or `GetIndexesAsync` names a label the database does not have at the statement's snapshot. No node carries it, so the read returns the rows the expression still matches (none for a required label), reports this `DiagnosticSeverity.Warning` diagnostic in `DatabaseResult.Diagnostics` or `GraphSchemaResult<T>.Diagnostics`, and leaves an explicit transaction active. Neo4j's `UnknownLabelWarning`, GQLSTATUS 01N50. Not sent over protocol 1.0 |
-| `COHDBG011` | **Warning**, not a failure: the same for a relationship type the database does not have; no relationship has it. Neo4j's `UnknownRelationshipTypeWarning`, GQLSTATUS 01N51. Not sent over protocol 1.0 |
+| `COHDBG010` | **Warning**, not a failure: a read-only statement or `GetIndexesAsync` names a label the database does not have at the statement's snapshot. No node carries it, so the read returns the rows the expression still matches (none for a required label), reports this `DiagnosticSeverity.Warning` diagnostic in `DatabaseResult.Diagnostics` or `GraphSchemaResult<T>.Diagnostics`, and leaves an explicit transaction active. Neo4j's `UnknownLabelWarning`, GQLSTATUS 01N50. Not sent over protocol 2.0 |
+| `COHDBG011` | **Warning**, not a failure: the same for a relationship type the database does not have; no relationship has it. Neo4j's `UnknownRelationshipTypeWarning`, GQLSTATUS 01N51. Not sent over protocol 2.0 |
 | `COHDBG012` | The database is offline (#1243): a durable flush of its journal or data file failed. Every operation is refused with `DatabaseOfflineException` until `OpenDatabaseAsync` reopens it; `Unavailable` on the wire. The storage's `StorageOfflineException` (`COHDBS002`) is the inner exception ("Storage operations") |
-| `COHDBG013` | Scalar value error (#1140): non-Boolean WHERE/logical value, invalid arithmetic or concatenation types, zero divisor, overflow or non-finite result. Reused by #1146, #1147 and #1148; structured Diagnostic, code-free Message, composed as CODE: message on protocol 1.0 |
+| `COHDBG013` | Scalar value error (#1140): non-Boolean WHERE/logical value, invalid arithmetic or concatenation types, zero divisor, overflow or non-finite result. Reused by #1146, #1147 and #1148; structured Diagnostic, code-free Message, composed as CODE: message on protocol 2.0 |
 | `COHDBI001` | `Database.Indexing`'s code, carried unchanged: opening a database whose property-index pages are in a B-tree page format this engine does not read (format 1, written before #1194) fails with "Database 'x' cannot be opened. COHDBI001: …", checked before recovery's scrub, so a cleanly closed database's files stay as they were (a crashed one has had only the storage layer's journal redo and undo, and keeps its journal) |
 | `COHDBS001` | `Database.Storage`'s code, carried unchanged: opening a database whose file set is in another storage format (#1251) fails with "Database 'x' cannot be opened. COHDBS001: …", the storage's `StorageFormatException` as its inner exception, refused before its journal is read, so the files stay as they were |
 
 Planner rejections carry stable codes in `DatabaseException.Diagnostics`, with Error severity
 and source offsets wherever the AST has a location. Their Message has no code prefix; the
-Graph protocol 1.0 server composes `CODE: message` for ExecutionFailure from that carrier.
+Graph protocol 2.0 server composes `CODE: message` for ExecutionFailure from that carrier.
 Text and parsed typed requests with error diagnostics throw `DatabaseParseException` with
 every diagnostic in source-offset order and the existing first-error Message. Graph path
 factories use the same contract. Unknown labels in reads retain #1228's empty-result/warning
@@ -943,13 +931,7 @@ their ordered column contracts above remain supported by `GraphDatabaseServer`. 
 bound to `GraphProtocol.Family` once, before the handshake. Path messages transport the engine's
 real `GraphPathsQueryResult`, without changing the existing payload definitions. A path response
 contains zero or more Path frames and one PathsComplete; a shared Error terminates either exchange
-without a completion frame. Statement errors leave a completely consumed exchange reusable. Version
-1.0 has no frame for a successful statement's warnings: a read that warns (`COHDBG010`,
-`COHDBG011`) reaches a 1.0 client as its rows alone, and protocol 1.1 (#1105) adds the negotiated
-core `Diagnostics` frame before `ResultComplete`, and, as #1228 proposes to #1105, before
-`PathsComplete`
-([Unknown labels and relationship types in reads](#unknown-labels-and-relationship-types-in-reads-1228)).
-Malformed or out-of-order frames are protocol violations. Server/client acceptance tests use the
+without a completion frame. Statement errors leave the server session ready. Negotiated Diagnostics precedes Error, ResultComplete or PathsComplete. Graph.Client retains scalar warnings on GraphResultSet; path enumeration consumes success warnings without exposing result metadata. Malformed or out-of-order frames are protocol violations. Server/client acceptance tests use the
 production `GraphDatabaseServer` and `Graph.Client` over `Connections.InMemory`.
 
 ### Path payload
@@ -1351,3 +1333,19 @@ exchange's complete text span, retained by the serial session pump because resul
 Rejected scalar results preserve their complete diagnostic list on DatabaseException; the first
 error supplies the unprefixed message. Error frames compose CODE: message once; parser messages
 already containing their code retain their existing format. No codes are added.
+
+## Negotiated statement diagnostics (#1105)
+
+The shared protocol is 2.1. Startup optionally appends the client's capability names;
+Ready returns the agreed version and the two-sided intersection. A negotiated 2.0
+session retains empty Ready and the existing model and Error bytes. An empty Ready
+from an older endpoint means 2.0 with no capabilities. Different majors are refused.
+Capability names are ordinal and append-only; model names are scoped with the
+lowercase endpoint family followed by a dot. The core owns `diagnostics` and frame 14.
+
+SQL and Graph register `ProtocolCapability.Diagnostics`. When agreed, one Diagnostics
+frame carries the complete Warning/Error list immediately before Error on failure,
+or immediately before ResultComplete (PathsComplete for graph paths) on success.
+Information, including SQL0100, is never sent. Error and result payloads are unchanged.
+Statement failures leave the server session ready. Model clients validate diagnostic
+ordering and preserve every code, severity, message, nullable offset and source line.

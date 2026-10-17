@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 
 namespace Assimalign.Cohesion.Database.Protocol;
 
@@ -29,6 +31,41 @@ public sealed class ProtocolMessageFamily
         }
     }
 
+    /// <summary>Defines an endpoint with optional, scoped capabilities.</summary>
+    /// <param name="name">The endpoint family name.</param>
+    /// <param name="capabilities">Capabilities supported by this endpoint.</param>
+    /// <param name="messageTypes">The endpoint message identifiers.</param>
+    /// <exception cref="ArgumentException">A capability is duplicated, wrongly scoped, or gates an undefined identifier.</exception>
+    /// <exception cref="ArgumentNullException">The capabilities are null.</exception>
+    public ProtocolMessageFamily(string name, IReadOnlyList<ProtocolCapability> capabilities, params byte[] messageTypes)
+        : this(name, messageTypes)
+    {
+        ArgumentNullException.ThrowIfNull(capabilities);
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        var gated = new HashSet<byte>();
+        foreach (var capability in capabilities)
+        {
+            ArgumentNullException.ThrowIfNull(capability);
+            bool core = ReferenceEquals(capability, ProtocolCapability.Diagnostics);
+            if (!names.Add(capability.Name) || (!core && !capability.Name.StartsWith(name.ToLowerInvariant() + ".", StringComparison.Ordinal)))
+            {
+                throw new ArgumentException(ErrorMessages.CapabilityListInvalid, nameof(capabilities));
+            }
+            foreach (byte type in capability.MessageTypes)
+            {
+                if ((!core && !_types[type]) || !gated.Add(type))
+                {
+                    throw new ArgumentException(ErrorMessages.CapabilityListInvalid, nameof(capabilities));
+                }
+            }
+        }
+        if (capabilities.Count > Internal.ProtocolCapabilityCodec.MaxCount) { throw new ArgumentException(ErrorMessages.CapabilityListInvalid, nameof(capabilities)); }
+        Capabilities = Array.AsReadOnly(capabilities.ToArray());
+    }
+
+    /// <summary>Gets the endpoint's supported capabilities.</summary>
+    public IReadOnlyList<ProtocolCapability> Capabilities { get; } = Array.Empty<ProtocolCapability>();
+
     /// <summary>Gets the endpoint family's diagnostic name.</summary>
     public string Name { get; }
 
@@ -39,5 +76,5 @@ public sealed class ProtocolMessageFamily
         type is ProtocolMessageType.Startup or ProtocolMessageType.Authenticate or
         ProtocolMessageType.AuthenticateResponse or ProtocolMessageType.Ready or
         ProtocolMessageType.Error or ProtocolMessageType.Ping or ProtocolMessageType.Pong or
-        ProtocolMessageType.Terminate || _types[(byte)type];
+        ProtocolMessageType.Terminate or ProtocolMessageType.Diagnostics || _types[(byte)type];
 }

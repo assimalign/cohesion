@@ -1,4 +1,8 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
+
+using Assimalign.Cohesion.Database.Types;
 
 using Assimalign.Cohesion.Database.Protocol;
 
@@ -40,6 +44,23 @@ public class DatabaseClientException : DatabaseException
     /// <param name="innerException">The underlying cause.</param>
     public DatabaseClientException(ProtocolErrorCode code, string message, Exception? innerException)
         : base(message, innerException)
+    {
+        Code = code;
+    }
+
+    /// <summary>Creates a statement failure with its negotiated structured diagnostics.</summary>
+    /// <param name="code">The wire error category.</param>
+    /// <param name="message">The unchanged Error frame text.</param>
+    /// <param name="diagnostics">The complete wire diagnostics.</param>
+    /// <param name="innerException">The underlying cause, when available.</param>
+    public DatabaseClientException(ProtocolErrorCode code, string message, IReadOnlyList<ProtocolDiagnostic> diagnostics, Exception? innerException)
+        : base(message, diagnostics.Select(entry => new Diagnostic
+        {
+            Code = entry.Code, Message = entry.Message,
+            Severity = entry.Severity == ProtocolDiagnosticSeverity.Warning ? DiagnosticSeverity.Warning : DiagnosticSeverity.Error,
+            Start = entry.Start, End = entry.End, Line = entry.Line,
+            Location = entry.Start.HasValue ? DiagnosticLocation.Absolute : null,
+        }), innerException)
     {
         Code = code;
     }

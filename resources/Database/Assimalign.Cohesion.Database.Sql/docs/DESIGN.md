@@ -3986,7 +3986,7 @@ first-error Message and carry every diagnostic on `DatabaseParseException`. A se
 the same parsed typed statement with the identical exception contract; no error AST executes.
 The documented SQL/GQL parser-out-of-stack translations remain engine complexity failures.
 Planner rejections carry stable codes and AST offsets where available; codes are separate from
-the in-process message. SQL and Graph protocol 1.0 compose `CODE: message` for ExecutionFailure.
+the in-process message. SQL and Graph protocol 2.0 compose `CODE: message` for ExecutionFailure.
 
 `QueryLanguageProfile.Functions` is the executable built-in set. Recognized non-executing
 functions live in each language's unsupported vocabulary and report COHDBL001 at parse time.
@@ -4333,7 +4333,7 @@ This package owns the Sql request and tabular result codecs; the shared protocol
 contains only mechanism. [Wire format](WIRE-PROTOCOL.md) specifies every message and
 scalar component for independent clients. The server binds SqlProtocol.Family
 once on accept and retains its existing model payloads. The shared startup version advances
-to 2.0 for #1126's Documents projection change and rejects incompatible majors before
+to 2.1 for #1105 negotiation, retaining #1126's major-2 Documents projection contract, and rejects incompatible majors before
 authentication. Result materialization belongs to
 Database.Sql.Client. The TCP Listen(Uri) extension lives in the optional Database.Sql.Tcp composition package; this engine references only generic Connections.
 
@@ -4849,3 +4849,21 @@ A CHECK that is not Boolean is a definition-binding rejection under COHSQLD001, 
 CREATE TABLE c (id INT CHECK (id)). It reports the predicate span before any table is created.
 PostgreSQL likewise rejects a non-Boolean CHECK operand during coercion and reports its expression
 position (src/backend/parser/parse_coerce.c:1163-1191). No runtime row-value failure is converted.
+
+## Negotiated statement diagnostics (#1105)
+
+The shared protocol is 2.1. Startup optionally appends the client's capability names;
+Ready returns the agreed version and the two-sided intersection. A negotiated 2.0
+session retains empty Ready and the existing model and Error bytes. An empty Ready
+from an older endpoint means 2.0 with no capabilities. Different majors are refused.
+Capability names are ordinal and append-only; model names are scoped with the
+lowercase endpoint family followed by a dot. The core owns `diagnostics` and frame 14.
+
+SQL and Graph register `ProtocolCapability.Diagnostics`. When agreed, one Diagnostics
+frame carries the complete Warning/Error list immediately before Error on failure,
+or immediately before ResultComplete (PathsComplete for graph paths) on success.
+Information, including SQL0100, is never sent. Error and result payloads are unchanged.
+Statement failures leave the server session ready. Model clients validate diagnostic
+ordering and preserve every code, severity, message, nullable offset and source line.
+
+The owning SQL test assembly supplies a result double through an internal server-session execution hook to verify success warnings and Information filtering. This adds no public seam or friend assembly.

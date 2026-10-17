@@ -57,7 +57,7 @@ the same operation as `ExecuteAsync` on a rented `DatabaseConnection` bound to S
 exact family instance. It stays an extension because the connection lives in
 Database.Client, which references no model package.
 `DatabaseClientResult` and `DatabaseClientColumn` moved to this package's
-namespace. Typed SQL APIs and protocol 1.0 wire behavior are unchanged.
+namespace. Typed SQL APIs and protocol 2.0 wire behavior are unchanged.
 
 The model reference supplies codecs without parsing SQL or inspecting plans.
 Its transitive assembly closure is an accepted packaging consequence; a dedicated
@@ -103,8 +103,7 @@ documents and enforces this boundary by faulting its scope/store and refusing re
 see its [reconciliation contract](../../Assimalign.Cohesion.Database.Sql.Mapping/docs/DESIGN.md#commit-outcome-and-reconciliation).
 
 In-process sessions carry engine codes in `DatabaseException.Diagnostics` (#1103).
-The SQL server composes the existing protocol 1.0 `CODE: message` text from that carrier;
-client wire exceptions retain that text. Cancellation tests that execute sessions directly
+The SQL server preserves the existing `CODE: message` Error text. On a negotiated 2.1 diagnostics session, client exceptions also retain the complete structured carrier. Cancellation tests that execute sessions directly
 assert structured codes, while their wire counterparts keep their original text assertions.
 CAST value failures follow the same contract: invalid text carries COHSQLE022 (PostgreSQL
 22P02), numeric overflow COHSQLE002 (22003), and division by zero COHSQLE001 (22012).
@@ -285,3 +284,21 @@ including CAST, naming the declaration and modifier. FLOAT(p) returns the resolv
 Float64. Invalid FLOAT precision remains SQL0005. INTERVAL field/range qualifiers, including
 SECOND(p), likewise report COHDBL001 at every declaration site and CAST, naming the complete
 qualifier; no-precision forms are also unsupported. Neither path changes the wire format.
+
+## Negotiated statement diagnostics (#1105)
+
+The shared protocol is 2.1. Startup optionally appends the client's capability names;
+Ready returns the agreed version and the two-sided intersection. A negotiated 2.0
+session retains empty Ready and the existing model and Error bytes. An empty Ready
+from an older endpoint means 2.0 with no capabilities. Different majors are refused.
+Capability names are ordinal and append-only; model names are scoped with the
+lowercase endpoint family followed by a dot. The core owns `diagnostics` and frame 14.
+
+SQL and Graph register `ProtocolCapability.Diagnostics`. When agreed, one Diagnostics
+frame carries the complete Warning/Error list immediately before Error on failure,
+or immediately before ResultComplete (PathsComplete for graph paths) on success.
+Information, including SQL0100, is never sent. Error and result payloads are unchanged.
+Statement failures leave the server session ready. Model clients validate diagnostic
+ordering and preserve every code, severity, message, nullable offset and source line.
+
+DatabaseClientResult.Diagnostics and SqlResultSet.Diagnostics expose negotiated ProtocolDiagnostic values. SqlClientException retains the shared core exception and copies its existing diagnostics carrier.

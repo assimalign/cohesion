@@ -36,6 +36,7 @@ internal sealed class SqlDatabaseServerSession : DatabaseServerSession
     private readonly CancellationTokenSource _lifetimeSource;
     private readonly long _acceptedTimestamp;
 
+    private ProtocolChannel? _channel;
     private ProtocolFrameReader? _reader;
     private ProtocolFrameWriter? _writer;
     private SqlDatabaseSession? _databaseSession;
@@ -70,6 +71,9 @@ internal sealed class SqlDatabaseServerSession : DatabaseServerSession
     /// Never faults — the pump owns its errors.
     /// </summary>
     internal Task Completion => _completion;
+
+    // Owning-assembly test seam for result diagnostics until SQL produces a success warning.
+    internal Func<DatabaseResult>? ExecuteResultOverride { get; set; }
 
     /// <summary>
     /// Gets why the session ended, for its <c>SessionClosed</c> event; the pump sets it on the
@@ -123,6 +127,7 @@ internal sealed class SqlDatabaseServerSession : DatabaseServerSession
 
         Stream stream = _connection.AsStream();
         await using var channel = new ProtocolChannel(stream, SqlProtocol.Family, leaveOpen: true);
+        _channel = channel;
         _reader = channel.Reader;
         _writer = channel.Writer;
 
@@ -294,7 +299,7 @@ internal sealed class SqlDatabaseServerSession : DatabaseServerSession
 
             SetAuthenticatedPrincipal(startup.Principal);
 
-            await WriteFrameAsync(ProtocolMessageType.Ready, ReadOnlyMemory<byte>.Empty, handshakeSource.Token).ConfigureAwait(false);
+            await WriteFrameAsync(ProtocolMessageType.Ready, _channel!.Negotiate(negotiatedVersion, startup.Capabilities).Encode(), handshakeSource.Token).ConfigureAwait(false);
             return true;
         }
         catch (OperationCanceledException) when (handshakeSource.IsCancellationRequested && !_lifetimeSource.IsCancellationRequested && !softStop.IsCancellationRequested)
@@ -397,11 +402,14 @@ internal sealed class SqlDatabaseServerSession : DatabaseServerSession
 
         try
         {
-            result = await _databaseSession!.ExecuteAsync(message.Statement, parameters, cancellationToken).ConfigureAwait(false);
+            result = ExecuteResultOverride is { } execute
+                ? execute()
+                : await _databaseSession!.ExecuteAsync(message.Statement, parameters, cancellationToken).ConfigureAwait(false);
         }
         catch (DatabaseParseException exception)
         {
             // Statement-level failures keep the session in the ready state.
+            await WriteDiagnosticsAsync(exception.Diagnostics, cancellationToken).ConfigureAwait(false);
             await WriteErrorAsync(ProtocolErrorCode.ParseFailure, exception.Message, cancellationToken).ConfigureAwait(false);
             return;
         }
@@ -409,6 +417,7 @@ internal sealed class SqlDatabaseServerSession : DatabaseServerSession
         {
             // The database is offline (#1243): every statement is refused, with the coded
             // reason, until it is reopened; the session stays ready to report it.
+            await WriteDiagnosticsAsync(exception.Diagnostics, cancellationToken).ConfigureAwait(false);
             await WriteErrorAsync(ProtocolErrorCode.Unavailable, exception.Message, cancellationToken).ConfigureAwait(false);
             return;
         }
@@ -416,6 +425,7 @@ internal sealed class SqlDatabaseServerSession : DatabaseServerSession
         {
             var diagnostic = exception.Diagnostics.FirstOrDefault(item => item.Severity == DiagnosticSeverity.Error);
             string errorText = diagnostic?.Code is { } code ? $"{code}: {exception.Message}" : exception.Message;
+            await WriteDiagnosticsAsync(exception.Diagnostics, cancellationToken).ConfigureAwait(false);
             await WriteErrorAsync(ProtocolErrorCode.ExecutionFailure, errorText, cancellationToken).ConfigureAwait(false);
             return;
         }
@@ -449,6 +459,7 @@ internal sealed class SqlDatabaseServerSession : DatabaseServerSession
                 // extraction: ResultComplete carries the set's real AffectedCount
                 // (SQL's materialized sets report -1, so SQL wire behavior is
                 // unchanged; outcome sets elsewhere carry real counts).
+                await WriteDiagnosticsAsync(resultSet.Diagnostics, cancellationToken).ConfigureAwait(false);
                 await WriteFrameAsync((ProtocolMessageType)SqlProtocolMessageType.ResultComplete, new ProtocolResultCompleteMessage(resultSet.AffectedCount).Encode(), cancellationToken).ConfigureAwait(false);
             }
 
@@ -461,10 +472,12 @@ internal sealed class SqlDatabaseServerSession : DatabaseServerSession
                 ? $"{diagnostics[0].Code}: {diagnosticMessage}"
                 : $"The statement completed with status {result.Status}.";
 
+            await WriteDiagnosticsAsync(result.Diagnostics, cancellationToken).ConfigureAwait(false);
             await WriteErrorAsync(ProtocolErrorCode.ExecutionFailure, detail, cancellationToken).ConfigureAwait(false);
             return;
         }
 
+        await WriteDiagnosticsAsync(result.Diagnostics, cancellationToken).ConfigureAwait(false);
         await WriteFrameAsync((ProtocolMessageType)SqlProtocolMessageType.ResultComplete, new ProtocolResultCompleteMessage(result.AffectedCount).Encode(), cancellationToken).ConfigureAwait(false);
     }
 
@@ -498,6 +511,18 @@ internal sealed class SqlDatabaseServerSession : DatabaseServerSession
         }
 
         return null;
+    }
+
+    private async ValueTask WriteDiagnosticsAsync(IReadOnlyList<Diagnostic>? diagnostics, CancellationToken cancellationToken)
+    {
+        if (diagnostics is null || !_channel!.Capabilities.Contains(ProtocolCapability.Diagnostics.Name)) { return; }
+        var entries = diagnostics.Where(item => item.Severity is DiagnosticSeverity.Warning or DiagnosticSeverity.Error)
+            .Select(item => new ProtocolDiagnostic(item.Severity == DiagnosticSeverity.Warning ? ProtocolDiagnosticSeverity.Warning : ProtocolDiagnosticSeverity.Error,
+                item.Code ?? string.Empty, item.Message ?? string.Empty, item.Start, item.End, item.Line)).ToArray();
+        if (entries.Length != 0)
+        {
+            await WriteFrameAsync(ProtocolMessageType.Diagnostics, new ProtocolDiagnosticsMessage(entries).Encode(), cancellationToken).ConfigureAwait(false);
+        }
     }
 
     private async ValueTask WriteFrameAsync(ProtocolMessageType type, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)

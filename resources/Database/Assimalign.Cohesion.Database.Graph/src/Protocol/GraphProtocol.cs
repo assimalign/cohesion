@@ -6,7 +6,7 @@ namespace Assimalign.Cohesion.Database.Graph;
 public static class GraphProtocol
 {
     /// <summary>Gets the graph family, including the unchanged catalog exchange and path results.</summary>
-    public static ProtocolMessageFamily Family { get; } = new("Graph", 5, 6, 7, 8, 9, 64, 65, 66);
+    public static ProtocolMessageFamily Family { get; } = new("Graph", [ProtocolCapability.Diagnostics], 5, 6, 7, 8, 9, 64, 65, 66);
 }
 
 /// <summary>Message identifiers scoped to graph endpoints.</summary>

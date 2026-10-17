@@ -67,7 +67,8 @@ misconfigured endpoint without the deliberately deferred handshake discriminator
 | 11 | Core: Ping |
 | 12 | Core: Pong |
 | 13 | Core: Terminate |
-| 14–63 | Reserved for future shared mechanism |
+| 14 | Core: Diagnostics, gated by `diagnostics` |
+| 15–63 | Reserved for future shared mechanism |
 | 64–255 | Model family |
 
 A single contiguous model range would have renumbered deployed messages unnecessarily.
@@ -208,7 +209,7 @@ packet-beta
 ```
 
 The existing trust handshake sends an empty Authenticate and AuthenticateResponse;
-authenticators receive response evidence as opaque bytes. Ready remains empty in 2.0.
+authenticators receive response evidence as opaque bytes. Ready is empty only for negotiated 2.0.
 Ping, Pong, and Terminate have empty payloads. Error is `u16 code + string message`.
 Codes are append-only: Internal=0, UnsupportedVersion=1, AuthenticationFailed=2,
 NotAuthorized=3, DatabaseNotFound=4, ParseFailure=5, ExecutionFailure=6,
@@ -223,20 +224,66 @@ cannot reach its remote server, `contrib/postgres_fdw/connection.c:661-666`).
 
 ## Version decision
 
-ProtocolVersion.Current advances **1.0 -> 2.0** for #1126: Documents projections now use
-Document (65) objects with omitted MISSING members instead of ResultRow (68) arrays.
-The existing startup version is shared by all models, so their clients and servers advance
-together without a new per-model public version seam or legacy reader. Other models' payload
-encodings remain unchanged. #1105 (protocol 1.1 capability negotiation, wave 4) supersedes
-per-feature version bumps when implemented.
+ProtocolVersion.Current advances **2.0 -> 2.1** for #1105, the one T1 minor bump.
+The earlier 1.0 -> 2.0 bump (#1126) changed Documents projections to Document frames.
+TryNegotiate still refuses different majors and selects the lower minor. All five
+models share startup and negotiate 2.1; only SQL and Graph adopt Diagnostics.
+Documents keeps its structured model Failure frame, while Blob and Key-Value have
+no Diagnostics capability. No catalog or storage format changes in this item.
 
-`TryNegotiate` rejects any major other than 2 and chooses the minimum peer/server
-minor. Model servers return UnsupportedVersion before authentication for incompatible
-majors and close through their existing fatal-error drain. Ready stays empty;
-success accepts the 2.0 baseline. A future minor requiring capabilities must negotiate
-them explicitly before use. An incompatible change to an existing endpoint's meaning
-or payload requires a deliberate major bump; changing only framing is not the sole
-reason to bump a major. Unknown identifiers never trigger a fallback to another family.
+## Negotiated statement diagnostics (#1105)
+
+The shared protocol is 2.1. Startup optionally appends the client's capability names;
+Ready returns the agreed version and the two-sided intersection. A negotiated 2.0
+session retains empty Ready and the existing model and Error bytes. An empty Ready
+from an older endpoint means 2.0 with no capabilities. Different majors are refused.
+Capability names are ordinal and append-only; model names are scoped with the
+lowercase endpoint family followed by a dot. The core owns `diagnostics` and frame 14.
+
+SQL and Graph register `ProtocolCapability.Diagnostics`. When agreed, one Diagnostics
+frame carries the complete Warning/Error list immediately before Error on failure,
+or immediately before ResultComplete (PathsComplete for graph paths) on success.
+Information, including SQL0100, is never sent. Error and result payloads are unchanged.
+Statement failures leave the server session ready. Model clients validate diagnostic
+ordering and preserve every code, severity, message, nullable offset and source line.
+
+### Startup extension and Ready
+
+The unchanged Startup prefix is `u16 major + u16 minor + string database + string principal`.
+For 2.1, append `u16 capabilityCount + capabilityCount * string name`. An absent
+extension is an empty list. The 2.0 decoder stops after principal, accepting a 2.1
+Startup; a 2.0 client sends the original four fields. Ready in 2.1 is
+`u16 major + u16 minor + u16 capabilityCount + capabilityCount * string name`.
+Both lists allow at most 64 unique names of 1..128 ASCII characters from
+`a-z`, `0-9`, `.` and `-`; the extension/Ready bound is 16,384 bytes. Trailing
+bytes, duplicates, malformed UTF-8, unsupported versions and unsolicited agreements
+are ProtocolViolation; the client discards a failed handshake's transport.
+
+`ProtocolMessageFamily` registers immutable capability descriptors alongside model
+identifiers. A model capability begins with its lowercase family name and a dot;
+it can gate only that family's identifiers. `ProtocolChannel.Negotiate` selects
+the intersection, and `SetAgreement` applies it exactly once. Read and write gates
+reject Diagnostics, and any model capability's added frames, until agreed. A
+capability may describe a payload extension with no new frame. Future Graph composite
+values (#1146) register `graph.composite-values` here without another version bump. Existing frames
+must keep their baseline encoding when the relevant capability was not agreed.
+
+### Diagnostics payload
+
+All numbers are big-endian. The payload is `i32 entryCount`, followed by entries:
+`u8 severity + string code + string message + i32 start + i32 end + i32 line`.
+Severity is Warning=1 or Error=2; other values are invalid. Both offsets are -1
+for an unlocated diagnostic, otherwise 0 <= start <= end; end is exclusive and
+line is one-based. Entry order is the producer's source order. The maximum is
+4,096 entries and 1,048,576 encoded bytes. Counts, truncation, invalid strings,
+invalid spans/lines, trailing bytes and size violations throw ProtocolException,
+translated by the endpoint/client to ProtocolViolation. No list is silently truncated.
+
+Protocol owns ProtocolDiagnostic and ProtocolDiagnosticSeverity with no Language
+or Types reference. Servers translate their carrier; the shared client maps the
+wire values into the existing DatabaseException.Diagnostics collection. Success
+result objects expose the ProtocolDiagnostic values directly. Codecs use checked
+span reads and static encoding, with no reflection or runtime discovery.
 
 ## Extending a model
 

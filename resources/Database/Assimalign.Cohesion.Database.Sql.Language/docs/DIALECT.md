@@ -2176,3 +2176,7 @@ The carrier retains an available expression span at runtime and during LIMIT/OFF
 planning. Column-scope failures use the offending column span, including INSERT VALUES.
 PostgreSQL's corresponding data exception codes are declared in
 `src/backend/utils/errcodes.txt:168,206,197` (22012, 22P02, 22003).
+
+## Wire diagnostics (#1105)
+
+On negotiated protocol 2.1 with the diagnostics capability, Warning and Error diagnostics retain their complete code, severity, message and source span over the model wire. Information diagnostics are omitted. A negotiated 2.0 connection retains the existing Error text and result frames. Language admission and execution semantics are unchanged.

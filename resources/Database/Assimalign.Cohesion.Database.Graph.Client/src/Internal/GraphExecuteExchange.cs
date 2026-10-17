@@ -33,11 +33,17 @@ internal sealed class GraphExecuteExchange
         await writer.FlushAsync(cancellationToken).ConfigureAwait(false);
         IReadOnlyList<GraphColumn> columns = [];
         var rows = new List<object?[]>();
+        IReadOnlyList<ProtocolDiagnostic> diagnostics = [];
+        bool hasDiagnostics = false;
         bool hasHeader = false;
         while (true)
         {
             ProtocolFrame frame = await reader.ReadFrameAsync(cancellationToken).ConfigureAwait(false)
                 ?? throw new DatabaseClientException(ProtocolErrorCode.Internal, "The server closed the graph exchange before completion.");
+            if (hasDiagnostics && frame.Type != ProtocolMessageType.Error && frame.Type != (ProtocolMessageType)GraphProtocolMessageType.ResultComplete)
+            {
+                throw new ProtocolException(ErrorMessages.DiagnosticsOrderInvalid);
+            }
             switch ((byte)frame.Type)
             {
                 case (byte)GraphProtocolMessageType.ResultHeader:
@@ -59,7 +65,11 @@ internal sealed class GraphExecuteExchange
                 case (byte)GraphProtocolMessageType.ResultComplete:
                     if (frame.Payload.Length != sizeof(long)) { throw new ProtocolException("Malformed graph result completion."); }
                     var complete = GraphProtocolResultCompleteMessage.Decode(frame.Payload.Span);
-                    return new GraphResultSet(columns, rows, complete.AffectedCount);
+                    return new GraphResultSet(columns, rows, complete.AffectedCount, diagnostics);
+                case (byte)ProtocolMessageType.Diagnostics:
+                    diagnostics = ProtocolDiagnosticsMessage.Decode(frame.Payload.Span).Entries;
+                    hasDiagnostics = true;
+                    break;
                 case (byte)ProtocolMessageType.Error:
                     var error = ProtocolErrorMessage.Decode(frame.Payload.Span);
                     // The ready-loop statement rejection is terminal only before result output.
@@ -68,7 +78,7 @@ internal sealed class GraphExecuteExchange
                     {
                         MarkResponseComplete();
                     }
-                    throw new DatabaseClientException(error.Code, error.Message);
+                    throw new DatabaseClientException(error.Code, error.Message, diagnostics, null);
                 default:
                     throw new ProtocolException($"Unexpected {frame.Type} frame in a graph execute exchange.");
             }
