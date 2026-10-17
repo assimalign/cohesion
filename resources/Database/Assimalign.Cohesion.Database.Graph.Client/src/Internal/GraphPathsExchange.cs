@@ -45,7 +45,7 @@ internal sealed class GraphPathsExchange
             {
                 // A terminal rejection before path output is a complete, healthy exchange.
                 // Finish the shared stream before GraphConnection raises the retained failure.
-                Rejection = new DatabaseClientException(error.Code, error.Message);
+                Rejection = new DatabaseClientException(error.Code, error.Message, _diagnostics, null);
                 return;
             }
         }
@@ -80,12 +80,12 @@ internal sealed class GraphPathsExchange
         }
     }
 
-    private static void ValidateFrame(ProtocolFrame frame)
+    private void ValidateFrame(ProtocolFrame frame)
     {
         if (frame.Type == ProtocolMessageType.Error)
         {
             var error = ProtocolErrorMessage.Decode(frame.Payload.Span);
-            throw new DatabaseClientException(error.Code, error.Message);
+            throw new DatabaseClientException(error.Code, error.Message, _diagnostics, null);
         }
         else if (frame.Type == (ProtocolMessageType)GraphProtocolMessageType.Path)
         {
@@ -105,7 +105,6 @@ internal sealed class GraphPathsExchange
     {
         ProtocolFrame frame = await reader.ReadFrameAsync(cancellationToken).ConfigureAwait(false)
             ?? throw new ProtocolException("The server closed the connection before completing the graph path exchange.");
-<<<<<<< HEAD
         if (frame.Type == ProtocolMessageType.Diagnostics)
         {
             if (_hasDiagnostics) { throw new ProtocolException(ErrorMessages.GraphDiagnosticsDuplicate); }
@@ -118,13 +117,7 @@ internal sealed class GraphPathsExchange
                 throw new ProtocolException(ErrorMessages.GraphDiagnosticsOrderInvalid);
             }
         }
-        if (frame.Type == ProtocolMessageType.Error)
-        {
-            ProtocolErrorMessage error = ProtocolErrorMessage.Decode(frame.Payload.Span);
-            throw new DatabaseClientException(error.Code, error.Message, _diagnostics, null);
-        }
-=======
->>>>>>> 774c0596e
+
         return frame;
     }
 }
