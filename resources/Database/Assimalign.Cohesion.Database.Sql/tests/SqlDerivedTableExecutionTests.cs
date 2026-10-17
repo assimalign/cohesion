@@ -288,7 +288,7 @@ public sealed class SqlDerivedTableExecutionTests
         // Assert
         var diagnostic = result.Diagnostics.ShouldHaveSingleItem();
         diagnostic.Code.ShouldBe("COHDBL001");
-        diagnostic.Message!.ShouldContain("Correlated SQL subqueries", Case.Sensitive);
+        diagnostic.Message!.ShouldContain("Correlated subqueries are not supported", Case.Sensitive);
         diagnostic.Message!.ShouldNotContain("LATERAL", Case.Sensitive);
         sql[diagnostic.Start!.Value..diagnostic.End!.Value].ShouldBe("t.id");
     }

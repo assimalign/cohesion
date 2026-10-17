@@ -83,7 +83,8 @@ internal sealed partial class SqlPlanner
         catch (SqlPlanningException exception) when (!exception.HasLocalQualifier && exception.UnresolvedColumn is { } column &&
             _queryScopes.ToArray().Any(scope => ReferenceBindsInScope(scope.Select, scope.Dml, column)))
         {
-            throw new SqlUnsupportedQueryException(ErrorMessages.CorrelatedSubquery, exception, exception.UnresolvedColumn!.Location);
+            throw new SqlUnsupportedQueryException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.CorrelatedSubquery, exception.Message),
+                exception, exception.UnresolvedColumn!.Location);
         }
         finally
         {

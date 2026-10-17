@@ -43,7 +43,8 @@ internal sealed partial class SqlPlanner
             }
             if (_queryScopes.Skip(1).ToArray().Any(scope => ReferenceBindsInScope(scope.Select, scope.Dml, column)))
             {
-                throw new SqlUnsupportedQueryException(ErrorMessages.CorrelatedSubquery, exception, column.Location);
+                throw new SqlUnsupportedQueryException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.CorrelatedSubquery, exception.Message),
+                    exception, column.Location);
             }
             throw;
         }
