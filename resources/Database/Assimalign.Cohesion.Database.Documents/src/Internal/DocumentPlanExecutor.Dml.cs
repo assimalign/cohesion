@@ -1,11 +1,13 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Documents.Catalog;
 using Assimalign.Cohesion.Database.Documents.Language;
+using Assimalign.Cohesion.Database.Documents.Storage;
 using Assimalign.Cohesion.Database.Execution;
 
 namespace Assimalign.Cohesion.Database.Documents.Internal;
@@ -63,7 +65,16 @@ internal static partial class DocumentPlanExecutor
                 throw new DocumentPlanningException("COHDOC008", ErrorMessages.InsertValueMissing, statement.Location);
             }
             var id = new DocumentId(text);
-            pending.Add((id, DocumentJsonValue.Encode(value)));
+            var content = DocumentJsonValue.Encode(value);
+            try
+            {
+                DocumentStorage.ValidateContent(content);
+            }
+            catch (JsonException exception)
+            {
+                throw new DocumentPlanningException("COHDOC008", ErrorMessages.InsertJsonInvalid, statement.Location, exception);
+            }
+            pending.Add((id, content));
         }
     }
 }

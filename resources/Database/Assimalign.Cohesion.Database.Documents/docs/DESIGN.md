@@ -486,6 +486,13 @@ generated. SELECT output names supply KEY and optional VALUE; omitting VALUE sto
 row in projection order. All source rows and VALUES inputs are materialized and validated before
 the first write. JSON uses only Utf8JsonWriter and JsonElement with the 128-level storage limit.
 
+Numeric literals retain their JSON digits until evaluation. Before normalizing a numeric
+JsonElement (including numbers nested in parameters), the evaluator delegates exact decimal
+representability to `DocumentStorage.ValidateContent`. Rounding, underflow and overflow raise
+COHDOC007 (SQLSTATE 22003), with the offending literal or parameter span. This also applies to
+computed INSERT SELECT inputs. Final document validation precedes all writes; other invalid
+INSERT JSON carries COHDOC008. PutAsync keeps its existing storage validation and write order.
+
 INSERT and PutAsync share one internal write primitive inside the existing statement operation:
 writer lock, collection/index snapshot checks, current-key check, content write/tombstone,
 durable version allocation and catalog/index maintenance. A statement is atomic, including its

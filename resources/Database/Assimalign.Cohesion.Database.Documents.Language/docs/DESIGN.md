@@ -231,11 +231,13 @@ a trailing stray `?` keeps its generic character error. Empty identifiers are sy
 The parser links Execution's stateless name check without an assembly dependency.
 ParameterConformanceTests is the parameter-form conformance corpus.
 
-Literal nodes hold a string, Boolean, decimal, or null; `NIL` is a synonym for null.
+Literal nodes hold a string, Boolean, numeric `JsonElement`, or null; `NIL` is a synonym for null.
 These values use `OqlLiteralExpression`; MISSING has its own `OqlMissingExpression`.
-Decimal and scientific notation use invariant culture and reject invalid/out-of-range decimal values.
-Numeric query literals therefore have a bounded decimal range even when JSON can represent a
-larger number. The parser does not silently round a literal to an infinity or coerce it to text.
+Decimal and scientific notation retain every digit until the Documents evaluator applies
+`DocumentStorage.ValidateContent` before conversion to decimal. Underflow, excess nonzero
+fractional precision and overflow report `COHDOC007` (SQLSTATE 22003) at the literal's span.
+The parser reports malformed numeric syntax as `OQL0004`; it adapts optional integer digits
+(`.5`) and leading zeros to JSON syntax without changing the number's value.
 
 Operator precedence, lowest first: `OR`, `AND`, comparisons and null tests, addition/subtraction,
 multiplication/division/remainder, unary signs. `NOT` binds around comparisons, so
@@ -274,7 +276,7 @@ The keyword-disposition corpus covers these identifiers both with and without th
 | `OQL0001` | Empty statement, including whitespace/comment-only text |
 | `OQL0002` | Syntax error, missing token, invalid identifier/path, multiple statements or leftover tokens, or a character OQL does not use (`?`, `#`, `^`, `§`, ...) |
 | `OQL0003` | Unterminated quoted text or block comment |
-| `OQL0004` | Invalid or out-of-range numeric literal |
+| `OQL0004` | Malformed numeric literal (decimal-domain refusals belong to the engine's `COHDOC007`) |
 | `OQL0005` | Expression nesting exceeds the supported depth |
 | `OQL0006` | Invalid aggregate argument count or star operand |
 

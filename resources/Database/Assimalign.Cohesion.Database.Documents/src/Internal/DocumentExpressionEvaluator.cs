@@ -2,9 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Text;
 using System.Text.Json;
-using Assimalign.Cohesion.Database.Documents.Language;
 
+using Assimalign.Cohesion.Database.Documents.Language;
+using Assimalign.Cohesion.Database.Documents.Storage;
 using Assimalign.Cohesion.Database.Execution.Internal;
 
 namespace Assimalign.Cohesion.Database.Documents.Internal;
@@ -146,23 +148,56 @@ internal sealed class DocumentExpressionEvaluator
     {
         null => null,
         DocumentMissing => value,
-        JsonElement json => json.ValueKind switch
-        {
-            JsonValueKind.Null => null,
-            JsonValueKind.Undefined => DocumentMissing.Instance,
-            JsonValueKind.True => true,
-            JsonValueKind.False => false,
-            JsonValueKind.String => json.GetString(),
-            JsonValueKind.Number => json.TryGetDecimal(out var number) ? number :
-                throw new DocumentPlanningException("COHDOC007", "OQL numbers must fit the decimal scalar domain."),
-            _ => json,
-        },
+        JsonElement json => NormalizeJson(json),
         byte or sbyte or short or ushort or int or uint or long or ulong or decimal => Convert.ToDecimal(value, CultureInfo.InvariantCulture),
         float number when float.IsFinite(number) => Convert.ToDecimal(number, CultureInfo.InvariantCulture),
         double number when double.IsFinite(number) => Convert.ToDecimal(number, CultureInfo.InvariantCulture),
         bool or string => value,
         _ => throw new DocumentPlanningException("COHDOC008", "OQL parameters must be JSON scalars or JsonElement values."),
     };
+
+    private static object? NormalizeJson(JsonElement json)
+    {
+        ValidateNumbers(json);
+        return json.ValueKind switch
+        {
+            JsonValueKind.Null => null,
+            JsonValueKind.Undefined => DocumentMissing.Instance,
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            JsonValueKind.String => json.GetString(),
+            JsonValueKind.Number => json.GetDecimal(),
+            _ => json,
+        };
+    }
+
+    private static void ValidateNumbers(JsonElement json)
+    {
+        var pending = new Stack<JsonElement>();
+        pending.Push(json);
+        while (pending.TryPop(out var current))
+        {
+            switch (current.ValueKind)
+            {
+                case JsonValueKind.Number:
+                    try
+                    {
+                        DocumentStorage.ValidateContent(Encoding.UTF8.GetBytes(current.GetRawText()));
+                    }
+                    catch (JsonException exception)
+                    {
+                        throw new DocumentPlanningException("COHDOC007", ErrorMessages.NumberOutsideDecimalDomain, innerException: exception);
+                    }
+                    break;
+                case JsonValueKind.Object:
+                    foreach (var property in current.EnumerateObject()) { pending.Push(property.Value); }
+                    break;
+                case JsonValueKind.Array:
+                    foreach (var item in current.EnumerateArray()) { pending.Push(item); }
+                    break;
+            }
+        }
+    }
 
     private object? Binary(OqlBinaryExpression expression, DocumentEvaluationContext document, IReadOnlyList<DocumentEvaluationContext>? group)
     {

@@ -52,4 +52,5 @@
   <data name="InsertOutputMissing" xml:space="preserve"><value>INSERT binding '{0}' must name a SELECT output column.</value></data>
   <data name="MetaContextInvalid" xml:space="preserve"><value>META requires a stored document source, an optional matching source alias, and the member id or version.</value></data>
   <data name="InsertJsonInvalid" xml:space="preserve"><value>INSERT JSON must be valid and nested no deeper than 128 levels.</value></data>
+  <data name="NumberOutsideDecimalDomain" xml:space="preserve"><value>OQL numbers must fit the decimal scalar domain exactly, without rounding or underflow.</value></data>
 </root>

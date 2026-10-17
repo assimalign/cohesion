@@ -125,6 +125,11 @@ Collection refusals preserve `COHDOC002` (missing DROP), `COHDOC010` (duplicate 
 carry the statement span; command diagnostics have no source location. All are ExecutionFailure
 and preserve the session, including conditional schema-owned drops.
 
+INSERT rejects numeric literals and JsonElement parameters outside the exact decimal domain
+with COHDOC007 before normalization, including underflow and excess fractional precision.
+VALUES and computed SELECT inputs preserve the collection on failure over both InMemory and
+TCP; the diagnostic span and the reusable session survive the wire unchanged.
+
 `DocumentClientException` is a sealed `DatabaseException` leaf, like Graph's model exception.
 It uses the inherited diagnostic carrier, so callers catching the area root see the same diagnostics.
 Before #1103 it derived from `DatabaseClientException` and owned a separate diagnostic list; keeping
