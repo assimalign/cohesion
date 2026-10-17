@@ -21,7 +21,7 @@ public sealed class GraphNegotiationTests
     {
         // Arrange
         await using var harness = await GraphClientTestHarness.StartAsync();
-        await using var transport = await harness.Listener.CreateFactory().ConnectAsync(harness.Listener.EndPoint, harness.Token);
+        await using var transport = await harness.ConnectionFactory.ConnectAsync(harness.Listener.EndPoint, harness.Token);
         await using var channel = new ProtocolChannel(transport.AsStream(), GraphProtocol.Family, true);
         var startup = new ProtocolStartupMessage(new(2, minor), "graph", "tester") { Capabilities = diagnostics ? ["diagnostics"] : [] };
         // Act

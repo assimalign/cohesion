@@ -8,4 +8,5 @@
   <data name="GraphDiagnosticsDuplicate" xml:space="preserve"><value>Duplicate graph diagnostics.</value></data>
   <data name="GraphDiagnosticsCompletionMissing" xml:space="preserve"><value>Missing graph diagnostics completion.</value></data>
   <data name="GraphDiagnosticsOrderInvalid" xml:space="preserve"><value>Graph diagnostics must precede completion or Error.</value></data>
+  <data name="PathResultAlreadyEnumerated" xml:space="preserve"><value>A graph path result can be enumerated only once.</value></data>
 </root>

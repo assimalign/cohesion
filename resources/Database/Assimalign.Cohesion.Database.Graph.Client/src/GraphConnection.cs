@@ -67,7 +67,7 @@ public sealed class GraphConnection : IAsyncDisposable
     /// <param name="statement">A MATCH statement returning one bound path or entity variable.</param>
     /// <param name="parameters">Scalar bindings for $name and @name. Bare names match case-sensitively; one leading sigil on a map key is ignored.</param>
     /// <param name="cancellationToken">Cancellation token for the full enumeration.</param>
-    /// <returns>Paths retaining node and relationship identities, labels, types, and properties.</returns>
+    /// <returns>A path stream retaining node and relationship identities, labels, types, properties, and completion diagnostics.</returns>
     /// <exception cref="ArgumentException">The statement is empty.</exception>
     /// <exception cref="ObjectDisposedException">The connection is disposed.</exception>
     /// <exception cref="InvalidOperationException">Another exchange is active.</exception>
@@ -75,13 +75,21 @@ public sealed class GraphConnection : IAsyncDisposable
     /// <exception cref="GraphClientException">The server rejected the query or the stream failed.
     /// A terminal statement rejection before path output keeps the connection; other stream failures discard it.</exception>
     /// <remarks>Enumerate to completion to verify the server's terminal path count. Disposing an
-    /// unfinished enumeration cancels the exchange and prevents reuse of that session.</remarks>
-    public async IAsyncEnumerable<GraphPath> QueryPathsAsync(string statement,
+    /// unfinished enumeration cancels the exchange and prevents reuse of that session. The returned
+    /// result exposes completion diagnostics after EOF and permits one enumeration.</remarks>
+    public GraphPathResult QueryPathsAsync(string statement,
         IReadOnlyDictionary<string, object?>? parameters = null,
-        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
         var exchange = new GraphPathsExchange(statement, parameters);
+        return new GraphPathResult(exchange, QueryPathsCoreAsync(exchange, cancellationToken));
+    }
+
+    private async IAsyncEnumerable<GraphPath> QueryPathsCoreAsync(GraphPathsExchange exchange,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
         long startTimestamp = GraphClientEventSource.Log.GetTimestamp();
         bool startWritten = GraphClientEventSource.Log.QueryStart(this, QueryPathsOperation);
 

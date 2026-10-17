@@ -1,3 +1,4 @@
+using System;
 using System.Linq;
 using System.Threading.Tasks;
 using Shouldly;
@@ -32,29 +33,37 @@ public sealed class GraphWireDiagnosticTests
         harness.Server.Sessions.Count.ShouldBe(1);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Graph.Client] - successful unknown-name reads carry warnings before scalar and path completion")]
-    public async Task QueryAsync_UnknownLabels_ShouldReceiveWarningsAndCompletePaths()
+    [Theory(DisplayName = "Cohesion Test [Database.Graph.Client] - successful unknown-name reads carry warnings before scalar and path completion")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task QueryAsync_UnknownLabels_ShouldReceiveWarningsAndCompletePaths(bool tcp)
     {
         // Arrange
-        await using var harness = await GraphClientTestHarness.StartAsync();
+        await using var harness = await GraphClientTestHarness.StartAsync(tcp);
         await using var connection = await harness.Client.ConnectAsync(harness.Token);
         // Act
         var result = await connection.QueryAsync("MATCH (n:Absent) RETURN n.name", cancellationToken: harness.Token);
         int paths = 0;
-        await foreach (var path in connection.QueryPathsAsync("MATCH (n:Absent) RETURN n", cancellationToken: harness.Token)) { paths++; }
+        var pathResult = connection.QueryPathsAsync("MATCH (n:Absent) RETURN n", cancellationToken: harness.Token);
+        await foreach (var path in pathResult) { paths++; }
         // Assert
         result.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG010");
         result.Diagnostics[0].Severity.ShouldBe(ProtocolDiagnosticSeverity.Warning);
         paths.ShouldBe(0);
+        Should.Throw<InvalidOperationException>(() => pathResult.GetAsyncEnumerator(harness.Token));
+        pathResult.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG010");
+        pathResult.Diagnostics[0].Severity.ShouldBe(ProtocolDiagnosticSeverity.Warning);
         await connection.QueryAsync("SHOW LABELS", cancellationToken: harness.Token);
         harness.Server.Sessions.Count.ShouldBe(1);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Graph.Client] - path parse failures retain full diagnostics")]
-    public async Task QueryPathsAsync_UnsupportedSyntax_ShouldReceiveDiagnostics()
+    [Theory(DisplayName = "Cohesion Test [Database.Graph.Client] - path parse failures retain full diagnostics and the same session")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task QueryPathsAsync_UnsupportedSyntax_ShouldReceiveDiagnostics(bool tcp)
     {
         // Arrange
-        await using var harness = await GraphClientTestHarness.StartAsync();
+        await using var harness = await GraphClientTestHarness.StartAsync(tcp);
         await using var connection = await harness.Client.ConnectAsync(harness.Token);
         // Act
         var error = await Should.ThrowAsync<GraphClientException>(async () =>
@@ -64,6 +73,11 @@ public sealed class GraphWireDiagnosticTests
         // Assert
         error.Diagnostics.Count.ShouldBeGreaterThanOrEqualTo(2);
         error.Code.ShouldBe(ProtocolErrorCode.ParseFailure);
+        error.Diagnostics.Select(Value).ShouldBe(new GqlQueryParser().Parse("MATCH ANY SHORTEST (a)->(b) RETURN a UNION MATCH (c) RETURN c").Diagnostics.Select(Value));
+        connection.IsOpen.ShouldBeTrue();
+        var session = harness.Server.Sessions.Single();
+        await connection.QueryAsync("SHOW LABELS", cancellationToken: harness.Token);
+        harness.Server.Sessions.ShouldHaveSingleItem().ShouldBeSameAs(session);
     }
 
     private static object Value(Diagnostic item) => (item.Code, item.Message, item.Severity, item.Start, item.End, item.Line);

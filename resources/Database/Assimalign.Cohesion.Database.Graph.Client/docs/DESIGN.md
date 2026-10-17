@@ -70,7 +70,7 @@ GraphPathsExchange derives from DatabaseStreamingExchange. OpenCoreAsync sends E
 validates the initial Path or PathsComplete frame. A terminal ParseFailure or ExecutionFailure
 before any path frame is retained as the rejected statement's error, and CopyToCoreAsync completes
 without content. GraphConnection consumes EOF, which joins the shared worker and releases the
-active exchange, then raises GraphClientException with the retained code and message. The healthy
+active exchange, then raises GraphClientException with the retained code, message and diagnostics. The healthy
 connection can execute another statement immediately and returns to the pool when disposed.
 This completion handling stays entirely in Graph.Client; the shared streaming and pool code is unchanged.
 For successful responses, CopyToCoreAsync validates each existing path
@@ -98,7 +98,7 @@ a named path retains traversal order. Scalar or mixed projections and mutations 
 so no path is reconstructed from scalar results. Execute serves scalar projection rows and
 mutations; bound entity projections direct callers to ExecutePaths.
 
-GraphResultSet.Diagnostics exposes negotiated success warnings, including COHDBG010 and COHDBG011 for unknown names. Path exchanges consume diagnostics before PathsComplete; the existing path enumeration has no result metadata surface. Its statement failures preserve diagnostics on GraphClientException, while the existing streaming contract discards a failed rental.
+GraphResultSet.Diagnostics exposes negotiated success warnings, including COHDBG010 and COHDBG011 for unknown names. QueryPathsAsync returns a sealed GraphPathResult implementing IAsyncEnumerable<GraphPath>. Its Diagnostics property exposes the same ProtocolDiagnostic values as scalar results, finalized after EOF. Each result permits one enumeration. Terminal statement rejections before path output preserve diagnostics on GraphClientException and retain the rental after EOF; later stream failures discard it.
 
 Graph transactions remain a deliberate limit: there are no connection transaction members;
 BEGIN, COMMIT, ROLLBACK, and the reserved Transaction message are unsupported. Mutations retain
@@ -195,10 +195,15 @@ Capability names are ordinal and append-only; model names are scoped with the
 lowercase endpoint family followed by a dot. The core owns `diagnostics` and frame 14.
 
 SQL and Graph register `ProtocolCapability.Diagnostics`. When agreed, one Diagnostics
-frame carries the complete Warning/Error list immediately before Error on failure,
+frame carries the bounded Warning/Error list immediately before Error on failure,
 or immediately before ResultComplete (PathsComplete for graph paths) on success.
 Information, including SQL0100, is never sent. Error and result payloads are unchanged.
 Statement failures leave the server session ready. Model clients validate diagnostic
 ordering and preserve every code, severity, message, nullable offset and source line.
 
-GraphClientException copies the underlying database diagnostics carrier; GraphResultSet.Diagnostics exposes negotiated ProtocolDiagnostic values. The existing stricter streaming failure/discard policy remains in force.
+GraphClientException copies the underlying database diagnostics carrier; GraphResultSet.Diagnostics exposes negotiated ProtocolDiagnostic values. GraphPathResult.Diagnostics exposes path completion warnings. Terminal path statement rejections before path output retain the connection after EOF; later failures discard it.
+
+Path completion diagnostics follow Neo4j's completion metadata model
+(community/bolt/src/main/java/org/neo4j/bolt/protocol/common/fsm/response/metadata/DefaultMetadataHandler.java:206).
+The concrete result stream preserves bounded streaming and adds no public interface.
+COHDBP001 reports diagnostic overflow without turning successful reads into failures.

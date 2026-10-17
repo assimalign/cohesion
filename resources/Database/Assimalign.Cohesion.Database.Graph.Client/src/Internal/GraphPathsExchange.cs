@@ -18,6 +18,8 @@ internal sealed class GraphPathsExchange
     private IReadOnlyList<ProtocolDiagnostic> _diagnostics = [];
     private bool _hasDiagnostics;
 
+    internal IReadOnlyList<ProtocolDiagnostic> Diagnostics => _diagnostics;
+
     internal DatabaseClientException? Rejection { get; private set; }
 
     /// <summary>
