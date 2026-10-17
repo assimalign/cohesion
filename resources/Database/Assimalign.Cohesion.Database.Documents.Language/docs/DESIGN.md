@@ -84,7 +84,9 @@ expression. OQL accepts these spellings, requiring FROM and rejecting VALUE alia
 multiple expressions. VALUE and RAW are reserved: use `"value"`, `"raw"` or `d.value` for fields.
 After AS, a projection label accepts reserved words, following PostgreSQL ColLabel
 (`src/backend/parser/gram.y:17638,18042-18046` in the reference clone). DISTINCT and ALL retain
-their positional capability refusal everywhere except directly after SELECT (and after a dot).
+their positional capability refusal everywhere except directly after a clause-head SELECT (and after a dot).
+A property or projection label named select does not open a SELECT clause. The AS-label exemption
+applies only within a SELECT list; reserved unsupported FROM and INSERT aliases retain COHDBL001.
 COUNT(DISTINCT x) remains one COHDBL001 naming COUNT(DISTINCT). ARRAY comprehensions, computed
 member names, IN's array form and path access on constructor results remain deferred.
 Member colons remain delimiters even without whitespace: `{a:DISTINCT}` receives the positional
@@ -103,7 +105,7 @@ Each entry has a spelling, the construct its `COHDBL001` names, and a position. 
 recognized-unsupported construct is reported once at the word that names it, and never bound as
 a name:
 
-- **Anywhere** (reserved unsupported SQL++ vocabulary): every occurrence except a path segment after a dot. All
+- **Anywhere** (reserved unsupported SQL++ vocabulary): every occurrence except a path segment after a dot or an explicit SELECT-list AS label. All
   are lexer keywords or functions.
 - **Clause** (statements and clauses of other languages, and the SQL++ words `LIMIT`,
   `OFFSET` and `UNNEST`): the first word of the statement, or the word directly after the end
@@ -122,7 +124,7 @@ a name:
   index names and aliases named `returning` are ordinary identifiers. An implicit FROM alias
   uses that name when followed by the end or a following clause; `FROM c RETURNING *` leaves
   RETURNING for the capability rejection. This positional check keeps a real trailing clause
-  at COHDBL001 without treating non-reserved INTO, KEY or VALUE as preceding operands.
+  at COHDBL001 without treating positional INTO or KEY as preceding operands. VALUE is reserved for projection and INSERT binding syntax.
 - **Function** (`ELEMENT`, `FLATTEN`, `LISTTOSET`, `STRUCT`, `LIST`, `BAG`, `TYPEOF`, and `ABS`):
   only immediately before `(`. Elsewhere these spellings are ordinary identifiers.
 - **Quantifier**: `EVERY`, `ANY` or `SOME` followed by `name IN` opens a quantified predicate.

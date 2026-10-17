@@ -196,6 +196,8 @@ public sealed partial class OqlQueryParser : QueryParser
     {
         List<(string, Lexeme)> result = [];
         bool selected = false;
+        bool inSelectList = false;
+        int selectHead = -2;
         int openQuantifiers = 0;
         for (int index = 0; index < _tokens.Count; index++)
         {
@@ -224,7 +226,7 @@ public sealed partial class OqlQueryParser : QueryParser
             // DISTINCT/ALL are legal only directly after SELECT, including INSERT SELECT.
             if (openQuantifiers == 0 && value is "DISTINCT" or "ALL")
             {
-                if (index > 0 && IsWord(_tokens[index - 1], "SELECT")) { continue; }
+                if (index == selectHead + 1) { continue; }
                 string construct = index > 1 && _tokens[index - 1].Type == TokenType.LeftParen &&
                     _tokens[index - 2].Type == TokenType.Function
                     ? _tokens[index - 2].Text.ToUpperInvariant() + "(" + value + ")" : value;
@@ -232,7 +234,8 @@ public sealed partial class OqlQueryParser : QueryParser
                 break;
             }
             // ColLabel accepts reserved words after AS; quantifier pins remain positional.
-            if (index > 0 && IsWord(_tokens[index - 1], "AS")) { continue; }
+            if (inSelectList && index > 0 && IsWord(_tokens[index - 1], "AS")) { continue; }
+            if (value == "FROM") { inSelectList = false; }
 
             // A SQL++ quantified predicate, EVERY x IN ... SATISFIES ... END, is one construct:
             // its binding IN is not the IN predicate, and its text up to END belongs to it.
@@ -298,6 +301,8 @@ public sealed partial class OqlQueryParser : QueryParser
                 }
 
                 selected = true;
+                selectHead = index;
+                inSelectList = true;
                 continue;
             }
 

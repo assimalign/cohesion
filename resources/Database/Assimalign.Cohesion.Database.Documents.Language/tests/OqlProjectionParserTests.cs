@@ -95,6 +95,12 @@ public sealed class OqlProjectionParserTests
 
     [Theory(DisplayName = "Cohesion Test [Documents.Language] - Misplaced quantifiers stay one capability refusal")]
     [InlineData("SELECT COUNT(DISTINCT x) FROM items", "COUNT(DISTINCT)")]
+    [InlineData("SELECT d.select DISTINCT FROM items d", "DISTINCT")]
+    [InlineData("SELECT d.select ALL FROM items d", "ALL")]
+    [InlineData("SELECT x AS select DISTINCT FROM items", "DISTINCT")]
+    [InlineData("SELECT * FROM items AS set", "SET")]
+    [InlineData("INSERT INTO items AS first (KEY, VALUE) VALUES ('k', 1)", "FIRST")]
+    [InlineData("SELECT * FROM items USE KEYS 'missing'", "USE")]
     [InlineData("SELECT x FROM items WHERE DISTINCT x", "DISTINCT")]
     [InlineData("SELECT {a:DISTINCT} FROM items", "DISTINCT")]
     [InlineData("SELECT {'a':ALL} FROM items", "ALL")]
