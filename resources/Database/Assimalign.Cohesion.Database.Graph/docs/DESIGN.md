@@ -1367,8 +1367,13 @@ Capability names are ordinal and append-only; model names are scoped with the
 lowercase endpoint family followed by a dot. The core owns `diagnostics` and frame 14.
 
 SQL and Graph register `ProtocolCapability.Diagnostics`. When agreed, one Diagnostics
-frame carries the complete Warning/Error list immediately before Error on failure,
+frame carries the bounded Warning/Error list immediately before Error on failure,
 or immediately before ResultComplete (PathsComplete for graph paths) on success.
 Information, including SQL0100, is never sent. Error and result payloads are unchanged.
 Statement failures leave the server session ready. Model clients validate diagnostic
 ordering and preserve every code, severity, message, nullable offset and source line.
+
+Diagnostic overflow is preflighted before output and retains a source-order prefix plus
+COHDBP001 with exact retained/omitted counts; the original Error category/message or
+successful result is preserved and the session stays reusable. Both the 4,096-entry
+and 1 MiB bounds include the notice. See [wire policy](../../Assimalign.Cohesion.Database.Sql/docs/WIRE-PROTOCOL.md#negotiated-statement-diagnostics-1105).

@@ -409,7 +409,7 @@ internal sealed class SqlDatabaseServerSession : DatabaseServerSession
         catch (DatabaseParseException exception)
         {
             // Statement-level failures keep the session in the ready state.
-            await WriteDiagnosticsAsync(exception.Diagnostics, cancellationToken).ConfigureAwait(false);
+            await WriteDiagnosticsAsync(PrepareDiagnostics(exception.Diagnostics), cancellationToken).ConfigureAwait(false);
             await WriteErrorAsync(ProtocolErrorCode.ParseFailure, exception.Message, cancellationToken).ConfigureAwait(false);
             return;
         }
@@ -417,7 +417,7 @@ internal sealed class SqlDatabaseServerSession : DatabaseServerSession
         {
             // The database is offline (#1243): every statement is refused, with the coded
             // reason, until it is reopened; the session stays ready to report it.
-            await WriteDiagnosticsAsync(exception.Diagnostics, cancellationToken).ConfigureAwait(false);
+            await WriteDiagnosticsAsync(PrepareDiagnostics(exception.Diagnostics), cancellationToken).ConfigureAwait(false);
             await WriteErrorAsync(ProtocolErrorCode.Unavailable, exception.Message, cancellationToken).ConfigureAwait(false);
             return;
         }
@@ -425,11 +425,12 @@ internal sealed class SqlDatabaseServerSession : DatabaseServerSession
         {
             var diagnostic = exception.Diagnostics.FirstOrDefault(item => item.Severity == DiagnosticSeverity.Error);
             string errorText = diagnostic?.Code is { } code ? $"{code}: {exception.Message}" : exception.Message;
-            await WriteDiagnosticsAsync(exception.Diagnostics, cancellationToken).ConfigureAwait(false);
+            await WriteDiagnosticsAsync(PrepareDiagnostics(exception.Diagnostics), cancellationToken).ConfigureAwait(false);
             await WriteErrorAsync(ProtocolErrorCode.ExecutionFailure, errorText, cancellationToken).ConfigureAwait(false);
             return;
         }
 
+        byte[]? diagnosticPayload = PrepareDiagnostics(result.Diagnostics);
         if (result is DatabaseResultSet resultSet)
         {
             await using (resultSet.ConfigureAwait(false))
@@ -459,7 +460,7 @@ internal sealed class SqlDatabaseServerSession : DatabaseServerSession
                 // extraction: ResultComplete carries the set's real AffectedCount
                 // (SQL's materialized sets report -1, so SQL wire behavior is
                 // unchanged; outcome sets elsewhere carry real counts).
-                await WriteDiagnosticsAsync(resultSet.Diagnostics, cancellationToken).ConfigureAwait(false);
+                await WriteDiagnosticsAsync(diagnosticPayload, cancellationToken).ConfigureAwait(false);
                 await WriteFrameAsync((ProtocolMessageType)SqlProtocolMessageType.ResultComplete, new ProtocolResultCompleteMessage(resultSet.AffectedCount).Encode(), cancellationToken).ConfigureAwait(false);
             }
 
@@ -472,12 +473,12 @@ internal sealed class SqlDatabaseServerSession : DatabaseServerSession
                 ? $"{diagnostics[0].Code}: {diagnosticMessage}"
                 : $"The statement completed with status {result.Status}.";
 
-            await WriteDiagnosticsAsync(result.Diagnostics, cancellationToken).ConfigureAwait(false);
+            await WriteDiagnosticsAsync(diagnosticPayload, cancellationToken).ConfigureAwait(false);
             await WriteErrorAsync(ProtocolErrorCode.ExecutionFailure, detail, cancellationToken).ConfigureAwait(false);
             return;
         }
 
-        await WriteDiagnosticsAsync(result.Diagnostics, cancellationToken).ConfigureAwait(false);
+        await WriteDiagnosticsAsync(diagnosticPayload, cancellationToken).ConfigureAwait(false);
         await WriteFrameAsync((ProtocolMessageType)SqlProtocolMessageType.ResultComplete, new ProtocolResultCompleteMessage(result.AffectedCount).Encode(), cancellationToken).ConfigureAwait(false);
     }
 
@@ -513,17 +514,55 @@ internal sealed class SqlDatabaseServerSession : DatabaseServerSession
         return null;
     }
 
-    private async ValueTask WriteDiagnosticsAsync(IReadOnlyList<Diagnostic>? diagnostics, CancellationToken cancellationToken)
+    // Prepare the complete bounded payload before any result or Error reaches the wire.
+    private byte[]? PrepareDiagnostics(IReadOnlyList<Diagnostic>? diagnostics)
     {
-        if (diagnostics is null || !_channel!.Capabilities.Contains(ProtocolCapability.Diagnostics.Name)) { return; }
-        var entries = diagnostics.Where(item => item.Severity is DiagnosticSeverity.Warning or DiagnosticSeverity.Error)
-            .Select(item => new ProtocolDiagnostic(item.Severity == DiagnosticSeverity.Warning ? ProtocolDiagnosticSeverity.Warning : ProtocolDiagnosticSeverity.Error,
-                item.Code ?? string.Empty, item.Message ?? string.Empty, item.Start, item.End, item.Line)).ToArray();
-        if (entries.Length != 0)
+        if (diagnostics is null || diagnostics.Count == 0 ||
+            !_channel!.Capabilities.Contains(ProtocolCapability.Diagnostics.Name)) { return null; }
+        var entries = new List<ProtocolDiagnostic>();
+        int size = sizeof(int);
+        int total = 0;
+        bool overflow = false;
+        foreach (Diagnostic item in diagnostics)
         {
-            await WriteFrameAsync(ProtocolMessageType.Diagnostics, new ProtocolDiagnosticsMessage(entries).Encode(), cancellationToken).ConfigureAwait(false);
+            if (item.Severity is not (DiagnosticSeverity.Warning or DiagnosticSeverity.Error)) { continue; }
+            total++;
+            long entrySize = DiagnosticSize(item.Code, item.Message);
+            if (overflow || entries.Count == ProtocolDiagnosticsMessage.MaxEntryCount ||
+                entrySize > ProtocolDiagnosticsMessage.MaxPayloadLength - size)
+            {
+                overflow = true;
+                continue;
+            }
+            entries.Add(new ProtocolDiagnostic(
+                item.Severity == DiagnosticSeverity.Warning ? ProtocolDiagnosticSeverity.Warning : ProtocolDiagnosticSeverity.Error,
+                item.Code, item.Message, item.Start, item.End, item.Line));
+            size += (int)entrySize;
         }
+        if (overflow)
+        {
+            while (true)
+            {
+                string notice = FormattableString.Invariant($"Diagnostic overflow: retained the first {entries.Count} of {total} Warning/Error entries in source order; omitted the remaining {total - entries.Count}. Limits: 4096 entries and 1048576 encoded bytes.");
+                if (entries.Count < ProtocolDiagnosticsMessage.MaxEntryCount &&
+                    DiagnosticSize("COHDBP001", notice) <= ProtocolDiagnosticsMessage.MaxPayloadLength - size)
+                {
+                    entries.Add(new ProtocolDiagnostic(ProtocolDiagnosticSeverity.Warning, "COHDBP001", notice, null, null, 1));
+                    break;
+                }
+                ProtocolDiagnostic last = entries[^1];
+                size -= (int)DiagnosticSize(last.Code, last.Message);
+                entries.RemoveAt(entries.Count - 1);
+            }
+        }
+        return entries.Count == 0 ? null : new ProtocolDiagnosticsMessage(entries).Encode();
     }
+
+    private static long DiagnosticSize(string? code, string? message)
+        => 21L + System.Text.Encoding.UTF8.GetByteCount(code ?? string.Empty) + System.Text.Encoding.UTF8.GetByteCount(message ?? string.Empty);
+
+    private ValueTask WriteDiagnosticsAsync(byte[]? payload, CancellationToken cancellationToken)
+        => payload is null ? ValueTask.CompletedTask : WriteFrameAsync(ProtocolMessageType.Diagnostics, payload, cancellationToken);
 
     private async ValueTask WriteFrameAsync(ProtocolMessageType type, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
     {
