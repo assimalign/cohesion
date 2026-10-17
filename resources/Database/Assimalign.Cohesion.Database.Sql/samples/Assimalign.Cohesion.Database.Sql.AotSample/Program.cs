@@ -65,6 +65,10 @@ internal static class Program
     private const string Characters = "SELECT c, CAST(c AS TEXT), LENGTH(c), c || 'b', c LIKE 'a' FROM fixed_codes WHERE c = 'a'";
     private static readonly object?[][] _characters = [["a  ", "a", 1L, "ab", false]];
 
+    private const string typeAliases = "SELECT n, CAST(s AS CHARACTER VARYING(5)), CAST(f AS DOUBLE PRECISION), " +
+        "CAST(NULL AS DATETIME2), CAST(NULL AS DATETIMEOFFSET), CAST(NULL AS UNIQUEIDENTIFIER) FROM type_aliases";
+    private static readonly object?[][] _typeAliases = [["ab ", "text", 1.5d, null, null, null]];
+
     // E3: a CAST no registered cast performs is refused while planning, rows or not.
     private const string CannotCast = "SELECT CAST(Active AS DATE) FROM customers WHERE Id < 0";
 
@@ -161,6 +165,9 @@ internal static class Program
         await session.ExecuteAsync("INSERT INTO sql_defined VALUES (sql_increment(3))");
         await session.ExecuteAsync("CREATE TABLE fixed_codes (c CHAR(3) PRIMARY KEY)");
         await session.ExecuteAsync("INSERT INTO fixed_codes VALUES ('a')");
+        await session.ExecuteAsync("CREATE TABLE type_aliases (n NCHAR(3), s NVARCHAR(MAX), f DOUBLE PRECISION, d TIMESTAMP WITH TIME ZONE)");
+        await session.ExecuteAsync("INSERT INTO type_aliases (n, s, f) VALUES ('ab', 'text', 1.5)");
+        Check("in process: ISO type names and SQL Server lexical aliases", await RowsAsync(session, typeAliases), _typeAliases);
         Check("in process: CHAR storage, cast, length, concat, LIKE and seek", await RowsAsync(session, Characters), _characters);
         Check("in process: SQL function and domain", await RowsAsync(session, "SELECT sql_increment(n) FROM sql_defined"), [[5]]);
         Check("in process: scalars of every arity, strict and non-strict", await RowsAsync(session, Projection), _projection);
@@ -203,6 +210,7 @@ internal static class Program
         await using SqlConnection connection = await client.ConnectAsync(timeout.Token);
 
         Check("over the wire: CHAR storage, cast, length, concat, LIKE and seek", await RowsAsync(connection, Characters, timeout.Token), _characters);
+        Check("over the wire: ISO type names and SQL Server lexical aliases", await RowsAsync(connection, typeAliases, timeout.Token), _typeAliases);
         var fixedCodes = await connection.QueryAsync(Characters, cancellationToken: timeout.Token);
         Check("over the wire: CHAR type", fixedCodes.Columns[0].Type == Types.DatabaseType.Character, true);
         Check("over the wire: CHAR length", fixedCodes.Columns[0].MaxLength == 3, true);

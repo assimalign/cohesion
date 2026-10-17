@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Text;
 
 using Assimalign.Cohesion.Database.Sql.Language;
+using Assimalign.Cohesion.Database.Sql.Language.Internal;
 using Assimalign.Cohesion.Database.Sql.Schema;
 using Assimalign.Cohesion.Database.Types;
 
@@ -202,7 +203,7 @@ internal static class SqlSchemaStatementRenderer
             // resolves as it resolves any type name. Only the name's shape is checked here: rewritten
             // from its parts, so the text written into the statement is nothing but a type name.
             if (!SqlTypeRules.TrySplit(declared, out string name, out int? first, out int? second) ||
-                !IsTypeIdentifier(name) || (second is not null && first is null))
+                !SqlTypeModifiers.IsTypeName(name) || (second is not null && first is null))
             {
                 throw new DatabaseException($"Column '{column.Name}' is declared with '{declared}', which is not a SQL type name.");
             }
@@ -238,24 +239,6 @@ internal static class SqlSchemaStatementRenderer
             _ => throw new DatabaseException(
                 $"Column '{column.Name}' uses database type '{column.Type}', which cannot be emitted as SQL DDL."),
         };
-    }
-
-    private static bool IsTypeIdentifier(string name)
-    {
-        if (name.Length == 0 || !(char.IsAsciiLetter(name[0]) || name[0] == '_'))
-        {
-            return false;
-        }
-
-        foreach (char character in name)
-        {
-            if (!(char.IsAsciiLetterOrDigit(character) || character == '_'))
-            {
-                return false;
-            }
-        }
-
-        return true;
     }
 
     private static string DecimalTypeName(CompiledSchemaColumn column)

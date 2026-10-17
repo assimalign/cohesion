@@ -1,8 +1,18 @@
 # Database SDK Design
 
+## SQL type aliases (#1108)
+
+The shared SqlTypeModifiers source admits ISO multi-word names and SQL Server lexical aliases
+in extracted typed column declarations. VARCHAR(MAX), NVARCHAR(MAX) and VARBINARY(MAX) are
+unbounded; NCHAR and NATIONAL CHARACTER normalize to padded Character like CHAR. Temporal
+precision, 7 included, stays COHDBSDK106 with COHDBL001 detail. The canonical format advances
+v6 -> v7 in runtime and SDK together because NCHAR CustomType now normalizes to Character
+rather than remaining an unresolved domain name. Earlier artifacts and migration baselines
+are refused without an upgrade path. Migration SQL retains the validated CustomType spelling.
+
 ## Fixed-length strings (#1437)
 
-SDK and runtime now emit **cohesion/database-schema/v6** together. CLR char maps to Character (19)
+SDK and runtime now emit **cohesion/database-schema/v7** together. CLR char maps to Character (19)
 with length one, and explicit CHAR(n)/CHARACTER(n) string columns normalize through the schema
 snapshot to Character with length n. Shared SqlTypeModifiers still owns length validation.
 Migration SQL renders CHAR(n), and switching between CHAR and VARCHAR is an AlterColumn change.
@@ -186,7 +196,7 @@ The outputs are:
 | `CohesionDatabaseSchema` items | Set by `CohesionDatabaseCompileSchema` | One per database the manifest lists (its schema document, full path), with `DatabaseName` and `HashPath` metadata, for downstream targets. |
 | `Schemas` task output | `CompileDatabaseSchemaTask` | One item per database, named for it, with `Hash`, `SchemaPath` and `HashPath` metadata. |
 
-The document format is `cohesion/database-schema/v6`, shared with the runtime compiler and the
+The document format is `cohesion/database-schema/v7`, shared with the runtime compiler and the
 migration baseline writer. B2 introduced `defaultLiteral` in v4; #1438 advanced to v5 because
 decimal scale normalization changes a raw v4 NUMERIC(p) document's identity. #1437 advances
 to v6 for Character identity. Earlier formats, including v5, are refused before normalization. Rebuild artifacts and recreate
@@ -252,7 +262,7 @@ dependency closure.
 
 ## E4 script artifact decision
 
-Iteration 1 keeps declared scripts outside the v6 typed schema. They require runtime statement
+Iteration 1 keeps declared scripts outside the v7 typed schema. They require runtime statement
 receipts and checksummed history that generated SQL alone cannot establish. The extractor emits
 COHDBSDK110 for SqlDatabaseBuilder.Script, preventing incomplete artifacts: migration files that
 carried a script without its receipt would leave a Verify-mode application unable to start, and a

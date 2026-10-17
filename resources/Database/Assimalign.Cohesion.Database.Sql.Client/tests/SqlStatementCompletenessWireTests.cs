@@ -54,7 +54,7 @@ public sealed class SqlStatementCompletenessWireTests
     /// </summary>
     /// <param name="statement">DDL with a type argument that is not an unsigned integer literal.</param>
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - Completeness: a malformed type argument is a parse failure that keeps the session")]
-    [InlineData("CREATE TABLE wide (a VARCHAR(MAX))")]
+    [InlineData("CREATE TABLE wide (a CHAR(MAX))")]
     [InlineData("ALTER TABLE users ADD COLUMN note VARCHAR(1e3)")]
     [InlineData("CREATE TABLE wide (a VARCHAR(25 5))")]
     public async Task ExecuteAsync_MalformedTypeArgument_ShouldReportParseFailureAndKeepTheSession(string statement)

@@ -33,8 +33,8 @@ public sealed class SqlCastExpression : SqlExpression
     public SqlExpression Operand { get; }
 
     /// <summary>
-    /// Gets the target data type as written, with its type arguments (<c>VARCHAR(10)</c>,
-    /// <c>email</c>).
+    /// Gets the target data type with normalized whitespace and arguments and without comments
+    /// (<c>VARCHAR(10)</c>, <c>DOUBLE PRECISION</c>, <c>email</c>).
     /// </summary>
     public string TargetType { get; }
 

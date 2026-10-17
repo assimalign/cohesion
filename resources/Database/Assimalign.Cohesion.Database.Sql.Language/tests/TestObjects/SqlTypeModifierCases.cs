@@ -34,7 +34,10 @@ public static class SqlTypeModifierCases
         get
         {
             foreach (var (name, member) in new[] { ("TIME", "Time"), ("TIMESTAMP", "Timestamp"),
-                ("TIMESTAMPTZ", "TimestampTz"), ("INTERVAL", "Duration"), ("DATETIME", "Timestamp") })
+                ("TIMESTAMPTZ", "TimestampTz"), ("INTERVAL", "Duration"), ("DATETIME", "Timestamp"),
+                ("DATETIME2", "Timestamp"), ("DATETIMEOFFSET", "TimestampTz"),
+                ("TIMESTAMP WITH TIME ZONE", "TimestampTz"), ("TIMESTAMP WITHOUT TIME ZONE", "Timestamp"),
+                ("TIME WITHOUT TIME ZONE", "Time") })
             {
                 foreach (int precision in new[] { 0, 2, 3, 6, 7, int.MaxValue })
                 {
@@ -87,6 +90,14 @@ public static class SqlTypeModifierCases
                 {
                     yield return [name + suffix, valid, binary ? "BINARY" : "TEXT", binary ? "Bytes" : "Text"];
                 }
+            }
+            foreach (string type in new[] { "DOUBLE PRECISION", "CHARACTER VARYING(20)", "CHAR VARYING(20)",
+                "NATIONAL CHARACTER VARYING(20)", "NVARCHAR(20)", "VARCHAR(MAX)", "NVARCHAR(MAX)",
+                "BINARY VARYING(20)", "VARBINARY(MAX)", "NCHAR(10)", "NATIONAL CHARACTER(10)" })
+            {
+                bool binary = type.StartsWith("BINARY", StringComparison.Ordinal) || type.StartsWith("VARBINARY", StringComparison.Ordinal);
+                bool floating = type == "DOUBLE PRECISION";
+                yield return [type, true, floating ? "DOUBLE" : binary ? "BINARY" : "TEXT", floating ? "Double" : binary ? "Bytes" : "Text"];
             }
             yield return ["INT", true, "INT", "Number"];
             yield return ["INT(5)", false, "INT", "Number"];

@@ -107,8 +107,9 @@ the parser implements today. Recognized clauses outside that set produce the sha
   A name outside the table is not this package's error (phase E3):
   an engine's type catalog may register it as a domain, so a CAST target that is not
   a built-in name parses with no resolved type and no diagnostic when it has no
-  arguments (domains take none; arguments produce `SQL0005`), and DDL keeps any identifier as the column's type text;
-  the engine resolves both and reports a name it does not know. Which conversions a
+  arguments (domains take none; arguments produce `SQL0005`). DDL retains normalized type text
+  and a built-in's resolved `DatabaseTypeInfo` in `SqlColumnDefinition.ResolvedType`;
+  the engine resolves remaining domain names and reports a name it does not know. Which conversions a
   CAST may make is the engine's cast registry's question too, so every built-in type
   is a valid CAST target here.
 - **Recognized-but-unsupported tokens stay in the lexer tables.** `UNION`, `WITH`,
@@ -121,6 +122,23 @@ the parser implements today. Recognized clauses outside that set produce the sha
   statement, so analyzers observe `COHDBL001` with the token location and the `SQL`
   surface name. An actually unknown leading command still receives `SQL0002`, even
   when a later recognized token is also unsupported.
+
+## ISO names and lexical aliases (#1108)
+
+CAST delegates its target grammar and validation to ParseDefinitionType, shared by column,
+domain and function declarations. The grammar consumes only defined contextual continuations
+(PRECISION, VARYING and time-zone suffixes), without enlarging the reserved list. The stateless
+SqlTypeModifiers mapping supplies ISO names and D1 SQL Server lexical aliases to SQL, typed
+schemas and SDK extraction. No reflection, Regex, new public type, interface or grant is needed.
+
+MAX means unbounded only on VARCHAR, NVARCHAR and VARBINARY. NCHAR and NATIONAL CHARACTER
+retain #1437's padded Character identity. Every temporal precision, including 7, and INTERVAL
+field qualifiers retain #1438's COHDBL001, because their semantics are not enforced. SQL0004
+stays retired for domains. BIT, SMALLDATETIME and TIME WITH TIME ZONE have SQL0005 reasons
+and replacements; arrays use COHDBL001. The planner consumes resolved column types directly.
+The preflight scan skips complete temporal WITH TIME ZONE suffixes so they cannot become CTE
+diagnostics. Canonical CAST rendering retains spaces between type-name words; parser/renderer
+fixed points and persisted SQL function bodies cover these targets through reopen and the wire.
 
 ## Namespace note
 

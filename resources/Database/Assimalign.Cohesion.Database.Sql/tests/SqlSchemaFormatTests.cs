@@ -144,7 +144,7 @@ public sealed class SqlSchemaFormatTests
         detail.Code.ShouldBe(SqlSchemaValidationErrorCode.InvalidDocument);
         detail.Declaration.ShouldBe("schema.format");
         error.Message.ShouldContain("cohesion/database-schema/v4", Case.Sensitive);
-        error.Message.ShouldContain("cohesion/database-schema/v6", Case.Sensitive);
+        error.Message.ShouldContain("cohesion/database-schema/v7", Case.Sensitive);
         error.Message.ShouldContain("Rebuild", Case.Sensitive);
         error.Message.ShouldContain("recreate", Case.Sensitive);
     }

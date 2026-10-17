@@ -37,57 +37,15 @@ public sealed partial class SqlQueryParser
             AddSyntaxDiagnostic(ref lexer, "Expected AS before the CAST target type.");
         }
 
-        int targetStart = lexer.Current.Position;
-        int diagnosticsBeforeTarget = _parseDiagnostics.Count;
-        int targetEnd = targetStart;
-        string targetName = string.Empty;
-        int? firstArgument = null;
-        int? secondArgument = null;
-        bool validArguments = true;
+        string targetType = string.Empty;
+        DatabaseTypeInfo? targetTypeInfo = null;
         if (IsIdentifierOrKeyword(ref lexer))
         {
-            targetName = CurrentText(ref lexer);
-            targetEnd = lexer.Current.Position + lexer.Current.Value.Length;
-            Advance(ref lexer);
-            targetName = ParseIntervalQualifier(ref lexer, targetName, out int? qualifierEnd);
-            targetEnd = qualifierEnd ?? targetEnd;
-            if (lexer.Current.Type == TokenType.LeftParen)
-            {
-                Advance(ref lexer);
-                validArguments = TryReadCastArgument(ref lexer, out firstArgument);
-                if (validArguments && lexer.Current.Type == TokenType.Comma)
-                {
-                    Advance(ref lexer);
-                    validArguments = TryReadCastArgument(ref lexer, out secondArgument);
-                }
-
-                if (lexer.Current.Type != TokenType.RightParen)
-                {
-                    validArguments = false;
-                    while (!IsAtEnd(ref lexer) && lexer.Current.Type is not TokenType.RightParen and not TokenType.Semicolon)
-                    {
-                        Advance(ref lexer);
-                    }
-                }
-
-                targetEnd = lexer.Current.Position + lexer.Current.Value.Length;
-                if (lexer.Current.Type == TokenType.RightParen)
-                {
-                    Advance(ref lexer);
-                }
-            }
+            targetType = ParseDefinitionType(ref lexer, $"CAST target '{CurrentText(ref lexer)}'", out targetTypeInfo);
         }
         else
         {
             AddSyntaxDiagnostic(ref lexer, "Expected a CAST target type name.");
-        }
-
-        string targetType = targetName.Length == 0 ? string.Empty : _sourceText[targetStart..targetEnd];
-        DatabaseTypeInfo? targetTypeInfo = null;
-        if (targetName.Length > 0 && _parseDiagnostics.Count == diagnosticsBeforeTarget)
-        {
-            targetTypeInfo = ResolveCastTarget(targetName, firstArgument, secondArgument,
-                validArguments, targetStart, targetEnd);
         }
 
         if (lexer.Current.Type == TokenType.RightParen)
@@ -115,32 +73,6 @@ public sealed partial class SqlQueryParser
         argument = value;
         Advance(ref lexer);
         return true;
-    }
-
-    /// <summary>
-    /// Resolves a CAST target that is a built-in type name, checking its type arguments. A name
-    /// that is not a built-in type is left unresolved without a diagnostic: the engine's type
-    /// catalog may register it as a domain (phase E3), so the planner resolves it, and reports a
-    /// name it does not know. Which conversions exist is the engine's cast registry's question,
-    /// not the parser's, so every built-in type is a valid target here.
-    /// </summary>
-    private DatabaseTypeInfo? ResolveCastTarget(
-        string name, int? firstArgument, int? secondArgument, bool validArguments, int start, int end)
-    {
-        // The lexer retains delimiters; resolution uses the identifier's value.
-        SqlTypeModifiers.TrySplit(name, out string identifier, out _, out _);
-        string code = SqlTypeModifiers.DiagnosticCode;
-        string? error = validArguments
-            ? SqlTypeModifiers.GetError(identifier, firstArgument, secondArgument, out code, isDelimited: name.StartsWith('"'))
-            : SqlTypeModifiers.ArgumentShape;
-        if (error is not null)
-        {
-            AddTypeModifierDiagnostic($"CAST target '{name}'", error, start, end, code);
-            return null;
-        }
-
-        return SqlTypeNames.TryResolve(identifier, firstArgument, null, secondArgument, out var typeInfo)
-            ? typeInfo : null;
     }
 
     private void AddTypeModifierDiagnostic(string subject, string message, int start, int end,

@@ -203,7 +203,7 @@ public sealed partial class SqlQueryParser
             AddExpectedDiagnostic(ref lexer, "a column name");
         }
 
-        string dataType = ParseDefinitionType(ref lexer, $"Column '{columnName}'");
+        string dataType = ParseDefinitionType(ref lexer, $"Column '{columnName}'", out var resolvedType);
 
         // Parse optional constraints
         bool isNullable = true;
@@ -271,19 +271,33 @@ public sealed partial class SqlQueryParser
             }
         }
 
-        return new SqlColumnDefinition(columnName, dataType, isNullable, isPrimaryKey, defaultValue, constraints, collationName);
+        return new SqlColumnDefinition(columnName, dataType, isNullable, isPrimaryKey, defaultValue, constraints, collationName, resolvedType);
     }
 
     /// <summary>
     /// Parses the arguments of a parameterized type, <c>(n)</c> or <c>(n, m)</c>, into
     /// their normalized text. Each argument must be an unsigned integer literal. The
+    /// MAX means unbounded only for VARCHAR, NVARCHAR and VARBINARY. The
     /// arguments used to be the concatenated text of every token up to <c>)</c>, so
     /// <c>VARCHAR(25 5)</c> became VARCHAR(255), <c>DECIMAL(10, 2, 5)</c> lost its third
     /// argument and <c>VARCHAR(MAX)</c> failed in the planner with a raw format error.
     /// </summary>
-    private string ParseTypeArguments(ref TokenLexer lexer, string subject)
+    private string ParseTypeArguments(ref TokenLexer lexer, string subject, string typeName)
     {
         Advance(ref lexer); // consume (
+        if (IsKeywordOrFunction(ref lexer, "MAX") && SqlTypeModifiers.AllowsMax(typeName))
+        {
+            Advance(ref lexer);
+            if (lexer.Current.Type == TokenType.RightParen)
+            {
+                Advance(ref lexer);
+                return "(MAX)";
+            }
+            AddTypeModifierDiagnostic(subject, SqlTypeModifiers.ArgumentShape, lexer.Current.Position,
+                lexer.Current.Position + lexer.Current.Value.Length);
+            SkipToClosingParenthesis(ref lexer);
+            return string.Empty;
+        }
         if (TryReadCastArgument(ref lexer, out int? first))
         {
             int? second = null;

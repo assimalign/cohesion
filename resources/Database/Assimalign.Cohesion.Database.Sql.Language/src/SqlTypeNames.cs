@@ -18,7 +18,7 @@ public static class SqlTypeNames
     /// identity, honoring optional length/precision/scale arguments. FLOAT precision
     /// selects Float32 for 1..24 bits and Float64 for 25..53; bare FLOAT is Float64.
     /// </summary>
-    /// <param name="name">The SQL type name, case-insensitive (e.g. <c>VARCHAR</c>, <c>BIGINT</c>).</param>
+    /// <param name="name">The SQL type name without arguments, case-insensitive (e.g. <c>VARCHAR</c>, <c>DOUBLE PRECISION</c>, <c>NVARCHAR</c>).</param>
     /// <param name="length">The declared length argument, when one was written.</param>
     /// <param name="precision">The declared precision argument, when one was written.</param>
     /// <param name="scale">The declared scale argument, when one was written.</param>
@@ -58,7 +58,9 @@ public static class SqlTypeNames
             return true;
         }
 
-        if (SqlTypeModifiers.GetError(type, length, precision, scale) is not null)
+        if (SqlTypeModifiers.GetError(type, length, precision, scale) is not null ||
+            type is DatabaseType.Time or DatabaseType.DateTime or DatabaseType.DateTimeOffset or DatabaseType.TimeSpan &&
+            (length is not null || precision is not null || scale is not null))
         {
             typeInfo = null!;
             return false;
