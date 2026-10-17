@@ -215,6 +215,9 @@ The ordinary binder plans the wrapped data statement once. The session then retu
 `SqlPlanner.Describe` before calling the data executor. It retains its normal
 statement admission and transaction bracket, so an explained mutation writes nothing in
 autocommit or an explicit transaction. SQL and its client use existing result frames unchanged.
+Deferred-provisioning admission recursively walks `SqlExplainExpression.Statement`, including
+its joins and subqueries, before binding or capturing the automatic snapshot. EXPLAIN therefore
+waits on the same reserved tables as its data statement and describes the published schema.
 The shared eight-column contract lives in
 [Execution](../../Assimalign.Cohesion.Database.Execution/docs/DESIGN.md#plan-descriptions-1104).
 

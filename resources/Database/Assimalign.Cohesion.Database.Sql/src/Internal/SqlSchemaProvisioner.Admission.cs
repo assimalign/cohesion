@@ -56,6 +56,12 @@ internal sealed partial class SqlSchemaProvisioner
         RuntimeHelpers.EnsureSufficientExecutionStack();
         switch (query)
         {
+            case SqlExplainExpression explain:
+                foreach (var table in References(explain.Statement))
+                {
+                    yield return table;
+                }
+                break;
             case SqlSelectExpression select:
                 if (select.From is { } from)
                 {

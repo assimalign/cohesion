@@ -47,6 +47,8 @@ statement, so supported subqueries remain supported and excluded UPDATE/DELETE s
 excluded. DDL, transactions, nested EXPLAIN and ANALYZE receive `COHDBL001`. The wrapped
 statement's nesting measure remains subject to the engine's existing limit. SqlClauses.Explain,
 the statement corpus and the live conformance case change together; DIALECT.md is the contract.
+The engine's deferred-provisioning admission walks the wrapped statement before binding, just
+as it does for an ordinary data statement; an EXPLAIN cannot bypass a pending table reservation.
 
 ## Design intent
 

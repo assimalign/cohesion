@@ -149,6 +149,93 @@ public sealed class SqlProvisioningAdmissionTests
         await AssertRowAsync(holder, "z_existing", timeout.Token);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - EXPLAIN: deferred index admission waits and describes the same seek as SELECT")]
+    public async Task Execute_ExplainDuringDeferredIndex_ShouldWaitAndDescribePublishedPlan()
+    {
+        // Arrange: pause the existing worker hook after it reserves a populated table.
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var release = new ManualResetEventSlim();
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var builder = SqlDatabaseEngine.CreateBuilder("explain-admission");
+        builder.Options.StorageStrategy = new CrashCaptureSqlStorageStrategy();
+        await using var engine = await builder.BuildAsync(timeout.Token);
+        var database = await engine.CreateDatabaseAsync("orders", timeout.Token);
+        var items = new CompiledSchemaTable("items", "Item", [new("id", DatabaseType.Int32, false)], null, [], []);
+        await database.ApplySchemaAsync(Schema(items), timeout.Token);
+        await using var reader = await database.CreateSessionAsync(timeout.Token);
+        await using var explainer = await database.CreateSessionAsync(timeout.Token);
+        await reader.ExecuteAsync("INSERT INTO items (id) VALUES (1)", cancellationToken: timeout.Token);
+        var desired = Schema(new CompiledSchemaTable(items.Name, items.RowType, items.Columns, null,
+            [new CompiledSchemaIndex("ix_items", ["id"])], []));
+        int workerSteps = 0;
+        database.SchemaProvisioner.BeforeDeferredStep = (_, token) =>
+        {
+            Interlocked.Increment(ref workerSteps);
+            entered.TrySetResult();
+            release.Wait(token);
+        };
+        try
+        {
+            await database.SchemaProvisioner.ApplyAsync(desired, timeout.Token, deferDataScalingSteps: true);
+            await entered.Task.WaitAsync(timeout.Token);
+            using var waits = new EventSourceRecorder(EventSource.GetSources().Single(source =>
+                source.Name == "Assimalign.Cohesion.Database.Transactions"), EventLevel.Verbose);
+
+            // Act: both calls synchronously reach a real lock-manager wait before yielding.
+            const string query = "SELECT id FROM items WHERE id = 1;";
+            Task<DatabaseResult> reading = reader.ExecuteAsync(query, cancellationToken: timeout.Token).AsTask();
+            Task<DatabaseResult> describing = explainer.ExecuteAsync("EXPLAIN " + query, cancellationToken: timeout.Token).AsTask();
+            try
+            {
+                // Assert: neither can bind the pre-migration TableScan. No scheduling delay is used.
+                waits.Events.Count(written => written.EventName == "LockWaitStart" &&
+                    written.Payload is { Count: > 3 } payload && Equals(payload[0], "orders") &&
+                    Equals(payload[3], "IntentShared")).ShouldBe(2);
+                reading.IsCompleted.ShouldBeFalse();
+                describing.IsCompleted.ShouldBeFalse();
+                workerSteps.ShouldBe(1);
+            }
+            finally
+            {
+                release.Set();
+            }
+
+            await using var rows = (await reading.WaitAsync(timeout.Token)).ShouldBeAssignableTo<DatabaseResultSet>();
+            int count = 0;
+            await foreach (var row in rows.GetRowsAsync(timeout.Token))
+            {
+                row.GetValue(0).ShouldBe(1);
+                count++;
+            }
+            count.ShouldBe(1);
+            reader.LastStatementMetrics.ShouldNotBeNull().AccessPath.ShouldBe("seek:ix_items");
+            await AssertIndexPlanAsync(await describing.WaitAsync(timeout.Token), timeout.Token);
+            await AssertIndexPlanAsync(await explainer.ExecuteAsync("EXPLAIN " + query, cancellationToken: timeout.Token), timeout.Token);
+            database.Catalog.SchemaState.ShouldNotBeNull().ContentHash.ShouldBe(desired.Hash);
+        }
+        finally
+        {
+            release.Set();
+        }
+    }
+
+    private static async Task AssertIndexPlanAsync(DatabaseResult result, CancellationToken cancellationToken)
+    {
+        await using var description = result.ShouldBeOfType<DatabasePlanDescription>();
+        int seeks = 0;
+        await foreach (var row in description.GetRowsAsync(cancellationToken))
+        {
+            row.GetString(2).ShouldNotBe("TableScan");
+            if (row.GetString(2) == "IndexSeek")
+            {
+                row.GetString(3).ShouldBe("dbo.items");
+                row.GetString(4).ShouldBe("ix_items");
+                seeks++;
+            }
+        }
+        seeks.ShouldBe(1);
+    }
+
     private static SqlCompiledSchema Schema(params CompiledSchemaTable[] tables)
         => new(SqlCompiledSchema.CurrentFormat, "orders", false, [], tables, []);
 

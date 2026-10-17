@@ -90,6 +90,8 @@ Rows travel unchanged in existing SQL header/row/complete frames.
 While a code-first migration runs on populated tables, statements referencing its reserved
 tables wait before binding. This includes FK parents in CREATE TABLE, ALTER ADD COLUMN and
 ALTER ADD CONSTRAINT, so a pending unique index is available when the FK is checked.
+EXPLAIN recursively admits its wrapped statement through the same table reservations before
+planning, so its access path reflects the completed migration.
 After admission, writes enforce the completed column nullability and bounds. Unrelated
 tables remain available. Code-first changes to built-in `VARCHAR` length and `DECIMAL`
 precision use the validation-only ALTER path described above; a storage, domain, scale or
