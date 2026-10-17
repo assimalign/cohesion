@@ -343,7 +343,7 @@ null itself yields NULL. The evaluator implements the owner-selected Couchbase f
 truth table and IS [NOT] MISSING / IS [NOT] VALUED predicates, recorded in the language
 [dialect contract](../../Assimalign.Cohesion.Database.Documents.Language/docs/DESIGN.md#sql-missing-semantics-1126).
 MISSING propagates before NULL through ordinary comparison and arithmetic; `MISSING IS NULL`
-and `MISSING IS NOT NULL` produce MISSING. WHERE/HAVING retain only Boolean true.
+and `MISSING IS NOT NULL` produce MISSING. WHERE/HAVING retain values whose SQL++ Truth conversion is true.
 Equality compares scalar values and structurally compares arrays/objects.
 Range predicates compare only values of the same scalar kind. Arithmetic requires
 decimal operands; invalid numeric input and division by zero fail explicitly.
@@ -428,6 +428,17 @@ escape or trailing pattern escape raises COHDOC013 with a fixed message and sour
 The trailing-escape refusal also follows PostgreSQL `85f55534e80`,
 `src/backend/utils/adt/like_match.c:353-356`; the matcher algorithm is independent.
 Matching backtracks only to the latest `%`, with no Regex or recursive suffix exploration.
+
+All Boolean contexts share SQL++ Truth conversion: WHERE, HAVING, both operands of AND/OR,
+NOT and searched WHEN. Nonzero numbers and nonempty strings, arrays and objects are true;
+zero and empty strings/arrays/objects are false. NULL/MISSING retain their four-valued
+operator behavior and do not pass filters or select WHEN. This corrects the earlier
+Boolean-only WHERE/HAVING rule: `WHERE 1` and `HAVING COUNT(*)` now retain nonempty input.
+Couchbase [case_searched.go:73-88](https://github.com/couchbase/query/blob/master/expression/case_searched.go#L73-L88)
+calls Truth; [integer.go:171-172](https://github.com/couchbase/query/blob/master/value/integer.go#L171-L172),
+[string.go:183-185](https://github.com/couchbase/query/blob/master/value/string.go#L183-L185),
+[array.go:254-256](https://github.com/couchbase/query/blob/master/value/array.go#L254-L256) and
+[object.go:440-442](https://github.com/couchbase/query/blob/master/value/object.go#L440-L442) define these conversions.
 
 CASE takes the first matching WHEN and evaluates only its THEN. Unknown conditions do not
 select a branch; simple CASE compares with structural `=` and therefore NULL/MISSING do

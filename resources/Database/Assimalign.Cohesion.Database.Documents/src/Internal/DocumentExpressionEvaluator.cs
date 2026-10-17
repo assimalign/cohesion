@@ -62,7 +62,7 @@ internal sealed partial class DocumentExpressionEvaluator
     }
 
     internal bool Matches(OqlExpression? expression, DocumentEvaluationContext document, IReadOnlyList<DocumentEvaluationContext>? group = null)
-        => expression is null || Evaluate(expression, document, group) is true;
+        => expression is null || Truth(Evaluate(expression, document, group)) is true;
 
     // Check every reference and original JSON number before planning, including skipped
     // Boolean branches and expressions over empty inputs.
@@ -214,9 +214,11 @@ internal sealed partial class DocumentExpressionEvaluator
     private object? Binary(OqlBinaryExpression expression, DocumentEvaluationContext document, IReadOnlyList<DocumentEvaluationContext>? group)
     {
         var left = Evaluate(expression.Left, document, group);
+        if (expression.Operator is "AND" or "OR") { left = Truth(left); }
         if (expression.Operator == "AND" && left is false) { return false; }
         if (expression.Operator == "OR" && left is true) { return true; }
         var right = Evaluate(expression.Right, document, group);
+        if (expression.Operator is "AND" or "OR") { right = Truth(right); }
         if (expression.Operator == "AND")
         {
             if (right is false) { return false; }
@@ -258,7 +260,7 @@ internal sealed partial class DocumentExpressionEvaluator
         _ when value is DocumentMissing => DocumentMissing.Instance,
         "IS NULL" => value is null,
         "IS NOT NULL" => value is not null,
-        "NOT" => value is bool boolean ? !boolean : null,
+        "NOT" => Truth(value) is bool boolean ? !boolean : null,
         "+" => value is null ? null : Number(value),
         "-" => value is null ? null : -Number(value),
         _ => throw new DocumentPlanningException("COHDOC001", $"OQL operator '{operation}' is not executable."),

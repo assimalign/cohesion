@@ -165,7 +165,10 @@ is the owner-selected dialect. T/F/N/M below mean TRUE/FALSE/NULL/MISSING.
 | M | T | M | N | M |
 
 NOT maps T/F/N/M to F/T/N/M. Ordinary comparison and arithmetic propagate MISSING before
-NULL, including `MISSING + NULL`. WHERE and HAVING retain only Boolean TRUE.
+NULL, including `MISSING + NULL`. WHERE, HAVING, AND, OR, NOT and searched WHEN share SQL++ Truth conversion. Nonzero numbers
+and nonempty strings, arrays and objects are true; zero and empty strings/arrays/objects are
+false. NULL/MISSING preserve the tables above. Thus WHERE 1 and HAVING COUNT(*) retain
+nonempty input; the earlier Boolean-only filter rule is superseded.
 
 | Predicate | Present value | NULL | MISSING |
 | --- | --- | --- | --- |
@@ -287,7 +290,7 @@ another operand is MISSING. The hand-written matcher uses two pointers and only 
 percent as its backtracking point; it uses no Regex, reflection or suffix recursion.
 
 CASE tests branches in order and evaluates only the selected result. Searched WHEN selects
-Boolean TRUE; simple CASE uses structural equality, so NULL and MISSING do not match WHEN
+values with true SQL++ Truth conversion; simple CASE uses structural equality, so NULL and MISSING do not match WHEN
 values, including themselves. An unmatched CASE returns ELSE or NULL when ELSE is absent.
 A selected result may itself be MISSING. These conditional rules follow
 [simple CASE](https://github.com/couchbase/query/blob/master/expression/case_simple.go#L77-L108)

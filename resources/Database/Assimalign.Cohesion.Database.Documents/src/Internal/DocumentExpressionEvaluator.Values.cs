@@ -5,6 +5,19 @@ namespace Assimalign.Cohesion.Database.Documents.Internal;
 
 internal sealed partial class DocumentExpressionEvaluator
 {
+    // Couchbase expression/case_searched.go:73-88 calls Truth(); value/integer.go:171-172,
+    // string.go:183-185, array.go:254-256 and object.go:440-442 define non-Boolean truth.
+    // Preserve unknown values for the four-valued AND/OR/NOT tables.
+    private static object? Truth(object? value) => value switch
+    {
+        null or DocumentMissing or bool => value,
+        decimal number => number != 0,
+        string text => text.Length > 0,
+        JsonElement { ValueKind: JsonValueKind.Array } array => array.GetArrayLength() > 0,
+        JsonElement { ValueKind: JsonValueKind.Object } obj => obj.GetPropertyCount() > 0,
+        _ => false,
+    };
+
     // Couchbase value/object.go:770-799 and value/array.go:751-779:
     // a definite mismatch wins over nested NULL; otherwise NULL is not equality.
     // IN consumes only TRUE (expression/coll_in.go:103-115), as does simple CASE.

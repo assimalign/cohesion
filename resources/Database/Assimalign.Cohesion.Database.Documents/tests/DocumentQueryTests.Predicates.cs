@@ -73,6 +73,20 @@ public sealed partial class DocumentQueryTests
     [InlineData("'x%' NOT LIKE 'x!%%' ESCAPE '!'", "F")]
     [InlineData("'x\\' LIKE 'x\\' ESCAPE ''", "T")]
     [InlineData("'x%' LIKE 'x😀%' ESCAPE '😀'", "T")]
+    [InlineData("CASE WHEN 1 THEN TRUE ELSE FALSE END", "T")]
+    [InlineData("CASE WHEN -2 THEN TRUE ELSE FALSE END", "T")]
+    [InlineData("CASE WHEN 'text' THEN TRUE ELSE FALSE END", "T")]
+    [InlineData("CASE WHEN {'a':NULL} THEN TRUE ELSE FALSE END", "T")]
+    [InlineData("CASE WHEN @nullArray THEN TRUE ELSE FALSE END", "T")]
+    [InlineData("1 OR 1 / 0", "T")]
+    [InlineData("0 AND 1 / 0", "F")]
+    [InlineData("NULL OR 1", "T")]
+    [InlineData("MISSING OR ''", "M")]
+    [InlineData("0 AND MISSING", "F")]
+    [InlineData("1 AND MISSING", "M")]
+    [InlineData("NULL AND 1", "N")]
+    [InlineData("NOT 0", "T")]
+    [InlineData("NOT 'text'", "F")]
     [InlineData("CASE MISSING WHEN 1 THEN TRUE END", "N")]
     [InlineData("CASE MISSING WHEN MISSING THEN TRUE ELSE FALSE END", "F")]
     [InlineData("CASE NULL WHEN NULL THEN TRUE END", "N")]
@@ -97,6 +111,38 @@ public sealed partial class DocumentQueryTests
         row.IsNull(0).ShouldBe(expected == "N");
         row.GetValue(0).ShouldBe(expected == "T" ? true : expected == "F" ? false : null);
         filtered.Count.ShouldBe(expected == "T" ? 1 : 0);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Documents] - Boolean contexts: all apply SQL++ Truth to non-Boolean values")]
+    [InlineData("1", true)]
+    [InlineData("-2", true)]
+    [InlineData("0", false)]
+    [InlineData("'text'", true)]
+    [InlineData("''", false)]
+    [InlineData("{'a':NULL}", true)]
+    [InlineData("{}", false)]
+    [InlineData("@nullArray", true)]
+    [InlineData("@emptyArray", false)]
+    public async Task Execute_NonBooleanContexts_ShouldUseSharedTruthAsync(string expression, bool truth)
+    {
+        // Arrange
+        await using var engine = DocumentDatabaseEngine.Create("truth", new());
+        var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        var collection = await session.CreateCollectionAsync("items", CancellationToken.None);
+        await PutAsync(collection, session, "one", "{}");
+        var parameters = PredicateParameters();
+        // Act
+        var row = (await RowsAsync(session, $"SELECT CASE WHEN {expression} THEN TRUE ELSE FALSE END AS c, " +
+            $"({expression}) AND TRUE AS a, TRUE AND ({expression}) AS b, " +
+            $"({expression}) OR FALSE AS d, FALSE OR ({expression}) AS e, NOT ({expression}) AS n FROM items", parameters)).Single();
+        var filtered = await RowsAsync(session, $"SELECT 1 FROM items WHERE {expression}", parameters);
+        var groups = await RowsAsync(session, $"SELECT COUNT(*) FROM items HAVING {expression}", parameters);
+        // Assert
+        Enumerable.Range(0, 5).Select(row.GetValue).ShouldBe(Enumerable.Repeat((object)truth, 5));
+        row.GetValue(5).ShouldBe(!truth);
+        filtered.Count.ShouldBe(truth ? 1 : 0);
+        groups.Count.ShouldBe(truth ? 1 : 0);
     }
 
     private static Dictionary<string, object?> PredicateParameters()

@@ -2212,4 +2212,8 @@ The Documents OQL dialect uses SQL++ value equality for `=`, `!=`, IN and simple
 Otherwise equal objects/arrays containing NULL have NULL equality, so they do not match
 an IN item or a simple WHEN. See the [OQL contract](../../Assimalign.Cohesion.Database.Documents.Language/docs/DESIGN.md#predicates-and-case-1127)
 and the [engine truth tables](../../Assimalign.Cohesion.Database.Documents/docs/DESIGN.md#predicate-truth-tables-1127)
-for the Couchbase source anchors. SQL's own predicate rules are unchanged.
+for the Couchbase source anchors. WHERE, HAVING, AND, OR, NOT and searched WHEN share
+SQL++ Truth: nonzero numbers and nonempty strings, arrays and objects are true; zero and
+empty strings/arrays/objects are false. NULL/MISSING retain four-valued logic. In OQL,
+`WHERE 1` and `HAVING COUNT(*)` now retain nonempty input, correcting Boolean-only filtering.
+SQL's own predicate rules are unchanged.

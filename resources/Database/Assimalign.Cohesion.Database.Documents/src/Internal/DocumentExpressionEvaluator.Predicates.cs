@@ -50,7 +50,7 @@ internal sealed partial class DocumentExpressionEvaluator
         foreach (var branch in expression.Branches)
         {
             var condition = Evaluate(branch.Key, document, group);
-            bool matches = expression.Operand is null ? condition is true :
+            bool matches = expression.Operand is null ? Truth(condition) is true :
                 operand is not null and not DocumentMissing && condition is not null and not DocumentMissing && Equal(operand, condition) is true;
             if (matches) { return Evaluate(branch.Value, document, group); }
         }
