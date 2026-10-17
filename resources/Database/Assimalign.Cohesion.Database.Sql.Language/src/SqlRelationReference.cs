@@ -9,6 +9,6 @@ public abstract class SqlRelationReference
         Alias = alias;
     }
 
-    /// <summary>Gets the alias that qualifies this relation's columns.</summary>
+    /// <summary>Gets the alias that qualifies this relation's columns, or null for an unaliased named table.</summary>
     public string? Alias { get; }
 }

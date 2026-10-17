@@ -309,12 +309,14 @@ internal sealed partial class SqlExpressionEvaluator
         if (_relations is IReadOnlyList<SqlRelationBinding> bindings)
         {
             int resolved = -1;
+            bool localQualifier = false;
             foreach (var binding in bindings)
             {
                 if (!MatchesQualifier(binding, column))
                 {
                     continue;
                 }
+                localQualifier |= column.TableAlias is not null;
 
                 for (int i = 0; i < binding.Source.Columns.Count; i++)
                 {
@@ -333,12 +335,12 @@ internal sealed partial class SqlExpressionEvaluator
                 }
             }
 
-            return resolved >= 0 ? resolved : throw new SqlPlanningException("COHSQLE015", $"Unknown column '{ColumnName(column)}'.", column.Location);
+            return resolved >= 0 ? resolved : throw UnknownColumn(column, localQualifier);
         }
 
         if (_relations is SqlRelationReference reference && !MatchesQualifier(reference, column))
         {
-            throw new SqlPlanningException("COHSQLE015", $"Unknown column '{ColumnName(column)}'.", column.Location);
+            throw UnknownColumn(column);
         }
 
         for (int i = 0; i < _columns.Count; i++)
@@ -349,8 +351,12 @@ internal sealed partial class SqlExpressionEvaluator
             }
         }
 
-        throw new SqlPlanningException("COHSQLE015", $"Unknown column '{ColumnName(column)}'.", column.Location);
+        throw UnknownColumn(column, column.TableAlias is not null && _relations is SqlRelationReference);
     }
+
+    private static SqlPlanningException UnknownColumn(SqlColumnReferenceExpression column, bool localQualifier = false)
+        => new("COHSQLE015", string.Format(CultureInfo.CurrentCulture, ErrorMessages.UnknownColumn, ColumnName(column)), column.Location)
+        { UnresolvedColumn = column, HasLocalQualifier = localQualifier };
 
     /// <summary>
     /// Resolves a column reference to its declared type, or null when the evaluator's scope
@@ -552,7 +558,7 @@ internal sealed partial class SqlExpressionEvaluator
     private static bool MatchesQualifier(SqlRelationBinding binding, SqlColumnReferenceExpression column)
         => MatchesQualifier(binding.Reference, column);
 
-    private static bool MatchesQualifier(SqlRelationReference reference, SqlColumnReferenceExpression column)
+    internal static bool MatchesQualifier(SqlRelationReference reference, SqlColumnReferenceExpression column)
     {
         if (column.TableAlias is null)
         {

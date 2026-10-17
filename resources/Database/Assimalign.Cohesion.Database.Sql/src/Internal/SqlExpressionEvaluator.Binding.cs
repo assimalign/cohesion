@@ -49,8 +49,12 @@ internal sealed partial class SqlExpressionEvaluator
     /// <param name="collation">The collation the expression's values compare under.</param>
     /// <returns>The bound expression.</returns>
     internal SqlBoundExpression Bind(SqlExpression expression, out SqlBoundCollation collation)
+        => Bind(expression, out collation, out _);
+
+    /// <summary>Retains collation provenance for projected expressions without resolving deferred terms early.</summary>
+    internal SqlBoundExpression Bind(SqlExpression expression, out SqlBoundCollation collation, out SqlCollationCandidate candidate)
     {
-        var bound = Bind(expression, out SqlCollationCandidate candidate);
+        var bound = Bind(expression, out candidate);
         collation = SqlBoundCollation.Of(candidate, default, _defaultCollation);
         return bound;
     }

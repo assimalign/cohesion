@@ -63,10 +63,10 @@ public sealed partial class SqlQueryParser
         {
             var select = ParseSelect(ref lexer);
 
-            // An abandoned statement keeps none of its tree, so there is nothing to check.
-            if (!NestingExceeded)
+            // Derived references require catalog bindings to distinguish siblings, enclosing scopes and unknown names.
+            if (!NestingExceeded && !derived)
             {
-                ValidateSubqueryReferences(select, derived);
+                ValidateSubqueryReferences(select);
             }
 
             return select;
@@ -139,7 +139,7 @@ public sealed partial class SqlQueryParser
         return clause.Length > 0;
     }
 
-    private void ValidateSubqueryReferences(SqlSelectExpression select, bool derived)
+    private void ValidateSubqueryReferences(SqlSelectExpression select)
     {
         var qualifiers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var item in select.From) { AddSubqueryQualifier(item.Table, qualifiers); }
@@ -153,27 +153,27 @@ public sealed partial class SqlQueryParser
 
         foreach (var column in select.Columns)
         {
-            ValidateSubqueryReference(column.Expression, qualifiers, derived);
+            ValidateSubqueryReference(column.Expression, qualifiers);
         }
         foreach (var item in select.From)
         {
             foreach (var join in item.Joins)
             {
-                ValidateSubqueryReference(join.Condition, qualifiers, derived);
+                ValidateSubqueryReference(join.Condition, qualifiers);
             }
         }
-        ValidateSubqueryReference(select.Where, qualifiers, derived);
+        ValidateSubqueryReference(select.Where, qualifiers);
         foreach (var group in select.GroupBy)
         {
-            ValidateSubqueryReference(group, qualifiers, derived);
+            ValidateSubqueryReference(group, qualifiers);
         }
-        ValidateSubqueryReference(select.Having, qualifiers, derived);
+        ValidateSubqueryReference(select.Having, qualifiers);
         foreach (var order in select.OrderBy)
         {
-            ValidateSubqueryReference(order.Expression, qualifiers, derived);
+            ValidateSubqueryReference(order.Expression, qualifiers);
         }
-        ValidateSubqueryReference(select.Limit, qualifiers, derived);
-        ValidateSubqueryReference(select.Offset, qualifiers, derived);
+        ValidateSubqueryReference(select.Limit, qualifiers);
+        ValidateSubqueryReference(select.Offset, qualifiers);
     }
 
     private static void AddSubqueryQualifier(SqlRelationReference? table, HashSet<string> qualifiers)
@@ -196,7 +196,7 @@ public sealed partial class SqlQueryParser
     // trees thousands of levels deep, and a left-associative chain that deep is built in a loop
     // without the parser recursing (#1151). Operands pop in source order, so the diagnostics
     // come out in the order the references appear.
-    private void ValidateSubqueryReference(SqlExpression? root, HashSet<string> qualifiers, bool derived)
+    private void ValidateSubqueryReference(SqlExpression? root, HashSet<string> qualifiers)
     {
         if (root is null)
         {
@@ -216,9 +216,7 @@ public sealed partial class SqlQueryParser
                     !(column.SchemaName is not null && qualifiers.Contains($"*.{column.TableAlias}")))
                 {
                     AddUnsupportedSurfaceDiagnostic(column.Location?.Start ?? 0, column.Location?.End ?? 0,
-                        derived
-                            ? $"A derived table cannot reference sibling relations without LATERAL: '{qualifier}.{column.ColumnName}'."
-                            : $"Correlated SQL subqueries are not supported: reference '{qualifier}.{column.ColumnName}' is outside the subquery's local FROM/JOIN scope.");
+                        $"Correlated SQL subqueries are not supported: reference '{qualifier}.{column.ColumnName}' is outside the subquery's local FROM/JOIN scope.");
                 }
 
                 continue;

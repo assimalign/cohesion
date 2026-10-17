@@ -72,10 +72,15 @@ The public `SqlRelationReference` variant set has sealed named-table and derived
 query leaves; DML/DDL targets keep `SqlTableReference`. FROM and JOIN retain the
 variant directly. Derived parsing uses the existing subquery and expression depth
 budgets, requires an alias, and preserves an optional column-name list. The engine
-checks output width before execution. Rendering and query depth visit every body.
+checks full output-name width and rejects blank names with COHSQLE013 before execution.
+Rendering and query depth visit every body. Derived-name classification waits for
+catalog binding: only actual sibling references require LATERAL, enclosing-query
+references retain the correlation refusal, and unknown/hidden names retain COHSQLE015.
 Uncorrelated UPDATE/DELETE WHERE children use ordinary subquery grammar; UPDATE
 SET, lateral references and correlation remain explicit capability refusals.
-The shared #1112 outer-ordering and #1114 set-operation pins remain excluded.
+The planner applies the shared #1112 outer-ordering pin only to keys bound to
+derived outputs, including projection aliases and ordinals. Ordering inside derived
+bodies executes, including over nested derived inputs. The #1114 set-operation pin remains excluded.
 
 ## Design intent
 
@@ -235,7 +240,8 @@ rename happened before external consumers existed.
 
 ## Non-goals (current dialect)
 
-Set operations, CTEs, window functions, views, `ON UPDATE`,
+Set operations, CTEs, window functions, views, correlated queries, LATERAL,
+outer ordering keys bound to derived outputs, UPDATE SET subqueries, `ON UPDATE`,
 `MERGE`, `RETURNING`, savepoints, isolation-level syntax, and cost-hint syntax.
 Each is an additive dialect extension when its engine feature
 lands.

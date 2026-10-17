@@ -129,12 +129,18 @@ internal sealed record SqlProjection(string Name, int? ColumnOrdinal, SqlExpress
     /// <summary>Gets the collation <c>DISTINCT</c> compares and hashes the output's values under.</summary>
     internal SqlBoundCollation Collation { get; init; }
 
+    /// <summary>Gets provenance needed only while binding a derived output; absent on ordinary stored queries.</summary>
+    internal SqlProjectionMetadata? Metadata { get; init; }
+
     /// <summary>
     /// Gets whether a grouped output may be NULL: false only for a bare call of an aggregate that
     /// never returns NULL, such as <c>COUNT</c>, which counts 0 for an empty group.
     /// </summary>
     internal bool IsNullable { get; init; } = true;
 }
+
+/// <summary>Projected expression metadata retained across derived materialization.</summary>
+internal sealed record SqlProjectionMetadata(SqlCollationCandidate Collation, SqlCatalogColumn? SourceColumn);
 
 internal sealed record SqlSelectPlan(
     SqlCatalogTable Table,

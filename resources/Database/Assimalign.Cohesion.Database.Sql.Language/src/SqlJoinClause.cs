@@ -11,7 +11,7 @@ public sealed class SqlJoinClause
     /// Initializes a new <see cref="SqlJoinClause"/>.
     /// </summary>
     /// <param name="joinType">The type of join.</param>
-    /// <param name="table">The table being joined.</param>
+    /// <param name="table">The named or derived relation being joined.</param>
     /// <param name="condition">The ON condition, if any.</param>
     /// <param name="usingColumns">The ordered USING column names; empty for ON or CROSS.</param>
     internal SqlJoinClause(SqlJoinType joinType, SqlRelationReference table, SqlExpression? condition, IReadOnlyList<string> usingColumns)
@@ -28,7 +28,7 @@ public sealed class SqlJoinClause
     public SqlJoinType JoinType { get; }
 
     /// <summary>
-    /// Gets the table being joined.
+    /// Gets the named or derived relation being joined.
     /// </summary>
     public SqlRelationReference Table { get; }
 

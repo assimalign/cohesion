@@ -101,25 +101,6 @@ public sealed partial class SqlQueryParser
         var orderBy = new List<SqlOrderByColumn>();
         if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "ORDER"))
         {
-            // Shared #1112/#1113 pin: ordering a derived output becomes advertised
-            // when the ordering item lands as well. Ordering inside its body is independent.
-            foreach (var item in from)
-            {
-                if (item.Table is SqlDerivedTableReference)
-                {
-                    AddUnsupportedSurfaceDiagnostic(lexer.Current.Position, lexer.Current.Position + lexer.Current.Value.Length,
-                        "SQL derived-table SUBQUERY output ordering awaits the ordering extension.");
-                    break;
-                }
-                bool derivedJoin = false;
-                foreach (var join in item.Joins) { derivedJoin |= join.Table is SqlDerivedTableReference; }
-                if (derivedJoin)
-                {
-                    AddUnsupportedSurfaceDiagnostic(lexer.Current.Position, lexer.Current.Position + lexer.Current.Value.Length,
-                        "SQL derived-table SUBQUERY output ordering awaits the ordering extension.");
-                    break;
-                }
-            }
             Advance(ref lexer);
             ExpectKeyword(ref lexer, "BY", "BY after ORDER");
 

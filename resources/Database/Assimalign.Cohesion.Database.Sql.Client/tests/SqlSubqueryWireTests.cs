@@ -11,6 +11,29 @@ namespace Assimalign.Cohesion.Database.Sql.Client.Tests;
 /// <summary>Exercises executable subquery forms through SqlDatabaseServer and the production typed client.</summary>
 public sealed class SqlSubqueryWireTests
 {
+    [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - Derived tables: blank output names fail the statement and preserve the transaction")]
+    [InlineData("SELECT * FROM (SELECT id AS \"\" FROM users) d")]
+    [InlineData("SELECT * FROM (SELECT id FROM users) d (\" \")")]
+    public async Task QueryAsync_BlankDerivedName_ShouldKeepConnectionUsable(string sql)
+    {
+        // Arrange
+        await using var harness = await SqlClientTestHarness.StartAsync();
+        await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
+        await ExecuteAsync(connection, "BEGIN TRANSACTION");
+        await ExecuteAsync(connection, "UPDATE users SET name = 'pending' WHERE id = 1");
+
+        // Act
+        var error = await Should.ThrowAsync<SqlClientException>(() => QueryAsync(connection, sql));
+
+        // Assert
+        error.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
+        error.ConnectionUsable.ShouldBeTrue();
+        error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE013");
+        (await QueryAsync(connection, "SELECT name FROM users WHERE id = 1")).ShouldHaveSingleItem()[0].ShouldBe("pending");
+        await ExecuteAsync(connection, "ROLLBACK");
+        (await QueryAsync(connection, "SELECT name FROM users WHERE id = 1")).ShouldHaveSingleItem()[0].ShouldBe("ada");
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - Subquery: derived joins and DML predicates execute over the wire")]
     public async Task ExecuteAsync_DerivedAndDmlSubqueries_ShouldReturnRowsAndAffectedCounts()
     {

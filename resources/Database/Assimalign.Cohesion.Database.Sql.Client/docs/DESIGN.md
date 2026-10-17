@@ -1,5 +1,9 @@
 # Database.Sql.Client — Design
 
+Blank derived output names fail planning with COHSQLE013 and arrive as an
+ExecutionFailure with ConnectionUsable true. The connection and an explicit
+transaction remain usable; the wire regression verifies pending writes and rollback.
+
 ## Derived relations and DML predicate subqueries (#1113, part b)
 
 The existing query and command exchanges carry derived-table results and

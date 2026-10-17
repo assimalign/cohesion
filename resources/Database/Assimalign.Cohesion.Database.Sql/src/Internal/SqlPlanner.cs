@@ -102,7 +102,7 @@ internal sealed partial class SqlPlanner
             throw new SqlPlanningException("COHSQLE013", "SELECT requires a FROM table.", select.Location);
         }
 
-        var source = ResolveRelation(select.From[0].Table);
+        var source = ResolveRelation(select.From[0].Table, select);
         var table = source.Table;
         var systemView = source.View;
         IReadOnlyList<SqlRelationBinding>? bindings = null;
@@ -125,7 +125,7 @@ internal sealed partial class SqlPlanner
             return PlanGroup(select, table, systemView, columns, bindings, evaluator, steps);
         }
 
-        var projections = new List<SqlProjection>();
+        var projections = new List<SqlProjection>(select.Columns.Count);
         foreach (var column in select.Columns)
         {
             if (column.Expression is SqlStarExpression)
@@ -145,10 +145,11 @@ internal sealed partial class SqlPlanner
             else
             {
                 ValidateExpression(column.Expression, evaluator, _subqueryTypes);
-                var value = evaluator.Bind(column.Expression, out SqlBoundCollation collation);
+                var value = evaluator.Bind(column.Expression, out SqlBoundCollation collation, out var candidate);
                 projections.Add(new SqlProjection(
                     column.Alias ?? $"column{projections.Count + 1}", null, column.Expression,
-                    GroupExpressionType(column.Expression, columns, evaluator)) { Value = value, Collation = collation, MaxLength = evaluator.MaximumLengthOf(column.Expression) });
+                    GroupExpressionType(column.Expression, columns, evaluator)) { Value = value, Collation = collation,
+                        Metadata = CaptureProjectionMetadata(candidate), MaxLength = evaluator.MaximumLengthOf(column.Expression) });
             }
         }
 
@@ -160,6 +161,7 @@ internal sealed partial class SqlPlanner
         }
 
         var orderByProjections = BindOrderByProjections(select, projections, outputOrdinals?.Count ?? columns.Count);
+        if (bindings is not null && select.OrderBy.Count > 0) { RejectDerivedOrdering(select, projections, orderByProjections, evaluator, bindings); }
         foreach (var orderBy in select.OrderBy)
         {
             ValidateExpression(orderBy.Expression, evaluator, _subqueryTypes, orderByProjections);
@@ -196,11 +198,11 @@ internal sealed partial class SqlPlanner
     }
 
     /// <summary>Resolves a read source and requests the statement's one catalog image at binding time.</summary>
-    private SqlRelationSource ResolveRelation(SqlRelationReference reference)
+    private SqlRelationSource ResolveRelation(SqlRelationReference reference, SqlSelectExpression? owner = null)
     {
         if (reference is SqlDerivedTableReference derived)
         {
-            return BindDerivedTable(derived);
+            return BindDerivedTable(derived, owner);
         }
         var named = (SqlTableReference)reference;
         if (SqlSystemViews.Find(named) is { } view)
@@ -212,7 +214,7 @@ internal sealed partial class SqlPlanner
     }
 
     /// <summary>A projection that passes a source column through, with the collation <c>DISTINCT</c> compares it under.</summary>
-    private static SqlProjection PassThrough(string name, int ordinal, IReadOnlyList<SqlCatalogColumn> columns,
+    private SqlProjection PassThrough(string name, int ordinal, IReadOnlyList<SqlCatalogColumn> columns,
         SqlExpressionEvaluator scope, bool merged = false)
     {
         var output = merged ? scope.MergedColumn(ordinal) : null;
@@ -220,6 +222,7 @@ internal sealed partial class SqlPlanner
         return new(name, output is null ? ordinal : null, null, column.Type.Type)
         {
             Value = output?.Value, Collation = new SqlBoundCollation(scope.ResolveColumnCollation(ordinal)),
+            Metadata = CaptureProjectionMetadata(new SqlCollationCandidate(column.Collation, column.Collation is null ? 0 : 2), column),
             MaxLength = column.Type.MaxLength, IsNullable = column.IsNullable,
         };
     }
@@ -770,7 +773,7 @@ internal sealed partial class SqlPlanner
     /// <exception cref="DatabaseException">An assignment or the filter contains an aggregate.</exception>
     private SqlPlan PlanUpdate(SqlUpdateExpression update)
     {
-        var queries = BindSubqueries(update.Where is null ? [] : WalkSubqueries(update.Where));
+        var queries = BindDmlSubqueries(update.Where, update.Table);
         var table = ResolveTable(update.Table);
         var evaluator = new SqlExpressionEvaluator(table.Columns, _parameters,
             defaultCollation: _catalog.DefaultCollation, subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken, relation: update.Table);
@@ -809,7 +812,7 @@ internal sealed partial class SqlPlanner
     /// <exception cref="DatabaseException">The filter contains an aggregate.</exception>
     private SqlPlan PlanDelete(SqlDeleteExpression delete)
     {
-        var queries = BindSubqueries(delete.Where is null ? [] : WalkSubqueries(delete.Where));
+        var queries = BindDmlSubqueries(delete.Where, delete.Table);
         var table = ResolveTable(delete.Table);
 
         SqlBoundExpression? where = null;

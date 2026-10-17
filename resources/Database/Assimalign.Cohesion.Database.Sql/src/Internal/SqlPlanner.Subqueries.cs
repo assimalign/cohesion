@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Runtime.CompilerServices;
 
@@ -35,12 +36,13 @@ internal sealed partial class SqlPlanner
     /// </summary>
     private SqlPlan PlanSubqueries(SqlSelectExpression select)
     {
-        var queries = BindSubqueries(SubquerySources(select));
+        var queries = BindSubqueries(SubquerySources(select), select);
         var input = PlanSelectCore(select);
         return queries.Count == 0 ? input : new SqlSubqueryPlan(input, queries);
     }
 
-    private IReadOnlyList<SqlSubqueryBinding> BindSubqueries(IEnumerable<SqlExpression> sources)
+    private IReadOnlyList<SqlSubqueryBinding> BindSubqueries(IEnumerable<SqlExpression> sources,
+        SqlSelectExpression? owner = null, SqlTableReference? dml = null)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
         var queries = new List<SqlSubqueryBinding>();
@@ -49,51 +51,58 @@ internal sealed partial class SqlPlanner
             switch (expression)
             {
                 case SqlSubqueryExpression scalar:
-                    Bind(scalar, scalar.Select, SqlSubqueryKind.Scalar, false);
+                    BindSubquery(scalar, scalar.Select, SqlSubqueryKind.Scalar, false, queries, owner, dml);
                     break;
                 case SqlExistsExpression exists:
-                    Bind(exists, exists.Subquery, SqlSubqueryKind.Exists, exists.IsNegated);
+                    BindSubquery(exists, exists.Subquery, SqlSubqueryKind.Exists, exists.IsNegated, queries, owner, dml);
                     break;
                 case SqlInExpression { Subquery: not null } member:
-                    Bind(member, member.Subquery, SqlSubqueryKind.Set, false);
+                    BindSubquery(member, member.Subquery, SqlSubqueryKind.Set, false, queries, owner, dml);
                     break;
             }
         }
 
         return queries;
+    }
 
-        void Bind(SqlExpression source, SqlSelectExpression query, SqlSubqueryKind kind, bool negated)
+    // Keep child binding out of a closure: a stored-only query allocates no scope state.
+    private void BindSubquery(SqlExpression source, SqlSelectExpression query, SqlSubqueryKind kind, bool negated,
+        List<SqlSubqueryBinding> queries, SqlSelectExpression? owner, SqlTableReference? dml)
+    {
+        if (_subqueryDepth >= 32)
         {
-            if (_subqueryDepth >= 32)
-            {
-                throw new SqlUnsupportedQueryException("Subquery nesting exceeds the supported maximum depth of 32.", location: source.Location);
-            }
-            SqlPlan child;
-            _subqueryDepth++;
-            try
-            {
-                child = PlanSelect(query);
-            }
-            catch (DatabaseException exception) when (exception.Message.StartsWith("Unknown column '", StringComparison.Ordinal))
-            {
-                throw new SqlUnsupportedQueryException($"Correlated subqueries are not supported; a subquery column must resolve in its local FROM/JOIN scope. {exception.Message}", exception, source.Location);
-            }
-            finally
-            {
-                _subqueryDepth--;
-            }
-            var projections = SubqueryProjections(child);
-            if (kind != SqlSubqueryKind.Exists && projections.Count != 1)
-            {
-                throw new SqlPlanningException("COHSQLE013", $"{(kind == SqlSubqueryKind.Scalar ? "Scalar" : "IN")} subquery requires exactly one output column; found {projections.Count}.", source.Location);
-            }
-            var type = kind == SqlSubqueryKind.Exists ? DatabaseType.Boolean : projections[0].Type;
-            var collation = kind == SqlSubqueryKind.Exists ? _catalog.DefaultCollation : SubqueryCollation(child);
-            var slot = new SqlSubquerySlot(_subquerySlotCount++, kind, collation, type);
-            _subqueryTypes[source] = type;
-            _subquerySlots[source] = slot;
-            queries.Add(new SqlSubqueryBinding(child, slot.Id, type, collation, kind, negated));
+            throw new SqlUnsupportedQueryException(ErrorMessages.SubqueryNestingDepth, location: source.Location);
         }
+        SqlPlan child;
+        (_queryScopes ??= new()).Push((owner, dml, null));
+        _subqueryDepth++;
+        try
+        {
+            child = PlanSelect(query);
+        }
+        catch (SqlPlanningException exception) when (!exception.HasLocalQualifier && exception.UnresolvedColumn is { } column &&
+            _queryScopes.ToArray().Any(scope => ReferenceBindsInScope(scope.Select, scope.Dml, column)))
+        {
+            throw new SqlUnsupportedQueryException(ErrorMessages.CorrelatedSubquery, exception, exception.UnresolvedColumn!.Location);
+        }
+        finally
+        {
+            _subqueryDepth--;
+            _queryScopes.Pop();
+        }
+        var projections = SubqueryProjections(child);
+        if (kind != SqlSubqueryKind.Exists && projections.Count != 1)
+        {
+            throw new SqlPlanningException("COHSQLE013", string.Format(CultureInfo.CurrentCulture,
+                ErrorMessages.SubqueryColumnCount, kind == SqlSubqueryKind.Scalar ? "Scalar" : "IN", projections.Count), source.Location);
+        }
+        var type = kind == SqlSubqueryKind.Exists ? DatabaseType.Boolean : projections[0].Type;
+        var collation = kind == SqlSubqueryKind.Exists ? _catalog.DefaultCollation : SubqueryCollation(child);
+        var slot = new SqlSubquerySlot(_subquerySlotCount++, kind, collation, type);
+        // The slot keeps the membership element type; the predicate itself produces BOOLEAN.
+        _subqueryTypes[source] = kind == SqlSubqueryKind.Scalar ? type : DatabaseType.Boolean;
+        _subquerySlots[source] = slot;
+        queries.Add(new SqlSubqueryBinding(child, slot.Id, type, collation, kind, negated));
     }
 
     /// <summary>

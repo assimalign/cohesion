@@ -183,7 +183,10 @@ row, and the key's collation follows the projection's source, fixed before any r
 is sorted ([Bound expressions](#bound-expressions-e1)). Nothing reconstructs language
 AST nodes or requires cross-assembly internal access. Sorting is stable, with NULL first ascending and
 last descending, followed by DISTINCT and LIMIT/OFFSET. Explicit NULL placement
-and derived-table ordering remain capability errors. The exact syntax contract
+and outer ordering keys bound to derived outputs remain capability errors. Stored-input
+keys still execute when a derived relation participates; ordering inside derived bodies
+also executes over nested derived inputs. The planner decides the pin after alias,
+ordinal and source bindings exist. The exact syntax contract
 and execution evidence are in
 [DIALECT.md](../../Assimalign.Cohesion.Database.Sql.Language/docs/DIALECT.md).
 
@@ -237,9 +240,11 @@ sources; value conversions use the literal insert rules. Both insert forms call
 the same preparation, default/nullability/CHECK/FK/UNIQUE validation, locking,
 index maintenance and transactional apply path.
 
-Correlation is deliberately excluded: qualified outer references receive
-`COHDBL001` in language validation, and catalog binding rejects any nested column
-that cannot resolve in its local scope. Parsing and planning enforce at most 32
+Correlation is deliberately excluded: qualified outer references in ordinary subqueries receive
+`COHDBL001` in language validation. Derived references wait for catalog binding:
+only references that actually bind to sibling FROM items name LATERAL; enclosing-query
+references keep the correlation refusal and unknown names retain COHSQLE015.
+Parsing and planning enforce at most 32
 subquery levels, counting derived bodies too. UPDATE SET, VALUES, CHECK/DEFAULT and LIMIT/OFFSET expression
 subqueries, quantified comparisons, CTEs and lateral joins remain
 outside the profile. SELECT continues to require FROM. Subquery resolution binds
@@ -265,6 +270,19 @@ each body once with the enclosing statement context, buffers rows only while its
 consumer runs, and detaches retained binary cells on delivery under the existing
 ownership rules. EXPLAIN emits DerivedTable with the complete child subtree.
 Single derived inputs use the same relation consumer as N-way joins.
+Their EXPLAIN root is Select with a DerivedTable child; only multiple relations
+emit NestedLoopJoin and JoinStep. Output metadata follows the projected expression
+(PostgreSQL `parse_relation.c:1715-1721`): qualified USING references keep physical
+types; unqualified merged outputs keep their common type and shared domain.
+Projection collation candidates retain provenance, so default-only computed text
+does not become a declared override. Declared source columns and explicit inner
+COLLATE become declared strength (2); ties between declared collations keep the
+existing left-operand rule. IN/NOT IN expression types are Boolean while
+their subquery slots retain the membership element type. Empty or whitespace-only
+derived output names and partial or excessive output-name lists fail planning with
+COHSQLE013, before row reads, preserving wire sessions and open transactions.
+Admission visits derived bodies and waits for deferred table/index publication
+before binding, including when EXPLAIN wraps the query.
 
 UPDATE/DELETE WHERE use the same pre-execution subquery bindings as SELECT;
 their existing mutation plans consume typed slots. Children read the pre-statement
@@ -295,6 +313,7 @@ SQL's combined operators, not a shared or independently executable algebra:
 | `NestedLoopJoin`, `JoinStep` | N-way written-order join; each JoinStep describes its kind and has its own scan or correlated index seek child |
 | `Group` | Group keys, aggregates, HAVING and result modifiers above the actual input plan |
 | `SystemView` | A qualified virtual relation; no fabricated stored-table access |
+| `DerivedTable` | Aliased materialized query source with its complete child plan; a single source has a Select parent |
 | `Subqueries` | Uncorrelated child plans in execution order, followed by the enclosing input |
 | `Insert`, `InsertSelect`, `Update`, `Delete` | Intended mutation and target; a source query or target scan is a child, never executed by EXPLAIN |
 | `CreateTable`, `DropTable`, `AddColumn`, `AlterColumn`, `DropColumn`, `AddConstraint`, `DropConstraint`, `CreateIndex`, `DropIndex`, `Definition` | Complete internal DDL mappings, including SQL function/domain definitions; EXPLAIN DDL remains refused at parse time |
@@ -1864,8 +1883,10 @@ the engine continues to authorize session operations against schema-owned object
 UPDATE SET values and UPDATE/DELETE predicates bind against the target relation, just as
 SELECT expressions do. An alias hides the base name; an unknown or hidden qualifier fails
 planning with located COHSQLE015 before any row changes, leaving an explicit transaction
-active. This follows PostgreSQL `src/backend/parser/parse_relation.c:3759`. Subqueries in
-UPDATE and DELETE retain the grammar's COHDBL001 refusal.
+active. This follows PostgreSQL `src/backend/parser/parse_relation.c:3759`. Uncorrelated
+UPDATE/DELETE WHERE subqueries execute, including aggregates inside child queries;
+aggregates outside children remain rejected. UPDATE SET subqueries and correlation
+retain COHDBL001.
 
 ## Virtual system relations (C1)
 
@@ -1912,7 +1933,7 @@ readonly struct: it fixes the MVCC row snapshot at construction and stores the l
 image in the existing shared `SqlStatementMetrics` state. Every context copy and nested plan
 uses that same state,
 so subqueries, derived tables, DML predicates and INSERT sources (and future CTEs, set operands, view
-bodies and UPDATE/DELETE predicate queries) inherit capture without an AST walk. Ordinary
+bodies) inherit capture without an AST walk. Ordinary
 stored-only statements never capture metadata or allocate a context/source/binding wrapper;
 the Release ReadCommitted allocation regression retains the pre-join per-query budget.
 Executing a system plan without a catalog
@@ -4403,7 +4424,7 @@ takes 35 and 16 µs.
 ## Non-goals (current cut)
 
 RIGHT/FULL OUTER, NATURAL and LATERAL joins, qualified wildcards, correlated
-subqueries, outer derived-table ordering, explicit NULL placement, `Serializable`
+subqueries, outer ordering keys bound to derived outputs, explicit NULL placement, `Serializable`
 isolation (rejected at begin), cost-based optimization (selection stays
 rule-based), index seeks for UPDATE/DELETE target collection, and index-only
 result production (a seek always fetches the row). (Row-level MVCC visibility

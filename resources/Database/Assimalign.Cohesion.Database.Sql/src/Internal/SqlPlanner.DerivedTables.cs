@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Language;
@@ -10,24 +11,43 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 internal sealed partial class SqlPlanner
 {
-    private SqlRelationSource BindDerivedTable(SqlDerivedTableReference derived)
+    private Stack<(SqlSelectExpression? Select, SqlTableReference? Dml, SqlDerivedTableReference? Derived)>? _queryScopes;
+
+    private bool InDerivedBody => _queryScopes?.Any(scope => scope.Derived is not null) ?? false;
+
+    private SqlProjectionMetadata? CaptureProjectionMetadata(SqlCollationCandidate candidate, SqlCatalogColumn? source = null)
+        => InDerivedBody ? new(candidate, source) : null;
+
+    private SqlRelationSource BindDerivedTable(SqlDerivedTableReference derived, SqlSelectExpression? owner)
     {
         if (_subqueryDepth >= 32)
         {
             throw new SqlUnsupportedQueryException(ErrorMessages.SubqueryNestingDepth, location: derived.Query.Location);
         }
         SqlPlan child;
+        (_queryScopes ??= new()).Push((owner, null, derived));
         _subqueryDepth++;
         try
         {
             child = PlanSelect(derived.Query);
         }
-        catch (DatabaseException exception) when (exception.Message.StartsWith("Unknown column '", StringComparison.Ordinal))
+        catch (SqlPlanningException exception) when (exception.UnresolvedColumn is not null && !exception.HasLocalQualifier)
         {
-            throw new SqlUnsupportedQueryException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.DerivedTableOuterReference, exception.Message),
-                exception, derived.Query.Location);
+            var column = exception.UnresolvedColumn;
+            // This level's FROM items need LATERAL; enclosing query levels are ordinary
+            // correlation, deferred to part (a). PostgreSQL parse_relation.c:3759-3789.
+            if (owner is not null && ReferenceBindsIn(owner, column))
+            {
+                throw new SqlUnsupportedQueryException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.DerivedTableOuterReference, exception.Message),
+                    exception, column.Location);
+            }
+            if (_queryScopes.Skip(1).ToArray().Any(scope => ReferenceBindsInScope(scope.Select, scope.Dml, column)))
+            {
+                throw new SqlUnsupportedQueryException(ErrorMessages.CorrelatedSubquery, exception, column.Location);
+            }
+            throw;
         }
-        finally { _subqueryDepth--; }
+        finally { _subqueryDepth--; _queryScopes.Pop(); }
 
         var output = QueryOutput(child);
         var projections = output.Projections;
@@ -41,32 +61,62 @@ internal sealed partial class SqlPlanner
         for (int i = 0; i < columns.Length; i++)
         {
             var projection = projections[i];
-            var inherited = projection.ColumnOrdinal is int ordinal ? output.Columns[ordinal] : null;
-            if (inherited is null && (projection.Expression is SqlColumnReferenceExpression || projection.Value is SqlBoundColumn))
+            var inherited = projection.Metadata?.SourceColumn ?? (projection.ColumnOrdinal is int ordinal ? output.Columns[ordinal] : null);
+            if (inherited is null && projection.Expression is SqlColumnReferenceExpression reference)
             {
                 scope ??= new SqlExpressionEvaluator(output.Columns, _parameters, output.Bindings,
                     defaultCollation: _catalog.DefaultCollation, subquerySlots: _subquerySlots,
                     functions: _functions, cancellationToken: _cancellationToken);
-                int physical = projection.Expression is SqlColumnReferenceExpression reference
-                    ? scope.ResolveColumn(reference) : ((SqlBoundColumn)projection.Value!).Ordinal;
-                inherited = scope.MergedColumn(physical)?.Column ?? output.Columns[physical];
+                inherited = scope.ColumnMetadata(reference);
             }
             var type = inherited?.Type ?? (projection.Expression as SqlCastExpression)?.TargetTypeInfo
                 ?? new DatabaseTypeInfo(projection.Type, projection.MaxLength);
-            Collation? collation = null;
-            if (type.Type is DatabaseType.String or DatabaseType.Character)
+            // PostgreSQL parse_relation.c:1715-1721 takes metadata from the projected
+            // expression. Default strength must not become a declared column override.
+            var candidate = type.Type is DatabaseType.String or DatabaseType.Character
+                ? (projection.Metadata?.Collation ?? default).Resolve(null) : default;
+            string name = derived.Columns.Count == 0 ? projection.Name : derived.Columns[i];
+            if (string.IsNullOrWhiteSpace(name))
             {
-                collation = projection.Collation.Resolve(null);
-                // A pass-through default collation keeps its lower coercibility;
-                // materialization must not turn it into a declared override.
-                if (inherited is { Collation: null } && collation == _catalog.DefaultCollation) { collation = null; }
+                throw new SqlPlanningException("COHSQLE013", ErrorMessages.DerivedColumnName, projection.Expression?.Location ?? derived.Query.Location);
             }
-            columns[i] = new SqlCatalogColumn(derived.Columns.Count == 0 ? projection.Name : derived.Columns[i],
+            columns[i] = new SqlCatalogColumn(name,
                 type, projection.IsNullable,
-                collation: collation,
+                collation: candidate.Priority >= 2 ? candidate.Collation : null,
                 domainName: inherited?.DomainName);
         }
         return new SqlRelationSource(new SqlDerivedRelation(derived.Alias!, child, columns));
+    }
+
+    private IReadOnlyList<SqlSubqueryBinding> BindDmlSubqueries(SqlExpression? where, SqlTableReference table)
+    {
+        return BindSubqueries(where is null ? [] : WalkSubqueries(where), dml: table);
+    }
+
+    private bool ReferenceBindsInScope(SqlSelectExpression? select, SqlTableReference? dml, SqlColumnReferenceExpression column)
+        => select is not null && ReferenceBindsIn(select, column) || ReferenceBindsTo(dml, column);
+
+    private bool ReferenceBindsIn(SqlSelectExpression select, SqlColumnReferenceExpression column)
+        => select.From.Any(item => ReferenceBindsTo(item.Table, column, select) ||
+            item.Joins.Any(join => ReferenceBindsTo(join.Table, column, select)));
+
+    private bool ReferenceBindsTo(SqlRelationReference? reference, SqlColumnReferenceExpression column, SqlSelectExpression? owner = null)
+    {
+        if (reference is null || (_queryScopes?.Any(scope => ReferenceEquals(scope.Derived, reference)) ?? false) || !SqlExpressionEvaluator.MatchesQualifier(reference, column))
+        {
+            return false;
+        }
+        try
+        {
+            var source = ResolveRelation(reference, owner);
+            var scope = new SqlExpressionEvaluator(source.Columns, _parameters, relation: reference);
+            scope.ResolveColumn(column);
+            return true;
+        }
+        // A diagnostic probe cannot establish a binding through an invalid sibling.
+        // Its own planning will report that failure if this statement reaches it.
+        catch (SqlPlanningException) { return false; }
+        catch (SqlUnsupportedQueryException) { return false; }
     }
 
     /// <summary>The output contract shared by subqueries, derived tables and INSERT sources.</summary>

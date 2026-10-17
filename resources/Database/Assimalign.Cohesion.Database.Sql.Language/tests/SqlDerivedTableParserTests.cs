@@ -68,19 +68,23 @@ public sealed class SqlDerivedTableParserTests
         statement.Diagnostics.ShouldContain(d => d.Code == "COHDBL001");
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Derived tables: sibling correlation names LATERAL")]
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Derived tables: reference classification waits for catalog binding")]
     [InlineData("SELECT * FROM t, (SELECT t.id FROM u) d;", "t.id")]
     [InlineData("SELECT * FROM t, (SELECT dbo.t.id FROM u) d;", "dbo.t.id")]
     [InlineData("SELECT * FROM t, (SELECT \"t\" . \"id\" FROM u) d;", "\"t\" . \"id\"")]
-    public void Parse_SiblingReference_ShouldRequireLateral(string sql, string reference)
+    [InlineData("SELECT * FROM (SELECT bogus.id FROM t) d;", "bogus.id")]
+    [InlineData("SELECT * FROM (SELECT t.id FROM t hidden) d;", "t.id")]
+    public void Parse_DerivedReference_ShouldPreserveSpanForBinding(string sql, string reference)
     {
         // Arrange / Act
         var statement = new SqlQueryParser().Parse(sql);
 
         // Assert
-        var diagnostic = statement.Diagnostics.Single(d => d.Code == "COHDBL001");
-        diagnostic.Message!.ShouldContain("LATERAL", Case.Sensitive);
-        sql[diagnostic.Start!.Value..diagnostic.End!.Value].ShouldBe(reference);
+        statement.Diagnostics.ShouldNotContain(d => d.Severity == DiagnosticSeverity.Error);
+        var query = ((SqlQueryStatement)statement).SqlExpression.ShouldBeOfType<SqlSelectExpression>();
+        var derived = query.From.Select(item => item.Table).OfType<SqlDerivedTableReference>().Single();
+        var column = derived.Query.Columns[0].Expression.ShouldBeOfType<SqlColumnReferenceExpression>();
+        sql[column.Location!.Start..column.Location.End].ShouldBe(reference);
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Derived tables: bodies count toward the 32-level query limit")]
