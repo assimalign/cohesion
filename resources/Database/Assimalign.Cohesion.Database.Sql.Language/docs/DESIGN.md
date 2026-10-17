@@ -74,7 +74,13 @@ alias share a contextual parser; no identity word becomes globally reserved. Cap
 skips identity option parentheses so START WITH cannot masquerade as a CTE. The type grammar's
 shared rejection rule keeps SERIAL/BIGSERIAL/SMALLSERIAL as COHDBL001 with an identity suggestion.
 SqlClauses.Identity and the parser and live conformance corpora advance together; DIALECT.md
-defines allocation and exclusions. Sql.Catalog has its own SQL-independent facet.
+defines allocation, exclusions and direction-dependent generator bounds. Explicit NULL conflicts
+with NOT NULL, PRIMARY KEY or IDENTITY through the common CREATE/ADD/ALTER column parser (`SQL0003`, naming the
+column); CREATE also checks table primary keys after reading all definitions. This follows
+PostgreSQL `src/backend/parser/parse_utilcmd.c:873`. INSERT target parsing leaves a bare
+OVERRIDING clause token unconsumed while explicit AS aliases retain their lexical meaning.
+SERIAL spellings live in the shared rejected-type table and cannot declare domains.
+Sql.Catalog has its own SQL-independent facet.
 
 ## Design intent
 

@@ -96,8 +96,8 @@ internal sealed partial class SqlPlanExecutor
                             column.Identity is { } identity ? identity.IsAlways ? "ALWAYS" : "BY DEFAULT" : null,
                             column.Identity?.Start.ToString(System.Globalization.CultureInfo.InvariantCulture),
                             column.Identity?.Increment.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                            column.Identity is null ? null : SqlPlanner.IdentityTypeBounds(column.Type.Type).Maximum.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                            column.Identity is null ? null : SqlPlanner.IdentityTypeBounds(column.Type.Type).Minimum.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                            column.Identity is null ? null : SqlPlanner.IdentityTypeBounds(column.Type.Type, column.Identity.Increment).Maximum.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                            column.Identity is null ? null : SqlPlanner.IdentityTypeBounds(column.Type.Type, column.Identity.Increment).Minimum.ToString(System.Globalization.CultureInfo.InvariantCulture),
                             column.Identity is null ? null : "NO",
                         ];
                     }

@@ -18,6 +18,7 @@
   <data name="ColumnNullNotAllowed" xml:space="preserve">
     <value>Column '{0}' does not allow NULL.</value>
   </data>
+  <data name="ColumnNullabilityConflict" xml:space="preserve"><value>Conflicting NULL/NOT NULL declarations for column '{0}'.</value></data>
   <data name="CastIntervalTimeRange" xml:space="preserve">
     <value>INTERVAL must be at least zero and less than 24 hours for TIME.</value>
   </data>
@@ -46,13 +47,13 @@
   <data name="IdentityAlreadyDeclared" xml:space="preserve"><value>a table may have only one identity column</value></data>
   <data name="IdentityZeroIncrement" xml:space="preserve"><value>INCREMENT must not be zero</value></data>
   <data name="IdentityDefaultConflict" xml:space="preserve"><value>IDENTITY cannot be combined with DEFAULT</value></data>
-  <data name="IdentityStartOutOfRange" xml:space="preserve"><value>START is outside the column type's range</value></data>
+  <data name="IdentityStartOutOfRange" xml:space="preserve"><value>START is outside the identity generator's bounds</value></data>
   <data name="IdentityUpdateForbidden" xml:space="preserve"><value>GENERATED ALWAYS forbids every UPDATE assignment</value></data>
   <data name="IdentityAlterForbidden" xml:space="preserve"><value>ALTER COLUMN cannot change identity generation, nullability or defaults</value></data>
   <data name="IdentityInsertForbidden" xml:space="preserve"><value>GENERATED ALWAYS forbids an explicit INSERT value</value></data>
   <data name="IdentityBackfillForbidden" xml:space="preserve"><value>ADD COLUMN IDENTITY requires a table with no live rows</value></data>
   <data name="IdentityTypeChangeForbidden" xml:space="preserve"><value>ALTER COLUMN cannot change an identity storage type</value></data>
-  <data name="IdentitySchemaOwnedForbidden" xml:space="preserve"><value>schema-owned tables cannot declare identity metadata</value></data>
+  <data name="IdentitySchemaOwnedForbidden" xml:space="preserve"><value>{0}: {1}: schema-owned column '{2}' cannot declare identity metadata. Nothing was changed.</value></data>
   <data name="IdentityColumnViolation" xml:space="preserve">
     <value>Identity column '{0}': {1}.</value>
   </data>

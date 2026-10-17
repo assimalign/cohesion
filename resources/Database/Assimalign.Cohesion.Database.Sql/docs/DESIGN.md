@@ -4,7 +4,8 @@
 
 CREATE and ADD column planning validate the identity mode, integer type, nonzero increment,
 START range, DEFAULT exclusion and one-column limit before catalog writes. ADD checks no live
-rows under the existing exclusive DDL lock. Typed schema reconciliation refuses identity facets.
+rows under the existing exclusive DDL lock. Typed schema reconciliation refuses identity facets
+with SqlSchemaMigrationException / COHSQLP005 and "Nothing was changed.".
 Identity metadata implies NOT NULL; COLUMN_DEFAULT remains null. INFORMATION_SCHEMA appends
 seven identity fields after DATETIME_PRECISION, preserving its previous ordinals.
 
@@ -24,10 +25,19 @@ value, including unused ones, so no returned value is reused after a crash. This
 nontransactional and ahead-of-use logging pattern in PostgreSQL sequence.c:690-729,808-849
 (local reference clone), with one database-wide catalog cursor instead of per-session caches.
 The block size 32 is an implementation choice; the final block is shortened to the column's
-full signed integer range. Int128 intermediates make all counter arithmetic checked independently
+direction-dependent bounds: ascending 1 through the type maximum, descending the type minimum
+through -1 (PostgreSQL `src/backend/commands/sequence.c:1462,1494,1529`). Planning, catalog
+validation, allocation and INFORMATION_SCHEMA use these same bounds. Exhaustion names the
+column, SQL type and limit once, with the catalog exception retained as its cause.
+Int128 intermediates make all counter arithmetic checked independently
 of SQL expression arithmetic. Table DROP retires the counter atomically; recreate begins at START.
 The unreleased record-space format advances **14 -> 15**, table extension **4 -> 5**, with no
 upgrade path. No new interface, visibility grant, project reference or wire format is introduced.
+
+The common column parser refuses explicit NULL with NOT NULL, PRIMARY KEY or IDENTITY
+in either order using SQL0003 and the column name, including table primary keys. ALTER of
+an existing primary key uses that coded refusal too. SERIAL/BIGSERIAL/SMALLSERIAL are
+rejected when SQL or native domains are created, with COHDBL001 and an IDENTITY suggestion.
 
 ## N-way joins (#1109)
 
@@ -1287,7 +1297,7 @@ SqlSchemaValidationException (InvalidDocument, schema.format), naming both forma
 rebuild/recreate remedy. SQL checks applied markers and pending targets before opening the data
 file set, and checks a replacement document before Apply/Verify compares hashes or plans work.
 The gate reads only the format; it never validates a pre-normalization hash or reconciles an old
-identity. Both catalog records retain a versioned document; the current record-space format 14
+identity. Both catalog records retain a versioned document; the current record-space format 15
 gates Character identity and its index keys, without changing these document envelopes.
 
 FLOAT(p) selects Float32 for 1..24 bits and Float64 for 25..53 bits; bare FLOAT stays Float64.
@@ -2181,7 +2191,7 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   format, no upgrade path.** The catalog stores the format version of the whole
   data file set, rows and the index trees that ride it (a kind-4 record for
   versions 1–3, a kind-8 record from version 4). The engine reads and writes
-  format 14 only: format 6's stamped rows in per-object page chains whose index keys use the
+  format 15 only: format 6's stamped rows in per-object page chains whose index keys use the
   temporal identity encoding (#1099, below), in index trees of B-tree page format
   2, which order entries by key, entry reference and writer (#1194,
   `Database.Indexing` DESIGN), decoded through each table's physical column

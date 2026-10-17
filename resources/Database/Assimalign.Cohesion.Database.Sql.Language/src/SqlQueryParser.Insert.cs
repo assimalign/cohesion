@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.Database.Sql.Language;
@@ -18,7 +17,7 @@ public sealed partial class SqlQueryParser
             Advance(ref lexer);
         }
 
-        var table = ParseRequiredTableReference(ref lexer);
+        var table = ParseRequiredTableReference(ref lexer, insertTarget: true);
 
         // Optional column list: (col1, col2, ...)
         IReadOnlyList<string>? columns = null;
@@ -29,7 +28,7 @@ public sealed partial class SqlQueryParser
             columns = ParseInsertColumnList(ref lexer);
         }
 
-        if (IsWord(ref lexer, "OVERRIDING") || string.Equals(table.Alias, "OVERRIDING", StringComparison.OrdinalIgnoreCase))
+        if (IsWord(ref lexer, "OVERRIDING"))
         {
             RejectIdentityConstruct(ref lexer, "OVERRIDING ... VALUE");
             return new SqlInsertExpression(table, columns, null, null, false, null,

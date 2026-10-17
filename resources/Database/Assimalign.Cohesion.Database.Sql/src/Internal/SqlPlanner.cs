@@ -1039,6 +1039,11 @@ internal sealed partial class SqlPlanner
         {
             throw SqlPlanningException.IdentityViolation(change.Column.ColumnName, ErrorMessages.IdentityAlterForbidden);
         }
+        if (change.Column.IsNullable && table.PrimaryKeyColumns.Contains(change.Column.ColumnName, StringComparer.OrdinalIgnoreCase))
+        {
+            throw new SqlPlanningException("SQL0003", string.Format(CultureInfo.CurrentCulture,
+                ErrorMessages.ColumnNullabilityConflict, change.Column.ColumnName));
+        }
         var type = ResolveColumnType(change.Column);
         return new SqlAlterColumnPlan(table, new SqlCatalogColumn(change.Column.ColumnName, type.Storage,
             change.Column.IsNullable, ResolveDefaultLiteral(change.Column, $"{table.Schema}.{table.Name}"),

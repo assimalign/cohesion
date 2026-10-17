@@ -75,6 +75,12 @@ internal static class SqlCompiledSchemaValidator
             }
 
             // A declared type is a domain of the SQL engine, named in DDL by this name.
+            if (declaration.Name.ToUpperInvariant() is "SERIAL" or "BIGSERIAL" or "SMALLSERIAL")
+            {
+                Add(errors, SqlSchemaValidationErrorCode.UnsupportedType, path,
+                    SqlTypeModifiers.GetError(declaration.Name, null, null)!);
+                continue;
+            }
             if (!CompiledSchemaTypeNames.IsIdentifier(declaration.Name))
             {
                 Add(errors, SqlSchemaValidationErrorCode.UnsupportedType, path,

@@ -84,7 +84,7 @@ would tell every caller the value is changeable and then guard that promise at
 runtime.
 
 Table metadata extension version 2 introduced one collation identifier per column
-after the existing constraints. Current format 14 requires the complete table record,
+after the existing constraints. Current format 15 requires the complete table record,
 including the resolved-call vectors described below. Column additions,
 drops, and restart preserve explicit overrides. An index inherits its key
 columns' effective collations; the SQL engine verifies index eligibility and
@@ -518,8 +518,12 @@ missing tables/columns, primary-key drops, malformed persisted records).
 Catalog kind **16** is pre-assigned to identity counters (15 is reserved for #1030; 17 for
 #1124). Its tuple is kind Int32, owning table ObjectId Int64, and last reserved value Int64.
 There is at most one counter per table; load refuses duplicates, orphaned counters, out-of-range
-values and values outside the START/INCREMENT progression. Identity metadata is immutable
-SqlCatalogColumn.Identity / SqlCatalogIdentity in table-extension version **5**. SQL record-space
+values and values outside the START/INCREMENT progression. Generator bounds follow PostgreSQL
+`src/backend/commands/sequence.c:1462,1494`: ascending 1 through the type maximum,
+descending the type minimum through -1. Load builds one ObjectId-to-table map, so validating
+all counters costs O(tables + counters), including the single pass over table columns.
+Identity metadata is immutable SqlCatalogColumn.Identity / SqlCatalogIdentity in table-extension
+version **5**. SQL record-space
 format **15** supersedes 14; earlier files are refused, with no migration or compatibility reader.
 
 AllocateIdentity is a concrete public catalog member, as ReserveTableAsync and PublishTableAsync

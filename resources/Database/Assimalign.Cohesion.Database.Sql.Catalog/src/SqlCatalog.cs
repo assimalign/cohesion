@@ -1413,7 +1413,8 @@ public sealed partial class SqlCatalog
             }
         }
 
-        ValidateIdentityCounters();
+        var tablesById = _tables.Values.ToDictionary(slot => slot.Table.ObjectId, slot => slot.Table);
+        ValidateIdentityCounters(tablesById);
 
         if (_tables.Values.Any(slot => _pendingReclamations.ContainsKey(slot.Table.ObjectId)))
         {
@@ -1581,7 +1582,7 @@ public sealed partial class SqlCatalog
                 {
                     throw new SqlCatalogException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.IdentityMetadataInvalid, column.Name));
                 }
-                var (minimum, maximum) = IdentityBounds(column.Type.Type);
+                var (minimum, maximum) = IdentityBounds(column.Type.Type, identity.Increment);
                 if (hasIdentity || column.IsNullable || column.DefaultLiteral is not null || column.DomainName is not null ||
                     identity.Start < minimum || identity.Start > maximum)
                 {

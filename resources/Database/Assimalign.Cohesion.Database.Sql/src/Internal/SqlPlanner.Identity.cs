@@ -18,7 +18,7 @@ internal sealed partial class SqlPlanner
         if (hasIdentity) { throw SqlPlanningException.IdentityViolation(definition.ColumnName, ErrorMessages.IdentityAlreadyDeclared); }
         if (identity.Increment == 0) { throw SqlPlanningException.IdentityViolation(definition.ColumnName, ErrorMessages.IdentityZeroIncrement); }
         if (definition.DefaultValue is not null) { throw SqlPlanningException.IdentityViolation(definition.ColumnName, ErrorMessages.IdentityDefaultConflict); }
-        var (minimum, maximum) = IdentityTypeBounds(type.Type);
+        var (minimum, maximum) = IdentityTypeBounds(type.Type, identity.Increment);
         if (identity.Start < minimum || identity.Start > maximum)
         {
             throw SqlPlanningException.IdentityViolation(definition.ColumnName, ErrorMessages.IdentityStartOutOfRange);
@@ -26,12 +26,17 @@ internal sealed partial class SqlPlanner
         return new SqlCatalogIdentity(identity.IsAlways, identity.Start, identity.Increment);
     }
 
-    internal static (long Minimum, long Maximum) IdentityTypeBounds(DatabaseType type) => type switch
+    internal static (long Minimum, long Maximum) IdentityTypeBounds(DatabaseType type, long increment)
     {
-        DatabaseType.Int8 => (sbyte.MinValue, sbyte.MaxValue),
-        DatabaseType.Int16 => (short.MinValue, short.MaxValue),
-        DatabaseType.Int32 => (int.MinValue, int.MaxValue),
-        DatabaseType.Int64 => (long.MinValue, long.MaxValue),
-        _ => throw new InvalidOperationException(),
-    };
+        // PostgreSQL sequence.c:1462,1494: default bounds depend on generation direction.
+        var (minimum, maximum) = type switch
+        {
+            DatabaseType.Int8 => (sbyte.MinValue, sbyte.MaxValue),
+            DatabaseType.Int16 => (short.MinValue, short.MaxValue),
+            DatabaseType.Int32 => (int.MinValue, int.MaxValue),
+            DatabaseType.Int64 => (long.MinValue, long.MaxValue),
+            _ => throw new InvalidOperationException(),
+        };
+        return increment > 0 ? (1, maximum) : (minimum, -1);
+    }
 }

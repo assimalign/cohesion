@@ -21,14 +21,17 @@ public sealed class SqlColumnDefinition
     /// <param name="collationName">The declared collation name, or null to inherit the database default.</param>
     /// <param name="identity">The identity generation facet, when declared.</param>
     /// <param name="resolvedType">The resolved built-in type, or null for an engine-resolved domain.</param>
+    /// <param name="isExplicitlyNullable">Whether a NULL declaration was written, for table-constraint conflict checking.</param>
     internal SqlColumnDefinition(string columnName, string dataType, bool isNullable, bool isPrimaryKey, SqlExpression? defaultValue,
-        IReadOnlyList<SqlConstraintDefinition>? constraints = null, string? collationName = null, DatabaseTypeInfo? resolvedType = null, SqlIdentityDefinition? identity = null)
+        IReadOnlyList<SqlConstraintDefinition>? constraints = null, string? collationName = null, DatabaseTypeInfo? resolvedType = null, SqlIdentityDefinition? identity = null,
+        bool isExplicitlyNullable = false)
     {
         Identity = identity;
         ColumnName = columnName;
         DataType = dataType;
         ResolvedType = resolvedType;
         IsNullable = isNullable;
+        IsExplicitlyNullable = isExplicitlyNullable;
         IsPrimaryKey = isPrimaryKey;
         DefaultValue = defaultValue;
         Constraints = constraints ?? [];
@@ -55,6 +58,8 @@ public sealed class SqlColumnDefinition
     /// Gets whether the column allows NULL values.
     /// </summary>
     public bool IsNullable { get; }
+
+    internal bool IsExplicitlyNullable { get; }
 
     /// <summary>
     /// Gets whether the column is marked as a primary key.

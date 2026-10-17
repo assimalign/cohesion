@@ -168,7 +168,7 @@ internal sealed partial class SqlPlanExecutor
             }
             catch (SqlCatalogException failure)
             {
-                throw SqlPlanningException.IdentityViolation(column.Name, failure.Message);
+                throw new SqlPlanningException("COHSQLE025", failure.Message, innerException: failure);
             }
         }
         return boundDefault is not null ? DefaultValue(boundDefault, cancellationToken) : ResolveDefault(column, null);

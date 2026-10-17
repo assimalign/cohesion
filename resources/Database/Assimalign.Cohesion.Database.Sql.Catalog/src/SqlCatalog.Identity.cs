@@ -43,10 +43,18 @@ public sealed partial class SqlCatalog
                 counter = new IdentityCounter { Next = identity.Start };
                 _identityCounters.Add(table.ObjectId, counter);
             }
-            var (minimum, maximum) = IdentityBounds(column.Type.Type);
+            var (minimum, maximum) = IdentityBounds(column.Type.Type, identity.Increment);
             if (counter.Next < minimum || counter.Next > maximum)
             {
-                throw new SqlCatalogException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.IdentityRangeExhausted, column.Name, column.Type.Type));
+                string typeName = column.Type.Type switch
+                {
+                    DatabaseType.Int8 => "TINYINT",
+                    DatabaseType.Int16 => "SMALLINT",
+                    DatabaseType.Int32 => "INT",
+                    _ => "BIGINT",
+                };
+                throw new SqlCatalogException(string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                    ErrorMessages.IdentityRangeExhausted, column.Name, typeName, identity.Increment > 0 ? maximum : minimum));
             }
             if (counter.Remaining == 0)
             {
@@ -74,14 +82,19 @@ public sealed partial class SqlCatalog
         }
     }
 
-    private static (long Minimum, long Maximum) IdentityBounds(DatabaseType type) => type switch
+    private static (long Minimum, long Maximum) IdentityBounds(DatabaseType type, long increment)
     {
-        DatabaseType.Int8 => (sbyte.MinValue, sbyte.MaxValue),
-        DatabaseType.Int16 => (short.MinValue, short.MaxValue),
-        DatabaseType.Int32 => (int.MinValue, int.MaxValue),
-        DatabaseType.Int64 => (long.MinValue, long.MaxValue),
-        _ => throw new SqlCatalogException(ErrorMessages.IdentityIntegerRequired),
-    };
+        // PostgreSQL sequence.c:1462,1494: default bounds depend on generation direction.
+        var (minimum, maximum) = type switch
+        {
+            DatabaseType.Int8 => (sbyte.MinValue, sbyte.MaxValue),
+            DatabaseType.Int16 => (short.MinValue, short.MaxValue),
+            DatabaseType.Int32 => (int.MinValue, int.MaxValue),
+            DatabaseType.Int64 => (long.MinValue, long.MaxValue),
+            _ => throw new SqlCatalogException(ErrorMessages.IdentityIntegerRequired),
+        };
+        return increment > 0 ? (1, maximum) : (minimum, -1);
+    }
 
     private void LoadIdentityCounter(ref DatabaseKeyReader reader, PageId pageId, int slotIndex)
     {
@@ -93,14 +106,14 @@ public sealed partial class SqlCatalog
         }
     }
 
-    private void ValidateIdentityCounters()
+    private void ValidateIdentityCounters(IReadOnlyDictionary<ulong, SqlCatalogTable> tablesById)
     {
         foreach (var (id, counter) in _identityCounters)
         {
-            var column = FindTableByObjectId(id)?.Columns.SingleOrDefault(column => column.Identity is not null)
+            var column = (tablesById.TryGetValue(id, out var table) ? table : null)?.Columns.SingleOrDefault(column => column.Identity is not null)
                 ?? throw new SqlCatalogException(ErrorMessages.IdentityCounterOrphaned);
-            var (minimum, maximum) = IdentityBounds(column.Type.Type);
             var identity = column.Identity!;
+            var (minimum, maximum) = IdentityBounds(column.Type.Type, identity.Increment);
             Int128 distance = counter.Next - identity.Start;
             if (counter.Next < minimum || counter.Next > maximum || distance % identity.Increment != 0 || distance / identity.Increment < 0)
             {

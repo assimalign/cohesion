@@ -715,7 +715,7 @@ public sealed partial class SqlQueryParser : QueryParser
     /// yields the <c>?</c> placeholder, which never executes because of that error:
     /// <c>DELETE;</c> once deleted every row of a table quoted as <c>"?"</c>.
     /// </summary>
-    private SqlTableReference ParseRequiredTableReference(ref TokenLexer lexer)
+    private SqlTableReference ParseRequiredTableReference(ref TokenLexer lexer, bool insertTarget = false)
     {
         // LATERAL (SELECT ...) alias used to bind LATERAL as the table name, so the JOIN it
         // followed also reported a missing ON predicate (#1101).
@@ -731,7 +731,7 @@ public sealed partial class SqlQueryParser : QueryParser
 
         if (IsNameToken(ref lexer))
         {
-            return ParseTableReference(ref lexer);
+            return ParseTableReference(ref lexer, insertTarget);
         }
 
         if (!SkipDerivedTable(ref lexer))
@@ -829,7 +829,7 @@ public sealed partial class SqlQueryParser : QueryParser
         }
     }
 
-    private SqlTableReference ParseTableReference(ref TokenLexer lexer)
+    private SqlTableReference ParseTableReference(ref TokenLexer lexer, bool insertTarget = false)
     {
         string firstPart = CurrentIdentifierText(ref lexer);
         string? schemaName = null;
@@ -863,6 +863,7 @@ public sealed partial class SqlQueryParser : QueryParser
             }
         }
         else if (!IsAtEnd(ref lexer) && IsIdentifierOrKeyword(ref lexer) &&
+                 !(insertTarget && IsWord(ref lexer, "OVERRIDING")) &&
                  !IsStatementBoundaryKeyword(ref lexer))
         {
             alias = CurrentIdentifierText(ref lexer);

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 
 namespace Assimalign.Cohesion.Database.Sql.Language;
 
@@ -191,12 +192,23 @@ public sealed partial class SqlQueryParser
             ExpectDdlToken(ref lexer, TokenType.RightParen, "')'");
         }
 
+        foreach (var column in columns)
+        {
+            if (column.IsExplicitlyNullable && !column.IsPrimaryKey && column.Identity is null &&
+                constraints.Any(constraint => constraint.Kind == SqlConstraintKind.PrimaryKey &&
+                    constraint.Columns.Contains(column.ColumnName, StringComparer.OrdinalIgnoreCase)))
+            {
+                AddSyntaxDiagnostic(pos, _lastTokenEnd, $"Conflicting NULL/NOT NULL declarations for column '{column.ColumnName}'.");
+            }
+        }
+
         return new SqlCreateTableExpression(table, columns, ifNotExists, null,
             Location.Create(1, 1, pos, _lastTokenEnd), constraints);
     }
 
     private SqlColumnDefinition ParseColumnDefinition(ref TokenLexer lexer)
     {
+        int columnStart = lexer.Current.Position;
         string columnName = string.Empty;
         if (IsIdentifierOrKeyword(ref lexer))
         {
@@ -212,6 +224,8 @@ public sealed partial class SqlQueryParser
 
         // Parse optional constraints
         bool isNullable = true;
+        bool sawNull = false;
+        bool sawNotNull = false;
         bool isPrimaryKey = false;
         SqlExpression? defaultValue = null;
         string? collationName = null;
@@ -243,6 +257,7 @@ public sealed partial class SqlQueryParser
                 if (IsKeyword(ref lexer, "NULL"))
                 {
                     isNullable = false;
+                    sawNotNull = true;
                     Advance(ref lexer);
                 }
                 else
@@ -254,6 +269,7 @@ public sealed partial class SqlQueryParser
             else if (IsKeyword(ref lexer, "NULL"))
             {
                 isNullable = true;
+                sawNull = true;
                 Advance(ref lexer);
             }
             else if (IsConstraintStart(ref lexer))
@@ -289,7 +305,12 @@ public sealed partial class SqlQueryParser
             }
         }
 
-        return new SqlColumnDefinition(columnName, dataType, isNullable && identity is null, isPrimaryKey, defaultValue, constraints, collationName, resolvedType, identity);
+        // PostgreSQL parse_utilcmd.c:873: explicit NULL conflicts with every NOT NULL implication.
+        if (sawNull && (sawNotNull || isPrimaryKey || identity is not null))
+        {
+            AddSyntaxDiagnostic(columnStart, _lastTokenEnd, $"Conflicting NULL/NOT NULL declarations for column '{columnName}'.");
+        }
+        return new SqlColumnDefinition(columnName, dataType, isNullable && identity is null, isPrimaryKey, defaultValue, constraints, collationName, resolvedType, identity, sawNull);
     }
 
     /// <summary>

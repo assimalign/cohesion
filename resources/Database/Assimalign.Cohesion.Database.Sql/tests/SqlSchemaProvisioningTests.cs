@@ -558,11 +558,14 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
         var schema = OrdersSchema([new CompiledSchemaColumn("id", DatabaseType.Int64, false)], [], hasPrimaryKey: false);
 
         // Act
-        var failure = await Should.ThrowAsync<DatabaseException>(async () => await database.ApplySchemaAsync(schema));
+        var failure = await Should.ThrowAsync<SqlSchemaMigrationException>(async () => await database.ApplySchemaAsync(schema));
 
         // Assert
         failure.Message.ShouldContain("id", Case.Sensitive);
+        failure.ShouldBeOfType<SqlSchemaMigrationException>();
+        failure.Message.ShouldContain("COHSQLP005", Case.Sensitive);
         failure.Message.ShouldContain("identity", Case.Insensitive);
+        failure.Message.ShouldEndWith("Nothing was changed.");
         catalog.DdlGeneration.ShouldBe(generation);
         catalog.SchemaState.ShouldBeNull();
         catalog.TryGetTable("dbo", "orders", out var unchanged).ShouldBeTrue();

@@ -643,7 +643,8 @@ internal sealed partial class SqlSchemaProvisioner
     {
         if (column.Identity is not null)
         {
-            throw SqlPlanningException.IdentityViolation(column.Name, ErrorMessages.IdentitySchemaOwnedForbidden);
+            throw new SqlSchemaMigrationException(string.Format(CultureInfo.CurrentCulture,
+                ErrorMessages.IdentitySchemaOwnedForbidden, SqlProvisioningCodes.PolicyRefused, Describe(), column.Name));
         }
         CompiledSchemaColumn? declared = desiredTable?.Columns.FirstOrDefault(candidate =>
             string.Equals(candidate.Name, column.Name, StringComparison.OrdinalIgnoreCase));
