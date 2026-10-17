@@ -15,7 +15,7 @@ public static class SqlLanguageProfile
     private static readonly string[] _keywords =
     [
         // DML
-        "SELECT", "FROM", "WHERE", "INSERT", "UPDATE", "DELETE",
+        "SELECT", "EXPLAIN", "FROM", "WHERE", "INSERT", "UPDATE", "DELETE",
         "SET", "VALUES", "INTO", "RETURNING",
         "FUNCTION", "DOMAIN", "RETURNS", "RETURN", "IMMUTABLE", "STABLE", "VOLATILE", "STRICT", "CALLED", "INPUT",
         // DDL
@@ -66,6 +66,7 @@ public static class SqlLanguageProfile
     private static readonly string[] _clauses =
     [
         SqlClauses.Select,
+        SqlClauses.Explain,
         SqlClauses.Insert,
         SqlClauses.Update,
         SqlClauses.Delete,

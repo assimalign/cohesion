@@ -1,10 +1,12 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Graph.Internal;
+using Assimalign.Cohesion.Database.Types;
 using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Graph;
@@ -294,8 +296,25 @@ public sealed class GraphDatabaseSession : DatabaseLanguageSession<GraphRequest>
     {
         _database.EnsureNotDisposed();
         _database.ThrowIfOffline();
-        return _database.RunAsync(this, operation => GraphPlanExecutor.ExecuteAsync(_database, operation, request.Statement,
-            request.Parameters, cancellationToken, paths: request.Paths), cancellationToken);
+        return _database.RunAsync(this, operation =>
+        {
+            // Error-recovery trees still go through the normal diagnostic refusal path.
+            if (request.Statement.GqlExpression.IsExplain &&
+                !request.Statement.Diagnostics.Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error))
+            {
+                operation.EnsureActive();
+                cancellationToken.ThrowIfCancellationRequested();
+                if (request.Paths)
+                {
+                    throw new GraphPlanningException("COHDBG001", "EXPLAIN returns rows and cannot run on ExecutePaths.", request.Statement.GqlExpression.Location);
+                }
+                var planner = new GraphPlanner(_database, operation.Context.Snapshot);
+                var plan = planner.Plan(request.Statement.GqlExpression);
+                return ValueTask.FromResult<DatabaseResult>(planner.Describe(plan));
+            }
+            return GraphPlanExecutor.ExecuteAsync(_database, operation, request.Statement,
+                request.Parameters, cancellationToken, paths: request.Paths);
+        }, cancellationToken);
     }
 
     /// <inheritdoc />

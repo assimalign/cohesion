@@ -21,6 +21,9 @@ public static class OqlClauses
     /// <summary>Selects values from one or more document collections.</summary>
     public const string Select = "SELECT";
 
+    /// <summary>Describes a SELECT query without executing it.</summary>
+    public const string Explain = "EXPLAIN";
+
     /// <summary>Introduces the source collections and iteration variables for a query.</summary>
     public const string From = "FROM";
 

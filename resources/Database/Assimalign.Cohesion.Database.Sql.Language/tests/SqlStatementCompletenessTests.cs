@@ -24,6 +24,14 @@ public sealed class SqlStatementCompletenessTests
     private static readonly Dictionary<string, string[]> _corpus = new(StringComparer.Ordinal)
     {
         [SqlClauses.Select] = ["SELECT 1", "SELECT a, b AS c FROM t", "SELECT DISTINCT a FROM t"],
+        [SqlClauses.Explain] =
+        [
+            "EXPLAIN SELECT * FROM t", "EXPLAIN SELECT a FROM t WHERE a = 1",
+            "EXPLAIN SELECT t.a FROM t JOIN u ON t.a = u.a", "EXPLAIN SELECT a, COUNT(*) FROM t GROUP BY a",
+            "EXPLAIN SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES", "EXPLAIN SELECT a FROM t WHERE a IN (SELECT a FROM u)",
+            "EXPLAIN INSERT INTO t VALUES (1)", "EXPLAIN INSERT INTO t SELECT a FROM u",
+            "EXPLAIN UPDATE t SET a = 1", "EXPLAIN DELETE FROM t",
+        ],
         [SqlClauses.From] = ["SELECT * FROM t", "SELECT * FROM dbo.t AS u", "SELECT * FROM t u"],
         [SqlClauses.Join] = ["SELECT * FROM t JOIN u ON t.id = u.id", "SELECT * FROM t INNER JOIN u v ON t.id = v.id"],
         [SqlClauses.Where] =

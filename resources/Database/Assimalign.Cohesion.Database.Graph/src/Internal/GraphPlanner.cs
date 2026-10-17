@@ -40,7 +40,7 @@ internal sealed record GraphPlan(GqlQueryExpression Query, IReadOnlyList<GraphPa
     internal IReadOnlyList<Diagnostic> Warnings { get; init; } = [];
 }
 
-internal sealed class GraphPlanner
+internal sealed partial class GraphPlanner
 {
     private readonly GraphDatabase _database;
     private readonly TransactionSnapshot _snapshot;

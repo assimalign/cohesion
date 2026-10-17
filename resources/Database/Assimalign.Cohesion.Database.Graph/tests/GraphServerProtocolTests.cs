@@ -33,6 +33,7 @@ public sealed class GraphServerProtocolTests
     [InlineData("CREATE (n:Injected) RETURN n")]
     [InlineData("MATCH (n) DETACH DELETE n")]
     [InlineData("SHOW LABELS")]
+    [InlineData("EXPLAIN MATCH (n) RETURN n")]
     public async Task ExecutePaths_InvalidShape_ShouldReturnOnlyErrorAndKeepSessionReady(string statement)
     {
         await WithServerAsync(async (channel, token) =>

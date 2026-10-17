@@ -120,7 +120,11 @@ public sealed partial class SqlQueryParser : QueryParser
         {
             var keyword = lexer.Current.Value;
 
-            if (keyword.Equals("SELECT", StringComparison.OrdinalIgnoreCase))
+            if (keyword.Equals("EXPLAIN", StringComparison.OrdinalIgnoreCase))
+            {
+                expression = ParseExplain(ref lexer);
+            }
+            else if (keyword.Equals("SELECT", StringComparison.OrdinalIgnoreCase))
             {
                 expression = ParseSelect(ref lexer);
             }
@@ -792,6 +796,26 @@ public sealed partial class SqlQueryParser : QueryParser
         }
     }
 
+    /// <summary>Parses one description prefix over an executable data statement.</summary>
+    private SqlQueryExpression ParseExplain(ref TokenLexer lexer)
+    {
+        int start = lexer.Current.Position;
+        Advance(ref lexer);
+        SqlQueryExpression statement;
+        if (IsWord(ref lexer, "SELECT")) { statement = ParseSelect(ref lexer); }
+        else if (IsWord(ref lexer, "INSERT")) { statement = ParseInsert(ref lexer); }
+        else if (IsWord(ref lexer, "UPDATE")) { statement = ParseUpdate(ref lexer); }
+        else if (IsWord(ref lexer, "DELETE")) { statement = ParseDelete(ref lexer); }
+        else
+        {
+            RequireSkippedConstruct(start, lexer.Current.Position + lexer.Current.Value.Length,
+                $"EXPLAIN {CurrentText(ref lexer)}");
+            ConsumeRemaining(ref lexer);
+            statement = new SqlQueryExpression(SqlQueryCommandType.Unknown, null, null);
+        }
+        return new SqlExplainExpression(statement, Location.Create(1, 1, start, _lastTokenEnd));
+    }
+
     /// <summary>
     /// Reports a construct the parser recognizes and skips for recovery, unless the preflight
     /// clause scan already reports it at <paramref name="start"/>. The scan reports only the
@@ -928,6 +952,10 @@ public sealed partial class SqlQueryParser : QueryParser
             }
 
             string token = CurrentText(ref lexer);
+            if (firstToken is null && token.Equals("EXPLAIN", StringComparison.OrdinalIgnoreCase))
+            {
+                continue; // Capability checks classify the statement being described.
+            }
             firstToken ??= token;
             // An adjacent :name in an operand is one rejected parameter form. Its name
             // belongs to syntax parsing even when it spells a clause or function keyword.

@@ -209,6 +209,33 @@ each use site to its slot number when the statement is planned; it needs no
 language-assembly friend access or public AST constructors. See [DIALECT.md](../../Assimalign.Cohesion.Database.Sql.Language/docs/DIALECT.md#subqueries-and-query-source-inserts-1021)
 for the exact supported forms and semantics.
 
+## EXPLAIN operator vocabulary (#1104)
+
+The ordinary binder plans the wrapped data statement once. The session then returns
+`SqlPlanner.Describe` before calling the data executor. It retains its normal
+statement admission and transaction bracket, so an explained mutation writes nothing in
+autocommit or an explicit transaction. SQL and its client use existing result frames unchanged.
+The shared eight-column contract lives in
+[Execution](../../Assimalign.Cohesion.Database.Execution/docs/DESIGN.md#plan-descriptions-1104).
+
+The description follows the chosen internal plan, in depth-first pre-order. These names describe
+SQL's combined operators, not a shared or independently executable algebra:
+
+| Operators | Meaning |
+| --- | --- |
+| `Select`, `TableScan`, `IndexSeek` | Bound projection/filter/order/distinct/window above the chosen table access; seeks name the catalog index and equality-prefix/range bounds |
+| `NestedLoopJoin` | A two-table join, with two scan inputs or a driving scan and correlated index seek; details identify which path was chosen |
+| `Group` | Group keys, aggregates, HAVING and result modifiers above the actual input plan |
+| `SystemView` | A qualified virtual relation; no fabricated stored-table access |
+| `Subqueries` | Uncorrelated child plans in execution order, followed by the enclosing input |
+| `Insert`, `InsertSelect`, `Update`, `Delete` | Intended mutation and target; a source query or target scan is a child, never executed by EXPLAIN |
+| `CreateTable`, `DropTable`, `AddColumn`, `AlterColumn`, `DropColumn`, `AddConstraint`, `DropConstraint`, `CreateIndex`, `DropIndex`, `Definition` | Complete internal DDL mappings, including SQL function/domain definitions; EXPLAIN DDL remains refused at parse time |
+
+Details include bound seek values with invariant formatting, quoted character values and
+hexadecimal binary values. Estimates and actual row counts
+are always null in T1. All mappings use closed type switches; the test guard enumerates every
+concrete `SqlPlan` record, and every item adding one supplies a mapping plus an EXPLAIN case.
+
 ## Bound expressions (E1)
 
 The planner compiles every scalar expression a plan evaluates — a WHERE or JOIN

@@ -20,6 +20,13 @@ public sealed class OqlExecutionConformanceTests
     private static readonly IReadOnlyDictionary<string, ExecutionCase[]> _cases =
         new Dictionary<string, ExecutionCase[]>(StringComparer.OrdinalIgnoreCase)
         {
+            [OqlClauses.Explain] =
+            [
+                new("EXPLAIN SELECT name FROM items",
+                    [[0, null, "Select", "items", null, "filter=False; grouped=False; order_keys=0", null, null],
+                     [1, 0, "Project", "items", null, null, null, null],
+                     [2, 1, "CollectionScan", "items", null, null, null, null]]),
+            ],
             [OqlClauses.Select] =
             [
                 new("SELECT d.name AS label, d.details.score + @increment AS adjusted, d.tags[0] AS tag FROM items AS d WHERE d.name = 'alpha'",
@@ -242,6 +249,7 @@ public sealed class OqlExecutionConformanceTests
 
     private static bool ContainsClause(OqlExpression expression, string clause) => clause switch
     {
+        OqlClauses.Explain => expression is OqlExplainExpression,
         OqlClauses.Select => expression is OqlSelectExpression { Projections.Count: > 0 },
         OqlClauses.From => expression is OqlSelectExpression { Collection.Length: > 0 },
         OqlClauses.Where => expression is OqlSelectExpression { Predicate: not null },

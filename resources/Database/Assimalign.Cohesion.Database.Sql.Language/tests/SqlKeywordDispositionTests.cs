@@ -23,6 +23,7 @@ public sealed class SqlKeywordDispositionTests
     {
         // DML
         ["SELECT"] = Parses("SELECT a FROM t"),
+        ["EXPLAIN"] = Parses("EXPLAIN SELECT a FROM t"),
         ["FROM"] = Parses("SELECT a FROM t"),
         ["WHERE"] = Parses("SELECT a FROM t WHERE a = 1"),
         ["INSERT"] = Parses("INSERT INTO t VALUES (1)"),

@@ -16,7 +16,7 @@ public static class OqlLanguageProfile
     private static readonly string[] _keywords =
     [
         // Query
-        "SELECT", "FROM", "WHERE",
+        "SELECT", "EXPLAIN", "FROM", "WHERE",
         "ORDER", "BY", "GROUP", "HAVING",
         "DISTINCT", "ALL", "AS", "ASC", "DESC",
         // Index definition
@@ -55,6 +55,7 @@ public static class OqlLanguageProfile
         OqlClauses.CreateIndex,
         OqlClauses.DropIndex,
         OqlClauses.Select,
+        OqlClauses.Explain,
         OqlClauses.From,
         OqlClauses.Where,
         OqlClauses.GroupBy,

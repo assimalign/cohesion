@@ -10,7 +10,7 @@ using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Documents.Internal;
 
-internal sealed class DocumentPlanner
+internal sealed partial class DocumentPlanner
 {
     private readonly DocumentCatalog _catalog;
     private readonly TransactionSnapshot _snapshot;

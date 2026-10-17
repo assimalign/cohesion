@@ -24,6 +24,7 @@ public sealed class GqlKeywordDispositionTests
     {
         // Supported clauses
         ["MATCH"] = Parses("MATCH (a) RETURN a"),
+        ["EXPLAIN"] = Parses("EXPLAIN MATCH (a) RETURN a"),
         ["RETURN"] = Parses("MATCH (a) RETURN a"),
         ["AS"] = Parses("MATCH (a) RETURN a.x AS y"),
         ["WHERE"] = Parses("MATCH (a) WHERE a.x = 1 RETURN a"),

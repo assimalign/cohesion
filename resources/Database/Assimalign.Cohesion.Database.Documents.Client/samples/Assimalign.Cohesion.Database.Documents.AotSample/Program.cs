@@ -77,6 +77,11 @@ internal static class Program
             Check(whole.IsDocumentQuery && whole.Documents[0].GetProperty("nested")[0].GetInt32() == 1, "whole documents");
             Check((await connection.QueryAsync("SELECT SUM(score) AS total FROM items HAVING SUM(score) > 0", cancellationToken: token))[0][0] is 3m, "aggregate");
             Check(await connection.ExecuteAsync("CREATE INDEX by_score ON items (score)", cancellationToken: token) == 0, "index create");
+            var explained = await connection.QueryAsync("EXPLAIN SELECT score FROM items WHERE score >= 2", cancellationToken: token);
+            Check(explained.IsDocumentQuery && explained.Documents.Any(document =>
+                document.GetProperty("operator").GetString() == "IndexSeek" && document.GetProperty("index").GetString() == "by_score" &&
+                document.GetProperty("estimated_rows").ValueKind == System.Text.Json.JsonValueKind.Null &&
+                document.GetProperty("actual_rows").ValueKind == System.Text.Json.JsonValueKind.Null), "EXPLAIN documents");
             Check((await connection.QueryAsync("SELECT * FROM COHESION_SCHEMA.INDEXES", cancellationToken: token)).Count == 1, "catalog");
             Check(await connection.ExecuteAsync("DROP INDEX by_score ON items", cancellationToken: token) == 0, "index drop");
             try

@@ -23,6 +23,7 @@ public sealed class OqlKeywordDispositionTests
     {
         // Supported query and index-definition vocabulary
         ["SELECT"] = Parses("SELECT a FROM c"),
+        ["EXPLAIN"] = Parses("EXPLAIN SELECT a FROM c"),
         ["FROM"] = Parses("SELECT a FROM c"),
         ["WHERE"] = Parses("SELECT a FROM c WHERE a = 1"),
         ["GROUP"] = Parses("SELECT a, COUNT(*) FROM c GROUP BY a"),

@@ -11,7 +11,7 @@ public static class GqlLanguageProfile
     private static readonly string[] _keywords =
     [
         // Pattern matching
-        "MATCH", "OPTIONAL", "MANDATORY",
+        "MATCH", "EXPLAIN", "OPTIONAL", "MANDATORY",
         // Projection
         "RETURN", "WITH", "AS",
         // Mutation
@@ -49,6 +49,7 @@ public static class GqlLanguageProfile
     private static readonly string[] _clauses =
     [
         GqlClauses.Match,
+        GqlClauses.Explain,
         GqlClauses.Return,
         GqlClauses.Create,
         GqlClauses.Insert,

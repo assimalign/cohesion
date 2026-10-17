@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Documents.Internal;
+using Assimalign.Cohesion.Database.Documents.Language;
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Database.Types;
@@ -405,6 +406,14 @@ public sealed class DocumentDatabaseSession : DatabaseLanguageSession<DocumentQu
             }
             var parameters = ParameterBindings.Normalize(request.Parameters, name =>
                 new DocumentPlanningException("COHDOC009", $"More than one parameter key binds the name '{name}'."));
+            if (request.Statement.OqlExpression is OqlExplainExpression explain)
+            {
+                operation.EnsureActive();
+                cancellationToken.ThrowIfCancellationRequested();
+                new DocumentExpressionEvaluator(null, parameters).ValidateParameters(explain.Statement);
+                var plan = new DocumentPlanner(_database.Catalog, operation.Context.Snapshot, parameters).Plan((OqlExpression)explain.Statement);
+                return ValueTask.FromResult<DatabaseResult>(DocumentPlanner.Describe(plan, request.Statement.Diagnostics));
+            }
             new DocumentExpressionEvaluator(null, parameters).ValidateParameters(request.Statement.OqlExpression);
             return DocumentPlanExecutor.ExecuteAsync(_database, operation, request.Statement, parameters, cancellationToken);
         }, cancellationToken);

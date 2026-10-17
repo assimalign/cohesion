@@ -95,6 +95,20 @@ public sealed partial class OqlQueryParser : QueryParser
             Error("OQL0001", "Query text is empty.", Current);
             expression = EmptyExpression();
         }
+        else if (Is("EXPLAIN"))
+        {
+            var start = Current;
+            _position++;
+            if (Is("SELECT"))
+            {
+                expression = new OqlExplainExpression(ParseSelect(), Span(start, _tokens[_position - 1]));
+            }
+            else
+            {
+                _diagnostics.Add(QueryDiagnostics.UnsupportedClause($"EXPLAIN {Current.Text}", Profile.Language, Span(start, Current)));
+                expression = EmptyExpression();
+            }
+        }
         else if (Is("SELECT"))
         {
             expression = ParseSelect();

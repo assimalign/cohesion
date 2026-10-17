@@ -407,7 +407,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
                     var scope = new SqlStatementContext(transaction.Context, _coordinator, _provisioningSchema,
                         _database.Name.ToString(), transaction.CatalogSnapshot ?? CaptureSystemViewSnapshot(request));
                     _lastStatementMetrics = scope.Metrics;
-                    return await _executor.ExecuteAsync(request, scope, cancellationToken).ConfigureAwait(false);
+                    return await ExecuteDataOrExplainAsync(request, scope, cancellationToken).ConfigureAwait(false);
                 }
                 catch (TransactionDeadlockException exception)
                 {
@@ -449,7 +449,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
             var scope = new SqlStatementContext(context, _coordinator, _provisioningSchema,
                 _database.Name.ToString(), CaptureSystemViewSnapshot(request), _ddlLockOwner, ProvisioningProgress, scriptReceipt);
             _lastStatementMetrics = scope.Metrics;
-            var result = await _executor.ExecuteAsync(request, scope, cancellationToken).ConfigureAwait(false);
+            var result = await ExecuteDataOrExplainAsync(request, scope, cancellationToken).ConfigureAwait(false);
             if (scriptReceipt is { } receipt && !IsSelfCommitting(request) && result.Status == DatabaseResultStatus.Success)
             {
                 await CompleteScriptStatementAsync(result, context, receipt, cancellationToken).ConfigureAwait(false);
@@ -476,6 +476,30 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         {
             await RollbackAutoCommitAsync(context).ConfigureAwait(false);
             throw;
+        }
+    }
+
+    private Task<DatabaseResult> ExecuteDataOrExplainAsync(SqlQueryRequest request, SqlStatementContext scope, CancellationToken cancellationToken)
+    {
+        if (request.Statement.SqlExpression is not SqlExplainExpression explain)
+        {
+            return _executor.ExecuteAsync(request, scope, cancellationToken);
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        SqlSystemViews.EnsureReadOnly(explain.Statement);
+        var parameters = SqlQueryExecutor.NormalizeParameters(request.Parameters);
+        _database.Definitions.EnsureDefinitions(cancellationToken);
+        var planner = new SqlPlanner(_database.Catalog, parameters, _database.Definitions.Functions, cancellationToken);
+        try
+        {
+            var plan = planner.Plan(explain.Statement);
+            scope.Metrics.IsPlanned = true;
+            return Task.FromResult<DatabaseResult>(SqlPlanner.Describe(plan, request.Statement.Diagnostics));
+        }
+        catch (SqlUnsupportedQueryException exception)
+        {
+            return Task.FromResult<DatabaseResult>(new SqlQueryResult(DatabaseResultStatus.Error, affectedCount: 0, [.. exception.Diagnostics]));
         }
     }
 

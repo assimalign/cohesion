@@ -152,6 +152,10 @@ public sealed class DocumentClientWireTests
 
         // CREATE INDEX, DROP INDEX and both virtual catalog collections use the same wire path.
         (await connection.ExecuteAsync("CREATE INDEX by_score ON items (score)", cancellationToken: harness.Token)).ShouldBe(0);
+        var explained = await connection.QueryAsync("EXPLAIN SELECT name FROM items WHERE score >= 2", cancellationToken: harness.Token);
+        explained.IsDocumentQuery.ShouldBeTrue();
+        explained.Documents.ShouldContain(document => document.GetProperty("operator").GetString() == "IndexSeek" &&
+            document.GetProperty("index").GetString() == "by_score");
         (await connection.QueryAsync("SELECT name FROM items WHERE score >= 2 ORDER BY score DESC", cancellationToken: harness.Token))
             .Select(row => row[0]).ShouldBe(new object?[] { "Bob", "Ada" });
         var indexes = await connection.QueryAsync("SELECT COLLECTION_CATALOG, COLLECTION_NAME, INDEX_NAME, PATH, IS_UNIQUE FROM COHESION_SCHEMA.INDEXES", cancellationToken: harness.Token);

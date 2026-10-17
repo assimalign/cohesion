@@ -25,6 +25,13 @@ public sealed class GqlProfileExecutionTests
     private static readonly IReadOnlyDictionary<string, ExecutionCase[]> _cases =
         new Dictionary<string, ExecutionCase[]>(StringComparer.OrdinalIgnoreCase)
         {
+            [GqlClauses.Explain] =
+            [
+                new("EXPLAIN MATCH (a:Person) RETURN a",
+                    [[0, null, "Match", null, null, "filter=False; matches_nothing=False", null, null],
+                     [1, 0, "ExpandPath", null, null, null, null, null],
+                     [2, 1, "LabelScan", "Person", null, "node=0; property=; value=NULL", null, null]]),
+            ],
             [GqlClauses.Match] =
             [
                 new("MATCH (a:Person {name: 'Alice'})-[r:KNOWS]->(b) RETURN b.name, r.weight", [["Bob", 2L]]),
@@ -203,6 +210,7 @@ public sealed class GqlProfileExecutionTests
 
     private static bool UsesClause(string clause, GqlQueryExpression query) => clause switch
     {
+        GqlClauses.Explain => query.IsExplain,
         GqlClauses.Match => query.Matches.Count != 0,
         GqlClauses.Return => query.Projections.Count != 0,
         GqlClauses.Create => query.Creates.Count != 0 && HasKeyword(query.Text ?? string.Empty, "CREATE"),

@@ -99,6 +99,20 @@ public sealed partial class GqlQueryParser : QueryParser
             Error("GQL0001", "Query text is empty.", Current);
             expression = EmptyExpression();
         }
+        else if (Is("EXPLAIN"))
+        {
+            _position++;
+            if (Is("MATCH") || Is("CREATE") || Is("INSERT"))
+            {
+                expression = ParseQuery();
+                expression.Explain();
+            }
+            else
+            {
+                Unsupported($"EXPLAIN {Current.Text}", Current);
+                expression = EmptyExpression();
+            }
+        }
         else if (catalogStatement) { expression = ParseCatalog(); }
         else if (Is("MATCH") || Is("CREATE") || Is("INSERT")) { expression = ParseQuery(); }
         else
