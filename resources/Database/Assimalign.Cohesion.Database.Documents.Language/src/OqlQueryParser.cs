@@ -203,7 +203,11 @@ public sealed partial class OqlQueryParser : QueryParser
     private List<(string Clause, Lexeme Token)> FindUnsupported()
     {
         List<(string, Lexeme)> result = [];
+        int statementStart = IsWord(_tokens[0], "EXPLAIN") ? 1 : 0;
+        bool hasQuery = statementStart < _tokens.Count &&
+            (IsWord(_tokens[statementStart], "SELECT") || IsWord(_tokens[statementStart], "INSERT"));
         bool selected = false;
+        int parentheses = 0;
         bool inSelectList = false;
         int selectHead = -2;
         int openQuantifiers = 0;
@@ -214,6 +218,9 @@ public sealed partial class OqlQueryParser : QueryParser
             {
                 break;
             }
+
+            if (token.Type == TokenType.LeftParen) { parentheses++; }
+            else if (token.Type == TokenType.RightParen) { parentheses--; }
 
             if (token.Type is not (TokenType.Keyword or TokenType.Function or TokenType.Identifier))
             {
@@ -303,7 +310,9 @@ public sealed partial class OqlQueryParser : QueryParser
             }
             if (value == "SELECT")
             {
-                if (selected)
+                // Only SELECT statements and INSERT SELECT have a query of their own.
+                // A SELECT inside an expression is nested even when it is the first one.
+                if (!hasQuery || selected || parentheses > 0)
                 {
                     result.Add((OqlClauses.Subquery, token));
                 }

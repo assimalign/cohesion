@@ -63,7 +63,7 @@ Lexical recognition preserves the established vocabulary so rejected constructs 
 | `DROP COLLECTION` | Yes | One database-local collection, optionally `IF EXISTS` |
 | `CREATE INDEX` | Yes | One named, nonunique index over one document path in one collection |
 | `DROP INDEX` | Yes | One named index in one collection; the `ON` qualifier is required |
-| `SUBQUERY` | No | A nested `SELECT` reports this capability name at the inner keyword |
+| `SUBQUERY` | No | A nested `SELECT` reports this capability name at the inner keyword, including every SELECT in DELETE or INSERT VALUES, with or without EXPLAIN |
 | `LIMIT`, `OFFSET` | No (pin) | SQL++ row limits; oql-limit-offset flips the pin |
 | `UPSERT` | No (pin) | SQL++ document write; oql-upsert flips the pin |
 | `MERGE` | No (pin) | SQL++ merge; stays a pin with no T1 item lifting it, and #1101 owns it |
