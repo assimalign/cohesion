@@ -4668,7 +4668,8 @@ on `DatabaseSession`.
 
 System-relation mutations use COHSQLE021 with the statement's available location, before
 lookup or IF EXISTS shortcuts. VALUES/LIMIT/OFFSET column-scope failures retain the
-column's own location. SQL operator and CAST bound nodes retain their immutable source
+column's own location, and UPDATE aggregate rejections retain the assignment expression's
+location. SQL operator and CAST bound nodes retain their immutable source
 locations so runtime failures and planning-time count evaluation preserve the expression
 span. Definitions without a separately located column or type token use the statement
 fallback; a DEFAULT span must not be used for an unrelated COLLATE failure.

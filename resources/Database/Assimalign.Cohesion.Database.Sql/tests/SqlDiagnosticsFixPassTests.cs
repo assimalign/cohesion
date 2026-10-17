@@ -11,6 +11,46 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed class SqlDiagnosticsFixPassTests
 {
+    [Fact(DisplayName = "Cohesion Test [Sql] - Diagnostics: UPDATE aggregate errors keep the assignment expression span")]
+    public async Task Execute_UpdateAggregate_ShouldCarryAssignmentSpanAsync()
+    {
+        // Arrange
+        var request = SqlQueryRequest.FromSql("UPDATE t SET id = 1 + SUM(id)");
+        var value = ((SqlUpdateExpression)request.Statement.SqlExpression).Assignments.Single().Value;
+        await using var engine = SqlDatabaseEngine.Create("diagnostics", new());
+        var database = await engine.CreateDatabaseAsync("diagnostics", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE t (id INT)", cancellationToken: CancellationToken.None);
+
+        // Act
+        var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(request, CancellationToken.None));
+
+        // Assert
+        var diagnostic = failure.Diagnostics.ShouldHaveSingleItem();
+        diagnostic.Code.ShouldBe("COHSQLE017");
+        diagnostic.Start.ShouldBe(value.Location!.Start);
+        diagnostic.End.ShouldBe(value.Location.End);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sql] - Diagnostics: COLLATE type errors never point at an unrelated DEFAULT")]
+    public async Task Execute_CollationTypeMismatch_ShouldUseStatementFallbackAsync()
+    {
+        // Arrange
+        var request = SqlQueryRequest.FromSql("CREATE TABLE t (id INT COLLATE binary DEFAULT 1)");
+        await using var engine = SqlDatabaseEngine.Create("diagnostics", new());
+        var database = await engine.CreateDatabaseAsync("diagnostics", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+
+        // Act
+        var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(request, CancellationToken.None));
+
+        // Assert
+        var diagnostic = failure.Diagnostics.ShouldHaveSingleItem();
+        diagnostic.Code.ShouldBe("COHSQLE013");
+        diagnostic.Start.ShouldBe(request.Statement.SqlExpression.Location!.Start);
+        diagnostic.End.ShouldBe(request.Statement.SqlExpression.Location.End);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Sql] - Diagnostics: quoted niladic names remain column references in VALUES")]
     public async Task Execute_QuotedNiladicColumn_ShouldCarryColumnScopeDiagnosticAsync()
     {

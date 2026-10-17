@@ -746,7 +746,7 @@ internal sealed partial class SqlPlanner
             int ordinal = FindColumnOrdinal(table, assignment.ColumnName);
             if (ContainsAggregate(assignment.Value))
             {
-                throw new SqlPlanningException("COHSQLE017", "Aggregate functions are not allowed in UPDATE SET.", update.Location);
+                throw new SqlPlanningException("COHSQLE017", "Aggregate functions are not allowed in UPDATE SET.", assignment.Value.Location ?? update.Location);
             }
             ValidateExpression(assignment.Value, evaluator);
             assignments.Add((ordinal, evaluator.Bind(assignment.Value)));
