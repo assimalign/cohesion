@@ -35,9 +35,16 @@ internal sealed partial class SqlPlanner
     /// </summary>
     private SqlPlan PlanSubqueries(SqlSelectExpression select)
     {
+        var queries = BindSubqueries(SubquerySources(select));
+        var input = PlanSelectCore(select);
+        return queries.Count == 0 ? input : new SqlSubqueryPlan(input, queries);
+    }
+
+    private IReadOnlyList<SqlSubqueryBinding> BindSubqueries(IEnumerable<SqlExpression> sources)
+    {
         RuntimeHelpers.EnsureSufficientExecutionStack();
         var queries = new List<SqlSubqueryBinding>();
-        foreach (var expression in SubquerySources(select))
+        foreach (var expression in sources)
         {
             switch (expression)
             {
@@ -53,8 +60,7 @@ internal sealed partial class SqlPlanner
             }
         }
 
-        var input = PlanSelectCore(select);
-        return queries.Count == 0 ? input : new SqlSubqueryPlan(input, queries);
+        return queries;
 
         void Bind(SqlExpression source, SqlSelectExpression query, SqlSubqueryKind kind, bool negated)
         {
@@ -99,7 +105,7 @@ internal sealed partial class SqlPlanner
     {
         foreach (var expression in Roots())
         {
-            foreach (var node in Walk(expression))
+            foreach (var node in WalkSubqueries(expression))
             {
                 yield return node;
             }
@@ -144,20 +150,21 @@ internal sealed partial class SqlPlanner
             }
         }
 
-        static IEnumerable<SqlExpression> Walk(SqlExpression expression)
-        {
-            // Each level is a nested iterator, so the stack grows with the tree (#1151).
-            RuntimeHelpers.EnsureSufficientExecutionStack();
-            yield return expression;
+    }
 
-            // Children treats a subquery as opaque, which is what keeps a child scope's
-            // own subqueries out of this statement's bindings.
-            foreach (var child in Children(expression))
+    private static IEnumerable<SqlExpression> WalkSubqueries(SqlExpression expression)
+    {
+        // Each level is a nested iterator, so the stack grows with the tree (#1151).
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+        yield return expression;
+
+        // Children treats a subquery as opaque, which is what keeps a child scope's
+        // own subqueries out of this statement's bindings.
+        foreach (var child in Children(expression))
+        {
+            foreach (var node in WalkSubqueries(child))
             {
-                foreach (var node in Walk(child))
-                {
-                    yield return node;
-                }
+                yield return node;
             }
         }
     }
@@ -179,35 +186,8 @@ internal sealed partial class SqlPlanner
     }
 
     /// <summary>Reads output metadata without executing a child query, including empty results.</summary>
-    private static IReadOnlyList<SqlProjection> SubqueryProjections(SqlPlan plan) => plan switch
-    {
-        SqlSubqueryPlan subquery => SubqueryProjections(subquery.Input),
-        SqlSelectPlan select => select.Projections,
-        SqlJoinPlan join => join.Projections,
-        SqlGroupPlan group => group.Projections,
-        SqlSystemViewPlan view => view.Projections,
-        _ => throw new SqlPlanningException("COHSQLE013", "A subquery requires a SELECT result."),
-    };
+    private static IReadOnlyList<SqlProjection> SubqueryProjections(SqlPlan plan) => QueryOutput(plan).Projections;
 
     /// <summary>Preserves the child column's comparison collation across materialization.</summary>
-    private Collation SubqueryCollation(SqlPlan plan)
-    {
-        if (plan is SqlSubqueryPlan subquery)
-        {
-            return SubqueryCollation(subquery.Input);
-        }
-        var columns = plan switch
-        {
-            SqlSelectPlan select => select.Table.Columns,
-            SqlJoinPlan join => join.Columns,
-            SqlGroupPlan group => group.SourceColumns,
-            SqlSystemViewPlan view => view.View.Columns,
-            _ => throw new SqlPlanningException("COHSQLE013", "A subquery requires a SELECT result."),
-        };
-        var bindings = plan switch { SqlJoinPlan join => join.Bindings, SqlGroupPlan group => group.Bindings, _ => null };
-        var projection = SubqueryProjections(plan)[0];
-        var evaluator = new SqlExpressionEvaluator(columns, _parameters, bindings, defaultCollation: _catalog.DefaultCollation, functions: _functions, cancellationToken: _cancellationToken);
-        return projection.ColumnOrdinal is int ordinal ? evaluator.ResolveColumnCollation(ordinal)
-            : evaluator.ResolveCollation(projection.Expression);
-    }
+    private static Collation SubqueryCollation(SqlPlan plan) => QueryOutput(plan).Projections[0].Collation.Resolve(null);
 }

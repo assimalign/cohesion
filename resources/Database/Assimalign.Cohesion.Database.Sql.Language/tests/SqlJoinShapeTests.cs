@@ -22,9 +22,9 @@ public sealed class SqlJoinShapeTests
         // Assert
         statement.Diagnostics.ShouldNotContain(d => d.Severity == DiagnosticSeverity.Error);
         select.From.Count.ShouldBe(2);
-        select.From[0].Table.TableName.ShouldBe("a");
+        select.From[0].Table.ShouldBeOfType<SqlTableReference>().TableName.ShouldBe("a");
         select.From[0].Joins.ShouldBeEmpty();
-        select.From[1].Table.TableName.ShouldBe("b");
+        select.From[1].Table.ShouldBeOfType<SqlTableReference>().TableName.ShouldBe("b");
         select.From[1].Joins.Select(j => j.JoinType).ShouldBe([SqlJoinType.LeftOuter, SqlJoinType.Cross]);
         select.From[1].Joins[0].UsingColumns.ShouldBe(["id", "name"]);
         var canonical = SqlExpressionRenderer.Render(select);
@@ -38,7 +38,7 @@ public sealed class SqlJoinShapeTests
     [InlineData("SELECT * FROM t JOIN u USING (id) ORDER BY ROW_NUMBER() OVER ();", "OVER")]
     [InlineData("SELECT * FROM t, LATERAL (SELECT id FROM u) d;", "LATERAL")]
     [InlineData("SELECT * FROM t JOIN LATERAL (SELECT id FROM u) d ON TRUE;", "LATERAL")]
-    [InlineData("SELECT * FROM t, (SELECT id FROM u) d;", "SELECT")]
+
     public void Parse_ExcludedAfterUsing_ShouldLocateFirstUnsupported(string sql, string token)
     {
         // Arrange / Act

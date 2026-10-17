@@ -16,6 +16,25 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed class SqlBinaryOwnershipTests
 {
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Binary derived tables: fanout owns every emitted cell")]
+    public async Task Select_DerivedFanout_ShouldDetachRetainedBinaryValues()
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("binary-derived", new());
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE t (id INT, b BINARY);", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT INTO t VALUES (1, X'00FF'), (2, X'00FF');", cancellationToken: CancellationToken.None);
+
+        // Act
+        var values = await ValuesAsync(session, "SELECT d.b, d.b FROM t CROSS JOIN (SELECT b FROM t LIMIT 1) d;");
+
+        // Assert
+        values.Count.ShouldBe(4);
+        values[0][0] = 41;
+        foreach (var bytes in values.Skip(1)) { bytes.ShouldBe(new byte[] { 0, 255 }); }
+    }
+
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Binary joins: repeated projections and fanout own each emitted cell")]
     [InlineData(false)]
     [InlineData(true)]

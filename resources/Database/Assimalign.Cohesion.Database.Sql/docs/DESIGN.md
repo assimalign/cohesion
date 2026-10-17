@@ -240,12 +240,39 @@ index maintenance and transactional apply path.
 Correlation is deliberately excluded: qualified outer references receive
 `COHDBL001` in language validation, and catalog binding rejects any nested column
 that cannot resolve in its local scope. Parsing and planning enforce at most 32
-subquery levels. UPDATE/DELETE, VALUES, CHECK/DEFAULT and LIMIT/OFFSET expression
-subqueries, quantified comparisons, derived tables, CTEs and lateral joins remain
+subquery levels, counting derived bodies too. UPDATE SET, VALUES, CHECK/DEFAULT and LIMIT/OFFSET expression
+subqueries, quantified comparisons, CTEs and lateral joins remain
 outside the profile. SELECT continues to require FROM. Subquery resolution binds
 each use site to its slot number when the statement is planned; it needs no
 language-assembly friend access or public AST constructors. See [DIALECT.md](../../Assimalign.Cohesion.Database.Sql.Language/docs/DIALECT.md#subqueries-and-query-source-inserts-1021)
 for the exact supported forms and semantics.
+
+## Derived sources and DML WHERE subqueries (#1113, part b)
+
+`SqlRelationReference` is the closed public AST variant base for named and derived
+relations. `SqlFromItem` and `SqlJoinClause` retain that relation directly; DML and
+DDL targets remain named tables. `SqlDerivedTableReference` carries the body,
+required alias and optional complete output-name list. No interface, assembly
+reference or visibility grant is added. Admission, canonical rendering, expression
+depth, function validation and persisted-tree equivalence visit the body.
+
+The internal `SqlRelationPlan` contract exposes typed outputs for every query
+plan. Subquery binding, derived binding and INSERT source validation share that
+contract instead of maintaining separate closed switches. A `SqlDerivedRelation`
+is the third source kind on the N-input seam: it has output columns and a child
+plan, with no object ID, index or fabricated stored table. The executor materializes
+each body once with the enclosing statement context, buffers rows only while its
+consumer runs, and detaches retained binary cells on delivery under the existing
+ownership rules. EXPLAIN emits DerivedTable with the complete child subtree.
+Single derived inputs use the same relation consumer as N-way joins.
+
+UPDATE/DELETE WHERE use the same pre-execution subquery bindings as SELECT;
+their existing mutation plans consume typed slots. Children read the pre-statement
+snapshot and session writes, and failure occurs before mutations. The existing
+FK/cascade and transaction paths remain responsible for mutation atomicity.
+Correlation is still refused; no partly correlated evaluator ships in this commit.
+The #1112 ordering and #1114 set-operation shared pins remain in place. There is
+no catalog representation change, so no format bump or upgrade path is needed.
 
 ## EXPLAIN operator vocabulary (#1104)
 
@@ -1884,7 +1911,7 @@ capture when the binder first resolves a system relation. `SqlStatementContext` 
 readonly struct: it fixes the MVCC row snapshot at construction and stores the lazy catalog
 image in the existing shared `SqlStatementMetrics` state. Every context copy and nested plan
 uses that same state,
-so subqueries and INSERT sources (and future derived tables, CTEs, set operands, view
+so subqueries, derived tables, DML predicates and INSERT sources (and future CTEs, set operands, view
 bodies and UPDATE/DELETE predicate queries) inherit capture without an AST walk. Ordinary
 stored-only statements never capture metadata or allocate a context/source/binding wrapper;
 the Release ReadCommitted allocation regression retains the pre-join per-query budget.
@@ -4376,7 +4403,7 @@ takes 35 and 16 µs.
 ## Non-goals (current cut)
 
 RIGHT/FULL OUTER, NATURAL and LATERAL joins, qualified wildcards, correlated
-and derived-table subqueries, explicit NULL placement, `Serializable`
+subqueries, outer derived-table ordering, explicit NULL placement, `Serializable`
 isolation (rejected at begin), cost-based optimization (selection stays
 rule-based), index seeks for UPDATE/DELETE target collection, and index-only
 result production (a seek always fetches the row). (Row-level MVCC visibility

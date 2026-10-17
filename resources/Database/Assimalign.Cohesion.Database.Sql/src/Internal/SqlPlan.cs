@@ -15,6 +15,14 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// </summary>
 internal abstract record SqlPlan;
 
+/// <summary>The typed output contract of every executable relation.</summary>
+internal abstract record SqlRelationPlan : SqlPlan
+{
+    internal abstract IReadOnlyList<SqlProjection> OutputProjections { get; }
+    internal abstract IReadOnlyList<SqlCatalogColumn> OutputColumns { get; }
+    internal virtual IReadOnlyList<SqlRelationBinding>? OutputBindings => null;
+}
+
 /// <summary>
 /// Groups the filtered rows of an input plan. A grouped row holds the group keys, then the
 /// aggregate results, then the projected outputs; <c>HAVING</c>, the projections and
@@ -32,7 +40,12 @@ internal sealed record SqlGroupPlan(
     IReadOnlyList<SqlBoundOrdering> OrderBy,
     long? Limit,
     long? Offset,
-    bool IsDistinct) : SqlPlan;
+    bool IsDistinct) : SqlRelationPlan
+{
+    internal override IReadOnlyList<SqlProjection> OutputProjections => Projections;
+    internal override IReadOnlyList<SqlCatalogColumn> OutputColumns => SourceColumns;
+    internal override IReadOnlyList<SqlRelationBinding>? OutputBindings => Bindings;
+}
 
 /// <summary>
 /// One distinct aggregate call of a grouping plan, bound to the overload it resolved to, so the
@@ -132,10 +145,14 @@ internal sealed record SqlSelectPlan(
     long? Offset,
     bool IsDistinct,
     SqlAccessPath Access,
-    IReadOnlyDictionary<SqlExpression, int>? OrderByProjections = null) : SqlPlan;
+    IReadOnlyDictionary<SqlExpression, int>? OrderByProjections = null) : SqlRelationPlan
+{
+    internal override IReadOnlyList<SqlProjection> OutputProjections => Projections;
+    internal override IReadOnlyList<SqlCatalogColumn> OutputColumns => Table.Columns;
+}
 
 /// <summary>A relation's source, qualifier and position in a joined row.</summary>
-internal sealed record SqlRelationBinding(SqlRelationSource Source, SqlTableReference Reference, int Offset)
+internal sealed record SqlRelationBinding(SqlRelationSource Source, SqlRelationReference Reference, int Offset)
 {
     // USING hides only unqualified right columns, never their qualified references.
     internal HashSet<int> HiddenColumns { get; } = [];
@@ -161,7 +178,12 @@ internal sealed record SqlJoinPlan(
     long? Limit,
     long? Offset,
     bool IsDistinct,
-    IReadOnlyDictionary<SqlExpression, int>? OrderByProjections = null) : SqlPlan;
+    IReadOnlyDictionary<SqlExpression, int>? OrderByProjections = null) : SqlRelationPlan
+{
+    internal override IReadOnlyList<SqlProjection> OutputProjections => Projections;
+    internal override IReadOnlyList<SqlCatalogColumn> OutputColumns => Columns;
+    internal override IReadOnlyList<SqlRelationBinding>? OutputBindings => Bindings;
+}
 
 /// <summary>One written join step; comma items introduce unconditional CROSS steps.</summary>
 internal sealed record SqlJoinStep(int Binding, SqlJoinType Kind, SqlBoundExpression? Condition, SqlJoinIndexPath? Access);
@@ -187,7 +209,11 @@ internal sealed record SqlSystemViewPlan(
     long? Limit,
     long? Offset,
     bool IsDistinct,
-    IReadOnlyDictionary<SqlExpression, int>? OrderByProjections = null) : SqlPlan;
+    IReadOnlyDictionary<SqlExpression, int>? OrderByProjections = null) : SqlRelationPlan
+{
+    internal override IReadOnlyList<SqlProjection> OutputProjections => Projections;
+    internal override IReadOnlyList<SqlCatalogColumn> OutputColumns => View.Columns;
+}
 
 /// <summary>
 /// How a SELECT reaches its table's rows — the seek node the thin IR gained when

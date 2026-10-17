@@ -40,20 +40,7 @@ internal sealed partial class SqlPlanner
     /// <summary>Reads projected types through the closed query plan family.</summary>
     private IReadOnlyList<SqlProjection> InsertSourceProjections(SqlPlan plan)
     {
-        var (projections, columns, bindings) = plan switch
-        {
-            SqlSubqueryPlan subquery => (InsertSourceProjections(subquery.Input),
-                (IReadOnlyList<SqlCatalogColumn>?)null, (IReadOnlyList<SqlRelationBinding>?)null),
-            SqlSelectPlan select => (select.Projections, select.Table.Columns, null),
-            SqlJoinPlan join => (join.Projections, join.Columns, join.Bindings),
-            SqlSystemViewPlan view => (view.Projections, view.View.Columns, null),
-            SqlGroupPlan group => (group.Projections, group.SourceColumns, group.Bindings),
-            _ => throw new SqlPlanningException("COHSQLE013", "INSERT SELECT requires a query source."),
-        };
-        if (columns is null)
-        {
-            return projections;
-        }
+        var (projections, columns, bindings) = QueryOutput(plan);
         var evaluator = new SqlExpressionEvaluator(columns, _parameters, bindings, defaultCollation: _catalog.DefaultCollation, functions: _functions, cancellationToken: _cancellationToken);
         return projections.Select(projection => projection.Type == DatabaseType.Null && projection.Expression is not null
             ? projection with { Type = GroupExpressionType(projection.Expression, columns, evaluator) }

@@ -201,8 +201,18 @@ internal static class SqlTreeDump
         builder.Append(']');
     }
 
-    private static string Table(SqlTableReference? table)
-        => table is null ? "null" : $"Table({Text(table.SchemaName)}, {Text(table.TableName)}, {Text(table.Alias)})";
+    private static string Table(SqlRelationReference? relation)
+    {
+        if (relation is SqlDerivedTableReference derived)
+        {
+            var builder = new StringBuilder("Derived(");
+            Append(builder, derived.Query);
+            return builder.Append(", ").Append(Text(derived.Alias)).Append(", [")
+                .Append(string.Join(", ", derived.Columns.Select(Text))).Append("])").ToString();
+        }
+        return relation is SqlTableReference table
+            ? $"Table({Text(table.SchemaName)}, {Text(table.TableName)}, {Text(table.Alias)})" : "null";
+    }
 
     // Brackets make leading, trailing and embedded whitespace visible in a failure message.
     private static string Text(string? value) => value is null ? "null" : "[" + value + "]";

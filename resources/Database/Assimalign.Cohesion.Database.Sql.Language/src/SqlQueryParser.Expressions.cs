@@ -804,6 +804,7 @@ public sealed partial class SqlQueryParser
             if (!IsAtEnd(ref lexer) && IsIdentifierOrKeyword(ref lexer))
             {
                 string second = CurrentIdentifierText(ref lexer);
+                int end = CurrentTokenEnd(ref lexer);
                 Advance(ref lexer);
 
                 // Check for a.b.c
@@ -817,15 +818,16 @@ public sealed partial class SqlQueryParser
                     if (!IsAtEnd(ref lexer) && IsIdentifierOrKeyword(ref lexer))
                     {
                         string third = CurrentIdentifierText(ref lexer);
+                        end = CurrentTokenEnd(ref lexer);
                         Advance(ref lexer);
                         return new SqlColumnReferenceExpression(third, second, first,
-                            Location.Create(1, 1, pos, pos));
+                            Location.Create(1, 1, pos, end));
                     }
                 }
 
                 // a.b — could be table.column or schema.table (interpret as table.column)
                 return new SqlColumnReferenceExpression(second, first, null,
-                    Location.Create(1, 1, pos, pos));
+                    Location.Create(1, 1, pos, end));
             }
         }
 

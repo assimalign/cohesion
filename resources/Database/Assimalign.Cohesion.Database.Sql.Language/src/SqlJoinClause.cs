@@ -14,7 +14,7 @@ public sealed class SqlJoinClause
     /// <param name="table">The table being joined.</param>
     /// <param name="condition">The ON condition, if any.</param>
     /// <param name="usingColumns">The ordered USING column names; empty for ON or CROSS.</param>
-    internal SqlJoinClause(SqlJoinType joinType, SqlTableReference table, SqlExpression? condition, IReadOnlyList<string> usingColumns)
+    internal SqlJoinClause(SqlJoinType joinType, SqlRelationReference table, SqlExpression? condition, IReadOnlyList<string> usingColumns)
     {
         JoinType = joinType;
         Table = table;
@@ -30,7 +30,7 @@ public sealed class SqlJoinClause
     /// <summary>
     /// Gets the table being joined.
     /// </summary>
-    public SqlTableReference Table { get; }
+    public SqlRelationReference Table { get; }
 
     /// <summary>
     /// Gets the ON condition expression, if present.

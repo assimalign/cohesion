@@ -88,6 +88,7 @@ internal static class Program
     private const string expandedJoin = "SELECT a.Id, c.Id FROM customers a JOIN customers b USING (Id) " +
         "LEFT JOIN customers c ON b.Id = c.Id AND c.Id = 1 ORDER BY a.Id";
     private const string crossJoin = "SELECT COUNT(*) FROM customers a, customers b CROSS JOIN customers c";
+    private const string derivedJoin = "SELECT d.key_id FROM customers c JOIN (SELECT Id FROM customers WHERE Id = 1) d (key_id) ON c.Id = d.key_id";
 
     private const string CannotCast = "SELECT CAST(Active AS DATE) FROM customers WHERE Id < 0";
 
@@ -188,6 +189,14 @@ internal static class Program
         Check("in process: all CAST families", await RowsAsync(session, allCasts), _allCasts);
         Check("in process: three-way USING and LEFT", await RowsAsync(session, expandedJoin), [[1L, 1L], [2L, null]]);
         Check("in process: comma and CROSS", await RowsAsync(session, crossJoin), [[8L]]);
+        Check("in process: renamed derived join", await RowsAsync(session, derivedJoin), [[1L]]);
+        await session.ExecuteAsync("CREATE TABLE subquery_guard (id INT)");
+        await session.ExecuteAsync("INSERT INTO subquery_guard VALUES (1), (2)");
+        var subqueryUpdate = await session.ExecuteAsync("UPDATE subquery_guard SET id = id + 10 WHERE id IN (SELECT id FROM subquery_guard WHERE id = 1)");
+        Check("in process: UPDATE WHERE subquery", subqueryUpdate.AffectedCount, 1L);
+        var subqueryDelete = await session.ExecuteAsync("DELETE FROM subquery_guard WHERE id > (SELECT AVG(id) FROM subquery_guard)");
+        Check("in process: DELETE WHERE snapshot", subqueryDelete.AffectedCount, 1L);
+        Check("in process: DML subquery rows", await RowsAsync(session, "SELECT id FROM subquery_guard"), [[2]]);
         Check("in process: strict typed literals", await RowsAsync(session, typedLiterals), _typedLiterals);
         Check("in process: ISO type names and SQL Server lexical aliases", await RowsAsync(session, typeAliases), _typeAliases);
         Check("in process: CHAR storage, cast, length, concat, LIKE and seek", await RowsAsync(session, Characters), _characters);
@@ -269,6 +278,7 @@ internal static class Program
         Check("over the wire: all CAST families", await RowsAsync(connection, allCasts, timeout.Token), _allCasts);
         Check("over the wire: three-way USING and LEFT", await RowsAsync(connection, expandedJoin, timeout.Token), [[1L, 1L], [2L, null]]);
         Check("over the wire: comma and CROSS", await RowsAsync(connection, crossJoin, timeout.Token), [[8L]]);
+        Check("over the wire: renamed derived join", await RowsAsync(connection, derivedJoin, timeout.Token), [[1L]]);
         Check("over the wire: strict typed literals", await RowsAsync(connection, typedLiterals, timeout.Token), _typedLiterals);
         Check("over the wire: ISO type names and SQL Server lexical aliases", await RowsAsync(connection, typeAliases, timeout.Token), _typeAliases);
         var fixedCodes = await connection.QueryAsync(Characters, cancellationToken: timeout.Token);

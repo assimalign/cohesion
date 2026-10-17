@@ -1,5 +1,12 @@
 # Database.Sql.Client — Design
 
+## Derived relations and DML predicate subqueries (#1113, part b)
+
+The existing query and command exchanges carry derived-table results and
+UPDATE/DELETE predicate-subquery affected counts. Server materialization preserves
+the existing column metadata and error taxonomy; no wire format changes. The
+subquery wire corpus covers a renamed derived join and both DML statement kinds.
+
 ## Parameter contract (#1102)
 
 SqlParameterCollection strips one leading sigil and keeps ordinal case-sensitive bare

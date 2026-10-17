@@ -11,7 +11,7 @@ public sealed partial class SqlQueryParser
     private int _subqueryDepth;
     private int _paginationDepth;
 
-    private SqlSelectExpression ParseSubquery(ref TokenLexer lexer)
+    private SqlSelectExpression ParseSubquery(ref TokenLexer lexer, bool derived = false)
     {
         if (_paginationDepth > 0)
         {
@@ -66,7 +66,7 @@ public sealed partial class SqlQueryParser
             // An abandoned statement keeps none of its tree, so there is nothing to check.
             if (!NestingExceeded)
             {
-                ValidateSubqueryReferences(select);
+                ValidateSubqueryReferences(select, derived);
             }
 
             return select;
@@ -97,6 +97,7 @@ public sealed partial class SqlQueryParser
         string? previousToken,
         string? previousPreviousToken,
         bool insertValues,
+        bool dmlWhere,
         bool followsFromComma,
         out string clause)
     {
@@ -124,14 +125,8 @@ public sealed partial class SqlQueryParser
         else if (lexer.Current.Type == TokenType.Keyword &&
                  token.Equals("SELECT", StringComparison.OrdinalIgnoreCase) && previousToken is not null)
         {
-            if (previousToken == "(" &&
-                (string.Equals(previousPreviousToken, "FROM", StringComparison.OrdinalIgnoreCase) ||
-                 string.Equals(previousPreviousToken, "JOIN", StringComparison.OrdinalIgnoreCase) || previousPreviousToken == "," && followsFromComma))
-            {
-                clause = "derived-table SUBQUERY in FROM or JOIN";
-            }
-            else if (!firstToken.Equals("SELECT", StringComparison.OrdinalIgnoreCase) &&
-                     !firstToken.Equals("INSERT", StringComparison.OrdinalIgnoreCase))
+            if (!firstToken.Equals("SELECT", StringComparison.OrdinalIgnoreCase) &&
+                !firstToken.Equals("INSERT", StringComparison.OrdinalIgnoreCase) && !dmlWhere)
             {
                 clause = $"SUBQUERY in {firstToken.ToUpperInvariant()}";
             }
@@ -144,7 +139,7 @@ public sealed partial class SqlQueryParser
         return clause.Length > 0;
     }
 
-    private void ValidateSubqueryReferences(SqlSelectExpression select)
+    private void ValidateSubqueryReferences(SqlSelectExpression select, bool derived)
     {
         var qualifiers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var item in select.From) { AddSubqueryQualifier(item.Table, qualifiers); }
@@ -158,41 +153,42 @@ public sealed partial class SqlQueryParser
 
         foreach (var column in select.Columns)
         {
-            ValidateSubqueryReference(column.Expression, qualifiers);
+            ValidateSubqueryReference(column.Expression, qualifiers, derived);
         }
         foreach (var item in select.From)
         {
             foreach (var join in item.Joins)
             {
-                ValidateSubqueryReference(join.Condition, qualifiers);
+                ValidateSubqueryReference(join.Condition, qualifiers, derived);
             }
         }
-        ValidateSubqueryReference(select.Where, qualifiers);
+        ValidateSubqueryReference(select.Where, qualifiers, derived);
         foreach (var group in select.GroupBy)
         {
-            ValidateSubqueryReference(group, qualifiers);
+            ValidateSubqueryReference(group, qualifiers, derived);
         }
-        ValidateSubqueryReference(select.Having, qualifiers);
+        ValidateSubqueryReference(select.Having, qualifiers, derived);
         foreach (var order in select.OrderBy)
         {
-            ValidateSubqueryReference(order.Expression, qualifiers);
+            ValidateSubqueryReference(order.Expression, qualifiers, derived);
         }
-        ValidateSubqueryReference(select.Limit, qualifiers);
-        ValidateSubqueryReference(select.Offset, qualifiers);
+        ValidateSubqueryReference(select.Limit, qualifiers, derived);
+        ValidateSubqueryReference(select.Offset, qualifiers, derived);
     }
 
-    private static void AddSubqueryQualifier(SqlTableReference? table, HashSet<string> qualifiers)
+    private static void AddSubqueryQualifier(SqlRelationReference? table, HashSet<string> qualifiers)
     {
         if (table is null)
         {
             return;
         }
-        qualifiers.Add(table.Alias ?? table.TableName);
-        if (table.Alias is null)
+        if (table.Alias is { } alias) { qualifiers.Add(alias); }
+        else if (table is SqlTableReference named)
         {
             // An omitted schema is resolved by the catalog. Its eventual fully
             // qualified column reference must not be mistaken for correlation.
-            qualifiers.Add($"{table.SchemaName ?? "*"}.{table.TableName}");
+            qualifiers.Add(named.TableName);
+            qualifiers.Add($"{named.SchemaName ?? "*"}.{named.TableName}");
         }
     }
 
@@ -200,7 +196,7 @@ public sealed partial class SqlQueryParser
     // trees thousands of levels deep, and a left-associative chain that deep is built in a loop
     // without the parser recursing (#1151). Operands pop in source order, so the diagnostics
     // come out in the order the references appear.
-    private void ValidateSubqueryReference(SqlExpression? root, HashSet<string> qualifiers)
+    private void ValidateSubqueryReference(SqlExpression? root, HashSet<string> qualifiers, bool derived)
     {
         if (root is null)
         {
@@ -220,7 +216,9 @@ public sealed partial class SqlQueryParser
                     !(column.SchemaName is not null && qualifiers.Contains($"*.{column.TableAlias}")))
                 {
                     AddUnsupportedSurfaceDiagnostic(column.Location?.Start ?? 0, column.Location?.End ?? 0,
-                        $"Correlated SQL subqueries are not supported: reference '{qualifier}.{column.ColumnName}' is outside the subquery's local FROM/JOIN scope.");
+                        derived
+                            ? $"A derived table cannot reference sibling relations without LATERAL: '{qualifier}.{column.ColumnName}'."
+                            : $"Correlated SQL subqueries are not supported: reference '{qualifier}.{column.ColumnName}' is outside the subquery's local FROM/JOIN scope.");
                 }
 
                 continue;

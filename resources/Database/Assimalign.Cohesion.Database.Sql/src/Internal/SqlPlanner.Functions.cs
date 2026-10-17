@@ -94,8 +94,10 @@ internal sealed partial class SqlPlanner
         }
         for (int i = 0; i < select.From.Count; i++)
         {
+            if (select.From[i].Table is SqlDerivedTableReference derived) { ValidateFunctionCalls(derived.Query); }
             foreach (var join in select.From[i].Joins)
             {
+                if (join.Table is SqlDerivedTableReference joined) { ValidateFunctionCalls(joined.Query); }
                 ValidateFunctionCalls(join.Condition);
             }
         }

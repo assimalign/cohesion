@@ -57,9 +57,10 @@ public sealed class SqlSubqueryParserTests
     [InlineData("SELECT id FROM t WHERE id <> SOME (SELECT id FROM u);", "SOME quantified comparison")]
     [InlineData("SELECT id FROM t WHERE id = any /* trivia */ (SELECT id FROM u);", "ANY quantified comparison")]
     [InlineData("SELECT * FROM LATERAL (SELECT id FROM u) q;", "LATERAL")]
-    [InlineData("SELECT * FROM t JOIN (SELECT id FROM u) q ON t.id = q.id;", "derived-table")]
+
     [InlineData("WITH q AS (SELECT id FROM u) SELECT id FROM q;", "WITH")]
-    [InlineData("UPDATE t SET id = 2 WHERE EXISTS (SELECT id FROM u);", "SUBQUERY in UPDATE")]
+    [InlineData("SELECT * FROM (SELECT id FROM t UNION SELECT id FROM u) d;", "UNION")]
+
     [InlineData("INSERT INTO t VALUES ((SELECT id FROM u));", "SUBQUERY in INSERT VALUES")]
     [InlineData("SELECT id FROM t LIMIT (SELECT id FROM u);", "LIMIT or OFFSET")]
     [InlineData("SELECT id FROM t OFFSET (SELECT id FROM u);", "LIMIT or OFFSET")]

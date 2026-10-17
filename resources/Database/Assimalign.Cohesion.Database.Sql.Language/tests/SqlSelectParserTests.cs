@@ -20,7 +20,7 @@ public class SqlSelectParserTests
         select.Columns[0].Expression.ShouldBeOfType<SqlStarExpression>();
         select.Columns[0].Alias.ShouldBeNull();
         select.From.ShouldNotBeNull();
-        select.From[0].Table.TableName.ShouldBe("Users");
+        select.From[0].Table.ShouldBeOfType<SqlTableReference>().TableName.ShouldBe("Users");
     }
 
     [Fact]
@@ -53,8 +53,8 @@ public class SqlSelectParserTests
         var select = statement.SqlExpression.ShouldBeOfType<SqlSelectExpression>();
 
         select.From.ShouldNotBeNull();
-        select.From[0].Table.SchemaName.ShouldBe("dbo");
-        select.From[0].Table.TableName.ShouldBe("Users");
+        select.From[0].Table.ShouldBeOfType<SqlTableReference>().SchemaName.ShouldBe("dbo");
+        select.From[0].Table.ShouldBeOfType<SqlTableReference>().TableName.ShouldBe("Users");
     }
 
     [Fact]
@@ -64,7 +64,7 @@ public class SqlSelectParserTests
         var select = statement.SqlExpression.ShouldBeOfType<SqlSelectExpression>();
 
         select.From.ShouldNotBeNull();
-        select.From[0].Table.TableName.ShouldBe("Users");
+        select.From[0].Table.ShouldBeOfType<SqlTableReference>().TableName.ShouldBe("Users");
         select.From[0].Table.Alias.ShouldBe("u");
     }
 
@@ -105,7 +105,7 @@ public class SqlSelectParserTests
 
         select.From[0].Joins.Count.ShouldBe(1);
         select.From[0].Joins[0].JoinType.ShouldBe(SqlJoinType.Inner);
-        select.From[0].Joins[0].Table.TableName.ShouldBe("Orders");
+        select.From[0].Joins[0].Table.ShouldBeOfType<SqlTableReference>().TableName.ShouldBe("Orders");
         select.From[0].Joins[0].Table.Alias.ShouldBe("o");
         select.From[0].Joins[0].Condition.ShouldNotBeNull();
         statement.Diagnostics.ShouldNotContain(item => item.Severity == DiagnosticSeverity.Error);
@@ -120,11 +120,11 @@ public class SqlSelectParserTests
 
         statement.Diagnostics.ShouldNotContain(item => item.Severity == DiagnosticSeverity.Error);
         var select = statement.SqlExpression.ShouldBeOfType<SqlSelectExpression>();
-        select.From[0].Table.SchemaName.ShouldBe("usr");
-        select.From[0].Table.TableName.ShouldBe("Users");
+        select.From[0].Table.ShouldBeOfType<SqlTableReference>().SchemaName.ShouldBe("usr");
+        select.From[0].Table.ShouldBeOfType<SqlTableReference>().TableName.ShouldBe("Users");
         select.From[0].Joins.Count.ShouldBe(1);
-        select.From[0].Joins[0].Table.SchemaName.ShouldBe("usr");
-        select.From[0].Joins[0].Table.TableName.ShouldBe("UsersProfile");
+        select.From[0].Joins[0].Table.ShouldBeOfType<SqlTableReference>().SchemaName.ShouldBe("usr");
+        select.From[0].Joins[0].Table.ShouldBeOfType<SqlTableReference>().TableName.ShouldBe("UsersProfile");
         var firstName = select.Columns[0].Expression.ShouldBeOfType<SqlColumnReferenceExpression>();
         firstName.SchemaName.ShouldBe("usr");
         firstName.TableAlias.ShouldBe("Users");

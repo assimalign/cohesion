@@ -98,7 +98,7 @@ internal sealed partial class SqlExpressionEvaluator
         SqlExpressionEvaluator? slotScope = null,
         SqlBindingContext bindingContext = SqlBindingContext.Table,
         bool[]? sharedColumns = null,
-        SqlTableReference? relation = null)
+        SqlRelationReference? relation = null)
     {
         _columns = columns;
         _bindingContext = bindingContext;
@@ -170,7 +170,7 @@ internal sealed partial class SqlExpressionEvaluator
         }
         return new SqlExpressionEvaluator(_columns, _parameters, _relations as IReadOnlyList<SqlRelationBinding>, ordinals,
             _defaultCollation, sources, _subquerySlots, _subqueryValues, _functions, _cancellationToken, _typing?.SlotScope, _bindingContext,
-            relation: _relations as SqlTableReference);
+            relation: _relations as SqlRelationReference);
     }
 
     /// <summary>
@@ -336,7 +336,7 @@ internal sealed partial class SqlExpressionEvaluator
             return resolved >= 0 ? resolved : throw new SqlPlanningException("COHSQLE015", $"Unknown column '{ColumnName(column)}'.", column.Location);
         }
 
-        if (_relations is SqlTableReference reference && !MatchesQualifier(reference, column))
+        if (_relations is SqlRelationReference reference && !MatchesQualifier(reference, column))
         {
             throw new SqlPlanningException("COHSQLE015", $"Unknown column '{ColumnName(column)}'.", column.Location);
         }
@@ -552,7 +552,7 @@ internal sealed partial class SqlExpressionEvaluator
     private static bool MatchesQualifier(SqlRelationBinding binding, SqlColumnReferenceExpression column)
         => MatchesQualifier(binding.Reference, column);
 
-    private static bool MatchesQualifier(SqlTableReference reference, SqlColumnReferenceExpression column)
+    private static bool MatchesQualifier(SqlRelationReference reference, SqlColumnReferenceExpression column)
     {
         if (column.TableAlias is null)
         {
@@ -564,8 +564,8 @@ internal sealed partial class SqlExpressionEvaluator
             return column.SchemaName is null && string.Equals(alias, column.TableAlias, StringComparison.OrdinalIgnoreCase);
         }
 
-        return string.Equals(reference.TableName, column.TableAlias, StringComparison.OrdinalIgnoreCase)
-            && (column.SchemaName is null || string.Equals(reference.SchemaName ?? SqlPlanner.DefaultSchema, column.SchemaName, StringComparison.OrdinalIgnoreCase));
+        return reference is SqlTableReference named && string.Equals(named.TableName, column.TableAlias, StringComparison.OrdinalIgnoreCase)
+            && (column.SchemaName is null || string.Equals(named.SchemaName ?? SqlPlanner.DefaultSchema, column.SchemaName, StringComparison.OrdinalIgnoreCase));
     }
 
     private static string ColumnName(SqlColumnReferenceExpression column)

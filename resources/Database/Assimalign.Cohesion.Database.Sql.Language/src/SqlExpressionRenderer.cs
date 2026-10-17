@@ -433,8 +433,14 @@ public static class SqlExpressionRenderer
         return builder.ToString();
     }
 
-    private static string Table(SqlTableReference table)
+    private static string Table(SqlRelationReference relation)
     {
+        if (relation is SqlDerivedTableReference derived)
+        {
+            return "(" + Select(derived.Query) + ") AS " + Identifier(derived.Alias!) +
+                (derived.Columns.Count == 0 ? string.Empty : " (" + string.Join(", ", derived.Columns.Select(Identifier)) + ")");
+        }
+        var table = (SqlTableReference)relation;
         string name = table.SchemaName is null
             ? Identifier(table.TableName)
             : Identifier(table.SchemaName) + "." + Identifier(table.TableName);

@@ -42,8 +42,8 @@ is the issue's approved public-profile option; no visibility grant or public int
 
 The UPDATE and DELETE dialect rows specify the same target qualifier rule as SELECT:
 an alias hides the base relation name, and unknown qualifiers fail with located COHSQLE015
-before any mutation. The engine supplies relation bindings; parser shapes and the existing
-COHDBL001 refusal of DML subqueries stay unchanged. PostgreSQL `parse_relation.c:3759`
+before any mutation. The engine supplies relation bindings; parser shapes are unchanged. #1113 adds uncorrelated WHERE subqueries; the existing
+COHDBL001 refusal is retained for UPDATE SET and correlated children. PostgreSQL `parse_relation.c:3759`
 is the reference for the hidden-name rule.
 
 ## System relation joins (#1106)
@@ -59,12 +59,23 @@ and the live JOIN conformance case cover system-to-system joins.
 `SqlExplainExpression` wraps a SELECT, INSERT, UPDATE or DELETE tree, retains the source text,
 and reports `SqlQueryCommandType.Explain`. The parser handles the prefix once, then uses the
 ordinary statement parser and terminator check. Capability scanning classifies the wrapped
-statement, so supported subqueries remain supported and excluded UPDATE/DELETE subqueries stay
+statement, so supported subqueries remain supported and excluded UPDATE SET subqueries stay
 excluded. DDL, transactions, nested EXPLAIN and ANALYZE receive `COHDBL001`. The wrapped
 statement's nesting measure remains subject to the engine's existing limit. SqlClauses.Explain,
 the statement corpus and the live conformance case change together; DIALECT.md is the contract.
 The engine's deferred-provisioning admission walks the wrapped statement before binding, just
 as it does for an ordinary data statement; an EXPLAIN cannot bypass a pending table reservation.
+
+## Derived relation AST (#1113, part b)
+
+The public `SqlRelationReference` variant set has sealed named-table and derived
+query leaves; DML/DDL targets keep `SqlTableReference`. FROM and JOIN retain the
+variant directly. Derived parsing uses the existing subquery and expression depth
+budgets, requires an alias, and preserves an optional column-name list. The engine
+checks output width before execution. Rendering and query depth visit every body.
+Uncorrelated UPDATE/DELETE WHERE children use ordinary subquery grammar; UPDATE
+SET, lateral references and correlation remain explicit capability refusals.
+The shared #1112 outer-ordering and #1114 set-operation pins remain excluded.
 
 ## Design intent
 

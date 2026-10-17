@@ -55,6 +55,11 @@ public sealed class SqlStatementCompletenessTests
             "SELECT a FROM t WHERE a IN (SELECT b FROM u)",
             "SELECT (SELECT MAX(b) FROM u) FROM t",
             "SELECT a FROM t WHERE NOT EXISTS (SELECT b FROM u)",
+            "SELECT d.a FROM (SELECT a FROM t) d",
+            "SELECT d.x FROM t, (SELECT b FROM u) d (x)",
+            "SELECT d.x FROM t JOIN (SELECT b FROM u) d (x) ON t.a = d.x",
+            "UPDATE t SET a = 1 WHERE EXISTS (SELECT b FROM u)",
+            "DELETE FROM t WHERE a IN (SELECT b FROM u)",
             "INSERT INTO t (a) SELECT b FROM u",
         ],
         [SqlClauses.Case] = ["SELECT CASE WHEN a = 1 THEN 'x' ELSE 'y' END FROM t", "SELECT a FROM t WHERE CASE a WHEN 1 THEN TRUE END"],
@@ -371,12 +376,12 @@ public sealed class SqlStatementCompletenessTests
     /// </summary>
     /// <param name="sql">A statement with a clause outside the profile.</param>
     /// <param name="expected">The error codes, in order.</param>
-    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Completeness: an unsupported clause owns the text after it, not the text before it")]
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Completeness: excluded and restored clauses retain precise boundaries")]
     [InlineData("DELETE FROM t WHERE id = 1 RETURNING *;", new[] { "COHDBL001" })]
     [InlineData("DELETE FROM t WHERE id = 1 RETURNING *; DELETE FROM t;", new[] { "COHDBL001" })]
     [InlineData("DELETE FROM t WHRE id = 1 RETURNING *;", new[] { "SQL0003", "COHDBL001" })]
     [InlineData("SELECT * FROM (SELECT id FROM u) d ORDER BY id;", new[] { "COHDBL001" })]
-    [InlineData("SELECT * FROM t JOIN (SELECT id FROM u) q ON t.id = q.id;", new[] { "COHDBL001" })]
+    [InlineData("SELECT * FROM t JOIN (SELECT id FROM u) q ON t.id = q.id;", new string[0])]
     public void Parse_UnsupportedClause_ShouldOwnOnlyTheTextAfterIt(string sql, string[] expected)
     {
         // Act

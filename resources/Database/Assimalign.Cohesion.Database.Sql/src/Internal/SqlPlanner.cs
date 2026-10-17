@@ -109,9 +109,9 @@ internal sealed partial class SqlPlanner
         IReadOnlyList<SqlCatalogColumn> columns = source.Columns;
         IReadOnlyList<SqlJoinStep> steps = [];
         IReadOnlyList<int>? outputOrdinals = null;
-        if (select.From.Count > 1 || select.From[0].Joins.Count > 0)
+        if (select.From.Count > 1 || select.From[0].Joins.Count > 0 || source.Derived is not null)
         {
-            bindings = BindJoin(select, out columns, out steps, out outputOrdinals);
+            bindings = BindJoin(select, source, out columns, out steps, out outputOrdinals);
         }
         var evaluator = new SqlExpressionEvaluator(columns, _parameters, bindings, defaultCollation: _catalog.DefaultCollation,
             subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken, relation: select.From[0].Table);
@@ -196,14 +196,19 @@ internal sealed partial class SqlPlanner
     }
 
     /// <summary>Resolves a read source and requests the statement's one catalog image at binding time.</summary>
-    private SqlRelationSource ResolveRelation(SqlTableReference reference)
+    private SqlRelationSource ResolveRelation(SqlRelationReference reference)
     {
-        if (SqlSystemViews.Find(reference) is { } view)
+        if (reference is SqlDerivedTableReference derived)
+        {
+            return BindDerivedTable(derived);
+        }
+        var named = (SqlTableReference)reference;
+        if (SqlSystemViews.Find(named) is { } view)
         {
             _statementMetrics?.CaptureCatalogSnapshot(_catalog);
             return new SqlRelationSource(view);
         }
-        return new SqlRelationSource(ResolveTable(reference));
+        return new SqlRelationSource(ResolveTable(named));
     }
 
     /// <summary>A projection that passes a source column through, with the collation <c>DISTINCT</c> compares it under.</summary>
@@ -759,15 +764,16 @@ internal sealed partial class SqlPlanner
     /// (<c>check_agglevels_and_constraints</c>, <c>src/backend/parser/parse_agg.c</c>, SQLSTATE
     /// 42803). Without the check the statement succeeded over an empty table and failed per row
     /// over a populated one. The search treats a subquery as opaque, since an aggregate there
-    /// summarizes the subquery's own rows; the dialect admits no subquery in UPDATE or DELETE yet
-    /// (<c>COHDBL001</c> at parse time).
+    /// summarizes the subquery's own rows. WHERE children bind to typed slots before the DML
+    /// filter is validated; subqueries in SET retain their capability refusal.
     /// </remarks>
     /// <exception cref="DatabaseException">An assignment or the filter contains an aggregate.</exception>
-    private SqlUpdatePlan PlanUpdate(SqlUpdateExpression update)
+    private SqlPlan PlanUpdate(SqlUpdateExpression update)
     {
+        var queries = BindSubqueries(update.Where is null ? [] : WalkSubqueries(update.Where));
         var table = ResolveTable(update.Table);
         var evaluator = new SqlExpressionEvaluator(table.Columns, _parameters,
-            defaultCollation: _catalog.DefaultCollation, functions: _functions, cancellationToken: _cancellationToken, relation: update.Table);
+            defaultCollation: _catalog.DefaultCollation, subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken, relation: update.Table);
 
         var assignments = new List<(int Ordinal, SqlBoundExpression Value)>(update.Assignments.Count);
         foreach (var assignment in update.Assignments)
@@ -790,18 +796,20 @@ internal sealed partial class SqlPlanner
         if (update.Where is not null)
         {
             RejectAggregateInDmlWhere(update.Where);
-            ValidateExpression(update.Where, evaluator);
+            ValidateExpression(update.Where, evaluator, _subqueryTypes);
             where = evaluator.Bind(update.Where);
         }
 
-        return new SqlUpdatePlan(table, assignments, where);
+        var input = new SqlUpdatePlan(table, assignments, where);
+        return queries.Count == 0 ? input : new SqlSubqueryPlan(input, queries);
     }
 
     /// <summary>Binds a DELETE's row filter.</summary>
     /// <remarks>An aggregate in the filter fails while planning, as in UPDATE (see <see cref="PlanUpdate"/>).</remarks>
     /// <exception cref="DatabaseException">The filter contains an aggregate.</exception>
-    private SqlDeletePlan PlanDelete(SqlDeleteExpression delete)
+    private SqlPlan PlanDelete(SqlDeleteExpression delete)
     {
+        var queries = BindSubqueries(delete.Where is null ? [] : WalkSubqueries(delete.Where));
         var table = ResolveTable(delete.Table);
 
         SqlBoundExpression? where = null;
@@ -809,12 +817,13 @@ internal sealed partial class SqlPlanner
         {
             RejectAggregateInDmlWhere(delete.Where);
             var evaluator = new SqlExpressionEvaluator(table.Columns, _parameters,
-                defaultCollation: _catalog.DefaultCollation, functions: _functions, cancellationToken: _cancellationToken, relation: delete.Table);
-            ValidateExpression(delete.Where, evaluator);
+                defaultCollation: _catalog.DefaultCollation, subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken, relation: delete.Table);
+            ValidateExpression(delete.Where, evaluator, _subqueryTypes);
             where = evaluator.Bind(delete.Where);
         }
 
-        return new SqlDeletePlan(table, where);
+        var input = new SqlDeletePlan(table, where);
+        return queries.Count == 0 ? input : new SqlSubqueryPlan(input, queries);
     }
 
     /// <summary>

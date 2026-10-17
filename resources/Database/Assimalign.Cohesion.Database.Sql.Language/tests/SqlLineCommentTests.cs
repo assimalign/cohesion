@@ -46,7 +46,7 @@ public sealed class SqlLineCommentTests
         assignment.Where.ShouldBeOfType<SqlBinaryExpression>().Operator.ShouldBe(SqlBinaryOperator.Equal);
         Errors(select).ShouldBeEmpty();
         var query = select.SqlExpression.ShouldBeOfType<SqlSelectExpression>();
-        query.From.ShouldHaveSingleItem().Table.TableName.ShouldBe("t");
+        query.From.ShouldHaveSingleItem().Table.ShouldBeOfType<SqlTableReference>().TableName.ShouldBe("t");
         query.Where.ShouldNotBeNull();
     }
 
