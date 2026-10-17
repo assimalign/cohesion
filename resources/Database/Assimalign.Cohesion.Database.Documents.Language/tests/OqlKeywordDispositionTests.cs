@@ -13,7 +13,7 @@ namespace Assimalign.Cohesion.Database.Documents.Language.Tests;
 
 /// <summary>
 /// Keyword disposition (#1101): every word the OQL profile lexes as a keyword, and every
-/// entry of the recognized-unsupported table, either parses inside a supported clause or is
+/// entry of the recognized-unsupported table, and contextual EXPLAIN either parses inside a supported clause or is
 /// rejected with exactly one <c>COHDBL001</c> naming its construct. A word added to either list
 /// without a case here fails the coverage test.
 /// </summary>
@@ -101,7 +101,7 @@ public sealed class OqlKeywordDispositionTests
         // Act / Assert
         RequireCoverage(Words(), _corpus);
         _corpus.Keys.Except(Words(), StringComparer.OrdinalIgnoreCase)
-            .ShouldBeEmpty("Corpus keys must name current keywords or recognized-unsupported entries.");
+            .ShouldBeEmpty("Corpus keys must name current keywords, contextual prefixes or recognized-unsupported entries.");
     }
 
     [Fact(DisplayName = "Cohesion Test [Documents.Language] - Keyword disposition: a word added without a case fails coverage")]
@@ -167,6 +167,45 @@ public sealed class OqlKeywordDispositionTests
         ((OqlSelectExpression)statement.OqlExpression).Projections[0].Expression.ShouldBeOfType<OqlPathExpression>();
     }
 
+    [Theory(DisplayName = "Cohesion Test [Documents.Language] - Keyword disposition: EXPLAIN is contextual and remains an unquoted identifier")]
+    [InlineData("SELECT x FROM explain", false)]
+    [InlineData("SELECT explain FROM c", false)]
+    [InlineData("SELECT c.explain.value FROM c", false)]
+    [InlineData("SELECT x AS explain FROM c", false)]
+    [InlineData("SELECT explain.x FROM c AS explain", false)]
+    [InlineData("SELECT explain.x FROM c explain", false)]
+    [InlineData("eXpLaIn SELECT explain.explain AS explain FROM explain AS explain", true)]
+    public void Parse_ExplainIdentifier_ShouldRecognizeOnlyStatementPrefix(string source, bool explained)
+    {
+        // Arrange
+        var parser = new OqlQueryParser();
+
+        // Act
+        var statement = (OqlQueryStatement)parser.Parse(source);
+
+        // Assert
+        OqlLanguageProfile.Instance.Keywords.ToArray().ShouldNotContain("EXPLAIN");
+        statement.Diagnostics.ShouldBeEmpty();
+        (statement.OqlExpression is OqlExplainExpression).ShouldBe(explained);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Documents.Language] - Keyword disposition: contextual EXPLAIN still rejects nesting and options")]
+    [InlineData("EXPLAIN EXPLAIN SELECT x FROM c")]
+    [InlineData("EXPLAIN ANALYZE SELECT x FROM c")]
+    [InlineData("EXPLAIN PROFILE SELECT x FROM c")]
+    [InlineData("EXPLAIN (FORMAT JSON) SELECT x FROM c")]
+    public void Parse_ExplainOptionsOrNesting_ShouldReportCodedRejection(string source)
+    {
+        // Arrange
+        var parser = new OqlQueryParser();
+
+        // Act
+        var statement = parser.Parse(source);
+
+        // Assert
+        statement.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBL001");
+    }
+
     [Fact(DisplayName = "Cohesion Test [Documents.Language] - Keyword disposition: words matched anywhere are lexer keywords or functions")]
     public void Table_AnywhereEntries_ShouldBeKeywordsOrFunctions()
     {
@@ -194,6 +233,7 @@ public sealed class OqlKeywordDispositionTests
     private static string[] Words()
         => OqlLanguageProfile.Instance.Keywords.ToArray()
             .Concat(OqlUnsupportedVocabulary.Words.Select(word => word.Spelling))
+            .Append("EXPLAIN") // Contextual statement prefix; identifier cases live in this corpus too.
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
 

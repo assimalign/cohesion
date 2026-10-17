@@ -184,6 +184,10 @@ ISO/IEC 39075 defines no EXPLAIN. This is a Cohesion extension on the same footi
 not a D3 Cypher alias. The parser recognizes the prefix before SHOW dispatch, marks the parsed
 `GqlQueryExpression.IsExplain`, and retains normal statement completeness. EXPLAIN SHOW,
 transaction control, nested EXPLAIN, EXPLAIN ANALYZE and PROFILE receive `COHDBL001`.
+`EXPLAIN` is contextual only at the statement prefix, matching PostgreSQL's unreserved keyword
+classification (`src/include/parser/kwlist.h:167` in the local clone). It is not a lexer keyword;
+unquoted `explain` remains a variable, label, relationship type, property or projection alias.
+The keyword-disposition corpus covers these identifiers both with and without the prefix.
 
 The engine returns the shared
 [description columns](../../Assimalign.Cohesion.Database.Execution/docs/DESIGN.md#plan-descriptions-1104)

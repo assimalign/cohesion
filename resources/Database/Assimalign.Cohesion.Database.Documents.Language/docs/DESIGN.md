@@ -178,6 +178,10 @@ SQL++'s `EXPLAIN SELECT` spelling produces the shared plan-description columns d
 planning. The parser rejects DDL, transaction control, nested EXPLAIN and EXPLAIN ANALYZE with
 `COHDBL001`, and applies the normal single-statement/trailing-token check to the whole form.
 The Documents engine owns its operator names and JSON-document wire representation.
+`EXPLAIN` is contextual only at the statement prefix, matching PostgreSQL's unreserved keyword
+classification (`src/include/parser/kwlist.h:167` in the local clone). It is not a lexer keyword;
+unquoted `explain` remains a collection, property path, iteration variable or output alias.
+The keyword-disposition corpus covers these identifiers both with and without the prefix.
 
 ## Diagnostic contract
 

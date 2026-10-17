@@ -13,10 +13,11 @@ namespace Assimalign.Cohesion.Database.Documents.Language;
 /// </remarks>
 public static class OqlLanguageProfile
 {
+    // EXPLAIN is recognized only at the statement prefix; elsewhere it remains an identifier.
     private static readonly string[] _keywords =
     [
         // Query
-        "SELECT", "EXPLAIN", "FROM", "WHERE",
+        "SELECT", "FROM", "WHERE",
         "ORDER", "BY", "GROUP", "HAVING",
         "DISTINCT", "ALL", "AS", "ASC", "DESC",
         // Index definition
