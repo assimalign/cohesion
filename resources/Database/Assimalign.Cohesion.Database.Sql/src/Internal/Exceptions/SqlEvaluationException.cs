@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Threading;
 
 using Assimalign.Cohesion.Database.Types;
@@ -121,6 +122,14 @@ internal sealed class SqlEvaluationException : DatabaseException
 
     /// <summary>A CAST input has invalid text representation (PostgreSQL SQLSTATE 22P02).</summary>
     internal const string InvalidTextRepresentationCode = "COHSQLE022";
+
+    /// <summary>A column that disallows NULL received it (SQLSTATE 23502, not_null_violation).</summary>
+    internal const string NotNullViolationCode = "COHSQLE024";
+
+    /// <summary>Creates an unlocated NOT NULL failure naming the target column.</summary>
+    internal static SqlEvaluationException NotNullViolation(string column, bool missingDefault = false)
+        => new(NotNullViolationCode, string.Format(CultureInfo.CurrentCulture,
+            missingDefault ? ErrorMessages.ColumnDefaultMissing : ErrorMessages.ColumnNullNotAllowed, column), null);
 
     /// <summary>Codes a CAST value fault using PostgreSQL's 22003, 22P02 or 42846.</summary>
     internal static SqlEvaluationException CastValueFailed(string detail, Exception exception)

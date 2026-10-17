@@ -202,9 +202,10 @@ profile and reports `COHDBL001`.
 `SqlDefaultExpression` is a parser-owned, scopeless leaf for a whole INSERT VALUES
 item or UPDATE SET value (#1193); canonical rendering emits `DEFAULT`. It never enters
 the scalar precedence parser as an operand. INSERT/UPDATE share a contextual value
-parser which rejects the DEFAULT keyword inside an ordinary expression, while quoted
-identifiers, comments and strings retain their lexical identity. That check scans only
-the expression's consumed token range, keeping the common scalar parser unchanged.
+parser which recognizes the whole-item keyword before scalar parsing. The scalar parser
+rejects bare DEFAULT everywhere with SQL0003; qualified field names such as `t.default`
+and `t."default"` use the normal column-reference parser. Quoted identifiers, comments
+and strings retain their lexical identity; no token rescan is needed.
 `SqlInsertExpression.IsDefaultValues` distinguishes one all-omitted row from a missing
 source, an empty VALUES list or INSERT SELECT. A column list is allowed on that form
 and remains available for target-name validation. No clause or profile entry is added.

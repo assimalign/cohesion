@@ -873,8 +873,15 @@ evaluation; this feature adds no new default-declaration expressions (#1121).
 
 DEFAULT is contextually typed syntax, not a scalar operand: `VALUES (DEFAULT + 1)`,
 `VALUES (COALESCE(DEFAULT, 1))`, `VALUES ((DEFAULT))` and `SET c = 1 + DEFAULT`
-report SQL0003. Quoted identifiers, string literals and comments containing the word
-are unaffected. PostgreSQL represents the keyword as `SetToDefault`
+report SQL0003. Bare DEFAULT in any scalar position also reports SQL0003, including
+SELECT lists, WHERE, function arguments, operator operands and INSERT ... SELECT.
+It never binds to a column named `"DEFAULT"`; the quoted spelling still binds.
+Qualified names `t.default` and `t."default"` are column references, including in SET
+and VALUES expressions (the latter still have no columns in scope at binding).
+Quoted identifiers, string literals and comments containing the word are unaffected.
+PostgreSQL rejects scalar DEFAULT in `src/backend/parser/parse_expr.c:310-316` and
+permits keyword field labels through `gram.y:17325-17329,17716,18042-18047`.
+PostgreSQL represents the keyword as `SetToDefault`
 (`src/backend/parser/gram.y:15788-15804`) and allows it directly in INSERT values and
 UPDATE sources (`src/backend/parser/parse_target.c:85-92,263-272`); DEFAULT VALUES
 has no SELECT source (`gram.y:12559-12565`). Its optional-column-list grammar does
@@ -2005,6 +2012,12 @@ quoted names to match uppercase vocabulary entries.
 | --- | --- | --- |
 | `COHSQLE021` | A mutation targets a read-only system relation | 25006 (read-only SQL transaction, analogous restriction) |
 | `COHSQLE022` | A CAST input has invalid text representation | 22P02 |
+| `COHSQLE024` | A column that disallows NULL receives NULL, including DEFAULT with no declared default | 23502 (`not_null_violation`) |
+
+NOT NULL failures carry one error diagnostic naming the column, with no source span at
+execution time. The existing missing-default and explicit-NULL message texts are unchanged.
+PostgreSQL raises the same constraint category in `src/backend/executor/execMain.c:2268-2274`.
+Execution-time diagnostic work #1653 now treats NOT NULL as done; `COHSQLE023` belongs to #1102.
 
 CAST range/precision faults use existing `COHSQLE002` (22003), division/remainder by zero
 uses `COHSQLE001` (22012), and operand-type errors including NOT and binary arithmetic

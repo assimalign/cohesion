@@ -134,6 +134,12 @@ atomicity remain on the shared INSERT/UPDATE paths; identity allocation (#1123) 
 extend the omitted-column resolver so these forms inherit it. No format, protocol,
 project-reference or visibility boundary changes.
 
+Both the missing-default resolver and explicit-NULL coercion raise COHSQLE024
+(SQLSTATE 23502, not_null_violation), preserving their existing message texts. Each
+failure carries one error diagnostic naming the column and no source span, because
+these execution paths have no source location. PostgreSQL raises this category at
+`src/backend/executor/execMain.c:2268-2274`. NOT NULL is complete for #1653.
+
 `SqlPlanner.Subqueries.cs` binds each uncorrelated child SELECT in its own local
 scope and lowers its use sites to typed slots, numbered from zero across the
 statement (`SqlSubquerySlot`); the enclosing expressions bind each use site to a

@@ -82,9 +82,48 @@ public sealed class SqlDefaultParserTests
         statement.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "SQL0003" && diagnostic.Severity == DiagnosticSeverity.Error);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - DEFAULT: bare scalar uses report a located syntax error")]
+    [InlineData("SELECT DEFAULT FROM t;")]
+    [InlineData("SELECT c FROM t WHERE DEFAULT = 42;")]
+    [InlineData("SELECT COALESCE(DEFAULT, 0) FROM t;")]
+    [InlineData("SELECT 1 + DEFAULT FROM t;")]
+    [InlineData("SELECT -DEFAULT FROM t;")]
+    [InlineData("INSERT INTO t (c) SELECT DEFAULT FROM t;")]
+    [InlineData("SELECT c FROM t ORDER BY DEFAULT;")]
+    [InlineData("CREATE TABLE t (c INT DEFAULT DEFAULT);")]
+    public void Parse_ScalarDefault_ShouldReportKeywordSpan(string sql)
+    {
+        // Arrange / Act
+        var statement = (SqlQueryStatement)new SqlQueryParser().Parse(sql);
+
+        // Assert
+        var diagnostic = statement.Diagnostics.Where(item => item.Severity == DiagnosticSeverity.Error).ShouldHaveSingleItem();
+        diagnostic.Code.ShouldBe("SQL0003");
+        diagnostic.Message.ShouldBe("DEFAULT is not allowed in this context.");
+        sql[diagnostic.Start!.Value..diagnostic.End!.Value].ShouldBe("DEFAULT");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - DEFAULT: qualified field names parse as columns in SET and VALUES expressions")]
+    [InlineData("UPDATE t SET c = t.default + 1;")]
+    [InlineData("UPDATE t SET c = t.\"default\" + 1;")]
+    [InlineData("INSERT INTO t VALUES (t.default + 1);")]
+    [InlineData("INSERT INTO t VALUES (t.\"default\" + 1);")]
+    public void Parse_QualifiedDefaultColumn_ShouldPreserveColumnExpression(string sql)
+    {
+        // Arrange / Act
+        var statement = (SqlQueryStatement)new SqlQueryParser().Parse(sql);
+
+        // Assert
+        statement.Diagnostics.ShouldBeEmpty();
+        SqlExpression expression = statement.SqlExpression is SqlUpdateExpression update
+            ? update.Assignments[0].Value : ((SqlInsertExpression)statement.SqlExpression).Values![0][0];
+        SqlExpressionRenderer.Render(expression).ShouldBe("t.\"default\" + 1");
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - DEFAULT: quoted words, strings and comments remain ordinary expression contents")]
     [InlineData("INSERT INTO t VALUES ('DEFAULT', 1 /* DEFAULT */);")]
     [InlineData("UPDATE t SET a = \"DEFAULT\" + 1;")]
+    [InlineData("SELECT \"DEFAULT\" FROM t;")]
     [InlineData("UPDATE t SET a = 1 /* DEFAULT */ + 2;")]
     public void Parse_DefaultTextInOtherTokens_ShouldPreserveExpression(string sql)
     {

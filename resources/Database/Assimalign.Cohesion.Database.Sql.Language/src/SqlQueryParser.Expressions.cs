@@ -557,6 +557,18 @@ public sealed partial class SqlQueryParser
             return MissingExpression(ref lexer, pos);
         }
 
+        // Whole VALUES items and SET values are handled by ParseDefaultableValue. A bare
+        // DEFAULT is never a scalar, including when a column has that quoted name
+        // (PostgreSQL src/backend/parser/parse_expr.c:310-316). Dotted field names are
+        // consumed inside ParseColumnRefOrFunction, where keywords remain valid labels.
+        if (IsKeyword(ref lexer, "DEFAULT"))
+        {
+            int end = pos + lexer.Current.Value.Length;
+            AddSyntaxDiagnostic(ref lexer, "DEFAULT is not allowed in this context.");
+            Advance(ref lexer);
+            return new SqlLiteralExpression("NULL", SqlLiteralType.Null, Location.Create(1, 1, pos, end));
+        }
+
         // Preserve a signed numeric token as a literal. ORDER BY binding must
         // distinguish +1 from a larger constant expression such as +1 + 1.
         if (lexer.Current.Type == TokenType.Plus)

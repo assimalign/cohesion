@@ -8,11 +8,78 @@ using Xunit;
 
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Sql.Language;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed class SqlDefaultAssignmentTests
 {
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - DEFAULT: scalar uses cannot bind a column with the quoted name")]
+    [InlineData("SELECT DEFAULT FROM defaults")]
+    [InlineData("SELECT c FROM defaults WHERE DEFAULT = 42")]
+    [InlineData("SELECT COALESCE(DEFAULT, 0) FROM defaults")]
+    [InlineData("SELECT 1 + DEFAULT FROM defaults")]
+    [InlineData("SELECT -DEFAULT FROM defaults")]
+    [InlineData("INSERT INTO defaults (c) SELECT DEFAULT FROM defaults")]
+    public async Task ExecuteAsync_ScalarDefault_ShouldRejectBeforeExecution(string sql)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("default-tests", new SqlDatabaseEngineOptions());
+        var database = await engine.CreateDatabaseAsync("defaults", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE defaults (\"DEFAULT\" INT, c INT DEFAULT 7)", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT INTO defaults VALUES (42, 1)", cancellationToken: CancellationToken.None);
+
+        // Act
+        var failure = await Should.ThrowAsync<DatabaseParseException>(() => session.ExecuteAsync(sql, cancellationToken: CancellationToken.None).AsTask());
+
+        // Assert
+        var diagnostic = failure.Diagnostics.Where(item => item.Severity == DiagnosticSeverity.Error).ShouldHaveSingleItem();
+        diagnostic.Code.ShouldBe("SQL0003");
+        sql[diagnostic.Start!.Value..diagnostic.End!.Value].ShouldBe("DEFAULT");
+        await using var rows = (await session.ExecuteAsync("SELECT \"DEFAULT\", c FROM defaults", cancellationToken: CancellationToken.None))
+            .ShouldBeAssignableTo<DatabaseResultSet>();
+        int count = 0;
+        await foreach (var row in rows.GetRowsAsync(CancellationToken.None))
+        {
+            row.GetValue(0).ShouldBe(42);
+            row.GetValue(1).ShouldBe(1);
+            count++;
+        }
+        count.ShouldBe(1);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - DEFAULT: qualified column spellings remain ordinary SET expressions")]
+    [InlineData("defaults.default")]
+    [InlineData("defaults.\"default\"")]
+    public async Task ExecuteAsync_QualifiedDefaultColumn_ShouldAssignColumnValue(string reference)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("default-tests", new SqlDatabaseEngineOptions());
+        var database = await engine.CreateDatabaseAsync("defaults", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE defaults (\"default\" INT, c INT)", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT INTO defaults VALUES (42, 1)", cancellationToken: CancellationToken.None);
+
+        // Act
+        var updated = await session.ExecuteAsync($"UPDATE defaults SET c = {reference} + 1", cancellationToken: CancellationToken.None);
+        var failure = await Should.ThrowAsync<DatabaseException>(() => session.ExecuteAsync(
+            $"INSERT INTO defaults (c) VALUES ({reference} + 1)", cancellationToken: CancellationToken.None).AsTask());
+
+        // Assert
+        updated.AffectedCount.ShouldBe(1);
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE005");
+        await using var rows = (await session.ExecuteAsync("SELECT c FROM defaults", cancellationToken: CancellationToken.None))
+            .ShouldBeAssignableTo<DatabaseResultSet>();
+        int count = 0;
+        await foreach (var row in rows.GetRowsAsync(CancellationToken.None))
+        {
+            row.GetValue(0).ShouldBe(43);
+            count++;
+        }
+        count.ShouldBe(1);
+    }
+
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - DEFAULT: explicit items and DEFAULT VALUES use column defaults")]
     [InlineData("INSERT INTO defaults VALUES (DEFAULT, DEFAULT, DEFAULT)")]
     [InlineData("INSERT INTO defaults DEFAULT VALUES")]
@@ -83,9 +150,11 @@ public sealed class SqlDefaultAssignmentTests
 
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - DEFAULT: a NOT NULL failure preserves earlier transaction work and the whole failed statement")]
     [InlineData("INSERT INTO defaults VALUES (2, 'ok', 2), (3, DEFAULT, 3)")]
+    [InlineData("INSERT INTO defaults (label) VALUES (DEFAULT)")]
     [InlineData("INSERT INTO defaults DEFAULT VALUES")]
     [InlineData("UPDATE defaults SET label = DEFAULT")]
     [InlineData("INSERT INTO defaults VALUES (2, NULL, 2)")]
+    [InlineData("UPDATE defaults SET label = NULL")]
     public async Task ExecuteAsync_NotNullDefaultFailure_ShouldKeepStatementAtomic(string sql)
     {
         // Arrange
@@ -100,7 +169,16 @@ public sealed class SqlDefaultAssignmentTests
         var failure = await Should.ThrowAsync<DatabaseException>(() => session.ExecuteAsync(sql, cancellationToken: CancellationToken.None).AsTask());
 
         // Assert
-        failure.Message.ShouldContain("NULL", Case.Sensitive);
+        failure.Message.ShouldBe(sql.Contains("NULL", System.StringComparison.Ordinal)
+            ? "Column 'label' does not allow NULL."
+            : "Column 'label' does not allow NULL and has no default.");
+        var diagnostic = failure.Diagnostics.ShouldHaveSingleItem();
+        diagnostic.Code.ShouldBe("COHSQLE024");
+        diagnostic.Severity.ShouldBe(DiagnosticSeverity.Error);
+        diagnostic.Message.ShouldBe(failure.Message);
+        diagnostic.Start.ShouldBeNull();
+        diagnostic.End.ShouldBeNull();
+        diagnostic.Location.ShouldBeNull();
         session.CurrentTransaction.ShouldNotBeNull();
         await session.ExecuteAsync("COMMIT", cancellationToken: CancellationToken.None);
         (await RowsAsync(session)).ShouldBe([[1, "old", 1]]);

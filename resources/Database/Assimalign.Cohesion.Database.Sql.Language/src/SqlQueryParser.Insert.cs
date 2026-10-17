@@ -134,9 +134,8 @@ public sealed partial class SqlQueryParser
     }
 
     /// <summary>
-    /// DEFAULT is a whole assignment value, never an operand. The expression parser is shared
-    /// with other value positions; inspect only the tokens it consumed to reject nested DEFAULT
-    /// without treating a quoted identifier or string containing that word as the keyword.
+    /// DEFAULT is a whole assignment value, never an operand. Scalar parsing rejects the bare
+    /// keyword, while qualified column names retain their normal identifier parsing.
     /// </summary>
     private SqlExpression ParseDefaultableValue(ref TokenLexer lexer)
     {
@@ -149,21 +148,6 @@ public sealed partial class SqlQueryParser
             return new SqlDefaultExpression(Location.Create(1, 1, start, end));
         }
 
-        var tokens = lexer;
-        var expression = ParseExpression(ref lexer);
-        int expressionEnd = lexer.Current.Position;
-        do
-        {
-            if (tokens.Current.Position >= expressionEnd)
-            {
-                break;
-            }
-            if (IsKeyword(ref tokens, "DEFAULT") && !HasErrorAt(tokens.Current.Position))
-            {
-                AddSyntaxDiagnostic(ref tokens, "DEFAULT must be a whole VALUES item or SET value, not part of an expression.");
-            }
-        }
-        while (tokens.MoveNext());
-        return expression;
+        return ParseExpression(ref lexer);
     }
 }

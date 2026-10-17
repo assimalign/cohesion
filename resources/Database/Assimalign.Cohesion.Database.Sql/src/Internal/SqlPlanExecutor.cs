@@ -1469,7 +1469,7 @@ internal sealed partial class SqlPlanExecutor
         {
             if (!column.IsNullable)
             {
-                throw new DatabaseException($"Column '{column.Name}' does not allow NULL.");
+                throw SqlEvaluationException.NotNullViolation(column.Name);
             }
 
             return null;
