@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Linq;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
 
 using Assimalign.Cohesion.Database.Documents.Language;
 using Assimalign.Cohesion.Database.Documents.Storage;
@@ -14,6 +15,8 @@ namespace Assimalign.Cohesion.Database.Documents.Internal;
 internal sealed partial class DocumentExpressionEvaluator
 {
     private readonly string? _alias;
+    private readonly CancellationToken _cancellationToken;
+    private readonly Dictionary<OqlLikeExpression, int[]> _likePatterns = new();
     private readonly IReadOnlyDictionary<string, object?>? _parameters;
 
     /// <summary>
@@ -21,14 +24,17 @@ internal sealed partial class DocumentExpressionEvaluator
     /// </summary>
     /// <param name="alias">The collection alias that may prefix document paths, or <see langword="null"/> when the query declares none.</param>
     /// <param name="parameters">The OQL parameter values, or <see langword="null"/> when the statement supplies none.</param>
-    public DocumentExpressionEvaluator(string? alias, IReadOnlyDictionary<string, object?>? parameters)
+    /// <param name="cancellationToken">The statement cancellation token.</param>
+    public DocumentExpressionEvaluator(string? alias, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken = default)
     {
         _alias = alias;
+        _cancellationToken = cancellationToken;
         _parameters = parameters;
     }
 
     internal object? Evaluate(OqlExpression expression, DocumentEvaluationContext document, IReadOnlyList<DocumentEvaluationContext>? group = null)
     {
+        _cancellationToken.ThrowIfCancellationRequested();
         try
         {
             return expression switch
@@ -68,6 +74,7 @@ internal sealed partial class DocumentExpressionEvaluator
     // Boolean branches and expressions over empty inputs.
     internal void ValidateInputs(OqlExpression? expression)
     {
+        _cancellationToken.ThrowIfCancellationRequested();
         System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
         switch (expression)
         {

@@ -22,7 +22,7 @@ internal static partial class DocumentPlanExecutor
         cancellationToken.ThrowIfCancellationRequested();
         var error = statement.Diagnostics.FirstOrDefault(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
         if (error is not null) { throw new DatabaseParseException($"OQL parse error {error.Code}: {error.Message}", statement.Diagnostics); }
-        var plan = new DocumentPlanner(database.Catalog, operation.Context.Snapshot, parameters).Plan(statement.OqlExpression);
+        var plan = new DocumentPlanner(database.Catalog, operation.Context.Snapshot, parameters, cancellationToken).Plan(statement.OqlExpression);
         return plan switch
         {
             DocumentInsertPlan insert => await ExecuteInsertAsync(database, operation, insert.Collection, insert.Statement, null, parameters, cancellationToken).ConfigureAwait(false),
@@ -41,7 +41,7 @@ internal static partial class DocumentPlanExecutor
         DocumentPlan plan, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
     {
         var query = plan.Logical.Query;
-        var evaluator = new DocumentExpressionEvaluator(query.Alias, parameters);
+        var evaluator = new DocumentExpressionEvaluator(query.Alias, parameters, cancellationToken);
         IReadOnlyList<DocumentCatalogEntry> candidates = plan.Access is DocumentIndexPath seek
             ? await database.Catalog.SearchIndexAsync(plan.Collection.Id, seek.Index.Name,
                 seek.Lower?.Value, seek.Lower?.Inclusive ?? false, seek.Upper?.Value, seek.Upper?.Inclusive ?? false,
@@ -67,7 +67,7 @@ internal static partial class DocumentPlanExecutor
     private static DatabaseResult ExecuteSystemCollection(DocumentDatabase database, DocumentOperation operation,
         DocumentSystemCollectionPlan plan, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
     {
-        var evaluator = new DocumentExpressionEvaluator(plan.Logical.Query.Alias, parameters);
+        var evaluator = new DocumentExpressionEvaluator(plan.Logical.Query.Alias, parameters, cancellationToken);
         var matches = new List<DocumentEvaluationContext>();
         foreach (var document in DocumentSystemCollections.Enumerate(database, operation.Context.Snapshot, plan.Name, cancellationToken))
         {

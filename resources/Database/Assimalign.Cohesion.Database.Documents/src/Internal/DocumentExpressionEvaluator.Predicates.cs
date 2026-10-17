@@ -1,5 +1,5 @@
+using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Text;
 
 using Assimalign.Cohesion.Database.Documents.Language;
@@ -62,58 +62,95 @@ internal sealed partial class DocumentExpressionEvaluator
     private object? Like(OqlLikeExpression expression, DocumentEvaluationContext document, IReadOnlyList<DocumentEvaluationContext>? group)
     {
         var operand = Evaluate(expression.Operand, document, group);
-        var pattern = Evaluate(expression.Pattern, document, group);
-        var escape = expression.Escape is null ? "\\" : Evaluate(expression.Escape, document, group);
-        // Couchbase expression/comp_like.go:105-109: MISSING precedes non-string/NULL.
-        if (operand is DocumentMissing || pattern is DocumentMissing || escape is DocumentMissing) { return DocumentMissing.Instance; }
-        if (operand is not string input || pattern is not string text || escape is not string escapeText) { return null; }
-        int[] escapes = escapeText.EnumerateRunes().Select(rune => rune.Value).ToArray();
-        if (escapes.Length > 1)
+        if (!_likePatterns.TryGetValue(expression, out var tokens))
         {
-            throw new DocumentPlanningException("COHDOC013", ErrorMessages.LikeEscapeInvalid, expression.Escape?.Location);
+            var pattern = Evaluate(expression.Pattern, document, group);
+            var escape = expression.Escape is null ? "\\" : Evaluate(expression.Escape, document, group);
+            // Couchbase expression/comp_like.go:105-109: MISSING precedes non-string/NULL.
+            if (operand is DocumentMissing || pattern is DocumentMissing || escape is DocumentMissing) { return DocumentMissing.Instance; }
+            if (operand is not string || pattern is not string text || escape is not string escapeText) { return null; }
+            int escapeScalar = -1;
+            foreach (var rune in escapeText.EnumerateRunes())
+            {
+                if (escapeScalar >= 0)
+                {
+                    throw new DocumentPlanningException("COHDOC013", ErrorMessages.LikeEscapeInvalid, expression.Escape?.Location);
+                }
+                escapeScalar = rune.Value;
+            }
+            tokens = CompileLike(text, escapeScalar);
+            if (DocumentPlanner.IsConstant(expression.Pattern) && (expression.Escape is null || DocumentPlanner.IsConstant(expression.Escape)))
+            {
+                _likePatterns.Add(expression, tokens);
+            }
         }
-        bool matches = MatchLike(input, text, escapes.Length == 0 ? -1 : escapes[0]);
+        if (operand is DocumentMissing) { return DocumentMissing.Instance; }
+        if (operand is not string input) { return null; }
+        bool matches = MatchLike(input, tokens);
         return expression.Negated ? !matches : matches;
     }
 
-    private static bool MatchLike(string input, string pattern, int escape)
+    private int[] CompileLike(string pattern, int escape)
+    {
+        var tokens = new List<int>();
+        bool escaped = false;
+        int iterations = 0;
+        foreach (var rune in pattern.EnumerateRunes())
+        {
+            if ((iterations++ & 1023) == 0) { _cancellationToken.ThrowIfCancellationRequested(); }
+            if (escaped) { tokens.Add(rune.Value); escaped = false; }
+            else if (rune.Value == escape) { escaped = true; }
+            else { tokens.Add(rune.Value == '%' ? -1 : rune.Value == '_' ? -2 : rune.Value); }
+        }
+        if (escaped) { throw new DocumentPlanningException("COHDOC013", ErrorMessages.LikeTrailingEscape); }
+        return tokens.ToArray();
+    }
+
+    private bool MatchLike(string input, int[] tokens)
     {
         const int many = -1;
         const int one = -2;
-        var tokens = new List<int>();
-        bool escaped = false;
-        foreach (var rune in pattern.EnumerateRunes())
-        {
-            if (escaped) { tokens.Add(rune.Value); escaped = false; }
-            else if (rune.Value == escape) { escaped = true; }
-            else { tokens.Add(rune.Value == '%' ? many : rune.Value == '_' ? one : rune.Value); }
-        }
-        if (escaped) { throw new DocumentPlanningException("COHDOC013", ErrorMessages.LikeTrailingEscape); }
-
-        int[] scalars = input.EnumerateRunes().Select(rune => rune.Value).ToArray();
-        int value = 0, token = 0, percent = -1, retry = 0;
+        int value = 0, token = 0, percent = -1, retry = 0, iterations = 0;
         // Only the most recent percent is a backtracking point. No suffix recursion,
         // regex engine or combinatorial exploration of earlier percent assignments.
-        while (value < scalars.Length)
+        while (value < input.Length)
         {
-            if (token < tokens.Count && tokens[token] == many)
+            // PostgreSQL src/backend/utils/adt/like_match.c:302 checks interrupts
+            // within matching. Bound cancellation latency even for a long literal suffix.
+            if ((iterations++ & 1023) == 0) { _cancellationToken.ThrowIfCancellationRequested(); }
+            if (token < tokens.Length && tokens[token] == many)
             {
                 percent = token++;
                 retry = value;
+                if (token == tokens.Length) { _cancellationToken.ThrowIfCancellationRequested(); return true; }
             }
-            else if (token < tokens.Count && (tokens[token] == one || tokens[token] == scalars[value]))
+            else
             {
-                token++;
-                value++;
+                // Decode at the current UTF-16 offset instead of allocating a scalar array per row.
+                // DecodeFromUtf16 consumes one code unit and yields U+FFFD for invalid UTF-16,
+                // preserving EnumerateRunes behavior for caller-supplied strings.
+                Rune.DecodeFromUtf16(input.AsSpan(value), out var rune, out int consumed);
+                if (token < tokens.Length && (tokens[token] == one || tokens[token] == rune.Value))
+                {
+                    token++;
+                    value += consumed;
+                }
+                else if (percent >= 0)
+                {
+                    token = percent + 1;
+                    Rune.DecodeFromUtf16(input.AsSpan(retry), out _, out int retryConsumed);
+                    retry += retryConsumed;
+                    value = retry;
+                }
+                else { return false; }
             }
-            else if (percent >= 0)
-            {
-                token = percent + 1;
-                value = ++retry;
-            }
-            else { return false; }
         }
-        while (token < tokens.Count && tokens[token] == many) { token++; }
-        return token == tokens.Count;
+        while (token < tokens.Length && tokens[token] == many)
+        {
+            if ((token & 1023) == 0) { _cancellationToken.ThrowIfCancellationRequested(); }
+            token++;
+        }
+        _cancellationToken.ThrowIfCancellationRequested();
+        return token == tokens.Length;
     }
 }

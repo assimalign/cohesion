@@ -2216,4 +2216,6 @@ for the Couchbase source anchors. WHERE, HAVING, AND, OR, NOT and searched WHEN 
 SQL++ Truth: nonzero numbers and nonempty strings, arrays and objects are true; zero and
 empty strings/arrays/objects are false. NULL/MISSING retain four-valued logic. In OQL,
 `WHERE 1` and `HAVING COUNT(*)` now retain nonempty input, correcting Boolean-only filtering.
+OQL LIKE periodically observes statement cancellation inside matching, including long literal
+suffix retries; constant patterns and escapes compile once per statement evaluator.
 SQL's own predicate rules are unchanged.

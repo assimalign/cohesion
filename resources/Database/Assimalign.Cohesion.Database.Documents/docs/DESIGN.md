@@ -428,6 +428,18 @@ escape or trailing pattern escape raises COHDOC013 with a fixed message and sour
 The trailing-escape refusal also follows PostgreSQL `85f55534e80`,
 `src/backend/utils/adt/like_match.c:353-356`; the matcher algorithm is independent.
 Matching backtracks only to the latest `%`, with no Regex or recursive suffix exploration.
+The statement token reaches every evaluator, including constant bound evaluation during planning,
+system sources and INSERT. Pattern compilation, input scalar decoding and matching check it every
+1,024 iterations; matching also checks before success. PostgreSQL checks interrupts inside its
+matching loop at `src/backend/utils/adt/like_match.c:302` in the local reference clone.
+When pattern and escape are constant (including statement parameters), the statement evaluator
+lazily compiles and caches tokens once per LIKE node; row-dependent patterns/escapes are compiled
+for each evaluation. Matching decodes Unicode scalars at UTF-16 offsets without allocating
+a scalar array per input row; a terminal percent accepts the remaining suffix directly. Lazy compilation preserves skipped CASE branches and NULL/MISSING priorities.
+Caches never outlive an execution, so another statement's parameter snapshot cannot reuse them.
+Regression tests repeat the 50,000/25,000-character cancellation probe with a 50 ms cancellation
+and a 500 ms ceiling, cover planning, filtering, grouping, ordering and INSERT, and bound
+allocations across rows with a long constant pattern.
 
 All Boolean contexts share SQL++ Truth conversion: WHERE, HAVING, both operands of AND/OR,
 NOT and searched WHEN. Nonzero numbers and nonempty strings, arrays and objects are true;

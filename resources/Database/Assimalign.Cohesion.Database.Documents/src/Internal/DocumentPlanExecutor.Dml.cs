@@ -38,7 +38,7 @@ internal static partial class DocumentPlanExecutor
         }
         else
         {
-            var evaluator = new DocumentExpressionEvaluator(null, parameters);
+            var evaluator = new DocumentExpressionEvaluator(null, parameters, cancellationToken);
             foreach (var pair in statement.Values)
             {
                 cancellationToken.ThrowIfCancellationRequested();

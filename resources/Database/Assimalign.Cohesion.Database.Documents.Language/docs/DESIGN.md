@@ -287,7 +287,10 @@ next scalar, including `%`, `_` and itself. A literal escape longer than one sca
 OQL0002 syntax error at that literal; an evaluated invalid escape or a trailing escape in
 the pattern gives COHDOC013. Non-string operands, patterns or escapes give NULL, unless
 another operand is MISSING. The hand-written matcher uses two pointers and only the latest
-percent as its backtracking point; it uses no Regex, reflection or suffix recursion.
+percent as its backtracking point; it uses no Regex, reflection or suffix recursion. The statement
+cancellation token is checked periodically during compilation, scalar decoding and matching.
+Constant patterns and escapes compile lazily once per LIKE node in the statement evaluator;
+row-dependent values compile per evaluation. The cache ends with that statement execution.
 
 CASE tests branches in order and evaluates only the selected result. Searched WHEN selects
 values with true SQL++ Truth conversion; simple CASE uses structural equality, so NULL and MISSING do not match WHEN

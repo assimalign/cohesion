@@ -65,6 +65,10 @@ public sealed partial class DocumentQueryTests
     [InlineData("'x' LIKE 1", "N")]
     [InlineData("'Ab' LIKE 'a%'", "F")]
     [InlineData("'a\nb' LIKE 'a_b'", "T")]
+    [InlineData("'😀😀a' LIKE '%😀a'", "T")]
+    [InlineData("'😀😀a' LIKE '%_a'", "T")]
+    [InlineData("@invalidUtf16 LIKE '_'", "T")]
+    [InlineData("@invalidUtf16 LIKE '__'", "F")]
     [InlineData("'😀' LIKE '_'", "T")]
     [InlineData("'😀' LIKE '__'", "F")]
     [InlineData("'x%' LIKE 'x\\%'", "T")]
@@ -148,7 +152,9 @@ public sealed partial class DocumentQueryTests
     private static Dictionary<string, object?> PredicateParameters()
     {
         using var json = JsonDocument.Parse("""{"nullArray":[null],"longerArray":[null,1],"array":[1,{"a":2}],"emptyArray":[]}""");
-        return json.RootElement.EnumerateObject().ToDictionary(property => property.Name, property => (object?)property.Value.Clone());
+        var parameters = json.RootElement.EnumerateObject().ToDictionary(property => property.Name, property => (object?)property.Value.Clone());
+        parameters["invalidUtf16"] = "\uD800";
+        return parameters;
     }
 
     [Fact(DisplayName = "Cohesion Test [Documents] - IN: a parenthesized array parameter remains one structural item")]

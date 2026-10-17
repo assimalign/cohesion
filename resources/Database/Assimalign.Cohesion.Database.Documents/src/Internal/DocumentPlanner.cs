@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Threading;
 
 using Assimalign.Cohesion.Database.Documents.Catalog;
 using Assimalign.Cohesion.Database.Documents.Language;
@@ -13,6 +14,7 @@ namespace Assimalign.Cohesion.Database.Documents.Internal;
 internal sealed partial class DocumentPlanner
 {
     private readonly DocumentCatalog _catalog;
+    private readonly CancellationToken _cancellationToken;
     private readonly TransactionSnapshot _snapshot;
     private readonly IReadOnlyDictionary<string, object?>? _parameters;
 
@@ -22,9 +24,11 @@ internal sealed partial class DocumentPlanner
     /// <param name="catalog">The document catalog used to resolve collections and indexes.</param>
     /// <param name="snapshot">The transaction snapshot at which catalog metadata is read.</param>
     /// <param name="parameters">The OQL parameter values, or <see langword="null"/> when the statement supplies none.</param>
-    public DocumentPlanner(DocumentCatalog catalog, TransactionSnapshot snapshot, IReadOnlyDictionary<string, object?>? parameters)
+    /// <param name="cancellationToken">The statement cancellation token, including constant evaluation.</param>
+    public DocumentPlanner(DocumentCatalog catalog, TransactionSnapshot snapshot, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken = default)
     {
         _catalog = catalog;
+        _cancellationToken = cancellationToken;
         _snapshot = snapshot;
         _parameters = parameters;
     }
@@ -220,7 +224,7 @@ internal sealed partial class DocumentPlanner
             if (expression is OqlBetweenExpression { Negated: false, Operand: OqlPathExpression rangePath } between &&
                 IsConstant(between.Lower) && IsConstant(between.Upper))
             {
-                var rangeEvaluator = new DocumentExpressionEvaluator(query.Alias, _parameters);
+                var rangeEvaluator = new DocumentExpressionEvaluator(query.Alias, _parameters, _cancellationToken);
                 var lower = rangeEvaluator.Evaluate(between.Lower, default);
                 var upper = rangeEvaluator.Evaluate(between.Upper, default);
                 string? name = IndexPath(rangePath, query.Alias);
@@ -245,7 +249,7 @@ internal sealed partial class DocumentPlanner
                 operation = operation switch { ">" => "<", ">=" => "<=", "<" => ">", "<=" => ">=", _ => operation };
             }
             if (path is null || !IsConstant(constant)) { return; }
-            var evaluator = new DocumentExpressionEvaluator(query.Alias, _parameters);
+            var evaluator = new DocumentExpressionEvaluator(query.Alias, _parameters, _cancellationToken);
             var value = evaluator.Evaluate(constant, default);
             string? pathName = IndexPath(path, query.Alias);
             if (pathName is not null && value is bool or decimal or string)
@@ -319,7 +323,7 @@ internal sealed partial class DocumentPlanner
         return builder.Length == 0 ? null : builder.ToString();
     }
 
-    private static bool IsConstant(OqlExpression expression) => expression switch
+    internal static bool IsConstant(OqlExpression expression) => expression switch
     {
         OqlInExpression or OqlBetweenExpression or OqlLikeExpression or OqlCaseExpression => PredicateChildren(expression).All(IsConstant),
         OqlLiteralExpression or OqlMissingExpression or OqlParameterExpression => true,
