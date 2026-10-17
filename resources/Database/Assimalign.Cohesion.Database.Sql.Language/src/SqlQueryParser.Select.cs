@@ -25,21 +25,20 @@ public sealed partial class SqlQueryParser
         var columns = ParseSelectColumns(ref lexer);
 
         // FROM
-        SqlTableReference? from = null;
+        var from = new List<SqlFromItem>();
         if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "FROM"))
         {
             Advance(ref lexer);
-
-            // A missing table is an error; SELECT 1 FROM; used to run as SELECT 1.
-            from = ParseRequiredTableReference(ref lexer);
-        }
-
-        // JOINs
-        var joins = ParseJoinClauses(ref lexer);
-        if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.Comma)
-        {
-            AddUnsupportedSurfaceDiagnostic(lexer.Current.Position, lexer.Current.Position + 1,
-                "Comma-separated SQL FROM tables are not supported; use a two-table INNER JOIN with an ON predicate.");
+            do
+            {
+                var table = ParseRequiredTableReference(ref lexer);
+                from.Add(new SqlFromItem(table, ParseJoinClauses(ref lexer)));
+                if (IsAtEnd(ref lexer) || lexer.Current.Type != TokenType.Comma)
+                {
+                    break;
+                }
+                Advance(ref lexer);
+            } while (true);
         }
 
         // WHERE
@@ -141,7 +140,7 @@ public sealed partial class SqlQueryParser
         // The semicolon is tracked by TrackToken when we advance
 
         return new SqlSelectExpression(
-            columns, from, joins, where, groupBy, having, orderBy,
+            columns, from, where, groupBy, having, orderBy,
             limit, offset, isDistinct, null,
             Location.Create(1, 1, pos, _lastTokenEnd));
     }
@@ -246,30 +245,53 @@ public sealed partial class SqlQueryParser
                 }
             }
 
-            if (joins.Count > 0)
+            var usingColumns = new List<string>();
+            bool hasUsing = IsKeyword(ref lexer, "USING");
+            if (hasUsing)
             {
-                AddUnsupportedSurfaceDiagnostic(joinStart, joinEnd,
-                    "The SQL JOIN surface supports exactly two tables; additional JOIN clauses are not supported.");
-            }
-            else if (!SqlLanguageProfile.SupportsJoin(joinType.Value))
-            {
-                string form = joinType.Value switch
+                Advance(ref lexer);
+                if (lexer.Current.Type != TokenType.LeftParen)
                 {
-                    SqlJoinType.LeftOuter => "LEFT OUTER JOIN",
-                    SqlJoinType.RightOuter => "RIGHT OUTER JOIN",
-                    SqlJoinType.FullOuter => "FULL OUTER JOIN",
-                    _ => "CROSS JOIN",
-                };
-                AddUnsupportedSurfaceDiagnostic(joinStart, joinEnd,
-                    $"The {form} form is not supported by the SQL surface; only two-table INNER JOIN with an ON predicate executes.");
+                    AddSyntaxDiagnostic(ref lexer, "Expected '(' after USING.");
+                }
+                else
+                {
+                    Advance(ref lexer);
+                    while (true)
+                    {
+                        if (!IsIdentifierOrKeyword(ref lexer) || IsStatementBoundaryKeyword(ref lexer))
+                        {
+                            AddSyntaxDiagnostic(ref lexer, "Expected a column name in USING.");
+                            break;
+                        }
+                        usingColumns.Add(CurrentIdentifierText(ref lexer));
+                        Advance(ref lexer);
+                        if (lexer.Current.Type != TokenType.Comma) { break; }
+                        Advance(ref lexer);
+                    }
+                    if (lexer.Current.Type == TokenType.RightParen) { Advance(ref lexer); }
+                    else { AddSyntaxDiagnostic(ref lexer, "Expected ')' after USING columns."); }
+                }
             }
-            else if (!hasOn && !IsKeyword(ref lexer, "USING"))
+            if (!SqlLanguageProfile.SupportsJoin(joinType.Value))
             {
                 AddUnsupportedSurfaceDiagnostic(joinStart, joinEnd,
-                    "The SQL JOIN surface requires an ON predicate; only two-table INNER JOIN with ON executes.");
+                    "SQL supports INNER, LEFT [OUTER] and CROSS JOIN; RIGHT OUTER JOIN and FULL OUTER JOIN are not supported.");
+            }
+            else if (joinType == SqlJoinType.Cross && (hasOn || hasUsing))
+            {
+                AddSyntaxDiagnostic(joinStart, joinEnd, "CROSS JOIN cannot have ON or USING.");
+            }
+            else if (joinType != SqlJoinType.Cross && !hasOn && !hasUsing)
+            {
+                AddUnsupportedSurfaceDiagnostic(joinStart, joinEnd, "INNER and LEFT JOIN require ON or USING.");
+            }
+            if (hasOn && hasUsing)
+            {
+                AddSyntaxDiagnostic(joinStart, joinEnd, "JOIN accepts exactly one of ON or USING.");
             }
 
-            joins.Add(new SqlJoinClause(joinType.Value, table, condition));
+            joins.Add(new SqlJoinClause(joinType.Value, table, condition, usingColumns));
         }
 
         return joins;

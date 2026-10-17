@@ -92,9 +92,12 @@ internal sealed partial class SqlPlanner
         {
             ValidateFunctionCalls(column.Expression);
         }
-        foreach (var join in select.Joins)
+        for (int i = 0; i < select.From.Count; i++)
         {
-            ValidateFunctionCalls(join.Condition);
+            foreach (var join in select.From[i].Joins)
+            {
+                ValidateFunctionCalls(join.Condition);
+            }
         }
         ValidateFunctionCalls(select.Where);
         foreach (var key in select.GroupBy)

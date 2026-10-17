@@ -1,3 +1,6 @@
+using System;
+using System.Collections.Generic;
+
 using Assimalign.Cohesion.Database.Sql.Catalog;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
@@ -16,6 +19,9 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 internal sealed class SqlStatementMetrics
 {
     private bool _capturedCatalogSnapshot;
+
+    // One slot for a scalar path or ordered join paths: plain stored queries pay no extra field.
+    private object _accessPath = string.Empty;
 
     /// <summary>The shared catalog image, supplied at BEGIN or captured lazily by binding.</summary>
     internal SqlCatalogSnapshot? CatalogSnapshot { get; set; }
@@ -43,10 +49,23 @@ internal sealed class SqlStatementMetrics
 
     /// <summary>
     /// Gets or sets the access path the executor drove ("scan", or
-    /// "seek:&lt;index&gt;", "join-scan", or "join-seek:&lt;index&gt;"), empty for
+    /// "seek:&lt;index&gt;", or one "join-scan"/"join-seek:&lt;index&gt;" entry per join step separated by semicolons), empty for
     /// statements with no table access.
     /// </summary>
-    internal string AccessPath { get; set; } = string.Empty;
+    internal string AccessPath
+    {
+        get => _accessPath is string text ? text
+            : _accessPath is IReadOnlyList<string> { Count: 1 } paths ? paths[0]
+            : string.Join("; ", (IReadOnlyList<string>)_accessPath);
+        set => _accessPath = value;
+    }
+
+    /// <summary>Gets the executed join access paths, one entry per step in written order, including empty inputs.</summary>
+    internal IReadOnlyList<string> JoinAccessPaths
+    {
+        get => _accessPath as IReadOnlyList<string> ?? Array.Empty<string>();
+        set => _accessPath = value;
+    }
 
     /// <summary>
     /// Gets the number of catalog changes the statement committed by itself that a reopened

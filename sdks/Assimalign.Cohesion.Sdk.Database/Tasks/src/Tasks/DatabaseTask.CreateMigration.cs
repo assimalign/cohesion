@@ -449,8 +449,8 @@ public sealed partial class CreateDatabaseMigrationTask : DatabaseTask
                 statement is not SqlQueryStatement { SqlExpression: SqlSelectExpression select } ||
                 select.Where is not { } literal || !IsDefaultLiteral(literal) || select.IsDistinct || select.Columns.Count != 1 ||
                 select.Columns[0] is not { Expression: SqlStarExpression, Alias: null } ||
-                select.From is not { TableName: carrierTable, SchemaName: null, Alias: null } ||
-                select.Joins.Count > 0 || select.GroupBy.Count > 0 || select.Having is not null ||
+                select.From is not [{ Table: { TableName: carrierTable, SchemaName: null, Alias: null }, Joins.Count: 0 }] ||
+                select.GroupBy.Count > 0 || select.Having is not null ||
                 select.OrderBy.Count > 0 || select.Limit is not null || select.Offset is not null)
             {
                 throw new InvalidOperationException($"DEFAULT '{text}' must be exactly one supported SQL literal.");

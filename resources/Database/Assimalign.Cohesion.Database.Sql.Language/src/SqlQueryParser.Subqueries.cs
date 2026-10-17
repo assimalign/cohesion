@@ -46,7 +46,7 @@ public sealed partial class SqlQueryParser
                 Advance(ref lexer);
             }
 
-            return new SqlSelectExpression([], null, [], null, [], null, [],
+            return new SqlSelectExpression([], [], null, [], null, [],
                 null, null, false, null, null);
         }
 
@@ -54,7 +54,7 @@ public sealed partial class SqlQueryParser
         // one level deeper; the expression limit spans the whole statement (#1151).
         if (!TryEnterOperand(ref lexer))
         {
-            return new SqlSelectExpression([], null, [], null, [], null, [],
+            return new SqlSelectExpression([], [], null, [], null, [],
                 null, null, false, null, null);
         }
 
@@ -97,6 +97,7 @@ public sealed partial class SqlQueryParser
         string? previousToken,
         string? previousPreviousToken,
         bool insertValues,
+        bool followsFromComma,
         out string clause)
     {
         clause = string.Empty;
@@ -116,7 +117,7 @@ public sealed partial class SqlQueryParser
         }
         else if (token.Equals("LATERAL", StringComparison.OrdinalIgnoreCase) &&
                  (string.Equals(previousToken, "FROM", StringComparison.OrdinalIgnoreCase) ||
-                  string.Equals(previousToken, "JOIN", StringComparison.OrdinalIgnoreCase)))
+                  string.Equals(previousToken, "JOIN", StringComparison.OrdinalIgnoreCase) || previousToken == "," && followsFromComma))
         {
             clause = "LATERAL subquery";
         }
@@ -125,7 +126,7 @@ public sealed partial class SqlQueryParser
         {
             if (previousToken == "(" &&
                 (string.Equals(previousPreviousToken, "FROM", StringComparison.OrdinalIgnoreCase) ||
-                 string.Equals(previousPreviousToken, "JOIN", StringComparison.OrdinalIgnoreCase)))
+                 string.Equals(previousPreviousToken, "JOIN", StringComparison.OrdinalIgnoreCase) || previousPreviousToken == "," && followsFromComma))
             {
                 clause = "derived-table SUBQUERY in FROM or JOIN";
             }
@@ -146,19 +147,25 @@ public sealed partial class SqlQueryParser
     private void ValidateSubqueryReferences(SqlSelectExpression select)
     {
         var qualifiers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        AddSubqueryQualifier(select.From, qualifiers);
-        foreach (var join in select.Joins)
+        foreach (var item in select.From) { AddSubqueryQualifier(item.Table, qualifiers); }
+        foreach (var item in select.From)
         {
-            AddSubqueryQualifier(join.Table, qualifiers);
+            foreach (var join in item.Joins)
+            {
+                AddSubqueryQualifier(join.Table, qualifiers);
+            }
         }
 
         foreach (var column in select.Columns)
         {
             ValidateSubqueryReference(column.Expression, qualifiers);
         }
-        foreach (var join in select.Joins)
+        foreach (var item in select.From)
         {
-            ValidateSubqueryReference(join.Condition, qualifiers);
+            foreach (var join in item.Joins)
+            {
+                ValidateSubqueryReference(join.Condition, qualifiers);
+            }
         }
         ValidateSubqueryReference(select.Where, qualifiers);
         foreach (var group in select.GroupBy)

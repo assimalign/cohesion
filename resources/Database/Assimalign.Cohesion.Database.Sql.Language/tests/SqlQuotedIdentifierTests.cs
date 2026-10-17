@@ -11,9 +11,9 @@ public sealed class SqlQuotedIdentifierTests
         var select = Parse("SELECT \"JOIN\".\"SELECT\" AS \"FROM\" FROM \"my schema\".\"order details\" AS \"JOIN\" WHERE \"JOIN\".\"SELECT\" = @p ORDER BY \"FROM\";")
             .ShouldBeOfType<SqlSelectExpression>();
 
-        select.From!.TableName.ShouldBe("order details");
-        select.From.SchemaName.ShouldBe("my schema");
-        select.From.Alias.ShouldBe("JOIN");
+        select.From[0].Table.TableName.ShouldBe("order details");
+        select.From[0].Table.SchemaName.ShouldBe("my schema");
+        select.From[0].Table.Alias.ShouldBe("JOIN");
         select.Columns[0].Alias.ShouldBe("FROM");
         var column = select.Columns[0].Expression.ShouldBeOfType<SqlColumnReferenceExpression>();
         column.TableAlias.ShouldBe("JOIN");
@@ -99,8 +99,8 @@ public sealed class SqlQuotedIdentifierTests
     public void QuotedDot_IsPartOfOneIdentifier()
     {
         var select = Parse("SELECT \"field.part\" FROM \"table.part\";").ShouldBeOfType<SqlSelectExpression>();
-        select.From!.TableName.ShouldBe("table.part");
-        select.From.SchemaName.ShouldBeNull();
+        select.From[0].Table.TableName.ShouldBe("table.part");
+        select.From[0].Table.SchemaName.ShouldBeNull();
         select.Columns[0].Expression.ShouldBeOfType<SqlColumnReferenceExpression>().ColumnName.ShouldBe("field.part");
     }
 

@@ -85,6 +85,10 @@ internal static class Program
         TimeSpan.FromHours(26), new byte[] { 0, 255 }, "héllo"]];
 
     // E3: a CAST no registered cast performs is refused while planning, rows or not.
+    private const string expandedJoin = "SELECT a.Id, c.Id FROM customers a JOIN customers b USING (Id) " +
+        "LEFT JOIN customers c ON b.Id = c.Id AND c.Id = 1 ORDER BY a.Id";
+    private const string crossJoin = "SELECT COUNT(*) FROM customers a, customers b CROSS JOIN customers c";
+
     private const string CannotCast = "SELECT CAST(Active AS DATE) FROM customers WHERE Id < 0";
 
     private static int _passed;
@@ -182,6 +186,8 @@ internal static class Program
         await session.ExecuteAsync("CREATE TABLE type_aliases (n NCHAR(3), s NVARCHAR(MAX), f DOUBLE PRECISION, d TIMESTAMP WITH TIME ZONE)");
         await session.ExecuteAsync("INSERT INTO type_aliases (n, s, f) VALUES ('ab', 'text', 1.5)");
         Check("in process: all CAST families", await RowsAsync(session, allCasts), _allCasts);
+        Check("in process: three-way USING and LEFT", await RowsAsync(session, expandedJoin), [[1L, 1L], [2L, null]]);
+        Check("in process: comma and CROSS", await RowsAsync(session, crossJoin), [[8L]]);
         Check("in process: strict typed literals", await RowsAsync(session, typedLiterals), _typedLiterals);
         Check("in process: ISO type names and SQL Server lexical aliases", await RowsAsync(session, typeAliases), _typeAliases);
         Check("in process: CHAR storage, cast, length, concat, LIKE and seek", await RowsAsync(session, Characters), _characters);
@@ -261,6 +267,8 @@ internal static class Program
         var explained = await RowsAsync(connection, "EXPLAIN SELECT c FROM fixed_codes WHERE c = 'a'", timeout.Token);
         Check("over the wire: EXPLAIN uses existing result rows", explained.Any(row => Equals(row[2], "IndexSeek") && row[4] is string && row.Length == 8), true);
         Check("over the wire: all CAST families", await RowsAsync(connection, allCasts, timeout.Token), _allCasts);
+        Check("over the wire: three-way USING and LEFT", await RowsAsync(connection, expandedJoin, timeout.Token), [[1L, 1L], [2L, null]]);
+        Check("over the wire: comma and CROSS", await RowsAsync(connection, crossJoin, timeout.Token), [[8L]]);
         Check("over the wire: strict typed literals", await RowsAsync(connection, typedLiterals, timeout.Token), _typedLiterals);
         Check("over the wire: ISO type names and SQL Server lexical aliases", await RowsAsync(connection, typeAliases, timeout.Token), _typeAliases);
         var fixedCodes = await connection.QueryAsync(Characters, cancellationToken: timeout.Token);

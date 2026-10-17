@@ -118,7 +118,7 @@ internal sealed partial class SqlExpressionEvaluator
         RuntimeHelpers.EnsureSufficientExecutionStack();
         return expression switch
         {
-            SqlColumnReferenceExpression column => _columns[ResolveColumn(column)].Type.MaxLength,
+            SqlColumnReferenceExpression column => ColumnMetadata(column).Type.MaxLength,
             SqlCastExpression cast => TryResolveCastTarget(cast)?.Storage.MaxLength,
             SqlCollateExpression collate => MaximumLengthOf(collate.Operand),
             SqlFunctionCallExpression call when !SqlStandardLibrary.IsCoalesce(call.FunctionName)
@@ -172,8 +172,7 @@ internal sealed partial class SqlExpressionEvaluator
             case SqlColumnReferenceExpression column:
                 try
                 {
-                    int ordinal = ResolveColumn(column);
-                    return ordinal < _columns.Count ? _columns[ordinal].Type.Type : DatabaseType.Null;
+                    return ResolveColumnType(column) ?? DatabaseType.Null;
                 }
                 catch (DatabaseException)
                 {

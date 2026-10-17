@@ -111,11 +111,11 @@ internal sealed partial class SqlPlanner
             {
                 yield return column.Expression;
             }
-            foreach (var join in select.Joins)
+            if (select.From.Count > 1 || select.From.Count == 1 && select.From[0].Joins.Count > 0)
             {
-                if (join.Condition is not null)
+                foreach (var condition in JoinConditions(select))
                 {
-                    yield return join.Condition;
+                    yield return condition;
                 }
             }
             foreach (var key in select.GroupBy)
@@ -157,6 +157,22 @@ internal sealed partial class SqlPlanner
                 foreach (var node in Walk(child))
                 {
                     yield return node;
+                }
+            }
+        }
+    }
+
+    // Keep the N-input walk's loop state out of Roots' iterator object. A stored-only
+    // SELECT never creates this iterator and retains its original allocation footprint.
+    private static IEnumerable<SqlExpression> JoinConditions(SqlSelectExpression select)
+    {
+        foreach (var item in select.From)
+        {
+            foreach (var join in item.Joins)
+            {
+                if (join.Condition is not null)
+                {
+                    yield return join.Condition;
                 }
             }
         }

@@ -97,14 +97,14 @@ public sealed class SqlCharacterBoundaryTests
         await session.ExecuteAsync("INSERT INTO shorter VALUES ('a')");
         const string query = "SELECT l.c, s.c FROM longer l JOIN shorter s ON l.c = s.c";
         (await RowsAsync(session, query)).ShouldBe([["a\u0301", "a"]]);
-        session.LastStatementMetrics.ShouldNotBeNull().AccessPath.ShouldBe("join-scan");
+        session.LastStatementMetrics.ShouldNotBeNull().JoinAccessPaths.ShouldBe(["join-scan"]);
 
         // Act
         await session.ExecuteAsync("CREATE INDEX ix_shorter ON shorter(c)");
         var indexed = await RowsAsync(session, query);
 
         // Assert
-        session.LastStatementMetrics.ShouldNotBeNull().AccessPath.ShouldBe("join-seek:ix_shorter");
+        session.LastStatementMetrics.ShouldNotBeNull().JoinAccessPaths.ShouldBe(["join-seek:ix_shorter"]);
         indexed.ShouldBe([["a\u0301", "a"]]);
     }
 

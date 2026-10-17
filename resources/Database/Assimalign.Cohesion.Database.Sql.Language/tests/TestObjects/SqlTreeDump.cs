@@ -159,12 +159,17 @@ internal static class SqlTreeDump
             Append(builder, select.Columns[index].Expression);
             builder.Append(" as ").Append(Text(select.Columns[index].Alias));
         }
-        builder.Append("], from=").Append(Table(select.From)).Append(", joins=[");
-        foreach (var join in select.Joins)
+        builder.Append("], from=[");
+        foreach (var item in select.From)
         {
-            builder.Append(join.JoinType).Append(' ').Append(Table(join.Table)).Append(" on ");
-            Append(builder, join.Condition);
-            builder.Append("; ");
+            builder.Append(Table(item.Table)).Append(", joins=[");
+            foreach (var join in item.Joins)
+            {
+                builder.Append(join.JoinType).Append(' ').Append(Table(join.Table)).Append(" using ").Append(string.Join(",", join.UsingColumns)).Append(" on ");
+                Append(builder, join.Condition);
+                builder.Append("; ");
+            }
+            builder.Append("]; ");
         }
         builder.Append("], where=");
         Append(builder, select.Where);

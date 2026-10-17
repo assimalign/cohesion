@@ -20,7 +20,7 @@ public class SqlSelectParserTests
         select.Columns[0].Expression.ShouldBeOfType<SqlStarExpression>();
         select.Columns[0].Alias.ShouldBeNull();
         select.From.ShouldNotBeNull();
-        select.From!.TableName.ShouldBe("Users");
+        select.From[0].Table.TableName.ShouldBe("Users");
     }
 
     [Fact]
@@ -53,8 +53,8 @@ public class SqlSelectParserTests
         var select = statement.SqlExpression.ShouldBeOfType<SqlSelectExpression>();
 
         select.From.ShouldNotBeNull();
-        select.From!.SchemaName.ShouldBe("dbo");
-        select.From.TableName.ShouldBe("Users");
+        select.From[0].Table.SchemaName.ShouldBe("dbo");
+        select.From[0].Table.TableName.ShouldBe("Users");
     }
 
     [Fact]
@@ -64,8 +64,8 @@ public class SqlSelectParserTests
         var select = statement.SqlExpression.ShouldBeOfType<SqlSelectExpression>();
 
         select.From.ShouldNotBeNull();
-        select.From!.TableName.ShouldBe("Users");
-        select.From.Alias.ShouldBe("u");
+        select.From[0].Table.TableName.ShouldBe("Users");
+        select.From[0].Table.Alias.ShouldBe("u");
     }
 
     [Fact]
@@ -103,11 +103,11 @@ public class SqlSelectParserTests
             "SELECT u.Id FROM Users u INNER JOIN Orders o ON u.Id = o.UserId;");
         var select = statement.SqlExpression.ShouldBeOfType<SqlSelectExpression>();
 
-        select.Joins.Count.ShouldBe(1);
-        select.Joins[0].JoinType.ShouldBe(SqlJoinType.Inner);
-        select.Joins[0].Table.TableName.ShouldBe("Orders");
-        select.Joins[0].Table.Alias.ShouldBe("o");
-        select.Joins[0].Condition.ShouldNotBeNull();
+        select.From[0].Joins.Count.ShouldBe(1);
+        select.From[0].Joins[0].JoinType.ShouldBe(SqlJoinType.Inner);
+        select.From[0].Joins[0].Table.TableName.ShouldBe("Orders");
+        select.From[0].Joins[0].Table.Alias.ShouldBe("o");
+        select.From[0].Joins[0].Condition.ShouldNotBeNull();
         statement.Diagnostics.ShouldNotContain(item => item.Severity == DiagnosticSeverity.Error);
     }
 
@@ -120,11 +120,11 @@ public class SqlSelectParserTests
 
         statement.Diagnostics.ShouldNotContain(item => item.Severity == DiagnosticSeverity.Error);
         var select = statement.SqlExpression.ShouldBeOfType<SqlSelectExpression>();
-        select.From!.SchemaName.ShouldBe("usr");
-        select.From.TableName.ShouldBe("Users");
-        select.Joins.Count.ShouldBe(1);
-        select.Joins[0].Table.SchemaName.ShouldBe("usr");
-        select.Joins[0].Table.TableName.ShouldBe("UsersProfile");
+        select.From[0].Table.SchemaName.ShouldBe("usr");
+        select.From[0].Table.TableName.ShouldBe("Users");
+        select.From[0].Joins.Count.ShouldBe(1);
+        select.From[0].Joins[0].Table.SchemaName.ShouldBe("usr");
+        select.From[0].Joins[0].Table.TableName.ShouldBe("UsersProfile");
         var firstName = select.Columns[0].Expression.ShouldBeOfType<SqlColumnReferenceExpression>();
         firstName.SchemaName.ShouldBe("usr");
         firstName.TableAlias.ShouldBe("Users");
@@ -133,7 +133,7 @@ public class SqlSelectParserTests
         email.SchemaName.ShouldBe("usr");
         email.TableAlias.ShouldBe("UsersProfile");
         email.ColumnName.ShouldBe("Email");
-        var predicate = select.Joins[0].Condition.ShouldBeOfType<SqlBinaryExpression>();
+        var predicate = select.From[0].Joins[0].Condition.ShouldBeOfType<SqlBinaryExpression>();
         predicate.Operator.ShouldBe(SqlBinaryOperator.Equal);
         var left = predicate.Left.ShouldBeOfType<SqlColumnReferenceExpression>();
         left.SchemaName.ShouldBe("usr");
@@ -152,9 +152,9 @@ public class SqlSelectParserTests
             "SELECT * FROM Users u LEFT JOIN Orders o ON u.Id = o.UserId;");
         var select = statement.SqlExpression.ShouldBeOfType<SqlSelectExpression>();
 
-        select.Joins.Count.ShouldBe(1);
-        select.Joins[0].JoinType.ShouldBe(SqlJoinType.LeftOuter);
-        statement.Diagnostics.ShouldContain(item => item.Code == "COHDBL001");
+        select.From[0].Joins.Count.ShouldBe(1);
+        select.From[0].Joins[0].JoinType.ShouldBe(SqlJoinType.LeftOuter);
+        statement.Diagnostics.ShouldNotContain(item => item.Severity == DiagnosticSeverity.Error);
     }
 
     [Fact]

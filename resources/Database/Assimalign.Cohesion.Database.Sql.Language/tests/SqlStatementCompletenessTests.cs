@@ -33,6 +33,7 @@ public sealed class SqlStatementCompletenessTests
             "EXPLAIN UPDATE t SET a = 1", "EXPLAIN DELETE FROM t",
         ],
         [SqlClauses.From] = ["SELECT * FROM t", "SELECT * FROM dbo.t AS u", "SELECT * FROM t u"],
+        [SqlClauses.Using] = ["SELECT * FROM t JOIN u USING (id)"],
         [SqlClauses.Join] = ["SELECT * FROM t JOIN u ON t.id = u.id", "SELECT * FROM t INNER JOIN u v ON t.id = v.id"],
         [SqlClauses.Where] =
         [

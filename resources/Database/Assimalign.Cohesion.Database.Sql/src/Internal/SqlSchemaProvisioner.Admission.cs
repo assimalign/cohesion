@@ -63,16 +63,16 @@ internal sealed partial class SqlSchemaProvisioner
                 }
                 break;
             case SqlSelectExpression select:
-                if (select.From is { } from)
+                foreach (var item in select.From)
                 {
-                    yield return from;
+                    yield return item.Table;
                 }
-                foreach (var join in select.Joins)
+                foreach (var join in select.From.SelectMany(item => item.Joins))
                 {
                     yield return join.Table;
                 }
                 var expressions = select.Columns.Select(value => value.Expression)
-                    .Concat(select.Joins.Select(value => value.Condition))
+                    .Concat(select.From.SelectMany(item => item.Joins).Select(value => value.Condition))
                     .Concat(select.GroupBy).Concat(select.OrderBy.Select(value => value.Expression))
                     .Append(select.Where).Append(select.Having).Append(select.Limit).Append(select.Offset);
                 foreach (var expression in expressions)

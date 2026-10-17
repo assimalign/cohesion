@@ -35,7 +35,7 @@ public sealed class SqlBinaryOwnershipTests
         var values = await ValuesAsync(session, "SELECT l.b, COALESCE(NULL, l.b), r.b FROM l JOIN r ON l.id = r.id;");
 
         // Assert
-        session.LastStatementMetrics.ShouldNotBeNull().AccessPath.ShouldBe(indexed ? "join-seek:ix_r" : "join-scan");
+        session.LastStatementMetrics.ShouldNotBeNull().JoinAccessPaths.ShouldBe([indexed ? "join-seek:ix_r" : "join-scan"]);
         values.Count.ShouldBe(9);
         foreach (var value in values)
         {
@@ -176,6 +176,46 @@ public sealed class SqlBinaryOwnershipTests
             if (all[i].Length > 0) { all[i][0] = 0x99; }
         }
         (await ValuesAsync(session, sql)).ShouldAllBe(value => value.SequenceEqual(expected));
+    }
+
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Binary joins: N-way and LEFT fanout preserve cell ownership")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Select_BinaryNWayAndLeft_ShouldOwnEveryDeliveredCell(bool indexed)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("binary-nway", new());
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE a (id INT, b BINARY);", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE b (id INT, b BINARY);", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE c (id INT, b BINARY);", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT INTO a VALUES (1, X'00FF'), (2, X'00FF');", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT INTO b VALUES (1, X'00FF'), (1, X'00FF'), (2, X'00FF');", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT INTO c VALUES (1, X'00FF'), (1, X'00FF');", cancellationToken: CancellationToken.None);
+        if (indexed)
+        {
+            await session.ExecuteAsync("CREATE INDEX ix_b ON b(id);", cancellationToken: CancellationToken.None);
+            await session.ExecuteAsync("CREATE INDEX ix_c ON c(id);", cancellationToken: CancellationToken.None);
+        }
+
+        // Act / Assert: NULL extension still delivers the retained outer binary cells independently.
+        const string sql = "SELECT a.b, b.b, COALESCE(c.b, a.b) FROM a JOIN b ON a.id = b.id LEFT JOIN c ON b.id = c.id;";
+        var values = await ValuesAsync(session, sql);
+        values.Count.ShouldBe(15);
+        foreach (var value in values)
+        {
+            value.ShouldBe(new byte[] { 0, 255 });
+            value[0] = 0x99;
+        }
+        (await ValuesAsync(session, sql)).ShouldAllBe(value => value.SequenceEqual(new byte[] { 0, 255 }));
+        await using var left = (await session.ExecuteAsync("SELECT a.b, c.b FROM a LEFT JOIN c ON a.id = c.id WHERE a.id = 2;",
+            cancellationToken: CancellationToken.None)).ShouldBeAssignableTo<DatabaseResultSet>();
+        await foreach (var row in left.GetRowsAsync(CancellationToken.None))
+        {
+            row.GetValue(0).ShouldBe(new byte[] { 0, 255 });
+            row.GetValue(1).ShouldBeNull();
+        }
     }
 
     private static async Task<List<byte[]>> ValuesAsync(SqlDatabaseSession session, string sql)

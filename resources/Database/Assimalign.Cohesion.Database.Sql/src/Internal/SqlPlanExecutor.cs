@@ -169,7 +169,7 @@ internal sealed partial class SqlPlanExecutor
             {
                 Name = projections[i].Name, Ordinal = i, Type = projections[i].Type,
                 MaxLength = projections[i].MaxLength,
-                IsNullable = projections[i].Expression is not null,
+                IsNullable = projections[i].IsNullable,
             };
         }
 

@@ -11,100 +11,222 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 internal sealed partial class SqlPlanner
 {
-    /// <summary>Binds both relation inputs into one unambiguous column scope.</summary>
-    private IReadOnlyList<SqlRelationBinding> BindJoin(SqlSelectExpression select, SqlRelationSource left)
+    /// <summary>Binds every step before execution, with ON visibility limited to its comma item.</summary>
+    private IReadOnlyList<SqlRelationBinding> BindJoin(SqlSelectExpression select,
+        out IReadOnlyList<SqlCatalogColumn> columns, out IReadOnlyList<SqlJoinStep> steps,
+        out IReadOnlyList<int> outputOrdinals)
     {
-        // The language capability check rejects unsupported forms before planning.
-        if (select.Joins.Count != 1 || select.Joins[0] is not { JoinType: SqlJoinType.Inner, Condition: not null })
+        var bindings = new List<SqlRelationBinding>();
+        var allColumns = new List<SqlCatalogColumn>();
+        var allSteps = new List<SqlJoinStep>();
+        var output = new List<int>();
+        foreach (var item in select.From)
         {
-            throw new SqlPlanningException("COHSQLE013", "Only a two-table INNER JOIN with an ON predicate can be planned.", select.Location);
+            int start = bindings.Count;
+            Add(item.Table, false);
+            var visible = Enumerable.Range(bindings[start].Offset, bindings[start].Source.Columns.Count).ToList();
+            if (start > 0) { allSteps.Add(new SqlJoinStep(start, SqlJoinType.Cross, null, null)); }
+            foreach (var join in item.Joins)
+            {
+                Add(join.Table, join.JoinType == SqlJoinType.LeftOuter);
+                int rightIndex = bindings.Count - 1;
+                var right = bindings[rightIndex];
+                var scope = new SqlExpressionEvaluator(allColumns, _parameters, bindings.Skip(start).ToArray(),
+                    defaultCollation: _catalog.DefaultCollation, subquerySlots: _subquerySlots,
+                    functions: _functions, cancellationToken: _cancellationToken);
+                var equalities = new List<(int Left, int Right, Collation Collation)>();
+                SqlBoundExpression? condition = null;
+                if (join.Condition is { } on)
+                {
+                    if (ContainsAggregate(on))
+                    {
+                        throw new SqlPlanningException("COHSQLE017", "Aggregate functions are not allowed in JOIN ON.", on.Location);
+                    }
+                    ValidateExpression(on, scope, _subqueryTypes);
+                    condition = scope.Bind(on);
+                    CollectJoinEqualities(on, scope, equalities);
+                }
+                else if (join.UsingColumns.Count > 0)
+                {
+                    var merged = new List<int>();
+                    var predicates = new List<SqlBoundExpression>();
+                    var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    foreach (string name in join.UsingColumns)
+                    {
+                        if (!names.Add(name))
+                        {
+                            throw new SqlPlanningException("COHSQLE015", $"Column '{name}' appears more than once in USING.", select.Location);
+                        }
+                        int leftOrdinal = FindUsing(visible, name, "left");
+                        int rightOrdinal = FindUsing(Enumerable.Range(right.Offset, right.Source.Columns.Count), name, "right");
+                        var previous = scope.MergedColumn(leftOrdinal);
+                        var leftColumn = previous?.Column ?? allColumns[leftOrdinal];
+                        var rightColumn = allColumns[rightOrdinal];
+                        var common = UsingType(leftColumn.Type, rightColumn.Type, name, select);
+                        bool sameDomain = string.Equals(leftColumn.DomainName, rightColumn.DomainName, StringComparison.OrdinalIgnoreCase);
+                        if (!sameDomain) { common = new DatabaseTypeInfo(common.Type); }
+                        var leftValue = previous?.Value ?? new SqlBoundColumn(leftOrdinal);
+                        var rightValue = new SqlBoundColumn(rightOrdinal);
+                        // PostgreSQL parse_clause.c:1676-1709,1718-1733: choose a common type,
+                        // coerce the inputs, prefer an unchanged INNER input, and preserve LEFT.
+                        var value = CoerceUsing(leftValue, leftColumn.Type.Type, common);
+                        if (join.JoinType == SqlJoinType.Inner && leftColumn.Type.Type != common.Type
+                            && rightColumn.Type.Type == common.Type)
+                        {
+                            value = rightValue;
+                        }
+                        var collation = SqlBoundCollation.Of(
+                            new SqlCollationCandidate(leftColumn.Collation ?? _catalog.DefaultCollation, leftColumn.Collation is null ? 1 : 2),
+                            new SqlCollationCandidate(rightColumn.Collation ?? _catalog.DefaultCollation, rightColumn.Collation is null ? 1 : 2),
+                            _catalog.DefaultCollation);
+                        predicates.Add(new SqlBoundBinary(SqlBinaryOperator.Equal, leftValue, rightValue, collation));
+                        if (leftValue is SqlBoundColumn physical)
+                        {
+                            equalities.Add((physical.Ordinal, rightOrdinal, collation.Resolve(null)));
+                        }
+                        var owner = bindings.Last(binding => binding.Offset <= leftOrdinal);
+                        owner.UsingColumns ??= [];
+                        owner.UsingColumns[leftOrdinal] = new SqlUsingColumn(
+                            new SqlCatalogColumn(name, common, leftColumn.IsNullable, collation: leftColumn.Collation,
+                                // PostgreSQL parse_coerce.c:1360-1387 preserves identical domains.
+                                domainName: sameDomain ? leftColumn.DomainName : null), value);
+                        merged.Add(leftOrdinal);
+                        right.HiddenColumns.Add(rightOrdinal - right.Offset);
+                    }
+                    condition = predicates.Count == 1 ? predicates[0] : new SqlBoundLogical(false, predicates.ToArray());
+                    visible = merged.Concat(visible.Except(merged)).ToList();
+                }
+                if (!SqlLanguageProfile.SupportsJoin(join.JoinType) ||
+                    (join.JoinType != SqlJoinType.Cross && condition is null) ||
+                    (join.JoinType == SqlJoinType.Cross && condition is not null))
+                {
+                    throw new SqlPlanningException("COHSQLE013", "INNER and LEFT JOIN require ON or USING; CROSS JOIN accepts neither.", select.Location);
+                }
+                visible.AddRange(Enumerable.Range(right.Offset, right.Source.Columns.Count)
+                    .Where(ordinal => !right.HiddenColumns.Contains(ordinal - right.Offset)));
+                var access = SelectJoinAccessPath(bindings, allColumns, equalities, rightIndex,
+                    rightIndex == 1 && start == 0 && join.JoinType == SqlJoinType.Inner);
+                allSteps.Add(new SqlJoinStep(rightIndex, join.JoinType, condition, access));
+            }
+            output.AddRange(visible);
+        }
+        columns = allColumns;
+        steps = allSteps;
+        outputOrdinals = output;
+        return bindings;
+
+        int FindUsing(IEnumerable<int> ordinals, string name, string side)
+        {
+            var found = ordinals.Where(i => string.Equals(allColumns[i].Name, name, StringComparison.OrdinalIgnoreCase)).ToArray();
+            if (found.Length != 1)
+            {
+                throw new SqlPlanningException("COHSQLE015", $"USING column '{name}' is {(found.Length == 0 ? "missing" : "ambiguous")} on the {side} input.", select.Location);
+            }
+            return found[0];
         }
 
-        var leftReference = select.From!;
-        var rightReference = select.Joins[0].Table;
-        var right = ResolveRelation(rightReference);
-        string leftName = leftReference.Alias ?? left.Name;
-        string rightName = rightReference.Alias ?? right.Name;
-        if (string.Equals(leftName, rightName, StringComparison.OrdinalIgnoreCase)
-            && (leftReference.Alias is not null || rightReference.Alias is not null
-                || string.Equals(left.Schema, right.Schema, StringComparison.OrdinalIgnoreCase)))
+        void Add(SqlTableReference reference, bool nullable)
         {
-            throw new SqlPlanningException("COHSQLE019", $"Duplicate table name or alias '{leftName}'; use distinct aliases for a self join.", select.Location);
+            var source = ResolveRelation(reference);
+            string name = reference.Alias ?? source.Name;
+            if (bindings.Any(binding => string.Equals(name, binding.Reference.Alias ?? binding.Source.Name, StringComparison.OrdinalIgnoreCase) &&
+                (reference.Alias is not null || binding.Reference.Alias is not null ||
+                    string.Equals(source.Schema, binding.Source.Schema, StringComparison.OrdinalIgnoreCase))))
+            {
+                throw new SqlPlanningException("COHSQLE019", $"Duplicate table name or alias '{name}'; use distinct aliases for a self join.", select.Location);
+            }
+            bindings.Add(new SqlRelationBinding(source, reference, allColumns.Count));
+            allColumns.AddRange(source.Columns.Select(column => nullable && !column.IsNullable
+                ? new SqlCatalogColumn(column.Name, column.Type, true, column.DefaultLiteral, column.Collation, column.DomainName, column.DefaultFunctionCalls)
+                : column));
         }
-
-        return [new SqlRelationBinding(left, leftReference, 0), new SqlRelationBinding(right, rightReference, left.Columns.Count)];
     }
 
-    /// <summary>
-    /// Chooses the longest safe equality prefix on either input. Ties prefer a
-    /// unique index, then its name, then the right input. Every ON conjunct is
-    /// retained as a residual; disjunctions and computed keys use nested loops.
-    /// </summary>
-    private SqlJoinIndexPath? SelectJoinAccessPath(
-        IReadOnlyList<SqlRelationBinding> bindings, SqlExpression condition, SqlExpressionEvaluator evaluator)
+    /// <summary>Selects the common USING type, retaining modifiers only when both inputs agree.</summary>
+    private DatabaseTypeInfo UsingType(DatabaseTypeInfo left, DatabaseTypeInfo right, string name, SqlSelectExpression select)
     {
-        var equalities = new List<(int Left, int Right, Collation Collation)>();
-        CollectJoinEqualities(condition, evaluator, equalities);
-        SqlJoinIndexPath? best = null;
+        var common = left.Type;
+        if (left.Type != right.Type)
+        {
+            // PostgreSQL parse_coerce.c:1393-1437: categories must match; switch candidates
+            // only for a one-way implicit conversion. CHAR/VARCHAR both convert implicitly.
+            static int Category(DatabaseType type) => type switch
+            {
+                DatabaseType.Int8 or DatabaseType.Int16 or DatabaseType.Int32 or DatabaseType.Int64
+                    or DatabaseType.Decimal or DatabaseType.Float32 or DatabaseType.Float64 => 1,
+                DatabaseType.Character or DatabaseType.String => 2,
+                DatabaseType.Date or DatabaseType.DateTime or DatabaseType.DateTimeOffset => 3,
+                _ => 0,
+            };
+            bool CanConvert(DatabaseType from, DatabaseType to)
+                => from == to || _functions.Types.ResolveCast(null, from, SqlType.ForStorage(new DatabaseTypeInfo(to)))
+                    is { Context: SqlCastContext.Implicit };
+            if (Category(left.Type) == 0 || Category(left.Type) != Category(right.Type)) { Refuse(); }
+            if (CanConvert(left.Type, right.Type) && !CanConvert(right.Type, left.Type)) { common = right.Type; }
+            if (!CanConvert(left.Type, common) || !CanConvert(right.Type, common)) { Refuse(); }
+        }
+        // PostgreSQL parse_coerce.c:1648-1678: a type or typmod mismatch clears the typmod.
+        return left.Type == right.Type && left.MaxLength == right.MaxLength
+            && left.Precision == right.Precision && left.Scale == right.Scale
+                ? left : new DatabaseTypeInfo(common);
 
-        foreach (int inner in new[] { 1, 0 })
+        void Refuse() => throw new SqlPlanningException("COHSQLE015",
+            $"USING column '{name}' requires a common type; found {left.Type} and {right.Type}.", select.Location);
+    }
+
+    /// <summary>Coerces the merged value without changing the physical input or qualified references.</summary>
+    private SqlBoundExpression CoerceUsing(SqlBoundExpression value, DatabaseType source, DatabaseTypeInfo common)
+    {
+        if (source == common.Type) { return value; }
+        var target = SqlType.ForStorage(common);
+        return new SqlBoundCast(value, target.Name, target, _functions.Types.ResolveCasts(null, target),
+            _functions.Database, _catalog.DefaultCollation);
+    }
+
+    /// <summary>Seeks into the added input; only the first INNER pair may reverse direction.</summary>
+    private SqlJoinIndexPath? SelectJoinAccessPath(IReadOnlyList<SqlRelationBinding> bindings,
+        IReadOnlyList<SqlCatalogColumn> columns, List<(int Left, int Right, Collation Collation)> equalities,
+        int added, bool maySwap)
+    {
+        SqlJoinIndexPath? best = null;
+        foreach (int inner in maySwap ? new[] { added, 0 } : new[] { added })
         {
             var innerBinding = bindings[inner];
-            var outerBinding = bindings[1 - inner];
-            if (innerBinding.Source.Table is not { } table)
-            {
-                continue;
-            }
+            if (innerBinding.Source.Table is not { } table) { continue; }
             foreach (var index in _catalog.GetIndexes(table.ObjectId).OrderBy(index => index.Name, StringComparer.OrdinalIgnoreCase))
             {
                 var outerOrdinals = new List<int>();
                 var innerColumns = new List<SqlCatalogColumn>();
                 foreach (string key in index.ColumnNames)
                 {
-                    int innerOrdinal = FindColumnOrdinal(table, key);
-                    int joinedOrdinal = innerBinding.Offset + innerOrdinal;
-                    int outerOrdinal = -1;
+                    int local = FindColumnOrdinal(table, key);
+                    int joined = innerBinding.Offset + local;
+                    int outer = -1;
                     foreach (var equality in equalities)
                     {
-                        int candidate = equality.Left == joinedOrdinal ? equality.Right
-                            : equality.Right == joinedOrdinal ? equality.Left : -1;
-                        int local = candidate - outerBinding.Offset;
-                        if (local >= 0 && local < outerBinding.Source.Columns.Count
-                            && CanSeekJoinEquality(innerBinding.Source.Columns[innerOrdinal].Type.Type,
-                                outerBinding.Source.Columns[local].Type.Type)
-                            && (innerBinding.Source.Columns[innerOrdinal].Type.Type is not (DatabaseType.String or DatabaseType.Character or DatabaseType.Json)
-                                || equality.Collation.IsIndexBacked
-                                    && equality.Collation == (innerBinding.Source.Columns[innerOrdinal].Collation ?? _catalog.DefaultCollation)))
+                        int candidate = equality.Left == joined ? equality.Right : equality.Right == joined ? equality.Left : -1;
+                        bool inOuter = inner == 0 ? candidate >= bindings[1].Offset && candidate < columns.Count
+                            : candidate >= 0 && candidate < innerBinding.Offset;
+                        if (inOuter && CanSeekJoinEquality(columns[joined].Type.Type, columns[candidate].Type.Type) &&
+                            (columns[joined].Type.Type is not (DatabaseType.String or DatabaseType.Character or DatabaseType.Json) ||
+                                equality.Collation.IsIndexBacked && equality.Collation == (columns[joined].Collation ?? _catalog.DefaultCollation)))
                         {
-                            outerOrdinal = local;
+                            outer = candidate;
                             break;
                         }
                     }
-
-                    if (outerOrdinal < 0)
-                    {
-                        break;
-                    }
-                    outerOrdinals.Add(outerOrdinal);
-                    innerColumns.Add(innerBinding.Source.Columns[innerOrdinal]);
+                    if (outer < 0) { break; }
+                    outerOrdinals.Add(outer);
+                    innerColumns.Add(columns[joined]);
                 }
-
-                if (outerOrdinals.Count == 0)
-                {
-                    continue;
-                }
-
-                if (best is null || outerOrdinals.Count > best.OuterOrdinals.Count
-                    || (outerOrdinals.Count == best.OuterOrdinals.Count
-                        && (index.IsUnique && !best.Index.IsUnique
-                            || index.IsUnique == best.Index.IsUnique
-                                && StringComparer.OrdinalIgnoreCase.Compare(index.Name, best.Index.Name) < 0)))
+                if (outerOrdinals.Count > 0 && (best is null || outerOrdinals.Count > best.OuterOrdinals.Count ||
+                    outerOrdinals.Count == best.OuterOrdinals.Count && (index.IsUnique && !best.Index.IsUnique ||
+                    index.IsUnique == best.Index.IsUnique && StringComparer.OrdinalIgnoreCase.Compare(index.Name, best.Index.Name) < 0)))
                 {
                     best = new SqlJoinIndexPath(inner, index, outerOrdinals, innerColumns);
                 }
             }
         }
-
         return best;
     }
 
@@ -124,7 +246,10 @@ internal sealed partial class SqlPlanner
             && UnwrapCollation(binary.Left) is SqlColumnReferenceExpression left
             && UnwrapCollation(binary.Right) is SqlColumnReferenceExpression right)
         {
-            equalities.Add((evaluator.ResolveColumn(left), evaluator.ResolveColumn(right), evaluator.ResolveCollation(binary.Left, binary.Right)));
+            if (evaluator.Bind(left) is SqlBoundColumn a && evaluator.Bind(right) is SqlBoundColumn b)
+            {
+                equalities.Add((a.Ordinal, b.Ordinal, evaluator.ResolveCollation(binary.Left, binary.Right)));
+            }
         }
     }
 

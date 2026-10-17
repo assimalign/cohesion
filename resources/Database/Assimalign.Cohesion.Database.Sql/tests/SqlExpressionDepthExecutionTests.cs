@@ -299,7 +299,7 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
         nested.ShouldBe(42);
         nestedMetrics.AccessPath.ShouldBe("seek:ix_id");
         joined.Select(row => (row[0], row[1])).ShouldBe([(7, 7), (42, 42)]);
-        joinMetrics.AccessPath.ShouldBe("join-seek:ix_id");
+        joinMetrics.JoinAccessPaths.ShouldBe(["join-seek:ix_id"]);
     }
 
     /// <summary>

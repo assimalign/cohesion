@@ -318,7 +318,8 @@ internal sealed partial class SqlExpressionEvaluator
 
                 for (int i = 0; i < binding.Source.Columns.Count; i++)
                 {
-                    if (!string.Equals(binding.Source.Columns[i].Name, column.ColumnName, StringComparison.OrdinalIgnoreCase))
+                    if (column.TableAlias is null && binding.HiddenColumns.Contains(i) ||
+                        !string.Equals(binding.Source.Columns[i].Name, column.ColumnName, StringComparison.OrdinalIgnoreCase))
                     {
                         continue;
                     }
@@ -359,7 +360,28 @@ internal sealed partial class SqlExpressionEvaluator
     internal DatabaseType? ResolveColumnType(SqlColumnReferenceExpression column)
     {
         int ordinal = ResolveColumn(column);
-        return ordinal >= 0 && ordinal < _columns.Count ? _columns[ordinal].Type.Type : null;
+        return ordinal >= 0 && ordinal < _columns.Count ? ColumnMetadata(column).Type.Type : null;
+    }
+
+    /// <summary>Gets unqualified USING metadata while qualified names retain their physical types.</summary>
+    internal SqlCatalogColumn ColumnMetadata(SqlColumnReferenceExpression column)
+    {
+        int ordinal = ResolveColumn(column);
+        return column.TableAlias is null && column.SchemaName is null && MergedColumn(ordinal) is { } merged
+            ? merged.Column : _columns[ordinal];
+    }
+
+    /// <summary>Finds a merged output without allocating state for ordinary single-source scopes.</summary>
+    internal SqlUsingColumn? MergedColumn(int ordinal)
+    {
+        if (_relations is IReadOnlyList<SqlRelationBinding> bindings)
+        {
+            foreach (var binding in bindings)
+            {
+                if (binding.UsingColumns is { } merged && merged.TryGetValue(ordinal, out var column)) { return column; }
+            }
+        }
+        return null;
     }
 
     /// <summary>

@@ -12,7 +12,7 @@ enumerates the profile and fails if any advertised clause lacks a passing case.
 
 ## Statement matrix
 
-With EXPLAIN (#1104), the profile measures **34 of 50 declared clauses** against the live SQL engine.
+With USING (#1109), the profile measures **35 of 50 declared clauses** against the live SQL engine.
 Phase 22 measured 33 of 49.
 The earlier 32/48 figure included `JOIN`, `GROUP BY`, `HAVING`, and `SUBQUERY`,
 removed in Phase 12e (#1019–#1021), plus a no-op `CAST` removed in Phase 13.
@@ -33,15 +33,15 @@ projection aliases, including aliases inside scalar expressions, and select-list
 ordinals through the SQL server/client (#1024). At Phase 22 the count remained 33/49 because
 `ALTER TABLE` and `ORDER BY` were already advertised for smaller executable subsets.
 
-The **16 excluded clauses** are set operations (`UNION`,
+The **15 excluded clauses** are set operations (`UNION`,
 `INTERSECT`, `EXCEPT`), CTEs (`WITH`, `RECURSIVE`), window clauses (`WINDOW`,
-`OVER`, `PARTITION`), views (`CREATE VIEW`, `DROP VIEW`), `NATURAL`, `USING`,
+`OVER`, `PARTITION`), views (`CREATE VIEW`, `DROP VIEW`), `NATURAL`,
 `TOP`, `ALL`, `FETCH`, and `RETURNING`. Counts describe named clauses, not
 complete ISO SQL support; the boundaries below are part of the contract.
 
 | Statement | Status | Notes |
 |---|---|---|
-| `SELECT` | Supported subset, measured | One stored table or virtual system relation, or a two-relation `INNER JOIN ... ON` over either source kind; `DISTINCT`, projections and aliases, scalar expressions, `WHERE`, grouping, multi-expression `ORDER BY ASC/DESC`, nonnegative integer `LIMIT`/`OFFSET`. `COUNT(*)`, `COUNT(expr)`, `SUM`, `AVG`, `MIN`, and `MAX` execute in grouped and ungrouped queries. See the aggregate contract below. `SELECT` without `FROM` is rejected by the planner. |
+| `SELECT` | Supported subset, measured | One stored table or virtual system relation, or written-order N-way INNER/LEFT/CROSS joins and comma items over either source kind; `DISTINCT`, projections and aliases, scalar expressions, `WHERE`, grouping, multi-expression `ORDER BY ASC/DESC`, nonnegative integer `LIMIT`/`OFFSET`. `COUNT(*)`, `COUNT(expr)`, `SUM`, `AVG`, `MIN`, and `MAX` execute in grouped and ungrouped queries. See the aggregate contract below. `SELECT` without `FROM` is rejected by the planner. |
 | `EXPLAIN` | Supported extension, measured | SELECT, INSERT (including query sources), UPDATE or DELETE returns the chosen plan as ordinary rows without executing it. DDL, transaction control, nested EXPLAIN and EXPLAIN ANALYZE report `COHDBL001`. |
 | `INSERT` / `VALUES` | Supported subset, measured | Optional column list, multi-row literal/scalar `VALUES` including whole-item `DEFAULT`, `INSERT ... DEFAULT VALUES` (one row of defaults, with an optional column list), and transactional `INSERT ... SELECT` with the same destination coercion, defaults, and constraints. `VALUES` expressions have no columns in scope: a column reference reports `COHSQLE005` before anything executes (see [VALUES and counts have no column scope](#values-and-counts-have-no-column-scope-1165)). Subqueries inside `VALUES` are excluded; use `INSERT ... SELECT`. |
 | `UPDATE` | Supported | multi-column `SET`, including `c = DEFAULT`, and `WHERE`; qualified references in both use the target name or its alias, which hides the base name (PostgreSQL `parse_relation.c:3759`); hidden/unknown qualifiers fail with located `COHSQLE015` before any write and leave an explicit transaction active; no aggregate in either (see [Grouping and aggregate functions](#grouping-and-aggregate-functions-1020)) |
@@ -55,12 +55,12 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `ORDER BY` | Supported subset, measured | Multiple source-column/scalar-expression keys, projection aliases (bare or nested in expressions), and one-based select-list ordinals execute with ASC/DESC. Unqualified aliases take precedence over same-named source columns; qualified references bind to the source. Composes with DISTINCT, LIMIT/OFFSET, supported joins, grouped/aggregate queries, and system relations. Zero, negative, out-of-range, and non-integer numeric ordinals error; `1 + 1` remains a constant expression. Explicit NULLS FIRST/LAST, derived-table output ordering, and GROUP BY ordinals report `COHDBL001`. See the ordering contract below (#1024). |
 | `CAST` | Supported subset, measured | Exact signed integer, decimal, boolean, and string conversions, text to the date, time, UUID and binary floating-point types, and an application's casts, to and from its domains and between built-in types the engine does not convert (E3's cast registry), in projections, predicates, ordering, and DML expressions, including the SQL server/client. See the exact pair and error contract below. CAST in DEFAULT or CHECK remains rejected. |
 | `COLLATE` | Supported subset, measured | Column and expression overrides: `binary`, `case_insensitive`, `case_accent_insensitive`, plus compatibility `invariant` with scan execution only. Effective collation governs comparisons, `LIKE`, ordering, grouping, `DISTINCT`, and unique keys. See the collation contract below. |
-| `JOIN` | Supported subset, measured | Two-relation `INNER JOIN ... ON` over stored tables and/or system relations or bare `JOIN ... ON`, with index assistance where the mandatory equality predicate matches an applicable secondary-index prefix. `LEFT [OUTER]`, `RIGHT [OUTER]`, `FULL [OUTER]`, `CROSS`, additional joins beyond two tables, joins without `ON`, and comma joins report `COHDBL001`. See the precise contract below. |
-| `GROUP BY` / `HAVING` | Supported subset, measured | One or more grouping expressions; `WHERE` filters input rows and `HAVING` filters groups after aggregation. Composes with supported two-table inner joins, `ORDER BY`, `LIMIT`, and `OFFSET`, including server/client execution. Ungrouped, unaggregated projected columns are errors. `DISTINCT`/`ALL` aggregate modifiers, grouping extensions, windows, and ordered-set aggregates report `COHDBL001`. |
+| `JOIN` / `USING` | Supported subset, measured | N-way INNER (or bare JOIN), LEFT [OUTER], CROSS and comma joins over stored/system sources. INNER/LEFT require ON or USING; CROSS accepts neither. RIGHT/FULL, NATURAL, LATERAL and qualified wildcards remain excluded. See the precise contract below. |
+| `GROUP BY` / `HAVING` | Supported subset, measured | One or more grouping expressions; `WHERE` filters input rows and `HAVING` filters groups after aggregation. Composes with supported N-way joins, `ORDER BY`, `LIMIT`, and `OFFSET`, including server/client execution. Ungrouped, unaggregated projected columns are errors. `DISTINCT`/`ALL` aggregate modifiers, grouping extensions, windows, and ordered-set aggregates report `COHDBL001`. |
 | Subqueries / `INSERT ... SELECT` | Supported subset, measured | Uncorrelated scalar, `IN`/`NOT IN`, and `EXISTS`/`NOT EXISTS` queries in supported SELECT expressions, plus transactional insert-source queries. All use the outer statement snapshot; nesting is limited to 32 subquery levels, within the statement's expression nesting limit (256 levels by default, `SQL0006`). Correlated queries, derived tables, quantified comparisons, subqueries in UPDATE/DELETE, VALUES, CHECK/DEFAULT, and LIMIT/OFFSET expressions report `COHDBL001`. See the subquery contract below. |
 | `TOP` / `SELECT ALL` / `FETCH` | Recognized, not supported | row-limit and select modifiers rejected with `COHDBL001` |
 | DML `RETURNING` | Recognized, not supported | rejected with `COHDBL001` |
-| `NATURAL JOIN` / `JOIN ... USING` | Recognized, not supported | rejected with `COHDBL001` |
+| `NATURAL JOIN` | Recognized, not supported | rejected with `COHDBL001` |
 | `UNION` / `INTERSECT` / `EXCEPT` | Recognized, not supported | keywords lexed; rejected with `COHDBL001` |
 | `WITH` / `WITH RECURSIVE` (CTEs) | Recognized, not supported | rejected with `COHDBL001` |
 | Window functions / `OVER` / `WINDOW` | Recognized, not supported | function names lexed; clauses rejected with `COHDBL001` |
@@ -396,7 +396,7 @@ function the engine no longer registers: the database opens and writes fail with
 `ORDER BY` evaluates its keys before `OFFSET` and `LIMIT`, using the result of
 grouping and `HAVING` when present. It accepts source columns, executable scalar
 expressions, output aliases, and one-based select-list ordinals. These keys
-compose with `DISTINCT`, pagination, the supported two-table inner join, grouped
+compose with `DISTINCT`, pagination, the supported N-way joins, grouped
 and ungrouped aggregates, and virtual system relations. Mixed ASC/DESC keys
 compare from left to right. NULL sorts first in ASC and last in DESC. Rows with
 equal keys have no promised relative order; add a tie-breaking key for stable
@@ -597,59 +597,68 @@ SQL defaults do not apply to Documents, Graph, Key-Value, or Blob comparisons.
 
 ## Joins (#1019)
 
-`SqlClauses.Join` represents the executable subset `INNER JOIN ... ON`, including
-bare `JOIN ... ON`. `SqlLanguageProfile.SupportsJoin` advertises only
-`SqlJoinType.Inner`. A SELECT can join exactly two relations, each a stored table or a registered
-`INFORMATION_SCHEMA`/`COHESION_SCHEMA` relation; aliases and
-schema-qualified references such as the following execute, including over the
-SQL server/client:
+FROM is a comma-separated list of join trees. Each item starts with a stored table or
+registered INFORMATION_SCHEMA/COHESION_SCHEMA relation, followed by any number of INNER
+(including bare JOIN), LEFT [OUTER], or CROSS joins. INNER and LEFT require exactly one
+ON predicate or USING (column [, column ...]); CROSS accepts neither. Missing ON/USING
+and RIGHT/FULL OUTER remain COHDBL001; malformed joins and CROSS with a condition fail
+with an error and never execute as a product. NATURAL, LATERAL and qualified wildcards
+such as t.* keep COHDBL001. Derived comma inputs, FROM t, (SELECT ...) d, remain excluded
+until #1113.
 
-```sql
-SELECT usr.Users.FirstName, usr.Users.LastName, usr.UsersProfile.Email
-FROM usr.Users INNER JOIN usr.UsersProfile ON usr.Users.Id = usr.UsersProfile.UserId
-```
+JOIN binds more tightly than comma: in FROM a, b JOIN c ON ..., ON can see b and c,
+but cannot see a. It also cannot reference a later input. Unknown/hidden qualifiers
+and ambiguous columns report located COHSQLE015 before rows are read; duplicate aliases
+report COHSQLE019. An explicit alias hides the base name in every join form and in DML.
+PostgreSQL anchors: doc/src/sgml/queries.sgml:217-227 and
+src/backend/parser/parse_clause.c:370-386 (the ON scope contains only its join inputs).
 
-`ON` evaluates for each candidate pair under the same statement MVCC snapshot
-for both inputs. Only TRUE matches; FALSE and UNKNOWN do not. Matching pairs
-preserve multiplicity, and an empty input produces no joined rows. The result
-composes with scalar projections, `WHERE`, `DISTINCT`, `GROUP BY`, `HAVING`,
-aggregates, `ORDER BY`, `LIMIT`, and `OFFSET`. Without `ORDER BY`, row order is unspecified;
-callers requiring stable paging must provide a sufficient ordering key.
+Joins execute left-deep in written order without reordering. Only the first INNER pair
+may swap sides for an index. Each later step may seek into the input it adds; a LEFT
+step always drives from its preserved left input. Mandatory equalities must bind an
+index-key prefix under the existing type and effective-collation rules. The full ON
+remains a residual predicate. Otherwise the added input buffers once. System inputs
+take no object lock and have no index path; all inputs share one statement catalog
+image and MVCC snapshot. EXPLAIN shows each step's kind and access, including scans.
 
-Column references can be unqualified, table/alias-qualified, or schema/table-qualified.
-An unqualified name present in both inputs is an ambiguous-column error, even
-when the inputs have no rows. Explicit aliases distinguish repeated table inputs.
-Source qualifiers are validated for single-relation reads too; an explicit alias
-replaces the base relation name.
-Unqualified `*` expands both inputs in FROM-then-JOIN column order. Qualified
-wildcards such as `u.*` and `usr.Users.*` are outside the executable subset and
-report `COHDBL001`.
+Only TRUE matches ON or the implicit USING equalities; FALSE and UNKNOWN do not.
+LEFT supplies NULL for every right column when no candidate matches. A predicate in
+ON preserves unmatched left rows; the same predicate in WHERE can remove them.
+COUNT(*) counts the extended row while COUNT(right.column) ignores its NULL. All
+join forms compose with grouping/HAVING, DISTINCT, ordering and LIMIT/OFFSET.
+CROSS and comma multiply cardinalities; either empty input yields a typed empty
+product. Row order without ORDER BY is unspecified.
 
-System relations take no object locks and have no index paths. The planner uses
-a secondary index on either stored input when mandatory `ON` equalities
-between columns bind a leading index-key prefix. It prefers the longest prefix,
-then a unique index, then index name, then the right input. It still evaluates
-the complete `ON` predicate after fetching snapshot-visible candidate rows.
-Compatible Boolean, String, Json, Date, Time, `TIMESTAMP` (DateTime),
-`TIMESTAMPTZ` (DateTimeOffset), TimeSpan, Guid and exact signed integer/Decimal
-key comparisons can use this path; temporal keys encode the identity described
-under "Temporal value identity" below. Approximate numeric comparisons retain
-scanning because their evaluator equality can be broader than their encoded
-index keys. Predicates without a
-usable mandatory column equality, including computed keys, keys reachable only
-through disjunctions, and inequalities, use the scan fallback, as do joins
-without an applicable index.
+USING requires each listed name exactly once on each input; missing, repeated or
+ambiguous names fail binding with COHSQLE015. Its equality uses ordinary ON collation
+precedence, including column overrides. The merged output uses PostgreSQL's common-type
+selection through implicit casts within the same type category. INT/DECIMAL produces DECIMAL
+and INT/BIGINT produces BIGINT in either order, including arithmetic and function overloads.
+LEFT preserves the coerced left value and its nullability; INNER prefers an unchanged input
+of the common type when available. Length, precision and scale remain only when both input
+types and modifiers agree; CHAR(3)/VARCHAR(10) clears the length. Qualified references retain
+their own types and modifiers; right qualified references become nullable under LEFT.
+Pairs with no common type fail planning with COHSQLE015, even on empty inputs.
+Identical domains retain their domain identity; differing domains or a domain/base pair
+resolve through their base types (PostgreSQL parse_coerce.c:1360-1387).
+Unqualified merged names are unambiguous; qualified left.id and right.id still bind.
+SELECT * orders merged columns once, in USING order, then remaining left columns,
+then remaining right columns. A later USING applies this rule to its accumulated
+left output; comma items concatenate their outputs. ORDER BY aliases after `*` and
+numeric ordinals count these visible output columns. PostgreSQL performs the same
+USING name validation and output ordering at parse_clause.c:1322-1399,1460-1510,
+common-type synthesis at parse_clause.c:1676-1733 and parse_coerce.c:1393-1437,
+and modifier clearing at parse_coerce.c:1648-1678.
 
-The fallback buffers the right input once: it performs O(L + R) stored-row reads,
-O(L × R) predicate evaluations, and O(R) input buffering for L and R input rows,
-in addition to result and sort storage. Index assistance replaces the indexed
-input scan with probes; performance still depends on key selectivity and result
-multiplicity.
+In-process pass-through metadata marks every null-supplying LEFT column nullable.
+The existing wire header still carries name, type and length without nullability.
+Binary delivery copies only selected retained outer/buffered-inner cells; the final
+index inner is freshly decoded. Earlier indexed inputs retained by later steps are
+copied on delivery, as are unmatched LEFT outer values used in multiple results.
 
-LEFT, RIGHT, and FULL outer joins, CROSS joins, NATURAL joins, USING, absent ON,
-comma joins, and joins beyond two tables do not execute and report `COHDBL001`.
-No outer-join null-extension behavior is advertised. These are explicit
-ISO/IEC 9075 subset boundaries, not additional named clauses in the 49-clause count.
+Capability preflight skips advertised clauses and reports the first unadvertised
+one. Thus USING cannot mask a later NATURAL, WINDOW or OVER. MERGE INTO ... USING
+remains SQL0002; DELETE ... USING and CREATE INDEX ... USING are syntax errors.
 
 ## Value comparison (#1029)
 
@@ -861,7 +870,7 @@ the value order cannot compare (`Cannot compare values of types ...`).
 discards that many rows and `LIMIT` keeps at most that many of the remaining rows.
 A limit greater than the result size keeps every remaining row; an offset at or
 beyond the result size returns no rows. These rules apply to stored tables,
-two-table joins, virtual system relations and grouped queries, in process and
+N-way joins, virtual system relations and grouped queries, in process and
 over the SQL wire protocol (#1100). Negative and non-integer counts retain the
 `LIMIT requires a non-negative integer.` / `OFFSET requires a non-negative integer.`
 diagnostics.
@@ -945,7 +954,7 @@ when the source has none.
 ## Grouping and aggregate functions (#1020)
 
 Grouping is a separate execution stage over a stored table, a virtual system
-relation, or the supported two-table `INNER JOIN ... ON`. `WHERE` first filters
+relation, or supported N-way INNER/LEFT/CROSS/comma joins. `WHERE` first filters
 individual input rows. `GROUP BY` then forms one row per distinct tuple of one
 or more scalar expressions. Aggregate functions consume the surviving rows in
 each group; `HAVING` filters the completed groups and retains only TRUE results.
@@ -1219,7 +1228,7 @@ than the thread has, such as a pattern of 200,000 `%a` segments over a value of
 
 ## System-view matrix (C1)
 
-All 11 registered system relations participate in the supported two-relation INNER JOIN,
+All 11 registered system relations participate in the supported N-way joins,
 with each other or with stored tables, on either side. Aliases, three-part column
 references, ambiguity checks and all supported SELECT operators use the same relation
 binding. New registered system relations inherit joining without join-specific code.
