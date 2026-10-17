@@ -1,6 +1,7 @@
 # Documents recovery fixture design
 
-The seed process commits a multi-page document and its secondary index, starts
+The seed process creates `items` with OQL `CREATE COLLECTION items`, obtains its session-bound
+handle with `GetCollectionAsync`, commits a multi-page document and its secondary index, starts
 an explicit transaction, overwrites that document, inserts another, writes dirty
 pages through the kernel's WAL-before-data gate, and exits
 without disposing anything. The verification process reopens storage, reads

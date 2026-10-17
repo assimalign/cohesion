@@ -140,8 +140,8 @@ with its own code, `COHDBD001`:
    `DatabaseTransactionAbortedException` and leaves the transaction `Faulted` and ended.
 5. Every failure of a statement that started counts: parse diagnostics of text the session parses
    or of a typed request, planning and execution errors (an unknown collection, a stale expected
-   version, a document whose indexed value outgrows the 1,024-byte index key, OQL `CREATE INDEX`
-   or `DROP INDEX` on a `COHESION_SCHEMA` collection, which the planner refuses), ownership
+   version, a document whose indexed value outgrows the 1,024-byte index key, OQL collection or
+   index DDL on a `COHESION_SCHEMA` collection), ownership
    refusals, kernel aborts such as snapshot conflicts, and cancellation while the statement runs,
    including a wait for the writer lock. Failures that come before a statement starts leave the
    transaction unchanged: argument validation (a null, empty or whitespace id, collection name or
@@ -220,7 +220,7 @@ PostgreSQL `85f55534e80`, Neo4j `54a7dcf7c25` and RavenDB `83399cb8bc8`.
 Documents wire commands use automatic statement transactions; explicit transactions remain in process only
 (`DocumentTransactionFailureTests`).
 
-Collections created by these APIs have `DatabaseObjectOwner.Adhoc`. A collection
+Collections created by these APIs or OQL `CREATE COLLECTION` have `DatabaseObjectOwner.Adhoc`. A collection
 directly marked `Schema` refuses `DROP COLLECTION`, `CREATE INDEX`, and `DROP INDEX`,
 with `DatabaseObjectLockedException` naming the collection, owning schema, and requested
 operation. Document contents remain mutable. There is no
@@ -293,7 +293,7 @@ uncommitted catalog writes are visible. Subsequent statements observe committed
 catalog changes according to their isolation level. No metadata copy, content record,
 or synthetic collection is stored, and existing collection listing stays unchanged.
 
-The sources are read-only. `CREATE INDEX` and `DROP INDEX` targeting either source,
+The sources are read-only. `CREATE COLLECTION`, `DROP COLLECTION`, `CREATE INDEX`, and `DROP INDEX` targeting either source,
 and `CreateCollectionAsync` or `DropCollectionAsync` using either reserved name,
 throw `DatabaseException` with `System collection '<canonical source>' is read-only.`
 before ordinary catalog lookup or mutation. OQL document `INSERT`, `UPDATE`, and
@@ -304,7 +304,8 @@ diagnostic. Virtual sources do not provide mutable `DocumentCollection` handles.
 
 The supported clause matrix lives in the language package's
 [DESIGN.md](../../Assimalign.Cohesion.Database.Documents.Language/docs/DESIGN.md).
-SELECT, FROM, WHERE, GROUP BY, HAVING, ORDER BY, CREATE INDEX, and DROP INDEX are executed;
+SELECT, FROM, WHERE, GROUP BY, HAVING, ORDER BY, CREATE COLLECTION, DROP COLLECTION,
+CREATE INDEX, and DROP INDEX are executed;
 DEFINE, ELEMENT, FLATTEN, nested queries, document data-mutation statements, and server
 statements are rejected with `COHDBL001`. The parser advertises only clauses this executor
 supports.
@@ -347,6 +348,30 @@ This baseline makes identical data and queries return identical sequences across
 access paths. Query results are materialized and own their JSON values; they do
 not retain a transaction or borrowed storage memory after execution.
 
+### Collection DDL (#1130)
+
+`CREATE COLLECTION [IF NOT EXISTS] name` and `DROP COLLECTION [IF EXISTS] name` use collection
+plans in the ordinary OQL pipeline. The internal database cores accept the statement's existing
+`DocumentOperation`; the session's unchanged C# collection members start one operation and
+delegate to those same cores. No statement reserves a second operation on its session.
+
+Both return Success with affected count zero. Conditional creation preserves an existing
+collection, including its identity and Schema ownership. Conditional removal ignores an absent
+collection; a Schema-owned collection still throws `DatabaseObjectLockedException` naming
+`DROP COLLECTION`. System sources remain read-only even with either modifier. Names are local
+to the session's database; `IF` is positional and remains usable as an unquoted name.
+
+Under the database writer lock, snapshot conflicts are checked before either conditional no-op.
+A collection committed after a Snapshot transaction began therefore aborts conditional creation.
+DDL is transactional: CREATE is visible to subsequent statements of its transaction; rollback
+removes it. DROP removes documents and indexes together with the collection; rollback restores
+all three, including physical index selection. A failed OQL collection statement aborts an
+explicit transaction under the ordinary failed-statement rule above.
+
+The existing wire Execute operation carries both clauses. CREATE followed by DocumentClient
+Put/Get works on the new collection. A schema-owned DROP returns ExecutionFailure (6), naming
+`DROP COLLECTION`; the next Execute on the same connection succeeds. No protocol layout changes.
+
 ## Index planning and writes
 
 `CREATE INDEX <index-name> ON <collection> (<path>)` and
@@ -381,7 +406,7 @@ for supported scalar keys, visibility filtering, and restart recovery.
 
 ## Data mutation and serialization semantics
 
-OQL now includes index DDL but no document data-mutation clauses. The existing collection API
+OQL includes collection and index DDL but no document data-mutation clauses. The existing collection API
 provides deterministic mutation semantics: Put replaces the complete JSON value
 by ordinal identity, Delete removes that identity, and each operation either
 completes in its transaction or rolls back. Put captures caller memory before
@@ -682,7 +707,7 @@ Terminate use the shared protocol. Requests cannot select another database or mo
 
 The server uses the session's internal `ExecuteStatementAsync` to parse and then invoke typed
 execution, so the root traces each executed statement once. OQL's SELECT/WHERE/GROUP BY/HAVING/
-ORDER BY, parameters, nested paths, aggregates, CREATE INDEX and DROP INDEX use the same executor
+ORDER BY, parameters, nested paths, aggregates, collection DDL and index DDL use the same executor
 as embedded execution. `SELECT *` returns whole JSON values; projections return positional rows.
 Document and collection commands use the existing session-bound operations and automatic
 transactions. No transaction-control member or frame is exposed over this wire.
@@ -1058,7 +1083,7 @@ growth when a reader stalls; they do not establish an end-to-end InMemory memory
 
 ## Diagnostic completion (#1103 review)
 
-Catalog-write helpers use COHDOC004 and accept an optional source location: OQL index DDL
+Catalog-write helpers use COHDOC004 and accept an optional source location: OQL collection and index DDL
 passes its location; direct collection APIs have none. Evaluator and executor rejections
 carry COHDOC001 for unsupported contexts/operators, COHDOC005 for missing parameters,
 COHDOC006 for division/remainder by zero (PostgreSQL SQLSTATE 22012), COHDOC007 for numbers

@@ -33,6 +33,8 @@ internal sealed class DocumentPlanner
         OqlSelectExpression select when DocumentSystemCollections.Find(select.Collection) is string name =>
             new DocumentSystemCollectionPlan(CreateLogicalPlan(select), name),
         OqlSelectExpression select => Plan(select),
+        OqlCreateCollectionExpression createCollection => new DocumentCreateCollectionPlan(createCollection),
+        OqlDropCollectionExpression dropCollection => new DocumentDropCollectionPlan(dropCollection),
         OqlCreateIndexExpression createIndex => PlanCreateIndex(createIndex),
         OqlDropIndexExpression dropIndex => PlanDropIndex(dropIndex),
         _ => throw new DocumentPlanningException("COHDOC001", "The OQL statement is not supported by the document executor.", expression.Location),

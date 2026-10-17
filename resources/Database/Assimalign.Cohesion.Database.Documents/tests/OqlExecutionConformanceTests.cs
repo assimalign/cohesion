@@ -58,6 +58,20 @@ public sealed class OqlExecutionConformanceTests
                 new("SELECT name AS label, amount FROM items ORDER BY amount DESC, label ASC",
                     [["beta", 6m], ["gamma", 4m], ["alpha", 2m], ["delta", null]]),
             ],
+            [OqlClauses.CreateCollection] =
+            [
+                new("CREATE COLLECTION extra", [["extra", "Adhoc"], ["items", "Adhoc"]],
+                    VerificationStatement: "SELECT OBJECT_NAME, OWNER FROM COHESION_SCHEMA.OBJECT_OWNERSHIP ORDER BY OBJECT_NAME"),
+                new("CREATE COLLECTION IF NOT EXISTS extra", [["extra", "Adhoc"], ["items", "Adhoc"]],
+                    VerificationStatement: "SELECT OBJECT_NAME, OWNER FROM COHESION_SCHEMA.OBJECT_OWNERSHIP ORDER BY OBJECT_NAME"),
+            ],
+            [OqlClauses.DropCollection] =
+            [
+                new("DROP COLLECTION items", [],
+                    VerificationStatement: "SELECT OBJECT_NAME, OWNER FROM COHESION_SCHEMA.OBJECT_OWNERSHIP ORDER BY OBJECT_NAME"),
+                new("DROP COLLECTION IF EXISTS items", [],
+                    VerificationStatement: "SELECT OBJECT_NAME, OWNER FROM COHESION_SCHEMA.OBJECT_OWNERSHIP ORDER BY OBJECT_NAME"),
+            ],
             [OqlClauses.CreateIndex] =
             [
                 new("CREATE INDEX by_score ON items (details.score)", [["by_score", "details.score", false]],
@@ -234,6 +248,8 @@ public sealed class OqlExecutionConformanceTests
         OqlClauses.GroupBy => expression is OqlSelectExpression { GroupBy.Count: > 0 },
         OqlClauses.Having => expression is OqlSelectExpression { Having: not null },
         OqlClauses.OrderBy => expression is OqlSelectExpression { OrderBy.Count: > 0 },
+        OqlClauses.CreateCollection => expression is OqlCreateCollectionExpression,
+        OqlClauses.DropCollection => expression is OqlDropCollectionExpression,
         OqlClauses.CreateIndex => expression is OqlCreateIndexExpression,
         OqlClauses.DropIndex => expression is OqlDropIndexExpression,
         _ => false,

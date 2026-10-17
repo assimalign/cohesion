@@ -43,7 +43,7 @@ internal static class OqlUnsupportedVocabulary
         new("TYPEOF", "TYPEOF", OqlWordPosition.Anywhere),
         new("UNDEFINED", "UNDEFINED", OqlWordPosition.Anywhere),
         new("ABS", "ABS", OqlWordPosition.Function),
-        // CREATE and DROP other than CREATE INDEX and DROP INDEX.
+        // CREATE and DROP outside supported collection and index DDL.
         new("CREATE", "CREATE", OqlWordPosition.Anywhere),
         new("DROP", "DROP", OqlWordPosition.Anywhere),
         // Statements and clauses of other languages.

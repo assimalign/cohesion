@@ -8,6 +8,7 @@ using Assimalign.Cohesion.Connections;
 using Assimalign.Cohesion.Connections.InMemory;
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Protocol;
+using Assimalign.Cohesion.Database.Transactions;
 
 using Shouldly;
 using Xunit;
@@ -16,6 +17,56 @@ namespace Assimalign.Cohesion.Database.Documents.Tests;
 
 public sealed class DocumentProtocolTests
 {
+    [Theory(DisplayName = "Cohesion Test [Documents] - Collection DDL: locked drops return ExecutionFailure and preserve the wire session")]
+    [InlineData("DROP COLLECTION owned")]
+    [InlineData("DROP COLLECTION IF EXISTS owned")]
+    public async Task Execute_SchemaOwnedDrop_ShouldReturnFailureAndKeepConnectionUsableAsync(string statement)
+    {
+        // Arrange: ownership setup uses this assembly's existing test grant; the real server
+        // and public wire codecs exercise failure classification without a new boundary.
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var token = timeout.Token;
+        await using var listener = new InMemoryConnectionListener();
+        await using var engine = DocumentDatabaseEngine.Create("collection-wire", new());
+        var database = await engine.CreateDatabaseAsync("documents", token);
+        await using (var setup = await database.CreateSessionAsync(token))
+        {
+            await setup.CreateCollectionAsync("owned", token);
+        }
+        var context = await database.Coordinator.BeginAsync(IsolationLevel.Snapshot, token);
+        var metadata = database.Catalog.FindCollection("owned", context.Snapshot).ShouldNotBeNull();
+        await database.Catalog.SaveCollectionAsync(metadata with { Owner = DatabaseObjectOwner.Schema, OwningSchema = "Sales" }, context, token);
+        await database.Coordinator.CommitAsync(context, token);
+        await using var server = DocumentDatabaseServer.Create(engine, new() { Listener = listener });
+        await server.StartAsync(token);
+        await using var peer = await listener.CreateFactory().ConnectAsync(listener.EndPoint, token);
+        await using var channel = new ProtocolChannel(peer.AsStream(), DocumentProtocol.Family, leaveOpen: true);
+        await WriteAsync(channel, ProtocolMessageType.Startup,
+            new ProtocolStartupMessage(ProtocolVersion.Current, "documents", "tester").Encode(), token);
+        (await ReadAsync(channel, token)).Type.ShouldBe(ProtocolMessageType.Authenticate);
+        await WriteAsync(channel, ProtocolMessageType.AuthenticateResponse, [], token);
+        (await ReadAsync(channel, token)).Type.ShouldBe(ProtocolMessageType.Ready);
+
+        // Act
+        await WriteAsync(channel, (ProtocolMessageType)DocumentProtocolMessageType.Execute,
+            DocumentProtocolExecuteMessage.Create(statement).Encode(), token);
+        var frame = await ReadAsync(channel, token);
+
+        // Assert: the next Execute on this same authenticated connection completes.
+        frame.Type.ShouldBe((ProtocolMessageType)DocumentProtocolMessageType.Failure);
+        var failure = DocumentProtocolFailureMessage.Decode(frame.Payload.Span);
+        failure.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
+        ((int)failure.Code).ShouldBe(6);
+        failure.Message.ShouldContain("DROP COLLECTION", Case.Sensitive);
+        await WriteAsync(channel, (ProtocolMessageType)DocumentProtocolMessageType.Execute,
+            DocumentProtocolExecuteMessage.Create("CREATE COLLECTION IF NOT EXISTS owned").Encode(), token);
+        var complete = await ReadAsync(channel, token);
+        complete.Type.ShouldBe((ProtocolMessageType)DocumentProtocolMessageType.Complete);
+        DocumentProtocolCompleteMessage.Decode(complete.Payload.Span).AffectedCount.ShouldBe(0);
+        await WriteAsync(channel, ProtocolMessageType.Terminate, [], token);
+        await server.StopAsync(token);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database.Documents] - Protocol: nested query results cross an in-memory connection")]
     public async Task Execute_NestedDocuments_ShouldPreserveShapeOverInMemory()
     {

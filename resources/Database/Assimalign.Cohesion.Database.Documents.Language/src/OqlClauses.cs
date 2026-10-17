@@ -6,6 +6,12 @@ namespace Assimalign.Cohesion.Database.Documents.Language;
 /// </summary>
 public static class OqlClauses
 {
+    /// <summary>A <c>CREATE COLLECTION</c> statement.</summary>
+    public const string CreateCollection = "CREATE COLLECTION";
+
+    /// <summary>A <c>DROP COLLECTION</c> statement.</summary>
+    public const string DropCollection = "DROP COLLECTION";
+
     /// <summary>A <c>CREATE INDEX</c> statement.</summary>
     public const string CreateIndex = "CREATE INDEX";
 

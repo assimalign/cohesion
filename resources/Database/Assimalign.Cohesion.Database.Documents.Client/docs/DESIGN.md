@@ -75,7 +75,10 @@ sequenceDiagram
 ```
 
 `DocumentResultSet` exposes ordinal/name-indexed rows, columns and `AffectedCount`. Queries use
-`-1`; index DDL uses zero. `IsDocumentQuery` distinguishes `SELECT *` even for an empty result.
+`-1`; collection and index DDL use zero. `CREATE COLLECTION [IF NOT EXISTS]` and
+`DROP COLLECTION [IF EXISTS]` use the existing Execute exchange and retain collection ownership
+and conditional no-op semantics. A schema-owned drop returns ExecutionFailure (6), and the
+connection remains usable. `IsDocumentQuery` distinguishes `SELECT *` even for an empty result.
 `Documents` holds owned `JsonElement` values in that case; positional queries leave it empty.
 Whole-document rows contain the same owned JsonElement as Documents, including scalar roots.
 Projected rows expose JSON numbers as `decimal`, strings, booleans, null, and nested object/array values as

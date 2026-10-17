@@ -2,7 +2,7 @@
 
 `Assimalign.Cohesion.Database.Documents` implements named logical databases containing
 versioned UTF-8 JSON documents. Each session is bound to one database. The engine
-supports document CRUD, an explicit OQL query and index-DDL subset, secondary B+Tree indexes,
+supports document CRUD, an explicit OQL query and collection/index-DDL subset, secondary B+Tree indexes,
 snapshot and read-committed transactions, durable file or in-memory storage, and a wire server.
 
 `DocumentDatabaseServer.Create(engine, options)` or `engineBuilder.AddServer(options => ...)`
@@ -25,6 +25,10 @@ active transaction or an automatic statement transaction; neither the database n
 has index-management members. A statement that fails inside an explicit transaction aborts the
 whole transaction: the session refuses further statements and BEGIN with `COHDBD001` until the
 caller rolls back, and a commit fails without committing.
+
+OQL also creates and removes collections with `CREATE COLLECTION [IF NOT EXISTS] name` and
+`DROP COLLECTION [IF EXISTS] name`. They share the C# collection operations' transaction and
+ownership rules and return Success with affected count zero. `IF` remains usable as a name.
 
 A failed journal or data fsync takes the database offline: every later operation is refused
 with `DatabaseOfflineException` (`COHDBD002`) until `OpenDatabaseAsync` reopens it and recovery

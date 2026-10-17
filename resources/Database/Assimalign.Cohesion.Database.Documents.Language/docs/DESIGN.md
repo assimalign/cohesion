@@ -8,8 +8,8 @@ there is no alternate lexer or duplicated keyword configuration.
 ## Family and pipeline
 
 `Database.Documents.Language` references only `Assimalign.Cohesion.Database.Language`.
-`Database.Documents` consumes its AST for logical planning, physical index selection or index
-catalog changes, and execution. This package has no catalog, storage, hosting, or
+`Database.Documents` consumes its AST for logical planning, physical index selection,
+collection and index catalog changes, and execution. This package has no catalog, storage, hosting, or
 ApplicationModel dependency.
 
 Parsing runs shared lexing, capability validation, statement/expression parsing, then shared
@@ -43,6 +43,8 @@ Lexical recognition preserves the established vocabulary so rejected constructs 
 | `GROUP BY` | Yes | One or more grouping expressions |
 | `HAVING` | Yes | Group filtering, including aggregate calls |
 | `ORDER BY` | Yes | One or more expressions, each optionally `ASC` or `DESC` |
+| `CREATE COLLECTION` | Yes | One database-local collection, optionally `IF NOT EXISTS` |
+| `DROP COLLECTION` | Yes | One database-local collection, optionally `IF EXISTS` |
 | `CREATE INDEX` | Yes | One named, nonunique index over one document path in one collection |
 | `DROP INDEX` | Yes | One named index in one collection; the `ON` qualifier is required |
 | `DEFINE` | No | Named query definitions are not planned |
@@ -105,10 +107,12 @@ one bad token from several rules no longer reports it three times.
 ## Grammar, statement, and expression trees
 
 ```text
-statement    := (query | create-index | drop-index) [';']
+statement    := (query | create-collection | drop-collection | create-index | drop-index) [';']
 query        := SELECT projection (',' projection)* FROM collection [AS? identifier]
                 [WHERE expression] [GROUP BY expression (',' expression)*]
                 [HAVING expression] [ORDER BY ordering (',' ordering)*]
+create-collection := CREATE COLLECTION [IF NOT EXISTS] collection
+drop-collection   := DROP COLLECTION [IF EXISTS] collection
 create-index := CREATE INDEX identifier ON collection '(' path ')'
 drop-index   := DROP INDEX identifier ON collection
 collection   := identifier | COHESION_SCHEMA '.' identifier
@@ -124,8 +128,10 @@ there is no iteration alias in an index statement. Index and collection names fo
 identifier quoting and case-preservation rules as query collection names.
 
 `OqlQueryStatement` wraps one top-level `OqlExpression`: `OqlSelectExpression`,
-`OqlCreateIndexExpression`, or `OqlDropIndexExpression`. Index creation retains its target as an
-`OqlPathExpression`, rather than flattening the path during parsing, so the planner receives the
+`OqlCreateCollectionExpression`, `OqlDropCollectionExpression`, `OqlCreateIndexExpression`, or
+`OqlDropIndexExpression`. Collection nodes retain `Name` and `IfNotExists`/`IfExists`.
+Index creation retains its target as an `OqlPathExpression`, rather than flattening the path during
+parsing, so the planner receives the
 same segment model used by query predicates.
 
 Keywords and function names are case-insensitive. Collection and property names preserve case.
@@ -146,7 +152,7 @@ multiplication/division/remainder, unary signs. `NOT` binds around comparisons, 
 and `>=`; the AST normalizes `<>` to `!=`. Null tests are unary `IS NULL` and `IS NOT NULL`
 nodes. Arithmetic supports `+`, `-`, `*`, `/`, and `%`.
 
-The parser is a partial class, split into dispatch/token handling, SELECT clauses, index DDL, and
+The parser is a partial class, split into dispatch/token handling, SELECT clauses, DDL, and
 expression parsing, following `SqlQueryParser`. Parser-produced list properties are read-only
 snapshots; AST nodes retain source spans and the top-level expression retains the original
 statement text.
@@ -172,7 +178,7 @@ length for both offsets. A line breaks at LF, CR, NEL (U+0085), LS (U+2028) or P
 CR LF is one break (`TokenLexer.CountLineBreaks`). Capability validation precedes statement parsing
 so an unsupported construct receives the shared capability diagnostic instead of an accidental
 generic syntax error. Quotes, comments, and property names after dots are not mistaken for clauses.
-Malformed index DDL produces `OQL0002` at the missing or invalid token; it does not escape the
+Malformed collection or index DDL produces `OQL0002` at the missing or invalid token; it does not escape the
 parser as an exception.
 
 A `--` comment ends before the first of those line terminators, the rule
@@ -186,7 +192,7 @@ A character OQL does not use lexes as `TokenType.Unrecognized`. It reports
 `Unexpected character '<c>'; it is not part of OQL.` (`OQL0002`) at its span during
 tokenization. The statement is then not parsed, so nothing is bound and no `NULL` literal stands
 in for the character. `SELECT * FROM people ^` and `SELECT * FROM c WHERE c.a = ?` each report
-exactly that one error (#1101). Every statement form (`SELECT`, `CREATE INDEX`, `DROP INDEX`)
+exactly that one error (#1101). Every statement form (`SELECT`, collection DDL, and index DDL)
 rejects leftover tokens with `OQL0002`, with or without a separating `;`, and the corpus pins
 both.
 
@@ -196,8 +202,20 @@ OQL's scope was deliberately expanded from query-only to include index DDL. Docu
 manage secondary indexes through their language pipelines, and callers no longer need document
 index extension members that switch on internal database implementations. This is an intentional
 language-design change, not an accidental departure from the earlier query-only boundary. It is
-limited to `CREATE INDEX` and `DROP INDEX`: both are parsed, planned, and executed by the Documents
+extended by `CREATE COLLECTION [IF NOT EXISTS] name` and `DROP COLLECTION [IF EXISTS] name`
+(#1130). Collection and index statements are parsed, planned, and executed by the Documents
 engine in the same change that adds them to `OqlLanguageProfile`.
+
+`IF` remains an identifier, recognized as a modifier only immediately after `COLLECTION` when
+followed by `NOT` or `EXISTS`. Thus `CREATE COLLECTION if`, `CREATE COLLECTION "if"`, and
+`DROP COLLECTION if` use the name `if`. The shared DDL helper requires `NOT EXISTS` for creation
+and `EXISTS` for removal. `CREATE COLLECTION IF EXISTS c` reports `OQL0002` at `EXISTS`.
+Unquoted `EXISTS` remains reserved and reports `COHDBL001` outside that modifier (except an
+ordinary property segment after a dot); `COLLECTION` remains reserved outside its DDL position.
+Both statements return Success with affected count zero. Creation defaults to Adhoc ownership;
+conditional creation preserves any existing collection, including a schema-owned one. Conditional
+removal ignores an absent collection but still refuses a schema-owned collection. Snapshot
+conflicts are checked before either no-op. DDL, documents, and indexes commit or roll back together.
 
 An OQL statement cannot name a server or switch databases. `FROM other.collection` is invalid
 syntax; quoted collection names remain a single opaque identifier. The only qualified source
@@ -207,7 +225,7 @@ collections computed from its statement catalog snapshot. Their qualified names 
 case-insensitive, including fully quoted names. Their document fields retain ordinary
 case-sensitive OQL path semantics. No catalog or storage dependency is added to this parser.
 
-The same source syntax is parsed in index DDL so supported mutations receive the engine's
+The same source syntax is parsed in collection and index DDL so supported mutations receive the engine's
 stable `System collection '<canonical source>' is read-only.` diagnostic instead of an
 accidental syntax or missing-collection error. Projection, filtering, grouping, and ordering
 reuse ordinary SELECT syntax; no separate metadata API or statement class is introduced.

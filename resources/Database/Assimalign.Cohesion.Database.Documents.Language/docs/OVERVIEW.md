@@ -3,7 +3,8 @@
 This package parses the Documents engine's executable OQL surface into typed statement and
 expression trees. It provides `OqlLanguageProfile`, stable `OqlClauses` names, `OqlQueryParser`,
 `OqlQueryStatement`,
-`OqlSelectExpression`, `OqlCreateIndexExpression`, `OqlDropIndexExpression`, and expression nodes
+`OqlSelectExpression`, `OqlCreateCollectionExpression`, `OqlDropCollectionExpression`,
+`OqlCreateIndexExpression`, `OqlDropIndexExpression`, and expression nodes
 for projection, filtering, grouping, aggregates, ordering, nested properties, and array access.
 
 ```csharp
@@ -17,7 +18,8 @@ var query = statement.OqlExpression;
 
 The package references only the shared `Assimalign.Cohesion.Database.Language` package. The
 Documents engine supplies catalog binding, planning, and execution. Queries and index DDL address
-one collection in the session's database. `CREATE INDEX` and `DROP INDEX` use the same
+one collection in the session's database. `CREATE COLLECTION [IF NOT EXISTS]`,
+`DROP COLLECTION [IF EXISTS]`, `CREATE INDEX`, and `DROP INDEX` use the same
 parse-plan-execute path as `SELECT`; document data mutations use the existing collection API.
 `DEFINE`, `ELEMENT`, `FLATTEN`, and subqueries are reserved but unsupported and produce
 `COHDBL001`.

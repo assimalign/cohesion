@@ -28,6 +28,8 @@ public class OqlLanguageProfileTests
     [InlineData(OqlClauses.GroupBy)]
     [InlineData(OqlClauses.Having)]
     [InlineData(OqlClauses.OrderBy)]
+    [InlineData(OqlClauses.CreateCollection)]
+    [InlineData(OqlClauses.DropCollection)]
     [InlineData(OqlClauses.CreateIndex)]
     [InlineData(OqlClauses.DropIndex)]
     public void Instance_DeclaredClause_IsSupported(string clause)

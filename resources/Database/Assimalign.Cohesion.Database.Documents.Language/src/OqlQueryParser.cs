@@ -105,9 +105,17 @@ public sealed partial class OqlQueryParser : QueryParser
         {
             expression = ParseDropIndex();
         }
+        else if (IsDdlStatement("CREATE", "COLLECTION"))
+        {
+            expression = ParseCreateCollection();
+        }
+        else if (IsDdlStatement("DROP", "COLLECTION"))
+        {
+            expression = ParseDropCollection();
+        }
         else
         {
-            Error("OQL0002", "Expected SELECT, CREATE INDEX, or DROP INDEX.", Current);
+            Error("OQL0002", "Expected SELECT, CREATE INDEX, DROP INDEX, CREATE COLLECTION, or DROP COLLECTION.", Current);
             expression = EmptyExpression();
         }
 
@@ -193,15 +201,30 @@ public sealed partial class OqlQueryParser : QueryParser
                 continue;
             }
 
-            if (value is "CREATE" or "DROP" && index + 1 < _tokens.Count &&
-                string.Equals(_tokens[index + 1].Text, "INDEX", StringComparison.OrdinalIgnoreCase))
+            // EXISTS is supported only in the positional DDL modifier. Keep malformed
+            // modifiers on the syntax path too (CREATE COLLECTION IF EXISTS reports NOT).
+            if (value == "EXISTS" && IsCollectionExistenceToken(index))
             {
-                string compound = value == "CREATE" ? OqlClauses.CreateIndex : OqlClauses.DropIndex;
+                continue;
+            }
+
+            if (value is "CREATE" or "DROP" && index + 1 < _tokens.Count &&
+                (IsWord(_tokens[index + 1], "INDEX") || IsWord(_tokens[index + 1], "COLLECTION")))
+            {
+                bool collection = IsWord(_tokens[index + 1], "COLLECTION");
+                string compound = (value, collection) switch
+                {
+                    ("CREATE", true) => OqlClauses.CreateCollection,
+                    ("DROP", true) => OqlClauses.DropCollection,
+                    ("CREATE", false) => OqlClauses.CreateIndex,
+                    _ => OqlClauses.DropIndex,
+                };
                 if (!Supports(compound))
                 {
                     var end = _tokens[index + 1];
                     result.Add((compound, new Lexeme(token.Type, compound, token.Start, end.End, token.Line)));
                 }
+                index++;
                 continue;
             }
             if (value == "SELECT")
@@ -322,8 +345,9 @@ public sealed partial class OqlQueryParser : QueryParser
         string.Equals(token.Text, word, StringComparison.OrdinalIgnoreCase);
 
     private OqlSelectExpression EmptyExpression() => new(string.Empty, null, [], null, [], null, [], Span(Current, Current));
-    private bool IsIndexStatement(string verb) => Is(verb) && _position + 1 < _tokens.Count &&
-        string.Equals(_tokens[_position + 1].Text, "INDEX", StringComparison.OrdinalIgnoreCase);
+    private bool IsIndexStatement(string verb) => IsDdlStatement(verb, "INDEX");
+    private bool IsDdlStatement(string verb, string kind) => Is(verb) && _position + 1 < _tokens.Count &&
+        IsWord(_tokens[_position + 1], kind);
     private Lexeme Current => _tokens[Math.Min(_position, _tokens.Count - 1)];
     private Lexeme Previous => _tokens[Math.Max(0, _position - 1)];
     private bool Failed => _diagnostics.Count != 0;
