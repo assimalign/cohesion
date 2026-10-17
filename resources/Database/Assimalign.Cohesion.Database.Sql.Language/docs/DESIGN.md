@@ -140,6 +140,11 @@ Malformed suffixes produce `SQL0003` instead of silently treating `ROLLBACK TO`
 as a complete rollback. END without a transaction retains the canonical
 `COHSQLT002` message, "COMMIT requires an open transaction."
 
+The uniform `SQL0100` policy applies to transaction statements too: omitting `;`
+produces an informational diagnostic, with no error or warning for a valid spelling.
+A valid spelling terminated with `;` produces no diagnostics. The transaction corpus
+asserts both forms rather than exempting transaction control from the common policy.
+
 The PostgreSQL grammar maps START TRANSACTION to its start node and END to its
 commit node, with WORK/TRANSACTION sharing `opt_transaction`
 (`src/backend/parser/gram.y:11358-11365`, `11471-11485`, local reference clone).

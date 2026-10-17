@@ -61,8 +61,18 @@ public sealed class SqlTransactionAndConstraintParserTests
             {
                 var statement = Parse(form + terminator);
                 statement.SqlExpression.ShouldBeOfType<SqlTransactionExpression>().CommandType.ShouldBe(command);
-                statement.Diagnostics.Select(diagnostic => diagnostic.Code)
-                    .ShouldBe(terminator.Length == 0 ? new[] { "SQL0100" } : []);
+                if (terminator.Length == 0)
+                {
+                    // SQL0100 uniformly reports an omitted terminator for every SQL statement.
+                    statement.Diagnostics.ShouldNotContain(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error || diagnostic.Severity == DiagnosticSeverity.Warning);
+                    var diagnostic = statement.Diagnostics.ShouldHaveSingleItem();
+                    diagnostic.Code.ShouldBe("SQL0100");
+                    diagnostic.Severity.ShouldBe(DiagnosticSeverity.Information);
+                }
+                else
+                {
+                    statement.Diagnostics.ShouldBeEmpty();
+                }
             }
         }
     }
