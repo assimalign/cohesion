@@ -45,9 +45,15 @@ public class SqlLanguageProfileTests
     [InlineData(SqlClauses.Cascade, "CREATE TABLE t (parent_id INT REFERENCES parent(id) ON DELETE CASCADE);")]
     [InlineData(SqlClauses.Restrict, "CREATE TABLE t (parent_id INT REFERENCES parent(id) ON DELETE RESTRICT);")]
     [InlineData(SqlClauses.Begin, "BEGIN;")]
+    [InlineData(SqlClauses.Begin, "START TRANSACTION;")]
+    [InlineData(SqlClauses.Begin, "BEGIN WORK;")]
     [InlineData(SqlClauses.Commit, "COMMIT;")]
+    [InlineData(SqlClauses.Commit, "END;")]
+    [InlineData(SqlClauses.Commit, "COMMIT WORK;")]
     [InlineData(SqlClauses.Rollback, "ROLLBACK;")]
+    [InlineData(SqlClauses.Rollback, "ROLLBACK WORK;")]
     [InlineData(SqlClauses.Transaction, "BEGIN TRANSACTION;")]
+    [InlineData(SqlClauses.Transaction, "COMMIT WORK;")]
     public void Parse_ImplementedClause_IsDeclaredAndParses(string clause, string sql)
     {
         SqlLanguageProfile.Instance.Supports(clause).ShouldBeTrue();

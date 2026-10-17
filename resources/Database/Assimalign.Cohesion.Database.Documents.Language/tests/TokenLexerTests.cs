@@ -57,19 +57,20 @@ public class TokenLexerTests
 
     // ── Functions ──────────────────────────────────────────────────────
 
-    [Theory]
+    [Theory(DisplayName = "Cohesion Test [Oql] - Lexer: function vocabulary follows executable profile membership")]
     [InlineData("COUNT")]
     [InlineData("SUM")]
     [InlineData("AVG")]
     [InlineData("MIN")]
     [InlineData("MAX")]
     [InlineData("ABS")]
-    public void MoveNext_OqlFunction_ReturnsFunctionToken(string function)
+    public void MoveNext_OqlFunctionVocabulary_ReturnsProfileToken(string function)
     {
         var tokens = Tokenize(function);
 
         tokens.ShouldHaveSingleItem()
-            .ShouldBe((TokenType.Function, function, 0));
+            .ShouldBe((OqlLanguageProfile.Instance.Functions.Contains(function, StringComparer.OrdinalIgnoreCase)
+                ? TokenType.Function : TokenType.Identifier, function, 0));
     }
 
     [Fact]

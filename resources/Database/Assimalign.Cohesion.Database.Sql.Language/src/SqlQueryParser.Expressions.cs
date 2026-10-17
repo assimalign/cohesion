@@ -4,6 +4,7 @@ using System.Collections.Generic;
 namespace Assimalign.Cohesion.Database.Sql.Language;
 
 using Assimalign.Cohesion.Database.Language;
+using Assimalign.Cohesion.Database.Sql.Language.Internal;
 
 public sealed partial class SqlQueryParser
 {
@@ -732,13 +733,23 @@ public sealed partial class SqlQueryParser
     private SqlExpression ParseColumnRefOrFunction(ref TokenLexer lexer)
     {
         var pos = lexer.Current.Position;
+        bool quoted = lexer.Current.Type == TokenType.QuotedIdentifier;
         string first = CurrentIdentifierText(ref lexer);
         Advance(ref lexer);
+
+        // Niladic datetime names are value functions, never unquoted column references.
+        if (!quoted && SqlUnsupportedVocabulary.IsNiladicFunction(first))
+        {
+            AddUnsupportedSurfaceDiagnostic(pos, pos + first.Length,
+                $"The SQL function {first.ToUpperInvariant()} is not supported.");
+            if (lexer.Current.Type == TokenType.LeftParen) { SkipParenthesized(ref lexer); }
+            return new SqlLiteralExpression("NULL", SqlLiteralType.Null, Location.Create(1, 1, pos, pos + first.Length));
+        }
 
         // Check for function call: identifier(
         if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.LeftParen)
         {
-            return ParseFunctionCallArgs(ref lexer, first, pos);
+            return ParseFunctionCallArgs(ref lexer, first, pos, quoted);
         }
 
         // Check for dotted reference: a.b or a.b.c
@@ -807,8 +818,21 @@ public sealed partial class SqlQueryParser
             Location.Create(1, 1, pos, pos + name.Length));
     }
 
-    private SqlExpression ParseFunctionCallArgs(ref TokenLexer lexer, string name, int pos)
+    private SqlExpression ParseFunctionCallArgs(ref TokenLexer lexer, string name, int pos, bool quoted = false)
     {
+        // PostgreSQL scan.l:773-783 preserves quoted case; namespace.c:1237 looks up that spelling.
+        // The vocabulary stores uppercase display names; quoted built-ins use lowercase lookup names.
+        if ((!quoted || string.Equals(name, name.ToLowerInvariant(), StringComparison.Ordinal)) && SqlUnsupportedVocabulary.IsFunction(name))
+        {
+            if (!SqlUnsupportedVocabulary.IsWindowFunction(name) || _preflightClauseStart < 0)
+            {
+                AddUnsupportedSurfaceDiagnostic(pos, pos + name.Length + (quoted ? 2 : 0),
+                    $"The SQL function {name.ToUpperInvariant()} is not supported.");
+            }
+            SkipParenthesized(ref lexer);
+            SkipCallExtensions(ref lexer);
+            return new SqlLiteralExpression("NULL", SqlLiteralType.Null, Location.Create(1, 1, pos, pos + name.Length));
+        }
         Advance(ref lexer); // consume (
 
         var args = new List<SqlExpression>();

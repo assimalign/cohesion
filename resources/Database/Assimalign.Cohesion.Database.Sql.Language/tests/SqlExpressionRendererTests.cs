@@ -162,9 +162,6 @@ public sealed class SqlExpressionRendererTests
     [InlineData("qty IN (SELECT qty FROM u WHERE u.id > 0)", "qty IN (SELECT qty FROM u WHERE u.id > 0)")]
     [InlineData("qty NOT IN ((SELECT 1 FROM u))", "qty NOT IN ((SELECT 1 FROM u))")]
     [InlineData("~qty", "~qty")]
-    [InlineData("\"rank\"(1)", "\"rank\"(1)")]
-    [InlineData("\"row_number\"()", "\"row_number\"()")]
-    [InlineData("\"rank\"(\"rank\") = 1", "\"rank\"(\"rank\") = 1")]
     [InlineData("f((*) = 1)", "f((* = 1))")]
     [InlineData("UPPER((*) || 'x', (*))", "UPPER((* || 'x'), *)")]
     [InlineData("f((*) = +@p)", "f((* = +@p))")]
@@ -186,33 +183,68 @@ public sealed class SqlExpressionRendererTests
         }
     }
 
-    /// <summary>
-    /// A delimited call to a user function named like a builtin window function stays delimited:
-    /// the bare spelling parses as the window function, which the dialect rejects.
-    /// </summary>
-    /// <param name="name">A window function name.</param>
-    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Renderer: a call named like a window function stays delimited")]
-    [InlineData("ROW_NUMBER")]
-    [InlineData("rank")]
-    [InlineData("Dense_Rank")]
-    [InlineData("lead")]
-    [InlineData("lag")]
-    [InlineData("first_value")]
-    [InlineData("last_value")]
-    [InlineData("nth_value")]
-    [InlineData("ntile")]
-    public void Render_WindowFunctionNamedCall_ShouldStayDelimited(string name)
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Renderer: unsupported quoted calls retain their rejection and recovery tree")]
+    [InlineData("\"rank\"(1)", "NULL")]
+    [InlineData("\"row_number\"()", "NULL")]
+    [InlineData("\"rank\"(\"rank\") = 1", "NULL = 1")]
+    public void Render_UnsupportedQuotedCall_ShouldRetainDiagnosticAndRecoveryTree(string written, string canonical)
     {
         // Arrange
-        var declared = ParseSelectColumn($"\"{name}\"(qty)", out var errors);
-        errors.ShouldBeEmpty();
+        var declared = ParseSelectColumn(written, out var errors);
 
         // Act
         string rendered = SqlExpressionRenderer.Render(declared);
         var reloaded = ParseSelectColumn(rendered, out var reloadErrors);
 
         // Assert
-        rendered.ShouldBe($"\"{name}\"(qty)");
+        var diagnostic = errors.ShouldHaveSingleItem();
+        diagnostic.Code.ShouldBe("COHDBL001");
+        diagnostic.Start.ShouldBe(7);
+        diagnostic.End.ShouldBe(7 + written.IndexOf('('));
+        rendered.ShouldBe(canonical);
+        reloadErrors.ShouldBeEmpty();
+        SqlTreeDump.Dump(reloaded).ShouldBe(SqlTreeDump.Dump(declared));
+    }
+
+    /// <summary>
+    /// Quoted uppercase and mixed-case window-like names remain distinct calls and stay delimited;
+    /// lowercase built-in names retain their unsupported-call diagnostic and recovery expression.
+    /// </summary>
+    /// <param name="name">A window-like function name.</param>
+    /// <param name="supported">Whether its quoted spelling lies outside the unsupported vocabulary.</param>
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Renderer: quoted window-like calls respect identifier case")]
+    [InlineData("ROW_NUMBER", true)]
+    [InlineData("rank", false)]
+    [InlineData("Dense_Rank", true)]
+    [InlineData("lead", false)]
+    [InlineData("lag", false)]
+    [InlineData("first_value", false)]
+    [InlineData("last_value", false)]
+    [InlineData("nth_value", false)]
+    [InlineData("ntile", false)]
+    public void Render_WindowFunctionNamedCall_ShouldRespectQuotedCase(string name, bool supported)
+    {
+        // Arrange
+        var declared = ParseSelectColumn($"\"{name}\"(qty)", out var errors);
+
+        // Act
+        string rendered = SqlExpressionRenderer.Render(declared);
+        var reloaded = ParseSelectColumn(rendered, out var reloadErrors);
+
+        // Assert
+        if (supported)
+        {
+            errors.ShouldBeEmpty();
+            rendered.ShouldBe($"\"{name}\"(qty)");
+        }
+        else
+        {
+            var diagnostic = errors.ShouldHaveSingleItem();
+            diagnostic.Code.ShouldBe("COHDBL001");
+            diagnostic.Start.ShouldBe(7);
+            diagnostic.End.ShouldBe(9 + name.Length);
+            rendered.ShouldBe("NULL");
+        }
         reloadErrors.ShouldBeEmpty();
         SqlTreeDump.Dump(reloaded).ShouldBe(SqlTreeDump.Dump(declared));
     }

@@ -1,3 +1,4 @@
+using Assimalign.Cohesion.Database.Language;
 using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
@@ -18,10 +19,12 @@ internal sealed class SqlBoundCast : SqlBoundExpression
     /// <param name="casts">The casts the CAST may apply, by the storage type of the value it converts.</param>
     /// <param name="database">The database whose statement makes the CAST, for a domain check's context.</param>
     /// <param name="collation">The collation a domain check's input compares under.</param>
+    /// <param name="location">The source expression span, if available.</param>
     internal SqlBoundCast(SqlBoundExpression operand, string targetText, SqlType target, SqlCast?[] casts, DatabaseName database,
-        Collation collation)
+        Collation collation, Location? location = null)
         : base(SqlBoundExpressionKind.Cast)
     {
+        Location = location;
         Operand = operand;
         TargetText = targetText;
         Target = target;
@@ -56,4 +59,7 @@ internal sealed class SqlBoundCast : SqlBoundExpression
 
     /// <summary>Gets the storage type a domain check's argument converts to; <see cref="DatabaseType.Null"/> for none.</summary>
     internal DatabaseType CheckTarget { get; }
+
+    /// <summary>Gets the source expression span.</summary>
+    internal Location? Location { get; }
 }

@@ -237,3 +237,20 @@ A new clause requires parser, planner, executor, conformance tests, and a matrix
 only then may it join the profile's supported set. The package uses static code and BCL values,
 with no reflection, runtime discovery, or `Microsoft.Extensions.*` dependencies, and remains
 NativeAOT compatible.
+
+## Function declaration and diagnostic delivery (#1103)
+
+Profile.Functions is the executable built-in set, checked by the engine's one function-
+coverage guard: every declared name has a passing live case and every live case has a
+declared name. GQL currently declares none. OQL removes ABS (already recognized by its
+unsupported table), and its parser/planner membership checks read the profile. The six
+temporary ODMG declarations ELEMENT, FLATTEN, FIRST, LAST, LISTTOSET and UNIQUE retain
+explicit COHDBL001 exemptions until #1126 deletes that exact exemption list.
+
+ABS now lexes as an identifier and its unsupported-table position matches calls only:
+`ABS(value)` reports COHDBL001 while a field named `abs` remains a path expression.
+
+The root DatabaseException.Diagnostics carrier preserves the complete parser list at text
+factories and session boundaries, including parsed typed requests. DatabaseParseException
+retains the existing first-error message and no error-recovery AST executes. Graph's path
+request factory shares this contract. Diagnostics remain plain Database.Types data.

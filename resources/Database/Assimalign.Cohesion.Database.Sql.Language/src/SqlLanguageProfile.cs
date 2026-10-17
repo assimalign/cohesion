@@ -1,9 +1,14 @@
 namespace Assimalign.Cohesion.Database.Sql.Language;
 
+using System;
+using System.Collections.Generic;
+using System.Linq;
+
 using Assimalign.Cohesion.Database.Language;
+using Assimalign.Cohesion.Database.Sql.Language.Internal;
 
 /// <summary>
-/// Exposes the lexical vocabulary and supported clause surface of the SQL model.
+/// Exposes the SQL lexical vocabulary, executable built-in functions and supported clauses.
 /// </summary>
 public static class SqlLanguageProfile
 {
@@ -49,19 +54,13 @@ public static class SqlLanguageProfile
         // Aggregate
         "COUNT", "SUM", "AVG", "MIN", "MAX",
         // Null handling
-        "COALESCE", "NULLIF",
+        "COALESCE",
         // Type
         "CAST",
         // String
-        "TRIM", "LTRIM", "RTRIM", "UPPER", "LOWER",
-        "SUBSTRING", "LENGTH", "REPLACE", "CONCAT",
+        "UPPER", "LOWER", "LENGTH",
         // Numeric
-        "ABS", "CEILING", "FLOOR", "ROUND", "POWER", "SQRT", "MOD",
-        // Date and time
-        "NOW", "CURRENT_DATE", "CURRENT_TIME", "CURRENT_TIMESTAMP", "EXTRACT",
-        // Window
-        "ROW_NUMBER", "RANK", "DENSE_RANK",
-        "LEAD", "LAG", "FIRST_VALUE", "LAST_VALUE", "NTH_VALUE", "NTILE",
+        "ABS",
     ];
 
     private static readonly string[] _clauses =
@@ -110,6 +109,13 @@ public static class SqlLanguageProfile
         _keywords,
         _functions,
         _clauses);
+
+    /// <summary>
+    /// Gets the recognized but unsupported SQL spellings. Renderers quote identifiers matching
+    /// these words; executable functions are listed separately by <see cref="Instance"/>.
+    /// </summary>
+    public static IReadOnlyList<string> RecognizedUnsupportedVocabulary { get; } =
+        Array.AsReadOnly(SqlUnsupportedVocabulary.Words.Select(word => word.Spelling).ToArray());
 
     /// <summary>
     /// Reports whether a join type executes in the SQL surface. Supported joins

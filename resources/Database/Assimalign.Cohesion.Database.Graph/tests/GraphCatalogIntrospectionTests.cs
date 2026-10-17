@@ -125,26 +125,44 @@ public sealed class GraphCatalogIntrospectionTests
         foreach (string subject in Subjects) { (await Rows(writer, "SHOW " + subject)).ShouldBeEmpty(); }
     }
 
-    [Theory]
+    [Theory(DisplayName = "Cohesion Test [Graph] - Catalog mutations: carry stable diagnostics without effects")]
     [InlineData("LABELS", "DELETE n")]
     [InlineData("RELATIONSHIP TYPES", "DETACH DELETE r")]
     [InlineData("PROPERTY KEYS", "SET key.name = 'changed'")]
     [InlineData("INDEXES", "DROP INDEX by_name")]
     [InlineData("OBJECT OWNERSHIP", "INSERT (:Injected)")]
-    public async Task CatalogMutationFailsWithStableDiagnosticAndNoEffects(string subject, string mutation)
+    public async Task Execute_CatalogMutation_ShouldCarryDiagnosticAndHaveNoEffectsAsync(string subject, string mutation)
     {
+        // Arrange
         await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var database = await engine.CreateDatabaseAsync("readonly");
         await using var session = await database.CreateSessionAsync();
+
+        // Act
         var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync($"SHOW {subject} {mutation}"));
+
+        // Assert
         error.Message.ShouldContain("GQL0007: Graph catalog introspection is read-only.");
+        var parsedDiagnostic = error.Diagnostics.ShouldHaveSingleItem();
+        parsedDiagnostic.Code.ShouldBe("GQL0007");
+        parsedDiagnostic.Start.ShouldNotBeNull();
+        parsedDiagnostic.End.ShouldNotBeNull();
         (await Rows(session, "SHOW LABELS")).ShouldBeEmpty();
 
+        // Arrange
         var expression = new GqlQueryExpression([], null,
             [new GqlPathPattern([new GqlNodePattern("n", ["Injected"], new Dictionary<string, object?>())], [])], [], false, [])
             { CatalogSurface = GqlCatalogSurface.Labels };
+
+        // Act
         var direct = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(new GraphQueryRequest(new GqlQueryStatement(expression))));
-        direct.Message.ShouldBe("GQL0007: Graph catalog introspection is read-only.");
+
+        // Assert
+        direct.Message.ShouldBe("Graph catalog introspection is read-only.");
+        var diagnostic = direct.Diagnostics.ShouldHaveSingleItem();
+        diagnostic.Code.ShouldBe("GQL0007");
+        diagnostic.Start.ShouldBeNull();
+        diagnostic.End.ShouldBeNull();
         (await Rows(session, "SHOW LABELS")).ShouldBeEmpty();
     }
 

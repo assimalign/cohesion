@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 using Assimalign.Cohesion.Database.Language;
 
 namespace Assimalign.Cohesion.Database.Documents.Language;
@@ -124,7 +125,7 @@ public sealed partial class OqlQueryParser
             if (Take(TokenType.LeftParen))
             {
                 string function = name.ToUpperInvariant();
-                if (function is not ("COUNT" or "SUM" or "AVG" or "MIN" or "MAX"))
+                if (!Profile.Functions.Contains(function, StringComparer.OrdinalIgnoreCase))
                 {
                     _diagnostics.Add(QueryDiagnostics.UnsupportedClause($"FUNCTION {name}", Profile.Language, Span(start, start)));
                 }

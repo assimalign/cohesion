@@ -20,7 +20,7 @@ internal sealed partial class SqlPlanner
         {
             if (ContainsAggregate(key))
             {
-                throw new DatabaseException("Aggregate functions are not allowed in GROUP BY.");
+                throw new SqlPlanningException("COHSQLE017", "Aggregate functions are not allowed in GROUP BY.", key.Location);
             }
             ValidateExpression(key, evaluator, _subqueryTypes);
         }
@@ -128,7 +128,7 @@ internal sealed partial class SqlPlanner
                 {
                     if (ContainsAggregate(argument))
                     {
-                        throw new DatabaseException("Nested aggregate functions are not allowed.");
+                        throw new SqlPlanningException("COHSQLE017", "Nested aggregate functions are not allowed.", call.Location);
                     }
                     if (argument is not SqlStarExpression)
                     {
@@ -157,11 +157,11 @@ internal sealed partial class SqlPlanner
             if (expression is SqlColumnReferenceExpression reference)
             {
                 evaluator.ResolveColumn(reference);
-                throw new DatabaseException($"Column '{reference.ColumnName}' must appear in GROUP BY or be used in an aggregate function.");
+                throw new SqlPlanningException("COHSQLE017", $"Column '{reference.ColumnName}' must appear in GROUP BY or be used in an aggregate function.", reference.Location);
             }
             if (expression is SqlStarExpression)
             {
-                throw new DatabaseException("SELECT * is not allowed in a grouped query; project GROUP BY expressions or aggregate functions.");
+                throw new SqlPlanningException("COHSQLE017", "SELECT * is not allowed in a grouped query; project GROUP BY expressions or aggregate functions.", expression.Location);
             }
             ValidateExpression(expression, evaluator, _subqueryTypes, outputSlots);
             foreach (var child in Children(expression))
@@ -369,7 +369,7 @@ internal sealed partial class SqlPlanner
         {
             return a >= b ? left : right;
         }
-        throw new DatabaseException($"Grouped CASE/COALESCE results require compatible types; found {left} and {right}.");
+        throw new SqlPlanningException("COHSQLE017", $"Grouped CASE/COALESCE results require compatible types; found {left} and {right}.");
     }
 
     /// <summary>Preserves parameter type metadata without reflection.</summary>

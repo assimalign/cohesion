@@ -78,7 +78,7 @@ internal static class SqlSystemViews
 
         if (target is not null && Find(target) is { } view)
         {
-            throw new DatabaseException($"System view '{view.Schema}.{view.Name}' is read-only.");
+            throw new SqlPlanningException("COHSQLE021", $"System view '{view.Schema}.{view.Name}' is read-only.", expression.Location);
         }
     }
 

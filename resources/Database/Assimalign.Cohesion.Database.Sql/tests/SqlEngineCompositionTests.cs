@@ -328,7 +328,7 @@ public sealed class SqlEngineCompositionTests
         var failure = Should.Throw<InvalidOperationException>(() => state.Complete(engine, compose, SqlDatabaseEngine.ReleaseRefusedWorkerAsync));
 
         // Assert: an attached product is released by the engine, an unattached one by the state.
-        failure.Message.ShouldBe(message);
+        failure.ShouldHaveMessage(message);
         engine.State.ShouldBe(EngineState.Disposed);
         workers.Count.ShouldBe(workersMade);
         servers.Count.ShouldBe(serversMade);

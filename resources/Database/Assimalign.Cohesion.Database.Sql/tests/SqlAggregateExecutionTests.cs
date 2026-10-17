@@ -325,7 +325,7 @@ public sealed class SqlAggregateExecutionTests
             var error = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, statement));
 
             // Assert
-            error.Message.ShouldBe(message, $"withRows: {withRows}");
+            error.ShouldHaveMessage(message, $"withRows: {withRows}");
             (await SnapshotAsync(session)).ShouldBe(before, $"withRows: {withRows}");
         }
 
@@ -349,7 +349,7 @@ public sealed class SqlAggregateExecutionTests
 
         // Act / Assert
         var error = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, $"SELECT {aggregate}(category) FROM metrics;"));
-        error.Message.ShouldContain(aggregate, Case.Sensitive);
+        error.ShouldContainMessage(aggregate, Case.Sensitive);
         error.Message.ShouldContain("numeric");
     }
 
@@ -418,7 +418,7 @@ public sealed class SqlAggregateExecutionTests
         foreach (string aggregate in new[] { "SUM", "AVG" })
         {
             var error = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, $"SELECT {aggregate}(amount) FROM large_floats;"));
-            error.Message.ShouldContain(aggregate, Case.Sensitive);
+            error.ShouldContainMessage(aggregate, Case.Sensitive);
             error.Message.ShouldContain("overflow");
         }
     }

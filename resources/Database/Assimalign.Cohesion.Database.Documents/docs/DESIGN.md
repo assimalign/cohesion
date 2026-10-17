@@ -226,6 +226,24 @@ with `DatabaseObjectLockedException` naming the collection, owning schema, and r
 operation. Document contents remain mutable. There is no
 compiled-schema provisioning authority in this engine.
 
+## Documents engine diagnostic codes (#1103)
+
+Planner failures are `DatabaseException` instances with structured `Diagnostics`, an Error
+severity and the offending expression's Start/End/Line when its AST has a location. Their
+Message contains no code prefix. The Documents family is `COHDOCnnn`:
+
+| Code | Meaning |
+| --- | --- |
+| `COHDOC001` | Invalid statement, index definition, expression or grouping context |
+| `COHDOC002` | Collection does not exist |
+| `COHDOC003` | Duplicate projection name; use unique aliases |
+
+`DocumentQueryRequest.FromOql` and a directly constructed typed query with parse errors
+throw `DatabaseParseException` carrying the complete, ordered parser diagnostics and the
+existing first-error Message. No recovery AST reaches the planner. Protocol 1.0's Documents
+server, when supplied by #190, must compose `CODE: message` for ExecutionFailure from this
+carrier, as the SQL and Graph servers do.
+
 ## OQL query and DDL semantics
 
 ### Catalog introspection
@@ -1031,3 +1049,14 @@ the same 8 MiB budget. Whole-process live-heap deltas are not used as a buffer m
 they include the loopback client's frame arrays and the engine's storage and runtime pools.
 These checks cover formatter storage and allocations before the header, not transport queue
 growth when a reader stalls; they do not establish an end-to-end InMemory memory bound.
+
+## Diagnostic completion (#1103 review)
+
+Catalog-write helpers use COHDOC004 and accept an optional source location: OQL index DDL
+passes its location; direct collection APIs have none. Evaluator and executor rejections
+carry COHDOC001 for unsupported contexts/operators, COHDOC005 for missing parameters,
+COHDOC006 for division/remainder by zero (PostgreSQL SQLSTATE 22012), COHDOC007 for numbers
+outside the decimal domain or arithmetic overflow (22003), and COHDOC008 for invalid
+operand/parameter/value types. The innermost evaluator expression supplies its span before
+a failure propagates; outer expressions preserve it. Numeric normalization also codes
+conversion overflow outside expression evaluation. No message embeds its code.

@@ -113,7 +113,7 @@ public sealed class SqlFunctionArityTests : IDisposable
 
             // Assert
             error.ShouldBeOfType<SqlEvaluationException>().Code.ShouldBe(FunctionSignatureMismatch, $"withRows: {withRows}");
-            error.Message.ShouldStartWith($"{FunctionSignatureMismatch}: Function '{function}' takes ", Case.Sensitive, $"withRows: {withRows}");
+            error.ShouldStartWithMessage($"{FunctionSignatureMismatch}: Function '{function}' takes ", Case.Sensitive, $"withRows: {withRows}");
             (await SnapshotAsync(session)).ShouldBe(before);
             database.Catalog.TryGetTable("dbo", "c", out _).ShouldBeFalse();
             database.Catalog.TryGetTable("dbo", "t", out var table).ShouldBeTrue();
@@ -147,7 +147,7 @@ public sealed class SqlFunctionArityTests : IDisposable
         var error = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, sql));
 
         // Assert
-        error.Message.ShouldBe(message);
+        error.ShouldHaveMessage(message);
     }
 
     /// <summary>
@@ -169,7 +169,7 @@ public sealed class SqlFunctionArityTests : IDisposable
         var accepted = await ExecuteAsync(session, "INSERT INTO ck1 VALUES (-4);");
 
         // Assert
-        refused.Message.ShouldStartWith(FunctionSignatureMismatch, Case.Sensitive);
+        refused.ShouldStartWithMessage(FunctionSignatureMismatch, Case.Sensitive);
         violation.ShouldNotBeNull();
         accepted.AffectedCount.ShouldBe(1);
         (await RowsAsync(session, "SELECT c FROM ck1;")).ShouldHaveSingleItem().ShouldBe(new object?[] { -4 });
@@ -228,7 +228,7 @@ public sealed class SqlFunctionArityTests : IDisposable
 
         // Assert
         error.Code.ShouldBe(FunctionSignatureMismatch);
-        error.Message.ShouldStartWith($"{FunctionSignatureMismatch}: Function '{function}' takes ", Case.Sensitive);
+        error.ShouldStartWithMessage($"{FunctionSignatureMismatch}: Function '{function}' takes ", Case.Sensitive);
     }
 
     /// <summary>
@@ -334,7 +334,7 @@ public sealed class SqlFunctionArityTests : IDisposable
 
         // Assert
         failure.Message.ShouldStartWith("Database 'shop' cannot be opened. CHECK constraint 'ck_arity' on table 'dbo.orders' cannot be loaded", Case.Sensitive);
-        failure.Message.ShouldContain(call, Case.Sensitive);
+        failure.ShouldContainMessage(call, Case.Sensitive);
         failure.Message.ShouldContain("open the database with that build and drop the constraint", Case.Sensitive);
         failure.Message.ShouldNotContain("restore the database from a backup", Case.Sensitive);
         var coded = failure.InnerException.ShouldNotBeNull().InnerException.ShouldBeOfType<SqlEvaluationException>();

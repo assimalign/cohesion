@@ -152,6 +152,69 @@ public sealed class OqlExecutionConformanceTests
         exception.Message.ShouldBe(message);
     }
 
+    // #1126 deletes this exact temporary ODMG list when SQL++ replaces those declarations.
+    private static readonly string[] _functionExemptions = ["ELEMENT", "FLATTEN", "FIRST", "LAST", "LISTTOSET", "UNIQUE"];
+    private static readonly IReadOnlyDictionary<string, FunctionCase> _functionCases =
+        new Dictionary<string, FunctionCase>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["COUNT"] = new("COUNT(*)", 4m),
+            ["SUM"] = new("SUM(amount)", 12m),
+            ["AVG"] = new("AVG(amount)", 4m),
+            ["MIN"] = new("MIN(amount)", 2m),
+            ["MAX"] = new("MAX(amount)", 6m),
+        };
+
+    [Fact(DisplayName = "Cohesion Test [Documents] - Functions: declarations have live evidence or the exact temporary ODMG pin")]
+    public async Task Profile_DeclaredFunctions_ShouldExecuteEveryCaseAsync()
+    {
+        // Arrange
+        RequireFunctionCoverage(OqlLanguageProfile.Instance.Functions.ToArray(), _functionCases.Keys, _functionExemptions);
+        await using var engine = DocumentDatabaseEngine.Create("document-functions", new());
+        var database = await engine.CreateDatabaseAsync("functions", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        var collection = await session.CreateCollectionAsync("items", CancellationToken.None);
+        await SeedAsync(collection, session, CancellationToken.None);
+
+        // Act / Assert
+        foreach (string name in OqlLanguageProfile.Instance.Functions.ToArray().Except(_functionExemptions))
+        {
+            var execution = _functionCases[name];
+            var result = await session.ExecuteAsync($"SELECT {execution.Expression} FROM items", cancellationToken: CancellationToken.None);
+            await VerifyRowsAsync(result, [[execution.Expected]], name, CancellationToken.None);
+        }
+        foreach (string name in _functionExemptions)
+        {
+            var errors = new OqlQueryParser().Parse($"SELECT {name}(amount) FROM items").Diagnostics.ToArray();
+            errors.ShouldHaveSingleItem().Code.ShouldBe("COHDBL001");
+        }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Documents] - Functions: coverage rejects missing evidence, retired cases and additional exemptions")]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public void Profile_FunctionCoverageMismatch_ShouldFail(int mismatch)
+    {
+        // Arrange
+        var declarations = OqlLanguageProfile.Instance.Functions.ToArray();
+        // Act / Assert
+        Should.Throw<ShouldAssertException>(() => RequireFunctionCoverage(
+            mismatch == 0 ? declarations.Append("FUTURE") : declarations,
+            mismatch == 1 ? _functionCases.Keys.Append("RETIRED") : _functionCases.Keys,
+            mismatch == 2 ? _functionExemptions.Append("ABS") : _functionExemptions));
+    }
+
+    private static void RequireFunctionCoverage(IEnumerable<string> declarations, IEnumerable<string> cases, IEnumerable<string> exemptions)
+    {
+        exemptions.Order().ShouldBe(new[] { "ELEMENT", "FLATTEN", "FIRST", "LAST", "LISTTOSET", "UNIQUE" }.Order());
+        exemptions.Except(declarations, StringComparer.OrdinalIgnoreCase).ShouldBeEmpty();
+        declarations.Except(exemptions, StringComparer.OrdinalIgnoreCase).Except(cases, StringComparer.OrdinalIgnoreCase).ShouldBeEmpty();
+        cases.Except(declarations, StringComparer.OrdinalIgnoreCase).ShouldBeEmpty();
+        cases.Intersect(exemptions, StringComparer.OrdinalIgnoreCase).ShouldBeEmpty();
+    }
+
+    private sealed record FunctionCase(string Expression, object Expected);
+
     private static void VerifyCoverage(QueryLanguageProfile profile)
     {
         profile.Clauses.ShouldNotBeEmpty();

@@ -211,7 +211,7 @@ flowchart TD
   once, for what the planner computes before any row exists (a LIMIT count, a seek
   bound, a parameter's type).
 - **Binding raises nothing evaluation raised only when it reached a node.** An
-  unsupported construct, a declared function that does not execute yet (`NULLIF`), an
+  unsupported typed construct (text rejects recognized non-executing functions at parse time), an
   aggregate outside a grouping plan, a call whose arguments its signature refuses, a
   parameter with no supplied value, a column that does not resolve in a scope planning
   did not validate, and a literal its type cannot hold each bind as a `SqlBoundFailure`
@@ -1823,7 +1823,7 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   (`ValidateFunctionCalls`), subqueries, DML values, `CHECK` predicates and
   `DEFAULT`s included, and checks every call before it binds the catalog or
   reads a row: a name outside the engine's function catalog and outside
-  `SqlLanguageProfile.Instance.Functions` is `Unknown function '<name>'.`, and a
+  `SqlLanguageProfile.Instance.Functions` and the recognized-unsupported vocabulary is `COHSQLE016`, `Unknown function '<name>'.`, and a
   call whose argument count no overload of its function accepts fails with
   `SqlEvaluationException` `COHSQLE006` (the overload by type is chosen once a scope
   types the arguments, [Functions (E2)](#functions-e2)). The
@@ -1834,9 +1834,9 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   arguments before the call itself, as PostgreSQL's parse analysis does
   (`transformFuncCall` transforms the arguments and then `ParseFuncOrColumn`
   resolves the function, `src/backend/parser/parse_expr.c`), so the innermost bad
-  call is the one reported. A declared name that does not execute yet (`NULLIF`,
-  `TRIM`, ...) passes this check and still fails during evaluation; #1103 rejects
-  those at parse time and gives planner rejections structured codes.
+  call is the one reported. A recognized name that does not execute yet (`NULLIF`,
+  `TRIM`, ...) is absent from the executable profile and rejects at parse time with
+  `COHDBL001`; it is not also reported as an unknown function (#1103).
 - **One catalog of functions (#1189, E2).** The engine's `SqlFunctionCatalog` holds
   every executable function, the standard library's and the application's alike
   ([Functions (E2)](#functions-e2)). Its readers are the planner walk above; the
@@ -2357,6 +2357,19 @@ declared dialect and retain their existing unsupported-clause diagnostics.
 - **SELECT materializes.** Sorting and `DISTINCT` need the full result anyway at
   this stage; `SqlMaterializedResultSet` carries typed columns and evaluated
   rows. Streaming operators arrive with the planner build-out.
+- **Row-window counts retain Int64 semantics (#1100).** The planner accepts
+  nonnegative integers through `Int64.MaxValue`, as PostgreSQL evaluates its
+  offset and limit as Int64 (`src/backend/executor/nodeLimit.c:369-399`). After
+  ordering and `DISTINCT`, stored-table/join, system-view and grouped execution
+  use one private `ApplyRowWindow` helper. It clamps the offset to the materialized
+  row count and the limit to the remaining row count before checked Int32
+  conversions for `List.GetRange`. The collection bounds justify each conversion;
+  no count wraps or allocates according to the requested size, and the helper
+  never adds the two Int64 counts. A large limit keeps all remaining rows and a
+  large offset keeps none. Count evaluation and invalid-count diagnostics stay
+  in the planner. The live conformance corpus and Sql.Client wire tests cover
+  every plan shape, zero and small windows, the Int32 and UInt32 boundaries, and
+  `Int64.MaxValue`, including combined limit/offset counts.
 - **Transactions (MVCC session binding, §3.8).** Every statement — explicit
   transaction or auto-commit — runs under a `TransactionContext` from the
   database's transaction manager, whose sequences come from the storage's own
@@ -3184,8 +3197,11 @@ drivers, while the server owns bind-through-release lifecycle.
 
 ## SQL transaction control and the B7 seam
 
-`BEGIN [TRANSACTION]`, `COMMIT [TRANSACTION]`, and `ROLLBACK [TRANSACTION]`
-are ordinary SQL requests over the existing wire `Execute` message. The session
+`START TRANSACTION`, `BEGIN [WORK|TRANSACTION]`, `COMMIT [WORK|TRANSACTION]`,
+`END`, and `ROLLBACK [WORK|TRANSACTION]` are ordinary SQL requests over the
+existing wire `Execute` message. The parser maps these spellings onto the existing
+Begin/Commit/Rollback commands (#1125), so END without a transaction reports the
+canonical `COHSQLT002` message, "COMMIT requires an open transaction." The session
 dispatches their parsed AST before creating an auto-commit transaction. `BEGIN`
 opens a coordinator context; subsequent queries and DML share that context and
 its visibility snapshot. `COMMIT` awaits the coordinator's durable commit;
@@ -3199,6 +3215,13 @@ journal rejects its abort record (#1226, `Database.Transactions` DESIGN.md,
 journal's append buffer that carries it, at the rollback or at a later drain such as the
 next commit's, which also takes the database offline (`Database.Storage` DESIGN.md,
 "The append buffer").
+
+`SqlTransactionControlTests` drives `START TRANSACTION ... END` and
+`BEGIN WORK ... ROLLBACK WORK` through `ServerTestHarness`, checking observer
+visibility across commit and restoration after rollback. Malformed
+`START TRANSACTION ISOLATION LEVEL SERIALIZABLE` returns wire `ParseFailure`
+carrying `SQL0003`, opens no transaction, and permits the next statement on the
+same connection. Protocol responses synchronize these checks without fixed sleeps.
 
 The session's transaction is the root `DatabaseSession`'s (concrete-types plan §6.4, phase 4):
 the base registers the `SqlDatabaseTransaction` the session's BEGIN core creates and reports it
@@ -3821,6 +3844,26 @@ production code consumed `IDatabaseEngineBuilder`, and the owner's 2026-10-04 de
 made every model builder sealed, which supersedes the 2026-10-02 ruling, its 2026-10-03
 narrowing and #1232. A hosting-aware factory configures the same sealed builder through
 `AddSql`; the model still sees no DI or configuration contract.
+
+## Diagnostics carrier and executable functions (#1103)
+
+`DatabaseException.Diagnostics` is a non-null, read-only snapshot of the complete diagnostic
+list, ordered stably by start offset (unlocated entries follow located entries). Legacy
+constructors supply an empty list. `Diagnostic`, its severity and location enum remain plain
+data in `Database.Types`; no reflection or runtime discovery is involved.
+
+SQL, OQL and GQL text factories, including `GraphPathsQueryRequest.FromGql`, retain their
+first-error Message and carry every diagnostic on `DatabaseParseException`. A session rejects
+the same parsed typed statement with the identical exception contract; no error AST executes.
+The documented SQL/GQL parser-out-of-stack translations remain engine complexity failures.
+Planner rejections carry stable codes and AST offsets where available; codes are separate from
+the in-process message. SQL and Graph protocol 1.0 compose `CODE: message` for ExecutionFailure.
+
+`QueryLanguageProfile.Functions` is the executable built-in set. Recognized non-executing
+functions live in each language's unsupported vocabulary and report COHDBL001 at parse time.
+The single function guard in each engine's execution-conformance suite requires live evidence
+for every declared name and rejects evidence for undeclared names. OQL temporarily exempts
+exactly ELEMENT, FLATTEN, FIRST, LAST, LISTTOSET and UNIQUE, each pinned to COHDBL001 until #1126.
 
 ## Error model
 
@@ -4647,3 +4690,32 @@ on `DatabaseSession`.
 ProtocolPayload string decoding uses strict UTF-8. The shared startup/error reader refuses invalid
 sequences with ProtocolException; the server reports fatal ProtocolViolation and closes the session.
 Model statement, parameter-name and result-header strings use that same shared strict reader.
+
+## Diagnostic completion (#1103 review)
+
+System-relation mutations use COHSQLE021 with the statement's available location, before
+lookup or IF EXISTS shortcuts. VALUES/LIMIT/OFFSET column-scope failures retain the
+column's own location, and UPDATE aggregate rejections retain the assignment expression's
+location. SQL operator and CAST bound nodes retain their immutable source
+locations so runtime failures and planning-time count evaluation preserve the expression
+span. Definitions without a separately located column or type token use the statement
+fallback; a DEFAULT span must not be used for an unrelated COLLATE failure.
+
+Evaluator unsupported nodes/operators use COHSQLE013, operand-type failures use COHSQLE003,
+and CAST range failures use COHSQLE002 (PostgreSQL 22003). CAST invalid text uses the new
+COHSQLE022 (22P02); division/remainder by zero keeps COHSQLE001 (22012). The dialect records
+the complete code mapping. Messages remain unprefixed; servers compose the code once.
+
+### Statement rejection carriers (second #1103 review)
+
+SqlDefinitionBinder.Refuse returns the existing SqlPlanningException with COHSQLD001 and an
+unprefixed message. Definition admission uses the offending expression's location, falling back
+to the declaration for type/parameter metadata without separate tokens. Reopened definitions
+locate their retained canonical body or type fragment when no declaration AST survives; expression
+walks retain the parsed node's span. DROP of an absent domain/function locates the DROP statement.
+The existing COHSQLD002/003 executor ownership and dependency checks are unchanged.
+
+A CHECK that is not Boolean is a definition-binding rejection under COHSQLD001, including
+CREATE TABLE c (id INT CHECK (id)). It reports the predicate span before any table is created.
+PostgreSQL likewise rejects a non-Boolean CHECK operand during coercion and reports its expression
+position (src/backend/parser/parse_coerce.c:1163-1191). No runtime row-value failure is converted.

@@ -140,7 +140,7 @@ public sealed partial class SqlDefinedFunctionTests
             foreach (string sql in new[] { "INSERT INTO checked VALUES(1)", "INSERT INTO defaults(id) VALUES(1)",
                 "INSERT INTO domains VALUES(1)", "SELECT body(v) FROM checked" })
             {
-                (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(read, sql))).Message.ShouldContain("COHSQLE009");
+                (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(read, sql))).Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE009");
             }
         }
         finally { if (Directory.Exists(root)) { Directory.Delete(root, true); } }
@@ -165,7 +165,7 @@ public sealed partial class SqlDefinedFunctionTests
             await using var read = await database.CreateSessionAsync();
             // Assert
             var failure = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(read, "INSERT INTO t VALUES(-1)"));
-            failure.Message.ShouldContain("COHSQLE009");
+            failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE009");
             failure.Message.ShouldContain("IMMUTABLE");
         }
         finally { if (Directory.Exists(root)) { Directory.Delete(root, true); } }

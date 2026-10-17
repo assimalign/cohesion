@@ -34,7 +34,8 @@ public sealed class SqlTypeModifierTests
                 // A domain name resolves, but nested domains retain their existing refusal.
                 var error = await Should.ThrowAsync<DatabaseException>(async () =>
                     await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None));
-                error.Message.ShouldBe("COHSQLD001: Domain 'bounded' must have a built-in base type.");
+                error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLD001");
+                error.Message.ShouldBe("Domain 'bounded' must have a built-in base type.");
                 continue;
             }
             var result = await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None);
@@ -61,14 +62,14 @@ public sealed class SqlTypeModifierTests
             var error = await Should.ThrowAsync<DatabaseParseException>(async () =>
                 await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None));
             error.Message.ShouldContain("COHDBL001", Case.Sensitive);
-            error.Message.ShouldContain(subject, Case.Sensitive);
-            error.Message.ShouldContain(type, Case.Sensitive);
+            error.ShouldContainMessage(subject, Case.Sensitive);
+            error.ShouldContainMessage(type, Case.Sensitive);
             var builder = SqlDatabaseEngine.CreateBuilder("script");
             builder.AddDatabase("app", declaration => declaration.Script("001", sql));
             var scriptError = await Should.ThrowAsync<DatabaseParseException>(async () => await builder.BuildAsync(CancellationToken.None));
             scriptError.Message.ShouldContain("COHDBL001", Case.Sensitive);
-            scriptError.Message.ShouldContain(subject, Case.Sensitive);
-            scriptError.Message.ShouldContain(type, Case.Sensitive);
+            scriptError.ShouldContainMessage(subject, Case.Sensitive);
+            scriptError.ShouldContainMessage(type, Case.Sensitive);
         }
 
         // Assert: typed declaration is refused before Build, and failed DDL left no objects.
@@ -193,7 +194,7 @@ public sealed class SqlTypeModifierTests
                 var error = await Should.ThrowAsync<DatabaseParseException>(async () =>
                     await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None));
                 error.Message.ShouldContain("SQL0005", Case.Sensitive);
-                error.Message.ShouldContain(subject, Case.Sensitive);
+                error.ShouldContainMessage(subject, Case.Sensitive);
             }
         }
 
@@ -223,7 +224,7 @@ public sealed class SqlTypeModifierTests
             {
                 var error = await Should.ThrowAsync<DatabaseParseException>(async () => await builder.BuildAsync(CancellationToken.None));
                 error.Message.ShouldContain("SQL0005", Case.Sensitive);
-                error.Message.ShouldContain(subject, Case.Sensitive);
+                error.ShouldContainMessage(subject, Case.Sensitive);
             }
         }
     }

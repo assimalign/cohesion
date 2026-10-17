@@ -78,9 +78,9 @@ public sealed class SqlStatementCompletenessTests
             "CREATE TABLE c (p INT REFERENCES t (id) ON DELETE RESTRICT)",
             "ALTER TABLE c ADD CONSTRAINT fk FOREIGN KEY (p) REFERENCES t (id) ON DELETE RESTRICT",
         ],
-        [SqlClauses.Begin] = ["BEGIN"],
-        [SqlClauses.Commit] = ["COMMIT", "COMMIT TRANSACTION"],
-        [SqlClauses.Rollback] = ["ROLLBACK", "ROLLBACK TRANSACTION"],
+        [SqlClauses.Begin] = ["BEGIN", "START TRANSACTION", "BEGIN WORK"],
+        [SqlClauses.Commit] = ["COMMIT", "COMMIT WORK", "COMMIT TRANSACTION", "END"],
+        [SqlClauses.Rollback] = ["ROLLBACK", "ROLLBACK WORK", "ROLLBACK TRANSACTION"],
         [SqlClauses.Transaction] = ["BEGIN TRANSACTION"],
     };
 

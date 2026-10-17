@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 using Assimalign.Cohesion.Database.Sql.Language;
 
@@ -140,9 +141,9 @@ internal static class SqlStandardLibrary
     internal static bool IsCoalesce(string name) => string.Equals(name, Coalesce, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
-    /// Whether the SQL dialect declares a name as a function that does not execute yet
-    /// (<c>NULLIF</c>, <c>TRIM</c>, <c>NOW</c>, ...): a call to it is not an unknown function, and fails
-    /// only when it is evaluated, until the dialect rejects such names at parse time (#1103). Read on
+    /// Whether the SQL dialect declares an executable function or recognizes an unsupported
+    /// spelling (<c>NULLIF</c>, <c>TRIM</c>, <c>NOW</c>, ...). Unsupported calls already carry a
+    /// parse-time COHDBL001; only names in neither list are unknown (#1068, #1103). Read on
     /// the failure path only, for a name the catalog does not hold.
     /// </summary>
     /// <param name="name">The name as written.</param>
@@ -159,7 +160,7 @@ internal static class SqlStandardLibrary
             }
         }
 
-        return false;
+        return SqlLanguageProfile.RecognizedUnsupportedVocabulary.Any(declared => string.Equals(declared, name, comparison));
     }
 
     /// <summary>

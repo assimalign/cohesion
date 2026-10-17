@@ -151,6 +151,47 @@ public sealed class GqlProfileExecutionTests
         error.Message.ShouldContain("COHDBL001", Case.Sensitive);
     }
 
+    // GQL currently executes no functions; #1147/#1148 add names and live cases together here.
+    private static readonly IReadOnlyDictionary<string, ExecutionCase> _functionCases =
+        new Dictionary<string, ExecutionCase>(StringComparer.OrdinalIgnoreCase);
+
+    [Fact(DisplayName = "Cohesion Test [Graph] - Functions: every declared function has passing live evidence")]
+    public async Task Profile_DeclaredFunctions_ShouldExecuteEveryCaseAsync()
+    {
+        // Arrange
+        RequireFunctionCoverage(GqlLanguageProfile.Instance.Functions.ToArray(), _functionCases.Keys);
+        await using var engine = GraphDatabaseEngine.Create("graph-functions", new());
+        var database = await engine.CreateDatabaseAsync("functions", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync(seed, cancellationToken: CancellationToken.None);
+
+        // Act / Assert
+        foreach (string name in GqlLanguageProfile.Instance.Functions.ToArray())
+        {
+            await ExecuteAndVerifyAsync(session, _functionCases[name], name, CancellationToken.None);
+        }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Graph] - Functions: coverage rejects an unmeasured declaration or a retired case")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Profile_FunctionCoverageMismatch_ShouldFail(bool addedDeclaration)
+    {
+        // Arrange
+        var declarations = GqlLanguageProfile.Instance.Functions.ToArray();
+        var cases = _functionCases.Keys;
+        // Act / Assert
+        Should.Throw<ShouldAssertException>(() => RequireFunctionCoverage(
+            addedDeclaration ? declarations.Append("FUTURE") : declarations,
+            addedDeclaration ? cases : cases.Append("RETIRED")));
+    }
+
+    private static void RequireFunctionCoverage(IEnumerable<string> declarations, IEnumerable<string> cases)
+    {
+        declarations.Except(cases, StringComparer.OrdinalIgnoreCase).ShouldBeEmpty();
+        cases.Except(declarations, StringComparer.OrdinalIgnoreCase).ShouldBeEmpty();
+    }
+
     private static void EnsureCoverage(IEnumerable<string> clauses)
     {
         foreach (string clause in clauses)

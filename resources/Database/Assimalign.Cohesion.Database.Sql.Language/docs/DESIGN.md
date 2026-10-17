@@ -13,6 +13,19 @@ The SQL front-end (area architecture: [resources/Database/DESIGN.md](../../../..
 §3.3). The dialect is deliberately fundamental — basic SQL, declared precisely —
 and structured to be extended without churning what exists (open/closed).
 
+## Executable functions and vocabulary (#1103)
+
+The profile's Functions list contains only executable built-ins, including the CAST special
+form. Non-executing recognized functions live in SqlUnsupportedVocabulary, with call,
+niladic datetime and window positions. Each call reports one named COHDBL001; the five ISO
+niladic datetime forms also reject without parentheses and cannot bind unquoted columns.
+The engine's single function-coverage guard requires a passing live case for every declaration.
+
+`SqlLanguageProfile.RecognizedUnsupportedVocabulary` exposes a read-only snapshot of spellings
+for identifier rendering and unknown-function classification. The internal position/construct
+table stays internal. There is no shipped-to-shipped InternalsVisibleTo grant to reuse, so this
+is the issue's approved public-profile option; no visibility grant or public internal type is added.
+
 ## Design intent
 
 Decision 49a adds `SqlAlterColumnAction`, a full column-definition action:
@@ -125,18 +138,41 @@ lands.
 ## Transactions and B7 extension points
 
 `SqlTransactionExpression` identifies `BEGIN`, `COMMIT`, and `ROLLBACK` through
-`SqlQueryCommandType`. The optional `TRANSACTION` token changes no semantics.
+`SqlQueryCommandType`. `START TRANSACTION` and `BEGIN WORK` map to Begin, `END`
+and `COMMIT WORK` map to Commit, and `ROLLBACK WORK` maps to Rollback (#1125).
+`WORK` is the ISO synonym of the optional `TRANSACTION` noise word after
+`BEGIN`, `COMMIT`, and `ROLLBACK`; START requires TRANSACTION and END takes no
+suffix. These are spellings of existing clauses, so the profile remains 33/49
+(+0): no `SqlClauses` constant or profile entry is added. START and WORK match
+contextually with ordinal, case-insensitive comparisons, keeping unquoted columns
+named start/work bindable and keeping the schema renderer from quoting them.
+END was already a keyword; its statement dispatch leaves CASE ... END unchanged.
 The executor joins subsequent statements to the session's active scope, and
 disconnect aborts that transaction. The language adds no concurrency machinery.
 Malformed suffixes produce `SQL0003` instead of silently treating `ROLLBACK TO`
-as a complete rollback.
+as a complete rollback. END without a transaction retains the canonical
+`COHSQLT002` message, "COMMIT requires an open transaction."
+
+The uniform `SQL0100` policy applies to transaction statements too: omitting `;`
+produces an informational diagnostic, with no error or warning for a valid spelling.
+A valid spelling terminated with `;` produces no diagnostics. The transaction corpus
+asserts both forms rather than exempting transaction control from the common policy.
+
+The PostgreSQL grammar maps START TRANSACTION to its start node and END to its
+commit node, with WORK/TRANSACTION sharing `opt_transaction`
+(`src/backend/parser/gram.y:11358-11365`, `11471-11485`, local reference clone).
+The family deliberately stops short of that broader grammar: END WORK and
+END TRANSACTION, transaction modes, AND [NO] CHAIN, ROLLBACK [WORK] TO
+[SAVEPOINT], BEGIN TRAN and named transactions, and COMMIT PREPARED remain
+`SQL0003`. ABORT [WORK|TRANSACTION], SAVEPOINT, RELEASE, SET TRANSACTION, and
+PREPARE TRANSACTION remain `SQL0002`. Recognition or recoding belongs to #1012.
 
 B7 anticipates **`SAVEPOINT <name>`**, **`ROLLBACK TO [SAVEPOINT] <name>`**,
 **`RELEASE [SAVEPOINT] <name>`**, and **`SET TRANSACTION ISOLATION LEVEL <level>`**.
-Those forms are not implemented by B2. The session owns a stack of transaction
-scopes with exactly one root entry today, plus a defaulted value of the existing
-transaction coordinator's `IsolationLevel`. Savepoints can add scope markers and
-isolation syntax can set that value without replacing the session representation.
+Those forms remain outside this family, reserved for #1012. The session owns
+exactly one root transaction through `DatabaseSession`, plus a defaulted value of
+the existing transaction coordinator's `IsolationLevel`. Savepoints can add scope
+markers within that transaction, and isolation syntax can set the carried value.
 
 ## Constraint normalization and persistence
 
@@ -405,3 +441,18 @@ Every valid qualifier reports one COHDBL001 naming the declaration and complete 
 forms without precision. Invalid ranges remain SQL0003; malformed arguments remain SQL0005 and
 suppress a secondary unsupported diagnostic. Case and token trivia do not change admission.
 Delimited names retain their lexical identity so a domain named `"INTERVAL DAY"` is still a domain.
+
+## Quoted function recognition (#1103 review)
+
+The function-call branch checks quoted names against the same recognized unsupported table
+as unquoted calls. Quoted names must match the lowercase lookup spelling exactly; unquoted
+names match without regard to case. Parentheses distinguish calls from quoted columns.
+DIALECT documents the PostgreSQL scanner and function-lookup references and examples.
+
+Rendering preserves accepted quoted uppercase and mixed-case window-like names with delimiters.
+A lowercase quoted unsupported call retains its diagnostic and NULL recovery expression; the
+renderer round-trip guarantee continues to apply to error-free parser trees. Renderer tests
+cover both accepted spellings and the coded recovery of rejected spellings.
+
+Definition-binding diagnostics remain engine-owned. DIALECT.md records COHSQLD001 for invalid
+CHECK predicates and absent DROP definitions, including the structured carrier and span fallback.

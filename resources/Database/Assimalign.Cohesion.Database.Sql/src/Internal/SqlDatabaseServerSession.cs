@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
@@ -413,7 +414,9 @@ internal sealed class SqlDatabaseServerSession : DatabaseServerSession
         }
         catch (DatabaseException exception)
         {
-            await WriteErrorAsync(ProtocolErrorCode.ExecutionFailure, exception.Message, cancellationToken).ConfigureAwait(false);
+            var diagnostic = exception.Diagnostics.FirstOrDefault(item => item.Severity == DiagnosticSeverity.Error);
+            string errorText = diagnostic?.Code is { } code ? $"{code}: {exception.Message}" : exception.Message;
+            await WriteErrorAsync(ProtocolErrorCode.ExecutionFailure, errorText, cancellationToken).ConfigureAwait(false);
             return;
         }
 

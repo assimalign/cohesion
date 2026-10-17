@@ -41,7 +41,7 @@ public sealed class SqlLanguageConformanceTests
     {
         // The profile drives enumeration. A newly advertised clause cannot silently escape this test.
         var cases = CreateCases();
-        // Phase 22 restores ORDER BY aliases and ordinals within the existing 33 named clauses.
+        // Phase 22 and #1125 extend spellings within the existing 33 named clauses (+0).
         SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(33);
         RequireExecutionCases(SqlLanguageProfile.Instance.Clauses, cases);
         cases.Keys.Except(SqlLanguageProfile.Instance.Clauses).ShouldBeEmpty("Cases must describe the current profile.");
@@ -132,6 +132,81 @@ public sealed class SqlLanguageConformanceTests
             _ => throw new InvalidOperationException($"Missing expected value for {projection}."),
         };
         (await RowsAsync(session, sql)).ShouldHaveSingleItem()[0].ShouldBe(expected);
+    }
+
+    /// <summary>Applies the full Int64 count range consistently to every materialized SELECT shape.</summary>
+    /// <param name="query">The ordered query producing three rows.</param>
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - LIMIT/OFFSET: Int64 counts preserve the row window for every plan shape")]
+    [InlineData("SELECT id FROM window_rows ORDER BY id")]
+    [InlineData("SELECT w.id FROM window_rows w INNER JOIN window_peers p ON w.id = p.id ORDER BY w.id")]
+    [InlineData("SELECT ORDINAL_POSITION FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'window_rows' ORDER BY ORDINAL_POSITION")]
+    [InlineData("SELECT id FROM window_rows GROUP BY id ORDER BY id")]
+    public async Task Select_Int64RowWindow_ShouldReturnExpectedRows(string query)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("sql-profile-window", new SqlDatabaseEngineOptions());
+        var database = await engine.CreateDatabaseAsync("audit");
+        await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
+        await ExecuteAsync(session, "CREATE TABLE window_rows (id INT, category INT, label TEXT)");
+        await ExecuteAsync(session, "INSERT INTO window_rows VALUES (3, 1, 'c'), (1, 1, 'a'), (2, 2, 'b')");
+        await ExecuteAsync(session, "CREATE TABLE window_peers (id INT)");
+        await ExecuteAsync(session, "INSERT INTO window_peers VALUES (1), (2), (3)");
+        (string Clause, long[] Expected)[] windows =
+        [
+            ("", [1, 2, 3]),
+            ("LIMIT 0", []),
+            ("LIMIT 1", [1]),
+            ("LIMIT 2 OFFSET 1", [2, 3]),
+            ("LIMIT 2147483647", [1, 2, 3]),
+            ("LIMIT 2147483648", [1, 2, 3]),
+            ("LIMIT 4294967295", [1, 2, 3]),
+            ("LIMIT 4294967296", [1, 2, 3]),
+            ("LIMIT 4294967297", [1, 2, 3]),
+            ("LIMIT 9223372036854775807", [1, 2, 3]),
+            ("OFFSET 0", [1, 2, 3]),
+            ("OFFSET 3", []),
+            ("OFFSET 2147483647", []),
+            ("OFFSET 2147483648", []),
+            ("OFFSET 4294967295", []),
+            ("OFFSET 4294967296", []),
+            ("OFFSET 4294967297", []),
+            ("OFFSET 9223372036854775807", []),
+            ("LIMIT 9223372036854775807 OFFSET 1", [2, 3]),
+            ("LIMIT 1 OFFSET 4294967297", []),
+            ("LIMIT 9223372036854775807 OFFSET 9223372036854775807", []),
+        ];
+
+        foreach (var (clause, expected) in windows)
+        {
+            // Act
+            var rows = await RowsAsync(session, $"{query} {clause}");
+
+            // Assert
+            rows.Select(row => Convert.ToInt64(row[0])).ShouldBe(expected, clause);
+        }
+    }
+
+    /// <summary>Keeps invalid count diagnostics unchanged before a row window executes.</summary>
+    /// <param name="clause">The count clause.</param>
+    /// <param name="count">The invalid count.</param>
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - LIMIT/OFFSET: negative and fractional counts retain their diagnostics")]
+    [InlineData("LIMIT", "-1")]
+    [InlineData("LIMIT", "1.5")]
+    [InlineData("OFFSET", "-1")]
+    [InlineData("OFFSET", "1.5")]
+    public async Task Select_InvalidRowWindow_ShouldRetainDiagnostic(string clause, string count)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("sql-profile-window-invalid", new SqlDatabaseEngineOptions());
+        var database = await engine.CreateDatabaseAsync("audit");
+        await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
+        foreach (string setup in _seed) { await ExecuteAsync(session, setup); }
+
+        // Act
+        var error = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, $"SELECT id FROM t {clause} {count}"));
+
+        // Assert
+        error.Message.ShouldBe($"{clause} requires a non-negative integer.");
     }
 
     private static void RequireExecutionCases(IEnumerable<string> clauses, IReadOnlyDictionary<string, ExecutionCase> cases)
@@ -232,8 +307,67 @@ public sealed class SqlLanguageConformanceTests
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         foreach (string setup in _orderingSeed) { await ExecuteAsync(session, setup); }
 
-        (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, query))).Message.ShouldBe(message);
+        (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, query))).ShouldHaveMessage(message);
     }
+
+    // The single function guard: add execution evidence here whenever the profile gains a name.
+    private static readonly IReadOnlyDictionary<string, FunctionCase> _functionCases =
+        new Dictionary<string, FunctionCase>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["COUNT"] = new("COUNT(*)", 3L),
+            ["SUM"] = new("SUM(age)", 122m),
+            ["AVG"] = new("AVG(age)", 122m / 3m),
+            ["MIN"] = new("MIN(age)", 36),
+            ["MAX"] = new("MAX(age)", 45),
+            ["COALESCE"] = new("COALESCE(NULL, 7)", 7L),
+            ["CAST"] = new("CAST('42' AS INT)", 42),
+            ["UPPER"] = new("UPPER('Ada')", "ADA"),
+            ["LOWER"] = new("LOWER('Ada')", "ada"),
+            ["LENGTH"] = new("LENGTH('Ada')", 3L),
+            ["ABS"] = new("ABS(-2)", 2L),
+        };
+
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Functions: every declared function has passing live evidence")]
+    public async Task Profile_DeclaredFunctions_ShouldExecuteEveryCase()
+    {
+        // Arrange
+        RequireFunctionCoverage(SqlLanguageProfile.Instance.Functions.ToArray(), _functionCases.Keys);
+        await using var engine = SqlDatabaseEngine.Create("sql-functions", new());
+        var database = await engine.CreateDatabaseAsync("functions", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        foreach (string setup in _seed) { await ExecuteAsync(session, setup); }
+
+        // Act / Assert
+        foreach (string name in SqlLanguageProfile.Instance.Functions.ToArray())
+        {
+            var execution = _functionCases[name];
+            var rows = await RowsAsync(session, $"SELECT {execution.Expression} FROM t");
+            rows.ShouldNotBeEmpty(name);
+            foreach (var row in rows) { row[0].ShouldBe(execution.Expected, name); }
+        }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Functions: coverage fails for an unmeasured declaration or a retired case")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Profile_FunctionCoverageMismatch_ShouldFail(bool addedDeclaration)
+    {
+        // Arrange
+        var declarations = SqlLanguageProfile.Instance.Functions.ToArray();
+        var cases = _functionCases.Keys;
+        // Act / Assert
+        Should.Throw<ShouldAssertException>(() => RequireFunctionCoverage(
+            addedDeclaration ? declarations.Append("FUTURE") : declarations,
+            addedDeclaration ? cases : cases.Append("RETIRED")));
+    }
+
+    private static void RequireFunctionCoverage(IEnumerable<string> declarations, IEnumerable<string> cases)
+    {
+        declarations.Except(cases, StringComparer.OrdinalIgnoreCase).ShouldBeEmpty("Declared functions need live cases.");
+        cases.Except(declarations, StringComparer.OrdinalIgnoreCase).ShouldBeEmpty("Retired functions cannot retain positive cases.");
+    }
+
+    private sealed record FunctionCase(string Expression, object Expected);
 
     private static Dictionary<string, ExecutionCase> CreateCases() => new(StringComparer.Ordinal)
     {
@@ -413,6 +547,19 @@ public sealed class SqlLanguageConformanceTests
                 await ExecuteAsync(session, "ROLLBACK TRANSACTION;");
                 session.CurrentTransaction.ShouldBeNull();
                 await ExpectRowsAsync(session, "SELECT id FROM t WHERE id = 4;", [[4]]);
+                await using var observer = await session.Database.CreateSessionAsync();
+                await ExecuteAsync(session, "START TRANSACTION;");
+                await ExecuteAsync(session, "INSERT INTO t VALUES (5, 'start', 2);");
+                await ExpectRowsAsync(observer, "SELECT id FROM t WHERE id = 5;", []);
+                await ExecuteAsync(session, "END;");
+                await ExpectRowsAsync(observer, "SELECT id FROM t WHERE id = 5;", [[5]]);
+                await ExecuteAsync(session, "BEGIN WORK;");
+                await ExecuteAsync(session, "UPDATE t SET name = 'changed' WHERE id = 5;");
+                await ExecuteAsync(session, "DELETE FROM t WHERE id = 4;");
+                await ExecuteAsync(session, "INSERT INTO t VALUES (6, 'rolled back', 3);");
+                await ExecuteAsync(session, "ROLLBACK WORK;");
+                session.CurrentTransaction.ShouldBeNull();
+                await ExpectRowsAsync(observer, "SELECT id, name FROM t WHERE id >= 4 ORDER BY id;", [[4, "new"], [5, "start"]]);
             }),
     };
 

@@ -1,0 +1,117 @@
+{
+  "schema": "cohesion.database.realign-plan/1",
+  "note": "The approved Data Platform realignment, for the Changes tab only: the decision record, the four board windows and the board corrections, each with checks the roadmap evaluates against the live snapshot. It is never used for placement. The per-operation target is derived from the approved carried data (taxonomy.json mapping, programs.json gate, tiers.json plan) until the realign executor exports data/realign-target.json, which then takes precedence. The journal never decides whether an operation is done; the board does.",
+  "approvedOn": "2026-10-16",
+  "approvedBy": "owner, all 20 decisions in full",
+  "sources": [
+    "realign-v2/delta-for-reapproval.md (decisions 1-20)",
+    "realign-v2/roadmap-model.md, realign-v2/skill-changes.md (this skill)",
+    "realign-v2/taxonomy.json (carried here as data/taxonomy.json)",
+    "realign-v2/hardening.md, realign-v2/hardening-ops.json",
+    "realign-v2/tooling.md section 6.4 (window order)",
+    "the regenerated v2 executor's dry run of 2026-10-16 (request counts)"
+  ],
+  "executorState": "The v2 executor was regenerated from the approved data and dry-run on 2026-10-16: W1 395, W2 389 (384 plus 5 Tier writes for #1576-#1580), W3 391 and W4 391 requests, about 3 h 55 min at 400 per hour. W1A (Stage 0, 7 requests: 3 field creates, the option-id probe, 3 option lists) runs right before the realignment tooling PR merges; W1B waits for that PR on main; W2 waits for programs.json with the gate entry on main.",
+  "decisions": [
+    { "id": 1, "group": "gates-run", "title": "Hardening (D1 v2): #1511 stays open as the program gate; its 8 features move to their code's categories; Program on 62 items and 33 blocked-by links.", "runsIn": ["W2"] },
+    { "id": 2, "group": "gates-run", "title": "Withdraw R5: no scaffold child leaves the story that defines it.", "runsIn": ["W1", "W2"] },
+    { "id": 3, "group": "gates-run", "title": "The 42-category set with R6, R7 and the Core rule.", "runsIn": ["W1", "W2"] },
+    { "id": 4, "group": "gates-run", "title": "The 6 new cross-epic moves (#1012, #1231, #1420 -> Core C04; #1342 -> C03; #1371 -> C01; #1446 -> Tooling C02).", "runsIn": ["W2"] },
+    { "id": 5, "group": "gates-run", "title": "Execution order D7 v2: the tree first, each category filled as it is created, then the gate, the cross-epic moves and the fields; 4 windows at 400 requests per hour.", "runsIn": ["W1", "W2", "W3", "W4"] },
+    { "id": 6, "group": "gates-run", "title": "Tooling D8 v2: -Category mandatory in Data Platform, an untiered filing needs -Wave or -Priority, -DirectUnderEpic, E18 and E19.", "runsIn": ["W1"], "note": "The tooling merges after Stage 0 and before Stage 1." },
+    { "id": 7, "group": "gates-run", "title": "One body edit: append the member note to #1511, after the features have moved.", "runsIn": ["W2"] },
+    { "id": 8, "group": "gates-run", "title": "The Program rule: an item in two programs carries the one the tree cannot show (#1373 becomes Hardening); no Query Language T1 option.", "runsIn": ["W1", "W2"] },
+    { "id": 9, "group": "gates-run", "title": "The WBS rule: the prefix names the epic an item was filed in; membership is the tree plus Category and Area.", "runsIn": [] },
+    { "id": 10, "group": "gates-run", "title": "The bug policy: B1-B6 plus the not-planned/duplicate guard now; bug-policy.md's broad B6 and its B7 decided at the post-#1168 backfill.", "runsIn": [], "note": "data/bug-policy.json carries the six rules; the two extensions are open calls C2 and C3." },
+    { "id": 11, "group": "board-correction", "title": "#190 first: #190 to P001; #1126, #1127, #1128 and #1131 to Backlog; native link #1097 blocked by #190.", "checks": "D11" },
+    { "id": 12, "group": "board-correction", "title": "Ready means unblocked: #1107, #1109, #1110, #1113, #1138 and #1141 to Backlog.", "checks": "D12" },
+    { "id": 13, "group": "board-correction", "title": "Hardening's tracked items: #1280, #1276 and #1274 to P001, #1276 to W01, #1012 to W04.", "checks": "D13" },
+    { "id": 14, "group": "board-correction", "title": "Set Priority and Wave on the Unplaced items; the values are the owner's.", "checks": "D14" },
+    { "id": 15, "group": "board-correction", "title": "#1250 stays open until its ratio timing guard lands.", "checks": "D15" },
+    { "id": 16, "group": "default", "title": "The roadmap model v2: untiered work in its Wave, else Priority, window; T2 in plan order per language; explained moves; nothing cached across runs.", "note": "This skill. Recorded in tiers.json as plan clarification D4a." },
+    { "id": 17, "group": "default", "title": "#1540 (W02, GQL T2 step 7), #1522 and #1541 (P002, W03) stay unedited and are flagged as conflicts.", "note": "The roadmap's contradictions block flags them on every run." },
+    { "id": 18, "group": "default", "title": "No HARDENING.md acceptance addenda on the 25 for now; no Effort field." },
+    { "id": 19, "group": "default", "title": "SQL C08 requires no Tier; the four language-surface categories do (C07, SQL C01, Documents C01, Graph C01)." },
+    { "id": 20, "group": "default", "title": "Stage 0 verifies an option ceiling of at least 42 before it creates Category.", "runsIn": ["W1"] }
+  ],
+  "corrections": [
+    { "id": "D11", "decision": 11, "issue": 190, "field": "Priority", "value": "P001" },
+    { "id": "D11", "decision": 11, "issue": 190, "field": "Status", "value": "Backlog", "note": "Decision 11 asked for Ready; the execution seam (#1579 blocks #190) supersedes it, so Backlog is the correct value." },
+    { "id": "D11", "decision": 11, "issue": 1126, "field": "Status", "value": "Backlog" },
+    { "id": "D11", "decision": 11, "issue": 1127, "field": "Status", "value": "Backlog" },
+    { "id": "D11", "decision": 11, "issue": 1128, "field": "Status", "value": "Backlog" },
+    { "id": "D11", "decision": 11, "issue": 1131, "field": "Status", "value": "Backlog" },
+    { "id": "D11", "decision": 11, "issue": 1097, "blockedBy": 190 },
+    { "id": "D12", "decision": 12, "issue": 1107, "field": "Status", "value": "Backlog" },
+    { "id": "D12", "decision": 12, "issue": 1109, "field": "Status", "value": "Backlog" },
+    { "id": "D12", "decision": 12, "issue": 1110, "field": "Status", "value": "Backlog" },
+    { "id": "D12", "decision": 12, "issue": 1113, "field": "Status", "value": "Backlog" },
+    { "id": "D12", "decision": 12, "issue": 1138, "field": "Status", "value": "Backlog" },
+    { "id": "D12", "decision": 12, "issue": 1141, "field": "Status", "value": "Backlog" },
+    { "id": "D13", "decision": 13, "issue": 1280, "field": "Priority", "value": "P001" },
+    { "id": "D13", "decision": 13, "issue": 1276, "field": "Priority", "value": "P001" },
+    { "id": "D13", "decision": 13, "issue": 1276, "field": "Wave", "value": "W01" },
+    { "id": "D13", "decision": 13, "issue": 1274, "field": "Priority", "value": "P001" },
+    { "id": "D13", "decision": 13, "issue": 1012, "field": "Wave", "value": "W04" },
+    { "id": "D14", "decision": 14, "unplaced": true, "field": "PriorityAndWave", "note": "Every item the run leaves Unplaced: done when none is left." },
+    { "id": "D15", "decision": 15, "issue": 1250, "state": "OPEN" }
+  ],
+  "seam": {
+    "title": "Execution seam: generic execution package and per-model session types (owner request, 2026-10-16)",
+    "note": "Filed and linked after the realignment was approved. The T1 items that write against the seam wait on the rename task, the last code change in the story. The story and its four tasks carry Tier Prerequisite in tiers.json (owner request, 2026-10-16); W2 sets the same Tier on the board.",
+    "checks": [
+      { "issue": 1576, "exists": true, "parent": 1255 },
+      { "issue": 1577, "exists": true, "parent": 1576 },
+      { "issue": 1578, "exists": true, "parent": 1576 },
+      { "issue": 1579, "exists": true, "parent": 1576 },
+      { "issue": 1580, "exists": true, "parent": 1576 },
+      { "issue": 1102, "blockedBy": 1579 },
+      { "issue": 1103, "blockedBy": 1579 },
+      { "issue": 1104, "blockedBy": 1579 },
+      { "issue": 190, "blockedBy": 1579 },
+      { "issue": 1138, "blockedBy": 1579 },
+      { "issue": 1102, "field": "Status", "value": "Backlog" },
+      { "issue": 1103, "field": "Status", "value": "Backlog" },
+      { "issue": 1104, "field": "Status", "value": "Backlog" }
+    ]
+  },
+  "windows": [
+    {
+      "id": "W1", "name": "Fields and options, then Core, SQL, Documents and KV/Blob/Cache categories, each filled as it is created", "requests": 395,
+      "ops": [
+        { "type": "fields", "fields": ["Category", "Tier", "Program"] },
+        { "type": "areaOptions", "prefix": "Database" },
+        { "type": "create", "epics": ["L03.02.01", "L03.02.02", "L03.02.03", "L03.02.04"] },
+        { "type": "reparent", "epics": ["L03.02.01", "L03.02.02", "L03.02.03", "L03.02.04"], "crossEpic": false }
+      ],
+      "endState": "4 epics have categories; #31 peaked at 80 sub-issues and ends at 21, #4 at 22. Nothing has left #1511. No field value is set."
+    },
+    {
+      "id": "W2", "name": "Graph, Tooling, Mapping and the L03.02.09 epic; the Hardening gate; the 27 cross-epic moves; the #1511 note; Tier, Program and issue type", "requests": 389,
+      "ops": [
+        { "type": "epic", "wbs": "L03.02.09" },
+        { "type": "create", "epics": ["L03.02.05", "L03.02.06", "L03.02.07", "L03.02.09"] },
+        { "type": "reparent", "epics": ["L03.02.05", "L03.02.06", "L03.02.07", "L03.02.09"], "crossEpic": false },
+        { "type": "gateLinks", "program": "hardening-benchmarks", "blockers": [1512, 1513, 1514, 1515, 1516, 1517, 1518, 1519, 1280, 1276, 1274, 1109, 1116, 1113, 1120, 1115, 1112, 1373, 1012, 1129, 1136, 1135, 1133, 190, 1271, 1142, 1147, 1138, 1144, 1195, 1239, 1269, 1229] },
+        { "type": "field", "field": "Kind", "issue": 1511, "value": "Feature", "from": "Area Epic" },
+        { "type": "reparent", "crossEpic": true },
+        { "type": "bodyAppend", "issue": 1511, "marker": "Program gate (added by the Data Platform board realignment; the text above is unchanged)" },
+        { "type": "field", "field": "Program" },
+        { "type": "field", "field": "Tier" },
+        { "type": "issueType" }
+      ],
+      "endState": "Tree final: #31 at 18, #4 at 7, #1511 with no sub-issues and 33 blockers. Gate live. Tier, Program and issue type set. Safe to pause for days."
+    },
+    {
+      "id": "W3", "name": "Category on every item", "requests": 391,
+      "ops": [ { "type": "field", "field": "Category" } ],
+      "endState": "Category roll-ups complete."
+    },
+    {
+      "id": "W4", "name": "Area on every item", "requests": 391,
+      "ops": [ { "type": "field", "field": "Area" } ],
+      "endState": "Field pass complete: the roadmap reads no carried category or program."
+    }
+  ],
+  "windowsNote": "Window order from realign-v2/delta-for-reapproval.md section 4; request counts from the regenerated v2 executor's dry run of 2026-10-16, W2 including the 5 Tier writes for the execution seam. W1 runs as W1A (Stage 0, 7 requests) and W1B (388). Decisions 11-13 were planned inside W3/W4; they were applied directly on 2026-10-16, before any window."
+}

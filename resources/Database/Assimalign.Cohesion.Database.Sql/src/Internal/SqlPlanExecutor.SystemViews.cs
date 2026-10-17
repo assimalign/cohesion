@@ -43,16 +43,6 @@ internal sealed partial class SqlPlanExecutor
             projected = Deduplicate(projected, plan.Projections, evaluator);
         }
 
-        IEnumerable<object?[]> window = projected;
-        if (plan.Offset is long offset)
-        {
-            window = window.Skip((int)offset);
-        }
-        if (plan.Limit is long limit)
-        {
-            window = window.Take((int)limit);
-        }
-
         var columns = new DatabaseColumn[plan.Projections.Count];
         for (int i = 0; i < plan.Projections.Count; i++)
         {
@@ -63,7 +53,7 @@ internal sealed partial class SqlPlanExecutor
                 IsNullable = plan.Projections[i].Expression is SqlCastExpression,
             };
         }
-        return new SqlMaterializedResultSet(columns, window.ToList());
+        return new SqlMaterializedResultSet(columns, ApplyRowWindow(projected, plan.Limit, plan.Offset));
     }
 
     private static IEnumerable<object?[]> EnumerateSystemViewRows(

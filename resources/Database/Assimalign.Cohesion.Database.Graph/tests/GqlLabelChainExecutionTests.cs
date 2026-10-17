@@ -170,7 +170,7 @@ public sealed class GqlLabelChainExecutionTests
             await session.ExecuteAsync("INSERT (:" + Chain(labels, "|") + ")", cancellationToken: CancellationToken.None));
 
         // Assert
-        error.Message.ShouldStartWith("COHDBG001", Case.Sensitive);
+        error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHDBG001");
         error.Message.Length.ShouldBeLessThan(1_000);
         (await RowsAsync(session, "MATCH (n) RETURN n")).Count.ShouldBe(before);
     }
@@ -268,7 +268,8 @@ public sealed class GqlLabelChainExecutionTests
 
         // Assert
         var failure = error.ShouldBeOfType<DatabaseException>();
-        failure.Message.ShouldStartWith("COHDBG008: Statement too complex", Case.Sensitive);
+        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHDBG008");
+        failure.Message.ShouldStartWith("Statement too complex", Case.Sensitive);
         failure.InnerException.ShouldBeOfType<InsufficientExecutionStackException>().Message.ShouldContain("GQL0009", Case.Sensitive);
         transaction.State.ShouldBe(TransactionState.Faulted);
         (await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync(CancellationToken.None)))
@@ -303,7 +304,7 @@ public sealed class GqlLabelChainExecutionTests
 
         // Assert
         statement!.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("GQL0009");
-        error.Message.ShouldStartWith("COHDBG008", Case.Sensitive);
+        error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHDBG008");
         (await ColumnAsync(session, "MATCH (n:X) RETURN n.name")).ShouldBe(["x"]);
     }
 
@@ -351,7 +352,8 @@ public sealed class GqlLabelChainExecutionTests
                 await session.ExecuteAsync(new GraphQueryRequest(statement), CancellationToken.None));
 
             // Assert
-            error.Message.ShouldStartWith("COHDBG008: Statement too complex", Case.Sensitive);
+            error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHDBG008");
+            error.Message.ShouldStartWith("Statement too complex", Case.Sensitive);
             error.InnerException.ShouldBeOfType<InsufficientExecutionStackException>();
             (await ColumnAsync(session, "MATCH (n:X) RETURN n.name")).ShouldBe(["x"]);
         }
@@ -520,7 +522,7 @@ public sealed class GqlLabelChainExecutionTests
         char.IsHighSurrogate(expression.ToString()[255]).ShouldBeTrue();
         described.ShouldBe(string.Concat(expression.ToString().AsSpan(0, 255), "..."));
         Should.NotThrow(() => strict.GetByteCount(described));
-        error.Message.ShouldStartWith("COHDBG001", Case.Sensitive);
+        error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHDBG001");
         error.Message.ShouldContain(described, Case.Sensitive);
         Should.NotThrow(() => strict.GetByteCount(error.Message));
     }

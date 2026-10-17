@@ -41,8 +41,6 @@ public static class OqlLanguageProfile
     [
         // Aggregate
         "COUNT", "SUM", "AVG", "MIN", "MAX",
-        // Numeric
-        "ABS",
         // Collection
         "ELEMENT", "FLATTEN", "FIRST", "LAST",
         "LISTTOSET", "UNIQUE",

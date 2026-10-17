@@ -112,10 +112,10 @@ public sealed class SqlDomainTests
         var added = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "ALTER TABLE t ADD COLUMN code nosuch"));
 
         // Assert
-        unknown.Message.ShouldBe($"{UnregisteredType}: Column 'code': type 'nosuch' does not exist: it is neither a built-in type nor a domain " +
+        unknown.ShouldHaveMessage($"{UnregisteredType}: Column 'code': type 'nosuch' does not exist: it is neither a built-in type nor a domain " +
             "this engine registers. Register the domain on the engine's builder (SqlDatabaseEngineBuilder.Types) before Build.");
         withArguments.Message.ShouldContain("SQL0005", Case.Sensitive);
-        added.Message.ShouldStartWith($"{UnregisteredType}: Column 'code': type 'nosuch' does not exist", Case.Sensitive);
+        added.ShouldStartWithMessage($"{UnregisteredType}: Column 'code': type 'nosuch' does not exist", Case.Sensitive);
         database.Catalog.TryGetTable("dbo", "t", out var table).ShouldBeTrue();
         table.Columns.ShouldHaveSingleItem();
     }
@@ -193,7 +193,7 @@ public sealed class SqlDomainTests
 
         // Assert: literal typing is unchanged, so the uncast literal is still TEXT, which no overload takes.
         rows.ShouldBe([[32]]);
-        withoutCast.Message.ShouldStartWith("COHSQLE006:", Case.Sensitive);
+        withoutCast.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE006");
     }
 
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Domains: a reopened database binds its columns' domains again, and without them opens and refuses writes to them with COHSQLE010")]
@@ -233,10 +233,10 @@ public sealed class SqlDomainTests
                 await ExecuteAsync(session, "DELETE FROM contacts WHERE id = 2");
 
                 rows.ShouldBe([[1L, "ann@example.com"], [2L, "bob@example.com"]]);
-                insert.Message.ShouldBe($"{UnregisteredType}: Column 'email' of table 'dbo.contacts' is of domain 'email', which this engine does not " +
+                insert.ShouldHaveMessage($"{UnregisteredType}: Column 'email' of table 'dbo.contacts' is of domain 'email', which this engine does not " +
                     "register, so the column cannot be written and the write is refused. Register the domain on the engine's builder " +
                     "(SqlDatabaseEngineBuilder.Types), or drop the column.");
-                update.Message.ShouldStartWith($"{UnregisteredType}: Column 'email' of table 'dbo.contacts' is of domain 'email'", Case.Sensitive);
+                update.ShouldStartWithMessage($"{UnregisteredType}: Column 'email' of table 'dbo.contacts' is of domain 'email'", Case.Sensitive);
                 (await RowsAsync(session, "SELECT id, note FROM contacts")).ShouldBe([[1L, "changed"]]);
             }
 
@@ -254,7 +254,7 @@ public sealed class SqlDomainTests
             declaring.Options.RootPath = root;
             declaring.AddDatabase("crm");
             var refused = await Should.ThrowAsync<SqlSchemaMigrationException>(async () => await declaring.BuildAsync());
-            refused.Message.ShouldStartWith($"{UnregisteredType}: SQL engine 'sql-domains', database 'crm': Column 'email' of table 'dbo.contacts' " +
+            refused.ShouldStartWithMessage($"{UnregisteredType}: SQL engine 'sql-domains', database 'crm': Column 'email' of table 'dbo.contacts' " +
                 "is of domain 'email', which this engine does not register.", Case.Sensitive);
         }
         finally
@@ -424,7 +424,7 @@ public sealed class SqlDomainTests
             var error = invalid.Errors.ShouldHaveSingleItem();
             error.Code.ShouldBe(SqlSchemaValidationErrorCode.UnsupportedType);
             error.Declaration.ShouldBe("customers.Email");
-            invalid.Message.ShouldContain(reason, Case.Sensitive);
+            invalid.ShouldContainMessage(reason, Case.Sensitive);
             Directory.Exists(root).ShouldBeFalse();
             return;
         }
@@ -433,7 +433,7 @@ public sealed class SqlDomainTests
 
         // Assert
         refused.Message.ShouldStartWith("COHSQLP001: SQL engine 'sql-domain-refused' cannot provision database 'shop': ", Case.Sensitive);
-        refused.Message.ShouldContain(reason, Case.Sensitive);
+        refused.ShouldContainMessage(reason, Case.Sensitive);
         refused.Message.ShouldEndWith("Nothing was opened or written.", Case.Sensitive);
         Directory.Exists(root).ShouldBeFalse();
     }
@@ -498,7 +498,7 @@ public sealed class SqlDomainTests
         rows.ShouldBe([["0.25", 1, 0]]);
         engine.Types.FindCast(SqlType.Double, SqlType.Text).ShouldNotBeNull().Context.ShouldBe(SqlCastContext.Assignment);
         plain.Types.FindCast(SqlType.Double, SqlType.Text).ShouldBeNull();
-        without.Message.ShouldStartWith("COHSQLE011: Cannot CAST type DOUBLE to TEXT: ", Case.Sensitive);
+        without.DiagnosticDetail("COHSQLE011").ShouldStartWith("Cannot CAST type DOUBLE to TEXT: ", Case.Sensitive);
     }
 
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Domains: a value of a domain cast to that domain is relabeled, not converted, and still checked")]
@@ -570,13 +570,13 @@ public sealed class SqlDomainTests
         var cast = await Should.ThrowAsync<DatabaseException>(() => RowsAsync(session, "SELECT CAST(1234.5 AS money2) FROM m"));
 
         // Assert: scale is rounded, and rejected statements write nothing; plain columns and domains share the codes.
-        precision.Message.ShouldStartWith("COHSQLE002:", Case.Sensitive);
+        precision.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE002");
         precision.Message.ShouldContain("domain 'money2'", Case.Sensitive);
-        length.Message.ShouldStartWith("COHSQLE012:", Case.Sensitive);
+        length.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE012");
         length.Message.ShouldContain("domain 'code5'", Case.Sensitive);
         update.Message.ShouldBe(length.Message);
-        select.Message.ShouldStartWith("COHSQLE002:", Case.Sensitive);
-        added.Message.ShouldStartWith("COHSQLE012:", Case.Sensitive);
+        select.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE002");
+        added.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE012");
         cast.Message.ShouldContain("Value exceeds precision 5 and scale 2", Case.Sensitive);
         (await RowsAsync(session, "SELECT id, v, c FROM m ORDER BY id")).ShouldBe([[1, 123.45m, "ABCDE"], [2, 123.46m, "A"]]);
     }
@@ -660,9 +660,9 @@ public sealed class SqlDomainTests
 
                 // Assert
                 rows.ShouldBe([[1, "ABCDEFGHIJ", 12.5m], [2, "XYZ", 1.25m]]);
-                insert.Message.ShouldStartWith($"{UnregisteredType}: Column 'c' of table 'dbo.r' is of domain 'code', which this engine registers over " +
+                insert.ShouldStartWithMessage($"{UnregisteredType}: Column 'c' of table 'dbo.r' is of domain 'code', which this engine registers over " +
                     "VARCHAR(3), but the column stores VARCHAR(10), so the column cannot be written", Case.Sensitive);
-                update.Message.ShouldStartWith($"{UnregisteredType}: Column 'a' of table 'dbo.r' is of domain 'amount', which this engine registers over " +
+                update.ShouldStartWithMessage($"{UnregisteredType}: Column 'a' of table 'dbo.r' is of domain 'amount', which this engine registers over " +
                     "NUMERIC(4, 1), but the column stores NUMERIC(10, 2)", Case.Sensitive);
             }
         }
@@ -690,8 +690,8 @@ public sealed class SqlDomainTests
         var toDomain = await Should.ThrowAsync<DatabaseException>(() => RowsAsync(session, "SELECT CAST(TRUE AS cents) FROM p"));
 
         // Assert
-        fromDomain.Message.ShouldStartWith("COHSQLE011: Cannot CAST type cents to DATE: no cast from cents to DATE is registered.", Case.Sensitive);
-        toDomain.Message.ShouldStartWith("COHSQLE011: Cannot CAST type BOOLEAN to cents: no cast from BOOLEAN to cents or to its base type BIGINT is registered.",
+        fromDomain.DiagnosticDetail("COHSQLE011").ShouldStartWith("Cannot CAST type cents to DATE: no cast from cents to DATE is registered.", Case.Sensitive);
+        toDomain.DiagnosticDetail("COHSQLE011").ShouldStartWith("Cannot CAST type BOOLEAN to cents: no cast from BOOLEAN to cents or to its base type BIGINT is registered.",
             Case.Sensitive);
     }
 
@@ -726,9 +726,9 @@ public sealed class SqlDomainTests
         var after = await RowsAsync(session, "SELECT CAST('7' AS points) FROM t");
 
         // Assert: the value's fault keeps the conversion contract's message; the code's fault is coded.
-        npe.Message.ShouldBe("COHSQLE007: Cast TEXT AS points failed: npe!");
+        npe.DiagnosticDetail("COHSQLE007").ShouldBe("Cast TEXT AS points failed: npe!");
         npe.InnerException.ShouldBeOfType<NullReferenceException>();
-        oce.Message.ShouldBe("COHSQLE007: Cast TEXT AS points failed: not this statement");
+        oce.DiagnosticDetail("COHSQLE007").ShouldBe("Cast TEXT AS points failed: not this statement");
         oce.InnerException.ShouldBeOfType<TaskCanceledException>();
         bad.Message.ShouldBe("CAST from String to points failed: not a number of points");
         bad.InnerException.ShouldBeOfType<FormatException>();

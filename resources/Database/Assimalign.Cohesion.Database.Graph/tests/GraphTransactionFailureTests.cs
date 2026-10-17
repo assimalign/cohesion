@@ -49,7 +49,8 @@ public sealed class GraphTransactionFailureTests
         await transaction.RollbackAsync();
 
         // Assert
-        failure.Message.ShouldStartWith(code, Case.Sensitive);
+        if (code == "COHDBG001") { failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == code); }
+        else { failure.Message.ShouldStartWith(code, Case.Sensitive); }
         refused.Message.ShouldStartWith("COHDBG007", Case.Sensitive);
         refused.InnerException.ShouldBeSameAs(failure);
         faultedState.ShouldBe(TransactionState.Faulted);
@@ -125,7 +126,7 @@ public sealed class GraphTransactionFailureTests
 
         // Assert
         error.Message.ShouldStartWith("COHDBG007", Case.Sensitive);
-        error.InnerException.ShouldNotBeNull().Message.ShouldStartWith("COHDBG001", Case.Sensitive);
+        error.InnerException.ShouldBeAssignableTo<DatabaseException>().ShouldNotBeNull().Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHDBG001");
         transaction.State.ShouldBe(TransactionState.RolledBack);
         session.CurrentTransaction.ShouldBeNull();
         // The client's rollback in a catch block after the failed commit is a no-op, not a second error.

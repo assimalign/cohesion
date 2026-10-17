@@ -17,7 +17,7 @@ internal sealed partial class SqlPlanner
         // The language capability check rejects unsupported forms before planning.
         if (select.Joins.Count != 1 || select.Joins[0] is not { JoinType: SqlJoinType.Inner, Condition: not null })
         {
-            throw new DatabaseException("Only a two-table INNER JOIN with an ON predicate can be planned.");
+            throw new SqlPlanningException("COHSQLE013", "Only a two-table INNER JOIN with an ON predicate can be planned.", select.Location);
         }
 
         var leftReference = select.From!;
@@ -29,7 +29,7 @@ internal sealed partial class SqlPlanner
             && (leftReference.Alias is not null || rightReference.Alias is not null
                 || string.Equals(left.Schema, right.Schema, StringComparison.OrdinalIgnoreCase)))
         {
-            throw new DatabaseException($"Duplicate table name or alias '{leftName}'; use distinct aliases for a self join.");
+            throw new SqlPlanningException("COHSQLE019", $"Duplicate table name or alias '{leftName}'; use distinct aliases for a self join.", select.Location);
         }
 
         return [new SqlTableBinding(left, leftReference, 0), new SqlTableBinding(right, rightReference, left.Columns.Count)];

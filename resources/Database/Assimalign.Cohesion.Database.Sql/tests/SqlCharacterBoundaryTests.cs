@@ -34,7 +34,7 @@ public sealed class SqlCharacterBoundaryTests
             await RowsAsync(session, $"SELECT {sign}(CASE WHEN TRUE THEN c ELSE NULL END) FROM t"));
 
         // Assert
-        failure.Message.ShouldBe($"COHSQLE003: Invalid operand type: unary '{sign}' requires a numeric operand, but the operand is Character.");
+        failure.DiagnosticDetail("COHSQLE003").ShouldBe($"Invalid operand type: unary '{sign}' requires a numeric operand, but the operand is Character.");
     }
 
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Native domain checks apply their own CHAR parameter width")]
@@ -429,7 +429,7 @@ public sealed class SqlCharacterBoundaryTests
         var failure = await Should.ThrowAsync<DatabaseException>(() => RowsAsync(session, $"SELECT observed_char({arguments}) FROM t"));
 
         // Assert
-        failure.Message.ShouldContain("COHSQLE012");
+        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE012");
     }
 
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Native CHAR aggregates repad already typed arguments to their declared lengths")]
@@ -477,7 +477,7 @@ public sealed class SqlCharacterBoundaryTests
         var failure = await Should.ThrowAsync<DatabaseException>(() => RowsAsync(session, $"SELECT observed_char({arguments}) FROM t"));
 
         // Assert
-        failure.Message.ShouldContain("COHSQLE012");
+        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE012");
     }
 
     private static async Task<List<object?[]>> RowsAsync(SqlDatabaseSession session, string sql,

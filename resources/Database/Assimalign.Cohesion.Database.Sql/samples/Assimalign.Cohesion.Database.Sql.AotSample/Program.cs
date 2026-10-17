@@ -281,7 +281,10 @@ internal static class Program
         }
         catch (Exception exception) when (exception is DatabaseException or SqlClientException)
         {
-            return exception.Message;
+            // Exercise the plain-data diagnostics carrier under NativeAOT too. The wire client
+            // already received the server's composed text; in process the code is structured.
+            return exception is DatabaseException { Diagnostics.Count: > 0 } failure
+                ? $"{failure.Diagnostics[0].Code}: {failure.Message}" : exception.Message;
         }
     }
 

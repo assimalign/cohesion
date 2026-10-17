@@ -34,26 +34,102 @@ public sealed class SqlTransactionAndConstraintParserTests
         SqlExpressionRenderer.Render(expression).ShouldBe(expected);
     }
 
-    [Theory]
-    [InlineData("BEGIN;", SqlQueryCommandType.Begin)]
-    [InlineData("begin transaction;", SqlQueryCommandType.Begin)]
-    [InlineData("COMMIT;", SqlQueryCommandType.Commit)]
-    [InlineData("COMMIT TRANSACTION;", SqlQueryCommandType.Commit)]
-    [InlineData("ROLLBACK;", SqlQueryCommandType.Rollback)]
-    [InlineData("ROLLBACK TRANSACTION;", SqlQueryCommandType.Rollback)]
-    public void Transaction_ParsesOnlyItsCommand(string sql, SqlQueryCommandType command)
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Transactions: spellings accept case, trivia and optional terminators")]
+    [InlineData("START TRANSACTION", SqlQueryCommandType.Begin)]
+    [InlineData("BEGIN", SqlQueryCommandType.Begin)]
+    [InlineData("BEGIN WORK", SqlQueryCommandType.Begin)]
+    [InlineData("BEGIN TRANSACTION", SqlQueryCommandType.Begin)]
+    [InlineData("COMMIT", SqlQueryCommandType.Commit)]
+    [InlineData("COMMIT WORK", SqlQueryCommandType.Commit)]
+    [InlineData("COMMIT TRANSACTION", SqlQueryCommandType.Commit)]
+    [InlineData("END", SqlQueryCommandType.Commit)]
+    [InlineData("ROLLBACK", SqlQueryCommandType.Rollback)]
+    [InlineData("ROLLBACK WORK", SqlQueryCommandType.Rollback)]
+    [InlineData("ROLLBACK TRANSACTION", SqlQueryCommandType.Rollback)]
+    public void Parse_TransactionSpelling_ShouldRetainCommand(string sql, SqlQueryCommandType command)
     {
-        var statement = Parse(sql);
-        statement.Diagnostics.ShouldBeEmpty();
-        statement.SqlExpression.ShouldBeOfType<SqlTransactionExpression>().CommandType.ShouldBe(command);
+        // Arrange
+        string mixedCase = string.Concat(sql.Select((character, index) => index % 2 == 0
+            ? char.ToLowerInvariant(character) : char.ToUpperInvariant(character)));
+        string[] forms = [sql, sql.ToLowerInvariant(), mixedCase,
+            mixedCase.Replace(" ", " /* between */ "), mixedCase.Replace(" ", " -- between\r\n ")];
+
+        // Act / Assert
+        foreach (string form in forms)
+        {
+            foreach (string terminator in new[] { "", ";" })
+            {
+                var statement = Parse(form + terminator);
+                statement.SqlExpression.ShouldBeOfType<SqlTransactionExpression>().CommandType.ShouldBe(command);
+                if (terminator.Length == 0)
+                {
+                    // SQL0100 uniformly reports an omitted terminator for every SQL statement.
+                    statement.Diagnostics.ShouldNotContain(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error || diagnostic.Severity == DiagnosticSeverity.Warning);
+                    var diagnostic = statement.Diagnostics.ShouldHaveSingleItem();
+                    diagnostic.Code.ShouldBe("SQL0100");
+                    diagnostic.Severity.ShouldBe(DiagnosticSeverity.Information);
+                }
+                else
+                {
+                    statement.Diagnostics.ShouldBeEmpty();
+                }
+            }
+        }
     }
 
-    [Theory]
-    [InlineData("BEGIN SAVEPOINT marker;")]
-    [InlineData("ROLLBACK TO marker;")]
-    [InlineData("COMMIT WORK;")]
-    public void Transaction_UnsupportedSuffix_IsAnError(string sql) =>
-        Parse(sql).Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "SQL0003");
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Transactions: malformed and excluded forms retain their diagnostic code")]
+    [InlineData("START", "SQL0003")]
+    [InlineData("START WORK", "SQL0003")]
+    [InlineData("BEGIN SAVEPOINT marker", "SQL0003")]
+    [InlineData("ROLLBACK TO marker", "SQL0003")]
+    [InlineData("BEGIN WORK TRANSACTION", "SQL0003")]
+    [InlineData("COMMIT WORK WORK", "SQL0003")]
+    [InlineData("END WORK", "SQL0003")]
+    [InlineData("END TRANSACTION", "SQL0003")]
+    [InlineData("BEGIN TRAN", "SQL0003")]
+    [InlineData("BEGIN TRANSACTION named", "SQL0003")]
+    [InlineData("END IF", "SQL0003")]
+    [InlineData("COMMIT PREPARED 'x'", "SQL0003")]
+    [InlineData("START TRANSACTION ISOLATION LEVEL READ COMMITTED", "SQL0003")]
+    [InlineData("START TRANSACTION READ ONLY", "SQL0003")]
+    [InlineData("BEGIN WORK ISOLATION LEVEL SERIALIZABLE", "SQL0003")]
+    [InlineData("ROLLBACK WORK TO SAVEPOINT a", "SQL0003")]
+    [InlineData("COMMIT AND NO CHAIN", "SQL0003")]
+    [InlineData("COMMIT AND CHAIN", "SQL0003")]
+    [InlineData("ROLLBACK AND NO CHAIN", "SQL0003")]
+    [InlineData("END AND NO CHAIN", "SQL0003")]
+    [InlineData("ABORT", "SQL0002")]
+    [InlineData("ABORT WORK", "SQL0002")]
+    [InlineData("ABORT TRANSACTION", "SQL0002")]
+    [InlineData("SAVEPOINT a", "SQL0002")]
+    [InlineData("RELEASE SAVEPOINT a", "SQL0002")]
+    [InlineData("SET TRANSACTION ISOLATION LEVEL READ COMMITTED", "SQL0002")]
+    [InlineData("PREPARE TRANSACTION 'x'", "SQL0002")]
+    [InlineData("\"START\" TRANSACTION", "SQL0002")]
+    [InlineData("START \"TRANSACTION\"", "SQL0003")]
+    [InlineData("BEGIN \"WORK\"", "SQL0003")]
+    public void Parse_UnsupportedTransactionForm_ShouldReportExpectedCode(string sql, string code)
+    {
+        // Act
+        var statement = Parse(sql + ";");
+
+        // Assert
+        statement.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(code);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Transactions: contextual words remain identifiers and CASE END is unchanged")]
+    [InlineData("CREATE TABLE shifts (start INT, work TEXT, abort BOOLEAN);")]
+    [InlineData("INSERT INTO shifts (start, work, abort) VALUES (1, 'day', FALSE);")]
+    [InlineData("SELECT start, work, abort FROM shifts;")]
+    [InlineData("SELECT CASE WHEN start = 1 THEN work ELSE 'other' END FROM shifts;")]
+    public void Parse_TransactionWordsInOtherContexts_ShouldReportNoDiagnostics(string sql)
+    {
+        // Act
+        var statement = Parse(sql);
+
+        // Assert
+        statement.Diagnostics.ShouldBeEmpty();
+    }
 
     [Fact]
     public void TransactionKeyword_RequiresAControlCommand() =>

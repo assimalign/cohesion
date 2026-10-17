@@ -35,54 +35,54 @@ internal sealed class DocumentPlanner
         OqlSelectExpression select => Plan(select),
         OqlCreateIndexExpression createIndex => PlanCreateIndex(createIndex),
         OqlDropIndexExpression dropIndex => PlanDropIndex(dropIndex),
-        _ => throw new DatabaseException("The OQL statement is not supported by the document executor."),
+        _ => throw new DocumentPlanningException("COHDOC001", "The OQL statement is not supported by the document executor.", expression.Location),
     };
 
     internal DocumentPlan Plan(OqlSelectExpression query)
     {
         var logical = CreateLogicalPlan(query);
-        var collection = ResolveCollection(query.Collection);
+        var collection = ResolveCollection(query.Collection, query.Location);
         return new DocumentPlan(logical, collection, ChooseAccess(query, _catalog.GetIndexes(collection.Id, _snapshot)));
     }
 
     private DocumentCreateIndexPlan PlanCreateIndex(OqlCreateIndexExpression create)
     {
-        DocumentSystemCollections.EnsureReadOnly(create.Collection);
+        DocumentSystemCollections.EnsureReadOnly(create.Collection, create.Location);
         if (string.IsNullOrWhiteSpace(create.IndexName))
         {
-            throw new DatabaseException("CREATE INDEX requires an index name.");
+            throw new DocumentPlanningException("COHDOC001", "CREATE INDEX requires an index name.", create.Location);
         }
 
         string path = IndexPath(create.Path, alias: null)
-            ?? throw new DatabaseException($"CREATE INDEX '{create.IndexName}' requires a representable document path.");
-        return new DocumentCreateIndexPlan(ResolveCollection(create.Collection), create.IndexName, path);
+            ?? throw new DocumentPlanningException("COHDOC001", $"CREATE INDEX '{create.IndexName}' requires a representable document path.", create.Location);
+        return new DocumentCreateIndexPlan(ResolveCollection(create.Collection, create.Location), create.IndexName, path);
     }
 
     private DocumentDropIndexPlan PlanDropIndex(OqlDropIndexExpression drop)
     {
-        DocumentSystemCollections.EnsureReadOnly(drop.Collection);
+        DocumentSystemCollections.EnsureReadOnly(drop.Collection, drop.Location);
         if (string.IsNullOrWhiteSpace(drop.IndexName))
         {
-            throw new DatabaseException("DROP INDEX requires an index name.");
+            throw new DocumentPlanningException("COHDOC001", "DROP INDEX requires an index name.", drop.Location);
         }
 
-        return new DocumentDropIndexPlan(ResolveCollection(drop.Collection), drop.IndexName);
+        return new DocumentDropIndexPlan(ResolveCollection(drop.Collection, drop.Location), drop.IndexName);
     }
 
-    private DocumentCollectionMetadata ResolveCollection(string name)
+    private DocumentCollectionMetadata ResolveCollection(string name, Assimalign.Cohesion.Database.Language.Location? location)
     {
         if (string.IsNullOrWhiteSpace(name))
         {
-            throw new DatabaseException("An OQL statement requires a collection name.");
+            throw new DocumentPlanningException("COHDOC001", "An OQL statement requires a collection name.", location);
         }
 
         return _catalog.FindCollection(name, _snapshot)
-            ?? throw new DatabaseException($"Collection '{name}' does not exist.");
+            ?? throw new DocumentPlanningException("COHDOC002", $"Collection '{name}' does not exist.", location);
     }
 
     internal static DocumentLogicalPlan CreateLogicalPlan(OqlSelectExpression query)
     {
-        if (query.Projections.Count == 0) { throw new DatabaseException("OQL SELECT requires a projection."); }
+        if (query.Projections.Count == 0) { throw new DocumentPlanningException("COHDOC001", "OQL SELECT requires a projection.", query.Location); }
         // An explicit projection alias is visible to ORDER BY. Other paths
         // continue to address source documents, including unprojected fields.
         var ordering = query.OrderBy.Select(order => order.Expression is OqlPathExpression { Segments.Count: 1 } path &&
@@ -97,7 +97,7 @@ internal sealed class DocumentPlanner
             Validate(query.Predicate, allowAggregate: false);
         }
         foreach (var key in query.GroupBy) { Validate(key, allowAggregate: false); }
-        if (query.Having is not null && !grouped) { throw new DatabaseException("OQL HAVING requires grouping or an aggregate."); }
+        if (query.Having is not null && !grouped) { throw new DocumentPlanningException("COHDOC001", "OQL HAVING requires grouping or an aggregate.", query.Having.Location); }
         var projections = new List<DocumentProjection>();
         foreach (var projection in query.Projections)
         {
@@ -112,7 +112,7 @@ internal sealed class DocumentPlanner
             };
             if (projections.Any(existing => string.Equals(existing.Name, name, StringComparison.Ordinal)))
             {
-                throw new DatabaseException($"OQL projection name '{name}' occurs more than once; specify unique aliases.");
+                throw new DocumentPlanningException("COHDOC003", $"OQL projection name '{name}' occurs more than once; specify unique aliases.", projection.Expression.Location);
             }
             projections.Add(new DocumentProjection(name, projection.Expression));
         }
@@ -290,12 +290,12 @@ internal sealed class DocumentPlanner
             case OqlUnaryExpression unary when unary.Operator is "+" or "-" or "NOT" or "IS NULL" or "IS NOT NULL":
                 Validate(unary.Operand, allowAggregate);
                 return;
-            case OqlCallExpression call when allowAggregate && call.Name is "COUNT" or "SUM" or "AVG" or "MIN" or "MAX":
-                if (call.Arguments.Count != 1) { throw new DatabaseException($"OQL aggregate '{call.Name}' requires one argument."); }
+            case OqlCallExpression call when allowAggregate && OqlLanguageProfile.Instance.Functions.Contains(call.Name, StringComparer.OrdinalIgnoreCase):
+                if (call.Arguments.Count != 1) { throw new DocumentPlanningException("COHDOC001", $"OQL aggregate '{call.Name}' requires one argument.", call.Location); }
                 Validate(call.Arguments[0], allowAggregate: false, allowStar: call.Name == "COUNT");
                 return;
             default:
-                throw new DatabaseException("The expression is not valid in this OQL planning context.");
+                throw new DocumentPlanningException("COHDOC001", "The expression is not valid in this OQL planning context.", expression.Location);
         }
     }
 
@@ -310,7 +310,7 @@ internal sealed class DocumentPlanner
             return;
         }
         if (expression is OqlUnaryExpression unary) { ValidateGrouped(unary.Operand, query); return; }
-        throw new DatabaseException("An OQL grouped query may only read grouping expressions outside aggregate calls.");
+        throw new DocumentPlanningException("COHDOC001", "An OQL grouped query may only read grouping expressions outside aggregate calls.", expression.Location);
     }
 
     private static bool EquivalentExpression(OqlExpression left, OqlExpression right, string? alias) => (left, right) switch

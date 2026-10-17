@@ -792,6 +792,26 @@ carried: `DatabaseEngine` and `DatabaseInstance` are `IAsyncDisposable` and `IDi
   made root → `Protocol` impossible. The child-root inversion removed that
   constraint, so the split was collapsed back into the protocol package.
 
+## Diagnostics carrier and executable functions (#1103)
+
+`DatabaseException.Diagnostics` is a non-null, read-only snapshot of the complete diagnostic
+list, ordered stably by start offset (unlocated entries follow located entries). Legacy
+constructors supply an empty list. `Diagnostic`, its severity and location enum remain plain
+data in `Database.Types`; no reflection or runtime discovery is involved.
+
+SQL, OQL and GQL text factories, including `GraphPathsQueryRequest.FromGql`, retain their
+first-error Message and carry every diagnostic on `DatabaseParseException`. A session rejects
+the same parsed typed statement with the identical exception contract; no error AST executes.
+The documented SQL/GQL parser-out-of-stack translations remain engine complexity failures.
+Planner rejections carry stable codes and AST offsets where available; codes are separate from
+the in-process message. SQL and Graph protocol 1.0 compose `CODE: message` for ExecutionFailure.
+
+`QueryLanguageProfile.Functions` is the executable built-in set. Recognized non-executing
+functions live in each language's unsupported vocabulary and report COHDBL001 at parse time.
+The single function guard in each engine's execution-conformance suite requires live evidence
+for every declared name and rejects evidence for undeclared names. OQL temporarily exempts
+exactly ELEMENT, FLATTEN, FIRST, LAST, LISTTOSET and UNIQUE, each pinned to COHDBL001 until #1126.
+
 ## Error model
 
 `DatabaseException` (inherits `Exception` per the area-scoped exception rule) is
@@ -1062,3 +1082,9 @@ JSON serialization live in `Database.Sql.Schema`.
   registration and hosting implementation remain in `Database.Hosting` (O34).
 - No model-specific request or result types — models subclass the
   `Database.Execution` family in their own packages.
+
+## Diagnostic ordering (#1103 review)
+
+The exception carrier snapshots diagnostics and sorts first by whether Start is absent,
+then by Start. Located diagnostics precede unlocated ones even at int.MaxValue; ordering
+within each equal-start group and among unlocated entries is stable.

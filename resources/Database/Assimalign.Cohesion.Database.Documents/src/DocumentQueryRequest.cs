@@ -48,7 +48,7 @@ public sealed class DocumentQueryRequest : DatabaseRequest
         var error = statement.Diagnostics.FirstOrDefault(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
         if (error is not null)
         {
-            throw new DatabaseParseException($"OQL parse error {error.Code}: {error.Message}");
+            throw new DatabaseParseException($"OQL parse error {error.Code}: {error.Message}", statement.Diagnostics);
         }
         return new DocumentQueryRequest(statement, parameters);
     }

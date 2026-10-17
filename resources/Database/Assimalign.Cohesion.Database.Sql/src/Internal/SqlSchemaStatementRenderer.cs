@@ -307,6 +307,10 @@ internal static class SqlSchemaStatementRenderer
         {
             requiresQuotes |= string.Equals(value, keyword, StringComparison.OrdinalIgnoreCase);
         }
+        foreach (string word in SqlLanguageProfile.RecognizedUnsupportedVocabulary)
+        {
+            requiresQuotes |= string.Equals(value, word, StringComparison.OrdinalIgnoreCase);
+        }
         foreach (string function in SqlLanguageProfile.Instance.Functions)
         {
             requiresQuotes |= string.Equals(value, function, StringComparison.OrdinalIgnoreCase);

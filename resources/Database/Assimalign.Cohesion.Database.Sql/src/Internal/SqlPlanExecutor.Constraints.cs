@@ -1147,7 +1147,7 @@ internal sealed partial class SqlPlanExecutor
                     throw new SqlFunctionResultMismatchException(call, ResultName(call, called), "BOOLEAN");
                 }
 
-                throw new DatabaseException("CHECK requires a BOOLEAN predicate.");
+                throw SqlDefinitionBinder.Refuse("CHECK requires a BOOLEAN predicate.", expression.Location);
             }
         }
 
@@ -1277,7 +1277,7 @@ internal sealed partial class SqlPlanExecutor
             }
             if (function is SqlExpressionFunction { Unresolved: { } reason })
             {
-                throw SqlDefinitionBinder.Refuse($"Function '{function.Name}' has an unresolved SQL definition ({reason}).");
+                throw SqlDefinitionBinder.Refuse($"Function '{function.Name}' has an unresolved SQL definition ({reason}).", call.Location);
             }
 
             return function;
