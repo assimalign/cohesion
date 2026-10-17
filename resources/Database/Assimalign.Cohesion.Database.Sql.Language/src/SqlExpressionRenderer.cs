@@ -261,6 +261,12 @@ public static class SqlExpressionRenderer
     private static string Literal(SqlLiteralExpression literal) => literal.LiteralType switch
     {
         SqlLiteralType.String => "'" + literal.Value.Replace("'", "''", StringComparison.Ordinal) + "'",
+        SqlLiteralType.Date => "DATE '" + literal.Value + "'",
+        SqlLiteralType.Time => "TIME '" + literal.Value + "'",
+        SqlLiteralType.Timestamp => "TIMESTAMP '" + literal.Value + "'",
+        SqlLiteralType.TimestampWithTimeZone => "TIMESTAMPTZ '" + literal.Value + "'",
+        SqlLiteralType.Interval => "INTERVAL '" + literal.Value + "'",
+        SqlLiteralType.Binary => "X'" + literal.Value + "'",
         SqlLiteralType.Null => "NULL",
         SqlLiteralType.Boolean => literal.Value.Equals("TRUE", StringComparison.OrdinalIgnoreCase) ? "TRUE" : "FALSE",
         SqlLiteralType.Integer or SqlLiteralType.Float => literal.Value,

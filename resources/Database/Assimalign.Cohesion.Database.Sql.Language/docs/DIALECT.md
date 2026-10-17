@@ -292,7 +292,9 @@ the tree alone:
   node (#1151).
 - Literals keep their value: strings double embedded quotes (`'O''Brien'`),
   numbers keep their digits as written (`007`, `1.5e3`, `.5`), and a `+` that was
-  part of a numeric literal is gone (`+5` is `5`).
+  part of a numeric literal is gone (`+5` is `5`). Typed literals store parser-normalized
+  canonical text: DATE/TIME/TIMESTAMP/TIMESTAMPTZ prefixes, INTERVAL total seconds,
+  uppercase X hex, and ordinary quoted text for N strings.
 - Names keep their spelling. An identifier is delimited with `"` only when the
   lexer would not read it back as one plain word: a keyword, a builtin function
   name, a word with a positional meaning such as `escape`, a name with spaces,
@@ -431,6 +433,11 @@ from persisted catalog metadata**: a missing trailing field takes the added
 column's validated literal default. Existing row bytes and MVCC writer/deleter
 stamps are unchanged. A stored NULL remains NULL; it is never mistaken for a
 missing field. A later UPDATE writes the resulting full row normally.
+
+Signed numeric defaults (`-1`, `- 1`, `-1.5e3`, `+7` and the BIGINT minimum)
+and typed DATE/TIME/TIMESTAMP/TIMESTAMPTZ/INTERVAL/X/N literals use this same path.
+A typed DEFAULT must match the column storage type; a mismatch fails planning before
+mutation. `DEFAULT -'x'` reports SQL0003 while the default grammar remains literal-only.
 
 A subsequent INSERT that omits the column uses the same default. Explicit NULL
 is stored for nullable columns and rejected for NOT NULL columns. A nullable
@@ -670,6 +677,21 @@ Nonzero floating equality may still seek; joins retain their conservative
 approximate-numeric scan policy. Mapper restrictions and key exclusions remain
 deferred with #1007/#1008.
 
+## Timestamp normalization (#1110)
+
+TIMESTAMP is a zone-less wall clock stored as DateTime with Kind Unspecified.
+TIMESTAMPTZ (TIMESTAMP WITH TIME ZONE) is an instant stored as DateTimeOffset;
+a literal without an offset means +00:00, and an explicit offset is retained.
+There is no session time zone. Wherever TIMESTAMP meets TIMESTAMPTZ in a cast,
+comparison or assignment, TIMESTAMP is read as UTC. Converting TIMESTAMPTZ to
+TIMESTAMP, DATE or TIME uses its UTC wall clock; the resulting TIMESTAMP has
+Kind Unspecified. INSERT and UPDATE apply the same rule to literals and parameters.
+For example, assigning `TIMESTAMPTZ '2024-01-01 12:00:00+02:00'` to a TIMESTAMP
+column stores 10:00 Unspecified. The reverse assignment uses offset +00:00.
+A plain string compared to a temporal value remains a type error; use
+`DATE '2024-01-01'` for a date comparison. CAST, datetime functions and expression
+defaults use this normalization rule; key identity is specified below.
+
 ## Temporal value identity (#1099)
 
 `TIMESTAMP` and `TIMESTAMPTZ` each have exactly one normalization rule.
@@ -680,7 +702,7 @@ a scan therefore return the same rows for every predicate.
 
 | Type | Identity (compared, ordered and keyed by) | Not part of identity | Stored and returned |
 |---|---|---|---|
-| `TIMESTAMP` (`DateTime`) | Wall-clock ticks | `DateTimeKind` (`Unspecified`, `Utc`, `Local`) | The written kind |
+| `TIMESTAMP` (`DateTime`) | Wall-clock ticks | `DateTimeKind` (`Unspecified`, `Utc`, `Local`) | Kind Unspecified |
 | `TIMESTAMPTZ` (`DateTimeOffset`) | Instant (UTC ticks) | Offset | The written offset |
 
 - `TIMESTAMP` is a timestamp without time zone. Values with equal ticks are equal
@@ -692,8 +714,7 @@ a scan therefore return the same rows for every predicate.
   WITH TIME ZONE`: `12:00+00:00`, `15:00+03:00` and `06:30-05:30` are one value,
   and values order by instant, never by local wall-clock time. A `UNIQUE` or
   `PRIMARY KEY` column rejects the same instant at another offset.
-- Rows keep what was written: a read returns the kind or offset the row was
-  inserted or last updated with. Index keys hold only the identity, so updating a
+- Rows return TIMESTAMP with Kind Unspecified and preserve the written TIMESTAMPTZ offset. Index keys hold only the identity, so updating a
   row to an equal value in another kind or offset does not collide with itself.
 - `=`, `<`, `<=`, `>`, `>=` and `BETWEEN` on either type seek an applicable
   index (alone, or after an equality prefix of a composite key), and two-table
@@ -1182,7 +1203,7 @@ conventions, not the complete ISO view layouts. Columns below are listed in
 | Relation | Columns, in order | Rows |
 |---|---|---|
 | `INFORMATION_SCHEMA.TABLES` | `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `TABLE_TYPE` | Stored tables in the current database; `TABLE_TYPE = 'BASE TABLE'` |
-| `INFORMATION_SCHEMA.COLUMNS` | `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `COLUMN_NAME`, `ORDINAL_POSITION`, `COLUMN_DEFAULT`, `IS_NULLABLE`, `DATA_TYPE`, `CHARACTER_MAXIMUM_LENGTH`, `CHARACTER_OCTET_LENGTH`, `NUMERIC_PRECISION`, `NUMERIC_PRECISION_RADIX`, `NUMERIC_SCALE`, `DATETIME_PRECISION` | One row per live table column; ordinals start at one and have no gap where a column was dropped. All 19 DATA_TYPE names parse in DDL and CAST; aliases report canonical identity and modifiers |
+| `INFORMATION_SCHEMA.COLUMNS` | `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `COLUMN_NAME`, `ORDINAL_POSITION`, `COLUMN_DEFAULT`, `IS_NULLABLE`, `DATA_TYPE`, `CHARACTER_MAXIMUM_LENGTH`, `CHARACTER_OCTET_LENGTH`, `NUMERIC_PRECISION`, `NUMERIC_PRECISION_RADIX`, `NUMERIC_SCALE`, `DATETIME_PRECISION` | One row per live table column; ordinals start at one and have no gap where a column was dropped. All 19 DATA_TYPE names parse in DDL and CAST; aliases report canonical identity and modifiers. COLUMN_DEFAULT renders resolved temporal and binary literal values with typed prefixes, including defaults declared as plain strings; other defaults retain canonical SQL |
 | `INFORMATION_SCHEMA.TABLE_CONSTRAINTS` | `CONSTRAINT_CATALOG`, `CONSTRAINT_SCHEMA`, `CONSTRAINT_NAME`, `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `CONSTRAINT_TYPE`, `IS_DEFERRABLE`, `INITIALLY_DEFERRED` | Primary keys, unique indexes/constraints, foreign keys, and explicit checks; both deferral fields are `NO` |
 | `INFORMATION_SCHEMA.KEY_COLUMN_USAGE` | `CONSTRAINT_CATALOG`, `CONSTRAINT_SCHEMA`, `CONSTRAINT_NAME`, `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `COLUMN_NAME`, `ORDINAL_POSITION` | One row per primary, unique, or foreign-key column, in constraint order |
 | `INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS` | `CONSTRAINT_CATALOG`, `CONSTRAINT_SCHEMA`, `CONSTRAINT_NAME`, `UNIQUE_CONSTRAINT_CATALOG`, `UNIQUE_CONSTRAINT_SCHEMA`, `UNIQUE_CONSTRAINT_NAME`, `MATCH_OPTION`, `UPDATE_RULE`, `DELETE_RULE` | Foreign keys with the referenced key identity; `MATCH_OPTION = 'NONE'`, `UPDATE_RULE = 'RESTRICT'`, delete rule `RESTRICT` or `CASCADE` |
@@ -1295,11 +1316,46 @@ the mapper diagnoses such retained names before emitting SQL.
 
 | Form | Examples | AST literal type |
 |---|---|---|
+| National string | `N'héllo'` (adjacent prefix; canonical output `'héllo'`) | `String` |
 | String | `'it''s'` (doubled-quote escape) | `String` |
 | Integer | `42` | `Integer` |
 | Float | `3.14`, `.5`, `1e10` | `Float` |
+| Date | `DATE '2024-01-01'`; exactly yyyy-MM-dd | `Date` (DateOnly) |
+| Time | `TIME [WITHOUT TIME ZONE] '10:30[:ss[.fffffff]]'`; canonical `TIME '10:30:00'` | `Time` (TimeOnly) |
+| Timestamp | `TIMESTAMP [WITHOUT TIME ZONE] '2024-01-01[ T10:30[:ss[.fffffff]]]'`; one space or T separates date and time; canonical `TIMESTAMP '2024-01-01 10:30:00'` | `Timestamp` (DateTime) |
+| Timestamp with zone | `TIMESTAMPTZ '2024-01-01 10:30:00[Z or +/-HH:mm]'`, or `TIMESTAMP WITH TIME ZONE`; canonical seven fractional digits and explicit offset | `TimestampWithTimeZone` (DateTimeOffset) |
+| Day-time interval | `INTERVAL '3' DAY`, `INTERVAL '1:30' HOUR TO MINUTE`, `INTERVAL '2 days 3 hours'`, `INTERVAL 'P1DT2H'`; canonical `INTERVAL 'PT93600S'` for the last example | `Interval` (TimeSpan) |
+| Binary string | `X''`, `X'00ff'`, `x'ABCD'`; adjacent prefix, even-count hexadecimal digits; canonical `X'00FF'` | `Binary` (byte[]) |
 | Boolean | `TRUE`, `FALSE` | `Boolean` |
 | Null | `NULL` | `Null` |
+
+Typed literals execute in every scalar position, including predicates, IN, CASE, VALUES,
+UPDATE and literal DEFAULTs. The parser validates their text and stores canonical values;
+invalid contents report SQL0008 over the complete literal. A bare date, time or interval
+remains a column reference. X and N prefixes must touch the quote: `X '00'` is not a literal.
+X is the ISO binary string form; PostgreSQL instead treats X as a bit-string form.
+
+Times use 00..23 hours, 00..59 minutes and seconds, and at most seven fractional digits.
+TIME and TIMESTAMP literals reject zones. TIMESTAMPTZ accepts Z or an offset within
++/-14:00; missing offsets mean UTC. Named zones, BC years, infinity, epoch, today and now
+are outside the grammar. `SqlLiteralText` exposes the invariant text readers publicly in
+Sql.Language, for reuse by CAST. Existing plain-string assignment keeps its input grammar,
+including TIMESTAMP ignoring a written offset, through SqlTemporalText.
+
+INTERVAL is day-time only. Qualifiers DAY, HOUR, MINUTE and SECOND and descending TO
+ranges are consumed greedily; multi-field values use a space after DAY and colons between
+clock fields. Subordinate hours are below 24, and subordinate minutes/seconds below 60.
+Only SECOND admits a fraction in qualified forms. A leading sign applies to the whole
+qualified value. Unit strings accept signed decimal weeks, days, hours, minutes, seconds, milliseconds
+and microseconds (including w/d/h/m/s, hr/hrs, min/mins, sec/secs, ms/msec and us/usec aliases),
+once per field, following PostgreSQL datetime.c:188-250. ISO durations use P with D and
+T with H/M/S in descending order, or a standalone PnW week duration, with an optional leading sign. All durations must fit
+TimeSpan exactly at 100 ns resolution; fractions have at most seven digits. Canonical
+text is optional minus, PT, total seconds and S. Year/month fields in every spelling
+(including YEAR TO MONTH, year/yr/mon/mons, quarter/decade/century/millennium units, P1Y and P1M) report COHDBL001;
+PT1M is one minute. Field precision, temporal precision, TIME WITH TIME ZONE,
+numeric/UUID/JSON/BYTEA typed strings and B/E/U& string prefixes also report COHDBL001.
+INTERVAL arithmetic and unary minus on INTERVAL remain owned by sql-functions (#1120).
 
 The engine evaluates an integer literal as BIGINT and a fractional or exponent
 literal as an exact `System.Decimal`, whatever the target. A literal its type cannot
@@ -1844,6 +1900,7 @@ pin in the same change.
 | `SQL0005` | Error | Invalid type modifiers at any declaration or CAST: malformed arguments (including CHAR(MAX)), out-of-range length/precision/scale (including FLOAT outside 1..53 bits), arguments a type does not take, or a rejected type spelling (BIT, SMALLDATETIME, TIME WITH TIME ZONE); names the declaration and reason. Temporal precision and INTERVAL qualifiers use COHDBL001 |
 | `SQL0006` | Error | Expression nesting exceeds the limit (256 levels by default, configurable within 32..4096), or parentheses nest deeper than the limit; an `AND`/`OR` chain counts one level. The rest of the statement is not parsed. An engine also reports it for a typed request whose statement nests deeper than the engine's limit (#1151) |
 | `SQL0007` | Error | The statement is within the nesting limit, but the thread parsing it has too little stack left to recurse that deep; the same text parses on a thread with more stack. An engine parsing statement text reports this as `COHSQLE004` (#1151) |
+| `SQL0008` | Error | Invalid DATE, TIME, TIMESTAMP, TIMESTAMPTZ, day-time INTERVAL or X binary literal content; the span covers the complete literal. Recognized unsupported forms use COHDBL001 |
 | `SQL0100` | Information | Statement does not end with `;` |
 | `COHSQLE001` | Error | Division by zero during evaluation (ISO SQLSTATE 22012) |
 | `COHSQLE002` | Error | Numeric value out of range during evaluation, store assignment, DEFAULT conversion or built-in NUMERIC CAST, including an inexact Decimal representation after any declared-scale rounding (ISO SQLSTATE 22003) |
@@ -1930,8 +1987,7 @@ and characters are quoted with apostrophes doubled, numbers use invariant cultur
 values use `TRUE`/`FALSE`, and null uses `NULL`. Temporal values and GUIDs use invariant quoted
 text converted to the column type. Enums use their numeric storage values.
 `table.DefaultSql(selector, sqlLiteral)` is the escape hatch for a raw supported SQL literal,
-for example `DefaultSql(row => row.Placed, "'2026-01-01'")`; the SQL typed prefix
-`DATE '2026-01-01'` remains unsupported. Both declarations store the rendered literal text in the
+for example `DefaultSql(row => row.Placed, "DATE '2026-01-01'")`. All supported typed literal forms are accepted. Both declarations store the rendered literal text in the
 `cohesion/database-schema/v7` document, so equal text gives the same hash. This format records CHAR separately from VARCHAR and normalizes
 an omitted decimal scale to zero when precision is present. Earlier artifacts, applied markers
 and pending targets are refused before hash comparison (SqlSchemaValidationException,
@@ -1943,7 +1999,9 @@ functions and other computed expressions remain unsupported in typed defaults an
 stored meaning as no default. A binary default is a quoted `\x` prefix followed by even-count
 hexadecimal digits, for example `DEFAULT '\x007FFF'`; no whitespace or octal escapes are accepted,
 and the column's length bounds still apply. The typed `byte[]` renderer emits uppercase digits.
-Hex decoding is specific to DEFAULT and does not add a general string-to-binary cast.
+The ISO `DEFAULT X'007FFF'` spelling also works. Quoted backslash-x defaults keep
+resolving after reopen; COLUMN_DEFAULT reports the resolved value as X hex.
+This does not add a general string-to-binary cast.
 
 While a compiled-schema apply runs, ordinary session DDL is refused with
 `DatabaseObjectLockedException`. Writers to tables the apply creates or alters wait until the

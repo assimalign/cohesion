@@ -209,6 +209,29 @@ each use site to its slot number when the statement is planned; it needs no
 language-assembly friend access or public AST constructors. See [DIALECT.md](../../Assimalign.Cohesion.Database.Sql.Language/docs/DIALECT.md#subqueries-and-query-source-inserts-1021)
 for the exact supported forms and semantics.
 
+## Typed literals (#1110)
+
+Sql.Language validates and normalizes temporal, binary and day-time interval literal text
+before planning. The binder evaluates each literal once as a constant; result typing and
+static operand typing preserve its storage type, and access-path extraction uses the same
+evaluator as residual predicates. Literal DEFAULT binding preserves the type before coercion,
+including compiled-schema and domain validation; mismatched typed defaults fail before mutation.
+Omitted values, explicit DEFAULT and ADD COLUMN missing tails use the same bound constant.
+COLUMN_DEFAULT renders the resolved temporal/binary value with a typed prefix, including
+plain-string defaults persisted previously. Other expression defaults keep their canonical text.
+
+The [timestamp normalization rule](../../Assimalign.Cohesion.Database.Sql.Language/docs/DIALECT.md#timestamp-normalization-1110)
+owns comparison, CAST and assignment behavior: zone-less clocks are UTC when meeting instants,
+and instant-to-clock/date/time uses UTC. Stored TIMESTAMP kinds normalize to Unspecified;
+TIMESTAMPTZ keeps the written offset. SqlTemporalText preserves the existing plain-string
+assignment acceptance, then delegates normalized date/offset text to public SqlLiteralText;
+typed literals use its strict readers directly. No session zone or assembly access grant is added.
+
+No catalog record changes. SqlCatalogColumn.DefaultLiteral still contains canonical SQL;
+previously accepted string and signed numeric defaults resolve identically, including after reopen.
+New typed spellings were previously unparseable, so no existing persisted text changes meaning
+and the record-space format remains 13. There is no upgrade path.
+
 ## Bound expressions (E1)
 
 The planner compiles every scalar expression a plan evaluates — a WHERE or JOIN
@@ -1812,7 +1835,7 @@ documented by PostgreSQL's implementation of the standard.
 identity. The catalog does not preserve the original alias spelling (`INT`
 versus `INTEGER`, for example), so this surface cannot reconstruct it. Declared
 length, precision, scale, nullability, and default text come from catalog fields
-(the default is the stored canonical literal, reported as is);
+(the default is canonical SQL, with temporal/binary literals rendered from their resolved value);
 unknown or inapplicable facts are null, including an unknown character octet
 bound. Cohesion types without an ISO spelling, such as `JSONB`, retain their
 documented dialect name.

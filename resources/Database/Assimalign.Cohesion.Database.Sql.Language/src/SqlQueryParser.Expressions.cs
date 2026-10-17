@@ -604,6 +604,8 @@ public sealed partial class SqlQueryParser
                 Location.Create(1, 1, pos, pos + text.Length));
         }
 
+        if (TryParseTypedLiteral(ref lexer, out var typedLiteral)) { return typedLiteral!; }
+
         // Integer literal
         if (lexer.Current.Type == TokenType.Integer)
         {

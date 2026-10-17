@@ -525,7 +525,7 @@ internal sealed partial class SqlExpressionEvaluator
     /// range, and a CAST operand still reports it as a conversion failure. Binding parses each
     /// literal once; one that does not parse raises this when it is evaluated.
     /// </remarks>
-    private static object? EvaluateLiteral(SqlLiteralExpression literal)
+    internal static object? EvaluateLiteral(SqlLiteralExpression literal)
     {
         return literal.LiteralType switch
         {
@@ -534,6 +534,12 @@ internal sealed partial class SqlExpressionEvaluator
             SqlLiteralType.Boolean => Box(literal.Value.Equals("TRUE", StringComparison.OrdinalIgnoreCase)),
             SqlLiteralType.Integer => ParseIntegerLiteral(literal.Value),
             SqlLiteralType.Float => ParseFractionalLiteral(literal.Value),
+            SqlLiteralType.Date => SqlLiteralText.ParseDate(literal.Value),
+            SqlLiteralType.Time => SqlLiteralText.ParseTime(literal.Value),
+            SqlLiteralType.Timestamp => SqlLiteralText.ParseTimestamp(literal.Value),
+            SqlLiteralType.TimestampWithTimeZone => SqlLiteralText.ParseTimestampWithTimeZone(literal.Value),
+            SqlLiteralType.Interval => SqlLiteralText.ParseInterval(literal.Value),
+            SqlLiteralType.Binary => SqlLiteralText.ParseBinary(literal.Value),
             _ => throw new SqlPlanningException("COHSQLE013", $"Literal type {literal.LiteralType} is not supported.", literal.Location),
         };
     }

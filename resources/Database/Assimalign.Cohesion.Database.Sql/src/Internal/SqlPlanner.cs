@@ -875,6 +875,19 @@ internal sealed partial class SqlPlanner
             return type.DefaultLiteral is null ? null : "NULL";
         }
         var expression = definition.DefaultValue;
+        if (expression is SqlLiteralExpression typed)
+        {
+            DatabaseType? literalType = typed.LiteralType switch
+            {
+                SqlLiteralType.Date => DatabaseType.Date, SqlLiteralType.Time => DatabaseType.Time,
+                SqlLiteralType.Timestamp => DatabaseType.DateTime, SqlLiteralType.TimestampWithTimeZone => DatabaseType.DateTimeOffset,
+                SqlLiteralType.Interval => DatabaseType.TimeSpan, SqlLiteralType.Binary => DatabaseType.Binary, _ => null,
+            };
+            if (literalType is { } declared && declared != type.Storage.Type)
+            {
+                throw new SqlPlanningException("COHSQLE013", $"Column '{definition.ColumnName}': typed DEFAULT {typed.LiteralType} does not match {type.Storage.Type}.", typed.Location);
+            }
+        }
         if (!SqlPersistedExpression.IsDefaultLiteral(expression))
         {
             if (!allowFunction || expression is not SqlFunctionCallExpression)
@@ -1279,6 +1292,12 @@ internal sealed partial class SqlPlanner
             SqlLiteralExpression { LiteralType: SqlLiteralType.Boolean } => DatabaseType.Boolean,
             SqlLiteralExpression { LiteralType: SqlLiteralType.Integer } => DatabaseType.Int64,
             SqlLiteralExpression { LiteralType: SqlLiteralType.Float } => DatabaseType.Decimal,
+            SqlLiteralExpression { LiteralType: SqlLiteralType.Date } => DatabaseType.Date,
+            SqlLiteralExpression { LiteralType: SqlLiteralType.Time } => DatabaseType.Time,
+            SqlLiteralExpression { LiteralType: SqlLiteralType.Timestamp } => DatabaseType.DateTime,
+            SqlLiteralExpression { LiteralType: SqlLiteralType.TimestampWithTimeZone } => DatabaseType.DateTimeOffset,
+            SqlLiteralExpression { LiteralType: SqlLiteralType.Interval } => DatabaseType.TimeSpan,
+            SqlLiteralExpression { LiteralType: SqlLiteralType.Binary } => DatabaseType.Binary,
             SqlColumnReferenceExpression column => evaluator.ResolveColumnType(column),
             SqlCollateExpression collate => StaticOperandType(collate.Operand, evaluator, boundSubqueries, boundValues),
             SqlCastExpression cast => cast.TargetTypeInfo?.Type ?? evaluator.TryResolveCastTarget(cast)?.Storage.Type,

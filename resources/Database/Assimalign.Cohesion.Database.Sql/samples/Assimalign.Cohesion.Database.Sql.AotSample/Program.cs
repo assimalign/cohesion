@@ -69,6 +69,14 @@ internal static class Program
         "CAST(NULL AS DATETIME2), CAST(NULL AS DATETIMEOFFSET), CAST(NULL AS UNIQUEIDENTIFIER) FROM type_aliases";
     private static readonly object?[][] _typeAliases = [["ab ", "text", 1.5d, null, null, null]];
 
+    private const string typedLiterals = "SELECT DATE '2024-01-01', TIME '10:20:30.1234567', " +
+        "TIMESTAMP '2024-01-01 10:00:00', TIMESTAMPTZ '2024-01-01 12:00:00+02:00', " +
+        "INTERVAL 'P1DT2H', X'00ff', N'héllo' FROM customers WHERE Id = 1";
+    private static readonly object?[][] _typedLiterals =
+    [[new DateOnly(2024, 1, 1), new TimeOnly(10, 20, 30).Add(TimeSpan.FromTicks(1234567)),
+        new DateTime(2024, 1, 1, 10, 0, 0), new DateTimeOffset(2024, 1, 1, 12, 0, 0, TimeSpan.FromHours(2)),
+        TimeSpan.FromHours(26), new byte[] { 0, 255 }, "héllo"]];
+
     // E3: a CAST no registered cast performs is refused while planning, rows or not.
     private const string CannotCast = "SELECT CAST(Active AS DATE) FROM customers WHERE Id < 0";
 
@@ -167,6 +175,7 @@ internal static class Program
         await session.ExecuteAsync("INSERT INTO fixed_codes VALUES ('a')");
         await session.ExecuteAsync("CREATE TABLE type_aliases (n NCHAR(3), s NVARCHAR(MAX), f DOUBLE PRECISION, d TIMESTAMP WITH TIME ZONE)");
         await session.ExecuteAsync("INSERT INTO type_aliases (n, s, f) VALUES ('ab', 'text', 1.5)");
+        Check("in process: strict typed literals", await RowsAsync(session, typedLiterals), _typedLiterals);
         Check("in process: ISO type names and SQL Server lexical aliases", await RowsAsync(session, typeAliases), _typeAliases);
         Check("in process: CHAR storage, cast, length, concat, LIKE and seek", await RowsAsync(session, Characters), _characters);
         await session.ExecuteAsync("CREATE TABLE default_guard (id INT DEFAULT 7 NOT NULL, label TEXT DEFAULT 'seed', note INT)");
@@ -225,6 +234,7 @@ internal static class Program
             [[1, "seed", null], [2, "seed", null], [7, "seed", null]]);
 
         Check("over the wire: CHAR storage, cast, length, concat, LIKE and seek", await RowsAsync(connection, Characters, timeout.Token), _characters);
+        Check("over the wire: strict typed literals", await RowsAsync(connection, typedLiterals, timeout.Token), _typedLiterals);
         Check("over the wire: ISO type names and SQL Server lexical aliases", await RowsAsync(connection, typeAliases, timeout.Token), _typeAliases);
         var fixedCodes = await connection.QueryAsync(Characters, cancellationToken: timeout.Token);
         Check("over the wire: CHAR type", fixedCodes.Columns[0].Type == Types.DatabaseType.Character, true);
@@ -352,6 +362,7 @@ internal static class Program
         => string.Join(" | ", rows.Select(static row => string.Join(", ", row.Select(static value => value switch
         {
             null => "NULL",
+            byte[] bytes => Convert.ToHexString(bytes) + ":Binary",
             decimal number => number.ToString("0.############", CultureInfo.InvariantCulture) + ":Decimal",
             _ => string.Create(CultureInfo.InvariantCulture, $"{value}:{value.GetType().Name}"),
         }))));

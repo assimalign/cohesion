@@ -64,6 +64,15 @@ Its transitive assembly closure is an accepted packaging consequence; a dedicate
 model protocol assembly can be a future refinement. The model's
 [design](../../Assimalign.Cohesion.Database.Sql/docs/DESIGN.md) defines wire ownership.
 
+## Typed literal wire values (#1110)
+
+DATE, TIME, TIMESTAMP, TIMESTAMPTZ, day-time INTERVAL and X binary literals use the existing
+DateOnly, TimeOnly, DateTime, DateTimeOffset, TimeSpan and byte[] tuple encodings and DatabaseType
+metadata. N strings remain String. No protocol format changes. SQL0008 content errors and
+COHDBL001 year-month exclusions arrive as ParseFailure and leave the connection usable.
+TIMESTAMP assignment returns Kind Unspecified; TIMESTAMPTZ preserves its offset, following the
+[dialect normalization rule](../../Assimalign.Cohesion.Database.Sql.Language/docs/DIALECT.md#timestamp-normalization-1110).
+
 ## Typed projection
 
 Column names map to ordinals once, shared by every result record. First column

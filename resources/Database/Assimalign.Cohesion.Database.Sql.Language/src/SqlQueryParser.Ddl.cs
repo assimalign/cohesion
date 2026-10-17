@@ -259,7 +259,14 @@ public sealed partial class SqlQueryParser
                 Advance(ref lexer);
                 // A signed numeric default uses the same unary node as an expression. The
                 // engine admits only one literal (including one numeric minus), not expressions.
+                int defaultStart = lexer.Current.Position;
+                int diagnosticsBeforeDefault = _parseDiagnostics.Count;
                 defaultValue = ParseUnary(ref lexer);
+                if (_parseDiagnostics.Count == diagnosticsBeforeDefault && defaultValue is SqlUnaryExpression { Operator: SqlUnaryOperator.Negate or SqlUnaryOperator.Plus } unary &&
+                    (unary.Operator != SqlUnaryOperator.Negate || unary.Operand is not SqlLiteralExpression { LiteralType: SqlLiteralType.Integer or SqlLiteralType.Float }))
+                {
+                    AddTypeModifierDiagnostic("DEFAULT", "A signed DEFAULT must be one numeric literal.", defaultStart, _lastTokenEnd, "SQL0003");
+                }
             }
             else
             {

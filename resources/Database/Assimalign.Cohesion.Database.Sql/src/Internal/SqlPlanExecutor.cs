@@ -1503,23 +1503,27 @@ internal sealed partial class SqlPlanExecutor
                     DateOnly date => date,
                     string text => SqlTemporalText.ParseDate(text),
                     DateTime dateTime => DateOnly.FromDateTime(dateTime),
+                    DateTimeOffset instant => DateOnly.FromDateTime(instant.UtcDateTime),
                     _ => throw new DatabaseException($"Cannot convert {value.GetType().Name} to DATE."),
                 },
                 DatabaseType.Time => value switch
                 {
                     TimeOnly time => time,
+                    DateTimeOffset instant => TimeOnly.FromDateTime(instant.UtcDateTime),
                     string text => TimeOnly.Parse(text, CultureInfo.InvariantCulture),
                     _ => throw new DatabaseException($"Cannot convert {value.GetType().Name} to TIME."),
                 },
                 DatabaseType.DateTime => value switch
                 {
-                    DateTime dateTime => dateTime,
+                    DateTime dateTime => DateTime.SpecifyKind(dateTime, DateTimeKind.Unspecified),
+                    DateTimeOffset instant => DateTime.SpecifyKind(instant.UtcDateTime, DateTimeKind.Unspecified),
                     string text => SqlTemporalText.ParseTimestamp(text),
                     _ => throw new DatabaseException($"Cannot convert {value.GetType().Name} to TIMESTAMP."),
                 },
                 DatabaseType.DateTimeOffset => value switch
                 {
                     DateTimeOffset dateTimeOffset => dateTimeOffset,
+                    DateTime timestamp => new DateTimeOffset(DateTime.SpecifyKind(timestamp, DateTimeKind.Unspecified), TimeSpan.Zero),
                     string text => SqlTemporalText.ParseTimestampTz(text),
                     _ => throw new DatabaseException($"Cannot convert {value.GetType().Name} to TIMESTAMPTZ."),
                 },

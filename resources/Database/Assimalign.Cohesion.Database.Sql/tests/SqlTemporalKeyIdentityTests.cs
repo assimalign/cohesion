@@ -18,8 +18,7 @@ using Assimalign.Cohesion.Database.Types;
 /// TIMESTAMP and TIMESTAMPTZ key identity (#1099): index keys, seek bounds and
 /// unique enforcement follow SQL equality — wall-clock ticks without the
 /// <see cref="DateTimeKind"/>, instants without the offset — through secondary
-/// indexes, primary keys and scans alike; and rows keep the kind and offset they
-/// were written with. Databases written with the format-3 key encoding are
+/// indexes, primary keys and scans alike; and rows normalize TIMESTAMP kind while keeping the written TIMESTAMPTZ offset (#1110). Databases written with the format-3 key encoding are
 /// refused at open, not rebuilt (<see cref="SqlDataStorageFormatTests"/>).
 /// </summary>
 public sealed class SqlTemporalKeyIdentityTests
@@ -210,7 +209,7 @@ public sealed class SqlTemporalKeyIdentityTests
         // Re-writing a row's own value in another kind is not a duplicate, and
         // the row keeps the kind it was last written with.
         await ExecuteAsync(session, "UPDATE unique_ts SET ts = @p WHERE id = 1", P(Local(Noon)));
-        (await ValuesAsync(session, "SELECT ts FROM unique_ts WHERE id = 1")).Single().ShouldBeOfType<DateTime>().Kind.ShouldBe(DateTimeKind.Local);
+        (await ValuesAsync(session, "SELECT ts FROM unique_ts WHERE id = 1")).Single().ShouldBeOfType<DateTime>().Kind.ShouldBe(DateTimeKind.Unspecified);
         (await IdsAsync(session, "SELECT id FROM unique_ts ORDER BY id")).ShouldBe([1, 2]);
         (await IdsAsync(session, "SELECT id FROM keyed_ts ORDER BY id")).ShouldBe([1]);
 
@@ -293,8 +292,8 @@ public sealed class SqlTemporalKeyIdentityTests
         (await IdsAsync(session, "SELECT id FROM moment_refs ORDER BY id")).ShouldBe([1]);
     }
 
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Temporal keys: rows keep the written kind and offset while index keys hold the identity (#1099)")]
-    public async Task Rows_ShouldKeepWrittenKindAndOffset_WhileKeysHoldIdentity()
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Temporal keys: rows normalize the wall clock kind and retain the instant offset while keys hold identity (#1099)")]
+    public async Task Rows_WrittenKindAndOffset_ShouldNormalizeClockAndKeepInstantOffset()
     {
         // Arrange.
         await using var engine = SqlDatabaseEngine.Create("temporal-roundtrip", new SqlDatabaseEngineOptions());
@@ -309,10 +308,10 @@ public sealed class SqlTemporalKeyIdentityTests
         var row = (await RowsAsync(session, "SELECT ts, at FROM t WHERE ts = @p AND at = @q",
             new Dictionary<string, object?> { ["p"] = Utc(Noon), ["q"] = At(Instant, -5.5) })).Single();
 
-        // Assert: the row round-trips what was written...
+        // Assert: storage normalizes the wall clock kind and retains the instant offset...
         var timestamp = row[0].ShouldBeOfType<DateTime>();
         timestamp.Ticks.ShouldBe(Noon.Ticks);
-        timestamp.Kind.ShouldBe(DateTimeKind.Local);
+        timestamp.Kind.ShouldBe(DateTimeKind.Unspecified);
         var instant = row[1].ShouldBeOfType<DateTimeOffset>();
         instant.UtcTicks.ShouldBe(Instant.UtcTicks);
         instant.Offset.ShouldBe(TimeSpan.FromHours(3));

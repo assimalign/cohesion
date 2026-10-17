@@ -162,6 +162,11 @@ internal sealed partial class SqlPlanExecutor
         {
             return new SqlBoundConstant(null);
         }
+        if (expression is SqlLiteralExpression { LiteralType: SqlLiteralType.Date or SqlLiteralType.Time or SqlLiteralType.Timestamp
+            or SqlLiteralType.TimestampWithTimeZone or SqlLiteralType.Interval or SqlLiteralType.Binary } typed)
+        {
+            return new SqlBoundConstant(ResolveDefault(column, typed.Value));
+        }
         if (SqlPersistedExpression.IsDefaultLiteral(expression))
         {
             string value = SqlPersistedExpression.LoadDefaultValue(column.DefaultLiteral!, subject);
@@ -248,7 +253,20 @@ internal sealed partial class SqlPlanExecutor
 
         try
         {
-            object? value = column.Type.Type is DatabaseType.Binary or DatabaseType.JsonBinary
+            SqlLiteralExpression? typed = column.DefaultLiteral is { } persisted
+                ? SqlPersistedExpression.Load(persisted, $"DEFAULT of column '{column.Name}'") as SqlLiteralExpression : null;
+            DatabaseType? literalType = typed?.LiteralType switch
+            {
+                SqlLiteralType.Date => DatabaseType.Date, SqlLiteralType.Time => DatabaseType.Time,
+                SqlLiteralType.Timestamp => DatabaseType.DateTime, SqlLiteralType.TimestampWithTimeZone => DatabaseType.DateTimeOffset,
+                SqlLiteralType.Interval => DatabaseType.TimeSpan, SqlLiteralType.Binary => DatabaseType.Binary, _ => null,
+            };
+            if (literalType is { } declared && declared != column.Type.Type)
+            {
+                throw new DatabaseException($"Typed DEFAULT {typed!.LiteralType} does not match column type {column.Type.Type}.");
+            }
+            object? value = literalType is not null ? CoerceForColumn(SqlExpressionEvaluator.EvaluateLiteral(typed!), column)
+                : column.Type.Type is DatabaseType.Binary or DatabaseType.JsonBinary
                 ? CoerceForColumn(ParseBinaryDefault(defaultValue), column)
                 : column.Type.Type == DatabaseType.Decimal
                 // Canonical DEFAULT text preserves quotes. Only an unquoted numeric literal
