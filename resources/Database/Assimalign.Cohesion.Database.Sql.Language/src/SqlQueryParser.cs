@@ -944,12 +944,12 @@ public sealed partial class SqlQueryParser : QueryParser
                 break;
             }
 
-            // WITH in a temporal type is not a CTE. The declaration/CAST parser validates
-            // the type and modifiers; this scan only skips a complete lexical suffix.
-            if (TrySkipTimeZoneType(ref lexer))
+            // WITH in a temporal type or identity option is not a CTE. Declaration parsing
+            // validates the syntax; this scan only locates complete lexical suffixes.
+            if (TrySkipIdentityOptions(ref lexer, firstToken, previousToken) || TrySkipTimeZoneType(ref lexer))
             {
                 previousPreviousToken = previousToken;
-                previousToken = "ZONE";
+                previousToken = CurrentText(ref lexer).ToUpperInvariant();
                 previousPosition = lexer.Current.Position;
                 continue;
             }

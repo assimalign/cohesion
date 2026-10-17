@@ -395,7 +395,7 @@ internal sealed partial class SqlPlanExecutor
             {
                 // Assignments evaluate against the ORIGINAL row (SQL semantics).
                 updated[ordinal] = expression.Kind == SqlBoundExpressionKind.DefaultItem
-                    ? ResolveColumnDefault(plan.Table.Columns[ordinal], bound.DefaultValues[ordinal], cancellationToken)
+                    ? ResolveColumnDefault(plan.Table, ordinal, bound.DefaultValues[ordinal], cancellationToken)
                     : CoerceForColumn(evaluator.Evaluate(expression, values, copySharedBinary: true), plan.Table.Columns[ordinal]);
             }
 

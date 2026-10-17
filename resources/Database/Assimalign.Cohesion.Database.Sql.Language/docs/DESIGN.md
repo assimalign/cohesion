@@ -66,6 +66,16 @@ the statement corpus and the live conformance case change together; DIALECT.md i
 The engine's deferred-provisioning admission walks the wrapped statement before binding, just
 as it does for an ordinary data statement; an EXPLAIN cannot bypass a pending table reservation.
 
+## Identity grammar (#1123)
+
+SqlColumnDefinition.Identity retains SqlIdentityDefinition (ALWAYS/BY DEFAULT, signed start,
+increment). Canonical identity syntax and the SQL Server IDENTITY(seed, increment) lexical
+alias share a contextual parser; no identity word becomes globally reserved. Capability scanning
+skips identity option parentheses so START WITH cannot masquerade as a CTE. The type grammar's
+shared rejection rule keeps SERIAL/BIGSERIAL/SMALLSERIAL as COHDBL001 with an identity suggestion.
+SqlClauses.Identity and the parser and live conformance corpora advance together; DIALECT.md
+defines allocation and exclusions. Sql.Catalog has its own SQL-independent facet.
+
 ## Design intent
 
 Decision 49a adds `SqlAlterColumnAction`, a full column-definition action:

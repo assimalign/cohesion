@@ -22,6 +22,9 @@ internal sealed class SqlPlanningException : DatabaseException
     {
     }
 
+    internal static SqlPlanningException IdentityViolation(string column, string reason)
+        => new("COHSQLE025", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.IdentityColumnViolation, column, reason));
+
     internal SqlPlanningException At(Location? location) => Diagnostics[0].Start is not null || location is null
         ? this : new(Diagnostics[0].Code!, Message, location, InnerException);
 }

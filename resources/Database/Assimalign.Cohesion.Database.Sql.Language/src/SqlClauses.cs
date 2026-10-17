@@ -24,6 +24,9 @@ public static class SqlClauses
     /// <summary>A <c>CREATE TABLE</c> statement.</summary>
     public const string CreateTable = "CREATE TABLE";
 
+    /// <summary>A generated identity column, including the SQL Server lexical alias.</summary>
+    public const string Identity = "IDENTITY";
+
     /// <summary>A <c>CREATE INDEX</c> statement.</summary>
     public const string CreateIndex = "CREATE INDEX";
 

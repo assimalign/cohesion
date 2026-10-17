@@ -76,8 +76,8 @@ public sealed class SqlCatalogDroppedColumnTests
         }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sql.Catalog] - Dropped columns: legacy records are refused without format 10 function identities")]
-    public void TableRecord_ExtensionVersionTwo_ShouldRefuseMissingFunctionIdentities()
+    [Fact(DisplayName = "Cohesion Test [Sql.Catalog] - Dropped columns: legacy extension versions are refused")]
+    public void TableRecord_ExtensionVersionTwo_ShouldRefuseUnsupportedVersion()
     {
         // Arrange: a table record as data-storage format 5 wrote it (extension version 2).
         using var storage = SqlStorage.Create(new MemoryStream(), new MemoryStream(), new MemoryStream(), "format-five");
@@ -87,7 +87,7 @@ public sealed class SqlCatalogDroppedColumnTests
         Insert(storage, record.ToArray());
 
         // Act / Assert
-        Should.Throw<SqlCatalogException>(() => SqlCatalog.Open(storage)).Message.ShouldContain("missing format 10 function-call identities");
+        Should.Throw<SqlCatalogException>(() => SqlCatalog.Open(storage)).Message.ShouldContain("Unsupported table-constraint metadata version 2");
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Catalog] - Dropped columns: a persisted layout that cannot describe the table is refused at load")]
@@ -100,13 +100,13 @@ public sealed class SqlCatalogDroppedColumnTests
         // Arrange: the dropped count, then the ordinals, after two live columns.
         using var storage = SqlStorage.Create(new MemoryStream(), new MemoryStream(), new MemoryStream(), "damaged");
         var record = TableRecordPrefix(1, "dbo", "damaged", ("id", false), ("note", true))
-            .AppendInt32(4).AppendInt32(0).AppendInt32(-1).AppendInt32(-1);
+            .AppendInt32(5).AppendInt32(0).AppendInt32(-1).AppendInt32(-1);
         foreach (int value in persisted)
         {
             record.AppendInt32(value);
         }
         // Complete the current format: no column domains and no function calls in either default.
-        record.AppendNull().AppendNull().AppendInt32(0).AppendInt32(0);
+        record.AppendNull().AppendNull().AppendInt32(0).AppendInt32(0).AppendBoolean(false).AppendBoolean(false);
 
         Insert(storage, record.ToArray());
 

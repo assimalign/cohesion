@@ -21,6 +21,7 @@ public class SqlLanguageProfileTests
     [InlineData(SqlClauses.Insert, "INSERT INTO t (id) VALUES (1);")]
     [InlineData(SqlClauses.Update, "UPDATE t SET id = 1;")]
     [InlineData(SqlClauses.Delete, "DELETE FROM t;")]
+    [InlineData(SqlClauses.Identity, "CREATE TABLE t (id INT IDENTITY);")]
     [InlineData(SqlClauses.CreateTable, "CREATE TABLE t (id INT);")]
     [InlineData(SqlClauses.CreateIndex, "CREATE INDEX ix_t_id ON t (id);")]
     [InlineData(SqlClauses.AlterTable, "ALTER TABLE t ADD COLUMN name TEXT;")]

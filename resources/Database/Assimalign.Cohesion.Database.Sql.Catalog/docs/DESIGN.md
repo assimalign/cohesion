@@ -59,7 +59,7 @@ worker, or hosting lifecycle.
 
 The compiled document is now `cohesion/database-schema/v7` (#1108), matching Sdk.Database.
 Applied-schema records (kind 6) and pending targets (kind 9) both retain the complete versioned
-document, so their field layout does not change. The SQL record-space gate is now 14 (#1109).
+document, so their field layout does not change. The SQL record-space gate is now 15 (#1123).
 SQL checks those document formats before opening
 the data file set and before Apply/Verify compares persisted hashes. A v4 NUMERIC(p) document
 with scale:null is refused through the schema format gate, with the rebuild/recreate remedy;
@@ -164,7 +164,7 @@ codec, the key encoding and every comparison read, so they do not consult the do
   column (the primary key's implicit NOT NULL).
 - **Persistence: table extension version 4** (data-storage format 7). After the dropped
   ordinals, one optional string per live column, NULL for a column of a built-in type,
-  which this catalog always writes. Current format 14 also requires the call vectors;
+  which this catalog always writes. Current format 15 also requires the call vectors and identity facets;
   the format gate refuses earlier databases rather than loading their definitions. A persisted blank
   name fails the load with `SqlCatalogException`, as does a blank `domainName` at the
   column's constructor (`ArgumentException`).
@@ -385,8 +385,9 @@ remain internal and are used only by catalog tests.
 
 ## Constraint persistence
 
-Table records now append a versioned constraint extension after ownership: version
-`1`, constraint count, and each immutable foreign-key/check definition. A reference
+Table records append a versioned extension after ownership: its current version is
+`5` (#1123), followed by constraint count and each immutable foreign-key/check definition.
+Later fields retain collations, physical layout, domains, call vectors and identity facets. A reference
 stores its ordered local and target columns, target SQL namespace/table, and
 `RESTRICT` or `CASCADE` delete action. A check stores its predicate as canonical
 SQL text and resolved function calls (below). Records ending after the original primary keys
@@ -511,6 +512,25 @@ No behavior changed. The `Abstractions/` folder is gone.
 
 `SqlCatalogException : DatabaseException` for catalog violations (duplicate or
 missing tables/columns, primary-key drops, malformed persisted records).
+
+## Identity counter records (#1123)
+
+Catalog kind **16** is pre-assigned to identity counters (15 is reserved for #1030; 17 for
+#1124). Its tuple is kind Int32, owning table ObjectId Int64, and last reserved value Int64.
+There is at most one counter per table; load refuses duplicates, orphaned counters, out-of-range
+values and values outside the START/INCREMENT progression. Identity metadata is immutable
+SqlCatalogColumn.Identity / SqlCatalogIdentity in table-extension version **5**. SQL record-space
+format **15** supersedes 14; earlier files are refused, with no migration or compatibility reader.
+
+AllocateIdentity is a concrete public catalog member, as ReserveTableAsync and PublishTableAsync
+are. Under the existing metadata lock it durably reserves up to 32 values with checked Int128
+intermediate arithmetic before delivering any. Reservations self-commit only the counter and
+never replace the table object, advance DDL generation or publish script receipts. The cursor
+and unused block stay private and volatile; reopen begins after the last reserved value, so
+crashes cannot reuse a delivered value. Unconfirmed commits fence the catalog through its existing
+storage-offline gate. Data transaction rollback does not reclaim values. DROP TABLE deletes the
+counter in the catalog's unpublication transaction; dropping the identity column likewise retires
+it atomically. A recreated table gets a fresh ObjectId and starts from START.
 
 ## Non-goals
 

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <data name="IdentityTableChanged" xml:space="preserve"><value>Table '{0}.{1}' changed before identity allocation.</value></data>
+  <data name="IdentityColumnMissing" xml:space="preserve"><value>Table '{0}.{1}' has no identity column.</value></data>
+  <data name="IdentityRangeExhausted" xml:space="preserve"><value>Identity column '{0}' has exhausted its {1} range.</value></data>
+  <data name="IdentityIntegerRequired" xml:space="preserve"><value>An identity column requires an integer storage type.</value></data>
+  <data name="IdentityCounterMalformed" xml:space="preserve"><value>Malformed or duplicate identity counter record.</value></data>
+  <data name="IdentityCounterOrphaned" xml:space="preserve"><value>An identity counter has no owning identity column.</value></data>
+  <data name="IdentityCounterInvalid" xml:space="preserve"><value>Identity counter of column '{0}' is invalid.</value></data>
+  <data name="IdentityMetadataInvalid" xml:space="preserve"><value>Column '{0}' has invalid or duplicate identity metadata.</value></data>
+</root>

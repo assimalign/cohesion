@@ -102,7 +102,7 @@ public sealed class SqlCatalogCollationTests
         }
 
         // Act / Assert
-        Should.Throw<SqlCatalogException>(() => SqlCatalog.Open(storage)).Message.ShouldContain("missing format 10 function-call identities");
+        Should.Throw<SqlCatalogException>(() => SqlCatalog.Open(storage)).Message.ShouldContain(hasConstraintExtension ? "Unsupported table-constraint metadata version 1" : "missing format 10 function-call identities");
     }
 
     /// <summary>A collation is meaningful only on a string column.</summary>

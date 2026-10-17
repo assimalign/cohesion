@@ -32,6 +32,11 @@ public sealed partial class SqlQueryParser
         {
             return ParseCreateDomain(ref lexer, pos);
         }
+        if (IsWord(ref lexer, "SEQUENCE"))
+        {
+            RejectIdentityConstruct(ref lexer, "CREATE SEQUENCE");
+            return new SqlQueryExpression(SqlQueryCommandType.Create, null, Location.Create(1, 1, pos, _lastTokenEnd));
+        }
         return ParseCreateTable(ref lexer, pos);
     }
 
@@ -210,6 +215,7 @@ public sealed partial class SqlQueryParser
         bool isPrimaryKey = false;
         SqlExpression? defaultValue = null;
         string? collationName = null;
+        SqlIdentityDefinition? identity = null;
         var constraints = new List<SqlConstraintDefinition>();
 
         while (!IsAtEnd(ref lexer) &&
@@ -217,7 +223,12 @@ public sealed partial class SqlQueryParser
                lexer.Current.Type != TokenType.RightParen &&
                lexer.Current.Type != TokenType.Semicolon)
         {
-            if (IsKeyword(ref lexer, "COLLATE"))
+            if (IsWord(ref lexer, "GENERATED") || IsWord(ref lexer, "IDENTITY"))
+            {
+                if (identity is not null) { AddSyntaxDiagnostic(ref lexer, "A column may declare only one IDENTITY clause."); }
+                identity = ParseIdentity(ref lexer);
+            }
+            else if (IsKeyword(ref lexer, "COLLATE"))
             {
                 if (collationName is not null)
                 {
@@ -278,7 +289,7 @@ public sealed partial class SqlQueryParser
             }
         }
 
-        return new SqlColumnDefinition(columnName, dataType, isNullable, isPrimaryKey, defaultValue, constraints, collationName, resolvedType);
+        return new SqlColumnDefinition(columnName, dataType, isNullable && identity is null, isPrimaryKey, defaultValue, constraints, collationName, resolvedType, identity);
     }
 
     /// <summary>
@@ -402,6 +413,10 @@ public sealed partial class SqlQueryParser
 
         // Action: ADD, DROP, or a complete ALTER COLUMN definition.
         SqlAlterAction action;
+        if (TryRejectIdentityAlter(ref lexer))
+        {
+            return new SqlQueryExpression(SqlQueryCommandType.Alter, null, Location.Create(1, 1, pos, _lastTokenEnd));
+        }
         if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "ALTER") && IsAlterColumnDefinition(lexer))
         {
             Advance(ref lexer);

@@ -29,6 +29,13 @@ public sealed partial class SqlQueryParser
             columns = ParseInsertColumnList(ref lexer);
         }
 
+        if (IsWord(ref lexer, "OVERRIDING") || string.Equals(table.Alias, "OVERRIDING", StringComparison.OrdinalIgnoreCase))
+        {
+            RejectIdentityConstruct(ref lexer, "OVERRIDING ... VALUE");
+            return new SqlInsertExpression(table, columns, null, null, false, null,
+                Location.Create(1, 1, pos, _lastTokenEnd));
+        }
+
         // VALUES, DEFAULT VALUES or SELECT
         List<IReadOnlyList<SqlExpression>>? values = null;
         SqlSelectExpression? selectSource = null;

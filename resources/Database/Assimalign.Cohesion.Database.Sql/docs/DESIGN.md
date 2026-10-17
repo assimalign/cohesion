@@ -1,5 +1,34 @@
 # Assimalign.Cohesion.Database.Sql — Design
 
+## Identity execution (#1123)
+
+CREATE and ADD column planning validate the identity mode, integer type, nonzero increment,
+START range, DEFAULT exclusion and one-column limit before catalog writes. ADD checks no live
+rows under the existing exclusive DDL lock. Typed schema reconciliation refuses identity facets.
+Identity metadata implies NOT NULL; COLUMN_DEFAULT remains null. INFORMATION_SCHEMA appends
+seven identity fields after DATETIME_PRECISION, preserving its previous ordinals.
+
+The common INSERT VALUES / INSERT SELECT path allocates omitted or DEFAULT identity values
+before any column's NOT NULL/default validation or application of the row write set, independent
+of the identity column's ordinal. BY DEFAULT UPDATE DEFAULT shares that path;
+ALWAYS rejects explicit INSERT values and every UPDATE assignment with COHSQLE025. Explicit
+BY DEFAULT values leave the counter untouched; existing indexes enforce any later collision.
+All rows are materialized before application, so range exhaustion inserts nothing. Existing
+plans and EXPLAIN mappings remain sufficient.
+
+SqlCatalog.AllocateIdentity reserves up to 32 values per durable catalog commit, separate from
+the data transaction and table record. It holds only the catalog's existing metadata lock and
+adds no coordinator lock or table replacement. Rollback or a failing constraint consumes values;
+allocation order does not imply commit order. After reopen, allocation skips every reserved
+value, including unused ones, so no returned value is reused after a crash. This follows the
+nontransactional and ahead-of-use logging pattern in PostgreSQL sequence.c:690-729,808-849
+(local reference clone), with one database-wide catalog cursor instead of per-session caches.
+The block size 32 is an implementation choice; the final block is shortened to the column's
+full signed integer range. Int128 intermediates make all counter arithmetic checked independently
+of SQL expression arithmetic. Table DROP retires the counter atomically; recreate begins at START.
+The unreleased record-space format advances **14 -> 15**, table extension **4 -> 5**, with no
+upgrade path. No new interface, visibility grant, project reference or wire format is introduced.
+
 ## N-way joins (#1109)
 
 ORDER BY aliases following a wildcard count its visible output columns after USING merges;
@@ -4374,6 +4403,11 @@ auto-commit seek, which paid the lock-table walk before #1363 too (96 and 321 µ
 takes 35 and 16 µs.
 
 ## Non-goals (current cut)
+
+Identity columns execute, but general sequences, currval/lastval/SCOPE_IDENTITY, OVERRIDING,
+RESTART, generation-mode changes and identity backfill on populated tables remain excluded
+(#1123). Compiled typed schemas cannot declare identity metadata; SQL scripts can create
+identity tables through the ordinary SQL executor.
 
 RIGHT/FULL OUTER, NATURAL and LATERAL joins, qualified wildcards, correlated
 and derived-table subqueries, explicit NULL placement, `Serializable`

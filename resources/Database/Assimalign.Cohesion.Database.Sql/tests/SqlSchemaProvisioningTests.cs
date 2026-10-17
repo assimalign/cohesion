@@ -543,6 +543,32 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
         return executor.ExecuteAsync(SqlQueryRequest.FromSql(statement), scope, TestTimeout.Token());
     }
 
+    [Fact(DisplayName = "Cohesion Test [Sql] - Schema apply: identity metadata on typed schema-owned tables is refused")]
+    public async Task ApplySchemaAsync_IdentityMetadata_ShouldRefuseUnrepresentableTypedColumn()
+    {
+        // Arrange
+        await using var engine = CreateEngine();
+        var database = await engine.CreateDatabaseAsync("orders");
+        var catalog = database.Catalog;
+        var table = await catalog.ReserveTableAsync("dbo", "orders",
+            [new SqlCatalogColumn("id", new DatabaseTypeInfo(DatabaseType.Int64), identity: new SqlCatalogIdentity(true))],
+            null, [], DatabaseObjectOwner.Schema, "orders");
+        await catalog.PublishTableAsync(table, [], [], replaceExisting: false);
+        ulong generation = catalog.DdlGeneration;
+        var schema = OrdersSchema([new CompiledSchemaColumn("id", DatabaseType.Int64, false)], [], hasPrimaryKey: false);
+
+        // Act
+        var failure = await Should.ThrowAsync<DatabaseException>(async () => await database.ApplySchemaAsync(schema));
+
+        // Assert
+        failure.Message.ShouldContain("id", Case.Sensitive);
+        failure.Message.ShouldContain("identity", Case.Insensitive);
+        catalog.DdlGeneration.ShouldBe(generation);
+        catalog.SchemaState.ShouldBeNull();
+        catalog.TryGetTable("dbo", "orders", out var unchanged).ShouldBeTrue();
+        unchanged.ShouldBeSameAs(table);
+    }
+
     private SqlDatabaseEngine CreateEngine()
         => SqlDatabaseEngine.Create("schema-tests", new SqlDatabaseEngineOptions
         {

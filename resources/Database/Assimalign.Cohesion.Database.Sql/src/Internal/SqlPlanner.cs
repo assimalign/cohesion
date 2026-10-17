@@ -623,6 +623,22 @@ internal sealed partial class SqlPlanner
             targetOrdinals = ordinals;
         }
 
+        for (int index = 0; index < targetOrdinals.Count && !insert.IsDefaultValues; index++)
+        {
+            var column = table.Columns[targetOrdinals[index]];
+            if (column.Identity is not { IsAlways: true }) { continue; }
+            if (insert.SelectSource is not null)
+            {
+                throw SqlPlanningException.IdentityViolation(column.Name, ErrorMessages.IdentityInsertForbidden);
+            }
+            foreach (var row in insert.Values!)
+            {
+                if (index < row.Count && row[index] is not SqlDefaultExpression)
+                {
+                    throw SqlPlanningException.IdentityViolation(column.Name, ErrorMessages.IdentityInsertForbidden);
+                }
+            }
+        }
         if (insert.SelectSource is not null)
         {
             return PlanInsertSelect(table, targetOrdinals, insert.SelectSource);
@@ -773,6 +789,10 @@ internal sealed partial class SqlPlanner
         foreach (var assignment in update.Assignments)
         {
             int ordinal = FindColumnOrdinal(table, assignment.ColumnName);
+            if (table.Columns[ordinal].Identity is { IsAlways: true })
+            {
+                throw SqlPlanningException.IdentityViolation(assignment.ColumnName, ErrorMessages.IdentityUpdateForbidden);
+            }
             if (assignment.Value is SqlDefaultExpression)
             {
                 assignments.Add((ordinal, SqlBoundDefaultItem.Instance));
@@ -836,18 +856,21 @@ internal sealed partial class SqlPlanner
         string schema = create.Table.SchemaName ?? DefaultSchema;
         var columns = new List<SqlCatalogColumn>(create.Columns.Count);
         var primaryKey = new List<string>();
+        bool hasIdentity = false;
 
         foreach (var definition in create.Columns)
         {
             var type = ResolveColumnType(definition);
             var typeInfo = type.Storage;
 
-            string? defaultLiteral = ResolveDefaultLiteral(definition, $"{schema}.{create.Table.TableName}");
+            var identity = ResolveIdentity(definition, typeInfo, hasIdentity);
+            hasIdentity |= identity is not null;
+            string? defaultLiteral = identity is null ? ResolveDefaultLiteral(definition, $"{schema}.{create.Table.TableName}") : null;
 
             // PRIMARY KEY columns are implicitly NOT NULL.
-            bool nullable = definition.IsNullable && !definition.IsPrimaryKey;
+            bool nullable = definition.IsNullable && !definition.IsPrimaryKey && identity is null;
             columns.Add(new SqlCatalogColumn(definition.ColumnName, typeInfo, nullable, defaultLiteral,
-                ResolveColumnCollation(definition, typeInfo), type.IsDomain ? type.Name : null, DefaultCalls(defaultLiteral)));
+                ResolveColumnCollation(definition, typeInfo), type.IsDomain ? type.Name : null, DefaultCalls(defaultLiteral), identity));
 
             if (definition.IsPrimaryKey)
             {
@@ -870,7 +893,7 @@ internal sealed partial class SqlPlanner
             var column = columns[i];
             if (primaryKey.Contains(column.Name, StringComparer.OrdinalIgnoreCase))
             {
-                columns[i] = new SqlCatalogColumn(column.Name, column.Type, false, column.DefaultLiteral, column.Collation, column.DomainName, column.DefaultFunctionCalls);
+                columns[i] = new SqlCatalogColumn(column.Name, column.Type, false, column.DefaultLiteral, column.Collation, column.DomainName, column.DefaultFunctionCalls, column.Identity);
             }
         }
         return new SqlCreateTablePlan(schema, create.Table.TableName, columns, primaryKey, create.IfNotExists, create.Constraints);
@@ -1010,26 +1033,37 @@ internal sealed partial class SqlPlanner
         {
             throw new SqlPlanningException("COHSQLE013", "ALTER COLUMN does not change constraints or primary keys.");
         }
+        var previous = table.Columns[FindColumnOrdinal(table, change.Column.ColumnName)];
+        if (change.Column.Identity is not null || previous.Identity is not null &&
+            (change.Column.IsNullable || change.Column.DefaultValue is not null))
+        {
+            throw SqlPlanningException.IdentityViolation(change.Column.ColumnName, ErrorMessages.IdentityAlterForbidden);
+        }
         var type = ResolveColumnType(change.Column);
         return new SqlAlterColumnPlan(table, new SqlCatalogColumn(change.Column.ColumnName, type.Storage,
             change.Column.IsNullable, ResolveDefaultLiteral(change.Column, $"{table.Schema}.{table.Name}"),
             ResolveColumnCollation(change.Column, type.Storage), type.IsDomain ? type.Name : null,
-            table.Columns[FindColumnOrdinal(table, change.Column.ColumnName)].DefaultFunctionCalls));
+            previous.DefaultFunctionCalls, previous.Identity));
     }
 
     private SqlAddColumnPlan PlanAddColumn(string schema, string table, SqlAlterAddColumnAction add)
     {
         var type = ResolveColumnType(add.Column);
+        if (!_catalog.TryGetTable(schema, table, out var current))
+        {
+            throw new SqlPlanningException("COHSQLE014", string.Format(CultureInfo.CurrentCulture, ErrorMessages.TableMissing, schema, table));
+        }
+        var identity = ResolveIdentity(add.Column, type.Storage, current.Columns.Any(column => column.Identity is not null));
         return new SqlAddColumnPlan(
             schema,
             table,
             new SqlCatalogColumn(
                 add.Column.ColumnName,
                 type.Storage,
-                add.Column.IsNullable && !add.Column.IsPrimaryKey,
-                ResolveDefaultLiteral(add.Column, $"{schema}.{table}", allowFunction: false),
+                add.Column.IsNullable && !add.Column.IsPrimaryKey && identity is null,
+                identity is null ? ResolveDefaultLiteral(add.Column, $"{schema}.{table}", allowFunction: false) : null,
                 ResolveColumnCollation(add.Column, type.Storage),
-                type.IsDomain ? type.Name : null),
+                type.IsDomain ? type.Name : null, identity: identity),
             add.Column.Constraints);
     }
 
@@ -1039,7 +1073,7 @@ internal sealed partial class SqlPlanner
 
         if (!_catalog.TryGetTable(schema, reference.TableName, out var table))
         {
-            throw new SqlPlanningException("COHSQLE014", $"Table '{schema}.{reference.TableName}' does not exist.");
+            throw new SqlPlanningException("COHSQLE014", string.Format(CultureInfo.CurrentCulture, ErrorMessages.TableMissing, schema, reference.TableName));
         }
 
         return table;

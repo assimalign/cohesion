@@ -64,6 +64,7 @@ public sealed class SqlStatementCompletenessTests
         [SqlClauses.Update] = ["UPDATE t SET a = 1", "UPDATE t SET a = DEFAULT", "UPDATE dbo.t SET a = 1, b = 'x' WHERE id = 1"],
         [SqlClauses.Delete] = ["DELETE FROM t", "DELETE FROM t WHERE id = 1"],
         [SqlClauses.CreateTable] = ["CREATE TABLE t (id INT PRIMARY KEY, name TEXT NOT NULL DEFAULT 'x')", "CREATE TABLE IF NOT EXISTS dbo.t (id INT)"],
+        [SqlClauses.Identity] = ["CREATE TABLE t (id BIGINT GENERATED ALWAYS AS IDENTITY)", "ALTER TABLE t ADD id INT IDENTITY(100, 5)"],
         [SqlClauses.CreateIndex] = ["CREATE INDEX ix ON t (a)", "CREATE UNIQUE INDEX IF NOT EXISTS ix ON dbo.t (a, b)"],
         [SqlClauses.AlterTable] =
         [

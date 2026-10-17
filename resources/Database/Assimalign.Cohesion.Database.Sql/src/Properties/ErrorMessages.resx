@@ -42,4 +42,21 @@
   <data name="CastJsonText" xml:space="preserve">
     <value>Invalid JSON text (maximum depth 128).</value>
   </data>
+  <data name="IdentityIntegerRequired" xml:space="preserve"><value>IDENTITY requires a built-in integer type</value></data>
+  <data name="IdentityAlreadyDeclared" xml:space="preserve"><value>a table may have only one identity column</value></data>
+  <data name="IdentityZeroIncrement" xml:space="preserve"><value>INCREMENT must not be zero</value></data>
+  <data name="IdentityDefaultConflict" xml:space="preserve"><value>IDENTITY cannot be combined with DEFAULT</value></data>
+  <data name="IdentityStartOutOfRange" xml:space="preserve"><value>START is outside the column type's range</value></data>
+  <data name="IdentityUpdateForbidden" xml:space="preserve"><value>GENERATED ALWAYS forbids every UPDATE assignment</value></data>
+  <data name="IdentityAlterForbidden" xml:space="preserve"><value>ALTER COLUMN cannot change identity generation, nullability or defaults</value></data>
+  <data name="IdentityInsertForbidden" xml:space="preserve"><value>GENERATED ALWAYS forbids an explicit INSERT value</value></data>
+  <data name="IdentityBackfillForbidden" xml:space="preserve"><value>ADD COLUMN IDENTITY requires a table with no live rows</value></data>
+  <data name="IdentityTypeChangeForbidden" xml:space="preserve"><value>ALTER COLUMN cannot change an identity storage type</value></data>
+  <data name="IdentitySchemaOwnedForbidden" xml:space="preserve"><value>schema-owned tables cannot declare identity metadata</value></data>
+  <data name="IdentityColumnViolation" xml:space="preserve">
+    <value>Identity column '{0}': {1}.</value>
+  </data>
+  <data name="TableMissing" xml:space="preserve">
+    <value>Table '{0}.{1}' does not exist.</value>
+  </data>
 </root>
