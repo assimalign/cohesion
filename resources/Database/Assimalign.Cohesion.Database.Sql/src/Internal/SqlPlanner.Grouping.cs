@@ -265,6 +265,12 @@ internal sealed partial class SqlPlanner
             SqlLiteralType.Float => DatabaseType.Decimal,
             SqlLiteralType.String => DatabaseType.String,
             SqlLiteralType.Boolean => DatabaseType.Boolean,
+            SqlLiteralType.Date => DatabaseType.Date,
+            SqlLiteralType.Time => DatabaseType.Time,
+            SqlLiteralType.Timestamp => DatabaseType.DateTime,
+            SqlLiteralType.TimestampWithTimeZone => DatabaseType.DateTimeOffset,
+            SqlLiteralType.Interval => DatabaseType.TimeSpan,
+            SqlLiteralType.Binary => DatabaseType.Binary,
             _ => DatabaseType.Null,
         },
         SqlFunctionCallExpression call when SqlStandardLibrary.IsCoalesce(call.FunctionName)

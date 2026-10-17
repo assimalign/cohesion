@@ -26,9 +26,10 @@ internal sealed partial class SqlPlanExecutor
             EnsureCurrentDefinition(binding.Table);
         }
 
-        var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
+        var sharedColumns = new bool[plan.Columns.Count];
+        var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken, sharedColumns);
         var matches = new List<object?[]>();
-        foreach (var row in EnumerateJoinRows(plan, statement, cancellationToken))
+        foreach (var row in EnumerateJoinRows(plan, statement, sharedColumns, cancellationToken))
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (evaluator.Matches(plan.Condition, row) && evaluator.Matches(plan.Where, row))
@@ -46,7 +47,8 @@ internal sealed partial class SqlPlanExecutor
     /// Without a usable index the inner input is read once, costing O(L + R)
     /// stored reads and O(L * R) predicate evaluations, with O(R) buffered rows.
     /// </summary>
-    private IEnumerable<object?[]> EnumerateJoinRows(SqlJoinPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
+    private IEnumerable<object?[]> EnumerateJoinRows(SqlJoinPlan plan, SqlStatementContext statement,
+        bool[] sharedColumns, CancellationToken cancellationToken)
     {
         var access = plan.Access;
         BTreeIndex? index = null;
@@ -58,6 +60,10 @@ internal sealed partial class SqlPlanExecutor
         int inner = access?.InnerBinding ?? 1;
         var outerBinding = plan.Bindings[1 - inner];
         var innerBinding = plan.Bindings[inner];
+        // Loop rows retain these values. Detach only when a projection delivers a selected cell;
+        // predicates and discarded/unprojected binary columns never copy. Indexed inner reads own theirs.
+        Array.Fill(sharedColumns, true, outerBinding.Offset, outerBinding.Table.Columns.Count);
+        if (access is null) { Array.Fill(sharedColumns, true, innerBinding.Offset, innerBinding.Table.Columns.Count); }
         statement.Metrics.AccessPath = access is null ? "join-scan" : $"join-seek:{access.Index.Name}";
         List<object?[]>? buffered = null;
 

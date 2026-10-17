@@ -36,6 +36,7 @@ namespace Assimalign.Cohesion.Database.Sql.Benchmarks;
 /// with a CHECK over a registered function on every table. Q8P and Q8CP separately time
 /// <c>ApplySchemaAsync</c> with one precompiled schema immediately after each corresponding build;
 /// those measurements exclude declaration compilation, engine creation, opening and binding.
+/// QB projects four 256-byte binary literals per row; QBS reads one stored 256-byte binary cell.
 /// </para>
 /// </remarks>
 internal static class Program
@@ -51,6 +52,7 @@ internal static class Program
     private const string Q7Insert = "INSERT INTO {0} (id, name, v) VALUES (@id, @name, @v)";
     private const string Q7Check = "LENGTH(name) > 0 AND ABS(v) < 1000000000";
     private const string Q7RCheck = "has_text(name) AND ABS(v) < 1000000000";
+    private static readonly string _binaryQuery = $"SELECT {string.Join(", ", Enumerable.Repeat($"X'{new string('A', 512)}'", 4))} FROM t";
 
     private static async Task<int> Main(string[] args)
     {
@@ -100,8 +102,17 @@ internal static class Program
             var database = await engine.CreateDatabaseAsync("benchmark");
             await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
             await LoadAsync(session, rows);
+            if (cases.Contains("QBS"))
+            {
+                await ExecuteAsync(session, "CREATE TABLE binary_storage (b BINARY)");
+                string value = $"(X'{new string('A', 512)}')";
+                for (int start = 0; start < rows; start += 500)
+                {
+                    await ExecuteAsync(session, "INSERT INTO binary_storage VALUES " + string.Join(", ", Enumerable.Repeat(value, Math.Min(500, rows - start))));
+                }
+            }
 
-            foreach (var (name, sql) in new[] { ("Q1", Q1), ("Q2", Q2), ("Q3", Q3), ("Q4", Q4), ("Q5L", Q5L), ("Q5T", Q5T), ("Q6", Q6), ("Q6C", Q6C) })
+            foreach (var (name, sql) in new[] { ("Q1", Q1), ("Q2", Q2), ("Q3", Q3), ("Q4", Q4), ("Q5L", Q5L), ("Q5T", Q5T), ("Q6", Q6), ("Q6C", Q6C), ("QB", _binaryQuery), ("QBS", "SELECT b FROM binary_storage") })
             {
                 if (cases.Contains(name))
                 {

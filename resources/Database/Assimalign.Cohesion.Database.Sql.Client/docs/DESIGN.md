@@ -64,6 +64,15 @@ Its transitive assembly closure is an accepted packaging consequence; a dedicate
 model protocol assembly can be a future refinement. The model's
 [design](../../Assimalign.Cohesion.Database.Sql/docs/DESIGN.md) defines wire ownership.
 
+## Typed literal wire values (#1110)
+
+DATE, TIME, TIMESTAMP, TIMESTAMPTZ, day-time INTERVAL and X binary literals use the existing
+DateOnly, TimeOnly, DateTime, DateTimeOffset, TimeSpan and byte[] tuple encodings and DatabaseType
+metadata. N strings remain String. No protocol format changes. SQL0008 content errors and
+COHDBL001 year-month exclusions arrive as ParseFailure and leave the connection usable.
+TIMESTAMP assignment returns Kind Unspecified; TIMESTAMPTZ preserves its offset, following the
+[dialect normalization rule](../../Assimalign.Cohesion.Database.Sql.Language/docs/DIALECT.md#timestamp-normalization-1110).
+
 ## Typed projection
 
 Column names map to ordinals once, shared by every result record. First column
@@ -231,6 +240,11 @@ The package has no public interface left and no `Abstractions/` folder
   (`SqlClientTests.QueryAsync_AfterDisposeAndReRent_ShouldThrowObjectDisposedException`).
 
 ## E4 SQL definitions
+
+Typed-literal wire theories run over both InMemory and loopback TCP. Temporal, interval,
+binary and national-string values retain the same runtime types and metadata. Malformed
+literals (SQL0008), year-month forms (COHDBL001) and interval overflow retain their parse
+diagnostics and permit a subsequent query on the same connection.
 
 Function/domain DDL and calls use the existing statement transport and server environment without
 client ABI or wire-format changes. Dependency/admission refusals retain leading COHSQLD codes in

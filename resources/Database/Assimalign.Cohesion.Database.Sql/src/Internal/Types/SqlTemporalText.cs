@@ -1,6 +1,8 @@
 using System;
 using System.Globalization;
 
+using Assimalign.Cohesion.Database.Sql.Language;
+
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 /// <summary>
@@ -35,7 +37,7 @@ internal static class SqlTemporalText
     internal static DateOnly ParseDate(string text)
     {
         RequireYearFirst(text, "DATE");
-        return DateOnly.Parse(text, CultureInfo.InvariantCulture);
+        return SqlLiteralText.ParseDate(DateOnly.Parse(text, CultureInfo.InvariantCulture).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
     }
 
     /// <summary>Reads a <c>TIMESTAMP</c>: the clock time as written, any offset ignored.</summary>
@@ -57,7 +59,10 @@ internal static class SqlTemporalText
         RequireYearFirst(text, type);
         try
         {
-            return DateTimeOffset.Parse(text, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal);
+            // Plain-string assignment keeps its existing input acceptance. Normalize that input
+            // before delegating to the literal grammar; typed literals call the strict reader directly.
+            var value = DateTimeOffset.Parse(text, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal);
+            return SqlLiteralText.ParseTimestampWithTimeZone(value.ToString("yyyy-MM-dd HH:mm:ss.fffffffzzz", CultureInfo.InvariantCulture));
         }
         catch (ArgumentOutOfRangeException exception)
         {

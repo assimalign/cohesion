@@ -17,6 +17,12 @@ individual wall times, median, best, process CPU times, allocations, and GC coll
 and pause durations. A best-of-five-medians campaign runs this command five times and takes the
 smallest reported `median_ns`, retaining all five reports and the exact command lines.
 
+The opt-in binary cases use the same warm-up, measurement and GetValue consumption:
+`--cases QB,QBS --rows 100000 --iterations 5`. QB projects four 256-byte literals from `t`;
+QBS projects one stored 256-byte BINARY value from a separate one-column table. Setup stays
+outside measurement. Compare each case against itself: their source rows and output widths differ.
+The [ownership review](../../docs/BINARY_OWNERSHIP_REVIEW.md) records the storage proof and allocations.
+
 Q8 creates a file-backed database with 50 tables before measurement. Each measured Q8 sample is
 the complete engine `BuildAsync`: declare and compile the schema, create the engine, open and
 recover the database, bind its persisted definitions, and provision the already-applied schema.

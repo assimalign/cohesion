@@ -76,6 +76,27 @@ public sealed class SqlLanguageConformanceTests
             .Message.ShouldContain("FUTURE SQL CLAUSE", Case.Sensitive);
     }
 
+    /// <summary>Measures the literal family through live execution without changing the clause count.</summary>
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Literals: typed forms execute with their declared metadata")]
+    [MemberData(nameof(SqlTypedLiteralTests.Literals), MemberType = typeof(SqlTypedLiteralTests))]
+    public async Task Select_TypedLiteral_ShouldReturnValueAndMetadata(string typeName, string literal, DatabaseType type, object expected)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("sql-literal-conformance", new SqlDatabaseEngineOptions());
+        var database = await engine.CreateDatabaseAsync("audit");
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+
+        await ExecuteAsync(session, _seed[0]);
+        await ExecuteAsync(session, _seed[1]);
+
+        // Act
+        await using var result = (await ExecuteAsync(session, $"SELECT {literal} FROM t WHERE id = 1;")).ShouldBeAssignableTo<DatabaseResultSet>();
+
+        // Assert
+        result.Columns.Single().Type.ShouldBe(type, typeName);
+        (await ReadRowsAsync(result)).ShouldHaveSingleItem().ShouldBe(new object?[] { expected });
+    }
+
     /// <summary>Restores the audit's valid conversion cases with target values and metadata.</summary>
     /// <param name="sql">The conversion to submit through the session text entry point.</param>
     /// <param name="expected">The expected value, whose runtime type differs from the operand.</param>

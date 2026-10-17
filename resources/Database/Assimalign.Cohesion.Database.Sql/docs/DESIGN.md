@@ -239,6 +239,54 @@ hexadecimal binary values. Estimates and actual row counts
 are always null in T1. All mappings use closed type switches; the test guard enumerates every
 concrete `SqlPlan` record, and every item adding one supplies a mapping plus an EXPLAIN case.
 
+## Typed literals (#1110)
+
+Sql.Language validates and normalizes temporal, binary and day-time interval literal text
+before planning. The binder evaluates each literal once as a constant; result typing and
+static operand typing preserve its storage type, and access-path extraction uses the same
+evaluator as residual predicates. Literal DEFAULT binding preserves the type before coercion,
+including compiled-schema and domain validation; mismatched typed defaults fail before mutation.
+Omitted values, explicit DEFAULT and ADD COLUMN missing tails use the same bound constant.
+Binary ownership is established where a shared value enters a row. Materialized results
+transfer those rows without copying their cells. GetValue and GetBytes expose the delivered
+bytes, so a caller changing a parameter after execution or a returned cell cannot change
+another cell, later row, function call, DEFAULT assignment or stored value.
+
+| Source | Delivery ownership |
+| --- | --- |
+| Bound literal, folded immutable call or caller parameter | The evaluator copies binary values when supplying a row, including INSERT/UPDATE rows. |
+| SQL function body or native scalar result | The call's delivered result is copied. Body/argument computation does not copy intermediate binary values. |
+| CASE, COALESCE, identity CAST or domain argument | Delivery follows the selected operand; predicate computation continues to share read-only values. Application casts copy their converted binary result. |
+| Converted literal DEFAULT, including an ADD COLUMN missing tail | DefaultValue copies the cached value once per supplied row. Expression defaults use evaluator delivery. |
+| Scalar subquery or grouped key/aggregate slot | Delivery copies the retained slot value for each use, including native aggregate results. |
+| Repeated projections and join fanout | An owned cell's first projection transfers it; repeated projections detach. Join delivery copies selected retained outer/buffered-inner columns; indexed inner rows decode afresh and transfer. Predicates, discarded candidates and unprojected columns never copy. |
+| Stored Binary/JsonBinary component, by scan or seek | SqlRowCodec reads a fresh nonempty array and transfers it. Only the decoder's shared empty array is replaced at this source. |
+| System/catalog views | Enumerators emit strings and immutable scalars, including rendered DEFAULT text; none exposes a catalog byte array. Binary expressions over these views use the same evaluator delivery. |
+
+The scan and index-seek paths both call DecodeRow/SqlRowCodec.Decode. Even an index-covered
+projection fetches the stored row; this engine has no heap-free index-only materialization.
+DatabaseKeyReader.ReadBinary delegates to KeyComponentEncoding.ReadEscaped, whose nonempty
+List.ToArray result is new on each read. Its empty result is Array.Empty<byte>(); SQL replaces
+only that shared empty value. No storage/index value cache retains decoded binary payloads.
+SqlBinaryOwnershipTests verifies repeated reads and covered seeks, and separately calls the
+row codec twice before result construction for Binary and JsonBinary. The ownership and
+measurement record is [BINARY_OWNERSHIP_REVIEW.md](BINARY_OWNERSHIP_REVIEW.md).
+
+COLUMN_DEFAULT renders the resolved temporal/binary value with a typed prefix, including
+plain-string defaults persisted previously. Other expression defaults keep their canonical text.
+
+The [timestamp normalization rule](../../Assimalign.Cohesion.Database.Sql.Language/docs/DIALECT.md#timestamp-normalization-1110)
+owns comparison, CAST and assignment behavior: zone-less clocks are UTC when meeting instants,
+and instant-to-clock/date/time uses UTC. Stored TIMESTAMP kinds normalize to Unspecified;
+TIMESTAMPTZ keeps the written offset. SqlTemporalText preserves the existing plain-string
+assignment acceptance, then delegates normalized date/offset text to public SqlLiteralText;
+typed literals use its strict readers directly. No session zone or assembly access grant is added.
+
+No catalog record changes. SqlCatalogColumn.DefaultLiteral still contains canonical SQL;
+previously accepted string and signed numeric defaults resolve identically, including after reopen.
+New typed spellings were previously unparseable, so no existing persisted text changes meaning
+and the record-space format remains 13. There is no upgrade path.
+
 ## Bound expressions (E1)
 
 The planner compiles every scalar expression a plan evaluates — a WHERE or JOIN
@@ -332,7 +380,7 @@ flowchart TD
   the column and every INSERT omitting it reads, where each use converted the text
   before. A DEFAULT that does not convert, which DDL never stores, binds as a
   `SqlBoundFailure` that fails each use as before, so the table still opens. Bound
-  trees and immutable converted values are shared; binary defaults are copied on delivery.
+  trees and converted values are shared; binary defaults are copied when delivered into a row.
   Failure nodes construct a new exception per throw, so sharing the cache across threads is safe.
 - **Allocation.** Literals and parameters are boxed once per statement instead of per
   row; predicates return shared boxed Booleans; `COUNT(*)` accumulates a shared boxed
@@ -1842,7 +1890,7 @@ documented by PostgreSQL's implementation of the standard.
 identity. The catalog does not preserve the original alias spelling (`INT`
 versus `INTEGER`, for example), so this surface cannot reconstruct it. Declared
 length, precision, scale, nullability, and default text come from catalog fields
-(the default is the stored canonical literal, reported as is);
+(the default is canonical SQL, with temporal/binary literals rendered from their resolved value);
 unknown or inapplicable facts are null, including an unknown character octet
 bound. Cohesion types without an ISO spelling, such as `JSONB`, retain their
 documented dialect name.

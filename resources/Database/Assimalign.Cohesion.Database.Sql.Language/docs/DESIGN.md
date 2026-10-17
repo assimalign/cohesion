@@ -111,6 +111,25 @@ the parser implements today. Recognized clauses outside that set produce the sha
   character, CR LF once), so its lines break where the lexer ends a `--`
   comment and agree with OQL and GQL diagnostic lines. The raw statement text
   is stamped once on the root (`SqlQueryExpression.Text`) after parsing.
+- **Typed literal values are normalized by the parser (#1110).** SqlLiteralText is the
+  public, strict invariant grammar in Sql.Language, alongside SqlTypeNames. It uses
+  spans and BCL exact readers, with no Regex or reflection. Six literal kinds carry
+  canonical text: dates and times, wall-clock timestamps, offset timestamps, day-time
+  intervals and uppercase binary hex. N strings use String. The existing multi-word
+  type grammar resolves temporal prefixes; X/N require token adjacency. Unsupported
+  valid forms (including year-month intervals) report COHDBL001, invalid contents
+  SQL0008, both at the complete literal. Canonical rendering retains typed prefixes
+  so persisted-expression equivalence checks kind and value without losing type.
+  SqlTemporalText keeps the established plain-string input acceptance and delegates
+  its normalized value to this grammar; typed input reaches the strict readers directly.
+  PostgreSQL gram.y:17806-17828 supplies the typed-string/interval split; datetime.c:3959-3977
+  distinguishes date M from time M in ISO durations. X deliberately uses ISO binary semantics.
+  PostgreSQL clock intervals accept explicit or implicit days and independently signed clock
+  fields (datetime.c:3504-3596), with hh:mm, hh:mm:ss.fraction and mm:ss.fraction interpreted
+  by DecodeTimeCommon (datetime.c:2656-2740). Hours are unbounded within TimeSpan, while
+  seven fractional digits retain the dialect's 100 ns precision. SQL years-months
+  (datetime.c:3669-3695) and ISO alternative dates (datetime.c:4038-4108) are recognized and
+  refused as COHDBL001 rather than malformed SQL0008. Day-time ISO P1DT2H remains executable.
 - **String literal nodes carry the value, not the lexeme** — quotes stripped,
   doubled quotes unescaped — because every consumer (executor, planner, schema
   compiler) wants the value, and exactly one component (the parser) knows the

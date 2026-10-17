@@ -63,12 +63,13 @@ internal sealed partial class SqlPlanExecutor
     /// The evaluator a plan's bound expressions run with: the statement's subquery values, and its
     /// cancellation token only when the engine registers an application function, the only kind of
     /// function that reads the token from its context. A statement of an engine with the standard
-    /// library alone therefore shares the evaluator without subquery values and allocates none,
-    /// whatever its token, as before functions carried a context.
+    /// library alone therefore shares the evaluator without subquery values or retained join
+    /// columns and allocates none, whatever its token, as before functions carried a context.
     /// </summary>
-    private SqlExpressionEvaluator ExecutionEvaluator(SqlSubqueryValues? subqueryValues, CancellationToken cancellationToken)
+    private SqlExpressionEvaluator ExecutionEvaluator(SqlSubqueryValues? subqueryValues, CancellationToken cancellationToken,
+        bool[]? sharedColumns = null)
         => SqlExpressionEvaluator.ForExecution(subqueryValues,
-            _definitions.Functions.RunsApplicationCode ? cancellationToken : default);
+            _definitions.Functions.RunsApplicationCode ? cancellationToken : default, sharedColumns);
 
     /// <summary>
     /// A registered index paired with its live tree and resolved key ordinals —
@@ -231,8 +232,21 @@ internal sealed partial class SqlPlanExecutor
             for (int i = 0; i < output.Length; i++)
             {
                 var projection = projections[i];
-                output[i] = projection.ColumnOrdinal is int ordinal ? row[ordinal]
-                    : NormalizeGroupValue(evaluator.Evaluate(projection.Value!, row), projection.Type);
+                output[i] = projection.ColumnOrdinal is int ordinal ? evaluator.DeliverColumn(row, ordinal)
+                    : NormalizeGroupValue(evaluator.Evaluate(projection.Value!, row, copySharedBinary: true), projection.Type);
+                if (output[i] is byte[])
+                {
+                    // One decoded cell can be projected more than once, directly or through CASE,
+                    // COALESCE or an identity CAST. Transfer its first use; copy subsequent uses.
+                    for (int previous = 0; previous < i; previous++)
+                    {
+                        if (ReferenceEquals(output[previous], output[i]))
+                        {
+                            output[i] = SqlBinaryValue.CopyShared(output[i]);
+                            break;
+                        }
+                    }
+                }
             }
             return output;
         }
@@ -341,7 +355,7 @@ internal sealed partial class SqlPlanExecutor
             {
                 if (valueRow[i].Kind != SqlBoundExpressionKind.DefaultItem)
                 {
-                    row[i] = evaluator.Evaluate(valueRow[i], Array.Empty<object?>());
+                    row[i] = evaluator.Evaluate(valueRow[i], Array.Empty<object?>(), copySharedBinary: true);
                 }
             }
             values.Add(row);
@@ -382,7 +396,7 @@ internal sealed partial class SqlPlanExecutor
                 // Assignments evaluate against the ORIGINAL row (SQL semantics).
                 updated[ordinal] = expression.Kind == SqlBoundExpressionKind.DefaultItem
                     ? ResolveColumnDefault(plan.Table.Columns[ordinal], bound.DefaultValues[ordinal], cancellationToken)
-                    : CoerceForColumn(evaluator.Evaluate(expression, values), plan.Table.Columns[ordinal]);
+                    : CoerceForColumn(evaluator.Evaluate(expression, values, copySharedBinary: true), plan.Table.Columns[ordinal]);
             }
 
             if (assigned is not null)
@@ -1503,23 +1517,27 @@ internal sealed partial class SqlPlanExecutor
                     DateOnly date => date,
                     string text => SqlTemporalText.ParseDate(text),
                     DateTime dateTime => DateOnly.FromDateTime(dateTime),
+                    DateTimeOffset instant => DateOnly.FromDateTime(instant.UtcDateTime),
                     _ => throw new DatabaseException($"Cannot convert {value.GetType().Name} to DATE."),
                 },
                 DatabaseType.Time => value switch
                 {
                     TimeOnly time => time,
+                    DateTimeOffset instant => TimeOnly.FromDateTime(instant.UtcDateTime),
                     string text => TimeOnly.Parse(text, CultureInfo.InvariantCulture),
                     _ => throw new DatabaseException($"Cannot convert {value.GetType().Name} to TIME."),
                 },
                 DatabaseType.DateTime => value switch
                 {
-                    DateTime dateTime => dateTime,
+                    DateTime dateTime => DateTime.SpecifyKind(dateTime, DateTimeKind.Unspecified),
+                    DateTimeOffset instant => DateTime.SpecifyKind(instant.UtcDateTime, DateTimeKind.Unspecified),
                     string text => SqlTemporalText.ParseTimestamp(text),
                     _ => throw new DatabaseException($"Cannot convert {value.GetType().Name} to TIMESTAMP."),
                 },
                 DatabaseType.DateTimeOffset => value switch
                 {
                     DateTimeOffset dateTimeOffset => dateTimeOffset,
+                    DateTime timestamp => new DateTimeOffset(DateTime.SpecifyKind(timestamp, DateTimeKind.Unspecified), TimeSpan.Zero),
                     string text => SqlTemporalText.ParseTimestampTz(text),
                     _ => throw new DatabaseException($"Cannot convert {value.GetType().Name} to TIMESTAMPTZ."),
                 },

@@ -33,6 +33,14 @@ internal static class SqlValueComparer
         {
             return firstInstant.UtcTicks.CompareTo(secondInstant.UtcTicks);
         }
+        if (left is DateTime wallClock && right is DateTimeOffset instant)
+        {
+            return wallClock.Ticks.CompareTo(instant.UtcTicks);
+        }
+        if (left is DateTimeOffset firstOffset && right is DateTime secondClock)
+        {
+            return firstOffset.UtcTicks.CompareTo(secondClock.Ticks);
+        }
         if (IsNumber(left) && IsNumber(right))
         {
             bool leftApproximate = left is float or double;
@@ -78,7 +86,8 @@ internal static class SqlValueComparer
         {
             return comparable.CompareTo(right);
         }
-        throw new DatabaseException($"Cannot compare values of types {left.GetType().Name} and {right.GetType().Name}.");
+        string hint = left is DateOnly && right is string || left is string && right is DateOnly ? " Use DATE 'yyyy-mm-dd' for a date literal." : string.Empty;
+        throw new DatabaseException($"Cannot compare values of types {left.GetType().Name} and {right.GetType().Name}.{hint}");
     }
 
     /// <summary>

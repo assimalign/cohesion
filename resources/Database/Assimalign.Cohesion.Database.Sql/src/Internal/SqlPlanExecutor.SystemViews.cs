@@ -293,7 +293,24 @@ internal sealed partial class SqlPlanExecutor
 
     // The catalog stores a DEFAULT as the canonical SQL text of its literal, which is the
     // default clause ISO's COLUMN_DEFAULT reports.
-    private static string? SystemColumnDefault(SqlCatalogColumn column) => column.DefaultLiteral;
+    private static string? SystemColumnDefault(SqlCatalogColumn column)
+    {
+        if (column.DefaultLiteral is null) { return null; }
+        var expression = SqlPersistedExpression.Load(column.DefaultLiteral, $"DEFAULT of column '{column.Name}'");
+        if (expression is not SqlLiteralExpression { LiteralType: SqlLiteralType.String } literal) { return column.DefaultLiteral; }
+        if (column.Type.Type is not (DatabaseType.Date or DatabaseType.Time or DatabaseType.DateTime or DatabaseType.DateTimeOffset or DatabaseType.TimeSpan or DatabaseType.Binary)) { return column.DefaultLiteral; }
+        object? value = ResolveDefault(column, literal.Value);
+        return value switch
+        {
+            DateOnly date => "DATE '" + date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + "'",
+            TimeOnly time => "TIME '" + time.ToString("HH:mm:ss.FFFFFFF", CultureInfo.InvariantCulture).TrimEnd('.') + "'",
+            DateTime timestamp => "TIMESTAMP '" + timestamp.ToString("yyyy-MM-dd HH:mm:ss.FFFFFFF", CultureInfo.InvariantCulture).TrimEnd('.') + "'",
+            DateTimeOffset instant => "TIMESTAMPTZ '" + instant.ToString("yyyy-MM-dd HH:mm:ss.fffffffzzz", CultureInfo.InvariantCulture) + "'",
+            TimeSpan interval => "INTERVAL '" + (interval.Ticks < 0 ? "-PT" : "PT") + (Math.Abs((decimal)interval.Ticks) / TimeSpan.TicksPerSecond).ToString("0.#######", CultureInfo.InvariantCulture) + "S'",
+            byte[] bytes => "X'" + Convert.ToHexString(bytes) + "'",
+            _ => column.DefaultLiteral,
+        };
+    }
 
     // The catalog retains shared type identities rather than lexical SQL
     // aliases. Report a canonical SQL name; size and precision have ISO columns.

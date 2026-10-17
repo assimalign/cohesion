@@ -148,8 +148,8 @@ internal sealed partial class SqlPlanExecutor
     /// catalog the engine wrote. One that does not convert binds as a <see cref="SqlBoundFailure"/>
     /// that converts it again, and so fails, each time the default is used, as it did before the
     /// value was bound: the table still opens, and reads and writes that never need the default
-    /// still succeed. Immutable converted values are shared; binary defaults are copied on delivery
-    /// so a caller cannot mutate the cached value through a materialized row.
+    /// still succeed. Converted binary constants are copied when delivered into a row, so a
+    /// missing stored tail cannot expose the cached value to a caller.
     /// </remarks>
     /// <param name="column">The column.</param>
     /// <param name="defaultValue">The value text of the column's DEFAULT literal (<see cref="SqlPersistedExpression.LoadDefaultValue"/>).</param>
@@ -161,6 +161,11 @@ internal sealed partial class SqlPlanExecutor
         if (expression is SqlLiteralExpression { LiteralType: SqlLiteralType.Null })
         {
             return new SqlBoundConstant(null);
+        }
+        if (expression is SqlLiteralExpression { LiteralType: SqlLiteralType.Date or SqlLiteralType.Time or SqlLiteralType.Timestamp
+            or SqlLiteralType.TimestampWithTimeZone or SqlLiteralType.Interval or SqlLiteralType.Binary } typed)
+        {
+            return new SqlBoundConstant(ResolveDefault(column, typed.Value));
         }
         if (SqlPersistedExpression.IsDefaultLiteral(expression))
         {
@@ -218,9 +223,9 @@ internal sealed partial class SqlPlanExecutor
     private static object? DefaultValue(SqlBoundExpression bound, CancellationToken cancellationToken = default)
     {
         object? value = bound.Kind == SqlBoundExpressionKind.Constant
-            ? ((SqlBoundConstant)bound).Value
-            : SqlExpressionEvaluator.ForExecution(null, cancellationToken).Evaluate(bound, []);
-        return value is byte[] bytes ? bytes.Clone() : value;
+            ? SqlBinaryValue.CopyShared(((SqlBoundConstant)bound).Value)
+            : SqlExpressionEvaluator.ForExecution(null, cancellationToken).Evaluate(bound, [], copySharedBinary: true);
+        return value;
     }
 
     /// <summary>
@@ -248,7 +253,20 @@ internal sealed partial class SqlPlanExecutor
 
         try
         {
-            object? value = column.Type.Type is DatabaseType.Binary or DatabaseType.JsonBinary
+            SqlLiteralExpression? typed = column.DefaultLiteral is { } persisted
+                ? SqlPersistedExpression.Load(persisted, $"DEFAULT of column '{column.Name}'") as SqlLiteralExpression : null;
+            DatabaseType? literalType = typed?.LiteralType switch
+            {
+                SqlLiteralType.Date => DatabaseType.Date, SqlLiteralType.Time => DatabaseType.Time,
+                SqlLiteralType.Timestamp => DatabaseType.DateTime, SqlLiteralType.TimestampWithTimeZone => DatabaseType.DateTimeOffset,
+                SqlLiteralType.Interval => DatabaseType.TimeSpan, SqlLiteralType.Binary => DatabaseType.Binary, _ => null,
+            };
+            if (literalType is { } declared && declared != column.Type.Type)
+            {
+                throw new DatabaseException($"Typed DEFAULT {typed!.LiteralType} does not match column type {column.Type.Type}.");
+            }
+            object? value = literalType is not null ? CoerceForColumn(SqlExpressionEvaluator.EvaluateLiteral(typed!), column)
+                : column.Type.Type is DatabaseType.Binary or DatabaseType.JsonBinary
                 ? CoerceForColumn(ParseBinaryDefault(defaultValue), column)
                 : column.Type.Type == DatabaseType.Decimal
                 // Canonical DEFAULT text preserves quotes. Only an unquoted numeric literal

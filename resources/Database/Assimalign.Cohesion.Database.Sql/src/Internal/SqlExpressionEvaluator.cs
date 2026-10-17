@@ -68,6 +68,9 @@ internal sealed partial class SqlExpressionEvaluator
     /// </summary>
     private readonly SqlSubqueryValues? _subqueryValues;
 
+    /// <summary>Columns retained by a join loop, populated before projection begins; null for owned input rows.</summary>
+    private readonly bool[]? _sharedColumns;
+
     /// <summary>The engine's function catalog and the database, which calls bind against.</summary>
     private readonly SqlFunctionEnvironment _functions;
 
@@ -91,7 +94,8 @@ internal sealed partial class SqlExpressionEvaluator
         SqlFunctionEnvironment? functions = null,
         CancellationToken cancellationToken = default,
         SqlExpressionEvaluator? slotScope = null,
-        SqlBindingContext bindingContext = SqlBindingContext.Table)
+        SqlBindingContext bindingContext = SqlBindingContext.Table,
+        bool[]? sharedColumns = null)
     {
         _columns = columns;
         _bindingContext = bindingContext;
@@ -102,6 +106,7 @@ internal sealed partial class SqlExpressionEvaluator
         _projectionSources = projectionSources;
         _subquerySlots = subquerySlots;
         _subqueryValues = subqueryValues;
+        _sharedColumns = sharedColumns;
         _functions = functions ?? SqlFunctionEnvironment.Standard;
         _cancellationToken = cancellationToken;
         _typing = slotScope is null ? null : new SqlTypingMemory(slotScope);
@@ -109,20 +114,26 @@ internal sealed partial class SqlExpressionEvaluator
 
     /// <summary>
     /// Gets the evaluator an executing plan evaluates its bound expressions with. Bound nodes carry
-    /// their ordinals, values, collations and functions, so it needs no scope: only the statement's
-    /// materialized subquery values, which bound subquery nodes read, and the statement's
-    /// cancellation token, which a called function's context carries.
+    /// their ordinals, values, collations and functions, so it needs no binding scope: only the
+    /// statement's subquery values, cancellation token and any retained input columns a join marks.
     /// </summary>
     /// <param name="subqueryValues">The statement's materialized subquery values, or null when it has none.</param>
     /// <param name="cancellationToken">The statement's cancellation token.</param>
+    /// <param name="sharedColumns">The input columns a producer retains, or null when all columns transfer ownership.</param>
     /// <returns>
-    /// The evaluator; a shared instance when there are no subquery values and the token cannot be
-    /// canceled, so such a statement allocates none.
+    /// The evaluator; a shared instance when there are no subquery values or retained columns and
+    /// the token cannot be canceled, so such a statement allocates none.
     /// </returns>
-    internal static SqlExpressionEvaluator ForExecution(SqlSubqueryValues? subqueryValues, CancellationToken cancellationToken = default)
-        => subqueryValues is null && !cancellationToken.CanBeCanceled
+    internal static SqlExpressionEvaluator ForExecution(SqlSubqueryValues? subqueryValues, CancellationToken cancellationToken = default,
+        bool[]? sharedColumns = null)
+        => subqueryValues is null && !cancellationToken.CanBeCanceled && sharedColumns is null
             ? RowEvaluator
-            : new SqlExpressionEvaluator(Array.Empty<SqlCatalogColumn>(), null, subqueryValues: subqueryValues, cancellationToken: cancellationToken);
+            : new SqlExpressionEvaluator(Array.Empty<SqlCatalogColumn>(), null, subqueryValues: subqueryValues,
+                cancellationToken: cancellationToken, sharedColumns: sharedColumns);
+
+    /// <summary>Transfers an owned column, or detaches a binary value retained by a join loop.</summary>
+    internal object? DeliverColumn(object?[] row, int ordinal)
+        => _sharedColumns is not null && _sharedColumns[ordinal] ? SqlBinaryValue.CopyShared(row[ordinal]) : row[ordinal];
 
     /// <summary>Gets the statement's materialized subquery values, which a deferred collation reads.</summary>
     internal SqlSubqueryValues? SubqueryValues => _subqueryValues;
@@ -186,13 +197,17 @@ internal sealed partial class SqlExpressionEvaluator
     /// the statement with a coded <see cref="SqlEvaluationException"/>; a raw runtime
     /// <see cref="ArithmeticException"/> never escapes evaluation.
     /// </summary>
+    /// <remarks>
+    /// Row producers request binary delivery copies. Only sources that can retain a value copy;
+    /// columns transfer decoded values, and predicates and call arguments keep read-only sharing.
+    /// </remarks>
     /// <exception cref="SqlEvaluationException">Division by zero or a numeric value out of range.</exception>
     /// <exception cref="DatabaseException">Any other evaluation error.</exception>
-    internal object? Evaluate(SqlBoundExpression expression, object?[] row)
+    internal object? Evaluate(SqlBoundExpression expression, object?[] row, bool copySharedBinary = false)
     {
         try
         {
-            return EvaluateCore(expression, row);
+            return EvaluateCore(expression, row, copySharedBinary);
         }
         catch (ArithmeticException exception)
         {
@@ -203,7 +218,7 @@ internal sealed partial class SqlExpressionEvaluator
         }
     }
 
-    private object? EvaluateCore(SqlBoundExpression expression, object?[] row)
+    private object? EvaluateCore(SqlBoundExpression expression, object?[] row, bool copySharedBinary = false)
     {
         // Every operator recurses through here, once per level of the tree, never once per term
         // of an AND/OR chain. A tree the thread has too little stack left for fails the statement
@@ -213,29 +228,32 @@ internal sealed partial class SqlExpressionEvaluator
         switch (expression.Kind)
         {
             case SqlBoundExpressionKind.Column:
-                return row[((SqlBoundColumn)expression).Ordinal];
+                int columnOrdinal = ((SqlBoundColumn)expression).Ordinal;
+                return copySharedBinary ? DeliverColumn(row, columnOrdinal) : row[columnOrdinal];
             case SqlBoundExpressionKind.Default:
                 var defaultValue = (SqlBoundDefault)expression;
-                return SqlPlanExecutor.CoerceForColumn(EvaluateCore(defaultValue.Value, row), defaultValue.Column);
+                return SqlPlanExecutor.CoerceForColumn(EvaluateCore(defaultValue.Value, row, copySharedBinary), defaultValue.Column);
             case SqlBoundExpressionKind.Constant:
-                return ((SqlBoundConstant)expression).Value;
+                return Deliver(((SqlBoundConstant)expression).Value, copySharedBinary);
             case SqlBoundExpressionKind.Binary:
                 return EvaluateBinary((SqlBoundBinary)expression, row);
             case SqlBoundExpressionKind.Logical:
                 return EvaluateLogical((SqlBoundLogical)expression, row);
             case SqlBoundExpressionKind.Call:
-                return EvaluateCall((SqlBoundCall)expression, row);
+                // Native functions can retain their result; SQL bodies can return cached constants.
+                // Arguments and bodies compute without delivery copies; only the returned value emits.
+                return Deliver(EvaluateCall((SqlBoundCall)expression, row), copySharedBinary);
             case SqlBoundExpressionKind.Slot:
-                return row[((SqlBoundSlot)expression).Ordinal];
+                return Deliver(row[((SqlBoundSlot)expression).Ordinal], copySharedBinary);
             case SqlBoundExpressionKind.Parameter:
-                return ((SqlBoundParameter)expression).Value;
+                return Deliver(((SqlBoundParameter)expression).Value, copySharedBinary);
             case SqlBoundExpressionKind.Unary:
                 return EvaluateUnary((SqlBoundUnary)expression, row);
             case SqlBoundExpressionKind.IsNull:
                 var isNull = (SqlBoundIsNull)expression;
                 return Box(EvaluateCore(isNull.Operand, row) is null != isNull.IsNegated);
             case SqlBoundExpressionKind.Coalesce:
-                return Coalesce(((SqlBoundCoalesce)expression).Arguments, row);
+                return Coalesce(((SqlBoundCoalesce)expression).Arguments, row, copySharedBinary);
             case SqlBoundExpressionKind.Between:
                 return EvaluateBetween((SqlBoundBetween)expression, row);
             case SqlBoundExpressionKind.In:
@@ -245,13 +263,13 @@ internal sealed partial class SqlExpressionEvaluator
             case SqlBoundExpressionKind.Like:
                 return EvaluateLike((SqlBoundLike)expression, row);
             case SqlBoundExpressionKind.Case:
-                return EvaluateCase((SqlBoundCase)expression, row);
+                return EvaluateCase((SqlBoundCase)expression, row, copySharedBinary);
             case SqlBoundExpressionKind.Cast:
-                return EvaluateCast((SqlBoundCast)expression, row);
+                return EvaluateCast((SqlBoundCast)expression, row, copySharedBinary);
             case SqlBoundExpressionKind.DomainArgument:
-                return EvaluateDomainArgument((SqlBoundDomainArgument)expression, row);
+                return EvaluateDomainArgument((SqlBoundDomainArgument)expression, row, copySharedBinary);
             case SqlBoundExpressionKind.Subquery:
-                return SqlSubqueryValues.Get(_subqueryValues, ((SqlBoundSubquery)expression).Slot)[0];
+                return Deliver(SqlSubqueryValues.Get(_subqueryValues, ((SqlBoundSubquery)expression).Slot)[0], copySharedBinary);
             case SqlBoundExpressionKind.Failure:
                 return ((SqlBoundFailure)expression).Raise();
             default:
@@ -262,9 +280,12 @@ internal sealed partial class SqlExpressionEvaluator
     /// <summary>Returns the shared box of a Boolean result.</summary>
     private static object Box(bool value) => value ? True : False;
 
+    private static object? Deliver(object? value, bool copySharedBinary)
+        => copySharedBinary ? SqlBinaryValue.CopyShared(value) : value;
+
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private object? EvaluateDomainArgument(SqlBoundDomainArgument argument, object?[] row)
-        => argument.Coerce(EvaluateCore(argument.Operand, row), _subqueryValues, _cancellationToken);
+    private object? EvaluateDomainArgument(SqlBoundDomainArgument argument, object?[] row, bool copySharedBinary)
+        => argument.Coerce(EvaluateCore(argument.Operand, row, copySharedBinary), _subqueryValues, _cancellationToken);
 
     /// <summary>
     /// Whether an expression reads a table column in this binding context. SQL function parameters
@@ -525,7 +546,7 @@ internal sealed partial class SqlExpressionEvaluator
     /// range, and a CAST operand still reports it as a conversion failure. Binding parses each
     /// literal once; one that does not parse raises this when it is evaluated.
     /// </remarks>
-    private static object? EvaluateLiteral(SqlLiteralExpression literal)
+    internal static object? EvaluateLiteral(SqlLiteralExpression literal)
     {
         return literal.LiteralType switch
         {
@@ -534,6 +555,12 @@ internal sealed partial class SqlExpressionEvaluator
             SqlLiteralType.Boolean => Box(literal.Value.Equals("TRUE", StringComparison.OrdinalIgnoreCase)),
             SqlLiteralType.Integer => ParseIntegerLiteral(literal.Value),
             SqlLiteralType.Float => ParseFractionalLiteral(literal.Value),
+            SqlLiteralType.Date => SqlLiteralText.ParseDate(literal.Value),
+            SqlLiteralType.Time => SqlLiteralText.ParseTime(literal.Value),
+            SqlLiteralType.Timestamp => SqlLiteralText.ParseTimestamp(literal.Value),
+            SqlLiteralType.TimestampWithTimeZone => SqlLiteralText.ParseTimestampWithTimeZone(literal.Value),
+            SqlLiteralType.Interval => SqlLiteralText.ParseInterval(literal.Value),
+            SqlLiteralType.Binary => SqlLiteralText.ParseBinary(literal.Value),
             _ => throw new SqlPlanningException("COHSQLE013", $"Literal type {literal.LiteralType} is not supported.", literal.Location),
         };
     }
@@ -567,12 +594,15 @@ internal sealed partial class SqlExpressionEvaluator
     /// Arithmetic inside the operand keeps its own coded fault: a division by zero or an
     /// overflowing operator is not a conversion failure.
     /// </summary>
-    private object? EvaluateCast(SqlBoundCast cast, object?[] row)
+    private object? EvaluateCast(SqlBoundCast cast, object?[] row, bool copySharedBinary)
     {
         object? value;
         try
         {
-            value = EvaluateCore(cast.Operand, row);
+            // An application conversion owns delivery of its result, as a scalar call does.
+            // Only an identity binary cast passes delivery through to its operand.
+            bool deliverOperand = copySharedBinary && cast.Casts[(int)DatabaseType.Binary] is null;
+            value = EvaluateCore(cast.Operand, row, deliverOperand);
         }
         catch (Exception exception) when (exception is FormatException or OverflowException)
         {
@@ -581,7 +611,7 @@ internal sealed partial class SqlExpressionEvaluator
 
         try
         {
-            return SqlCastConverter.Convert(value, cast, _cancellationToken);
+            return SqlCastConverter.Convert(value, cast, _cancellationToken, copySharedBinary);
         }
         catch (SqlEvaluationException exception) when (exception.Diagnostics[0].Start is null && cast.Location is not null)
         {
@@ -876,7 +906,7 @@ internal sealed partial class SqlExpressionEvaluator
         return Box(matches != expression.IsNegated);
     }
 
-    private object? EvaluateCase(SqlBoundCase expression, object?[] row)
+    private object? EvaluateCase(SqlBoundCase expression, object?[] row, bool copySharedBinary)
     {
         object? input = expression.Input is null ? null : EvaluateCore(expression.Input, row);
 
@@ -886,7 +916,7 @@ internal sealed partial class SqlExpressionEvaluator
             {
                 if (EvaluateCore(when.Condition, row) is true)
                 {
-                    return EvaluateCore(when.Result, row);
+                    return EvaluateCore(when.Result, row, copySharedBinary);
                 }
             }
             else
@@ -896,12 +926,12 @@ internal sealed partial class SqlExpressionEvaluator
                 if (input is not null && candidate is not null && Compare(input, candidate,
                     when.Collation.Resolve(_subqueryValues)) == 0)
                 {
-                    return EvaluateCore(when.Result, row);
+                    return EvaluateCore(when.Result, row, copySharedBinary);
                 }
             }
         }
 
-        return expression.ElseResult is null ? null : EvaluateCore(expression.ElseResult, row);
+        return expression.ElseResult is null ? null : EvaluateCore(expression.ElseResult, row, copySharedBinary);
     }
 
     /// <summary>
@@ -1058,11 +1088,11 @@ internal sealed partial class SqlExpressionEvaluator
     }
 
     /// <summary>The first non-NULL argument, evaluated left to right and no further.</summary>
-    private object? Coalesce(SqlBoundExpression[] arguments, object?[] row)
+    private object? Coalesce(SqlBoundExpression[] arguments, object?[] row, bool copySharedBinary)
     {
         for (int index = 0; index < arguments.Length; index++)
         {
-            object? value = EvaluateCore(arguments[index], row);
+            object? value = EvaluateCore(arguments[index], row, copySharedBinary);
 
             if (value is not null)
             {
