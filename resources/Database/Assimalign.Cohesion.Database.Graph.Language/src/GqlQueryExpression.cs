@@ -16,20 +16,36 @@ public sealed class GqlQueryExpression : GqlExpression
     /// <param name="location">The source span.</param>
     public GqlQueryExpression(IReadOnlyList<GqlPathPattern> matches, GqlExpression? predicate,
         IReadOnlyList<GqlPathPattern> creates, IReadOnlyList<string> deleteVariables, bool detachDelete,
+        IReadOnlyList<GqlProjection> projections, Location? location = null)
+        : this(matches is { Count: 0 } && predicate is null ? [] : [new GqlMatchClause(matches, predicate, false)],
+            creates, deleteVariables, detachDelete, projections, location)
+    {
+    }
+
+    /// <summary>Initializes a query with source-ordered matching clauses.</summary>
+    /// <param name="matchClauses">The matching clauses evaluated before mutation or projection.</param>
+    /// <param name="creates">The patterns inserted for each matching binding.</param>
+    /// <param name="deleteVariables">The bound variables to delete.</param>
+    /// <param name="detachDelete">Whether deleting nodes also deletes incident relationships.</param>
+    /// <param name="projections">The result columns in source order.</param>
+    /// <param name="location">The source span.</param>
+    public GqlQueryExpression(IReadOnlyList<GqlMatchClause> matchClauses,
+        IReadOnlyList<GqlPathPattern> creates, IReadOnlyList<string> deleteVariables, bool detachDelete,
         IReadOnlyList<GqlProjection> projections, Location? location = null) : base(location)
     {
-        Matches = matches;
-        Predicate = predicate;
+        MatchClauses = matchClauses;
         Creates = creates;
         DeleteVariables = deleteVariables;
         DetachDelete = detachDelete;
         Projections = projections;
     }
 
-    /// <summary>Gets the finite patterns to match.</summary>
-    public IReadOnlyList<GqlPathPattern> Matches { get; }
-    /// <summary>Gets the optional match predicate.</summary>
-    public GqlExpression? Predicate { get; }
+    /// <summary>Gets the matching clauses in source order.</summary>
+    public IReadOnlyList<GqlMatchClause> MatchClauses { get; }
+    /// <summary>Gets the paths when there is exactly one mandatory clause; empty otherwise.</summary>
+    public IReadOnlyList<GqlPathPattern> Matches => MatchClauses is [{ Optional: false } clause] ? clause.Paths : [];
+    /// <summary>Gets the predicate when there is exactly one mandatory clause; null otherwise.</summary>
+    public GqlExpression? Predicate => MatchClauses is [{ Optional: false } clause] ? clause.Predicate : null;
     /// <summary>Gets the patterns to insert.</summary>
     public IReadOnlyList<GqlPathPattern> Creates { get; }
     /// <summary>Gets the bound node or relationship variables to delete.</summary>

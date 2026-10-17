@@ -102,7 +102,7 @@ public sealed partial class GqlQueryParser : QueryParser
         else if (Is("EXPLAIN"))
         {
             _position++;
-            if (Is("MATCH") || Is("CREATE") || Is("INSERT") || Is("RETURN"))
+            if (Is("MATCH") || Is("OPTIONAL") || Is("CREATE") || Is("INSERT") || Is("RETURN"))
             {
                 expression = ParseQuery();
                 expression.Explain();
@@ -114,7 +114,7 @@ public sealed partial class GqlQueryParser : QueryParser
             }
         }
         else if (catalogStatement) { expression = ParseCatalog(); }
-        else if (Is("MATCH") || Is("CREATE") || Is("INSERT") || Is("RETURN")) { expression = ParseQuery(); }
+        else if (Is("MATCH") || Is("OPTIONAL") || Is("CREATE") || Is("INSERT") || Is("RETURN")) { expression = ParseQuery(); }
         else
         {
             if (Is("DELETE") || Is("DETACH") || Is("WHERE"))
@@ -238,6 +238,27 @@ public sealed partial class GqlQueryParser : QueryParser
             if (i > 0 && _tokens[i - 1].Type is TokenType.Dot or TokenType.Colon) { continue; }
             if (i + 1 < _tokens.Count && _tokens[i + 1].Type == TokenType.Colon) { continue; }
             string value = token.Text.ToUpperInvariant();
+            // ISO OPTIONAL block operands are recognized outside T1. Consume their complete
+            // operand here so nested MATCH/WHERE words cannot produce extra capability errors.
+            // This precedes function detection, including after a WHERE expression.
+            if (patternDepth == 0 && value == "OPTIONAL")
+            {
+                if (i + 1 < _tokens.Count && _tokens[i + 1].Type is TokenType.LeftBrace or TokenType.LeftParen)
+                {
+                    int endIndex = i + 1;
+                    int depth = 0;
+                    for (int j = i + 1; j < _tokens.Count; j++)
+                    {
+                        if (_tokens[j].Type is TokenType.LeftBrace or TokenType.LeftParen or TokenType.LeftBracket) { depth++; }
+                        if (_tokens[j].Type is TokenType.RightBrace or TokenType.RightParen or TokenType.RightBracket) { depth--; }
+                        endIndex = j;
+                        if (depth == 0 || _tokens[j].Type == TokenType.Eof) { break; }
+                    }
+                    UnsupportedConstruct(GqlUnsupportedVocabulary.OptionalBlockOperand, token, _tokens[endIndex]);
+                    i = endIndex;
+                }
+                continue;
+            }
             if (patternDepth == 0 && value is "WHERE" or "RETURN") { inValueExpression = true; }
             if (patternDepth == 0 && value is "MATCH" or "CREATE" or "INSERT" or "DELETE") { inValueExpression = false; }
 

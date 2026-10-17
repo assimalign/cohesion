@@ -14,6 +14,8 @@ internal sealed partial class GraphPlanner
     internal static string DescribeOperator(object plan) => plan switch
     {
         GraphPlan => "Match",
+        GraphMatchClausePlan { Optional: true } => "OptionalMatch",
+        GraphMatchClausePlan => "Match",
         GraphPathPlan => "ExpandPath",
         GraphProjectionPlan => "Project",
         GraphDistinctPlan => "Distinct",
@@ -28,28 +30,35 @@ internal sealed partial class GraphPlanner
         var nodes = new List<DatabasePlanNode>();
         var query = plan.Query;
         string root = query.Creates.Count > 0 ? "Insert" : query.DeleteVariables.Count > 0
-            ? query.DetachDelete ? "DetachDelete" : "Delete" : query.Matches.Count == 0 ? "Return" : DescribeOperator(plan);
-        Add(root, null, detail: $"filter={query.Predicate is not null}; matches_nothing={plan.MatchesNothing}");
-        foreach (var path in plan.Matches)
+            ? query.DetachDelete ? "DetachDelete" : "Delete" : plan.MatchClauses.Count == 0 ? "Return" : DescribeOperator(plan);
+        Add(root, null, detail: $"filter={plan.MatchClauses.Any(clause => clause.Predicate is not null)}; matches_nothing={plan.MatchesNothing}");
+        foreach (var clause in plan.MatchClauses)
         {
-            int pathId = Add(DescribeOperator(path), 0, path.Pattern.Variable);
-            var anchor = path.Anchor;
-            string? index = anchor.Property is null ? null : $"{anchor.Label}({anchor.Property})";
-            if (anchor.Property is not null && _database.Catalog.FindLabel(anchor.Label!, _snapshot) is { } label)
+            // Preserve the familiar single mandatory MATCH description; multiple clauses and
+            // optionals expose their ordered join boundary and local filter/null extension.
+            int clauseId = plan.MatchClauses.Count == 1 && !clause.Optional ? 0
+                : Add(DescribeOperator(clause), 0, detail: $"filter={clause.Predicate is not null}; matches_nothing={clause.MatchesNothing}; nulls={string.Join(",", clause.Optional ? clause.NewVariables : [])}");
+            foreach (var path in clause.Paths)
             {
-                index = _database.Catalog.GetIndexes(label.Id, _snapshot)
-                    .Where(candidate => candidate.PropertyKey == anchor.Property)
-                    .OrderBy(candidate => candidate.Name, StringComparer.Ordinal).FirstOrDefault().Name ?? index;
-            }
-            int parent = Add(DescribeOperator(anchor),
-                pathId, anchor.Label, index, $"node={anchor.NodeIndex}; property={anchor.Property}; value={Value(anchor.Value)}");
-            // The executor expands right of the anchor, then left, in this exact order.
-            foreach (int edge in Enumerable.Range(anchor.NodeIndex, path.Pattern.Relationships.Count - anchor.NodeIndex)
-                .Concat(Enumerable.Range(0, anchor.NodeIndex).Reverse()))
-            {
-                var relationship = path.Pattern.Relationships[edge];
-                parent = Add("Expand", parent, relationship.Type,
-                    detail: $"edge={edge}; direction={relationship.Direction}; labels={relationship.LabelExpression}");
+                int pathId = Add(DescribeOperator(path), clauseId, path.Pattern.Variable);
+                var anchor = path.Anchor;
+                string? index = anchor.Property is null ? null : $"{anchor.Label}({anchor.Property})";
+                if (anchor.Property is not null && _database.Catalog.FindLabel(anchor.Label!, _snapshot) is { } label)
+                {
+                    index = _database.Catalog.GetIndexes(label.Id, _snapshot)
+                        .Where(candidate => candidate.PropertyKey == anchor.Property)
+                        .OrderBy(candidate => candidate.Name, StringComparer.Ordinal).FirstOrDefault().Name ?? index;
+                }
+                int parent = Add(DescribeOperator(anchor),
+                    pathId, anchor.Label, index, $"node={anchor.NodeIndex}; property={anchor.Property}; value={Value(anchor.Value)}");
+                // The executor expands right of the anchor, then left, in this exact order.
+                foreach (int edge in Enumerable.Range(anchor.NodeIndex, path.Pattern.Relationships.Count - anchor.NodeIndex)
+                    .Concat(Enumerable.Range(0, anchor.NodeIndex).Reverse()))
+                {
+                    var relationship = path.Pattern.Relationships[edge];
+                    parent = Add("Expand", parent, relationship.Type,
+                        detail: $"edge={edge}; direction={relationship.Direction}; labels={relationship.LabelExpression}");
+                }
             }
         }
         foreach (var path in query.Creates)

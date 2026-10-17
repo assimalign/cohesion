@@ -476,11 +476,11 @@ public sealed class GqlLabelChainExecutionTests
         var same = await ColumnAsync(session, sameKey);
         var distinct = await ColumnAsync(session, distinctKeys);
         timer.Stop();
-        var labelOrder = (await PlanAsync(database, session, "MATCH (n:A&B {p: 1}) WHERE n.q = 2 RETURN n.name")).Matches.Single().Anchor;
-        var reversed = (await PlanAsync(database, session, "MATCH (n:B&A {q: 2}) WHERE n.p = 1 RETURN n.name")).Matches.Single().Anchor;
-        var inlineFirst = (await PlanAsync(database, session, "MATCH (n:A {q: 2, p: 1}) RETURN n.name")).Matches.Single().Anchor;
-        var nullInline = (await PlanAsync(database, session, "MATCH (n:A {p: null}) WHERE n.q = 3 AND n.p = 1 RETURN n.name")).Matches.Single().Anchor;
-        var unindexed = (await PlanAsync(database, session, "MATCH (n:" + conjunction + ") WHERE n.name = 'all' RETURN n.name")).Matches.Single().Anchor;
+        var labelOrder = (await PlanAsync(database, session, "MATCH (n:A&B {p: 1}) WHERE n.q = 2 RETURN n.name")).MatchClauses.Single().Paths.Single().Anchor;
+        var reversed = (await PlanAsync(database, session, "MATCH (n:B&A {q: 2}) WHERE n.p = 1 RETURN n.name")).MatchClauses.Single().Paths.Single().Anchor;
+        var inlineFirst = (await PlanAsync(database, session, "MATCH (n:A {q: 2, p: 1}) RETURN n.name")).MatchClauses.Single().Paths.Single().Anchor;
+        var nullInline = (await PlanAsync(database, session, "MATCH (n:A {p: null}) WHERE n.q = 3 AND n.p = 1 RETURN n.name")).MatchClauses.Single().Paths.Single().Anchor;
+        var unindexed = (await PlanAsync(database, session, "MATCH (n:" + conjunction + ") WHERE n.name = 'all' RETURN n.name")).MatchClauses.Single().Paths.Single().Anchor;
 
         // Assert
         timer.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(15));

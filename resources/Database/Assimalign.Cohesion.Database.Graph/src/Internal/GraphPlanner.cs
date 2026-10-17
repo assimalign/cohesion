@@ -10,14 +10,16 @@ namespace Assimalign.Cohesion.Database.Graph.Internal;
 
 internal sealed record GraphAnchor(int NodeIndex, string? Label, string? Property, object? Value);
 internal sealed record GraphPathPlan(GqlPathPattern Pattern, GraphAnchor Anchor);
+internal sealed record GraphMatchClausePlan(IReadOnlyList<GraphPathPlan> Paths, GqlExpression? Predicate,
+    bool Optional, IReadOnlyList<string> NewVariables, bool MatchesNothing);
 internal enum GraphProjectionKind { Scalar, Node, Relationship, Path }
 internal sealed record GraphProjectionPlan(GqlExpression Expression, string Name, GraphProjectionKind Kind);
 internal sealed record GraphDistinctPlan(IReadOnlyList<GraphProjectionPlan> Keys);
 
 /// <summary>A validated statement with each MATCH pattern's anchor.</summary>
 /// <param name="Query">The validated statement.</param>
-/// <param name="Matches">Each MATCH pattern with the anchor it expands from, in source order.</param>
-internal sealed record GraphPlan(GqlQueryExpression Query, IReadOnlyList<GraphPathPlan> Matches)
+/// <param name="MatchClauses">The clause-ordered joins, filters and null-extension bindings.</param>
+internal sealed record GraphPlan(GqlQueryExpression Query, IReadOnlyList<GraphMatchClausePlan> MatchClauses)
 {
     internal IReadOnlyList<GraphProjectionPlan> Projections { get; init; } = [];
     internal GraphDistinctPlan? Distinct { get; init; }
@@ -30,11 +32,8 @@ internal sealed record GraphPlan(GqlQueryExpression Query, IReadOnlyList<GraphPa
     /// matches no row and the executor reads nothing.
     /// </summary>
     /// <remarks>
-    /// The flag empties the whole statement, which is correct only because every MATCH in the
-    /// subset is mandatory. Only a mandatory MATCH, or a <c>WHERE</c> that filters the whole row,
-    /// may set it: when <c>gql-optional-match</c> lands, an optional pattern that requires an
-    /// unknown name binds nulls instead and must not set it (Graph.Language DESIGN, "when
-    /// gql-optional-match lands, a variable without a binding yields UNKNOWN").
+    /// Only a mandatory clause may set this flag. An unsatisfiable optional clause records its
+    /// own flag and null-extends its input without reading candidates.
     /// </remarks>
     internal bool MatchesNothing { get; init; }
 
@@ -94,17 +93,40 @@ internal sealed partial class GraphPlanner
     {
         var variables = new Dictionary<string, BindingKind>(StringComparer.Ordinal);
         var declarations = new List<string>();
-        var paths = new List<GraphPathPlan>();
-        var anchors = new AnchorSources(_database, _snapshot, query.Predicate, _parameters);
+        var mandatoryVariables = new HashSet<string>(StringComparer.Ordinal);
+        var boundVariables = new HashSet<string>(StringComparer.Ordinal);
+        var clauses = new List<GraphMatchClausePlan>();
         var tokens = new GraphTokenResolver(_database.Catalog, _snapshot);
         bool matchesNothing = false;
-        foreach (var path in query.Matches)
+        bool optional = false;
+        if (query.MatchClauses is null)
+        { throw new GraphPlanningException("COHDBG001", ErrorMessages.MatchClausePathsRequired, query.Location); }
+        foreach (var clause in query.MatchClauses)
         {
-            if (!Validate(path, creating: false)) { matchesNothing = true; }
-            paths.Add(new GraphPathPlan(path, ChooseAnchor(path, anchors)));
+            if (clause?.Paths is null || clause.Paths.Count == 0)
+            { throw new GraphPlanningException("COHDBG001", ErrorMessages.MatchClausePathsRequired, query.Location); }
+            optional = clause.Optional;
+            int firstDeclaration = declarations.Count;
+            bool clauseMatchesNothing = false;
+            foreach (var path in clause.Paths)
+            { if (!Validate(path, creating: false)) { clauseMatchesNothing = true; } }
+            ValidateExpression(clause.Predicate);
+            clauseMatchesNothing |= RequiresUnknownName(clause.Predicate);
+            var anchors = new AnchorSources(_database, _snapshot, clause.Predicate, _parameters);
+            var paths = new List<GraphPathPlan>();
+            foreach (var path in clause.Paths)
+            {
+                paths.Add(new GraphPathPlan(path, ChooseAnchor(path, anchors, boundVariables)));
+                foreach (var node in path.Nodes)
+                { if (node.Variable is { } variable) { boundVariables.Add(variable); } }
+                foreach (var relationship in path.Relationships)
+                { if (relationship.Variable is { } variable) { boundVariables.Add(variable); } }
+            }
+            clauses.Add(new GraphMatchClausePlan(paths, clause.Predicate, optional,
+                declarations.Skip(firstDeclaration).ToArray(), clauseMatchesNothing));
+            matchesNothing |= !optional && clauseMatchesNothing;
         }
-        ValidateExpression(query.Predicate);
-        matchesNothing |= RequiresUnknownName(query.Predicate);
+        optional = false;
         foreach (var path in query.Creates) { Validate(path, creating: true); }
         foreach (var variable in query.DeleteVariables) { RequireVariable(variable, entity: true); }
         if (!Enum.IsDefined(query.SetQuantifier) || query.ReturnStar && (query.Projections.Count != 0 || declarations.Count == 0) ||
@@ -123,7 +145,7 @@ internal sealed partial class GraphPlanner
             projections.Add(new GraphProjectionPlan(projection.Expression,
                 projection.Alias ?? GraphProjectionText.Describe(projection.Expression), kind));
         }
-        if (query.Matches.Count == 0 && query.Creates.Count == 0 && projections.Count == 0)
+        if (query.MatchClauses.Count == 0 && query.Creates.Count == 0 && projections.Count == 0)
         { throw new GraphPlanningException("COHDBG001", ErrorMessages.PatternOrReturnRequired, query.Location); }
         if (query.Creates.Count != 0 && query.DeleteVariables.Count != 0)
         { throw new GraphPlanningException("COHDBG001", "Insertion and deletion cannot share a statement.", query.Location); }
@@ -132,6 +154,8 @@ internal sealed partial class GraphPlanner
         if (pathsRequest && (projections.Count != 1 || projections[0].Kind == GraphProjectionKind.Scalar ||
             projections[0].Expression is not GqlVariableExpression))
         { throw new GraphPlanningException("COHDBG001", ErrorMessages.PathProjectionRequired, query.Location); }
+        if (pathsRequest && projections[0].Expression is GqlVariableExpression projected && !mandatoryVariables.Contains(projected.Variable))
+        { throw new GraphPlanningException("COHDBG001", ErrorMessages.OptionalPathProjection, projected.Location ?? query.Location); }
         var names = new HashSet<string>(StringComparer.Ordinal);
         foreach (var projection in projections)
         {
@@ -142,7 +166,7 @@ internal sealed partial class GraphPlanner
             }
         }
         bool readOnly = query.Creates.Count == 0 && query.DeleteVariables.Count == 0;
-        return new GraphPlan(query, paths)
+        return new GraphPlan(query, clauses.AsReadOnly())
         {
             MatchesNothing = matchesNothing,
             Projections = projections.AsReadOnly(),
@@ -171,7 +195,9 @@ internal sealed partial class GraphPlanner
         // Returns false when a MATCH pattern requires a name the database does not have.
         bool Validate(GqlPathPattern path, bool creating)
         {
-            if (path.Nodes.Count == 0 || path.Relationships.Count != path.Nodes.Count - 1 || path.Relationships.Count > 64)
+            if (path?.Nodes is null || path.Relationships is null || path.Nodes.Count == 0 ||
+                path.Relationships.Count != path.Nodes.Count - 1 || path.Relationships.Count > 64 ||
+                path.Nodes.Any(node => node is null) || path.Relationships.Any(relationship => relationship is null))
             { throw new GraphPlanningException("COHDBG001", "A finite path requires one more node than relationships and at most 64 hops.", query.Location); }
             bool satisfiable = true;
             if (path.Variable is { } variable)
@@ -179,6 +205,7 @@ internal sealed partial class GraphPlanner
                 if (creating || !variables.TryAdd(variable, BindingKind.Path))
                 { throw new GraphPlanningException("COHDBG003", $"Path variable '{variable}' must be a new MATCH binding.", query.Location); }
                 declarations.Add(variable);
+                if (!optional) { mandatoryVariables.Add(variable); }
             }
             for (int i = 0; i < path.Nodes.Count; i++)
             {
@@ -201,6 +228,7 @@ internal sealed partial class GraphPlanner
             { throw new GraphPlanningException("COHDBG003", $"Variable '{variable}' has incompatible graph bindings.", query.Location); }
             if (!variables.ContainsKey(variable)) { declarations.Add(variable); }
             variables[variable] = kind;
+            if (!optional) { mandatoryVariables.Add(variable); }
         }
         BindingKind RequireVariable(string variable, bool entity = false)
         {
@@ -458,7 +486,10 @@ internal sealed partial class GraphPlanner
 
     private enum BindingKind { Node, Relationship, Path }
 
-    // Anchors come from Labels only, which holds a node's labels only when every match must carry
+    // Earlier paths and clauses supply argument bindings before any scan or seek, as Neo4j's
+    // argumentLeafPlanner.scala:33-37 does (community/cypher/cypher-planner/.../steps/leafplanner).
+    // A bound relationship supplies its adjacent endpoint when no node is already bound.
+    // Fresh anchors come from Labels only, which holds a node's labels only when every match must carry
     // them all: a pure conjunction. A disjunction, negation or wildcard leaves Labels empty, and a
     // labeled predicate is never an equality, so neither can narrow the candidates and drop rows;
     // such a node scans every node and the executor evaluates the expression on each.
@@ -469,8 +500,18 @@ internal sealed partial class GraphPlanner
     // plus the indexes its labels own, never their product: Neo4j's leaf planner likewise groups the
     // predicates once and visits only each label's own index descriptors
     // (cypher-planner .../leafplanner/index/NodeIndexLeafPlanner.scala:184, :201, :248-261, :279-296).
-    private GraphAnchor ChooseAnchor(GqlPathPattern path, AnchorSources sources)
+    private GraphAnchor ChooseAnchor(GqlPathPattern path, AnchorSources sources, IReadOnlySet<string> boundVariables)
     {
+        for (int i = 0; i < path.Nodes.Count; i++)
+        {
+            if (path.Nodes[i].Variable is { } variable && boundVariables.Contains(variable))
+            { return new GraphAnchor(i, path.Nodes[i].Labels.FirstOrDefault(), null, null); }
+        }
+        for (int i = 0; i < path.Relationships.Count; i++)
+        {
+            if (path.Relationships[i].Variable is { } variable && boundVariables.Contains(variable))
+            { return new GraphAnchor(i, path.Nodes[i].Labels.FirstOrDefault(), null, null); }
+        }
         for (int i = 0; i < path.Nodes.Count; i++)
         {
             var node = path.Nodes[i];
@@ -518,7 +559,7 @@ internal sealed partial class GraphPlanner
     private readonly record struct FirstValue(int Position, object Value);
 
     /// <summary>
-    /// What anchor selection reads from outside the pattern, each read at most once per plan: the
+    /// What anchor selection reads from outside the pattern, each read at most once per clause: the
     /// visible indexes grouped by label, and every variable's <c>variable.key = literal-or-parameter</c>
     /// equalities from the <c>WHERE</c> chain.
     /// </summary>
@@ -535,7 +576,7 @@ internal sealed partial class GraphPlanner
         /// <summary>Initializes a new instance of the <see cref="AnchorSources"/> class.</summary>
         /// <param name="database">The database whose store lists the visible indexes.</param>
         /// <param name="snapshot">The snapshot the index list observes.</param>
-        /// <param name="predicate">The statement's <c>WHERE</c> predicate, if any.</param>
+        /// <param name="predicate">The clause's <c>WHERE</c> predicate, if any.</param>
         /// <param name="parameters">The normalized bindings used for scalar equality values.</param>
         public AnchorSources(GraphDatabase database, TransactionSnapshot snapshot, GqlExpression? predicate, IReadOnlyDictionary<string, object?>? parameters)
         {

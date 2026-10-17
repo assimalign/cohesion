@@ -17,7 +17,6 @@ internal static class GqlUnsupportedVocabulary
     internal static readonly GqlUnsupportedWord[] Words =
     [
         // Clauses, statements and predicates outside the executable subset.
-        new("OPTIONAL", GqlClauses.OptionalMatch, GqlWordPosition.Clause),
         new("MANDATORY", GqlClauses.MandatoryMatch, GqlWordPosition.Clause),
         new("ORDER", GqlClauses.OrderBy, GqlWordPosition.Clause),
         new("WITH", "WITH", GqlWordPosition.Clause),
@@ -81,6 +80,9 @@ internal static class GqlUnsupportedVocabulary
     /// <c>&lt;~</c> or <c>~&gt;</c> directly after a node pattern.
     /// </summary>
     internal const string UndirectedEdge = "UNDIRECTED EDGE";
+
+    /// <summary>The ISO OPTIONAL brace and parenthesized operands, outside the T1 subset.</summary>
+    internal const string OptionalBlockOperand = "OPTIONAL BLOCK OPERAND";
 
     /// <summary>Finds the entry for an unquoted word or operator.</summary>
     /// <param name="spelling">The word upper-cased with the invariant culture, or the operator.</param>

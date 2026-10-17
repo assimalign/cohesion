@@ -121,9 +121,9 @@ public sealed class GraphQueryTests
         var database = await engine.CreateDatabaseAsync("indexed");
         await using var session = await database.CreateSessionAsync();
         await session.ExecuteAsync("INSERT (a:Vertex {name: 'A'})-[:LINK]->(b:Vertex {name: 'B'})-[:LINK]->(c:Vertex {name: 'C'}), (:Vertex {name: 'D'})");
-        (await Plan(database, session, query)).Matches.Single().Anchor.Property.ShouldBeNull();
+        (await Plan(database, session, query)).MatchClauses.Single().Paths.Single().Anchor.Property.ShouldBeNull();
         await GraphSchema.Open(database, session).CreateIndexAsync("Vertex", "by_name", "name");
-        var anchor = (await Plan(database, session, query)).Matches.Single().Anchor;
+        var anchor = (await Plan(database, session, query)).MatchClauses.Single().Paths.Single().Anchor;
         anchor.NodeIndex.ShouldBe(1);
         anchor.Label.ShouldBe("Vertex");
         anchor.Property.ShouldBe("name");
@@ -146,7 +146,7 @@ public sealed class GraphQueryTests
         foreach (string value in new[] { "direct", "create", "insert" })
         {
             string query = $"MATCH (a:Person {{name: '{value}'}}) RETURN a.name";
-            (await Plan(database, session, query)).Matches.Single().Anchor.Property.ShouldBe("name");
+            (await Plan(database, session, query)).MatchClauses.Single().Paths.Single().Anchor.Property.ShouldBe("name");
             (await Rows(session, query)).Single().GetString(0).ShouldBe(value);
         }
         await database.DeleteNodeAsync(session, direct.Id);
@@ -246,7 +246,7 @@ public sealed class GraphQueryTests
         foreach (var literal in new[] { "1e100", "1e101", "1e-100", "2e-100" })
         {
             string query = $"MATCH (n:Number) WHERE n.value = {literal} RETURN n.value";
-            (await Plan(database, session, query)).Matches.Single().Anchor.Property.ShouldBe("value");
+            (await Plan(database, session, query)).MatchClauses.Single().Paths.Single().Anchor.Property.ShouldBe("value");
             (await Rows(session, query)).Count.ShouldBe(1);
         }
     }
@@ -262,7 +262,7 @@ public sealed class GraphQueryTests
         foreach (long value in new[] { 9007199254740992L, 9007199254740993L })
         {
             string query = $"MATCH (n:Number) WHERE n.value = {value} RETURN n.value";
-            (await Plan(database, session, query)).Matches.Single().Anchor.Property.ShouldBe("value");
+            (await Plan(database, session, query)).MatchClauses.Single().Paths.Single().Anchor.Property.ShouldBe("value");
             (await Rows(session, query)).Single().GetInt64(0).ShouldBe(value);
         }
     }

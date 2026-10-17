@@ -35,6 +35,9 @@ public sealed class GqlProfileExecutionTests
             ],
             [GqlClauses.Match] =
             [
+                new("MATCH (a:Person) MATCH (a)-[:KNOWS]->(b) RETURN a.name, b.name", [["Alice", "Bob"]]),
+                new("MATCH (a)-[r:KNOWS]->(b) MATCH (a)-[s:KNOWS]->(b) RETURN r.weight, s.weight", [[2L, 2L]]),
+                new("MATCH (a:Person)-[:KNOWS]->(b) WHERE b.age > 50 RETURN a.name", []),
                 new("MATCH (a:Person {name: $name}) RETURN a.name", [["Alice"]],
                     Parameters: new Dictionary<string, object?> { ["name"] = "Alice" }),
                 new("MATCH (a:Person {name: 'Alice'})-[r:KNOWS]->(b) RETURN b.name, r.weight", [["Bob", 2L]]),
@@ -46,6 +49,29 @@ public sealed class GqlProfileExecutionTests
                 new("MATCH (b:Person {name: 'Bob'})<-(a) RETURN a.name", [["Alice"]]),
                 new("MATCH (b:Person {name: 'Bob'})-(a) RETURN a.name", [["Alice"]]),
                 new("MATCH (a:Person {name: 'Alice'})<->(b) RETURN b.name", [["Bob"]]),
+            ],
+            [GqlClauses.OptionalMatch] =
+            [
+                new("MATCH (a:Person) OPTIONAL MATCH (a)-[:KNOWS]->(b) RETURN a.name, b.name",
+                    [["Alice", "Bob"], ["Bob", null], ["Isolated", null]]),
+                new("MATCH (a:Person) OPTIONAL MATCH (a)-[:KNOWS]->(b) WHERE b.age > 50 RETURN a.name, b.name",
+                    [["Alice", null], ["Bob", null], ["Isolated", null]]),
+                new("OPTIONAL MATCH (n:Person {name: 'Nobody'}) RETURN n.name", [[null]]),
+                new("MATCH (a:Person) OPTIONAL MATCH (a)-[:KNOWS]->(b) OPTIONAL MATCH (a)<-[:KNOWS]-(c) RETURN a.name, b.name, c.name",
+                    [["Alice", "Bob", null], ["Bob", null, "Alice"], ["Isolated", null, null]]),
+                new("MATCH (a:Person) OPTIONAL MATCH (a)-[:KNOWS]->(b) OPTIONAL MATCH (b)-[:KNOWS]->(c) RETURN a.name, b.name, c.name",
+                    [["Alice", "Bob", null], ["Bob", null, null], ["Isolated", null, null]]),
+                new("MATCH (a:Person) OPTIONAL MATCH (a)-[:KNOWS]->(b) MATCH (b)-[:KNOWS]->(c) RETURN a.name", []),
+                new("MATCH (a:Person)-[r:KNOWS]->(b) OPTIONAL MATCH (a)-[s:KNOWS]->(b) RETURN r.weight, s.weight", [[2L, 2L]]),
+                new("MATCH (a:Person {name:'Alice'}) OPTIONAL MATCH (a)-[r:KNOWS]->(b), (b)-[s:KNOWS]->(c) RETURN a.name, b.name, r.weight, c.name",
+                    [["Alice", null, null, null]]),
+                new("MATCH (a:Person) OPTIONAL MATCH (a) WHERE FALSE RETURN a.name", [["Alice"], ["Bob"], ["Isolated"]]),
+                new("MATCH (a:Person) OPTIONAL MATCH (a)-[:KNOWS]->(b {name: $name}) RETURN a.name, b.name",
+                    [["Alice", "Bob"], ["Bob", null], ["Isolated", null]], Parameters: new Dictionary<string, object?> { ["name"] = "Bob" }),
+                new("MATCH (a:Person) OPTIONAL MATCH (a)-[:KNOWS]->(b) RETURN a.name, b IS NULL, b:Person, b.age + 1",
+                    [["Alice", false, true, 18L], ["Bob", true, null, null], ["Isolated", true, null, null]]),
+                Mutation("MATCH (a:Person) OPTIONAL MATCH (a)-[r:KNOWS]->(b) DELETE r", 1,
+                    new ExecutionCase("MATCH ()-[r:KNOWS]->() RETURN r.weight", [])),
             ],
             [GqlClauses.Return] =
             [
@@ -282,15 +308,16 @@ public sealed class GqlProfileExecutionTests
     private static bool UsesClause(string clause, GqlQueryExpression query) => clause switch
     {
         GqlClauses.Explain => query.IsExplain,
-        GqlClauses.Match => query.Matches.Count != 0,
+        GqlClauses.Match => query.MatchClauses.Any(clause => !clause.Optional),
+        GqlClauses.OptionalMatch => query.MatchClauses.Any(clause => clause.Optional),
         GqlClauses.Return => query.Projections.Count != 0 || query.ReturnStar,
         GqlClauses.Create => query.Creates.Count != 0 && HasKeyword(query.Text ?? string.Empty, "CREATE"),
         GqlClauses.Insert => query.Creates.Count != 0 && HasKeyword(query.Text ?? string.Empty, "INSERT"),
         GqlClauses.Delete => query.DeleteVariables.Count != 0 && !query.DetachDelete,
         GqlClauses.DetachDelete => query.DeleteVariables.Count != 0 && query.DetachDelete,
-        GqlClauses.Where => query.Predicate is not null,
+        GqlClauses.Where => query.MatchClauses.Any(clause => clause.Predicate is not null),
         GqlClauses.Show => query.CatalogSurface is not null,
-        GqlClauses.LabelExpression => query.Matches.Concat(query.Creates).Any(UsesLabelOperators) || HasLabeledPredicate(query.Predicate),
+        GqlClauses.LabelExpression => query.MatchClauses.SelectMany(clause => clause.Paths).Concat(query.Creates).Any(UsesLabelOperators) || query.MatchClauses.Any(clause => HasLabeledPredicate(clause.Predicate)),
         _ => false,
     };
 

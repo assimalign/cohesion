@@ -109,6 +109,14 @@ match in-process results; the [GQL dialect](../../Assimalign.Cohesion.Database.G
 defines normalization and equality. This implements the owner's static conservative gate default;
 no protocol 2.1 frame or GraphPathResult shape changes.
 
+OPTIONAL MATCH scalar null extension uses the existing scalar NULL encoding. ExecutePaths
+rejects an optional-only projected node, relationship or named path during planning with
+ExecutionFailure carrying COHDBG001, even when the data would match. Terminal rejection completes
+before any path output and preserves the authenticated pooled session. A mandatory projection
+alongside an optional remains valid; unknown optional labels/types still deliver their warnings
+on scalar results or GraphPathResult completion. GraphOptionalMatchWireTests covers these cases
+through GraphDatabaseServer over Connections.InMemory without a codec change.
+
 GraphResultSet.Diagnostics exposes negotiated success warnings, including COHDBG010 and COHDBG011 for unknown names. QueryPathsAsync returns a sealed GraphPathResult implementing IAsyncEnumerable<GraphPath>. Its Diagnostics property exposes the same ProtocolDiagnostic values as scalar results, finalized after EOF. Each result permits one enumeration. Terminal statement rejections before path output preserve diagnostics on GraphClientException and retain the rental after EOF; later stream failures discard it.
 
 Graph transactions remain a deliberate limit: there are no connection transaction members;
