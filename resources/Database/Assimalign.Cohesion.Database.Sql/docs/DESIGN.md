@@ -72,7 +72,7 @@ aggregates. The resolved scalar and aggregate conversion paths also enforce CHAR
 storage types match: native domain checks can enter these paths without a bound argument wrapper.
 CHECK's application-function type validator recognizes CHAR and TEXT as comparable character types.
 Runtime unary-sign errors name Character, matching the planner's diagnostic instead of exposing the
-private wrapper's CLR name. The complete boundary review is in [CHAR_REVIEW_AUDIT.md](CHAR_REVIEW_AUDIT.md).
+private wrapper's CLR name.
 
 Validation-only ALTER COLUMN compares the exact padded CLR values, not wrapper references or SQL
 trailing-space-insensitive equality. Every CHAR length change requires validation, including widening;
@@ -106,8 +106,7 @@ and the same predicate over domain VALUE rejects `'a'`; the common TEXT comparis
 Table columns, including a real column named VALUE, still compare independently. The context
 survives ordering-scope copies. This changes neither slot evaluation nor constant folding: SQL
 parameters and VALUE remain invocation-dependent reads, while supplied statement parameters
-remain fixed values. The consumer audit and baseline evidence are in
-[CHAR_BINDING_REVIEW.md](CHAR_BINDING_REVIEW.md).
+remain fixed values.
 
 The bound IN group carries that comparison identity, so CHAR-selected groups convert even typed
 TEXT/VARCHAR values to CHAR comparands without padding or truncating to any operand's declared width
@@ -269,8 +268,10 @@ DatabaseKeyReader.ReadBinary delegates to KeyComponentEncoding.ReadEscaped, whos
 List.ToArray result is new on each read. Its empty result is Array.Empty<byte>(); SQL replaces
 only that shared empty value. No storage/index value cache retains decoded binary payloads.
 SqlBinaryOwnershipTests verifies repeated reads and covered seeks, and separately calls the
-row codec twice before result construction for Binary and JsonBinary. The ownership and
-measurement record is [BINARY_OWNERSHIP_REVIEW.md](BINARY_OWNERSHIP_REVIEW.md).
+row codec twice before result construction for Binary and JsonBinary. Measured with the
+benchmark's QB and QBS cases (100,000 rows, five iterations, Release, Windows arm64), a stored
+256-byte BINARY cell adds no copy (1,431 B/row against 1,711 B/row for a blanket copy at result
+construction), and each projected binary constant pays one (four 256-byte constants: 2,048 B/row).
 
 COLUMN_DEFAULT renders the resolved temporal/binary value with a typed prefix, including
 plain-string defaults persisted previously. Other expression defaults keep their canonical text.

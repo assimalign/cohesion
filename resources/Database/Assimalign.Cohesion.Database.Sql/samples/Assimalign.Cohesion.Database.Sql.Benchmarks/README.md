@@ -21,7 +21,7 @@ The opt-in binary cases use the same warm-up, measurement and GetValue consumpti
 `--cases QB,QBS --rows 100000 --iterations 5`. QB projects four 256-byte literals from `t`;
 QBS projects one stored 256-byte BINARY value from a separate one-column table. Setup stays
 outside measurement. Compare each case against itself: their source rows and output widths differ.
-The [ownership review](../../docs/BINARY_OWNERSHIP_REVIEW.md) records the storage proof and allocations.
+The [Sql DESIGN](../../docs/DESIGN.md#typed-literals-1110) records the storage proof and the measured allocations.
 
 Q8 creates a file-backed database with 50 tables before measurement. Each measured Q8 sample is
 the complete engine `BuildAsync`: declare and compile the schema, create the engine, open and
