@@ -1242,3 +1242,13 @@ Typed catalog mutations carry GQL0007 with the query location and an unprefixed 
 the protocol server composes CODE: message once. Invalid GraphPaths projections and SHOW
 compositions carry COHDBG001 with query.Location, including early executor rejections
 before GraphPlanner runs.
+
+### Wire request rejection carriers (second #1103 review)
+
+Empty wire text retains ParseFailure and leaves an explicit transaction active. Its
+DatabaseParseException carries GQL0001 over the complete empty/whitespace text span. Entity or
+path projections sent through Execute carry COHDBG001 on GraphPlanningException with the query
+span. An unexpected ExecutePaths result uses the same invalid-request code and the current
+exchange's complete text span, retained by the serial session pump because results have no AST.
+Rejected scalar results preserve their complete diagnostic list on DatabaseException; the first
+error supplies the unprefixed message. Error frames compose CODE: message once. No codes are added.
