@@ -38,6 +38,7 @@ internal sealed class DocumentExchange : DatabaseProtocolExchange<DocumentExchan
         var ordinals = new Dictionary<string, int>(StringComparer.Ordinal);
         var rows = new List<object?[]>();
         var documents = new List<JsonElement>();
+        var rawDocuments = new List<ReadOnlyMemory<byte>>();
         var collections = new List<string>();
         Document? stored = null;
         long count = 0;
@@ -69,6 +70,7 @@ internal sealed class DocumentExchange : DatabaseProtocolExchange<DocumentExchan
                         {
                             var document = json.RootElement.Clone();
                             documents.Add(document);
+                            rawDocuments.Add(result.Json);
                             rows.Add([document]);
                         }
                         else
@@ -120,11 +122,12 @@ internal sealed class DocumentExchange : DatabaseProtocolExchange<DocumentExchan
                     var complete = DocumentProtocolCompleteMessage.Decode(frame.Payload.Span);
                     ValidateCompletion(complete, count, header);
                     return new(new DocumentResultSet(columns.AsReadOnly(), rows, complete.AffectedCount,
-                        header?.WholeDocuments ?? false, documents.AsReadOnly()), stored, collections.AsReadOnly());
+                        header?.WholeDocuments ?? false, documents.AsReadOnly(), header?.WholeDocuments == true ? rawDocuments : null), stored, collections.AsReadOnly());
                 case (byte)DocumentProtocolMessageType.Failure:
                     var failure = DocumentProtocolFailureMessage.Decode(frame.Payload.Span);
                     rows.Clear();
                     documents.Clear();
+                    rawDocuments.Clear();
                     collections.Clear();
                     stored = null;
                     MarkResponseComplete();

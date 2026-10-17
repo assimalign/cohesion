@@ -72,6 +72,9 @@ internal sealed partial class DocumentPlanner
             case OqlCallExpression call:
                 foreach (var argument in call.Arguments) { ValidateMetadata(argument, alias, storedSource); }
                 break;
+            case OqlArrayExpression array:
+                foreach (var element in array.Elements) { ValidateMetadata(element, alias, storedSource); }
+                break;
             case OqlObjectExpression obj:
                 foreach (var member in obj.Members) { ValidateMetadata(member.Value, alias, storedSource); }
                 break;

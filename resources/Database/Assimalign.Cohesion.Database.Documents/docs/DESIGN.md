@@ -254,6 +254,8 @@ Message contains no code prefix. The Documents family is `COHDOCnnn`:
 | `COHDOC011` | Collection is owned by the declared schema and cannot be dropped through a session |
 | `COHDOC012` | INSERT found a duplicate document key visible in its transaction |
 | `COHDOC013` | Invalid evaluated LIKE escape or a pattern ending in its escape character |
+| `COHDOC014` | DISTINCT ORDER BY expression is absent from the projection |
+| `COHDOC015` | A SELECT array or object constructor exceeds the 256-level result limit |
 
 `DocumentQueryRequest.FromOql` and a directly constructed typed query with parse errors
 throw `DatabaseParseException` carrying the complete, ordered parser diagnostics and the
@@ -320,12 +322,52 @@ remain unsupported and return the existing `COHDBL001` parse diagnostic. Virtual
 
 The supported clause matrix lives in the language package's
 [DESIGN.md](../../Assimalign.Cohesion.Database.Documents.Language/docs/DESIGN.md).
-SELECT, FROM, WHERE, GROUP BY, HAVING, ORDER BY, CREATE COLLECTION, DROP COLLECTION,
+SELECT (ALL/DISTINCT and VALUE/RAW), object/array constructors, FROM, WHERE, GROUP BY, HAVING, ORDER BY, CREATE COLLECTION, DROP COLLECTION,
 CREATE INDEX, DROP INDEX, INSERT, VALUES, IN, BETWEEN, LIKE and CASE are executed. OQL retains its name with a SQL++ basis.
 Retired ODMG constructs are rejected positionally; nested queries, deferred document mutations
 and server statements are rejected with `COHDBL001`. The parser advertises only clauses this executor
 supports.
 AST diagnostics are checked both for text requests and directly constructed requests.
+
+Each result is one JSON value. A SELECT list desugars to a VALUE object: `e1 AS a, e2 AS b`
+means `SELECT VALUE {"a": e1, "b": e2}`. In-process SELECT lists retain named columns in
+projection order; VALUE/RAW exposes one `value` column. The internal DocumentRowWriter is
+the sole row-to-Document-frame mapping: lists become objects in projection order, omitting
+MISSING members and retaining NULL; VALUE emits the bare value. A star mixed with other
+projections becomes a `document` member. A lone SELECT * deliberately deviates from Couchbase:
+it returns the stored document byte for byte, including surrounding whitespace, rather than
+wrapping it under the source name. Object, array and scalar roots (`42`, `"text"`, `true`, `null`)
+are valid JSON. Raw bytes travel with rows through DISTINCT and ordering and are owned by the
+result. No catalog format or wire version changes are required.
+
+The owner ruling normalizes a top-level VALUE/RAW MISSING to NULL inside the engine during
+projection, before DISTINCT, ORDER BY over that projection, and completion counting. In-process,
+InMemory and TCP results therefore agree: IsMissing is false and a MISSING/NULL mix deduplicates
+to one NULL row. This preserves Couchbase's observable bare-MISSING JSON null output
+(query `execution/project_initial.go:128-167`, `value/missing.go:66-68` at 179bff61402a),
+while embedded object members still omit MISSING and array elements still become NULL.
+
+Evaluation proceeds through WHERE, GROUP BY/HAVING, projection, DISTINCT, then ORDER BY;
+future paging follows DISTINCT. Duplicate removal uses grouping's total-order equality and
+retains the first occurrence. This differs from predicate equality: two objects containing NULL
+deduplicate, and decimal values 2 and 2.0 are equal. Couchbase documents
+[duplicate result removal](https://docs.couchbase.com/server/current/n1ql/n1ql-language-reference/selectclause.html#all-distinct);
+its [object collation](https://github.com/couchbase/query/blob/master/value/object.go#L781-L823)
+compares member values through Collate rather than the NULL-propagating Equals function.
+Under DISTINCT, ORDER BY must match a projected expression after alias rewriting, following
+PostgreSQL `src/backend/parser/parse_clause.c:3018` in the reference clone; otherwise COHDOC014
+reports `SELECT DISTINCT requires every ORDER BY expression to appear in the projection.`
+Its span is the rejected ORDER BY expression, excluding ASC/DESC.
+Constructors recurse through validation and grouping; array MISSING elements become NULL,
+while object MISSING members are omitted. Duplicate object names retain #1131's keyed semantics.
+SELECT constructors accept nested stored values and parameters up to the result writer's
+256-level limit, including the outer object for named projections. An over-limit array or object
+raises COHDOC015, naming the constructor at its expression span. INSERT retains the 128-level storage limit and COHDOC008 INSERT diagnostic.
+
+GetBytes returns unquoted UTF-8 for named string columns and empty bytes for named NULL/MISSING
+columns; named JSON objects/arrays return JSON bytes. A bare VALUE/RAW row returns JSON bytes
+(including quotes for strings and null for NULL), and a lone SELECT * returns exact stored bytes.
+The in-process row and Documents.Client share this contract.
 
 Projection supports whole documents, nested field paths, zero-based array element
 paths, literals, parameters, arithmetic, and aggregates. `SELECT *` returns one
@@ -515,7 +557,8 @@ It changes no documents or catalog entries, including when its explicit transact
 
 | Operators | Meaning |
 | --- | --- |
-| `Select`, `Project`, `Group` | The physical query and its logical projection or grouping stage; details include filters and ordering |
+| `Select`, `Project`, `ProjectValue`, `Group` | The physical query and its logical projection or grouping stage; details include filters and ordering |
+| `Distinct` | A separate parent node above Project, ProjectValue or Group, preserving the underlying stage |
 | `CollectionScan` | Candidate retrieval from the named collection |
 | `IndexSeek` | The chosen catalog index name, collection and inclusive/exclusive path bounds |
 | `Insert`, `InsertSelect` | Document creation from VALUES or a fully materialized query; SELECT children describe the source access |
@@ -528,7 +571,8 @@ records, including #1130's collection DDL records; shipped descriptions use clos
 Documents wire differs from SQL and Graph. The implemented default for #1104/#190 is one JSON
 document per description row, with `node_id`, `parent_id`, `operator`, `target`, `index`, `detail`,
 `estimated_rows` and `actual_rows` as members in shared column order. Absent optional values
-are explicit JSON nulls. Existing ResultHeader (one `document` Json column, whole-document mode),
+are explicit JSON nulls. DocumentRowWriter performs the same row-to-frame mapping used for query
+rows. Existing ResultHeader (one `document` Json column, whole-document mode),
 Document and Complete frames carry it. No new frame kind or positional-row contract is added.
 The typed client exposes these values in `Documents` and each row's document value. #190's
 advertised-clause suite and the description parity cases cover InMemory and TCP. This default
@@ -1008,7 +1052,8 @@ then Complete. Index DDL returns only Complete. Commands return their table's re
 Complete. A statement failure terminates the response with Failure, including after partial
 rows or documents. The client discards accumulated results, throws the typed error and may reuse
 the session. Failure has no following Complete.
-ResultHeader's wholeDocuments flag distinguishes source JSON values from projected objects;
+ResultHeader's wholeDocuments flag means one bare JSON value per frame (a lone SELECT *, or
+VALUE/RAW), including scalar and constructed values; false means named projection objects;
 for projections a missing property maps to MISSING by header ordinal. ResultRow remains a
 defined codec but is not emitted or accepted by OQL execution. The existing raw-JSON
 Document payload carries the major-2 projection contract on both negotiated 2.0 and 2.1 sessions. Shared Error terminates the
@@ -1042,7 +1087,7 @@ The wire permits depth at most 256, without comments, trailing
 commas, malformed UTF-8 or multiple roots. Stored document codecs preserve exact bytes, including
 whitespace and Unicode spelling. Projected numbers become decimals; objects/arrays remain owned
 JsonElement values. Whole-document results retain JSON values in `DocumentResultSet.Documents`;
-OQL serialization may change whitespace and escape spelling. Put/Get retain exact stored bytes.
+A lone SELECT * and Put/Get retain exact stored bytes; constructed and other projected values may change whitespace and escape spelling.
 The [client design](../../Assimalign.Cohesion.Database.Documents.Client/docs/DESIGN.md) shows the
 full exchange diagram, API ownership, pool evidence and telemetry. Real server/client tests run
 all advertised clauses and commands on both InMemory and TCP; the NativeAOT consumer and Studio

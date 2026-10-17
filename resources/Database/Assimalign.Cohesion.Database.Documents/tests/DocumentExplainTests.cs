@@ -51,6 +51,29 @@ public sealed class DocumentExplainTests
         (await collection.GetAsync(session, "a", CancellationToken.None)).ShouldNotBeNull();
     }
 
+    [Theory(DisplayName = "Cohesion Test [Documents] - EXPLAIN places DISTINCT above projection and grouping")]
+    [InlineData("SELECT DISTINCT name FROM items", "Project", true)]
+    [InlineData("SELECT VALUE name FROM items", "ProjectValue", false)]
+    [InlineData("SELECT DISTINCT VALUE name FROM items", "ProjectValue", true)]
+    [InlineData("SELECT DISTINCT name, COUNT(*) AS n FROM items GROUP BY name", "Group", true)]
+    public async Task Execute_ProjectionStages_ShouldDescribeParentsAsync(string query, string stage, bool distinct)
+    {
+        // Arrange
+        await using var engine = DocumentDatabaseEngine.Create("explain-projection", new());
+        var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.CreateCollectionAsync("items", CancellationToken.None);
+        // Act
+        await using var description = (await session.ExecuteAsync("EXPLAIN " + query, cancellationToken: CancellationToken.None)).ShouldBeOfType<DatabasePlanDescription>();
+        var nodes = new List<object?[]>();
+        await foreach (var row in description.GetRowsAsync(CancellationToken.None))
+        { nodes.Add(Enumerable.Range(0, row.FieldCount).Select(row.GetValue).ToArray()); }
+        // Assert
+        nodes.Select(node => node[2]).ShouldBe(distinct ? new[] { "Select", "Distinct", stage, "CollectionScan" } : new[] { "Select", stage, "CollectionScan" });
+        nodes[0][1].ShouldBeNull();
+        for (int i = 1; i < nodes.Count; i++) { nodes[i][1].ShouldBe(nodes[i - 1][0]); }
+    }
+
     [Fact(DisplayName = "Cohesion Test [Documents] - EXPLAIN: every statement plan record includes collection DDL mappings")]
     [UnconditionalSuppressMessage("Trimming", "IL2026", Justification = "Test-only plan-family enumeration; shipped descriptions use a closed switch.")]
     [UnconditionalSuppressMessage("Trimming", "IL2072", Justification = "Test-only records exercise the mapping's type patterns without reading fields.")]

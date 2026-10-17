@@ -154,12 +154,24 @@ public sealed partial class OqlQueryParser
                     string name;
                     if (Current.Type == TokenType.String) { name = Unquote(Current.Text); Advance(); }
                     else { name = Identifier(allowKeyword: true); }
+                    if (Failed) { break; }
                     Expect(TokenType.Colon, "':'");
+                    if (Failed) { break; }
                     members.Add(new(name, ParseExpression()));
                 } while (!Failed && Take(TokenType.Comma));
             }
-            Expect(TokenType.RightBrace, "'}'");
+            if (!Failed) { Expect(TokenType.RightBrace, "'}'"); }
             return new OqlObjectExpression(members.AsReadOnly(), Span(start, Previous));
+        }
+        if (Take(TokenType.LeftBracket))
+        {
+            List<OqlExpression> elements = [];
+            if (Current.Type != TokenType.RightBracket)
+            {
+                do { elements.Add(ParseExpression()); } while (!Failed && Take(TokenType.Comma));
+            }
+            if (!Failed) { Expect(TokenType.RightBracket, "']'"); }
+            return new OqlArrayExpression(elements.AsReadOnly(), Span(start, Previous));
         }
         if (Take(TokenType.LeftParen))
         {

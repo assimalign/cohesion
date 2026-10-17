@@ -196,6 +196,8 @@ public sealed partial class OqlQueryParser : QueryParser
     {
         List<(string, Lexeme)> result = [];
         bool selected = false;
+        bool inSelectList = false;
+        int selectHead = -2;
         int openQuantifiers = 0;
         for (int index = 0; index < _tokens.Count; index++)
         {
@@ -213,12 +215,27 @@ public sealed partial class OqlQueryParser : QueryParser
             // A keyword-shaped name in adjacent :name is part of the rejected operand,
             // not a clause, subquery or unsupported operation. Syntax parsing owns it.
             if (index > 0 && (_tokens[index - 1].Type == TokenType.Dot ||
-                _tokens[index - 1].Type == TokenType.Colon && _tokens[index - 1].End == token.Start))
+                _tokens[index - 1].Type == TokenType.Colon && _tokens[index - 1].End == token.Start &&
+                !IsObjectMemberValue(index)))
             {
                 continue;
             }
 
             string value = token.Text.ToUpperInvariant();
+
+            // DISTINCT/ALL are legal only directly after SELECT, including INSERT SELECT.
+            if (openQuantifiers == 0 && value is "DISTINCT" or "ALL")
+            {
+                if (index == selectHead + 1) { continue; }
+                string construct = index > 1 && _tokens[index - 1].Type == TokenType.LeftParen &&
+                    _tokens[index - 2].Type == TokenType.Function
+                    ? _tokens[index - 2].Text.ToUpperInvariant() + "(" + value + ")" : value;
+                _diagnostics.Add(QueryDiagnostics.UnsupportedClause(construct, Profile.Language, Span(token, token)));
+                break;
+            }
+            // ColLabel accepts reserved words after AS; quantifier pins remain positional.
+            if (inSelectList && index > 0 && IsWord(_tokens[index - 1], "AS")) { continue; }
+            if (value == "FROM") { inSelectList = false; }
 
             // A SQL++ quantified predicate, EVERY x IN ... SATISFIES ... END, is one construct:
             // its binding IN is not the IN predicate, and its text up to END belongs to it.
@@ -284,6 +301,8 @@ public sealed partial class OqlQueryParser : QueryParser
                 }
 
                 selected = true;
+                selectHead = index;
+                inSelectList = true;
                 continue;
             }
 
@@ -400,7 +419,14 @@ public sealed partial class OqlQueryParser : QueryParser
         token.Type is TokenType.Keyword or TokenType.Identifier or TokenType.Function &&
         string.Equals(token.Text, word, StringComparison.OrdinalIgnoreCase);
 
-    private OqlSelectExpression EmptyExpression() => new(string.Empty, null, [], null, [], null, [], Span(Current, Current));
+    // In {key:expr}, the colon belongs to the member rather than an adjacent :name
+    // parameter. Keys follow an opening brace or a member comma and are literal names.
+    private bool IsObjectMemberValue(int index) => index >= 3 &&
+        _tokens[index - 3].Type is TokenType.LeftBrace or TokenType.Comma &&
+        _tokens[index - 2].Type is TokenType.Identifier or TokenType.QuotedIdentifier or
+            TokenType.String or TokenType.Keyword or TokenType.Function;
+
+    private OqlSelectExpression EmptyExpression() => new(string.Empty, null, [], null, [], null, [], false, false, Span(Current, Current));
     private bool IsIndexStatement(string verb) => IsDdlStatement(verb, "INDEX");
     private bool IsDdlStatement(string verb, string kind) => Is(verb) && _position + 1 < _tokens.Count &&
         IsWord(_tokens[_position + 1], kind);

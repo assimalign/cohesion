@@ -184,7 +184,7 @@ public sealed class DocumentClientWireTests
         await connection.PutAsync("items", "c", "{\"name\":\"Cy\",\"group\":\"B\",\"score\":1,\"active\":true}"u8.ToArray(), cancellationToken: harness.Token);
 
         // Act / Assert: SELECT, FROM alias, WHERE, paths, parameters, ORDER BY and arithmetic.
-        var rows = await connection.QueryAsync("SELECT d.name AS person, d.nested.x AS x, d.array[0] AS entry_value, d.score * 2 + 1 AS value FROM items AS d WHERE d.score >= @min AND NOT d.active = false ORDER BY value DESC",
+        var rows = await connection.QueryAsync("SELECT d.name AS person, d.nested.x AS x, d.array[0] AS entry_value, d.score * 2 + 1 AS value FROM items AS d WHERE d.score >= @min AND NOT d.active = false ORDER BY \"value\" DESC",
             new Dictionary<string, object?> { ["min"] = 2 }, harness.Token);
         rows.Columns.Select(column => column.Name).ShouldBe(["person", "x", "entry_value", "value"]);
         rows.Columns.Select(column => column.Ordinal).ShouldBe([0, 1, 2, 3]);

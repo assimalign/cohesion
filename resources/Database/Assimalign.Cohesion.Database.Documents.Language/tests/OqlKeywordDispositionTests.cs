@@ -23,6 +23,8 @@ public sealed class OqlKeywordDispositionTests
     {
         // Supported query and index-definition vocabulary
         ["SELECT"] = Parses("SELECT a FROM c"),
+        ["VALUE"] = Parses("SELECT VALUE a FROM c"),
+        ["RAW"] = Parses("SELECT RAW a FROM c"),
         ["EXPLAIN"] = Parses("EXPLAIN SELECT a FROM c"),
         ["FROM"] = Parses("SELECT a FROM c"),
         ["WHERE"] = Parses("SELECT a FROM c WHERE a = 1"),
@@ -61,8 +63,8 @@ public sealed class OqlKeywordDispositionTests
         ["DEFINE"] = Rejects("DEFINE people AS SELECT * FROM c", "DEFINE"),
         ["ELEMENT"] = Rejects("SELECT ELEMENT(a) FROM c", "ELEMENT"),
         ["FLATTEN"] = Rejects("SELECT FLATTEN(a) FROM c", "FLATTEN"),
-        ["DISTINCT"] = Rejects("SELECT DISTINCT a FROM c", "DISTINCT"),
-        ["ALL"] = Rejects("SELECT ALL a FROM c", "ALL"),
+        ["DISTINCT"] = Parses("SELECT DISTINCT a FROM c"),
+        ["ALL"] = Parses("SELECT ALL a FROM c"),
         ["IN"] = Parses("SELECT * FROM c WHERE a IN (1, 2)"),
         ["LIKE"] = Parses("SELECT * FROM c WHERE a LIKE 'x%'"),
         ["BETWEEN"] = Parses("SELECT * FROM c WHERE a BETWEEN 1 AND 2"),

@@ -208,7 +208,7 @@ internal static class DocumentSamples
             SELECT COLLECTION_NAME, INDEX_NAME, PATH, IS_UNIQUE FROM COHESION_SCHEMA.INDEXES;
             """),
         new("6. Diagnostics demo (expected errors)", """
-            SELECT DISTINCT name FROM items;
+            SELECT * FROM items USE KEYS 'missing';
             """),
     ];
 }

@@ -7,9 +7,9 @@ using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Documents;
 
-/// <summary>Describes positional rows or a whole-document result sequence.</summary>
+/// <summary>Describes named projection rows or one bare JSON value per Document frame.</summary>
 /// <param name="Columns">Names and shared type identities in projection order.</param>
-/// <param name="WholeDocuments">Whether Document frames follow; requires exactly one column.</param>
+/// <param name="WholeDocuments">Whether each frame is one bare JSON value (a lone SELECT *, or VALUE/RAW); requires exactly one column. Otherwise frames contain named projection objects.</param>
 public sealed record DocumentProtocolResultHeaderMessage(IReadOnlyList<(string Name, byte Type)> Columns, bool WholeDocuments)
 {
     /// <summary>Encodes the result header.</summary>

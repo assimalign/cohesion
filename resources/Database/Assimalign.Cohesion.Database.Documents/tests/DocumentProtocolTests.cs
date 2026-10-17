@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Connections;
 using Assimalign.Cohesion.Connections.InMemory;
+using Assimalign.Cohesion.Database.Documents.Internal;
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Transactions;
@@ -162,12 +163,13 @@ public sealed class DocumentProtocolTests
             request.Type.ShouldBe((ProtocolMessageType)DocumentProtocolMessageType.Execute);
             var message = DocumentProtocolExecuteMessage.Decode(request.Payload.Span);
             Encoding.UTF8.GetString(message.Parameters.Span).ShouldBe("{}");
-            await using var results = (DatabaseResultSet)await session.ExecuteAsync(DocumentQueryRequest.FromOql(message.Statement), token);
+            await using var results = (await session.ExecuteAsync(DocumentQueryRequest.FromOql(message.Statement), token)).ShouldBeOfType<DocumentQueryResult>();
+            using var writer = new DocumentRowWriter();
             long count = 0;
             await foreach (var item in results.GetRowsAsync(token))
             {
                 await WriteAsync(server, (ProtocolMessageType)DocumentProtocolMessageType.Document,
-                    new DocumentProtocolResultMessage(item.GetBytes(0)).Encode(), token);
+                    new DocumentProtocolResultMessage(writer.Write(item, results.Columns, results.BareValue)).Encode(), token);
                 count++;
             }
             await WriteAsync(server, (ProtocolMessageType)DocumentProtocolMessageType.Complete,

@@ -55,4 +55,12 @@
   <data name="NumberOutsideDecimalDomain" xml:space="preserve"><value>OQL numbers must fit the decimal scalar domain exactly, without rounding or underflow.</value></data>
   <data name="LikeEscapeInvalid" xml:space="preserve"><value>LIKE ESCAPE must be empty or one Unicode scalar.</value></data>
   <data name="LikeTrailingEscape" xml:space="preserve"><value>LIKE pattern must not end with the escape character.</value></data>
+  <data name="DistinctOrderNotProjected" xml:space="preserve">
+    <value>SELECT DISTINCT requires every ORDER BY expression to appear in the projection.</value>
+  </data>
+  <data name="ValueProjectionInvalid" xml:space="preserve">
+    <value>SELECT VALUE requires exactly one expression without an alias or star.</value>
+  </data>
+  <data name="RowBytesInvalid" xml:space="preserve"><value>Field {0} is not JSON or a string.</value></data>
+  <data name="SelectConstructorDepthExceeded" xml:space="preserve"><value>SELECT {0} constructor values must be nested no deeper than 256 levels.</value></data>
 </root>

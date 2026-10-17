@@ -27,6 +27,18 @@ public static class OqlClauses
     /// <summary>Selects values from one or more document collections.</summary>
     public const string Select = "SELECT";
 
+    /// <summary>Eliminates duplicate projected values.</summary>
+    public const string Distinct = "DISTINCT";
+
+    /// <summary>Projects one bare JSON value; RAW is a synonym.</summary>
+    public const string SelectValue = "SELECT VALUE";
+
+    /// <summary>Constructs a JSON object from named expressions.</summary>
+    public const string ObjectConstructor = "OBJECT CONSTRUCTOR";
+
+    /// <summary>Constructs a JSON array from expressions.</summary>
+    public const string ArrayConstructor = "ARRAY CONSTRUCTOR";
+
     /// <summary>Describes a SELECT or INSERT statement without executing it.</summary>
     public const string Explain = "EXPLAIN";
 

@@ -44,7 +44,7 @@ public sealed class DocumentResponseStreamingTests
     public async Task QueryAsync_LargeResult_ShouldBoundFormatterAllocationsBeforeHeader(string statement, DocumentProtocolMessageType rowType)
     {
         // Arrange: 32 MiB of encoded rows exceeds the 8 MiB pre-header allocation budget.
-        // DocumentJsonValuesTests separately measures peak backing-buffer capacity directly.
+        // DocumentRowWriterTests separately measures peak backing-buffer capacity directly.
         // This raw peer discards rows while verifying every frame and its distinct marker.
         // Neither check bounds InMemory transport queues when a peer stops reading.
         const int rowCount = 128;

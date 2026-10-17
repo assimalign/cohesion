@@ -7,25 +7,34 @@ using Assimalign.Cohesion.Database.Execution;
 
 namespace Assimalign.Cohesion.Database.Documents.Internal;
 
-internal sealed class DocumentJsonValues : IDisposable
+internal sealed class DocumentRowWriter : IDisposable
 {
     private readonly DocumentJsonBuffer _buffer = new();
     private readonly Utf8JsonWriter _writer;
 
-    internal DocumentJsonValues() => _writer = new(_buffer, new JsonWriterOptions { MaxDepth = 256 });
+    internal DocumentRowWriter() => _writer = new(_buffer, new JsonWriterOptions { MaxDepth = 256 });
 
-    internal ReadOnlyMemory<byte> Result(IReadOnlyList<object?> values, bool wholeDocument)
+    private ReadOnlyMemory<byte> Value(object? value)
     {
         _buffer.Clear();
         _writer.Reset(_buffer);
-        if (!wholeDocument) { _writer.WriteStartArray(); }
-        foreach (object? value in values) { Write(_writer, value); }
-        if (!wholeDocument) { _writer.WriteEndArray(); }
+        Write(_writer, value);
         _writer.Flush();
         return _buffer.WrittenMemory;
     }
 
-    internal ReadOnlyMemory<byte> Projection(DatabaseRow row, IReadOnlyList<DatabaseColumn> columns)
+    internal ReadOnlyMemory<byte> Write(DatabaseRow row, IReadOnlyList<DatabaseColumn> columns, bool bareValue)
+    {
+        if (bareValue)
+        {
+            if (row is DocumentQueryResult.DocumentQueryRow { RawContent.IsEmpty: false } document) { return document.RawContent; }
+            // VALUE/RAW roots have already normalized MISSING to NULL in the engine.
+            return Value(row.GetValue(0));
+        }
+        return Projection(row, columns);
+    }
+
+    private ReadOnlyMemory<byte> Projection(DatabaseRow row, IReadOnlyList<DatabaseColumn> columns)
     {
         _buffer.Clear();
         _writer.Reset(_buffer);

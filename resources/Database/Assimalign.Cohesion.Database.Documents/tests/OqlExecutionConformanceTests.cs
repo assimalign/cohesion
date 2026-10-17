@@ -48,6 +48,22 @@ public sealed class OqlExecutionConformanceTests
                 new("SELECT COUNT(*) AS total, SUM(amount) AS sum, AVG(amount) AS average, MIN(amount) AS minimum, MAX(amount) AS maximum FROM items WHERE amount > 100",
                     [[0m, null, null, null, null]]),
             ],
+            [OqlClauses.Distinct] =
+            [
+                new("SELECT DISTINCT category FROM items ORDER BY category", [["a"], ["b"]]),
+            ],
+            [OqlClauses.SelectValue] =
+            [
+                new("SELECT VALUE name FROM items WHERE category = 'b'", [["gamma"]]),
+            ],
+            [OqlClauses.ObjectConstructor] =
+            [
+                new("SELECT VALUE {\"n\": name, \"t\": tags} FROM items WHERE name = 'alpha'", [[Json("{\"n\":\"alpha\",\"t\":[\"blue\"]}")]]),
+            ],
+            [OqlClauses.ArrayConstructor] =
+            [
+                new("SELECT [name, amount] AS pair FROM items WHERE name = 'beta'", [[Json("[\"beta\",6]")]]),
+            ],
             [OqlClauses.From] =
             [
                 new("SELECT d.name FROM items d", [["alpha"], ["beta"], ["gamma"], ["delta"]]),
@@ -260,6 +276,12 @@ public sealed class OqlExecutionConformanceTests
         cases.Except(declarations, StringComparer.OrdinalIgnoreCase).ShouldBeEmpty();
     }
 
+    private static JsonElement Json(string text)
+    {
+        using var json = JsonDocument.Parse(text);
+        return json.RootElement.Clone();
+    }
+
     private sealed record FunctionCase(string Expression, object?[][] ExpectedRows);
 
     private static void VerifyCoverage(QueryLanguageProfile profile)
@@ -279,6 +301,10 @@ public sealed class OqlExecutionConformanceTests
         OqlClauses.Insert => expression is OqlInsertExpression,
         OqlClauses.Values => expression is OqlInsertExpression { Values.Count: > 0 },
         OqlClauses.Select => expression is OqlSelectExpression { Projections.Count: > 0 },
+        OqlClauses.Distinct => expression is OqlSelectExpression { IsDistinct: true },
+        OqlClauses.SelectValue => expression is OqlSelectExpression { IsValue: true },
+        OqlClauses.ObjectConstructor => expression is OqlSelectExpression objectQuery && objectQuery.Projections.Any(p => p.Expression is OqlObjectExpression),
+        OqlClauses.ArrayConstructor => expression is OqlSelectExpression arrayQuery && arrayQuery.Projections.Any(p => p.Expression is OqlArrayExpression),
         OqlClauses.From => expression is OqlSelectExpression { Collection.Length: > 0 },
         OqlClauses.Where => expression is OqlSelectExpression { Predicate: not null },
         OqlClauses.In => expression is OqlSelectExpression { Predicate: OqlInExpression },
@@ -332,7 +358,15 @@ public sealed class OqlExecutionConformanceTests
         actual.Count.ShouldBe(expected.Length, context);
         for (int index = 0; index < expected.Length; index++)
         {
-            actual[index].ShouldBe(expected[index], context);
+            actual[index].Length.ShouldBe(expected[index].Length, context);
+            for (int ordinal = 0; ordinal < expected[index].Length; ordinal++)
+            {
+                if (expected[index][ordinal] is JsonElement json)
+                {
+                    JsonElement.DeepEquals(actual[index][ordinal].ShouldBeOfType<JsonElement>(), json).ShouldBeTrue(context);
+                }
+                else { actual[index][ordinal].ShouldBe(expected[index][ordinal], context); }
+            }
         }
     }
 
