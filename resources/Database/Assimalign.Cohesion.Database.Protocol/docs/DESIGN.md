@@ -208,7 +208,7 @@ packet-beta
 ```
 
 The existing trust handshake sends an empty Authenticate and AuthenticateResponse;
-authenticators receive response evidence as opaque bytes. Ready is empty in 1.0.
+authenticators receive response evidence as opaque bytes. Ready remains empty in 2.0.
 Ping, Pong, and Terminate have empty payloads. Error is `u16 code + string message`.
 Codes are append-only: Internal=0, UnsupportedVersion=1, AuthenticationFailed=2,
 NotAuthorized=3, DatabaseNotFound=4, ParseFailure=5, ExecutionFailure=6,
@@ -223,16 +223,17 @@ cannot reach its remote server, `contrib/postgres_fdw/connection.c:661-666`).
 
 ## Version decision
 
-ProtocolVersion.Current remains **1.0**. SQL and Key-Value deployed clients retain
-exactly the same header, message identifiers, handshake, payload encodings, and
-exchange order. New families are additive on separately selected model endpoints;
-no existing endpoint silently reinterprets an identifier. Moving CLR types between
-assemblies is a source/package migration, not a wire-format change.
+ProtocolVersion.Current advances **1.0 -> 2.0** for #1126: Documents projections now use
+Document (65) objects with omitted MISSING members instead of ResultRow (68) arrays.
+The existing startup version is shared by all models, so their clients and servers advance
+together without a new per-model public version seam or legacy reader. Other models' payload
+encodings remain unchanged. #1105 (protocol 1.1 capability negotiation, wave 4) supersedes
+per-feature version bumps when implemented.
 
-`TryNegotiate` rejects any major other than 1 and chooses the minimum peer/server
+`TryNegotiate` rejects any major other than 2 and chooses the minimum peer/server
 minor. Model servers return UnsupportedVersion before authentication for incompatible
-majors. Version 1.0 Ready stays empty, so no new version field is sent to old clients;
-success accepts the 1.0 baseline. A future minor requiring capabilities must negotiate
+majors and close through their existing fatal-error drain. Ready stays empty;
+success accepts the 2.0 baseline. A future minor requiring capabilities must negotiate
 them explicitly before use. An incompatible change to an existing endpoint's meaning
 or payload requires a deliberate major bump; changing only framing is not the sole
 reason to bump a major. Unknown identifiers never trigger a fallback to another family.

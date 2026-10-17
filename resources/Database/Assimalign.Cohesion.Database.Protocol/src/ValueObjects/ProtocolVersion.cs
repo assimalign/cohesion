@@ -18,7 +18,7 @@ public readonly record struct ProtocolVersion(ushort Major, ushort Minor) : ICom
     /// <summary>
     /// Gets the current protocol version implemented by this assembly.
     /// </summary>
-    public static ProtocolVersion Current => new(1, 0);
+    public static ProtocolVersion Current => new(2, 0);
 
     /// <summary>Negotiates the common version while rejecting incompatible major versions.</summary>
     /// <param name="requested">The peer's requested version.</param>

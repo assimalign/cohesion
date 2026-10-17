@@ -255,7 +255,7 @@ Message contains no code prefix. The Documents family is `COHDOCnnn`:
 
 `DocumentQueryRequest.FromOql` and a directly constructed typed query with parse errors
 throw `DatabaseParseException` carrying the complete, ordered parser diagnostics and the
-existing first-error Message. No recovery AST reaches the planner. Protocol 1.0's Documents
+existing first-error Message. No recovery AST reaches the planner. The Documents
 server reads `DatabaseException.Diagnostics` for every database exception, including parse,
 plan, evaluator and system-collection rejections. It composes `CODE: message` from the first
 Error diagnostic, as the SQL and Graph servers do, preserving a message that already contains
@@ -373,8 +373,10 @@ an absent value has `IsMissing(ordinal) == true`, `IsNull(ordinal) == false`, an
 `GetValue(ordinal) == null`. Explicit NULL has the reverse predicates. SELECT * keeps the
 whole source value. SQL, Graph and KeyValuePair leaves keep the default unsupported capability.
 The evaluator's sentinel remains internal to Documents; no catalog value or public sentinel
-type is introduced. Existing v1 index key extraction already omits absent, null and nonscalar
-keys; no catalog format changes. Unary NULL/MISSING/VALUED tests never select an index seek.
+type is introduced. Catalog format remains **version 1**: its index key extraction already
+skips MISSING, NULL and non-scalars, the encoded keys are unchanged, and no persisted value
+changes meaning. The SQL++ query semantics therefore require no catalog format bump.
+Unary NULL/MISSING/VALUED tests never select an index seek.
 
 ### Collection DDL (#1130)
 
@@ -753,16 +755,21 @@ execution, so the root traces each executed statement once. OQL's SELECT/WHERE/G
 ORDER BY, parameters, nested paths, aggregates, collection DDL and index DDL use the same executor
 as embedded execution. `SELECT *` returns whole JSON values; projections return JSON objects
 whose property names are the unique column names. MISSING members are omitted; explicit NULL
-members emit JSON null. Both use the existing Document frame with unchanged encoding.
+members emit JSON null (for example, `"x":null`). Both use Document (65) frames.
 Document and collection commands use the existing session-bound operations and automatic
 transactions. No transaction-control member or frame is exposed over this wire.
 
 ### Envelope and payload layout
 
 The shared envelope is unchanged: `u32be payloadLength`, `u8 messageType`, payload bytes. The length
-excludes the five-byte header and is at most 16,777,216. Shared handshake negotiation remains at
-protocol 1.0; there is no Documents-specific version exchange (#1095 / #1105). Documents has not
-shipped, so the completion change needs no legacy reader or compatibility shim.
+excludes the five-byte header and is at most 16,777,216. The shared startup handshake used by
+#190 now negotiates **protocol 2.0**, advancing the major from 1.0 because #1126 replaces
+ResultRow (68) projection arrays with Document (65) objects carrying MISSING by omission.
+The startup version is shared by all model endpoints; their clients and servers advance together.
+An incompatible major receives the existing fatal Error(UnsupportedVersion) before authentication,
+then the connection closes; there is no legacy reader. This follows #1437's deliberate versioning
+of the unreleased SQL result header. #1105 (protocol 1.1 capability negotiation, wave 4)
+supersedes per-feature version bumps when that negotiation is implemented.
 
 All integers below are big-endian. `str(x)` means `i32 byteLength` followed by that many UTF-8
 bytes. `json(x)` means `i32 byteLength` followed by one complete UTF-8 JSON value. Negative lengths,
@@ -777,7 +784,7 @@ result count. Execute and Document retain their byte layouts. The full family is
 | 65 | Document | Server to client | Raw JSON value occupying the whole payload, no inner length |
 | 66 | Complete | Server to client | `i64 resultCount, i64 affectedCount` (exactly 16 bytes) |
 | 67 | ResultHeader | Server to client | `u8 wholeDocuments, i32 columnCount`, then columnCount repetitions of `str(name), u8 DatabaseType` |
-| 68 | ResultRow | Server to client | Raw JSON array occupying the whole payload; exactly one value per column |
+| 68 | ResultRow (reserved) | None | Retired projection-array frame; not emitted or accepted by OQL execution |
 | 69 | Command | Client to server | `u8 operation`, then the operation-specific fields below |
 | 70 | StoredDocument | Server to client | `str(id), u64 version, json(content)` |
 | 71 | Collection | Server to client | `str(name)` |
@@ -790,7 +797,7 @@ and columns begin at 5. columnCount must be positive; wholeDocuments requires ex
 StoredDocument's ID length I is at 0, its bytes at 4, version at 4+I..11+I, content length at
 12+I..15+I, and content at 16+I. Collection's name length N is at 0, with N name bytes at 4.
 Failure's code is at 0..1, message length M at 2..5, message bytes at 6, diagnostic count at
-6+M..9+M, and records begin at 10+M. ResultRow and Document are raw JSON from offset 0 to the end.
+6+M..9+M, and records begin at 10+M. Document is raw JSON from offset 0 to the end.
 
 Complete's fixed layout carries both result cardinality and write effect:
 
@@ -844,8 +851,8 @@ rows or documents. The client discards accumulated results, throws the typed err
 the session. Failure has no following Complete.
 ResultHeader's wholeDocuments flag distinguishes source JSON values from projected objects;
 for projections a missing property maps to MISSING by header ordinal. ResultRow remains a
-defined codec but is not emitted or accepted by OQL execution. This uses the existing raw-JSON
-Document payload and adds no protocol message, field or version. Shared Error terminates the
+defined codec but is not emitted or accepted by OQL execution. The existing raw-JSON
+Document payload carries the new projection contract under protocol 2.0. Shared Error terminates the
 session. The client rejects wrong ordering, unknown projection members, identity,
 collection ordering, count or affected-count semantics before accepting completion.
 

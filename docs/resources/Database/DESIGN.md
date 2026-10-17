@@ -210,7 +210,8 @@ facts it depicts are stated here in prose so the section stands without it:
 - **Transport selection belongs to the composition root.** All engine servers accept
   `IDuplexConnectionListener`; `Database.Sql.Tcp` supplies the existing `Listen(Uri)` convenience
   for consumers that choose TCP. Engine packages reference no concrete transport.
-- **Wire version stays 1.0.** SQL/Key-Value identifiers and payloads are unchanged. Servers
+- **Wire version is 2.0** since #1126's incompatible Documents projection change; the startup
+  version is shared by all models. SQL/Key-Value identifiers and payloads are unchanged. Servers
   reject incompatible majors before authentication and negotiate the supported minor baseline.
 
 The flow below follows composition into the two server execution paths and their shared kernel.
