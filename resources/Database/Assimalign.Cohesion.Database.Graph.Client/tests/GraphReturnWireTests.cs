@@ -118,8 +118,8 @@ public sealed class GraphReturnWireTests
     [InlineData("RETURN 1 AS x, 2 AS x")]
     [InlineData("MATCH (a) RETURN a, a")]
     [InlineData("MATCH (a) RETURN a.x, a.x")]
-    [InlineData("MATCH (a) RETURN a.x, 1 AS `a.x`")]
-    [InlineData("RETURN 1, 2 AS `1`")]
+    [InlineData("MATCH (a) RETURN a.x, 1 AS \"a.x\"")]
+    [InlineData("RETURN 1, 2 AS \"1\"")]
     [InlineData("EXPLAIN RETURN 1 AS x, 2 AS x")]
     [InlineData("INSERT (:Unwritten) RETURN 1 AS x, 2 AS x")]
     public async Task QueryAsync_DuplicateColumnNames_ShouldRejectBeforeOutputAndKeepSessionReadyAsync(string source)

@@ -205,9 +205,9 @@ public sealed class GraphReturnTests
     [InlineData("RETURN 1 AS x, 2 AS x")]
     [InlineData("MATCH (a) RETURN a, a")]
     [InlineData("MATCH (a) RETURN a.x, a.x")]
-    [InlineData("MATCH (a) RETURN a.x, 1 AS `a.x`")]
-    [InlineData("RETURN 1, 2 AS `1`")]
-    [InlineData("RETURN 1 + 2, 3 AS `1 + 2`")]
+    [InlineData("MATCH (a) RETURN a.x, 1 AS \"a.x\"")]
+    [InlineData("RETURN 1, 2 AS \"1\"")]
+    [InlineData("RETURN 1 + 2, 3 AS \"1 + 2\"")]
     [InlineData("EXPLAIN RETURN 1 AS x, 2 AS x")]
     public async Task Execute_DuplicateColumnNames_ShouldRejectBeforeExecutionAsync(string source)
     {
