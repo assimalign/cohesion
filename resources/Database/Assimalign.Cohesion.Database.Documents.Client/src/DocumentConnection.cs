@@ -204,7 +204,7 @@ public sealed class DocumentConnection : IAsyncDisposable
                 }
                 return result = await execution.ConfigureAwait(false);
             }
-            catch (DatabaseClientException exception) when (exception is not DocumentClientException)
+            catch (DatabaseClientException exception)
             {
                 throw new DocumentClientException(exception.Code, exception.Message, exception);
             }

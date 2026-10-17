@@ -241,8 +241,11 @@ Message contains no code prefix. The Documents family is `COHDOCnnn`:
 `DocumentQueryRequest.FromOql` and a directly constructed typed query with parse errors
 throw `DatabaseParseException` carrying the complete, ordered parser diagnostics and the
 existing first-error Message. No recovery AST reaches the planner. Protocol 1.0's Documents
-server, when supplied by #190, must compose `CODE: message` for ExecutionFailure from this
-carrier, as the SQL and Graph servers do.
+server reads `DatabaseException.Diagnostics` for every database exception, including parse,
+plan, evaluator and system-collection rejections. It composes `CODE: message` from the first
+Error diagnostic, as the SQL and Graph servers do, preserving a message that already contains
+that code and colon. Parser exceptions carry every parser diagnostic. Failed results likewise
+carry their diagnostics through the exception used by the terminal Failure path.
 
 ## OQL query and DDL semantics
 
@@ -752,8 +755,11 @@ message length at 4+C, message bytes at 8+C, and the five i32 fields start at 8+
 16+C+D, 20+C+D and 24+C+D; the record length is 28+C+D. Empty code/message represent null;
 -1 represents nullable start/end/severity/location; line is one-based. Severity and location use
 Database.Types enum values. Failure accepts only ParseFailure, ExecutionFailure and Unavailable.
-Parser diagnostics and offline COHDBD002 retain their codes; uncoded engine failures have an
-empty diagnostics list. The server limits failure/diagnostic messages to 4096 UTF-16 characters,
+The Failure diagnostics come from the exception carrier, preserving code, message, severity,
+location kind and nullable Start/End/Line fields. Older offline and unconfirmed-commit exceptions
+with an empty carrier retain their existing unlocated COHDBD002 fallback; a supplied carrier
+always takes precedence. Other uncoded engine failures have an empty diagnostics list.
+The server limits failure/diagnostic messages to 4096 UTF-16 characters,
 diagnostic codes to 256 characters and the list to 256 entries. Truncated text is marked and
 omitted entries are announced in the failure message. Surrogate pairs are not split; all retained
 locations and normal diagnostic codes remain intact. Even worst-case UTF-8 expansion fits the

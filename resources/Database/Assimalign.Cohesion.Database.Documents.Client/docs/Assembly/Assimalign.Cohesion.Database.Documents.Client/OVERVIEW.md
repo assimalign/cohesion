@@ -41,12 +41,12 @@ public sealed class DocumentConnection : IAsyncDisposable
     public ValueTask DisposeAsync();
 }
 
-public sealed class DocumentClientException : DatabaseClientException
+public sealed class DocumentClientException : DatabaseException
 {
     public DocumentClientException(ProtocolErrorCode code, string message,
         Exception? innerException = null, IReadOnlyList<Diagnostic>? diagnostics = null);
-    public IReadOnlyList<Diagnostic> Diagnostics { get; }
-    // Code is inherited from DatabaseClientException.
+    public ProtocolErrorCode Code { get; }
+    // Diagnostics is inherited from DatabaseException.
 }
 
 public sealed class DocumentResultSet : IReadOnlyList<DocumentRow>
@@ -77,6 +77,8 @@ protocol and statement execution surface as `DocumentClientException`. Cancellat
 `OperationCanceledException`. Concurrent exchanges fail with `InvalidOperationException`.
 Result indexers use normal out-of-range and missing-name exceptions. DocumentId, DocumentVersion
 and Document are reused from Database.Documents, and Diagnostic from Database.Types.
+The exception's inherited Diagnostics carrier preserves all retained diagnostic fields and
+source ordering; Message is the server's composed text with each code prefixed once.
 
 The companion server types live in `Assimalign.Cohesion.Database.Documents`:
 

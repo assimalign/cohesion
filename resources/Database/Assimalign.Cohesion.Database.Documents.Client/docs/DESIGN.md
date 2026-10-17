@@ -94,15 +94,24 @@ including after partial rows or documents, with no `Complete` after it. The clie
 accumulated results and throws the typed error; the authenticated session remains reusable. Failure
 carries the shared classification
 and the server's structured `Diagnostic` values, including codes and nullable locations. Parser
-diagnostics and offline `COHDBD002` survive intact. An engine failure without structured diagnostics
+diagnostics, planning and evaluation diagnostics (`COHDOC001`–`008`), and offline `COHDBD002`
+survive intact. The server reads the database exception carrier and composes `CODE: message`
+once; the client preserves that text without adding a prefix. Located diagnostics retain their
+spans; direct collection APIs retain unlocated diagnostics. An engine failure without structured diagnostics
 has an empty list; the client never extracts codes from message text. The server bounds failure
 text to 4096 UTF-16 characters and diagnostics to 256 (codes to 256 characters), with explicit
 truncation/omission markers. Codes and locations of retained diagnostics are unchanged. This
 keeps even a near-frame-sized failing identifier from turning a statement error into a broken wire.
 
-`DocumentClientException` is a sealed `DatabaseClientException` leaf. This differs from Graph's
-`DatabaseException` leaf so the shared pool can observe the coded failure while the model retains
-structured diagnostics, without a new bridge member or exception translation that loses evidence.
+`DocumentClientException` is a sealed `DatabaseException` leaf, like Graph's model exception.
+It uses the inherited diagnostic carrier, so callers catching the area root see the same diagnostics.
+Before #1103 it derived from `DatabaseClientException` and owned a separate diagnostic list; keeping
+that shape would hide the root carrier or require widening the shared client's constructors just for
+this model. The local ancestry change avoids both. Shared client failures are translated locally,
+retaining their protocol code and inner exception. The model source reports statement failures;
+the shared source continues to report dial, handshake and transport failures. Its ExchangeFailed
+event observes shared-client exceptions, not model failures. Pool reuse depends on terminal-response
+evidence for any exception type, so this change preserves session health.
 Only a fully decoded model `Failure` calls `MarkResponseComplete`. Shared `Error` is fatal;
 bad order, widths, counts, enum values, trailing bytes and malformed JSON discard the session.
 EOF, transport failure or cancellation during an unfinished exchange also discard it.
@@ -154,7 +163,8 @@ the shared protocol's responsibility (#1095 / #1105), with no model-specific ver
 - Commands add CRUD, versions and collection names because OQL has no document-write syntax yet.
 - A dedicated terminal Failure carries diagnostics and gives the pool explicit reuse evidence.
   Bounded failure text/cardinality keeps error responses below the frame limit.
-- The typed exception derives from the shared client exception for that evidence and its code.
+- The typed exception uses the root diagnostic carrier and owns its protocol code, like Graph;
+  terminal-response evidence remains independent of exception ancestry.
 - A rental disposal guard closes the stale-wrapper return hazard locally.
 - Server recovery event IDs 1–2 remain stable; lifecycle events occupy 3–11 and parse failure 12.
   Repeatable Warning/Error events are throttled with suppression counts under rule 13.
@@ -164,6 +174,10 @@ the shared protocol's responsibility (#1095 / #1105), with no model-specific ver
 The [protocol layout](../../Assimalign.Cohesion.Database.Documents/docs/DESIGN.md#document-wire-family)
 is authoritative for bytes and completion semantics. Tests drive both transports, all advertised
 OQL clauses and commands, malformed responses, lifecycle limits, failure recovery and telemetry.
+`DocumentClientDiagnosticTests` compares embedded and wire carriers over InMemory and TCP for
+parse, plan, division-by-zero, missing-parameter and read-only system-collection rejections,
+including multiple parser diagnostics and direct collection writes. It verifies complete diagnostic
+fields, composed text, a successful next command and reuse of the same pooled server session.
 
 JSON result and parameter writers use `JsonElement.WriteTo` so the configured writer depth
 of 256 applies, including values deeper than 64 levels. The other wire readers explicitly set

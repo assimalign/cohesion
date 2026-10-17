@@ -34,8 +34,9 @@ namespaces. The client library itself references only the transport contracts. Q
 accept JSON scalars and `JsonElement`; object and array results remain owned `JsonElement`
 values. A stored `Document` carries its exact UTF-8 content, identity and version.
 
-`DocumentClientException.Code` describes the wire failure; `Diagnostics` retains the server's
-codes and source locations. A rejected statement leaves the session usable. A malformed or
+`DocumentClientException.Code` describes the wire failure; its inherited `DatabaseException.Diagnostics`
+retains the server's codes and source locations, and its message preserves the composed `CODE: message`
+text. A rejected statement leaves the session usable. A malformed or
 unfinished exchange invalidates it. Cancellation of a write does not establish whether it committed.
 
 [DESIGN.md](DESIGN.md) explains the exchange and ownership contracts; the

@@ -379,7 +379,6 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
         DocumentProtocolExecuteMessage? execute = frame.Type == (ProtocolMessageType)DocumentProtocolMessageType.Execute
             ? DocumentProtocolExecuteMessage.Decode(frame.Payload.Span) : null;
         DocumentProtocolCommandMessage? command = execute is null ? DocumentProtocolCommandMessage.Decode(frame.Payload.Span) : null;
-        IReadOnlyList<Diagnostic> diagnostics = [];
         try
         {
             if (execute is not null)
@@ -397,11 +396,11 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
                 var result = await _databaseSession!.ExecuteStatementAsync(() =>
                 {
                     var statement = (OqlQueryStatement)new OqlQueryParser().Parse(execute.Statement);
-                    diagnostics = statement.Diagnostics.ToArray();
+                    var diagnostics = statement.Diagnostics.ToArray();
                     if (string.IsNullOrWhiteSpace(execute.Statement) || diagnostics.Any(d => d.Severity == DiagnosticSeverity.Error))
                     {
                         string detail = string.Join("; ", diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error).Select(d => $"{d.Code}: {d.Message}"));
-                        var error = new DatabaseParseException(detail.Length == 0 ? ErrorMessages.StatementInvalid : detail);
+                        var error = new DatabaseParseException(detail.Length == 0 ? ErrorMessages.StatementInvalid : detail, diagnostics);
                         DocumentDatabaseEventSource.Log.StatementParseFailed(this, _databaseSession!.Database.Name, error);
                         throw error;
                     }
@@ -409,7 +408,6 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
                         select.Projections[0].Expression is OqlStarExpression;
                     return new DocumentQueryRequest(statement, parameters);
                 }, cancellationToken).ConfigureAwait(false);
-                if (result.Status != DatabaseResultStatus.Success) { diagnostics = result.Diagnostics ?? []; }
                 await WriteResultAsync(result, wholeDocuments, cancellationToken).ConfigureAwait(false);
             }
             else
@@ -421,16 +419,22 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
         {
             ProtocolErrorCode code = exception is DatabaseParseException ? ProtocolErrorCode.ParseFailure :
                 exception is DatabaseOfflineException ? ProtocolErrorCode.Unavailable : ProtocolErrorCode.ExecutionFailure;
-            if (exception is DatabaseOfflineException offline)
+            IReadOnlyList<Diagnostic> diagnostics = exception is DatabaseException databaseException ? databaseException.Diagnostics : [];
+            // Preserve the existing offline evidence for root exceptions that predate the carrier.
+            // A supplied carrier always wins, including its source locations and ordering.
+            if (diagnostics.Count == 0 && exception is DatabaseOfflineException offline)
             {
                 diagnostics = [new Diagnostic { Code = offline.Code, Message = offline.Message, Severity = DiagnosticSeverity.Error }];
             }
-            else if (exception is DatabaseTransactionCommitUnconfirmedException)
+            else if (diagnostics.Count == 0 && exception is DatabaseTransactionCommitUnconfirmedException)
             {
                 diagnostics = [new Diagnostic { Code = DocumentDatabase.OfflineCode, Message = exception.Message, Severity = DiagnosticSeverity.Error }];
             }
+            var diagnostic = diagnostics.FirstOrDefault(item => item.Severity == DiagnosticSeverity.Error);
+            string errorText = diagnostic?.Code is { } diagnosticCode && !exception.Message.Contains(diagnosticCode + ":", StringComparison.Ordinal)
+                ? $"{diagnosticCode}: {exception.Message}" : exception.Message;
             await WriteFrameAsync((ProtocolMessageType)DocumentProtocolMessageType.Failure,
-                CreateFailure(code, exception.Message, diagnostics).Encode(), cancellationToken).ConfigureAwait(false);
+                CreateFailure(code, errorText, diagnostics).Encode(), cancellationToken).ConfigureAwait(false);
             return;
         }
     }
@@ -483,7 +487,7 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
         }
         else if (result.Status != DatabaseResultStatus.Success)
         {
-            throw new DatabaseException(ErrorMessages.StatementFailed);
+            throw new DatabaseException(ErrorMessages.StatementFailed, result.Diagnostics ?? []);
         }
         await WriteResultFrameAsync(DocumentProtocolMessageType.Complete, new DocumentProtocolCompleteMessage(count, result.AffectedCount).Encode(), cancellationToken).ConfigureAwait(false);
     }
