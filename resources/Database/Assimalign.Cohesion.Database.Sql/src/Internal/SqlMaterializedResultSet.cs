@@ -23,6 +23,16 @@ internal sealed class SqlMaterializedResultSet : DatabaseResultSet
     {
         _columns = columns;
         _rows = rows;
+        // Transfer each projected row to the result with its own binary cells before ExecuteAsync
+        // returns. Literals, function bodies, defaults and parameters may share their source
+        // arrays, and GetBytes can expose a backing array just as GetValue does.
+        foreach (var row in rows)
+        {
+            for (int ordinal = 0; ordinal < row.Length; ordinal++)
+            {
+                if (row[ordinal] is byte[] bytes) { row[ordinal] = bytes.Clone(); }
+            }
+        }
     }
 
     /// <inheritdoc />

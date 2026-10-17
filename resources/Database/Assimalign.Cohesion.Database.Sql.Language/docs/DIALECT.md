@@ -1370,6 +1370,11 @@ fractional digits (`02::04`, `02:03:.5`, `02:03:04.`), as those PostgreSQL reade
 The pure day-time ISO form `P1DT2H` is supported, as PostgreSQL's
 DecodeISO8601Interval supports day and time designators (datetime.c:3990-4026, 4126-4138).
 
+In-process binary row values are result-owned snapshots. Changing a returned byte array
+(including the backing array of GetBytes) cannot change another output cell, later row,
+function call, default-driven INSERT or stored/indexed value. Binary parameters are
+snapshotted into completed results before execution returns.
+
 The engine evaluates an integer literal as BIGINT and a fractional or exponent
 literal as an exact `System.Decimal`, whatever the target. A literal its type cannot
 hold reports `COHSQLE002` and names itself, for example

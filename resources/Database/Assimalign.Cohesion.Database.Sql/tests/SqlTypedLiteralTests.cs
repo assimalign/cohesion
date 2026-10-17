@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -17,6 +18,111 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed class SqlTypedLiteralTests
 {
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Binary results: every query route snapshots each output cell before returning")]
+    [InlineData("SELECT X'00FF', binval(), @bytes, COALESCE(NULL, binval()) FROM dest ORDER BY id;")]
+    [InlineData("SELECT b, binval(), @bytes, X'00FF' FROM dest ORDER BY id;")]
+    [InlineData("SELECT b, binval(), @bytes, X'00FF' FROM dest WHERE b = X'00FF' ORDER BY id;")]
+    [InlineData("SELECT b, binval(), @bytes, X'00FF' FROM tails ORDER BY id;")]
+    [InlineData("SELECT appbin(id), binval(), @bytes, X'00FF' FROM dest ORDER BY id;")]
+    [InlineData("SELECT b, binval(), @bytes, X'00FF' FROM dest GROUP BY b, id ORDER BY id;")]
+    [InlineData("SELECT d.b, binval(), @bytes, X'00FF' FROM dest d JOIN tails t ON d.id = t.id ORDER BY d.id;")]
+    [InlineData("SELECT (SELECT binval() FROM tails WHERE id = 1), binval(), @bytes, X'00FF' FROM dest ORDER BY id;")]
+    [InlineData("SELECT X'00FF', binval(), @bytes, X'00FF' FROM INFORMATION_SCHEMA.TABLES;")]
+    public async Task Select_BinaryResults_ShouldIsolateRowsFunctionsDefaultsAndParameters(string sql)
+    {
+        // Arrange
+        byte[] functionValue = [0, 255];
+        var builder = SqlDatabaseEngine.CreateBuilder("binary-ownership");
+        builder.Functions.Add(SqlScalarFunction.Create<int, byte[]>("appbin", _ => functionValue, SqlFunctionVolatility.Immutable));
+        await using var engine = await builder.BuildAsync(CancellationToken.None);
+        var database = await engine.CreateDatabaseAsync("db");
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync("CREATE FUNCTION binval() RETURNS BINARY IMMUTABLE RETURN X'00FF';");
+        await session.ExecuteAsync("CREATE TABLE dest (id INT, b BINARY DEFAULT binval());");
+        await session.ExecuteAsync("INSERT INTO dest (id) VALUES (1), (2);");
+        await session.ExecuteAsync("CREATE INDEX ix_binary ON dest(b);");
+        await session.ExecuteAsync("CREATE TABLE tails (id INT);");
+        await session.ExecuteAsync("INSERT INTO tails VALUES (1), (2);");
+        await session.ExecuteAsync("ALTER TABLE tails ADD COLUMN b BINARY DEFAULT X'00FF';");
+        byte[] parameter = [0, 255];
+        var parameters = new Dictionary<string, object?> { ["bytes"] = parameter };
+
+        // Act
+        await using var result = (await session.ExecuteAsync(SqlQueryRequest.FromSql(sql, parameters), CancellationToken.None)).ShouldBeAssignableTo<DatabaseResultSet>();
+        parameter[0] = 0x77;
+        int count = 0;
+        await foreach (var row in result.GetRowsAsync(CancellationToken.None))
+        {
+            for (int field = 0; field < row.FieldCount; field++)
+            {
+                // Assert: earlier cells and rows cannot change this cell, including GetBytes' backing array.
+                row.GetValue(field).ShouldBeOfType<byte[]>().ShouldBe(new byte[] { 0, 255 }, sql);
+                if (field % 2 == 0) { ((byte[])row.GetValue(field)!)[0] = 0x99; }
+                else
+                {
+                    MemoryMarshal.TryGetArray(row.GetBytes(field), out var bytes).ShouldBeTrue();
+                    bytes.Array![bytes.Offset] = 0x99;
+                }
+            }
+            count++;
+        }
+        count.ShouldBe(2);
+
+        // Assert: the returned bytes cannot alter cached function bodies, literal defaults or stored/indexed values.
+        await session.ExecuteAsync("INSERT INTO dest (id) VALUES (3);");
+        await session.ExecuteAsync("INSERT INTO tails (id) VALUES (3);");
+        (await RowsAsync(session, "SELECT binval() = X'00FF', b = X'00FF', b = X'99FF' FROM dest ORDER BY id;"))
+            .ShouldAllBe(row => Equals(row[0], true) && Equals(row[1], true) && Equals(row[2], false));
+        (await RowsAsync(session, "SELECT b = X'00FF' FROM tails ORDER BY id;")).ShouldAllBe(row => Equals(row[0], true));
+        (await RowsAsync(session, "SELECT id FROM dest WHERE b = X'00FF' ORDER BY id;")).Select(row => row[0]).ShouldBe(new object?[] { 1, 2, 3 });
+        parameter[0].ShouldBe((byte)0x77);
+        functionValue.ShouldBe(new byte[] { 0, 255 });
+    }
+
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Binary DEFAULT: a mutated result cannot corrupt the next default-driven INSERT")]
+    public async Task Insert_BinaryLiteralDefault_ShouldRetainCachedBytesAfterResultMutation()
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("binary-default", new SqlDatabaseEngineOptions());
+        var database = await engine.CreateDatabaseAsync("db");
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE dest (id INT, b BINARY DEFAULT X'00FF');");
+        await session.ExecuteAsync("INSERT INTO dest (id) VALUES (1);");
+
+        // Act
+        var returned = (await RowsAsync(session, "SELECT b FROM dest;")).ShouldHaveSingleItem()[0].ShouldBeOfType<byte[]>();
+        returned[0] = 0x99;
+        await session.ExecuteAsync("INSERT INTO dest (id) VALUES (2);");
+
+        // Assert
+        (await RowsAsync(session, "SELECT b = X'00FF', b = X'99FF' FROM dest ORDER BY id;"))
+            .ShouldAllBe(row => Equals(row[0], true) && Equals(row[1], false));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Empty binary results: even empty cells have separate arrays")]
+    public async Task Select_EmptyBinary_ShouldOwnEachOutputArray()
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("empty-binary", new SqlDatabaseEngineOptions());
+        var database = await engine.CreateDatabaseAsync("db");
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE t (id INT);");
+        await session.ExecuteAsync("INSERT INTO t VALUES (1), (2);");
+
+        // Act
+        var rows = await RowsAsync(session, "SELECT X'', X'' FROM t;");
+
+        // Assert
+        var values = rows.SelectMany(row => row).Select(value => value.ShouldBeOfType<byte[]>()).ToArray();
+        values.Length.ShouldBe(4);
+        for (int i = 0; i < values.Length; i++)
+        {
+            values[i].ShouldBeEmpty();
+            values[i].ShouldNotBeSameAs(Array.Empty<byte>());
+            for (int j = 0; j < i; j++) { values[i].ShouldNotBeSameAs(values[j]); }
+        }
+    }
+
     public static IEnumerable<object[]> Literals() =>
     [
         ["DATE", "DATE '2024-01-01'", DatabaseType.Date, new DateOnly(2024, 1, 1)],

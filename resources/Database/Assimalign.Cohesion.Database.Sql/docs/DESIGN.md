@@ -217,6 +217,22 @@ static operand typing preserve its storage type, and access-path extraction uses
 evaluator as residual predicates. Literal DEFAULT binding preserves the type before coercion,
 including compiled-schema and domain validation; mismatched typed defaults fail before mutation.
 Omitted values, explicit DEFAULT and ADD COLUMN missing tails use the same bound constant.
+Every materialized result snapshots each binary cell before execution returns. This single
+output boundary covers table scans and index reads, projections and SQL/application functions,
+literal and expression DEFAULTs, joins, groups, subqueries and system views. GetValue and
+GetBytes then expose only result-owned bytes. Cells and rows have separate copies even when
+their source is one bound constant; a caller changing an input parameter after execution
+cannot change the completed result. Internal evaluation and DEFAULT delivery share bytes;
+they do not add copies to expression or storage paths.
+
+The benchmark's opt-in `--cases QB --rows 100000 --iterations 5` projects four 256-byte
+X literals per row and reads every GetValue. On Windows arm64, Release .NET 10 JIT with
+DOTNET_TieredCompilation=0, one warm-up and five measured iterations, the median allocation
+increased from 927.9 to 2047.9 bytes per row: +1120 bytes, exactly four 280-byte arrays
+(1024 payload bytes plus 96 array overhead). The measuring thread did not hop in either
+run; process-wide allocation agreed within 0.1 byte per row. This is the deliberate cost
+of independent mutable result cells; no timing claim is made on the shared build host.
+
 COLUMN_DEFAULT renders the resolved temporal/binary value with a typed prefix, including
 plain-string defaults persisted previously. Other expression defaults keep their canonical text.
 
@@ -325,7 +341,7 @@ flowchart TD
   the column and every INSERT omitting it reads, where each use converted the text
   before. A DEFAULT that does not convert, which DDL never stores, binds as a
   `SqlBoundFailure` that fails each use as before, so the table still opens. Bound
-  trees and immutable converted values are shared; binary defaults are copied on delivery.
+  trees and converted values are shared; binary cells are copied at the result boundary.
   Failure nodes construct a new exception per throw, so sharing the cache across threads is safe.
 - **Allocation.** Literals and parameters are boxed once per statement instead of per
   row; predicates return shared boxed Booleans; `COUNT(*)` accumulates a shared boxed
