@@ -106,6 +106,12 @@ Negative and fractional LIMIT/OFFSET counts retain COHSQLE018 in the composed wi
 The Int64 row-window tests (#1100) assert that prefix alongside ExecutionFailure and connection
 reuse, aligning their expected text with the carrier convention added by #1103.
 
+NOT NULL failures retain COHSQLE024 (SQLSTATE 23502) in the composed wire message,
+with the unchanged column-specific missing-default or explicit-NULL detail. DEFAULT
+VALUES, DEFAULT items and UPDATE DEFAULT use that same contract. SqlInsertValuesWireTests
+covers success, syntax rejection and constraint rejection over InMemory and loopback TCP,
+then queries and writes on the same connection to verify it remains usable.
+
 `SqlClientException : DatabaseException` maps stable wire codes to SQL error kinds
 and retains the original code. The shared pool invalidates incomplete exchanges,
 including cancellation and decoder failure. Completed parse/execution failures

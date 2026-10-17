@@ -29,14 +29,20 @@ public sealed partial class SqlQueryParser
             columns = ParseInsertColumnList(ref lexer);
         }
 
-        // VALUES or SELECT
+        // VALUES, DEFAULT VALUES or SELECT
         List<IReadOnlyList<SqlExpression>>? values = null;
         SqlSelectExpression? selectSource = null;
+        bool isDefaultValues = false;
 
         if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "VALUES"))
         {
             Advance(ref lexer);
             values = ParseValuesList(ref lexer);
+        }
+        else if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "DEFAULT"))
+        {
+            Advance(ref lexer);
+            isDefaultValues = ExpectKeyword(ref lexer, "VALUES", "VALUES after DEFAULT");
         }
         else if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "SELECT"))
         {
@@ -44,10 +50,10 @@ public sealed partial class SqlQueryParser
         }
         else
         {
-            AddExpectedDiagnostic(ref lexer, "VALUES or SELECT");
+            AddExpectedDiagnostic(ref lexer, "VALUES, DEFAULT VALUES or SELECT");
         }
 
-        return new SqlInsertExpression(table, columns, values, selectSource, null,
+        return new SqlInsertExpression(table, columns, values, selectSource, isDefaultValues, null,
             Location.Create(1, 1, pos, _lastTokenEnd));
     }
 
@@ -115,15 +121,33 @@ public sealed partial class SqlQueryParser
         }
         else
         {
-            values.Add(ParseExpression(ref lexer));
+            values.Add(ParseDefaultableValue(ref lexer));
             while (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.Comma)
             {
                 Advance(ref lexer);
-                values.Add(ParseExpression(ref lexer));
+                values.Add(ParseDefaultableValue(ref lexer));
             }
         }
 
         Expect(ref lexer, TokenType.RightParen, "')' after the VALUES row");
         return values;
+    }
+
+    /// <summary>
+    /// DEFAULT is a whole assignment value, never an operand. Scalar parsing rejects the bare
+    /// keyword, while qualified column names retain their normal identifier parsing.
+    /// </summary>
+    private SqlExpression ParseDefaultableValue(ref TokenLexer lexer)
+    {
+        if (IsKeyword(ref lexer, "DEFAULT"))
+        {
+            int start = lexer.Current.Position;
+            int end = start + lexer.Current.Value.Length;
+            EnterLeaf();
+            Advance(ref lexer);
+            return new SqlDefaultExpression(Location.Create(1, 1, start, end));
+        }
+
+        return ParseExpression(ref lexer);
     }
 }

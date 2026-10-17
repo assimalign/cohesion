@@ -54,7 +54,7 @@ public static class SqlExpressionRenderer
         ["ROW_NUMBER", "RANK", "DENSE_RANK", "LEAD", "LAG", "FIRST_VALUE", "LAST_VALUE", "NTH_VALUE", "NTILE"];
 
     /// <summary>
-    /// Renders a scalar expression as canonical SQL.
+    /// Renders a value expression or contextual DEFAULT item as canonical SQL.
     /// </summary>
     /// <param name="expression">An expression produced by <see cref="SqlQueryParser"/>.</param>
     /// <returns>The canonical SQL text of <paramref name="expression"/>.</returns>
@@ -125,6 +125,7 @@ public static class SqlExpressionRenderer
         SqlBinaryExpression binary => Binary(binary),
         SqlUnaryExpression unary => Unary(unary),
         SqlLiteralExpression literal => Literal(literal),
+        SqlDefaultExpression => "DEFAULT",
         SqlColumnReferenceExpression column => Column(column),
         SqlParameterExpression parameter => parameter.ParameterName,
         SqlStarExpression => "*",

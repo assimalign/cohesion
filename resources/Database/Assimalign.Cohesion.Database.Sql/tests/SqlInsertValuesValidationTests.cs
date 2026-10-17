@@ -55,8 +55,6 @@ public sealed class SqlInsertValuesValidationTests
     [InlineData("INSERT INTO v (id, flag) VALUES (2, FALSE OR FALSE OR a = 1)", "a")]
     [InlineData("INSERT INTO v (id, a) VALUES (2, SUM(a))", "a")]
     [InlineData("INSERT INTO v (id, a) VALUES (2, 2), (3, id)", "id")]
-    // DEFAULT in VALUES is outside the dialect and parses as a column named DEFAULT.
-    [InlineData("INSERT INTO v (id, a) VALUES (2, DEFAULT)", "DEFAULT")]
     public async Task ExecuteAsync_ColumnReferenceInValues_ShouldFailBeforeExecution(string sql, string reference)
     {
         // Arrange

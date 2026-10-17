@@ -236,6 +236,19 @@ profile and reports `COHDBL001`.
 
 ## Canonical rendering (`SqlExpressionRenderer`)
 
+`SqlDefaultExpression` is a parser-owned, scopeless leaf for a whole INSERT VALUES
+item or UPDATE SET value (#1193); canonical rendering emits `DEFAULT`. It never enters
+the scalar precedence parser as an operand. INSERT/UPDATE share a contextual value
+parser which recognizes the whole-item keyword before scalar parsing. The scalar parser
+rejects bare DEFAULT everywhere with SQL0003; qualified field names such as `t.default`
+and `t."default"` use the normal column-reference parser. Quoted identifiers, comments
+and strings retain their lexical identity; no token rescan is needed.
+`SqlInsertExpression.IsDefaultValues` distinguishes one all-omitted row from a missing
+source, an empty VALUES list or INSERT SELECT. A column list is allowed on that form
+and remains available for target-name validation. No clause or profile entry is added.
+The planner maps these forms to target-column assignment instructions; catalog default
+binding and execution remain in Database.Sql, with no cross-assembly visibility grant.
+
 `SqlExpressionRenderer.Render(SqlExpression)` and `Render(SqlSelectExpression)` turn
 a parsed tree back into SQL text. It is the one AST-to-SQL renderer: every
 definition the engine persists — CHECK predicates and literal DEFAULTs today,
@@ -428,9 +441,10 @@ and `+@p` build a unary-plus node. Typing and evaluation belong to the engine.
 
 Column DEFAULT parses through the unary rung too, so negative numeric defaults retain the same
 unary-minus node as a scalar expression. The engine's DEFAULT admission remains narrower than
-the expression grammar: one literal, or one minus over a numeric literal. Arithmetic, nested
-signs and function calls do not become expression defaults. This supports the schema builder's
-invariant rendering of negative C# numeric values without rewriting them as text literals.
+the expression grammar: one literal, or one minus over a numeric literal, plus E4's stored
+scalar-call defaults. General expression-default admission remains #1121's scope. This supports
+the schema builder's invariant rendering of negative C# numeric values without rewriting them
+as text literals; DEFAULT assignment (#1193) reuses whatever the catalog already stores.
 
 ## AOT posture
 

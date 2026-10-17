@@ -96,6 +96,9 @@ internal enum SqlBoundExpressionKind : byte
     /// <summary>A row-independent column DEFAULT expression.</summary>
     Default,
 
+    /// <summary><see cref="SqlBoundDefaultItem"/>: use the target column's omitted-value path.</summary>
+    DefaultItem,
+
     /// <summary><see cref="SqlBoundDomainArgument"/>: domain coercion before a function's STRICT dispatch.</summary>
     DomainArgument,
 }

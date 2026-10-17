@@ -39,7 +39,8 @@ shared storage, with DDL flowing through the relational catalog
 - **SQL execution** — the declared dialect (`Database.Sql.Language/docs/DIALECT.md`)
   planned rule-based and executed against table scans: `SELECT` with `WHERE`,
   projection, `ORDER BY`, `LIMIT/OFFSET`, `DISTINCT`, lone `COUNT(*)`;
-  `INSERT` (multi-row, defaults, nullability); `UPDATE`/`DELETE` with accurate
+  `INSERT` (multi-row, whole-item `DEFAULT`, `DEFAULT VALUES`, nullability);
+  `UPDATE` (including `SET c = DEFAULT`)/`DELETE` with accurate
   affected counts; `CREATE/ALTER/DROP TABLE`. DROP unpublishes immediately and the
   version-purge worker reclaims its data/index pages after older readers finish.
   Unsupported dialect features fail

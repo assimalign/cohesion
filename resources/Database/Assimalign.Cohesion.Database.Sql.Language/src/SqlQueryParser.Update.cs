@@ -79,7 +79,7 @@ public sealed partial class SqlQueryParser
             }
         }
 
-        var value = ParseExpression(ref lexer);
+        var value = ParseDefaultableValue(ref lexer);
 
         return new SqlAssignment(columnName, value);
     }

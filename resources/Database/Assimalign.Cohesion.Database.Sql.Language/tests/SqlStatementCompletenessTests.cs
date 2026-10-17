@@ -40,7 +40,7 @@ public sealed class SqlStatementCompletenessTests
         [SqlClauses.OrderBy] = ["SELECT a FROM t ORDER BY a", "SELECT a FROM t ORDER BY a DESC, 2 ASC"],
         [SqlClauses.Limit] = ["SELECT a FROM t LIMIT 1"],
         [SqlClauses.Offset] = ["SELECT a FROM t OFFSET 1", "SELECT a FROM t ORDER BY a LIMIT 1 OFFSET 2"],
-        [SqlClauses.Values] = ["INSERT INTO t VALUES (1), (2)"],
+        [SqlClauses.Values] = ["INSERT INTO t VALUES (1), (2)", "INSERT INTO t VALUES (DEFAULT), (2)", "INSERT INTO t DEFAULT VALUES"],
         [SqlClauses.Subquery] =
         [
             "SELECT a FROM t WHERE a IN (SELECT b FROM u)",
@@ -51,8 +51,8 @@ public sealed class SqlStatementCompletenessTests
         [SqlClauses.Case] = ["SELECT CASE WHEN a = 1 THEN 'x' ELSE 'y' END FROM t", "SELECT a FROM t WHERE CASE a WHEN 1 THEN TRUE END"],
         [SqlClauses.Cast] = ["SELECT CAST(a AS INT) FROM t", "SELECT a FROM t WHERE CAST(a AS TEXT) = '1'"],
         [SqlClauses.Collate] = ["SELECT a FROM t WHERE a = 'x' COLLATE binary", "SELECT a COLLATE case_insensitive FROM t"],
-        [SqlClauses.Insert] = ["INSERT INTO t VALUES (1)", "INSERT INTO t (a, b) VALUES (1, 'x')"],
-        [SqlClauses.Update] = ["UPDATE t SET a = 1", "UPDATE dbo.t SET a = 1, b = 'x' WHERE id = 1"],
+        [SqlClauses.Insert] = ["INSERT INTO t VALUES (1)", "INSERT INTO t (a, b) VALUES (1, 'x')", "INSERT INTO t (b, a) DEFAULT VALUES"],
+        [SqlClauses.Update] = ["UPDATE t SET a = 1", "UPDATE t SET a = DEFAULT", "UPDATE dbo.t SET a = 1, b = 'x' WHERE id = 1"],
         [SqlClauses.Delete] = ["DELETE FROM t", "DELETE FROM t WHERE id = 1"],
         [SqlClauses.CreateTable] = ["CREATE TABLE t (id INT PRIMARY KEY, name TEXT NOT NULL DEFAULT 'x')", "CREATE TABLE IF NOT EXISTS dbo.t (id INT)"],
         [SqlClauses.CreateIndex] = ["CREATE INDEX ix ON t (a)", "CREATE UNIQUE INDEX IF NOT EXISTS ix ON dbo.t (a, b)"],
@@ -241,7 +241,7 @@ public sealed class SqlStatementCompletenessTests
     [InlineData("INSERT INTO t VALUES (1),^;", ";")]
     [InlineData("INSERT INTO t (id, name,^, age) VALUES (5, 'x', 1);", ",")]
     [InlineData("INSERT INTO t (^) VALUES (1);", ")")]
-    [InlineData("INSERT INTO t (id) ^DEFAULT VALUES;", "DEFAULT")]
+    [InlineData("INSERT INTO t (id) DEFAULT ^;", ";")]
     [InlineData("CREATE INDEX ^ON t (name);", "ON")]
     [InlineData("CREATE INDEX ix ON t (name,^, age);", ",")]
     [InlineData("CREATE INDEX ix ON t^;", ";")]

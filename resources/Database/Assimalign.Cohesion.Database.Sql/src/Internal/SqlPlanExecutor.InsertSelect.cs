@@ -47,7 +47,8 @@ internal sealed partial class SqlPlanExecutor
     /// then publish the complete write set within one transactional statement.
     /// </summary>
     private async Task<DatabaseResult> ExecuteInsertRowsAsync(SqlCatalogTable table, IReadOnlyList<int> targetOrdinals,
-        IReadOnlyList<object?[]> sourceRows, SqlStatementContext statement, CancellationToken cancellationToken)
+        IReadOnlyList<object?[]> sourceRows, SqlStatementContext statement, CancellationToken cancellationToken,
+        IReadOnlyList<SqlBoundExpression[]>? valueRows = null)
     {
         await AcquireOutgoingReferenceIntentLocksAsync(table, statement, cancellationToken).ConfigureAwait(false);
         await statement.Coordinator.LockManager.AcquireAsync(statement.Transaction.Sequence, LockResource.Object(table.ObjectId),
@@ -58,8 +59,9 @@ internal sealed partial class SqlPlanExecutor
         var defaults = bound.DefaultValues;
         var domainEvaluator = bound.Domains.Count == 0 ? null : ExecutionEvaluator(null, cancellationToken);
         var rows = new List<(byte[] Record, object?[] Values)>(sourceRows.Count);
-        foreach (var sourceRow in sourceRows)
+        for (int rowIndex = 0; rowIndex < sourceRows.Count; rowIndex++)
         {
+            var sourceRow = sourceRows[rowIndex];
             cancellationToken.ThrowIfCancellationRequested();
             if (sourceRow.Length != targetOrdinals.Count)
             {
@@ -70,6 +72,10 @@ internal sealed partial class SqlPlanExecutor
             var assigned = new bool[table.Columns.Count];
             for (int i = 0; i < targetOrdinals.Count; i++)
             {
+                if (valueRows is not null && valueRows[rowIndex][i].Kind == SqlBoundExpressionKind.DefaultItem)
+                {
+                    continue;
+                }
                 int ordinal = targetOrdinals[i];
                 values[ordinal] = CoerceForColumn(sourceRow[i], table.Columns[ordinal]);
                 assigned[ordinal] = true;
@@ -79,7 +85,7 @@ internal sealed partial class SqlPlanExecutor
                 if (!assigned[ordinal])
                 {
                     // The bound DEFAULT's value, or NULL, or the NOT NULL failure, for a column without one.
-                    values[ordinal] = defaults[ordinal] is { } boundDefault ? DefaultValue(boundDefault, cancellationToken) : ResolveDefault(table.Columns[ordinal], null);
+                    values[ordinal] = ResolveColumnDefault(table.Columns[ordinal], defaults[ordinal], cancellationToken);
                 }
             }
 
@@ -123,4 +129,8 @@ internal sealed partial class SqlPlanExecutor
             throw TranslateUniqueViolation(table, exception);
         }
     }
+
+    /// <summary>One default-resolution path for omitted INSERT columns and explicit DEFAULT assignments.</summary>
+    private static object? ResolveColumnDefault(SqlCatalogColumn column, SqlBoundExpression? boundDefault, CancellationToken cancellationToken)
+        => boundDefault is not null ? DefaultValue(boundDefault, cancellationToken) : ResolveDefault(column, null);
 }
