@@ -13,7 +13,7 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Internal;
 /// </summary>
 internal readonly struct KeyValueStatementContext
 {
-    internal KeyValueStatementContext(ITransactionContext transaction, TransactionCoordinator coordinator)
+    internal KeyValueStatementContext(TransactionContext transaction, TransactionCoordinator coordinator)
     {
         Transaction = transaction;
         Coordinator = coordinator;
@@ -23,7 +23,7 @@ internal readonly struct KeyValueStatementContext
     /// <summary>
     /// Gets the MVCC transaction context the command executes under.
     /// </summary>
-    internal ITransactionContext Transaction { get; }
+    internal TransactionContext Transaction { get; }
 
     /// <summary>
     /// Gets the database's transaction coordinator.

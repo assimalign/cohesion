@@ -3,7 +3,7 @@ namespace Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Language;
 
 /// <summary>
-/// Represents a literal value in a SQL expression (string, integer, float, null, or boolean).
+/// Represents an untyped or typed literal value in a SQL expression.
 /// </summary>
 public sealed class SqlLiteralExpression : SqlExpression
 {
@@ -21,12 +21,12 @@ public sealed class SqlLiteralExpression : SqlExpression
     }
 
     /// <summary>
-    /// Gets the text representation of the literal value.
+    /// Gets the unquoted literal value; temporal, interval and binary values use parser-normalized canonical text.
     /// </summary>
     public string Value { get; }
 
     /// <summary>
-    /// Gets the kind of literal (string, integer, float, null, or boolean).
+    /// Gets the kind of literal.
     /// </summary>
     public SqlLiteralType LiteralType { get; }
 }

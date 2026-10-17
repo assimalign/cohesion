@@ -80,7 +80,7 @@ public class KeyValueCatalogTests
             new(1, new IndexDefinition("key", IndexKind.BTree, IsUnique: true), RootPageId: 3),
         });
 
-        // Act: a root split drifted the root page id; the engine re-exports.
+        // Act: the engine re-exports a changed registration set.
         await catalog.SaveIndexRegistrationsAsync(new List<BTreeIndexRegistration>
         {
             new(1, new IndexDefinition("key", IndexKind.BTree, IsUnique: true), RootPageId: 11),

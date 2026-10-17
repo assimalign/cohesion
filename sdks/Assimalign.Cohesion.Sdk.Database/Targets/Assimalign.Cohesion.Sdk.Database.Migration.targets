@@ -2,10 +2,17 @@
 	<!--
 		Set artifact defaults after Microsoft.NET.Sdk has finalized the per-target-
 		framework IntermediateOutputPath. Consumer overrides set earlier are kept.
+		Each declared database writes <database>.schema.json and <database>.schema.sha256
+		into the output directory, and the manifest beside them lists those databases. The
+		manifest is the model compile target's incremental output and the only record of
+		which files in the directory the SDK owns, so a deleted directory, a deleted
+		artifact or a new output directory each trigger a recompile, and a foreign
+		*.schema.json in an overridden directory is neither deleted nor read.
 	-->
 	<PropertyGroup>
-		<CohesionDatabaseSchemaOutputPath Condition="'$(CohesionDatabaseSchemaOutputPath)' == ''">$(IntermediateOutputPath)cohesion/database.schema.json</CohesionDatabaseSchemaOutputPath>
-		<CohesionDatabaseSchemaHashOutputPath Condition="'$(CohesionDatabaseSchemaHashOutputPath)' == ''">$(IntermediateOutputPath)cohesion/database.schema.sha256</CohesionDatabaseSchemaHashOutputPath>
+		<CohesionDatabaseSchemaOutputDirectory Condition="'$(CohesionDatabaseSchemaOutputDirectory)' == ''">$(IntermediateOutputPath)cohesion/database/</CohesionDatabaseSchemaOutputDirectory>
+		<CohesionDatabaseSchemaOutputDirectory Condition="!HasTrailingSlash('$(CohesionDatabaseSchemaOutputDirectory)')">$(CohesionDatabaseSchemaOutputDirectory)/</CohesionDatabaseSchemaOutputDirectory>
+		<_CohesionDatabaseSchemaManifest>$(CohesionDatabaseSchemaOutputDirectory)schemas.manifest</_CohesionDatabaseSchemaManifest>
 	</PropertyGroup>
 
 	<!--
@@ -34,33 +41,61 @@
 	</Target>
 
 	<!--
-		The model target statically analyzes the retained C# AddDatabase declarations.
-		It runs after references resolve and before C# compilation, so invalid schemas
-		fail the ordinary Build without executing the consumer entry point.
+		An artifact the manifest lists but that is gone (deleted by hand, say) makes the
+		manifest stale: deleting it puts the model compile target out of date, so the
+		artifacts are written again instead of the build reading a partial set.
+	-->
+	<Target
+		Name="_CohesionDatabaseCheckSchemaArtifacts"
+		Condition="'$(CohesionDatabaseProject)' == 'true' and Exists('$(_CohesionDatabaseSchemaManifest)')">
+		<ReadLinesFromFile File="$(_CohesionDatabaseSchemaManifest)">
+			<Output TaskParameter="Lines" ItemName="_CohesionDatabaseRecordedSchema" />
+		</ReadLinesFromFile>
+		<ItemGroup>
+			<_CohesionDatabaseRecordedArtifact Include="$(CohesionDatabaseSchemaOutputDirectory)%(_CohesionDatabaseRecordedSchema.Identity).schema.json" />
+			<_CohesionDatabaseRecordedArtifact Include="$(CohesionDatabaseSchemaOutputDirectory)%(_CohesionDatabaseRecordedSchema.Identity).schema.sha256" />
+			<_CohesionDatabaseMissingArtifact Include="@(_CohesionDatabaseRecordedArtifact)" Condition="!Exists('%(_CohesionDatabaseRecordedArtifact.FullPath)')" />
+		</ItemGroup>
+		<Delete Files="$(_CohesionDatabaseSchemaManifest)" Condition="'@(_CohesionDatabaseMissingArtifact)' != ''" />
+	</Target>
+
+	<!--
+		The model target statically analyzes the retained C# schema declarations, one
+		per database: SqlSchema.Create/Compile, or SqlDatabaseBuilder.Schema inside the
+		engine builder's AddDatabase. It runs after references resolve and before C#
+		compilation, so invalid schemas fail the ordinary Build without executing the
+		consumer entry point. Whether the model target ran or was up to date, each
+		database the manifest lists becomes a CohesionDatabaseSchema item (its schema
+		document) for downstream targets, with DatabaseName and HashPath metadata.
 	-->
 	<Target
 		Name="CohesionDatabaseCompileSchema"
 		BeforeTargets="CoreCompile"
 		Condition="'$(CohesionDatabaseProject)' == 'true'"
-		DependsOnTargets="ResolveReferences;_CohesionDatabaseValidateModel;$(_CohesionDatabaseModelCompileTarget)">
-		<ReadLinesFromFile File="$(CohesionDatabaseSchemaHashOutputPath)">
-			<Output TaskParameter="Lines" ItemName="_CohesionDatabaseSchemaHashLine" />
+		DependsOnTargets="ResolveReferences;_CohesionDatabaseValidateModel;_CohesionDatabaseCheckSchemaArtifacts;$(_CohesionDatabaseModelCompileTarget)">
+		<ReadLinesFromFile File="$(_CohesionDatabaseSchemaManifest)" Condition="Exists('$(_CohesionDatabaseSchemaManifest)')">
+			<Output TaskParameter="Lines" ItemName="_CohesionDatabaseDeclaredSchema" />
 		</ReadLinesFromFile>
 		<PropertyGroup>
-			<CohesionDatabaseSchemaHash>@(_CohesionDatabaseSchemaHashLine)</CohesionDatabaseSchemaHash>
+			<_CohesionDatabaseSchemaFullDirectory>$([MSBuild]::NormalizeDirectory('$(MSBuildProjectDirectory)', '$(CohesionDatabaseSchemaOutputDirectory)'))</_CohesionDatabaseSchemaFullDirectory>
 		</PropertyGroup>
 		<ItemGroup>
-			<FileWrites Include="$(CohesionDatabaseSchemaOutputPath);$(CohesionDatabaseSchemaHashOutputPath)" />
-			<_CohesionDatabaseSchemaHashLine Remove="@(_CohesionDatabaseSchemaHashLine)" />
+			<CohesionDatabaseSchema Remove="@(CohesionDatabaseSchema)" />
+			<CohesionDatabaseSchema Include="$(_CohesionDatabaseSchemaFullDirectory)%(_CohesionDatabaseDeclaredSchema.Identity).schema.json">
+				<DatabaseName>%(_CohesionDatabaseDeclaredSchema.Identity)</DatabaseName>
+				<HashPath>$(_CohesionDatabaseSchemaFullDirectory)%(_CohesionDatabaseDeclaredSchema.Identity).schema.sha256</HashPath>
+			</CohesionDatabaseSchema>
+			<FileWrites Include="@(CohesionDatabaseSchema);@(CohesionDatabaseSchema->'%(HashPath)');$(_CohesionDatabaseSchemaManifest)" />
 		</ItemGroup>
 	</Target>
 
     <!--
-        Opt-in migration generation: diffs the compiled schema model against the
-        newest baseline under $(CohesionDatabaseMigrationsRoot) and emits an
-        ordered migration script. Invoke explicitly:
+        Opt-in migration generation for one declared database: diffs its compiled
+        schema against the newest baseline under
+        $(CohesionDatabaseMigrationsRoot)/<database>/ and emits an ordered migration
+        script. Invoke explicitly:
 
-            dotnet msbuild -t:CohesionDatabaseCreateMigration -p:CohesionDatabaseMigrationName=<name>
+            dotnet msbuild -t:CohesionDatabaseCreateMigration -p:CohesionDatabaseName=<database> -p:CohesionDatabaseMigrationName=<name>
     -->
 	<Target
 		Name="CohesionDatabaseCreateMigration"
@@ -68,7 +103,8 @@
 		Condition="'$(CohesionDatabaseProject)' == 'true'">
 
         <CreateDatabaseMigrationTask
-            SchemaModelPath="$(CohesionDatabaseSchemaOutputPath)"
+            SchemaDirectory="$(CohesionDatabaseSchemaOutputDirectory)"
+            DatabaseName="$(CohesionDatabaseName)"
             MigrationsRoot="$(CohesionDatabaseMigrationsRoot)"
             MigrationName="$(CohesionDatabaseMigrationName)"
 			Model="$(CohesionDatabaseModel)"

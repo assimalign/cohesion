@@ -13,10 +13,14 @@ namespace Assimalign.Cohesion.Database.Protocol;
 /// <param name="Principal">The principal name the client claims.</param>
 public sealed record ProtocolStartupMessage(ProtocolVersion Version, string Database, string Principal)
 {
+    /// <summary>Gets the optional capability names understood by the client.</summary>
+    public IReadOnlyList<string> Capabilities { get; init; } = Array.Empty<string>();
+
     /// <summary>
     /// Encodes the message payload.
     /// </summary>
     /// <returns>The payload bytes for a <see cref="ProtocolMessageType.Startup"/> frame.</returns>
+    /// <exception cref="ProtocolException">The capability list is malformed.</exception>
     public byte[] Encode()
     {
         var buffer = new List<byte>(64);
@@ -24,6 +28,7 @@ public sealed record ProtocolStartupMessage(ProtocolVersion Version, string Data
         ProtocolPayload.WriteUInt16(buffer, Version.Minor);
         ProtocolPayload.WriteString(buffer, Database);
         ProtocolPayload.WriteString(buffer, Principal);
+        if (Version.Minor >= 1) { Internal.ProtocolCapabilityCodec.Write(buffer, Capabilities); }
         return buffer.ToArray();
     }
 
@@ -40,6 +45,7 @@ public sealed record ProtocolStartupMessage(ProtocolVersion Version, string Data
         ushort minor = ProtocolPayload.ReadUInt16(payload, ref position);
         string database = ProtocolPayload.ReadString(payload, ref position);
         string principal = ProtocolPayload.ReadString(payload, ref position);
-        return new ProtocolStartupMessage(new ProtocolVersion(major, minor), database, principal);
+        var capabilities = position == payload.Length ? Array.Empty<string>() : Internal.ProtocolCapabilityCodec.Read(payload, ref position);
+        return new ProtocolStartupMessage(new ProtocolVersion(major, minor), database, principal) { Capabilities = capabilities };
     }
 }

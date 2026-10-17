@@ -26,6 +26,10 @@ namespace Assimalign.Cohesion.Database.Types;
 /// <see cref="Collation"/> identifier and its deterministic byte transform;
 /// variable-length payloads are zero-escaped and terminated. <see cref="DatabaseType.Json"/>
 /// and <see cref="DatabaseType.JsonBinary"/> are not orderable key components.
+/// Date-time components carry their kind and date-time-offset components their
+/// offset after the ordering ticks, so values that differ only there encode
+/// differently; identity keys append the canonical form instead (see
+/// <see cref="AppendDateTime"/> and <see cref="AppendDateTimeOffset"/>).
 /// </para>
 /// <para>
 /// The writer is reusable: <see cref="Reset"/> clears it without releasing the buffer.
@@ -257,10 +261,16 @@ public sealed class DatabaseKeyWriter
     }
 
     /// <summary>
-    /// Appends a date-time component ordered by ticks. The kind is preserved for
-    /// round-tripping but does not participate in ordering — store UTC when values
-    /// of mixed kinds could meet in one key.
+    /// Appends a date-time component ordered by ticks. The kind follows the ticks
+    /// so it round-trips; it therefore breaks ticks ties, and two values that
+    /// differ only in <see cref="DateTime.Kind"/> encode as different keys.
     /// </summary>
+    /// <remarks>
+    /// This is the value encoding. A key whose byte equality must match an
+    /// equality that ignores the kind (SQL <c>TIMESTAMP</c>) appends the value's
+    /// identity form, <c>DateTime.SpecifyKind(value, DateTimeKind.Unspecified)</c>;
+    /// see the type system design's time-identity rule.
+    /// </remarks>
     /// <param name="value">The value to append.</param>
     /// <returns>This writer.</returns>
     public DatabaseKeyWriter AppendDateTime(DateTime value)
@@ -275,8 +285,15 @@ public sealed class DatabaseKeyWriter
 
     /// <summary>
     /// Appends a date-time-offset component ordered by its UTC instant; the offset is
-    /// preserved for round-tripping and breaks instant ties deterministically.
+    /// preserved for round-tripping and breaks instant ties deterministically, so the
+    /// same instant at two offsets encodes as two different keys.
     /// </summary>
+    /// <remarks>
+    /// This is the value encoding. A key whose byte equality must match instant
+    /// equality (SQL <c>TIMESTAMP WITH TIME ZONE</c>) appends the value's identity
+    /// form, <c>value.ToUniversalTime()</c> (offset zero); see the type system
+    /// design's time-identity rule.
+    /// </remarks>
     /// <param name="value">The value to append.</param>
     /// <returns>This writer.</returns>
     public DatabaseKeyWriter AppendDateTimeOffset(DateTimeOffset value)

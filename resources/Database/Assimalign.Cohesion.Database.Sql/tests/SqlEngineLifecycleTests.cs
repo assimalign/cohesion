@@ -38,7 +38,7 @@ public sealed class SqlEngineLifecycleTests : IDisposable
     }
 
     private SqlDatabaseEngine CreateEngine()
-        => SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "lifecycle", RootPath = _rootPath });
+        => SqlDatabaseEngine.Create("lifecycle", new SqlDatabaseEngineOptions { RootPath = _rootPath });
 
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Creation: The engine is operational from Create — no start ceremony")]
     public async Task Create_ShouldReturnOperationalEngine()
@@ -48,7 +48,7 @@ public sealed class SqlEngineLifecycleTests : IDisposable
 
         // Assert: running from creation, workers spawned, and immediately usable.
         engine.State.ShouldBe(EngineState.Running);
-        engine.Workers.Count.ShouldBe(5);
+        engine.Workers.Count.ShouldBe(6);
 
         var database = await engine.CreateDatabaseAsync("immediate");
         engine.TryGetDatabase("immediate", out var found).ShouldBeTrue();
@@ -87,7 +87,7 @@ public sealed class SqlEngineLifecycleTests : IDisposable
     {
         // Arrange
         var asyncDisposed = CreateEngine();
-        var syncDisposed = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sync-dispose" });
+        var syncDisposed = SqlDatabaseEngine.Create("sync-dispose", new SqlDatabaseEngineOptions());
 
         // Act / Assert: DisposeAsync twice, Dispose twice, and mixed — all no-throw.
         await asyncDisposed.DisposeAsync();
@@ -130,7 +130,7 @@ public sealed class SqlEngineLifecycleTests : IDisposable
         await using var verify = await reopened.CreateSessionAsync();
 
         var result = await verify.ExecuteAsync("SELECT id FROM t");
-        var rows = result.ShouldBeAssignableTo<Assimalign.Cohesion.Database.Execution.QueryResultSet>();
+        var rows = result.ShouldBeAssignableTo<Assimalign.Cohesion.Database.Execution.DatabaseResultSet>();
 
         int count = 0;
         await foreach (var _ in rows!.GetRowsAsync())
@@ -162,7 +162,7 @@ public sealed class SqlEngineLifecycleTests : IDisposable
         reopenedEngine.State.ShouldBe(EngineState.Running);
         await using var verify = await reopened.CreateSessionAsync();
         var result = await verify.ExecuteAsync("SELECT id FROM t");
-        var rows = result.ShouldBeAssignableTo<Assimalign.Cohesion.Database.Execution.QueryResultSet>();
+        var rows = result.ShouldBeAssignableTo<Assimalign.Cohesion.Database.Execution.DatabaseResultSet>();
 
         int count = 0;
         await foreach (var _ in rows!.GetRowsAsync())

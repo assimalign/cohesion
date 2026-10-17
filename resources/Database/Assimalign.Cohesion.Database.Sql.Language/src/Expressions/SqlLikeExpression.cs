@@ -20,6 +20,7 @@ public sealed class SqlLikeExpression : SqlExpression
         Operand = operand;
         Pattern = pattern;
         IsNegated = isNegated;
+        Depth = 1 + System.Math.Max(operand.Depth, pattern.Depth);
     }
 
     /// <summary>

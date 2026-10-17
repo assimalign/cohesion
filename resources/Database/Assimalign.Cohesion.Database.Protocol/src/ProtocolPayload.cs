@@ -11,6 +11,8 @@ namespace Assimalign.Cohesion.Database.Protocol;
 /// </summary>
 public static class ProtocolPayload
 {
+    private static readonly UTF8Encoding _strictUtf8 = new(false, true);
+
     /// <summary>Appends a big-endian length-prefixed UTF-8 string.</summary>
     /// <param name="buffer">The destination payload.</param>
     /// <param name="value">The value to encode.</param>
@@ -41,7 +43,7 @@ public static class ProtocolPayload
         buffer.AddRange(scratch.ToArray());
     }
 
-    /// <summary>Reads a length-prefixed UTF-8 string.</summary>
+    /// <summary>Reads a length-prefixed string, rejecting invalid UTF-8.</summary>
     /// <param name="payload">The encoded payload.</param>
     /// <param name="position">The current offset, advanced on success.</param>
     /// <returns>The decoded value.</returns>
@@ -55,9 +57,16 @@ public static class ProtocolPayload
             throw new ProtocolException("Malformed payload: invalid string length.");
         }
 
-        string value = Encoding.UTF8.GetString(payload.Slice(position, length));
-        position += length;
-        return value;
+        try
+        {
+            string value = _strictUtf8.GetString(payload.Slice(position, length));
+            position += length;
+            return value;
+        }
+        catch (DecoderFallbackException exception)
+        {
+            throw new ProtocolException(ErrorMessages.StringUtf8Invalid, exception);
+        }
     }
 
     /// <summary>Reads a big-endian Int32 value.</summary>

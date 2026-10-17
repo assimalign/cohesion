@@ -15,7 +15,7 @@ using static KeyValueTestHarness;
 /// </summary>
 public class KeyValueScanTests
 {
-    private static async Task SeedAsync(IKeyValueDatabase database, IDatabaseSession session, params string[] keys)
+    private static async Task SeedAsync(KeyValueDatabase database, KeyValueDatabaseSession session, params string[] keys)
     {
         foreach (string key in keys)
         {
@@ -24,7 +24,7 @@ public class KeyValueScanTests
         }
     }
 
-    private static async Task<List<string>> CollectKeysAsync(IKeyValueDatabase database, IDatabaseSession session, KeyValueScanOptions? options = null)
+    private static async Task<List<string>> CollectKeysAsync(KeyValueDatabase database, KeyValueDatabaseSession session, KeyValueScanOptions? options = null)
     {
         var keys = new List<string>();
 

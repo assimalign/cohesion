@@ -12,7 +12,7 @@ public sealed class SqlCheckNullSemanticsTests
     [Fact]
     public async Task CheckAndWhere_ShouldApplyThreeValuedInPredicates()
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "check-null" });
+        await using var engine = SqlDatabaseEngine.Create("check-null", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("app");
         await using var session = await database.CreateSessionAsync();
         await session.ExecuteAsync("CREATE TABLE t (id INT CHECK (id IN (1, NULL)))");
@@ -20,7 +20,7 @@ public sealed class SqlCheckNullSemanticsTests
         (await session.ExecuteAsync("INSERT INTO t VALUES (1), (2), (NULL)")).AffectedCount.ShouldBe(3);
 
         await using var included = (await session.ExecuteAsync("SELECT id FROM t WHERE id IN (1, NULL)"))
-            .ShouldBeAssignableTo<QueryResultSet>();
+            .ShouldBeAssignableTo<DatabaseResultSet>();
         int matches = 0;
         await foreach (var row in included.GetRowsAsync())
         {
@@ -30,7 +30,7 @@ public sealed class SqlCheckNullSemanticsTests
         matches.ShouldBe(1);
 
         await using var excluded = (await session.ExecuteAsync("SELECT id FROM t WHERE id NOT IN (1, NULL)"))
-            .ShouldBeAssignableTo<QueryResultSet>();
+            .ShouldBeAssignableTo<DatabaseResultSet>();
         int excludedMatches = 0;
         await foreach (var _ in excluded.GetRowsAsync())
         {

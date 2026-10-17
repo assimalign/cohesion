@@ -18,6 +18,7 @@ public sealed class SqlExistsExpression : SqlExpression
     {
         Subquery = subquery;
         IsNegated = isNegated;
+        Depth = 1 + subquery.ExpressionDepth;
     }
 
     /// <summary>

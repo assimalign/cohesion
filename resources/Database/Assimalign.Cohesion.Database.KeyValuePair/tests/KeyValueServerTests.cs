@@ -60,10 +60,10 @@ public class KeyValueServerTests
         await client.HandshakeAsync(principal: "ada");
 
         // Assert
-        var session = harness.Server.Context.Sessions.ShouldHaveSingleItem();
+        var session = harness.Server.Sessions.ShouldHaveSingleItem();
         session.Principal.ShouldBe("ada");
         session.DatabaseSession.ShouldNotBeNull();
-        harness.Server.Context.Engine.ShouldBeSameAs(harness.Engine);
+        harness.Server.Engine.ShouldBeSameAs(harness.Engine);
         harness.Server.Engine.Model.ShouldBe(EngineModel.KeyValueStore);
     }
 
@@ -145,7 +145,7 @@ public class KeyValueServerTests
 
         // Assert
         frame.ShouldBeNull();
-        await KeyValueServerHarness.WaitUntilAsync(() => harness.Server.Context.Sessions.Count == 0);
+        await KeyValueServerHarness.WaitUntilAsync(() => harness.Server.Sessions.Count == 0);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Server guardrails: idle sessions are evicted after the idle timeout")]
@@ -162,7 +162,7 @@ public class KeyValueServerTests
         // Assert
         ProtocolErrorMessage.Decode(frame.Payload.Span).Code.ShouldBe(ProtocolErrorCode.Unavailable);
         (await client.ReadAsync()).ShouldBeNull();
-        await KeyValueServerHarness.WaitUntilAsync(() => harness.Server.Context.Sessions.Count == 0);
+        await KeyValueServerHarness.WaitUntilAsync(() => harness.Server.Sessions.Count == 0);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Server liveness: ping frames answer with pong")]
@@ -193,7 +193,7 @@ public class KeyValueServerTests
 
         // Assert
         (await client.ReadAsync()).ShouldBeNull();
-        await KeyValueServerHarness.WaitUntilAsync(() => harness.Server.Context.Sessions.Count == 0);
+        await KeyValueServerHarness.WaitUntilAsync(() => harness.Server.Sessions.Count == 0);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Server lifecycle: StopAsync drains idle sessions within the budget")]
@@ -212,7 +212,7 @@ public class KeyValueServerTests
         // Assert: the drain closed the idle session at the frame boundary — far
         // inside the budget — and told the client why.
         stopwatch.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(10));
-        harness.Server.Context.Sessions.ShouldBeEmpty();
+        harness.Server.Sessions.ShouldBeEmpty();
 
         var frame = await client.ExpectAsync(ProtocolMessageType.Error);
         ProtocolErrorMessage.Decode(frame.Payload.Span).Code.ShouldBe(ProtocolErrorCode.Unavailable);

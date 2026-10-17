@@ -3,19 +3,23 @@
 The contract for the Cohesion SQL surface that executes today. **Supported** means
 the documented subset has been measured through a live engine, including correct
 results, state changes, or intended semantic errors. Recognized clauses without
-execution support report `COHDBL001`; unknown commands report `SQL0002`. Extending
+execution support report `COHDBL001`; unknown commands report `SQL0002`; text the
+parser did not consume reports `SQL0003`, so nothing executes a truncated statement
+(see [Statement completeness](#statement-completeness-1068)). Extending
 the profile requires updating the parser, this matrix, and the engine's
 `SqlLanguageConformanceTests` execution-case table in the same change. That test
 enumerates the profile and fails if any advertised clause lacks a passing case.
 
 ## Statement matrix
 
-Phase 22 measures **33 of 49 declared clauses** against the live SQL engine.
+With USING (#1109), the profile measures **35 of 50 declared clauses** against the live SQL engine.
+Phase 22 measured 33 of 49.
 The earlier 32/48 figure included `JOIN`, `GROUP BY`, `HAVING`, and `SUBQUERY`,
 removed in Phase 12e (#1019–#1021), plus a no-op `CAST` removed in Phase 13.
 Phase 14 restores `CAST` with actual conversion, type metadata, and wire execution
 coverage (#1022). Phase 15 restores `JOIN` for two stored-table inner joins with
-an `ON` predicate, including server/client execution (#1019). Phase 16 restores
+an `ON` predicate, including server/client execution (#1019); #1106 extends the same
+clause to registered system relations. Phase 16 restores
 `GROUP BY` and `HAVING`, including aggregation over the supported inner join
 and server/client execution (#1020). Phase 17 adds executable column and expression
 `COLLATE`, including persisted defaults, collation-aware index seeks, grouping,
@@ -26,52 +30,373 @@ Phase 21 restores literal `ALTER TABLE ADD COLUMN` defaults for populated tables
 including old-row and omitted-column insert values over the wire, and rejects
 nonliteral defaults before mutation (#1023). Phase 22 resolves `ORDER BY`
 projection aliases, including aliases inside scalar expressions, and select-list
-ordinals through the SQL server/client (#1024). The count remains 33/49 because
+ordinals through the SQL server/client (#1024). At Phase 22 the count remained 33/49 because
 `ALTER TABLE` and `ORDER BY` were already advertised for smaller executable subsets.
 
-The **16 excluded clauses** are set operations (`UNION`,
+The **15 excluded clauses** are set operations (`UNION`,
 `INTERSECT`, `EXCEPT`), CTEs (`WITH`, `RECURSIVE`), window clauses (`WINDOW`,
-`OVER`, `PARTITION`), views (`CREATE VIEW`, `DROP VIEW`), `NATURAL`, `USING`,
+`OVER`, `PARTITION`), views (`CREATE VIEW`, `DROP VIEW`), `NATURAL`,
 `TOP`, `ALL`, `FETCH`, and `RETURNING`. Counts describe named clauses, not
 complete ISO SQL support; the boundaries below are part of the contract.
 
 | Statement | Status | Notes |
 |---|---|---|
-| `SELECT` | Supported subset, measured | One stored table or virtual system relation, or a two stored-table `INNER JOIN ... ON`; `DISTINCT`, projections and aliases, scalar expressions, `WHERE`, grouping, multi-expression `ORDER BY ASC/DESC`, nonnegative integer `LIMIT`/`OFFSET`. `COUNT(*)`, `COUNT(expr)`, `SUM`, `AVG`, `MIN`, and `MAX` execute in grouped and ungrouped queries. See the aggregate contract below. `SELECT` without `FROM` is rejected by the planner. |
-| `INSERT` / `VALUES` | Supported subset, measured | Optional column list, multi-row literal/scalar `VALUES`, and transactional `INSERT ... SELECT` with the same destination coercion, defaults, and constraints. Subqueries inside `VALUES` are excluded; use `INSERT ... SELECT`. |
-| `UPDATE` | Supported | multi-column `SET`, `WHERE` |
-| `DELETE` | Supported | optional `WHERE` |
+| `SELECT` | Supported subset, measured | One stored table or virtual system relation, or written-order N-way INNER/LEFT/CROSS joins and comma items over either source kind; `DISTINCT`, projections and aliases, scalar expressions, `WHERE`, grouping, multi-expression `ORDER BY ASC/DESC`, nonnegative integer `LIMIT`/`OFFSET`. `COUNT(*)`, `COUNT(expr)`, `SUM`, `AVG`, `MIN`, and `MAX` execute in grouped and ungrouped queries. See the aggregate contract below. `SELECT` without `FROM` is rejected by the planner. |
+| `EXPLAIN` | Supported extension, measured | SELECT, INSERT (including query sources), UPDATE or DELETE returns the chosen plan as ordinary rows without executing it. DDL, transaction control, nested EXPLAIN and EXPLAIN ANALYZE report `COHDBL001`. |
+| `INSERT` / `VALUES` | Supported subset, measured | Optional column list, multi-row literal/scalar `VALUES` including whole-item `DEFAULT`, `INSERT ... DEFAULT VALUES` (one row of defaults, with an optional column list), and transactional `INSERT ... SELECT` with the same destination coercion, defaults, and constraints. `VALUES` expressions have no columns in scope: a column reference reports `COHSQLE005` before anything executes (see [VALUES and counts have no column scope](#values-and-counts-have-no-column-scope-1165)). Subqueries inside `VALUES` are excluded; use `INSERT ... SELECT`. |
+| `UPDATE` | Supported | multi-column `SET`, including `c = DEFAULT`, and `WHERE`; qualified references in both use the target name or its alias, which hides the base name (PostgreSQL `parse_relation.c:3759`); hidden/unknown qualifiers fail with located `COHSQLE015` before any write and leave an explicit transaction active; no aggregate in either (see [Grouping and aggregate functions](#grouping-and-aggregate-functions-1020)) |
+| `DELETE` | Supported | optional `WHERE`, without an aggregate; qualified references use the target name or its alias, which hides the base name (PostgreSQL `parse_relation.c:3759`); hidden/unknown qualifiers fail with located `COHSQLE015` before any write and leave an explicit transaction active |
 | `CREATE TABLE` | Supported | `IF NOT EXISTS`, column definitions with parameterized types, `COLLATE <name>`, `NOT NULL`/`NULL`, `DEFAULT <literal>`, column and table `PRIMARY KEY`, `REFERENCES`/`FOREIGN KEY`, `CHECK`, and `UNIQUE`; optional `CONSTRAINT <name>` |
-| `ALTER TABLE` | Supported subset, measured | ADD/DROP COLUMN and ADD/DROP CONSTRAINT execute. ADD COLUMN literal defaults backfill old-row reads and apply to subsequent inserts that omit the column; explicit NULL follows nullability. Nullable additions without a default read NULL. NOT NULL additions to populated tables require a non-null default. Invalid defaults and nonliteral expressions reject before mutation. Column COLLATE persists and governs default comparisons. See the default, atomicity and MVCC contract below (#1023). |
-| `DROP TABLE` | Supported | `IF EXISTS` |
+| `ALTER TABLE` | Supported subset, measured | ADD/DROP COLUMN and ADD/DROP CONSTRAINT execute. Full-definition `ALTER COLUMN c TYPE [NULL | NOT NULL] [DEFAULT literal]` accepts nullability, length and precision changes that preserve storage type, scale, collation, domain and DEFAULT; tightening and every CHAR length change check existing live values and refuse changes requiring a rewrite. PostgreSQL `TYPE ... USING`, `SET` and `DROP` variants remain unsupported (49a). ADD COLUMN literal defaults backfill old-row reads and apply to subsequent inserts that omit the column; explicit NULL follows nullability. Nullable additions without a default read NULL. NOT NULL additions to populated tables require a non-null default. Invalid defaults and nonliteral expressions reject before mutation. Column COLLATE persists and governs default comparisons. See the default, atomicity and MVCC contract below (#1023). DROP COLUMN changes only the catalog: it rewrites no row, survives a crash at any point on one definition, and SELECTs running beside it read every value in its own column; see the DROP COLUMN contract below (#1241). |
+| `DROP TABLE` | Supported | `IF EXISTS`; returns after catalog unpublication, with page reclamation asynchronous after older readers finish; the name may be recreated immediately |
 | `CREATE INDEX` | Supported | `CREATE [UNIQUE] INDEX [IF NOT EXISTS] <name> ON <table> (<column> [, ...])` — plain column lists only (no `ASC`/`DESC`, expressions, or `INCLUDE`; each is an additive extension) |
 | `DROP INDEX` | Supported | `DROP INDEX [IF EXISTS] <name> ON <table>` — the `ON <table>` qualifier is required: index names are scoped per table |
 | `CASE` | Supported, measured | Simple and searched forms, multiple branches, `ELSE`, implicit null result, and row expressions; branch expressions remain limited to the executable scalar subset. |
 | `ORDER BY` | Supported subset, measured | Multiple source-column/scalar-expression keys, projection aliases (bare or nested in expressions), and one-based select-list ordinals execute with ASC/DESC. Unqualified aliases take precedence over same-named source columns; qualified references bind to the source. Composes with DISTINCT, LIMIT/OFFSET, supported joins, grouped/aggregate queries, and system relations. Zero, negative, out-of-range, and non-integer numeric ordinals error; `1 + 1` remains a constant expression. Explicit NULLS FIRST/LAST, derived-table output ordering, and GROUP BY ordinals report `COHDBL001`. See the ordering contract below (#1024). |
-| `CAST` | Supported subset, measured | Exact signed integer, decimal, boolean, and string conversions in projections, predicates, ordering, and DML expressions, including the SQL server/client. See the exact pair and error contract below. CAST in DEFAULT or CHECK remains rejected. |
+| `CAST` | Supported subset, measured | Built-in conversions across all 19 shared types according to the [conversion matrix](#explicit-conversion-cast-1022-e3), plus application-registered casts (E3's cast registry), in projections, predicates, ordering, and DML expressions, including the SQL server/client. See the exact pair and error contract below. CAST in DEFAULT or CHECK remains rejected. |
 | `COLLATE` | Supported subset, measured | Column and expression overrides: `binary`, `case_insensitive`, `case_accent_insensitive`, plus compatibility `invariant` with scan execution only. Effective collation governs comparisons, `LIKE`, ordering, grouping, `DISTINCT`, and unique keys. See the collation contract below. |
-| `JOIN` | Supported subset, measured | Two stored-table `INNER JOIN ... ON` or bare `JOIN ... ON`, with index assistance where the mandatory equality predicate matches an applicable secondary-index prefix. `LEFT [OUTER]`, `RIGHT [OUTER]`, `FULL [OUTER]`, `CROSS`, additional joins beyond two tables, joins without `ON`, comma joins, and joins of virtual system relations report `COHDBL001`. See the precise contract below. |
-| `GROUP BY` / `HAVING` | Supported subset, measured | One or more grouping expressions; `WHERE` filters input rows and `HAVING` filters groups after aggregation. Composes with supported two-table inner joins, `ORDER BY`, `LIMIT`, and `OFFSET`, including server/client execution. Ungrouped, unaggregated projected columns are errors. `DISTINCT`/`ALL` aggregate modifiers, grouping extensions, windows, and ordered-set aggregates report `COHDBL001`. |
-| Subqueries / `INSERT ... SELECT` | Supported subset, measured | Uncorrelated scalar, `IN`/`NOT IN`, and `EXISTS`/`NOT EXISTS` queries in supported SELECT expressions, plus transactional insert-source queries. All use the outer statement snapshot; nesting is limited to 32 subquery levels. Correlated queries, derived tables, quantified comparisons, subqueries in UPDATE/DELETE, VALUES, CHECK/DEFAULT, and LIMIT/OFFSET expressions report `COHDBL001`. See the subquery contract below. |
+| `JOIN` / `USING` | Supported subset, measured | N-way INNER (or bare JOIN), LEFT [OUTER], CROSS and comma joins over stored/system sources. INNER/LEFT require ON or USING; CROSS accepts neither. RIGHT/FULL, NATURAL, LATERAL and qualified wildcards remain excluded. See the precise contract below. |
+| `GROUP BY` / `HAVING` | Supported subset, measured | One or more grouping expressions; `WHERE` filters input rows and `HAVING` filters groups after aggregation. Composes with supported N-way joins, `ORDER BY`, `LIMIT`, and `OFFSET`, including server/client execution. Ungrouped, unaggregated projected columns are errors. `DISTINCT`/`ALL` aggregate modifiers, grouping extensions, windows, and ordered-set aggregates report `COHDBL001`. |
+| Subqueries / `INSERT ... SELECT` | Supported subset, measured | Uncorrelated scalar, `IN`/`NOT IN`, and `EXISTS`/`NOT EXISTS` queries in supported SELECT expressions, plus transactional insert-source queries. All use the outer statement snapshot; nesting is limited to 32 subquery levels, within the statement's expression nesting limit (256 levels by default, `SQL0006`). Correlated queries, derived tables, quantified comparisons, subqueries in UPDATE/DELETE, VALUES, CHECK/DEFAULT, and LIMIT/OFFSET expressions report `COHDBL001`. See the subquery contract below. |
 | `TOP` / `SELECT ALL` / `FETCH` | Recognized, not supported | row-limit and select modifiers rejected with `COHDBL001` |
 | DML `RETURNING` | Recognized, not supported | rejected with `COHDBL001` |
-| `NATURAL JOIN` / `JOIN ... USING` | Recognized, not supported | rejected with `COHDBL001` |
+| `NATURAL JOIN` | Recognized, not supported | rejected with `COHDBL001` |
 | `UNION` / `INTERSECT` / `EXCEPT` | Recognized, not supported | keywords lexed; rejected with `COHDBL001` |
 | `WITH` / `WITH RECURSIVE` (CTEs) | Recognized, not supported | rejected with `COHDBL001` |
 | Window functions / `OVER` / `WINDOW` | Recognized, not supported | function names lexed; clauses rejected with `COHDBL001` |
 | `CREATE VIEW` / `DROP VIEW` | Recognized, not supported | rejected with `COHDBL001` |
-| `CONSTRAINT` / `FOREIGN KEY` / `REFERENCES` / `CHECK` / `UNIQUE` constraints | Supported subset, measured | Column and table declarations normalize into constraint definitions; UNIQUE lowers to a unique catalog index. NULL is an equal index key: a second NULL violates a single-column UNIQUE constraint. Foreign-key NULL values are allowed; CHECK accepts UNKNOWN and rejects FALSE. CHECK expressions must be deterministic Boolean row expressions with the supported scalar functions; parameters and aggregates are excluded. |
-| `ON DELETE CASCADE` / `ON DELETE RESTRICT` | Supported | omitted deletion action defaults to `RESTRICT`; `DROP TABLE ... CASCADE` is not supported |
+| `CONSTRAINT` / `FOREIGN KEY` / `REFERENCES` / `CHECK` / `UNIQUE` constraints | Supported subset, measured | Column and table declarations normalize into constraint definitions; UNIQUE lowers to a unique catalog index. NULL is an equal index key: a second NULL violates a single-column UNIQUE constraint. Foreign-key NULL values are allowed; CHECK accepts UNKNOWN and rejects FALSE. CHECK expressions must be deterministic Boolean row expressions with the engine's scalar functions (built-in or registered, `IMMUTABLE` only), each called with arguments its signature accepts (`COHSQLE006` otherwise); parameters and aggregates are excluded. CHECK predicates and DEFAULT literals are stored as canonical text and parsed once per table version; see [Persisted definitions are canonical](#persisted-definitions-are-canonical). |
+| `ON DELETE CASCADE` / `ON DELETE RESTRICT` | Supported | omitted deletion action defaults to `RESTRICT`; a cascade deletes its whole transitive closure with no depth limit, so a self-referencing chain deletes however long it is (#1164), and a cycle deletes each row once; `DROP TABLE ... CASCADE` is not supported |
 | `ON UPDATE` | Recognized, not supported | absent from the profile; rejected with `COHDBL001` |
-| `BEGIN [TRANSACTION]` / `COMMIT [TRANSACTION]` / `ROLLBACK [TRANSACTION]` | Supported | session-scoped transactions through the existing MVCC coordinator; `TRANSACTION` alone is not a statement |
+| `START TRANSACTION` / `BEGIN [WORK\|TRANSACTION]` / `COMMIT [WORK\|TRANSACTION]` / `END` / `ROLLBACK [WORK\|TRANSACTION]` | Supported | Spellings map to the existing BEGIN/COMMIT/ROLLBACK session commands (+0 clauses). Like every SQL statement, a valid spelling without `;` receives informational SQL0100, with no error or warning; with `;` it has no parser diagnostics. START and WORK are contextual, so columns named start/work remain valid. END takes no suffix; without a transaction its COHSQLT002 message names COMMIT. END WORK/TRANSACTION, AND [NO] CHAIN, modes, ROLLBACK [WORK] TO [SAVEPOINT], BEGIN TRAN/named transactions and COMMIT PREPARED stay SQL0003. ABORT [WORK\|TRANSACTION], SAVEPOINT, RELEASE, SET TRANSACTION and PREPARE TRANSACTION stay SQL0002 (#1012); TRANSACTION alone is not a statement. |
 | `MERGE`, `TRUNCATE`, `GRANT` | Not in the dialect | `SQL0002` |
+
+## Plan descriptions (#1104)
+
+Grammar: `EXPLAIN (select | insert | update | delete) [';']`. The wrapped statement retains
+normal name binding, parameter validation and planning errors. EXPLAIN never calls its data
+executor, including inside a transaction that later commits. Estimates and actual counts are
+null; EXPLAIN ANALYZE is deferred. PostgreSQL likewise distinguishes planning from execution
+with `EXEC_FLAG_EXPLAIN_ONLY` in `ExplainOnePlan` (local reference clone,
+`src/backend/commands/explain.c:562-566,574-576`); Cohesion accepts only the documented data-statement subset.
+
+The result's eight columns, types, nullability and order are the shared
+[Execution contract](../../Assimalign.Cohesion.Database.Execution/docs/DESIGN.md#plan-descriptions-1104).
+Operator names and seek-bound details belong to the
+[SQL engine](../../Assimalign.Cohesion.Database.Sql/docs/DESIGN.md#explain-operator-vocabulary-1104).
+Rows travel unchanged in existing SQL header/row/complete frames.
+
+## Admission during deferred provisioning (49a)
+
+While a code-first migration runs on populated tables, statements referencing its reserved
+tables wait before binding. This includes FK parents in CREATE TABLE, ALTER ADD COLUMN and
+ALTER ADD CONSTRAINT, so a pending unique index is available when the FK is checked.
+EXPLAIN recursively admits its wrapped statement through the same table reservations before
+planning, so its access path reflects the completed migration.
+After admission, writes enforce the completed column nullability and bounds. Unrelated
+tables remain available. Code-first changes to built-in `VARCHAR` length and `DECIMAL`
+precision use the validation-only ALTER path described above; a storage, domain, scale or
+DEFAULT rewrite remains unsupported.
+
+## Statement completeness (#1068)
+
+A request carries exactly one statement, and the parser either consumes all of
+it or reports what it could not. One terminating `;` is optional, and comments
+may follow it. Any other text after a complete statement reports `SQL0003` at the
+first token the parser did not consume, and nothing executes: the text-execute
+seam throws `DatabaseParseException` (`ParseFailure` on the wire), and a typed
+request returns an error result carrying the diagnostics. Until #1068 the parser
+checked for leftover tokens only after `CREATE TABLE`, `ALTER TABLE` and
+`DROP TABLE`, so every other statement executed the prefix it understood:
+`DELETE FROM t WHRE id = 1` read `WHRE` as an alias of `t` and deleted every row.
+
+Required tokens are required. A missing closing `)`, `THEN`, `END`, the `AND` of
+`BETWEEN`, the `BY` of `ORDER BY`, the `SET` of `UPDATE`, the `=` of an
+assignment, a table, index or column name, or a `VALUES` row reports `SQL0003`
+where it was expected. A clause keyword in a name position means the name is
+missing: `SET a = 1, WHERE id = 1` reports the trailing comma instead of
+assigning `(id = 1)` to a column named `WHERE`. `IF NOT EXISTS` (CREATE) and
+`IF EXISTS` (DROP) must be complete, and a column's `NOT` must be followed by
+`NULL`. A `?` placeholder name never executes, because it is built only together
+with an error.
+
+Lexical errors are reported too. A string literal, quoted identifier or block
+comment without its closing delimiter would otherwise run to the end of the text
+as one token and swallow the clauses after it: `DELETE FROM t /* WHERE id = 1;`
+deleted every row. Each reports `SQL0003` at its opening delimiter. A character
+outside the dialect, such as `?`, `#`, `^`, `§`, a backtick or a zero-width space,
+lexes as `TokenType.Unrecognized` and reports one `SQL0003` at the character
+(#1101). It used to lex as a one-character identifier, so `SELECT * FROM t ?` bound
+`?` as an alias and ran, and `SELECT ? FROM t` returned a column named `?`. The
+statement now keeps only its command type: no alias, column or `NULL` placeholder
+is built around the character. An operand `?` receives the shared supported-form
+message, as does `:name`; a trailing stray `?` retains the generic character message.
+A non-ASCII decimal digit, such as Arabic-Indic `٣` or fullwidth `１`, is a character
+outside the dialect too:
+only ASCII digits make a numeric literal. It used to lex as an integer, parse
+cleanly and then fail at execution with an uncoded `FormatException`. A stray
+character before the statement, such as a byte order mark that was not stripped,
+is reported once, and the statement after it is not reported as an unknown
+command. A numeric literal whose exponent has no digits, such as `1e` or `2.5E-`,
+reports `SQL0003` at the literal; it also used to fail only at execution.
+
+| Written | Reported as `SQL0003` | Diagnostic starts at |
+|---|---|---|
+| `DELETE FROM t WHRE id = 1` | Leftover text after the DELETE; the message adds that `WHRE` was read as an alias of table `t` | `id` |
+| `UPDATE t SET a = 1 WHRE id = 1`, `UPDATE t SET ... FROM u WHERE ...` | Leftover text after the UPDATE | `WHRE`, `FROM` |
+| `INSERT ... ON CONFLICT DO NOTHING`, `INSERT ... ON DUPLICATE KEY UPDATE ...` | Leftover text after the INSERT | `ON` |
+| `SELECT ... OFFSET 1 LIMIT 2` | `LIMIT` must precede `OFFSET` | `LIMIT` |
+| `name LIKE 'a!%' ESCAPE '!'` | `LIKE ... ESCAPE` is not supported; `%` and `_` are always wildcards | `ESCAPE` |
+| `a IS [NOT] DISTINCT FROM b`, `a IS [NOT] TRUE`, `FALSE` or `UNKNOWN` | Only `IS [NOT] NULL` is supported | `IS` |
+| `a NOT NULL`, `flag NOT FALSE`, `x NOT y` | `NOT` after an operand must begin `NOT BETWEEN`, `NOT IN` or `NOT LIKE`; it used to parse as `x AND NOT y` | the token after `NOT` |
+| `WHERE id = :id`, `SET a = :a`, `WHERE id = ;`, a statement ending in `WHERE` or `=` | Expected an expression; the NULL literal the parser used to substitute is gone | the token, or the end of the text |
+| `WHERE (id = 1`, `id IN (1, 2`, `id BETWEEN 1 2`, `CASE WHEN c 'a' END`, `ORDER id`, `UPDATE t;`, `DELETE;`, `VALUES (1), ()` | The missing token, keyword, name or value | where it was expected |
+| `VARCHAR(25 5)`, `DECIMAL(10, 2, 5)`, `VARCHAR(-5)`, `CHAR(MAX)` | Type arguments must be one or two unsigned integer literals, except MAX on VARCHAR/NVARCHAR/VARBINARY | the first offending token |
+| `'abc WHERE id = 1`, `"id FROM t`, `/* WHERE id = 1` | Unterminated literal, quoted identifier or comment | the opening delimiter |
+| `SELECT * FROM t ?`, `SELECT a # b FROM t`, `WHERE b = ?`, `WHERE id = ١` | A character outside the dialect; nothing is bound around it | the character |
+| `SELECT 1e FROM t`, `WHERE a = 2.5E-` | A numeric literal whose exponent has no digits | the literal |
+| `SELECT 1; SELECT 2`, `BEGIN; DELETE FROM t`, `COMMIT;;` | A request accepts exactly one statement | the first token after `;` |
+
+A `--` comment ends before the first line terminator: line feed (LF), carriage
+return (CR), next line (NEL, U+0085), line separator (LS, U+2028) or paragraph
+separator (PS, U+2029); CR LF is one line break (#1150). The terminator set is the
+one `Database.Language/docs/DESIGN.md` records for every language. The comment
+used to end only at LF, so `DELETE FROM t -- note<CR>WHERE id = 1;` parsed as an
+unfiltered `DELETE` and removed every row, and `UPDATE t SET a = 1 -- note<CR>WHERE
+id = 1;` updated every row. The leftover-text rule above could not catch either,
+because the swallowed clause was part of the comment token, not text after the
+statement. Both now affect exactly one row, on both session seams and over the
+wire, and a statement on the line after a comment is leftover text. Text on the
+comment's own line is still comment text, vertical tab and form feed do not end a
+comment, and a string literal or block comment may span lines. `//` is not a
+comment: `/` is the division operator, so `//` is a syntax error.
+
+A recognized clause outside the profile keeps its `COHDBL001`, for example
+`RETURNING` or `FETCH`. The parser stops at such a clause by design, so the text
+from that clause on adds no second diagnostic. Text the parser stopped at before
+it reached the clause still reports `SQL0003`: `DELETE FROM t WHRE id = 1
+RETURNING *` reports both, so fixing `RETURNING` does not reveal a new error. A
+derived table, `(SELECT ...) alias`, is skipped as a unit after its `COHDBL001`.
+Named `:name` parameters are not part of the dialect; bind `@name` or `$1`.
+
+A syntax error is reported once per position: recovery leaves the offending
+token in place for the enclosing parser, which finds it already reported. One
+mistake can still yield two diagnostics when it breaks two independent rules, for
+example an unclosed type argument list followed by a second statement after `;`.
+
+**Signs.** The operand of a sign is itself a unary expression, so `- -1` is
+`1`; it used to parse as a negated NULL followed by leftover text. `+` is ISO
+unary plus on any operand: `+a`, `+(1 + 2)` and `+@p` parse to a unary-plus node
+(`SqlUnaryOperator.Plus`). Directly before a numeric literal the `+` stays part of
+the literal, so `+1` is the literal `1` and `ORDER BY +1` remains an ordinal; `+(1)`
+is unary plus applied to `1`. Unary plus returns a numeric operand with its value
+and type unchanged (`+tiny` is still `TINYINT`, unlike `-tiny`, which computes in
+BIGINT) and propagates NULL. Both signs require a numeric operand. When the plan
+already knows the operand is not a number (a string or Boolean literal, a
+string, Boolean, date/time or other non-numeric column, a predicate, `||`,
+`UPPER`/`LOWER`, a CAST to a non-numeric type, or a scalar subquery of such a
+type), the statement fails before it reads a row, with `COHSQLE003` (see the
+[arithmetic contract](#arithmetic-and-numeric-faults-1069)): `+'abc'`, `+TRUE`
+and `-name` fail over an empty table exactly as over a populated one. A sign
+directly over a parameter is checked against the value the statement binds, also
+before any row is read: `+@p` with `@p = 'abc'` fails with `COHSQLE003` whether or
+not the table has rows, and a NULL value propagates. An operand whose type only a
+row's value reveals, such as a `CASE` that returns a string, fails with the same
+code when the row is evaluated. `+a` and `+(1 + 2)` reported
+`SQL0003` before unary plus existed. `~` is not a sign of the dialect; see
+[Expressions](#expressions).
+
+**ALTER TABLE actions.** `ADD [COLUMN]`, `ADD CONSTRAINT`, `DROP [COLUMN]`,
+`DROP CONSTRAINT` and full-definition `ALTER COLUMN` parse. Any other action, such as
+`RENAME TO`, `RENAME COLUMN` or `MODIFY`, reports `SQL0003` naming the action at parse time.
+The statement then carries no action node. It used to carry a placeholder
+`DROP COLUMN ?` that failed later, in the catalog. A missing action, table name,
+column name or constraint name also reports `SQL0003`; `ADD` or `DROP` directly
+after `ALTER TABLE` is a missing table name. `TABLE` is required: `ALTER INDEX`,
+`ALTER VIEW` and other `ALTER <object>` forms report `SQL0003` naming the object.
+
+**Unknown functions.** A call to a name outside the engine's function catalog (the
+standard library and the functions the application registered on the engine, see
+[Builtin functions](#builtin-functions)), the executable profile and the recognized-unsupported
+vocabulary fails at plan time with `COHSQLE016` and `Unknown function '<name>'.`, a `DatabaseException`
+(`ExecutionFailure` on the wire). The planner checks every expression position
+before it binds the statement or reads a row: projections, predicates, joins,
+grouping, ordering, `LIMIT`/`OFFSET`, subqueries, DML values and `CHECK`. The
+statement therefore fails the same way over an empty table as over a populated
+one; the evaluator used to find the name per row, so an empty table succeeded.
+Recognized names that do not execute yet, such as `NULLIF` and `TRIM` (see
+[Builtin functions](#builtin-functions)), are not unknown. They reject at parse time
+with one named `COHDBL001` and are absent from the executable profile (#1103).
+
+**Function arguments (#1189).** A call to an executable function must pass a number
+of arguments its signature accepts (the table under
+[Builtin functions](#builtin-functions)): `UPPER`, `LOWER`, `LENGTH` and `ABS` take
+exactly one, `COALESCE` one or more, each aggregate exactly one, and only `COUNT`
+accepts `*`. Any other call fails while planning with `COHSQLE006`, a
+`DatabaseException` (`ExecutionFailure` on the wire), in every position the
+unknown-function check covers: projections, `VALUES`, `UPDATE ... SET`, predicates
+(`WHERE`, `JOIN ... ON`, `HAVING`), grouping, ordering, `LIMIT`/`OFFSET`,
+subqueries, `CHECK` (in `CREATE TABLE`, `ALTER TABLE ADD CONSTRAINT` and `ADD
+COLUMN`) and `DEFAULT`. Nothing is read or written, and the statement fails the same
+way over an empty table as over a populated one. The message names the function as
+written, the counts it accepts, what the call passed and the accepted call forms:
+
+```text
+COHSQLE006: Function 'ABS' takes exactly 1 argument but was called with 2. Accepted: ABS(numeric).
+COHSQLE006: Function 'COUNT' takes exactly 1 argument or '*' but was called with 2. Accepted: COUNT(*) or COUNT(value).
+COHSQLE006: Function 'SUM' takes exactly 1 argument but was called with '*'. Accepted: SUM(numeric).
+COHSQLE006: Function 'COUNT' takes exactly 1 argument or '*' but was called with 2 arguments including '*'. Accepted: COUNT(*) or COUNT(value).
+```
+
+A call passes `'*'` only when `*` is its sole argument; the parser also accepts `*`
+after other arguments (`COUNT(id, *)`, `COALESCE(a, *)`), and such a call is reported
+by its full count.
+
+**Overloads (E2).** A function name can carry several overloads, distinguished by their
+parameter types. Among the overloads whose count matches, the planner chooses the one
+the arguments' types fit best: an exact type, then an implicit widening along INT8 →
+INT16 → INT32 → INT64 → DECIMAL → DOUBLE (nothing converts to or from text, and REAL does
+not widen), then a polymorphic overload. An integer literal has the smallest of INTEGER
+and BIGINT that holds it; a NULL literal, a NULL parameter and a grouped value match any
+type. A call no overload's types accept also reports `COHSQLE006`, and one that several
+accept equally well reports `COHSQLE008` (SQLSTATE 42725); a `CAST` on an argument
+chooses. Both are raised while planning:
+
+```text
+COHSQLE006: Function 'SUM' has no overload that accepts argument types (TEXT). Accepted: SUM(numeric).
+COHSQLE008: Function call 'describe(unknown)' is ambiguous: describe(BIGINT) and describe(TEXT) accept it equally well. Cast an argument to choose one.
+```
+
+The engine resolves a call's arguments before the call itself, as PostgreSQL's parse
+analysis does, so `COALESCE(name, UPPER())` reports `UPPER`, and `FOO(ABS())` reports
+`ABS` rather than the unknown `FOO`. Until #1189 the evaluator evaluated an argument
+only when a call had exactly one, so `SELECT ABS(1, 2), UPPER(), COALESCE() FROM t`
+returned three NULLs, `CHECK (ABS(c, 1) > 0)` was stored and admitted every row, and
+an aggregate with no argument outside a projection (`UPDATE t SET a = SUM()`)
+succeeded over an empty table. A wrong aggregate count in a projection failed while
+planning already, without a code. A recognized name that does not execute has no
+signature, and fails as described above. A database whose catalog stores a CHECK
+with such a call does not open; see [Persisted definitions are
+canonical](#persisted-definitions-are-canonical).
+
+**Guard.** `SqlStatementCompletenessTests` (Sql.Language) holds a complete statement
+form for every profile clause and every `SqlQueryCommandType`, appends leftover
+text to each form (words, a literal, `)`, a misspelled clause, text after `;`,
+an unterminated string or comment, a character outside the dialect, and words on
+the line after a `--` comment for every line terminator), and fails unless every
+combination reports an error after the form. A clause added to the profile
+without a form fails the test, as does a new statement kind.
+
+## Persisted definitions are canonical
+
+Every SQL expression the catalog persists is stored as **canonical SQL rendered
+from its parsed tree**, never as the text the user wrote: a `CHECK` predicate, a
+literal column `DEFAULT`, and — when they arrive — expression defaults (#1121) and
+view queries (#1124), which must use the same path. `SqlExpressionRenderer` (this
+package) produces the canonical text; the engine's one persistence helper renders
+it, proves before anything is stored that the text parses back to the declared
+tree, and is the only code that reads it back. The canonical form is a function of
+the tree alone:
+
+- Keywords are upper case (`AND`, `IS NOT NULL`, `NOT BETWEEN ... AND ...`,
+  `CASE ... END`, `TRUE`, `NULL`); collation names are lower case, as the parser
+  normalizes them.
+- Binary operators, `AND`/`OR` and list separators take single spaces; `!=` is
+  written `<>`. Comments and line breaks are dropped.
+- Parentheses appear only where precedence needs them: `(qty + 1) * 2` keeps
+  them, `((qty - 1) - 2)` becomes `qty - 1 - 2`, `qty - (1 - 2)` keeps them. A sign
+  applied to a sign is parenthesized (`- -1` becomes `-(-1)`, never a `--`
+  comment), and `+(1)` keeps its parentheses so it stays unary plus. An `AND` or
+  `OR` chain is written term by term: `(a AND b) AND c` becomes `a AND b AND c`,
+  and `a AND (b AND c)` keeps its parentheses, as it did before chains became one
+  node (#1151).
+- Literals keep their value: strings double embedded quotes (`'O''Brien'`),
+  numbers keep their digits as written (`007`, `1.5e3`, `.5`), and a `+` that was
+  part of a numeric literal is gone (`+5` is `5`). Typed literals store parser-normalized
+  canonical text: DATE/TIME/TIMESTAMP/TIMESTAMPTZ prefixes, INTERVAL total seconds,
+  uppercase X hex, and ordinary quoted text for N strings.
+- Names keep their spelling. An identifier is delimited with `"` only when the
+  lexer would not read it back as one plain word: a keyword, a builtin function
+  name, a word with a positional meaning such as `escape`, a name with spaces,
+  punctuation or a combining mark, or a name starting with a digit. `"qty"`
+  becomes `qty`, while `"order"` and `"my qty"` keep their quotes; unicode words
+  such as `größe` stay bare. Function names keep their spelling (`lower(name)`); a
+  user function named like a window function stays delimited (`"rank"(x)`).
+
+For example, `CHECK (QTY>0   and /* upper */ qty<100)` is stored, and reported in
+`INFORMATION_SCHEMA.CHECK_CONSTRAINTS.CHECK_CLAUSE`, as `QTY > 0 AND qty < 100`,
+and `DEFAULT +5` as `5`. The renderer's corpus and a randomized round-trip test
+(`SqlExpressionRendererTests`) pin both the canonical spelling of every form a
+CHECK accepts and the invariant that parsing the rendered text yields the same
+tree. A CHECK supplied by a compiled schema (`table.Check(name, sql)`) keeps its
+author's spelling in the schema document; the engine compares it with the catalog by
+canonical form, so reapplying an unchanged schema stays a no-op. Before the engine's
+build touches any file it parses that text as exactly one expression and binds it to
+the engine's functions and the table's declared columns, applying the same rules
+`CREATE TABLE` applies (only `IMMUTABLE` functions among them), and refuses the
+declaration with `COHSQLP001` when it does not bind.
+
+**Size.** A table's whole definition, including canonical CHECK/DEFAULT text and the
+resolved function identities (consecutive repeats are compacted), is one catalog record
+of at most 8,092 bytes. That bounds a stored CHECK
+at a few hundred comparisons however the nesting limit is configured; a larger
+definition fails its DDL with `The definition of table '<name>' encodes to <n>
+bytes, more than the 8092 bytes a catalog record can hold.` and stores nothing.
+
+**Parsed once.** The engine parses and binds a table's persisted CHECK and DEFAULT
+definitions once per table version — when the database opens, and when a DDL
+statement (`CREATE TABLE`, `ALTER TABLE ADD/DROP CONSTRAINT`, `ADD/DROP COLUMN`)
+publishes a new version — and caches the result. Validated writes evaluate the
+cached predicate; no statement parses catalog text. A dropped, re-created or
+altered table is a new version, so no write is ever checked against a stale
+definition.
+
+**Fails at open.** Because canonical text always reloads, a persisted definition
+that does not parse, is more than one expression, or no longer binds to its table
+means the catalog is damaged or came from an incompatible engine build. Opening
+the database then fails with `Database '<name>' cannot be opened.`, naming the
+table and the constraint or column (`CHECK constraint 'ck_qty' on table
+'dbo.orders' cannot be loaded: ...`). It never surfaces later as a failure of
+every write to that table. A CHECK whose call names an application function the
+opening engine no longer registers is not damage and does not fail the open: its
+writes fail with `COHSQLE009` instead (see Builtin functions, "A stored CHECK whose
+function is gone"). Canonical storage is part of data-storage format 4;
+text from earlier formats is not migrated, and a database on an earlier format
+whose catalog holds a CHECK or DEFAULT fails the open with a format error that
+says so.
+
+**Binding is not re-validation.** Opening a database binds each stored CHECK —
+its columns and collations resolve, each function call binds to its recorded signature
+and remains Immutable, and it is a Boolean row predicate the engine can evaluate — but
+does not apply again the rules `CREATE TABLE` and `ALTER TABLE` use to accept one,
+such as the sign operand check or the ban on `CAST`. Those rules may tighten in a
+later release; a predicate an earlier release accepted keeps opening and is
+enforced as stored, and a row it cannot evaluate fails its own statement with the
+evaluator's coded error.
+
+A call's argument count is not such a rule: a call no signature accepts has no
+value on any row (#1189). Engine builds before #1189 stored such CHECKs in format-4
+catalogs, and format 4 is unreleased and has no upgrade path (#1152), so none is
+carried forward. Opening a database whose catalog holds one fails with the coded
+error and the constraint's name, and sends the operator to the build that stored it
+rather than to a backup, which holds the same definition:
+
+```text
+Database 'shop' cannot be opened. CHECK constraint 'ck1' on table 'dbo.t' cannot be loaded: its persisted definition 'COALESCE() IS NULL' calls a function with arguments the function does not accept (COHSQLE006: Function 'COALESCE' takes 1 or more arguments but was called with none. Accepted: COALESCE(value [, value ...]).). An engine build that did not check function arguments stored it, and this engine cannot evaluate it; open the database with that build and drop the constraint or replace it with a valid one.
+```
+
+That holds for the special form `COALESCE`. A stored call of a function name with an
+argument count no built-in takes, `ABS(c, 1)`, can only come from an application's
+overload of the name since E2 lets an application add one for another arity, so it is a
+function the engine no longer registers: the database opens and writes fail with
+`COHSQLE009` (see [Builtin functions](#builtin-functions)).
 
 ## Ordering, output aliases and ordinals (#1024)
 
 `ORDER BY` evaluates its keys before `OFFSET` and `LIMIT`, using the result of
 grouping and `HAVING` when present. It accepts source columns, executable scalar
 expressions, output aliases, and one-based select-list ordinals. These keys
-compose with `DISTINCT`, pagination, the supported two-table inner join, grouped
+compose with `DISTINCT`, pagination, the supported N-way joins, grouped
 and ungrouped aggregates, and virtual system relations. Mixed ASC/DESC keys
 compare from left to right. NULL sorts first in ASC and last in DESC. Rows with
 equal keys have no promised relative order; add a tie-breaking key for stable
@@ -129,6 +454,11 @@ column's validated literal default. Existing row bytes and MVCC writer/deleter
 stamps are unchanged. A stored NULL remains NULL; it is never mistaken for a
 missing field. A later UPDATE writes the resulting full row normally.
 
+Signed numeric defaults (`-1`, `- 1`, `-1.5e3`, `+7` and the BIGINT minimum)
+and typed DATE/TIME/TIMESTAMP/TIMESTAMPTZ/INTERVAL/X/N literals use this same path.
+A typed DEFAULT must match the column storage type; a mismatch fails planning before
+mutation. `DEFAULT -'x'` reports SQL0003 while the default grammar remains literal-only.
+
 A subsequent INSERT that omits the column uses the same default. Explicit NULL
 is stored for nullable columns and rejected for NOT NULL columns. A nullable
 addition with no default, or with `DEFAULT NULL`, yields NULL for old rows and
@@ -141,14 +471,25 @@ snapshot retain a missing NULL field when such an addition has no default.
 Only literal defaults execute. `DEFAULT (1 + 2)`, function calls, parameters,
 CAST, and other expressions are rejected during planning, before schema or data
 mutation, using CREATE TABLE's diagnostic:
-`Column 'extra': only literal DEFAULT values are supported.` Defaults must
+`Column 'extra': only literal DEFAULT values are supported.` A call to a name
+outside the engine's catalog, executable profile and recognized-unsupported vocabulary fails
+first, with `COHSQLE016` and `Unknown function '<name>'.`,
+and so does a call whose arguments its function does not accept, with `COHSQLE006`
+(`DEFAULT ABS(1, 2)`; see [Statement completeness](#statement-completeness-1068)),
+and a parameter such as `:x` is a parse error. Defaults must
 convert to the declared storage type and fit its bounds, including string length
 and decimal precision/scale; invalid conversions and out-of-range defaults reject
-before publication. Strings are not truncated and decimals are not rounded.
+before publication. `CREATE TABLE` applies the same check to every column
+`DEFAULT` before it publishes the table (`INT DEFAULT 'abc'` fails the DDL, not
+each later INSERT that omits the column). The assignment rules in
+[Declared bounds on writes](#declared-bounds-on-writes-1418) apply: excess ASCII spaces
+may be discarded, other excess characters report `COHSQLE012`, and NUMERIC rounds
+to its scale before checking precision (`COHSQLE002`). The code still leads a
+DEFAULT failure's message.
 Approximate floating-point defaults use normal IEEE conversion rounding, but
 nonfinite results and nonzero values that underflow to zero are rejected.
-`COLLATE` on an added string column preserves the literal's
-original text and controls its comparisons and indexes, just as for CREATE TABLE.
+`COLLATE` on an added string column controls its comparisons and indexes without
+changing the bounded text, just as for CREATE TABLE.
 
 Publication changes the complete table definition atomically after validation;
 there is no row-rewrite phase to partially commit. A failed ADD COLUMN preserves
@@ -165,6 +506,53 @@ DDL remains self-committing and is rejected inside an explicit transaction with
 `COHSQLT003`; it cannot be undone by a later ROLLBACK. ALTER against a code-owned
 table (`DatabaseObjectOwner.Schema`) remains refused unless performed by its
 owning schema deployment.
+
+## DROP COLUMN (#1241)
+
+`ALTER TABLE t DROP COLUMN c` removes `c` from the table's definition: `SELECT *`,
+INSERT without a column list, name resolution, the wire result header and the
+system views no longer see it. It is refused, with nothing changed, for an unknown
+column, a primary-key column, a column an index covers (drop the index first), a
+column a foreign key, UNIQUE or CHECK constraint uses or references, and a table's
+last column. A refusal for a constraint names it, a table-level CHECK that reads the
+column included: "Column 'c' is referenced by constraint 'ck_t'. Drop the constraint
+first."
+
+The drop is **a catalog-only change**, as in PostgreSQL: the column's physical
+position is marked dropped and no stored row is read or rewritten, so the statement
+takes the same time on an empty table and a large one and holds up no other
+table's writes. The dropped values stay in the rows that hold them, unreadable,
+and the space returns as rows are updated and their old versions purged. Rows
+written afterwards store a one-byte NULL in the dropped column's place when a
+live column follows it, and nothing when none does, so each dropped column with
+a live column after it lowers the largest row the table can store by one byte.
+(PostgreSQL likewise keeps a null-bitmap bit for each dropped column in every
+new row.) A crash at any point leaves either the
+table as it was or the column dropped, with every value in its own column either
+way. DDL stays self-committing (above).
+
+Statements running beside the drop: a write or a join waits for it, and one planned
+on the old definition then fails with "changed while the statement was waiting" and
+can be retried. A single-table SELECT does not wait. Whichever definition it was
+planned on, every value it returns is in its own column. One planned before the
+drop still sees the dropped column, with the values of the rows its snapshot
+sees; rows written after the drop are never visible to it, because a statement's
+snapshot is taken before it is planned. Snapshots older than the drop keep
+reading their rows, without the dropped column once a statement is planned on
+the new definition.
+
+`ADD COLUMN` after a drop adds a new column, even under the dropped column's name:
+existing rows read the new column's default (or NULL), never the dropped values.
+`INFORMATION_SCHEMA.COLUMNS.ORDINAL_POSITION` numbers the live columns 1..n, so a
+column behind a dropped one moves up by one, as the SQL standard specifies;
+PostgreSQL instead reports its internal attribute number, with gaps. A table's
+dropped positions are never reused; each one keeps five bytes in the table's
+catalog definition, which is limited to one catalog record, so once a table has
+dropped about 1,590 columns (fewer when its live columns are many or have long
+names) ADD and DROP COLUMN on it are refused with a message that counts the
+dropped columns. Only a new table starts without them: recreate the
+table and copy its rows (`CREATE TABLE`, `INSERT ... SELECT`). PostgreSQL counts
+dropped columns against its 1,600-column limit in the same way.
 
 ## Collation (#1025)
 
@@ -209,54 +597,68 @@ SQL defaults do not apply to Documents, Graph, Key-Value, or Blob comparisons.
 
 ## Joins (#1019)
 
-`SqlClauses.Join` represents the executable subset `INNER JOIN ... ON`, including
-bare `JOIN ... ON`. `SqlLanguageProfile.SupportsJoin` advertises only
-`SqlJoinType.Inner`. A SELECT can join exactly two stored tables; aliases and
-schema-qualified references such as the following execute, including over the
-SQL server/client:
+FROM is a comma-separated list of join trees. Each item starts with a stored table or
+registered INFORMATION_SCHEMA/COHESION_SCHEMA relation, followed by any number of INNER
+(including bare JOIN), LEFT [OUTER], or CROSS joins. INNER and LEFT require exactly one
+ON predicate or USING (column [, column ...]); CROSS accepts neither. Missing ON/USING
+and RIGHT/FULL OUTER remain COHDBL001; malformed joins and CROSS with a condition fail
+with an error and never execute as a product. NATURAL, LATERAL and qualified wildcards
+such as t.* keep COHDBL001. Derived comma inputs, FROM t, (SELECT ...) d, remain excluded
+until #1113.
 
-```sql
-SELECT usr.Users.FirstName, usr.Users.LastName, usr.UsersProfile.Email
-FROM usr.Users INNER JOIN usr.UsersProfile ON usr.Users.Id = usr.UsersProfile.UserId
-```
+JOIN binds more tightly than comma: in FROM a, b JOIN c ON ..., ON can see b and c,
+but cannot see a. It also cannot reference a later input. Unknown/hidden qualifiers
+and ambiguous columns report located COHSQLE015 before rows are read; duplicate aliases
+report COHSQLE019. An explicit alias hides the base name in every join form and in DML.
+PostgreSQL anchors: doc/src/sgml/queries.sgml:217-227 and
+src/backend/parser/parse_clause.c:370-386 (the ON scope contains only its join inputs).
 
-`ON` evaluates for each candidate pair under the same statement MVCC snapshot
-for both inputs. Only TRUE matches; FALSE and UNKNOWN do not. Matching pairs
-preserve multiplicity, and an empty input produces no joined rows. The result
-composes with scalar projections, `WHERE`, `DISTINCT`, `GROUP BY`, `HAVING`,
-aggregates, `ORDER BY`, `LIMIT`, and `OFFSET`. Without `ORDER BY`, row order is unspecified;
-callers requiring stable paging must provide a sufficient ordering key.
+Joins execute left-deep in written order without reordering. Only the first INNER pair
+may swap sides for an index. Each later step may seek into the input it adds; a LEFT
+step always drives from its preserved left input. Mandatory equalities must bind an
+index-key prefix under the existing type and effective-collation rules. The full ON
+remains a residual predicate. Otherwise the added input buffers once. System inputs
+take no object lock and have no index path; all inputs share one statement catalog
+image and MVCC snapshot. EXPLAIN shows each step's kind and access, including scans.
 
-Column references can be unqualified, table/alias-qualified, or schema/table-qualified.
-An unqualified name present in both inputs is an ambiguous-column error, even
-when the inputs have no rows. Explicit aliases distinguish repeated table inputs.
-Unqualified `*` expands both inputs in FROM-then-JOIN column order. Qualified
-wildcards such as `u.*` and `usr.Users.*` are outside the executable subset and
-report `COHDBL001`.
+Only TRUE matches ON or the implicit USING equalities; FALSE and UNKNOWN do not.
+LEFT supplies NULL for every right column when no candidate matches. A predicate in
+ON preserves unmatched left rows; the same predicate in WHERE can remove them.
+COUNT(*) counts the extended row while COUNT(right.column) ignores its NULL. All
+join forms compose with grouping/HAVING, DISTINCT, ordering and LIMIT/OFFSET.
+CROSS and comma multiply cardinalities; either empty input yields a typed empty
+product. Row order without ORDER BY is unspecified.
 
-The planner uses a secondary index on either input when mandatory `ON` equalities
-between columns bind a leading index-key prefix. It prefers the longest prefix,
-then a unique index, then index name, then the right input. It still evaluates
-the complete `ON` predicate after fetching snapshot-visible candidate rows.
-Compatible Boolean, String, Json, Date, Time, TimeSpan, Guid and exact signed
-integer/Decimal key comparisons can use this path. Approximate numeric,
-DateTime, and DateTimeOffset comparisons retain scanning because their evaluator
-equality can be broader than their encoded index keys. Predicates without a
-usable mandatory column equality, including computed keys, keys reachable only
-through disjunctions, and inequalities, use the scan fallback, as do joins
-without an applicable index.
+USING requires each listed name exactly once on each input; missing, repeated or
+ambiguous names fail binding with COHSQLE015. Its equality uses ordinary ON collation
+precedence, including column overrides. The merged output uses PostgreSQL's common-type
+selection through implicit casts within the same type category. INT/DECIMAL produces DECIMAL
+and INT/BIGINT produces BIGINT in either order, including arithmetic and function overloads.
+LEFT preserves the coerced left value and its nullability; INNER prefers an unchanged input
+of the common type when available. Length, precision and scale remain only when both input
+types and modifiers agree; CHAR(3)/VARCHAR(10) clears the length. Qualified references retain
+their own types and modifiers; right qualified references become nullable under LEFT.
+Pairs with no common type fail planning with COHSQLE015, even on empty inputs.
+Identical domains retain their domain identity; differing domains or a domain/base pair
+resolve through their base types (PostgreSQL parse_coerce.c:1360-1387).
+Unqualified merged names are unambiguous; qualified left.id and right.id still bind.
+SELECT * orders merged columns once, in USING order, then remaining left columns,
+then remaining right columns. A later USING applies this rule to its accumulated
+left output; comma items concatenate their outputs. ORDER BY aliases after `*` and
+numeric ordinals count these visible output columns. PostgreSQL performs the same
+USING name validation and output ordering at parse_clause.c:1322-1399,1460-1510,
+common-type synthesis at parse_clause.c:1676-1733 and parse_coerce.c:1393-1437,
+and modifier clearing at parse_coerce.c:1648-1678.
 
-The fallback buffers the right input once: it performs O(L + R) stored-row reads,
-O(L × R) predicate evaluations, and O(R) input buffering for L and R input rows,
-in addition to result and sort storage. Index assistance replaces the indexed
-input scan with probes; performance still depends on key selectivity and result
-multiplicity.
+In-process pass-through metadata marks every null-supplying LEFT column nullable.
+The existing wire header still carries name, type and length without nullability.
+Binary delivery copies only selected retained outer/buffered-inner cells; the final
+index inner is freshly decoded. Earlier indexed inputs retained by later steps are
+copied on delivery, as are unmatched LEFT outer values used in multiple results.
 
-LEFT, RIGHT, and FULL outer joins, CROSS joins, NATURAL joins, USING, absent ON,
-comma joins, and joins beyond two tables do not execute and report `COHDBL001`.
-Joins involving `INFORMATION_SCHEMA` or `COHESION_SCHEMA` are also excluded.
-No outer-join null-extension behavior is advertised. These are explicit
-ISO/IEC 9075 subset boundaries, not additional named clauses in the 49-clause count.
+Capability preflight skips advertised clauses and reports the first unadvertised
+one. Thus USING cannot mask a later NATURAL, WINDOW or OVER. MERGE INTO ... USING
+remains SQL0002; DELETE ... USING and CREATE INDEX ... USING are syntax errors.
 
 ## Value comparison (#1029)
 
@@ -286,6 +688,9 @@ grouping combines NULL keys and ascending ordering places NULL first.
   equal. Positive and negative zero are equal in predicates and form one
   DISTINCT/grouping class. NaN is a value, not NULL. These deliberate rules
   apply to Float32, Float64, and mixed numeric comparisons.
+- **Temporal values:** `TIMESTAMP` compares wall-clock ticks and ignores the
+  host `DateTimeKind`; `TIMESTAMPTZ` compares instants and ignores the offset.
+  See "Temporal value identity" below.
 - **Other values:** strings use the effective collation; Boolean orders FALSE
   before TRUE. Supported same-type comparable values retain their runtime
   ordering. Incompatible type families raise a query error.
@@ -304,10 +709,252 @@ Nonzero floating equality may still seek; joins retain their conservative
 approximate-numeric scan policy. Mapper restrictions and key exclusions remain
 deferred with #1007/#1008.
 
+## Timestamp normalization (#1110)
+
+TIMESTAMP is a zone-less wall clock stored as DateTime with Kind Unspecified.
+TIMESTAMPTZ (TIMESTAMP WITH TIME ZONE) is an instant stored as DateTimeOffset;
+a literal without an offset means +00:00, and an explicit offset is retained.
+There is no session time zone. Wherever TIMESTAMP meets TIMESTAMPTZ in a cast,
+comparison or assignment, TIMESTAMP is read as UTC. Converting TIMESTAMPTZ to
+TIMESTAMP, DATE or TIME uses its UTC wall clock; the resulting TIMESTAMP has
+Kind Unspecified. INSERT and UPDATE apply the same rule to literals and parameters.
+For example, assigning `TIMESTAMPTZ '2024-01-01 12:00:00+02:00'` to a TIMESTAMP
+column stores 10:00 Unspecified. The reverse assignment uses offset +00:00.
+A plain string compared to a temporal value remains a type error; use
+`DATE '2024-01-01'` for a date comparison. CAST, datetime functions and expression
+defaults use this normalization rule; key identity is specified below.
+
+## Temporal value identity (#1099)
+
+`TIMESTAMP` and `TIMESTAMPTZ` each have exactly one normalization rule.
+Comparison (predicates, join conditions, `ORDER BY`, `DISTINCT`, `GROUP BY`,
+`MIN`/`MAX`), index keys, seek bounds, and `UNIQUE`/`PRIMARY KEY` enforcement
+with its key locks all follow it. A secondary-index seek, a primary-key seek and
+a scan therefore return the same rows for every predicate.
+
+| Type | Identity (compared, ordered and keyed by) | Not part of identity | Stored and returned |
+|---|---|---|---|
+| `TIMESTAMP` (`DateTime`) | Wall-clock ticks | `DateTimeKind` (`Unspecified`, `Utc`, `Local`) | Kind Unspecified |
+| `TIMESTAMPTZ` (`DateTimeOffset`) | Instant (UTC ticks) | Offset | The written offset |
+
+- `TIMESTAMP` is a timestamp without time zone. Values with equal ticks are equal
+  whatever their kind, and no time-zone conversion happens: a `Local` 12:00, a
+  `Utc` 12:00 and an `Unspecified` 12:00 are one value, ordered by those ticks.
+  A `UNIQUE` or `PRIMARY KEY` column rejects equal ticks that differ only in
+  kind.
+- `TIMESTAMPTZ` compares by instant, as ISO/IEC 9075 specifies for `TIMESTAMP
+  WITH TIME ZONE`: `12:00+00:00`, `15:00+03:00` and `06:30-05:30` are one value,
+  and values order by instant, never by local wall-clock time. A `UNIQUE` or
+  `PRIMARY KEY` column rejects the same instant at another offset.
+- Rows return TIMESTAMP with Kind Unspecified and preserve the written TIMESTAMPTZ offset. Index keys hold only the identity, so updating a
+  row to an equal value in another kind or offset does not collide with itself.
+- `=`, `<`, `<=`, `>`, `>=` and `BETWEEN` on either type seek an applicable
+  index (alone, or after an equality prefix of a composite key), and two-table
+  joins on equal temporal types can use index assistance.
+- Parameters keep their kind and offset across the wire protocol, so these
+  rules hold identically in-process and through `SqlDatabaseServer` and
+  `Sql.Client`.
+
+**Indexes written before this rule.** The rule changes the on-disk key format:
+data-storage format 3 (written through 10.0.0-preview.1) stored the kind and
+the offset inside index keys, and format 4 does not. Format 5 (#1194) keeps
+format 4's rows and key encoding but stores index trees in B-tree page format 2,
+whose entries are ordered by key, entry reference and writer, so a format-4
+database is refused too. Format 6 (#1241) keeps format 5's rows and index trees
+but records each table's dropped-column positions in the catalog and decodes
+rows through them, so a format-5 database is refused too. The engine has no
+upgrade path (#1152). It refuses to
+open a database on any format but 6 — older or newer — with an error that names
+the database, the format it found and the format it supports. The check reads
+only the database's catalog and runs before the engine opens the data files, so
+a refused open never touches them. A cleanly
+closed database is left byte-identical. A crashed one keeps its journals: the
+catalog files get only the storage layer's own crash recovery, which does not
+depend on the format. To move an older database to the current engine, export
+its data with the engine that wrote it (which can still open it), drop the
+database (`DropDatabaseAsync`), create it again and reload the data. A database
+whose creation was interrupted before its format was recorded reads as format 1
+and needs only the drop and create. Upgrading databases across format versions
+is tracked by #1152. New databases are created on format 6.
+
+From format 4 on, the catalog stores the format marker in a record that engines
+before format 4 do not recognize, so those engines refuse to open a format-4
+database instead of writing index keys that this rule's seeks and `UNIQUE`
+checks would miss.
+
+This closes the key-identity gap behind the mapper's `COHMAP003` key exclusion;
+the mapper's own review stays with #1008. No external conformance suite applies;
+the rule is the declared dialect contract above.
+
+## Arithmetic and numeric faults (#1069)
+
+`+`, `-`, `*`, `/`, and `%` propagate NULL. For non-null operands the operand
+families choose the computation:
+
+| Operands | Computation | Result type |
+|---|---|---|
+| Both exact signed integers (`TINYINT`, `SMALLINT`, `INT`, `BIGINT`, integer literals) | 64-bit signed, overflow-checked | `Int64` |
+| Any `DECIMAL`, `REAL`, or `DOUBLE` operand | Both operands promoted to `System.Decimal` | `Decimal` |
+
+Integer `/` truncates toward zero and `%` takes the dividend's sign
+(`-7 / 2 = -3`, `-7 % 3 = -1`). Narrower integers compute in BIGINT, so
+`2147483647 + 1` is the exact BIGINT `2147483648`, not a fault. `x % -1` is 0
+for every integer, including the BIGINT minimum. Approximate operands enter
+Decimal arithmetic through the runtime floating-point conversion, as before
+(about 7 significant digits for REAL and 15 for DOUBLE). A nonzero REAL or
+DOUBLE smaller in magnitude than Decimal's smallest step (1e-28) converts to 0
+like any other digit the conversion drops, so `@tiny + 1` is `1`. As a divisor
+it has no Decimal quotient and reports `COHSQLE002`, not a division by zero.
+
+An arithmetic fault fails the statement. No operator result wraps, saturates, or
+becomes NULL. A sign applied to a value that is not a number is a fault of the
+same kind, with its own code:
+
+| Code | ISO SQLSTATE | Raised when |
+|---|---|---|
+| `COHSQLE001` | 22012, division by zero | The right operand of `/` or `%` is zero: integer, decimal, or approximate (either signed zero), whether it is a literal, column, computed value, or bound parameter. |
+| `COHSQLE002` | 22003, numeric value out of range | A BIGINT result leaves -9223372036854775808..9223372036854775807, including `-x`, `ABS(x)`, and `x / -1` for the minimum; a Decimal result exceeds `System.Decimal`; a REAL or DOUBLE operand is NaN, infinite, or beyond Decimal's range, or is a nonzero divisor below Decimal's smallest step; a numeric literal does not fit its type (see Literals); `SUM` or `AVG` overflows or meets a non-finite value; a value does not fit the common type of `CASE`/`COALESCE` branches; a value does not fit the integer or `DECIMAL` column it is stored into; or a NUMERIC/DECIMAL value exceeds its declared precision or cannot be represented exactly as `System.Decimal` in assignment, DEFAULT or CAST, after rounding to the declared scale when there is one. |
+| `COHSQLE003` | 42804, datatype mismatch | The operand of unary `+` or `-` is not a number: `+'abc'`, `-TRUE`, `+name` on a string column. Raised while planning when the operand's type is already known or the operand is a parameter bound to a non-number, so it fails over an empty table too, and while evaluating when only a row's value reveals it. See Signs under [Statement completeness](#statement-completeness-1068). |
+
+The code leads the message, for example
+`COHSQLE001: Division by zero: the right operand of '/' is zero.` In process the
+statement throws a `DatabaseException` with that message. Over the wire the server
+reports `ExecutionFailure` with the same text, and the SQL client raises
+`SqlClientException` with `Kind = ExecutionFailure` and `ConnectionUsable = true`.
+An evaluation fault never terminates a session. That covers the coded faults above
+and uncoded query errors raised while rows are evaluated, such as `ORDER BY` keys
+the value order cannot compare (`Cannot compare values of types ...`).
+
+- **Atomicity:** every expression of a DML statement, including CHECK
+  constraints, is evaluated before its first write, so a faulting `INSERT`,
+  `UPDATE`, `DELETE`, or `INSERT ... SELECT` applies nothing, not even rows
+  evaluated before the faulting one. `ALTER TABLE ... ADD CONSTRAINT ... CHECK`
+  that faults on an existing row publishes no constraint.
+- **Transactions:** an auto-commit statement rolls back. Inside `BEGIN`, the fault
+  follows the rule for any failed statement: the transaction stays active with its
+  earlier statements' work, and both `COMMIT` and `ROLLBACK` remain available.
+- **Evaluation point:** faults are raised where an expression is evaluated. A
+  predicate over an empty table evaluates nothing and raises nothing. The one
+  exception is `COHSQLE003` for a sign whose operand type the plan already knows,
+  or whose operand is a parameter bound to a non-number, which is raised while
+  planning. A constant
+  comparand that faults during index-seek planning is not used for the seek, and
+  the scan faults on the first row that evaluates it. `LIMIT` and `OFFSET`
+  expressions are evaluated during planning and fault there.
+- **Short-circuit:** `AND` and `OR` evaluate their left operand first and skip the
+  right one when the left decides the result (`FALSE AND x`, `TRUE OR x`). A guard
+  such as `d <> 0 AND x / d > 1` therefore never divides by zero; a guard written
+  after the division, or a left operand that is NULL, does not protect it. A chain
+  of terms (`a AND b AND c ...`, one node of any length since #1151) runs its terms
+  first to last and stops at the first that decides the result, which is the order
+  and the stopping point of the nested operators it replaces, so a guard anywhere
+  before a division protects it. `CASE`
+  evaluates only the selected branch, `COALESCE` stops at the first non-NULL
+  argument, and `IN` stops at the first list value that matches. Every other
+  operator and function evaluates all of its operands.
+- **Store assignment:** a value an integer or `DECIMAL` column cannot hold, such as
+  `UPDATE t SET i = i + 1` on an `INT` at 2147483647, reports `COHSQLE002`
+  (`value '2147483648' does not fit column 'i' of type Int32.`). A value that is not
+  a number at all keeps the uncoded `Cannot convert value ...` error, and a REAL
+  column stores a finite DOUBLE beyond REAL's range as an infinity.
+- **CAST:** arithmetic inside a CAST operand keeps its own code
+  (`CAST(1 / 0 AS INT)` reports `COHSQLE001`). NUMERIC modifier overflow, or a built-in
+  text-to-NUMERIC result that cannot fit `System.Decimal` exactly after any declared-scale
+  rounding, reports `COHSQLE002`. Other source conversion failures keep
+  their `CAST ... failed` message under the conversion contract below.
+
+## VALUES and counts have no column scope (#1165)
+
+`LIMIT` and `OFFSET` accept nonnegative integer counts through
+`9223372036854775807` (`Int64.MaxValue`). After ordering and `DISTINCT`, `OFFSET`
+discards that many rows and `LIMIT` keeps at most that many of the remaining rows.
+A limit greater than the result size keeps every remaining row; an offset at or
+beyond the result size returns no rows. These rules apply to stored tables,
+N-way joins, virtual system relations and grouped queries, in process and
+over the SQL wire protocol (#1100). Negative and non-integer counts retain the
+`LIMIT requires a non-negative integer.` / `OFFSET requires a non-negative integer.`
+diagnostics.
+
+A row of `INSERT ... VALUES` is evaluated once, against no table row: ISO SQL
+forbids a column reference in an INSERT's table value constructor. `LIMIT` and
+`OFFSET` counts are evaluated once too, while planning. Their expressions are
+literals, parameters, and operators, signs, `CAST`, `COLLATE`, `CASE`, predicates
+and scalar functions over them. A column reference anywhere in one of them,
+qualified or not and however deeply nested, reports `COHSQLE005` (ISO SQLSTATE
+class 42, syntax error or access rule violation) while planning, so nothing
+executes:
+
+```text
+COHSQLE005: Column reference 'id' is not allowed in INSERT ... VALUES, which has no columns in scope. Use literals, parameters and expressions over them, or INSERT ... SELECT to read values from a table.
+```
+
+For a count the clause is `LIMIT` or `OFFSET` and the message ends after
+"expressions over them.". Every row is checked before the first is written, so
+`VALUES (1, 1), (2, id)` inserts nothing. In process the statement throws a
+`DatabaseException` with that message; over the wire it is `ExecutionFailure` with
+the same text, the session stays ready, and an explicit transaction stays active.
+`INSERT INTO u (id, a) VALUES (id, 1)` used to resolve `id` against the target table
+and fail during evaluation with a runtime error that ended a wire session with
+`Internal`. A count with a column reference reported `Unknown column` without a
+code, or, inside a subquery, came back as an error result carrying `COHDBL001`'s
+correlated-subquery diagnosis instead of throwing (`ExecutionFailure` on the wire
+either way). A subquery's count follows the same rule as the top level's at every
+nesting level, whether the reference names the subquery's own columns or the outer
+query's: ISO SQL's fetch-first count is a simple value specification, so no column
+of any scope is visible to it. An explicit outer qualifier there, as in
+`(SELECT id FROM w LIMIT v.a)`, is still the parser's `COHDBL001`, reported before
+planning. To insert values read from a table, use `INSERT ... SELECT`.
+
+The same clauses reject an aggregate (`Aggregate functions are not allowed in
+INSERT ... VALUES.`, and likewise for `LIMIT` and `OFFSET`) and a bare `*` (`'*' is
+not allowed in INSERT ... VALUES.`, likewise for `LIMIT` and `OFFSET`, where it used
+to report `Expression 'SqlStarExpression' is not supported by the executor yet.`)
+while planning, and a sign over an operand the plan already knows is not a number
+reports `COHSQLE003` there too. A column reference is reported first, so
+`VALUES (SUM(a))` and `VALUES (-a)` name the column.
+
+`DEFAULT` as a whole VALUES item uses the target column's catalog default, exactly
+like omitting that column. Without a default it supplies NULL, subject to NOT NULL.
+Explicit NULL remains NULL even when the column has a default. Reordered column lists
+and mixed multi-row lists map each DEFAULT to its own target column.
+`INSERT INTO t DEFAULT VALUES` inserts exactly one row with every column omitted.
+The optional column-list form, `INSERT INTO t (a) DEFAULT VALUES`, has the same effect;
+listed columns must still exist and must not repeat. `UPDATE t SET c = DEFAULT`
+uses the same column-default path for each matching row. All constraints apply before
+the statement publishes any writes, and both session requests and the SQL wire use
+these rules. Existing stored function-call defaults retain their per-assignment
+evaluation; this feature adds no new default-declaration expressions (#1121).
+
+DEFAULT is contextually typed syntax, not a scalar operand: `VALUES (DEFAULT + 1)`,
+`VALUES (COALESCE(DEFAULT, 1))`, `VALUES ((DEFAULT))` and `SET c = 1 + DEFAULT`
+report SQL0003. Bare DEFAULT in any scalar position also reports SQL0003, including
+SELECT lists, WHERE, function arguments, operator operands and INSERT ... SELECT.
+It never binds to a column named `"DEFAULT"`; the quoted spelling still binds.
+Qualified names `t.default` and `t."default"` are column references, including in SET
+and VALUES expressions (the latter still have no columns in scope at binding).
+Quoted identifiers, string literals and comments containing the word are unaffected.
+PostgreSQL rejects scalar DEFAULT in `src/backend/parser/parse_expr.c:310-316` and
+permits keyword field labels through `gram.y:17325-17329,17716,18042-18047`.
+PostgreSQL represents the keyword as `SetToDefault`
+(`src/backend/parser/gram.y:15788-15804`) and allows it directly in INSERT values and
+UPDATE sources (`src/backend/parser/parse_target.c:85-92,263-272`); DEFAULT VALUES
+has no SELECT source (`gram.y:12559-12565`). Its optional-column-list grammar does
+not include DEFAULT VALUES; accepting that combination here follows #1193's explicit
+column-list requirement. These DEFAULT forms add no named clause (+0); see the [statement matrix](#statement-matrix).
+
+`CURRENT_DATE`, `CURRENT_TIME` and `CURRENT_TIMESTAMP` take no parentheses, so the
+parser reads each as a name. In these clauses an unqualified name spelled as one of
+them is the recognized function, not a column, and reports
+`Function 'CURRENT_TIMESTAMP' is not supported by the executor yet.` while
+planning, the message `NOW()` reports during evaluation; nothing executes. The
+parser does not keep quoting, so a delimited `"CURRENT_TIMESTAMP"` reports the same
+message. Elsewhere the name still binds as a column and reports `Unknown column`
+when the source has none.
+
 ## Grouping and aggregate functions (#1020)
 
 Grouping is a separate execution stage over a stored table, a virtual system
-relation, or the supported two-table `INNER JOIN ... ON`. `WHERE` first filters
+relation, or supported N-way INNER/LEFT/CROSS/comma joins. `WHERE` first filters
 individual input rows. `GROUP BY` then forms one row per distinct tuple of one
 or more scalar expressions. Aggregate functions consume the surviving rows in
 each group; `HAVING` filters the completed groups and retains only TRUE results.
@@ -322,6 +969,17 @@ from grouped columns. An ungrouped source column in a projection, `HAVING`, or
 `ORDER BY` is a planning error, even when the input is empty; the executor never
 chooses an arbitrary row's value. Aggregate arguments cannot contain another
 aggregate, and aggregates cannot occur in `WHERE`, `JOIN ... ON`, or `GROUP BY`.
+
+`UPDATE` and `DELETE` act on one row at a time, so an aggregate in `UPDATE ... SET`
+or in their `WHERE` fails while planning, as PostgreSQL rejects one in those clauses
+(SQLSTATE 42803), with `Aggregate functions are not allowed in UPDATE SET.` or
+`Aggregate functions are not allowed in WHERE.`. The statement fails
+the same way over an empty table as over a populated one and changes no row. Until
+the #1189 review it succeeded over an empty table and failed per row over a
+populated one, with an uncoded `... is not supported by the executor yet.` message.
+A wrong argument count is checked first, so `UPDATE t SET a = SUM()` reports
+`COHSQLE006`. (A subquery in either statement is outside the dialect and reports
+`COHDBL001` at parse time.)
 
 | Aggregate | NULL and empty-input behavior | Result type |
 |---|---|---|
@@ -342,7 +1000,8 @@ original spelling in the result.
 `SUM` and `AVG` accept signed integers, Decimal, Float32, and Float64. Numeric
 arguments are converted to `System.Decimal` before accumulation; approximate
 inputs follow the runtime floating-point-to-Decimal conversion. Non-numeric
-arguments, non-finite approximate values, and numeric overflow are errors.
+arguments, non-finite approximate values, and numeric overflow are errors;
+the last two report `COHSQLE002` (see the arithmetic fault contract above).
 `SUM` always returns Decimal. `AVG` divides the Decimal sum by the non-NULL
 Int64 count using `System.Decimal` division: the nearest representable Decimal,
 with midpoint ties rounded to even and up to 28 fractional digits. Thus integer
@@ -358,10 +1017,13 @@ queries under the ordering contract above. Aliases in `GROUP BY` or `HAVING`
 remain outside this subset; use the source/grouping expression or repeat the
 aggregate. GROUP BY ordinals report `COHDBL001`.
 
-`DISTINCT` and explicit `ALL` inside aggregates, aggregate `FILTER`, in-aggregate
-`ORDER BY`, empty grouping sets (`GROUP BY ()`), `GROUPING SETS`, `ROLLUP`, `CUBE`, `GROUPING`/`GROUPING_ID`, window
+`DISTINCT` and explicit `ALL` inside a call, aggregate `FILTER`, `ORDER BY` inside a
+call, empty grouping sets (`GROUP BY ()`), `GROUPING SETS`, `ROLLUP`, `CUBE`, `GROUPING`/`GROUPING_ID`, window
 functions and clauses, and ordered-set `WITHIN GROUP` aggregates are excluded
-and report `COHDBL001`. Top-level `SELECT DISTINCT` remains available. These
+and report `COHDBL001`. Which names are aggregates is the engine's function catalog to
+say, so the parser reports `DISTINCT`, `ALL` and `ORDER BY` inside any call, an
+application's aggregate included; PostgreSQL refuses them on a function that is not an
+aggregate. Top-level `SELECT DISTINCT` remains available. These
 boundaries do not add named clauses to the 49-clause denominator.
 
 ## Subqueries and query-source inserts (#1021)
@@ -384,8 +1046,10 @@ exactly one column; EXISTS accepts any valid select list.
 
 Every child query uses the containing statement's MVCC snapshot and transaction
 context; it never creates another read view. Inner and outer stored rows
-therefore observe the same instant. A child that reads a virtual system relation
-uses the statement's catalog snapshot. Materialization retains the output type
+therefore observe the same instant. Children and INSERT sources can join system
+relations with each other or with stored tables. Their relation bindings request the
+containing statement's one catalog image, including system relations in JOIN targets.
+Materialization retains the output type
 and collation, including NULL and empty scalar results.
 
 `INSERT ... SELECT` maps the result columns to the specified destination list,
@@ -401,9 +1065,16 @@ inserted rows cannot feed back into the source query.
 Correlation is excluded with `COHDBL001`: a nested column must bind to that
 query's local FROM/JOIN scope. The parser diagnoses explicit outer qualifiers;
 catalog binding rejects unresolved local columns, including unqualified outer
-references. Local aliases may shadow outer aliases. Query nesting permits at
+references. A column reference in a subquery's `LIMIT` or `OFFSET` that the parser
+lets through, outer or local, reports `COHSQLE005` instead, because counts have no
+column scope (#1165; see [VALUES and counts have no column scope](#values-and-counts-have-no-column-scope-1165)).
+Local aliases may shadow outer aliases. Query nesting permits at
 most **32 expression-subquery levels** below the top-level SELECT (or INSERT's
 source SELECT); level 33 reports `COHDBL001` before recursive parsing continues.
+Each subquery is also one level of the statement's expression tree, and its
+clauses nest below it, so the [expression nesting limit](#expression-nesting-limit-1151)
+(256 levels by default) bounds the statement as a whole, subqueries included. The
+32-level subquery limit is fixed; it does not follow the configured expression limit.
 
 `ANY`/`ALL`/`SOME` quantified comparisons, derived tables in FROM or JOIN, CTEs,
 lateral joins, and subqueries in UPDATE/DELETE, INSERT VALUES, CHECK/DEFAULT,
@@ -412,7 +1083,171 @@ LIMIT/OFFSET clauses on queries containing subqueries do execute. CHECK remains
 a deterministic row-local expression and still rejects every subquery form.
 These subset boundaries do not add named clauses to the 49-clause denominator.
 
+## Expression nesting limit (#1151)
+
+ISO SQL leaves nesting limits implementation-defined. The dialect takes a middle
+course between SQL Server, which fixes small limits on particular constructs, and
+PostgreSQL, which bounds only the stack (owner decision of 2026-10-01): it counts
+**genuine nesting only**, against **one documented, configurable limit**, and keeps
+a **stack check as the backstop** for whatever the limit admits.
+
+- **The limit.** An expression nests at most **256 levels** by default. An engine
+  sets its own within **32..4096** (`SqlDatabaseEngineOptions.ExpressionNestingLimit`,
+  or `ExpressionNestingLimit` on the engine builder) and refuses a value outside that
+  range with `ArgumentOutOfRangeException` when it is created. A parser takes the
+  limit from `SqlQueryParserOptions.ExpressionNestingLimit` and checks the range when
+  it is constructed; any other parser options, or none, give the default.
+- **Tree depth counts.** Every node of the expression tree is a level: an
+  arithmetic, concatenation or comparison operator, a predicate (`IS NULL`,
+  `BETWEEN`, `IN`, `LIKE`), `NOT`, a sign, `CASE`, `CAST`, `COLLATE`, a function call
+  (its arguments sit one level below it), an `IN` list (its values sit one level
+  below it), a subquery, and the leaf at the bottom (a literal, column, parameter or
+  `*`, the `*` of `COUNT(*)` included). Depth is measured on the tree, so an
+  arithmetic chain counts every link: `1 + 1 + ... + 1` with N terms is N levels
+  deep, and so are N - 1 signs over a column or N - 1 nested `ABS(...)` calls. A
+  subquery's clauses count below the subquery, so the limit spans the whole
+  statement: `SELECT (SELECT <255-level expression> FROM u) FROM t` is at the
+  default limit.
+- **Parenthesis nesting counts.** Grouping parentheses are not nodes, so they add no
+  level to the tree, but at most as many pairs as the limit may enclose any point of
+  an expression. A subquery's, call's, `IN` list's or `CAST`'s own parentheses are
+  part of that construct, not grouping.
+- **A flat `AND` or `OR` chain does not.** A run of terms joined by `AND` (or by
+  `OR`) at one level is one node however many terms it has, as in PostgreSQL:
+  `a = 1 OR a = 2 OR ... OR a = 10000` is three levels deep (the `OR`, the
+  comparisons, their operands), and it parses, plans and executes, in process and
+  over the wire. A parenthesized chain that opens a chain of the same operator is
+  part of it (`(a AND b) AND c` is the chain `a AND b AND c`); one in a later
+  position is a nested chain and a level (`a AND (b AND c)`). Evaluation is
+  unchanged: the terms run first to last, the first that decides the result ends
+  the chain, and three-valued logic gives the result the nested binary operators
+  gave (see Short-circuit under [Arithmetic and numeric faults](#arithmetic-and-numeric-faults-1069)).
+
+Deeper text reports `SQL0006` at the token where the limit was crossed: the link of
+a chain that made it too deep, the operand that would be one level too deep, the
+operator of an `AND`/`OR` chain that would be one level too deep, or the first `(`
+past the limit. The message names the limit (`Expression nesting exceeds the
+supported limit of 256 levels.`). The rest of the statement is not parsed, so the
+parser reports nothing further, and the statement keeps only its command type, so it
+never executes: the text-execute seam throws `DatabaseParseException`
+(`ParseFailure` on the wire, with the connection still usable), and a typed request
+returns an error result carrying the diagnostic. Diagnostics the parser reported
+before that point, such as a `COHDBL001` earlier in the statement, are kept, and so
+are those of the checks that scan the whole text before parsing: an unterminated
+literal or comment, a character outside the dialect, and an unsupported clause.
+Before #1151 nothing bounded nesting: a 200,000-term expression overflowed the
+stack, which .NET cannot catch, so one statement ended the process, and over the
+wire every session of the server with it.
+
+**The engine's limit holds on every seam.** The engine parses statement text with
+its own limit, which covers every statement a wire client sends. A typed request was
+parsed by its caller, perhaps with a higher limit, so the parser records how deep
+each statement nests (`SqlQueryStatement.ExpressionNestingDepth`, the greater of its
+deepest tree and its deepest parentheses), and the engine refuses a request that
+nests deeper than its limit with an error result carrying `SQL0006`
+(`Expression nesting of 300 levels exceeds this engine's limit of 256 levels.`),
+exactly what parsing the text itself would have decided. A request over a query the
+parser did not return as a statement, such as a subquery taken out of a parsed
+statement, has no parser's measure and is held to the depth of its own expression
+tree, which is what the engine's walks recurse through. `SqlQueryRequest.FromSql`
+parses at the default limit; a caller targeting an engine configured with another
+limit passes it through the overload that takes `SqlQueryParserOptions`, so the
+typed path accepts exactly what the engine accepts as text.
+
+| Written | Levels | Result under the default limit |
+|---|---|---|
+| `1 + 1 + ... + 1`, 256 terms | 256 | Parses and executes |
+| `1 + 1 + ... + 1`, 257 terms | 257 | `SQL0006` at the 256th `+` |
+| `- - ... - a`, 255 signs | 256 | Parses and executes |
+| `ABS(ABS(... 1 ...))`, 256 calls | 257 | `SQL0006` at the innermost `1` |
+| `((( ... 1 ... )))`, 256 pairs | 1 | Parses and executes |
+| `((( ... 1 ... )))`, 257 pairs | 1 | `SQL0006` at the 257th `(` |
+| `a = 1 AND a = 2 AND ...`, 10,000 comparisons | 3 | Parses and executes |
+| `a = 1 OR (a = 2 OR (... OR (a = 256)))`, 256 comparisons | 257 | `SQL0006` at the 255th `OR` |
+| `a IN (1, 2, ..., 10000)` | 2 | Parses and executes |
+
+**Compared with SQL Server and PostgreSQL.**
+
+| | SQL Server | PostgreSQL | This dialect |
+|---|---|---|---|
+| Long `AND`/`OR` chains | Thousands of terms; an expression holds at most 65,535 identifiers and constants (error 8632) | One n-ary `BoolExpr` per chain, bounded by the stack alone | One n-ary `SqlLogicalExpression` per chain, one level of the limit |
+| Fixed construct limits | `CASE` nests at most 10 levels (error 125); subqueries at most 32 | None | Subqueries at most 32 (`COHDBL001`); every other construct only by the expression limit |
+| Expression nesting | No documented limit; a statement too deep for the server's stack fails (error 8631) | None beyond `max_stack_depth` (2 MB by default) | A documented limit, 256 by default, configurable within 32..4096 (`SQL0006`) |
+| Stack backstop | Error 8631 | `check_stack_depth()`: SQLSTATE 54001, stack depth limit exceeded | Stack checks in the parser and every walker: `COHSQLE004`, SQLSTATE 54001 |
+
+From SQL Server the dialect takes a fixed, documented limit that a client can rely
+on and an operator can tune; from PostgreSQL it takes n-ary chains, which make long
+generated predicates cheap, and the stack check as the last line of defense rather
+than the only one.
+
+**Stack.** The limit bounds how deep a statement nests, not how much stack the
+thread that runs it has. Each level of parentheses, call arguments, `CASE` or `CAST`
+costs the parser about 1 to 2 KB of stack in a release build, depending on how far
+the JIT has optimized it, and about 6 KB in a debug build. In a release build the
+deepest text the default limit accepts, 256 pairs of parentheses around 255 nested
+calls, parses on a 1 MB thread, and a default .NET thread has more (1.5 MB on
+Windows); a debug build needs about 3 MB for it. A higher configured limit admits
+text no default thread can parse: 4,000 nested parentheses need several MB. Wherever
+the stack runs out first, the statement fails instead of the process. The parser
+checks the stack each time it recurses and reports `SQL0007` (the text is within
+the dialect and parses on a thread with more stack). An engine reports a statement
+whose parse, or any later walk, runs out of stack as `COHSQLE004` (ISO SQLSTATE
+54001, statement too complex): a `DatabaseException` in process, `ExecutionFailure`
+on the wire, with the session and any open transaction intact as for any failed
+statement. A statement within the limit therefore executes or fails with
+`COHSQLE004`; it never ends the process.
+
+**Persisted definitions stay openable.** `CREATE TABLE` and `ALTER TABLE` parse
+with the engine's limit, so a stored `CHECK` or `DEFAULT` is never deeper than the
+limit of the engine that stored it. Its canonical text (see [Persisted definitions
+are canonical](#persisted-definitions-are-canonical)) has the same tree, and the
+renderer adds at most one pair of parentheses around a node, so the stored text also
+nests its parentheses no deeper than that tree. The engine reads persisted
+definitions back at the highest limit, 4096, because the limit decides which
+statements an engine accepts, not which databases it opens: a definition stored
+under one engine's limit opens, and is enforced, under every other, including one
+that would refuse the same text as a statement. `SqlExpressionRenderer` refuses a
+tree deeper than 4096 levels with `NotSupportedException`, because no parser would
+read its text back. An `AND`/`OR` chain renders term by term to the text the nested
+binary form rendered (`a AND b AND c`, `a AND (b AND c)`), so canonical text stored
+before chains were n-ary reads back to the same chain and renders unchanged. A
+database opened on a thread too small to read its deepest definition back fails to
+open with an error that says so, that the catalog is not damaged, and to open it on
+a thread with a larger stack. A statement that reads a definition back on such a
+thread, such as a DDL proving its canonical text, fails with `COHSQLE004` instead.
+
+**The engine checks its stack too.** Every recursive walk over a statement (the
+session's system-relation scan, planning, evaluation, CHECK validation, and
+binding a persisted definition) checks the stack before it descends, and recurses
+once per level of the tree, never once per term of an `AND`/`OR` chain, whose terms
+it iterates. A statement that runs any walk out of stack fails with `COHSQLE004` as
+described above. `LIKE` matching recurses once per `%` it backtracks through, so
+its depth follows the values rather than the text: a match that needs more stack
+than the thread has, such as a pattern of 200,000 `%a` segments over a value of
+200,000 characters, fails the same way with `COHSQLE004`.
+
 ## System-view matrix (C1)
+
+All 11 registered system relations participate in the supported N-way joins,
+with each other or with stored tables, on either side. Aliases, three-part column
+references, ambiguity checks and all supported SELECT operators use the same relation
+binding. New registered system relations inherit joining without join-specific code.
+
+The binder requests one immutable catalog image when it first resolves a system relation.
+Every child query and INSERT source shares that image; no outer-AST prediction is needed.
+Snapshot transactions supply their BEGIN-time image; ReadCommitted and automatic statements
+capture on first system-relation binding. A stored-only statement needs no catalog capture.
+Future derived tables, CTEs, set operands, view bodies and UPDATE/DELETE subqueries inherit
+this binding rule when their syntax becomes executable. Their current admission boundaries
+remain as stated above.
+
+The every-relation conformance theory seeds a domain with `CREATE DOMAIN`. Its self-join
+key is the first (catalog-name) column for TABLES, COLUMNS, TABLE_CONSTRAINTS,
+KEY_COLUMN_USAGE, REFERENTIAL_CONSTRAINTS, CHECK_CONSTRAINTS, INDEXES and OBJECT_OWNERSHIP;
+FUNCTIONS, TYPES and DOMAINS use IS_SQL_DEFINED. Equality preserves each key's multiplicity:
+for key groups of size k the self join yields the sum of k squared rows. Catalog-name keys
+are constant within the database and therefore yield n squared rows. Function/type/domain
+names are not constant and are deliberately not used as that cross-product key.
 
 The SQL engine exposes the following virtual relations through ordinary `SELECT`,
 including the wire protocol. View names require their schema and are
@@ -423,13 +1258,16 @@ conventions, not the complete ISO view layouts. Columns below are listed in
 | Relation | Columns, in order | Rows |
 |---|---|---|
 | `INFORMATION_SCHEMA.TABLES` | `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `TABLE_TYPE` | Stored tables in the current database; `TABLE_TYPE = 'BASE TABLE'` |
-| `INFORMATION_SCHEMA.COLUMNS` | `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `COLUMN_NAME`, `ORDINAL_POSITION`, `COLUMN_DEFAULT`, `IS_NULLABLE`, `DATA_TYPE`, `CHARACTER_MAXIMUM_LENGTH`, `CHARACTER_OCTET_LENGTH`, `NUMERIC_PRECISION`, `NUMERIC_PRECISION_RADIX`, `NUMERIC_SCALE`, `DATETIME_PRECISION` | One row per table column; ordinals start at one |
+| `INFORMATION_SCHEMA.COLUMNS` | `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `COLUMN_NAME`, `ORDINAL_POSITION`, `COLUMN_DEFAULT`, `IS_NULLABLE`, `DATA_TYPE`, `CHARACTER_MAXIMUM_LENGTH`, `CHARACTER_OCTET_LENGTH`, `NUMERIC_PRECISION`, `NUMERIC_PRECISION_RADIX`, `NUMERIC_SCALE`, `DATETIME_PRECISION` | One row per live table column; ordinals start at one and have no gap where a column was dropped. All 19 DATA_TYPE names parse in DDL and CAST; aliases report canonical identity and modifiers. COLUMN_DEFAULT renders resolved temporal and binary literal values with typed prefixes, including defaults declared as plain strings; other defaults retain canonical SQL |
 | `INFORMATION_SCHEMA.TABLE_CONSTRAINTS` | `CONSTRAINT_CATALOG`, `CONSTRAINT_SCHEMA`, `CONSTRAINT_NAME`, `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `CONSTRAINT_TYPE`, `IS_DEFERRABLE`, `INITIALLY_DEFERRED` | Primary keys, unique indexes/constraints, foreign keys, and explicit checks; both deferral fields are `NO` |
 | `INFORMATION_SCHEMA.KEY_COLUMN_USAGE` | `CONSTRAINT_CATALOG`, `CONSTRAINT_SCHEMA`, `CONSTRAINT_NAME`, `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `COLUMN_NAME`, `ORDINAL_POSITION` | One row per primary, unique, or foreign-key column, in constraint order |
 | `INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS` | `CONSTRAINT_CATALOG`, `CONSTRAINT_SCHEMA`, `CONSTRAINT_NAME`, `UNIQUE_CONSTRAINT_CATALOG`, `UNIQUE_CONSTRAINT_SCHEMA`, `UNIQUE_CONSTRAINT_NAME`, `MATCH_OPTION`, `UPDATE_RULE`, `DELETE_RULE` | Foreign keys with the referenced key identity; `MATCH_OPTION = 'NONE'`, `UPDATE_RULE = 'RESTRICT'`, delete rule `RESTRICT` or `CASCADE` |
-| `INFORMATION_SCHEMA.CHECK_CONSTRAINTS` | `CONSTRAINT_CATALOG`, `CONSTRAINT_SCHEMA`, `CONSTRAINT_NAME`, `CHECK_CLAUSE` | Persisted explicit check expressions |
+| `INFORMATION_SCHEMA.CHECK_CONSTRAINTS` | `CONSTRAINT_CATALOG`, `CONSTRAINT_SCHEMA`, `CONSTRAINT_NAME`, `CHECK_CLAUSE` | Explicit checks; `CHECK_CLAUSE` is the persisted canonical predicate (see [Persisted definitions are canonical](#persisted-definitions-are-canonical)) |
 | `COHESION_SCHEMA.INDEXES` | `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `INDEX_NAME`, `COLUMN_NAME`, `ORDINAL_POSITION`, `IS_UNIQUE`, `IS_PRIMARY_KEY` | Cohesion extension: one row per index key column |
 | `COHESION_SCHEMA.OBJECT_OWNERSHIP` | `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `OBJECT_TYPE`, `OBJECT_NAME`, `OWNER`, `OWNING_SCHEMA` | Cohesion extension: one row per table or index; `OWNER` is `Adhoc` or `Schema` |
+| `COHESION_SCHEMA.FUNCTIONS` | `FUNCTION_NAME`, `FUNCTION_KIND`, `PARAMETER_TYPES`, `PARAMETER_COUNT`, `RETURN_TYPE`, `VOLATILITY`, `NULL_BEHAVIOR`, `IS_BUILT_IN`, `IS_SQL_DEFINED` | Cohesion extension (E2): one row per function overload of the engine's catalog, built-ins first in registration order, then one row per special form. `FUNCTION_KIND` is `SCALAR`, `AGGREGATE` or `SPECIAL FORM`; `PARAMETER_TYPES` lists the parameter types (`TEXT ...` for a variadic tail, `*` for an aggregate called as `name(*)`, empty for none); `VOLATILITY` is `IMMUTABLE`, `STABLE` or `VOLATILE` for a scalar and NULL for an aggregate, which is never folded or admitted in a CHECK; `NULL_BEHAVIOR` is `RETURNS NULL ON NULL INPUT` or `CALLED ON NULL INPUT`. A special form's type, count, volatility and NULL-behavior columns are NULL. Native rows are frozen at engine build; SQL-defined rows come from the statement catalog image |
+| `COHESION_SCHEMA.TYPES` | `TYPE_NAME`, `BASE_TYPE`, `IS_DOMAIN`, `IS_SQL_DEFINED` | Native types and domains plus SQL domains in the catalog image |
+| `COHESION_SCHEMA.DOMAINS` | `DOMAIN_NAME`, `BASE_TYPE`, `IS_SQL_DEFINED` | Native domains and SQL domains in the catalog image |
 
 Identifier, descriptive, expression, and `YES`/`NO` columns have shared type
 `String`. Ordinals, lengths, precision, radix, and scale have shared type `Int64`;
@@ -442,14 +1280,15 @@ database.
 
 `DATA_TYPE` uses canonical names for catalog type identities; it does not retain
 the original alias spelling. For example, `INT`/`INTEGER` report `INTEGER`,
-`DECIMAL`/`NUMERIC` report `NUMERIC`, and `CHAR`/`VARCHAR`/`TEXT` report
+`DECIMAL`/`NUMERIC` report `NUMERIC`, and `CHAR` reports `CHARACTER` with its declared length; `VARCHAR`/`TEXT` report
 `CHARACTER VARYING`. The remaining canonical names are `BOOLEAN`, `TINYINT`,
 `SMALLINT`, `BIGINT`, `REAL`, `DOUBLE PRECISION`, `BINARY VARYING`, `DATE`,
 `TIME`, `TIMESTAMP`, `TIMESTAMP WITH TIME ZONE`, `INTERVAL`, `UUID`, `JSON`, and
 `JSONB`. Type parameters appear separately where catalog metadata retains them.
 Unknown or inapplicable values are null; `CHARACTER_OCTET_LENGTH` is null because
-the catalog stores no character-set byte bound. `COLUMN_DEFAULT` is SQL literal
-text, including escaped quotes for string defaults, or null when absent.
+the catalog stores no character-set byte bound. `COLUMN_DEFAULT` is the persisted
+canonical expression as declared, including escaped quotes for string defaults (`DEFAULT
+'it''s'` reports `'it''s'`, `DEFAULT +5` reports `5`), or null when absent.
 
 Projection, aliases, parameters, `WHERE`, `ORDER BY`, `DISTINCT`, aggregation,
 `LIMIT`, and `OFFSET` follow the engine's existing SELECT surface.
@@ -467,21 +1306,59 @@ All relations are read-only. DML and supported table/index DDL targeting them,
 including colliding `CREATE TABLE` statements and `IF [NOT] EXISTS` forms, fail
 with `System view '<SCHEMA>.<VIEW>' is read-only.` The wire error code is
 `ExecutionFailure`. User-defined `CREATE VIEW` / `DROP VIEW` remain unsupported.
-The snapshot rules, ISO-subset limitations, and the rationale for the two
-extension views are recorded in the
+The snapshot rules, ISO-subset limitations, and the rationale for the Cohesion
+extension relations are recorded in the
 [SQL engine design](../../Assimalign.Cohesion.Database.Sql/docs/DESIGN.md#virtual-system-relations-c1).
 
 ## Expressions
 
+Parameters follow the [shared parameter contract](../../Assimalign.Cohesion.Database.Language/docs/DESIGN.md#parameter-contract-1102).
+`$name`, `@name`, `$_x`, `$1` and `@1` are accepted. The name is an identifier or
+only ASCII digits; a bare sigil, `$1a`, `$١`, `@١` or `$1١` is SQL0003 at the whole
+reference. Sigils are interchangeable and caller
+keys may have one leading sigil. Matching is ordinal and case-sensitive, regardless
+of the caller dictionary's comparer. `$01` binds key `01`, not key `1`. Unused keys
+are ignored; normalized duplicates fail with COHSQLE023, including on BEGIN, COMMIT
+and ROLLBACK, before transaction state changes. Unbound references fail
+with COHSQLE020 before any row is read or written, including empty inputs. SQL
+GROUP BY compares parameter references by bare name. Operand `?` and `:name`
+report one SQL0003 at their complete span and name the supported forms; a trailing
+stray `?` keeps its generic message. SQL `::` keeps its existing diagnostic.
+ParameterConformanceTests, ParameterBindingTests and SqlParameterWireTests cover
+these rules without changing SQL request payloads.
+
 Precedence, low to high: `OR` < `AND` < `NOT` < comparison (`=`, `<>`, `<`, `>`,
 `<=`, `>=`, `IS [NOT] NULL`, `[NOT] BETWEEN`, `[NOT] IN`, `[NOT] LIKE`) < additive
-(`+`, `-`, `||`) < multiplicative (`*`, `/`, `%`) < unary (`-`, `~`, `NOT`) <
-primary. Executable primary forms include literals, parameters (`@name`, `$1`),
+(`+`, `-`, `||`) < multiplicative (`*`, `/`, `%`) < unary signs (`-`, `+`) <
+`COLLATE` < primary. Executable primary forms include literals, parameters (`$name`, `@name`, `$1`),
 column references, supported function calls, simple/searched `CASE`, and
 parenthesized expressions and `CAST` within the conversion contract below.
 Uncorrelated scalar subqueries and subquery predicates execute within the contract above.
-SQL aggregates follow the grouping and aggregate contract below. `~` is parsed but not evaluated; it is outside the
-executable scalar subset.
+SQL aggregates follow the grouping and aggregate contract below. Arithmetic result
+types and the `COHSQLE001`/`COHSQLE002`/`COHSQLE003` faults follow the arithmetic
+contract above.
+`IS` takes only `[NOT] NULL`, and `LIKE` has no `ESCAPE` clause; the other forms
+report `SQL0003` (see Statement completeness). An expression nests at most 256
+levels by default (configurable per engine within 32..4096), and its parentheses at
+most as many pairs; a chain of `AND` (or `OR`) terms is one level however long, and
+deeper text reports `SQL0006` (see [Expression nesting limit](#expression-nesting-limit-1151)).
+
+`~` is recognized but not part of the dialect, and is rejected at parse time with
+one `COHDBL001` at the operator (#1101). In prefix position (`~a`, bitwise NOT)
+the message names the prefix `~` operator. That covers every operand position,
+including a rule that takes a primary directly, such as a `LIKE` pattern
+(`LIKE ~'x'`) or a column `DEFAULT ~1`, and a run of prefix operators (`~ ~a`) is
+one diagnostic. In infix position (`a ~ 'x'`, PostgreSQL's regular-expression
+match) it names the infix operator as written. The infix form is recognized
+wherever an additive operator may follow an operand, and after a predicate that
+completes on its own (`a IS NULL ~ 'x'`, `a IN (1, 2) ~ 'x'`, `a LIKE 'x' ~ 'y'`,
+`BETWEEN 1 AND 2 ~ 3`). PostgreSQL's operators built on `~` are one operator each:
+`~*`, `!~` and `!~*` (regular-expression match) and `~~`, `~~*`, `!~~` and `!~~*`
+(LIKE match). `~` used to parse as bitwise NOT, and the evaluator returned NULL
+for a NULL operand and threw per row otherwise. So `SELECT ~NULL;` and `~` over an
+empty table succeeded, and an infix `~` fell to the leftover-token check with a
+generic message. None of them executes now, on either session seam or over the
+wire.
 
 ## Literals
 
@@ -496,11 +1373,80 @@ the mapper diagnoses such retained names before emitting SQL.
 
 | Form | Examples | AST literal type |
 |---|---|---|
+| National string | `N'héllo'` (adjacent prefix; canonical output `'héllo'`) | `String` |
 | String | `'it''s'` (doubled-quote escape) | `String` |
 | Integer | `42` | `Integer` |
 | Float | `3.14`, `.5`, `1e10` | `Float` |
+| Date | `DATE '2024-01-01'`; exactly yyyy-MM-dd | `Date` (DateOnly) |
+| Time | `TIME [WITHOUT TIME ZONE] '10:30[:ss[.fffffff]]'`; canonical `TIME '10:30:00'` | `Time` (TimeOnly) |
+| Timestamp | `TIMESTAMP [WITHOUT TIME ZONE] '2024-01-01[ T10:30[:ss[.fffffff]]]'`; one space or T separates date and time; canonical `TIMESTAMP '2024-01-01 10:30:00'` | `Timestamp` (DateTime) |
+| Timestamp with zone | `TIMESTAMPTZ '2024-01-01 10:30:00[Z or +/-HH:mm]'`, or `TIMESTAMP WITH TIME ZONE`; canonical seven fractional digits and explicit offset | `TimestampWithTimeZone` (DateTimeOffset) |
+| Day-time interval | `INTERVAL '3' DAY`, `INTERVAL '1:30' HOUR TO MINUTE`, `INTERVAL '2 days 3 hours'`, `INTERVAL 'P1DT2H'`; canonical `INTERVAL 'PT93600S'` for the last example | `Interval` (TimeSpan) |
+| Binary string | `X''`, `X'00ff'`, `x'ABCD'`; adjacent prefix, even-count hexadecimal digits; canonical `X'00FF'` | `Binary` (byte[]) |
 | Boolean | `TRUE`, `FALSE` | `Boolean` |
 | Null | `NULL` | `Null` |
+
+Typed literals execute in every scalar position, including predicates, IN, CASE, VALUES,
+UPDATE and literal DEFAULTs. The parser validates their text and stores canonical values;
+invalid contents report SQL0008 over the complete literal. A bare date, time or interval
+remains a column reference. X and N prefixes must touch the quote: `X '00'` is not a literal.
+X is the ISO binary string form; PostgreSQL instead treats X as a bit-string form.
+
+Times use 00..23 hours, 00..59 minutes and seconds, and at most seven fractional digits.
+TIME and TIMESTAMP literals reject zones. TIMESTAMPTZ accepts Z or an offset within
++/-14:00; missing offsets mean UTC. Named zones, BC years, infinity, epoch, today and now
+are outside the grammar. `SqlLiteralText` exposes the invariant text readers publicly in
+Sql.Language, for reuse by CAST. Existing plain-string assignment keeps its input grammar,
+including TIMESTAMP ignoring a written offset, through SqlTemporalText.
+
+INTERVAL is day-time only. Qualifiers DAY, HOUR, MINUTE and SECOND and descending TO
+ranges are consumed greedily; multi-field values use a space after DAY and colons between
+clock fields. Subordinate hours are below 24, and subordinate minutes/seconds below 60.
+Only SECOND admits a fraction in qualified forms. A leading sign applies to the whole
+qualified value. Unit strings accept signed decimal weeks, days, hours, minutes, seconds, milliseconds
+and microseconds (including w/d/h/m/s, hr/hrs, min/mins, sec/secs, ms/msec and us/usec aliases),
+once per field, following PostgreSQL datetime.c:188-250. ISO durations use P with D and
+T with H/M/S in descending order, or a standalone PnW week duration, with an optional leading sign. All durations must fit
+TimeSpan exactly at 100 ns resolution; fractions have at most seven digits. Canonical
+text is optional minus, PT, total seconds and S. Year/month fields in every spelling
+(including YEAR TO MONTH, year/yr/mon/mons, quarter/decade/century/millennium units, 1-2,
+P1Y2M, P0001-02-03T04:05:06 and the basic P00010203T040506) report COHDBL001;
+PT1M is one minute. Field precision, temporal precision,
+numeric/UUID/JSON/BYTEA typed strings and B/E/U& string prefixes also report COHDBL001.
+TIME WITH TIME ZONE is recognized but refused: SQL0005 in declarations and CAST
+(see [Type names](#type-names-the-sqltypenames-table)), COHDBL001 as a typed literal.
+INTERVAL arithmetic and unary minus on INTERVAL remain owned by sql-functions (#1120).
+
+Unqualified PostgreSQL clock forms accept `1 day 02:03:04`, `1 02:03:04` and
+`02:03:04`, including fractional seconds. Days and clocks have independent signs:
+`-1 day -02:03:04` is -93784 seconds; `-1 02:03:04` is -79016 seconds
+(datetime.c:3504-3596). `hh:mm` means hours/minutes; a fraction in a two-field clock
+makes it minutes/seconds (`2:03.5` is 123.5 seconds). Clock hours may exceed 23;
+minutes are 0..59 and seconds 0..60, following DecodeTimeCommon
+(datetime.c:2656-2740). The complete duration must fit TimeSpan, including both endpoints;
+overflow is SQL0008. Empty minute/second fields mean zero and a seconds fraction may omit its integer or
+fractional digits (`02::04`, `02:03:.5`, `02:03:04.`), as those PostgreSQL readers allow.
+The pure day-time ISO form `P1DT2H` is supported, as PostgreSQL's
+DecodeISO8601Interval supports day and time designators (datetime.c:3990-4026, 4126-4138).
+
+In-process binary row values are result-owned snapshots. Changing a returned byte array
+(including the backing array of GetBytes) cannot change another output cell, later row,
+function call, default-driven INSERT or stored/indexed value. Binary parameters are
+snapshotted into completed results before execution returns.
+Shared constants, function results, parameters, defaults and retained execution slots copy
+when supplying a row value. Fresh stored payloads transfer directly; repeated uses detach
+at their source. Result materialization adds no blanket binary copy.
+
+The engine evaluates an integer literal as BIGINT and a fractional or exponent
+literal as an exact `System.Decimal`, whatever the target. A literal its type cannot
+hold reports `COHSQLE002` and names itself, for example
+`integer literal 9223372036854775808 exceeds BIGINT.`: an integer literal above
+9223372036854775807 (write `12345678901234567890.0` for a larger exact value), or
+a fractional literal Decimal cannot hold exactly, with more than 28 decimal places
+or beyond Decimal's range (`1e-30`, `1e40`), even when it is stored into a REAL or
+DOUBLE column. Bind such approximate values as parameters. A negated integer
+literal is read as one signed literal, so `-9223372036854775808` is the BIGINT
+minimum. Inside `CAST` an unrepresentable literal stays a CAST failure.
 
 ## Type names (the `SqlTypeNames` table)
 
@@ -512,47 +1458,393 @@ the mapper diagnoses such retained names before emitting SQL.
 | `INT`, `INTEGER`, `INT4` | `Int32` |
 | `BIGINT`, `INT8` | `Int64` |
 | `REAL`, `FLOAT4` | `Float32` |
-| `FLOAT`, `FLOAT8`, `DOUBLE` | `Float64` |
+| `FLOAT[(p)]` | `Float32` for p = 1..24; `Float64` for p = 25..53 or no argument |
+| `FLOAT8`, `DOUBLE`, `DOUBLE PRECISION` | `Float64` |
 | `DECIMAL[(p[,s])]`, `NUMERIC[(p[,s])]` | `Decimal` (single argument = precision) |
-| `CHAR[(n)]`, `CHARACTER[(n)]`, `VARCHAR[(n)]`, `TEXT` | `String` |
-| `BINARY`, `VARBINARY`, `BLOB`, `BYTEA` | `Binary` |
-| `DATE` / `TIME` / `TIMESTAMP`, `DATETIME` / `TIMESTAMPTZ` / `INTERVAL` | `Date` / `Time` / `DateTime` / `DateTimeOffset` / `TimeSpan` |
-| `UUID`, `GUID` | `Guid` |
+| `CHAR[(n)]`, `CHARACTER[(n)]`, `NCHAR[(n)]`, `NATIONAL CHAR[(n)]`, `NATIONAL CHARACTER[(n)]` | `Character` (bare forms have length one) |
+| `VARCHAR[(n)]`, `TEXT[(n)]`, `NVARCHAR[(n)]`, `CHARACTER VARYING[(n)]`, `CHAR VARYING[(n)]`, `NCHAR VARYING[(n)]`, `NATIONAL CHAR VARYING[(n)]`, `NATIONAL CHARACTER VARYING[(n)]` | `String` |
+| `BINARY[(n)]`, `VARBINARY[(n)]`, `BLOB[(n)]`, `BYTEA[(n)]`, `BINARY VARYING[(n)]` | `Binary` |
+| `DATE` | `Date` |
+| `TIME`, `TIME WITHOUT TIME ZONE` | `Time` |
+| `TIMESTAMP`, `TIMESTAMP WITHOUT TIME ZONE`, `DATETIME`, `DATETIME2` | `DateTime` |
+| `TIMESTAMPTZ`, `TIMESTAMP WITH TIME ZONE`, `DATETIMEOFFSET` | `DateTimeOffset` |
+| `INTERVAL` | `TimeSpan` |
+| `UUID`, `GUID`, `UNIQUEIDENTIFIER` | `Guid` |
 | `JSON` / `JSONB` | `Json` / `JsonBinary` |
+
+DDL and CAST share one contextual type-name grammar, including case, whitespace and comments
+between words (`double /*x*/ precision`). No additional words are reserved. CREATE TABLE,
+both column ALTER forms, function signatures and domain bases resolve built-ins at parse time;
+columns expose `SqlColumnDefinition.ResolvedType`. Unknown names remain engine-resolved domains.
+All 19 current INFORMATION_SCHEMA DATA_TYPE spellings parse back to the same shared type,
+including CHARACTER added by #1437. The catalog stores type identity and modifiers, not aliases.
+
+`VARCHAR(MAX)`, `NVARCHAR(MAX)` and `VARBINARY(MAX)` mean unbounded String or Binary;
+MAX is accepted only on these three spellings. NCHAR, NATIONAL CHAR and NATIONAL CHARACTER
+are padded Character exactly like CHAR, including DATA_TYPE CHARACTER. Adding VARYING to any
+of those three names selects unpadded String exactly like VARCHAR; bare varying forms are
+unbounded. NATIONAL and VARYING remain usable as unquoted table and column names.
+UNIQUEIDENTIFIER is UUID/Guid and takes no arguments. DATETIME and DATETIME2 are lexical TIMESTAMP aliases: SQL Server's
+DATETIME 1753 lower bound and 1/300-second rounding are not emulated. DATETIMEOFFSET is
+TIMESTAMPTZ. These aliases add no Unicode storage distinction: all character spellings store Unicode.
+
+| Rejected spelling | Diagnostic and reason; replacement |
+| --- | --- |
+| TIME WITH TIME ZONE | SQL0005: no shared storage type; use TIME WITHOUT TIME ZONE or TIMESTAMP WITH TIME ZONE |
+| BIT, BIT(n) | SQL0005: PostgreSQL bit-string meaning wins under D1; use BOOLEAN for truth values |
+| SMALLDATETIME | SQL0005: range and minute precision cannot be honored; use TIMESTAMP |
+| INT[], INTEGER ARRAY (and other scalar array forms) | COHDBL001: arrays are unsupported; use a scalar type |
+| INTERVAL field qualifiers | COHDBL001: field restrictions are not enforced; use bare INTERVAL |
+
+PostgreSQL's grammar anchors the numeric, character and temporal spellings
+(`src/backend/parser/gram.y:14923-15016,15081-15181`, local reference clone). Every national
+character spelling has optional VARYING (`gram.y:15130-15140`).
 
 Coercion rules are an engine concern (planner/executor); the language layer
 guarantees only that declared names resolve to shared type identities so every
 model orders and stores values identically.
 
-## Explicit conversion (`CAST`, #1022)
+**A name that is not in this table** (phase E3) is not an error of the language
+layer: a SQL engine resolves it against its type catalog, where an application
+registers domains (`SqlType.CreateDomain`, `SqlDatabaseEngineBuilder.Types`). DDL
+(`CREATE TABLE`, `ALTER TABLE ADD COLUMN`) and `CAST` read a built-in name from this
+table first and fall back to the engine's domains for any other name; a domain takes
+no type arguments. A name neither resolves fails while planning with `COHSQLE010`
+(SQLSTATE 42704), the same over an empty table as over a populated one. A column of
+a domain stores its base type and keeps the domain's name in the catalog; every
+write that assigns the column, its INSERT default included, and every `CAST` to the
+domain applies the base type's length, precision and scale, then evaluates the
+domain's check, of which only FALSE refuses the value (`DOMAIN constraint 'email' on
+'dbo.contacts' was violated.`, a `SqlConstraintViolationException` of kind `DOMAIN`,
+which a `CAST` raises too, with an empty table). Plain columns and domain base types
+use the same bounds, described next. A native domain's name is an ASCII identifier. SQL-defined
+domains and functions may use delimited names containing punctuation, such as `"positive.type:amount"`.
+Function parameters, results, columns and CAST targets resolve the same domain name ignoring case.
 
-Targets resolve through `SqlTypeNames` into `DatabaseTypeInfo`; the executor uses
-that shared identity, never a second SQL-name table. All aliases in the type-name
-table for Boolean, Int8, Int16, Int32, Int64, Decimal, and String are accepted.
-The complete non-null source/target pair set is:
+## Type modifiers at declaration (#1438)
 
-| Evaluated source | Allowed targets |
-|---|---|
-| Signed `sbyte`, `short`, `int`, `long`, or `decimal` | Any signed integer width, Decimal, String |
-| String | Any signed integer width, Decimal, Boolean, String |
-| Boolean | Boolean, String |
+Every type spelling uses these ranges: CREATE TABLE, ALTER TABLE ADD COLUMN,
+ALTER TABLE ALTER COLUMN, CREATE DOMAIN, CREATE FUNCTION parameters and RETURNS,
+CAST, declared scripts, and typed schemas (including SDK extraction).
 
-All other pairs are rejected, including floating-point (`float`/`double`),
-unsigned integers, binary, temporal, GUID and JSON targets. Numeric/boolean
-conversion is not supported. Sources are evaluated values: SQL integer literals
-are Int64 and SQL fractional literals are Decimal; parameters and columns retain
-their runtime types. SQL fractional literals permit exponent and leading decimal
-point syntax (such as `1e2` and `.5`) but must also fit Decimal exactly; literal
-underflow/rounding is rejected before conversion. Insignificant zeros may be
-normalized. Identity conversions in the table still enforce target bounds.
+| Type names | Accepted arguments | No arguments |
+| --- | --- | --- |
+| NUMERIC, DECIMAL | Precision p = 1..28; optional scale s = 0..p; omitted scale is zero | No declared precision or scale; values must still fit System.Decimal |
+| CHAR, CHARACTER, NCHAR, NATIONAL CHAR, NATIONAL CHARACTER | One length n = 1..10485760 Unicode scalar values | CHAR(1) |
+| VARCHAR, TEXT, NVARCHAR and varying character spellings | One length n = 1..10485760 Unicode scalar values; MAX on VARCHAR/NVARCHAR | No declared length limit |
+| BINARY, VARBINARY, BLOB, BYTEA, BINARY VARYING | One length n = 1..10485760 bytes; MAX on VARBINARY | No declared length limit |
+| FLOAT | One binary precision p = 1..53: 1..24 resolves to REAL (Float32), 25..53 to DOUBLE PRECISION (Float64) | Float64 |
+| TIME, TIMESTAMP, TIMESTAMPTZ, INTERVAL; DATETIME, DATETIME2, DATETIMEOFFSET and time-zone spellings | One nonnegative precision is recognized but unsupported (COHDBL001), including 7 | The type's normal meaning |
+| INTERVAL field qualifiers | YEAR, MONTH, DAY, HOUR, MINUTE, SECOND and the ranges below are recognized but unsupported (COHDBL001); only SECOND accepts `(p)` | Bare INTERVAL keeps its normal meaning |
+| Every other built-in type and every domain | None (INT(5), BOOLEAN(1) and domain(1) are invalid) | The type's normal meaning |
 
-- **Text:** surrounding whitespace is trimmed when reading numbers or booleans.
-  Numeric text must match `[+-]?[0-9]+(\.[0-9]+)?`; grouping, exponent notation,
-  empty strings, and invalid text (including `'abc' AS INT`) are errors. Numeric
-  text must be exactly representable as `System.Decimal` before narrowing.
-  Boolean text accepts case-insensitive `TRUE`/`FALSE` only. String output uses
-  invariant numeric formatting and uppercase `TRUE`/`FALSE`; string-to-string
-  preserves the original text, including whitespace.
+Except for the three MAX aliases, arguments are one or two unsigned integer literals within Int32; negative, fractional,
+overflowing, empty or extra arguments are invalid. CHAR and CHARACTER share the length validator
+with VARCHAR, but have their own padded type identity. The explicit string
+ceiling follows PostgreSQL's anychar_typmodin (src/backend/utils/adt/varchar.c:33-57)
+and MaxAttrSize (src/include/access/htup_details.h:620-626). The same ceiling for binary
+makes explicit bounded declarations consistent; a bound does not allocate a buffer.
+Unbounded VARCHAR and the other unbounded aliases remain unbounded. The numeric ceiling
+is Cohesion's System.Decimal policy, rather than PostgreSQL's wider NUMERIC range
+(src/backend/utils/adt/numeric.c:1332-1397). Types without modifiers follow PostgreSQL's
+refusal in src/backend/parser/parse_type.c:358-365.
+
+FLOAT follows PostgreSQL's storage selection (src/backend/parser/gram.y:14991-15016).
+FLOAT(0) reports that precision must be at least 1 bit; FLOAT(54) and greater report that
+precision must be less than 54 bits. Both are SQL0005 and name the declaration or CAST target.
+The catalog reports the resolved type; binary precision is not retained as a decimal modifier.
+REAL/FLOAT4 and DOUBLE/FLOAT8 do not take arguments. Function overloads use the resolved storage
+type, so FLOAT(24) is a REAL signature and FLOAT(53) is a DOUBLE signature.
+
+**PostgreSQL difference: temporal precision is recognized, not supported.** TIME(p), TIMESTAMP(p),
+TIMESTAMPTZ(p), INTERVAL(p), DATETIME(p), DATETIME2(p) and DATETIMEOFFSET(p) report COHDBL001, naming both the
+object and precision modifier, including in CAST and declared scripts. The engine does not yet
+implement fractional-second rounding and never silently ignores a precision. PostgreSQL admits
+these modifiers (gram.y:15146-15181 and timestamp.c:1051-1110), and reduces precision above six
+with a warning (date.c:57-81; timestamp.c:110-132). A single unsigned Int32 precision above six
+is therefore also unsupported here. Malformed argument lists remain SQL0005, including empty,
+negative, nonnumeric and excess arguments before WITH TIME ZONE. Declarations and CAST report
+only the modifier error for those lists; the temporal suffix never adds an unsupported-WITH
+diagnostic. A well-formed precision still reports COHDBL001 with or without that suffix. Typed declarations
+retain UnsupportedType and SDK diagnostics retain COHDBSDK106, with COHDBL001 in their detail.
+Every temporal precision, including 7, remains COHDBL001; #1509 is the rounding follow-up.
+
+**PostgreSQL difference: interval field qualifiers are recognized but unsupported.** The complete
+recognized set is YEAR, MONTH, DAY, HOUR, MINUTE, SECOND, YEAR TO MONTH, DAY TO HOUR,
+DAY TO MINUTE, DAY TO SECOND, HOUR TO MINUTE, HOUR TO SECOND, and MINUTE TO SECOND.
+SECOND, including the last field of a range, may carry one unsigned Int32 precision `(p)`.
+PostgreSQL accepts these forms (`src/backend/parser/gram.y:15197-15267`); Cohesion does not yet
+implement their field restriction/truncation or precision rounding. Every declaration site and
+CAST therefore reports COHDBL001 naming the object and complete qualifier, with or without
+precision. The same refusal reaches declared scripts, typed SQL names and SDK extraction.
+Malformed arguments remain SQL0005; invalid ranges such as YEAR TO DAY remain SQL0003 in SQL.
+Delimited domain names such as `"INTERVAL DAY"` remain identifiers, not field qualifiers.
+
+Invalid modifiers produce SQL0005 before execution, naming the column, domain, function
+parameter or return type, or CAST target. In process the text execution API throws
+DatabaseParseException; Database.Sql.Client receives ParseFailure with SQL0005 and the
+same object name in its message, and ConnectionUsable stays true. Malformed surrounding
+statement syntax remains SQL0003. Declared scripts are parsed during engine Build before
+any database is opened, and preserve SQL0005. Typed schema builders and compiled schema
+validation use SqlSchemaValidationException with UnsupportedType and the table/column
+or domain name; Sdk.Database uses COHDBSDK106 at the source location. COHSQLS001-005 are
+script receipt/ownership codes, not the typed-schema validation enum.
+
+Raw compiled decimal columns and domains with precision but no scale normalize to scale zero
+before validation and hashing, just like SQL and CAST resolution. They apply, re-apply, verify
+and reopen with the same metadata as an explicit zero scale; bare decimals remain unconstrained.
+
+The supported alteration is the full definition, for example
+ALTER TABLE t ALTER COLUMN c NUMERIC(28,2). PostgreSQL's ALTER COLUMN c TYPE ...
+form remains unsupported. Function overload identity and invocation semantics are
+unchanged apart from FLOAT(p)'s resolved storage selection.
+
+## Declared bounds on writes (#1418)
+
+INSERT VALUES, INSERT ... SELECT and UPDATE apply a destination column's declared
+length, precision and scale. Numeric text rounds to a declared scale before
+conversion to its storage type; other values are bounded after conversion.
+DEFAULT validation uses the same rule, including CREATE
+TABLE defaults and ADD COLUMN's existing-row backfill. Domain checks see the
+bounded value. NULL remains NULL, subject to the column's nullability and the
+domain's check. Comparison literals retain their comparison meaning: a bound that
+would change or reject an index-seek comparand falls back to residual evaluation.
+Character join probes retain the complete text, since strings of different
+lengths can compare equal under the index's collation.
+
+- **VARCHAR(n), CHAR(n), CHARACTER(n), TEXT(n):** length counts Unicode scalar
+  values, so a supplementary character is one character. If a value is longer than
+  n, assignment accepts it only when everything past n is an ASCII space (U+0020),
+  discarding those spaces. Other excess characters fail with `COHSQLE012`, SQLSTATE
+  22001 (`value too long for type character varying(n)`). Explicit CAST truncates to
+  n characters instead. PostgreSQL makes the same assignment/explicit distinction
+  in `varchar()` and `bpchar()` (`src/backend/utils/adt/varchar.c:264-268`,
+  `:605-647`). A bound never splits a surrogate pair. Bare VARCHAR and TEXT have no
+  declared length limit.
+- **CHAR padding:** CHAR and CHARACTER are the distinct shared `Character` type. A short
+  value stores and returns ASCII spaces through n Unicode scalar values. Bare CHAR is CHAR(1).
+  Comparison, sorting, grouping, DISTINCT, hashes, index keys, UNIQUE/primary keys and CHAR foreign
+  keys ignore trailing U+0020 before applying the collation; tabs and nonbreaking spaces remain
+  significant. An untyped string literal or bound parameter compared with CHAR acquires CHAR
+  comparison semantics without assignment truncation. A simple CASE literal input remains TEXT,
+  as PostgreSQL forces it to TEXT before comparing WHEN values (src/backend/parser/parse_expr.c:1668-1669).
+  A typed VARCHAR/TEXT operand retains its
+  spaces, with the CHAR side converted to text. CHAR-to-TEXT/VARCHAR casts strip trailing spaces;
+  CHAR-to-CHAR casts repad to the target length. Concatenation converts CHAR to text first, so
+  `CAST('a' AS CHAR(3)) || 'b'` yields `'ab'`. LENGTH ignores padding and counts Unicode scalar
+  values for CHAR (the existing TEXT/VARCHAR LENGTH counts UTF-16 code units).
+  LIKE sees the stored padded left operand; its pattern is text, so a CHAR pattern is stripped.
+  Thus CHAR(3) 'a' fails LIKE 'a', but matches LIKE 'a  ' and LIKE 'a%'. There is no separate
+  pattern operator class or OCTET_LENGTH builtin in this dialect. The compatibility invariant
+  collation's LIKE wildcard still advances UTF-16 code units; the three index-backed collations
+  advance Unicode scalars. PostgreSQL's bpchar pattern
+  ordering operators trim spaces too; they do not define LIKE's input conversion.
+  Native scalar and aggregate CHAR arguments apply their declared lengths even when an argument
+  is already CHAR, before STRICT skips a NULL row. A native domain check also receives the
+  CHAR width its own parameter declares. CHECK accepts CHAR-returning functions in character
+  comparisons, BETWEEN and IN. Runtime unary-sign errors report Character, as planning errors do.
+  Domains over CHAR and CHAR function
+  parameters/results retain and enforce their declared
+  length, including after reopen. This differs from PostgreSQL function signatures, which discard
+  typmods when resolving parameter/result type OIDs (functioncmds.c:114, :250, :276).
+  Mixed CHAR and TEXT/VARCHAR CASE or COALESCE results use TEXT and strip CHAR branches.
+  BETWEEN resolves each comparison independently (`src/backend/parser/parse_expr.c:1325-1341`),
+  so `'a ' BETWEEN CAST('a' AS CHAR(3)) AND CAST('a' AS TEXT)` returns FALSE.
+  IN binds candidates containing table-column references as independent comparisons, including references
+  inside calls, casts and other expressions (`parse_expr.c:1163-1176,1253-1295`). For a table column
+  `c CHAR(3)` containing `'a'`, `'a ' IN (c, CAST('b' AS TEXT))` therefore returns TRUE, like its
+  `= OR =` expansion. Only when more than one remaining candidate has no table-column reference does IN
+  choose a common character type, considering the left operand first (`:1182-1190`). The first
+  non-unknown CHAR/TEXT/VARCHAR type wins: the one-way implicit-cast replacement rule in
+  `parse_coerce.c:1397-1440` cannot replace any of these with another, because
+  `src/include/catalog/pg_cast.dat:313-325` permits implicit casts in both directions. Untyped string
+  literals/statement parameters do not set the type; all-unknown inputs use TEXT (`parse_coerce.c:1444-1456`).
+  SQL function parameters and domain VALUE are typed values in that common group, including when
+  nested inside calls or other expressions. PostgreSQL binds them as `Param`
+  (`src/backend/executor/functions.c:491-505`) and `CoerceToDomainValue`
+  (`src/backend/commands/typecmds.c:3603-3618`), neither a table Var. Consequently
+  `'a ' IN (CAST('b' AS TEXT), p)` returns FALSE for a CHAR parameter `p` containing `'a'`.
+  A domain `CHECK ('a ' IN (text_b(), VALUE))`, where `text_b()` returns TEXT `'b'`, rejects
+  `'a'` for the same reason: the common TEXT comparison sees trimmed CHAR `'a'`.
+  Domain CHECK rejects FALSE and accepts UNKNOWN (`execExprInterp.c:4498-4508`).
+  Thus `'a ' IN (CAST('b' AS CHAR(3)), CAST('a' AS TEXT))` returns TRUE; reversing those candidates
+  returns FALSE. VARCHAR first preserves significant text spaces too. A CHAR left operand wins
+  before either: `CAST('a' AS CHAR(3)) IN ('a ', CAST('b' AS TEXT))` returns TRUE. Common coercion
+  applies no operand's declared length (`parse_coerce.c:1583-1585`); CHAR equality ignores trailing
+  spaces on both sides (`varchar.c:746-776`), while TEXT equality retains them (`varlena.c:1429-1480`).
+  ALTER COLUMN validates every CHAR length change, widening included, and refuses changes that
+  would repad existing non-null values. An unchanged length can change nullability when existing
+  values satisfy it. Empty or all-null columns can change length. Table rewrites remain deferred
+  to #1447; both rewrite refusals name the column and direct callers to an explicit table-copy
+  migration. Code-first validation on populated tables runs on the provisioning worker.
+  Branch string literals retain this dialect's TEXT identity, unlike PostgreSQL's unknown literals.
+  CHARACTER VARYING is accepted as VARCHAR; bpchar, :: casts and character typed-string prefixes
+  remain excluded. See [Type names](#type-names-the-sqltypenames-table) and [Literals](#literals).
+  The overflow code is COHSQLE012/22001; its shared message still names character varying(n).
+  PostgreSQL anchors: varchar.c:130 (input), :219 (padded output), :271 (explicit coercion),
+  :673-712 (trimmed LENGTH versus padded octet length), :746, :912, :933, :991 (comparison,
+  sorting and hashing), :1112-1119 (pattern ordering); pg_cast.dat:318-325 and pg_proc.dat:1178
+  (trimmed text conversion), pg_proc.dat:3669-3670 (bpcharlike uses textlike),
+  gram.y:15114-15119 (bare CHAR defaults to one). Paths are under PostgreSQL src/backend/utils/adt,
+  src/include/catalog, src/backend/commands and src/backend/parser respectively.
+- **NUMERIC(p,s), DECIMAL(p,s):** round to s fractional digits, with midpoint ties
+  away from zero, then reject a rounded magnitude of `10^(p-s)` or more with
+  `COHSQLE002`, SQLSTATE 22003 (`numeric field overflow`). NUMERIC(p) and DECIMAL(p)
+  mean scale zero. For NUMERIC(3,2), `1.235` becomes `1.24`, `-1.235` becomes `-1.24`,
+  and `9.995` fails because it rounds to `10.00`. CAST uses the same numeric rule.
+  Text is rounded directly from all its digits before conversion to `System.Decimal`,
+  so `'1.23499999999999999999999999995'` becomes `1.23` in NUMERIC(4,2), and
+  `'9.94999999999999999999999999999'` becomes `9.9` in NUMERIC(2,1). Only the rounded
+  value must fit Decimal exactly; rounding to Decimal's capacity first would change
+  both answers. This applies equally to quoted literals, string parameters,
+  text-source INSERT ... SELECT, UPDATE, CAST, DEFAULT and ADD COLUMN backfill,
+  for plain columns and domain base types.
+  PostgreSQL rounds before checking precision in `apply_typmod`
+  (`src/backend/utils/adt/numeric.c:7693-7750`), with midpoint handling in
+  `round_var` at `:11720-11748`. Bare NUMERIC/DECIMAL requires text to fit the existing
+  `System.Decimal` representation exactly, without rounding. An unrepresentable
+  unscaled value, or a rounded value that still cannot fit Decimal exactly, fails
+  with `COHSQLE002` too. Numeric text follows CAST's grammar: surrounding whitespace
+  and a leading `+` or `-` are accepted; exponent notation such as `'1.5e2'`,
+  grouping, and a decimal point without digits on both sides are rejected.
+  Unquoted SQL numeric literals retain their separate lexical rules.
+  Declared scale does not promise display padding or arbitrary precision.
+  Scale 28 needs no rounding of a value Decimal can hold. Declaration validation
+  rejects precision outside 1..28 or scale outside 0..precision.
+
+Bounds are checked before DML writes or DDL publication, so a failing statement
+stores no partial rows or added column. Its code leads the `DatabaseException`
+message in process and the `ExecutionFailure` message over the wire; the SQL
+client's `SqlClientException` retains `ConnectionUsable = true`. Earlier successful
+statements of an explicit transaction remain available to commit or roll back.
+The shared rule corrects the earlier CAST, DEFAULT and domain behavior too: CAST
+now truncates character values, and all four paths round NUMERIC to its scale.
+
+## Explicit conversion (`CAST`, #1022, E3)
+
+A target that is a built-in type name resolves through `SqlTypeNames` into
+`DatabaseTypeInfo`, with the shared declaration modifier checks: every built-in
+type is a valid target. Any other name is left to the engine's type catalog (a
+domain, or `COHSQLE010` while planning). Which conversions exist is the engine's
+**cast registry** (phase E3), PostgreSQL's `pg_cast` (`castfunc`, `castcontext`): the
+engine's own conversions and an application's casts, to and from its domains and
+between built-in types the engine does not convert, are entries of the same
+registry, and `CAST` applies an entry of any context. A `CAST` picks the entry by
+the operand's storage type at run time, preferring a cast from the operand's domain
+when the plan knows it (a column of a domain, or a `CAST` to one, under any
+`COLLATE`; any other expression over a domain's value has the base type, so
+`CAST(COALESCE(amount, 0) AS TEXT)` runs the base type's cast where
+`CAST(amount AS TEXT)` runs the domain's), and for a domain target a cast to the
+domain before one to its base type; a value that already has the target's storage
+type needs no entry, and a value of a domain cast to that same domain takes none.
+Then the target's length, precision and scale apply, then a domain target's check.
+The built-in non-null conversions form the following 19×19 matrix. Y permits the pair;
+– rejects it unless an application registers a cast. CHAR has its own identity;
+TEXT covers VARCHAR and the varying national character spellings, and BYTEA covers
+BINARY/VARBINARY. The shared type-name grammar owns all aliases and modifiers.
+
+| Source \ target | BOOLEAN | TINYINT | SMALLINT | INTEGER | BIGINT | REAL | DOUBLE | NUMERIC | TEXT | BYTEA | DATE | TIME | TIMESTAMP | TIMESTAMPTZ | INTERVAL | UUID | JSON | JSONB | CHAR |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| BOOLEAN | Y | – | – | – | – | – | – | – | Y | – | – | – | – | – | – | – | – | – | Y |
+| TINYINT | – | Y | Y | Y | Y | Y | Y | Y | Y | – | – | – | – | – | – | – | – | – | Y |
+| SMALLINT | – | Y | Y | Y | Y | Y | Y | Y | Y | – | – | – | – | – | – | – | – | – | Y |
+| INTEGER | – | Y | Y | Y | Y | Y | Y | Y | Y | – | – | – | – | – | – | – | – | – | Y |
+| BIGINT | – | Y | Y | Y | Y | Y | Y | Y | Y | – | – | – | – | – | – | – | – | – | Y |
+| REAL | – | Y | Y | Y | Y | Y | Y | Y | Y | – | – | – | – | – | – | – | – | – | Y |
+| DOUBLE | – | Y | Y | Y | Y | Y | Y | Y | Y | – | – | – | – | – | – | – | – | – | Y |
+| NUMERIC | – | Y | Y | Y | Y | Y | Y | Y | Y | – | – | – | – | – | – | – | – | – | Y |
+| TEXT | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| BYTEA | – | – | – | – | – | – | – | – | Y | Y | – | – | – | – | – | – | – | – | Y |
+| DATE | – | – | – | – | – | – | – | – | Y | – | Y | – | Y | Y | – | – | – | – | Y |
+| TIME | – | – | – | – | – | – | – | – | Y | – | – | Y | – | – | Y | – | – | – | Y |
+| TIMESTAMP | – | – | – | – | – | – | – | – | Y | – | Y | Y | Y | Y | – | – | – | – | Y |
+| TIMESTAMPTZ | – | – | – | – | – | – | – | – | Y | – | Y | Y | Y | Y | – | – | – | – | Y |
+| INTERVAL | – | – | – | – | – | – | – | – | Y | – | – | Y | – | – | Y | – | – | – | Y |
+| UUID | – | – | – | – | – | – | – | – | Y | – | – | – | – | – | – | Y | – | – | Y |
+| JSON | – | – | – | – | – | – | – | – | Y | – | – | – | – | – | – | – | Y | Y | Y |
+| JSONB | – | – | – | – | – | – | – | – | Y | – | – | – | – | – | – | – | Y | Y | Y |
+| CHAR | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+
+Identity conversions still apply target bounds. A pair without a conversion fails
+with COHSQLE011, naming CAST and both SQL types. When the source is static (a
+column, typed literal, nested CAST, predicate, resolved call, scalar subquery, or a
+CASE, COALESCE, unary-sign or arithmetic result the binder can infer), planning rejects
+the pair before reading any rows, including empty input and NULL-valued columns.
+This uses the existing binder inference (PostgreSQL src/backend/parser/parse_expr.c:2764-2788).
+Parameter-dependent result types are checked when evaluated, including CASE result arms
+and polymorphic calls; parameters used only in CASE conditions leave its static result type
+intact. NULLIF retains its existing parse-time COHDBL001 unsupported-function diagnostic.
+A NULL operand returns NULL with target metadata; it does not bypass a statically
+unsupported pair or invalid target. SQL integer literals are Int64 and fractional
+literals are Decimal, including exponent and leading decimal-point forms. To
+supply a floating operand, cast text to REAL or DOUBLE first.
+
+- **Contexts.** Each built-in entry carries PostgreSQL's context for the same pair
+  (`src/include/catalog/pg_cast.dat`): widenings among the numbers implicit,
+  narrowings and conversions to text assignment, conversions from text explicit. In
+  this iteration only `CAST` consults the registry; assignment coercion and overload
+  resolution keep their own rules, so a literal string still does not reach a DATE
+  function parameter without a `CAST` (`day_of_year(CAST('2026-02-01' AS DATE))`).
+- **Temporal input** calls the public strict literal readers in `SqlLiteralText`,
+  trimming surrounding whitespace. DATE, TIME, TIMESTAMP, TIMESTAMPTZ and INTERVAL
+  use the [typed-literal grammar](#literals); a TIMESTAMP input containing an offset
+  is rejected. INTERVAL input is day-time only; year-month fields and bare numbers
+  such as '12' fail. INSERT's plain-string assignment acceptance is unchanged.
+  All zone-dependent temporal conversions follow the
+  [timestamp normalization rule](#timestamp-normalization-1110).
+  TIMESTAMP to DATE/TIME extracts fields. INTERVAL to TIME requires
+  `0 <= interval < 24 hours`; it never wraps. UUID input uses invariant Guid parsing.
+- **Floating input and exact targets:** REAL/DOUBLE text accepts invariant
+  `NumberStyles.Float` syntax without grouping, including NaN, Infinity and
+  -Infinity. Finite text that overflows to infinity or nonzero text that underflows
+  to zero fails. DOUBLE to REAL applies the same finite overflow and nonzero
+  underflow checks; exact numeric to float rounds to the represented binary value.
+  NUMERIC-to-REAL parses the exact Decimal text directly to Single, without an intermediate
+  DOUBLE conversion (PostgreSQL src/backend/utils/adt/numeric.c:4691-4696).
+  Float to integer requires a finite whole number in range, without rounding or
+  truncation. NaN and either infinity to any integer target fail with COHSQLE002/22003
+  (src/backend/utils/adt/float.c:1267-1270). Float to NUMERIC parses its shortest round-trip text (including an
+  exponent when present) exactly as Decimal before applying declared scale/precision;
+  non-finite values and values Decimal cannot represent fail.
+- **Character input:** surrounding whitespace is trimmed for numeric, Boolean,
+  temporal, interval, UUID and hexadecimal BYTEA input. Exact numeric text uses
+  `[+-]?[0-9]+(\.[0-9]+)?`; grouping, exponent notation, empty and invalid text fail.
+  Integer and unscaled NUMERIC input must fit Decimal exactly; a declared NUMERIC
+  scale rounds the original digits first, as described below. Boolean input is
+  case-insensitive TRUE/FALSE. TEXT identity preserves whitespace; CHAR-to-TEXT
+  removes trailing ASCII spaces before conversion. JSON text preserves whitespace.
+- **Canonical character output:** Boolean is TRUE/FALSE; exact numbers use invariant
+  decimal formatting. REAL/DOUBLE use shortest round-trip formatting, including
+  NaN, Infinity, -Infinity and -0 (the zero sign is preserved). DATE is yyyy-MM-dd;
+  TIME is HH:mm:ss[.f]; TIMESTAMP is yyyy-MM-dd HH:mm:ss[.f]; TIMESTAMPTZ appends
+  a +/-HH:mm offset. Fractions retain up to seven significant fractional digits,
+  omitting trailing zeros. INTERVAL follows PostgreSQL's postgres style: positive one
+  uses `1 day`, other nonzero day counts use `days` (including `-1 days`), followed by a
+  signed HH:mm:ss[.f] clock only when nonzero. Zero is `00:00:00`; negative durations
+  give both day and clock negative signs. TimeSpan first normalizes mixed-sign fields:
+  `2 days -02:03:04` becomes `1 day 21:56:56`. These forms round-trip through
+  SqlLiteralText even at the temporal and interval extrema. PostgreSQL's emission rules
+  are src/backend/utils/adt/datetime.c:4675-4694,4875-4890.
+  UUID is lowercase hyphenated; BYTEA is `\x` followed by lowercase hex digits,
+  including `\x` for empty bytes. `||` renders each non-null operand with this
+  built-in CAST-to-TEXT formatting, so `TRUE || ''` is TRUE and
+  `DATE '2024-01-01' || ''` is 2024-01-01. NULL still propagates.
+- **BYTEA input:** accepts `\x` plus an even number of hex digits, or the UTF-8
+  bytes of the original backslash-free text, preserving leading/trailing whitespace and
+  whitespace-only payloads (PostgreSQL src/backend/utils/adt/bytea.c:230-231).
+  Hex input retains its separate rules: surrounding whitespace is trimmed, its digits
+  must be contiguous, and `\x` alone produces empty bytes. Invalid hex, an unpaired Unicode surrogate, any
+  other backslash form and a binary length overflow fail; bytes never truncate.
+- **JSON and JSONB:** casts into either validate one JSON value using
+  System.Text.Json JsonDocument with MaxDepth 128; comments, trailing commas,
+  extra values and malformed JSON fail. JSON retains its original text; JSONB
+  stores its validated UTF-8 bytes without normalization. JSON ↔ JSONB validates
+  and preserves the original spelling, property order, duplicates and whitespace.
+  JSONB equality is byte equality, unlike PostgreSQL's normalized JSONB equality;
+  another binary encoding would require a data migration. JSONB-to-text validates
+  the stored UTF-8 JSON before decoding. JSON columns may still accept unvalidated
+  text on INSERT; that assignment behavior is outside CAST. JSON-to-scalar casts
+  remain outside Tier 1.
 - **NULL:** returns NULL for every supported target, with the target's result
   type metadata even when every row is null or the result has no rows. Invalid
   target names/modifiers are still errors with a NULL operand.
@@ -562,55 +1854,419 @@ normalized. Identity conversions in the table still enforce target bounds.
 - **Decimal:** the implementation uses `System.Decimal` (96-bit coefficient,
   scale 0..28), not arbitrary precision. Bare DECIMAL/NUMERIC has no additional
   bound. `DECIMAL(p)` means scale 0; `DECIMAL(p,s)` requires `1 <= p <= 28` and
-  `0 <= s <= p`, `abs(value) < 10^(p-s)`, and no nonzero digits beyond scale s.
-  Excess precision/scale errors; trailing fractional zeros may be discarded
-  without changing value. Text too precise for the runtime errors before it can
-  be rounded. The output does not promise padding to the declared scale.
-- **Strings:** all four string aliases permit an optional positive Int32 length
-  n; bare aliases have no CAST length limit. Length counts UTF-16 code units.
-  Longer results error; CHAR/CHARACTER do not pad, and no alias truncates.
-  Integer and Boolean targets take no parameters.
-- **Diagnostics and metadata:** unknown names produce parse error `SQL0004`;
-  recognized unsupported targets and invalid target
-  arguments produce `SQL0005`; malformed CAST syntax produces `SQL0003`. Conversion failures throw `DatabaseException`
-  naming CAST and its target, surfaced as query errors over the wire. The AST
+  `0 <= s <= p`. The value rounds to s fractional digits, with midpoint ties away
+  from zero, then must satisfy `abs(value) < 10^(p-s)` or it fails with `COHSQLE002`
+  (22003). Text rounds directly to the target scale before Decimal conversion,
+  avoiding a second rounding caused by Decimal's own precision limit. If the rounded
+  text still cannot fit Decimal exactly, or unscaled text cannot fit it exactly,
+  conversion fails with the same `COHSQLE002` code.
+  The output does not promise padding to the declared scale.
+- **Strings:** CHAR/CHARACTER and VARCHAR/TEXT permit an optional length
+  n from 1 through 10485760; bare CHAR is CHAR(1), while bare VARCHAR/TEXT have no CAST length limit.
+  Length counts Unicode scalar values. Longer results truncate at a character boundary; CHAR pads shorter results. The
+  binary aliases permit the same optional length in bytes. Other targets follow the
+  shared [type-modifier rules](#type-modifiers-at-declaration-1438); domains take no parameters.
+- **Diagnostics and metadata:** a name that is not a built-in type and that the
+  engine does not register as a domain fails while planning with `COHSQLE010`
+  (`SQL0004` is retired: the parser no longer knows which names exist); invalid
+  target arguments produce `SQL0005`; recognized but unsupported temporal precision
+  produces `COHDBL001`; malformed CAST syntax produces `SQL0003`.
+  A pair no registered cast converts is `COHSQLE011` (SQLSTATE 42846). A conversion
+  that fails on the value (a `FormatException`, `OverflowException` or
+  `InvalidCastException`, the only failures the built-in casts throw, an
+  application's alike) throws `DatabaseException` naming CAST and its target, with
+  the original as the inner exception, surfaced as a query error over the wire.
+  A built-in NUMERIC conversion's representation failure or modifier overflow
+  instead carries `COHSQLE002` (22003), after rounding to its declared scale when
+  present. A cast that throws anything else, a cancellation the statement did not ask for
+  included, fails with `COHSQLE007` (`Cast TEXT AS cents failed: ...`), as a
+  function does, and the connection stays usable; a `DatabaseException` it throws
+  passes unchanged. A value a domain target's check refuses is the
+  `SqlConstraintViolationException` of kind `DOMAIN` a write raises. The AST
   retains full `DatabaseTypeInfo`; in-process result columns expose the base
   `DatabaseType` and conservative nullability. The existing wire/client contract
   exposes the base type, with a matching boxed runtime value. Neither result
-  contract has length/precision/scale fields; the client has no nullability field.
+  contract exposes precision/scale fields; CHAR result metadata includes its length,
+  and the client has no nullability field.
 
-This is a deliberate ISO/IEC 9075 subset: approximate numerics and other type
-families are excluded; lossy narrowing raises an error, and fixed character
-padding is not implemented. CAST in DEFAULT and CHECK is rejected by planning.
+This is a deliberate ISO/IEC 9075 subset: integer conversion requires an exact
+value, declared numeric scale rounds, explicit character conversion truncates,
+and CHAR pads shorter results. CAST in DEFAULT and CHECK is
+rejected by planning.
 CAST values in INSERT/UPDATE are converted before the existing destination-column
 storage coercion; nested arithmetic therefore sees the converted numeric value.
 
 ## Builtin functions
 
-The profile's function list is lexical vocabulary, not an execution claim and
-not part of the 49-clause denominator. Executable scalar functions are `COALESCE`,
-`UPPER`, `LOWER`, `LENGTH`, and `ABS`; supported aggregates are `COUNT`, `SUM`,
-`AVG`, `MIN`, and `MAX`, under the contract below.
-Other parsed calls can still fail in planning/evaluation and must not be inferred
-to work from a supported `SELECT`. Recognized names include aggregates `COUNT`,
-`SUM`, `AVG`, `MIN`, `MAX`; null handling `COALESCE`, `NULLIF`; strings `TRIM`,
-`LTRIM`, `RTRIM`, `UPPER`, `LOWER`, `SUBSTRING`, `LENGTH`, `REPLACE`, `CONCAT`;
-numeric `ABS`, `CEILING`, `FLOOR`, `ROUND`, `POWER`, `SQRT`, `MOD`; date/time
-`NOW`, `CURRENT_DATE`, `CURRENT_TIME`, `CURRENT_TIMESTAMP`, `EXTRACT`. Window
-function names are lexed but not supported (see the statement matrix).
+The profile's function list is the executable built-in set: `COUNT`, `SUM`, `AVG`,
+`MIN`, `MAX`, `ABS`, `LENGTH`, `UPPER`, `LOWER`, `COALESCE` and `CAST`. It is
+not part of the 49-clause denominator. The engine's function catalog (E2) also runs
+the functions the application registered on the
+engine builder (`SqlDatabaseEngineBuilder.Functions`), which every database of the engine
+calls exactly as it calls the built-ins. Executable built-in scalars are `UPPER`, `LOWER`,
+`LENGTH` and `ABS`, beside the special form `COALESCE`; built-in aggregates are `COUNT`,
+`SUM`, `AVG`, `MIN` and `MAX`, under the contract below. The planner checks every call
+against its function's overloads before it reads a row, the evaluator checks again before
+it computes one, and opening a database checks every stored CHECK (#1189). A call outside
+them reports `COHSQLE006` (see Function arguments under
+[Statement completeness](#statement-completeness-1068)):
+
+| Function | Kind | Arguments | Accepted call forms |
+|---|---|---|---|
+| `COALESCE` | Scalar | 1 or more | `COALESCE(value [, value ...])` |
+| `UPPER`, `LOWER`, `LENGTH` | Scalar | Exactly 1 | `UPPER(value)`, `LOWER(value)`, `LENGTH(value)` |
+| `ABS` | Scalar | Exactly 1 | `ABS(numeric)` |
+| `COUNT` | Aggregate | Exactly 1, or `*` | `COUNT(*)`, `COUNT(value)` |
+| `SUM`, `AVG` | Aggregate | Exactly 1 | `SUM(numeric)`, `AVG(numeric)` |
+| `MIN`, `MAX` | Aggregate | Exactly 1 | `MIN(value)`, `MAX(value)` |
+
+`*` is an argument only of `COUNT`: `SUM(*)` and `UPPER(*)` report `COHSQLE006`.
+**`COALESCE` takes one or more operands, a recorded deviation from ISO.** ISO/IEC
+9075-2's `<case abbreviation>` spells `COALESCE` with two or more value expressions;
+PostgreSQL's grammar (`COALESCE '(' expr_list ')'`) accepts one or more, and the
+dialect follows PostgreSQL. `COALESCE(x)` is `x`, so accepting it changes no result
+and keeps PostgreSQL text running; `COALESCE()` is an error in all three. The
+argument-type, result-type and NULL rules of the T1 functions (#1120) extend these
+same signatures. `ABS` accepts every numeric
+storage type: integer arguments return BIGINT (so `ABS` of the INT minimum is
+exact), REAL returns REAL, DOUBLE returns DOUBLE, and DECIMAL returns DECIMAL.
+`ABS` of the BIGINT minimum reports `COHSQLE002`.
+`COALESCE`, `NULLIF`, `CASE`, `CAST` and `EXTRACT` are grammar, not catalog functions:
+`COALESCE` evaluates its operands lazily, so one after the first non-NULL operand never
+runs, and an application cannot register a function under any of those names or under a
+keyword.
+
+**Registered functions.** An application function has a name (an identifier), parameter
+types, a result type, a volatility and a NULL rule. A name and parameter-type list is
+registered once, and a name is either scalar or aggregate. A built-in cannot be replaced: an
+overload of a built-in's name is accepted only for a number of arguments the built-in does
+not take (`upper(TEXT, BIGINT)` beside `UPPER(value)`). A name in the recognized-unsupported vocabulary (`TRIM`, `NOW`, `ROUND`, ...), a type name (`INT`, `DATE`), `ANY`,
+`SOME`, `LOCALTIME` and `LOCALTIMESTAMP` cannot be registered. An argument converts to its
+parameter's type along INT8 → INT16 → INT32 → INT64 → NUMERIC → DOUBLE, or REAL → DOUBLE;
+nothing converts from text, so a DATE or UUID parameter takes a column or a parameter of
+its type, not a string literal. Inside a grouping, a grouping key or an aggregate result
+has its type for that choice (`describe(COUNT(*))` calls `describe(BIGINT)`). A strict
+function (the default) returns NULL over a NULL argument without being called, and a strict
+aggregate skips the row. An `IMMUTABLE` call whose arguments are constants or parameters is
+computed once, while the statement is planned. Immutable constant calls in shared SQL function/domain
+bodies, table CHECKs and DEFAULT expressions can also fold when the definition is bound, using that
+operation's cancellation token. Remaining calls use the evaluating statement's token. A `CHECK` admits only `IMMUTABLE` functions,
+so a function registered with the default `VOLATILE` volatility is refused there, naming its
+volatility; one returning BOOLEAN is a predicate by itself, and DDL refuses a CHECK that
+compares an application function's result with a value of a type it does not compare with,
+or uses one that is not a number in arithmetic. What a function throws fails the statement
+as `COHSQLE007`, which names it, and so does a result of another type than the function
+declares (a type that widens to the declared one is converted); the statement writes
+nothing and an explicit transaction stays usable, as for every coded failure. A sign over a
+constant is itself a constant, so `ABS(-5)` is computed once too. An application function's
+`OperationCanceledException` is also `COHSQLE007` unless the statement's own token is
+canceled, regardless of the exception's token. This applies to every aggregate phase and
+to engine/SQL domain checks and application calls inside SQL functions, including LIMIT/OFFSET,
+seek-bound evaluation and constant folding during planning. Actual cancellation stops folding
+immediately; it is never deferred and retried as a function failure. The coded error
+leaves the wire connection usable; actual statement cancellation retains its cancellation behavior.
+
+A statement waiting for another statement to bind the same shared function body, collation variant
+or table definition can cancel its own wait. It does not cancel the computing statement. Different
+entries and unrelated metadata queries proceed independently. Canceled or failed binding attempts
+are not cached; a subsequent caller retries using its own token. Definition DDL remains committed
+if its following body preparation fails, and later statements prepare only the entries they need.
+
+**A stored CHECK whose function is gone.** A CHECK stores canonical SQL and each call's
+resolved function identity. A later engine build may omit that exact signature, change
+its volatility from Immutable, or register a result type that no longer fits where the
+CHECK uses it (a BOOLEAN predicate, a comparison). Another overload never replaces it.
+The database still opens and
+its reads proceed; every write that would evaluate the CHECK (an `INSERT`, an `UPDATE`, or a
+DDL backfill over existing rows) fails with `COHSQLE009`, naming the constraint, the table and
+the call as the CHECK makes it, on a session or connection that stays usable. A `DELETE`, an
+unrelated `DROP COLUMN` and `ALTER TABLE ... DROP CONSTRAINT` still run, and dropping the
+constraint lets the table's writes through again. An engine that declares the database (its
+builder's `AddDatabase`) fails its build with the same code instead, before it accepts work:
+
+```text
+COHSQLE009: CHECK constraint 'ck_email' on table 'dbo.customers' calls function 'is_email(TEXT)', which this engine does not register, so the constraint cannot be evaluated and the write is refused. Register the function on the engine's builder (SqlDatabaseEngineBuilder.Functions), or drop the constraint.
+```
+
+Native, built-in and SQL calls all reload by recorded identity. Special forms such as
+`COALESCE` have no function identity; its wrong arity is the #1189 case under
+[Persisted definitions are canonical](#persisted-definitions-are-canonical), which still
+fails the open.
+
+A call found in neither the engine catalog nor the profile's executable and recognized-
+unsupported lists fails at plan time with `COHSQLE016`, `Unknown function '<name>'.`
+before any row is read (#1068). Recognized unsupported functions fail at parse time with
+exactly one `COHDBL001` naming the function, even over an empty table (#1103):
+`NULLIF`, `TRIM`, `LTRIM`, `RTRIM`, `SUBSTRING`, `REPLACE`, `CONCAT`, `CEILING`,
+`FLOOR`, `ROUND`, `POWER`, `SQRT`, `MOD`, `NOW`, `CURRENT_DATE`, `CURRENT_TIME`,
+`CURRENT_TIMESTAMP`, `LOCALTIME`, `LOCALTIMESTAMP`, `EXTRACT`, and the nine window
+functions `ROW_NUMBER`, `RANK`, `DENSE_RANK`, `LEAD`, `LAG`, `FIRST_VALUE`,
+`LAST_VALUE`, `NTH_VALUE` and `NTILE`. Window rejection also works when these names
+lex as identifiers. An OVER clause keeps its existing clause diagnostic.
+
+The ISO datetime value functions `CURRENT_DATE`, `CURRENT_TIME`, `CURRENT_TIMESTAMP`,
+`LOCALTIME` and `LOCALTIMESTAMP` receive that diagnostic with or without parentheses.
+An unqualified, unquoted name in that set never binds a column; quote the identifier to read a
+same-named column. PostgreSQL likewise parses these value functions separately from column
+references (`src/backend/parser/gram.y:16180-16214`, `17315-17329`, `18019-18049` in the local
+reference clone). Schema rendering quotes both executable function names and the
+recognized-unsupported vocabulary, including `rank`, `current_date` and `localtime`.
+Reapplying the same compiled schema remains a no-op; quoting does not change its identity.
+
+`SqlLanguageConformanceTests` is the single function-coverage guard: every declared
+function needs a passing live case, and a case for a retired name fails too. A feature
+that starts executing a function adds its name and live case and flips its `COHDBL001`
+pin in the same change.
 
 ## Diagnostics
 
 | Code | Severity | Meaning |
 |---|---|---|
-| `COHDBL001` | Error | Recognized clause is not supported by the SQL model surface |
+| `COHDBL001` | Error | Recognized clause, keyword, function, operator or type modifier is not supported by the SQL model surface, including prefix and infix `~` (#1101), temporal precision and INTERVAL field qualifiers in declarations and CAST (#1438); the message names the construct and, for a modifier, its declaration |
 | `SQL0001` | Error | Empty query text |
 | `SQL0002` | Error | Unknown command (recognized unsupported clauses use `COHDBL001`) |
-| `SQL0003` | Error | Malformed transaction-control, JOIN, GROUP BY, HAVING, CAST, COLLATE, or constraint/DDL syntax |
-| `SQL0004` | Error | Unknown CAST target type |
-| `SQL0005` | Error | Unsupported CAST target or invalid target parameters |
+| `SQL0003` | Error | Malformed syntax: text after a complete statement or after its terminating `;`; a missing expression, closing token, keyword, name or `VALUES` row; an unterminated string, quoted identifier or block comment; a character outside the dialect, such as `?`, `#`, `^` or a non-ASCII digit, which binds no alias or column (#1101); a numeric literal whose exponent has no digits; an `IS` form other than `[NOT] NULL`; `NOT` after an operand without `BETWEEN`, `IN` or `LIKE`; `LIKE ... ESCAPE`; `LIMIT` after `OFFSET`; an incomplete `IF [NOT] EXISTS`; `ALTER` without `TABLE`; an unsupported or incomplete `ALTER TABLE` action; and malformed transaction-control, JOIN, GROUP BY, HAVING, CAST, COLLATE, or constraint/DDL syntax |
+| `SQL0004` | — | Retired (E3): an unknown CAST target type was a parse error; a name that is not a built-in type is now resolved by the engine, and one it does not know is `COHSQLE010` |
+| `SQL0005` | Error | Invalid type modifiers at any declaration or CAST: malformed arguments (including CHAR(MAX)), out-of-range length/precision/scale (including FLOAT outside 1..53 bits), arguments a type does not take, or a rejected type spelling (BIT, SMALLDATETIME, TIME WITH TIME ZONE); names the declaration and reason. Temporal precision and INTERVAL qualifiers use COHDBL001 |
+| `SQL0006` | Error | Expression nesting exceeds the limit (256 levels by default, configurable within 32..4096), or parentheses nest deeper than the limit; an `AND`/`OR` chain counts one level. The rest of the statement is not parsed. An engine also reports it for a typed request whose statement nests deeper than the engine's limit (#1151) |
+| `SQL0007` | Error | The statement is within the nesting limit, but the thread parsing it has too little stack left to recurse that deep; the same text parses on a thread with more stack. An engine parsing statement text reports this as `COHSQLE004` (#1151) |
+| `SQL0008` | Error | Invalid DATE, TIME, TIMESTAMP, TIMESTAMPTZ, day-time INTERVAL or X binary literal content; the span covers the complete literal. Recognized unsupported forms use COHDBL001 |
 | `SQL0100` | Information | Statement does not end with `;` |
+| `COHSQLE001` | Error | Division by zero during evaluation (ISO SQLSTATE 22012) |
+| `COHSQLE002` | Error | Numeric value out of range during evaluation, store assignment, DEFAULT conversion or built-in NUMERIC CAST, including an inexact Decimal representation after any declared-scale rounding (ISO SQLSTATE 22003) |
+| `COHSQLE003` | Error | Unary `+` or `-` over a non-numeric operand (ISO SQLSTATE 42804) |
+| `COHSQLE004` | Error | Statement too complex: parsing it or a walk over it needs more stack than the executing thread has left, which a statement within a high configured nesting limit, a deeply backtracking `LIKE` match or a thread created with a small stack can reach (ISO SQLSTATE 54001, #1151) |
+| `COHSQLE005` | Error | Column reference in a clause with no columns in scope: an `INSERT ... VALUES` row or a `LIMIT`/`OFFSET` count, raised while planning (ISO SQLSTATE class 42, #1165) |
+| `COHSQLE006` | Error | Function call whose arguments no overload of its function accepts: a count outside every overload's (`ABS(1, 2)`, `UPPER()`, `COALESCE()`, `COUNT(a, b)`, `SUM()`), `*` for a function other than a parameterless aggregate such as `COUNT`, or argument types no overload takes (`SUM(name)` over text). Raised while planning, in every expression position, `CHECK` and `DEFAULT` included; by the evaluator for a call that reaches it unplanned; and by opening a database whose catalog stores a CHECK holding `COALESCE` with no operand (ISO SQLSTATE class 42; PostgreSQL's 42883, undefined function, #1189) |
+| `COHSQLE007` | Error | A function threw while the statement ran: anything but a `DatabaseException`, cancellation of the statement itself or an exhausted stack or memory, which is the inner exception; or a `CAST`'s registered cast threw anything but those and a value's fault (`FormatException`, `OverflowException`, `InvalidCastException`), a cancellation the statement did not ask for included (`Cast TEXT AS cents failed: ...`, E3); or a function returned a value of another type than it declares (one that widens to the declared type is converted), or NULL when it declares it never returns NULL. The message names the function (ISO SQLSTATE 38000, external routine exception; E2) |
+| `COHSQLE008` | Error | A function call that more than one overload accepts equally well, such as an overloaded function over a NULL literal. Raised while planning; a `CAST` on an argument chooses (ISO SQLSTATE 42725, ambiguous function; E2) |
+| `COHSQLE009` | Error | A write would evaluate a stored CHECK that calls a function the engine does not register, registers as an aggregate, registers with no overload, or more than one, that accepts the stored call, or registers with a result that no longer fits where the CHECK uses it. The database opens and its reads proceed; the message names the constraint, the table and the call. An engine build that declares the database fails with it (ISO SQLSTATE 42883, undefined function, as PostgreSQL raises at use for a missing implementation; E2, owner decision 65) |
+| `COHSQLE010` | Error | A type name that is neither a built-in type nor a domain in the merged engine/SQL type environment: a column type in DDL or a `CAST` target, raised while planning; or a write that assigns a stored column whose domain the opening engine cannot resolve, or resolves over another storage type, length, precision or scale than the column stores. The database opens and its reads, and writes that do not assign the column, proceed; an engine build that declares the database fails with it (ISO SQLSTATE 42704, undefined object, PostgreSQL's "type ... does not exist"; E3, decision 65's rule applied to domains). The one code names both causes, an unknown name while planning and a stored column's unregistered domain, where E2 split a function's two (`COHSQLE006`, `COHSQLE009`); whether to split it is an open owner question |
+| `COHSQLE011` | Error | A `CAST` whose operand's type no registered cast converts to the target, nor is of its storage type: raised while planning when the plan knows the operand's type, the same over an empty table as over a populated one, and while evaluating for a parameter, whose type only its value reveals (ISO SQLSTATE 42846, cannot coerce, PostgreSQL's "cannot cast type ... to ..."; E3) |
+| `COHSQLE012` | Error | Character value exceeds its destination's declared length and the excess is not entirely ASCII spaces: INSERT, INSERT ... SELECT, UPDATE, DEFAULT or ADD COLUMN backfill, for plain columns and domain base types. Explicit CAST truncates instead (ISO SQLSTATE 22001, string data right truncation; #1418) |
+| `COHSQLE013` | Error | Invalid statement, expression, DDL or query shape for the executor |
+| `COHSQLE014` | Error | Table does not exist |
+| `COHSQLE015` | Error | Unknown or ambiguous column |
+| `COHSQLE016` | Error | Unknown function, absent from executable and recognized-unsupported vocabulary |
+| `COHSQLE017` | Error | Invalid aggregate placement or grouping expression |
+| `COHSQLE018` | Error | Invalid ordering ordinal, row count or CAST target declaration |
+| `COHSQLE019` | Error | Duplicate target column, table binding or ambiguous output alias |
+| `COHSQLE020` | Error | No value supplied for a parameter; rejected before rows are read or written |
+| `COHSQLE023` | Error | Caller parameter keys collide after one leading sigil is stripped |
 
 Positions are absolute character offsets into the statement text; line/column
 presentation is computed by tooling from the source (offset → line mapping), not
 carried per node.
+
+**Keyword disposition (#1101).** Every keyword of the profile, and every entry of
+the internal recognized-unsupported table (`SqlUnsupportedVocabulary`), either
+parses inside a supported clause or reports exactly one `COHDBL001` naming its
+construct. The table holds the clause keywords the preflight scan rejects,
+`UNION` through `USING` in the statement matrix. It also holds every other word or
+operator outside the profile's keywords that a dedicated rule recognizes and
+rejects with `COHDBL001`: `WITH`, `SELECT ALL`, `CREATE`/`DROP VIEW`,
+`CREATE COLLATION`, `CREATE FULLTEXT`, `NULLS FIRST`/`LAST`, `GROUPING SETS` and
+the `GROUPING`, `ROLLUP`, `CUBE` and `GROUPING_ID` calls, `FILTER (...)` and
+`WITHIN GROUP` after a call, the `ANY`/`SOME` (and `ALL`) quantified comparisons,
+`LATERAL`, and `~`. It also holds the recognized non-executing functions listed
+above, including the window and niladic datetime names (#1103). Profile keywords
+that start an unsupported form by another rule, such as `LEFT` or `CROSS`, need no entry.
+A recognized construct is skipped once it is reported, so the text after it adds
+no second diagnostic: `= ANY (SELECT ...)` no longer parses as a call to a
+function named `ANY`, `LATERAL` is no longer bound as a table name, and `WITHIN`
+is no longer read as a column alias. `SqlKeywordDispositionTests` (Sql.Language)
+holds one case per word. It fails when a keyword or table entry is added without
+one, so the item that adds a word adds its case in the same change. It also fails
+when an entry's diagnostic does not name the construct the table records for it.
+
+Every planner rejection carries structured `DatabaseException.Diagnostics`: a stable code,
+severity, message and the offending AST location where available. The in-process message
+contains no code prefix. SQL composes `CODE: message` from the structured code
+for `ExecutionFailure`; [negotiated diagnostics](#wire-diagnostics-1105) add structured delivery.
+Text factories and sessions throw `DatabaseParseException` containing every statement
+diagnostic, ordered by start offset. A parsed typed request with errors throws the same
+exception with the same complete list; no recovery AST executes. The first-error message
+retains its existing `SQL parse error CODE: message` spelling.
+While planning, the engine raises `COHSQLE003` for a sign over an operand it knows
+is not a number, `COHSQLE005` for a column reference where no columns are in
+scope, `COHSQLE006` for a function call whose arguments no overload of its function
+accepts, and `COHSQLE008` for one several accept equally well; a `LIMIT`/`OFFSET` count
+is evaluated while planning, so its arithmetic
+faults (`COHSQLE001`, `COHSQLE002`) surface there too, and `COHSQLE004` can come
+from any planner walk. Comparison-literal coercion for an access path falls back
+to residual evaluation if the value fails the destination's declared bounds.
+
+The `COHSQLE` codes are engine diagnostics, not parser diagnostics. They are structured
+in process, with source offsets when planning has an offending AST location; a runtime
+failure without a source location leaves its offsets null. The wire's
+`ExecutionFailure` text leads with the code. The arithmetic fault contract above
+defines when each of `COHSQLE001`–`COHSQLE003` is raised, the expression
+nesting limit when `COHSQLE004` is, the column-scope rule for VALUES and
+counts when `COHSQLE005` is, the function-argument and overload rules under Statement
+completeness when `COHSQLE006` and `COHSQLE008` are, and the registered-function rules
+under Builtin functions when `COHSQLE007` and `COHSQLE009` are, the type and cast rules
+under Explicit conversion when `COHSQLE010` and `COHSQLE011` are, and Declared bounds
+on writes when `COHSQLE012` is. The engine's transaction-state codes,
+`COHSQLT001`–`COHSQLT003`, its offline-database code, `COHSQLT004`, and its aborted-transaction
+code, `COHSQLT005`, are documented in the SQL engine design.
+
+## Code-first literal defaults (B2)
+
+The typed schema's `table.Default(selector, value)` renders C# values into SQL literals: strings
+and characters are quoted with apostrophes doubled, numbers use invariant culture, Boolean
+values use `TRUE`/`FALSE`, and null uses `NULL`. Temporal values and GUIDs use invariant quoted
+text converted to the column type. Enums use their numeric storage values.
+`table.DefaultSql(selector, sqlLiteral)` is the escape hatch for a raw supported SQL literal,
+for example `DefaultSql(row => row.Placed, "DATE '2026-01-01'")`. All supported typed literal forms are accepted. Both declarations store the rendered literal text in the
+`cohesion/database-schema/v7` document, so equal text gives the same hash. This format records CHAR separately from VARCHAR and normalizes
+an omitted decimal scale to zero when precision is present. Earlier artifacts, applied markers
+and pending targets are refused before hash comparison (SqlSchemaValidationException,
+InvalidDocument at schema.format; COHDBSDK206 for SDK migration input). Rebuild artifacts and
+recreate databases recording an earlier schema format; there is no upgrade or old-hash reconciliation.
+
+`DEFAULT -7` and `DEFAULT -1.2500` accept a single numeric minus. Arithmetic, nested unary expressions,
+functions and other computed expressions remain unsupported in typed defaults and ADD COLUMN; see E4 below for CREATE TABLE function-call defaults. `DEFAULT NULL` has the same
+stored meaning as no default. A binary default is a quoted `\x` prefix followed by even-count
+hexadecimal digits, for example `DEFAULT '\x007FFF'`; no whitespace or octal escapes are accepted,
+and the column's length bounds still apply. The typed `byte[]` renderer emits uppercase digits.
+The ISO `DEFAULT X'007FFF'` spelling also works. Quoted backslash-x defaults keep
+resolving after reopen; COLUMN_DEFAULT reports the resolved value as X hex.
+General text-to-BYTEA conversion is separately defined by the [CAST contract](#explicit-conversion-cast-1022-e3).
+
+While a compiled-schema apply runs, ordinary session DDL is refused with
+`DatabaseObjectLockedException`. Writers to tables the apply creates or alters wait until the
+apply, including any compensation, finishes; unrelated table reads and writes continue.
+
+## SQL definitions and declared scripts (E4)
+
+~~~sql
+CREATE FUNCTION increment(p INT) RETURNS INT IMMUTABLE STRICT RETURN p + 1;
+DROP FUNCTION increment(INT);
+CREATE DOMAIN positive AS INT DEFAULT 1 NOT NULL CONSTRAINT positive_value CHECK (VALUE > 0);
+DROP DOMAIN positive;
+~~~
+
+Functions have one expression body. Parameters are named; tables, subqueries, aggregates,
+external parameters and recursion are refused. Defaults are VOLATILE and CALLED ON NULL INPUT,
+as in PostgreSQL src/backend/commands/functioncmds.c:1095-1098. Domain arguments are coerced
+and checked before STRICT bypasses a body on NULL. Thus a bad domain value still fails
+when another argument is NULL; a NOT NULL domain rejects NULL before strict dispatch.
+A function may call only functions whose volatility is at least its own; CHECK, including a
+domain CHECK, admits Immutable functions only. Functions share the engine namespace and E2's
+storage-type overload identity. Domain names in SQL function signatures persist, and their
+bounds and checks apply to arguments before dispatch and results after body execution.
+Parameters keep their domain identity inside the body: a domain-specific cast is selected for
+both a direct domain-column argument and an argument explicitly CAST to that domain, also after
+reopen. Return-domain checks accept the same supported widening as column and argument checks,
+including INTEGER to a BIGINT check parameter. Strict checks skip NULL; CALLED ON NULL INPUT
+checks receive it, and a NOT NULL result domain still rejects it.
+The invocation collation becomes the parameter collation inside the body: a case-insensitive
+column or explicit COLLATE affects comparisons and LIKE, and string results use it for ordering
+and grouping. A call without an input collation uses the database default. Body variants are
+bound once per collation and reused. Iteration 1 has no CREATE OR REPLACE, procedural body, LANGUAGE,
+CASCADE, qualified function name or domain-over-domain, unlike PostgreSQL's broader facilities.
+
+Every persisted function call in table/domain CHECKs, column/domain DEFAULTs and SQL bodies
+records its normalized name and resolved parameter signature beside canonical SQL. A later
+overload never rebinds these calls, including after reopen with different engine registrations.
+DROP dependencies use the same identities. A missing recorded identity or a native signature
+whose volatility has weakened below the persisted use's requirement follows COHSQLE009. The
+database opens and stored rows remain readable; affected writes fail, including through SQL
+wrappers and domain CHECKs, including domains in casts and function parameter/result types.
+Reopening with the original compatible registration restores use.
+New declarations still reject incompatible volatility. CHECK rechecks Immutable-only admission
+on every bind. Domain defaults remain literal-only
+and carry an empty call list. Format 10 is unchanged and has no compatibility reader.
+
+Domains share E3's type namespace and coercion/check path. Columns inherit their domain's
+literal default unless they supply one; explicit DEFAULT NULL overrides inheritance. Domain
+bounds and NOT NULL apply on writes and CAST. SQL definitions persist as canonical expressions.
+DROP refuses dependencies in other function/domain bodies, CHECK, DEFAULT, casts and domain
+columns. Ordinary DDL cannot drop Schema-owned objects. Engine registrations cannot be dropped.
+DROP FUNCTION checks the requested normalized signature: an engine-registered overload is
+COHSQLD003; an absent overload is COHSQLD001 even when the engine registers another overload
+with the same name. Type aliases and function-name casing do not change that identity.
+
+CREATE TABLE defaults additionally admit column-free scalar function calls, bound once and
+executed for each omitted value. Domain defaults, ADD COLUMN, typed DefaultSql and SDK defaults
+remain literal-only. ADD COLUMN retains the existing missing-tail representation; a volatile
+expression there would change historical rows on each read. ALTER cannot change defaults.
+
+| Code | Meaning |
+| --- | --- |
+| COHSQLD001 | Invalid, duplicate, recursive or volatility-incompatible SQL definition; non-Boolean CHECK predicate; absent function/domain requested by DROP. |
+| COHSQLD002 | A persisted definition or column depends on the object being dropped. |
+| COHSQLD003 | SQL attempted to drop an engine-registered function/type. |
+| COHSQLS001 | A script checksum, identity, completed target or object claim is inconsistent, or publication does not match the actual mutation and exact preceding receipt/generation. |
+| COHSQLS002 | Verify requires a complete receipt with the declared checksum. |
+| COHSQLS003 | Transaction control inside a declared script; the runner owns transactions. |
+| COHSQLS004 | A script statement failed or attempted to adopt an existing table or index. |
+| COHSQLS005 | A script attempts ALTER TABLE, DROP TABLE or DROP INDEX against an object declared by the typed schema; declare the change in the typed schema. |
+
+Definition-binding COHSQLD001 rejections carry the code separately from their message in
+DatabaseException.Diagnostics. The span identifies the offending expression, or the statement
+when a parameter/type has no separate token location. Binding retained catalog metadata uses its
+canonical expression/type fragment when the original declaration is unavailable. In particular,
+CREATE TABLE c (id INT CHECK (id)); locates id in CHECK, and DROP DOMAIN absent; locates DROP.
+The in-process message is unprefixed; the SQL server composes CODE: message.
+
+SqlDatabaseBuilder.Script(name, sql) runs after the typed schema in declaration order. Names are
+case-sensitive, unique and at most 128 characters. Exact UTF-8 bodies are SHA-256 checked;
+whitespace changes the checksum. Parsing precedes file I/O and lexical semicolon splitting
+respects strings, quoted names and comments. Deleting a declaration undoes nothing. Each statement
+commits with a receipt; crash recovery resumes after its committed prefix, including DML.
+DDL receipts certify the catalog's actual mutation: its target must match the parsed statement,
+and its preceding receipt and generation must still match before commit. The catalog derives the
+object claims. An IF EXISTS drop of an absent object completes its receipt without advancing
+DDL generation. Outside the unchanged digest/generation O(1) skip, Apply and Verify validate every
+completed statement's target and created-object claims against the declared SQL. Function receipts
+retain the CREATE definition's or bound DROP request's parameter type spellings together with the
+actual signature, so removed or redefined domains do not prevent validation of completed statements.
+An inconsistency is `COHSQLS001`; Verify still requires every declared script to be complete.
+The typed schema exclusively owns its declared tables and indexes. Script ALTER TABLE and DROP
+TABLE against a typed table, and DROP INDEX against a typed index (including its primary key),
+are refused before Build opens or changes the database. Scripts may create and later alter their
+own tables, create their own indexes on typed tables, and run DML against typed tables.
+Scripts run inline, including data-scaling DDL, and force preceding typed migrations inline.
+SDK v7 artifacts do not carry scripts; extraction refuses Script calls with COHDBSDK110.
+
+## Quoted calls (#1103 review)
+
+A quoted identifier followed by parentheses is a function call. Recognized unsupported
+built-ins use their lowercase lookup spelling for quoted names: `"sqrt"(id)` reports
+parse-time `COHDBL001`, while `"SQRT"(id)` and `"Sqrt"(id)` are distinct names outside
+that vocabulary. Unquoted names match the vocabulary without regard to case. Quoting a name
+without parentheses keeps it a column reference, including `"sqrt"` and `"current_date"`.
+Declared executable calls such as `"abs"(id)` remain executable. Unknown function names
+continue to be resolved by the engine's function catalog during planning.
+
+PostgreSQL preserves delimited spelling in `src/backend/parser/scan.l:773-783`, folds
+unquoted identifiers at `scan.l:1067`, and looks up that name through
+`src/backend/parser/parse_func.c:1608` and `src/backend/catalog/namespace.c:1237`.
+This is the reference for the quoted unsupported-vocabulary comparison; it must not fold
+quoted names to match uppercase vocabulary entries.
+
+## Diagnostic completion (#1103 review)
+
+| Code | Meaning | PostgreSQL SQLSTATE |
+| --- | --- | --- |
+| `COHSQLE021` | A mutation targets a read-only system relation | 25006 (read-only SQL transaction, analogous restriction) |
+| `COHSQLE022` | A CAST input has invalid text representation | 22P02 |
+| `COHSQLE024` | A column that disallows NULL receives NULL, including DEFAULT with no declared default | 23502 (`not_null_violation`) |
+
+NOT NULL failures carry one error diagnostic naming the column, with no source span at
+execution time. The existing missing-default and explicit-NULL message texts are unchanged.
+PostgreSQL raises the same constraint category in `src/backend/executor/execMain.c:2268-2274`.
+Execution-time diagnostic work #1653 now treats NOT NULL as done; `COHSQLE023` belongs to #1102.
+
+CAST range/precision faults use existing `COHSQLE002` (22003), division/remainder by zero
+uses `COHSQLE001` (22012), and operand-type errors including NOT and binary arithmetic
+use `COHSQLE003` (42804). Unsupported evaluator nodes/operators use `COHSQLE013`.
+The carrier retains an available expression span at runtime and during LIMIT/OFFSET
+planning. Column-scope failures use the offending column span, including INSERT VALUES.
+PostgreSQL's corresponding data exception codes are declared in
+`src/backend/utils/errcodes.txt:168,206,197` (22012, 22P02, 22003).
+
+## Wire diagnostics (#1105)
+
+On negotiated protocol 2.1 with the diagnostics capability, Warning and Error diagnostics retain code, severity, message and source span over the model wire within the 4,096-entry and 1 MiB limits. Overflow retains a leading prefix plus COHDBP001 with exact omission counts, preserving the original failure text or successful result and a usable session. Null/empty code and message fields decode as null. Information diagnostics are omitted. A negotiated 2.0 connection retains the existing Error text and result frames. Language admission and execution semantics are unchanged.

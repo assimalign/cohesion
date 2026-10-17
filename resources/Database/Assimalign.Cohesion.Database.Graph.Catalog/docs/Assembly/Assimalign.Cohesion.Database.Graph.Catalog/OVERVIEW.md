@@ -1,6 +1,6 @@
 # Graph catalog API
 
-`GraphCatalog.Open` creates an `IGraphCatalog` over graph storage and its transaction
+`GraphCatalog.Open` creates the sealed `GraphCatalog` over graph storage and its transaction
 coordinator. `GraphLabelMetadata` and `GraphRelationshipTypeMetadata` carry stable GUIDs,
 case-sensitive names, ownership, and owning schema. `GraphPropertyKeyMetadata` declares
 optional value type and requiredness. `GraphIndexMetadata` names a node-property index.

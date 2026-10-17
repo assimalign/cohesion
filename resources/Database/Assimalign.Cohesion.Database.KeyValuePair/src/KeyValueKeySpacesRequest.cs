@@ -17,7 +17,7 @@ public sealed class KeyValueKeySpacesRequest : KeyValueRequest
     /// Initializes a request for the current database's key-space metadata.
     /// </summary>
     public KeyValueKeySpacesRequest()
-        : base(new KeyValueStatement(KeyValueOperation.KeySpaces))
+        : base(KeyValueOperation.KeySpaces)
     {
     }
 }

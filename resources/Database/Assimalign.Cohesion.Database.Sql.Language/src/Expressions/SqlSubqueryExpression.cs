@@ -16,6 +16,7 @@ public sealed class SqlSubqueryExpression : SqlExpression
         : base(location)
     {
         Select = select;
+        Depth = 1 + select.ExpressionDepth;
     }
 
     /// <summary>

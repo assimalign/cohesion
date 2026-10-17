@@ -1,3 +1,5 @@
+using System;
+
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Transactions;
 
@@ -15,11 +17,14 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 internal readonly struct SqlStatementContext
 {
     internal SqlStatementContext(
-        ITransactionContext transaction,
+        TransactionContext transaction,
         TransactionCoordinator coordinator,
         string? provisioningSchema = null,
         string databaseName = "",
-        ISqlCatalogSnapshot? catalogSnapshot = null)
+        SqlCatalogSnapshot? catalogSnapshot = null,
+        TransactionSequence? ddlLockOwner = null,
+        Action<long, long?>? provisioningProgress = null,
+        SqlCatalogScriptPublication? scriptReceipt = null)
     {
         Transaction = transaction;
         Coordinator = coordinator;
@@ -27,13 +32,25 @@ internal readonly struct SqlStatementContext
         Metrics = new SqlStatementMetrics();
         ProvisioningSchema = provisioningSchema;
         DatabaseName = databaseName;
-        CatalogSnapshot = catalogSnapshot;
+        Metrics.CatalogSnapshot = catalogSnapshot;
+        DdlLockOwner = ddlLockOwner ?? transaction.Sequence;
+        ProvisioningProgress = provisioningProgress;
+        ScriptReceipt = scriptReceipt;
     }
 
     /// <summary>
     /// Gets the MVCC transaction context the statement executes under.
     /// </summary>
-    internal ITransactionContext Transaction { get; }
+    internal TransactionContext Transaction { get; }
+
+    // Schema steps keep their table locks until the entire apply and compensation end,
+    // while each statement's data/catalog brackets retain their existing commit lifetime.
+    internal TransactionSequence DdlLockOwner { get; }
+
+    internal Action<long, long?>? ProvisioningProgress { get; }
+
+    /// <summary>Gets the receipt published only by this statement's explicit commit.</summary>
+    internal SqlCatalogScriptPublication? ScriptReceipt { get; }
 
     /// <summary>
     /// Gets the database's transaction coordinator.
@@ -58,5 +75,12 @@ internal readonly struct SqlStatementContext
     internal string DatabaseName { get; }
 
     /// <summary>Gets the catalog directory paired with this statement's visibility lifetime.</summary>
-    internal ISqlCatalogSnapshot? CatalogSnapshot { get; }
+    internal SqlCatalogSnapshot? CatalogSnapshot => Metrics.CatalogSnapshot;
+
+    /// <summary>Requires binding to have supplied the catalog image before execution, including empty inputs.</summary>
+    internal SqlCatalogSnapshot RequireCatalogSnapshot()
+        => CatalogSnapshot ?? throw new DatabaseException("Internal invariant: a bound system relation requires a captured catalog snapshot.");
+
+    /// <summary>Captures lazily in the existing shared statement state; context copies use the same image.</summary>
+    internal void CaptureCatalogSnapshot(SqlCatalog catalog) => Metrics.CaptureCatalogSnapshot(catalog);
 }

@@ -26,6 +26,9 @@ public enum ProtocolMessageType : byte
     /// <summary>Either direction: liveness response.</summary>
     Pong = 12,
 
+    /// <summary>Server → client: negotiated structured statement diagnostics.</summary>
+    Diagnostics = 14,
+
     /// <summary>Client → server: orderly session termination.</summary>
     Terminate = 13,
 }

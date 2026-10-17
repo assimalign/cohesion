@@ -15,15 +15,9 @@ public static class SqlSchemaMigrationPlanner
     public static SqlSchemaMigrationPlan Plan(SqlCompiledSchema? current, SqlCompiledSchema desired)
     {
         ArgumentNullException.ThrowIfNull(desired);
-        StringComparer identifiers = desired.Model == EngineModel.Sql
-            ? StringComparer.OrdinalIgnoreCase
-            : StringComparer.Ordinal;
-        if (current is not null && current.Model != desired.Model)
-        {
-            throw new SqlSchemaMigrationException(
-                $"Schema '{desired.Name}' targets {desired.Model}, but the catalog schema targets {current.Model}.");
-        }
 
+        // SQL identifiers compare without case, as the engine's catalog does.
+        StringComparer identifiers = StringComparer.OrdinalIgnoreCase;
         if (current is not null && !identifiers.Equals(current.Name, desired.Name))
         {
             throw new SqlSchemaMigrationException(
@@ -36,7 +30,13 @@ public static class SqlSchemaMigrationPlanner
         }
 
         var operations = new List<SqlSchemaMigrationOperation>();
+        IReadOnlyList<CompiledSchemaType> currentTypes = current?.Types ?? Array.Empty<CompiledSchemaType>();
+
+        // Domains first, so the columns of the tables below can be declared with them; a domain the
+        // schema no longer declares is dropped last, after the columns that used it.
+        PlanAddedDomains(currentTypes, desired.Types, operations, identifiers);
         PlanTables(current?.Tables ?? Array.Empty<CompiledSchemaTable>(), desired.Tables, operations, identifiers);
+        PlanDroppedDomains(currentTypes, desired.Types, operations, identifiers);
         EnsureSupportedMetadataIsUnchanged(current, desired);
 
         SqlSchemaMigrationOperation? destructive = operations.FirstOrDefault(
@@ -224,6 +224,56 @@ public static class SqlSchemaMigrationPlanner
         }
     }
 
+    /// <summary>
+    /// Plans each domain the desired schema declares that the current one does not, or declares over
+    /// another storage type, precision or scale (phase E3). A changed domain is dropped and added
+    /// again; the columns declared with it change through their own steps.
+    /// </summary>
+    private static void PlanAddedDomains(
+        IReadOnlyList<CompiledSchemaType> current,
+        IReadOnlyList<CompiledSchemaType> desired,
+        List<SqlSchemaMigrationOperation> operations,
+        StringComparer identifiers)
+    {
+        foreach (CompiledSchemaType domain in desired.OrderBy(type => type.Name, StringComparer.Ordinal))
+        {
+            CompiledSchemaType? previous = current.FirstOrDefault(type => identifiers.Equals(type.Name, domain.Name));
+            if (previous is not null && DomainEquals(previous, domain))
+            {
+                continue;
+            }
+
+            if (previous is not null)
+            {
+                operations.Add(new SqlSchemaMigrationOperation(
+                    SqlSchemaMigrationOperationKind.DropDomain, SqlSchemaMigrationSafety.Safe, previous.Name, domain: previous));
+            }
+
+            operations.Add(new SqlSchemaMigrationOperation(
+                SqlSchemaMigrationOperationKind.AddDomain, SqlSchemaMigrationSafety.Safe, domain.Name, domain: domain));
+        }
+    }
+
+    /// <summary>Plans each domain the current schema declares that the desired one does not.</summary>
+    private static void PlanDroppedDomains(
+        IReadOnlyList<CompiledSchemaType> current,
+        IReadOnlyList<CompiledSchemaType> desired,
+        List<SqlSchemaMigrationOperation> operations,
+        StringComparer identifiers)
+    {
+        foreach (CompiledSchemaType domain in current.OrderByDescending(type => type.Name, StringComparer.Ordinal))
+        {
+            if (!desired.Any(type => identifiers.Equals(type.Name, domain.Name)))
+            {
+                operations.Add(new SqlSchemaMigrationOperation(
+                    SqlSchemaMigrationOperationKind.DropDomain, SqlSchemaMigrationSafety.Safe, domain.Name, domain: domain));
+            }
+        }
+    }
+
+    private static bool DomainEquals(CompiledSchemaType left, CompiledSchemaType right)
+        => left.StorageType == right.StorageType && left.Precision == right.Precision && left.Scale == right.Scale;
+
     private static bool IndexEquals(
         CompiledSchemaIndex left,
         CompiledSchemaIndex right,
@@ -242,7 +292,8 @@ public static class SqlSchemaMigrationPlanner
         && left.MaxLength == right.MaxLength
         && left.Precision == right.Precision
         && left.Scale == right.Scale
-        && string.Equals(left.CustomType, right.CustomType, StringComparison.Ordinal);
+        && string.Equals(left.CustomType, right.CustomType, StringComparison.OrdinalIgnoreCase)
+        && string.Equals(left.DefaultLiteral, right.DefaultLiteral, StringComparison.Ordinal);
 
     private static bool KeyEquals(
         CompiledSchemaKey? left,
@@ -267,8 +318,7 @@ public static class SqlSchemaMigrationPlanner
     {
         if (current is null)
         {
-            if (desired.Types.Count > 0 || desired.Functions.Count > 0 || desired.Triggers.Count > 0 ||
-                desired.Principals.Count > 0 || desired.Extensions.Count > 0)
+            if (desired.Principals.Count > 0)
             {
                 throw UnsupportedMetadata(desired.Name);
             }
@@ -276,40 +326,10 @@ public static class SqlSchemaMigrationPlanner
             return;
         }
 
-        if (!current.Types.SequenceEqual(desired.Types) ||
-            !FunctionsEqual(current.Functions, desired.Functions) ||
-            !current.Triggers.SequenceEqual(desired.Triggers) ||
-            !PrincipalsEqual(current.Principals, desired.Principals) ||
-            !current.Extensions.SequenceEqual(desired.Extensions))
+        if (!PrincipalsEqual(current.Principals, desired.Principals))
         {
             throw UnsupportedMetadata(desired.Name);
         }
-    }
-
-    private static bool FunctionsEqual(
-        IReadOnlyList<CompiledSchemaFunction> left,
-        IReadOnlyList<CompiledSchemaFunction> right)
-    {
-        if (left.Count != right.Count)
-        {
-            return false;
-        }
-
-        for (int index = 0; index < left.Count; index++)
-        {
-            CompiledSchemaFunction first = left[index];
-            CompiledSchemaFunction second = right[index];
-            if (!string.Equals(first.Name, second.Name, StringComparison.Ordinal) ||
-                first.ResultType != second.ResultType ||
-                !string.Equals(first.CustomResultType, second.CustomResultType, StringComparison.Ordinal) ||
-                first.Body != second.Body ||
-                !first.Parameters.SequenceEqual(second.Parameters))
-            {
-                return false;
-            }
-        }
-
-        return true;
     }
 
     private static bool PrincipalsEqual(
@@ -348,6 +368,6 @@ public static class SqlSchemaMigrationPlanner
 
     private static SqlSchemaMigrationException UnsupportedMetadata(string schemaName)
         => new(
-            $"Schema '{schemaName}' changes custom types, functions, triggers, principals, or model extensions, " +
+            $"Schema '{schemaName}' changes principals, " +
             "but the shipped migration statement models cannot apply those metadata dimensions yet.");
 }

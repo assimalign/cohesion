@@ -26,8 +26,11 @@ flowchart LR
 
 ## Public seam and ownership
 
-`GraphCatalog.Open` returns `IGraphCatalog`; implementation classes and codecs are internal.
-Every mutation takes the caller's `ITransactionContext`, and none commits it. The caller
+`GraphCatalog.Open` returns the sealed `GraphCatalog`, which has a private constructor; its
+record and codec are internal. The former `IGraphCatalog` interface, `GraphCatalog` static
+factory and internal `DefaultGraphCatalog` collapsed into it (concrete-types plan, phase 4,
+#1260).
+Every mutation takes the caller's `TransactionContext`, and none commits it. The caller
 holds the database definition lock to serialize DDL and detect conflicting writes before
 publication. Reads use the caller's snapshot.
 
@@ -85,7 +88,10 @@ Opening scans only owner 0 and builds an in-memory directory keyed by kind, pare
 The directory holds physical references and creator stamps, not mutable metadata copies.
 Every read reloads the record and checks identity, creator, and deleter visibility against the
 snapshot. Reclaimed slots and reused identities invalidate cached references; corrupt live
-records propagate an error rather than appearing absent.
+records propagate an error rather than appearing absent. The reload is `Storage.TryReadRecord`
+with owner zero, the storage's shared reclamation check (#1342): the catalog made the same
+allocation, page-type, owner and slot checks inline before, and the other models' catalogs
+now make them through the same member.
 
 Saving a version tombstones the old version and inserts the new one inside one shared physical
 statement bracket. Both changes register with the coordinator's version store. Deleting a

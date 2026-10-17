@@ -223,7 +223,7 @@ public sealed class SqlSubqueryWireTests
         (await QueryAsync(connection, "SELECT id FROM users ORDER BY id")).Select(row => row[0]).ShouldBe(new object?[] { 1, 2 });
     }
 
-    private static async Task SeedAsync(ISqlConnection connection)
+    private static async Task SeedAsync(SqlConnection connection)
     {
         await ExecuteAsync(connection, "CREATE TABLE candidates (id INT)");
         await ExecuteAsync(connection, "CREATE TABLE choices (id INT)");
@@ -231,9 +231,9 @@ public sealed class SqlSubqueryWireTests
         await ExecuteAsync(connection, "INSERT INTO choices VALUES (2), (NULL)");
     }
 
-    private static Task<long> ExecuteAsync(ISqlConnection connection, string sql)
+    private static Task<long> ExecuteAsync(SqlConnection connection, string sql)
         => connection.ExecuteAsync(sql, cancellationToken: SqlClientTestHarness.Timeout()).AsTask();
 
-    private static Task<SqlResultSet> QueryAsync(ISqlConnection connection, string sql)
+    private static Task<SqlResultSet> QueryAsync(SqlConnection connection, string sql)
         => connection.QueryAsync(sql, cancellationToken: SqlClientTestHarness.Timeout()).AsTask();
 }

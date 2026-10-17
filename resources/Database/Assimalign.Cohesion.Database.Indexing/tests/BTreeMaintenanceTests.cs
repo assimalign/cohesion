@@ -1,5 +1,7 @@
 using System;
+using System.Buffers.Binary;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
@@ -17,7 +19,7 @@ namespace Assimalign.Cohesion.Database.Indexing.Tests;
 /// </summary>
 public class BTreeMaintenanceTests
 {
-    private static async Task<(IndexTestHarness Harness, IIndex Index)> CreateIndexAsync(bool unique = false)
+    private static async Task<(IndexTestHarness Harness, BTreeIndex Index)> CreateIndexAsync(bool unique = false)
     {
         var harness = new IndexTestHarness();
         var setup = await harness.BeginAsync();
@@ -27,7 +29,7 @@ public class BTreeMaintenanceTests
         return (harness, index);
     }
 
-    private static async Task<List<ulong>> VisibleReferencesAsync(IndexTestHarness harness, IIndex index)
+    private static async Task<List<ulong>> VisibleReferencesAsync(IndexTestHarness harness, BTreeIndex index)
     {
         var reader = await harness.BeginAsync();
 
@@ -134,6 +136,51 @@ public class BTreeMaintenanceTests
         // untouched entry survived the mismatched erase.
         (await VisibleReferencesAsync(harness, index)).ShouldBe(new[] { 10UL, 30UL });
     }
+
+    /// <summary>
+    /// An erase shifts the leaf's entry directory down one slot. The slot it vacates joins the
+    /// free gap between the directory and the entry data and is cleared, so a full page image of
+    /// the leaf elides it with the rest of the gap (#1253 review).
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Indexing] - Maintenance: erase clears the directory slot it vacates")]
+    public async Task EraseAsync_LeafEntry_ShouldClearTheVacatedDirectorySlot()
+    {
+        // Arrange: three entries of an aborting writer in the root leaf.
+        var (harness, index) = await CreateIndexAsync();
+        await using var harnessLifetime = harness;
+        var aborted = new TransactionSequence(500);
+        using (var bracket = harness.Storage.BeginTransaction())
+        {
+            for (long key = 1; key <= 3; key++)
+            {
+                await index.InsertVersionAsync(bracket, IndexKey.FromInt64(key), (ulong)key * 10, aborted, TransactionSequence.None);
+            }
+
+            bracket.Commit();
+        }
+
+        long root = harness.IndexManager.ExportRegistrations().Single().RootPageId;
+
+        // Act
+        using (var undo = harness.Storage.BeginTransaction())
+        {
+            await index.EraseAsync(undo, IndexKey.FromInt64(2), 20, aborted);
+            undo.Commit();
+        }
+
+        // Assert: two directory slots remain, and the third slot's bytes are zero again.
+        using var handle = harness.Storage.PageManager.GetPage(root);
+        byte[] body = handle.Page.AsBodySpan().ToArray();
+        BinaryPrimitives.ReadUInt16LittleEndian(body.AsSpan(NodeCountOffset)).ShouldBe((ushort)2);
+        BinaryPrimitives.ReadUInt16LittleEndian(body.AsSpan(NodeDirectoryOffset)).ShouldNotBe((ushort)0);
+        BinaryPrimitives.ReadUInt16LittleEndian(body.AsSpan(NodeDirectoryOffset + 2)).ShouldNotBe((ushort)0);
+        body.AsSpan(NodeDirectoryOffset + 4, 2).ToArray().ShouldBe(new byte[2]);
+    }
+
+    // Offsets from BTreeNode's documented body layout, page format 2: the entry count at 4,
+    // the directory of two-byte entry offsets at 32.
+    private const int NodeCountOffset = 4;
+    private const int NodeDirectoryOffset = 32;
 
     [Fact(DisplayName = "Cohesion Test [Database.Indexing] - Maintenance: the purge walk scrubs every unproven writer in one pass")]
     public async Task PurgeWritersAsync_UnprovenWriters_ShouldScrubEntriesAndTombstones()

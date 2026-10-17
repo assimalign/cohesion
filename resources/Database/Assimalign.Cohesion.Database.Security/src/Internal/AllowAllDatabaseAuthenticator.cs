@@ -8,12 +8,9 @@ namespace Assimalign.Cohesion.Database.Security.Internal;
 /// The trust-everything authenticator behind <see cref="DatabaseAuthenticator.AllowAll"/>:
 /// accepts any principal for any database without inspecting the evidence.
 /// </summary>
-internal sealed class AllowAllDatabaseAuthenticator : IDatabaseAuthenticator
+internal sealed class AllowAllDatabaseAuthenticator : DatabaseAuthenticator
 {
     /// <inheritdoc />
-    public ValueTask<bool> AuthenticateAsync(string database, string principal, ReadOnlyMemory<byte> evidence, CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        return ValueTask.FromResult(true);
-    }
+    protected override ValueTask<bool> AuthenticateCoreAsync(string database, string principal, ReadOnlyMemory<byte> evidence, CancellationToken cancellationToken)
+        => ValueTask.FromResult(true);
 }

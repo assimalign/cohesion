@@ -3,7 +3,9 @@ using System.Buffers;
 using System.Collections.Generic;
 using System.Text.Json;
 using System.Threading;
+
 using Assimalign.Cohesion.Database.Documents.Catalog;
+using Assimalign.Cohesion.Database.Language;
 using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Documents.Internal;
@@ -18,15 +20,15 @@ internal static class DocumentSystemCollections
         => string.Equals(name, Indexes, StringComparison.OrdinalIgnoreCase) ? Indexes :
             string.Equals(name, Ownership, StringComparison.OrdinalIgnoreCase) ? Ownership : null;
 
-    internal static void EnsureReadOnly(string name)
+    internal static void EnsureReadOnly(string name, Location? location = null)
     {
         if (Find(name) is string systemName)
         {
-            throw new DatabaseException($"System collection '{systemName}' is read-only.");
+            throw new DocumentPlanningException("COHDOC004", $"System collection '{systemName}' is read-only.", location);
         }
     }
 
-    internal static IEnumerable<JsonElement> Enumerate(DocumentDatabaseInstance database, TransactionSnapshot snapshot,
+    internal static IEnumerable<JsonElement> Enumerate(DocumentDatabase database, TransactionSnapshot snapshot,
         string name, CancellationToken cancellationToken)
     {
         // Every lookup uses the same statement snapshot, including a transaction's

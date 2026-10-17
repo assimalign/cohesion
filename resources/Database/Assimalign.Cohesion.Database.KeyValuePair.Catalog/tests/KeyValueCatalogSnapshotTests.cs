@@ -20,11 +20,11 @@ public sealed class KeyValueCatalogSnapshotTests
         using var storage = KeyValueStorage.Create(new MemoryStream(), new MemoryStream(), new MemoryStream(), "kv.catalog");
         var catalog = KeyValueCatalog.Open(storage);
         await catalog.SaveIndexRegistrationsAsync([new(1, new IndexDefinition("key", IndexKind.BTree, IsUnique: true), 7)]);
-        var before = KeyValueCatalog.CaptureSnapshot(catalog);
+        var before = catalog.CaptureSnapshot();
 
         await catalog.SetEntrySpaceFormatVersionAsync(2);
         await catalog.SaveIndexRegistrationsAsync([new(1, new IndexDefinition("key", IndexKind.BTree, IsUnique: true), 11)]);
-        var after = KeyValueCatalog.CaptureSnapshot(catalog);
+        var after = catalog.CaptureSnapshot();
 
         before.EntrySpaceFormatVersion.ShouldBe(1);
         before.IndexRegistrations.ShouldHaveSingleItem().RootPageId.ShouldBe(7);

@@ -22,6 +22,11 @@ internal sealed class StorageGroupCommitGate
     private long _requestedLsn;
     private long _durableLsn;
 
+    // Set when the storage went offline: no group flush will ever come, so waiters stop
+    // waiting for one and go straight to their own flush, which the offline journal refuses
+    // (or confirms, for an LSN that was already durable).
+    private bool _abandoned;
+
     /// <summary>
     /// Invoked (outside the gate lock) when a committer registers a new pending
     /// commit, so an engine-level flush worker can be woken. Set by the owning
@@ -30,11 +35,17 @@ internal sealed class StorageGroupCommitGate
     internal Action? CommitPending;
 
     /// <summary>
+    /// The name of the storage that owns the gate, for its events' <c>database</c> payload
+    /// (<see cref="StorageEventSource"/>): set by the storage when it is created or opened.
+    /// </summary>
+    internal string StorageName { get; set; } = string.Empty;
+
+    /// <summary>
     /// Blocks until the journal is durable at least up to <paramref name="lsn"/>:
     /// first waiting up to <paramref name="window"/> for the flush worker's group
     /// flush, then flushing inline as self-help if the worker did not respond.
     /// </summary>
-    internal void AwaitDurable(long lsn, TimeSpan window, IStorageJournal journal)
+    internal void AwaitDurable(long lsn, TimeSpan window, StorageJournal journal)
     {
         bool signal = false;
 
@@ -59,10 +70,11 @@ internal sealed class StorageGroupCommitGate
         }
 
         long start = Stopwatch.GetTimestamp();
+        bool abandoned;
 
         lock (_syncRoot)
         {
-            while (_durableLsn < lsn)
+            while (_durableLsn < lsn && !_abandoned)
             {
                 TimeSpan remaining = window - Stopwatch.GetElapsedTime(start);
 
@@ -76,13 +88,28 @@ internal sealed class StorageGroupCommitGate
             {
                 return;
             }
+
+            // An abandoned wait is the storage going offline, not a missed window (its own event).
+            abandoned = _abandoned;
         }
 
         // Self-help: the worker did not flush within the window. Flush inline (a
         // no-op if another self-helper got there first) and publish so any other
         // waiter covered by this flush wakes too.
-        journal.EnsureDurable(lsn);
+        bool flushed = journal.EnsureDurableReportingFlush(lsn);
         PublishDurable(journal.DurableLsn);
+
+        if (!abandoned)
+        {
+            // Every committer whose window passed missed it; only one whose request reached the
+            // device is a self-flush, so N committers sharing one inline flush count once.
+            if (flushed)
+            {
+                StorageEventSource.Log.CountGroupCommitSelfFlush();
+            }
+
+            StorageEventSource.Log.GroupCommitWindowMissed(this, lsn, window);
+        }
     }
 
     /// <summary>
@@ -90,7 +117,7 @@ internal sealed class StorageGroupCommitGate
     /// durable up to the highest pending commit LSN and wakes every covered waiter.
     /// </summary>
     /// <returns>True when a flush was performed; false when nothing was pending.</returns>
-    internal bool FlushPending(IStorageJournal journal)
+    internal bool FlushPending(StorageJournal journal)
     {
         long target;
 
@@ -105,8 +132,24 @@ internal sealed class StorageGroupCommitGate
         }
 
         journal.EnsureDurable(target);
-        PublishDurable(journal.DurableLsn);
+        long durable = journal.DurableLsn;
+        PublishDurable(durable);
+        StorageEventSource.Log.PendingCommitsFlushed(this, durable);
         return true;
+    }
+
+    /// <summary>
+    /// Wakes every waiter for good: the storage went offline, so no group flush will come. Each
+    /// waiter then makes its own flush request, which the offline journal refuses unless the
+    /// waiter's LSN was already durable.
+    /// </summary>
+    internal void Abandon()
+    {
+        lock (_syncRoot)
+        {
+            _abandoned = true;
+            Monitor.PulseAll(_syncRoot);
+        }
     }
 
     /// <summary>

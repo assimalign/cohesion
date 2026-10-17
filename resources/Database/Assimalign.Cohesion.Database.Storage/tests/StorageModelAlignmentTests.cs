@@ -217,11 +217,9 @@ public class StorageModelAlignmentTests
     private sealed class TestStorage : Storage
     {
         private TestStorage(StorageStream data, StorageStream journal, StorageStream backup)
-            : base(data, journal, backup, bufferPoolCapacity: 8)
+            : base(StorageModel.Custom, data, journal, backup, bufferPoolCapacity: 8)
         {
         }
-
-        public override StorageModel Model => StorageModel.Custom;
 
         public static TestStorage Create(Stream data)
         {

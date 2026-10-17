@@ -19,21 +19,13 @@ internal sealed class SqlIndexMaintenanceWorker : DatabaseEngineWorker
     private readonly SqlDatabaseEngine _engine;
 
     internal SqlIndexMaintenanceWorker(SqlDatabaseEngine engine)
+        : base(engine.Name + "/index-maintenance", DatabaseEngineWorkerKind.IndexMaintenance, engine.EngineOptions.MaintenanceInterval)
     {
         _engine = engine;
     }
 
     /// <inheritdoc />
-    public override string Name => _engine.Name + "/index-maintenance";
-
-    /// <inheritdoc />
-    public override DatabaseEngineWorkerKind Kind => DatabaseEngineWorkerKind.IndexMaintenance;
-
-    /// <inheritdoc />
-    public override TimeSpan Interval => _engine.EngineOptions.MaintenanceInterval;
-
-    /// <inheritdoc />
-    public override void RunIteration(CancellationToken cancellationToken)
+    protected override void RunIterationCore(CancellationToken cancellationToken)
     {
         // Stub: the index layer has no compaction to drive yet.
     }

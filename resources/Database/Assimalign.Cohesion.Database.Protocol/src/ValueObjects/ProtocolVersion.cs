@@ -9,7 +9,7 @@ namespace Assimalign.Cohesion.Database.Protocol;
 /// <param name="Minor">The minor version; negotiated additive capabilities increment this.</param>
 /// <remarks>
 /// The value type lives with the wire implementation that defines it (this package);
-/// the area root consumes it for the <c>IDatabaseServerSession</c> vocabulary through
+/// the area root consumes it for the <c>DatabaseServerSession</c> vocabulary through
 /// the root's child-root reference. <see cref="Current"/> is the version this
 /// assembly implements.
 /// </remarks>
@@ -18,7 +18,7 @@ public readonly record struct ProtocolVersion(ushort Major, ushort Minor) : ICom
     /// <summary>
     /// Gets the current protocol version implemented by this assembly.
     /// </summary>
-    public static ProtocolVersion Current => new(1, 0);
+    public static ProtocolVersion Current => new(2, 1);
 
     /// <summary>Negotiates the common version while rejecting incompatible major versions.</summary>
     /// <param name="requested">The peer's requested version.</param>

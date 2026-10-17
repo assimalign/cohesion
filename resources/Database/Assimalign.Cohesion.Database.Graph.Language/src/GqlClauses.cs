@@ -11,6 +11,9 @@ public static class GqlClauses
     /// <summary>Matches a graph pattern.</summary>
     public const string Match = "MATCH";
 
+    /// <summary>The Cohesion extension that describes a data statement without executing it.</summary>
+    public const string Explain = "EXPLAIN";
+
     /// <summary>Matches a graph pattern without requiring a result.</summary>
     public const string OptionalMatch = "OPTIONAL MATCH";
 
@@ -46,6 +49,13 @@ public static class GqlClauses
 
     /// <summary>Restricts graph results by a predicate.</summary>
     public const string Where = "WHERE";
+
+    /// <summary>
+    /// ISO/IEC 39075 label expressions (<c>|</c>, <c>&amp;</c>, <c>!</c>, <c>%</c>, parentheses and
+    /// <c>IS</c>) in node and edge patterns, and the labeled predicate
+    /// (<c>n IS [NOT] LABELED A</c>, <c>n:A</c>) in <c>WHERE</c>.
+    /// </summary>
+    public const string LabelExpression = "LABEL EXPRESSION";
 
     /// <summary>Orders graph results by one or more expressions.</summary>
     public const string OrderBy = "ORDER BY";

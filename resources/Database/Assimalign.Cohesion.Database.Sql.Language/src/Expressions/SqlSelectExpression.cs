@@ -13,8 +13,7 @@ public sealed class SqlSelectExpression : SqlQueryExpression
     /// Initializes a new <see cref="SqlSelectExpression"/>.
     /// </summary>
     /// <param name="columns">The columns in the SELECT list.</param>
-    /// <param name="from">The FROM table reference.</param>
-    /// <param name="joins">The JOIN clauses.</param>
+    /// <param name="from">The comma-separated FROM join trees.</param>
     /// <param name="where">The WHERE filter expression.</param>
     /// <param name="groupBy">The GROUP BY expressions.</param>
     /// <param name="having">The HAVING filter expression.</param>
@@ -26,8 +25,7 @@ public sealed class SqlSelectExpression : SqlQueryExpression
     /// <param name="location">The source location.</param>
     internal SqlSelectExpression(
         IReadOnlyList<SqlSelectColumn> columns,
-        SqlTableReference? from,
-        IReadOnlyList<SqlJoinClause> joins,
+        IReadOnlyList<SqlFromItem> from,
         SqlExpression? where,
         IReadOnlyList<SqlExpression> groupBy,
         SqlExpression? having,
@@ -41,7 +39,6 @@ public sealed class SqlSelectExpression : SqlQueryExpression
     {
         Columns = columns;
         From = from;
-        Joins = joins;
         Where = where;
         GroupBy = groupBy;
         Having = having;
@@ -49,7 +46,42 @@ public sealed class SqlSelectExpression : SqlQueryExpression
         Limit = limit;
         Offset = offset;
         IsDistinct = isDistinct;
+
+        int depth = System.Math.Max(SqlExpression.DepthOf(where), SqlExpression.DepthOf(having));
+        depth = System.Math.Max(depth, System.Math.Max(SqlExpression.DepthOf(limit), SqlExpression.DepthOf(offset)));
+        depth = System.Math.Max(depth, SqlExpression.DepthOf(groupBy));
+        foreach (var column in columns)
+        {
+            depth = System.Math.Max(depth, column.Expression.Depth);
+        }
+        foreach (var item in from)
+        {
+            foreach (var join in item.Joins)
+            {
+                depth = System.Math.Max(depth, SqlExpression.DepthOf(join.Condition));
+            }
+        }
+        foreach (var order in orderBy)
+        {
+            depth = System.Math.Max(depth, order.Expression.Depth);
+        }
+
+        ExpressionDepth = depth;
     }
+
+    /// <summary>
+    /// Gets the greatest <see cref="SqlExpression.Depth"/> among the query's clauses, or 0 when
+    /// it has none. A subquery node is one level deeper than the query it wraps.
+    /// </summary>
+    internal int ExpressionDepth { get; }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// A SELECT is the one query kind another statement nests, as a subquery or the source of an
+    /// <c>INSERT</c>, so it is the one a caller can take out of a parsed statement and execute
+    /// without a parser's measure.
+    /// </remarks>
+    private protected override int ExpressionTreeDepth => ExpressionDepth;
 
     /// <summary>
     /// Gets the columns in the SELECT list.
@@ -57,14 +89,10 @@ public sealed class SqlSelectExpression : SqlQueryExpression
     public IReadOnlyList<SqlSelectColumn> Columns { get; }
 
     /// <summary>
-    /// Gets the FROM table reference, if present.
+    /// Gets the comma-separated FROM join trees; JOIN binds more tightly than comma.
     /// </summary>
-    public SqlTableReference? From { get; }
+    public IReadOnlyList<SqlFromItem> From { get; }
 
-    /// <summary>
-    /// Gets the JOIN clauses.
-    /// </summary>
-    public IReadOnlyList<SqlJoinClause> Joins { get; }
 
     /// <summary>
     /// Gets the WHERE filter expression, if present.

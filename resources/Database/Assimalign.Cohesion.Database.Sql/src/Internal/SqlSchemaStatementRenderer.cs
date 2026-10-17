@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Text;
 
 using Assimalign.Cohesion.Database.Sql.Language;
+using Assimalign.Cohesion.Database.Sql.Language.Internal;
 using Assimalign.Cohesion.Database.Sql.Schema;
 using Assimalign.Cohesion.Database.Types;
 
@@ -69,6 +70,13 @@ internal static class SqlSchemaStatementRenderer
 
     internal static string DropColumn(string tableName, string columnName)
         => $"ALTER TABLE {QualifiedTable(tableName)} DROP COLUMN {Identifier(columnName)};";
+
+    internal static string AlterColumn(string tableName, CompiledSchemaColumn column)
+    {
+        var builder = new StringBuilder($"ALTER TABLE {QualifiedTable(tableName)} ALTER COLUMN ");
+        AppendColumn(builder, column, isPrimaryKey: false);
+        return builder.Append(';').ToString();
+    }
 
     internal static string AddConstraint(string tableName, CompiledSchemaConstraint constraint)
     {
@@ -163,6 +171,10 @@ internal static class SqlSchemaStatementRenderer
         }
 
         builder.Append(column.IsNullable && !isPrimaryKey ? " NULL" : " NOT NULL");
+        if (column.DefaultLiteral is not null)
+        {
+            builder.Append(" DEFAULT ").Append(SqlSchemaProvisioner.CanonicalDefault(column.DefaultLiteral) ?? "NULL");
+        }
     }
 
     private static bool IsPrimaryKeyColumn(CompiledSchemaKey? key, string columnName)
@@ -185,10 +197,22 @@ internal static class SqlSchemaStatementRenderer
 
     private static string TypeName(CompiledSchemaColumn column)
     {
-        if (!string.IsNullOrWhiteSpace(column.CustomType))
+        if (column.CustomType is { } declared)
         {
-            throw new DatabaseException(
-                $"Column '{column.Name}' uses custom type '{column.CustomType}', which the SQL DDL executor does not support yet.");
+            // A domain's name or a built-in type name as declared (phase E3), which the engine's DDL
+            // resolves as it resolves any type name. Only the name's shape is checked here: rewritten
+            // from its parts, so the text written into the statement is nothing but a type name.
+            if (!SqlTypeRules.TrySplit(declared, out string name, out int? first, out int? second) ||
+                !SqlTypeModifiers.IsTypeName(name) || (second is not null && first is null))
+            {
+                throw new DatabaseException($"Column '{column.Name}' is declared with '{declared}', which is not a SQL type name.");
+            }
+
+            return first is null
+                ? name
+                : second is null
+                    ? $"{name}({first.Value.ToString(CultureInfo.InvariantCulture)})"
+                    : $"{name}({first.Value.ToString(CultureInfo.InvariantCulture)}, {second.Value.ToString(CultureInfo.InvariantCulture)})";
         }
 
         return column.Type switch
@@ -201,6 +225,7 @@ internal static class SqlSchemaStatementRenderer
             DatabaseType.Float32 => "REAL",
             DatabaseType.Float64 => "DOUBLE",
             DatabaseType.Decimal => DecimalTypeName(column),
+            DatabaseType.Character => SizedTypeName("CHAR", "CHAR", column.MaxLength ?? 1),
             DatabaseType.String => SizedTypeName("VARCHAR", "TEXT", column.MaxLength),
             DatabaseType.Binary => SizedTypeName("VARBINARY", "BLOB", column.MaxLength),
             DatabaseType.Date => "DATE",
@@ -264,6 +289,10 @@ internal static class SqlSchemaStatementRenderer
         foreach (string keyword in SqlLanguageProfile.Instance.Keywords)
         {
             requiresQuotes |= string.Equals(value, keyword, StringComparison.OrdinalIgnoreCase);
+        }
+        foreach (string word in SqlLanguageProfile.RecognizedUnsupportedVocabulary)
+        {
+            requiresQuotes |= string.Equals(value, word, StringComparison.OrdinalIgnoreCase);
         }
         foreach (string function in SqlLanguageProfile.Instance.Functions)
         {

@@ -113,14 +113,14 @@ public sealed class NonDurableStorageTests
     public void ReopenedNonDurableJournalDoesNotClaimExistingBytesAreDurable()
     {
         using var memory = new MemoryStream();
-        using (var journal = new StreamJournal(memory, leaveOpen: true))
+        using (var journal = StorageJournal.Create(memory, leaveOpen: true))
         {
             journal.AppendBegin(1);
             journal.AppendCommit(1);
             journal.Flush();
         }
 
-        using var reopened = new StreamJournal(memory, leaveOpen: true);
+        using var reopened = StorageJournal.Create(memory, leaveOpen: true);
         reopened.LastLsn.ShouldBe(2L);
         reopened.DurableLsn.ShouldBe(0L);
         Should.Throw<NotSupportedException>(() => reopened.EnsureDurable(reopened.LastLsn));
@@ -163,13 +163,12 @@ public sealed class NonDurableStorageTests
     private sealed class HarnessStorage : Storage
     {
         private HarnessStorage(ObservedHandle data, ObservedHandle journal)
-            : base(new StorageStream(data), new StorageStream(journal), StorageStream.FromInMemory())
+            : base(StorageModel.Custom, new StorageStream(data), new StorageStream(journal), StorageStream.FromInMemory())
         {
             ConfigureCommitDurability(null, "non-durable-regression");
         }
 
-        public override StorageModel Model => StorageModel.Custom;
-        public IStorageJournal Wal => WriteAheadLog;
+        public StorageJournal Wal => WriteAheadLog;
 
         public static HarnessStorage Create(ObservedHandle data, ObservedHandle journal)
         {
@@ -185,13 +184,13 @@ public sealed class NonDurableStorageTests
             return storage;
         }
 
-        public (PageId PageId, int SlotIndex) Insert(IStorageTransaction transaction, byte[] bytes)
+        public (PageId PageId, int SlotIndex) Insert(StorageTransaction transaction, byte[] bytes)
             => InsertRecord(transaction, bytes);
 
         public byte[] Read((PageId PageId, int SlotIndex) location)
             => ReadRecord(location.PageId, location.SlotIndex).ToArray();
 
-        public void Update(IStorageTransaction transaction, (PageId PageId, int SlotIndex) location, byte[] bytes)
+        public void Update(StorageTransaction transaction, (PageId PageId, int SlotIndex) location, byte[] bytes)
             => UpdateRecord(transaction, location.PageId, location.SlotIndex, bytes);
 
         public void FlushChanges() => Flush();

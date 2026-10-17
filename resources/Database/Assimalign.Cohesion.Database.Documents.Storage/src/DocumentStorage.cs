@@ -41,10 +41,7 @@ using Assimalign.Cohesion.Database.Storage;
 public sealed partial class DocumentStorage : Assimalign.Cohesion.Database.Storage.Storage
 {
     private DocumentStorage(StorageStream data, StorageStream journal, StorageStream backup)
-        : base(data, journal, backup) => Records = new DocumentTransactionRecordSpace(this);
-
-    /// <inheritdoc />
-    public override StorageModel Model => StorageModel.Document;
+        : base(StorageModel.Document, data, journal, backup) => Records = new DocumentTransactionRecordSpace(this);
 
     /// <summary>
     /// Creates a new document storage file set backed by the given streams.

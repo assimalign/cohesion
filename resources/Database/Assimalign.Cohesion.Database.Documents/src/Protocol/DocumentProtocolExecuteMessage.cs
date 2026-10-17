@@ -40,7 +40,7 @@ public sealed record DocumentProtocolExecuteMessage(string Statement, ReadOnlyMe
         int length = ProtocolPayload.ReadInt32(payload, ref position);
         if (length < 0 || length != payload.Length - position)
         {
-            throw new ProtocolException("Malformed document parameter length.");
+            throw new ProtocolException(ErrorMessages.ParameterLengthInvalid);
         }
         var parameters = payload[position..];
         DocumentProtocolJson.Validate(parameters, requireObject: true);

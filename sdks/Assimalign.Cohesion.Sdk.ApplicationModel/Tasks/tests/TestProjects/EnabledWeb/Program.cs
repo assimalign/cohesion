@@ -17,7 +17,7 @@ using Assimalign.Cohesion.Web.Routing;
 using EnabledWeb;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
-ISqlClient orders = SqlClient.Create(new SqlClientOptions
+SqlClient orders = SqlClient.Create(new SqlClientOptions
 {
     Settings = DatabaseConnectionSettings.For(
         Resource.References.InventoryDatabase.Db.Url,

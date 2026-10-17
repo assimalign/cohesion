@@ -12,13 +12,16 @@ public sealed class SqlCatalogSchemaState
     /// </summary>
     /// <param name="contentHash">The deterministic content hash of the compiled schema.</param>
     /// <param name="canonicalDocument">The canonical compiled-schema document.</param>
-    public SqlCatalogSchemaState(string contentHash, string canonicalDocument)
+    /// <param name="generation">The catalog DDL generation after every schema step succeeded.</param>
+    /// <exception cref="ArgumentException">The content hash or canonical document is blank.</exception>
+    public SqlCatalogSchemaState(string contentHash, string canonicalDocument, ulong generation)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(contentHash);
         ArgumentException.ThrowIfNullOrWhiteSpace(canonicalDocument);
 
         ContentHash = contentHash;
         CanonicalDocument = canonicalDocument;
+        Generation = generation;
     }
 
     /// <summary>
@@ -30,4 +33,9 @@ public sealed class SqlCatalogSchemaState
     /// Gets the canonical compiled-schema document.
     /// </summary>
     public string CanonicalDocument { get; }
+
+    /// <summary>
+    /// Gets the catalog DDL generation at which this schema was fully applied.
+    /// </summary>
+    public ulong Generation { get; }
 }

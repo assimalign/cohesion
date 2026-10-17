@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
+  <data name="ArithmeticFailure" xml:space="preserve"><value>Graph arithmetic failed: division by zero, overflow or a non-finite result.</value></data>
+  <data name="BooleanRequired" xml:space="preserve"><value>A Boolean expression requires TRUE, FALSE or NULL.</value></data>
+  <data name="NumericRequired" xml:space="preserve"><value>A numeric sign requires a numeric operand.</value></data>
+  <data name="ArithmeticOperands" xml:space="preserve"><value>Arithmetic requires numeric operands; string concatenation requires two strings.</value></data>
+  <data name="LogicalNodeRequired" xml:space="preserve"><value>AND joins predicates in a GqlLogicalExpression; a GqlBinaryExpression holds a scalar operation.</value></data>
+  <data name="MembershipListRequired" xml:space="preserve"><value>IN requires a list.</value></data>
+  <data name="UnsupportedStringPredicate" xml:space="preserve"><value>Unsupported string predicate.</value></data>
+  <data name="ParameterCollision" xml:space="preserve"><value>Parameter '{0}' has more than one binding after removing its sigil.</value></data>
+  <data name="ParameterUnbound" xml:space="preserve"><value>Parameter '{0}' is not bound.</value></data>
+  <data name="ParameterScalarRequired" xml:space="preserve"><value>A parameter requires a supported finite graph scalar value.</value></data>
+  <data name="PropertyScalarRequired" xml:space="preserve"><value>A property map value must be a scalar literal or named parameter.</value></data>
+  <data name="LiteralScalarRequired" xml:space="preserve"><value>A literal expression requires a supported finite graph scalar value.</value></data>
+  <data name="ReturnShapeInvalid" xml:space="preserve"><value>RETURN requires a valid set quantifier and either items or named bindings for *.</value></data>
+  <data name="ProjectionExpressionRequired" xml:space="preserve"><value>A projection requires an expression.</value></data>
+  <data name="PatternOrReturnRequired" xml:space="preserve"><value>A graph statement requires a pattern or RETURN items.</value></data>
+  <data name="ProjectionUnsupported" xml:space="preserve"><value>Unsupported graph projection.</value></data>
+  <data name="DuplicateResultColumn" xml:space="preserve"><value>Result column '{0}' is declared more than once.</value></data>
+  <data name="PathProjectionRequired" xml:space="preserve"><value>Path execution requires a read-only MATCH with exactly one path or bound entity projection.</value></data>
+  <data name="ExecuteScalarRequired" xml:space="preserve"><value>Execute accepts scalar projections. Use ExecutePaths with a read-only MATCH to return a node, relationship, or path.</value></data>
+</root>

@@ -5,7 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Execution;
-using Assimalign.Cohesion.Database.Language;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
@@ -14,19 +14,19 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// executor materializes SELECT results (sorting and DISTINCT require it anyway);
 /// streaming plans arrive with the cost-based planner.
 /// </summary>
-internal sealed class SqlMaterializedResultSet : QueryResultSet
+internal sealed class SqlMaterializedResultSet : DatabaseResultSet
 {
-    private readonly IReadOnlyList<QueryColumn> _columns;
+    private readonly IReadOnlyList<DatabaseColumn> _columns;
     private readonly List<object?[]> _rows;
 
-    internal SqlMaterializedResultSet(IReadOnlyList<QueryColumn> columns, List<object?[]> rows)
+    internal SqlMaterializedResultSet(IReadOnlyList<DatabaseColumn> columns, List<object?[]> rows)
     {
         _columns = columns;
         _rows = rows;
     }
 
     /// <inheritdoc />
-    public override QueryResultStatus Status => QueryResultStatus.Success;
+    public override DatabaseResultStatus Status => DatabaseResultStatus.Success;
 
     /// <inheritdoc />
     public override long AffectedCount => -1;
@@ -35,10 +35,10 @@ internal sealed class SqlMaterializedResultSet : QueryResultSet
     public override IReadOnlyList<Diagnostic>? Diagnostics => null;
 
     /// <inheritdoc />
-    public override IReadOnlyList<QueryColumn> Columns => _columns;
+    public override IReadOnlyList<DatabaseColumn> Columns => _columns;
 
     /// <inheritdoc />
-    public override async IAsyncEnumerable<QueryRow> GetRowsAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
+    public override async IAsyncEnumerable<DatabaseRow> GetRowsAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         foreach (var row in _rows)
         {

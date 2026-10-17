@@ -20,7 +20,6 @@
 		<Project Path="../../../libraries/FileSystem/Assimalign.Cohesion.FileSystem.Physical/src/Assimalign.Cohesion.FileSystem.Physical.csproj" />
 		<Project Path="../../../libraries/FileSystem/Assimalign.Cohesion.FileSystem/src/Assimalign.Cohesion.FileSystem.csproj" />
 		<Project Path="../Assimalign.Cohesion.Database.Execution/src/Assimalign.Cohesion.Database.Execution.csproj" />
-		<Project Path="../Assimalign.Cohesion.Database.Governance/src/Assimalign.Cohesion.Database.Governance.csproj" />
 		<Project Path="../Assimalign.Cohesion.Database.Indexing/src/Assimalign.Cohesion.Database.Indexing.csproj" />
 		<Project Path="../Assimalign.Cohesion.Database.Language/src/Assimalign.Cohesion.Database.Language.csproj" />
 		<Project Path="../Assimalign.Cohesion.Database.Protocol/src/Assimalign.Cohesion.Database.Protocol.csproj" />

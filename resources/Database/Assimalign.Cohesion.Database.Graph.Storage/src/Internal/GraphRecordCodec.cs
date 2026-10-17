@@ -46,7 +46,16 @@ internal static class GraphRecordCodec
         }
         if (stream.Length > SlottedPage.MaxRecordSize)
         {
-            throw new ArgumentException($"Graph record exceeds the {SlottedPage.MaxRecordSize}-byte slotted-record limit.");
+            // One record holds the whole element, so its size is the user's input, not a store
+            // fault: a typed failure lets the engine fail the statement and keep the session.
+            string element = record.Kind switch
+            {
+                1 => "A node's labels and properties",
+                2 => "A relationship's type and properties",
+                _ => "A property index definition's label and property key",
+            };
+            throw new GraphElementTooLargeException(
+                $"{element} encode to {stream.Length} bytes, more than the {SlottedPage.MaxRecordSize} bytes one graph record can hold.");
         }
         return stream.ToArray();
     }
@@ -144,10 +153,31 @@ internal static class GraphRecordCodec
         return new System.Collections.ObjectModel.ReadOnlyDictionary<string, object?>(properties);
     }
 
-    internal static IndexKey Key(object? value)
+    /// <summary>The longest scalar key prefix, leaving the 8-byte node identity within the 1,024-byte B+Tree key.</summary>
+    internal const int MaximumKeyPrefix = 1016;
+
+    /// <summary>The index key prefix of a stored property value.</summary>
+    /// <param name="value">The property value.</param>
+    /// <returns>The key prefix.</returns>
+    /// <exception cref="ArgumentException">The value is not a supported index scalar.</exception>
+    /// <exception cref="GraphElementTooLargeException">The value encodes past <see cref="MaximumKeyPrefix"/> bytes.</exception>
+    internal static IndexKey Key(object? value) => TryKey(value, out var key) ? key
+        : throw new GraphElementTooLargeException(
+            $"An indexed property value encodes to {key.Length} bytes, more than the {MaximumKeyPrefix}-byte index key it must fit.");
+
+    /// <summary>
+    /// The index key prefix of a property value, or <see langword="false"/> when it encodes past
+    /// <see cref="MaximumKeyPrefix"/> bytes. No stored entry holds such a key, so a search for it
+    /// matches nothing.
+    /// </summary>
+    /// <param name="value">The property value.</param>
+    /// <param name="key">The key prefix, oversized when the method returns <see langword="false"/>.</param>
+    /// <returns><see langword="true"/> when the key fits.</returns>
+    /// <exception cref="ArgumentException">The value is not a supported index scalar.</exception>
+    internal static bool TryKey(object? value, out IndexKey key)
     {
         var writer = new DatabaseKeyWriter();
-        var key = value switch
+        key = value switch
         {
             null => IndexKey.From(writer.AppendNull()),
             bool boolean => IndexKey.From(writer.AppendBoolean(boolean)),
@@ -156,8 +186,7 @@ internal static class GraphRecordCodec
                 => IndexKey.From(writer.AppendFloat64(NumberKey(value))),
             _ => throw new ArgumentException("Unsupported graph property index scalar.", nameof(value))
         };
-        if (key.Length > 1016) { throw new ArgumentException("Graph property index scalar exceeds 1016 bytes before its 8-byte node identity suffix.", nameof(value)); }
-        return key;
+        return key.Length <= MaximumKeyPrefix;
     }
 
     // Float64 is a candidate projection: large integers/nearby decimals may share a key.

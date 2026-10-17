@@ -32,11 +32,11 @@ public sealed class SqlCatalogSnapshotTests
         var unreserved = new SqlCatalogTable(objectId, "dbo", "unreserved", columns);
 
         // Act
-        await Should.ThrowAsync<SqlCatalogException>(() => SqlCatalog.PublishTableAsync(catalog,
+        await Should.ThrowAsync<SqlCatalogException>(() => catalog.PublishTableAsync(
             unreserved, [], [], cancellationToken: CancellationToken.None).AsTask());
 
         // Assert: failure publishes nothing and leaves the next legitimate identity available.
-        SqlCatalog.CaptureSnapshot(catalog).Tables.ShouldBeEmpty();
+        catalog.CaptureSnapshot().Tables.ShouldBeEmpty();
         var created = await catalog.CreateTableAsync("dbo", "reserved", columns, cancellationToken: CancellationToken.None);
         created.ObjectId.ShouldBe(1UL);
     }
@@ -53,13 +53,13 @@ public sealed class SqlCatalogSnapshotTests
         var columns = new List<SqlCatalogColumn> { originalColumn };
         var primaryKeyColumns = new List<string> { "id" };
         var indexColumns = new List<string> { "id" };
-        var table = await SqlCatalog.ReserveTableAsync(catalog, "dbo", "orders", columns, primaryKeyColumns, [],
+        var table = await catalog.ReserveTableAsync("dbo", "orders", columns, primaryKeyColumns, [],
             DatabaseObjectOwner.Adhoc, null, CancellationToken.None);
         var index = new SqlCatalogIndex(table.ObjectId, "pk_orders", indexColumns, true, isPrimaryKey: true);
-        await SqlCatalog.PublishTableAsync(catalog, table, [index],
+        await catalog.PublishTableAsync(table, [index],
             [new(table.ObjectId, new IndexDefinition(index.Name, IndexKind.BTree, true), 7)],
             cancellationToken: CancellationToken.None);
-        var snapshot = SqlCatalog.CaptureSnapshot(catalog);
+        var snapshot = catalog.CaptureSnapshot();
 
         // Act
         var replacementColumn = new SqlCatalogColumn("changed", new DatabaseTypeInfo(DatabaseType.String));
@@ -91,20 +91,20 @@ public sealed class SqlCatalogSnapshotTests
         using var storage = SqlStorage.Create(new MemoryStream(), new MemoryStream(), new MemoryStream(), "snapshot");
         var catalog = SqlCatalog.Open(storage);
         var check = new SqlCatalogConstraint("ck_id", SqlCatalogConstraintKind.Check, ["id"], checkExpression: "id > 0");
-        var table = await SqlCatalog.ReserveTableAsync(catalog, "dbo", "orders",
+        var table = await catalog.ReserveTableAsync("dbo", "orders",
             [new SqlCatalogColumn("id", new DatabaseTypeInfo(DatabaseType.Int32), false)],
             ["id"], [check], DatabaseObjectOwner.Adhoc, null, CancellationToken.None);
-        var beforePublish = SqlCatalog.CaptureSnapshot(catalog);
+        var beforePublish = catalog.CaptureSnapshot();
         var index = new SqlCatalogIndex(table.ObjectId, "pk_orders", ["id"], true, isPrimaryKey: true);
         BTreeIndexRegistration[] registrations =
             [new(table.ObjectId, new IndexDefinition(index.Name, IndexKind.BTree, true), 7)];
 
         // Act: keep a read image while the live catalog publishes then drops
         // both definitions. Subsequent lookups must use the captured directory.
-        await SqlCatalog.PublishTableAsync(catalog, table, [index], registrations, cancellationToken: CancellationToken.None);
-        var afterPublish = SqlCatalog.CaptureSnapshot(catalog);
+        await catalog.PublishTableAsync(table, [index], registrations, cancellationToken: CancellationToken.None);
+        var afterPublish = catalog.CaptureSnapshot();
         await catalog.DropTableAsync("dbo", "orders", CancellationToken.None);
-        var afterDrop = SqlCatalog.CaptureSnapshot(catalog);
+        var afterDrop = catalog.CaptureSnapshot();
 
         // Assert
         beforePublish.Tables.ShouldBeEmpty();

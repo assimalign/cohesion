@@ -6,6 +6,11 @@
     <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
   <ItemGroup>
+    <!-- The database run test writes and reads a row over the wire with the SQL client; the generated
+         projects themselves stay package-only consumers. -->
+    <CohesionProjectReference Include="Assimalign.Cohesion.Connections.Tcp" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Database.Client" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Client" />
     <CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
     <CohesionPackageReference Include="Shouldly" />
     <CohesionPackageReference Include="xunit" />

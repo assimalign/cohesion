@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+
 namespace Assimalign.Cohesion.Database.Sql.Language;
 
 /// <summary>
@@ -11,11 +13,13 @@ public sealed class SqlJoinClause
     /// <param name="joinType">The type of join.</param>
     /// <param name="table">The table being joined.</param>
     /// <param name="condition">The ON condition, if any.</param>
-    internal SqlJoinClause(SqlJoinType joinType, SqlTableReference table, SqlExpression? condition)
+    /// <param name="usingColumns">The ordered USING column names; empty for ON or CROSS.</param>
+    internal SqlJoinClause(SqlJoinType joinType, SqlTableReference table, SqlExpression? condition, IReadOnlyList<string> usingColumns)
     {
         JoinType = joinType;
         Table = table;
         Condition = condition;
+        UsingColumns = usingColumns;
     }
 
     /// <summary>
@@ -32,4 +36,7 @@ public sealed class SqlJoinClause
     /// Gets the ON condition expression, if present.
     /// </summary>
     public SqlExpression? Condition { get; }
+
+    /// <summary>Gets the ordered USING column names; empty for ON or CROSS.</summary>
+    public IReadOnlyList<string> UsingColumns { get; }
 }

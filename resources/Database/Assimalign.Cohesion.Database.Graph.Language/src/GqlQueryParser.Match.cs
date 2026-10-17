@@ -14,6 +14,8 @@ public sealed partial class GqlQueryParser
         List<string> deletes = [];
         List<GqlProjection> projections = [];
         bool detach = false;
+        bool returnStar = false;
+        var quantifier = GqlSetQuantifier.All;
         if (Take("MATCH"))
         {
             matches = ParsePatterns(allowPathVariable: true);
@@ -28,23 +30,62 @@ public sealed partial class GqlQueryParser
         }
         if (!Failed && Take("RETURN"))
         {
-            do
+            if (Take("DISTINCT")) { quantifier = GqlSetQuantifier.Distinct; }
+            else { Take("ALL"); }
+            returnStar = Take(TokenType.Asterisk);
+            if (returnStar && !HasNamedBinding(matches) && !HasNamedBinding(creates))
+            { Error("GQL0002", "RETURN * requires at least one named binding.", Previous); }
+            if (!returnStar)
             {
-                string variable = Identifier();
-                string? property = Take(TokenType.Dot) ? Identifier(allowKeyword: true) : null;
-                string? alias = Take("AS") ? Identifier() : null;
-                projections.Add(new GqlProjection(variable, property, alias));
-            } while (!Failed && Take(TokenType.Comma));
+                do
+                {
+                    int first = _position;
+                    var expression = ParsePredicate();
+                    expression.SetStatementText(NormalizeProjectionText(first, _position));
+                    if (!Failed && Current.Type == TokenType.LeftBrace) { Unsupported("MAP PROJECTION", Current); }
+                    string? alias = Take("AS") ? Identifier() : null;
+                    projections.Add(new GqlProjection(expression, alias));
+                } while (!Failed && Take(TokenType.Comma));
+            }
         }
-        if (!Failed && creates.Count == 0 && deletes.Count == 0 && projections.Count == 0)
+        if (!Failed && creates.Count == 0 && deletes.Count == 0 && projections.Count == 0 && !returnStar)
         {
             Error("GQL0002", "MATCH requires RETURN, INSERT, CREATE, or DELETE.", Current);
         }
-        if (!Failed && deletes.Count != 0 && projections.Count != 0)
+        if (!Failed && deletes.Count != 0 && (projections.Count != 0 || returnStar))
         {
             Unsupported("RETURN AFTER DELETE", Previous);
         }
         return new GqlQueryExpression(matches, predicate, creates, deletes.AsReadOnly(), detach,
-            projections.AsReadOnly(), Span(start, Previous));
+            projections.AsReadOnly(), Span(start, Previous)) { SetQuantifier = quantifier, ReturnStar = returnStar };
+    }
+
+    private static bool HasNamedBinding(IReadOnlyList<GqlPathPattern> paths)
+    {
+        foreach (var path in paths)
+        {
+            if (path.Variable is not null) { return true; }
+            foreach (var node in path.Nodes) { if (node.Variable is not null) { return true; } }
+            foreach (var edge in path.Relationships) { if (edge.Variable is not null) { return true; } }
+        }
+        return false;
+    }
+
+    // Normalize token spacing, preserving spelling, quoted text and grouping. Comments
+    // are absent from _tokens. A property reference keeps its familiar variable.property name.
+    private string NormalizeProjectionText(int first, int end)
+    {
+        var text = new System.Text.StringBuilder();
+        for (int i = first; i < end; i++)
+        {
+            var token = _tokens[i];
+            if (i > first && token.Type is not (TokenType.Dot or TokenType.RightParen or TokenType.RightBracket or TokenType.Comma) &&
+                _tokens[i - 1].Type is not (TokenType.Dot or TokenType.LeftParen or TokenType.LeftBracket)) { text.Append(' '); }
+            // Scalar parsing splits a lexical <- into < and unary - in place. Restore the
+            // comparison in its column name without inserting tokens (quadratic for chains).
+            if (token.Type == TokenType.Minus && token.Start > 0 && _source[token.Start - 1] == '<') { text.Append("< "); }
+            text.Append(token.Text);
+        }
+        return text.ToString();
     }
 }

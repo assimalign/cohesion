@@ -9,11 +9,12 @@ using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Client.Internal;
 
-internal sealed class SqlExecuteExchange : IDatabaseProtocolExchange<DatabaseClientResult>
+internal sealed class SqlExecuteExchange : DatabaseProtocolExchange<DatabaseClientResult>
 {
     private readonly ProtocolExecuteMessage _request;
 
     internal SqlExecuteExchange(string statement, IReadOnlyDictionary<string, object?>? parameters)
+        : base(SqlProtocol.Family)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(statement);
         var encoded = new Dictionary<string, byte[]>(parameters?.Count ?? 0);
@@ -30,23 +31,24 @@ internal sealed class SqlExecuteExchange : IDatabaseProtocolExchange<DatabaseCli
         _request = new ProtocolExecuteMessage(statement, encoded);
     }
 
-    public ProtocolMessageFamily Family => SqlProtocol.Family;
-
-    public bool IsResponseComplete { get; private set; }
-
-    public async ValueTask<DatabaseClientResult> ExecuteAsync(IProtocolFrameReader reader, IProtocolFrameWriter writer, CancellationToken cancellationToken = default)
+    protected override async ValueTask<DatabaseClientResult> ExecuteCoreAsync(ProtocolFrameReader reader, ProtocolFrameWriter writer, CancellationToken cancellationToken)
     {
-        IsResponseComplete = false;
         await writer.WriteFrameAsync(new ProtocolFrame((ProtocolMessageType)SqlProtocolMessageType.Execute, _request.Encode()), cancellationToken).ConfigureAwait(false);
         await writer.FlushAsync(cancellationToken).ConfigureAwait(false);
 
         IReadOnlyList<DatabaseClientColumn> columns = [];
         var rows = new List<object?[]>();
+        IReadOnlyList<ProtocolDiagnostic> diagnostics = [];
+        bool hasDiagnostics = false;
         bool hasResultFrames = false;
         while (true)
         {
             ProtocolFrame frame = await reader.ReadFrameAsync(cancellationToken).ConfigureAwait(false)
                 ?? throw new DatabaseClientException(ProtocolErrorCode.Internal, "The server closed the connection mid-exchange.");
+            if (hasDiagnostics && frame.Type != ProtocolMessageType.Error && frame.Type != (ProtocolMessageType)SqlProtocolMessageType.ResultComplete)
+            {
+                throw new ProtocolException(ErrorMessages.DiagnosticsOrderInvalid);
+            }
             switch ((byte)frame.Type)
             {
                 case (byte)SqlProtocolMessageType.ResultHeader:
@@ -54,9 +56,9 @@ internal sealed class SqlExecuteExchange : IDatabaseProtocolExchange<DatabaseCli
                     hasResultFrames = true;
                     ProtocolResultHeaderMessage header = ProtocolResultHeaderMessage.Decode(frame.Payload.Span);
                     var decoded = new List<DatabaseClientColumn>(header.Columns.Count);
-                    foreach ((string name, byte type) in header.Columns)
+                    foreach ((string name, byte type, int? maxLength) in header.Columns)
                     {
-                        decoded.Add(new DatabaseClientColumn(name, (DatabaseType)type));
+                        decoded.Add(new DatabaseClientColumn(name, (DatabaseType)type, maxLength));
                     }
                     columns = decoded;
                     break;
@@ -68,18 +70,24 @@ internal sealed class SqlExecuteExchange : IDatabaseProtocolExchange<DatabaseCli
                 case (byte)SqlProtocolMessageType.ResultComplete:
                 {
                     ProtocolResultCompleteMessage complete = ProtocolResultCompleteMessage.Decode(frame.Payload.Span);
-                    IsResponseComplete = true;
-                    return new DatabaseClientResult(columns, rows, complete.AffectedCount);
+                    return new DatabaseClientResult(columns, rows, complete.AffectedCount, diagnostics);
                 }
+                case (byte)ProtocolMessageType.Diagnostics:
+                    diagnostics = ProtocolDiagnosticsMessage.Decode(frame.Payload.Span).Entries;
+                    hasDiagnostics = true;
+                    break;
                 case (byte)ProtocolMessageType.Error:
                 {
                     ProtocolErrorMessage error = ProtocolErrorMessage.Decode(frame.Payload.Span);
                     // The SQL server sends these as the entire failed statement
                     // response before any results, then returns to its ready loop.
                     // An Error after result frames cannot certify that boundary.
-                    IsResponseComplete = !hasResultFrames &&
-                        error.Code is ProtocolErrorCode.ParseFailure or ProtocolErrorCode.ExecutionFailure;
-                    throw new DatabaseClientException(error.Code, error.Message);
+                    if (!hasResultFrames &&
+                        error.Code is ProtocolErrorCode.ParseFailure or ProtocolErrorCode.ExecutionFailure)
+                    {
+                        MarkResponseComplete();
+                    }
+                    throw new DatabaseClientException(error.Code, error.Message, diagnostics, null);
                 }
                 default:
                     throw new DatabaseClientException(ProtocolErrorCode.ProtocolViolation, $"Unexpected {frame.Type} frame in a Sql execute exchange.");

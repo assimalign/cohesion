@@ -15,7 +15,7 @@ internal sealed class LocalResourceResolver
 
     public LocalResourceResolver(string baseDirectory)
     {
-        _baseDirectory = baseDirectory;
+        _baseDirectory = LocalProcessPath.Unquote(baseDirectory);
     }
 
     public string ResolveAppHost(string appHost)
@@ -32,6 +32,7 @@ internal sealed class LocalResourceResolver
 
     private string ResolvePath(string path, string description)
     {
+        path = LocalProcessPath.Unquote(path);
         string candidate = Path.IsPathFullyQualified(path)
             ? Path.GetFullPath(path)
             : Path.GetFullPath(Path.Combine(_baseDirectory, path));

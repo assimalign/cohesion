@@ -6,11 +6,14 @@ namespace Assimalign.Cohesion.Database.Documents.Language;
 /// Provides the lexical vocabulary and clause capabilities for the Object Query Language (OQL).
 /// </summary>
 /// <remarks>
-/// The query vocabulary is based on the ODMG OQL specification. <c>CREATE INDEX</c> and
-/// <c>DROP INDEX</c> are deliberate Cohesion extensions because ODMG specifies no index DDL.
+/// The OQL name is retained for the document model's executable SQL++ profile, following
+/// Couchbase SQL++ for Query, including distinct NULL and MISSING values.
+/// Collection DDL accepts the SQL++ <c>CREATE COLLECTION [IF NOT EXISTS]</c> and
+/// <c>DROP COLLECTION [IF EXISTS]</c> spellings. <c>IF</c> remains positional, not reserved.
 /// </remarks>
 public static class OqlLanguageProfile
 {
+    // EXPLAIN is recognized only at the statement prefix; elsewhere it remains an identifier.
     private static readonly string[] _keywords =
     [
         // Query
@@ -22,39 +25,42 @@ public static class OqlLanguageProfile
         // Logical
         "AND", "OR", "NOT",
         // Predicates
-        "IN", "EXISTS", "LIKE", "BETWEEN", "IS",
+        "IN", "EXISTS", "LIKE", "ESCAPE", "BETWEEN", "IS", "VALUED", "KNOWN", "UNKNOWN",
+        // Conditional expressions
+        "CASE", "WHEN", "THEN", "ELSE", "END",
         // Quantifiers
         "FOR", "SOME", "ANY",
         // Literals / Constants
-        "NULL", "NIL", "UNDEFINED", "TRUE", "FALSE",
+        "NULL", "MISSING", "NIL", "UNDEFINED", "TRUE", "FALSE",
         // Collection constructors
-        "STRUCT", "LIST", "SET", "BAG", "ARRAY", "COLLECTION",
+        "SET", "ARRAY", "COLLECTION",
         // Object / Collection operations
-        "DEFINE", "ELEMENT", "FLATTEN",
         "FIRST", "LAST", "UNIQUE",
-        "LISTTOSET",
-        // Type
-        "TYPEOF",
     ];
 
     private static readonly string[] _functions =
     [
+        "META",
         // Aggregate
         "COUNT", "SUM", "AVG", "MIN", "MAX",
-        // Numeric
-        "ABS",
-        // Collection
-        "ELEMENT", "FLATTEN", "FIRST", "LAST",
-        "LISTTOSET", "UNIQUE",
     ];
 
     private static readonly string[] _clauses =
     [
+        OqlClauses.CreateCollection,
+        OqlClauses.DropCollection,
         OqlClauses.CreateIndex,
         OqlClauses.DropIndex,
+        OqlClauses.Insert,
+        OqlClauses.Values,
         OqlClauses.Select,
+        OqlClauses.Explain,
         OqlClauses.From,
         OqlClauses.Where,
+        OqlClauses.In,
+        OqlClauses.Between,
+        OqlClauses.Like,
+        OqlClauses.Case,
         OqlClauses.GroupBy,
         OqlClauses.Having,
         OqlClauses.OrderBy,

@@ -2,15 +2,19 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Threading;
+
 using Assimalign.Cohesion.Database.Documents.Catalog;
 using Assimalign.Cohesion.Database.Documents.Language;
+using Assimalign.Cohesion.Database.Language;
 using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Documents.Internal;
 
-internal sealed class DocumentPlanner
+internal sealed partial class DocumentPlanner
 {
-    private readonly IDocumentCatalog _catalog;
+    private readonly DocumentCatalog _catalog;
+    private readonly CancellationToken _cancellationToken;
     private readonly TransactionSnapshot _snapshot;
     private readonly IReadOnlyDictionary<string, object?>? _parameters;
 
@@ -20,68 +24,113 @@ internal sealed class DocumentPlanner
     /// <param name="catalog">The document catalog used to resolve collections and indexes.</param>
     /// <param name="snapshot">The transaction snapshot at which catalog metadata is read.</param>
     /// <param name="parameters">The OQL parameter values, or <see langword="null"/> when the statement supplies none.</param>
-    public DocumentPlanner(IDocumentCatalog catalog, TransactionSnapshot snapshot, IReadOnlyDictionary<string, object?>? parameters)
+    /// <param name="cancellationToken">The statement cancellation token, including constant evaluation.</param>
+    public DocumentPlanner(DocumentCatalog catalog, TransactionSnapshot snapshot, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken = default)
     {
         _catalog = catalog;
+        _cancellationToken = cancellationToken;
         _snapshot = snapshot;
         _parameters = parameters;
     }
 
     internal DocumentStatementPlan Plan(OqlExpression expression) => expression switch
     {
+        OqlInsertExpression insert => PlanInsert(insert),
         OqlSelectExpression select when DocumentSystemCollections.Find(select.Collection) is string name =>
             new DocumentSystemCollectionPlan(CreateLogicalPlan(select), name),
         OqlSelectExpression select => Plan(select),
+        OqlCreateCollectionExpression createCollection => PlanCreateCollection(createCollection),
+        OqlDropCollectionExpression dropCollection => PlanDropCollection(dropCollection),
         OqlCreateIndexExpression createIndex => PlanCreateIndex(createIndex),
         OqlDropIndexExpression dropIndex => PlanDropIndex(dropIndex),
-        _ => throw new DatabaseException("The OQL statement is not supported by the document executor."),
+        _ => throw new DocumentPlanningException("COHDOC001", "The OQL statement is not supported by the document executor.", expression.Location),
     };
 
     internal DocumentPlan Plan(OqlSelectExpression query)
     {
         var logical = CreateLogicalPlan(query);
-        var collection = ResolveCollection(query.Collection);
+        var collection = ResolveCollection(query.Collection, query.Location);
         return new DocumentPlan(logical, collection, ChooseAccess(query, _catalog.GetIndexes(collection.Id, _snapshot)));
+    }
+
+    private static DocumentCreateCollectionPlan PlanCreateCollection(OqlCreateCollectionExpression create)
+    {
+        ValidateCollectionName(create.Name, create);
+        return new DocumentCreateCollectionPlan(create);
+    }
+
+    private static DocumentDropCollectionPlan PlanDropCollection(OqlDropCollectionExpression drop)
+    {
+        ValidateCollectionName(drop.Name, drop);
+        return new DocumentDropCollectionPlan(drop);
+    }
+
+    private static void ValidateCollectionName(string name, OqlExpression expression)
+    {
+        // Match the session API's ArgumentException.ThrowIfNullOrWhiteSpace rule before either core runs.
+        if (!string.IsNullOrWhiteSpace(name)) { return; }
+        var location = expression.Location;
+        if (expression.Text is { } text && location is not null)
+        {
+            // The last token is the name. Reuse the shared lexer only on this refusal path,
+            // retaining the AST's statement span for other collection failures.
+            foreach (var token in new TokenLexer(text, new TokenLexerOptions { Keywords = [] }))
+            {
+                int end = token.Position + token.Value.Length;
+                if (end == location.End && token.Type == TokenType.QuotedIdentifier)
+                {
+                    location = Location.Create(1 + TokenLexer.CountLineBreaks(text.AsSpan(0, token.Position)),
+                        location.EndLine, token.Position, end);
+                    break;
+                }
+            }
+        }
+        throw new DocumentPlanningException("COHDOC001", ErrorMessages.CollectionNameMissing, location);
     }
 
     private DocumentCreateIndexPlan PlanCreateIndex(OqlCreateIndexExpression create)
     {
-        DocumentSystemCollections.EnsureReadOnly(create.Collection);
+        DocumentSystemCollections.EnsureReadOnly(create.Collection, create.Location);
         if (string.IsNullOrWhiteSpace(create.IndexName))
         {
-            throw new DatabaseException("CREATE INDEX requires an index name.");
+            throw new DocumentPlanningException("COHDOC001", "CREATE INDEX requires an index name.", create.Location);
         }
 
         string path = IndexPath(create.Path, alias: null)
-            ?? throw new DatabaseException($"CREATE INDEX '{create.IndexName}' requires a representable document path.");
-        return new DocumentCreateIndexPlan(ResolveCollection(create.Collection), create.IndexName, path);
+            ?? throw new DocumentPlanningException("COHDOC001", $"CREATE INDEX '{create.IndexName}' requires a representable document path.", create.Location);
+        return new DocumentCreateIndexPlan(ResolveCollection(create.Collection, create.Location), create.IndexName, path);
     }
 
     private DocumentDropIndexPlan PlanDropIndex(OqlDropIndexExpression drop)
     {
-        DocumentSystemCollections.EnsureReadOnly(drop.Collection);
+        DocumentSystemCollections.EnsureReadOnly(drop.Collection, drop.Location);
         if (string.IsNullOrWhiteSpace(drop.IndexName))
         {
-            throw new DatabaseException("DROP INDEX requires an index name.");
+            throw new DocumentPlanningException("COHDOC001", "DROP INDEX requires an index name.", drop.Location);
         }
 
-        return new DocumentDropIndexPlan(ResolveCollection(drop.Collection), drop.IndexName);
+        return new DocumentDropIndexPlan(ResolveCollection(drop.Collection, drop.Location), drop.IndexName);
     }
 
-    private DocumentCollectionMetadata ResolveCollection(string name)
+    private DocumentCollectionMetadata ResolveCollection(string name, Assimalign.Cohesion.Database.Language.Location? location)
     {
         if (string.IsNullOrWhiteSpace(name))
         {
-            throw new DatabaseException("An OQL statement requires a collection name.");
+            throw new DocumentPlanningException("COHDOC001", "An OQL statement requires a collection name.", location);
         }
 
         return _catalog.FindCollection(name, _snapshot)
-            ?? throw new DatabaseException($"Collection '{name}' does not exist.");
+            ?? throw new DocumentPlanningException("COHDOC002", $"Collection '{name}' does not exist.", location);
     }
 
     internal static DocumentLogicalPlan CreateLogicalPlan(OqlSelectExpression query)
     {
-        if (query.Projections.Count == 0) { throw new DatabaseException("OQL SELECT requires a projection."); }
+        foreach (var expression in query.Projections.Select(p => p.Expression).Concat(query.GroupBy)
+            .Concat(query.OrderBy.Select(o => o.Expression)).Concat(new[] { query.Predicate, query.Having }).OfType<OqlExpression>())
+        {
+            ValidateMetadata(expression, query.Alias, DocumentSystemCollections.Find(query.Collection) is null);
+        }
+        if (query.Projections.Count == 0) { throw new DocumentPlanningException("COHDOC001", "OQL SELECT requires a projection.", query.Location); }
         // An explicit projection alias is visible to ORDER BY. Other paths
         // continue to address source documents, including unprojected fields.
         var ordering = query.OrderBy.Select(order => order.Expression is OqlPathExpression { Segments.Count: 1 } path &&
@@ -96,7 +145,7 @@ internal sealed class DocumentPlanner
             Validate(query.Predicate, allowAggregate: false);
         }
         foreach (var key in query.GroupBy) { Validate(key, allowAggregate: false); }
-        if (query.Having is not null && !grouped) { throw new DatabaseException("OQL HAVING requires grouping or an aggregate."); }
+        if (query.Having is not null && !grouped) { throw new DocumentPlanningException("COHDOC001", "OQL HAVING requires grouping or an aggregate.", query.Having.Location); }
         var projections = new List<DocumentProjection>();
         foreach (var projection in query.Projections)
         {
@@ -107,11 +156,12 @@ internal sealed class DocumentPlanner
                 OqlStarExpression => "document",
                 OqlPathExpression path => path.Segments.LastOrDefault().Name ?? $"column{projections.Count + 1}",
                 OqlCallExpression call => call.Name.ToLowerInvariant(),
+                OqlMetaExpression meta => meta.Member!,
                 _ => $"column{projections.Count + 1}",
             };
             if (projections.Any(existing => string.Equals(existing.Name, name, StringComparison.Ordinal)))
             {
-                throw new DatabaseException($"OQL projection name '{name}' occurs more than once; specify unique aliases.");
+                throw new DocumentPlanningException("COHDOC003", $"OQL projection name '{name}' occurs more than once; specify unique aliases.", projection.Expression.Location);
             }
             projections.Add(new DocumentProjection(name, projection.Expression));
         }
@@ -171,6 +221,21 @@ internal sealed class DocumentPlanner
 
         void Collect(OqlExpression expression)
         {
+            if (expression is OqlBetweenExpression { Negated: false, Operand: OqlPathExpression rangePath } between &&
+                IsConstant(between.Lower) && IsConstant(between.Upper))
+            {
+                var rangeEvaluator = new DocumentExpressionEvaluator(query.Alias, _parameters, _cancellationToken);
+                var lower = rangeEvaluator.Evaluate(between.Lower, default);
+                var upper = rangeEvaluator.Evaluate(between.Upper, default);
+                string? name = IndexPath(rangePath, query.Alias);
+                if (name is not null && lower is bool or decimal or string && upper is bool or decimal or string)
+                {
+                    var legacy = LegacyIndexPath(rangePath, query.Alias);
+                    predicates.Add((name, legacy, ">=", lower));
+                    predicates.Add((name, legacy, "<=", upper));
+                }
+                return;
+            }
             if (expression is not OqlBinaryExpression binary) { return; }
             if (binary.Operator == "AND") { Collect(binary.Left); Collect(binary.Right); return; }
             if (binary.Operator is not ("=" or ">" or ">=" or "<" or "<=")) { return; }
@@ -184,7 +249,7 @@ internal sealed class DocumentPlanner
                 operation = operation switch { ">" => "<", ">=" => "<=", "<" => ">", "<=" => ">=", _ => operation };
             }
             if (path is null || !IsConstant(constant)) { return; }
-            var evaluator = new DocumentExpressionEvaluator(query.Alias, _parameters);
+            var evaluator = new DocumentExpressionEvaluator(query.Alias, _parameters, _cancellationToken);
             var value = evaluator.Evaluate(constant, default);
             string? pathName = IndexPath(path, query.Alias);
             if (pathName is not null && value is bool or decimal or string)
@@ -258,9 +323,11 @@ internal sealed class DocumentPlanner
         return builder.Length == 0 ? null : builder.ToString();
     }
 
-    private static bool IsConstant(OqlExpression expression) => expression switch
+    internal static bool IsConstant(OqlExpression expression) => expression switch
     {
-        OqlLiteralExpression or OqlParameterExpression => true,
+        OqlInExpression or OqlBetweenExpression or OqlLikeExpression or OqlCaseExpression => PredicateChildren(expression).All(IsConstant),
+        OqlLiteralExpression or OqlMissingExpression or OqlParameterExpression => true,
+        OqlObjectExpression obj => obj.Members.All(member => IsConstant(member.Value)),
         OqlUnaryExpression unary => IsConstant(unary.Operand),
         OqlBinaryExpression binary => IsConstant(binary.Left) && IsConstant(binary.Right),
         _ => false,
@@ -268,6 +335,8 @@ internal sealed class DocumentPlanner
 
     internal static bool ContainsAggregate(OqlExpression expression) => expression switch
     {
+        OqlInExpression or OqlBetweenExpression or OqlLikeExpression or OqlCaseExpression => PredicateChildren(expression).Any(ContainsAggregate),
+        OqlObjectExpression obj => obj.Members.Any(member => ContainsAggregate(member.Value)),
         OqlCallExpression => true,
         OqlBinaryExpression binary => ContainsAggregate(binary.Left) || ContainsAggregate(binary.Right),
         OqlUnaryExpression unary => ContainsAggregate(unary.Operand),
@@ -278,7 +347,13 @@ internal sealed class DocumentPlanner
     {
         switch (expression)
         {
-            case OqlLiteralExpression or OqlParameterExpression or OqlPathExpression:
+            case OqlInExpression or OqlBetweenExpression or OqlLikeExpression or OqlCaseExpression:
+                foreach (var child in PredicateChildren(expression)) { Validate(child, allowAggregate); }
+                return;
+            case OqlLiteralExpression or OqlMissingExpression or OqlParameterExpression or OqlPathExpression or OqlMetaExpression:
+                return;
+            case OqlObjectExpression obj:
+                foreach (var member in obj.Members) { Validate(member.Value, allowAggregate); }
                 return;
             case OqlStarExpression when allowStar:
                 return;
@@ -286,22 +361,33 @@ internal sealed class DocumentPlanner
                 Validate(binary.Left, allowAggregate);
                 Validate(binary.Right, allowAggregate);
                 return;
-            case OqlUnaryExpression unary when unary.Operator is "+" or "-" or "NOT" or "IS NULL" or "IS NOT NULL":
+            case OqlUnaryExpression unary when unary.Operator is "+" or "-" or "NOT" or "IS NULL" or "IS NOT NULL" or
+                "IS MISSING" or "IS NOT MISSING" or "IS VALUED" or "IS NOT VALUED":
                 Validate(unary.Operand, allowAggregate);
                 return;
-            case OqlCallExpression call when allowAggregate && call.Name is "COUNT" or "SUM" or "AVG" or "MIN" or "MAX":
-                if (call.Arguments.Count != 1) { throw new DatabaseException($"OQL aggregate '{call.Name}' requires one argument."); }
+            case OqlCallExpression call when allowAggregate && call.Name != "META" && OqlLanguageProfile.Instance.Functions.Contains(call.Name, StringComparer.OrdinalIgnoreCase):
+                if (call.Arguments.Count != 1) { throw new DocumentPlanningException("COHDOC001", $"OQL aggregate '{call.Name}' requires one argument.", call.Location); }
                 Validate(call.Arguments[0], allowAggregate: false, allowStar: call.Name == "COUNT");
                 return;
             default:
-                throw new DatabaseException("The expression is not valid in this OQL planning context.");
+                throw new DocumentPlanningException("COHDOC001", "The expression is not valid in this OQL planning context.", expression.Location);
         }
     }
 
     private static void ValidateGrouped(OqlExpression expression, OqlSelectExpression query)
     {
-        if (expression is OqlCallExpression or OqlLiteralExpression or OqlParameterExpression) { return; }
         if (query.GroupBy.Any(key => EquivalentExpression(key, expression, query.Alias))) { return; }
+        if (expression is OqlInExpression or OqlBetweenExpression or OqlLikeExpression or OqlCaseExpression)
+        {
+            foreach (var child in PredicateChildren(expression)) { ValidateGrouped(child, query); }
+            return;
+        }
+        if (expression is OqlObjectExpression obj)
+        {
+            foreach (var member in obj.Members) { ValidateGrouped(member.Value, query); }
+            return;
+        }
+        if (expression is OqlCallExpression or OqlLiteralExpression or OqlMissingExpression or OqlParameterExpression) { return; }
         if (expression is OqlBinaryExpression binary)
         {
             ValidateGrouped(binary.Left, query);
@@ -309,13 +395,23 @@ internal sealed class DocumentPlanner
             return;
         }
         if (expression is OqlUnaryExpression unary) { ValidateGrouped(unary.Operand, query); return; }
-        throw new DatabaseException("An OQL grouped query may only read grouping expressions outside aggregate calls.");
+        throw new DocumentPlanningException("COHDOC001", "An OQL grouped query may only read grouping expressions outside aggregate calls.", expression.Location);
     }
 
     private static bool EquivalentExpression(OqlExpression left, OqlExpression right, string? alias) => (left, right) switch
     {
+        (OqlInExpression a, OqlInExpression b) => a.Negated == b.Negated && EquivalentChildren(a, b, alias),
+        (OqlBetweenExpression a, OqlBetweenExpression b) => a.Negated == b.Negated && EquivalentChildren(a, b, alias),
+        (OqlLikeExpression a, OqlLikeExpression b) => a.Negated == b.Negated && EquivalentChildren(a, b, alias),
+        (OqlCaseExpression a, OqlCaseExpression b) => (a.Operand is null) == (b.Operand is null) &&
+            (a.Otherwise is null) == (b.Otherwise is null) && a.Branches.Count == b.Branches.Count && EquivalentChildren(a, b, alias),
         (OqlPathExpression a, OqlPathExpression b) => PathSegments(a, alias).SequenceEqual(PathSegments(b, alias)),
         (OqlLiteralExpression a, OqlLiteralExpression b) => DocumentExpressionEvaluator.Compare(a.Value, b.Value) == 0,
+        (OqlMetaExpression a, OqlMetaExpression b) => a.Member == b.Member,
+        (OqlObjectExpression a, OqlObjectExpression b) => a.Members.Count == b.Members.Count &&
+            a.Members.Zip(b.Members).All(pair => pair.First.Key == pair.Second.Key &&
+                EquivalentExpression(pair.First.Value, pair.Second.Value, alias)),
+        (OqlMissingExpression, OqlMissingExpression) => true,
         (OqlParameterExpression a, OqlParameterExpression b) => a.Name == b.Name,
         (OqlBinaryExpression a, OqlBinaryExpression b) => a.Operator == b.Operator &&
             EquivalentExpression(a.Left, b.Left, alias) && EquivalentExpression(a.Right, b.Right, alias),
@@ -325,4 +421,11 @@ internal sealed class DocumentPlanner
 
     private static IEnumerable<OqlPathSegment> PathSegments(OqlPathExpression path, string? alias)
         => path.Segments.Skip(alias is not null && path.Segments.Count > 0 && path.Segments[0].Name == alias ? 1 : 0);
+
+    private static bool EquivalentChildren(OqlExpression left, OqlExpression right, string? alias)
+    {
+        var a = PredicateChildren(left).ToArray();
+        var b = PredicateChildren(right).ToArray();
+        return a.Length == b.Length && a.Zip(b).All(pair => EquivalentExpression(pair.First, pair.Second, alias));
+    }
 }

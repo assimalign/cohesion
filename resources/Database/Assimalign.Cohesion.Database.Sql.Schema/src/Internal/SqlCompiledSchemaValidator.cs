@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 
+using Assimalign.Cohesion.Database.Sql.Language.Internal;
 using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Schema.Internal;
@@ -14,35 +15,31 @@ internal static class SqlCompiledSchemaValidator
     {
         ArgumentNullException.ThrowIfNull(schema);
 
+        ValidateFormat(schema.Format);
         var errors = new List<SqlSchemaValidationError>();
-        if (!string.Equals(schema.Format, SqlCompiledSchema.CurrentFormat, StringComparison.Ordinal))
-        {
-            Add(errors, SqlSchemaValidationErrorCode.InvalidDocument, "schema.format",
-                $"Compiled schema format '{schema.Format}' is not supported.");
-        }
 
         RequireName(schema.Name, "schema.name", errors);
-        if (schema.Model != EngineModel.Sql)
-        {
-            Add(errors, SqlSchemaValidationErrorCode.ModelMismatch, "schema.model",
-                $"Engine model '{schema.Model}' cannot own a SQL compiled schema.");
-        }
 
         Dictionary<string, CompiledSchemaType> types = ValidateTypes(schema.Types, errors);
         Dictionary<string, CompiledSchemaTable> tables = CollectTables(schema.Tables, errors);
         Dictionary<CompiledSchemaTable, Dictionary<string, CompiledSchemaColumn>> tableColumns =
             ValidateTables(schema.Tables, types, errors);
         ValidateTableConstraints(schema.Tables, tables, tableColumns, errors);
-
-        Dictionary<string, CompiledSchemaFunction> functions =
-            ValidateFunctions(schema.Functions, types, errors);
-        ValidateTriggers(schema.Triggers, tables, errors);
-        ValidatePrincipals(schema.Principals, tables, functions, errors);
-        ValidateExtensions(schema.Extensions, errors);
+        ValidatePrincipals(schema.Principals, tables, errors);
 
         if (errors.Count > 0)
         {
             throw new SqlSchemaValidationException(errors);
+        }
+    }
+
+    internal static void ValidateFormat(string? format)
+    {
+        if (!string.Equals(format, SqlCompiledSchema.CurrentFormat, StringComparison.Ordinal))
+        {
+            throw InvalidDocument("schema.format",
+                $"Compiled schema format '{format}' is not supported; expected '{SqlCompiledSchema.CurrentFormat}'. " +
+                "Rebuild schema artifacts and recreate databases that record an older schema format.");
         }
     }
 
@@ -77,6 +74,14 @@ internal static class SqlCompiledSchemaValidator
                 continue;
             }
 
+            // A declared type is a domain of the SQL engine, named in DDL by this name.
+            if (!CompiledSchemaTypeNames.IsIdentifier(declaration.Name))
+            {
+                Add(errors, SqlSchemaValidationErrorCode.UnsupportedType, path,
+                    $"The custom type name '{declaration.Name}' is not a SQL identifier, so it cannot name a domain.");
+                continue;
+            }
+
             if (!result.TryAdd(declaration.Name, declaration))
             {
                 Add(errors, SqlSchemaValidationErrorCode.DuplicateDeclaration, path,
@@ -85,6 +90,7 @@ internal static class SqlCompiledSchemaValidator
 
             ValidateStorageType(
                 declaration.StorageType,
+                null,
                 declaration.Precision,
                 declaration.Scale,
                 path,
@@ -261,100 +267,9 @@ internal static class SqlCompiledSchemaValidator
         }
     }
 
-    private static Dictionary<string, CompiledSchemaFunction> ValidateFunctions(
-        IReadOnlyList<CompiledSchemaFunction> declarations,
-        IReadOnlyDictionary<string, CompiledSchemaType> types,
-        List<SqlSchemaValidationError> errors)
-    {
-        var result = new Dictionary<string, CompiledSchemaFunction>(StringComparer.OrdinalIgnoreCase);
-        for (int index = 0; index < declarations.Count; index++)
-        {
-            CompiledSchemaFunction? function = declarations[index];
-            string path = NamedPath("functions", function?.Name, index);
-            if (function is null)
-            {
-                Add(errors, SqlSchemaValidationErrorCode.InvalidDocument, path,
-                    "The function entry cannot be null.");
-                continue;
-            }
-
-            if (RequireName(function.Name, path, errors) && !result.TryAdd(function.Name, function))
-            {
-                Add(errors, SqlSchemaValidationErrorCode.DuplicateDeclaration, path,
-                    "The function name is declared more than once.");
-            }
-
-            ValidateTypeReference(function.ResultType, function.CustomResultType, types, $"{path}.resultType", errors);
-            var parameterNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            for (int parameterIndex = 0; parameterIndex < function.Parameters.Count; parameterIndex++)
-            {
-                CompiledSchemaParameter? parameter = function.Parameters[parameterIndex];
-                string parameterPath = NamedPath($"{path}.parameters", parameter?.Name, parameterIndex);
-                if (parameter is null)
-                {
-                    Add(errors, SqlSchemaValidationErrorCode.InvalidDocument, parameterPath,
-                        "The function parameter cannot be null.");
-                    continue;
-                }
-
-                if (RequireName(parameter.Name, parameterPath, errors) && !parameterNames.Add(parameter.Name))
-                {
-                    Add(errors, SqlSchemaValidationErrorCode.DuplicateDeclaration, parameterPath,
-                        "The function parameter name is declared more than once.");
-                }
-
-                ValidateTypeReference(parameter.Type, parameter.CustomType, types, $"{parameterPath}.type", errors);
-            }
-
-            ValidateExpression(function.Body, $"{path}.body", errors);
-        }
-
-        return result;
-    }
-
-    private static void ValidateTriggers(
-        IReadOnlyList<CompiledSchemaTrigger> declarations,
-        IReadOnlyDictionary<string, CompiledSchemaTable> tables,
-        List<SqlSchemaValidationError> errors)
-    {
-        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        for (int index = 0; index < declarations.Count; index++)
-        {
-            CompiledSchemaTrigger? trigger = declarations[index];
-            string path = NamedPath("triggers", trigger?.Name, index);
-            if (trigger is null)
-            {
-                Add(errors, SqlSchemaValidationErrorCode.InvalidDocument, path,
-                    "The trigger entry cannot be null.");
-                continue;
-            }
-
-            if (RequireName(trigger.Name, path, errors) && !names.Add(trigger.Name))
-            {
-                Add(errors, SqlSchemaValidationErrorCode.DuplicateDeclaration, path,
-                    "The trigger name is declared more than once.");
-            }
-
-            if (!RequireName(trigger.Table, $"{path}.table", errors) || !tables.ContainsKey(trigger.Table))
-            {
-                Add(errors, SqlSchemaValidationErrorCode.UnknownReference, $"{path}.table",
-                    $"Trigger table '{trigger.Table}' is not declared.");
-            }
-
-            if (!Enum.IsDefined(trigger.Event))
-            {
-                Add(errors, SqlSchemaValidationErrorCode.InvalidDocument, $"{path}.event",
-                    $"Trigger event '{trigger.Event}' is not defined.");
-            }
-
-            ValidateExpression(trigger.Body, $"{path}.body", errors);
-        }
-    }
-
     private static void ValidatePrincipals(
         IReadOnlyList<CompiledSchemaPrincipal> declarations,
         IReadOnlyDictionary<string, CompiledSchemaTable> tables,
-        IReadOnlyDictionary<string, CompiledSchemaFunction> functions,
         List<SqlSchemaValidationError> errors)
     {
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -419,44 +334,13 @@ internal static class SqlCompiledSchemaValidator
                             $"{objectPath}.{objectName}", "The grant names the same object more than once.");
                     }
 
-                    if (!tables.ContainsKey(objectName!) &&
-                        !functions.ContainsKey(objectName!))
+                    if (!tables.ContainsKey(objectName!))
                     {
                         Add(errors, SqlSchemaValidationErrorCode.UnknownReference,
                             $"{objectPath}.{objectName}", "The granted schema object is not declared.");
                     }
                 }
 
-            }
-        }
-    }
-
-    private static void ValidateExtensions(
-        IReadOnlyList<CompiledSchemaExtension> declarations,
-        List<SqlSchemaValidationError> errors)
-    {
-        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        for (int index = 0; index < declarations.Count; index++)
-        {
-            CompiledSchemaExtension? extension = declarations[index];
-            string path = NamedPath("extensions", extension?.Name, index);
-            if (extension is null)
-            {
-                Add(errors, SqlSchemaValidationErrorCode.InvalidDocument, path,
-                    "The extension entry cannot be null.");
-                continue;
-            }
-
-            if (RequireName(extension.Name, path, errors) && !names.Add(extension.Name))
-            {
-                Add(errors, SqlSchemaValidationErrorCode.DuplicateDeclaration, path,
-                    "The extension name is declared more than once.");
-            }
-
-            if (extension.Value is null)
-            {
-                Add(errors, SqlSchemaValidationErrorCode.IncompleteDeclaration, $"{path}.value",
-                    "The extension value cannot be null.");
             }
         }
     }
@@ -486,16 +370,11 @@ internal static class SqlCompiledSchemaValidator
             }
 
             ValidateTypeReference(column.Type, column.CustomType, types, $"{columnPath}.type", errors);
-            ValidateStorageType(column.Type, column.Precision, column.Scale, columnPath, errors);
-            if (column.MaxLength is <= 0)
+            ValidateStorageType(column.Type, column.MaxLength, column.Precision, column.Scale, columnPath, errors);
+            if (column.DefaultLiteral is not null && string.IsNullOrWhiteSpace(column.DefaultLiteral))
             {
-                Add(errors, SqlSchemaValidationErrorCode.IncompleteDeclaration, $"{columnPath}.maxLength",
-                    "Maximum length must be greater than zero.");
-            }
-            else if (column.MaxLength is not null && column.Type is not DatabaseType.String and not DatabaseType.Binary)
-            {
-                Add(errors, SqlSchemaValidationErrorCode.UnsupportedType, $"{columnPath}.maxLength",
-                    "Maximum length is supported only for string and binary values.");
+                Add(errors, SqlSchemaValidationErrorCode.IncompleteDeclaration, $"{columnPath}.defaultLiteral",
+                    "A declared DEFAULT literal cannot be empty or white space.");
             }
         }
 
@@ -607,8 +486,18 @@ internal static class SqlCompiledSchemaValidator
 
         if (!types.TryGetValue(customType, out CompiledSchemaType? declaration))
         {
-            Add(errors, SqlSchemaValidationErrorCode.UnknownReference, $"{path}.customType",
-                $"Custom type '{customType}' is not declared.");
+            // Not a type the schema declares: a domain the SQL engine registers, or a built-in type
+            // name. Shape and built-in modifiers are validated here; domain existence is the engine's.
+            if (!CompiledSchemaTypeNames.IsTypeName(customType))
+            {
+                Add(errors, SqlSchemaValidationErrorCode.UnsupportedType, $"{path}.customType",
+                    $"'{customType}' is not a SQL type name: an identifier, optionally followed by one or two unsigned integer arguments.");
+            }
+            else if (SqlTypeModifiers.TrySplit(customType, out string name, out int? first, out int? second) &&
+                SqlTypeModifiers.GetError(name, first, second) is { } error)
+            {
+                Add(errors, SqlSchemaValidationErrorCode.UnsupportedType, path, error);
+            }
         }
         else if (declaration.StorageType != type)
         {
@@ -619,6 +508,7 @@ internal static class SqlCompiledSchemaValidator
 
     private static void ValidateStorageType(
         DatabaseType type,
+        int? length,
         int? precision,
         int? scale,
         string path,
@@ -631,16 +521,9 @@ internal static class SqlCompiledSchemaValidator
             return;
         }
 
-        if (precision is null && scale is null)
+        if (SqlTypeModifiers.GetError(type, length, precision, scale) is { } error)
         {
-            return;
-        }
-
-        if (type != DatabaseType.Decimal || precision is null || scale is null ||
-            precision <= 0 || scale < 0 || scale > precision)
-        {
-            Add(errors, SqlSchemaValidationErrorCode.UnsupportedType, $"{path}.precision",
-                "Precision and scale must form a valid decimal storage definition.");
+            Add(errors, SqlSchemaValidationErrorCode.UnsupportedType, path, error);
         }
     }
 

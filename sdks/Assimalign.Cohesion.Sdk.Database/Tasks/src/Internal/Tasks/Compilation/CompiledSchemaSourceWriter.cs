@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 
-using Assimalign.Cohesion.Database;
 using Assimalign.Cohesion.Database.Sql.Schema;
 using Assimalign.Cohesion.Database.Types;
 
@@ -19,20 +18,23 @@ internal static class CompiledSchemaSourceWriter
             throw new InvalidOperationException($"Database model '{modelName}' has no model-specific compiled-schema package.");
         }
 
+        // A declared type is a domain named for its CLR type's simple name (phase E3), matched to a
+        // column by the member's CLR type identity, as the runtime compiler does.
         var customTypes = source.Types.ToDictionary(
             static type => type.TypeName,
-            static type => new CompiledSchemaType(type.TypeName, DatabaseType.Decimal, type.Precision, type.Scale),
+            static type => new CompiledSchemaType(type.SqlName, DatabaseType.Decimal, type.Precision, type.Scale),
             StringComparer.Ordinal);
         CompiledSchemaColumn CreateColumn(SchemaColumnSource column)
         {
-            (DatabaseType type, string? custom, int? precision, int? scale) = ResolveType(column.TypeName, customTypes);
+            (DatabaseType type, string? custom, int? precision, int? scale) = ResolveColumnType(column, customTypes);
             return new CompiledSchemaColumn(
                 column.Name,
                 type,
                 column.IsNullable,
                 Precision: precision,
                 Scale: scale,
-                CustomType: custom);
+                CustomType: custom,
+                DefaultLiteral: column.DefaultLiteral);
         }
 
         var tablesByRowType = source.Tables.ToDictionary(static table => table.RowType, StringComparer.Ordinal);
@@ -58,6 +60,14 @@ internal static class CompiledSchemaSourceWriter
                         target.Name,
                         Array.AsReadOnly([target.PrimaryKey!]));
                 })
+                // A CHECK keeps its author's SQL text, as the runtime compiler records it.
+                .Concat(table.Checks.Select(static check => new CompiledSchemaConstraint(
+                    check.Name,
+                    CompiledSchemaConstraintKind.Check,
+                    Array.Empty<string>(),
+                    null,
+                    Array.Empty<string>(),
+                    new CompiledSchemaExpression(check.Sql))))
                 .ToArray();
             tables.Add(new CompiledSchemaTable(
                 table.Name,
@@ -67,39 +77,6 @@ internal static class CompiledSchemaSourceWriter
                 indexes,
                 constraints));
         }
-
-        CompiledSchemaFunction[] functions = source.Functions
-            .Select(function =>
-            {
-                (DatabaseType resultType, string? customResult, _, _) = ResolveType(function.ReturnType, customTypes);
-                CompiledSchemaParameter[] parameters = function.Parameters
-                    .Select(parameter =>
-                    {
-                        (DatabaseType type, string? custom, _, _) = ResolveType(parameter.TypeName, customTypes);
-                        return new CompiledSchemaParameter(parameter.Name, type, custom);
-                    })
-                    .ToArray();
-                return new CompiledSchemaFunction(
-                    function.Name,
-                    parameters,
-                    resultType,
-                    customResult,
-                    new CompiledSchemaExpression(function.Expression));
-            })
-            .ToArray();
-
-        CompiledSchemaTrigger[] triggers = source.Triggers
-            .Select(trigger =>
-            {
-                SchemaTableSource table = tablesByRowType[trigger.RowType];
-                SqlTriggerEvent triggerEvent = Enum.Parse<SqlTriggerEvent>(trigger.Event, ignoreCase: false);
-                return new CompiledSchemaTrigger(
-                    $"TR_{table.Name}_{triggerEvent}",
-                    table.Name,
-                    triggerEvent,
-                    new CompiledSchemaExpression(trigger.Expression));
-            })
-            .ToArray();
 
         CompiledSchemaPrincipal[] principals = source.Principals
             .Select(principal => new CompiledSchemaPrincipal(
@@ -119,29 +96,36 @@ internal static class CompiledSchemaSourceWriter
         return new SqlCompiledSchema(
             SqlCompiledSchema.CurrentFormat,
             source.Name,
-            EngineModel.Sql,
             source.AllowsDestructiveChanges,
             customTypes.Values.OrderBy(static type => type.Name, StringComparer.Ordinal).ToArray(),
             tables.OrderBy(static table => table.Name, StringComparer.Ordinal).ToArray(),
-            functions.OrderBy(static function => function.Name, StringComparer.Ordinal).ToArray(),
-            triggers.OrderBy(static trigger => trigger.Name, StringComparer.Ordinal).ToArray(),
-            principals.OrderBy(static principal => principal.Name, StringComparer.Ordinal).ToArray(),
-            source.Extensions
-                .OrderBy(static extension => extension.Name, StringComparer.Ordinal)
-                .Select(static extension => new CompiledSchemaExtension(extension.Name, extension.Value))
-                .ToArray());
+            principals.OrderBy(static principal => principal.Name, StringComparer.Ordinal).ToArray());
+    }
+
+    internal static (DatabaseType Type, string? CustomType, int? Precision, int? Scale) ResolveColumnType(
+        SchemaColumnSource column,
+        IReadOnlyDictionary<string, CompiledSchemaType> customTypes)
+    {
+        var resolved = ResolveType(column.TypeName, customTypes, column.StorageType);
+        return column.SqlType is { } sqlType ? (resolved.Type, sqlType, null, null) : resolved;
     }
 
     private static (DatabaseType Type, string? CustomType, int? Precision, int? Scale) ResolveType(
         string typeName,
-        IReadOnlyDictionary<string, CompiledSchemaType> customTypes)
+        IReadOnlyDictionary<string, CompiledSchemaType> customTypes,
+        DatabaseType? storageType)
     {
         if (customTypes.TryGetValue(typeName, out CompiledSchemaType? custom))
         {
             return (custom.StorageType, custom.Name, custom.Precision, custom.Scale);
         }
 
-        DatabaseType type = typeName switch
+        return (storageType ?? ResolveBuiltInType(typeName), null, null, null);
+    }
+
+    internal static DatabaseType ResolveBuiltInType(string typeName)
+    {
+        return typeName switch
         {
             "System.Private.CoreLib:System.Boolean" => DatabaseType.Boolean,
             "System.Private.CoreLib:System.SByte" => DatabaseType.Int8,
@@ -152,6 +136,7 @@ internal static class CompiledSchemaSourceWriter
             "System.Private.CoreLib:System.Double" => DatabaseType.Float64,
             "System.Private.CoreLib:System.Decimal" => DatabaseType.Decimal,
             "System.Private.CoreLib:System.String" => DatabaseType.String,
+            "System.Private.CoreLib:System.Char" => DatabaseType.Character,
             "System.Private.CoreLib:System.Byte[]" => DatabaseType.Binary,
             "System.Private.CoreLib:System.DateOnly" => DatabaseType.Date,
             "System.Private.CoreLib:System.TimeOnly" => DatabaseType.Time,
@@ -161,6 +146,5 @@ internal static class CompiledSchemaSourceWriter
             "System.Private.CoreLib:System.Guid" => DatabaseType.Guid,
             _ => throw new InvalidOperationException($"CLR type '{typeName}' is not supported by the compiled-schema contract.")
         };
-        return (type, null, null, null);
     }
 }

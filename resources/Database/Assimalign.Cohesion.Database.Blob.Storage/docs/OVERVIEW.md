@@ -16,6 +16,6 @@ listing does not scan blob content.
 callback receives the chain head, length, and IEEE CRC-32 for atomic metadata
 publication. `OpenRead` follows that reference one chunk at a time. An optional
 disposal callback keeps the caller's snapshot pinned until the download closes.
-Cancellation and failed uploads invoke the abort callback and cannot publish.
+Cancellation and failed uploads invoke the abort callback with the failure and cannot publish.
 
 The [design](DESIGN.md) specifies the binary format and recovery invariants.

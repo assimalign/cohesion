@@ -19,20 +19,20 @@ public sealed class SqlCatalogConstraintTests
         using var data = new MemoryStream();
         using var journal = new MemoryStream();
         using var storage = SqlStorage.Create(new NonClosingStream(data), new NonClosingStream(journal), new MemoryStream(), "constraints");
-        ISqlCatalog catalog = SqlCatalog.Open(storage);
+        SqlCatalog catalog = SqlCatalog.Open(storage);
         var reference = new SqlCatalogConstraint("fk_parent", SqlCatalogConstraintKind.Reference,
             ["parent_id"], "dbo", "parent", ["id"], onDelete: SqlCatalogReferentialAction.Cascade);
         var check = new SqlCatalogConstraint("ck_positive", SqlCatalogConstraintKind.Check,
             ["qty"], checkExpression: "qty > 0");
-        await SqlCatalog.CreateTableAsync(catalog, "dbo", "child",
-            [Column("id"), Column("parent_id"), Column("qty")], ["id"], [reference],
-            DatabaseObjectOwner.Schema, "app", default);
-        await SqlCatalog.AddConstraintAsync(catalog, "dbo", "child", check, default);
+        await catalog.CreateTableAsync("dbo", "child",
+            [Column("id"), Column("parent_id"), Column("qty")], ["id"],
+            DatabaseObjectOwner.Schema, "app", default, [reference]);
+        await catalog.AddConstraintAsync("dbo", "child", check, default);
         await catalog.AddColumnAsync("dbo", "child", Column("extra"));
 
         // Copy the live no-force data and WAL, without checkpoint or clean shutdown.
         using var recoveredStorage = SqlStorage.Open(Copy(data), Copy(journal), new MemoryStream());
-        ISqlCatalog recovered = SqlCatalog.Open(recoveredStorage);
+        SqlCatalog recovered = SqlCatalog.Open(recoveredStorage);
         recovered.TryGetTable("dbo", "child", out SqlCatalogTable table).ShouldBeTrue();
         table.Owner.ShouldBe(DatabaseObjectOwner.Schema);
         table.OwningSchema.ShouldBe("app");
@@ -45,15 +45,16 @@ public sealed class SqlCatalogConstraintTests
         table.Constraints[1].CheckExpression.ShouldBe("qty > 0");
         table.FindColumn("extra").ShouldNotBeNull();
 
-        await SqlCatalog.DropConstraintAsync(recovered, "dbo", "child", "ck_positive", default);
+        await recovered.DropConstraintAsync("dbo", "child", "ck_positive", default);
         SqlCatalog.Open(recoveredStorage).Tables.ShouldHaveSingleItem().Constraints.ShouldHaveSingleItem().Name.ShouldBe("fk_parent");
     }
 
-    [Theory]
+    [Theory(DisplayName = "Cohesion Test [Sql.Catalog] - Legacy constraint records without format 10 identities are refused")]
     [InlineData(false)]
     [InlineData(true)]
-    public void OlderTableRecords_ShouldLoadWithoutConstraints(bool ownershipSuffix)
+    public void Open_OlderTableRecords_ShouldRefuseMissingFunctionIdentities(bool ownershipSuffix)
     {
+        // Arrange
         using var storage = SqlStorage.Create(new MemoryStream(), new MemoryStream(), new MemoryStream(), "legacy");
         var writer = LegacyTable();
         if (ownershipSuffix)
@@ -65,9 +66,8 @@ public sealed class SqlCatalogConstraintTests
             storage.InsertRow(transaction, writer.ToArray());
             transaction.Commit();
         }
-        SqlCatalogTable table = SqlCatalog.Open(storage).Tables.ShouldHaveSingleItem();
-        table.Constraints.ShouldBeEmpty();
-        table.Owner.ShouldBe(ownershipSuffix ? DatabaseObjectOwner.Schema : DatabaseObjectOwner.Adhoc);
+        // Act / Assert
+        Should.Throw<SqlCatalogException>(() => SqlCatalog.Open(storage)).Message.ShouldContain("missing format 10 function-call identities");
     }
 
     [Fact]
@@ -90,24 +90,24 @@ public sealed class SqlCatalogConstraintTests
         using var data = new MemoryStream();
         using var journal = new MemoryStream();
         using var storage = SqlStorage.Create(new NonClosingStream(data), new NonClosingStream(journal), new MemoryStream(), "publish");
-        ISqlCatalog catalog = SqlCatalog.Open(storage);
+        SqlCatalog catalog = SqlCatalog.Open(storage);
         var check = new SqlCatalogConstraint("ck_id", SqlCatalogConstraintKind.Check, ["id"], checkExpression: "id > 0");
-        SqlCatalogTable table = await SqlCatalog.ReserveTableAsync(catalog, "dbo", "t", [Column("id")], [], [check],
+        SqlCatalogTable table = await catalog.ReserveTableAsync("dbo", "t", [Column("id")], [], [check],
             DatabaseObjectOwner.Adhoc, null, default);
         catalog.Tables.ShouldBeEmpty();
         using (var reservedStorage = SqlStorage.Open(Copy(data), Copy(journal), new MemoryStream()))
         {
-            ISqlCatalog reservedCatalog = SqlCatalog.Open(reservedStorage);
+            SqlCatalog reservedCatalog = SqlCatalog.Open(reservedStorage);
             reservedCatalog.Tables.ShouldBeEmpty();
             (await reservedCatalog.CreateTableAsync("dbo", "next", [Column("id")])).ObjectId.ShouldBeGreaterThan(table.ObjectId);
         }
 
         var index = new SqlCatalogIndex(table.ObjectId, "uq_id", ["id"], true);
         BTreeIndexRegistration[] registrations = [new(table.ObjectId, new IndexDefinition("uq_id", IndexKind.BTree, true), 7)];
-        await SqlCatalog.PublishTableAsync(catalog, table, [index], registrations, cancellationToken: default);
+        await catalog.PublishTableAsync(table, [index], registrations, cancellationToken: default);
 
         using var reopenedStorage = SqlStorage.Open(Copy(data), Copy(journal), new MemoryStream());
-        ISqlCatalog reopened = SqlCatalog.Open(reopenedStorage);
+        SqlCatalog reopened = SqlCatalog.Open(reopenedStorage);
         reopened.Tables.ShouldHaveSingleItem().Constraints.ShouldHaveSingleItem().Name.ShouldBe("ck_id");
         reopened.GetIndexes(table.ObjectId).ShouldHaveSingleItem().IsUnique.ShouldBeTrue();
         reopened.GetIndexRegistrations().ShouldHaveSingleItem().Definition.IsUnique.ShouldBeTrue();
@@ -119,15 +119,15 @@ public sealed class SqlCatalogConstraintTests
         using var data = new MemoryStream();
         using var journal = new MemoryStream();
         using var storage = SqlStorage.Create(new NonClosingStream(data), new NonClosingStream(journal), new MemoryStream(), "pk-index");
-        ISqlCatalog catalog = SqlCatalog.Open(storage);
-        SqlCatalogTable table = await SqlCatalog.ReserveTableAsync(catalog, "dbo", "t", [Column("id")], ["id"], [],
+        SqlCatalog catalog = SqlCatalog.Open(storage);
+        SqlCatalogTable table = await catalog.ReserveTableAsync("dbo", "t", [Column("id")], ["id"], [],
             DatabaseObjectOwner.Adhoc, null, default);
         SqlCatalogIndex[] indexes = [new(table.ObjectId, "pk_t", ["id"], true, isPrimaryKey: true), new(table.ObjectId, "uq_id", ["id"], true)];
         BTreeIndexRegistration[] registrations = [new(table.ObjectId, new IndexDefinition("pk_t", IndexKind.BTree, true), 7), new(table.ObjectId, new IndexDefinition("uq_id", IndexKind.BTree, true), 8)];
-        await SqlCatalog.PublishTableAsync(catalog, table, indexes, registrations, cancellationToken: default);
+        await catalog.PublishTableAsync(table, indexes, registrations, cancellationToken: default);
 
         using var reopenedStorage = SqlStorage.Open(Copy(data), Copy(journal), new MemoryStream());
-        ISqlCatalog reopened = SqlCatalog.Open(reopenedStorage);
+        SqlCatalog reopened = SqlCatalog.Open(reopenedStorage);
         reopened.TryGetIndex(table.ObjectId, "pk_t", out SqlCatalogIndex primary).ShouldBeTrue();
         reopened.TryGetIndex(table.ObjectId, "uq_id", out SqlCatalogIndex unique).ShouldBeTrue();
         primary.IsPrimaryKey.ShouldBeTrue();

@@ -19,19 +19,20 @@ The model reference supplies wire codecs; the client never calls its parser.
 
 ## Scope
 
-- `SqlClient.Create(SqlClientOptions)` → `ISqlClient`: a pooling client bound to one
+- `SqlClient.Create(SqlClientOptions)` → the sealed `SqlClient`: a pooling client bound to one
   database on one server.
-- `ISqlClient.ConnectAsync()` → `ISqlConnection`: rents a typed connection (a pooled,
+- `SqlClient.ConnectAsync()` → the sealed `SqlConnection`: rents a typed connection (a pooled,
   authenticated session under the hood).
 - `SqlCommand` + `SqlParameterCollection`: statement text with named parameters
   (the `@`/`$` sigil is normalized away on bind).
-- `ISqlConnection.QueryAsync` / `ExecuteAsync` / `ExecuteScalarAsync<T>`: run commands
+- `SqlConnection.QueryAsync` / `ExecuteAsync` / `ExecuteScalarAsync<T>`: run commands
   and get a `SqlResultSet`, an affected count, or a scalar.
 - `SqlResultSet` / `SqlRow` / `SqlColumn`: typed, ordinal- and name-addressable rows
   with widening numeric getters.
 - `SqlClientException` + `SqlClientErrorKind`: a SQL-scoped failure taxonomy mapped
   from the core's wire codes, with a `ConnectionUsable` flag.
-- `ISqlClientObserver`: an allocation-free telemetry hook fired around every command.
+- `SqlClientObserver`: an abstract, allocation-free telemetry hook fired around every
+  command; an observer overrides only the hooks it needs.
 
 ## Dependencies
 
@@ -45,13 +46,13 @@ The model reference supplies wire codecs; the client never calls its parser.
 ## Usage
 
 ```csharp
-await using ISqlClient client = SqlClient.Create(new SqlClientOptions
+await using SqlClient client = SqlClient.Create(new SqlClientOptions
 {
     Settings = DatabaseConnectionSettings.Parse("Database=orders;Endpoint=db-host:5740"),
     ConnectionFactory = tcpConnectionFactory,   // composed statically, never in the string
 });
 
-await using ISqlConnection connection = await client.ConnectAsync();
+await using SqlConnection connection = await client.ConnectAsync();
 
 SqlResultSet rows = await connection.QueryAsync(
     new SqlCommand("SELECT id, name FROM users WHERE id = @id").WithParameter("id", 42));

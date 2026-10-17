@@ -5,6 +5,8 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Database.Transactions.Internal;
+
 namespace Assimalign.Cohesion.Database.Transactions.Tests;
 
 /// <summary>
@@ -14,11 +16,11 @@ namespace Assimalign.Cohesion.Database.Transactions.Tests;
 /// </summary>
 public class TransactionManagerTests
 {
-    private static (ITransactionManager Manager, IVersionStore Versions, ILockManager Locks) CreateKernel()
+    private static (TransactionManager Manager, VersionStore Versions, LockManager Locks) CreateKernel()
     {
         var locks = LockManager.Create();
         var versions = VersionStore.CreateInMemory();
-        var manager = TransactionManager.Create(TransactionLog.CreateInMemory(), locks, versions);
+        var manager = TransactionManager.Create(locks, versions);
         return (manager, versions, locks);
     }
 
@@ -208,7 +210,6 @@ public class TransactionManagerTests
         // pre-advanced past values the manager never saw (a storage-side bracket).
         ulong counter = 10;
         var manager = TransactionManager.Create(
-            TransactionLog.CreateInMemory(),
             LockManager.Create(),
             VersionStore.CreateInMemory(),
             () => new TransactionSequence(++counter));
@@ -248,13 +249,13 @@ public class TransactionManagerTests
         await managerB.RollbackAsync(foreign);
     }
 
-    private sealed class FailingCommitLog : ITransactionLog
+    private sealed class FailingCommitLog : TransactionLog
     {
-        public ValueTask AppendBeginAsync(TransactionSequence sequence, CancellationToken cancellationToken = default) => default;
+        public override ValueTask AppendBeginAsync(TransactionSequence sequence, CancellationToken cancellationToken = default) => default;
 
-        public ValueTask AppendCommitAsync(TransactionSequence sequence, CancellationToken cancellationToken = default)
+        public override ValueTask AppendCommitAsync(TransactionSequence sequence, CancellationToken cancellationToken = default)
             => throw new InvalidOperationException("Simulated durability failure.");
 
-        public ValueTask AppendAbortAsync(TransactionSequence sequence, CancellationToken cancellationToken = default) => default;
+        public override ValueTask AppendAbortAsync(TransactionSequence sequence, CancellationToken cancellationToken = default) => default;
     }
 }

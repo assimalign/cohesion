@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+<resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+<resheader name="version"><value>2.0</value></resheader>
+<resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
+<resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
+  <data name="JsonScalarInvalid" xml:space="preserve"><value>OQL values must be JSON scalars or JsonElement values; numbers must fit System.Decimal.</value></data>
+  <data name="ClientOptionsMissing" xml:space="preserve"><value>Connection settings and a connection factory are required.</value></data>
+  <data name="ExchangeIncomplete" xml:space="preserve"><value>The document exchange ended before completion.</value></data>
+  <data name="ResultHeaderUnexpected" xml:space="preserve"><value>Unexpected document result header.</value></data>
+  <data name="ResultKindUnexpected" xml:space="preserve"><value>Unexpected document result kind.</value></data>
+  <data name="RowWidthInvalid" xml:space="preserve"><value>A document row must contain exactly one value per column.</value></data>
+  <data name="StoredDocumentUnexpected" xml:space="preserve"><value>Unexpected stored document.</value></data>
+  <data name="DocumentIdentityMismatch" xml:space="preserve"><value>The document identity does not match the request.</value></data>
+  <data name="CollectionUnexpected" xml:space="preserve"><value>Unexpected collection result.</value></data>
+  <data name="CollectionOrderInvalid" xml:space="preserve"><value>Unexpected collection name or ordering.</value></data>
+  <data name="ResponseFrameUnexpected" xml:space="preserve"><value>Unexpected frame in the document exchange.</value></data>
+  <data name="CompletionCountMismatch" xml:space="preserve"><value>The document completion count does not match its results.</value></data>
+  <data name="CompletionUnexpected" xml:space="preserve"><value>Invalid completion for the document operation.</value></data>
+  <data name="RowBytesInvalid" xml:space="preserve"><value>The field is not JSON or a string.</value></data>
+  <data name="RowValueAbsent" xml:space="preserve"><value>The field is NULL or MISSING.</value></data>
+</root>

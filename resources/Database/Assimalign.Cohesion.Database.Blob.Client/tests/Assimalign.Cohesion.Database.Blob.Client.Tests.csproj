@@ -12,6 +12,8 @@
     <CohesionProjectReference Include="Assimalign.Cohesion.Database.Blob.Client" />
     <CohesionProjectReference Include="Assimalign.Cohesion.Database.Blob" />
     <CohesionProjectReference Include="Assimalign.Cohesion.Connections.InMemory" />
+    <!-- Dial-failure tests (owner decision 39): a refused TCP dial. -->
+    <CohesionProjectReference Include="Assimalign.Cohesion.Connections.Tcp" />
     <CohesionProjectReference Include="Assimalign.Cohesion.Database.Blob.Client.StreamingFixture" ReferenceOutputAssembly="false" />
   </ItemGroup>
   <Target Name="CopyBlobClientStreamingFixture" AfterTargets="Build">

@@ -8,9 +8,14 @@ this project so ordering is consistent across every database model.
 
 ## Scope
 
+- **Diagnostics** — `Diagnostic`, `DiagnosticSeverity` and `DiagnosticLocation` are shared
+  by language parsers and model-neutral execution results. Their names and members are unchanged
+  after the move from Language (#1577, 2026-10-16).
+
 - **Type identity** — the `DatabaseType` scalar set (boolean, integers, floats,
-  decimal, string, binary, date/time family, GUID, JSON) and `DatabaseTypeInfo`
-  constraints (length/precision/scale).
+  decimal, fixed-length character, string, binary, date/time family, GUID, JSON) and
+  `DatabaseTypeInfo` constraints (length/precision/scale). Character retains a distinct
+  catalog/wire metadata identity; SQL stores padded strings and trims their index keys.
 - **Collation** — explicit, named, persisted-by-id string ordering rules:
   `Collation.Binary` (code-point order), `CaseInsensitive` (Unicode simple case fold),
   and `CaseAccentInsensitive` (canonical decomposition, mark removal, case fold).
@@ -20,7 +25,8 @@ this project so ordering is consistent across every database model.
 - **Key encodings** — `DatabaseKeyWriter` builds self-describing composite keys whose
   unsigned byte-wise comparison equals component-by-component value comparison;
   `DatabaseKeyReader` decodes them back (folding collations return canonical text;
-  original spelling stays in value storage). `Database.Indexing`'s `IndexKey`
+  original spelling stays in value storage) and can skip a component without
+  materializing its value. `Database.Indexing`'s `IndexKey`
   and every model's key convention consume these.
 - **Boxed-value bridge** — `DatabaseValueCodec` maps boxed runtime values onto the
   same component encoding (dispatch by runtime type, read back boxed). The wire
@@ -30,7 +36,8 @@ this project so ordering is consistent across every database model.
 ## Dependencies
 
 None — a leaf kernel project. Consumers: `Database.Indexing` (key composition),
-`Database.Execution` (value typing), per-model catalogs and planners.
+`Database.Execution` (value typing and diagnostics), `Database.Language` (diagnostic production),
+per-model catalogs and planners.
 
 ## Usage
 

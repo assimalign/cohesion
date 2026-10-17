@@ -474,7 +474,13 @@ unpacked, and downloading and extracting it costs about as much as downloading t
 extraction, which a cache restore repeats. Revisit if a job starts restoring large packages on
 every run.
 
-The Database workflow keeps its per-project shape and three-OS matrix until #1470 rewrites it.
+The Database workflow follows the same settings, with one job outside the shape.
+Database.Testing's tests build the real Sdk.Database SampleHost, so they need packed SDKs and
+frameworks. A pack job runs `Install-Local.ps1` once, and the `database-testing` job builds
+Database.Testing through the action's `project` input, one leg per OS. The project stays in the
+build list because the inventory guard reads only that list. A step in the build job removes it
+from the projects handed to the action. Off `main` the pack job packs only `linux-x64`, the one
+E2E leg that runs there.
 
 The shared test step uses a five-minute blame hang timeout and mini dumps. Recent healthy runs
 completed the Http.Connections test step in at most 78 seconds and Web.Hosting's in 41 seconds
@@ -489,7 +495,10 @@ consolidated jobs and resize under the rule below if any leg passes 15 minutes.
 Templates is the exception. Its job packs the local feed, and the slowest successful job took
 32m30s (run `38563045950`), so it has `timeout-minutes: 75` under the rule below. The first 30-minute
 limit cut off a healthy macOS job.
-Database workflow timeouts are deferred to #1470 while the owner rewrites that workflow.
+Database's build job starts at `timeout-minutes: 60` until its first `main` runs measure it.
+Run `38740702835`'s single-project legs bound it at 29 minutes on Linux and 42 on Windows
+(the shortest leg plus every other leg's time beyond it, which counts the shared closure build
+more than once). The first consolidated Linux job took 10.2 minutes (run `38797738233`).
 On failure, the action uploads `TestResults/<project>/**/Sequence_*.xml` and dumps as one
 artifact per job, named for the project (release legs) or the area category, OS, architecture,
 job, and attempt, and retained for seven days. Ordinary failures

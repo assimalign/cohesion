@@ -111,7 +111,7 @@ public sealed class SqlSubqueryExecutionTests
         await using var result = (await ExecuteAsync(session,
             "SELECT (SELECT id FROM choices WHERE id IS NOT NULL) AS picked, " +
             "(SELECT id FROM choices WHERE id < 0) AS absent FROM candidates WHERE id = 1;"))
-            .ShouldBeAssignableTo<QueryResultSet>();
+            .ShouldBeAssignableTo<DatabaseResultSet>();
 
         // Assert
         result.Columns.Select(column => column.Name).ShouldBe(["picked", "absent"]);
@@ -254,7 +254,7 @@ public sealed class SqlSubqueryExecutionTests
     {
         // Arrange
         await using var engine = CreateEngine();
-        var database = (SqlDatabaseInstance)await engine.CreateDatabaseAsync("subquery");
+        var database = await engine.CreateDatabaseAsync("subquery");
         await using var writer = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await ExecuteAsync(writer, "CREATE TABLE candidates (id INT);");
         await ExecuteAsync(writer, "CREATE TABLE choices (id INT);");
@@ -267,7 +267,7 @@ public sealed class SqlSubqueryExecutionTests
             var request = SqlQueryRequest.FromSql(
                 "SELECT id, (SELECT id FROM choices) FROM candidates WHERE id IN (SELECT id FROM choices) " +
                 "AND EXISTS (SELECT id FROM choices WHERE id IN (SELECT id FROM candidates));");
-            var executor = new SqlQueryExecutor(database.DataStorage, database.Catalog, database.IndexManager);
+            var executor = new SqlQueryExecutor(database.DataStorage, database.Catalog, database.IndexManager, database.Definitions);
 
             // Act: change both outer and nested inputs after the ReadCommitted statement captured its view.
             var update = await writer.BeginTransactionAsync(cancellationToken: CancellationToken.None);
@@ -275,10 +275,10 @@ public sealed class SqlSubqueryExecutionTests
             await ExecuteAsync(writer, "UPDATE choices SET id = 2;");
             await update.CommitAsync(CancellationToken.None);
             await using var oldResult = (await executor.ExecuteAsync(request, captured, CancellationToken.None))
-                .ShouldBeAssignableTo<QueryResultSet>();
+                .ShouldBeAssignableTo<DatabaseResultSet>();
             await using var newResult = (await executor.ExecuteAsync(request,
                 new SqlStatementContext(transaction, database.Coordinator), CancellationToken.None))
-                .ShouldBeAssignableTo<QueryResultSet>();
+                .ShouldBeAssignableTo<DatabaseResultSet>();
 
             // Assert
             (await ReadRowsAsync(oldResult)).ShouldHaveSingleItem().ShouldBe(new object?[] { 1, 1 });
@@ -488,7 +488,7 @@ public sealed class SqlSubqueryExecutionTests
     {
         // Arrange
         await using var engine = CreateEngine();
-        var database = (SqlDatabaseInstance)await engine.CreateDatabaseAsync("subquery");
+        var database = await engine.CreateDatabaseAsync("subquery");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
 
         // Act / Assert
@@ -499,9 +499,9 @@ public sealed class SqlSubqueryExecutionTests
     }
 
     private static SqlDatabaseEngine CreateEngine()
-        => SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "subquery-tests" });
+        => SqlDatabaseEngine.Create("subquery-tests", new SqlDatabaseEngineOptions());
 
-    private static async Task SeedMembershipAsync(IDatabaseSession session)
+    private static async Task SeedMembershipAsync(SqlDatabaseSession session)
     {
         await ExecuteAsync(session, "CREATE TABLE candidates (id INT);");
         await ExecuteAsync(session, "CREATE TABLE choices (id INT);");
@@ -509,18 +509,18 @@ public sealed class SqlSubqueryExecutionTests
         await ExecuteAsync(session, "INSERT INTO choices VALUES (2), (NULL);");
     }
 
-    private static Task<QueryResult> ExecuteAsync(IDatabaseSession session, string sql)
+    private static Task<DatabaseResult> ExecuteAsync(SqlDatabaseSession session, string sql)
         => session.ExecuteAsync(sql, cancellationToken: CancellationToken.None).AsTask();
 
-    private static async Task<List<object?[]>> RowsAsync(IDatabaseSession session, string sql)
+    private static async Task<List<object?[]>> RowsAsync(SqlDatabaseSession session, string sql)
     {
-        await using var result = (await ExecuteAsync(session, sql)).ShouldBeAssignableTo<QueryResultSet>();
+        await using var result = (await ExecuteAsync(session, sql)).ShouldBeAssignableTo<DatabaseResultSet>();
         return await ReadRowsAsync(result);
     }
 
-    private static async Task<List<object?[]>> ReadRowsAsync(QueryResultSet result)
+    private static async Task<List<object?[]>> ReadRowsAsync(DatabaseResultSet result)
     {
-        result.Status.ShouldBe(QueryResultStatus.Success);
+        result.Status.ShouldBe(DatabaseResultStatus.Success);
         var rows = new List<object?[]>();
         await foreach (var row in result.GetRowsAsync(CancellationToken.None))
         {

@@ -19,6 +19,10 @@
 		     exempt from the area layering rules). -->
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Documents" />
+		<!-- The Blob server refuses only the database a worker fails on, while health is Degraded
+		     (owner decision 42 of 2026-10-07): a hosted Blob engine and its server over the
+		     in-memory driver. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Blob" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Client" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Client" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.InMemory" />

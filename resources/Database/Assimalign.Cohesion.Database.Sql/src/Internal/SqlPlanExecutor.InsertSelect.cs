@@ -18,10 +18,10 @@ internal sealed partial class SqlPlanExecutor
     /// before writing. Reading the destination is supported without feeding newly
     /// inserted rows back into the query.
     /// </summary>
-    private async Task<QueryResult> ExecuteInsertSelectAsync(SqlInsertSelectPlan plan, SqlStatementContext statement,
+    private async Task<DatabaseResult> ExecuteInsertSelectAsync(SqlInsertSelectPlan plan, SqlStatementContext statement,
         CancellationToken cancellationToken)
     {
-        await using var source = (QueryResultSet)await ExecuteAsync(plan.Source, statement, cancellationToken).ConfigureAwait(false);
+        await using var source = (DatabaseResultSet)await ExecuteAsync(plan.Source, statement, cancellationToken).ConfigureAwait(false);
         if (source.Columns.Count != plan.TargetOrdinals.Count)
         {
             throw new DatabaseException(
@@ -34,7 +34,7 @@ internal sealed partial class SqlPlanExecutor
             var row = new object?[sourceRow.FieldCount];
             for (int i = 0; i < row.Length; i++)
             {
-                row[i] = sourceRow.GetValue(i);
+                row[i] = SqlCharacter.Input(sourceRow.GetValue(i), source.Columns[i].Type);
             }
             rows.Add(row);
         }
@@ -46,17 +46,22 @@ internal sealed partial class SqlPlanExecutor
     /// defaults, validate all row constraints, acquire reference and unique locks,
     /// then publish the complete write set within one transactional statement.
     /// </summary>
-    private async Task<QueryResult> ExecuteInsertRowsAsync(SqlCatalogTable table, IReadOnlyList<int> targetOrdinals,
-        IReadOnlyList<object?[]> sourceRows, SqlStatementContext statement, CancellationToken cancellationToken)
+    private async Task<DatabaseResult> ExecuteInsertRowsAsync(SqlCatalogTable table, IReadOnlyList<int> targetOrdinals,
+        IReadOnlyList<object?[]> sourceRows, SqlStatementContext statement, CancellationToken cancellationToken,
+        IReadOnlyList<SqlBoundExpression[]>? valueRows = null)
     {
         await AcquireOutgoingReferenceIntentLocksAsync(table, statement, cancellationToken).ConfigureAwait(false);
         await statement.Coordinator.LockManager.AcquireAsync(statement.Transaction.Sequence, LockResource.Object(table.ObjectId),
             LockMode.IntentExclusive, cancellationToken).ConfigureAwait(false);
         EnsureCurrentDefinition(table);
         var indexes = GetLiveIndexes(table);
+        var bound = _definitions.Get(table, cancellationToken);
+        var defaults = bound.DefaultValues;
+        var domainEvaluator = bound.Domains.Count == 0 ? null : ExecutionEvaluator(null, cancellationToken);
         var rows = new List<(byte[] Record, object?[] Values)>(sourceRows.Count);
-        foreach (var sourceRow in sourceRows)
+        for (int rowIndex = 0; rowIndex < sourceRows.Count; rowIndex++)
         {
+            var sourceRow = sourceRows[rowIndex];
             cancellationToken.ThrowIfCancellationRequested();
             if (sourceRow.Length != targetOrdinals.Count)
             {
@@ -67,6 +72,10 @@ internal sealed partial class SqlPlanExecutor
             var assigned = new bool[table.Columns.Count];
             for (int i = 0; i < targetOrdinals.Count; i++)
             {
+                if (valueRows is not null && valueRows[rowIndex][i].Kind == SqlBoundExpressionKind.DefaultItem)
+                {
+                    continue;
+                }
                 int ordinal = targetOrdinals[i];
                 values[ordinal] = CoerceForColumn(sourceRow[i], table.Columns[ordinal]);
                 assigned[ordinal] = true;
@@ -75,10 +84,18 @@ internal sealed partial class SqlPlanExecutor
             {
                 if (!assigned[ordinal])
                 {
-                    values[ordinal] = ResolveDefault(table.Columns[ordinal]);
+                    // The bound DEFAULT's value, or NULL, or the NOT NULL failure, for a column without one.
+                    values[ordinal] = ResolveColumnDefault(table.Columns[ordinal], defaults[ordinal], cancellationToken);
                 }
             }
-            rows.Add((SqlRowCodec.Encode(table.ObjectId, table.Columns, values, statement.Transaction.Sequence), values));
+
+            // Every column of a domain is assigned by an INSERT, its default included (phase E3).
+            if (domainEvaluator is not null)
+            {
+                CheckDomains(bound, values, domainEvaluator);
+            }
+
+            rows.Add((SqlRowCodec.Encode(table, values, statement.Transaction.Sequence), values));
         }
 
         // As with literal INSERT, acquire reference locks and unique-key locks
@@ -104,7 +121,7 @@ internal sealed partial class SqlPlanExecutor
                     await InsertIndexEntriesAsync(statement, indexes, table, values,
                         SqlRecordLocation.Pack(pageId, slotIndex), cancellationToken).ConfigureAwait(false);
                 }
-                return (QueryResult)new SqlQueryResult(QueryResultStatus.Success, rows.Count);
+                return (DatabaseResult)new SqlQueryResult(DatabaseResultStatus.Success, rows.Count);
             }, durable: false, cancellationToken).ConfigureAwait(false);
         }
         catch (IndexUniqueViolationException exception)
@@ -112,4 +129,8 @@ internal sealed partial class SqlPlanExecutor
             throw TranslateUniqueViolation(table, exception);
         }
     }
+
+    /// <summary>One default-resolution path for omitted INSERT columns and explicit DEFAULT assignments.</summary>
+    private static object? ResolveColumnDefault(SqlCatalogColumn column, SqlBoundExpression? boundDefault, CancellationToken cancellationToken)
+        => boundDefault is not null ? DefaultValue(boundDefault, cancellationToken) : ResolveDefault(column, null);
 }

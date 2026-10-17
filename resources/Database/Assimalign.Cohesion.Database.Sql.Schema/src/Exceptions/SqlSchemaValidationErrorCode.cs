@@ -24,7 +24,4 @@ public enum SqlSchemaValidationErrorCode : byte
 
     /// <summary>A compiled schema document is invalid or uses an unsupported format.</summary>
     InvalidDocument,
-
-    /// <summary>The declaration is not valid for the selected engine model.</summary>
-    ModelMismatch,
 }

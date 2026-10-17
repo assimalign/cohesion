@@ -45,7 +45,7 @@ public class ProtocolFamilyTests
             await channel.Writer.WriteFrameAsync(new ProtocolFrame((ProtocolMessageType)65, new byte[] { 1 }), CancellationToken.None));
         stream.Length.ShouldBe(0);
 
-        await using var raw = ProtocolFraming.CreateWriter(stream, leaveOpen: true);
+        await using var raw = ProtocolFrameWriter.Create(stream, leaveOpen: true);
         await raw.WriteFrameAsync(new ProtocolFrame((ProtocolMessageType)65, ReadOnlyMemory<byte>.Empty), CancellationToken.None);
         stream.Position = 0;
         await Should.ThrowAsync<ProtocolException>(async () => await channel.Reader.ReadFrameAsync(CancellationToken.None));
@@ -68,12 +68,14 @@ public class ProtocolFamilyTests
 
     [Theory(DisplayName = "Cohesion Test [Database.Protocol] - Version: incompatible majors reject and compatible minors negotiate")]
     [InlineData(0, 0, false)]
-    [InlineData(1, 0, true)]
-    [InlineData(1, 99, true)]
-    [InlineData(2, 0, false)]
+    [InlineData(1, 0, false)]
+    [InlineData(1, 99, false)]
+    [InlineData(2, 0, true)]
+    [InlineData(2, 99, true)]
+    [InlineData(3, 0, false)]
     public void TryNegotiate_PeerVersion_ShouldEnforceMajor(ushort major, ushort minor, bool accepted)
     {
         ProtocolVersion.TryNegotiate(new ProtocolVersion(major, minor), out var negotiated).ShouldBe(accepted);
-        negotiated.ShouldBe(accepted ? new ProtocolVersion(1, 0) : default);
+        negotiated.ShouldBe(accepted ? new ProtocolVersion(2, Math.Min(minor, (ushort)1)) : default);
     }
 }

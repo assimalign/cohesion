@@ -16,6 +16,7 @@ public sealed class SqlCollateExpression : SqlExpression
     {
         Operand = operand;
         CollationName = collationName;
+        Depth = 1 + operand.Depth;
     }
 
     /// <summary>Gets the expression whose comparison rules are overridden.</summary>

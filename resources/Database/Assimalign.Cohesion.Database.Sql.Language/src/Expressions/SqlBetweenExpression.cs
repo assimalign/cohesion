@@ -22,6 +22,7 @@ public sealed class SqlBetweenExpression : SqlExpression
         Low = low;
         High = high;
         IsNegated = isNegated;
+        Depth = 1 + System.Math.Max(operand.Depth, System.Math.Max(low.Depth, high.Depth));
     }
 
     /// <summary>

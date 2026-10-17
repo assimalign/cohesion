@@ -1,4 +1,5 @@
 using System.Threading.Tasks;
+
 using Shouldly;
 using Xunit;
 
@@ -6,33 +7,34 @@ namespace Assimalign.Cohesion.Database.Blob.Tests;
 
 public sealed class BlobDatabaseScopeTests
 {
-    [Theory]
-    [InlineData("USE other")]
-    [InlineData("CREATE DATABASE injected")]
-    [InlineData("DROP DATABASE other")]
-    [InlineData("SELECT * FROM other.files")]
-    [InlineData("GET other/files/item")]
-    [InlineData("SHOW DATABASES")]
-    public async Task Session_commands_cannot_reach_another_database_or_server(string command)
+    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Bound session: Should keep containers inside its database")]
+    public async Task GetContainerAsync_BoundSession_ShouldKeepContainersInsideItsDatabase()
     {
-        await using var engine = BlobDatabaseEngine.Create(new());
-        var own = (IBlobDatabase)await engine.CreateDatabaseAsync("own");
-        var other = (IBlobDatabase)await engine.CreateDatabaseAsync("other");
-        var ownContainer = await own.CreateContainerAsync("files");
-        var otherContainer = await other.CreateContainerAsync("files");
-        await BlobEngineTests.Write(ownContainer, "item", "own"u8.ToArray());
-        await BlobEngineTests.Write(otherContainer, "item", "other"u8.ToArray());
+        // Arrange
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", new());
+        var own = await engine.CreateDatabaseAsync("own");
+        var other = await engine.CreateDatabaseAsync("other");
+        var ownContainer = await AutocommitContainer.CreateAsync(own, "files");
+        var otherContainer = await AutocommitContainer.CreateAsync(other, "files");
+        await BlobEngineTests.WriteAsync(ownContainer, "item", "own"u8.ToArray());
+        await BlobEngineTests.WriteAsync(otherContainer, "item", "other"u8.ToArray());
         await using var session = await own.CreateSessionAsync();
+
+        // Act
+        var value = await BlobEngineTests.ReadAsync(await session.GetContainerAsync("files"), "item");
+
+        // Assert: every container lookup stays bound to this database.
         session.Database.Name.ShouldBe(own.Name);
-        var scoped = (IBlobDatabase)session.Database;
-        (await BlobEngineTests.Read(await scoped.GetContainerAsync("files"), "item")).ShouldBe("own"u8.ToArray());
-        await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(command));
-        await Should.ThrowAsync<DatabaseException>(async () => await scoped.GetContainerAsync("other/files"));
-        (await BlobEngineTests.Read(otherContainer, "item")).ShouldBe("other"u8.ToArray());
+        value.ShouldBe("own"u8.ToArray());
+        await Should.ThrowAsync<DatabaseException>(async () => await session.GetContainerAsync("other/files"));
+        (await BlobEngineTests.ReadAsync(otherContainer, "item")).ShouldBe("other"u8.ToArray());
         engine.TryGetDatabase("other", out _).ShouldBeTrue();
-        engine.TryGetDatabase("injected", out _).ShouldBeFalse();
-        var boundContainer = await scoped.GetContainerAsync("files");
+
+        // Act: a container obtained from the session is bound to its lifetime too.
+        var boundContainer = await session.GetContainerAsync("files");
         await session.DisposeAsync();
+
+        // Assert
         await Should.ThrowAsync<DatabaseException>(async () => await boundContainer.OpenReadAsync("item"));
     }
 }

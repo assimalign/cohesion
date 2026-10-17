@@ -16,6 +16,43 @@ namespace Assimalign.Cohesion.Database.Graph.Client.Tests;
 /// <summary>Tests scalar GQL and mutations through the production graph server and typed client.</summary>
 public sealed class GraphClientWireTests
 {
+    [Fact(DisplayName = "Cohesion Test [Graph.Client] - Parameters: scalar and path exchanges bind values and reuse a rejected session")]
+    public async Task Execute_NamedParameters_ShouldRoundTripAndKeepSessionReady()
+    {
+        // Arrange
+        await using var harness = await GraphClientTestHarness.StartAsync();
+        await using var connection = await harness.Client.ConnectAsync(harness.Token);
+        var parameters = new Dictionary<string, object?>
+        { ["name"] = "Ada", ["age"] = 42, ["weight"] = 2.5, ["active"] = true, ["optional"] = null };
+
+        // Act
+        (await connection.ExecuteAsync(
+            "INSERT (a:Person {name: $name, age: @age, weight: $weight, active: $active, optional: $optional})-[:KNOWS]->(:Person {name: 'Bob'})",
+            parameters, harness.Token)).ShouldBe(3);
+        var rows = await connection.QueryAsync(
+            "MATCH (a:Person {name: $name}) WHERE a.age >= $min RETURN a.name, a.age, a.weight, a.active, a.optional",
+            new Dictionary<string, object?> { ["name"] = "Ada", ["min"] = 18 }, harness.Token);
+
+        // Assert
+        var row = rows.ShouldHaveSingleItem();
+        row.ToArray().ShouldBe(new object?[] { "Ada", 42, 2.5, true, null });
+        row[1].ShouldBeOfType<int>();
+        row[2].ShouldBeOfType<double>();
+        row[3].ShouldBeOfType<bool>();
+        var paths = new List<GraphPath>();
+        await foreach (var path in connection.QueryPathsAsync(
+            "MATCH p = (a:Person {name: $name})-[:KNOWS]->(b) RETURN p", parameters, harness.Token))
+        { paths.Add(path); }
+        paths.ShouldHaveSingleItem().Nodes.Select(node => node.Properties["name"]).ShouldBe(["Ada", "Bob"]);
+        Guid sessionId = harness.Server.Sessions.ShouldHaveSingleItem().Id;
+        var error = await Should.ThrowAsync<GraphClientException>(async () => await connection.ExecuteAsync(
+            "INSERT (:Unwritten {k: $missing})", cancellationToken: harness.Token));
+        error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
+        error.Message.ShouldContain("COHDBG001", Case.Sensitive);
+        (await connection.QueryAsync("MATCH (n:Person) RETURN n.name", cancellationToken: harness.Token)).Count.ShouldBe(2);
+        harness.Server.Sessions.ShouldHaveSingleItem().Id.ShouldBe(sessionId);
+    }
+
     /// <summary>CREATE and MATCH preserve scalar values, columns, directions, and filtering over the wire.</summary>
     [Fact(DisplayName = "Cohesion Test [Graph.Client] - CREATE and MATCH round-trip scalar projections")]
     public async Task QueryAsync_CreateAndMatch_ShouldReturnScalarRows()
@@ -79,7 +116,7 @@ public sealed class GraphClientWireTests
         await connection.ExecuteAsync(
             "CREATE (:Vertex {name: 'Isolated'}), (a:Vertex {name: 'A'})-[:LINK]->(b:Vertex {name: 'B'})-[:LINK]->(a), (b)-[:LINK]->(b)",
             cancellationToken: harness.Token);
-        Guid sessionId = harness.Server.Context.Sessions.ShouldHaveSingleItem().Id;
+        Guid sessionId = harness.Server.Sessions.ShouldHaveSingleItem().Id;
 
         // Act / Assert
         var error = await Should.ThrowAsync<GraphClientException>(async () =>
@@ -94,7 +131,7 @@ public sealed class GraphClientWireTests
         (await connection.QueryAsync("MATCH (a)-[r:LINK]->(b) RETURN a.name", cancellationToken: harness.Token)).ShouldBeEmpty();
         (await connection.QueryAsync("MATCH (n:Vertex) RETURN n.name", cancellationToken: harness.Token))
             .Select(row => (string)row[0]!).Order(StringComparer.Ordinal).ShouldBe(["A", "Isolated"]);
-        harness.Server.Context.Sessions.ShouldHaveSingleItem().Id.ShouldBe(sessionId);
+        harness.Server.Sessions.ShouldHaveSingleItem().Id.ShouldBe(sessionId);
     }
 
     /// <summary>Schema-owned definitions keep required-property validation and remain unchanged after data writes.</summary>
@@ -145,7 +182,7 @@ public sealed class GraphClientWireTests
             await schema.SavePropertyKeyAsync(new(labelId, "name", DatabaseType.String, true), harness.Token);
             await schema.CreateIndexAsync("Person", "by_name", "name", harness.Token);
         }
-        var other = (IGraphDatabase)await harness.Engine.CreateDatabaseAsync("other", harness.Token);
+        var other = await harness.Engine.CreateDatabaseAsync("other", harness.Token);
         await using (var session = await other.CreateSessionAsync(harness.Token))
         {
             await GraphSchema.Open(other, session).SaveLabelAsync(new(Guid.NewGuid(), "Hidden"), harness.Token);
@@ -172,7 +209,7 @@ public sealed class GraphClientWireTests
         await using var otherClient = GraphClient.Create(new()
         {
             Settings = new DatabaseConnectionSettings { Database = "other", EndPoint = harness.Listener.EndPoint },
-            ConnectionFactory = harness.Listener.CreateFactory(),
+            ConnectionFactory = harness.ConnectionFactory,
         });
         await using var otherConnection = await otherClient.ConnectAsync(harness.Token);
         (await otherConnection.QueryAsync("SHOW LABELS", cancellationToken: harness.Token)).ShouldHaveSingleItem()[2].ShouldBe("Hidden");
@@ -205,8 +242,8 @@ public sealed class GraphClientWireTests
     /// <param name="statement">The statement to reject.</param>
     /// <param name="code">The expected stable error code.</param>
     [Theory(DisplayName = "Cohesion Test [Graph.Client] - Statement failures preserve pooled authenticated sessions")]
-    [InlineData("MATCH (a) RETURN *", ProtocolErrorCode.ParseFailure)]
-    [InlineData("MATCH (a:Missing) RETURN a.name", ProtocolErrorCode.ExecutionFailure)]
+    [InlineData("MATCH (a) RETURN *", ProtocolErrorCode.ExecutionFailure)]
+    [InlineData("MATCH (a) RETURN b.name", ProtocolErrorCode.ExecutionFailure)]
     [InlineData("MATCH (a) RETURN a", ProtocolErrorCode.ExecutionFailure)]
     [InlineData("BEGIN", ProtocolErrorCode.ParseFailure)]
     [InlineData("COMMIT", ProtocolErrorCode.ParseFailure)]
@@ -218,7 +255,7 @@ public sealed class GraphClientWireTests
         Guid sessionId;
         await using (var connection = await harness.Client.ConnectAsync(harness.Token))
         {
-            sessionId = harness.Server.Context.Sessions.ShouldHaveSingleItem().Id;
+            sessionId = harness.Server.Sessions.ShouldHaveSingleItem().Id;
 
             // Act
             var error = await Should.ThrowAsync<GraphClientException>(async () =>
@@ -230,12 +267,15 @@ public sealed class GraphClientWireTests
         }
         await using var reused = await harness.Client.ConnectAsync(harness.Token);
         (await reused.QueryAsync("SHOW LABELS", cancellationToken: harness.Token)).ShouldBeEmpty();
-        harness.Server.Context.Sessions.ShouldHaveSingleItem().Id.ShouldBe(sessionId);
+        harness.Server.Sessions.ShouldHaveSingleItem().Id.ShouldBe(sessionId);
     }
 
     /// <summary>A mutation with a non-scalar result is rejected before its writes can be applied.</summary>
-    [Fact(DisplayName = "Cohesion Test [Graph.Client] - Entity projection on Execute fails before mutation")]
-    public async Task ExecuteAsync_EntityProjection_ShouldRejectBeforeMutating()
+    [Theory(DisplayName = "Cohesion Test [Graph.Client] - Entity projection on Execute fails before mutation")]
+    [InlineData("CREATE (n:Injected) RETURN n")]
+    [InlineData("INSERT (a:Person {name: 'X'}) RETURN a")]
+    [InlineData("INSERT (a:Person {name: 'X'}) RETURN *")]
+    public async Task ExecuteAsync_EntityProjection_ShouldRejectBeforeMutating(string statement)
     {
         // Arrange
         await using var harness = await GraphClientTestHarness.StartAsync();
@@ -243,10 +283,11 @@ public sealed class GraphClientWireTests
 
         // Act / Assert
         var error = await Should.ThrowAsync<GraphClientException>(async () =>
-            await connection.QueryAsync("CREATE (n:Injected) RETURN n", cancellationToken: harness.Token));
+            await connection.QueryAsync(statement, cancellationToken: harness.Token));
         error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
         error.Message.ShouldContain("ExecutePaths", Case.Sensitive);
         (await connection.QueryAsync("SHOW LABELS", cancellationToken: harness.Token)).ShouldBeEmpty();
+        (await connection.QueryAsync("MATCH (a) WHERE a.name = 'X' RETURN a.name", cancellationToken: harness.Token)).ShouldBeEmpty();
     }
 
     /// <summary>Late teardown on an already returned wrapper cannot abort a newer rental of its pooled session.</summary>
@@ -256,7 +297,7 @@ public sealed class GraphClientWireTests
         // Arrange
         await using var harness = await GraphClientTestHarness.StartAsync();
         var returned = await harness.Client.ConnectAsync(harness.Token);
-        Guid sessionId = harness.Server.Context.Sessions.ShouldHaveSingleItem().Id;
+        Guid sessionId = harness.Server.Sessions.ShouldHaveSingleItem().Id;
         await returned.DisposeAsync();
         await using var current = await harness.Client.ConnectAsync(harness.Token);
 
@@ -268,6 +309,58 @@ public sealed class GraphClientWireTests
         returned.IsOpen.ShouldBeFalse();
         current.IsOpen.ShouldBeTrue();
         (await current.QueryAsync("SHOW LABELS", cancellationToken: harness.Token)).ShouldBeEmpty();
-        harness.Server.Context.Sessions.ShouldHaveSingleItem().Id.ShouldBe(sessionId);
+        harness.Server.Sessions.ShouldHaveSingleItem().Id.ShouldBe(sessionId);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Graph.Client] - WHERE: value errors complete before a header and retain the pooled session")]
+    [InlineData("a.age / 0")]
+    [InlineData("a.age % 0")]
+    [InlineData("9223372036854775807 + a.age")]
+    [InlineData("'a' + 1")]
+    [InlineData("a.age")]
+    public async Task QueryAsync_WhereValueError_ShouldReuseExactSession(string predicate)
+    {
+        // Arrange
+        await using var harness = await GraphClientTestHarness.StartAsync();
+        Guid sessionId;
+        await using (var connection = await harness.Client.ConnectAsync(harness.Token))
+        {
+            await connection.ExecuteAsync("INSERT (:Person {age: 42})", cancellationToken: harness.Token);
+            sessionId = harness.Server.Sessions.ShouldHaveSingleItem().Id;
+
+            // Act
+            var error = await Should.ThrowAsync<GraphClientException>(async () =>
+                await connection.QueryAsync("MATCH (a:Person) WHERE " + predicate + " RETURN a.age", cancellationToken: harness.Token));
+
+            // Assert: only a failure before ResultHeader certifies completion and permits reuse.
+            error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
+            error.Message.ShouldStartWith("COHDBG013: ", Case.Sensitive);
+            connection.IsOpen.ShouldBeTrue();
+        }
+        await using var reused = await harness.Client.ConnectAsync(harness.Token);
+        (await reused.QueryAsync("SHOW LABELS", cancellationToken: harness.Token)).Count.ShouldBe(1);
+        harness.Server.Sessions.ShouldHaveSingleItem().Id.ShouldBe(sessionId);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Graph.Client] - WHERE: OR, IN, string predicates and arithmetic agree with in-process execution")]
+    public async Task QueryAsync_FullWhereExpression_ShouldMatchEngineRows()
+    {
+        // Arrange
+        await using var harness = await GraphClientTestHarness.StartAsync();
+        await using var connection = await harness.Client.ConnectAsync(harness.Token);
+        await connection.ExecuteAsync("INSERT (:Person {name: 'Alice', age: 42}), (:Person {name: 'Bob', age: 17}), (:Person {name: 'Cara', age: 30})",
+            cancellationToken: harness.Token);
+        const string query = "MATCH (a:Person) WHERE a.age IN [17, 42] AND (a.name STARTS WITH 'Al' OR a.age + 1 = 18) RETURN a.name";
+        await using var session = await harness.Database.CreateSessionAsync(harness.Token);
+        await using var direct = (Assimalign.Cohesion.Database.Execution.DatabaseResultSet)await session.ExecuteAsync(query, cancellationToken: harness.Token);
+        List<string> expected = [];
+        await foreach (var row in direct.GetRowsAsync(harness.Token)) { expected.Add(row.GetString(0)!); }
+
+        // Act
+        var result = await connection.QueryAsync(query, cancellationToken: harness.Token);
+
+        // Assert
+        expected.ShouldBe(["Alice", "Bob"]);
+        result.Select(row => (string)row[0]!).ShouldBe(expected);
     }
 }

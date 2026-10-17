@@ -1,5 +1,7 @@
 using System.Collections.Generic;
 
+using Assimalign.Cohesion.Database.Types;
+
 namespace Assimalign.Cohesion.Database.Sql.Language;
 
 /// <summary>
@@ -17,11 +19,13 @@ public sealed class SqlColumnDefinition
     /// <param name="defaultValue">The default value expression, if any.</param>
     /// <param name="constraints">The normalized column constraints.</param>
     /// <param name="collationName">The declared collation name, or null to inherit the database default.</param>
+    /// <param name="resolvedType">The resolved built-in type, or null for an engine-resolved domain.</param>
     internal SqlColumnDefinition(string columnName, string dataType, bool isNullable, bool isPrimaryKey, SqlExpression? defaultValue,
-        IReadOnlyList<SqlConstraintDefinition>? constraints = null, string? collationName = null)
+        IReadOnlyList<SqlConstraintDefinition>? constraints = null, string? collationName = null, DatabaseTypeInfo? resolvedType = null)
     {
         ColumnName = columnName;
         DataType = dataType;
+        ResolvedType = resolvedType;
         IsNullable = isNullable;
         IsPrimaryKey = isPrimaryKey;
         DefaultValue = defaultValue;
@@ -38,6 +42,12 @@ public sealed class SqlColumnDefinition
     /// Gets the data type name (e.g., <c>INT</c>, <c>TEXT</c>, <c>VARCHAR(100)</c>).
     /// </summary>
     public string DataType { get; }
+
+    /// <summary>
+    /// Gets the built-in type resolved during parsing, or null when the name requires
+    /// the engine's domain catalog or the type is invalid.
+    /// </summary>
+    public DatabaseTypeInfo? ResolvedType { get; }
 
     /// <summary>
     /// Gets whether the column allows NULL values.

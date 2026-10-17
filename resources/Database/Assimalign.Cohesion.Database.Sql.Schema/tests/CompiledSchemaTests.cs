@@ -4,6 +4,7 @@ using System.Linq;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Database.Sql.Schema.Internal;
 using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Schema.Tests;
@@ -15,9 +16,8 @@ public class CompiledSchemaTests
     {
         SqlCompiledSchema schema = CompileOrders();
 
-        schema.Format.ShouldBe(SqlCompiledSchema.CurrentFormat);
+        schema.Format.ShouldBe("cohesion/database-schema/v7");
         schema.Name.ShouldBe("orders-db");
-        schema.Model.ShouldBe(EngineModel.Sql);
         schema.Tables.Select(table => table.Name).ShouldBe(["order_lines", "orders"]);
         schema.Tables[1].RowType.ShouldStartWith("Assimalign.Cohesion.Database.Sql.Schema.Tests:");
         schema.Tables[1].RowType.ShouldNotContain("Version=");
@@ -26,8 +26,6 @@ public class CompiledSchemaTests
         schema.Tables.ShouldAllBe(table => table.Owner == DatabaseObjectOwner.Schema);
         schema.Tables.SelectMany(table => table.Indexes).ShouldAllBe(index => index.Owner == DatabaseObjectOwner.Schema);
         schema.Tables[0].Constraints.ShouldHaveSingleItem().Owner.ShouldBe(DatabaseObjectOwner.Schema);
-        schema.Functions.ShouldHaveSingleItem().Body.CanonicalText.ShouldContain("lambda<");
-        schema.Triggers.ShouldHaveSingleItem().Table.ShouldBe("orders");
         schema.Principals.ShouldHaveSingleItem().Grants.ShouldHaveSingleItem().Objects.ShouldBe(["order_lines", "orders"]);
         schema.Hash.Length.ShouldBe(64);
 
@@ -36,10 +34,77 @@ public class CompiledSchemaTests
         document.ShouldNotContain("\"collections\"");
         document.ShouldNotContain("\"hash\"");
         document.ShouldNotContain("\"canonicalDocument\"");
+        document.ShouldNotContain("\"model\"");
+        document.ShouldNotContain("\"functions\"");
+        document.ShouldNotContain("\"triggers\"");
+        document.ShouldNotContain("\"extensions\"");
         SqlCompiledSchema restored = SqlCompiledSchemaSerializer.Deserialize(document);
         restored.Hash.ShouldBe(schema.Hash);
         restored.Tables.ShouldAllBe(table => table.Owner == DatabaseObjectOwner.Schema);
         SqlCompiledSchemaSerializer.Serialize(restored).ShouldBe(document);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database] - Schema compiler: the canonical document and its hash are computed once")]
+    public void CanonicalDocumentAndHash_RepeatedReads_ShouldBeComputedOnce()
+    {
+        // Arrange
+        SqlCompiledSchema schema = CompileOrders();
+        schema.SerializationComputationCount.ShouldBe(0);
+        schema.HashComputationCount.ShouldBe(0);
+
+        // Act
+        string document = schema.CanonicalDocument;
+        string hash = schema.Hash;
+
+        // Assert
+        for (int iteration = 0; iteration < 10; iteration++)
+        {
+            schema.CanonicalDocument.ShouldBeSameAs(document);
+            schema.Hash.ShouldBeSameAs(hash);
+            SqlCompiledSchemaSerializer.ComputeHash(schema).ShouldBeSameAs(hash);
+        }
+        schema.SerializationComputationCount.ShouldBe(1);
+        schema.HashComputationCount.ShouldBe(1);
+        hash.ShouldBe(Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(document))));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database] - Schema compiler: a document that carries the engine model, as v1 did, no longer reads")]
+    public void Deserialize_DocumentWithModel_ShouldBeRefused()
+    {
+        string withModel = CompileOrders().CanonicalDocument.Replace("\"name\":", "\"model\":1,\"name\":", StringComparison.Ordinal);
+
+        Should.Throw<SqlSchemaValidationException>(() => SqlCompiledSchemaSerializer.Deserialize(withModel))
+            .Errors.ShouldHaveSingleItem().Code.ShouldBe(SqlSchemaValidationErrorCode.InvalidDocument);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database] - Schema compiler: a document of an earlier format version no longer reads")]
+    [InlineData("cohesion/database-schema/v1")]
+    [InlineData("cohesion/database-schema/v2")]
+    [InlineData("cohesion/database-schema/v3")]
+    [InlineData("cohesion/database-schema/v4")]
+    [InlineData("cohesion/database-schema/v5")]
+    [InlineData("cohesion/database-schema/v6")]
+    public void Deserialize_EarlierFormatVersion_ShouldBeRefused(string format)
+    {
+        // v1 carried the engine model; v2 had no domains or named column types; v3 had no defaults.
+        string earlier = CompileOrders().CanonicalDocument.Replace(SqlCompiledSchema.CurrentFormat, format, StringComparison.Ordinal);
+
+        earlier.ShouldContain(format, Case.Sensitive);
+        Should.Throw<SqlSchemaValidationException>(() => SqlCompiledSchemaSerializer.Deserialize(earlier))
+            .Errors.ShouldHaveSingleItem().Declaration.ShouldBe("schema.format");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database] - Schema migration result: retains the outcome of an apply")]
+    public void SqlSchemaMigrationResult_ShouldRetainTheOutcome()
+    {
+        var result = new SqlSchemaMigrationResult("before", "after", 2, false);
+        var (fromHash, toHash, operationCount, wasAlreadyApplied) = result;
+
+        fromHash.ShouldBe("before");
+        toHash.ShouldBe("after");
+        operationCount.ShouldBe(2);
+        wasAlreadyApplied.ShouldBeFalse();
+        result.ShouldBe(new SqlSchemaMigrationResult("before", "after", 2, false));
     }
 
     [Fact(DisplayName = "Cohesion Test [Database] - Schema compiler: declaration ordering does not change the content hash")]
@@ -59,7 +124,6 @@ public class CompiledSchemaTests
         {
             database.Table<GenericRow<GenericValue<int[,], string[]>[]>>("arrays", table => table.Key(row => row.Id));
             database.Table<GenericContainer<int>.Nested<string>>("nested", table => table.Key(row => row.Id));
-            database.Type<GenericValue<decimal?[,], byte[][]>>(type => type.Decimal(18, 2));
         });
         const string local = "Assimalign.Cohesion.Database.Sql.Schema.Tests:Assimalign.Cohesion.Database.Sql.Schema.Tests.CompiledSchemaTests+";
         const string system = "System.Private.CoreLib:System.";
@@ -68,16 +132,26 @@ public class CompiledSchemaTests
             local + "GenericRow`1[" + local + "GenericValue`2[" + system + "Int32[,];" + system + "String[]][]]");
         schema.Tables[1].RowType.ShouldBe(
             local + "GenericContainer`1+Nested`1[" + system + "Int32;" + system + "String]");
-        schema.Types.ShouldHaveSingleItem().Name.ShouldBe(
-            local + "GenericValue`2[" + system + "Nullable`1[" + system + "Decimal][,];" + system + "Byte[][]]");
         schema.CanonicalDocument.ShouldNotContain("Version=");
         SqlCompiledSchemaSerializer.Deserialize(schema.CanonicalDocument).Hash.ShouldBe(schema.Hash);
+
+        // A declared type is a domain named for its CLR type's simple name (phase E3), which a generic
+        // type's is not: refused, naming the CLR type's identity.
+        SqlSchemaValidationException refused = Should.Throw<SqlSchemaValidationException>(() => SqlSchema.Compile("generic-type", database =>
+        {
+            database.Table<Order>("orders", table => table.Key(order => order.Id));
+            database.Type<GenericValue<decimal?[,], byte[][]>>(type => type.Decimal(18, 2));
+        }));
+        SqlSchemaValidationError error = refused.Errors.ShouldHaveSingleItem();
+        error.Code.ShouldBe(SqlSchemaValidationErrorCode.UnsupportedType);
+        error.Declaration.ShouldBe(local + "GenericValue`2[" + system + "Nullable`1[" + system + "Decimal][,];" + system + "Byte[][]]");
+        error.Message.ShouldContain("is not a SQL identifier");
     }
 
     [Fact(DisplayName = "Cohesion Test [Database] - Schema compiler: typed diagnostics name the offending declaration")]
     public void Compile_WithInvalidDeclarations_ShouldReportTypedNamedErrors()
     {
-        ISqlSchema declaration = SqlSchema.Create("invalid", database =>
+        SqlSchema declaration = SqlSchema.Create("invalid", database =>
         {
             database.Table<Order>("orders", table => table.Key(order => order.Id));
             database.Table<Order>("orders", table => table.Key(order => order.Id));
@@ -85,7 +159,7 @@ public class CompiledSchemaTests
         });
 
         SqlSchemaValidationException exception = Should.Throw<SqlSchemaValidationException>(
-            () => SqlSchemaCompiler.Compile(declaration, EngineModel.Sql));
+            () => SqlSchemaCompiler.Compile(declaration));
 
         exception.Errors.ShouldContain(error =>
             error.Code == SqlSchemaValidationErrorCode.DuplicateDeclaration && error.Declaration == "orders");
@@ -96,7 +170,7 @@ public class CompiledSchemaTests
     [Fact(DisplayName = "Cohesion Test [Database] - Schema compiler: invalid references remain typed and named")]
     public void Compile_WithInvalidReferences_ShouldReportPreciseDiagnostics()
     {
-        ISqlSchema relational = SqlSchema.Create("invalid-references", database =>
+        SqlSchema relational = SqlSchema.Create("invalid-references", database =>
         {
             database.Table<Order>("orders", table => table.Key(order => order.Id));
             database.Table<InvalidOrderLine>("lines", table =>
@@ -107,52 +181,24 @@ public class CompiledSchemaTests
             });
         });
         SqlSchemaValidationException relationalError = Should.Throw<SqlSchemaValidationException>(
-            () => SqlSchemaCompiler.Compile(relational, EngineModel.Sql));
+            () => SqlSchemaCompiler.Compile(relational));
 
         relationalError.Errors.ShouldContain(error =>
             error.Code == SqlSchemaValidationErrorCode.DuplicateDeclaration &&
             error.Declaration == "FK_lines_orders_OrderId");
         relationalError.Errors.ShouldContain(error =>
-            error.Code == SqlSchemaValidationErrorCode.ModelMismatch &&
+            error.Code == SqlSchemaValidationErrorCode.UnsupportedType &&
             error.Declaration == "lines.OrderId");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database] - Schema compiler: nondeterministic expressions are rejected")]
-    public void Compile_WithNondeterministicExpression_ShouldRejectNamedFunction()
+    [Fact(DisplayName = "Cohesion Test [Database] - Schema compiler: grant declaration order does not affect hashes")]
+    public void Compile_WithEquivalentGrantOrder_ShouldKeepHashStable()
     {
-        ISqlSchema declaration = SqlSchema.Create("invalid-expression", database =>
-            database.Function("current_time", () => DateTime.Now));
-
-        SqlSchemaValidationException exception = Should.Throw<SqlSchemaValidationException>(
-            () => SqlSchemaCompiler.Compile(declaration, EngineModel.Sql));
-
-        exception.Errors.ShouldContain(error =>
-            error.Code == SqlSchemaValidationErrorCode.UnsupportedExpression &&
-            error.Declaration == "current_time");
-    }
-
-    [Fact(DisplayName = "Cohesion Test [Database] - Schema compiler: parameter names and grant declaration order do not affect hashes")]
-    public void Compile_WithEquivalentParameterAndGrantOrder_ShouldKeepHashStable()
-    {
-        SqlCompiledSchema first = CompileFunctionAndGrants(reverse: false);
-        SqlCompiledSchema second = CompileFunctionAndGrants(reverse: true);
+        SqlCompiledSchema first = CompileGrants(reverse: false);
+        SqlCompiledSchema second = CompileGrants(reverse: true);
 
         second.Hash.ShouldBe(first.Hash);
-        first.Functions.ShouldHaveSingleItem().Parameters.ShouldHaveSingleItem().Name.ShouldBe("arg0");
         first.Principals.ShouldHaveSingleItem().Grants.ShouldHaveSingleItem().Objects.ShouldBe(["order_lines", "orders"]);
-    }
-
-    [Theory]
-    [InlineData(EngineModel.KeyValueStore)]
-    [InlineData(EngineModel.Document)]
-    [InlineData(EngineModel.Custom)]
-    public void Compile_WithNonSqlModel_ShouldRejectModel(EngineModel model)
-    {
-        ISqlSchema declaration = SqlSchema.Create("orders", _ => { });
-        SqlSchemaValidationException exception = Should.Throw<SqlSchemaValidationException>(
-            () => SqlSchemaCompiler.Compile(declaration, model));
-
-        exception.Errors.ShouldHaveSingleItem().Code.ShouldBe(SqlSchemaValidationErrorCode.ModelMismatch);
     }
     [Fact(DisplayName = "Cohesion Test [Database] - Migration planner: add table and index use deterministic safe order")]
     public void Plan_FromEmptySchema_ShouldAddTableBeforeIndex()
@@ -224,13 +270,13 @@ public class CompiledSchemaTests
         SqlCompiledSchema desired = SqlSchema.Compile("orders", database =>
         {
             database.Table<Order>("orders", table => table.Key(order => order.Id));
-            database.Extension("sql.collation", "ordinal");
+            database.Principal("reader", principal => principal.Grant(SqlPermission.Read, "orders"));
         });
 
         SqlSchemaMigrationException exception = Should.Throw<SqlSchemaMigrationException>(
             () => SqlSchemaMigrationPlanner.Plan(current, desired));
 
-        exception.Message.ShouldContain("model extensions");
+        exception.Message.ShouldContain("changes principals");
     }
 
     [Fact(DisplayName = "Cohesion Test [Database] - Migration planner: column reordering is a destructive table alteration")]
@@ -288,14 +334,11 @@ public class CompiledSchemaTests
                 AddLines(database);
             }
 
-            database.Function("order_identity", (long orderId) => orderId);
-            database.Trigger<Order>(SqlTriggerEvent.AfterInsert, (transaction, row) => transaction.Audit("order.placed", row.Id));
             database.Principal("reader", principal => principal.Grant(SqlPermission.Read, "orders", "order_lines"));
-            database.Extension("sql.collation", "ordinal");
         });
     }
 
-    private static void AddOrders(ISqlSchemaBuilder database)
+    private static void AddOrders(SqlSchemaBuilder database)
     {
         database.Table<Order>("orders", table =>
         {
@@ -305,7 +348,7 @@ public class CompiledSchemaTests
         });
     }
 
-    private static void AddLines(ISqlSchemaBuilder database)
+    private static void AddLines(SqlSchemaBuilder database)
     {
         database.Table<OrderLine>("order_lines", table =>
         {
@@ -352,14 +395,13 @@ public class CompiledSchemaTests
                 }
             }));
 
-    private static SqlCompiledSchema CompileFunctionAndGrants(bool reverse)
+    private static SqlCompiledSchema CompileGrants(bool reverse)
         => SqlSchema.Compile("orders-db", database =>
         {
             database.Table<Order>("orders", table => table.Key(order => order.Id));
             database.Table<OrderLine>("order_lines", table => table.Key(line => line.Id));
             if (reverse)
             {
-                database.Function("identity", (long renamed) => renamed);
                 database.Principal("reader", principal =>
                 {
                     principal.Grant(SqlPermission.Read, "orders");
@@ -368,7 +410,6 @@ public class CompiledSchemaTests
             }
             else
             {
-                database.Function("identity", (long value) => value);
                 database.Principal("reader", principal =>
                 {
                     principal.Grant(SqlPermission.Read, "order_lines");
@@ -394,13 +435,9 @@ public class CompiledSchemaTests
         return new SqlCompiledSchema(
             SqlCompiledSchema.CurrentFormat,
             "people",
-            EngineModel.Sql,
             allowDestructive,
             [],
             [new CompiledSchemaTable("People", "Tests:Person", columns, new CompiledSchemaKey("PK_People", ["Id"]), [], [])],
-            [],
-            [],
-            [],
             []);
     }
 
@@ -412,7 +449,6 @@ public class CompiledSchemaTests
         => new(
             SqlCompiledSchema.CurrentFormat,
             "people",
-            EngineModel.Sql,
             allowsDestructiveChanges: false,
             [],
             [new CompiledSchemaTable(
@@ -422,9 +458,6 @@ public class CompiledSchemaTests
                 new CompiledSchemaKey(keyName, [columnName]),
                 [new CompiledSchemaIndex(indexName, [columnName])],
                 [])],
-            [],
-            [],
-            [],
             []);
 
     private readonly record struct Money(decimal Amount);

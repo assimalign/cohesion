@@ -18,6 +18,7 @@ public sealed class SqlUnaryExpression : SqlExpression
     {
         Operand = operand;
         Operator = op;
+        Depth = 1 + operand.Depth;
     }
 
     /// <summary>

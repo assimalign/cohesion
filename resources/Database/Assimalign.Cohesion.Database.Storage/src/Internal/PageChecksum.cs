@@ -6,9 +6,10 @@ namespace Assimalign.Cohesion.Database.Storage.Internal;
 using Assimalign.Cohesion.Database.Storage.Units;
 
 /// <summary>
-/// Computes, stamps, and verifies the per-page CRC-32 integrity checksum.
-/// The checksum covers the full page with the four checksum bytes treated as zero,
-/// so a page can be verified in place without copying.
+/// Computes, stamps, and verifies the per-page CRC-32C integrity checksum
+/// (<see cref="Crc32C"/>, storage format 2). The checksum covers the full page with the
+/// four checksum bytes treated as zero, so a page can be verified in place without
+/// copying.
 /// </summary>
 internal static class PageChecksum
 {
@@ -17,11 +18,11 @@ internal static class PageChecksum
     /// </summary>
     internal static uint Compute(ReadOnlySpan<byte> page)
     {
-        uint state = Crc32.Begin();
-        state = Crc32.Append(state, page[..Page.ChecksumFieldOffset]);
-        state = Crc32.AppendZeros(state, sizeof(uint));
-        state = Crc32.Append(state, page[(Page.ChecksumFieldOffset + sizeof(uint))..]);
-        return Crc32.Finalize(state);
+        uint state = Crc32C.Begin();
+        state = Crc32C.Append(state, page[..Page.ChecksumFieldOffset]);
+        state = Crc32C.AppendZeros(state, sizeof(uint));
+        state = Crc32C.Append(state, page[(Page.ChecksumFieldOffset + sizeof(uint))..]);
+        return Crc32C.Finalize(state);
     }
 
     /// <summary>
@@ -45,18 +46,28 @@ internal static class PageChecksum
     /// </remarks>
     internal static void Verify(ReadOnlySpan<byte> page, PageId pageId)
     {
-        uint stored = BinaryPrimitives.ReadUInt32LittleEndian(page.Slice(Page.ChecksumFieldOffset, sizeof(uint)));
-        if (stored == 0)
-        {
-            return;
-        }
-
-        uint computed = Compute(page);
-        if (computed != stored)
+        if (!TryVerify(page, out uint stored, out uint computed))
         {
             throw new StorageCorruptionException(
                 pageId,
                 $"Page {(long)pageId} failed checksum verification (stored 0x{stored:X8}, computed 0x{computed:X8}).");
         }
+    }
+
+    /// <summary>
+    /// Verifies the checksum stored in the page buffer against its content without
+    /// throwing: true when the checksum matches or was never stamped.
+    /// </summary>
+    internal static bool TryVerify(ReadOnlySpan<byte> page, out uint stored, out uint computed)
+    {
+        stored = BinaryPrimitives.ReadUInt32LittleEndian(page.Slice(Page.ChecksumFieldOffset, sizeof(uint)));
+        computed = 0;
+        if (stored == 0)
+        {
+            return true;
+        }
+
+        computed = Compute(page);
+        return computed == stored;
     }
 }

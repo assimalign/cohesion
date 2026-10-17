@@ -33,7 +33,19 @@ internal static class SqlSystemViews
             Text("COLUMN_NAME"), Number("ORDINAL_POSITION"), Text("IS_UNIQUE"), Text("IS_PRIMARY_KEY")),
         Cohesion("OBJECT_OWNERSHIP", Text("TABLE_CATALOG"), Text("TABLE_SCHEMA"), Text("TABLE_NAME"),
             Text("OBJECT_TYPE"), Text("OBJECT_NAME"), Text("OWNER"), Text("OWNING_SCHEMA", true)),
+        // The engine's function catalog, one row per overload, then the special forms (owner
+        // decision 66): engine-wide, so every database of the engine lists the same rows.
+        Cohesion(FunctionsView, Text("FUNCTION_NAME"), Text("FUNCTION_KIND"), Text("PARAMETER_TYPES", true),
+            Number("PARAMETER_COUNT", true), Text("RETURN_TYPE", true), Text("VOLATILITY", true), Text("NULL_BEHAVIOR", true),
+            Text("IS_BUILT_IN"), Text("IS_SQL_DEFINED")),
+        Cohesion("TYPES", Text("TYPE_NAME"), Text("BASE_TYPE"), Text("IS_DOMAIN"), Text("IS_SQL_DEFINED")),
+        Cohesion("DOMAINS", Text("DOMAIN_NAME"), Text("BASE_TYPE"), Text("IS_SQL_DEFINED")),
     ];
+
+    /// <summary>The name of <c>COHESION_SCHEMA.FUNCTIONS</c>, the engine's function catalog as rows.</summary>
+    internal const string FunctionsView = "FUNCTIONS";
+
+    internal static IReadOnlyList<SqlSystemViewDefinition> Relations { get; } = Array.AsReadOnly(_views);
 
     internal static SqlSystemViewDefinition? Find(SqlTableReference reference)
     {
@@ -68,7 +80,7 @@ internal static class SqlSystemViews
 
         if (target is not null && Find(target) is { } view)
         {
-            throw new DatabaseException($"System view '{view.Schema}.{view.Name}' is read-only.");
+            throw new SqlPlanningException("COHSQLE021", $"System view '{view.Schema}.{view.Name}' is read-only.", expression.Location);
         }
     }
 

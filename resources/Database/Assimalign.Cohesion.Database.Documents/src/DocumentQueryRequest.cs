@@ -3,31 +3,44 @@ using System.Collections.Generic;
 using System.Linq;
 using Assimalign.Cohesion.Database.Documents.Language;
 using Assimalign.Cohesion.Database.Execution;
-using Assimalign.Cohesion.Database.Language;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Documents;
 
 /// <summary>A parsed, database-scoped OQL statement and its named parameter values.</summary>
-public sealed class DocumentQueryRequest : QueryRequest<OqlQueryStatement>
+/// <remarks>
+/// The document model's member of the shared <see cref="DatabaseRequest"/> family, and the request
+/// root of <see cref="DocumentDatabaseSession"/> (<c>DatabaseLanguageSession&lt;DocumentQueryRequest&gt;</c>):
+/// the session's typed execute member takes this type, so a request of another model does not
+/// compile. The request owns its typed statement.
+/// Each execution snapshots bare names ordinally, strips one optional key sigil, rejects
+/// normalized collisions and unbound references before data rows are read or written,
+/// and ignores unused keys. Numeric names bind their exact digits; null is a bound value.
+/// </remarks>
+public sealed class DocumentQueryRequest : DatabaseRequest
 {
+    private readonly OqlQueryStatement _statement;
     private readonly IReadOnlyDictionary<string, object?>? _parameters;
 
     /// <summary>Creates a request from a parsed OQL statement.</summary>
     /// <param name="statement">The parsed statement.</param>
-    /// <param name="parameters">Named parameter values, without their @ or $ prefix.</param>
+    /// <param name="parameters">Ordinal, case-sensitive parameter values, with at most one optional leading @ or $ on keys.</param>
     /// <exception cref="ArgumentNullException">The statement is null.</exception>
     public DocumentQueryRequest(OqlQueryStatement statement, IReadOnlyDictionary<string, object?>? parameters = null)
-        : base(statement ?? throw new ArgumentNullException(nameof(statement)))
     {
+        _statement = statement ?? throw new ArgumentNullException(nameof(statement));
         _parameters = parameters;
     }
 
-    /// <inheritdoc />
-    public override IReadOnlyDictionary<string, object?>? Parameters => _parameters;
+    /// <summary>Gets the parsed OQL statement.</summary>
+    public OqlQueryStatement Statement => _statement;
+
+    /// <summary>Gets the ordinal, case-sensitive parameter map; keys may carry one leading @ or $; null when none are supplied.</summary>
+    public IReadOnlyDictionary<string, object?>? Parameters => _parameters;
 
     /// <summary>Parses OQL text into an executable document statement request.</summary>
     /// <param name="oql">The OQL statement text.</param>
-    /// <param name="parameters">Named parameter values, without their @ or $ prefix.</param>
+    /// <param name="parameters">Ordinal, case-sensitive parameter values, with at most one optional leading @ or $ on keys.</param>
     /// <returns>The parsed request.</returns>
     /// <exception cref="ArgumentException">The statement text is empty.</exception>
     /// <exception cref="DatabaseParseException">The statement has an error diagnostic.</exception>
@@ -38,7 +51,7 @@ public sealed class DocumentQueryRequest : QueryRequest<OqlQueryStatement>
         var error = statement.Diagnostics.FirstOrDefault(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
         if (error is not null)
         {
-            throw new DatabaseParseException($"OQL parse error {error.Code}: {error.Message}");
+            throw new DatabaseParseException($"OQL parse error {error.Code}: {error.Message}", statement.Diagnostics);
         }
         return new DocumentQueryRequest(statement, parameters);
     }

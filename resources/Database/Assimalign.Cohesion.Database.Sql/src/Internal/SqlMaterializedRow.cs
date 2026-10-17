@@ -8,7 +8,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// <summary>
 /// A row over evaluated values with converting typed accessors.
 /// </summary>
-internal sealed class SqlMaterializedRow : QueryRow
+internal sealed class SqlMaterializedRow : DatabaseRow
 {
     private readonly object?[] _values;
 
@@ -36,6 +36,7 @@ internal sealed class SqlMaterializedRow : QueryRow
     {
         null => null,
         string text => text,
+        SqlCharacter character => character.Value,
         var value => Convert.ToString(value, CultureInfo.InvariantCulture),
     };
 
@@ -52,8 +53,8 @@ internal sealed class SqlMaterializedRow : QueryRow
     public override double GetDouble(int ordinal) => Convert.ToDouble(RequireValue(ordinal), CultureInfo.InvariantCulture);
 
     /// <inheritdoc />
-    public override object? GetValue(int ordinal) => _values[ordinal];
+    public override object? GetValue(int ordinal) => SqlCharacter.Output(_values[ordinal]);
 
     private object RequireValue(int ordinal)
-        => _values[ordinal] ?? throw new DatabaseException($"Field {ordinal} is NULL.");
+        => SqlCharacter.Output(_values[ordinal]) ?? throw new DatabaseException($"Field {ordinal} is NULL.");
 }

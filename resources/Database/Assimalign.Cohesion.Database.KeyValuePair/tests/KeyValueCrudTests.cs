@@ -196,7 +196,7 @@ public class KeyValueCrudTests
         // Arrange
         var (engine, database) = await CreateAsync();
         await using var _ = engine;
-        var other = (IKeyValueDatabase)await engine.CreateDatabaseAsync("other");
+        var other = await engine.CreateDatabaseAsync("other");
         await using var foreign = await other.CreateSessionAsync();
 
         // Act / Assert

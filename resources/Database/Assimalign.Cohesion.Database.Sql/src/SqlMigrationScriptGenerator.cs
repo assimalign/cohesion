@@ -3,6 +3,7 @@ using System.Collections.Generic;
 
 using Assimalign.Cohesion.Database.Sql.Schema;
 using Assimalign.Cohesion.Database.Sql.Internal;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql;
 
@@ -36,6 +37,14 @@ public static class SqlMigrationScriptGenerator
 
         foreach (SqlSchemaMigrationOperation operation in plan.Operations)
         {
+            // A domain is registered on the engine, not stored in the database (phase E3): adding or
+            // dropping one changes no catalog, so it renders no statement. The engine that declares the
+            // database registers the schema's domains when it builds.
+            if (operation.Kind is SqlSchemaMigrationOperationKind.AddDomain or SqlSchemaMigrationOperationKind.DropDomain)
+            {
+                continue;
+            }
+
             steps.Add(Render(operation, currentSchema));
         }
 
@@ -103,7 +112,9 @@ public static class SqlMigrationScriptGenerator
                     operation.Constraint is null ? null : SqlSchemaStatementRenderer.AddConstraint(
                         RequireParent(operation), RequireConstraint(operation))),
 
-                SqlSchemaMigrationOperationKind.AlterTable or SqlSchemaMigrationOperationKind.AlterColumn =>
+                SqlSchemaMigrationOperationKind.AlterColumn => RenderAlterColumn(operation),
+
+                SqlSchemaMigrationOperationKind.AlterTable =>
                     throw Unsupported(operation, "ALTER metadata is not implemented by the SQL DDL dialect"),
 
                 _ => throw Unsupported(operation, "the operation kind is unknown"),
@@ -119,6 +130,44 @@ public static class SqlMigrationScriptGenerator
                 $"Cannot render SQL migration operation '{operation.Kind}' for '{QualifiedName(operation)}': {exception.Message}",
                 exception);
         }
+    }
+
+    private static SqlMigrationScriptStep RenderAlterColumn(SqlSchemaMigrationOperation operation)
+    {
+        if (operation.Column is not { } column || operation.PreviousColumn is not { } previous)
+        {
+            throw InvalidPayload(operation, "the previous and desired column definitions");
+        }
+        RequireMatchingName(operation, column.Name, "column");
+        DatabaseTypeInfo type = ResolveAlterColumnType(column, out string? domain);
+        DatabaseTypeInfo previousType = ResolveAlterColumnType(previous, out string? previousDomain);
+        if (type.Type != previousType.Type || type.Scale != previousType.Scale ||
+            !string.Equals(domain, previousDomain, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(SqlSchemaProvisioner.CanonicalDefault(column.DefaultLiteral),
+                SqlSchemaProvisioner.CanonicalDefault(previous.DefaultLiteral), StringComparison.Ordinal))
+        {
+            throw Unsupported(operation, "ALTER metadata requiring a storage-type, domain, scale or default rewrite is not implemented");
+        }
+        return new SqlMigrationScriptStep(operation, SqlSchemaStatementRenderer.AlterColumn(RequireParent(operation), column),
+            SqlSchemaStatementRenderer.AlterColumn(RequireParent(operation), previous));
+    }
+
+    private static DatabaseTypeInfo ResolveAlterColumnType(CompiledSchemaColumn column, out string? domain)
+    {
+        if (column.CustomType is not { } declared || SqlTypeCatalog.Standard.Resolve(declared, out _) is not null)
+        {
+            return SqlSchemaProvisioner.ResolveColumnType(column, SqlTypeCatalog.Standard, out domain);
+        }
+
+        // Script generation has no engine catalog. An engine-owned domain is compared by
+        // identity; its immutable bounds are validated when provisioning binds the schema.
+        if (!SqlTypeRules.TrySplit(declared, out string name, out int? first, out _) || first is not null)
+        {
+            throw new DatabaseException($"Column '{column.Name}' is declared with an invalid domain type '{declared}'.");
+        }
+        SqlTypeRules.ValidateDomainName(name);
+        domain = name;
+        return new DatabaseTypeInfo(column.Type, column.MaxLength, column.Precision, column.Scale);
     }
 
     private static string? PreviousIndexStatement(
@@ -171,11 +220,11 @@ public static class SqlMigrationScriptGenerator
             throw InvalidPayload(operation, "a desired column definition");
         RequireMatchingName(operation, column.Name, "column");
 
-        if (!column.IsNullable)
+        if (!column.IsNullable && SqlSchemaProvisioner.CanonicalDefault(column.DefaultLiteral) is null)
         {
             throw Unsupported(
                 operation,
-                "adding a non-nullable column requires a default or backfill, which is not supported");
+                "adding a non-nullable column requires a non-null literal default or a backfill");
         }
 
         return column;

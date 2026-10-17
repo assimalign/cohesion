@@ -16,7 +16,7 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.KeyValuePair.Catalog" />
 		<!-- Direct (not just transitive via KeyValuePair.Storage): the engine's public
 		     options surface exposes StorageCommitDurability and its workers drive the
-		     IStorage worker seams. -->
+		     Storage worker seams. -->
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Storage" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Types" />
 	</ItemGroup>

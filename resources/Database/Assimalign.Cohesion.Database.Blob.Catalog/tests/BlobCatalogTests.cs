@@ -1,13 +1,16 @@
 using System;
+using System.Buffers.Binary;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Database.Blob.Storage;
-using Assimalign.Cohesion.Database.Transactions;
-
 using Shouldly;
 using Xunit;
+
+using Assimalign.Cohesion.Database.Blob.Storage;
+using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Storage.Units;
+using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Blob.Catalog.Tests;
 
@@ -148,6 +151,75 @@ public sealed class BlobCatalogTests
         await database.Coordinator.RollbackAsync(reader);
     }
 
+    /// <summary>
+    /// The directory keeps a reference to every version a blob's metadata had until a lookup finds
+    /// it stale. Once the purge reclaims enough old versions to empty a metadata page, the page is
+    /// freed, and a lookup that reaches one of its references treats it as reclaimed. Before #1342
+    /// the lookup read the freed page and failed with "Page N is not allocated".
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Blob.Catalog] - Reclaimed versions: a lookup skips references into metadata pages the purge freed (#1342)")]
+    public async Task FindBlob_PurgeFreedOldVersionPages_ShouldReturnTheLatestVersion()
+    {
+        // Arrange: enough versions of one blob's metadata to fill several metadata pages.
+        await using var database = new TestDatabase();
+        var container = new BlobContainerMetadata(Guid.NewGuid(), "files");
+        var create = await database.Coordinator.BeginAsync(IsolationLevel.Snapshot);
+        await database.Catalog.SaveContainerAsync(container, create);
+        await database.Coordinator.CommitAsync(create);
+        const ulong versions = 250;
+        var entry = Entry(container.Id, "item");
+        for (ulong etag = 1; etag <= versions; etag++)
+        {
+            var writer = await database.Coordinator.BeginAsync(IsolationLevel.Snapshot);
+            await database.Catalog.SaveBlobAsync(entry with { ETag = etag }, writer);
+            await database.Coordinator.CommitAsync(writer);
+        }
+
+        long freeBeforePurge = database.Storage.FreeSpaceMap.FreePageCount;
+        database.Coordinator.RunVersionPurgePass(default).ShouldBeGreaterThan(0);
+        var reader = await database.Coordinator.BeginAsync(IsolationLevel.Snapshot);
+
+        // Act
+        var latest = database.Catalog.FindBlob(container.Id, "item", reader.Snapshot);
+
+        // Assert
+        database.Storage.FreeSpaceMap.FreePageCount.ShouldBeGreaterThan(freeBeforePurge);
+        latest.ShouldBe(entry with { ETag = versions });
+        database.Catalog.GetBlobs(container.Id, null, reader.Snapshot).ShouldHaveSingleItem().ShouldBe(entry with { ETag = versions });
+        await database.Coordinator.RollbackAsync(reader);
+    }
+
+    /// <summary>
+    /// A metadata page that cannot be read is not a reclaimed one: the lookup fails instead of
+    /// reading the blob as absent (#1342).
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Blob.Catalog] - Reclaimed versions: a lookup over a malformed metadata page throws instead of reading the blob as absent (#1342)")]
+    public async Task FindBlob_LatestVersionSlotMalformed_ShouldThrowStorageCorruption()
+    {
+        // Arrange: the newest metadata record's slot entry made to address bytes past its page.
+        await using var database = new TestDatabase();
+        var container = new BlobContainerMetadata(Guid.NewGuid(), "files");
+        var writer = await database.Coordinator.BeginAsync(IsolationLevel.Snapshot);
+        await database.Catalog.SaveContainerAsync(container, writer);
+        await database.Catalog.SaveBlobAsync(Entry(container.Id, "item"), writer);
+        await database.Coordinator.CommitAsync(writer);
+        var page = database.Storage.GetOwnerPages(0)[^1];
+        using (var handle = database.Storage.PageManager.GetPage(page))
+        {
+            int newest = new SlottedPage(handle.Page).SlotCount - 1;
+            BinaryPrimitives.WriteUInt16LittleEndian(handle.Page.AsSpan().Slice(Page.Size - ((newest + 1) * 4), 2), Page.Size - 1);
+        }
+
+        var reader = await database.Coordinator.BeginAsync(IsolationLevel.Snapshot);
+
+        // Act
+        var failure = Should.Throw<StorageCorruptionException>(() => database.Catalog.FindBlob(container.Id, "item", reader.Snapshot));
+
+        // Assert
+        failure.PageId.ShouldBe(page);
+        await database.Coordinator.RollbackAsync(reader);
+    }
+
     private static BlobCatalogEntry Entry(Guid containerId, string name)
         => new(containerId, name, 0, "text/plain", 42,
             new DateTimeOffset(2026, 9, 17, 8, 30, 0, TimeSpan.FromHours(-4)),
@@ -167,7 +239,7 @@ public sealed class BlobCatalogTests
         internal MemoryStream Journal { get; } = new();
         internal BlobStorage Storage { get; }
         internal TransactionCoordinator Coordinator { get; }
-        internal IBlobCatalog Catalog { get; }
+        internal BlobCatalog Catalog { get; }
 
         internal TestDatabase()
         {

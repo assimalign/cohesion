@@ -14,6 +14,95 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed class SqlTransactionControlTests
 {
+    [Fact(DisplayName = "Cohesion Test [Sql] - Wire transactions: START TRANSACTION and END publish rows only after commit")]
+    public async Task ExecuteAsync_WireStartTransactionEnd_ShouldPublishToObserverAfterCommit()
+    {
+        // Arrange
+        await using var harness = await ServerTestHarness.StartAsync();
+        await using var writer = await harness.DialAsync();
+        await using var observer = await harness.DialAsync();
+        await writer.HandshakeAsync();
+        await observer.HandshakeAsync();
+
+        // Act
+        await ExecuteAsync(writer, "START TRANSACTION");
+        var transaction = harness.Server.Sessions
+            .Where(session => session.DatabaseSession!.CurrentTransaction != null).ShouldHaveSingleItem()
+            .DatabaseSession!.CurrentTransaction!;
+        await ExecuteAsync(writer, "INSERT INTO users VALUES (3, 'lin'), (4, 'ed')");
+
+        // Assert
+        (await CountAsync(writer)).ShouldBe(4);
+        (await CountAsync(observer)).ShouldBe(2);
+        (await CountAsync(observer, "id >= 3")).ShouldBe(0);
+        transaction.State.ShouldBe(TransactionState.Active);
+        await ExecuteAsync(writer, "END");
+        transaction.State.ShouldBe(TransactionState.Committed);
+        (await CountAsync(observer)).ShouldBe(4);
+        (await CountAsync(observer, "id >= 3")).ShouldBe(2);
+        harness.Server.Sessions.ShouldAllBe(session => session.DatabaseSession!.CurrentTransaction == null);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sql] - Wire transactions: BEGIN WORK and ROLLBACK WORK restore every mutation")]
+    public async Task ExecuteAsync_WireBeginWorkRollbackWork_ShouldRestoreRows()
+    {
+        // Arrange
+        await using var harness = await ServerTestHarness.StartAsync();
+        await using var writer = await harness.DialAsync();
+        await using var observer = await harness.DialAsync();
+        await writer.HandshakeAsync();
+        await observer.HandshakeAsync();
+
+        // Act
+        await ExecuteAsync(writer, "BEGIN WORK");
+        var transaction = harness.Server.Sessions
+            .Where(session => session.DatabaseSession!.CurrentTransaction != null).ShouldHaveSingleItem()
+            .DatabaseSession!.CurrentTransaction!;
+        await ExecuteAsync(writer, "INSERT INTO users VALUES (3, 'lin'), (4, 'ed')");
+        await ExecuteAsync(writer, "UPDATE users SET name = 'changed' WHERE id = 1");
+        await ExecuteAsync(writer, "DELETE FROM users WHERE id = 2");
+
+        // Assert
+        (await CountAsync(writer)).ShouldBe(3);
+        (await CountAsync(writer, "name = 'changed'")).ShouldBe(1);
+        (await CountAsync(writer, "id = 2")).ShouldBe(0);
+        (await CountAsync(observer)).ShouldBe(2);
+        (await CountAsync(observer, "name = 'changed'")).ShouldBe(0);
+        await ExecuteAsync(writer, "ROLLBACK WORK");
+        transaction.State.ShouldBe(TransactionState.RolledBack);
+        foreach (var client in new[] { writer, observer })
+        {
+            (await CountAsync(client)).ShouldBe(2);
+            (await CountAsync(client, "id = 1 AND name = 'ada'")).ShouldBe(1);
+            (await CountAsync(client, "id = 2 AND name = 'grace'")).ShouldBe(1);
+            (await CountAsync(client, "id >= 3")).ShouldBe(0);
+        }
+        harness.Server.Sessions.ShouldAllBe(session => session.DatabaseSession!.CurrentTransaction == null);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sql] - Wire transactions: malformed START returns SQL0003 without opening a transaction and the connection recovers")]
+    public async Task ExecuteAsync_WireMalformedStartTransaction_ShouldReportParseFailureAndKeepConnectionUsable()
+    {
+        // Arrange
+        await using var harness = await ServerTestHarness.StartAsync();
+        await using var client = await harness.DialAsync();
+        await client.HandshakeAsync();
+        var session = harness.Server.Sessions.ShouldHaveSingleItem().DatabaseSession.ShouldNotBeNull();
+
+        // Act
+        await client.SendAsync(ProtocolMessageType.Execute,
+            ProtocolExecuteMessage.Create("START TRANSACTION ISOLATION LEVEL SERIALIZABLE").Encode());
+        var frame = await client.ExpectAsync(ProtocolMessageType.Error);
+        var error = ProtocolErrorMessage.Decode(frame.Payload.Span);
+
+        // Assert
+        error.Code.ShouldBe(ProtocolErrorCode.ParseFailure);
+        error.Message.ShouldContain("SQL0003", Case.Sensitive);
+        session.CurrentTransaction.ShouldBeNull();
+        (await CountAsync(client)).ShouldBe(2);
+        session.CurrentTransaction.ShouldBeNull();
+    }
+
     [Fact]
     public async Task WireCommit_ShouldPublishMultipleStatementsTogether()
     {
@@ -31,7 +120,7 @@ public sealed class SqlTransactionControlTests
 
         await ExecuteAsync(writer, "COMMIT TRANSACTION");
         (await CountAsync(observer)).ShouldBe(4);
-        harness.Server.Context.Sessions.ShouldAllBe(s => s.DatabaseSession!.CurrentTransaction == null);
+        harness.Server.Sessions.ShouldAllBe(s => s.DatabaseSession!.CurrentTransaction == null);
     }
 
     [Fact]
@@ -69,7 +158,7 @@ public sealed class SqlTransactionControlTests
         var writer = await harness.DialAsync();
         await writer.HandshakeAsync();
         await ExecuteAsync(writer, "BEGIN");
-        var transaction = harness.Server.Context.Sessions
+        var transaction = harness.Server.Sessions
             .Where(s => s.DatabaseSession!.CurrentTransaction != null).ShouldHaveSingleItem()
             .DatabaseSession!.CurrentTransaction!;
         await ExecuteAsync(writer, "INSERT INTO users VALUES (3, 'lin')");
@@ -82,7 +171,7 @@ public sealed class SqlTransactionControlTests
         }
 
         await writer.DisposeAsync();
-        await ServerTestHarness.WaitUntilAsync(() => harness.Server.Context.Sessions.Count == 1);
+        await ServerTestHarness.WaitUntilAsync(() => harness.Server.Sessions.Count == 1);
         transaction.State.ShouldBe(TransactionState.RolledBack);
         (await CountAsync(observer)).ShouldBe(2);
         (await CountAsync(observer, "id = 3")).ShouldBe(0);
@@ -94,22 +183,22 @@ public sealed class SqlTransactionControlTests
     [Fact]
     public async Task TransactionStateErrors_ShouldReturnStableDiagnosticsAndPreserveScope()
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "transaction-diagnostics" });
+        await using var engine = SqlDatabaseEngine.Create("transaction-diagnostics", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("app");
         await using var session = await database.CreateSessionAsync();
 
         foreach (string command in new[] { "COMMIT", "ROLLBACK TRANSACTION" })
         {
             var result = await session.ExecuteAsync(command);
-            result.Status.ShouldBe(QueryResultStatus.Error);
+            result.Status.ShouldBe(DatabaseResultStatus.Error);
             result.Diagnostics.ShouldNotBeNull().ShouldHaveSingleItem().Code.ShouldBe("COHSQLT002");
         }
 
-        (await session.ExecuteAsync("BEGIN")).Status.ShouldBe(QueryResultStatus.Success);
+        (await session.ExecuteAsync("BEGIN")).Status.ShouldBe(DatabaseResultStatus.Success);
         var transaction = session.CurrentTransaction.ShouldNotBeNull();
         transaction.IsolationLevel.ShouldBe(IsolationLevel.Snapshot);
         var nested = await session.ExecuteAsync("BEGIN TRANSACTION");
-        nested.Status.ShouldBe(QueryResultStatus.Error);
+        nested.Status.ShouldBe(DatabaseResultStatus.Error);
         nested.Diagnostics.ShouldNotBeNull().ShouldHaveSingleItem().Code.ShouldBe("COHSQLT001");
         session.CurrentTransaction.ShouldBeSameAs(transaction);
         await session.ExecuteAsync("ROLLBACK");
@@ -123,16 +212,15 @@ public sealed class SqlTransactionControlTests
     [Fact]
     public async Task TypedRequestWithParseErrors_ShouldNotExecuteRecoveredTransactionCommand()
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "typed-control" });
+        await using var engine = SqlDatabaseEngine.Create("typed-control", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("app");
         await using var session = await database.CreateSessionAsync();
         await session.ExecuteAsync("BEGIN");
         var transaction = session.CurrentTransaction.ShouldNotBeNull();
         var invalid = (SqlQueryStatement)new SqlQueryParser().Parse("ROLLBACK TO marker");
 
-        var result = await session.ExecuteAsync(new SqlQueryRequest(invalid));
-        result.Status.ShouldBe(QueryResultStatus.Error);
-        result.Diagnostics.ShouldNotBeNull().ShouldNotBeEmpty();
+        var result = await Should.ThrowAsync<DatabaseParseException>(() => session.ExecuteAsync(new SqlQueryRequest(invalid)).AsTask());
+        result.Diagnostics.ShouldNotBeEmpty();
         transaction.State.ShouldBe(TransactionState.Active);
         session.CurrentTransaction.ShouldBeSameAs(transaction);
         await session.ExecuteAsync("ROLLBACK");
@@ -141,13 +229,13 @@ public sealed class SqlTransactionControlTests
     [Fact]
     public async Task ExplicitTransactionDdl_ShouldFailClosedAndLeaveTransactionUsable()
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "ddl-diagnostics" });
+        await using var engine = SqlDatabaseEngine.Create("ddl-diagnostics", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("app");
         await using var session = await database.CreateSessionAsync();
         await session.ExecuteAsync("CREATE TABLE t (id INT)");
         await session.ExecuteAsync("BEGIN");
         var result = await session.ExecuteAsync("DROP TABLE t");
-        result.Status.ShouldBe(QueryResultStatus.Error);
+        result.Status.ShouldBe(DatabaseResultStatus.Error);
         result.Diagnostics.ShouldNotBeNull().ShouldHaveSingleItem().Code.ShouldBe("COHSQLT003");
         (await session.ExecuteAsync("INSERT INTO t VALUES (1)")).AffectedCount.ShouldBe(1);
         await session.ExecuteAsync("ROLLBACK");
@@ -169,6 +257,49 @@ public sealed class SqlTransactionControlTests
         (await CountAsync(client)).ShouldBe(3);
     }
 
+    /// <summary>
+    /// Over the wire, a transaction the kernel ended under its caller (the served database was
+    /// dropped while the connection held it) refuses the connection's statements and its COMMIT with
+    /// <c>COHSQLT005</c> as execution failures, the COMMIT ends it, and the connection stays usable
+    /// (concrete-types plan §6.4, "Sql at P4"). Before the root bases the session dropped such a
+    /// transaction, so the statement ran in auto-commit against the dropped database and the COMMIT
+    /// answered <c>COHSQLT002</c>.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Wire transaction: one the kernel ended refuses work and COMMIT with COHSQLT005")]
+    public async Task ExecuteAsync_WireTransactionEndedByTheKernel_ShouldCarryCohsqlt005AndKeepConnectionUsable()
+    {
+        // Arrange
+        await using var harness = await ServerTestHarness.StartAsync();
+        await using var client = await harness.DialAsync();
+        await client.HandshakeAsync();
+        await ExecuteAsync(client, "BEGIN");
+        await ExecuteAsync(client, "INSERT INTO users VALUES (3, 'lin')");
+        var session = harness.Server.Sessions.ShouldHaveSingleItem().DatabaseSession.ShouldNotBeNull();
+        var transaction = session.CurrentTransaction.ShouldNotBeNull();
+        await harness.Engine.DropDatabaseAsync(ServerTestHarness.DatabaseName);
+
+        // Act
+        string statement = await ExpectExecutionFailureAsync(client, "SELECT COUNT(*) FROM users");
+        string commit = await ExpectExecutionFailureAsync(client, "COMMIT");
+        await client.SendAsync(ProtocolMessageType.Ping);
+
+        // Assert
+        await client.ExpectAsync(ProtocolMessageType.Pong);
+        statement.ShouldStartWith("COHSQLT005: The session's transaction is aborted; statements are refused until it is rolled back.", Case.Sensitive);
+        commit.ShouldStartWith("COHSQLT005: The session's transaction is aborted and cannot commit; nothing was committed.", Case.Sensitive);
+        transaction.State.ShouldNotBe(TransactionState.Committed);
+        session.CurrentTransaction.ShouldBeNull();
+    }
+
+    private static async Task<string> ExpectExecutionFailureAsync(ProtocolTestClient client, string sql)
+    {
+        await client.SendAsync(ProtocolMessageType.Execute, ProtocolExecuteMessage.Create(sql).Encode());
+        var frame = await client.ExpectAsync(ProtocolMessageType.Error);
+        var error = ProtocolErrorMessage.Decode(frame.Payload.Span);
+        error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
+        return error.Message;
+    }
+
     private static async Task ExecuteAsync(ProtocolTestClient client, string sql)
     {
         await client.SendAsync(ProtocolMessageType.Execute, ProtocolExecuteMessage.Create(sql).Encode());
@@ -181,7 +312,7 @@ public sealed class SqlTransactionControlTests
         var frame = await client.ExpectAsync(ProtocolMessageType.Error);
         var error = ProtocolErrorMessage.Decode(frame.Payload.Span);
         error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-        error.Message.ShouldContain(code);
+        error.ShouldContainMessage(code);
     }
 
     private static async Task<long> CountAsync(ProtocolTestClient client, string? predicate = null)

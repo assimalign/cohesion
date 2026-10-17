@@ -39,7 +39,7 @@ public sealed class SqlAggregateExecutionTests
         await using var result = (await ExecuteAsync(session,
             "SELECT COUNT(*) AS rows_seen, COUNT(amount) AS values_seen, SUM(amount) AS total, " +
             "AVG(amount) AS mean, MIN(amount) AS smallest, MAX(amount) AS largest FROM metrics;"))
-            .ShouldBeAssignableTo<QueryResultSet>();
+            .ShouldBeAssignableTo<DatabaseResultSet>();
 
         // Assert
         result.Columns.Select(column => column.Name).ShouldBe(["rows_seen", "values_seen", "total", "mean", "smallest", "largest"]);
@@ -88,7 +88,7 @@ public sealed class SqlAggregateExecutionTests
         // Act
         await using var result = (await ExecuteAsync(session,
             "SELECT COUNT(*), COUNT(empty_amount), SUM(empty_amount), AVG(empty_amount), MIN(empty_amount), MAX(empty_amount) FROM metrics;"))
-            .ShouldBeAssignableTo<QueryResultSet>();
+            .ShouldBeAssignableTo<DatabaseResultSet>();
 
         // Assert
         (await ReadRowsAsync(result)).ShouldHaveSingleItem().ShouldBe(new object?[] { 9L, 0L, null, null, null, null });
@@ -115,7 +115,7 @@ public sealed class SqlAggregateExecutionTests
         // Act / Assert
         await using var result = (await ExecuteAsync(session,
             $"SELECT COUNT(*), COUNT(amount), SUM(amount), AVG(amount), MIN(amount), MAX(amount) FROM metrics{where};"))
-            .ShouldBeAssignableTo<QueryResultSet>();
+            .ShouldBeAssignableTo<DatabaseResultSet>();
         (await ReadRowsAsync(result)).ShouldHaveSingleItem().ShouldBe(new object?[] { 0L, 0L, null, null, null, null });
         result.Columns.Select(column => column.Type).ShouldBe(
             [DatabaseType.Int64, DatabaseType.Int64, DatabaseType.Decimal, DatabaseType.Decimal, DatabaseType.Int32, DatabaseType.Int32]);
@@ -289,6 +289,51 @@ public sealed class SqlAggregateExecutionTests
         error.Message.ShouldContain("aggregate");
     }
 
+    /// <summary>
+    /// UPDATE and DELETE act on one row at a time, so an aggregate in an assignment or a filter has
+    /// no group to summarize. It fails while planning, as PostgreSQL rejects one in UPDATE and WHERE
+    /// (SQLSTATE 42803): over an empty table as over a populated one, and without changing a row.
+    /// It used to succeed over an empty table and fail per row over a populated one.
+    /// </summary>
+    /// <param name="statement">An UPDATE or DELETE with an aggregate outside any subquery.</param>
+    /// <param name="message">The planner's message.</param>
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Aggregates: UPDATE and DELETE reject aggregates before reading rows")]
+    [InlineData("UPDATE metrics SET amount = SUM(amount);", "Aggregate functions are not allowed in UPDATE SET.")]
+    [InlineData("UPDATE metrics SET amount = 1, region = UPPER(MAX(region));", "Aggregate functions are not allowed in UPDATE SET.")]
+    [InlineData("UPDATE metrics SET amount = 0 WHERE COUNT(*) > 1;", "Aggregate functions are not allowed in WHERE.")]
+    [InlineData("DELETE FROM metrics WHERE COUNT(*) > 1;", "Aggregate functions are not allowed in WHERE.")]
+    [InlineData("DELETE FROM metrics WHERE amount > 0 AND min(amount) < 0;", "Aggregate functions are not allowed in WHERE.")]
+    public async Task Aggregates_InUpdateOrDelete_ShouldRejectBeforeReadingRows(string statement, string message)
+    {
+        foreach (bool withRows in new[] { false, true })
+        {
+            // Arrange
+            await using var engine = CreateEngine();
+            var database = await engine.CreateDatabaseAsync("aggregate");
+            await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
+            if (withRows)
+            {
+                await SeedAsync(session);
+            }
+            else
+            {
+                (await ExecuteAsync(session, CreateMetrics)).Status.ShouldBe(DatabaseResultStatus.Success);
+            }
+            var before = await SnapshotAsync(session);
+
+            // Act
+            var error = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, statement));
+
+            // Assert
+            error.ShouldHaveMessage(message, $"withRows: {withRows}");
+            (await SnapshotAsync(session)).ShouldBe(before, $"withRows: {withRows}");
+        }
+
+        static async Task<string[]> SnapshotAsync(SqlDatabaseSession session)
+            => (await RowsAsync(session, "SELECT id, category, region, amount FROM metrics ORDER BY id;"))
+                .Select(row => string.Join(",", row)).ToArray();
+    }
+
     /// <summary>SUM and AVG reject text explicitly rather than inferring a numeric result from non-null rows.</summary>
     /// <param name="aggregate">The numeric aggregate to validate.</param>
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Aggregates: SUM and AVG require numeric arguments")]
@@ -304,7 +349,7 @@ public sealed class SqlAggregateExecutionTests
 
         // Act / Assert
         var error = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, $"SELECT {aggregate}(category) FROM metrics;"));
-        error.Message.ShouldContain(aggregate, Case.Sensitive);
+        error.ShouldContainMessage(aggregate, Case.Sensitive);
         error.Message.ShouldContain("numeric");
     }
 
@@ -322,7 +367,7 @@ public sealed class SqlAggregateExecutionTests
         // Act
         await using var result = (await ExecuteAsync(session,
             "SELECT AVG(integer_value), SUM(decimal_value), AVG(decimal_value), SUM(float_value), AVG(float_value), MIN(float_value), MAX(float_value) FROM numbers;"))
-            .ShouldBeAssignableTo<QueryResultSet>();
+            .ShouldBeAssignableTo<DatabaseResultSet>();
 
         // Assert
         (await ReadRowsAsync(result)).ShouldHaveSingleItem().ShouldBe(
@@ -339,7 +384,7 @@ public sealed class SqlAggregateExecutionTests
         await using var engine = CreateEngine();
         var database = await engine.CreateDatabaseAsync("aggregate");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
-        await ExecuteAsync(session, "CREATE TABLE midpoints (category TEXT, amount DECIMAL(29, 28));");
+        await ExecuteAsync(session, "CREATE TABLE midpoints (category TEXT, amount DECIMAL(28, 28));");
         await ExecuteAsync(session, "INSERT INTO midpoints VALUES " +
             "('down', 0.0000000000000000000000000005), ('down', 0), " +
             "('up', 0.0000000000000000000000000007), ('up', 0);");
@@ -367,13 +412,13 @@ public sealed class SqlAggregateExecutionTests
         CheckRows(await RowsAsync(session, "SELECT amount, COUNT(*) FROM large_floats GROUP BY amount ORDER BY amount;"),
             [[1e100, 2L], [2e100, 1L]]);
         await using var result = (await ExecuteAsync(session, "SELECT MIN(amount), MAX(amount) FROM large_floats;"))
-            .ShouldBeAssignableTo<QueryResultSet>();
+            .ShouldBeAssignableTo<DatabaseResultSet>();
         result.Columns.Select(column => column.Type).ShouldBe([DatabaseType.Float64, DatabaseType.Float64]);
         (await ReadRowsAsync(result)).ShouldHaveSingleItem().ShouldBe(new object?[] { 1e100, 2e100 });
         foreach (string aggregate in new[] { "SUM", "AVG" })
         {
             var error = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, $"SELECT {aggregate}(amount) FROM large_floats;"));
-            error.Message.ShouldContain(aggregate, Case.Sensitive);
+            error.ShouldContainMessage(aggregate, Case.Sensitive);
             error.Message.ShouldContain("overflow");
         }
     }
@@ -392,12 +437,12 @@ public sealed class SqlAggregateExecutionTests
 
         // Act / Assert
         await using var populated = (await ExecuteAsync(session, projection + ";", parameters))
-            .ShouldBeAssignableTo<QueryResultSet>();
+            .ShouldBeAssignableTo<DatabaseResultSet>();
         populated.Columns.Select(column => column.Type).ShouldBe(
             [DatabaseType.Int32, DatabaseType.Int32, DatabaseType.String, DatabaseType.String]);
         (await ReadRowsAsync(populated)).ShouldHaveSingleItem().ShouldBe(new object?[] { 27, 27, "typed", "typed" });
         await using var empty = (await ExecuteAsync(session, projection + " WHERE id < 0;", parameters))
-            .ShouldBeAssignableTo<QueryResultSet>();
+            .ShouldBeAssignableTo<DatabaseResultSet>();
         empty.Columns.Select(column => column.Type).ShouldBe(
             [DatabaseType.Int32, DatabaseType.Int32, DatabaseType.String, DatabaseType.String]);
         (await ReadRowsAsync(empty)).ShouldHaveSingleItem().ShouldBe(new object?[] { null, null, null, null });
@@ -417,7 +462,7 @@ public sealed class SqlAggregateExecutionTests
         await using var result = (await ExecuteAsync(session,
             "SELECT category, COALESCE(NULL, SUM(amount), 0), COALESCE(NULL, MIN(amount), 0) " +
             "FROM metrics GROUP BY category ORDER BY category;"))
-            .ShouldBeAssignableTo<QueryResultSet>();
+            .ShouldBeAssignableTo<DatabaseResultSet>();
 
         // Assert
         result.Columns.Select(column => column.Type).ShouldBe([DatabaseType.String, DatabaseType.Decimal, DatabaseType.Int64]);
@@ -439,7 +484,7 @@ public sealed class SqlAggregateExecutionTests
         CheckRows(await RowsAsync(session, "SELECT name, COUNT(*) FROM names GROUP BY name ORDER BY name;"),
             [[null, 2L], ["Alice", 2L], ["alice", 1L]]);
         await using var result = (await ExecuteAsync(session, "SELECT MIN(name), MAX(name), COUNT(name) FROM names;"))
-            .ShouldBeAssignableTo<QueryResultSet>();
+            .ShouldBeAssignableTo<DatabaseResultSet>();
         (await ReadRowsAsync(result)).ShouldHaveSingleItem().ShouldBe(new object?[] { "Alice", "alice", 3L });
         result.Columns.Select(column => column.Type).ShouldBe([DatabaseType.String, DatabaseType.String, DatabaseType.Int64]);
     }
@@ -470,7 +515,7 @@ public sealed class SqlAggregateExecutionTests
     {
         // Arrange
         await using var engine = CreateEngine();
-        var database = (SqlDatabaseInstance)await engine.CreateDatabaseAsync("aggregate");
+        var database = await engine.CreateDatabaseAsync("aggregate");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await ExecuteAsync(session, CreateMetrics);
         await ExecuteAsync(session, "CREATE TABLE categories (name TEXT, label TEXT);");
@@ -531,7 +576,7 @@ public sealed class SqlAggregateExecutionTests
         await using var result = (await ExecuteAsync(session,
             "SELECT MIN(CASE WHEN id = 1 THEN amount ELSE amount + 1 END), " +
             "MAX(CASE WHEN id = 1 THEN amount ELSE amount + 1 END) FROM metrics;"))
-            .ShouldBeAssignableTo<QueryResultSet>();
+            .ShouldBeAssignableTo<DatabaseResultSet>();
 
         // Assert
         result.Columns.Select(column => column.Type).ShouldBe([DatabaseType.Int64, DatabaseType.Int64]);
@@ -550,7 +595,7 @@ public sealed class SqlAggregateExecutionTests
 
         // Act
         await using var result = (await ExecuteAsync(session, "SELECT MIN(UPPER(amount)), MAX(LOWER(amount)) FROM metrics;"))
-            .ShouldBeAssignableTo<QueryResultSet>();
+            .ShouldBeAssignableTo<DatabaseResultSet>();
 
         // Assert
         result.Columns.Select(column => column.Type).ShouldBe([DatabaseType.Int32, DatabaseType.Int32]);
@@ -578,26 +623,26 @@ public sealed class SqlAggregateExecutionTests
     }
 
     private static SqlDatabaseEngine CreateEngine()
-        => SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "aggregate-tests" });
+        => SqlDatabaseEngine.Create("aggregate-tests", new SqlDatabaseEngineOptions());
 
-    private static async Task SeedAsync(IDatabaseSession session)
+    private static async Task SeedAsync(SqlDatabaseSession session)
     {
-        (await ExecuteAsync(session, CreateMetrics)).Status.ShouldBe(QueryResultStatus.Success);
+        (await ExecuteAsync(session, CreateMetrics)).Status.ShouldBe(DatabaseResultStatus.Success);
         (await ExecuteAsync(session, InsertMetrics)).AffectedCount.ShouldBe(9);
     }
 
-    private static Task<QueryResult> ExecuteAsync(IDatabaseSession session, string statement, IReadOnlyDictionary<string, object?>? parameters = null)
+    private static Task<DatabaseResult> ExecuteAsync(SqlDatabaseSession session, string statement, IReadOnlyDictionary<string, object?>? parameters = null)
         => session.ExecuteAsync(statement, parameters, CancellationToken.None).AsTask();
 
-    private static async Task<List<object?[]>> RowsAsync(IDatabaseSession session, string statement, IReadOnlyDictionary<string, object?>? parameters = null)
+    private static async Task<List<object?[]>> RowsAsync(SqlDatabaseSession session, string statement, IReadOnlyDictionary<string, object?>? parameters = null)
     {
-        await using var result = (await ExecuteAsync(session, statement, parameters)).ShouldBeAssignableTo<QueryResultSet>();
+        await using var result = (await ExecuteAsync(session, statement, parameters)).ShouldBeAssignableTo<DatabaseResultSet>();
         return await ReadRowsAsync(result);
     }
 
-    private static async Task<List<object?[]>> ReadRowsAsync(QueryResultSet result)
+    private static async Task<List<object?[]>> ReadRowsAsync(DatabaseResultSet result)
     {
-        result.Status.ShouldBe(QueryResultStatus.Success);
+        result.Status.ShouldBe(DatabaseResultStatus.Success);
         var rows = new List<object?[]>();
         await foreach (var row in result.GetRowsAsync(CancellationToken.None))
         {

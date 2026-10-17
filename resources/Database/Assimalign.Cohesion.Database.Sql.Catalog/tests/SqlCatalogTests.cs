@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
@@ -8,6 +9,7 @@ using Xunit;
 
 using Assimalign.Cohesion.Database.Indexing;
 using Assimalign.Cohesion.Database.Sql.Storage;
+using Assimalign.Cohesion.Database.Storage.Units;
 using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Catalog.Tests;
@@ -32,32 +34,57 @@ public class SqlCatalogTests
         private readonly MemoryStream _data = new();
         private readonly MemoryStream _journal = new();
 
-        public ISqlCatalog Open()
+        public SqlCatalog Open()
         {
             var storage = SqlStorage.Create(
                 new NonClosingStream(_data), new NonClosingStream(_journal), new MemoryStream(), "catalog-test");
             return SqlCatalog.Open(storage);
         }
 
-        public ISqlCatalog Reopen()
+        public SqlCatalog Reopen() => SqlCatalog.Open(OpenCopy());
+
+        /// <summary>
+        /// Reads the raw catalog records the way a catalog's load does and returns
+        /// the kinds of the record-space format marker records found (4 or 8).
+        /// </summary>
+        public List<int> MarkerKinds()
+        {
+            using var storage = OpenCopy();
+            using var iterator = storage.GetUnitIterator();
+            var kinds = new List<int>();
+
+            while (iterator.MoveNext())
+            {
+                var reader = new DatabaseKeyReader(iterator.Current.Data.Span);
+                int kind = reader.ReadInt32();
+
+                if (kind is 4 or 8)
+                {
+                    kinds.Add(kind);
+                }
+            }
+
+            return kinds;
+        }
+
+        private SqlStorage OpenCopy()
         {
             var dataCopy = new MemoryStream();
             dataCopy.Write(_data.ToArray());
             var journalCopy = new MemoryStream();
             journalCopy.Write(_journal.ToArray());
 
-            var storage = SqlStorage.Open(dataCopy, journalCopy, new MemoryStream());
-            return SqlCatalog.Open(storage);
+            return SqlStorage.Open(dataCopy, journalCopy, new MemoryStream());
         }
     }
 
-    private static (ISqlCatalog Catalog, CatalogHarness Harness) OpenFresh()
+    private static (SqlCatalog Catalog, CatalogHarness Harness) OpenFresh()
     {
         var harness = new CatalogHarness();
         return (harness.Open(), harness);
     }
 
-    private static ISqlCatalog Reopen(CatalogHarness harness) => harness.Reopen();
+    private static SqlCatalog Reopen(CatalogHarness harness) => harness.Reopen();
 
     // NonClosingStream lives in TestObjects/ (shared with the index metadata suite).
 
@@ -65,16 +92,16 @@ public class SqlCatalogTests
     public async Task SchemaOwnership_AfterColumnChanges_ShouldPersistForTableAndIndex()
     {
         var (catalog, harness) = OpenFresh();
-        var table = await SqlCatalog.CreateSchemaTableAsync(catalog, "dbo", "customers",
+        var table = await catalog.CreateTableAsync("dbo", "customers",
             [Column("id", DatabaseType.Int64), Column("legacy", DatabaseType.String)],
-            null, "AppSchema", default);
+            null, DatabaseObjectOwner.Schema, "AppSchema", default);
         await catalog.CreateIndexAsync(new SqlCatalogIndex(table.ObjectId, "ix_customers_id", ["id"], false,
-            DatabaseObjectOwner.Schema, "AppSchema"), []);
+            DatabaseObjectOwner.Schema, "AppSchema"), [new(table.ObjectId, new IndexDefinition("ix_customers_id"), 7)]);
         await catalog.AddColumnAsync("dbo", "customers", Column("note", DatabaseType.String));
         await catalog.DropColumnAsync("dbo", "customers", "legacy");
         await catalog.CreateTableAsync("dbo", "scratch", [Column("id", DatabaseType.Int64)]);
 
-        ISqlCatalog reopened = Reopen(harness);
+        SqlCatalog reopened = Reopen(harness);
 
         reopened.TryGetTable("dbo", "customers", out var persisted).ShouldBeTrue();
         persisted.Owner.ShouldBe(DatabaseObjectOwner.Schema);
@@ -89,9 +116,10 @@ public class SqlCatalogTests
         scratch.OwningSchema.ShouldBeNull();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sql.Catalog] - Ownership: legacy records remain ad-hoc")]
-    public void LegacyRecords_WithoutOwnershipSuffix_ShouldRemainAdhoc()
+    [Fact(DisplayName = "Cohesion Test [Sql.Catalog] - Ownership: legacy records are refused without format 10 function identities")]
+    public void Open_LegacyRecordsWithoutOwnershipSuffix_ShouldRefuseMissingFunctionIdentities()
     {
+        // Arrange
         using var storage = SqlStorage.Create(new MemoryStream(), new MemoryStream(), new MemoryStream(), "legacy-catalog");
         var table = new DatabaseKeyWriter();
         table.AppendInt32(1).AppendInt64(1).AppendString("dbo", Collation.Binary)
@@ -109,14 +137,8 @@ public class SqlCatalogTests
             transaction.Commit();
         }
 
-        ISqlCatalog catalog = SqlCatalog.Open(storage);
-
-        catalog.TryGetTable("dbo", "legacy", out var loadedTable).ShouldBeTrue();
-        loadedTable.Owner.ShouldBe(DatabaseObjectOwner.Adhoc);
-        loadedTable.OwningSchema.ShouldBeNull();
-        catalog.TryGetIndex(1, "ix_legacy_id", out var loadedIndex).ShouldBeTrue();
-        loadedIndex.Owner.ShouldBe(DatabaseObjectOwner.Adhoc);
-        loadedIndex.OwningSchema.ShouldBeNull();
+        // Act / Assert
+        Should.Throw<SqlCatalogException>(() => SqlCatalog.Open(storage)).Message.ShouldContain("missing format 10 function-call identities");
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Catalog] - Ownership: inconsistent metadata is rejected")]
@@ -148,7 +170,7 @@ public class SqlCatalogTests
         // Arrange
         var (catalog, harness) = OpenFresh();
         string largeDocument = "{\"schema\":\"" + new string('x', 20_000) + "\"}";
-        var first = new SqlCatalogSchemaState("sha256:first", largeDocument);
+        var first = new SqlCatalogSchemaState("sha256:first", largeDocument, catalog.DdlGeneration);
 
         // Act / Assert: the canonical document spans catalog records and reassembles on open.
         await catalog.SaveSchemaStateAsync(first);
@@ -159,19 +181,47 @@ public class SqlCatalogTests
 
         // Act / Assert: replacement removes every old chunk and persists hash + document together.
         const string replacementDocument = "{\"schema\":\"replacement\"}";
-        await catalog.SaveSchemaStateAsync(new SqlCatalogSchemaState("sha256:replacement", replacementDocument));
+        await catalog.SaveSchemaStateAsync(new SqlCatalogSchemaState("sha256:replacement", replacementDocument, catalog.DdlGeneration));
         var replacementReopen = Reopen(harness);
         replacementReopen.SchemaState.ShouldNotBeNull();
         replacementReopen.SchemaState.ContentHash.ShouldBe("sha256:replacement");
         replacementReopen.SchemaState.CanonicalDocument.ShouldBe(replacementDocument);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Sql.Catalog] - 49a: pending intent spans records, survives reopen, and clears atomically with its applied marker")]
+    public async Task SavePendingMigration_AcrossReopen_ShouldRetainOrderedIntentUntilCompletion()
+    {
+        // Arrange
+        var (catalog, harness) = OpenFresh();
+        string document = "{\"schema\":\"" + new string('x', 20_000) + "\"}";
+        await catalog.SaveSchemaStateAsync(new SqlCatalogSchemaState("old", "{}", catalog.DdlGeneration));
+        var steps = new[] { new SqlCatalogMigrationStep("AddIndex", "items", "ix_value", 2) };
+        var pending = new SqlCatalogPendingMigration("new", document, steps, 2);
+        steps[0] = new SqlCatalogMigrationStep("AddConstraint", "items", "ck_value", 1);
+
+        // Act
+        await catalog.SavePendingMigrationAsync(pending);
+        var reopened = Reopen(harness);
+
+        // Assert: intent is immutable and distinct from the old trusted marker.
+        reopened.SchemaState.ShouldNotBeNull().ContentHash.ShouldBe("old");
+        var intent = reopened.PendingMigration.ShouldNotBeNull();
+        intent.ContentHash.ShouldBe("new");
+        intent.CanonicalDocument.ShouldBe(document);
+        intent.Steps.ShouldHaveSingleItem().Position.ShouldBe(2);
+        intent.Steps[0].Kind.ShouldBe("AddIndex");
+        await catalog.SaveSchemaStateAsync(new SqlCatalogSchemaState("new", document, catalog.DdlGeneration));
+        var completed = Reopen(harness);
+        completed.PendingMigration.ShouldBeNull();
+        completed.SchemaState.ShouldNotBeNull().CanonicalDocument.ShouldBe(document);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Sql.Catalog] - Schema state: invalid values are rejected")]
     public void CreateSchemaState_InvalidValues_ShouldThrow()
     {
         // Act / Assert
-        Should.Throw<ArgumentException>(() => new SqlCatalogSchemaState("", "{}"));
-        Should.Throw<ArgumentException>(() => new SqlCatalogSchemaState("sha256:value", ""));
+        Should.Throw<ArgumentException>(() => new SqlCatalogSchemaState("", "{}", 0));
+        Should.Throw<ArgumentException>(() => new SqlCatalogSchemaState("sha256:value", "", 0));
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql.Catalog] - CreateTable: assigns object ids and exposes the table")]
@@ -281,10 +331,12 @@ public class SqlCatalogTests
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql.Catalog] - Indexes: registrations round-trip across reopen")]
-    public async Task SaveIndexRegistrations_ShouldRoundTripAcrossReopen()
+    public async Task CreateIndex_WithRegistrationSnapshots_ShouldRoundTripAcrossReopen()
     {
         // Arrange
         var (catalog, harness) = OpenFresh();
+        var users = await catalog.CreateTableAsync("dbo", "users", [Column("id", DatabaseType.Int32)]);
+        var orders = await catalog.CreateTableAsync("dbo", "orders", [Column("date", DatabaseType.Int64)]);
         var registrations = new List<BTreeIndexRegistration>
         {
             new(1, new IndexDefinition("pk_users", IndexKind.BTree, IsUnique: true), 7),
@@ -292,8 +344,8 @@ public class SqlCatalogTests
         };
 
         // Act
-        await catalog.SaveIndexRegistrationsAsync(registrations);
-        await catalog.SaveIndexRegistrationsAsync(registrations); // idempotent rewrite path
+        await catalog.CreateIndexAsync(new SqlCatalogIndex(users.ObjectId, "pk_users", ["id"], true), registrations);
+        await catalog.CreateIndexAsync(new SqlCatalogIndex(orders.ObjectId, "ix_orders_date", ["date"], false), registrations);
 
         var reopened = Reopen(harness);
 
@@ -327,5 +379,98 @@ public class SqlCatalogTests
         reopened.Tables.Count.ShouldBe(50);
         reopened.TryGetTable("dbo", "table_49", out var last).ShouldBeTrue();
         last.Columns.Count.ShouldBe(20);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sql.Catalog] - Format marker: version 4 and later persist under a record kind earlier catalogs refuse (#1099)")]
+    public async Task SetRecordSpaceFormatVersion_FromVersionFour_ShouldUseFencedRecordKind()
+    {
+        // Arrange
+        var (catalog, harness) = OpenFresh();
+        harness.MarkerKinds().ShouldBeEmpty();
+
+        // Act + Assert: versions 1-3 keep the kind-4 record every catalog reads...
+        await catalog.SetRecordSpaceFormatVersionAsync(3);
+        harness.MarkerKinds().ShouldBe([4]);
+        Reopen(harness).RecordSpaceFormatVersion.ShouldBe(3);
+
+        // ...version 4 rewrites it as a kind-8 record. Catalogs before format 4
+        // (through 10.0.0-preview.1) load kinds 1-7 only and refuse any other,
+        // so an engine that would write format-3 index keys cannot open it...
+        await catalog.SetRecordSpaceFormatVersionAsync(4);
+        harness.MarkerKinds().ShouldBe([8]);
+        Reopen(harness).RecordSpaceFormatVersion.ShouldBe(4);
+
+        // ...later versions stay behind the same fence...
+        await catalog.SetRecordSpaceFormatVersionAsync(5);
+        harness.MarkerKinds().ShouldBe([8]);
+        Reopen(harness).RecordSpaceFormatVersion.ShouldBe(5);
+
+        // ...and lowering the marker below 4 restores the single kind-4 record.
+        await catalog.SetRecordSpaceFormatVersionAsync(3);
+        harness.MarkerKinds().ShouldBe([4]);
+        Reopen(harness).RecordSpaceFormatVersion.ShouldBe(3);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sql.Catalog] - Record size: a column addition past one catalog record is refused and the table is kept")]
+    public async Task AddColumn_DefinitionPastTheRecordSize_ShouldThrowAndKeepTheTable()
+    {
+        // Arrange: each long-named column adds about a hundred bytes to the table's record,
+        // which must fit one slotted-page slot.
+        var (catalog, harness) = OpenFresh();
+        await catalog.CreateTableAsync("dbo", "wide", [Column("id", DatabaseType.Int64)]);
+        string prefix = new('w', 100);
+        int added = 0;
+        SqlCatalogException? failure = null;
+
+        // Act
+        for (int column = 1; column <= 200 && failure is null; column++)
+        {
+            try
+            {
+                await catalog.AddColumnAsync("dbo", "wide", Column($"{prefix}{column}", DatabaseType.Int32));
+                added++;
+            }
+            catch (SqlCatalogException exception)
+            {
+                failure = exception;
+            }
+        }
+
+        // Assert: a catalog error naming the table, and the definition is the last one
+        // that fit, in memory and after a reopen; smaller changes still succeed.
+        failure.ShouldNotBeNull();
+        failure.Message.ShouldContain("table 'dbo.wide'", Case.Sensitive);
+        failure.Message.ShouldContain(SlottedPage.MaxRecordSize.ToString(CultureInfo.InvariantCulture), Case.Sensitive);
+        added.ShouldBeGreaterThan(40);
+        catalog.TryGetTable("dbo", "wide", out var table).ShouldBeTrue();
+        table.Columns.Count.ShouldBe(1 + added);
+        Reopen(harness).TryGetTable("dbo", "wide", out var persisted).ShouldBeTrue();
+        persisted.Columns.Count.ShouldBe(1 + added);
+        await catalog.DropColumnAsync("dbo", "wide", $"{prefix}{added}");
+        await catalog.AddColumnAsync("dbo", "wide", Column("small", DatabaseType.Int32));
+        Reopen(harness).TryGetTable("dbo", "wide", out var shrunk).ShouldBeTrue();
+        shrunk.FindColumn("small").ShouldNotBeNull();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sql.Catalog] - Record size: a table definition past one catalog record is refused and nothing is created")]
+    public async Task CreateTable_DefinitionPastTheRecordSize_ShouldThrowAndCreateNothing()
+    {
+        // Arrange
+        var (catalog, harness) = OpenFresh();
+        var columns = Enumerable.Range(0, 120)
+            .Select(column => Column($"{new string('n', 100)}{column}", DatabaseType.String))
+            .ToList();
+
+        // Act
+        var failure = await Should.ThrowAsync<SqlCatalogException>(async () =>
+            await catalog.CreateTableAsync("dbo", "huge", columns));
+
+        // Assert
+        failure.Message.ShouldContain("table 'dbo.huge'", Case.Sensitive);
+        catalog.TryGetTable("dbo", "huge", out _).ShouldBeFalse();
+        Reopen(harness).TryGetTable("dbo", "huge", out _).ShouldBeFalse();
+        await catalog.CreateTableAsync("dbo", "huge", columns.Take(10).ToList());
+        Reopen(harness).TryGetTable("dbo", "huge", out var created).ShouldBeTrue();
+        created.Columns.Count.ShouldBe(10);
     }
 }

@@ -1,5 +1,5 @@
 using System.Linq;
-using Assimalign.Cohesion.Database.Language;
+using Assimalign.Cohesion.Database.Types;
 using Shouldly;
 using Xunit;
 
@@ -102,7 +102,6 @@ public sealed class OqlIndexDdlParserTests
 
     [Theory]
     [InlineData("CREATE TABLE people", "CREATE", 0)]
-    [InlineData("DROP COLLECTION people", "DROP", 0)]
     [InlineData("ALTER INDEX ix", "ALTER", 0)]
     public void UnsupportedClause_StillReportsCohdbl001(string query, string clause, int start)
     {

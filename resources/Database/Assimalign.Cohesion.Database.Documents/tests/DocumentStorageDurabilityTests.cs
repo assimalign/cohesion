@@ -2,7 +2,6 @@ using System;
 using System.IO;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Database.Documents.Internal;
 using Assimalign.Cohesion.Database.Storage;
 
 using Shouldly;
@@ -23,9 +22,9 @@ public sealed class DocumentStorageDurabilityTests
         var options = new DocumentDatabaseEngineOptions { RootPath = physical ? FileSystemPath.Parse(directory) : (FileSystemPath?)null, Durability = configured };
         try
         {
-            await using (var engine = DocumentDatabaseEngine.Create(options))
+            await using (var engine = DocumentDatabaseEngine.Create("document-engine", options))
             {
-                var database = (DocumentDatabaseInstance)await engine.CreateDatabaseAsync("db");
+                var database = await engine.CreateDatabaseAsync("db");
                 database.DataStorage.SupportsDurableFlush.ShouldBe(physical);
                 database.DataStorage.CommitDurability.ShouldBe(expected);
                 using var transaction = database.DataStorage.BeginTransaction();
@@ -41,8 +40,8 @@ public sealed class DocumentStorageDurabilityTests
             }
             if (physical)
             {
-                await using var reopened = DocumentDatabaseEngine.Create(options);
-                var database = (DocumentDatabaseInstance)await reopened.OpenDatabaseAsync("db");
+                await using var reopened = DocumentDatabaseEngine.Create("document-engine", options);
+                var database = await reopened.OpenDatabaseAsync("db");
                 database.DataStorage.CommitDurability.ShouldBe(expected);
             }
         }
@@ -60,7 +59,7 @@ public sealed class DocumentStorageDurabilityTests
     [InlineData(StorageCommitDurability.Grouped)]
     public async Task ExplicitDurabilityOnMemory_ShouldRejectBeforeDatabasePublication(StorageCommitDurability durability)
     {
-        await using var engine = DocumentDatabaseEngine.Create(new DocumentDatabaseEngineOptions { Durability = durability });
+        await using var engine = DocumentDatabaseEngine.Create("document-engine", new DocumentDatabaseEngineOptions { Durability = durability });
         var failure = await Should.ThrowAsync<NotSupportedException>(async () => await engine.CreateDatabaseAsync("memory-store"));
         failure.Message.ShouldContain("DocumentStorage");
         failure.Message.ShouldContain("memory-store");

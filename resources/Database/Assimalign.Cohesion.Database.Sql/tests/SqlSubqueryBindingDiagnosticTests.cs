@@ -2,8 +2,8 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Execution;
-using Assimalign.Cohesion.Database.Language;
 using Assimalign.Cohesion.Database.Sql.Language;
+using Assimalign.Cohesion.Database.Types;
 
 using Shouldly;
 using Xunit;
@@ -26,7 +26,7 @@ public sealed class SqlSubqueryBindingDiagnosticTests
     public async Task Execute_UnqualifiedOuterReference_ShouldReturnUnsupportedDiagnostic(string sql, bool emptyOuter)
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "subquery-binding" });
+        await using var engine = SqlDatabaseEngine.Create("subquery-binding", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("app");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await session.ExecuteAsync("CREATE TABLE outer_rows (outer_key INT);", cancellationToken: CancellationToken.None);
@@ -43,9 +43,9 @@ public sealed class SqlSubqueryBindingDiagnosticTests
         var result = await session.ExecuteAsync(new SqlQueryRequest(statement), CancellationToken.None);
 
         // Assert
-        result.Status.ShouldBe(QueryResultStatus.Error);
+        result.Status.ShouldBe(DatabaseResultStatus.Error);
         result.AffectedCount.ShouldBe(0);
-        (result is QueryResultSet).ShouldBeFalse();
+        (result is DatabaseResultSet).ShouldBeFalse();
         var diagnostic = result.Diagnostics.ShouldNotBeNull().ShouldHaveSingleItem();
         diagnostic.Code.ShouldBe("COHDBL001");
         diagnostic.Severity.ShouldBe(DiagnosticSeverity.Error);

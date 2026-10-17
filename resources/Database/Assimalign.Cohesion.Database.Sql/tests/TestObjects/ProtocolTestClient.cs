@@ -16,15 +16,15 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 internal sealed class ProtocolTestClient : IAsyncDisposable
 {
     private readonly IDuplexConnection _connection;
-    private readonly IProtocolFrameReader _reader;
-    private readonly IProtocolFrameWriter _writer;
+    private readonly ProtocolFrameReader _reader;
+    private readonly ProtocolFrameWriter _writer;
 
     internal ProtocolTestClient(IDuplexConnection connection)
     {
         _connection = connection;
         var stream = connection.AsStream();
-        _reader = ProtocolFraming.CreateReader(stream, leaveOpen: true);
-        _writer = ProtocolFraming.CreateWriter(stream, leaveOpen: true);
+        _reader = ProtocolFrameReader.Create(stream, leaveOpen: true);
+        _writer = ProtocolFrameWriter.Create(stream, leaveOpen: true);
     }
 
     public async Task SendAsync(ProtocolMessageType type, ReadOnlyMemory<byte> payload = default)

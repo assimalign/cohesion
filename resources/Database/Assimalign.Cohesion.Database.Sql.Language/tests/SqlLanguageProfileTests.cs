@@ -3,6 +3,7 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Language;
+using Assimalign.Cohesion.Database.Types;
 
 using Shouldly;
 using Xunit;
@@ -16,6 +17,7 @@ public class SqlLanguageProfileTests
 {
     [Theory]
     [InlineData(SqlClauses.Select, "SELECT 1;")]
+    [InlineData(SqlClauses.Explain, "EXPLAIN SELECT * FROM t;")]
     [InlineData(SqlClauses.Insert, "INSERT INTO t (id) VALUES (1);")]
     [InlineData(SqlClauses.Update, "UPDATE t SET id = 1;")]
     [InlineData(SqlClauses.Delete, "DELETE FROM t;")]
@@ -44,9 +46,15 @@ public class SqlLanguageProfileTests
     [InlineData(SqlClauses.Cascade, "CREATE TABLE t (parent_id INT REFERENCES parent(id) ON DELETE CASCADE);")]
     [InlineData(SqlClauses.Restrict, "CREATE TABLE t (parent_id INT REFERENCES parent(id) ON DELETE RESTRICT);")]
     [InlineData(SqlClauses.Begin, "BEGIN;")]
+    [InlineData(SqlClauses.Begin, "START TRANSACTION;")]
+    [InlineData(SqlClauses.Begin, "BEGIN WORK;")]
     [InlineData(SqlClauses.Commit, "COMMIT;")]
+    [InlineData(SqlClauses.Commit, "END;")]
+    [InlineData(SqlClauses.Commit, "COMMIT WORK;")]
     [InlineData(SqlClauses.Rollback, "ROLLBACK;")]
+    [InlineData(SqlClauses.Rollback, "ROLLBACK WORK;")]
     [InlineData(SqlClauses.Transaction, "BEGIN TRANSACTION;")]
+    [InlineData(SqlClauses.Transaction, "COMMIT WORK;")]
     public void Parse_ImplementedClause_IsDeclaredAndParses(string clause, string sql)
     {
         SqlLanguageProfile.Instance.Supports(clause).ShouldBeTrue();
@@ -58,6 +66,7 @@ public class SqlLanguageProfileTests
     }
 
     [Theory]
+    [InlineData(SqlClauses.Using, "SELECT * FROM t JOIN u USING (id);")]
     [InlineData(SqlClauses.Subquery, "SELECT * FROM t WHERE id IN (SELECT id FROM u);")]
     public void Parse_ExecutableSubquery_IsDeclaredAndReportsNoError(string clause, string sql)
     {
@@ -72,10 +81,10 @@ public class SqlLanguageProfileTests
 
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Language] - JOIN: Profile advertises only executable join types")]
     [InlineData(SqlJoinType.Inner, true)]
-    [InlineData(SqlJoinType.LeftOuter, false)]
+    [InlineData(SqlJoinType.LeftOuter, true)]
     [InlineData(SqlJoinType.RightOuter, false)]
     [InlineData(SqlJoinType.FullOuter, false)]
-    [InlineData(SqlJoinType.Cross, false)]
+    [InlineData(SqlJoinType.Cross, true)]
     public void Profile_JoinType_DeclaresExactExecutionSurface(SqlJoinType joinType, bool supported)
     {
         SqlLanguageProfile.SupportsJoin(joinType).ShouldBe(supported);
@@ -95,7 +104,6 @@ public class SqlLanguageProfileTests
     [InlineData(SqlClauses.Top)]
     [InlineData(SqlClauses.All)]
     [InlineData(SqlClauses.Natural)]
-    [InlineData(SqlClauses.Using)]
     [InlineData(SqlClauses.CreateView)]
     [InlineData(SqlClauses.DropView)]
     public void Profile_UnsupportedClause_IsNotDeclared(string clause)
@@ -117,7 +125,6 @@ public class SqlLanguageProfileTests
     [InlineData(SqlClauses.Top, "SELECT TOP 1 * FROM t;")]
     [InlineData(SqlClauses.All, "SELECT ALL id FROM t;")]
     [InlineData(SqlClauses.Natural, "SELECT * FROM t NATURAL JOIN u;")]
-    [InlineData(SqlClauses.Using, "SELECT * FROM t JOIN u USING (id);")]
     [InlineData(SqlClauses.CreateView, "CREATE VIEW active_users AS SELECT * FROM users;")]
     [InlineData(SqlClauses.DropView, "DROP VIEW active_users;")]
     public void Parse_UnsupportedClause_EmitsModelSpecificDiagnostic(string clause, string sql)

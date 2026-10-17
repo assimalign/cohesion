@@ -105,34 +105,13 @@ public class CompiledSchemaValidationTests
     public void Deserialize_WithNullCollection_ShouldReportCollectionPath()
     {
         string document = SqlCompiledSchemaSerializer.Serialize(CreateSchema([CreateOrdersTable()]));
-        string malformed = document.Replace("\"extensions\":[]", "\"extensions\":null", StringComparison.Ordinal);
+        string malformed = document.Replace("\"principals\":[]", "\"principals\":null", StringComparison.Ordinal);
         malformed.ShouldNotBe(document);
 
         SqlSchemaValidationException exception = Should.Throw<SqlSchemaValidationException>(() =>
             SqlCompiledSchemaSerializer.Deserialize(malformed));
 
-        exception.Errors.ShouldHaveSingleItem().Declaration.ShouldBe("schema.extensions");
-    }
-
-    [Fact(DisplayName = "Cohesion Test [Database] - Compiled schema validation: invalid engine models are rejected")]
-    public void Create_WithInvalidEngineModel_ShouldReportModelPath()
-    {
-        SqlSchemaValidationException exception = Should.Throw<SqlSchemaValidationException>(() =>
-            new SqlCompiledSchema(
-                SqlCompiledSchema.CurrentFormat,
-                "orders",
-                (EngineModel)byte.MaxValue,
-                false,
-                [],
-                [],
-                [],
-                [],
-                [],
-                []));
-
-        SqlSchemaValidationError error = exception.Errors.ShouldHaveSingleItem();
-        error.Code.ShouldBe(SqlSchemaValidationErrorCode.ModelMismatch);
-        error.Declaration.ShouldBe("schema.model");
+        exception.Errors.ShouldHaveSingleItem().Declaration.ShouldBe("schema.principals");
     }
 
     [Fact(DisplayName = "Cohesion Test [Database] - Compiled schema canonicalization: semantic set ordering is stable")]
@@ -168,14 +147,10 @@ public class CompiledSchemaValidationTests
             new SqlCompiledSchema(
                 SqlCompiledSchema.CurrentFormat,
                 "orders",
-                EngineModel.Sql,
                 false,
                 [],
                 [table],
-                [],
-                [],
-                [principal],
-                []));
+                [principal]));
 
         SqlSchemaValidationError error = exception.Errors.ShouldHaveSingleItem();
         error.Code.ShouldBe(SqlSchemaValidationErrorCode.DuplicateDeclaration);
@@ -186,13 +161,9 @@ public class CompiledSchemaValidationTests
         => new(
             SqlCompiledSchema.CurrentFormat,
             "orders",
-            EngineModel.Sql,
             false,
             [],
             tables,
-            [],
-            [],
-            [],
             []);
 
     private static CompiledSchemaTable CreateOrdersTable()
@@ -246,7 +217,6 @@ public class CompiledSchemaValidationTests
         return new SqlCompiledSchema(
             SqlCompiledSchema.CurrentFormat,
             "canonical",
-            EngineModel.Sql,
             false,
             reverse
                 ? [
@@ -258,11 +228,6 @@ public class CompiledSchemaValidationTests
                     new CompiledSchemaType("ZType", DatabaseType.Decimal, 18, 2),
                 ],
             reverse ? [beta, alpha] : [alpha, beta],
-            [],
-            [],
-            [new CompiledSchemaPrincipal("reader", reverse ? [write, read] : [read, write])],
-            reverse
-                ? [new CompiledSchemaExtension("z", "2"), new CompiledSchemaExtension("a", "1")]
-                : [new CompiledSchemaExtension("a", "1"), new CompiledSchemaExtension("z", "2")]);
+            [new CompiledSchemaPrincipal("reader", reverse ? [write, read] : [read, write])]);
     }
 }

@@ -1,5 +1,24 @@
 # Database.Sql.Client — Design
 
+## Parameter contract (#1102)
+
+SqlParameterCollection strips one leading sigil and keeps ordinal case-sensitive bare
+names; `$name`, `@name` and numeric names such as `$1` follow the
+[shared parameter contract](../../Assimalign.Cohesion.Database.Language/docs/DESIGN.md#parameter-contract-1102).
+Add and the indexer continue to replace a previously normalized name. A raw request
+map containing two keys for one bare name is rejected by the server with COHSQLE023.
+An unbound reference fails with COHSQLE020 before rows are accessed; wire execution
+failures keep the connection usable, including on empty tables. No protocol changes.
+
+
+## Character metadata (#1437)
+
+SQL result-header format 2 carries name, DatabaseType and nullable MaxLength. Both SqlColumn and
+DatabaseClientColumn retain the length. A CHAR(n) column reports Character (19) with n; its row
+value remains the padded CLR string, so GetString/GetValue and parameter round trips preserve
+padding. The header's Int32 -2 discriminator refuses older payloads. Rebuild client and server
+together; the shared handshake and row tuple encoding are unchanged.
+
 The SQL client owns parameter encoding, response decoding and materialization,
 typed commands/results, and error/telemetry mapping. It delegates dialing,
 startup/authentication, framing, and pooling to the shared client.
@@ -25,23 +44,55 @@ flowchart LR
 
 Other model clients do not depend on this package.
 
+## Expanded joins (#1109)
+
+LEFT null values, N-way, CROSS, comma and USING results use the existing SQL frames and
+production materializer. No nullability field or frame-writing change is introduced.
+Wire tests run every join case over InMemory and loopback TCP, pin exact values and
+multiplicities, and retain RIGHT/FULL/NATURAL and qualified-wildcard exclusions. USING
+wildcard alias/ordinal ordering, decimal common-type values in both input orders, qualified
+types and cleared character lengths use the same production frames and materializer.
+
+## System relation joins (#1106)
+
+Stored/system, system/system and grouped catalog joins use the existing SQL exchange.
+Wire tests pin exact rows and String/Int64 metadata; there is no protocol format change.
+
 ## SQL-owned exchange
 
 `SqlClient.Create` binds the pool to `SqlProtocol.Family`.
-`SqlExecuteExchange` implements `IDatabaseProtocolExchange<DatabaseClientResult>`:
+`SqlExecuteExchange` derives from `DatabaseProtocolExchange<DatabaseClientResult>`:
 it encodes parameters with `DatabaseValueCodec`, writes the execute request,
 consumes SQL's header/data/completion exchange, and materializes values.
 `SqlConnection` projects this result into `SqlResultSet`.
 
-`SqlProtocolConnectionExtensions.ExecuteAsync` provides the same operation on a
-rented `IDatabaseConnection` bound to SQL's exact family instance.
+`SqlProtocolConnectionExtensions`, an `extension(DatabaseConnection)` block, provides
+the same operation as `ExecuteAsync` on a rented `DatabaseConnection` bound to SQL's
+exact family instance. It stays an extension because the connection lives in
+Database.Client, which references no model package.
 `DatabaseClientResult` and `DatabaseClientColumn` moved to this package's
-namespace. Typed SQL APIs and protocol 1.0 wire behavior are unchanged.
+namespace. Typed SQL APIs and protocol 2.0 wire behavior are unchanged.
 
 The model reference supplies codecs without parsing SQL or inspecting plans.
 Its transitive assembly closure is an accepted packaging consequence; a dedicated
 model protocol assembly can be a future refinement. The model's
 [design](../../Assimalign.Cohesion.Database.Sql/docs/DESIGN.md) defines wire ownership.
+
+## Typed literal wire values (#1110)
+
+DATE, TIME, TIMESTAMP, TIMESTAMPTZ, day-time INTERVAL and X binary literals use the existing
+DateOnly, TimeOnly, DateTime, DateTimeOffset, TimeSpan and byte[] tuple encodings and DatabaseType
+metadata. N strings remain String. No protocol format changes. SQL0008 content errors and
+COHDBL001 year-month exclusions arrive as ParseFailure and leave the connection usable.
+TIMESTAMP assignment returns Kind Unspecified; TIMESTAMPTZ preserves its offset, following the
+[dialect normalization rule](../../Assimalign.Cohesion.Database.Sql.Language/docs/DIALECT.md#timestamp-normalization-1110).
+
+## Explicit casts (#1119)
+
+The expanded built-in CAST matrix uses the existing scalar type tags and result metadata.
+Wire tests cover float, temporal, interval, UUID, BYTEA, JSON and JSONB values, canonical text,
+conversion refusals and connection reuse after a floating arithmetic overflow. JSONB remains
+validated UTF-8 bytes with byte equality; there is no new wire encoding.
 
 ## Typed projection
 
@@ -58,7 +109,7 @@ wire. SQL parsing remains the server's responsibility.
 Disposing a typed connection returns its shared authenticated session; disposing
 the client closes its pool. Connections support one exchange at a time.
 
-`ISqlConnection.AbortAsync` discards a rental and closes its session instead of
+`SqlConnection.AbortAsync` discards a rental and closes its session instead of
 returning it to the pool. Use it when SQL session state cannot be reset, including
 a failed ROLLBACK or uncertain COMMIT. It delegates to the shared client's discard
 operation and is not cancellable. Discarding prevents session leakage; it cannot
@@ -72,14 +123,96 @@ exceptions do not promise that a failed COMMIT left no writes. The SQL mapper
 documents and enforces this boundary by faulting its scope/store and refusing replay;
 see its [reconciliation contract](../../Assimalign.Cohesion.Database.Sql.Mapping/docs/DESIGN.md#commit-outcome-and-reconciliation).
 
+In-process sessions carry engine codes in `DatabaseException.Diagnostics` (#1103).
+The SQL server preserves the existing `CODE: message` Error text. On a negotiated 2.1 diagnostics session, client exceptions also retain the complete structured carrier. Cancellation tests that execute sessions directly
+assert structured codes, while their wire counterparts keep their original text assertions.
+CAST value failures follow the same contract: invalid text carries COHSQLE022 (PostgreSQL
+22P02), numeric overflow COHSQLE002 (22003), and division by zero COHSQLE001 (22012).
+Protocol 2.0 clients retain the composed code prefix and ExecutionFailure category; a value
+failure keeps the connection usable. In-process regression tests assert code and source span.
+
+Negative and fractional LIMIT/OFFSET counts retain COHSQLE018 in the composed wire text.
+The Int64 row-window tests (#1100) assert that prefix alongside ExecutionFailure and connection
+reuse, aligning their expected text with the carrier convention added by #1103.
+
+NOT NULL failures retain COHSQLE024 (SQLSTATE 23502) in the composed wire message,
+with the unchanged column-specific missing-default or explicit-NULL detail. DEFAULT
+VALUES, DEFAULT items and UPDATE DEFAULT use that same contract. SqlInsertValuesWireTests
+covers success, syntax rejection and constraint rejection over InMemory and loopback TCP,
+then queries and writes on the same connection to verify it remains usable.
+
 `SqlClientException : DatabaseException` maps stable wire codes to SQL error kinds
 and retains the original code. The shared pool invalidates incomplete exchanges,
 including cancellation and decoder failure. Completed parse/execution failures
 keep the connection reusable.
 
+Application function cancellation follows the statement token (#1419): an
+`OperationCanceledException` from a scalar, any aggregate phase or a domain CHECK is
+`COHSQLE007`, naming the function, unless the server statement's own token is canceled.
+This includes application calls inside SQL functions and SQL domains, and plan-time calls in
+LIMIT/OFFSET, seek bounds and constant folding. The coded error is
+an `ExecutionFailure` with `ConnectionUsable = true`; the next command uses the same
+connection. Actual server cancellation retains the existing session teardown behavior.
+An explicit transaction also stays active: BEGIN, an earlier write, a coded function failure,
+a later write and COMMIT retain both successful writes and none from the failed statement.
+The cancellation wire theories cover that sequence and verify its committed state from a second
+connection, as well as checking the token on every planning and execution callback.
+
+A failed dial reaches `ConnectAsync` as the core's `DatabaseClientException` with
+`ProtocolErrorCode.ConnectionFailure` (owner decision 39; the core's `DESIGN.md`,
+"Lifecycle and errors"). The mapper translates it like a handshake rejection, to
+`SqlClientErrorKind.ConnectionFailure` with `ConnectionUsable` false, and the core
+exception, which keeps the transport's exception, is the inner exception. A canceled
+dial throws `OperationCanceledException` unchanged (`SqlClientDialFailureTests`).
+
 Observers receive synchronous primitive callbacks before execution, on completion,
 and on failure. Observer exceptions are swallowed so telemetry cannot change the
-command outcome.
+command outcome. An observer derives from the abstract `SqlClientObserver`, whose
+three hooks are `protected internal virtual` with empty bodies: an observer overrides
+only the hooks it records, and only the owning `SqlConnection` fires them.
+
+## Diagnostics
+
+The client reports through one internal event source named for its assembly,
+`Assimalign.Cohesion.Database.Sql.Client` (`src/Internal/EventSource/SqlClientEventSource.cs`),
+written by `SqlConnection`'s one command path. Start and stop carry the `Commands` keyword (`0x1`).
+The Key-Value client's source has the same ids, names and payloads, so one query reads both.
+
+| Id | Event | Level | Keyword | Payload |
+| --- | --- | --- | --- | --- |
+| 1 | `CommandStart` | Verbose | `Commands` | `database`, `parameterCount` |
+| 2 | `CommandStop` | Verbose | `Commands` | `database`, `status` (`Success`, `Error` or `Cancelled`), `rowCount`, `affectedCount` (both -1 unless `Success`), `durationMilliseconds` |
+| 3 | `CommandFailed` | Error | — | `database`, `errorKind` (`SqlClientErrorKind`; empty for an uncoded failure), `code` (the wire code; empty for an uncoded failure), `exceptionType`, `durationMilliseconds` |
+| 4 | `ObserverFailed` | Warning | — | `database`, `callback` (`OnExecuting`, `OnExecuted` or `OnFailed`), `exceptionType`, `exceptionMessage` |
+
+**Every start has a stop** (the area's convention, `docs/resources/Database/DESIGN.md`,
+"Diagnostics"): the command writes its end from a `finally`, before its observer hears of it. A
+failure writes event 3 and then `CommandStop` with `Error`: a coded failure the server or the
+connection raised (`SqlClientException`, with its kind and code) or an uncoded one (an overlapping
+exchange, a disposed connection: kind and code empty). A cancellation, which is how a timeout
+surfaces, writes `CommandStop` with `Cancelled` and no failure. The failure is captured by an
+exception filter that declines it and written from the `finally`, so it reaches the caller unchanged.
+A command fails with an Error whatever its cause, a statement the server rejects included (owner
+question Q1 of the event-source plan). As `System.Net.Http`'s `RequestStop`, `CommandStop` is
+written only for a command whose `CommandStart` was written, so a listener that attaches mid-command
+sees no stop without its start; event 3 is written either way.
+
+**The failure rule.** The statement text and the parameter values are never written (Q3), and nor is
+the server's message: a parse error's quotes a fragment of the statement, a literal included
+(`Malformed numeric literal '…'`), so event 3 writes the error kind, the wire code and the
+exception's type only (the area's failure rule). Event 4 makes visible an observer failure the
+client swallows; the command's outcome is unchanged, and the hook's own exception keeps its message.
+The connection itself is the shared core's (`Assimalign.Cohesion.Database.Client`). No counters: a
+process-wide count updated per command would be a contention point. The command path already takes
+the timestamp its observer receives, so the events add only `IsEnabled` checks while nobody listens.
+
+`SqlClientEventSourceTests` checks the name, the strict manifest, a succeeding and a failing command
+under an observer whose every hook throws (each event once, in order, with its payload, the failure's
+stop after it, no statement text and no server message), a cancelled command (a `Cancelled` stop and
+no failure), that start and stop need the `Commands` keyword, and, by direct writes, an uncoded
+failure (empty kind and code) and a stop written only after a written start. The test assembly's
+observers override the hooks as `protected internal`, which the project's test-only
+`InternalsVisibleTo` requires (CS0507); an application overrides them as `protected`.
 
 ## AOT and non-goals
 
@@ -88,6 +221,55 @@ generation. Transports are typed options, never string-named plugins. Full resul
 materialization is SQL client policy; an incremental API can be added here
 independently. Parsing, ORM behavior, retries, and explicit wire transactions
 remain outside the current surface.
+
+## Concrete types (concrete-types plan, phase 5, #1261)
+
+The package has no public interface left and no `Abstractions/` folder
+([plan](../../../../docs/programs/DATABASE_CONCRETE_TYPES_PLAN.md) §7, "P5, as landed").
+
+| Type | Shape | Was |
+|---|---|---|
+| `SqlClient` | sealed; `Create(SqlClientOptions)` over a private constructor | the static `SqlClient` factory, `ISqlClient` and the internal `DefaultSqlClient` |
+| `SqlConnection` | sealed; internal constructor; moved out of `Internal/` | `ISqlConnection` and the internal `SqlConnection` |
+| `SqlClientObserver` | abstract; protected constructor; `protected internal virtual` hooks with empty bodies | `ISqlClientObserver` |
+| `SqlProtocolConnectionExtensions` | `extension(DatabaseConnection)` block | an old-style `this IDatabaseConnection` extension |
+
+- **Why the observer is abstract.** It is an inverted seam (`database-area.md`, rule 2): the
+  application supplies it through `SqlClientOptions.Observer` and the connection fires it; no
+  observer ships. Its constructor is protected because applications derive from it (rule 3),
+  and it carries the deviation marker. Because the hooks have empty bodies, an observer overrides
+  only what it records; one that implemented the interface had to implement all three.
+  `SqlClientTests.QueryAsync_WithPartialThrowingObserver_ShouldKeepEachCommandOutcome` covers a
+  one-hook observer that throws.
+- **Typed surface.** `ConnectAsync` returns the sealed `SqlConnection`, which wraps the core's
+  sealed `DatabaseConnection`; nothing casts. `Settings` reads the core's settings.
+- **What changed for a caller.** `ISqlClient` and `ISqlConnection` become `SqlClient` and
+  `SqlConnection` (the Sdk.ApplicationModel `EnabledWeb` fixture and Studio's SQL workspace were
+  retyped), and an observer overrides `protected` hooks instead of implementing public ones.
+  An observer cannot forward to another observer instance: outside this assembly the hooks are
+  protected (CS1540), so an application that needs several sinks fans out inside one subclass
+  (plan §7, "P5, as landed", owner review 38).
+  The sealed `SqlConnection` shares its name with `Microsoft.Data.SqlClient.SqlConnection`; a
+  file that imports both namespaces aliases one (plan §11, R11).
+- **Disposal is final for the instance.** The pool rents the same core `DatabaseConnection` to
+  the next caller, so `SqlConnection` keeps its own disposed flag, as `GraphConnection` and
+  `BlobConnection` do: after `DisposeAsync` or `AbortAsync` every command throws
+  `ObjectDisposedException` before the observer runs, and a second dispose or an abort does
+  nothing. Before the P5 review a stale `SqlConnection` ran its commands on whichever caller had
+  rented the session next, and a second dispose returned that caller's rental
+  (`SqlClientTests.QueryAsync_AfterDisposeAndReRent_ShouldThrowObjectDisposedException`).
+
+## E4 SQL definitions
+
+Typed-literal wire theories run over both InMemory and loopback TCP. Temporal, interval,
+binary and national-string values retain the same runtime types and metadata. Malformed
+literals (SQL0008), year-month forms (COHDBL001) and interval overflow retain their parse
+diagnostics and permit a subsequent query on the same connection.
+
+Function/domain DDL and calls use the existing statement transport and server environment without
+client ABI or wire-format changes. Dependency/admission refusals retain leading COHSQLD codes in
+execution-failure messages and leave connections usable. SqlDomainWireTests exercises SQL-defined
+functions in SELECT, WHERE, CHECK and DEFAULT alongside SQL domain enforcement.
 
 ## Duplex transport composition
 
@@ -108,3 +290,36 @@ can derive from `DuplexConnectionFactory`, implement `ConnectCoreAsync` returnin
 `ValueTask<IDuplexConnection>`, and produce a `DuplexConnection` implementation. Built-in TCP,
 InMemory and TLS-layered duplex factories already satisfy the new contract. Database wire
 framing, handshake and model messages are unchanged.
+
+## Declaration modifier failures (#1438)
+
+The server parses every SQL declaration and CAST against the shared modifier ranges before any
+catalog mutation. SQL0005 and the column/domain/function parameter or return-type name travel in
+the existing ParseFailure message; SqlClientException reports ParseFailure with ConnectionUsable
+true. No client ABI or wire format changes. Typed schema and declared-script validation happen at
+host declaration/Build, before a server starts; these host APIs have no remote declaration verb.
+
+Recognized but unsupported temporal precision uses COHDBL001 in the same ParseFailure exchange,
+including CAST, naming the declaration and modifier. FLOAT(p) returns the resolved Float32
+(1..24 bits) or Float64 (25..53 bits) in catalog queries and result headers; bare FLOAT stays
+Float64. Invalid FLOAT precision remains SQL0005. INTERVAL field/range qualifiers, including
+SECOND(p), likewise report COHDBL001 at every declaration site and CAST, naming the complete
+qualifier; no-precision forms are also unsupported. Neither path changes the wire format.
+
+## Negotiated statement diagnostics (#1105)
+
+The shared protocol is 2.1. Startup optionally appends the client's capability names;
+Ready returns the agreed version and the two-sided intersection. A negotiated 2.0
+session retains empty Ready and the existing model and Error bytes. An empty Ready
+from an older endpoint means 2.0 with no capabilities. Different majors are refused.
+Capability names are ordinal and append-only; model names are scoped with the
+lowercase endpoint family followed by a dot. The core owns `diagnostics` and frame 14.
+
+SQL and Graph register `ProtocolCapability.Diagnostics`. When agreed, one Diagnostics
+frame carries the complete Warning/Error list immediately before Error on failure,
+or immediately before ResultComplete (PathsComplete for graph paths) on success.
+Information, including SQL0100, is never sent. Error and result payloads are unchanged.
+Statement failures leave the server session ready. Model clients validate diagnostic
+ordering and preserve every code, severity, message, nullable offset and source line.
+
+DatabaseClientResult.Diagnostics and SqlResultSet.Diagnostics expose negotiated ProtocolDiagnostic values. SqlClientException retains the shared core exception and copies its existing diagnostics carrier.

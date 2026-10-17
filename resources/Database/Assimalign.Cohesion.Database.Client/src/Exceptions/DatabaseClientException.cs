@@ -1,17 +1,27 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
+
+using Assimalign.Cohesion.Database.Types;
 
 using Assimalign.Cohesion.Database.Protocol;
 
 namespace Assimalign.Cohesion.Database.Client;
 
 /// <summary>
-/// Thrown when a client operation fails: a server error frame, a broken
+/// Thrown when a client operation fails: a failed dial, a server error frame, a broken
 /// connection mid-exchange, or invalid connection settings.
 /// </summary>
 /// <remarks>
 /// Server-reported failures carry the wire's stable <see cref="ProtocolErrorCode"/>
-/// in <see cref="Code"/>; client-local failures (settings, broken transport) use
-/// <see cref="ProtocolErrorCode.Internal"/>.
+/// in <see cref="Code"/>. A failed dial uses <see cref="ProtocolErrorCode.ConnectionFailure"/>
+/// and keeps the transport's exception as <see cref="Exception.InnerException"/>; other
+/// client-local failures (settings, a transport broken after the dial, in the handshake or in
+/// an exchange) use <see cref="ProtocolErrorCode.Internal"/>, and a broken transport keeps its
+/// exception (an <see cref="System.IO.IOException"/>, a
+/// <see cref="System.Net.Sockets.SocketException"/>, a connection reset or abort) as the inner
+/// exception too. No server sends <see cref="ProtocolErrorCode.ConnectionFailure"/>: an error
+/// frame that carries it is a <see cref="ProtocolErrorCode.ProtocolViolation"/>.
 /// </remarks>
 public class DatabaseClientException : DatabaseException
 {
@@ -34,6 +44,23 @@ public class DatabaseClientException : DatabaseException
     /// <param name="innerException">The underlying cause.</param>
     public DatabaseClientException(ProtocolErrorCode code, string message, Exception? innerException)
         : base(message, innerException)
+    {
+        Code = code;
+    }
+
+    /// <summary>Creates a statement failure with its negotiated structured diagnostics.</summary>
+    /// <param name="code">The wire error category.</param>
+    /// <param name="message">The unchanged Error frame text.</param>
+    /// <param name="diagnostics">The complete wire diagnostics.</param>
+    /// <param name="innerException">The underlying cause, when available.</param>
+    public DatabaseClientException(ProtocolErrorCode code, string message, IReadOnlyList<ProtocolDiagnostic> diagnostics, Exception? innerException)
+        : base(message, diagnostics.Select(entry => new Diagnostic
+        {
+            Code = entry.Code, Message = entry.Message,
+            Severity = entry.Severity == ProtocolDiagnosticSeverity.Warning ? DiagnosticSeverity.Warning : DiagnosticSeverity.Error,
+            Start = entry.Start, End = entry.End, Line = entry.Line,
+            Location = entry.Start.HasValue ? DiagnosticLocation.Absolute : null,
+        }), innerException)
     {
         Code = code;
     }

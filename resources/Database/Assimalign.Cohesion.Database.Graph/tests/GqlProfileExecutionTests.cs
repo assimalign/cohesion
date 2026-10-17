@@ -16,24 +16,60 @@ namespace Assimalign.Cohesion.Database.Graph.Tests;
 public sealed class GqlProfileExecutionTests
 {
     private static readonly Guid _personLabelId = new("13333333-3333-3333-3333-333333333333");
-    private const string seed = "INSERT (a:Person {name: 'Alice', age: 42, active: TRUE})-[r:KNOWS {weight: 2}]->(b:Person {name: 'Bob', age: 17, active: FALSE}), (:Person {name: 'Isolated', age: 30})";
+    private static readonly Guid _robotLabelId = new("24444444-4444-4444-4444-444444444444");
+    // Node identities follow insertion order: Alice, Bob, Isolated, Robo, then the unlabeled Ghost.
+    private const string seed = "INSERT (a:Person {name: 'Alice', age: 42, active: TRUE})-[r:KNOWS {weight: 2}]->(b:Person {name: 'Bob', age: 17, active: FALSE}), " +
+        "(:Person {name: 'Isolated', age: 30}), (:Robot {name: 'Robo'})-[:SERVES]->({name: 'Ghost'})";
 
     // The profile drives execution. A profile addition without data here fails before any query runs.
     private static readonly IReadOnlyDictionary<string, ExecutionCase[]> _cases =
         new Dictionary<string, ExecutionCase[]>(StringComparer.OrdinalIgnoreCase)
         {
+            [GqlClauses.Explain] =
+            [
+                new("EXPLAIN MATCH (a:Person) RETURN a",
+                    [[0, null, "Match", null, null, "filter=False; matches_nothing=False", null, null],
+                     [1, 0, "ExpandPath", null, null, null, null, null],
+                     [2, 1, "LabelScan", "Person", null, "node=0; property=; value=NULL", null, null],
+                     [3, 0, "Project", "a", null, "kind=Node; expression=a", null, null]]),
+            ],
             [GqlClauses.Match] =
             [
+                new("MATCH (a:Person {name: $name}) RETURN a.name", [["Alice"]],
+                    Parameters: new Dictionary<string, object?> { ["name"] = "Alice" }),
                 new("MATCH (a:Person {name: 'Alice'})-[r:KNOWS]->(b) RETURN b.name, r.weight", [["Bob", 2L]]),
                 new("MATCH (b:Person {name: 'Bob'})<-[r:KNOWS]-(a) RETURN a.name", [["Alice"]]),
                 new("MATCH (b:Person {name: 'Bob'})-[r:KNOWS]-(a) RETURN a.name", [["Alice"]]),
+                // ISO/IEC 39075 left-or-right and the abbreviated edges (#1139).
+                new("MATCH (b:Person {name: 'Bob'})<-[r:KNOWS]->(a) RETURN a.name", [["Alice"]]),
+                new("MATCH (a:Person {name: 'Alice'})->(b) RETURN b.name", [["Bob"]]),
+                new("MATCH (b:Person {name: 'Bob'})<-(a) RETURN a.name", [["Alice"]]),
+                new("MATCH (b:Person {name: 'Bob'})-(a) RETURN a.name", [["Alice"]]),
+                new("MATCH (a:Person {name: 'Alice'})<->(b) RETURN b.name", [["Bob"]]),
             ],
             [GqlClauses.Return] =
             [
                 new("MATCH (a:Person {name: 'Alice'}) RETURN a.name AS person, a.age, a.absent", [["Alice", 42L, null]]),
+                new("MATCH (a:Person), (b:Person) RETURN DISTINCT a.active", [[true], [false], [null]], Columns: ["a.active"]),
+                new("MATCH (a:Person), (b:Person) RETURN ALL a.active",
+                    [[true], [true], [true], [false], [false], [false], [null], [null], [null]]),
+                new("MATCH (a:Person {name: 'Alice'}) RETURN a.age + 1 AS next, a.name || '!'", [[43L, "Alice!"]],
+                    Columns: ["next", "a.name || '!'"]),
+                new("RETURN 1 + 1 AS two", [[2L]], Columns: ["two"]),
+                new("MATCH (a:Person {name: 'Alice'}) RETURN a IS LABELED Person, a.active IS TRUE, a.absent IS NULL",
+                    [[true, true, true]]),
+                new("MATCH (a:Person) RETURN $p AS p", [[5], [5], [5]], Parameters: new Dictionary<string, object?> { ["p"] = 5 }),
+                new("MATCH (a:Person {name: 'Alice'}) RETURN a.age + $d AS next", [[43L]],
+                    Parameters: new Dictionary<string, object?> { ["d"] = 1 }, Columns: ["next"]),
+                new("RETURN $p AS p", [[5]], Parameters: new Dictionary<string, object?> { ["p"] = 5 }),
+                new("MATCH (a) RETURN $p", [[5], [5], [5], [5], [5]],
+                    Parameters: new Dictionary<string, object?> { ["p"] = 5 }, Columns: ["$p"]),
             ],
             [GqlClauses.Create] =
             [
+                new("CREATE (:Person {name: $name})", [], 1,
+                    [new("MATCH (a:Person {name: 'Cara'}) RETURN a.name", [["Cara"]])],
+                    new Dictionary<string, object?> { ["name"] = "Cara" }),
                 Mutation("CREATE (:Person {name: 'Cara'})", 1,
                     new ExecutionCase("MATCH (a:Person {name: 'Cara'}) RETURN a.name", [["Cara"]])),
                 Mutation("MATCH (a:Person {name: 'Bob'}), (b:Person {name: 'Isolated'}) CREATE (a)-[:KNOWS {weight: 3}]->(b)", 1,
@@ -41,6 +77,9 @@ public sealed class GqlProfileExecutionTests
             ],
             [GqlClauses.Insert] =
             [
+                new("INSERT (:Person {name: $name})", [], 1,
+                    [new("MATCH (a:Person {name: 'Cara'}) RETURN a.name", [["Cara"]])],
+                    new Dictionary<string, object?> { ["name"] = "Cara" }),
                 Mutation("INSERT (:Person {name: 'Cara'})", 1,
                     new ExecutionCase("MATCH (a:Person {name: 'Cara'}) RETURN a.name", [["Cara"]])),
                 Mutation("MATCH (a:Person {name: 'Bob'}), (b:Person {name: 'Isolated'}) INSERT (a)<-[:KNOWS {weight: 3}]-(b)", 1,
@@ -64,12 +103,71 @@ public sealed class GqlProfileExecutionTests
             ],
             [GqlClauses.Where] =
             [
+                new("MATCH (a:Person) WHERE a.age = @age RETURN a.name", [["Alice"]],
+                    Parameters: new Dictionary<string, object?> { ["age"] = 42 }),
                 new("MATCH (a:Person) WHERE (a.age >= 18 AND a.age <= 42) AND a.age > 17 AND a.age < 43 AND a.name <> 'Isolated' AND a.active = TRUE RETURN a.name", [["Alice"]]),
                 new("MATCH (a:Person) WHERE a.absent = NULL RETURN a.name", []),
+                new("MATCH (a:Person) WHERE UNKNOWN RETURN a.name", []),
+                new("MATCH (a:Person) WHERE UNKNOWN IS UNKNOWN RETURN a.name", [["Alice"], ["Bob"], ["Isolated"]]),
+                new("MATCH (a:Person) WHERE a.age = 17 OR a.age = 42 RETURN a.name", [["Alice"], ["Bob"]]),
+                new("MATCH (a:Person) WHERE a.age > 20 XOR a.age = 30 RETURN a.name", [["Alice"]]),
+                new("MATCH (a:Person) WHERE TRUE OR TRUE XOR TRUE RETURN a.name", []),
+                new("MATCH (a:Person) WHERE TRUE XOR TRUE OR TRUE RETURN a.name", [["Alice"], ["Bob"], ["Isolated"]]),
+                new("MATCH (a:Person) WHERE NOT a.active RETURN a.name", [["Bob"]]),
+                new("MATCH (a:Person) WHERE a.active RETURN a.name", [["Alice"]]),
+                new("MATCH (a:Person) WHERE a.active IS NULL RETURN a.name", [["Isolated"]]),
+                new("MATCH (a:Person) WHERE a.age IS NOT NULL RETURN a.name", [["Alice"], ["Bob"], ["Isolated"]]),
+                new("MATCH (a:Person) WHERE a.active IS TRUE RETURN a.name", [["Alice"]]),
+                new("MATCH (a:Person) WHERE a.active IS NOT TRUE RETURN a.name", [["Bob"], ["Isolated"]]),
+                new("MATCH (a:Person) WHERE a.active IS FALSE RETURN a.name", [["Bob"]]),
+                new("MATCH (a:Person) WHERE a.active IS NOT FALSE RETURN a.name", [["Alice"], ["Isolated"]]),
+                new("MATCH (a:Person) WHERE a.active IS UNKNOWN RETURN a.name", [["Isolated"]]),
+                new("MATCH (a:Person) WHERE a.active IS NOT UNKNOWN RETURN a.name", [["Alice"], ["Bob"]]),
+                new("MATCH (a:Person) WHERE a.age IN [17, 42] RETURN a.name", [["Alice"], ["Bob"]]),
+                new("MATCH (a:Person) WHERE 1 IN [1, NULL] RETURN a.name", [["Alice"], ["Bob"], ["Isolated"]]),
+                new("MATCH (a:Person) WHERE (1 IN [2, NULL]) IS UNKNOWN RETURN a.name", [["Alice"], ["Bob"], ["Isolated"]]),
+                new("MATCH (a:Person) WHERE a.name STARTS WITH 'Al' RETURN a.name", [["Alice"]]),
+                new("MATCH (a:Person) WHERE a.name ENDS WITH 'ob' RETURN a.name", [["Bob"]]),
+                new("MATCH (a:Person) WHERE a.name CONTAINS 'sol' RETURN a.name", [["Isolated"]]),
+                new("MATCH (a:Person) WHERE a.name || 'x' = 'Alicex' RETURN a.name", [["Alice"]]),
+                new("MATCH (a:Person) WHERE a.name + 'x' = 'Bobx' RETURN a.name", [["Bob"]]),
+                new("MATCH (a:Person) WHERE a.age + 1 = 43 RETURN a.name", [["Alice"]]),
+                new("MATCH (a:Person) WHERE a.age - 2 = 40 RETURN a.name", [["Alice"]]),
+                new("MATCH (a:Person) WHERE a.age * 2 = 84 RETURN a.name", [["Alice"]]),
+                new("MATCH (a:Person) WHERE a.age / 5 = 8 RETURN a.name", [["Alice"]]),
+                new("MATCH (a:Person) WHERE -a.age / 5 = -8 AND -a.age % 5 = -2 RETURN a.name", [["Alice"]]),
+                new("MATCH (a:Person) WHERE a.age / -5 = -8 AND a.age % -5 = 2 RETURN a.name", [["Alice"]]),
+                new("MATCH (a:Person) WHERE a.age / 5.0 = 8.4 RETURN a.name", [["Alice"]]),
+                new("MATCH (a:Person) WHERE a.age % 5 = 2 RETURN a.name", [["Alice"], ["Bob"]]),
+                new("MATCH (a:Person) WHERE -9223372036854775808 % -1 = 0 RETURN a.name", [["Alice"], ["Bob"], ["Isolated"]]),
+                new("MATCH (a:Person) WHERE NOT (a.absent = 1) RETURN a.name", []),
+                new("MATCH (a:Person) WHERE a.absent = 1 OR a.age = 42 RETURN a.name", [["Alice"]]),
+                new("MATCH (a:Person) WHERE (2 IN [1, NULL]) IS UNKNOWN RETURN a.name", [["Alice"], ["Bob"], ["Isolated"]]),
+                new("MATCH (a:Person) WHERE (NULL IN []) IS FALSE RETURN a.name", [["Alice"], ["Bob"], ["Isolated"]]),
+                new("MATCH (a:Person) WHERE NOT (a.name < 1) RETURN a.name", []),
+                new("MATCH (a:Person) WHERE a.name <> 1 RETURN a.name", [["Alice"], ["Bob"], ["Isolated"]]),
+                new("MATCH (a:Person) WHERE (1 STARTS WITH '1') IS UNKNOWN RETURN a.name", [["Alice"], ["Bob"], ["Isolated"]]),
+                new("MATCH (a:Person) WHERE ('1' ENDS WITH 1) IS UNKNOWN RETURN a.name", [["Alice"], ["Bob"], ["Isolated"]]),
+                new("MATCH (a:Person) WHERE (NULL CONTAINS '1') IS UNKNOWN RETURN a.name", [["Alice"], ["Bob"], ["Isolated"]]),
+                new("MATCH (a:Person) WHERE a.name STARTS WITH 'al' RETURN a.name", []),
+                new("MATCH (a:Person) WHERE NOT a:Robot OR a:Missing RETURN a.name", [["Alice"], ["Bob"], ["Isolated"]]),
+                new("MATCH (a:Person) WHERE a:Missing OR a.age = 42 RETURN a.name", [["Alice"]]),
+                new("MATCH (a:Person) WHERE NOT a:Missing RETURN a.name", [["Alice"], ["Bob"], ["Isolated"]]),
             ],
             [GqlClauses.Show] =
             [
-                new("SHOW LABELS", [["audit", _personLabelId, "Person"]]),
+                new("SHOW LABELS", [["audit", _personLabelId, "Person"], ["audit", _robotLabelId, "Robot"]]),
+            ],
+            [GqlClauses.LabelExpression] =
+            [
+                new("MATCH (n:Person|Robot) RETURN n.name", [["Alice"], ["Bob"], ["Isolated"], ["Robo"]]),
+                new("MATCH (n:!Person) RETURN n.name", [["Robo"], ["Ghost"]]),
+                new("MATCH (n:!%) RETURN n.name", [["Ghost"]]),
+                new("MATCH (n IS %&!Robot {active: TRUE}) RETURN n.name", [["Alice"]]),
+                new("MATCH (a)-[r:KNOWS|SERVES]->(b) RETURN a.name, b.name", [["Alice", "Bob"], ["Robo", "Ghost"]]),
+                new("MATCH (a)-[r:!KNOWS]->(b) RETURN a.name", [["Robo"]]),
+                new("MATCH (n) WHERE n IS LABELED Robot|!% RETURN n.name", [["Robo"], ["Ghost"]]),
+                new("MATCH (n) WHERE n:Person AND n IS NOT LABELED Robot AND n.age > 20 RETURN n.name", [["Alice"], ["Isolated"]]),
             ],
         };
 
@@ -78,19 +176,22 @@ public sealed class GqlProfileExecutionTests
     public async Task Profile_AdvertisedClauses_AllHavePassingExecutionCasesAsync()
     {
         EnsureCoverage(GqlLanguageProfile.Instance.Clauses);
-        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        var token = cancellation.Token;
         foreach (string clause in GqlLanguageProfile.Instance.Clauses)
         {
             foreach (var executionCase in _cases[clause])
             {
+                // Isolate each case's parsing, seeding and execution deadline: repeated engine
+                // setup must not consume the following case's budget (timings in DESIGN.md).
+                using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+                var token = cancellation.Token;
                 var statement = new GqlQueryParser().Parse(executionCase.Statement).ShouldBeOfType<GqlQueryStatement>();
                 statement.Diagnostics.ShouldBeEmpty($"{clause}: {executionCase.Statement}");
                 UsesClause(clause, statement.GqlExpression).ShouldBeTrue($"The {clause} case must exercise its clause: {executionCase.Statement}");
-                await using var engine = GraphDatabaseEngine.Create(new());
-                var database = (IGraphDatabase)await engine.CreateDatabaseAsync("audit", token);
+                await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
+                var database = await engine.CreateDatabaseAsync("audit", token);
                 await using var session = await database.CreateSessionAsync(token);
                 await GraphSchema.Open(database, session).SaveLabelAsync(new(_personLabelId, "Person"), token);
+                await GraphSchema.Open(database, session).SaveLabelAsync(new(_robotLabelId, "Robot"), token);
                 await session.ExecuteAsync(seed, cancellationToken: token);
 
                 await ExecuteAndVerifyAsync(session, executionCase, clause, token);
@@ -111,21 +212,62 @@ public sealed class GqlProfileExecutionTests
     [Theory(DisplayName = "Cohesion Test [Graph] - Unsupported forms fail at parse time against a live engine")]
     [InlineData("MATCH (a)-[r*1..3]->(b) RETURN a")]
     [InlineData("MATCH (a) RETURN count(a)")]
-    [InlineData("MATCH (a) RETURN *")]
-    [InlineData("MATCH (a) WHERE a.age = 17 OR a.age = 42 RETURN a")]
-    [InlineData("MATCH (a) WHERE a.age = $age RETURN a")]
+    [InlineData("MATCH (a) RETURN a {.name}")]
     [InlineData("INSERT (:Person {tags: [1, 2]})")]
     [InlineData("MATCH (a) DELETE a RETURN a")]
     [InlineData("SHOW DATABASES")]
+    [InlineData("MATCH (a)~[r]~(b) RETURN a")]
+    [InlineData("MATCH (a)<~(b) RETURN a")]
     public async Task Profile_UnsupportedForms_ReportCapabilityDiagnosticAsync(string source)
     {
         new GqlQueryParser().Parse(source).Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHDBL001");
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var database = await engine.CreateDatabaseAsync("boundary", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         var error = await Should.ThrowAsync<DatabaseParseException>(async () =>
             await session.ExecuteAsync(source, cancellationToken: CancellationToken.None));
         error.Message.ShouldContain("COHDBL001", Case.Sensitive);
+    }
+
+    // GQL currently executes no functions; #1147/#1148 add names and live cases together here.
+    private static readonly IReadOnlyDictionary<string, ExecutionCase> _functionCases =
+        new Dictionary<string, ExecutionCase>(StringComparer.OrdinalIgnoreCase);
+
+    [Fact(DisplayName = "Cohesion Test [Graph] - Functions: every declared function has passing live evidence")]
+    public async Task Profile_DeclaredFunctions_ShouldExecuteEveryCaseAsync()
+    {
+        // Arrange
+        RequireFunctionCoverage(GqlLanguageProfile.Instance.Functions.ToArray(), _functionCases.Keys);
+        await using var engine = GraphDatabaseEngine.Create("graph-functions", new());
+        var database = await engine.CreateDatabaseAsync("functions", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync(seed, cancellationToken: CancellationToken.None);
+
+        // Act / Assert
+        foreach (string name in GqlLanguageProfile.Instance.Functions.ToArray())
+        {
+            await ExecuteAndVerifyAsync(session, _functionCases[name], name, CancellationToken.None);
+        }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Graph] - Functions: coverage rejects an unmeasured declaration or a retired case")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Profile_FunctionCoverageMismatch_ShouldFail(bool addedDeclaration)
+    {
+        // Arrange
+        var declarations = GqlLanguageProfile.Instance.Functions.ToArray();
+        var cases = _functionCases.Keys;
+        // Act / Assert
+        Should.Throw<ShouldAssertException>(() => RequireFunctionCoverage(
+            addedDeclaration ? declarations.Append("FUTURE") : declarations,
+            addedDeclaration ? cases : cases.Append("RETIRED")));
+    }
+
+    private static void RequireFunctionCoverage(IEnumerable<string> declarations, IEnumerable<string> cases)
+    {
+        declarations.Except(cases, StringComparer.OrdinalIgnoreCase).ShouldBeEmpty();
+        cases.Except(declarations, StringComparer.OrdinalIgnoreCase).ShouldBeEmpty();
     }
 
     private static void EnsureCoverage(IEnumerable<string> clauses)
@@ -139,14 +281,37 @@ public sealed class GqlProfileExecutionTests
 
     private static bool UsesClause(string clause, GqlQueryExpression query) => clause switch
     {
+        GqlClauses.Explain => query.IsExplain,
         GqlClauses.Match => query.Matches.Count != 0,
-        GqlClauses.Return => query.Projections.Count != 0,
+        GqlClauses.Return => query.Projections.Count != 0 || query.ReturnStar,
         GqlClauses.Create => query.Creates.Count != 0 && HasKeyword(query.Text ?? string.Empty, "CREATE"),
         GqlClauses.Insert => query.Creates.Count != 0 && HasKeyword(query.Text ?? string.Empty, "INSERT"),
         GqlClauses.Delete => query.DeleteVariables.Count != 0 && !query.DetachDelete,
         GqlClauses.DetachDelete => query.DeleteVariables.Count != 0 && query.DetachDelete,
         GqlClauses.Where => query.Predicate is not null,
         GqlClauses.Show => query.CatalogSurface is not null,
+        GqlClauses.LabelExpression => query.Matches.Concat(query.Creates).Any(UsesLabelOperators) || HasLabeledPredicate(query.Predicate),
+        _ => false,
+    };
+
+    // A label expression beyond the conjunction :A:B the profile always ran: an operator, the
+    // wildcard or a type alternative on a pattern element.
+    private static bool UsesLabelOperators(GqlPathPattern path)
+        => path.Nodes.Any(node => node.LabelExpression is { } labels && !IsNameConjunction(labels)) ||
+           path.Relationships.Any(edge => edge.LabelExpression is { } labels && labels is not GqlLabelName);
+
+    private static bool IsNameConjunction(GqlLabelExpression expression) => expression switch
+    {
+        GqlLabelName => true,
+        GqlLabelConjunction conjunction => conjunction.Operands.All(IsNameConjunction),
+        _ => false,
+    };
+
+    private static bool HasLabeledPredicate(GqlExpression? expression) => expression switch
+    {
+        GqlLabeledPredicate => true,
+        GqlLogicalExpression logical => logical.Operands.Any(HasLabeledPredicate),
+        GqlBinaryExpression binary => HasLabeledPredicate(binary.Left) || HasLabeledPredicate(binary.Right),
         _ => false,
     };
 
@@ -163,20 +328,21 @@ public sealed class GqlProfileExecutionTests
     private static ExecutionCase Mutation(string statement, long affectedCount, params ExecutionCase[] verification)
         => new(statement, [], affectedCount, verification);
 
-    private static async Task ExecuteAndVerifyAsync(IDatabaseSession session, ExecutionCase executionCase,
+    private static async Task ExecuteAndVerifyAsync(GraphDatabaseSession session, ExecutionCase executionCase,
         string clause, CancellationToken cancellationToken)
     {
         string context = $"{clause}: {executionCase.Statement}";
-        var result = await session.ExecuteAsync(executionCase.Statement, cancellationToken: cancellationToken);
-        result.Status.ShouldBe(QueryResultStatus.Success, context);
+        var result = await session.ExecuteAsync(executionCase.Statement, executionCase.Parameters, cancellationToken);
+        result.Status.ShouldBe(DatabaseResultStatus.Success, context);
         if (executionCase.AffectedCount is { } affected)
         {
             result.AffectedCount.ShouldBe(affected, context);
         }
         else
         {
-            (result is QueryResultSet).ShouldBeTrue(context);
-            await using var rowset = (QueryResultSet)result;
+            (result is DatabaseResultSet).ShouldBeTrue(context);
+            await using var rowset = (DatabaseResultSet)result;
+            if (executionCase.Columns is { } columns) { rowset.Columns.Select(column => column.Name).ShouldBe(columns, context); }
             var rows = new List<object?[]>();
             await foreach (var row in rowset.GetRowsAsync(cancellationToken))
             {
@@ -192,5 +358,5 @@ public sealed class GqlProfileExecutionTests
     }
 
     private sealed record ExecutionCase(string Statement, object?[][] Rows, long? AffectedCount = null,
-        ExecutionCase[]? Verification = null);
+        ExecutionCase[]? Verification = null, IReadOnlyDictionary<string, object?>? Parameters = null, string[]? Columns = null);
 }

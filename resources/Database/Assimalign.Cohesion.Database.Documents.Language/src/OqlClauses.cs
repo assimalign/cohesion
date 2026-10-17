@@ -6,20 +6,47 @@ namespace Assimalign.Cohesion.Database.Documents.Language;
 /// </summary>
 public static class OqlClauses
 {
+    /// <summary>A <c>CREATE COLLECTION</c> statement.</summary>
+    public const string CreateCollection = "CREATE COLLECTION";
+
+    /// <summary>A <c>DROP COLLECTION</c> statement.</summary>
+    public const string DropCollection = "DROP COLLECTION";
+
     /// <summary>A <c>CREATE INDEX</c> statement.</summary>
     public const string CreateIndex = "CREATE INDEX";
 
     /// <summary>A <c>DROP INDEX</c> statement.</summary>
     public const string DropIndex = "DROP INDEX";
 
+    /// <summary>Inserts externally keyed documents.</summary>
+    public const string Insert = "INSERT";
+
+    /// <summary>Supplies key and value pairs to INSERT.</summary>
+    public const string Values = "VALUES";
+
     /// <summary>Selects values from one or more document collections.</summary>
     public const string Select = "SELECT";
+
+    /// <summary>Describes a SELECT or INSERT statement without executing it.</summary>
+    public const string Explain = "EXPLAIN";
 
     /// <summary>Introduces the source collections and iteration variables for a query.</summary>
     public const string From = "FROM";
 
     /// <summary>Restricts values by a predicate.</summary>
     public const string Where = "WHERE";
+
+    /// <summary>Tests membership in an explicit value list.</summary>
+    public const string In = "IN";
+
+    /// <summary>Tests an inclusive scalar range.</summary>
+    public const string Between = "BETWEEN";
+
+    /// <summary>Matches a string pattern with optional ESCAPE.</summary>
+    public const string Like = "LIKE";
+
+    /// <summary>Evaluates searched or simple conditional branches.</summary>
+    public const string Case = "CASE";
 
     /// <summary>Groups values by one or more expressions.</summary>
     public const string GroupBy = "GROUP BY";
@@ -29,15 +56,6 @@ public static class OqlClauses
 
     /// <summary>Orders values by one or more expressions.</summary>
     public const string OrderBy = "ORDER BY";
-
-    /// <summary>Defines a named OQL query.</summary>
-    public const string Define = "DEFINE";
-
-    /// <summary>Extracts the sole value from a singleton collection.</summary>
-    public const string Element = "ELEMENT";
-
-    /// <summary>Flattens a nested collection by one level.</summary>
-    public const string Flatten = "FLATTEN";
 
     /// <summary>Evaluates a query nested within another OQL expression.</summary>
     public const string Subquery = "SUBQUERY";

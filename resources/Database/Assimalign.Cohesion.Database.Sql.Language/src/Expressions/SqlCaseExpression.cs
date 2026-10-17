@@ -22,6 +22,14 @@ public sealed class SqlCaseExpression : SqlExpression
         Input = input;
         WhenClauses = whenClauses;
         ElseResult = elseResult;
+
+        int depth = System.Math.Max(DepthOf(input), DepthOf(elseResult));
+        foreach (var clause in whenClauses)
+        {
+            depth = System.Math.Max(depth, System.Math.Max(clause.Condition.Depth, clause.Result.Depth));
+        }
+
+        Depth = 1 + depth;
     }
 
     /// <summary>

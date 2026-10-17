@@ -1,15 +1,33 @@
 using System;
+using System.Threading;
+using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Client;
-using Assimalign.Cohesion.Database.KeyValuePair.Client.Internal;
+using Assimalign.Cohesion.Database.Protocol;
 
 namespace Assimalign.Cohesion.Database.KeyValuePair.Client;
 
 /// <summary>
-/// Creates key-value client instances from options.
+/// A pooling key-value client: hands out typed connections to one key-value database on one server,
+/// reusing authenticated sessions across connects.
 /// </summary>
-public static class KeyValueClient
+/// <remarks>
+/// The typed key-value surface layers over the shared <see cref="DatabaseClient"/> core: it adds
+/// point and range operations with etag-conditional writes, a key-value-scoped error surface, and a
+/// telemetry hook, and delegates pooling, framing, and the wire handshake to the core. Disposing the
+/// client closes every pooled connection.
+/// </remarks>
+public sealed class KeyValueClient : IAsyncDisposable
 {
+    private readonly DatabaseClient _client;
+    private readonly KeyValueClientObserver? _observer;
+
+    private KeyValueClient(DatabaseClient client, KeyValueClientObserver? observer)
+    {
+        _client = client;
+        _observer = observer;
+    }
+
     /// <summary>
     /// Creates a pooling key-value client from options. Connections dial lazily —
     /// creation performs no I/O.
@@ -17,8 +35,8 @@ public static class KeyValueClient
     /// <param name="options">The composition options. Requires settings with a database and endpoint, and a connection factory.</param>
     /// <returns>The client.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="options"/> is null.</exception>
-    /// <exception cref="ArgumentException">Thrown when the options carry no settings or no connection factory.</exception>
-    public static IKeyValueClient Create(KeyValueClientOptions options)
+    /// <exception cref="ArgumentException">Thrown when the options carry no settings or no connection factory, or the settings are invalid.</exception>
+    public static KeyValueClient Create(KeyValueClientOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
 
@@ -33,13 +51,47 @@ public static class KeyValueClient
 
         // The shared core validates the settings and factory in full (database,
         // endpoint, pool size); let its ArgumentException surface with its message.
-        IDatabaseClient client = DatabaseClient.Create(new DatabaseClientOptions
+        DatabaseClient client = DatabaseClient.Create(new DatabaseClientOptions
         {
             Settings = options.Settings,
             ConnectionFactory = options.ConnectionFactory,
             Family = KeyValueProtocol.Family,
         });
 
-        return new DefaultKeyValueClient(client, options.Settings, options.Observer);
+        return new KeyValueClient(client, options.Observer);
     }
+
+    /// <summary>
+    /// Gets the connection settings the client was composed with.
+    /// </summary>
+    public DatabaseConnectionSettings Settings => _client.Settings;
+
+    /// <summary>
+    /// Rents an open, authenticated typed connection from the pool, dialing and
+    /// handshaking a new one when none is idle and the pool is under its limit.
+    /// Waits when the pool is exhausted.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token for the operation, including the wait for a free slot.</param>
+    /// <returns>An open typed connection; dispose it to return it to the pool.</returns>
+    /// <exception cref="ObjectDisposedException">Thrown when the client, or an object its connection factory needs, is disposed.</exception>
+    /// <exception cref="OperationCanceledException">Thrown when <paramref name="cancellationToken"/> cancels the wait for a slot, the dial or the handshake.</exception>
+    /// <exception cref="KeyValueClientException">Thrown when the dial fails (<see cref="KeyValueClientErrorKind.ConnectionFailure"/> with <see cref="ProtocolErrorCode.ConnectionFailure"/>; the inner <see cref="DatabaseClientException"/> keeps the transport's exception) or the handshake fails: the server's code, or <see cref="KeyValueClientErrorKind.Internal"/> with <see cref="ProtocolErrorCode.Internal"/> when the transport breaks during it (the inner <see cref="DatabaseClientException"/> keeps the transport's exception).</exception>
+    public async ValueTask<KeyValueConnection> ConnectAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            DatabaseConnection connection = await _client.RentAsync(cancellationToken).ConfigureAwait(false);
+            return new KeyValueConnection(connection, _observer);
+        }
+        catch (DatabaseClientException exception)
+        {
+            throw KeyValueClientException.FromClientException(exception);
+        }
+    }
+
+    /// <summary>
+    /// Closes every idle pooled connection; outstanding connections close when they are returned.
+    /// </summary>
+    /// <returns>A task that completes when the idle connections are closed.</returns>
+    public ValueTask DisposeAsync() => _client.DisposeAsync();
 }

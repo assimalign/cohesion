@@ -27,12 +27,12 @@ public sealed class SqlSystemViewTests
         // Arrange
         await using var engine = CreateEngine();
         var database = await engine.CreateDatabaseAsync("app");
-        var schema = new SqlCompiledSchema(SqlCompiledSchema.CurrentFormat, "app", EngineModel.Sql, false,
+        var schema = new SqlCompiledSchema(SqlCompiledSchema.CurrentFormat, "app", false,
             [], [new CompiledSchemaTable("managed", "Tests.Managed",
                 [new("id", DatabaseType.Int32, false), new("label", DatabaseType.String, true)],
                 new CompiledSchemaKey("pk_managed", ["id"]),
-                [new CompiledSchemaIndex("ix_managed_label", ["label"])], [])], [], [], [], []);
-        await database.ShouldBeAssignableTo<IDatabaseSchemaProvisioner>().ApplySchemaAsync(schema);
+                [new CompiledSchemaIndex("ix_managed_label", ["label"])], [])], []);
+        await database.ApplySchemaAsync(schema);
         await using var session = await database.CreateSessionAsync();
         await session.ExecuteAsync("CREATE TABLE adhoc (id INT PRIMARY KEY, label VARCHAR(20))");
         await session.ExecuteAsync("CREATE INDEX ix_adhoc_label ON adhoc(label)");
@@ -56,10 +56,10 @@ public sealed class SqlSystemViewTests
         indexes[1].ShouldBe(new object?[] { "ix_managed_label", "Schema", "app" });
 
         await using var iso = (await session.ExecuteAsync("SELECT * FROM INFORMATION_SCHEMA.TABLES"))
-            .ShouldBeAssignableTo<QueryResultSet>();
+            .ShouldBeAssignableTo<DatabaseResultSet>();
         iso.Columns.Select(column => column.Name).ShouldNotContain("OWNER");
         iso.Columns.Select(column => column.Name).ShouldNotContain("OWNING_SCHEMA");
-        var catalog = database.ShouldBeOfType<SqlDatabaseInstance>().Catalog;
+        var catalog = database.ShouldBeOfType<SqlDatabase>().Catalog;
         catalog.TryGetTable("INFORMATION_SCHEMA", "TABLES", out _).ShouldBeFalse();
         catalog.TryGetTable("COHESION_SCHEMA", "OBJECT_OWNERSHIP", out _).ShouldBeFalse();
     }
@@ -90,7 +90,7 @@ public sealed class SqlSystemViewTests
         sizes[1].ShouldBe(new object?[] { "label", 40L, null, null, null });
         sizes[2].ShouldBe(new object?[] { "amount", null, 12L, 10L, 3L });
 
-        await using var result = (await session.ExecuteAsync(query)).ShouldBeAssignableTo<QueryResultSet>();
+        await using var result = (await session.ExecuteAsync(query)).ShouldBeAssignableTo<DatabaseResultSet>();
         result.Columns.Select(column => column.Name).ShouldBe(new[]
             { "COLUMN_NAME", "ORDINAL_POSITION", "DATA_TYPE", "IS_NULLABLE", "COLUMN_DEFAULT" });
         result.Columns[0].Type.ShouldBe(DatabaseType.String);
@@ -360,7 +360,7 @@ public sealed class SqlSystemViewTests
         // Act
         await using var result = (await reader.ExecuteAsync(
             "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'orders' ORDER BY ORDINAL_POSITION"))
-            .ShouldBeAssignableTo<QueryResultSet>();
+            .ShouldBeAssignableTo<DatabaseResultSet>();
         await writer.ExecuteAsync("DROP TABLE orders");
         await writer.ExecuteAsync("CREATE TABLE orders (replacement INT)");
 
@@ -434,9 +434,9 @@ public sealed class SqlSystemViewTests
     }
 
     private static SqlDatabaseEngine CreateEngine()
-        => SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "system-views" });
+        => SqlDatabaseEngine.Create("system-views", new SqlDatabaseEngineOptions());
 
-    private static async Task CreateConstrainedTablesAsync(IDatabaseSession session)
+    private static async Task CreateConstrainedTablesAsync(SqlDatabaseSession session)
     {
         await session.ExecuteAsync("CREATE TABLE parent (a INT, b INT, CONSTRAINT pk_parent PRIMARY KEY(b,a))");
         await session.ExecuteAsync("CREATE TABLE child (id INT, parent_a INT, parent_b INT, quantity INT, CONSTRAINT pk_child PRIMARY KEY(id), CONSTRAINT uq_child UNIQUE(parent_a,id), CONSTRAINT fk_parent FOREIGN KEY(parent_b,parent_a) REFERENCES parent(b,a) ON DELETE CASCADE, CONSTRAINT ck_quantity CHECK(quantity > 0))");
@@ -444,14 +444,14 @@ public sealed class SqlSystemViewTests
 
     private static long Number(object? value) => Convert.ToInt64(value, CultureInfo.InvariantCulture);
 
-    private static async Task<List<object?[]>> RowsAsync(IDatabaseSession session, string sql,
+    private static async Task<List<object?[]>> RowsAsync(SqlDatabaseSession session, string sql,
         IReadOnlyDictionary<string, object?>? parameters = null)
     {
-        await using var result = (await session.ExecuteAsync(sql, parameters, CancellationToken.None)).ShouldBeAssignableTo<QueryResultSet>();
+        await using var result = (await session.ExecuteAsync(sql, parameters, CancellationToken.None)).ShouldBeAssignableTo<DatabaseResultSet>();
         return await ReadRowsAsync(result);
     }
 
-    private static async Task<List<object?[]>> ReadRowsAsync(QueryResultSet result)
+    private static async Task<List<object?[]>> ReadRowsAsync(DatabaseResultSet result)
     {
         var rows = new List<object?[]>();
         await foreach (var row in result.GetRowsAsync(CancellationToken.None))

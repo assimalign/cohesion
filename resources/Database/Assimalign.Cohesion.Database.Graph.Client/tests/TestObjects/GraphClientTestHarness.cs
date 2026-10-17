@@ -1,8 +1,11 @@
 using System;
+using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Connections;
 using Assimalign.Cohesion.Connections.InMemory;
+using Assimalign.Cohesion.Connections.Tcp;
 using Assimalign.Cohesion.Database.Client;
 
 namespace Assimalign.Cohesion.Database.Graph.Client.Tests;
@@ -11,39 +14,44 @@ internal sealed class GraphClientTestHarness : IAsyncDisposable
 {
     private readonly CancellationTokenSource _timeout = new(TimeSpan.FromSeconds(30));
 
-    private GraphClientTestHarness(GraphDatabaseEngine engine, IGraphDatabase database,
-        InMemoryConnectionListener listener, GraphDatabaseServer server, IGraphClient client)
+    private GraphClientTestHarness(GraphDatabaseEngine engine, GraphDatabase database,
+        IDuplexConnectionListener listener, IDuplexConnectionFactory connectionFactory, GraphDatabaseServer server, GraphClient client)
     {
         Engine = engine;
         Database = database;
         Listener = listener;
+        ConnectionFactory = connectionFactory;
         Server = server;
         Client = client;
     }
 
     internal GraphDatabaseEngine Engine { get; }
-    internal IGraphDatabase Database { get; }
-    internal InMemoryConnectionListener Listener { get; }
+    internal GraphDatabase Database { get; }
+    internal IDuplexConnectionListener Listener { get; }
+    internal IDuplexConnectionFactory ConnectionFactory { get; }
     internal GraphDatabaseServer Server { get; }
-    internal IGraphClient Client { get; }
+    internal GraphClient Client { get; }
     internal CancellationToken Token => _timeout.Token;
 
-    internal static async Task<GraphClientTestHarness> StartAsync()
+    internal static async Task<GraphClientTestHarness> StartAsync(bool tcp = false)
     {
-        var engine = GraphDatabaseEngine.Create(new());
-        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("graph", CancellationToken.None);
-        var listener = new InMemoryConnectionListener();
+        var engine = GraphDatabaseEngine.Create("graph-engine", new());
+        var database = await engine.CreateDatabaseAsync("graph", CancellationToken.None);
+        IDuplexConnectionListener listener = tcp
+            ? TcpConnectionListener.Create(options => options.EndPoint = new IPEndPoint(IPAddress.Loopback, 0))
+            : new InMemoryConnectionListener();
         var server = GraphDatabaseServer.Create(engine, new() { Listener = listener, ShutdownDrainTimeout = TimeSpan.FromSeconds(2) });
         await server.StartAsync(CancellationToken.None);
+        IDuplexConnectionFactory connectionFactory = tcp ? new TcpConnectionFactory() : ((InMemoryConnectionListener)listener).CreateFactory();
         var client = GraphClient.Create(new()
         {
             Settings = new DatabaseConnectionSettings
             {
                 Database = "graph", Principal = "tester", EndPoint = listener.EndPoint, MaxPoolSize = 1,
             },
-            ConnectionFactory = listener.CreateFactory(),
+            ConnectionFactory = connectionFactory,
         });
-        return new(engine, database, listener, server, client);
+        return new(engine, database, listener, connectionFactory, server, client);
     }
 
     public async ValueTask DisposeAsync()

@@ -46,7 +46,15 @@ public sealed partial class SqlQueryParser
                 Advance(ref lexer);
             }
 
-            return new SqlSelectExpression([], null, [], null, [], null, [],
+            return new SqlSelectExpression([], [], null, [], null, [],
+                null, null, false, null, null);
+        }
+
+        // The subquery node (scalar, IN or EXISTS) encloses the query's clauses, so they parse
+        // one level deeper; the expression limit spans the whole statement (#1151).
+        if (!TryEnterOperand(ref lexer))
+        {
+            return new SqlSelectExpression([], [], null, [], null, [],
                 null, null, false, null, null);
         }
 
@@ -54,12 +62,19 @@ public sealed partial class SqlQueryParser
         try
         {
             var select = ParseSelect(ref lexer);
-            ValidateSubqueryReferences(select);
+
+            // An abandoned statement keeps none of its tree, so there is nothing to check.
+            if (!NestingExceeded)
+            {
+                ValidateSubqueryReferences(select);
+            }
+
             return select;
         }
         finally
         {
             _subqueryDepth--;
+            _expressionDepth--;
         }
     }
 
@@ -82,6 +97,7 @@ public sealed partial class SqlQueryParser
         string? previousToken,
         string? previousPreviousToken,
         bool insertValues,
+        bool followsFromComma,
         out string clause)
     {
         clause = string.Empty;
@@ -101,7 +117,7 @@ public sealed partial class SqlQueryParser
         }
         else if (token.Equals("LATERAL", StringComparison.OrdinalIgnoreCase) &&
                  (string.Equals(previousToken, "FROM", StringComparison.OrdinalIgnoreCase) ||
-                  string.Equals(previousToken, "JOIN", StringComparison.OrdinalIgnoreCase)))
+                  string.Equals(previousToken, "JOIN", StringComparison.OrdinalIgnoreCase) || previousToken == "," && followsFromComma))
         {
             clause = "LATERAL subquery";
         }
@@ -110,7 +126,7 @@ public sealed partial class SqlQueryParser
         {
             if (previousToken == "(" &&
                 (string.Equals(previousPreviousToken, "FROM", StringComparison.OrdinalIgnoreCase) ||
-                 string.Equals(previousPreviousToken, "JOIN", StringComparison.OrdinalIgnoreCase)))
+                 string.Equals(previousPreviousToken, "JOIN", StringComparison.OrdinalIgnoreCase) || previousPreviousToken == "," && followsFromComma))
             {
                 clause = "derived-table SUBQUERY in FROM or JOIN";
             }
@@ -131,19 +147,25 @@ public sealed partial class SqlQueryParser
     private void ValidateSubqueryReferences(SqlSelectExpression select)
     {
         var qualifiers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        AddSubqueryQualifier(select.From, qualifiers);
-        foreach (var join in select.Joins)
+        foreach (var item in select.From) { AddSubqueryQualifier(item.Table, qualifiers); }
+        foreach (var item in select.From)
         {
-            AddSubqueryQualifier(join.Table, qualifiers);
+            foreach (var join in item.Joins)
+            {
+                AddSubqueryQualifier(join.Table, qualifiers);
+            }
         }
 
         foreach (var column in select.Columns)
         {
             ValidateSubqueryReference(column.Expression, qualifiers);
         }
-        foreach (var join in select.Joins)
+        foreach (var item in select.From)
         {
-            ValidateSubqueryReference(join.Condition, qualifiers);
+            foreach (var join in item.Joins)
+            {
+                ValidateSubqueryReference(join.Condition, qualifiers);
+            }
         }
         ValidateSubqueryReference(select.Where, qualifiers);
         foreach (var group in select.GroupBy)
@@ -174,11 +196,24 @@ public sealed partial class SqlQueryParser
         }
     }
 
-    private void ValidateSubqueryReference(SqlExpression? expression, HashSet<string> qualifiers)
+    // Iterative, so its stack use never depends on the tree's depth: a configured limit allows
+    // trees thousands of levels deep, and a left-associative chain that deep is built in a loop
+    // without the parser recursing (#1151). Operands pop in source order, so the diagnostics
+    // come out in the order the references appear.
+    private void ValidateSubqueryReference(SqlExpression? root, HashSet<string> qualifiers)
     {
-        switch (expression)
+        if (root is null)
         {
-            case SqlColumnReferenceExpression { TableAlias: not null } column:
+            return;
+        }
+
+        var pending = new Stack<SqlExpression>();
+        pending.Push(root);
+        while (pending.Count > 0)
+        {
+            var expression = pending.Pop();
+            if (expression is SqlColumnReferenceExpression { TableAlias: not null } column)
+            {
                 string qualifier = column.SchemaName is null
                     ? column.TableAlias : $"{column.SchemaName}.{column.TableAlias}";
                 if (!qualifiers.Contains(qualifier) &&
@@ -187,58 +222,84 @@ public sealed partial class SqlQueryParser
                     AddUnsupportedSurfaceDiagnostic(column.Location?.Start ?? 0, column.Location?.End ?? 0,
                         $"Correlated SQL subqueries are not supported: reference '{qualifier}.{column.ColumnName}' is outside the subquery's local FROM/JOIN scope.");
                 }
+
+                continue;
+            }
+
+            PushOperands(pending, expression);
+        }
+    }
+
+    /// <summary>
+    /// Pushes the operands of a node in reverse source order, so they pop in source order. A
+    /// nested query body is not an operand: it has already been checked in its own scope.
+    /// </summary>
+    private static void PushOperands(Stack<SqlExpression> pending, SqlExpression expression)
+    {
+        switch (expression)
+        {
+            case SqlLogicalExpression logical:
+                PushReversed(pending, logical.Operands);
                 break;
             case SqlBinaryExpression binary:
-                ValidateSubqueryReference(binary.Left, qualifiers);
-                ValidateSubqueryReference(binary.Right, qualifiers);
+                pending.Push(binary.Right);
+                pending.Push(binary.Left);
                 break;
             case SqlUnaryExpression unary:
-                ValidateSubqueryReference(unary.Operand, qualifiers);
+                pending.Push(unary.Operand);
                 break;
             case SqlBetweenExpression between:
-                ValidateSubqueryReference(between.Operand, qualifiers);
-                ValidateSubqueryReference(between.Low, qualifiers);
-                ValidateSubqueryReference(between.High, qualifiers);
+                pending.Push(between.High);
+                pending.Push(between.Low);
+                pending.Push(between.Operand);
                 break;
             case SqlInExpression membership:
-                ValidateSubqueryReference(membership.Operand, qualifiers);
                 if (membership.Values is not null)
                 {
-                    foreach (var value in membership.Values)
-                    {
-                        ValidateSubqueryReference(value, qualifiers);
-                    }
+                    PushReversed(pending, membership.Values);
                 }
+                pending.Push(membership.Operand);
                 break;
             case SqlLikeExpression like:
-                ValidateSubqueryReference(like.Operand, qualifiers);
-                ValidateSubqueryReference(like.Pattern, qualifiers);
+                pending.Push(like.Pattern);
+                pending.Push(like.Operand);
                 break;
             case SqlIsNullExpression isNull:
-                ValidateSubqueryReference(isNull.Operand, qualifiers);
+                pending.Push(isNull.Operand);
                 break;
             case SqlCaseExpression choice:
-                ValidateSubqueryReference(choice.Input, qualifiers);
-                foreach (var when in choice.WhenClauses)
+                if (choice.ElseResult is not null)
                 {
-                    ValidateSubqueryReference(when.Condition, qualifiers);
-                    ValidateSubqueryReference(when.Result, qualifiers);
+                    pending.Push(choice.ElseResult);
                 }
-                ValidateSubqueryReference(choice.ElseResult, qualifiers);
+                for (int index = choice.WhenClauses.Count - 1; index >= 0; index--)
+                {
+                    pending.Push(choice.WhenClauses[index].Result);
+                    pending.Push(choice.WhenClauses[index].Condition);
+                }
+                if (choice.Input is not null)
+                {
+                    pending.Push(choice.Input);
+                }
                 break;
             case SqlCastExpression cast:
-                ValidateSubqueryReference(cast.Operand, qualifiers);
+                pending.Push(cast.Operand);
                 break;
             case SqlCollateExpression collate:
-                ValidateSubqueryReference(collate.Operand, qualifiers);
+                pending.Push(collate.Operand);
                 break;
             case SqlFunctionCallExpression function:
-                foreach (var argument in function.Arguments)
-                {
-                    ValidateSubqueryReference(argument, qualifiers);
-                }
+                PushReversed(pending, function.Arguments);
                 break;
             // Nested query bodies have already been checked in their own scope.
+        }
+    }
+
+    private static void PushReversed(Stack<SqlExpression> pending, IReadOnlyList<SqlExpression> operands)
+    {
+        for (int index = operands.Count - 1; index >= 0; index--)
+        {
+            pending.Push(operands[index]);
         }
     }
 }

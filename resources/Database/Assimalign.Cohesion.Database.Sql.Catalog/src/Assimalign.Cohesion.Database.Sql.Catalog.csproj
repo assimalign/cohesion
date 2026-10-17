@@ -3,6 +3,7 @@
 		<RootNamespace>Assimalign.Cohesion.Database.Sql.Catalog</RootNamespace>
 	</PropertyGroup>
 	<ItemGroup>
+		<CohesionSharedSource Include="Assimalign.Cohesion.Database.Sql.Catalog" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Storage" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Storage" />

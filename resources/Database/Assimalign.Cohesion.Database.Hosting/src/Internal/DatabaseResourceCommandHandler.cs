@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.Tracing;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -12,7 +14,7 @@ namespace Assimalign.Cohesion.Database.Hosting.Internal;
 internal sealed class DatabaseResourceCommandHandler : IResourceCommandHandler
 {
     private readonly IDatabaseApplicationContext _context;
-    private readonly Dictionary<string, IDatabaseEngine> _createdDatabases = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, DatabaseEngine> _createdDatabases = new(StringComparer.Ordinal);
 
     internal DatabaseResourceCommandHandler(string kind, IDatabaseApplicationContext context)
     {
@@ -22,7 +24,29 @@ internal sealed class DatabaseResourceCommandHandler : IResourceCommandHandler
 
     public string Kind { get; }
 
-    public async ValueTask<ReadOnlyMemory<byte>> ExecuteAsync(ResourceCommand command, CancellationToken cancellationToken = default)
+    public ValueTask<ReadOnlyMemory<byte>> ExecuteAsync(ResourceCommand command, CancellationToken cancellationToken = default)
+        => DatabaseHostingEventSource.Log.IsEnabled(EventLevel.Warning, EventKeywords.None)
+            ? ExecuteTracedAsync(command, cancellationToken)
+            : ExecuteCoreAsync(command, cancellationToken);
+
+    [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
+    private async ValueTask<ReadOnlyMemory<byte>> ExecuteTracedAsync(ResourceCommand command, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var result = await ExecuteCoreAsync(command, cancellationToken).ConfigureAwait(false);
+            DatabaseHostingEventSource.Log.ResourceCommandHandled(command, "Execute");
+            return result;
+        }
+        catch (Exception exception) when (exception is ResourceCommandRejectedException or JsonException)
+        {
+            DatabaseHostingEventSource.Log.ResourceCommandRejected(command, "Execute", exception);
+            throw;
+        }
+    }
+
+    // Internal so the owning tests can measure the untraced dispatch baseline without copying it.
+    internal async ValueTask<ReadOnlyMemory<byte>> ExecuteCoreAsync(ResourceCommand command, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         using JsonDocument document = JsonDocument.Parse(command.Payload);
@@ -44,8 +68,8 @@ internal sealed class DatabaseResourceCommandHandler : IResourceCommandHandler
         {
             throw new ResourceCommandRejectedException($"database.add-database key '{command.Key}' must match database key '{expectedKey}'.");
         }
-        IDatabaseEngine engine = ResolveEngine(payload);
-        if (_createdDatabases.TryGetValue(command.Key, out IDatabaseEngine? originalEngine))
+        DatabaseEngine engine = ResolveEngine(payload);
+        if (_createdDatabases.TryGetValue(command.Key, out DatabaseEngine? originalEngine))
         {
             if (!ReferenceEquals(engine, originalEngine))
             {
@@ -65,14 +89,39 @@ internal sealed class DatabaseResourceCommandHandler : IResourceCommandHandler
             await engine.CreateDatabaseAsync(database, cancellationToken).ConfigureAwait(false);
             _createdDatabases[command.Key] = engine;
         }
-        catch (DatabaseException exception)
+        catch (Exception exception) when (exception is DatabaseException or ArgumentException)
         {
+            // An ArgumentException is the engine's refusal of a name that breaks the area's name
+            // rule (#1392); its message states the rule, so it reaches the gateway as a rejection
+            // with that detail, not as a bare BadRequest.
             throw new ResourceCommandRejectedException($"database.add-database '{database}' on engine '{engine.Name}' was refused: {exception.Message}");
         }
         return ReadOnlyMemory<byte>.Empty;
     }
 
-    public async ValueTask<ReadOnlyMemory<byte>> DeleteAsync(ResourceCommand command, CancellationToken cancellationToken = default)
+    public ValueTask<ReadOnlyMemory<byte>> DeleteAsync(ResourceCommand command, CancellationToken cancellationToken = default)
+        => DatabaseHostingEventSource.Log.IsEnabled(EventLevel.Warning, EventKeywords.None)
+            ? DeleteTracedAsync(command, cancellationToken)
+            : DeleteCoreAsync(command, cancellationToken);
+
+    [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
+    private async ValueTask<ReadOnlyMemory<byte>> DeleteTracedAsync(ResourceCommand command, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var result = await DeleteCoreAsync(command, cancellationToken).ConfigureAwait(false);
+            DatabaseHostingEventSource.Log.ResourceCommandHandled(command, "Delete");
+            return result;
+        }
+        catch (Exception exception) when (exception is ResourceCommandRejectedException or JsonException)
+        {
+            DatabaseHostingEventSource.Log.ResourceCommandRejected(command, "Delete", exception);
+            throw;
+        }
+    }
+
+    // Internal for the same allocation baseline as ExecuteCoreAsync.
+    internal async ValueTask<ReadOnlyMemory<byte>> DeleteCoreAsync(ResourceCommand command, CancellationToken cancellationToken)
     {
         using JsonDocument document = JsonDocument.Parse(command.Payload);
         string database = Required(document.RootElement, "database");
@@ -80,7 +129,7 @@ internal sealed class DatabaseResourceCommandHandler : IResourceCommandHandler
         {
             throw new ResourceCommandRejectedException($"{Kind} cannot be deleted: the database runtime has no principal mutation seam.");
         }
-        IDatabaseEngine engine = ResolveEngine(document.RootElement);
+        DatabaseEngine engine = ResolveEngine(document.RootElement);
         try
         {
             if (engine.TryGetDatabase(database, out _))
@@ -89,27 +138,27 @@ internal sealed class DatabaseResourceCommandHandler : IResourceCommandHandler
             }
             _createdDatabases.Remove(command.Key);
         }
-        catch (DatabaseException exception)
+        catch (Exception exception) when (exception is DatabaseException or ArgumentException)
         {
             throw new ResourceCommandRejectedException($"database.add-database deletion of '{database}' on engine '{engine.Name}' was refused: {exception.Message}");
         }
         return ReadOnlyMemory<byte>.Empty;
     }
 
-    private IDatabaseEngine ResolveEngine(JsonElement payload)
+    private DatabaseEngine ResolveEngine(JsonElement payload)
     {
-        var engines = new HashSet<IDatabaseEngine>(ReferenceEqualityComparer.Instance);
-        foreach (IDatabaseEngine engine in _context.Engines)
+        var engines = new HashSet<DatabaseEngine>(ReferenceEqualityComparer.Instance);
+        foreach (DatabaseEngine engine in _context.Engines)
         {
             engines.Add(engine);
         }
-        foreach (IDatabaseServer server in _context.Servers)
+        foreach (DatabaseServer server in _context.Servers)
         {
-            engines.Add(server.Context.Engine);
+            engines.Add(server.Engine);
         }
         string? name = payload.TryGetProperty("engine", out JsonElement configured) && configured.ValueKind is not JsonValueKind.Null
             ? Required(payload, "engine") : null;
-        IDatabaseEngine[] candidates = engines.Where(engine => name is null || engine.Name == name).ToArray();
+        DatabaseEngine[] candidates = engines.Where(engine => name is null || engine.Name == name).ToArray();
         return candidates.Length == 1 ? candidates[0] : throw new ResourceCommandRejectedException(
             $"database.add-database requires exactly one matching engine; engine '{name ?? "(unspecified)"}' matched {candidates.Length}. Specify a registered engine name.");
     }

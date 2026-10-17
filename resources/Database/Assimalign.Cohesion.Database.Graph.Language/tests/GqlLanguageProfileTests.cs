@@ -21,12 +21,14 @@ public class GqlLanguageProfileTests
 
     [Theory]
     [InlineData(GqlClauses.Match)]
+    [InlineData(GqlClauses.Explain)]
     [InlineData(GqlClauses.Return)]
     [InlineData(GqlClauses.Create)]
     [InlineData(GqlClauses.Insert)]
     [InlineData(GqlClauses.Delete)]
     [InlineData(GqlClauses.DetachDelete)]
     [InlineData(GqlClauses.Where)]
+    [InlineData(GqlClauses.LabelExpression)]
     public void Instance_DeclaredClause_IsSupported(string clause)
     {
         GqlLanguageProfile.Instance.Supports(clause).ShouldBeTrue();
@@ -58,8 +60,9 @@ public class GqlLanguageProfileTests
     public void Profile_AdvertisesOnlyExecutableClauses()
     {
         GqlLanguageProfile.Instance.Clauses.ShouldBe([
-            GqlClauses.Match, GqlClauses.Return, GqlClauses.Create, GqlClauses.Insert,
-            GqlClauses.Delete, GqlClauses.DetachDelete, GqlClauses.Where, GqlClauses.Show]);
+            GqlClauses.Match, GqlClauses.Explain, GqlClauses.Return, GqlClauses.Create, GqlClauses.Insert,
+            GqlClauses.Delete, GqlClauses.DetachDelete, GqlClauses.Where, GqlClauses.Show,
+            GqlClauses.LabelExpression]);
     }
 
     [Theory]

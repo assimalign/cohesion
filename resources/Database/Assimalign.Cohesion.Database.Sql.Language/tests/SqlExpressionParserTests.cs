@@ -132,10 +132,13 @@ public class SqlExpressionParserTests
     {
         // a OR b AND c should parse as a OR (b AND c)
         var expr = ParseWhere("a = 1 OR b = 2 AND c = 3");
-        var or = expr.ShouldBeOfType<SqlBinaryExpression>();
-        or.Operator.ShouldBe(SqlBinaryOperator.Or);
-        or.Right.ShouldBeOfType<SqlBinaryExpression>()
-            .Operator.ShouldBe(SqlBinaryOperator.And);
+        var or = expr.ShouldBeOfType<SqlLogicalExpression>();
+        or.Operator.ShouldBe(SqlLogicalOperator.Or);
+        or.Operands.Count.ShouldBe(2);
+        or.Operands[0].ShouldBeOfType<SqlBinaryExpression>().Operator.ShouldBe(SqlBinaryOperator.Equal);
+        var and = or.Operands[1].ShouldBeOfType<SqlLogicalExpression>();
+        and.Operator.ShouldBe(SqlLogicalOperator.And);
+        and.Operands.Count.ShouldBe(2);
     }
 
     [Fact]

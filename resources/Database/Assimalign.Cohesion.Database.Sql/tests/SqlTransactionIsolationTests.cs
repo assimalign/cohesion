@@ -15,7 +15,7 @@ using Assimalign.Cohesion.Database.Transactions;
 /// </summary>
 public sealed class SqlTransactionIsolationTests
 {
-    private static async Task<IDatabaseSession> CreateSessionAsync(SqlDatabaseEngine engine)
+    private static async Task<SqlDatabaseSession> CreateSessionAsync(SqlDatabaseEngine engine)
     {
         var database = await engine.CreateDatabaseAsync("iso-db");
         return await database.CreateSessionAsync();
@@ -25,7 +25,7 @@ public sealed class SqlTransactionIsolationTests
     public async Task BeginTransactionAsync_WithoutLevel_ShouldDefaultToSnapshot()
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "iso-default" });
+        await using var engine = SqlDatabaseEngine.Create("iso-default", new SqlDatabaseEngineOptions());
         await using var session = await CreateSessionAsync(engine);
 
         // Act
@@ -42,7 +42,7 @@ public sealed class SqlTransactionIsolationTests
     public async Task BeginTransactionAsync_WithLevel_ShouldCarryLevelAndResolve(IsolationLevel isolationLevel)
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "iso-levels" });
+        await using var engine = SqlDatabaseEngine.Create("iso-levels", new SqlDatabaseEngineOptions());
         await using var session = await CreateSessionAsync(engine);
         await session.ExecuteAsync("CREATE TABLE t (id INT NOT NULL)");
 
@@ -61,7 +61,7 @@ public sealed class SqlTransactionIsolationTests
     public async Task BeginTransactionAsync_Serializable_ShouldBeRejected()
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "iso-serializable" });
+        await using var engine = SqlDatabaseEngine.Create("iso-serializable", new SqlDatabaseEngineOptions());
         await using var session = await CreateSessionAsync(engine);
 
         // Act + Assert: the engine has no serialization-conflict detection, and

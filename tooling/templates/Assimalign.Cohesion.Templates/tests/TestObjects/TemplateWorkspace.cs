@@ -56,7 +56,10 @@ internal sealed class TemplateWorkspace : IDisposable
         return output;
     }
 
-    internal async Task BuildAsync(string output, CancellationToken cancellationToken = default)
+    internal Task BuildAsync(string output, CancellationToken cancellationToken = default)
+        => BuildAsync(output, [], cancellationToken);
+
+    internal async Task BuildAsync(string output, IReadOnlyList<string> properties, CancellationToken cancellationToken = default)
     {
         string globalPath = Path.Combine(output, "global.json");
         JsonObject global = JsonNode.Parse(File.ReadAllText(globalPath))!.AsObject();
@@ -77,7 +80,7 @@ internal sealed class TemplateWorkspace : IDisposable
                 new XElement("packageSource", new XAttribute("key", "nuget.org"),
                     new XElement("package", new XAttribute("pattern", "*"))))))
             .Save(Path.Combine(output, "nuget.config"));
-        await RunAsync(output, ["build", "--nologo", "-m:1", "-nr:false"], cancellationToken);
+        await RunAsync(output, ["build", "--nologo", "-m:1", "-nr:false", .. properties], cancellationToken);
     }
 
     /// <summary>

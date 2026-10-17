@@ -1,9 +1,10 @@
 # Assimalign.Cohesion.Database.Documents.Language
 
-This package parses the Documents engine's executable OQL surface into typed statement and
+This package parses the Documents engine's executable SQL++ profile, retaining the OQL name, into typed statement and
 expression trees. It provides `OqlLanguageProfile`, stable `OqlClauses` names, `OqlQueryParser`,
 `OqlQueryStatement`,
-`OqlSelectExpression`, `OqlCreateIndexExpression`, `OqlDropIndexExpression`, and expression nodes
+`OqlSelectExpression`, `OqlInsertExpression`, `OqlMetaExpression`, `OqlObjectExpression`, `OqlCreateCollectionExpression`, `OqlDropCollectionExpression`,
+`OqlCreateIndexExpression`, `OqlDropIndexExpression`, and expression nodes
 for projection, filtering, grouping, aggregates, ordering, nested properties, and array access.
 
 ```csharp
@@ -17,10 +18,15 @@ var query = statement.OqlExpression;
 
 The package references only the shared `Assimalign.Cohesion.Database.Language` package. The
 Documents engine supplies catalog binding, planning, and execution. Queries and index DDL address
-one collection in the session's database. `CREATE INDEX` and `DROP INDEX` use the same
-parse-plan-execute path as `SELECT`; document data mutations use the existing collection API.
-`DEFINE`, `ELEMENT`, `FLATTEN`, and subqueries are reserved but unsupported and produce
-`COHDBL001`.
+one collection in the session's database. `CREATE COLLECTION [IF NOT EXISTS]`,
+`DROP COLLECTION [IF EXISTS]`, `CREATE INDEX`, and `DROP INDEX` use the same
+parse-plan-execute path as `SELECT`. `INSERT INTO ... (KEY, VALUE) VALUES` and INSERT SELECT
+create externally keyed documents. `META([alias]).id` and `.version` expose stored identities
+and versions independently of JSON content. Collection APIs retain replacement and delete operations.
+`DEFINE` is recognized statement-initially, and `ELEMENT` / `FLATTEN` in call position, to
+produce `COHDBL001`; all three remain usable field names. Subqueries remain unsupported.
+MISSING has its own AST node, distinct from NULL, and `IS [NOT] MISSING` / `IS [NOT] VALUED`
+are executable presence predicates. NIL remains a NULL synonym.
 
 See [DESIGN.md](DESIGN.md) for the supported-clause matrix, statement/expression grammar,
 diagnostics, scope restrictions, and extension rules. Co-located Shouldly tests provide the

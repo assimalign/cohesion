@@ -21,8 +21,8 @@ internal sealed partial class SqlPlanner
         var projections = InsertSourceProjections(plan);
         if (projections.Count != targetOrdinals.Count)
         {
-            throw new DatabaseException(
-                $"INSERT SELECT has {projections.Count} source columns but {targetOrdinals.Count} target columns.");
+            throw new SqlPlanningException("COHSQLE013",
+                $"INSERT SELECT has {projections.Count} source columns but {targetOrdinals.Count} target columns.", source.Location);
         }
         for (int i = 0; i < projections.Count; i++)
         {
@@ -30,8 +30,8 @@ internal sealed partial class SqlPlanner
             var sourceType = projections[i].Type;
             if (!CanAssignInsertType(sourceType, target.Type.Type))
             {
-                throw new DatabaseException(
-                    $"INSERT SELECT source column {i + 1} of type {sourceType} is incompatible with target column '{target.Name}' of type {target.Type.Type}.");
+                throw new SqlPlanningException("COHSQLE013",
+                    $"INSERT SELECT source column {i + 1} of type {sourceType} is incompatible with target column '{target.Name}' of type {target.Type.Type}.", source.Location);
             }
         }
         return new SqlInsertSelectPlan(table, targetOrdinals, plan);
@@ -43,18 +43,18 @@ internal sealed partial class SqlPlanner
         var (projections, columns, bindings) = plan switch
         {
             SqlSubqueryPlan subquery => (InsertSourceProjections(subquery.Input),
-                (IReadOnlyList<SqlCatalogColumn>?)null, (IReadOnlyList<SqlTableBinding>?)null),
+                (IReadOnlyList<SqlCatalogColumn>?)null, (IReadOnlyList<SqlRelationBinding>?)null),
             SqlSelectPlan select => (select.Projections, select.Table.Columns, null),
             SqlJoinPlan join => (join.Projections, join.Columns, join.Bindings),
             SqlSystemViewPlan view => (view.Projections, view.View.Columns, null),
             SqlGroupPlan group => (group.Projections, group.SourceColumns, group.Bindings),
-            _ => throw new DatabaseException("INSERT SELECT requires a query source."),
+            _ => throw new SqlPlanningException("COHSQLE013", "INSERT SELECT requires a query source."),
         };
         if (columns is null)
         {
             return projections;
         }
-        var evaluator = new SqlExpressionEvaluator(columns, _parameters, bindings, defaultCollation: _catalog.DefaultCollation);
+        var evaluator = new SqlExpressionEvaluator(columns, _parameters, bindings, defaultCollation: _catalog.DefaultCollation, functions: _functions, cancellationToken: _cancellationToken);
         return projections.Select(projection => projection.Type == DatabaseType.Null && projection.Expression is not null
             ? projection with { Type = GroupExpressionType(projection.Expression, columns, evaluator) }
             : projection).ToArray();
@@ -67,7 +67,7 @@ internal sealed partial class SqlPlanner
     /// </summary>
     private static bool CanAssignInsertType(DatabaseType source, DatabaseType target)
     {
-        if (source == DatabaseType.Null || source == target || target is DatabaseType.String or DatabaseType.Json)
+        if (source == DatabaseType.Null || source == target || target is DatabaseType.String or DatabaseType.Character or DatabaseType.Json)
         {
             return true;
         }
@@ -76,14 +76,14 @@ internal sealed partial class SqlPlanner
 
         return target switch
         {
-            DatabaseType.Boolean => IsNumber(source) || source is DatabaseType.String or DatabaseType.Json,
+            DatabaseType.Boolean => IsNumber(source) || source is DatabaseType.String or DatabaseType.Character or DatabaseType.Json,
             DatabaseType.Int8 or DatabaseType.Int16 or DatabaseType.Int32 or DatabaseType.Int64
                 or DatabaseType.Float32 or DatabaseType.Float64 or DatabaseType.Decimal
-                => IsNumber(source) || source is DatabaseType.Boolean or DatabaseType.String or DatabaseType.Json,
+                => IsNumber(source) || source is DatabaseType.Boolean or DatabaseType.String or DatabaseType.Character or DatabaseType.Json,
             DatabaseType.Binary or DatabaseType.JsonBinary => source is DatabaseType.Binary or DatabaseType.JsonBinary,
-            DatabaseType.Date => source is DatabaseType.String or DatabaseType.Json or DatabaseType.DateTime,
+            DatabaseType.Date => source is DatabaseType.String or DatabaseType.Character or DatabaseType.Json or DatabaseType.DateTime,
             DatabaseType.Time or DatabaseType.DateTime or DatabaseType.DateTimeOffset or DatabaseType.TimeSpan or DatabaseType.Guid
-                => source is DatabaseType.String or DatabaseType.Json,
+                => source is DatabaseType.String or DatabaseType.Character or DatabaseType.Json,
             _ => false,
         };
     }

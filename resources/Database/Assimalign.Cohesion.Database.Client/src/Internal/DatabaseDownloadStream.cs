@@ -13,7 +13,7 @@ namespace Assimalign.Cohesion.Database.Client.Internal;
 internal sealed class DatabaseDownloadStream : Stream
 {
     private const int chunkSize = 64 * 1024;
-    private readonly IDatabaseConnection _connection;
+    private readonly DatabaseConnection _connection;
     private readonly bool _ownsConnection;
     private readonly CancellationTokenSource _operation;
     private readonly CancellationToken _cancellationToken;
@@ -33,7 +33,7 @@ internal sealed class DatabaseDownloadStream : Stream
     private int _released;
     private int _reading;
 
-    private DatabaseDownloadStream(IDatabaseConnection connection, CancellationToken cancellationToken, bool ownsConnection)
+    private DatabaseDownloadStream(DatabaseConnection connection, CancellationToken cancellationToken, bool ownsConnection)
     {
         _connection = connection;
         _ownsConnection = ownsConnection;
@@ -41,8 +41,8 @@ internal sealed class DatabaseDownloadStream : Stream
         _cancellationToken = _operation.Token;
     }
 
-    internal static async ValueTask<Stream> CreateAsync(IDatabaseConnection connection,
-        IDatabaseStreamingExchange exchange, CancellationToken cancellationToken, bool ownsConnection = false)
+    internal static async ValueTask<Stream> CreateAsync(DatabaseConnection connection,
+        DatabaseStreamingExchange exchange, CancellationToken cancellationToken, bool ownsConnection = false)
     {
         try
         {
@@ -207,7 +207,7 @@ internal sealed class DatabaseDownloadStream : Stream
         }
     }
 
-    private async Task RunAsync(IDatabaseStreamingExchange exchange)
+    private async Task RunAsync(DatabaseStreamingExchange exchange)
     {
         var operation = new StreamingExchange(this, exchange);
         try
@@ -223,9 +223,11 @@ internal sealed class DatabaseDownloadStream : Stream
                 {
                     await ReleaseConnectionAsync().ConfigureAwait(false);
                 }
-                catch (Exception)
+                catch (Exception releaseFailure)
                 {
-                    // The diagnostic remains the exchange failure if returning its broken lease fails.
+                    // The diagnostic remains the exchange failure if returning its broken lease fails;
+                    // the event source keeps the release failure visible.
+                    DatabaseClientEventSource.Log.DownloadReleaseFailed(_connection, releaseFailure);
                 }
             }
             Volatile.Write(ref _failure, ExceptionDispatchInfo.Capture(exception));
@@ -272,27 +274,29 @@ internal sealed class DatabaseDownloadStream : Stream
         _cancellationToken.ThrowIfCancellationRequested();
     }
 
-    private sealed class StreamingExchange : IDatabaseProtocolExchange<bool>
+    // The materialized exchange that carries a streaming one: the connection's exchange lock and
+    // health handling cover the whole transfer. It never certifies a failed response complete.
+    private sealed class StreamingExchange : DatabaseProtocolExchange<bool>
     {
         private readonly DatabaseDownloadStream _owner;
-        private readonly IDatabaseStreamingExchange _exchange;
+        private readonly DatabaseStreamingExchange _exchange;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="StreamingExchange"/> class.
         /// </summary>
         /// <param name="owner">The download stream that receives the exchange's content.</param>
         /// <param name="exchange">The streaming exchange to run on the leased connection.</param>
-        public StreamingExchange(DatabaseDownloadStream owner, IDatabaseStreamingExchange exchange)
+        public StreamingExchange(DatabaseDownloadStream owner, DatabaseStreamingExchange exchange)
+            : base(exchange.Family)
         {
             _owner = owner;
             _exchange = exchange;
         }
 
-        public ProtocolMessageFamily Family => _exchange.Family;
         internal bool Entered { get; private set; }
 
-        public async ValueTask<bool> ExecuteAsync(IProtocolFrameReader reader, IProtocolFrameWriter writer,
-            CancellationToken cancellationToken = default)
+        protected override async ValueTask<bool> ExecuteCoreAsync(ProtocolFrameReader reader, ProtocolFrameWriter writer,
+            CancellationToken cancellationToken)
         {
             Entered = true;
             using CancellationTokenRegistration registration = cancellationToken.UnsafeRegister(

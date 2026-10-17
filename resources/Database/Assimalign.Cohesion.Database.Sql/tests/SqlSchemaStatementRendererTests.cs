@@ -5,12 +5,40 @@ using Xunit;
 
 using Assimalign.Cohesion.Database.Sql.Schema;
 using Assimalign.Cohesion.Database.Sql.Internal;
+using Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public class SqlSchemaStatementRendererTests
 {
+    [Fact(DisplayName = "Cohesion Test [Sql] - Schema statements: every storage type renders and resolves its full modifiers")]
+    public void CreateTable_EveryStorageType_ShouldRoundTripResolvedType()
+    {
+        // Arrange
+        foreach (var type in Enum.GetValues<DatabaseType>())
+        {
+            if (type == DatabaseType.Null) { continue; }
+            int? length = type is DatabaseType.Character or DatabaseType.String or DatabaseType.Binary ? 20 : null;
+            int? precision = type == DatabaseType.Decimal ? 12 : null;
+            int? scale = type == DatabaseType.Decimal ? 3 : null;
+            var table = new CompiledSchemaTable("types", "Row",
+                [new CompiledSchemaColumn("value", type, true, length, precision, scale)], null, [], []);
+
+            // Act
+            string sql = SqlSchemaStatementRenderer.CreateTable(table);
+            var statement = new SqlQueryParser().Parse(sql);
+
+            // Assert
+            statement.Diagnostics.ShouldBeEmpty(sql);
+            var resolved = statement.Expression.ShouldBeOfType<SqlCreateTableExpression>().Columns[0].ResolvedType.ShouldNotBeNull();
+            resolved.Type.ShouldBe(type);
+            resolved.MaxLength.ShouldBe(length);
+            resolved.Precision.ShouldBe(precision);
+            resolved.Scale.ShouldBe(scale);
+        }
+    }
+
     [Fact(DisplayName = "Cohesion Test [Sql] - Schema statements: CREATE TABLE is deterministic and executable")]
     public void CreateTable_CompiledTable_ShouldRenderDeterministicRequestText()
     {
@@ -93,12 +121,12 @@ public class SqlSchemaStatementRendererTests
     [Fact(DisplayName = "Cohesion Test [Sql] - Schema statements: unsupported schema shapes fail explicitly")]
     public void Render_UnsupportedShape_ShouldFailPrecisely()
     {
-        // Arrange
+        // Arrange: a column whose declared type is not a type name never reaches the statement.
         var customColumn = new CompiledSchemaColumn(
             "amount",
             DatabaseType.Decimal,
             IsNullable: false,
-            CustomType: "Currency");
+            CustomType: "Currency); DROP TABLE dbo.ledger; --");
         var customTable = new CompiledSchemaTable(
             "ledger",
             "Example.Ledger",
@@ -109,9 +137,32 @@ public class SqlSchemaStatementRendererTests
 
         // Act / Assert
         Should.Throw<DatabaseException>(() => SqlSchemaStatementRenderer.CreateTable(customTable))
-            .Message.ShouldContain("custom type");
+            .Message.ShouldContain("which is not a SQL type name");
         Should.Throw<DatabaseException>(() => SqlSchemaStatementRenderer.DropTable("not\"safe"))
             .Message.ShouldContain("embedded double quote");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sql] - Schema statements: a column declared with a domain or a built-in type name renders that name (E3)")]
+    public void Render_ColumnOfDeclaredType_ShouldRenderTheName()
+    {
+        // Arrange
+        var table = new CompiledSchemaTable(
+            "ledger",
+            "Example.Ledger",
+            [
+                new CompiledSchemaColumn("id", DatabaseType.Int64, IsNullable: false),
+                new CompiledSchemaColumn("amount", DatabaseType.Decimal, IsNullable: true, Precision: 18, Scale: 2, CustomType: "Currency"),
+                new CompiledSchemaColumn("code", DatabaseType.String, IsNullable: true, CustomType: "VARCHAR( 16 )"),
+            ],
+            new CompiledSchemaKey("pk_ledger", ["id"]),
+            [],
+            []);
+
+        // Act
+        string statement = SqlSchemaStatementRenderer.CreateTable(table);
+
+        // Assert
+        statement.ShouldBe("CREATE TABLE IF NOT EXISTS dbo.ledger (id BIGINT PRIMARY KEY NOT NULL, amount Currency NULL, code VARCHAR(16) NULL);");
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Migration scripts: portable operations render in plan order")]
@@ -214,7 +265,7 @@ public class SqlSchemaStatementRendererTests
 
         // Act / Assert
         Should.Throw<SqlSchemaMigrationException>(() => SqlMigrationScriptGenerator.Generate(plan))
-            .Message.ShouldContain("requires a default or backfill");
+            .Message.ShouldContain("requires a non-null literal default or a backfill");
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Migration scripts: compensation baseline must match source hash")]
@@ -224,14 +275,10 @@ public class SqlSchemaStatementRendererTests
         var current = new SqlCompiledSchema(
             SqlCompiledSchema.CurrentFormat,
             "orders",
-            EngineModel.Sql,
             allowsDestructiveChanges: false,
             Array.Empty<CompiledSchemaType>(),
             Array.Empty<CompiledSchemaTable>(),
-            Array.Empty<CompiledSchemaFunction>(),
-            Array.Empty<CompiledSchemaTrigger>(),
-            Array.Empty<CompiledSchemaPrincipal>(),
-            Array.Empty<CompiledSchemaExtension>());
+            Array.Empty<CompiledSchemaPrincipal>());
         var plan = new SqlSchemaMigrationPlan("not-the-current-hash", "target-hash", []);
 
         // Act / Assert

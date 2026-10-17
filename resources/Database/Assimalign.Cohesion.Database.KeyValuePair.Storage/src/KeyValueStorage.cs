@@ -22,10 +22,7 @@ using Assimalign.Cohesion.Database.Storage;
 public sealed class KeyValueStorage : Assimalign.Cohesion.Database.Storage.Storage
 {
     private KeyValueStorage(StorageStream data, StorageStream journal, StorageStream backup)
-        : base(data, journal, backup) { }
-
-    /// <inheritdoc />
-    public override StorageModel Model => StorageModel.KeyValue;
+        : base(StorageModel.KeyValue, data, journal, backup) { }
 
     /// <summary>
     /// Creates a new key-value storage file set backed by the given streams.
@@ -136,7 +133,7 @@ public sealed class KeyValueStorage : Assimalign.Cohesion.Database.Storage.Stora
     /// <value>The journal used by this storage instance; ownership remains with the storage.</value>
     /// <exception cref="InvalidOperationException">The storage has not been initialized.</exception>
     /// <remarks>Do not dispose the journal separately from its owning storage.</remarks>
-    public IStorageJournal WriteAheadJournal => WriteAheadLog;
+    public StorageJournal WriteAheadJournal => WriteAheadLog;
 
     /// <summary>
     /// Inserts an entry record into the specified key space's record chain within
@@ -147,7 +144,7 @@ public sealed class KeyValueStorage : Assimalign.Cohesion.Database.Storage.Stora
     /// <param name="ownerId">The owning key space's object id; zero is the shared space.</param>
     /// <param name="entry">The serialized entry bytes.</param>
     /// <returns>The page and slot location where the entry was written.</returns>
-    public (PageId PageId, int SlotIndex) InsertEntry(IStorageTransaction transaction, ulong ownerId, ReadOnlySpan<byte> entry)
+    public (PageId PageId, int SlotIndex) InsertEntry(StorageTransaction transaction, ulong ownerId, ReadOnlySpan<byte> entry)
     {
         return InsertRecord(transaction, ownerId, entry);
     }
@@ -159,7 +156,7 @@ public sealed class KeyValueStorage : Assimalign.Cohesion.Database.Storage.Stora
     /// <param name="transaction">The owning storage transaction.</param>
     /// <param name="entry">The serialized entry bytes.</param>
     /// <returns>The page and slot location where the entry was written.</returns>
-    public (PageId PageId, int SlotIndex) InsertEntry(IStorageTransaction transaction, ReadOnlySpan<byte> entry)
+    public (PageId PageId, int SlotIndex) InsertEntry(StorageTransaction transaction, ReadOnlySpan<byte> entry)
     {
         return InsertRecord(transaction, entry);
     }
@@ -183,7 +180,7 @@ public sealed class KeyValueStorage : Assimalign.Cohesion.Database.Storage.Stora
     /// <param name="pageId">The page containing the entry.</param>
     /// <param name="slotIndex">The slot index within the page.</param>
     /// <param name="entry">The new entry bytes.</param>
-    public void UpdateEntry(IStorageTransaction transaction, PageId pageId, int slotIndex, ReadOnlySpan<byte> entry)
+    public void UpdateEntry(StorageTransaction transaction, PageId pageId, int slotIndex, ReadOnlySpan<byte> entry)
     {
         UpdateRecord(transaction, pageId, slotIndex, entry);
     }
@@ -195,7 +192,7 @@ public sealed class KeyValueStorage : Assimalign.Cohesion.Database.Storage.Stora
     /// <param name="transaction">The owning storage transaction.</param>
     /// <param name="pageId">The page containing the entry.</param>
     /// <param name="slotIndex">The slot index within the page.</param>
-    public void DeleteEntry(IStorageTransaction transaction, PageId pageId, int slotIndex)
+    public void DeleteEntry(StorageTransaction transaction, PageId pageId, int slotIndex)
     {
         DeleteRecord(transaction, pageId, slotIndex);
     }

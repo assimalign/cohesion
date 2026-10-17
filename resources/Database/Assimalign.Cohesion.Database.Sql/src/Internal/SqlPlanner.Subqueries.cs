@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.CompilerServices;
 
 using Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Types;
@@ -19,11 +20,22 @@ internal sealed partial class SqlPlanner
     private readonly Dictionary<SqlExpression, DatabaseType> _subqueryTypes = new();
 
     /// <summary>
+    /// The slot every subquery bound while planning this statement fills, keyed by its source node
+    /// and numbered from zero across every nesting level: the expression binder turns each such node
+    /// into a read of its slot (<see cref="SqlBoundSubquery"/>, <see cref="SqlBoundInSubquery"/>).
+    /// </summary>
+    private readonly Dictionary<SqlExpression, SqlSubquerySlot> _subquerySlots = new();
+
+    /// <summary>The number of subquery slots this statement has numbered so far.</summary>
+    private int _subquerySlotCount;
+
+    /// <summary>
     /// Binds each uncorrelated child independently, then binds the ordinary
     /// relational operators over typed slots. Scalar evaluation never runs a query.
     /// </summary>
     private SqlPlan PlanSubqueries(SqlSelectExpression select)
     {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
         var queries = new List<SqlSubqueryBinding>();
         foreach (var expression in SubquerySources(select))
         {
@@ -48,7 +60,7 @@ internal sealed partial class SqlPlanner
         {
             if (_subqueryDepth >= 32)
             {
-                throw new SqlUnsupportedQueryException("Subquery nesting exceeds the supported maximum depth of 32.");
+                throw new SqlUnsupportedQueryException("Subquery nesting exceeds the supported maximum depth of 32.", location: source.Location);
             }
             SqlPlan child;
             _subqueryDepth++;
@@ -58,7 +70,7 @@ internal sealed partial class SqlPlanner
             }
             catch (DatabaseException exception) when (exception.Message.StartsWith("Unknown column '", StringComparison.Ordinal))
             {
-                throw new SqlUnsupportedQueryException($"Correlated subqueries are not supported; a subquery column must resolve in its local FROM/JOIN scope. {exception.Message}", exception);
+                throw new SqlUnsupportedQueryException($"Correlated subqueries are not supported; a subquery column must resolve in its local FROM/JOIN scope. {exception.Message}", exception, source.Location);
             }
             finally
             {
@@ -67,13 +79,14 @@ internal sealed partial class SqlPlanner
             var projections = SubqueryProjections(child);
             if (kind != SqlSubqueryKind.Exists && projections.Count != 1)
             {
-                throw new DatabaseException($"{(kind == SqlSubqueryKind.Scalar ? "Scalar" : "IN")} subquery requires exactly one output column; found {projections.Count}.");
+                throw new SqlPlanningException("COHSQLE013", $"{(kind == SqlSubqueryKind.Scalar ? "Scalar" : "IN")} subquery requires exactly one output column; found {projections.Count}.", source.Location);
             }
             var type = kind == SqlSubqueryKind.Exists ? DatabaseType.Boolean : projections[0].Type;
+            var collation = kind == SqlSubqueryKind.Exists ? _catalog.DefaultCollation : SubqueryCollation(child);
+            var slot = new SqlSubquerySlot(_subquerySlotCount++, kind, collation, type);
             _subqueryTypes[source] = type;
-            queries.Add(new SqlSubqueryBinding(child, source, type,
-                kind == SqlSubqueryKind.Exists ? _catalog.DefaultCollation : SubqueryCollation(child),
-                kind, negated));
+            _subquerySlots[source] = slot;
+            queries.Add(new SqlSubqueryBinding(child, slot.Id, type, collation, kind, negated));
         }
     }
 
@@ -98,11 +111,11 @@ internal sealed partial class SqlPlanner
             {
                 yield return column.Expression;
             }
-            foreach (var join in select.Joins)
+            if (select.From.Count > 1 || select.From.Count == 1 && select.From[0].Joins.Count > 0)
             {
-                if (join.Condition is not null)
+                foreach (var condition in JoinConditions(select))
                 {
-                    yield return join.Condition;
+                    yield return condition;
                 }
             }
             foreach (var key in select.GroupBy)
@@ -133,6 +146,8 @@ internal sealed partial class SqlPlanner
 
         static IEnumerable<SqlExpression> Walk(SqlExpression expression)
         {
+            // Each level is a nested iterator, so the stack grows with the tree (#1151).
+            RuntimeHelpers.EnsureSufficientExecutionStack();
             yield return expression;
 
             // Children treats a subquery as opaque, which is what keeps a child scope's
@@ -147,6 +162,22 @@ internal sealed partial class SqlPlanner
         }
     }
 
+    // Keep the N-input walk's loop state out of Roots' iterator object. A stored-only
+    // SELECT never creates this iterator and retains its original allocation footprint.
+    private static IEnumerable<SqlExpression> JoinConditions(SqlSelectExpression select)
+    {
+        foreach (var item in select.From)
+        {
+            foreach (var join in item.Joins)
+            {
+                if (join.Condition is not null)
+                {
+                    yield return join.Condition;
+                }
+            }
+        }
+    }
+
     /// <summary>Reads output metadata without executing a child query, including empty results.</summary>
     private static IReadOnlyList<SqlProjection> SubqueryProjections(SqlPlan plan) => plan switch
     {
@@ -155,7 +186,7 @@ internal sealed partial class SqlPlanner
         SqlJoinPlan join => join.Projections,
         SqlGroupPlan group => group.Projections,
         SqlSystemViewPlan view => view.Projections,
-        _ => throw new DatabaseException("A subquery requires a SELECT result."),
+        _ => throw new SqlPlanningException("COHSQLE013", "A subquery requires a SELECT result."),
     };
 
     /// <summary>Preserves the child column's comparison collation across materialization.</summary>
@@ -171,11 +202,11 @@ internal sealed partial class SqlPlanner
             SqlJoinPlan join => join.Columns,
             SqlGroupPlan group => group.SourceColumns,
             SqlSystemViewPlan view => view.View.Columns,
-            _ => throw new DatabaseException("A subquery requires a SELECT result."),
+            _ => throw new SqlPlanningException("COHSQLE013", "A subquery requires a SELECT result."),
         };
         var bindings = plan switch { SqlJoinPlan join => join.Bindings, SqlGroupPlan group => group.Bindings, _ => null };
         var projection = SubqueryProjections(plan)[0];
-        var evaluator = new SqlExpressionEvaluator(columns, _parameters, bindings, defaultCollation: _catalog.DefaultCollation);
+        var evaluator = new SqlExpressionEvaluator(columns, _parameters, bindings, defaultCollation: _catalog.DefaultCollation, functions: _functions, cancellationToken: _cancellationToken);
         return projection.ColumnOrdinal is int ordinal ? evaluator.ResolveColumnCollation(ordinal)
             : evaluator.ResolveCollation(projection.Expression);
     }
