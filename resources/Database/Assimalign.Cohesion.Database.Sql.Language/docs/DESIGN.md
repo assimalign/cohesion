@@ -442,8 +442,8 @@ results, with an object-specific diagnostic subject. SQL0005 now covers malforme
 modifiers on every type spelling, including a domain given arguments. SQL0003 remains for
 surrounding syntax errors. SqlTypeNames.TryResolve returns false for an unknown name or invalid
 modifiers; name-only resolution still distinguishes known built-ins. The shared splitter preserves
-quoted identifiers and reads at most two unsigned Int32 arguments; typed schemas retain their
-identifier-only supported spelling and recognize interval qualifiers for the unsupported-modifier
+quoted identifiers and reads at most two unsigned Int32 arguments; typed schemas admit
+identifiers and the closed built-in multi-word names, and recognize interval qualifiers for the unsupported-modifier
 diagnostic. DIALECT.md records the exact ranges and unbounded defaults.
 
 `NormalizeScale` is the shared decimal default: an explicit precision with no scale means zero;

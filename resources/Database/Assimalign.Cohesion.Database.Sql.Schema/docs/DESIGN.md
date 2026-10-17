@@ -302,7 +302,7 @@ validated when a SqlCompiledSchema is constructed or deserialized, closing the r
 
 Precision is 1..28, scale 0..precision (an omitted scale means zero with an explicit precision),
 and explicit string/binary lengths are 1..10485760; omitted bounds remain unbounded. Domains take
-no modifiers at use sites. Supported typed names remain identifiers; interval field qualifiers are
+no modifiers at use sites. Typed names are identifiers or closed built-in multi-word names; interval field qualifiers are
 also recognized solely to report COHDBL001. Integer arguments
 now use the parser's Int32 rule rather than the previous nine-digit shape check. DIALECT.md is the
 range contract. C# int/string parameters and the raw compiled
