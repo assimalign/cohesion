@@ -32,6 +32,7 @@ internal sealed class DocumentExpressionEvaluator
             return expression switch
             {
                 OqlLiteralExpression literal => Normalize(literal.Value),
+                OqlMissingExpression => DocumentMissing.Instance,
                 OqlParameterExpression parameter => Parameter(parameter.Name),
                 OqlStarExpression => Normalize(document),
                 OqlPathExpression path => ReadPath(path, document),
@@ -105,11 +106,11 @@ internal sealed class DocumentExpressionEvaluator
             var segment = path.Segments[i];
             if (segment.Name is string name)
             {
-                if (current.ValueKind != JsonValueKind.Object || !current.TryGetProperty(name, out current)) { return null; }
+                if (current.ValueKind != JsonValueKind.Object || !current.TryGetProperty(name, out current)) { return DocumentMissing.Instance; }
             }
             else if (segment.Index is int index)
             {
-                if (current.ValueKind != JsonValueKind.Array || index < 0 || index >= current.GetArrayLength()) { return null; }
+                if (current.ValueKind != JsonValueKind.Array || index < 0 || index >= current.GetArrayLength()) { return DocumentMissing.Instance; }
                 current = current[index];
             }
         }
@@ -131,9 +132,11 @@ internal sealed class DocumentExpressionEvaluator
     private static object? NormalizeCore(object? value) => value switch
     {
         null => null,
+        DocumentMissing => value,
         JsonElement json => json.ValueKind switch
         {
-            JsonValueKind.Null or JsonValueKind.Undefined => null,
+            JsonValueKind.Null => null,
+            JsonValueKind.Undefined => DocumentMissing.Instance,
             JsonValueKind.True => true,
             JsonValueKind.False => false,
             JsonValueKind.String => json.GetString(),
@@ -154,8 +157,20 @@ internal sealed class DocumentExpressionEvaluator
         if (expression.Operator == "AND" && left is false) { return false; }
         if (expression.Operator == "OR" && left is true) { return true; }
         var right = Evaluate(expression.Right, document, group);
-        if (expression.Operator == "AND") { return left is true && right is true ? true : right is false ? false : null; }
-        if (expression.Operator == "OR") { return left is true || right is true ? true : left is false && right is false ? false : null; }
+        if (expression.Operator == "AND")
+        {
+            if (right is false) { return false; }
+            if (left is DocumentMissing || right is DocumentMissing) { return DocumentMissing.Instance; }
+            return left is true && right is true ? true : null;
+        }
+        if (expression.Operator == "OR")
+        {
+            if (right is true) { return true; }
+            if (left is null || right is null) { return null; }
+            if (left is DocumentMissing || right is DocumentMissing) { return DocumentMissing.Instance; }
+            return left is false && right is false ? false : null;
+        }
+        if (left is DocumentMissing || right is DocumentMissing) { return DocumentMissing.Instance; }
         if (left is null || right is null) { return null; }
         return expression.Operator switch
         {
@@ -176,6 +191,11 @@ internal sealed class DocumentExpressionEvaluator
 
     private static object? Unary(string operation, object? value) => operation switch
     {
+        "IS MISSING" => value is DocumentMissing,
+        "IS NOT MISSING" => value is not DocumentMissing,
+        "IS VALUED" => value is not null and not DocumentMissing,
+        "IS NOT VALUED" => value is null or DocumentMissing,
+        _ when value is DocumentMissing => DocumentMissing.Instance,
         "IS NULL" => value is null,
         "IS NOT NULL" => value is not null,
         "NOT" => value is bool boolean ? !boolean : null,
@@ -188,7 +208,7 @@ internal sealed class DocumentExpressionEvaluator
     {
         if (call.Arguments.Count != 1) { throw new DocumentPlanningException("COHDOC001", $"OQL aggregate '{call.Name}' requires one argument."); }
         if (call.Name == "COUNT" && call.Arguments[0] is OqlStarExpression) { return (decimal)group.Count; }
-        var values = group.Select(document => Evaluate(call.Arguments[0], document)).Where(value => value is not null).ToArray();
+        var values = group.Select(document => Evaluate(call.Arguments[0], document)).Where(value => value is not null and not DocumentMissing).ToArray();
         if (call.Name == "COUNT") { return (decimal)values.Length; }
         if (values.Length == 0) { return null; }
         return call.Name switch
@@ -225,6 +245,7 @@ internal sealed class DocumentExpressionEvaluator
 
     private static int Kind(object? value) => value switch
     {
+        DocumentMissing => -1,
         null => 0,
         bool => 1,
         decimal => 2,

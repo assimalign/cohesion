@@ -92,6 +92,7 @@ public sealed class DocumentClientProtocolTests
     [Theory(DisplayName = "Cohesion Test [Documents.Client] - Malformed responses invalidate the pooled session")]
     [InlineData("row-before-header")]
     [InlineData("row-width")]
+    [InlineData("duplicate-member")]
     [InlineData("count")]
     [InlineData("query-affected-count")]
     [InlineData("duplicate-header")]
@@ -133,12 +134,13 @@ public sealed class DocumentClientProtocolTests
             if (scenario != "row-before-header") { await WriteAsync(channel, 67, header, token); }
             switch (scenario)
             {
-                case "row-before-header": await WriteAsync(channel, 68, "[1]"u8.ToArray(), token); break;
-                case "row-width": await WriteAsync(channel, 68, "[1,2]"u8.ToArray(), token); break;
+                case "row-before-header": await WriteAsync(channel, 65, "{\"n\":1}"u8.ToArray(), token); break;
+                case "row-width": await WriteAsync(channel, 65, "{\"n\":1,\"extra\":2}"u8.ToArray(), token); break;
+                case "duplicate-member": await WriteAsync(channel, 65, "{\"n\":null,\"n\":2}"u8.ToArray(), token); break;
                 case "count": await WriteAsync(channel, 66, new DocumentProtocolCompleteMessage(1, -1).Encode(), token); break;
                 case "query-affected-count": await WriteAsync(channel, 66, new DocumentProtocolCompleteMessage(0, 1).Encode(), token); break;
                 case "duplicate-header": await WriteAsync(channel, 67, header, token); break;
-                case "invalid-json": await WriteAsync(channel, 68, "{"u8.ToArray(), token); break;
+                case "invalid-json": await WriteAsync(channel, 65, "{"u8.ToArray(), token); break;
             }
             // Keep the peer alive until the client has discarded it.
             try { (await channel.Reader.ReadFrameAsync(token)).ShouldBeNull(); }

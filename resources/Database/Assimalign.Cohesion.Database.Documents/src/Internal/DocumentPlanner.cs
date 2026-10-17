@@ -299,7 +299,7 @@ internal sealed class DocumentPlanner
 
     private static bool IsConstant(OqlExpression expression) => expression switch
     {
-        OqlLiteralExpression or OqlParameterExpression => true,
+        OqlLiteralExpression or OqlMissingExpression or OqlParameterExpression => true,
         OqlUnaryExpression unary => IsConstant(unary.Operand),
         OqlBinaryExpression binary => IsConstant(binary.Left) && IsConstant(binary.Right),
         _ => false,
@@ -317,7 +317,7 @@ internal sealed class DocumentPlanner
     {
         switch (expression)
         {
-            case OqlLiteralExpression or OqlParameterExpression or OqlPathExpression:
+            case OqlLiteralExpression or OqlMissingExpression or OqlParameterExpression or OqlPathExpression:
                 return;
             case OqlStarExpression when allowStar:
                 return;
@@ -325,7 +325,8 @@ internal sealed class DocumentPlanner
                 Validate(binary.Left, allowAggregate);
                 Validate(binary.Right, allowAggregate);
                 return;
-            case OqlUnaryExpression unary when unary.Operator is "+" or "-" or "NOT" or "IS NULL" or "IS NOT NULL":
+            case OqlUnaryExpression unary when unary.Operator is "+" or "-" or "NOT" or "IS NULL" or "IS NOT NULL" or
+                "IS MISSING" or "IS NOT MISSING" or "IS VALUED" or "IS NOT VALUED":
                 Validate(unary.Operand, allowAggregate);
                 return;
             case OqlCallExpression call when allowAggregate && OqlLanguageProfile.Instance.Functions.Contains(call.Name, StringComparer.OrdinalIgnoreCase):
@@ -339,7 +340,7 @@ internal sealed class DocumentPlanner
 
     private static void ValidateGrouped(OqlExpression expression, OqlSelectExpression query)
     {
-        if (expression is OqlCallExpression or OqlLiteralExpression or OqlParameterExpression) { return; }
+        if (expression is OqlCallExpression or OqlLiteralExpression or OqlMissingExpression or OqlParameterExpression) { return; }
         if (query.GroupBy.Any(key => EquivalentExpression(key, expression, query.Alias))) { return; }
         if (expression is OqlBinaryExpression binary)
         {
@@ -355,6 +356,7 @@ internal sealed class DocumentPlanner
     {
         (OqlPathExpression a, OqlPathExpression b) => PathSegments(a, alias).SequenceEqual(PathSegments(b, alias)),
         (OqlLiteralExpression a, OqlLiteralExpression b) => DocumentExpressionEvaluator.Compare(a.Value, b.Value) == 0,
+        (OqlMissingExpression, OqlMissingExpression) => true,
         (OqlParameterExpression a, OqlParameterExpression b) => a.Name == b.Name,
         (OqlBinaryExpression a, OqlBinaryExpression b) => a.Operator == b.Operator &&
             EquivalentExpression(a.Left, b.Left, alias) && EquivalentExpression(a.Right, b.Right, alias),

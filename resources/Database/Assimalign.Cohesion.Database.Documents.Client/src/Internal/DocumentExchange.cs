@@ -35,6 +35,7 @@ internal sealed class DocumentExchange : DatabaseProtocolExchange<DocumentExchan
         await writer.FlushAsync(cancellationToken).ConfigureAwait(false);
         DocumentProtocolResultHeaderMessage? header = null;
         var columns = new List<DocumentColumn>();
+        var ordinals = new Dictionary<string, int>(StringComparer.Ordinal);
         var rows = new List<object?[]>();
         var documents = new List<JsonElement>();
         var collections = new List<string>();
@@ -53,11 +54,11 @@ internal sealed class DocumentExchange : DatabaseProtocolExchange<DocumentExchan
                     {
                         var column = header.Columns[index];
                         columns.Add(new(column.Name, index, (DatabaseType)column.Type));
+                        if (!ordinals.TryAdd(column.Name, index)) { throw new ProtocolException(ErrorMessages.RowWidthInvalid); }
                     }
                     break;
                 case (byte)DocumentProtocolMessageType.Document:
-                case (byte)DocumentProtocolMessageType.ResultRow:
-                    if (header is null || header.WholeDocuments != (frame.Type == (ProtocolMessageType)DocumentProtocolMessageType.Document))
+                    if (header is null)
                     {
                         throw new ProtocolException(ErrorMessages.ResultKindUnexpected);
                     }
@@ -72,12 +73,21 @@ internal sealed class DocumentExchange : DatabaseProtocolExchange<DocumentExchan
                         }
                         else
                         {
-                            if (json.RootElement.ValueKind != JsonValueKind.Array || json.RootElement.GetArrayLength() != columns.Count)
+                            if (json.RootElement.ValueKind != JsonValueKind.Object)
                             {
                                 throw new ProtocolException(ErrorMessages.RowWidthInvalid);
                             }
                             var values = new object?[columns.Count];
-                            for (int index = 0; index < values.Length; index++) { values[index] = DocumentJsonValues.Read(json.RootElement[index]); }
+                            Array.Fill(values, default(JsonElement));
+                            foreach (var property in json.RootElement.EnumerateObject())
+                            {
+                                if (!ordinals.TryGetValue(property.Name, out int ordinal) ||
+                                    values[ordinal] is not JsonElement { ValueKind: JsonValueKind.Undefined })
+                                {
+                                    throw new ProtocolException(ErrorMessages.RowWidthInvalid);
+                                }
+                                values[ordinal] = DocumentJsonValues.Read(property.Value);
+                            }
                             rows.Add(values);
                         }
                     }

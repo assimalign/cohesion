@@ -1,7 +1,7 @@
 # Documents client
 
 `Assimalign.Cohesion.Database.Documents.Client` is the concrete, NativeAOT-compatible client for
-`DocumentDatabaseServer`. It executes OQL, returns positional rows and whole JSON documents,
+`DocumentDatabaseServer`. It executes the OQL SQL++ profile, returns projection rows and whole JSON documents,
 reads catalogs, and manages collections and versioned documents. It ships as a NuGet-only
 package, outside the `App.Database` shared framework.
 

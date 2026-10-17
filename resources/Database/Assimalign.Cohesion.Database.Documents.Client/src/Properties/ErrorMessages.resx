@@ -17,4 +17,6 @@
   <data name="ResponseFrameUnexpected" xml:space="preserve"><value>Unexpected frame in the document exchange.</value></data>
   <data name="CompletionCountMismatch" xml:space="preserve"><value>The document completion count does not match its results.</value></data>
   <data name="CompletionUnexpected" xml:space="preserve"><value>Invalid completion for the document operation.</value></data>
+  <data name="RowBytesInvalid" xml:space="preserve"><value>The field is not JSON or a string.</value></data>
+  <data name="RowValueAbsent" xml:space="preserve"><value>The field is NULL or MISSING.</value></data>
 </root>

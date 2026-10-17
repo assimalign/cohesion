@@ -6,8 +6,8 @@ namespace Assimalign.Cohesion.Database.Documents.Language;
 /// Provides the lexical vocabulary and clause capabilities for the Object Query Language (OQL).
 /// </summary>
 /// <remarks>
-/// The query vocabulary is based on the ODMG OQL specification. <c>CREATE INDEX</c> and
-/// <c>DROP INDEX</c> are deliberate Cohesion extensions because ODMG specifies no index DDL.
+/// The OQL name is retained for the document model's executable SQL++ profile, following
+/// Couchbase SQL++ for Query, including distinct NULL and MISSING values.
 /// Collection DDL accepts the SQL++ <c>CREATE COLLECTION [IF NOT EXISTS]</c> and
 /// <c>DROP COLLECTION [IF EXISTS]</c> spellings. <c>IF</c> remains positional, not reserved.
 /// </remarks>
@@ -24,28 +24,21 @@ public static class OqlLanguageProfile
         // Logical
         "AND", "OR", "NOT",
         // Predicates
-        "IN", "EXISTS", "LIKE", "BETWEEN", "IS",
+        "IN", "EXISTS", "LIKE", "BETWEEN", "IS", "VALUED", "KNOWN", "UNKNOWN",
         // Quantifiers
         "FOR", "SOME", "ANY",
         // Literals / Constants
-        "NULL", "NIL", "UNDEFINED", "TRUE", "FALSE",
+        "NULL", "MISSING", "NIL", "UNDEFINED", "TRUE", "FALSE",
         // Collection constructors
-        "STRUCT", "LIST", "SET", "BAG", "ARRAY", "COLLECTION",
+        "SET", "ARRAY", "COLLECTION",
         // Object / Collection operations
-        "DEFINE", "ELEMENT", "FLATTEN",
         "FIRST", "LAST", "UNIQUE",
-        "LISTTOSET",
-        // Type
-        "TYPEOF",
     ];
 
     private static readonly string[] _functions =
     [
         // Aggregate
         "COUNT", "SUM", "AVG", "MIN", "MAX",
-        // Collection
-        "ELEMENT", "FLATTEN", "FIRST", "LAST",
-        "LISTTOSET", "UNIQUE",
     ];
 
     private static readonly string[] _clauses =

@@ -477,10 +477,9 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
                     new DocumentProtocolResultHeaderMessage(set.Columns.Select(column => (column.Name, (byte)column.Type)).ToArray(), wholeDocuments).Encode(), cancellationToken).ConfigureAwait(false);
                 await foreach (DatabaseRow row in set.GetRowsAsync(cancellationToken).ConfigureAwait(false))
                 {
-                    var values = new object?[row.FieldCount];
-                    for (int index = 0; index < values.Length; index++) { values[index] = row.GetValue(index); }
-                    await WriteResultFrameAsync(wholeDocuments ? DocumentProtocolMessageType.Document : DocumentProtocolMessageType.ResultRow,
-                        json.Result(values, wholeDocuments), cancellationToken).ConfigureAwait(false);
+                    await WriteResultFrameAsync(DocumentProtocolMessageType.Document,
+                        wholeDocuments ? json.Result([row.GetValue(0)], wholeDocument: true) : json.Projection(row, set.Columns),
+                        cancellationToken).ConfigureAwait(false);
                     count++;
                 }
             }

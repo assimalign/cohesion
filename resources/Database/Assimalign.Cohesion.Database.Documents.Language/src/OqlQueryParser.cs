@@ -352,7 +352,7 @@ public sealed partial class OqlQueryParser : QueryParser
             TokenType.RightParen or TokenType.RightBracket or TokenType.Parameter or
             TokenType.Integer or TokenType.Float or TokenType.String => true,
             TokenType.Keyword => index > 0 && _tokens[index - 1].Type == TokenType.Dot ||
-                token.Text.ToUpperInvariant() is "NULL" or "NIL" or "TRUE" or "FALSE" or "ASC" or "DESC",
+                token.Text.ToUpperInvariant() is "NULL" or "MISSING" or "NIL" or "TRUE" or "FALSE" or "VALUED" or "ASC" or "DESC",
             _ => false,
         };
     }

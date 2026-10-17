@@ -28,13 +28,9 @@ public class TokenLexerTests
     [InlineData("SELECT")]
     [InlineData("FROM")]
     [InlineData("WHERE")]
-    [InlineData("DEFINE")]
-    [InlineData("ELEMENT")]
-    [InlineData("FLATTEN")]
-    [InlineData("STRUCT")]
-    [InlineData("LIST")]
     [InlineData("SET")]
-    [InlineData("BAG")]
+    [InlineData("MISSING")]
+    [InlineData("VALUED")]
     public void MoveNext_OqlKeyword_ReturnsKeywordToken(string keyword)
     {
         var tokens = Tokenize(keyword);
@@ -89,6 +85,14 @@ public class TokenLexerTests
     [InlineData("_private")]
     [InlineData("col1")]
     [InlineData("Customer")]
+    [InlineData("DEFINE")]
+    [InlineData("ELEMENT")]
+    [InlineData("FLATTEN")]
+    [InlineData("STRUCT")]
+    [InlineData("LIST")]
+    [InlineData("BAG")]
+    [InlineData("LISTTOSET")]
+    [InlineData("TYPEOF")]
     public void MoveNext_Identifier_ReturnsIdentifierToken(string identifier)
     {
         var tokens = Tokenize(identifier);
@@ -413,7 +417,7 @@ public class TokenLexerTests
         var tokens = Tokenize("STRUCT(name: 'John', age: 30)");
 
         tokens.Count.ShouldBe(10);
-        tokens[0].Type.ShouldBe(TokenType.Keyword);   // STRUCT
+        tokens[0].Type.ShouldBe(TokenType.Identifier); // STRUCT is positional unsupported vocabulary
         tokens[1].Type.ShouldBe(TokenType.LeftParen);  // (
         tokens[2].Type.ShouldBe(TokenType.Identifier); // name
         tokens[3].Type.ShouldBe(TokenType.Colon);      // :
@@ -433,7 +437,7 @@ public class TokenLexerTests
 
         tokens.Count.ShouldBe(8);
         tokens[0].Type.ShouldBe(TokenType.Keyword);    // SELECT
-        tokens[1].Type.ShouldBe(TokenType.Keyword);    // FLATTEN (keyword takes precedence)
+        tokens[1].Type.ShouldBe(TokenType.Identifier); // FLATTEN is positional unsupported vocabulary
         tokens[2].Type.ShouldBe(TokenType.LeftParen);
         tokens[3].Type.ShouldBe(TokenType.Keyword);    // SELECT
         tokens[4].Type.ShouldBe(TokenType.Identifier); // addresses
@@ -477,7 +481,7 @@ public class TokenLexerTests
         // OQL: ELEMENT(SELECT salary FROM employees WHERE name = 'Alice')
         var tokens = Tokenize("ELEMENT(SELECT salary FROM employees WHERE name = 'Alice')");
 
-        tokens[0].Type.ShouldBe(TokenType.Keyword); // ELEMENT (keyword takes precedence)
+        tokens[0].Type.ShouldBe(TokenType.Identifier); // ELEMENT is positional unsupported vocabulary
         tokens[1].Type.ShouldBe(TokenType.LeftParen);
         tokens[2].Type.ShouldBe(TokenType.Keyword); // SELECT
         tokens[tokens.Count - 1].Type.ShouldBe(TokenType.RightParen);

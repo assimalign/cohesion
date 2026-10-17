@@ -38,14 +38,19 @@ public sealed class OqlExecutionConformanceTests
             [
                 new("SELECT name FROM items WHERE (amount >= @minimum AND amount < 6) OR amount IS NULL",
                     [["gamma"], ["delta"]]),
-                new("SELECT name FROM items WHERE details.score IS NULL AND NOT (amount IS NOT NULL)", [["delta"]]),
+                new("SELECT name FROM items WHERE details.score IS NULL AND NOT (amount IS NOT NULL)", []),
+                new("SELECT name FROM items WHERE details.score IS MISSING", [["delta"]]),
+                new("SELECT name FROM items WHERE amount IS MISSING", []),
+                new("SELECT name FROM items WHERE details.score IS NOT MISSING", [["alpha"], ["beta"], ["gamma"]]),
+                new("SELECT name FROM items WHERE amount IS NOT VALUED", [["delta"]]),
+                new("SELECT name FROM items WHERE details.score IS VALUED", [["alpha"], ["beta"], ["gamma"]]),
             ],
             [OqlClauses.GroupBy] =
             [
                 new("SELECT category, COUNT(*) AS total, COUNT(amount) AS present, SUM(amount) AS sum, AVG(amount) AS average, MIN(amount) AS minimum, MAX(amount) AS maximum FROM items GROUP BY category ORDER BY category",
                     [["a", 3m, 2m, 8m, 4m, 2m, 6m], ["b", 1m, 1m, 4m, 4m, 4m, 4m]]),
                 new("SELECT category, tags[0] AS tag, COUNT(*) AS total FROM items GROUP BY category, tags[0] ORDER BY category, tag",
-                    [["a", null, 1m], ["a", "blue", 1m], ["a", "green", 1m], ["b", "blue", 1m]]),
+                    [["a", null, 1m], ["a", "blue", 1m], ["a", "green", 1m], ["b", "blue", 1m]], Missing: [(0, 1)]),
             ],
             [OqlClauses.Having] =
             [
@@ -126,7 +131,7 @@ public sealed class OqlExecutionConformanceTests
                     result.AffectedCount.ShouldBe(0L, context);
                     result = await session.ExecuteAsync(verification, cancellationToken: cancellationToken);
                 }
-                await VerifyRowsAsync(result, execution.ExpectedRows, context, cancellationToken);
+                await VerifyRowsAsync(result, execution.ExpectedRows, context, cancellationToken, execution.Missing);
             }
         }
     }
@@ -166,8 +171,6 @@ public sealed class OqlExecutionConformanceTests
         exception.Message.ShouldBe(message);
     }
 
-    // #1126 deletes this exact temporary ODMG list when SQL++ replaces those declarations.
-    private static readonly string[] _functionExemptions = ["ELEMENT", "FLATTEN", "FIRST", "LAST", "LISTTOSET", "UNIQUE"];
     private static readonly IReadOnlyDictionary<string, FunctionCase> _functionCases =
         new Dictionary<string, FunctionCase>(StringComparer.OrdinalIgnoreCase)
         {
@@ -178,11 +181,11 @@ public sealed class OqlExecutionConformanceTests
             ["MAX"] = new("MAX(amount)", 6m),
         };
 
-    [Fact(DisplayName = "Cohesion Test [Documents] - Functions: declarations have live evidence or the exact temporary ODMG pin")]
+    [Fact(DisplayName = "Cohesion Test [Documents] - Functions: every declaration has live execution evidence")]
     public async Task Profile_DeclaredFunctions_ShouldExecuteEveryCaseAsync()
     {
         // Arrange
-        RequireFunctionCoverage(OqlLanguageProfile.Instance.Functions.ToArray(), _functionCases.Keys, _functionExemptions);
+        RequireFunctionCoverage(OqlLanguageProfile.Instance.Functions.ToArray(), _functionCases.Keys);
         await using var engine = DocumentDatabaseEngine.Create("document-functions", new());
         var database = await engine.CreateDatabaseAsync("functions", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
@@ -190,20 +193,15 @@ public sealed class OqlExecutionConformanceTests
         await SeedAsync(collection, session, CancellationToken.None);
 
         // Act / Assert
-        foreach (string name in OqlLanguageProfile.Instance.Functions.ToArray().Except(_functionExemptions))
+        foreach (string name in OqlLanguageProfile.Instance.Functions.ToArray())
         {
             var execution = _functionCases[name];
             var result = await session.ExecuteAsync($"SELECT {execution.Expression} FROM items", cancellationToken: CancellationToken.None);
             await VerifyRowsAsync(result, [[execution.Expected]], name, CancellationToken.None);
         }
-        foreach (string name in _functionExemptions)
-        {
-            var errors = new OqlQueryParser().Parse($"SELECT {name}(amount) FROM items").Diagnostics.ToArray();
-            errors.ShouldHaveSingleItem().Code.ShouldBe("COHDBL001");
-        }
     }
 
-    [Theory(DisplayName = "Cohesion Test [Documents] - Functions: coverage rejects missing evidence, retired cases and additional exemptions")]
+    [Theory(DisplayName = "Cohesion Test [Documents] - Functions: coverage rejects missing evidence and retired cases")]
     [InlineData(0)]
     [InlineData(1)]
     [InlineData(2)]
@@ -213,18 +211,14 @@ public sealed class OqlExecutionConformanceTests
         var declarations = OqlLanguageProfile.Instance.Functions.ToArray();
         // Act / Assert
         Should.Throw<ShouldAssertException>(() => RequireFunctionCoverage(
-            mismatch == 0 ? declarations.Append("FUTURE") : declarations,
-            mismatch == 1 ? _functionCases.Keys.Append("RETIRED") : _functionCases.Keys,
-            mismatch == 2 ? _functionExemptions.Append("ABS") : _functionExemptions));
+            mismatch == 0 ? declarations.Append("FUTURE") : mismatch == 2 ? declarations.Where(name => name != "COUNT") : declarations,
+            mismatch == 1 ? _functionCases.Keys.Append("RETIRED") : _functionCases.Keys));
     }
 
-    private static void RequireFunctionCoverage(IEnumerable<string> declarations, IEnumerable<string> cases, IEnumerable<string> exemptions)
+    private static void RequireFunctionCoverage(IEnumerable<string> declarations, IEnumerable<string> cases)
     {
-        exemptions.Order().ShouldBe(new[] { "ELEMENT", "FLATTEN", "FIRST", "LAST", "LISTTOSET", "UNIQUE" }.Order());
-        exemptions.Except(declarations, StringComparer.OrdinalIgnoreCase).ShouldBeEmpty();
-        declarations.Except(exemptions, StringComparer.OrdinalIgnoreCase).Except(cases, StringComparer.OrdinalIgnoreCase).ShouldBeEmpty();
+        declarations.Except(cases, StringComparer.OrdinalIgnoreCase).ShouldBeEmpty();
         cases.Except(declarations, StringComparer.OrdinalIgnoreCase).ShouldBeEmpty();
-        cases.Intersect(exemptions, StringComparer.OrdinalIgnoreCase).ShouldBeEmpty();
     }
 
     private sealed record FunctionCase(string Expression, object Expected);
@@ -270,12 +264,17 @@ public sealed class OqlExecutionConformanceTests
         }
     }
 
-    private static async Task VerifyRowsAsync(DatabaseResult result, object?[][] expected, string context, CancellationToken cancellationToken)
+    private static async Task VerifyRowsAsync(DatabaseResult result, object?[][] expected, string context, CancellationToken cancellationToken,
+        (int Row, int Column)[]? missing = null)
     {
         await using var rows = result.ShouldBeAssignableTo<DatabaseResultSet>(context);
         var actual = new List<object?[]>();
         await foreach (var row in rows.GetRowsAsync(cancellationToken))
         {
+            for (int ordinal = 0; ordinal < row.FieldCount; ordinal++)
+            {
+                row.IsMissing(ordinal).ShouldBe(missing?.Contains((actual.Count, ordinal)) ?? false, context);
+            }
             actual.Add(Enumerable.Range(0, rows.Columns.Count).Select(row.GetValue).ToArray());
         }
         actual.Count.ShouldBe(expected.Length, context);
@@ -286,5 +285,5 @@ public sealed class OqlExecutionConformanceTests
     }
 
     private sealed record ExecutionCase(string Statement, object?[][] ExpectedRows,
-        string[]? Setup = null, string? VerificationStatement = null);
+        string[]? Setup = null, string? VerificationStatement = null, (int Row, int Column)[]? Missing = null);
 }

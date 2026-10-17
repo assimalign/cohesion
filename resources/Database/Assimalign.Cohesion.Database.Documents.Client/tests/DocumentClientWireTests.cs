@@ -128,7 +128,7 @@ public sealed class DocumentClientWireTests
         rows.Documents.ShouldBeEmpty();
         var grouped = await connection.QueryAsync("SELECT d.group AS category, COUNT(*) AS n, SUM(d.score) AS total, AVG(d.score) AS average, MIN(d.score) AS low, MAX(d.score) AS high FROM items d GROUP BY d.group HAVING SUM(d.score) > 2 ORDER BY total DESC", cancellationToken: harness.Token);
         grouped.ShouldHaveSingleItem().ToArray().ShouldBe(new object?[] { "A", 2m, 6m, 3m, 2m, 4m });
-        (await connection.QueryAsync("SELECT name FROM items WHERE nested.x IS NULL OR score < 0 ORDER BY name ASC", cancellationToken: harness.Token))
+        (await connection.QueryAsync("SELECT name FROM items WHERE nested.x IS MISSING OR score < 0 ORDER BY name ASC", cancellationToken: harness.Token))
             .Select(row => row[0]).ShouldBe(new object?[] { "Bob", "Cy" });
         (await connection.QueryAsync("SELECT name FROM items WHERE score <> 2 AND score != 4 AND score <= 1 AND score > 0", cancellationToken: harness.Token))
             .ShouldHaveSingleItem()[0].ShouldBe("Cy");
@@ -194,6 +194,8 @@ public sealed class DocumentClientWireTests
         result.Documents.Select(value => value.ValueKind).ShouldBe([JsonValueKind.Null, JsonValueKind.True, JsonValueKind.Number, JsonValueKind.String, JsonValueKind.Array, JsonValueKind.Object]);
         result.Documents[3].GetString().ShouldBe("東京");
         result[2][0].ShouldBeOfType<JsonElement>().GetRawText().ShouldBe("42.5");
+        result[0].IsNull(0).ShouldBeTrue();
+        foreach (var row in result) { row.SupportsMissing.ShouldBeTrue(); row.IsMissing(0).ShouldBeFalse(); }
         result.AffectedCount.ShouldBe(-1);
     }
 

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Text.Json;
 
+using Assimalign.Cohesion.Database.Execution;
 
 namespace Assimalign.Cohesion.Database.Documents.Internal;
 
@@ -20,6 +21,22 @@ internal sealed class DocumentJsonValues : IDisposable
         if (!wholeDocument) { _writer.WriteStartArray(); }
         foreach (object? value in values) { Write(_writer, value); }
         if (!wholeDocument) { _writer.WriteEndArray(); }
+        _writer.Flush();
+        return _buffer.WrittenMemory;
+    }
+
+    internal ReadOnlyMemory<byte> Projection(DatabaseRow row, IReadOnlyList<DatabaseColumn> columns)
+    {
+        _buffer.Clear();
+        _writer.Reset(_buffer);
+        _writer.WriteStartObject();
+        for (int index = 0; index < columns.Count; index++)
+        {
+            if (row.SupportsMissing && row.IsMissing(index)) { continue; }
+            _writer.WritePropertyName(columns[index].Name);
+            Write(_writer, row.GetValue(index));
+        }
+        _writer.WriteEndObject();
         _writer.Flush();
         return _buffer.WrittenMemory;
     }

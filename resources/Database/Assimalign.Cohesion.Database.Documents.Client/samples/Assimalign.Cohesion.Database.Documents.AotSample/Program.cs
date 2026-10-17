@@ -73,6 +73,10 @@ internal static class Program
             var rows = await connection.QueryAsync("SELECT name, score + @offset AS n FROM items WHERE score >= 2 ORDER BY n DESC",
                 new Dictionary<string, object?> { ["offset"] = 4 }, token);
             Check(rows.Count == 1 && (decimal)rows[0]["n"]! == 7m && rows.AffectedCount == -1, "rows and parameters");
+            var presence = await connection.QueryAsync("SELECT absent AS absent_value, nested[1] AS null_value FROM items WHERE absent IS MISSING", cancellationToken: token);
+            Check(presence.Count == 1 && presence[0].SupportsMissing && presence[0].IsMissing(0) &&
+                !presence[0].IsNull(0) && presence[0].GetValue(0) is null, "MISSING projection");
+            Check(!presence[0].IsMissing(1) && presence[0].IsNull(1), "explicit NULL projection");
             var whole = await connection.QueryAsync("SELECT * FROM items", cancellationToken: token);
             Check(whole.IsDocumentQuery && whole.Documents[0].GetProperty("nested")[0].GetInt32() == 1, "whole documents");
             Check((await connection.QueryAsync("SELECT SUM(score) AS total FROM items HAVING SUM(score) > 0", cancellationToken: token))[0][0] is 3m, "aggregate");

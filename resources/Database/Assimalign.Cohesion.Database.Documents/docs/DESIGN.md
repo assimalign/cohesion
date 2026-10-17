@@ -320,9 +320,9 @@ diagnostic. Virtual sources do not provide mutable `DocumentCollection` handles.
 The supported clause matrix lives in the language package's
 [DESIGN.md](../../Assimalign.Cohesion.Database.Documents.Language/docs/DESIGN.md).
 SELECT, FROM, WHERE, GROUP BY, HAVING, ORDER BY, CREATE COLLECTION, DROP COLLECTION,
-CREATE INDEX, and DROP INDEX are executed;
-DEFINE, ELEMENT, FLATTEN, nested queries, document data-mutation statements, and server
-statements are rejected with `COHDBL001`. The parser advertises only clauses this executor
+CREATE INDEX, and DROP INDEX are executed. OQL retains its name with a SQL++ basis.
+Retired ODMG constructs are rejected positionally; nested queries, document data-mutation
+statements, and server statements are rejected with `COHDBL001`. The parser advertises only clauses this executor
 supports.
 AST diagnostics are checked both for text requests and directly constructed requests.
 
@@ -336,15 +336,19 @@ No POCO reflection, schema inference, or runtime code generation is involved.
 Query JSON parsing uses the same 128-level nesting limit as storage validation
 and index extraction, so every accepted document can be queried at its stored depth.
 
-Absent fields, paths through an incompatible shape, and out-of-range array indexes
-evaluate to null. Null and missing share the same group and `IS NULL` behavior.
-Ordinary comparison with null is unknown; WHERE/HAVING retain only true predicates.
+Absent fields, paths through an incompatible shape (including explicit null), and out-of-range
+array indexes evaluate to a private MISSING sentinel, distinct from null. Reading an explicit
+null itself yields NULL. The evaluator implements the owner-selected Couchbase four-valued
+truth table and IS [NOT] MISSING / IS [NOT] VALUED predicates, recorded in the language
+[dialect contract](../../Assimalign.Cohesion.Database.Documents.Language/docs/DESIGN.md#sql-missing-semantics-1126).
+MISSING propagates before NULL through ordinary comparison and arithmetic; `MISSING IS NULL`
+and `MISSING IS NOT NULL` produce MISSING. WHERE/HAVING retain only Boolean true.
 Equality compares scalar values and structurally compares arrays/objects.
 Range predicates compare only values of the same scalar kind. Arithmetic requires
 decimal operands; invalid numeric input and division by zero fail explicitly.
 
-COUNT(*) counts documents; COUNT(expression) counts nonnull values. SUM and AVG
-require numeric nonnull inputs. SUM, AVG, MIN, and MAX over no nonnull inputs return
+COUNT(*) counts documents; COUNT(expression) skips both MISSING and NULL. SUM and AVG
+require numeric valued inputs. SUM, AVG, MIN, and MAX skip MISSING and NULL; no valued inputs return
 null; COUNT returns zero. Ungrouped aggregate queries yield a single group even
 for an empty source. Outside aggregate calls, grouped projection, HAVING, and
 ORDER BY expressions must be a group key or an expression built from group keys
@@ -354,7 +358,8 @@ variable as equivalent. Group values compare structurally.
 
 Results are deterministic. A scan and an index seek both establish ordinal
 document-ID order before filtering and projection. GROUP BY uses the total order
-null, Boolean, decimal, ordinal string, array, object. Arrays compare element by
+MISSING, NULL, FALSE, TRUE, decimal, ordinal string, array, object. NULL and MISSING form
+separate groups; absent values do not mask a column's observed scalar type. Arrays compare element by
 element; objects compare property names in ordinal order and their values.
 ORDER BY accepts source expressions or a standalone explicit projection alias;
 alias names take precedence over source fields for that standalone form.
@@ -362,6 +367,14 @@ It compares its expressions and preserves the established order for ties.
 This baseline makes identical data and queries return identical sequences across
 access paths. Query results are materialized and own their JSON values; they do
 not retain a transaction or borrowed storage memory after execution.
+
+Documents rows opt into Execution's optional MISSING capability. `SupportsMissing` is true;
+an absent value has `IsMissing(ordinal) == true`, `IsNull(ordinal) == false`, and
+`GetValue(ordinal) == null`. Explicit NULL has the reverse predicates. SELECT * keeps the
+whole source value. SQL, Graph and KeyValuePair leaves keep the default unsupported capability.
+The evaluator's sentinel remains internal to Documents; no catalog value or public sentinel
+type is introduced. Existing v1 index key extraction already omits absent, null and nonscalar
+keys; no catalog format changes. Unary NULL/MISSING/VALUED tests never select an index seek.
 
 ### Collection DDL (#1130)
 
@@ -738,7 +751,9 @@ Terminate use the shared protocol. Requests cannot select another database or mo
 The server uses the session's internal `ExecuteStatementAsync` to parse and then invoke typed
 execution, so the root traces each executed statement once. OQL's SELECT/WHERE/GROUP BY/HAVING/
 ORDER BY, parameters, nested paths, aggregates, collection DDL and index DDL use the same executor
-as embedded execution. `SELECT *` returns whole JSON values; projections return positional rows.
+as embedded execution. `SELECT *` returns whole JSON values; projections return JSON objects
+whose property names are the unique column names. MISSING members are omitted; explicit NULL
+members emit JSON null. Both use the existing Document frame with unchanged encoding.
 Document and collection commands use the existing session-bound operations and automatic
 transactions. No transaction-control member or frame is exposed over this wire.
 
@@ -822,12 +837,16 @@ frame. The client never infers codes from error-message prose.
 
 ### Exchange boundaries and JSON
 
-After Ready, Execute returns ResultHeader followed by matching ResultRow or Document frames,
+After Ready, Execute returns ResultHeader followed by Document frames,
 then Complete. Index DDL returns only Complete. Commands return their table's result frames and
 Complete. A statement failure terminates the response with Failure, including after partial
 rows or documents. The client discards accumulated results, throws the typed error and may reuse
 the session. Failure has no following Complete.
-Shared Error terminates the session. The client rejects wrong ordering, row width, identity,
+ResultHeader's wholeDocuments flag distinguishes source JSON values from projected objects;
+for projections a missing property maps to MISSING by header ordinal. ResultRow remains a
+defined codec but is not emitted or accepted by OQL execution. This uses the existing raw-JSON
+Document payload and adds no protocol message, field or version. Shared Error terminates the
+session. The client rejects wrong ordering, unknown projection members, identity,
 collection ordering, count or affected-count semantics before accepting completion.
 
 The server streams the header and each row/document frame directly, then Complete. It retains

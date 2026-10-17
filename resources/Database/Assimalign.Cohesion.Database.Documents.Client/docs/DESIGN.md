@@ -62,7 +62,7 @@ sequenceDiagram
     alt Successful query
         Server-->>Client: ResultHeader with columns and whole-document flag
         loop Each result
-            Server-->>Client: ResultRow or Document
+        Server-->>Client: Document (source value or projected object)
         end
         Server-->>Client: Complete with result and affected counts
         Client-->>App: Owned DocumentResultSet
@@ -82,7 +82,14 @@ connection remains usable. `IsDocumentQuery` distinguishes `SELECT *` even for a
 `Documents` holds owned `JsonElement` values in that case; positional queries leave it empty.
 Whole-document rows contain the same owned JsonElement as Documents, including scalar roots.
 Projected rows expose JSON numbers as `decimal`, strings, booleans, null, and nested object/array values as
-owned `JsonElement`. Duplicate column names resolve to the first ordinal, following Graph.
+owned `JsonElement`. Projected Document-frame objects omit MISSING members and retain explicit
+null members. The header supplies each column's ordinal even when its member is omitted.
+`DocumentRow` is a sealed DatabaseRow leaf with SupportsMissing true: IsMissing distinguishes
+omission from explicit NULL, IsNull is false for MISSING, and GetValue/indexers return null
+for either. An internal undefined JsonElement marks absence without crossing an assembly
+boundary as a sentinel type. Whole-document rows retain their original JSON and are never MISSING.
+The engine requires unique projection names; duplicate header names and unknown or duplicate
+object members are malformed responses. This follows the authorized concrete-first row capability.
 
 CRUD uses `DocumentId`, `DocumentVersion` and `Document` from the model assembly. Get returns
 null when absent; Put returns the new stored version; Delete returns whether it removed a document.

@@ -36,15 +36,6 @@ public static class OqlClauses
     /// <summary>Orders values by one or more expressions.</summary>
     public const string OrderBy = "ORDER BY";
 
-    /// <summary>Defines a named OQL query.</summary>
-    public const string Define = "DEFINE";
-
-    /// <summary>Extracts the sole value from a singleton collection.</summary>
-    public const string Element = "ELEMENT";
-
-    /// <summary>Flattens a nested collection by one level.</summary>
-    public const string Flatten = "FLATTEN";
-
     /// <summary>Evaluates a query nested within another OQL expression.</summary>
     public const string Subquery = "SUBQUERY";
 }

@@ -17,10 +17,10 @@ internal static class OqlUnsupportedVocabulary
     /// <summary>The table, in the order the scan documents it.</summary>
     internal static readonly OqlUnsupportedWord[] Words =
     [
-        // ODMG constructs the planner does not run. oql-sqlpp-basis owns their removal.
-        new("DEFINE", OqlClauses.Define, OqlWordPosition.Anywhere),
-        new("ELEMENT", OqlClauses.Element, OqlWordPosition.Anywhere),
-        new("FLATTEN", OqlClauses.Flatten, OqlWordPosition.Anywhere),
+        // Retired ODMG constructs stay recognizable only in their construct positions.
+        new("DEFINE", "DEFINE", OqlWordPosition.Statement),
+        new("ELEMENT", "ELEMENT", OqlWordPosition.Function),
+        new("FLATTEN", "FLATTEN", OqlWordPosition.Function),
         new("DISTINCT", "DISTINCT", OqlWordPosition.Anywhere),
         new("ALL", "ALL", OqlWordPosition.Anywhere),
         new("IN", "IN", OqlWordPosition.Anywhere),
@@ -30,18 +30,20 @@ internal static class OqlUnsupportedVocabulary
         new("FOR", "FOR", OqlWordPosition.Anywhere),
         new("SOME", "SOME", OqlWordPosition.Anywhere),
         new("ANY", "ANY", OqlWordPosition.Anywhere),
-        new("STRUCT", "STRUCT", OqlWordPosition.Anywhere),
-        new("LIST", "LIST", OqlWordPosition.Anywhere),
+        new("STRUCT", "STRUCT", OqlWordPosition.Function),
+        new("LIST", "LIST", OqlWordPosition.Function),
         new("SET", "SET", OqlWordPosition.Anywhere),
-        new("BAG", "BAG", OqlWordPosition.Anywhere),
+        new("BAG", "BAG", OqlWordPosition.Function),
         new("ARRAY", "ARRAY", OqlWordPosition.Anywhere),
         new("COLLECTION", "COLLECTION", OqlWordPosition.Anywhere),
         new("FIRST", "FIRST", OqlWordPosition.Anywhere),
         new("LAST", "LAST", OqlWordPosition.Anywhere),
         new("UNIQUE", "UNIQUE", OqlWordPosition.Anywhere),
-        new("LISTTOSET", "LISTTOSET", OqlWordPosition.Anywhere),
-        new("TYPEOF", "TYPEOF", OqlWordPosition.Anywhere),
+        new("LISTTOSET", "LISTTOSET", OqlWordPosition.Function),
+        new("TYPEOF", "TYPEOF", OqlWordPosition.Function),
         new("UNDEFINED", "UNDEFINED", OqlWordPosition.Anywhere),
+        new("KNOWN", "KNOWN", OqlWordPosition.Anywhere),
+        new("UNKNOWN", "UNKNOWN", OqlWordPosition.Anywhere),
         new("ABS", "ABS", OqlWordPosition.Function),
         // CREATE and DROP outside supported collection and index DDL.
         new("CREATE", "CREATE", OqlWordPosition.Anywhere),
