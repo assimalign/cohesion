@@ -17,7 +17,7 @@ internal static class GraphPlanExecutor
     // Finite syntax guarantees termination; this cap also bounds materialization.
     private const int MaximumMatches = 100_000;
     internal static async ValueTask<DatabaseResult> ExecuteAsync(GraphDatabase database, GraphOperation operation,
-        GqlQueryStatement statement, IReadOnlyDictionary<string, object?>? parameters, CancellationToken token, bool paths = false)
+        GqlQueryStatement statement, IReadOnlyDictionary<string, object?>? parameters, CancellationToken token, bool paths = false, bool scalarsOnly = false)
     {
         operation.EnsureActive();
         var error = statement.Diagnostics.FirstOrDefault(item => item.Severity == DiagnosticSeverity.Error);
@@ -30,7 +30,7 @@ internal static class GraphPlanExecutor
         {
             var query = statement.GqlExpression;
             if (query.CatalogSurface is not null || query.Matches.Count == 0 || query.Creates.Count != 0 ||
-                query.DeleteVariables.Count != 0 || query.DetachDelete || query.Projections.Count != 1 || query.Projections[0].Property is not null)
+                query.DeleteVariables.Count != 0 || query.DetachDelete)
             { throw new GraphPlanningException("COHDBG001", "Path execution requires a read-only MATCH with exactly one path or bound entity projection.", query.Location); }
         }
         if (statement.GqlExpression.CatalogSurface is { } surface)
@@ -43,6 +43,12 @@ internal static class GraphPlanExecutor
         }
         var plan = new GraphPlanner(database, operation.Context.Snapshot).Plan(statement.GqlExpression, parameters);
         parameters = plan.Parameters;
+        // Validate result shape before locking a writer, expanding a MATCH or applying mutations.
+        if (scalarsOnly && plan.Projections.Any(projection => projection.Kind != GraphProjectionKind.Scalar))
+        { throw new GraphPlanningException("COHDBG001", ErrorMessages.ExecuteScalarRequired, plan.Query.Location); }
+        if (paths && (plan.Projections.Count != 1 || plan.Projections[0].Kind == GraphProjectionKind.Scalar ||
+            plan.Projections[0].Expression is not GqlVariableExpression))
+        { throw new GraphPlanningException("COHDBG001", "Path execution requires a read-only MATCH with exactly one path or bound entity projection.", plan.Query.Location); }
         if (plan.Query.Creates.Count > 0 || plan.Query.DeleteVariables.Count > 0)
         { await database.LockWriterAsync(operation.Context, token).ConfigureAwait(false); }
         // A pattern that requires a label or relationship type the database does not have matches
@@ -62,11 +68,13 @@ internal static class GraphPlanExecutor
         bindings = bindings.Where(binding => plan.Query.Predicate is null || GraphExpressionEvaluator.Boolean(GraphExpressionEvaluator.Evaluate(plan.Query.Predicate, binding, parameters), plan.Query.Predicate) is true).ToList();
         if (paths)
         {
-            string variable = plan.Query.Projections[0].Variable;
+            string variable = ((GqlVariableExpression)plan.Projections[0].Expression).Variable;
             var results = new List<GraphPath>(bindings.Count);
+            var seen = plan.Distinct is null ? null : new HashSet<object?>(GraphValueComparer.Instance);
             foreach (var binding in bindings)
             {
                 token.ThrowIfCancellationRequested();
+                if (seen is not null && !seen.Add(binding[variable])) { continue; }
                 results.Add(binding[variable] switch
                 {
                     GraphPath path => path,
@@ -104,12 +112,18 @@ internal static class GraphPlanExecutor
             if (database.Store.FindNode(id.Value, operation.Context.Snapshot) is not null) { affected++; }
             await database.Store.DeleteNodeAsync(id.Value, plan.Query.DetachDelete, operation.Context, token).ConfigureAwait(false);
         }
-        if (plan.Query.Projections.Count == 0) { return new GraphMutationResult(affected, plan.Warnings); }
-        var columns = plan.Query.Projections.Select((projection, i) => new DatabaseColumn
-        { Name = projection.Alias ?? projection.Variable + (projection.Property is null ? "" : "." + projection.Property), Ordinal = i, Type = DatabaseType.Null }).ToArray();
-        var rows = bindings.Select(binding => plan.Query.Projections.Select(projection => projection.Property is { } property
-            ? GraphExpressionEvaluator.Property(binding[projection.Variable], property) : binding[projection.Variable]).ToArray()).ToArray();
-        return new GraphQueryResult(columns, rows, plan.Warnings);
+        if (plan.Projections.Count == 0) { return new GraphMutationResult(affected, plan.Warnings); }
+        var columns = plan.Projections.Select((projection, i) => new DatabaseColumn
+        { Name = projection.Name, Ordinal = i, Type = DatabaseType.Null }).ToArray();
+        var rows = new List<object?[]>(bindings.Count);
+        var distinct = plan.Distinct is null ? null : new HashSet<object?[]>(GraphRowComparer.Instance);
+        foreach (var binding in bindings)
+        {
+            token.ThrowIfCancellationRequested();
+            var row = plan.Projections.Select(projection => GraphExpressionEvaluator.Evaluate(projection.Expression, binding, parameters)).ToArray();
+            if (distinct is null || distinct.Add(row)) { rows.Add(row); }
+        }
+        return new GraphQueryResult(columns, rows.ToArray(), plan.Warnings);
     }
 
     private static async ValueTask MatchAsync(GraphDatabase database, GraphOperation operation, GraphPathPlan plan,

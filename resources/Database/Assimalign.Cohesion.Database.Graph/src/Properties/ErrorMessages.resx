@@ -15,4 +15,10 @@
   <data name="ParameterUnbound" xml:space="preserve"><value>Parameter '{0}' is not bound.</value></data>
   <data name="ParameterScalarRequired" xml:space="preserve"><value>A parameter requires a supported finite graph scalar value.</value></data>
   <data name="PropertyScalarRequired" xml:space="preserve"><value>A property map value must be a scalar literal or named parameter.</value></data>
+  <data name="LiteralScalarRequired" xml:space="preserve"><value>A literal expression requires a supported finite graph scalar value.</value></data>
+  <data name="ReturnShapeInvalid" xml:space="preserve"><value>RETURN requires a valid set quantifier and either items or named bindings for *.</value></data>
+  <data name="ProjectionExpressionRequired" xml:space="preserve"><value>A projection requires an expression.</value></data>
+  <data name="PatternOrReturnRequired" xml:space="preserve"><value>A graph statement requires a pattern or RETURN items.</value></data>
+  <data name="ProjectionUnsupported" xml:space="preserve"><value>Unsupported graph projection.</value></data>
+  <data name="ExecuteScalarRequired" xml:space="preserve"><value>Execute accepts scalar projections. Use ExecutePaths with a read-only MATCH to return a node, relationship, or path.</value></data>
 </root>

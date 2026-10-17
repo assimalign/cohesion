@@ -9,7 +9,7 @@ namespace Assimalign.Cohesion.Database.Graph;
 
 /// <summary>A parsed, database-scoped GQL statement whose result is rows.</summary>
 /// <remarks>
-/// Node and relationship property maps and WHERE operands bind named scalar parameters. The
+/// Node and relationship property maps, WHERE operands and RETURN expressions bind named scalar parameters. The
 /// statement and the parameters live on <see cref="GraphRequest"/>, which a graph session's typed
 /// execute member takes.
 /// </remarks>

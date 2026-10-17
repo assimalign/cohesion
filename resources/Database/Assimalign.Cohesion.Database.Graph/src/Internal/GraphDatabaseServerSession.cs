@@ -476,15 +476,7 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
         try
         {
             var request = GraphQueryRequest.FromGql(statement, parameters);
-            if (request.Statement.GqlExpression.IsExplain) { return request; }
-            foreach (var projection in request.Statement.GqlExpression.Projections)
-            {
-                if (projection.Property is null)
-                {
-                    throw new GraphPlanningException("COHDBG001", "Execute accepts scalar property projections. Use ExecutePaths with a read-only MATCH to return a node, relationship, or path.", request.Statement.GqlExpression.Location);
-                }
-            }
-            return request;
+            return new GraphQueryRequest(request.Statement, parameters) { ScalarsOnly = true };
         }
         catch (Exception exception) when (exception is DatabaseException or DatabaseTypeException)
         {

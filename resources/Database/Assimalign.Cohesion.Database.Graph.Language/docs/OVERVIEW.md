@@ -14,8 +14,8 @@ var statement = (GqlQueryStatement)parser.Parse(
 The supported surface is finite `MATCH` paths, including named paths such as
 `MATCH p = (a)-[r:KNOWS]->(b) RETURN p`, ISO label expressions such as `(n:(A|B)&!C)`, `(n:%)` and
 `-[r:T|U]->`, every directed ISO edge in full and abbreviated form (`->`, `<-`, `-`, `<->`), scalar
-Boolean, arithmetic, null/truth, list-membership and string filters and labeled predicates (`n IS NOT LABELED A`, `n:A|B`), variable or
-property projection, `INSERT`, `CREATE` as an insertion compatibility extension, and restricted or
+Boolean, arithmetic, null/truth, list-membership and string filters and labeled predicates (`n IS NOT LABELED A`, `n:A|B`),
+RETURN expressions and aliases, DISTINCT/ALL, RETURN * and standalone RETURN, `INSERT`, `CREATE` as an insertion compatibility extension, and restricted or
 cascading deletion. Unsupported features, including the undirected tilde edges, produce
 `COHDBL001`; malformed supported syntax produces stable `GQL` diagnostics, and a Cypher arrow such
 as `(a)-->(b)`, which GQL reads as a comment, produces `GQL0008`. The parser does not throw for
@@ -28,7 +28,7 @@ Named path assignment is supported only in `MATCH`. The engine's path request AP
 bound node, relationship or named path; deleting a path variable or accessing a path property is
 rejected by binding. Path results retain the actual traversal entities rather than scalar rows.
 
-Property maps and WHERE scalar operands accept `$name` and the Cohesion spelling `@name`.
+Property maps, WHERE operands and RETURN expressions accept `$name` and the Cohesion spelling `@name`.
 Both produce `GqlParameterExpression` with a bare name and source span; property-map values
 are literal or parameter expressions. See [DIALECT.md](DIALECT.md#named-scalar-parameters) for binding rules.
 

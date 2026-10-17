@@ -15,6 +15,8 @@ internal sealed partial class GraphPlanner
     {
         GraphPlan => "Match",
         GraphPathPlan => "ExpandPath",
+        GraphProjectionPlan => "Project",
+        GraphDistinctPlan => "Distinct",
         GraphAnchor { Property: not null } => "IndexSeek",
         GraphAnchor { Label: not null } => "LabelScan",
         GraphAnchor => "NodeScan",
@@ -26,7 +28,7 @@ internal sealed partial class GraphPlanner
         var nodes = new List<DatabasePlanNode>();
         var query = plan.Query;
         string root = query.Creates.Count > 0 ? "Insert" : query.DeleteVariables.Count > 0
-            ? query.DetachDelete ? "DetachDelete" : "Delete" : DescribeOperator(plan);
+            ? query.DetachDelete ? "DetachDelete" : "Delete" : query.Matches.Count == 0 ? "Return" : DescribeOperator(plan);
         Add(root, null, detail: $"filter={query.Predicate is not null}; matches_nothing={plan.MatchesNothing}");
         foreach (var path in plan.Matches)
         {
@@ -56,6 +58,13 @@ internal sealed partial class GraphPlanner
             foreach (var node in path.Nodes) { Add("InsertNode", parent, string.Join("&", node.Labels), detail: node.Variable); }
             foreach (var relationship in path.Relationships)
             { Add("InsertRelationship", parent, relationship.Type, detail: relationship.Direction.ToString()); }
+        }
+        if (plan.Projections.Count != 0)
+        {
+            int parent = plan.Distinct is { } distinct
+                ? Add(DescribeOperator(distinct), 0, detail: $"keys={distinct.Keys.Count}") : 0;
+            foreach (var projection in plan.Projections)
+            { Add(DescribeOperator(projection), parent, projection.Name, detail: $"kind={projection.Kind}; expression={GraphProjectionText.Describe(projection.Expression)}"); }
         }
         return DatabasePlanDescription.Create(nodes, plan.Warnings);
 

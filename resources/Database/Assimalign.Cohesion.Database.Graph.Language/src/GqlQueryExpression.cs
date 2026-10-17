@@ -42,6 +42,10 @@ public sealed class GqlQueryExpression : GqlExpression
     internal void Explain() => IsExplain = true;
     /// <summary>Gets the result projections.</summary>
     public IReadOnlyList<GqlProjection> Projections { get; }
+    /// <summary>Gets the RETURN set quantifier; omitted quantifiers mean ALL.</summary>
+    public GqlSetQuantifier SetQuantifier { get; init; }
+    /// <summary>Gets whether RETURN * projects every named binding in declaration order.</summary>
+    public bool ReturnStar { get; init; }
     /// <summary>Gets the optional read-only catalog subject; graph clauses cannot accompany it.</summary>
     public GqlCatalogSurface? CatalogSurface { get; init; }
 }

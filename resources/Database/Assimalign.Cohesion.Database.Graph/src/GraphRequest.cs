@@ -55,6 +55,9 @@ public abstract class GraphRequest : DatabaseRequest
     /// <summary>Gets whether this request returns paths instead of rows.</summary>
     internal bool Paths => _paths;
 
+    /// <summary>The wire Execute exchange requires statically scalar result columns.</summary>
+    internal bool ScalarsOnly { get; init; }
+
     /// <summary>
     /// Gets the named scalar bindings for $name and @name references, or null for none.
     /// Lookup strips one leading sigil from map keys and uses ordinal, case-sensitive bare names.

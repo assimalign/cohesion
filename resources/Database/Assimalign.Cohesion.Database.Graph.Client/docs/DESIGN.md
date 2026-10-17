@@ -57,7 +57,7 @@ OR/IN/string/arithmetic case compares wire rows with in-process rows. No wire fi
 ## Named scalar parameters (#1138)
 
 QueryAsync, ExecuteAsync and QueryPathsAsync send the existing named scalar map unchanged.
-The server now binds `$name` and `@name` in node/relationship property maps and WHERE operands
+The server now binds `$name` and `@name` in node/relationship property maps, WHERE operands and RETURN expressions
 using exact bare names after removing one sigil. Values keep their runtime scalar types.
 An unbound parameter returns ExecutionFailure carrying COHDBG001; materialized statement
 rejections and terminal path rejections before any path output complete the exchange and allow
@@ -94,9 +94,18 @@ depends on the number of matched paths. A single path must fit the existing maxi
 
 ExecutePaths accepts exactly one bound path, node, or relationship projection from a read-only
 MATCH. A node becomes a singleton path; a relationship includes its stored-direction endpoints;
-a named path retains traversal order. Scalar or mixed projections and mutations are rejected,
+a named path retains traversal order. DISTINCT compares the projected binding's identity before
+path conversion. RETURN * is accepted with exactly one named binding. Computed or multiple
+projections, star over several bindings and mutations are rejected with COHDBG001,
 so no path is reconstructed from scalar results. Execute serves scalar projection rows and
-mutations; bound entity projections direct callers to ExecutePaths.
+mutations; its gate uses static planned projection kinds before reads or writes. Computed
+scalar expressions, parameters, aliases and standalone RETURN pass; possible entity/path results
+direct callers to ExecutePaths even for an empty MATCH. Thus `MATCH (a) RETURN *` now returns
+ExecutionFailure instead of ParseFailure. Entity-returning INSERT fails before mutation.
+EXPLAIN remains scalar, including `EXPLAIN MATCH (a:Person) RETURN a`. Names and DISTINCT values
+match in-process results; the [GQL dialect](../../Assimalign.Cohesion.Database.Graph.Language/docs/DIALECT.md#return)
+defines normalization and equality. This implements the owner's static conservative gate default;
+no protocol 2.1 frame or GraphPathResult shape changes.
 
 GraphResultSet.Diagnostics exposes negotiated success warnings, including COHDBG010 and COHDBG011 for unknown names. QueryPathsAsync returns a sealed GraphPathResult implementing IAsyncEnumerable<GraphPath>. Its Diagnostics property exposes the same ProtocolDiagnostic values as scalar results, finalized after EOF. Each result permits one enumeration. Terminal statement rejections before path output preserve diagnostics on GraphClientException and retain the rental after EOF; later stream failures discard it.
 

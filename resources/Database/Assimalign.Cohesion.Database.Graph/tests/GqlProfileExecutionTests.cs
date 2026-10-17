@@ -30,7 +30,8 @@ public sealed class GqlProfileExecutionTests
                 new("EXPLAIN MATCH (a:Person) RETURN a",
                     [[0, null, "Match", null, null, "filter=False; matches_nothing=False", null, null],
                      [1, 0, "ExpandPath", null, null, null, null, null],
-                     [2, 1, "LabelScan", "Person", null, "node=0; property=; value=NULL", null, null]]),
+                     [2, 1, "LabelScan", "Person", null, "node=0; property=; value=NULL", null, null],
+                     [3, 0, "Project", "a", null, "kind=Node; expression=a", null, null]]),
             ],
             [GqlClauses.Match] =
             [
@@ -49,6 +50,20 @@ public sealed class GqlProfileExecutionTests
             [GqlClauses.Return] =
             [
                 new("MATCH (a:Person {name: 'Alice'}) RETURN a.name AS person, a.age, a.absent", [["Alice", 42L, null]]),
+                new("MATCH (a:Person), (b:Person) RETURN DISTINCT a.active", [[true], [false], [null]], Columns: ["a.active"]),
+                new("MATCH (a:Person), (b:Person) RETURN ALL a.active",
+                    [[true], [true], [true], [false], [false], [false], [null], [null], [null]]),
+                new("MATCH (a:Person {name: 'Alice'}) RETURN a.age + 1 AS next, a.name || '!'", [[43L, "Alice!"]],
+                    Columns: ["next", "a.name || '!'"]),
+                new("RETURN 1 + 1 AS two", [[2L]], Columns: ["two"]),
+                new("MATCH (a:Person {name: 'Alice'}) RETURN a IS LABELED Person, a.active IS TRUE, a.absent IS NULL",
+                    [[true, true, true]]),
+                new("MATCH (a:Person) RETURN $p AS p", [[5], [5], [5]], Parameters: new Dictionary<string, object?> { ["p"] = 5 }),
+                new("MATCH (a:Person {name: 'Alice'}) RETURN a.age + $d AS next", [[43L]],
+                    Parameters: new Dictionary<string, object?> { ["d"] = 1 }, Columns: ["next"]),
+                new("RETURN $p AS p", [[5]], Parameters: new Dictionary<string, object?> { ["p"] = 5 }),
+                new("MATCH (a) RETURN $p", [[5], [5], [5], [5], [5]],
+                    Parameters: new Dictionary<string, object?> { ["p"] = 5 }, Columns: ["$p"]),
             ],
             [GqlClauses.Create] =
             [
@@ -197,7 +212,7 @@ public sealed class GqlProfileExecutionTests
     [Theory(DisplayName = "Cohesion Test [Graph] - Unsupported forms fail at parse time against a live engine")]
     [InlineData("MATCH (a)-[r*1..3]->(b) RETURN a")]
     [InlineData("MATCH (a) RETURN count(a)")]
-    [InlineData("MATCH (a) RETURN *")]
+    [InlineData("MATCH (a) RETURN a {.name}")]
     [InlineData("INSERT (:Person {tags: [1, 2]})")]
     [InlineData("MATCH (a) DELETE a RETURN a")]
     [InlineData("SHOW DATABASES")]
@@ -268,7 +283,7 @@ public sealed class GqlProfileExecutionTests
     {
         GqlClauses.Explain => query.IsExplain,
         GqlClauses.Match => query.Matches.Count != 0,
-        GqlClauses.Return => query.Projections.Count != 0,
+        GqlClauses.Return => query.Projections.Count != 0 || query.ReturnStar,
         GqlClauses.Create => query.Creates.Count != 0 && HasKeyword(query.Text ?? string.Empty, "CREATE"),
         GqlClauses.Insert => query.Creates.Count != 0 && HasKeyword(query.Text ?? string.Empty, "INSERT"),
         GqlClauses.Delete => query.DeleteVariables.Count != 0 && !query.DetachDelete,
@@ -327,6 +342,7 @@ public sealed class GqlProfileExecutionTests
         {
             (result is DatabaseResultSet).ShouldBeTrue(context);
             await using var rowset = (DatabaseResultSet)result;
+            if (executionCase.Columns is { } columns) { rowset.Columns.Select(column => column.Name).ShouldBe(columns, context); }
             var rows = new List<object?[]>();
             await foreach (var row in rowset.GetRowsAsync(cancellationToken))
             {
@@ -342,5 +358,5 @@ public sealed class GqlProfileExecutionTests
     }
 
     private sealed record ExecutionCase(string Statement, object?[][] Rows, long? AffectedCount = null,
-        ExecutionCase[]? Verification = null, IReadOnlyDictionary<string, object?>? Parameters = null);
+        ExecutionCase[]? Verification = null, IReadOnlyDictionary<string, object?>? Parameters = null, string[]? Columns = null);
 }

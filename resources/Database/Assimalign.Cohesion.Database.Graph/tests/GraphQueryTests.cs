@@ -275,7 +275,7 @@ public sealed class GraphQueryTests
         await using var session = await database.CreateSessionAsync();
         GqlNodePattern node = new("a", [], new Dictionary<string, GqlExpression>());
         GqlRelationshipPattern edge = new("r", null, (GqlPatternDirection)99, new Dictionary<string, GqlExpression>());
-        var malformed = new GqlQueryStatement(new GqlQueryExpression([new GqlPathPattern([node, node], [edge])], null, [], [], false, [new GqlProjection("a")]));
+        var malformed = new GqlQueryStatement(new GqlQueryExpression([new GqlPathPattern([node, node], [edge])], null, [], [], false, [new GqlProjection(new GqlVariableExpression("a"))]));
         var invalid = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(new GraphQueryRequest(malformed)));
         invalid.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHDBG001");
 
@@ -294,7 +294,7 @@ public sealed class GraphQueryTests
         ];
         foreach (var badChain in badChains)
         {
-            var statement = new GqlQueryStatement(new GqlQueryExpression([new GqlPathPattern([node], [])], badChain, [], [], false, [new GqlProjection("a")]));
+            var statement = new GqlQueryStatement(new GqlQueryExpression([new GqlPathPattern([node], [])], badChain, [], [], false, [new GqlProjection(new GqlVariableExpression("a"))]));
             (await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(new GraphQueryRequest(statement))))
                 .Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHDBG001");
         }
@@ -318,7 +318,7 @@ public sealed class GraphQueryTests
         ];
         foreach (var badNode in nodes)
         {
-            var statement = new GqlQueryStatement(new GqlQueryExpression([new GqlPathPattern([badNode], [])], null, [], [], false, [new GqlProjection("a")]));
+            var statement = new GqlQueryStatement(new GqlQueryExpression([new GqlPathPattern([badNode], [])], null, [], [], false, [new GqlProjection(new GqlVariableExpression("a"))]));
             (await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(new GraphQueryRequest(statement))))
                 .Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHDBG001");
         }
@@ -333,7 +333,7 @@ public sealed class GraphQueryTests
         ];
         foreach (var badEdge in edges)
         {
-            var statement = new GqlQueryStatement(new GqlQueryExpression([new GqlPathPattern([node, new("b", [], empty)], [badEdge])], null, [], [], false, [new GqlProjection("a")]));
+            var statement = new GqlQueryStatement(new GqlQueryExpression([new GqlPathPattern([node, new("b", [], empty)], [badEdge])], null, [], [], false, [new GqlProjection(new GqlVariableExpression("a"))]));
             (await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(new GraphQueryRequest(statement))))
                 .Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHDBG001");
         }
@@ -346,7 +346,7 @@ public sealed class GraphQueryTests
         ];
         foreach (var badPredicate in predicates)
         {
-            var statement = new GqlQueryStatement(new GqlQueryExpression([new GqlPathPattern([node], [])], badPredicate, [], [], false, [new GqlProjection("a")]));
+            var statement = new GqlQueryStatement(new GqlQueryExpression([new GqlPathPattern([node], [])], badPredicate, [], [], false, [new GqlProjection(new GqlVariableExpression("a"))]));
             (await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(new GraphQueryRequest(statement))))
                 .Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHDBG001");
         }
@@ -375,7 +375,7 @@ public sealed class GraphQueryTests
         GqlNodePattern paired = new("a", ["A"], empty) { LabelExpression = new GqlLabelName("A") };
         foreach (var pattern in new[] { legacy, paired })
         {
-            var statement = new GqlQueryStatement(new GqlQueryExpression([new GqlPathPattern([pattern], [])], null, [], [], false, [new GqlProjection("a", "k")]));
+            var statement = new GqlQueryStatement(new GqlQueryExpression([new GqlPathPattern([pattern], [])], null, [], [], false, [new GqlProjection(new GqlPropertyExpression("a", "k"))]));
             await using var result = (DatabaseResultSet)await session.ExecuteAsync(new GraphQueryRequest(statement));
             var values = new List<object?>();
             await foreach (var row in result.GetRowsAsync()) { values.Add(row.GetValue(0)); }

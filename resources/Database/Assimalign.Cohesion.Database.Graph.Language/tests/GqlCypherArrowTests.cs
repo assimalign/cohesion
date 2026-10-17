@@ -85,7 +85,7 @@ public sealed class GqlCypherArrowTests
 
         // Assert
         statement.Diagnostics.ShouldBeEmpty();
-        statement.GqlExpression.Projections.ShouldHaveSingleItem().Variable.ShouldBe("a");
+        statement.GqlExpression.Projections.ShouldHaveSingleItem().Expression.ShouldBeOfType<GqlVariableExpression>().Variable.ShouldBe("a");
     }
 
     /// <summary>

@@ -18,6 +18,7 @@ internal static class GraphExpressionEvaluator
             {
                 GqlLiteralExpression literal => literal.Value,
                 GqlParameterExpression parameter => Parameter(parameter, parameters),
+                GqlVariableExpression variable => bindings[variable.Variable],
                 GqlPropertyExpression property => Property(bindings[property.Variable], property.Property),
                 GqlBinaryExpression binary => Binary(binary, bindings, parameters),
                 GqlLogicalExpression logical => Logical(logical, bindings, parameters),
@@ -227,7 +228,7 @@ internal static class GraphExpressionEvaluator
         {
             (string a, string b) => StringComparer.Ordinal.Compare(a, b),
             (bool a, bool b) => a.CompareTo(b),
-            _ => left.Equals(right) ? 0 : null,
+            _ => GraphValueComparer.Instance.Equals(left, right) ? 0 : null,
         };
     }
     private static bool IsNumber(object value) => value is sbyte or short or int or long or byte or ushort or uint or ulong or float or double or decimal;

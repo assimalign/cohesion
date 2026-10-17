@@ -189,7 +189,7 @@ public sealed class GqlWhereExpressionTests
         {
             var query = new GqlQueryExpression(
                 [new GqlPathPattern([new GqlNodePattern("a", [], new Dictionary<string, GqlExpression>())], [])],
-                predicate, [], [], false, [new GqlProjection("a", "x")]);
+                predicate, [], [], false, [new GqlProjection(new GqlPropertyExpression("a", "x"))]);
             var error = await Should.ThrowAsync<DatabaseException>(async () =>
                 await session.ExecuteAsync(new GraphQueryRequest(new GqlQueryStatement(query)), CancellationToken.None));
             error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG001");

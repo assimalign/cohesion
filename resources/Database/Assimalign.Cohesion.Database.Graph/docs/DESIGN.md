@@ -306,6 +306,29 @@ rejected before it reaches the session and changes nothing. Each refusal is an `
 
 ## Planning, execution and bounds
 
+RETURN (#1141) evaluates the same expressions as WHERE after matching and mutation. A standalone
+RETURN starts with the executor's one empty binding. The planner validates every projection and
+parameter before data access, expands star in first-declaration order (path assignment, then
+interleaved nodes/relationships), and records each expression's name and static result kind.
+Aliases name columns exactly; unaliased parsed expressions use normalized source text. The
+[language design](../../Assimalign.Cohesion.Database.Graph.Language/docs/DESIGN.md#return-expressions-and-duplicate-elimination-1141)
+records the owner's naming default and the limits of the ISO 14.11 check.
+
+DISTINCT runs on projected tuples, after writes have completed for every input binding. It uses
+NULL equality, ordinal strings, exact numeric value equality across CLR tags, entity IDs and
+ordered path identities. Reduced fractions preserve transitivity and hash consistency for
+large integers, decimals and subnormal floats; WHERE retains floating-operand promotion.
+First representatives retain their actual values and types. ALL preserves multiplicity. These
+implement the owner's duplicate-equality default; no persistent state or catalog version changes.
+GraphProjectionPlan and GraphDistinctPlan both have EXPLAIN mappings and description rows.
+
+The owner's Execute default is a conservative static gate over planned column kinds. The wire
+request marks its scalar requirement internally; the executor checks it after binding and planning,
+before writer locking, reads or writes. Node, relationship or path columns fail with COHDBG001
+and the existing ExecutePaths guidance, even for empty matches. Future collection/CASE result
+kinds must explicitly propagate possible entities in the closed planner dispatch. EXPLAIN
+bypasses execution and continues to return scalar description rows for entity projections.
+
 WHERE executes the scalar grammar in
 [Graph.Language](../../Assimalign.Cohesion.Database.Graph.Language/docs/DESIGN.md#scalar-where-expressions-1140):
 OR/XOR/NOT, null/truth tests, arithmetic, concatenation, list membership and string predicates.
@@ -444,7 +467,9 @@ the same pinned snapshot as scalar execution. Exactly one projection is required
 produces a singleton path, a relationship variable produces its stored source and target nodes,
 and a named path (`MATCH p = (a)-[r:KNOWS]->(b) RETURN p`) preserves traversal order, including
 reverse traversal and legal cycles. Properties, labels, types and database-local identities are
-the actual engine values. Scalar projections, multiple projections, mutations and catalog queries
+the actual engine values. DISTINCT deduplicates the projected binding by entity/path identity
+before conversion to GraphPath; star is accepted when exactly one named binding is in scope.
+Computed projections, multiple projections, multi-binding star, mutations and catalog queries
 are rejected as path requests before execution. This new request/result pair adds no members to
 existing public interfaces and does not infer paths from scalar rows.
 
@@ -1271,7 +1296,7 @@ root's failed open reports the failure itself.
 `StatementParseFailed` closes the gap the root's statement events leave on the wire path: the
 server parses a statement inside the delegate it hands `ExecuteStatementAsync`, before the root
 session sees a request, so a statement that fails to parse or validate there (a GQL syntax
-error, an empty statement, a non-scalar projection on Execute) is written here once and
+error or an empty statement) is written here once and
 propagates unchanged. The delegates catch only `DatabaseException` and `DatabaseTypeException`,
 the failures the session answers as statement failures; any other exception is an unexpected
 fault, which the pump reports once, as `SessionFaulted`. The in-process text path parses inside
