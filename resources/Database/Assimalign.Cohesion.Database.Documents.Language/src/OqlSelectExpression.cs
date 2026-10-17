@@ -14,10 +14,12 @@ public sealed class OqlSelectExpression : OqlExpression
     /// <param name="groupBy">The grouping expressions.</param>
     /// <param name="having">The optional group filter.</param>
     /// <param name="orderBy">The ordering expressions.</param>
+    /// <param name="isDistinct">Whether to eliminate duplicate projected values.</param>
+    /// <param name="isValue">Whether to return one bare expression rather than named members.</param>
     /// <param name="location">The source span.</param>
     public OqlSelectExpression(string collection, string? alias, IReadOnlyList<OqlProjection> projections,
         OqlExpression? predicate, IReadOnlyList<OqlExpression> groupBy, OqlExpression? having,
-        IReadOnlyList<OqlOrdering> orderBy, Location? location = null) : base(location)
+        IReadOnlyList<OqlOrdering> orderBy, bool isDistinct, bool isValue, Location? location = null) : base(location)
     {
         Collection = collection;
         Alias = alias;
@@ -26,7 +28,14 @@ public sealed class OqlSelectExpression : OqlExpression
         GroupBy = groupBy;
         Having = having;
         OrderBy = orderBy;
+        IsDistinct = isDistinct;
+        IsValue = isValue;
     }
+
+    /// <summary>Gets whether duplicate projected values are eliminated.</summary>
+    public bool IsDistinct { get; }
+    /// <summary>Gets whether the projection returns one bare value (VALUE or RAW).</summary>
+    public bool IsValue { get; }
 
     /// <summary>Gets the collection name; database qualification is never accepted.</summary>
     public string Collection { get; }

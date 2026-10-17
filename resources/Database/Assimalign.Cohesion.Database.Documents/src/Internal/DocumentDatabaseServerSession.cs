@@ -392,7 +392,6 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
                         throw new DatabaseException(ErrorMessages.ParameterNameDuplicate);
                     }
                 }
-                bool wholeDocuments = false;
                 var result = await _databaseSession!.ExecuteStatementAsync(() =>
                 {
                     var statement = (OqlQueryStatement)new OqlQueryParser().Parse(execute.Statement);
@@ -404,11 +403,9 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
                         DocumentDatabaseEventSource.Log.StatementParseFailed(this, _databaseSession!.Database.Name, error);
                         throw error;
                     }
-                    wholeDocuments = statement.OqlExpression is OqlSelectExpression { Projections.Count: 1 } select &&
-                        select.Projections[0].Expression is OqlStarExpression;
                     return new DocumentQueryRequest(statement, parameters);
                 }, cancellationToken).ConfigureAwait(false);
-                await WriteResultAsync(result, wholeDocuments, cancellationToken).ConfigureAwait(false);
+                await WriteResultAsync(result, cancellationToken).ConfigureAwait(false);
             }
             else
             {
@@ -465,7 +462,7 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
         return value[..limit] + ErrorMessages.DiagnosticTruncated;
     }
 
-    private async Task WriteResultAsync(DatabaseResult result, bool wholeDocuments, CancellationToken cancellationToken)
+    private async Task WriteResultAsync(DatabaseResult result, CancellationToken cancellationToken)
     {
         if (result is DatabasePlanDescription description)
         {
@@ -477,13 +474,14 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
         {
             await using (set.ConfigureAwait(false))
             {
-                using var json = new DocumentJsonValues();
+                bool wholeDocuments = set is DocumentQueryResult { BareValue: true };
+                using var json = new DocumentRowWriter();
                 await WriteResultFrameAsync(DocumentProtocolMessageType.ResultHeader,
                     new DocumentProtocolResultHeaderMessage(set.Columns.Select(column => (column.Name, (byte)column.Type)).ToArray(), wholeDocuments).Encode(), cancellationToken).ConfigureAwait(false);
                 await foreach (DatabaseRow row in set.GetRowsAsync(cancellationToken).ConfigureAwait(false))
                 {
                     await WriteResultFrameAsync(DocumentProtocolMessageType.Document,
-                        wholeDocuments ? json.Result([row.GetValue(0)], wholeDocument: true) : json.Projection(row, set.Columns),
+                        json.Write(row, set.Columns, wholeDocuments),
                         cancellationToken).ConfigureAwait(false);
                     count++;
                 }

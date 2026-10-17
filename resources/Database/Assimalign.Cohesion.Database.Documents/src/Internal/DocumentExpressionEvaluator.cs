@@ -44,6 +44,7 @@ internal sealed partial class DocumentExpressionEvaluator
                 OqlParameterExpression parameter => Parameter(parameter.Name),
                 OqlStarExpression => Normalize(document.Content),
                 OqlMetaExpression meta => meta.Member == "id" ? document.Id : (decimal)document.Version,
+                OqlArrayExpression array => DocumentJsonValue.Array(array.Elements.Select(element => Evaluate(element, document, group))),
                 OqlObjectExpression obj => DocumentJsonValue.Object(obj.Members.Select(member =>
                     new KeyValuePair<string, object?>(member.Key, Evaluate(member.Value, document, group)))),
                 OqlPathExpression path => ReadPath(path, document.Content),
@@ -97,6 +98,9 @@ internal sealed partial class DocumentExpressionEvaluator
                 break;
             case OqlMetaExpression meta:
                 foreach (var argument in meta.Arguments) { ValidateInputs(argument); }
+                break;
+            case OqlArrayExpression array:
+                foreach (var element in array.Elements) { ValidateInputs(element); }
                 break;
             case OqlObjectExpression obj:
                 foreach (var member in obj.Members) { ValidateInputs(member.Value); }

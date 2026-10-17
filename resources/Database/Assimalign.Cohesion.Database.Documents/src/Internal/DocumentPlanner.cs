@@ -131,13 +131,18 @@ internal sealed partial class DocumentPlanner
             ValidateMetadata(expression, query.Alias, DocumentSystemCollections.Find(query.Collection) is null);
         }
         if (query.Projections.Count == 0) { throw new DocumentPlanningException("COHDOC001", "OQL SELECT requires a projection.", query.Location); }
+        if (query.IsValue && (query.Projections.Count != 1 || query.Projections[0].Alias is not null ||
+            query.Projections[0].Expression is OqlStarExpression))
+        {
+            throw new DocumentPlanningException("COHDOC001", ErrorMessages.ValueProjectionInvalid, query.Location);
+        }
         // An explicit projection alias is visible to ORDER BY. Other paths
         // continue to address source documents, including unprojected fields.
         var ordering = query.OrderBy.Select(order => order.Expression is OqlPathExpression { Segments.Count: 1 } path &&
             query.Projections.FirstOrDefault(projection => projection.Alias is not null && projection.Alias == path.Segments[0].Name) is { } projection
                 ? new OqlOrdering(projection.Expression, order.Descending) : order).ToArray();
         query = new OqlSelectExpression(query.Collection, query.Alias, query.Projections, query.Predicate,
-            query.GroupBy, query.Having, ordering, query.Location);
+            query.GroupBy, query.Having, ordering, query.IsDistinct, query.IsValue, query.Location);
         bool grouped = query.GroupBy.Count > 0 || query.Projections.Any(projection => ContainsAggregate(projection.Expression)) ||
             (query.Having is not null && ContainsAggregate(query.Having)) || query.OrderBy.Any(order => ContainsAggregate(order.Expression));
         if (query.Predicate is not null)
@@ -151,7 +156,7 @@ internal sealed partial class DocumentPlanner
         {
             Validate(projection.Expression, allowAggregate: true, allowStar: !grouped);
             if (grouped) { ValidateGrouped(projection.Expression, query); }
-            string name = projection.Alias ?? projection.Expression switch
+            string name = query.IsValue ? "value" : projection.Alias ?? projection.Expression switch
             {
                 OqlStarExpression => "document",
                 OqlPathExpression path => path.Segments.LastOrDefault().Name ?? $"column{projections.Count + 1}",
@@ -172,6 +177,11 @@ internal sealed partial class DocumentPlanner
         }
         foreach (var order in query.OrderBy)
         {
+            if (query.IsDistinct && !query.Projections.Any(projection =>
+                EquivalentExpression(projection.Expression, order.Expression, query.Alias)))
+            {
+                throw new DocumentPlanningException("COHDOC014", ErrorMessages.DistinctOrderNotProjected, order.Expression.Location);
+            }
             Validate(order.Expression, allowAggregate: true);
             if (grouped) { ValidateGrouped(order.Expression, query); }
         }
@@ -327,6 +337,7 @@ internal sealed partial class DocumentPlanner
     {
         OqlInExpression or OqlBetweenExpression or OqlLikeExpression or OqlCaseExpression => PredicateChildren(expression).All(IsConstant),
         OqlLiteralExpression or OqlMissingExpression or OqlParameterExpression => true,
+        OqlArrayExpression array => array.Elements.All(IsConstant),
         OqlObjectExpression obj => obj.Members.All(member => IsConstant(member.Value)),
         OqlUnaryExpression unary => IsConstant(unary.Operand),
         OqlBinaryExpression binary => IsConstant(binary.Left) && IsConstant(binary.Right),
@@ -336,6 +347,7 @@ internal sealed partial class DocumentPlanner
     internal static bool ContainsAggregate(OqlExpression expression) => expression switch
     {
         OqlInExpression or OqlBetweenExpression or OqlLikeExpression or OqlCaseExpression => PredicateChildren(expression).Any(ContainsAggregate),
+        OqlArrayExpression array => array.Elements.Any(ContainsAggregate),
         OqlObjectExpression obj => obj.Members.Any(member => ContainsAggregate(member.Value)),
         OqlCallExpression => true,
         OqlBinaryExpression binary => ContainsAggregate(binary.Left) || ContainsAggregate(binary.Right),
@@ -351,6 +363,9 @@ internal sealed partial class DocumentPlanner
                 foreach (var child in PredicateChildren(expression)) { Validate(child, allowAggregate); }
                 return;
             case OqlLiteralExpression or OqlMissingExpression or OqlParameterExpression or OqlPathExpression or OqlMetaExpression:
+                return;
+            case OqlArrayExpression array:
+                foreach (var element in array.Elements) { Validate(element, allowAggregate); }
                 return;
             case OqlObjectExpression obj:
                 foreach (var member in obj.Members) { Validate(member.Value, allowAggregate); }
@@ -382,6 +397,11 @@ internal sealed partial class DocumentPlanner
             foreach (var child in PredicateChildren(expression)) { ValidateGrouped(child, query); }
             return;
         }
+        if (expression is OqlArrayExpression array)
+        {
+            foreach (var element in array.Elements) { ValidateGrouped(element, query); }
+            return;
+        }
         if (expression is OqlObjectExpression obj)
         {
             foreach (var member in obj.Members) { ValidateGrouped(member.Value, query); }
@@ -407,6 +427,11 @@ internal sealed partial class DocumentPlanner
             (a.Otherwise is null) == (b.Otherwise is null) && a.Branches.Count == b.Branches.Count && EquivalentChildren(a, b, alias),
         (OqlPathExpression a, OqlPathExpression b) => PathSegments(a, alias).SequenceEqual(PathSegments(b, alias)),
         (OqlLiteralExpression a, OqlLiteralExpression b) => DocumentExpressionEvaluator.Compare(a.Value, b.Value) == 0,
+        (OqlCallExpression a, OqlCallExpression b) => a.Name == b.Name && a.Arguments.Count == b.Arguments.Count &&
+            a.Arguments.Zip(b.Arguments).All(pair => EquivalentExpression(pair.First, pair.Second, alias)),
+        (OqlStarExpression, OqlStarExpression) => true,
+        (OqlArrayExpression a, OqlArrayExpression b) => a.Elements.Count == b.Elements.Count &&
+            a.Elements.Zip(b.Elements).All(pair => EquivalentExpression(pair.First, pair.Second, alias)),
         (OqlMetaExpression a, OqlMetaExpression b) => a.Member == b.Member,
         (OqlObjectExpression a, OqlObjectExpression b) => a.Members.Count == b.Members.Count &&
             a.Members.Zip(b.Members).All(pair => pair.First.Key == pair.Second.Key &&

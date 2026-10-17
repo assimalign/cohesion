@@ -82,6 +82,11 @@ internal static class Program
                 predicates[0][2] is true && predicates[0][3] is "big", "IN BETWEEN LIKE CASE");
             var conditionalNull = await connection.QueryAsync("SELECT CASE absent WHEN 1 THEN 2 END AS c, 0 BETWEEN 1 AND MISSING AS b FROM items", cancellationToken: token);
             Check(conditionalNull[0].IsNull(0) && conditionalNull[0].IsMissing(1), "CASE NULL and BETWEEN MISSING");
+            var shaped = await connection.QueryAsync("SELECT DISTINCT VALUE {n: name, a: [score, MISSING, NULL]} FROM items", cancellationToken: token);
+            Check(shaped.Count == 1 && shaped.Documents[0].GetProperty("a")[0].GetInt32() == 3 &&
+                shaped.Documents[0].GetProperty("a")[1].ValueKind == System.Text.Json.JsonValueKind.Null, "DISTINCT VALUE constructors");
+            var scalar = await connection.QueryAsync("SELECT RAW score FROM items", cancellationToken: token);
+            Check(scalar.Count == 1 && scalar.Columns[0].Name == "value" && scalar.Documents[0].GetInt32() == 3, "RAW scalar");
             var whole = await connection.QueryAsync("SELECT * FROM items", cancellationToken: token);
             Check(whole.IsDocumentQuery && whole.Documents[0].GetProperty("nested")[0].GetInt32() == 1, "whole documents");
             Check((await connection.QueryAsync("SELECT SUM(score) AS total FROM items HAVING SUM(score) > 0", cancellationToken: token))[0][0] is 3m, "aggregate");

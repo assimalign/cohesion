@@ -36,10 +36,10 @@ public sealed class DocumentResultSet : IReadOnlyList<DocumentRow>
     /// <summary>Gets the mutation count, or -1 for a row-returning statement.</summary>
     public long AffectedCount { get; }
 
-    /// <summary>Gets whether the statement projects whole documents, including an empty result.</summary>
+    /// <summary>Gets whether the statement returns bare JSON values (SELECT *, VALUE or RAW), including an empty result.</summary>
     public bool IsDocumentQuery { get; }
 
-    /// <summary>Gets whole JSON values for a whole-document query; empty for positional projections.</summary>
+    /// <summary>Gets bare JSON values for SELECT *, VALUE or RAW; empty for named projections.</summary>
     public IReadOnlyList<JsonElement> Documents { get; }
 
     /// <summary>Gets the number of materialized rows.</summary>

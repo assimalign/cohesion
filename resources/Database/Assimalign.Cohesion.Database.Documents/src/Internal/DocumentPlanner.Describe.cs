@@ -13,6 +13,8 @@ internal sealed partial class DocumentPlanner
     internal static string DescribeOperator(object plan) => plan switch
     {
         DocumentPlan => "Select",
+        DocumentLogicalPlan { Query.IsDistinct: true } => "Distinct",
+        DocumentLogicalPlan { Query.IsValue: true, IsGrouped: false } => "ProjectValue",
         DocumentLogicalPlan { IsGrouped: true } => "Group",
         DocumentLogicalPlan => "Project",
         DocumentSystemCollectionPlan => "SystemCollection",

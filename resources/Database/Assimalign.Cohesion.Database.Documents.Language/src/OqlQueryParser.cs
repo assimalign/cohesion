@@ -220,6 +220,19 @@ public sealed partial class OqlQueryParser : QueryParser
 
             string value = token.Text.ToUpperInvariant();
 
+            // DISTINCT/ALL are legal only directly after SELECT, including INSERT SELECT.
+            if (openQuantifiers == 0 && value is "DISTINCT" or "ALL")
+            {
+                if (index > 0 && IsWord(_tokens[index - 1], "SELECT")) { continue; }
+                string construct = index > 1 && _tokens[index - 1].Type == TokenType.LeftParen &&
+                    _tokens[index - 2].Type == TokenType.Function
+                    ? _tokens[index - 2].Text.ToUpperInvariant() + "(" + value + ")" : value;
+                _diagnostics.Add(QueryDiagnostics.UnsupportedClause(construct, Profile.Language, Span(token, token)));
+                break;
+            }
+            // ColLabel accepts reserved words after AS; quantifier pins remain positional.
+            if (index > 0 && IsWord(_tokens[index - 1], "AS")) { continue; }
+
             // A SQL++ quantified predicate, EVERY x IN ... SATISFIES ... END, is one construct:
             // its binding IN is not the IN predicate, and its text up to END belongs to it.
             bool quantifier = value is "EVERY" or "ANY" or "SOME" && IsQuantifierBinding(index + 1);
@@ -400,7 +413,7 @@ public sealed partial class OqlQueryParser : QueryParser
         token.Type is TokenType.Keyword or TokenType.Identifier or TokenType.Function &&
         string.Equals(token.Text, word, StringComparison.OrdinalIgnoreCase);
 
-    private OqlSelectExpression EmptyExpression() => new(string.Empty, null, [], null, [], null, [], Span(Current, Current));
+    private OqlSelectExpression EmptyExpression() => new(string.Empty, null, [], null, [], null, [], false, false, Span(Current, Current));
     private bool IsIndexStatement(string verb) => IsDdlStatement(verb, "INDEX");
     private bool IsDdlStatement(string verb, string kind) => Is(verb) && _position + 1 < _tokens.Count &&
         IsWord(_tokens[_position + 1], kind);

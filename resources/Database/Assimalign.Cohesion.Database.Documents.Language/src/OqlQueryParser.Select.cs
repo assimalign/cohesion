@@ -9,13 +9,20 @@ public sealed partial class OqlQueryParser
     {
         var start = Current;
         Advance();
+        bool distinct = Take("DISTINCT");
+        if (!distinct) { Take("ALL"); }
+        var kindToken = Current;
+        bool value = Take("VALUE") || Take("RAW");
+        if (value && Is("FROM")) { Error("OQL0002", "SELECT VALUE requires an expression.", kindToken); }
         List<OqlProjection> projections = [];
         do
         {
-            var expression = ParseExpression();
-            string? projectionAlias = Take("AS") ? Identifier() : null;
+            var expression = Failed ? new OqlLiteralExpression(null, Span(kindToken, kindToken)) : ParseExpression();
+            if (value && expression is OqlStarExpression) { Error("OQL0002", "SELECT VALUE requires an expression other than star.", Previous); }
+            string? projectionAlias = !value && Take("AS") ? Identifier(allowKeyword: true) : null;
             projections.Add(new OqlProjection(expression, projectionAlias));
-        } while (!Failed && Take(TokenType.Comma));
+        } while (!value && !Failed && Take(TokenType.Comma));
+        if (Failed) { return EmptyExpression(); }
         Expect("FROM");
         string collection = CollectionName();
         string? alias = null;
@@ -53,7 +60,7 @@ public sealed partial class OqlQueryParser
             } while (!Failed && Take(TokenType.Comma));
         }
         return new OqlSelectExpression(collection, alias, projections.AsReadOnly(), predicate,
-            groups.AsReadOnly(), having, ordering.AsReadOnly(), Span(start, Previous));
+            groups.AsReadOnly(), having, ordering.AsReadOnly(), distinct, value, Span(start, Previous));
     }
 
     private bool IsReturningClause()

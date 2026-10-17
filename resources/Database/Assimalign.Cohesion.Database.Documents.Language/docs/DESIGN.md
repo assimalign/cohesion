@@ -41,7 +41,11 @@ Lexical recognition preserves the established vocabulary so rejected constructs 
 
 | Clause | Supported | Shape or reason |
 | --- | --- | --- |
-| `SELECT` | Yes | One or more projected expressions, optional `AS` output names; `*` returns the source document |
+| `SELECT` | Yes | One or more projected expressions, optional `AS` labels; a lone `*` returns the stored document |
+| `DISTINCT` | Yes | Optional quantifier directly after SELECT; ALL is the default |
+| `SELECT VALUE` | Yes | One bare expression; RAW is a synonym |
+| `OBJECT CONSTRUCTOR` | Yes | Named members in braces; last non-MISSING member wins |
+| `ARRAY CONSTRUCTOR` | Yes | Expressions in brackets; MISSING elements become NULL |
 | `EXPLAIN` | Yes | `EXPLAIN SELECT` or `EXPLAIN INSERT` describes the plan without reading document data or writing |
 | `INSERT` | Yes | Explicit KEY/VALUE pairs, or KEY and optional VALUE bindings to SELECT output names |
 | `VALUES` | Yes | One or more parenthesized key/value pairs for INSERT |
@@ -67,10 +71,28 @@ Lexical recognition preserves the established vocabulary so rejected constructs 
 
 Callable functions are `META` and the aggregates `COUNT`, `SUM`, `AVG`, `MIN`, and `MAX`. Each aggregate takes one expression;
 `COUNT(*)` also counts documents. Aggregate placement, grouping consistency, and value semantics
-are validated by the Documents planner/executor. `DISTINCT`, `ALL`, `EXISTS`,
+are validated by the Documents planner/executor. `EXISTS`,
 collection constructors/quantifiers, `ABS`, and other reserved but unimplemented
 operations produce `COHDBL001`. Unknown function calls likewise produce `COHDBL001` naming the
 function. Retired ODMG constructs remain recognized only to produce deliberate diagnostics.
+
+### Projection semantics (#1128)
+
+The [Couchbase SELECT clause](https://docs.couchbase.com/server/current/n1ql/n1ql-language-reference/selectclause.html)
+defines ALL as the default, DISTINCT as duplicate removal, and VALUE/RAW as a single unwrapped
+expression. OQL accepts these spellings, requiring FROM and rejecting VALUE aliases, star and
+multiple expressions. VALUE and RAW are reserved: use `"value"`, `"raw"` or `d.value` for fields.
+After AS, a projection label accepts reserved words, following PostgreSQL ColLabel
+(`src/backend/parser/gram.y:17638,18042-18046` in the reference clone). DISTINCT and ALL retain
+their positional capability refusal everywhere except directly after SELECT (and after a dot).
+COUNT(DISTINCT x) remains one COHDBL001 naming COUNT(DISTINCT). ARRAY comprehensions, computed
+member names, IN's array form and path access on constructor results remain deferred.
+
+Object and array constructors are primary expressions and participate in input validation,
+constant evaluation, predicates, grouping and aggregates. Objects retain #1131's last-member-wins
+rule, including repeated literal names; arrays preserve source order and replace MISSING elements
+with JSON null. Constructors use Utf8JsonWriter and owned JsonElement values, preserving decimal
+scale and the decimal scalar domain. The existing 128-level parser limit also covers constructors.
 
 ### Keyword disposition (#1101)
 
@@ -127,6 +149,7 @@ Membership tests assert these lists without freezing arrays that later T1 items 
 | Disposition | Words |
 | --- | --- |
 | Reserved | MISSING, VALUED, KNOWN, UNKNOWN, NIL, UNDEFINED, SET, ARRAY, COLLECTION, FIRST, LAST, UNIQUE |
+| Projection reservations (#1128) | VALUE, RAW |
 | Predicate and conditional reservations (#1127) | CASE, WHEN, THEN, ELSE, END, ESCAPE |
 | Freed identifiers | DEFINE, ELEMENT, FLATTEN, STRUCT, LIST, BAG, LISTTOSET, TYPEOF |
 | Removed functions | ELEMENT, FLATTEN, FIRST, LAST, LISTTOSET, UNIQUE |
@@ -197,9 +220,10 @@ Composite/UNIQUE index keys belong to oql-index-ddl.
 
 ```text
 statement    := (query | insert | EXPLAIN (query | insert) | create-collection | drop-collection | create-index | drop-index) [';']
-query        := SELECT projection (',' projection)* FROM collection [AS? identifier]
+query        := SELECT [ALL | DISTINCT] select-kind FROM collection [AS? identifier]
                 [WHERE expression] [GROUP BY expression (',' expression)*]
                 [HAVING expression] [ORDER BY ordering (',' ordering)*]
+select-kind  := projection (',' projection)* | (VALUE | RAW) expression
 insert       := INSERT INTO collection [AS identifier] '(' KEY ',' VALUE ')'
                 VALUES '(' expression ',' expression ')' (',' '(' expression ',' expression ')')*
               | INSERT INTO collection [AS identifier] '(' KEY identifier [',' VALUE identifier] ')' query
@@ -210,7 +234,9 @@ drop-collection   := DROP COLLECTION [IF EXISTS] collection
 create-index := CREATE INDEX identifier ON collection '(' path ')'
 drop-index   := DROP INDEX identifier ON collection
 collection   := identifier | COHESION_SCHEMA '.' identifier
-projection   := expression [AS identifier]
+projection   := expression [AS label]
+label        := identifier | quoted-identifier | reserved-word
+array        := '[' [expression (',' expression)*] ']'
 ordering     := expression [ASC | DESC]
 path         := identifier ('.' identifier | '[' integer ']' | '[' string ']')*
 presence-test := expression IS [NOT] (NULL | MISSING | VALUED)

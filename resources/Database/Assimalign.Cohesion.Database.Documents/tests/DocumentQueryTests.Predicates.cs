@@ -251,10 +251,10 @@ public sealed partial class DocumentQueryTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Documents] - IN: structural residuals agree across scans and index seeks")]
-    [InlineData("value IN ({'a':NULL})", 0)]
-    [InlineData("value IN (@nullArray)", 0)]
-    [InlineData("value IN (@array, {'a':1})", 2)]
-    [InlineData("value NOT IN (@nullArray, {'a':NULL})", 4)]
+    [InlineData("\"value\" IN ({'a':NULL})", 0)]
+    [InlineData("\"value\" IN (@nullArray)", 0)]
+    [InlineData("\"value\" IN (@array, {'a':1})", 2)]
+    [InlineData("\"value\" NOT IN (@nullArray, {'a':NULL})", 4)]
     [InlineData("score IN (1, 2, 3, NULL, MISSING)", 3)]
     public async Task Execute_IndexedMembership_ShouldEqualScanAsync(string predicate, int expected)
     {

@@ -27,6 +27,12 @@ flowchart LR
     Core --> Connections["Connections"]
 ```
 
+SELECT lists arrive as objects in projection order. SELECT VALUE/RAW uses the existing
+whole-value header mode and exposes a single `value` column and its JSON values in Documents.
+DISTINCT completion counts follow duplicate removal; object/array constructors need no codec
+extension. A lone SELECT * preserves stored bytes on the wire, including scalar roots.
+VALUE MISSING uses the engine's documented JSON-null default at the wire boundary.
+
 ## Exchange and result ownership
 
 Every rental supports one active exchange. Requests capture parameter and content bytes before

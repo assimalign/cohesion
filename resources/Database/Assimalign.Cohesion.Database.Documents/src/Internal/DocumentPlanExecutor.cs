@@ -57,7 +57,8 @@ internal static partial class DocumentPlanExecutor
             operation.EnsureActive();
             var document = database.ReadDocument(entry);
             using var json = JsonDocument.Parse(document.Content, new JsonDocumentOptions { MaxDepth = 128 });
-            var context = new DocumentEvaluationContext(json.RootElement, entry.Id, entry.Version);
+            var context = new DocumentEvaluationContext(json.RootElement, entry.Id, entry.Version,
+                query.Projections.Count == 1 && query.Projections[0].Expression is OqlStarExpression ? document.Content : default);
             if (evaluator.Matches(query.Predicate, context)) { matches.Add(context with { Content = json.RootElement.Clone() }); }
         }
 
@@ -107,8 +108,24 @@ internal static partial class DocumentPlanExecutor
         {
             foreach (var document in matches) { cancellationToken.ThrowIfCancellationRequested(); Project(document, null); }
         }
+        if (query.IsDistinct)
+        {
+            var seen = new SortedSet<object?[]>(TupleComparer.Instance);
+            var distinct = new List<EvaluatedRow>();
+            foreach (var row in output)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (seen.Add(row.Values)) { distinct.Add(row); }
+            }
+            output = distinct;
+        }
         if (query.OrderBy.Count > 0)
         {
+            foreach (var row in output)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                row.OrderKeys = query.OrderBy.Select(order => evaluator.Evaluate(order.Expression, row.Document, row.Group)).ToArray();
+            }
             output.Sort((left, right) =>
             {
                 for (int i = 0; i < query.OrderBy.Count; i++)
@@ -125,13 +142,14 @@ internal static partial class DocumentPlanExecutor
             var types = output.Select(row => GetType(row.Values[i])).Where(type => type != DatabaseType.Null).Distinct().ToArray();
             columns[i] = new DatabaseColumn { Name = logical.Projections[i].Name, Ordinal = i, Type = types.Length == 1 ? types[0] : DatabaseType.Null };
         }
-        return new DocumentQueryResult(columns, output.Select(row => row.Values).ToList());
+        bool wholeDocument = query.Projections.Count == 1 && query.Projections[0].Expression is OqlStarExpression;
+        return new DocumentQueryResult(columns, output.Select(row => row.Values).ToList(),
+            query.IsValue || wholeDocument, wholeDocument ? output.Select(row => row.Document.RawContent).ToArray() : null);
 
         void Project(DocumentEvaluationContext document, IReadOnlyList<DocumentEvaluationContext>? group)
         {
             var values = logical.Projections.Select(projection => evaluator.Evaluate(projection.Expression, document, group)).ToArray();
-            var orderKeys = query.OrderBy.Select(order => evaluator.Evaluate(order.Expression, document, group)).ToArray();
-            output.Add(new EvaluatedRow(values, orderKeys, output.Count));
+            output.Add(new EvaluatedRow(values, document, group, output.Count));
         }
     }
 
@@ -199,7 +217,10 @@ internal static partial class DocumentPlanExecutor
         _ => DatabaseType.Null,
     };
 
-    private sealed record EvaluatedRow(object?[] Values, object?[] OrderKeys, int Ordinal);
+    private sealed record EvaluatedRow(object?[] Values, DocumentEvaluationContext Document, IReadOnlyList<DocumentEvaluationContext>? Group, int Ordinal)
+    {
+        internal object?[] OrderKeys { get; set; } = [];
+    }
 
     private sealed class TupleComparer : IComparer<object?[]>
     {

@@ -41,6 +41,19 @@ internal static class DocumentJsonValue
         return json.RootElement.Clone();
     }
 
+    internal static JsonElement Array(IEnumerable<object?> elements)
+    {
+        var buffer = new ArrayBufferWriter<byte>();
+        using (var writer = new Utf8JsonWriter(buffer, new JsonWriterOptions { MaxDepth = 128 }))
+        {
+            writer.WriteStartArray();
+            foreach (var element in elements) { Write(writer, element is DocumentMissing ? null : element); }
+            writer.WriteEndArray();
+        }
+        using var json = JsonDocument.Parse(buffer.WrittenMemory, new JsonDocumentOptions { MaxDepth = 128 });
+        return json.RootElement.Clone();
+    }
+
     private static void Write(Utf8JsonWriter writer, object? value)
     {
         switch (value)
