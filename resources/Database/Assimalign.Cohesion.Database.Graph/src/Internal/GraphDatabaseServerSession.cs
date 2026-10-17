@@ -441,7 +441,7 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
         {
             // Statement-level failures keep the session in the ready state.
             var diagnostic = exception.Diagnostics.FirstOrDefault(item => item.Severity == DiagnosticSeverity.Error);
-            string errorText = diagnostic?.Code is { } code && !exception.Message.StartsWith(code + ":", StringComparison.Ordinal)
+            string errorText = diagnostic?.Code is { } code && !exception.Message.Contains(code + ":", StringComparison.Ordinal)
                 ? $"{code}: {exception.Message}" : exception.Message;
             await WriteErrorAsync(ProtocolErrorCode.ParseFailure, errorText, cancellationToken).ConfigureAwait(false);
             return;

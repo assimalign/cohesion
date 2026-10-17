@@ -1251,4 +1251,5 @@ path projections sent through Execute carry COHDBG001 on GraphPlanningException 
 span. An unexpected ExecutePaths result uses the same invalid-request code and the current
 exchange's complete text span, retained by the serial session pump because results have no AST.
 Rejected scalar results preserve their complete diagnostic list on DatabaseException; the first
-error supplies the unprefixed message. Error frames compose CODE: message once. No codes are added.
+error supplies the unprefixed message. Error frames compose CODE: message once; parser messages
+already containing their code retain their existing format. No codes are added.
