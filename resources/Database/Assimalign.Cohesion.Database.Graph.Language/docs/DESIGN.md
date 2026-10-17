@@ -92,6 +92,7 @@ The builtin-function table is empty because the executor implements no functions
 | --- | --- | --- |
 | `MATCH` | Comma-separated finite node/relationship chains; optional `variable =` path assignment, label expressions, literal property maps; every ISO full and abbreviated edge except the tilde forms | Planner chooses an indexed anchor when available; executor matches bounded relationship-unique trails and binds named paths in traversal order |
 | `WHERE` | Boolean and scalar expressions: comparisons, labels, AND/OR/XOR/NOT, IS null/truth tests, arithmetic, concatenation, IN lists and string predicates | Keeps TRUE only; see [DIALECT.md](DIALECT.md) and scalar expressions below |
+| `EXPLAIN` | One MATCH/RETURN, INSERT/CREATE, or MATCH [DETACH] DELETE statement | Shared description rows without executing any read expansion or write; Cohesion extension |
 | `RETURN` | Bound node/relationship/path variables or scalar properties, optional `AS` aliases | Projects elements or scalar values in source order; the engine path-request API requires exactly one bound entity or path projection |
 | `INSERT` | Literal node/path insertion, optionally following a match; a node takes a label conjunction (`:A&B`, `:A:B`), a relationship one type and a directed edge (`-[:T]->`, `<-[:T]-`) | Inserts nodes and relationships transactionally |
 | `CREATE` | Same insertion grammar as `INSERT`; compatibility extension | Same transactional insertion path |
@@ -117,6 +118,7 @@ return-after-delete are not accepted.
 The grammar is intentionally finite:
 
 ```text
+statement    := (query | EXPLAIN query | catalog) [';']
 query        := [ MATCH match-paths [ WHERE predicate ] ]
                 ( (INSERT | CREATE) paths [ RETURN projections ]
                 | [ DETACH ] DELETE variables
@@ -184,6 +186,22 @@ mutation. Attempted mutation composition produces `GQL0007`, including verbs suc
 The [engine's catalog section](../../Assimalign.Cohesion.Database.Graph/docs/DESIGN.md#catalog-introspection-c2)
 defines ordered result columns, SQL-consistent ownership vocabulary and session snapshot behavior.
 The parser describes only the metadata subject; it never accesses or caches catalog state.
+
+## EXPLAIN (#1104)
+
+ISO/IEC 39075 defines no EXPLAIN. This is a Cohesion extension on the same footing as SHOW,
+not a D3 Cypher alias. The parser recognizes the prefix before SHOW dispatch, marks the parsed
+`GqlQueryExpression.IsExplain`, and retains normal statement completeness. EXPLAIN SHOW,
+transaction control, nested EXPLAIN, EXPLAIN ANALYZE and PROFILE receive `COHDBL001`.
+`EXPLAIN` is contextual only at the statement prefix, matching PostgreSQL's unreserved keyword
+classification (`src/include/parser/kwlist.h:167` in the local clone). It is not a lexer keyword;
+unquoted `explain` remains a variable, label, relationship type, property or projection alias.
+The keyword-disposition corpus covers these identifiers both with and without the prefix.
+
+The engine returns the shared
+[description columns](../../Assimalign.Cohesion.Database.Execution/docs/DESIGN.md#plan-descriptions-1104)
+on Execute, including `EXPLAIN MATCH (a:Person) RETURN a`. ExecutePaths rejects it with
+`COHDBG001` and leaves the server session ready. The Graph engine owns anchor/expansion names.
 
 ## Diagnostics and conformance (#194, #195)
 

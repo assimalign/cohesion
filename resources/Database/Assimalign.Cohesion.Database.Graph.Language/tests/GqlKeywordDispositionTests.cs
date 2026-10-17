@@ -13,7 +13,7 @@ namespace Assimalign.Cohesion.Database.Graph.Language.Tests;
 
 /// <summary>
 /// Keyword disposition (#1101): every word the GQL profile lexes as a keyword, every entry of
-/// the recognized-unsupported table, and every executable label-expression spelling (#1139)
+/// the recognized-unsupported table, contextual EXPLAIN, and every executable label-expression spelling (#1139)
 /// either parses inside a supported clause or is rejected with exactly one <c>COHDBL001</c>
 /// naming its construct. A word added to any of those lists without a case here fails the
 /// coverage test.
@@ -24,6 +24,7 @@ public sealed class GqlKeywordDispositionTests
     {
         // Supported clauses
         ["MATCH"] = Parses("MATCH (a) RETURN a"),
+        ["EXPLAIN"] = Parses("EXPLAIN MATCH (a) RETURN a"),
         ["RETURN"] = Parses("MATCH (a) RETURN a"),
         ["AS"] = Parses("MATCH (a) RETURN a.x AS y"),
         ["WHERE"] = Parses("MATCH (a) WHERE a.x = 1 RETURN a"),
@@ -131,7 +132,7 @@ public sealed class GqlKeywordDispositionTests
         // Act / Assert
         RequireCoverage(Words(), _corpus);
         _corpus.Keys.Except(Words(), StringComparer.OrdinalIgnoreCase)
-            .ShouldBeEmpty("Corpus keys must name current keywords or recognized-unsupported entries.");
+            .ShouldBeEmpty("Corpus keys must name current keywords, contextual prefixes or recognized-unsupported entries.");
     }
 
     [Fact(DisplayName = "Cohesion Test [Graph.Language] - Keyword disposition: a word added without a case fails coverage")]
@@ -199,6 +200,45 @@ public sealed class GqlKeywordDispositionTests
             .ShouldBeEmpty();
     }
 
+    [Theory(DisplayName = "Cohesion Test [Graph.Language] - Keyword disposition: EXPLAIN is contextual and remains an unquoted identifier")]
+    [InlineData("MATCH (explain) RETURN explain", false)]
+    [InlineData("MATCH (n) RETURN n AS explain", false)]
+    [InlineData("MATCH (n:explain) RETURN n", false)]
+    [InlineData("MATCH (n) RETURN n.explain", false)]
+    [InlineData("MATCH explain = (n) RETURN explain", false)]
+    [InlineData("MATCH ()-[explain:explain]->() RETURN explain", false)]
+    [InlineData("eXpLaIn MATCH (explain:explain) RETURN explain.explain AS explain", true)]
+    public void Parse_ExplainIdentifier_ShouldRecognizeOnlyStatementPrefix(string source, bool explained)
+    {
+        // Arrange
+        var parser = new GqlQueryParser();
+
+        // Act
+        var statement = (GqlQueryStatement)parser.Parse(source);
+
+        // Assert
+        GqlLanguageProfile.Instance.Keywords.ToArray().ShouldNotContain("EXPLAIN");
+        statement.Diagnostics.ShouldBeEmpty();
+        statement.GqlExpression.IsExplain.ShouldBe(explained);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Graph.Language] - Keyword disposition: contextual EXPLAIN still rejects nesting and options")]
+    [InlineData("EXPLAIN EXPLAIN MATCH (n) RETURN n")]
+    [InlineData("EXPLAIN ANALYZE MATCH (n) RETURN n")]
+    [InlineData("EXPLAIN PROFILE MATCH (n) RETURN n")]
+    [InlineData("EXPLAIN (FORMAT JSON) MATCH (n) RETURN n")]
+    public void Parse_ExplainOptionsOrNesting_ShouldReportCodedRejection(string source)
+    {
+        // Arrange
+        var parser = new GqlQueryParser();
+
+        // Act
+        var statement = parser.Parse(source);
+
+        // Assert
+        statement.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBL001");
+    }
+
     private static void RequireCoverage(IEnumerable<string> words, IReadOnlyDictionary<string, KeywordCase> corpus)
         => words.Where(word => !corpus.ContainsKey(word))
             .ShouldBeEmpty("Every keyword and recognized-unsupported entry needs a keyword-disposition case.");
@@ -207,6 +247,7 @@ public sealed class GqlKeywordDispositionTests
         => GqlLanguageProfile.Instance.Keywords.ToArray()
             .Concat(GqlUnsupportedVocabulary.Words.Select(word => word.Spelling))
             .Concat(GqlLabelVocabulary.Spellings)
+            .Append("EXPLAIN") // Contextual statement prefix; identifier cases live in this corpus too.
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
 

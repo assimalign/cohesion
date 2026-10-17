@@ -177,6 +177,23 @@ internal static class Program
             await RowsAsync(session, "SELECT id, label, note FROM default_guard ORDER BY id"),
             [[1, "seed", null], [2, "seed", null], [7, "seed", null]]);
         Check("in process: SQL function and domain", await RowsAsync(session, "SELECT sql_increment(n) FROM sql_defined"), [[5]]);
+        var explained = await RowsAsync(session, "EXPLAIN SELECT c FROM fixed_codes WHERE c = 'a'");
+        Check("in process: EXPLAIN retains index and shared columns", explained.Any(row => Equals(row[2], "IndexSeek") && row[4] is string && row.Length == 8), true);
+        await RowsAsync(session, "EXPLAIN DELETE FROM default_guard");
+        Check("in process: EXPLAIN DELETE has no effects", await RowsAsync(session, "SELECT COUNT(*) FROM default_guard"), [[3L]]);
+        await session.ExecuteAsync("CREATE TABLE binary_keys (key_bytes VARBINARY(4))");
+        await session.ExecuteAsync("CREATE INDEX by_bytes ON binary_keys (key_bytes)");
+        await using (var description = (DatabaseResultSet)await session.ExecuteAsync(
+            "EXPLAIN SELECT key_bytes FROM binary_keys WHERE key_bytes = @key",
+            new Dictionary<string, object?> { ["key"] = new byte[] { 0, 0xAB, 0xFF } }, CancellationToken.None))
+        {
+            bool describedBytes = false;
+            await foreach (var row in description.GetRowsAsync(CancellationToken.None))
+            {
+                describedBytes |= row.GetString(2) == "IndexSeek" && row.GetString(5) == "key_bytes = X'00ABFF'";
+            }
+            Check("in process: EXPLAIN binary bounds", describedBytes, true);
+        }
         Check("in process: scalars of every arity, strict and non-strict", await RowsAsync(session, Projection), _projection);
         Check("in process: typed and hand-written aggregates", await RowsAsync(session, Aggregates), _aggregates);
         Check("in process: COHESION_SCHEMA.FUNCTIONS", await RowsAsync(session, Registered), _registered);
@@ -225,6 +242,8 @@ internal static class Program
             [[1, "seed", null], [2, "seed", null], [7, "seed", null]]);
 
         Check("over the wire: CHAR storage, cast, length, concat, LIKE and seek", await RowsAsync(connection, Characters, timeout.Token), _characters);
+        var explained = await RowsAsync(connection, "EXPLAIN SELECT c FROM fixed_codes WHERE c = 'a'", timeout.Token);
+        Check("over the wire: EXPLAIN uses existing result rows", explained.Any(row => Equals(row[2], "IndexSeek") && row[4] is string && row.Length == 8), true);
         Check("over the wire: ISO type names and SQL Server lexical aliases", await RowsAsync(connection, typeAliases, timeout.Token), _typeAliases);
         var fixedCodes = await connection.QueryAsync(Characters, cancellationToken: timeout.Token);
         Check("over the wire: CHAR type", fixedCodes.Columns[0].Type == Types.DatabaseType.Character, true);

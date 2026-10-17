@@ -417,6 +417,34 @@ The existing wire Execute operation carries both clauses. CREATE followed by Doc
 Put/Get works on the new collection. A schema-owned DROP returns ExecutionFailure (6), naming
 `DROP COLLECTION`; the next Execute on the same connection succeeds. No protocol layout changes.
 
+## EXPLAIN operator vocabulary and wire shape (#1104)
+
+`EXPLAIN SELECT` performs ordinary parameter validation and snapshot-visible planning, then
+materializes a `DatabasePlanDescription` before reading document content or invoking the plan
+executor. Its columns and nullable count fields follow
+[Execution](../../Assimalign.Cohesion.Database.Execution/docs/DESIGN.md#plan-descriptions-1104).
+It changes no documents or catalog entries, including when its explicit transaction commits.
+
+| Operators | Meaning |
+| --- | --- |
+| `Select`, `Project`, `Group` | The physical query and its logical projection or grouping stage; details include filters and ordering |
+| `CollectionScan` | Candidate retrieval from the named collection |
+| `IndexSeek` | The chosen catalog index name, collection and inclusive/exclusive path bounds |
+| `SystemCollection` | A virtual `COHESION_SCHEMA` collection without stored-document access |
+| `CreateCollection`, `DropCollection`, `CreateIndex`, `DropIndex` | Internal DDL mappings; EXPLAIN DDL is refused by the parser |
+
+Nodes use depth-first pre-order. Test-only enumeration guards both logical and statement plan
+records, including #1130's collection DDL records; shipped descriptions use closed switches.
+
+Documents wire differs from SQL and Graph. The implemented default for #1104/#190 is one JSON
+document per description row, with `node_id`, `parent_id`, `operator`, `target`, `index`, `detail`,
+`estimated_rows` and `actual_rows` as members in shared column order. Absent optional values
+are explicit JSON nulls. Existing ResultHeader (one `document` Json column, whole-document mode),
+Document and Complete frames carry it. No new frame kind or positional-row contract is added.
+The typed client exposes these values in `Documents` and each row's document value. #190's
+advertised-clause suite and the description parity cases cover InMemory and TCP. This default
+is recorded for owner review; P8 (#1264) later absorbs the description into its per-row shape.
+
 ## Index planning and writes
 
 `CREATE INDEX <index-name> ON <collection> (<path>)` and

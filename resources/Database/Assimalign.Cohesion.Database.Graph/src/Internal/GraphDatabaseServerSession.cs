@@ -475,6 +475,7 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
         try
         {
             var request = GraphQueryRequest.FromGql(statement, parameters);
+            if (request.Statement.GqlExpression.IsExplain) { return request; }
             foreach (var projection in request.Statement.GqlExpression.Projections)
             {
                 if (projection.Property is null)

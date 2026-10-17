@@ -42,6 +42,7 @@ Lexical recognition preserves the established vocabulary so rejected constructs 
 | Clause | Supported | Shape or reason |
 | --- | --- | --- |
 | `SELECT` | Yes | One or more projected expressions, optional `AS` output names; `*` returns the source document |
+| `EXPLAIN` | Yes | `EXPLAIN SELECT` describes the chosen query plan without reading document data or writing |
 | `FROM` | Yes | Exactly one unqualified collection or reserved `COHESION_SCHEMA` source and optional iteration variable, with or without `AS` |
 | `WHERE` | Yes | Scalar comparison and Boolean document filtering |
 | `GROUP BY` | Yes | One or more grouping expressions |
@@ -179,7 +180,7 @@ belongs to oql-projection; composite/UNIQUE index keys belong to oql-index-ddl.
 ## Grammar, statement, and expression trees
 
 ```text
-statement    := (query | create-collection | drop-collection | create-index | drop-index) [';']
+statement    := (query | EXPLAIN query | create-collection | drop-collection | create-index | drop-index) [';']
 query        := SELECT projection (',' projection)* FROM collection [AS? identifier]
                 [WHERE expression] [GROUP BY expression (',' expression)*]
                 [HAVING expression] [ORDER BY ordering (',' ordering)*]
@@ -202,6 +203,7 @@ there is no iteration alias in an index statement. Index and collection names fo
 identifier quoting and case-preservation rules as query collection names.
 
 `OqlQueryStatement` wraps one top-level `OqlExpression`: `OqlSelectExpression`,
+`OqlExplainExpression` (one SELECT),
 `OqlCreateCollectionExpression`, `OqlDropCollectionExpression`, `OqlCreateIndexExpression`, or
 `OqlDropIndexExpression`. Collection nodes retain `Name` and `IfNotExists`/`IfExists`.
 Index creation retains its target as an `OqlPathExpression`, rather than flattening the path during
@@ -243,6 +245,19 @@ Locations use zero-based UTF-16 offsets with exclusive ends and one-based line n
 Nested expressions are capped at 128 recursive parse levels; rejection is a diagnostic, not a
 stack-overflow exception. Concurrent calls on one parser are serialized. The parser owns no
 disposable resources beyond those used by the shared analyzer pipeline.
+
+## EXPLAIN (#1104)
+
+SQL++'s `EXPLAIN SELECT` spelling produces the shared plan-description columns documented by
+[Execution](../../Assimalign.Cohesion.Database.Execution/docs/DESIGN.md#plan-descriptions-1104).
+`OqlExplainExpression.Statement` retains the query for ordinary parameter validation and
+planning. The parser rejects DDL, transaction control, nested EXPLAIN and EXPLAIN ANALYZE with
+`COHDBL001`, and applies the normal single-statement/trailing-token check to the whole form.
+The Documents engine owns its operator names and JSON-document wire representation.
+`EXPLAIN` is contextual only at the statement prefix, matching PostgreSQL's unreserved keyword
+classification (`src/include/parser/kwlist.h:167` in the local clone). It is not a lexer keyword;
+unquoted `explain` remains a collection, property path, iteration variable or output alias.
+The keyword-disposition corpus covers these identifiers both with and without the prefix.
 
 ## Diagnostic contract
 

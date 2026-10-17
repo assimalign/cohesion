@@ -8,6 +8,7 @@ namespace Assimalign.Cohesion.Database.Graph.Language;
 /// <remarks>The executable ISO/IEC 39075 subset includes documented Cohesion CREATE and SHOW extensions.</remarks>
 public static class GqlLanguageProfile
 {
+    // EXPLAIN is recognized only at the statement prefix; elsewhere it remains an identifier.
     private static readonly string[] _keywords =
     [
         // Pattern matching
@@ -49,6 +50,7 @@ public static class GqlLanguageProfile
     private static readonly string[] _clauses =
     [
         GqlClauses.Match,
+        GqlClauses.Explain,
         GqlClauses.Return,
         GqlClauses.Create,
         GqlClauses.Insert,

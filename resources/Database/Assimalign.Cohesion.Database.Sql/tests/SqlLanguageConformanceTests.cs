@@ -42,7 +42,7 @@ public sealed class SqlLanguageConformanceTests
         // The profile drives enumeration. A newly advertised clause cannot silently escape this test.
         var cases = CreateCases();
         // Phase 22 and #1125 extend spellings within the existing 33 named clauses (+0).
-        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(33);
+        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(34);
         RequireExecutionCases(SqlLanguageProfile.Instance.Clauses, cases);
         cases.Keys.Except(SqlLanguageProfile.Instance.Clauses).ShouldBeEmpty("Cases must describe the current profile.");
 
@@ -371,6 +371,13 @@ public sealed class SqlLanguageConformanceTests
 
     private static Dictionary<string, ExecutionCase> CreateCases() => new(StringComparer.Ordinal)
     {
+        [SqlClauses.Explain] = new("EXPLAIN SELECT id FROM t WHERE age = 36;",
+            [.. _seed, "CREATE INDEX by_age ON t (age);"], expression => expression is SqlExplainExpression,
+            async (_, result) =>
+            {
+                var rows = await ReadRowsAsync(result);
+                rows.ShouldContain(row => Equals(row[2], "IndexSeek") && Equals(row[4], "by_age") && Equals(row[5], "age = 36"));
+            }),
         [SqlClauses.Select] = Query("SELECT id, age + 1 AS next_age FROM t ORDER BY id;", expression => expression is SqlSelectExpression,
             [[1, 37L], [2, 46L], [3, 42L]]),
         [SqlClauses.From] = Query("SELECT u.name FROM dbo.t AS u WHERE id = 1;", expression => expression is SqlSelectExpression { From: not null },

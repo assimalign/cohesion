@@ -50,6 +50,39 @@ other model retains SupportsMissing false and IsMissing throws; it does not retu
 Existing row members' NVI conversion remains #1264's work. Deviates from interface-first
 (database-area.md): the existing abstract row family remains the concrete-first seam.
 
+## Plan descriptions (#1104)
+
+`DatabasePlanDescription` is a sealed materialized `DatabaseResultSet`, created from sealed
+`DatabasePlanNode` values. Every model emits depth-first pre-order, with zero-based sequential
+node identifiers and a null parent for the root. The fixed column order is:
+
+| Column | DatabaseType | Nullable |
+| --- | --- | --- |
+| `node_id` | Int32 | No |
+| `parent_id` | Int32 | Yes |
+| `operator` | String | No |
+| `target` | String | Yes |
+| `index` | String | Yes |
+| `detail` | String | Yes |
+| `estimated_rows` | Int64 | Yes |
+| `actual_rows` | Int64 | Yes |
+
+All eight fields are present: nullable values are NULL, never SQL++ MISSING. Both count
+columns are null in every Tier 1 row: the planners have no statistics and EXPLAIN
+never executes the described statement. A successful description changes zero records, reports
+the ordinary row-result affected count of -1, and carries
+parser/planner diagnostics. It uses the ordinary SQL and Graph result frames. Documents encodes
+each row as a JSON document with these eight member names in its existing document stream.
+
+This is a description shape, not a shared operator algebra: each model owns its vocabulary and
+closed, reflection-free plan mapping. Test-only reflection enumerates each model's plan records
+and requires a mapping. An item adding a plan record also adds its mapping and an EXPLAIN case;
+whichever item lands second owns that hand-off, including collection DDL and SQL definition and
+column-alteration plans. No public interface or shipped assembly visibility grant is added.
+
+The sequencing default is T1 before #1264 (P8). P8 folds this result into its per-row result
+shape; this item retains today's result bases and introduces no P8 row contract.
+
 ## Session capabilities
 
 The capability bases live in the root `Database` assembly, which references this package:

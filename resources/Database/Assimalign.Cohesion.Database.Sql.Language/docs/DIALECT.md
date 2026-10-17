@@ -12,7 +12,8 @@ enumerates the profile and fails if any advertised clause lacks a passing case.
 
 ## Statement matrix
 
-Phase 22 measures **33 of 49 declared clauses** against the live SQL engine.
+With EXPLAIN (#1104), the profile measures **34 of 50 declared clauses** against the live SQL engine.
+Phase 22 measured 33 of 49.
 The earlier 32/48 figure included `JOIN`, `GROUP BY`, `HAVING`, and `SUBQUERY`,
 removed in Phase 12e (#1019–#1021), plus a no-op `CAST` removed in Phase 13.
 Phase 14 restores `CAST` with actual conversion, type metadata, and wire execution
@@ -28,7 +29,7 @@ Phase 21 restores literal `ALTER TABLE ADD COLUMN` defaults for populated tables
 including old-row and omitted-column insert values over the wire, and rejects
 nonliteral defaults before mutation (#1023). Phase 22 resolves `ORDER BY`
 projection aliases, including aliases inside scalar expressions, and select-list
-ordinals through the SQL server/client (#1024). The count remains 33/49 because
+ordinals through the SQL server/client (#1024). At Phase 22 the count remained 33/49 because
 `ALTER TABLE` and `ORDER BY` were already advertised for smaller executable subsets.
 
 The **16 excluded clauses** are set operations (`UNION`,
@@ -40,6 +41,7 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | Statement | Status | Notes |
 |---|---|---|
 | `SELECT` | Supported subset, measured | One stored table or virtual system relation, or a two stored-table `INNER JOIN ... ON`; `DISTINCT`, projections and aliases, scalar expressions, `WHERE`, grouping, multi-expression `ORDER BY ASC/DESC`, nonnegative integer `LIMIT`/`OFFSET`. `COUNT(*)`, `COUNT(expr)`, `SUM`, `AVG`, `MIN`, and `MAX` execute in grouped and ungrouped queries. See the aggregate contract below. `SELECT` without `FROM` is rejected by the planner. |
+| `EXPLAIN` | Supported extension, measured | SELECT, INSERT (including query sources), UPDATE or DELETE returns the chosen plan as ordinary rows without executing it. DDL, transaction control, nested EXPLAIN and EXPLAIN ANALYZE report `COHDBL001`. |
 | `INSERT` / `VALUES` | Supported subset, measured | Optional column list, multi-row literal/scalar `VALUES` including whole-item `DEFAULT`, `INSERT ... DEFAULT VALUES` (one row of defaults, with an optional column list), and transactional `INSERT ... SELECT` with the same destination coercion, defaults, and constraints. `VALUES` expressions have no columns in scope: a column reference reports `COHSQLE005` before anything executes (see [VALUES and counts have no column scope](#values-and-counts-have-no-column-scope-1165)). Subqueries inside `VALUES` are excluded; use `INSERT ... SELECT`. |
 | `UPDATE` | Supported | multi-column `SET`, including `c = DEFAULT`, and `WHERE`; no aggregate in either (see [Grouping and aggregate functions](#grouping-and-aggregate-functions-1020)) |
 | `DELETE` | Supported | optional `WHERE`, without an aggregate |
@@ -68,11 +70,28 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `START TRANSACTION` / `BEGIN [WORK\|TRANSACTION]` / `COMMIT [WORK\|TRANSACTION]` / `END` / `ROLLBACK [WORK\|TRANSACTION]` | Supported | Spellings map to the existing BEGIN/COMMIT/ROLLBACK session commands (+0 clauses; 33/49 unchanged). Like every SQL statement, a valid spelling without `;` receives informational SQL0100, with no error or warning; with `;` it has no parser diagnostics. START and WORK are contextual, so columns named start/work remain valid. END takes no suffix; without a transaction its COHSQLT002 message names COMMIT. END WORK/TRANSACTION, AND [NO] CHAIN, modes, ROLLBACK [WORK] TO [SAVEPOINT], BEGIN TRAN/named transactions and COMMIT PREPARED stay SQL0003. ABORT [WORK\|TRANSACTION], SAVEPOINT, RELEASE, SET TRANSACTION and PREPARE TRANSACTION stay SQL0002 (#1012); TRANSACTION alone is not a statement. |
 | `MERGE`, `TRUNCATE`, `GRANT` | Not in the dialect | `SQL0002` |
 
+## Plan descriptions (#1104)
+
+Grammar: `EXPLAIN (select | insert | update | delete) [';']`. The wrapped statement retains
+normal name binding, parameter validation and planning errors. EXPLAIN never calls its data
+executor, including inside a transaction that later commits. Estimates and actual counts are
+null; EXPLAIN ANALYZE is deferred. PostgreSQL likewise distinguishes planning from execution
+with `EXEC_FLAG_EXPLAIN_ONLY` in `ExplainOnePlan` (local reference clone,
+`src/backend/commands/explain.c:562-566,574-576`); Cohesion accepts only the documented data-statement subset.
+
+The result's eight columns, types, nullability and order are the shared
+[Execution contract](../../Assimalign.Cohesion.Database.Execution/docs/DESIGN.md#plan-descriptions-1104).
+Operator names and seek-bound details belong to the
+[SQL engine](../../Assimalign.Cohesion.Database.Sql/docs/DESIGN.md#explain-operator-vocabulary-1104).
+Rows travel unchanged in existing SQL header/row/complete frames.
+
 ## Admission during deferred provisioning (49a)
 
 While a code-first migration runs on populated tables, statements referencing its reserved
 tables wait before binding. This includes FK parents in CREATE TABLE, ALTER ADD COLUMN and
 ALTER ADD CONSTRAINT, so a pending unique index is available when the FK is checked.
+EXPLAIN recursively admits its wrapped statement through the same table reservations before
+planning, so its access path reflects the completed migration.
 After admission, writes enforce the completed column nullability and bounds. Unrelated
 tables remain available. Code-first changes to built-in `VARCHAR` length and `DECIMAL`
 precision use the validation-only ALTER path described above; a storage, domain, scale or

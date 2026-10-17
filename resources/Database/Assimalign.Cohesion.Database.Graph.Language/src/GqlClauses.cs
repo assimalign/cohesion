@@ -11,6 +11,9 @@ public static class GqlClauses
     /// <summary>Matches a graph pattern.</summary>
     public const string Match = "MATCH";
 
+    /// <summary>The Cohesion extension that describes a data statement without executing it.</summary>
+    public const string Explain = "EXPLAIN";
+
     /// <summary>Matches a graph pattern without requiring a result.</summary>
     public const string OptionalMatch = "OPTIONAL MATCH";
 

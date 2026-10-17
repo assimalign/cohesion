@@ -36,6 +36,10 @@ public sealed class GqlQueryExpression : GqlExpression
     public IReadOnlyList<string> DeleteVariables { get; }
     /// <summary>Gets whether deletion cascades to incident relationships.</summary>
     public bool DetachDelete { get; }
+    /// <summary>Gets whether EXPLAIN requests a description instead of execution.</summary>
+    public bool IsExplain { get; private set; }
+
+    internal void Explain() => IsExplain = true;
     /// <summary>Gets the result projections.</summary>
     public IReadOnlyList<GqlProjection> Projections { get; }
     /// <summary>Gets the optional read-only catalog subject; graph clauses cannot accompany it.</summary>

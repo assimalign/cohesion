@@ -467,6 +467,11 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
 
     private async Task WriteResultAsync(DatabaseResult result, bool wholeDocuments, CancellationToken cancellationToken)
     {
+        if (result is DatabasePlanDescription description)
+        {
+            await WriteDescriptionAsync(description, cancellationToken).ConfigureAwait(false);
+            return;
+        }
         long count = 0;
         if (result is DatabaseResultSet set)
         {
@@ -557,6 +562,44 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
                 break;
         }
         await WriteResultFrameAsync(DocumentProtocolMessageType.Complete, new DocumentProtocolCompleteMessage(count, affected).Encode(), cancellationToken).ConfigureAwait(false);
+    }
+
+    // Documents' wire carries each description row as a JSON document whose members are the
+    // shared columns. It uses the existing document stream, with no new protocol messages.
+    private async Task WriteDescriptionAsync(DatabasePlanDescription description, CancellationToken cancellationToken)
+    {
+        await using (description.ConfigureAwait(false))
+        {
+            await WriteResultFrameAsync(DocumentProtocolMessageType.ResultHeader,
+                new DocumentProtocolResultHeaderMessage([("document", (byte)DatabaseType.Json)], true).Encode(), cancellationToken).ConfigureAwait(false);
+            long count = 0;
+            using var buffer = new MemoryStream();
+            using var writer = new Utf8JsonWriter(buffer);
+            await foreach (var row in description.GetRowsAsync(cancellationToken).ConfigureAwait(false))
+            {
+                buffer.SetLength(0);
+                writer.Reset(buffer);
+                writer.WriteStartObject();
+                foreach (var column in description.Columns)
+                {
+                    writer.WritePropertyName(column.Name);
+                    switch (row.GetValue(column.Ordinal))
+                    {
+                        case null: writer.WriteNullValue(); break;
+                        case int value: writer.WriteNumberValue(value); break;
+                        case long value: writer.WriteNumberValue(value); break;
+                        case string value: writer.WriteStringValue(value); break;
+                    }
+                }
+                writer.WriteEndObject();
+                writer.Flush();
+                await WriteResultFrameAsync(DocumentProtocolMessageType.Document,
+                    new DocumentProtocolResultMessage(buffer.ToArray()).Encode(), cancellationToken).ConfigureAwait(false);
+                count++;
+            }
+            await WriteResultFrameAsync(DocumentProtocolMessageType.Complete,
+                new DocumentProtocolCompleteMessage(count, description.AffectedCount).Encode(), cancellationToken).ConfigureAwait(false);
+        }
     }
 
     private async ValueTask WriteResultFrameAsync(DocumentProtocolMessageType type, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)

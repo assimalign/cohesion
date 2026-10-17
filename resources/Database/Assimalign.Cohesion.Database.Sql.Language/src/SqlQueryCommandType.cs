@@ -7,6 +7,8 @@ public enum SqlQueryCommandType
 {
     Unknown = 0,
     Select,
+    /// <summary>Describe a data statement without executing it.</summary>
+    Explain,
     Insert,
     Update,
     Delete,

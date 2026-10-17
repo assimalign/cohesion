@@ -9,6 +9,9 @@ public static class SqlClauses
     /// <summary>A <c>SELECT</c> statement.</summary>
     public const string Select = "SELECT";
 
+    /// <summary>An <c>EXPLAIN</c> description of a data statement.</summary>
+    public const string Explain = "EXPLAIN";
+
     /// <summary>An <c>INSERT</c> statement.</summary>
     public const string Insert = "INSERT";
 

@@ -17,6 +17,7 @@ public class SqlLanguageProfileTests
 {
     [Theory]
     [InlineData(SqlClauses.Select, "SELECT 1;")]
+    [InlineData(SqlClauses.Explain, "EXPLAIN SELECT * FROM t;")]
     [InlineData(SqlClauses.Insert, "INSERT INTO t (id) VALUES (1);")]
     [InlineData(SqlClauses.Update, "UPDATE t SET id = 1;")]
     [InlineData(SqlClauses.Delete, "DELETE FROM t;")]

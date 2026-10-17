@@ -557,6 +557,34 @@ yet keeps the caller's transaction and its earlier writes.
   `ExecutePaths`; #1228 proposes the same placement there, before `PathsComplete`, for #1105 to
   record.
 
+## EXPLAIN operator vocabulary (#1104)
+
+EXPLAIN is a Cohesion extension, not ISO GQL or a D3 Cypher alias. The session validates and
+plans the wrapped graph statement, then returns its description before acquiring a writer lock,
+matching nodes, expanding relationships or inserting/deleting elements. An explicit transaction
+may commit afterward with its node and relationship counts unchanged. The result uses the fixed
+[Execution columns](../../Assimalign.Cohesion.Database.Execution/docs/DESIGN.md#plan-descriptions-1104),
+with both count fields null in T1.
+
+| Operators | Meaning |
+| --- | --- |
+| `Match`, `Insert`, `Delete`, `DetachDelete` | Statement intent; details include residual filtering and an unsatisfiable-match flag |
+| `ExpandPath` | One chosen finite MATCH pattern |
+| `NodeScan`, `LabelScan`, `IndexSeek` | Its actual anchor node ordinal, label, property and equality value; a seek reports the catalog index name (or physical label/property identity if catalog metadata is absent) |
+| `Expand` | One relationship expansion, in executor order: right of the anchor, then left; includes edge ordinal, direction and type/label expression |
+| `InsertPath`, `InsertNode`, `InsertRelationship` | Intended insertion shapes and labels/types; a pure insertion has no read anchor |
+
+Nodes are depth-first pre-order; expansion nodes form a chain below their anchor. Each model
+owns its operator names. The closed plan switch and test-only record-enumeration guard require
+future plan types to add a mapping and one EXPLAIN case.
+
+Execute admits EXPLAIN even when the wrapped RETURN projects an entity, such as
+`EXPLAIN MATCH (a:Person) RETURN a`, because the returned values are scalar description rows.
+Existing ResultHeader/ResultRow/ResultComplete frames carry them. ExecutePaths returns the coded
+`COHDBG001` error and keeps the server session ready; raw protocol tests send another request
+on that same session. Graph.Client retains its existing policy of discarding a path stream after
+an opening error. EXPLAIN ANALYZE and PROFILE are deferred and fail at parse time.
+
 ## Catalog introspection (C2)
 
 `GraphSchema.Open(database, session)` already supplies in-process discovery of labels, relationship

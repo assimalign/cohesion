@@ -38,6 +38,18 @@ for identifier rendering and unknown-function classification. The internal posit
 table stays internal. There is no shipped-to-shipped InternalsVisibleTo grant to reuse, so this
 is the issue's approved public-profile option; no visibility grant or public internal type is added.
 
+## EXPLAIN (#1104)
+
+`SqlExplainExpression` wraps a SELECT, INSERT, UPDATE or DELETE tree, retains the source text,
+and reports `SqlQueryCommandType.Explain`. The parser handles the prefix once, then uses the
+ordinary statement parser and terminator check. Capability scanning classifies the wrapped
+statement, so supported subqueries remain supported and excluded UPDATE/DELETE subqueries stay
+excluded. DDL, transactions, nested EXPLAIN and ANALYZE receive `COHDBL001`. The wrapped
+statement's nesting measure remains subject to the engine's existing limit. SqlClauses.Explain,
+the statement corpus and the live conformance case change together; DIALECT.md is the contract.
+The engine's deferred-provisioning admission walks the wrapped statement before binding, just
+as it does for an ordinary data statement; an EXPLAIN cannot bypass a pending table reservation.
+
 ## Design intent
 
 Decision 49a adds `SqlAlterColumnAction`, a full column-definition action:

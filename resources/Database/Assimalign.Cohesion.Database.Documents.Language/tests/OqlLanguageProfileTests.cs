@@ -23,6 +23,7 @@ public class OqlLanguageProfileTests
 
     [Theory]
     [InlineData(OqlClauses.Select)]
+    [InlineData(OqlClauses.Explain)]
     [InlineData(OqlClauses.From)]
     [InlineData(OqlClauses.Where)]
     [InlineData(OqlClauses.GroupBy)]

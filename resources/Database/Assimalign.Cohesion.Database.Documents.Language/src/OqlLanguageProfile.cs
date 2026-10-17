@@ -13,6 +13,7 @@ namespace Assimalign.Cohesion.Database.Documents.Language;
 /// </remarks>
 public static class OqlLanguageProfile
 {
+    // EXPLAIN is recognized only at the statement prefix; elsewhere it remains an identifier.
     private static readonly string[] _keywords =
     [
         // Query
@@ -48,6 +49,7 @@ public static class OqlLanguageProfile
         OqlClauses.CreateIndex,
         OqlClauses.DropIndex,
         OqlClauses.Select,
+        OqlClauses.Explain,
         OqlClauses.From,
         OqlClauses.Where,
         OqlClauses.GroupBy,
