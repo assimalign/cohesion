@@ -1004,12 +1004,19 @@ of 256 applies, including values deeper than 64 levels. The other wire readers e
 256. Embedded stored-document validation and query reads explicitly use 128; system-collection
 JSON uses fixed, one-level objects and cannot carry arbitrary nested content.
 
-Before disposing after a terminal shared Error, the server completes transport output and waits
-for connection closure, bounded by ShutdownDrainTimeout and interrupted by shutdown or abort.
+Before writing a terminal shared Error, the server starts one ShutdownDrainTimeout deadline.
+That same deadline covers the error write, its flush, transport output completion and the wait
+for connection closure. Expiry aborts the connection to release blocked transport I/O; the pump
+joins that I/O before releasing the session and its counter. The hard-abort registration stays
+attached through the drain, and shutdown can interrupt output completion and the closure wait.
 A flush only queues pipe bytes; immediate TCP disposal can discard a queued fatal frame. This
 local drain uses the existing connection contract and adds no public transport member. A deferred
 send fixture deterministically verifies error delivery before disposal; TCP unknown-database
 coverage verifies the real transport path.
+Controlled-output regressions block the terminal frame write, explicit flush and asynchronous
+completion separately, and assert session completion and registry/counter release within the
+100 ms budget plus a 500 ms scheduling margin. A separate unwind gate verifies that an abort
+does not release the session before pending output completion returns.
 
 Streaming regressions count all 128 rows and 130 wire frames and verify a distinct marker in
 each row. They limit allocations before the first header to 8 MiB, which detects pre-encoding

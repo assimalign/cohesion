@@ -47,12 +47,14 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
     private ProtocolFrameWriter? _writer;
     private DocumentDatabaseSession? _databaseSession;
     private bool _terminalResponseWritten;
+    private CancellationTokenSource? _terminalDrainSource;
+    private CancellationTokenRegistration _terminalDrainRegistration;
     private Task _completion = Task.CompletedTask;
     private string _closeReason = DocumentDatabaseEventSource.CloseReason.Unknown;
 
     // Set by Abort before it cancels the lifetime, so the pump can tell the server's own teardown
     // from a transport that closed under it.
-    private bool _abortRequested;
+    private int _abortRequested;
 
     internal DocumentDatabaseServerSession(
         DocumentDatabaseServer server,
@@ -102,9 +104,11 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
     /// </summary>
     internal void Abort()
     {
+        // The drain deadline, connection close and hard abort can converge here. Claim abort
+        // before cancelling the lifetime, whose linked terminal deadline calls back here too.
+        if (Interlocked.Exchange(ref _abortRequested, 1) != 0) { return; }
         try
         {
-            Volatile.Write(ref _abortRequested, true);
             _lifetimeSource.Cancel();
             _connection.Abort(new ConnectionAbortedException(_shutdownMessage));
         }
@@ -181,6 +185,8 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
             // Detach from the abort signal before the lifetime source is disposed
             // so a late hard abort cannot race a disposed token source.
             await abortRegistration.DisposeAsync().ConfigureAwait(false);
+            await _terminalDrainRegistration.DisposeAsync().ConfigureAwait(false);
+            _terminalDrainSource?.Dispose();
             await CleanupAsync().ConfigureAwait(false);
         }
     }
@@ -605,7 +611,15 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
     {
         try
         {
-            await WriteErrorAsync(code, message, CancellationToken.None).ConfigureAwait(false);
+            // Start one budget before any terminal I/O. Aborting on cancellation also releases
+            // transports whose write/flush ignores tokens or whose completion has no token.
+            if (_terminalDrainSource is null)
+            {
+                _terminalDrainSource = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeSource.Token);
+                _terminalDrainRegistration = _terminalDrainSource.Token.Register(static state => ((DocumentDatabaseServerSession)state!).Abort(), this);
+                _terminalDrainSource.CancelAfter(_options.ShutdownDrainTimeout);
+            }
+            await WriteErrorAsync(code, message, _terminalDrainSource.Token).ConfigureAwait(false);
             _terminalResponseWritten = true;
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
@@ -660,7 +674,7 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
     private bool ClosedUnderPump(CancellationToken softStop, CancellationToken hardAbort)
         => !softStop.IsCancellationRequested
             && !hardAbort.IsCancellationRequested
-            && !Volatile.Read(ref _abortRequested)
+            && Volatile.Read(ref _abortRequested) == 0
             && _connection.ConnectionClosed.IsCancellationRequested;
 
     private static string? TransportCloseReason(Exception exception) => exception switch
@@ -679,11 +693,12 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
         {
             // Flush queues bytes in a transport pipe. Completing output lets its send pump
             // drain them before disposal can abort it. A peer that keeps its half open is
-            // bounded by the existing shutdown drain budget; shutdown/abort can end it early.
-            using var drain = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeSource.Token, softStop);
-            drain.CancelAfter(_options.ShutdownDrainTimeout);
+            // bounded by the deadline already running since before the terminal write. Keep
+            // the abort registrations while joining completion: cancellation must abort the
+            // transport, not abandon a pending operation that still owns its output.
+            using var stopRegistration = softStop.Register(static state => ((CancellationTokenSource)state!).Cancel(), _terminalDrainSource!);
             await _connection.Output.CompleteAsync().ConfigureAwait(false);
-            await Task.Delay(Timeout.InfiniteTimeSpan, drain.Token).ConfigureAwait(false);
+            await Task.Delay(Timeout.InfiniteTimeSpan, _terminalDrainSource!.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException) { }
         catch (Exception exception) when (exception is not OutOfMemoryException)

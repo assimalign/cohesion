@@ -53,7 +53,8 @@ public sealed class DocumentDatabaseServerOptions
 
     /// <summary>
     /// Gets or sets the drain budget honored by <see cref="DatabaseServer.StopAsync"/>
-    /// before remaining sessions are aborted.
+    /// before remaining sessions are aborted. Also bounds a terminal error's write, flush,
+    /// output completion and connection-closure wait with one deadline.
     /// </summary>
     public TimeSpan ShutdownDrainTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
