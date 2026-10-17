@@ -14,7 +14,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// each statement exactly one refreshed view; under <c>Snapshot</c> isolation
 /// the same capture returns the begin-time snapshot for every statement.
 /// </summary>
-internal sealed class SqlStatementContext
+internal readonly struct SqlStatementContext
 {
     internal SqlStatementContext(
         TransactionContext transaction,
@@ -32,7 +32,7 @@ internal sealed class SqlStatementContext
         Metrics = new SqlStatementMetrics();
         ProvisioningSchema = provisioningSchema;
         DatabaseName = databaseName;
-        CatalogSnapshot = catalogSnapshot;
+        Metrics.CatalogSnapshot = catalogSnapshot;
         DdlLockOwner = ddlLockOwner ?? transaction.Sequence;
         ProvisioningProgress = provisioningProgress;
         ScriptReceipt = scriptReceipt;
@@ -75,19 +75,12 @@ internal sealed class SqlStatementContext
     internal string DatabaseName { get; }
 
     /// <summary>Gets the catalog directory paired with this statement's visibility lifetime.</summary>
-    internal SqlCatalogSnapshot? CatalogSnapshot { get; private set; }
+    internal SqlCatalogSnapshot? CatalogSnapshot => Metrics.CatalogSnapshot;
 
     /// <summary>Requires binding to have supplied the catalog image before execution, including empty inputs.</summary>
     internal SqlCatalogSnapshot RequireCatalogSnapshot()
         => CatalogSnapshot ?? throw new DatabaseException("Internal invariant: a bound system relation requires a captured catalog snapshot.");
 
-    /// <summary>Captures lazily on the first bound system relation; child plans share this context.</summary>
-    internal void CaptureCatalogSnapshot(SqlCatalog catalog)
-    {
-        if (CatalogSnapshot is null)
-        {
-            CatalogSnapshot = catalog.CaptureSnapshot();
-            Metrics.CatalogSnapshotCaptures++;
-        }
-    }
+    /// <summary>Captures lazily in the existing shared statement state; context copies use the same image.</summary>
+    internal void CaptureCatalogSnapshot(SqlCatalog catalog) => Metrics.CaptureCatalogSnapshot(catalog);
 }

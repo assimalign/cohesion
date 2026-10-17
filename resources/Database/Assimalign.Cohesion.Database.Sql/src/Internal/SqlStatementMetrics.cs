@@ -1,3 +1,5 @@
+using Assimalign.Cohesion.Database.Sql.Catalog;
+
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 /// <summary>
@@ -13,8 +15,22 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// </remarks>
 internal sealed class SqlStatementMetrics
 {
+    private bool _capturedCatalogSnapshot;
+
+    /// <summary>The shared catalog image, supplied at BEGIN or captured lazily by binding.</summary>
+    internal SqlCatalogSnapshot? CatalogSnapshot { get; set; }
+
     /// <summary>Catalog images captured by binding; zero when using a BEGIN-time image.</summary>
-    internal int CatalogSnapshotCaptures { get; set; }
+    internal int CatalogSnapshotCaptures => _capturedCatalogSnapshot ? 1 : 0;
+
+    internal void CaptureCatalogSnapshot(SqlCatalog catalog)
+    {
+        if (CatalogSnapshot is null)
+        {
+            CatalogSnapshot = catalog.CaptureSnapshot();
+            _capturedCatalogSnapshot = true;
+        }
+    }
 
     /// <summary>Whether the planner produced a plan, including one whose execution later failed.</summary>
     internal bool IsPlanned { get; set; }

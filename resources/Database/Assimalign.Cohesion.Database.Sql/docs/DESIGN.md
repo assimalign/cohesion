@@ -1803,9 +1803,10 @@ select a SQL namespace, never another database. `TABLES` lists stored tables as
 ### The relation seam and statement snapshot
 
 `SqlPlanner.ResolveRelation` is the single read-source caller of `SqlSystemViews.Find`.
-It resolves a closed `SqlRelationSource` record: `SqlStoredTableSource` carries a stored
-table, and `SqlSystemRelationSource` carries virtual column metadata. `SqlRelationBinding`
-adds the reference and joined-row offset. Qualifier lookup, joins and grouping use that
+It resolves a closed `SqlRelationSource` value over existing stored-table or virtual-column
+metadata, with no source allocation. `SqlRelationBinding` adds the reference and joined-row
+offset for joins; a single-relation evaluator retains the original AST reference in the same
+reference slot, avoiding a binding wrapper or array. Qualifier lookup, joins and grouping use that
 metadata; only stored sources acquire object locks or supply secondary-index paths. An
 indexed stored input can be probed with virtual rows as the outer input on either logical
 side. Adding a registered system relation needs no join-specific code. Single-source
@@ -1829,12 +1830,15 @@ available over `SqlDatabaseServer` without a separate protocol operation.
 catalog's existing metadata lock. The capture is read-only, carries no storage
 handle, and has no disposal lifetime. A snapshot transaction
 retains the capture taken at begin; auto-commit and `ReadCommitted` statements
-capture when the binder first resolves a system relation. `SqlStatementContext` is a
-shared internal sealed class: it fixes the MVCC row snapshot at construction and lazily
-fixes its catalog snapshot at that first binding. Every nested plan shares the context,
+capture when the binder first resolves a system relation. `SqlStatementContext` is an internal
+readonly struct: it fixes the MVCC row snapshot at construction and stores the lazy catalog
+image in the existing shared `SqlStatementMetrics` state. Every context copy and nested plan
+uses that same state,
 so subqueries and INSERT sources (and future derived tables, CTEs, set operands, view
 bodies and UPDATE/DELETE predicate queries) inherit capture without an AST walk. Ordinary
-stored-only statements never capture metadata. Executing a system plan without a catalog
+stored-only statements never capture metadata or allocate a context/source/binding wrapper;
+the Release ReadCommitted allocation regression retains the pre-join per-query budget.
+Executing a system plan without a catalog
 image is an internal-invariant `DatabaseException`, even with empty inputs.
 All system rows for that statement use that one
 capture, including referenced-key resolution. Catalog publication cannot split

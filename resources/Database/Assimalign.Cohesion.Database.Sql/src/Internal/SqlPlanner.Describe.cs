@@ -130,7 +130,7 @@ internal sealed partial class SqlPlanner
         }
 
         void RelationScan(SqlRelationSource source, int parent)
-            => Add(source is SqlSystemRelationSource ? "SystemView" : "TableScan", parent, Target(source));
+            => Add(source.View is not null ? "SystemView" : "TableScan", parent, Target(source));
 
         void Access(SqlCatalogTable table, SqlAccessPath access, int parent)
         {

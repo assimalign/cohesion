@@ -51,17 +51,17 @@ internal sealed partial class SqlPlanner
         {
             var innerBinding = bindings[inner];
             var outerBinding = bindings[1 - inner];
-            if (innerBinding.Source is not SqlStoredTableSource stored)
+            if (innerBinding.Source.Table is not { } table)
             {
                 continue;
             }
-            foreach (var index in _catalog.GetIndexes(stored.Table.ObjectId).OrderBy(index => index.Name, StringComparer.OrdinalIgnoreCase))
+            foreach (var index in _catalog.GetIndexes(table.ObjectId).OrderBy(index => index.Name, StringComparer.OrdinalIgnoreCase))
             {
                 var outerOrdinals = new List<int>();
                 var innerColumns = new List<SqlCatalogColumn>();
                 foreach (string key in index.ColumnNames)
                 {
-                    int innerOrdinal = FindColumnOrdinal(stored.Table, key);
+                    int innerOrdinal = FindColumnOrdinal(table, key);
                     int joinedOrdinal = innerBinding.Offset + innerOrdinal;
                     int outerOrdinal = -1;
                     foreach (var equality in equalities)

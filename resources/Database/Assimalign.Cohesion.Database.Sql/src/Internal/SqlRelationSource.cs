@@ -4,26 +4,20 @@ using Assimalign.Cohesion.Database.Sql.Catalog;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
-/// <summary>The closed sources a relation binding can read, without inventing storage identities.</summary>
-internal abstract record SqlRelationSource
+/// <summary>
+/// A closed source value over existing metadata. One reference keeps stored-only binding
+/// allocation-neutral; a virtual relation never acquires a fabricated storage identity.
+/// </summary>
+internal readonly struct SqlRelationSource
 {
-    private protected SqlRelationSource() { }
+    private readonly object _metadata;
 
-    internal abstract string Schema { get; }
-    internal abstract string Name { get; }
-    internal abstract IReadOnlyList<SqlCatalogColumn> Columns { get; }
-}
+    internal SqlRelationSource(SqlCatalogTable table) { _metadata = table; }
+    internal SqlRelationSource(SqlSystemViewDefinition view) { _metadata = view; }
 
-internal sealed record SqlStoredTableSource(SqlCatalogTable Table) : SqlRelationSource
-{
-    internal override string Schema => Table.Schema;
-    internal override string Name => Table.Name;
-    internal override IReadOnlyList<SqlCatalogColumn> Columns => Table.Columns;
-}
-
-internal sealed record SqlSystemRelationSource(SqlSystemViewDefinition View) : SqlRelationSource
-{
-    internal override string Schema => View.Schema;
-    internal override string Name => View.Name;
-    internal override IReadOnlyList<SqlCatalogColumn> Columns => View.Columns;
+    internal SqlCatalogTable? Table => _metadata as SqlCatalogTable;
+    internal SqlSystemViewDefinition? View => _metadata as SqlSystemViewDefinition;
+    internal string Schema => Table?.Schema ?? View!.Schema;
+    internal string Name => Table?.Name ?? View!.Name;
+    internal IReadOnlyList<SqlCatalogColumn> Columns => Table?.Columns ?? View!.Columns;
 }

@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Indexing;
+using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
@@ -19,15 +20,14 @@ internal sealed partial class SqlPlanExecutor
     /// </summary>
     private async Task<DatabaseResult> ExecuteJoinAsync(SqlJoinPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
-        foreach (var table in plan.Bindings.Select(binding => binding.Source).OfType<SqlStoredTableSource>()
-            .Select(source => source.Table).OrderBy(table => table.ObjectId))
+        foreach (var table in plan.Bindings.Select(binding => binding.Source.Table).OfType<SqlCatalogTable>().OrderBy(table => table.ObjectId))
         {
             await statement.Coordinator.LockManager.AcquireAsync(statement.Transaction.Sequence,
                 LockResource.Object(table.ObjectId), LockMode.IntentShared, cancellationToken).ConfigureAwait(false);
             EnsureCurrentDefinition(table);
         }
         // Require binding's image even when an empty outer input would skip virtual enumeration.
-        if (plan.Bindings.Any(binding => binding.Source is SqlSystemRelationSource))
+        if (plan.Bindings.Any(binding => binding.Source.View is not null))
         {
             _ = statement.RequireCatalogSnapshot();
         }
@@ -58,7 +58,7 @@ internal sealed partial class SqlPlanExecutor
     {
         var access = plan.Access;
         BTreeIndex? index = null;
-        if (access is not null && !_indexManager.TryGetIndex(((SqlStoredTableSource)plan.Bindings[access.InnerBinding].Source).Table.ObjectId, access.Index.Name, out index))
+        if (access is not null && !_indexManager.TryGetIndex(plan.Bindings[access.InnerBinding].Source.Table!.ObjectId, access.Index.Name, out index))
         {
             access = null; // A detached index changes cost, never the result.
         }
@@ -88,7 +88,7 @@ internal sealed partial class SqlPlanExecutor
                 {
                     continue;
                 }
-                candidates = SeekRows(((SqlStoredTableSource)innerBinding.Source).Table, new SqlIndexSeekPath(access.Index, values, null, null),
+                candidates = SeekRows(innerBinding.Source.Table!, new SqlIndexSeekPath(access.Index, values, null, null),
                     index!, statement, cancellationToken).Select(row => row.Values);
             }
 
@@ -107,8 +107,8 @@ internal sealed partial class SqlPlanExecutor
     private IEnumerable<object?[]> ReadRelation(SqlRelationSource source, SqlStatementContext statement, CancellationToken cancellationToken)
         => source switch
         {
-            SqlStoredTableSource stored => Scan(stored.Table, statement, cancellationToken).Select(row => row.Values),
-            SqlSystemRelationSource system => ReadSystemRelation(system.View, statement, cancellationToken),
+            { Table: { } table } => Scan(table, statement, cancellationToken).Select(row => row.Values),
+            { View: { } view } => ReadSystemRelation(view, statement, cancellationToken),
             _ => throw new DatabaseException("Internal invariant: unknown SQL relation source."),
         };
 

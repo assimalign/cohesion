@@ -28,7 +28,7 @@ internal sealed partial class SqlPlanner
     private const string insertValuesClause = "INSERT ... VALUES";
 
     private readonly SqlCatalog _catalog;
-    private readonly SqlStatementContext? _statement;
+    private readonly SqlStatementMetrics? _statementMetrics;
     private readonly IReadOnlyDictionary<string, object?>? _parameters;
     private readonly CancellationToken _cancellationToken;
 
@@ -47,7 +47,7 @@ internal sealed partial class SqlPlanner
     internal SqlPlanner(SqlCatalog catalog, IReadOnlyDictionary<string, object?>? parameters, SqlFunctionEnvironment? functions = null,
         CancellationToken cancellationToken = default, SqlStatementContext? statement = null)
     {
-        _statement = statement;
+        _statementMetrics = statement?.Metrics;
         _catalog = catalog;
         _parameters = parameters;
         _cancellationToken = cancellationToken;
@@ -103,14 +103,13 @@ internal sealed partial class SqlPlanner
         }
 
         var source = ResolveRelation(select.From);
-        var table = (source as SqlStoredTableSource)?.Table;
-        var systemView = (source as SqlSystemRelationSource)?.View;
+        var table = source.Table;
+        var systemView = source.View;
         var bindings = select.Joins.Count > 0 ? BindJoin(select, source) : null;
         var columns = bindings is null ? source.Columns
             : bindings.SelectMany(binding => binding.Source.Columns).ToArray();
-        var evaluatorBindings = bindings ?? new[] { new SqlRelationBinding(source, select.From, 0) };
-        var evaluator = new SqlExpressionEvaluator(columns, _parameters, evaluatorBindings, defaultCollation: _catalog.DefaultCollation,
-            subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken);
+        var evaluator = new SqlExpressionEvaluator(columns, _parameters, bindings, defaultCollation: _catalog.DefaultCollation,
+            subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken, relation: select.From);
 
         if (bindings is not null)
         {
@@ -128,7 +127,7 @@ internal sealed partial class SqlPlanner
 
         if (select.GroupBy.Count > 0 || select.Having is not null || ProjectsOrOrdersByAggregate(select))
         {
-            return PlanGroup(select, table, systemView, columns, bindings, evaluatorBindings, evaluator);
+            return PlanGroup(select, table, systemView, columns, bindings, evaluator);
         }
 
         var projections = new List<SqlProjection>();
@@ -204,10 +203,10 @@ internal sealed partial class SqlPlanner
     {
         if (SqlSystemViews.Find(reference) is { } view)
         {
-            _statement?.CaptureCatalogSnapshot(_catalog);
-            return new SqlSystemRelationSource(view);
+            _statementMetrics?.CaptureCatalogSnapshot(_catalog);
+            return new SqlRelationSource(view);
         }
-        return new SqlStoredTableSource(ResolveTable(reference));
+        return new SqlRelationSource(ResolveTable(reference));
     }
 
     /// <summary>A projection that passes a source column through, with the collation <c>DISTINCT</c> compares it under.</summary>
@@ -762,8 +761,7 @@ internal sealed partial class SqlPlanner
     {
         var table = ResolveTable(update.Table);
         var evaluator = new SqlExpressionEvaluator(table.Columns, _parameters,
-            [new SqlRelationBinding(new SqlStoredTableSource(table), update.Table, 0)],
-            defaultCollation: _catalog.DefaultCollation, functions: _functions, cancellationToken: _cancellationToken);
+            defaultCollation: _catalog.DefaultCollation, functions: _functions, cancellationToken: _cancellationToken, relation: update.Table);
 
         var assignments = new List<(int Ordinal, SqlBoundExpression Value)>(update.Assignments.Count);
         foreach (var assignment in update.Assignments)
@@ -805,8 +803,7 @@ internal sealed partial class SqlPlanner
         {
             RejectAggregateInDmlWhere(delete.Where);
             var evaluator = new SqlExpressionEvaluator(table.Columns, _parameters,
-                [new SqlRelationBinding(new SqlStoredTableSource(table), delete.Table, 0)],
-                defaultCollation: _catalog.DefaultCollation, functions: _functions, cancellationToken: _cancellationToken);
+                defaultCollation: _catalog.DefaultCollation, functions: _functions, cancellationToken: _cancellationToken, relation: delete.Table);
             ValidateExpression(delete.Where, evaluator);
             where = evaluator.Bind(delete.Where);
         }
