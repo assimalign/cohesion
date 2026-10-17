@@ -41,7 +41,7 @@ public sealed class SqlLanguageConformanceTests
     {
         // The profile drives enumeration. A newly advertised clause cannot silently escape this test.
         var cases = CreateCases();
-        // Phase 22 restores ORDER BY aliases and ordinals within the existing 33 named clauses.
+        // Phase 22 and #1125 extend spellings within the existing 33 named clauses (+0).
         SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(33);
         RequireExecutionCases(SqlLanguageProfile.Instance.Clauses, cases);
         cases.Keys.Except(SqlLanguageProfile.Instance.Clauses).ShouldBeEmpty("Cases must describe the current profile.");
@@ -488,6 +488,19 @@ public sealed class SqlLanguageConformanceTests
                 await ExecuteAsync(session, "ROLLBACK TRANSACTION;");
                 session.CurrentTransaction.ShouldBeNull();
                 await ExpectRowsAsync(session, "SELECT id FROM t WHERE id = 4;", [[4]]);
+                await using var observer = await session.Database.CreateSessionAsync();
+                await ExecuteAsync(session, "START TRANSACTION;");
+                await ExecuteAsync(session, "INSERT INTO t VALUES (5, 'start', 2);");
+                await ExpectRowsAsync(observer, "SELECT id FROM t WHERE id = 5;", []);
+                await ExecuteAsync(session, "END;");
+                await ExpectRowsAsync(observer, "SELECT id FROM t WHERE id = 5;", [[5]]);
+                await ExecuteAsync(session, "BEGIN WORK;");
+                await ExecuteAsync(session, "UPDATE t SET name = 'changed' WHERE id = 5;");
+                await ExecuteAsync(session, "DELETE FROM t WHERE id = 4;");
+                await ExecuteAsync(session, "INSERT INTO t VALUES (6, 'rolled back', 3);");
+                await ExecuteAsync(session, "ROLLBACK WORK;");
+                session.CurrentTransaction.ShouldBeNull();
+                await ExpectRowsAsync(observer, "SELECT id, name FROM t WHERE id >= 4 ORDER BY id;", [[4, "new"], [5, "start"]]);
             }),
     };
 

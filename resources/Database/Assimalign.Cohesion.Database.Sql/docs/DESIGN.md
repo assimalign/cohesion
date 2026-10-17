@@ -3197,8 +3197,11 @@ drivers, while the server owns bind-through-release lifecycle.
 
 ## SQL transaction control and the B7 seam
 
-`BEGIN [TRANSACTION]`, `COMMIT [TRANSACTION]`, and `ROLLBACK [TRANSACTION]`
-are ordinary SQL requests over the existing wire `Execute` message. The session
+`START TRANSACTION`, `BEGIN [WORK|TRANSACTION]`, `COMMIT [WORK|TRANSACTION]`,
+`END`, and `ROLLBACK [WORK|TRANSACTION]` are ordinary SQL requests over the
+existing wire `Execute` message. The parser maps these spellings onto the existing
+Begin/Commit/Rollback commands (#1125), so END without a transaction reports the
+canonical `COHSQLT002` message, "COMMIT requires an open transaction." The session
 dispatches their parsed AST before creating an auto-commit transaction. `BEGIN`
 opens a coordinator context; subsequent queries and DML share that context and
 its visibility snapshot. `COMMIT` awaits the coordinator's durable commit;
@@ -3212,6 +3215,13 @@ journal rejects its abort record (#1226, `Database.Transactions` DESIGN.md,
 journal's append buffer that carries it, at the rollback or at a later drain such as the
 next commit's, which also takes the database offline (`Database.Storage` DESIGN.md,
 "The append buffer").
+
+`SqlTransactionControlTests` drives `START TRANSACTION ... END` and
+`BEGIN WORK ... ROLLBACK WORK` through `ServerTestHarness`, checking observer
+visibility across commit and restoration after rollback. Malformed
+`START TRANSACTION ISOLATION LEVEL SERIALIZABLE` returns wire `ParseFailure`
+carrying `SQL0003`, opens no transaction, and permits the next statement on the
+same connection. Protocol responses synchronize these checks without fixed sleeps.
 
 The session's transaction is the root `DatabaseSession`'s (concrete-types plan §6.4, phase 4):
 the base registers the `SqlDatabaseTransaction` the session's BEGIN core creates and reports it

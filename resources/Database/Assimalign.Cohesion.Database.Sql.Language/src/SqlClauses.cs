@@ -150,6 +150,6 @@ public static class SqlClauses
     /// <summary>A <c>ROLLBACK</c> transaction-control statement.</summary>
     public const string Rollback = "ROLLBACK";
 
-    /// <summary>The optional <c>TRANSACTION</c> keyword on transaction-control statements.</summary>
+    /// <summary>The <c>TRANSACTION</c> keyword, required after <c>START</c> and optional (with <c>WORK</c> as a synonym) after <c>BEGIN</c>, <c>COMMIT</c>, or <c>ROLLBACK</c>.</summary>
     public const string Transaction = "TRANSACTION";
 }
