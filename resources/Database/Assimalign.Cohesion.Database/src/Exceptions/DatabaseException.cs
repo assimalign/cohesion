@@ -43,6 +43,6 @@ public class DatabaseException : Exception
         : base(message, innerException)
     {
         ArgumentNullException.ThrowIfNull(diagnostics);
-        Diagnostics = Array.AsReadOnly(diagnostics.OrderBy(diagnostic => diagnostic.Start ?? int.MaxValue).ToArray());
+        Diagnostics = Array.AsReadOnly(diagnostics.OrderBy(diagnostic => diagnostic.Start is null).ThenBy(diagnostic => diagnostic.Start).ToArray());
     }
 }

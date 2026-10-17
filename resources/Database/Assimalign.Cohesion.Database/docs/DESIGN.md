@@ -1082,3 +1082,9 @@ JSON serialization live in `Database.Sql.Schema`.
   registration and hosting implementation remain in `Database.Hosting` (O34).
 - No model-specific request or result types — models subclass the
   `Database.Execution` family in their own packages.
+
+## Diagnostic ordering (#1103 review)
+
+The exception carrier snapshots diagnostics and sorts first by whether Start is absent,
+then by Start. Located diagnostics precede unlocated ones even at int.MaxValue; ordering
+within each equal-start group and among unlocated entries is stable.
