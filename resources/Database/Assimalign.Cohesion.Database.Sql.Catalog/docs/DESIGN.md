@@ -7,8 +7,8 @@ Domain base types and function parameter/result type text retain CHAR(n), and re
 restores padding and comparison semantics. String and Character both accept collations.
 SQL record-space format **12** supersedes 11 because CHAR index equality now ignores trailing
 spaces. Catalog records retain their existing shapes; no old-format reader is added.
-Applied/pending compiled documents use **cohesion/database-schema/v6**, shared with the SDK;
-v5 and earlier documents are refused before hashes are compared. Rebuild artifacts and recreate
+Applied/pending compiled documents use **cohesion/database-schema/v7**, shared with the SDK;
+v6 and earlier documents are refused before hashes are compared. Rebuild artifacts and recreate
 databases. INFORMATION_SCHEMA.COLUMNS reports CHARACTER with length; the COHESION_SCHEMA type,
 domain and function views expose CHAR(n) through their existing name/signature columns.
 
@@ -57,9 +57,9 @@ pending chunk in the same transaction. Open validates the envelope and ordering,
 gates the target document's format before checking its hash or resuming. Catalog persistence knows no SQL executor,
 worker, or hosting lifecycle.
 
-The compiled document is now `cohesion/database-schema/v6` (#1437), matching Sdk.Database.
+The compiled document is now `cohesion/database-schema/v7` (#1108), matching Sdk.Database.
 Applied-schema records (kind 6) and pending targets (kind 9) both retain the complete versioned
-document, so their field layout does not change. The SQL record-space gate is now 12 for CHAR.
+document, so their field layout does not change. The SQL record-space gate is now 14 (#1109).
 SQL checks those document formats before opening
 the data file set and before Apply/Verify compares persisted hashes. A v4 NUMERIC(p) document
 with scale:null is refused through the schema format gate, with the rebuild/recreate remedy;
@@ -84,7 +84,7 @@ would tell every caller the value is changeable and then guard that promise at
 runtime.
 
 Table metadata extension version 2 introduced one collation identifier per column
-after the existing constraints. Current format 12 requires the complete table record,
+after the existing constraints. Current format 14 requires the complete table record,
 including the resolved-call vectors described below. Column additions,
 drops, and restart preserve explicit overrides. An index inherits its key
 columns' effective collations; the SQL engine verifies index eligibility and
@@ -164,7 +164,7 @@ codec, the key encoding and every comparison read, so they do not consult the do
   column (the primary key's implicit NOT NULL).
 - **Persistence: table extension version 4** (data-storage format 7). After the dropped
   ordinals, one optional string per live column, NULL for a column of a built-in type,
-  which this catalog always writes. Current format 12 also requires the call vectors;
+  which this catalog always writes. Current format 14 also requires the call vectors;
   the format gate refuses earlier databases rather than loading their definitions. A persisted blank
   name fails the load with `SqlCatalogException`, as does a blank `domainName` at the
   column's constructor (`ArgumentException`).

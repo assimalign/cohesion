@@ -185,10 +185,10 @@ Documents.Client is inventoried and built in the Database workflow, but remains 
 Graph.Client. Documents.Security remains deferred. Transactions, remote database administration,
 replication and model-specific security policies are outside this wire slice. OQL INSERT
 returns its affected count through the existing completion field. Wire negotiation remains
-the shared protocol's responsibility, with no model-specific version exchange. The startup major
-is now 2.1, retaining the incompatible 2.0 projection contract; old-major peers receive the existing coded
-startup refusal and close before authentication. #1105 (protocol 1.1 capability negotiation,
-wave 4) supersedes per-feature version bumps when implemented.
+the shared protocol's responsibility, with no model-specific version exchange. The startup version
+is 2.1, retaining the major-2 projection contract; old-major peers receive the existing coded
+startup refusal and close before authentication. See [Shared startup 2.1](#shared-startup-21-1105)
+for #1105's capability negotiation.
 
 ## Graph precedent differences
 

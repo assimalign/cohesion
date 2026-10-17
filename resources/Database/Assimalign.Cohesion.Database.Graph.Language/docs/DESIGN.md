@@ -681,9 +681,8 @@ keyword recognition alone never enables it.
 Profile.Functions is the executable built-in set, checked by the engine's one function-
 coverage guard: every declared name has a passing live case and every live case has a
 declared name. GQL currently declares none. OQL removes ABS (already recognized by its
-unsupported table), and its parser/planner membership checks read the profile. The six
-temporary ODMG declarations ELEMENT, FLATTEN, FIRST, LAST, LISTTOSET and UNIQUE retain
-explicit COHDBL001 exemptions until #1126 deletes that exact exemption list.
+unsupported table), and its parser/planner membership checks read the profile. OQL's
+[temporary ODMG exemptions were removed by #1126](../../Assimalign.Cohesion.Database.Documents.Language/docs/DESIGN.md#function-declaration-and-diagnostic-delivery-1103).
 
 The root DatabaseException.Diagnostics carrier preserves the complete parser list at text
 factories and session boundaries, including parsed typed requests. DatabaseParseException

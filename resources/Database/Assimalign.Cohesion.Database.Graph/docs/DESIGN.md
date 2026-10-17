@@ -605,7 +605,7 @@ yet keeps the caller's transaction and its earlier writes.
 - **Traversal.** `TraverseAsync` filters by `GraphTraversal.RelationshipType` without a catalog
   lookup, so an unknown type visits nothing; its node stream has no diagnostics, so it reports no
   warning.
-- **The wire.** A negotiated 2.0 client receives successful rows without warnings. In 2.1 with diagnostics agreed, Diagnostics (14) carries Warning/Error entries before ResultComplete or PathsComplete, and before Error on a statement failure. Information is never sent. GraphResultSet exposes scalar warnings; the path enumeration consumes success diagnostics without a metadata API. The server session remains ready after statement failures; the existing path-stream client discards a failed rental.
+- **The wire.** A negotiated 2.0 client receives successful rows without warnings. In 2.1 with diagnostics agreed, Diagnostics (14) carries Warning/Error entries before ResultComplete or PathsComplete, and before Error on a statement failure. Information is never sent. GraphResultSet exposes scalar warnings; GraphPathResult.Diagnostics exposes path warnings after EOF. The server session remains ready after statement failures; the path client retains the rental after a terminal statement rejection before path output and discards it on later failures.
 
 ## EXPLAIN operator vocabulary (#1104)
 
@@ -738,7 +738,7 @@ to exercise that enforcement path; compiled provisioning is not included.
 
 Planner rejections carry stable codes in `DatabaseException.Diagnostics`, with Error severity
 and source offsets wherever the AST has a location. Their Message has no code prefix; the
-Graph protocol 2.0 server composes `CODE: message` for ExecutionFailure from that carrier.
+Graph server composes `CODE: message` for ExecutionFailure from that carrier; [negotiated diagnostics](#negotiated-statement-diagnostics-1105) add structured delivery.
 Text and parsed typed requests with error diagnostics throw `DatabaseParseException` with
 every diagnostic in source-offset order and the existing first-error Message. Graph path
 factories use the same contract. Unknown labels in reads retain #1228's empty-result/warning
@@ -964,13 +964,13 @@ failing gives up at about 101 s, like the other workers.
 `ProtocolChannel` handles framing and validates every type against the bound family; Graph owns
 all request/result payloads. The endpoint selects Graph before startup. No model discriminator is
 added to startup, and a connection or client pool cannot change families. Other endpoints may use
-the same model-scoped bytes for other meanings; shared codes 1–4 and 10–13 retain their meanings
-and 14–63 remain reserved. Bytes 5–9 retain Graph's deployed catalog exchange. The path extension
+the same model-scoped bytes for other meanings; shared codes 1–4 and 10–13 retain their meanings;
+Diagnostics uses shared byte 14, and 15–63 remain reserved. Bytes 5–9 retain Graph's deployed catalog exchange. The path extension
 uses 64–66. This follows the shared lexer/parser and per-model grammar precedent.
 
-Version **1.0** is retained: the deployed catalog, SQL and Key-Value exchanges are byte-for-byte
-unchanged. Unknown major versions receive shared `UnsupportedVersion`. Compatible negotiation
-chooses the smaller server/requested minor. The wire envelope is unsigned 32-bit big-endian payload
+Version **2.1** uses the [shared capability negotiation](../../Assimalign.Cohesion.Database.Protocol/docs/DESIGN.md#negotiated-statement-diagnostics-1105),
+retaining the major-2 baseline introduced by #1126. Unknown major versions receive shared
+`UnsupportedVersion`; compatible negotiation chooses the smaller server/requested minor. The wire envelope is unsigned 32-bit big-endian payload
 length, one type byte, then the payload. The length excludes the five-byte header and cannot exceed
 16,777,216. Integers below are big-endian. A string is a nonnegative signed `int32` UTF-8 byte length
 followed by those bytes. There is no padding.
@@ -995,7 +995,7 @@ their ordered column contracts above remain supported by `GraphDatabaseServer`. 
 bound to `GraphProtocol.Family` once, before the handshake. Path messages transport the engine's
 real `GraphPathsQueryResult`, without changing the existing payload definitions. A path response
 contains zero or more Path frames and one PathsComplete; a shared Error terminates either exchange
-without a completion frame. Statement errors leave the server session ready. Negotiated Diagnostics precedes Error, ResultComplete or PathsComplete. Graph.Client retains scalar warnings on GraphResultSet; path enumeration consumes success warnings without exposing result metadata. Malformed or out-of-order frames are protocol violations. Server/client acceptance tests use the
+without a completion frame. Statement errors leave the server session ready. Negotiated Diagnostics precedes Error, ResultComplete or PathsComplete. Graph.Client retains scalar warnings on GraphResultSet and path completion warnings on GraphPathResult.Diagnostics after EOF. Malformed or out-of-order frames are protocol violations. Server/client acceptance tests use the
 production `GraphDatabaseServer` and `Graph.Client` over `Connections.InMemory`.
 
 ### Path payload

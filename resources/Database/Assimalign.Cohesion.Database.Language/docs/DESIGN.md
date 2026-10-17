@@ -36,7 +36,7 @@ including GQL; it is not an ISO GQL or openCypher spelling.
 | --- | --- | --- |
 | SQL | `$name`, `@name`, `$_x`, `$1`, `@1` | Parsing and execution under this contract |
 | OQL | `$name`, `@name`, `$_x`, `$1`, `@1` | Parsing and execution under this contract |
-| GQL | `$name`, `@name`, `$_x`, `$1`, `@1` | Parsing and scalar binding in property maps and WHERE (#1138); RETURN parameters remain COHDBL001 until #1141 |
+| GQL | `$name`, `@name`, `$_x`, `$1`, `@1` | Parsing and scalar binding in property maps, WHERE and RETURN (#1138, #1141) |
 
 SQL uses `SQL0003`, OQL `OQL0002` and GQL `GQL0002` for unsupported forms.
 `QueryDiagnostics.UnsupportedParameterForm` owns their shared message. SQL unbound
@@ -212,13 +212,14 @@ first-error Message and carry every diagnostic on `DatabaseParseException`. A se
 the same parsed typed statement with the identical exception contract; no error AST executes.
 The documented SQL/GQL parser-out-of-stack translations remain engine complexity failures.
 Planner rejections carry stable codes and AST offsets where available; codes are separate from
-the in-process message. SQL and Graph protocol 1.0 compose `CODE: message` for ExecutionFailure.
+the in-process message. SQL and Graph compose `CODE: message` for ExecutionFailure;
+[negotiated diagnostics](../../Assimalign.Cohesion.Database.Protocol/docs/DESIGN.md#negotiated-statement-diagnostics-1105) add structured delivery.
 
 `QueryLanguageProfile.Functions` is the executable built-in set. Recognized non-executing
 functions live in each language's unsupported vocabulary and report COHDBL001 at parse time.
 The single function guard in each engine's execution-conformance suite requires live evidence
-for every declared name and rejects evidence for undeclared names. OQL temporarily exempts
-exactly ELEMENT, FLATTEN, FIRST, LAST, LISTTOSET and UNIQUE, each pinned to COHDBL001 until #1126.
+for every declared name and rejects evidence for undeclared names. OQL's
+[temporary exemptions were removed by #1126](../../Assimalign.Cohesion.Database.Documents.Language/docs/DESIGN.md#function-declaration-and-diagnostic-delivery-1103).
 
 ## AOT posture
 

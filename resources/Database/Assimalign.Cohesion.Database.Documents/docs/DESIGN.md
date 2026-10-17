@@ -927,8 +927,8 @@ transactions. No transaction-control member or frame is exposed over this wire.
 ### Envelope and payload layout
 
 The shared envelope is unchanged: `u32be payloadLength`, `u8 messageType`, payload bytes. The length
-excludes the five-byte header and is at most 16,777,216. The shared startup handshake used by
-#1126 advanced 1.0 to 2.0 because Documents projections changed from ResultRow (68) arrays to Document (65) objects carrying MISSING by omission. The shared handshake now negotiates 2.1 (#1105), with an empty capability list for Documents and its existing structured Failure payload. Different majors are refused before authentication; additive future capabilities use negotiation rather than another minor bump.
+excludes the five-byte header and is at most 16,777,216.
+#1126 advanced the shared startup version from 1.0 to 2.0 because Documents projections changed from ResultRow (68) arrays to Document (65) objects carrying MISSING by omission. The shared handshake now negotiates 2.1 (#1105), with an empty capability list for Documents and its existing structured Failure payload. Different majors are refused before authentication; additive future capabilities use negotiation rather than another minor bump.
 
 All integers below are big-endian. `str(x)` means `i32 byteLength` followed by that many UTF-8
 bytes. `json(x)` means `i32 byteLength` followed by one complete UTF-8 JSON value. Negative lengths,
@@ -1011,7 +1011,7 @@ the session. Failure has no following Complete.
 ResultHeader's wholeDocuments flag distinguishes source JSON values from projected objects;
 for projections a missing property maps to MISSING by header ordinal. ResultRow remains a
 defined codec but is not emitted or accepted by OQL execution. The existing raw-JSON
-Document payload carries the new projection contract under protocol 2.0. Shared Error terminates the
+Document payload carries the major-2 projection contract on both negotiated 2.0 and 2.1 sessions. Shared Error terminates the
 session. The client rejects wrong ordering, unknown projection members, identity,
 collection ordering, count or affected-count semantics before accepting completion.
 
