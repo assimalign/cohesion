@@ -610,8 +610,8 @@ public sealed class SqlExpressionDepthTests
             tree = new SqlBinaryExpression(tree, SqlBinaryOperator.Add,
                 new SqlLiteralExpression("1", SqlLiteralType.Integer, null), null);
         }
-        var query = new SqlSelectExpression([new SqlSelectColumn(tree, null)], new SqlTableReference("t", null, null),
-            [], null, [], null, [], null, null, false, null, null);
+        var query = new SqlSelectExpression([new SqlSelectColumn(tree, null)], [new SqlFromItem(new SqlTableReference("t", null, null), [])],
+            null, [], null, [], null, null, false, null, null);
 
         // Act
         var expression = Should.Throw<NotSupportedException>(() => SqlExpressionRenderer.Render(tree));

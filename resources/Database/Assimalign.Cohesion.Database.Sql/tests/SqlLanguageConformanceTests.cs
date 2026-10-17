@@ -42,7 +42,7 @@ public sealed class SqlLanguageConformanceTests
         // The profile drives enumeration. A newly advertised clause cannot silently escape this test.
         var cases = CreateCases();
         // Phase 22 and #1125 extend spellings within the existing 33 named clauses (+0).
-        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(34);
+        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(35);
         RequireExecutionCases(SqlLanguageProfile.Instance.Clauses, cases);
         cases.Keys.Except(SqlLanguageProfile.Instance.Clauses).ShouldBeEmpty("Cases must describe the current profile.");
 
@@ -401,22 +401,25 @@ public sealed class SqlLanguageConformanceTests
             }),
         [SqlClauses.Select] = Query("SELECT id, age + 1 AS next_age FROM t ORDER BY id;", expression => expression is SqlSelectExpression,
             [[1, 37L], [2, 46L], [3, 42L]]),
-        [SqlClauses.From] = Query("SELECT u.name FROM dbo.t AS u WHERE id = 1;", expression => expression is SqlSelectExpression { From: not null },
+        [SqlClauses.From] = Query("SELECT u.name FROM dbo.t AS u WHERE id = 1;", expression => expression is SqlSelectExpression { From.Count: 1 },
             [["Ada"]]),
         [SqlClauses.Subquery] = Query("SELECT id, (SELECT MAX(age) FROM t) AS oldest FROM t WHERE id IN (SELECT id FROM t WHERE age > 40) AND EXISTS (SELECT id FROM t WHERE age = 36) ORDER BY id;",
             expression => expression is SqlSelectExpression select && select.Columns.Any(column => column.Expression is SqlSubqueryExpression),
             [[2, 45], [3, 45]]),
-        [SqlClauses.Join] = new("SELECT t.name, p.email FROM t INNER JOIN profiles p ON t.id = p.user_id ORDER BY t.id;",
+        [SqlClauses.Join] = new("SELECT t.name, p.email FROM t INNER JOIN t copy ON t.id = copy.id LEFT JOIN profiles p ON t.id = p.user_id ORDER BY t.id;",
             [.. _seed, "CREATE TABLE profiles (user_id INT REFERENCES t(id), email TEXT);",
                 "INSERT INTO profiles VALUES (1, 'ada@example.test'), (3, 'alan@example.test');"],
-            expression => expression is SqlSelectExpression { Joins.Count: 1 } select && select.Joins[0].JoinType == SqlJoinType.Inner,
+            expression => expression is SqlSelectExpression { From.Count: 1 } select && select.From[0].Joins.Count == 2 && select.From[0].Joins[1].JoinType == SqlJoinType.LeftOuter,
             async (session, result) =>
             {
-                CheckRows(await ReadRowsAsync(result), [["Ada", "ada@example.test"], ["Alan", "alan@example.test"]]);
+                CheckRows(await ReadRowsAsync(result), [["Ada", "ada@example.test"], ["Grace", null], ["Alan", "alan@example.test"]]);
                 await ExpectRowsAsync(session, "SELECT c.COLUMN_NAME FROM INFORMATION_SCHEMA.TABLES t " +
                     "JOIN INFORMATION_SCHEMA.COLUMNS c ON t.TABLE_NAME = c.TABLE_NAME WHERE t.TABLE_NAME = 'profiles' ORDER BY c.ORDINAL_POSITION;",
                     [["user_id"], ["email"]]);
             }),
+        [SqlClauses.Using] = Query("SELECT id FROM t LEFT JOIN t copy USING (id) ORDER BY id;",
+            expression => expression is SqlSelectExpression select && select.From[0].Joins[0].UsingColumns.Count == 1,
+            [[1], [2], [3]]),
         [SqlClauses.Where] = Query("SELECT id FROM t WHERE age > 40 AND name LIKE 'G%' ORDER BY id;", expression => expression is SqlSelectExpression { Where: not null },
             [[2]]),
         [SqlClauses.Collate] = Query("SELECT id FROM t WHERE name = 'ada' COLLATE case_insensitive;",

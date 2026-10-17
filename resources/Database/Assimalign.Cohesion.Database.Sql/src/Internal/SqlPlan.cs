@@ -135,28 +135,34 @@ internal sealed record SqlSelectPlan(
     IReadOnlyDictionary<SqlExpression, int>? OrderByProjections = null) : SqlPlan;
 
 /// <summary>A relation's source, qualifier and position in a joined row.</summary>
-internal sealed record SqlRelationBinding(SqlRelationSource Source, SqlTableReference Reference, int Offset);
+internal sealed record SqlRelationBinding(SqlRelationSource Source, SqlTableReference Reference, int Offset)
+{
+    // USING hides only unqualified right columns, never their qualified references.
+    internal HashSet<int> HiddenColumns { get; } = [];
+}
 
 /// <summary>
-/// A two-relation inner join. Source columns retain FROM-then-JOIN order even
+/// A left-deep N-relation join. Physical slots retain FROM-then-JOIN order even
 /// when the selected index reverses which relation drives the nested loop.
 /// </summary>
 internal sealed record SqlJoinPlan(
     IReadOnlyList<SqlRelationBinding> Bindings,
     IReadOnlyList<SqlCatalogColumn> Columns,
-    SqlBoundExpression Condition,
+    IReadOnlyList<SqlJoinStep> Steps,
     IReadOnlyList<SqlProjection> Projections,
     SqlBoundExpression? Where,
     IReadOnlyList<SqlBoundOrdering> OrderBy,
     long? Limit,
     long? Offset,
     bool IsDistinct,
-    SqlJoinIndexPath? Access,
     IReadOnlyDictionary<SqlExpression, int>? OrderByProjections = null) : SqlPlan;
+
+/// <summary>One written join step; comma items introduce unconditional CROSS steps.</summary>
+internal sealed record SqlJoinStep(int Binding, SqlJoinType Kind, SqlBoundExpression? Condition, SqlJoinIndexPath? Access);
 
 /// <summary>
 /// A correlated equality-prefix seek into one input, with probe ordinals in
-/// the other input's local row and the inner columns of the seek prefix, resolved
+/// the accumulated physical row and the inner columns of the seek prefix, resolved
 /// once when the statement is planned rather than by name for every outer row.
 /// A null path means a buffered nested-loop scan.
 /// </summary>

@@ -16,7 +16,7 @@ internal sealed partial class SqlPlanner
     /// <summary>Binds aggregation above a normal filtered relation plan.</summary>
     private SqlGroupPlan PlanGroup(SqlSelectExpression select, SqlCatalogTable? table,
         SqlSystemViewDefinition? view, IReadOnlyList<SqlCatalogColumn> columns,
-        IReadOnlyList<SqlRelationBinding>? bindings, SqlExpressionEvaluator evaluator)
+        IReadOnlyList<SqlRelationBinding>? bindings, SqlExpressionEvaluator evaluator, IReadOnlyList<SqlJoinStep> steps)
     {
         foreach (var key in select.GroupBy)
         {
@@ -67,17 +67,16 @@ internal sealed partial class SqlPlanner
         // then aggregate results, then the projected outputs that ordering may name). Both scopes
         // resolve columns through the same relation references as the input scope.
         var sourceScope = new SqlExpressionEvaluator(columns, _parameters, bindings, defaultCollation: _catalog.DefaultCollation,
-            subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken, relation: select.From);
+            subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken, relation: select.From[0].Table);
         // A call over a key or an aggregate result resolves by the slot's type over the input row,
         // as the same call does outside a grouping: describe(COUNT(*)) is describe(BIGINT).
         var groupScope = new SqlExpressionEvaluator(columns, _parameters, bindings, slots, _catalog.DefaultCollation,
-            subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken, slotScope: sourceScope, relation: select.From);
+            subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken, slotScope: sourceScope, relation: select.From[0].Table);
 
         var source = columns.Select((column, index) => PassThrough(column.Name, index, columns, sourceScope)).ToArray();
         var where = select.Where is null ? null : evaluator.Bind(select.Where);
         SqlPlan input = bindings is not null
-            ? new SqlJoinPlan(bindings, columns, evaluator.Bind(select.Joins[0].Condition!), source, where,
-                [], null, null, false, SelectJoinAccessPath(bindings, select.Joins[0].Condition!, evaluator))
+            ? new SqlJoinPlan(bindings, columns, steps, source, where, [], null, null, false)
             : view is not null
                 ? new SqlSystemViewPlan(view, source, where, [], null, null, false)
                 : new SqlSelectPlan(table!, source, where, [], null, null, false, SelectAccessPath(table!, select.Where));

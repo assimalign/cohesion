@@ -1,5 +1,30 @@
 # Assimalign.Cohesion.Database.Sql — Design
 
+## N-way joins (#1109)
+
+FROM binds each comma item's join tree separately before any row is read. ON scopes contain
+only that item's inputs through the current step. SqlJoinPlan retains stable physical slots,
+an ordered SqlJoinStep list and one access path per step; USING hides right names only from
+unqualified lookup and derives wildcard order independently of physical slots. Its merged
+column retains the left value and metadata; ordinary equality and collation rules match it.
+This deliberately leaves PostgreSQL's common-type synthesis for a later extension.
+
+Execution is left-deep in written order. Only the first INNER pair may swap for an index;
+later steps seek into the added input, and LEFT always preserves its left side. Each LEFT
+step tests its own residual before deciding whether to extend an unmatched row with NULL.
+WHERE filters after the complete join. Catalog inputs use #1106's one captured image and
+never take object locks or index paths. Stored inputs lock once each in ObjectId order.
+Metrics retain ordered JoinAccessPaths (AccessPath renders them separated by semicolons),
+even when empty inputs skip enumeration. EXPLAIN emits a JoinStep child for every step,
+with its scan or correlated seek. Grouping and subqueries use this same input plan.
+
+Pass-through projections carry source nullability, including all LEFT right columns.
+Delivery transfers the final fresh index inner; every earlier input retained by a later loop
+detaches only selected binary cells. Null-extended outer rows follow the same ownership rule.
+No interface, visibility grant, project reference, reflection or protocol frame is added.
+The unreleased storage format advances 13 -> 14 for the canonical FROM shape; older files
+are refused without an upgrade path. DIALECT.md records syntax and the retained t.* gap.
+
 ## Type-name resolution (#1108)
 
 Column planning consumes SqlColumnDefinition.ResolvedType for built-ins, as CAST already did;
@@ -226,7 +251,7 @@ SQL's combined operators, not a shared or independently executable algebra:
 | Operators | Meaning |
 | --- | --- |
 | `Select`, `TableScan`, `IndexSeek` | Bound projection/filter/order/distinct/window above the chosen table access; seeks name the catalog index and equality-prefix/range bounds |
-| `NestedLoopJoin` | A two-table join, with two scan inputs or a driving scan and correlated index seek; details identify which path was chosen |
+| `NestedLoopJoin`, `JoinStep` | N-way written-order join; each JoinStep describes its kind and has its own scan or correlated index seek child |
 | `Group` | Group keys, aggregates, HAVING and result modifiers above the actual input plan |
 | `SystemView` | A qualified virtual relation; no fabricated stored-table access |
 | `Subqueries` | Uncorrelated child plans in execution order, followed by the enclosing input |
@@ -258,7 +283,7 @@ another cell, later row, function call, DEFAULT assignment or stored value.
 | CASE, COALESCE, identity CAST or domain argument | Delivery follows the selected operand; predicate computation continues to share read-only values. Application casts copy their converted binary result. |
 | Converted literal DEFAULT, including an ADD COLUMN missing tail | DefaultValue copies the cached value once per supplied row. Expression defaults use evaluator delivery. |
 | Scalar subquery or grouped key/aggregate slot | Delivery copies the retained slot value for each use, including native aggregate results. |
-| Repeated projections and join fanout | An owned cell's first projection transfers it; repeated projections detach. Join delivery copies selected retained outer/buffered-inner columns; indexed inner rows decode afresh and transfer. Predicates, discarded candidates and unprojected columns never copy. |
+| Repeated projections and join fanout | An owned cell's first projection transfers it; repeated projections detach. Join delivery copies selected retained outer/buffered-inner columns, including indexed inputs retained by later steps; the final indexed inner decodes afresh and transfers. Predicates, discarded candidates and unprojected columns never copy. |
 | Stored Binary/JsonBinary component, by scan or seek | SqlRowCodec reads a fresh nonempty array and transfers it. Only the decoder's shared empty array is replaced at this source. |
 | System/catalog views | Enumerators emit strings and immutable scalars, including rendered DEFAULT text; none exposes a catalog byte array. Binary expressions over these views use the same evaluator delivery. |
 
@@ -4324,7 +4349,7 @@ takes 35 and 16 µs.
 
 ## Non-goals (current cut)
 
-Outer/multi-table joins beyond the supported two-table INNER JOIN, correlated
+RIGHT/FULL OUTER, NATURAL and LATERAL joins, qualified wildcards, correlated
 and derived-table subqueries, explicit NULL placement, `Serializable`
 isolation (rejected at begin), cost-based optimization (selection stays
 rule-based), index seeks for UPDATE/DELETE target collection, and index-only

@@ -213,22 +213,29 @@ public sealed class SqlJoinExecutionTests
         await using var writer = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await ExecuteAsync(writer, "CREATE TABLE a (id INT, value TEXT);");
         await ExecuteAsync(writer, "CREATE TABLE b (id INT, value TEXT);");
-        if (indexed) { await ExecuteAsync(writer, "CREATE INDEX ix_b_id ON b(id);"); }
+        await ExecuteAsync(writer, "CREATE TABLE c (id INT, value TEXT);");
+        if (indexed)
+        {
+            await ExecuteAsync(writer, "CREATE INDEX ix_b_id ON b(id);");
+            await ExecuteAsync(writer, "CREATE INDEX ix_c_id ON c(id);");
+        }
         await ExecuteAsync(writer, "INSERT INTO a VALUES (1, 'old-a');");
         await ExecuteAsync(writer, "INSERT INTO b VALUES (1, 'old-b');");
+        await ExecuteAsync(writer, "INSERT INTO c VALUES (1, 'old-c');");
         var pinned = await reader.BeginTransactionAsync(IsolationLevel.Snapshot, CancellationToken.None);
-        const string query = "SELECT a.value, b.value FROM a JOIN b ON a.id = b.id;";
+        const string query = "SELECT a.value, b.value, c.value FROM a JOIN b ON a.id = b.id LEFT JOIN c ON b.id = c.id;";
 
         // Act: one committed transaction changes both keys and values after the reader's snapshot.
         var update = await writer.BeginTransactionAsync(cancellationToken: CancellationToken.None);
         await ExecuteAsync(writer, "UPDATE a SET id = 2, value = 'new-a';");
         await ExecuteAsync(writer, "UPDATE b SET id = 2, value = 'new-b';");
+        await ExecuteAsync(writer, "UPDATE c SET id = 2, value = 'new-c';");
         await update.CommitAsync(CancellationToken.None);
 
         // Assert
-        (await RowsAsync(reader, query)).ShouldHaveSingleItem().ShouldBe(new object?[] { "old-a", "old-b" });
+        (await RowsAsync(reader, query)).ShouldHaveSingleItem().ShouldBe(new object?[] { "old-a", "old-b", "old-c" });
         await pinned.RollbackAsync(CancellationToken.None);
-        (await RowsAsync(reader, query)).ShouldHaveSingleItem().ShouldBe(new object?[] { "new-a", "new-b" });
+        (await RowsAsync(reader, query)).ShouldHaveSingleItem().ShouldBe(new object?[] { "new-a", "new-b", "new-c" });
     }
 
     /// <summary>ReadCommitted captures once per statement even when execution begins after another transaction commits.</summary>
@@ -244,20 +251,27 @@ public sealed class SqlJoinExecutionTests
         await using var writer = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await ExecuteAsync(writer, "CREATE TABLE a (id INT, value TEXT);");
         await ExecuteAsync(writer, "CREATE TABLE b (id INT, value TEXT);");
-        if (indexed) { await ExecuteAsync(writer, "CREATE INDEX ix_b_id ON b(id);"); }
+        await ExecuteAsync(writer, "CREATE TABLE c (id INT, value TEXT);");
+        if (indexed)
+        {
+            await ExecuteAsync(writer, "CREATE INDEX ix_b_id ON b(id);");
+            await ExecuteAsync(writer, "CREATE INDEX ix_c_id ON c(id);");
+        }
         await ExecuteAsync(writer, "INSERT INTO a VALUES (1, 'old-a');");
         await ExecuteAsync(writer, "INSERT INTO b VALUES (1, 'old-b');");
+        await ExecuteAsync(writer, "INSERT INTO c VALUES (1, 'old-c');");
         var transaction = await database.Coordinator.BeginAsync(IsolationLevel.ReadCommitted, CancellationToken.None);
         try
         {
             var captured = new SqlStatementContext(transaction, database.Coordinator);
-            var request = SqlQueryRequest.FromSql("SELECT a.value, b.value FROM a JOIN b ON a.id = b.id;");
+            var request = SqlQueryRequest.FromSql("SELECT a.value, b.value, c.value FROM a JOIN b ON a.id = b.id LEFT JOIN c ON b.id = c.id;");
             var executor = new SqlQueryExecutor(database.DataStorage, database.Catalog, database.IndexManager, database.Definitions);
 
             // Act: replace both ON operands atomically after this statement captured its view.
             var update = await writer.BeginTransactionAsync(cancellationToken: CancellationToken.None);
             await ExecuteAsync(writer, "UPDATE a SET id = 2, value = 'new-a';");
             await ExecuteAsync(writer, "UPDATE b SET id = 2, value = 'new-b';");
+            await ExecuteAsync(writer, "UPDATE c SET id = 2, value = 'new-c';");
             await update.CommitAsync(CancellationToken.None);
             await using var oldResult = (await executor.ExecuteAsync(request, captured, CancellationToken.None))
                 .ShouldBeAssignableTo<DatabaseResultSet>();
@@ -266,8 +280,8 @@ public sealed class SqlJoinExecutionTests
                 .ShouldBeAssignableTo<DatabaseResultSet>();
 
             // Assert: recapturing Transaction.Snapshot inside either input would violate the old result.
-            (await ReadRowsAsync(oldResult)).ShouldHaveSingleItem().ShouldBe(new object?[] { "old-a", "old-b" });
-            (await ReadRowsAsync(newResult)).ShouldHaveSingleItem().ShouldBe(new object?[] { "new-a", "new-b" });
+            (await ReadRowsAsync(oldResult)).ShouldHaveSingleItem().ShouldBe(new object?[] { "old-a", "old-b", "old-c" });
+            (await ReadRowsAsync(newResult)).ShouldHaveSingleItem().ShouldBe(new object?[] { "new-a", "new-b", "new-c" });
         }
         finally
         {
@@ -286,14 +300,16 @@ public sealed class SqlJoinExecutionTests
         await using var reader = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await ExecuteAsync(writer, "CREATE TABLE a (id INT);");
         await ExecuteAsync(writer, "CREATE TABLE b (id INT);");
+        await ExecuteAsync(writer, "CREATE TABLE c (id INT);");
         await ExecuteAsync(writer, "CREATE INDEX ix_b_id ON b(id);");
         var transaction = await writer.BeginTransactionAsync(cancellationToken: CancellationToken.None);
         await ExecuteAsync(writer, "INSERT INTO a VALUES (1);");
         await ExecuteAsync(writer, "INSERT INTO b VALUES (1);");
-        const string query = "SELECT a.id, b.id FROM a JOIN b ON a.id = b.id;";
+        await ExecuteAsync(writer, "INSERT INTO c VALUES (1);");
+        const string query = "SELECT a.id, b.id, c.id FROM a JOIN b ON a.id = b.id LEFT JOIN c ON b.id = c.id;";
 
         // Act / Assert
-        (await RowsAsync(writer, query)).ShouldHaveSingleItem().ShouldBe(new object?[] { 1, 1 });
+        (await RowsAsync(writer, query)).ShouldHaveSingleItem().ShouldBe(new object?[] { 1, 1, 1 });
         (await RowsAsync(reader, query)).ShouldBeEmpty();
         await transaction.RollbackAsync(CancellationToken.None);
         (await RowsAsync(reader, query)).ShouldBeEmpty();
@@ -326,7 +342,7 @@ public sealed class SqlJoinExecutionTests
         // Act
         var seekRows = await RowsAsync(session, query);
         var seekMetrics = MetricsOf(session);
-        seekMetrics.AccessPath.ShouldBe("join-seek:ix_large_key");
+        seekMetrics.JoinAccessPaths.ShouldBe(["join-seek:ix_large_key"]);
         long seekExamined = seekMetrics.RecordsExamined;
         await ExecuteAsync(session, "DROP INDEX ix_large_key ON large;");
         var scanRows = await RowsAsync(session, query);
@@ -338,7 +354,7 @@ public sealed class SqlJoinExecutionTests
         seekRows[1].ShouldBe(new object?[] { 201, "n201" });
         scanRows.Select(row => string.Join("|", row)).ShouldBe(seekRows.Select(row => string.Join("|", row)));
         seekExamined.ShouldBe(4);
-        scanMetrics.AccessPath.ShouldBe("join-scan");
+        scanMetrics.JoinAccessPaths.ShouldBe(["join-scan"]);
         scanMetrics.RecordsExamined.ShouldBeGreaterThanOrEqualTo(size);
     }
 
@@ -364,7 +380,7 @@ public sealed class SqlJoinExecutionTests
         rows.Count.ShouldBe(2);
         rows[0].ShouldBe(new object?[] { 1, 2 });
         rows[1].ShouldBe(new object?[] { 2, 2 });
-        MetricsOf(session).AccessPath.ShouldBe("join-seek:ix_items_tenant_item");
+        MetricsOf(session).JoinAccessPaths.ShouldBe(["join-seek:ix_items_tenant_item"]);
         MetricsOf(session).RecordsExamined.ShouldBe(5);
     }
 

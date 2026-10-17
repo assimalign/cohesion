@@ -44,6 +44,12 @@ flowchart LR
 
 Other model clients do not depend on this package.
 
+## Expanded joins (#1109)
+
+LEFT null values, N-way, CROSS, comma and USING results use the existing SQL frames and
+production materializer. No nullability field or frame-writing change is introduced.
+Wire tests pin exact values and multiplicities and retain RIGHT/FULL/NATURAL exclusions.
+
 ## System relation joins (#1106)
 
 Stored/system, system/system and grouped catalog joins use the existing SQL exchange.

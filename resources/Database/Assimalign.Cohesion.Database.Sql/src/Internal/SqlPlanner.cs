@@ -97,37 +97,32 @@ internal sealed partial class SqlPlanner
     /// <summary>Binds a SELECT whose subqueries have already been lowered to value slots.</summary>
     private SqlPlan PlanSelectCore(SqlSelectExpression select)
     {
-        if (select.From is null)
+        if (select.From.Count == 0)
         {
             throw new SqlPlanningException("COHSQLE013", "SELECT requires a FROM table.", select.Location);
         }
 
-        var source = ResolveRelation(select.From);
+        var source = ResolveRelation(select.From[0].Table);
         var table = source.Table;
         var systemView = source.View;
-        var bindings = select.Joins.Count > 0 ? BindJoin(select, source) : null;
-        var columns = bindings is null ? source.Columns
-            : bindings.SelectMany(binding => binding.Source.Columns).ToArray();
-        var evaluator = new SqlExpressionEvaluator(columns, _parameters, bindings, defaultCollation: _catalog.DefaultCollation,
-            subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken, relation: select.From);
-
-        if (bindings is not null)
+        IReadOnlyList<SqlRelationBinding>? bindings = null;
+        IReadOnlyList<SqlCatalogColumn> columns = source.Columns;
+        IReadOnlyList<SqlJoinStep> steps = [];
+        IReadOnlyList<int> outputOrdinals = Enumerable.Range(0, columns.Count).ToArray();
+        if (select.From.Count > 1 || select.From[0].Joins.Count > 0)
         {
-            ValidateExpression(select.Joins[0].Condition!, evaluator, _subqueryTypes);
+            bindings = BindJoin(select, out columns, out steps, out outputOrdinals);
         }
+        var evaluator = new SqlExpressionEvaluator(columns, _parameters, bindings, defaultCollation: _catalog.DefaultCollation,
+            subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken, relation: select.From[0].Table);
 
         if (select.Where is not null && ContainsAggregate(select.Where))
         {
             throw new SqlPlanningException("COHSQLE017", "Aggregate functions are not allowed in WHERE; use HAVING to filter groups.", select.Where?.Location);
         }
-        if (bindings is not null && ContainsAggregate(select.Joins[0].Condition!))
-        {
-            throw new SqlPlanningException("COHSQLE017", "Aggregate functions are not allowed in JOIN ON.", select.Joins[0].Condition?.Location);
-        }
-
         if (select.GroupBy.Count > 0 || select.Having is not null || ProjectsOrOrdersByAggregate(select))
         {
-            return PlanGroup(select, table, systemView, columns, bindings, evaluator);
+            return PlanGroup(select, table, systemView, columns, bindings, evaluator, steps);
         }
 
         var projections = new List<SqlProjection>();
@@ -135,7 +130,7 @@ internal sealed partial class SqlPlanner
         {
             if (column.Expression is SqlStarExpression)
             {
-                for (int i = 0; i < columns.Count; i++)
+                foreach (int i in outputOrdinals)
                 {
                     projections.Add(PassThrough(columns[i].Name, i, columns, evaluator));
                 }
@@ -174,10 +169,10 @@ internal sealed partial class SqlPlanner
 
         if (bindings is not null)
         {
-            return new SqlJoinPlan(bindings, columns, evaluator.Bind(select.Joins[0].Condition!), projections,
+            return new SqlJoinPlan(bindings, columns, steps, projections,
                 where, ordering, EvaluateCount(select.Limit, "LIMIT"),
                 EvaluateCount(select.Offset, "OFFSET"), select.IsDistinct,
-                SelectJoinAccessPath(bindings, select.Joins[0].Condition!, evaluator), orderByProjections);
+                orderByProjections);
         }
 
         if (systemView is not null)
@@ -211,7 +206,7 @@ internal sealed partial class SqlPlanner
 
     /// <summary>A projection that passes a source column through, with the collation <c>DISTINCT</c> compares it under.</summary>
     private static SqlProjection PassThrough(string name, int ordinal, IReadOnlyList<SqlCatalogColumn> columns, SqlExpressionEvaluator scope)
-        => new(name, ordinal, null, columns[ordinal].Type.Type) { Collation = new SqlBoundCollation(scope.ResolveColumnCollation(ordinal)), MaxLength = columns[ordinal].Type.MaxLength };
+        => new(name, ordinal, null, columns[ordinal].Type.Type) { Collation = new SqlBoundCollation(scope.ResolveColumnCollation(ordinal)), MaxLength = columns[ordinal].Type.MaxLength, IsNullable = columns[ordinal].IsNullable };
 
     /// <summary>Binds <c>ORDER BY</c> keys in their ordering scope, each with the collation it sorts under.</summary>
     /// <param name="orderBy">The keys.</param>

@@ -48,9 +48,9 @@ is the reference for the hidden-name rule.
 
 ## System relation joins (#1106)
 
-The ordinary two-relation INNER JOIN grammar accepts stored tables and registered
+The FROM join-tree grammar accepts stored tables and registered
 INFORMATION_SCHEMA/COHESION_SCHEMA sources in either position. No clause is added;
-all existing join-shape and read-only diagnostics remain. Engine binding owns source
+read-only diagnostics remain. INNER, LEFT and CROSS compose across N inputs (#1109). Engine binding owns source
 resolution and one lazy statement catalog capture, including child plans. DIALECT.md
 and the live JOIN conformance case cover system-to-system joins.
 
@@ -84,6 +84,15 @@ the parser implements today. Recognized clauses outside that set produce the sha
 `COHDBL001` model-specific diagnostic; `SQL0002` remains the unknown-command diagnostic.
 
 ## Why-this-not-that decisions
+
+FROM exposes one SqlFromItem join tree per comma item (#1109), preserving JOIN precedence
+and ON scopes without recovering grouping from flattened text. SqlJoinClause retains ordered
+UsingColumns separately from ON. The capability pre-scan skips advertised clauses and reports
+the first unadvertised construct, so USING cannot mask NATURAL, WINDOW or OVER.
+The renderer, nesting measure and correlation walker traverse every item and condition.
+The engine implements written-order steps; DIALECT.md defines LEFT null extension and the
+left-column merged-type rule for USING. Qualified wildcards keep COHDBL001.
+
 
 - **Recursive descent, hand-written** — over a parser generator. The dialect is
   small, error tolerance matters more than grammar elegance, the AST is the

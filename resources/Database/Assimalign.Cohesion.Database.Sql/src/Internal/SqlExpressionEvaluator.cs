@@ -318,7 +318,8 @@ internal sealed partial class SqlExpressionEvaluator
 
                 for (int i = 0; i < binding.Source.Columns.Count; i++)
                 {
-                    if (!string.Equals(binding.Source.Columns[i].Name, column.ColumnName, StringComparison.OrdinalIgnoreCase))
+                    if (column.TableAlias is null && binding.HiddenColumns.Contains(i) ||
+                        !string.Equals(binding.Source.Columns[i].Name, column.ColumnName, StringComparison.OrdinalIgnoreCase))
                     {
                         continue;
                     }

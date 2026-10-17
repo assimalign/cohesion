@@ -13,8 +13,7 @@ public sealed class SqlSelectExpression : SqlQueryExpression
     /// Initializes a new <see cref="SqlSelectExpression"/>.
     /// </summary>
     /// <param name="columns">The columns in the SELECT list.</param>
-    /// <param name="from">The FROM table reference.</param>
-    /// <param name="joins">The JOIN clauses.</param>
+    /// <param name="from">The comma-separated FROM join trees.</param>
     /// <param name="where">The WHERE filter expression.</param>
     /// <param name="groupBy">The GROUP BY expressions.</param>
     /// <param name="having">The HAVING filter expression.</param>
@@ -26,8 +25,7 @@ public sealed class SqlSelectExpression : SqlQueryExpression
     /// <param name="location">The source location.</param>
     internal SqlSelectExpression(
         IReadOnlyList<SqlSelectColumn> columns,
-        SqlTableReference? from,
-        IReadOnlyList<SqlJoinClause> joins,
+        IReadOnlyList<SqlFromItem> from,
         SqlExpression? where,
         IReadOnlyList<SqlExpression> groupBy,
         SqlExpression? having,
@@ -41,7 +39,6 @@ public sealed class SqlSelectExpression : SqlQueryExpression
     {
         Columns = columns;
         From = from;
-        Joins = joins;
         Where = where;
         GroupBy = groupBy;
         Having = having;
@@ -57,9 +54,12 @@ public sealed class SqlSelectExpression : SqlQueryExpression
         {
             depth = System.Math.Max(depth, column.Expression.Depth);
         }
-        foreach (var join in joins)
+        foreach (var item in from)
         {
-            depth = System.Math.Max(depth, SqlExpression.DepthOf(join.Condition));
+            foreach (var join in item.Joins)
+            {
+                depth = System.Math.Max(depth, SqlExpression.DepthOf(join.Condition));
+            }
         }
         foreach (var order in orderBy)
         {
@@ -89,14 +89,10 @@ public sealed class SqlSelectExpression : SqlQueryExpression
     public IReadOnlyList<SqlSelectColumn> Columns { get; }
 
     /// <summary>
-    /// Gets the FROM table reference, if present.
+    /// Gets the comma-separated FROM join trees; JOIN binds more tightly than comma.
     /// </summary>
-    public SqlTableReference? From { get; }
+    public IReadOnlyList<SqlFromItem> From { get; }
 
-    /// <summary>
-    /// Gets the JOIN clauses.
-    /// </summary>
-    public IReadOnlyList<SqlJoinClause> Joins { get; }
 
     /// <summary>
     /// Gets the WHERE filter expression, if present.

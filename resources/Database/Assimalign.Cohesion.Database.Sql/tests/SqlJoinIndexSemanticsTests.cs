@@ -86,9 +86,9 @@ public sealed class SqlJoinIndexSemanticsTests
 
         // Assert: a rounded probe must not manufacture a match, overflow must
         // not abort the statement, and NULL must not match the indexed NULL.
-        plan.Access.ShouldNotBeNull().Index.Name.ShouldBe("ix_key");
+        plan.Steps[0].Access.ShouldNotBeNull().Index.Name.ShouldBe("ix_key");
         pairs.ShouldBe(new[] { (1, 10), (6, 20) });
-        MetricsOf(session).AccessPath.ShouldBe("join-seek:ix_key");
+        MetricsOf(session).JoinAccessPaths.ShouldBe(["join-seek:ix_key"]);
     }
 
     /// <summary>Probes a decimal index with integer values without losing normalization.</summary>
@@ -112,9 +112,9 @@ public sealed class SqlJoinIndexSemanticsTests
         var pairs = await ReadPairsAsync(session, sql);
 
         // Assert.
-        plan.Access.ShouldNotBeNull().Index.Name.ShouldBe("ix_key");
+        plan.Steps[0].Access.ShouldNotBeNull().Index.Name.ShouldBe("ix_key");
         pairs.ShouldBe(new[] { (1, 10), (1, 11), (2, 20) });
-        MetricsOf(session).AccessPath.ShouldBe("join-seek:ix_key");
+        MetricsOf(session).JoinAccessPaths.ShouldBe(["join-seek:ix_key"]);
     }
 
     /// <summary>Uses only mandatory key equalities and still evaluates all residual predicates.</summary>
@@ -136,13 +136,13 @@ public sealed class SqlJoinIndexSemanticsTests
         const string mandatoryEquality = "SELECT l.id, r.id FROM outer_rows l INNER JOIN inner_rows r ON l.key_value = r.key_value AND (r.marker = 0 OR l.marker = r.marker) ORDER BY l.id, r.id";
 
         // Act + Assert.
-        PlanOf(database, optionalEquality).Access.ShouldBeNull();
+        PlanOf(database, optionalEquality).Steps[0].Access.ShouldBeNull();
         (await ReadPairsAsync(session, optionalEquality)).ShouldBe(new[] { (1, 10), (2, 20), (2, 30), (2, 40) });
-        MetricsOf(session).AccessPath.ShouldBe("join-scan");
+        MetricsOf(session).JoinAccessPaths.ShouldBe(["join-scan"]);
 
-        PlanOf(database, mandatoryEquality).Access.ShouldNotBeNull().Index.Name.ShouldBe("ix_key");
+        PlanOf(database, mandatoryEquality).Steps[0].Access.ShouldNotBeNull().Index.Name.ShouldBe("ix_key");
         (await ReadPairsAsync(session, mandatoryEquality)).ShouldBe(new[] { (1, 10), (2, 30) });
-        MetricsOf(session).AccessPath.ShouldBe("join-seek:ix_key");
+        MetricsOf(session).JoinAccessPaths.ShouldBe(["join-seek:ix_key"]);
     }
 
     private static async Task AssertUnsafeEqualityScansAsync(string type, object left, object right, bool equal = true)
@@ -159,9 +159,9 @@ public sealed class SqlJoinIndexSemanticsTests
             new Dictionary<string, object?> { ["left"] = left, ["right"] = right });
         const string sql = "SELECT l.id, r.id FROM outer_rows l INNER JOIN inner_rows r ON l.key_value = r.key_value ORDER BY l.id, r.id";
 
-        PlanOf(database, sql).Access.ShouldBeNull();
+        PlanOf(database, sql).Steps[0].Access.ShouldBeNull();
         (await ReadPairsAsync(session, sql)).ShouldBe(equal ? new[] { (1, 2), (1, 3) } : new[] { (1, 2) });
-        MetricsOf(session).AccessPath.ShouldBe("join-scan");
+        MetricsOf(session).JoinAccessPaths.ShouldBe(["join-scan"]);
     }
 
     private static async Task AssertTemporalEqualitySeeksAsync(string type, object outer, object first, object second, object other)
@@ -184,14 +184,14 @@ public sealed class SqlJoinIndexSemanticsTests
         const string scan = "SELECT l.id, r.id FROM outer_rows l INNER JOIN scan_rows r ON l.key_value = r.key_value ORDER BY l.id, r.id";
 
         // The scan is the reference: the evaluator's equality defines the answer.
-        PlanOf(database, scan).Access.ShouldBeNull();
+        PlanOf(database, scan).Steps[0].Access.ShouldBeNull();
         var expected = await ReadPairsAsync(session, scan);
-        MetricsOf(session).AccessPath.ShouldBe("join-scan");
+        MetricsOf(session).JoinAccessPaths.ShouldBe(["join-scan"]);
         expected.ShouldBe(new[] { (1, 2), (1, 3) });
 
-        PlanOf(database, seek).Access.ShouldNotBeNull().Index.Name.ShouldBe("ix_key");
+        PlanOf(database, seek).Steps[0].Access.ShouldNotBeNull().Index.Name.ShouldBe("ix_key");
         (await ReadPairsAsync(session, seek)).ShouldBe(expected);
-        MetricsOf(session).AccessPath.ShouldBe("join-seek:ix_key");
+        MetricsOf(session).JoinAccessPaths.ShouldBe(["join-seek:ix_key"]);
     }
 
     private static SqlJoinPlan PlanOf(SqlDatabase database, string sql)

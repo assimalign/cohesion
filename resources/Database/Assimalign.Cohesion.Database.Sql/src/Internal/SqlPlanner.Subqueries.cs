@@ -111,7 +111,7 @@ internal sealed partial class SqlPlanner
             {
                 yield return column.Expression;
             }
-            foreach (var join in select.Joins)
+            foreach (var join in select.From.SelectMany(item => item.Joins))
             {
                 if (join.Condition is not null)
                 {

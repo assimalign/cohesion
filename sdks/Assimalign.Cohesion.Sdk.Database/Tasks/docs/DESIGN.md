@@ -240,7 +240,9 @@ collisions fail without partial outputs. `KeyValuePair` fails explicitly because
 not a valid migration artifact for that model. SQL text uses the same guarded, `dbo`-qualified
 dialect as the runtime renderer; the current dialect explicitly rejects constraints,
 ALTER metadata, and required column additions that have no non-null literal default or backfill.
-Every emitted column retains its DEFAULT. The migration writer validates it as exactly one SQL
+Every emitted column retains its DEFAULT. The literal carrier guard follows
+SqlSelectExpression.From's join-tree list (#1109): exactly one unaliased carrier table,
+with no joins or comma siblings. No new engine reference or visibility grant is needed. The migration writer validates it as exactly one SQL
 literal through `Sql.Language`, then renders the parsed value, accepting a minus sign on a numeric literal and no other expressions, so signs, Boolean spelling and
 escaped strings match the runtime's DDL. Required additions retain the shared planner's
 conservative destructive-change opt-in; after that opt-in, a non-null default makes the DDL valid;

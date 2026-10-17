@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Text;
@@ -376,24 +377,29 @@ public static class SqlExpressionRenderer
             }
         }
 
-        if (select.From is not null)
+        for (int itemIndex = 0; itemIndex < select.From.Count; itemIndex++)
         {
-            builder.Append(" FROM ").Append(Table(select.From));
-        }
-        foreach (var join in select.Joins)
-        {
-            builder.Append(join.JoinType switch
+            var item = select.From[itemIndex];
+            builder.Append(itemIndex == 0 ? " FROM " : ", ").Append(Table(item.Table));
+            foreach (var join in item.Joins)
             {
-                SqlJoinType.Inner => " INNER JOIN ",
-                SqlJoinType.LeftOuter => " LEFT OUTER JOIN ",
-                SqlJoinType.RightOuter => " RIGHT OUTER JOIN ",
-                SqlJoinType.FullOuter => " FULL OUTER JOIN ",
-                SqlJoinType.Cross => " CROSS JOIN ",
-                _ => throw new NotSupportedException($"Join type '{join.JoinType}' has no SQL spelling."),
-            }).Append(Table(join.Table));
-            if (join.Condition is not null)
-            {
-                builder.Append(" ON ").Append(Expression(join.Condition));
+                builder.Append(join.JoinType switch
+                {
+                    SqlJoinType.Inner => " INNER JOIN ",
+                    SqlJoinType.LeftOuter => " LEFT OUTER JOIN ",
+                    SqlJoinType.RightOuter => " RIGHT OUTER JOIN ",
+                    SqlJoinType.FullOuter => " FULL OUTER JOIN ",
+                    SqlJoinType.Cross => " CROSS JOIN ",
+                    _ => throw new NotSupportedException($"Join type '{join.JoinType}' has no SQL spelling."),
+                }).Append(Table(join.Table));
+                if (join.Condition is not null)
+                {
+                    builder.Append(" ON ").Append(Expression(join.Condition));
+                }
+                if (join.UsingColumns.Count > 0)
+                {
+                    builder.Append(" USING (").Append(string.Join(", ", join.UsingColumns.Select(Identifier))).Append(')');
+                }
             }
         }
         if (select.Where is not null)

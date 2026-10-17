@@ -74,8 +74,7 @@ public sealed partial class SqlQueryParser : QueryParser
         RejectLexicalErrors(lexer);
 
         bool hasUnsupportedClause =
-            TryFindUnsupportedClause(lexer, out string unsupportedClause, out Location unsupportedLocation) &&
-            !Supports(unsupportedClause);
+            TryFindUnsupportedClause(lexer, out string unsupportedClause, out Location unsupportedLocation);
         _preflightClauseStart = hasUnsupportedClause ? unsupportedLocation.Start : -1;
 
         // Advance to the first non-comment token
@@ -913,7 +912,7 @@ public sealed partial class SqlQueryParser : QueryParser
                value.Equals("RETURNING", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static bool TryFindUnsupportedClause(
+    private bool TryFindUnsupportedClause(
         TokenLexer lexer,
         out string clause,
         out Location location)
@@ -925,6 +924,10 @@ public sealed partial class SqlQueryParser : QueryParser
         string? previousPreviousToken = null;
         string? firstToken = null;
         bool insertValues = false;
+        bool inFrom = false;
+        bool previousFromComma = false;
+        bool previousPreviousFromComma = false;
+        var fromScopes = new Stack<bool>();
         int previousPosition = 0;
 
         while (lexer.MoveNext())
@@ -971,7 +974,8 @@ public sealed partial class SqlQueryParser : QueryParser
                 lexer.Current.Position + lexer.Current.Value.Length);
 
             if (TryFindUnsupportedSubqueryForm(lexer, firstToken, previousToken,
-                previousPreviousToken, insertValues, out clause))
+                previousPreviousToken, insertValues,
+                previousFromComma || previousPreviousFromComma, out clause))
             {
                 location = tokenLocation;
                 return true;
@@ -1079,7 +1083,7 @@ public sealed partial class SqlQueryParser : QueryParser
                     return true;
                 }
 
-                if (TryGetUnsupportedClause(token, out clause))
+                if (TryGetUnsupportedClause(token, out clause) && !Supports(clause))
                 {
                     location = tokenLocation;
                     return true;
@@ -1087,6 +1091,30 @@ public sealed partial class SqlQueryParser : QueryParser
 
             }
 
+            // A comma is a relation separator only in a FROM scope. Parentheses
+            // suspend that scope, so a select-list comma before a scalar subquery
+            // cannot be mistaken for a derived relation (#1109).
+            if (lexer.Current.Type == TokenType.LeftParen)
+            {
+                fromScopes.Push(inFrom);
+                inFrom = false;
+            }
+            else if (lexer.Current.Type == TokenType.RightParen && fromScopes.Count > 0)
+            {
+                inFrom = fromScopes.Pop();
+            }
+            else if (lexer.Current.Type == TokenType.Keyword)
+            {
+                if (token.Equals("FROM", StringComparison.OrdinalIgnoreCase)) { inFrom = true; }
+                else if (token.Equals("WHERE", StringComparison.OrdinalIgnoreCase) ||
+                    token.Equals("GROUP", StringComparison.OrdinalIgnoreCase) ||
+                    token.Equals("HAVING", StringComparison.OrdinalIgnoreCase) ||
+                    token.Equals("ORDER", StringComparison.OrdinalIgnoreCase) ||
+                    token.Equals("LIMIT", StringComparison.OrdinalIgnoreCase) ||
+                    token.Equals("OFFSET", StringComparison.OrdinalIgnoreCase)) { inFrom = false; }
+            }
+            previousPreviousFromComma = previousFromComma;
+            previousFromComma = inFrom && lexer.Current.Type == TokenType.Comma;
             previousPreviousToken = previousToken;
             previousToken = token;
             previousPosition = lexer.Current.Position;

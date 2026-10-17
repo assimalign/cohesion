@@ -75,7 +75,7 @@ internal sealed partial class SqlPlanner
             {
                 SqlSelectPlan p => QueryDetail(p.Where is not null, p.OrderBy.Count, p.IsDistinct, p.Limit, p.Offset),
                 SqlSystemViewPlan p => QueryDetail(p.Where is not null, p.OrderBy.Count, p.IsDistinct, p.Limit, p.Offset),
-                SqlJoinPlan p => (p.Access is null ? "buffered inputs; " : "correlated equality-prefix seek; ") +
+                SqlJoinPlan p => string.Join("; ", p.Steps.Select(step => $"{step.Kind}: {(step.Access is null ? "buffered inputs" : "correlated equality-prefix seek")}")) + "; " +
                     QueryDetail(p.Where is not null, p.OrderBy.Count, p.IsDistinct, p.Limit, p.Offset),
                 SqlGroupPlan p => $"keys={p.Keys.Count}; aggregates={p.Aggregates.Count}; having={p.Having is not null}; " +
                     QueryDetail(false, p.OrderBy.Count, p.IsDistinct, p.Limit, p.Offset),
@@ -98,17 +98,21 @@ internal sealed partial class SqlPlanner
                     Access(select.Table, select.Access, id);
                     break;
                 case SqlJoinPlan join:
-                    int inner = join.Access?.InnerBinding ?? 1;
-                    var outerBinding = join.Bindings[1 - inner];
-                    RelationScan(outerBinding.Source, id);
-                    var innerBinding = join.Bindings[inner];
-                    if (join.Access is { } seek)
+                    bool swapped = join.Steps[0].Access?.InnerBinding == 0;
+                    RelationScan(join.Bindings[swapped ? 1 : 0].Source, id);
+                    foreach (var step in join.Steps)
                     {
-                        string bounds = string.Join(" AND ", seek.InnerColumns.Select((column, i) =>
-                            $"{column.Name} = {outerBinding.Reference.Alias ?? outerBinding.Source.Name}.{outerBinding.Source.Columns[seek.OuterOrdinals[i]].Name}"));
-                        Add("IndexSeek", id, Target(innerBinding.Source), seek.Index.Name, bounds);
+                        var binding = join.Bindings[step.Access?.InnerBinding ?? step.Binding];
+                        int stepId = nodes.Count;
+                        Add("JoinStep", id, Target(join.Bindings[step.Binding].Source), detail: step.Kind.ToString());
+                        if (step.Access is { } seek)
+                        {
+                            string bounds = string.Join(" AND ", seek.InnerColumns.Select((column, i) =>
+                                $"{column.Name} = {JoinProbeReference(join.Bindings, seek.OuterOrdinals[i])}"));
+                            Add("IndexSeek", stepId, Target(binding.Source), seek.Index.Name, bounds);
+                        }
+                        else { RelationScan(binding.Source, stepId); }
                     }
-                    else { RelationScan(innerBinding.Source, id); }
                     break;
                 case SqlGroupPlan group:
                     Visit(group.Input, id);
@@ -147,6 +151,12 @@ internal sealed partial class SqlPlanner
 
         void Add(string name, int? parent, string? target = null, string? index = null, string? detail = null)
             => nodes.Add(new DatabasePlanNode { NodeId = nodes.Count, ParentId = parent, Operator = name, Target = target, Index = index, Detail = detail });
+    }
+
+    private static string JoinProbeReference(IReadOnlyList<SqlRelationBinding> bindings, int ordinal)
+    {
+        var binding = bindings.Last(candidate => candidate.Offset <= ordinal);
+        return (binding.Reference.Alias ?? binding.Source.Name) + "." + binding.Source.Columns[ordinal - binding.Offset].Name;
     }
 
     private static string Target(SqlRelationSource source) => source.Schema + "." + source.Name;

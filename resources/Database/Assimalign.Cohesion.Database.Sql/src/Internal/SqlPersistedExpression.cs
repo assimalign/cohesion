@@ -302,8 +302,8 @@ internal static class SqlPersistedExpression
         if (statement is not SqlQueryStatement { SqlExpression: SqlSelectExpression select } ||
             select.Where is null || select.IsDistinct || select.Columns.Count != 1 ||
             select.Columns[0] is not { Expression: SqlStarExpression, Alias: null } ||
-            select.From is not { TableName: carrierTable, SchemaName: null, Alias: null } ||
-            select.Joins.Count > 0 || select.GroupBy.Count > 0 || select.Having is not null ||
+            select.From is not [{ Table: { TableName: carrierTable, SchemaName: null, Alias: null }, Joins.Count: 0 }] ||
+            select.GroupBy.Count > 0 || select.Having is not null ||
             select.OrderBy.Count > 0 || select.Limit is not null || select.Offset is not null)
         {
             problem = "the text is not exactly one scalar expression";
@@ -397,8 +397,9 @@ internal static class SqlPersistedExpression
 
         return left.IsDistinct == right.IsDistinct &&
             SameList(left.Columns, right.Columns, (a, b) => Same(a.Alias, b.Alias) && AreEquivalent(a.Expression, b.Expression)) &&
-            SameTable(left.From, right.From) &&
-            SameList(left.Joins, right.Joins, (a, b) => a.JoinType == b.JoinType && SameTable(a.Table, b.Table) && AreEquivalent(a.Condition, b.Condition)) &&
+            SameList(left.From, right.From, (a, b) => SameTable(a.Table, b.Table) &&
+                SameList(a.Joins, b.Joins, (x, y) => x.JoinType == y.JoinType && SameTable(x.Table, y.Table) &&
+                    SameList(x.UsingColumns, y.UsingColumns, Same) && AreEquivalent(x.Condition, y.Condition))) &&
             AreEquivalent(left.Where, right.Where) &&
             SameList(left.GroupBy, right.GroupBy, AreEquivalent) &&
             AreEquivalent(left.Having, right.Having) &&

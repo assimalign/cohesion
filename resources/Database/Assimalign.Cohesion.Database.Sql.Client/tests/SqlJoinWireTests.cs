@@ -85,13 +85,9 @@ public sealed class SqlJoinWireTests
     /// <summary>Unimplemented join forms produce the capability diagnostic before planning over the wire.</summary>
     /// <param name="statement">The excluded join form.</param>
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - JOIN: excluded forms report COHDBL001 over the wire")]
-    [InlineData("SELECT u.id FROM users u LEFT JOIN users v ON u.id = v.id")]
     [InlineData("SELECT u.id FROM users u RIGHT OUTER JOIN users v ON u.id = v.id")]
     [InlineData("SELECT u.id FROM users u FULL OUTER JOIN users v ON u.id = v.id")]
-    [InlineData("SELECT u.id FROM users u CROSS JOIN users v")]
     [InlineData("SELECT u.id FROM users u NATURAL JOIN users v")]
-    [InlineData("SELECT u.id FROM users u JOIN users v USING (id)")]
-    [InlineData("SELECT u.id FROM users u JOIN users v ON u.id = v.id JOIN users w ON v.id = w.id")]
     public async Task QueryAsync_ExcludedJoin_ShouldReportCapabilityDiagnosticOverTheWire(string statement)
     {
         // Arrange
@@ -152,6 +148,27 @@ public sealed class SqlJoinWireTests
         var row = result.ShouldHaveSingleItem();
         row[0].ShouldBe("inventory_names");
         row[1].ShouldBe(1L);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql.Client] - JOIN: LEFT, CROSS, comma, USING and N-way execute on production frames")]
+    [InlineData("SELECT u.id, v.id FROM users u LEFT JOIN users v ON u.id = v.id AND v.id = 1 ORDER BY u.id", "1|1;2|")]
+    [InlineData("SELECT u.id, v.id FROM users u CROSS JOIN users v ORDER BY u.id, v.id", "1|1;1|2;2|1;2|2")]
+    [InlineData("SELECT u.id, v.id FROM users u, users v ORDER BY u.id, v.id", "1|1;1|2;2|1;2|2")]
+    [InlineData("SELECT id, v.id FROM users u LEFT JOIN users v USING (id) ORDER BY id", "1|1;2|2")]
+    [InlineData("SELECT u.id, w.id FROM users u JOIN users v ON u.id = v.id LEFT JOIN users w ON v.id = w.id AND w.id = 1 ORDER BY u.id", "1|1;2|")]
+    [InlineData("SELECT u.id, t.TABLE_NAME FROM users u LEFT JOIN INFORMATION_SCHEMA.TABLES t ON t.TABLE_NAME = 'absent' ORDER BY u.id", "1|;2|")]
+    public async Task QueryAsync_ExpandedJoins_ShouldReturnExactWireValues(string sql, string expected)
+    {
+        // Arrange
+        await using var harness = await SqlClientTestHarness.StartAsync();
+        await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
+
+        // Act
+        var result = await connection.QueryAsync(sql, cancellationToken: SqlClientTestHarness.Timeout());
+
+        // Assert
+        string.Join(";", result.Select(row => $"{row[0]}|{row[1]}")).ShouldBe(expected);
+        result.Columns[0].Type.ShouldBe(DatabaseType.Int32);
     }
 
     private static async Task SeedAsync(SqlConnection connection)

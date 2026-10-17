@@ -1036,7 +1036,7 @@ public sealed partial class SqlQueryParser
         }
 
         subquery ??= new SqlSelectExpression(
-            Array.Empty<SqlSelectColumn>(), null, Array.Empty<SqlJoinClause>(),
+            Array.Empty<SqlSelectColumn>(), Array.Empty<SqlFromItem>(),
             null, Array.Empty<SqlExpression>(), null, Array.Empty<SqlOrderByColumn>(),
             null, null, false, null, null);
 

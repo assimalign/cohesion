@@ -15,6 +15,16 @@ public class SqlExecutionSurfaceDiagnosticTests
     [InlineData("select * from t inner /* trivia */ join u on t.id = u.id;")]
     [InlineData("SELECT * FROM INFORMATION_SCHEMA.TABLES t JOIN u ON t.TABLE_NAME = u.name;")]
     [InlineData("SELECT * FROM t JOIN COHESION_SCHEMA.INDEXES i ON t.name = i.TABLE_NAME;")]
+    [InlineData("SELECT * FROM t LEFT JOIN u ON t.id = u.id;")]
+    [InlineData("SELECT * FROM t LEFT OUTER JOIN u ON t.id = u.id;")]
+    [InlineData("SELECT * FROM t CROSS JOIN u;")]
+    [InlineData("SELECT * FROM t, u, v;")]
+    [InlineData("SELECT * FROM t JOIN u USING (id, name);")]
+    [InlineData("SELECT * FROM t LEFT JOIN u USING (id);")]
+    [InlineData("SELECT * FROM t JOIN u ON t.id = u.id LEFT JOIN v USING (name) CROSS JOIN w;")]
+    [InlineData("SELECT * FROM t, u JOIN v USING (id), w;")]
+    [InlineData("SELECT * FROM t LEFT JOIN INFORMATION_SCHEMA.COLUMNS c ON t.id = c.ORDINAL_POSITION;")]
+    [InlineData("SELECT * FROM INFORMATION_SCHEMA.TABLES t JOIN INFORMATION_SCHEMA.COLUMNS c USING (TABLE_NAME) LEFT JOIN u ON u.id = c.ORDINAL_POSITION;")]
     public void Parse_InnerJoin_ReportsNoError(string sql)
     {
         SqlLanguageProfile.Instance.Supports(SqlClauses.Join).ShouldBeTrue();
@@ -25,12 +35,9 @@ public class SqlExecutionSurfaceDiagnosticTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Language] - JOIN: Excludes unimplemented join types")]
-    [InlineData("SELECT * FROM t LEFT JOIN u ON t.id = u.id;", "LEFT OUTER JOIN", "LEFT JOIN")]
-    [InlineData("SELECT * FROM t LEFT OUTER JOIN u ON t.id = u.id;", "LEFT OUTER JOIN", "LEFT OUTER JOIN")]
     [InlineData("SELECT * FROM t RIGHT JOIN u ON t.id = u.id;", "RIGHT OUTER JOIN", "RIGHT JOIN")]
     [InlineData("SELECT * FROM t RIGHT OUTER JOIN u ON t.id = u.id;", "RIGHT OUTER JOIN", "RIGHT OUTER JOIN")]
     [InlineData("SELECT * FROM t FULL OUTER JOIN u ON t.id = u.id;", "FULL OUTER JOIN", "FULL OUTER JOIN")]
-    [InlineData("SELECT * FROM t CROSS JOIN u;", "CROSS JOIN", "CROSS JOIN")]
     public void Parse_UnimplementedJoinType_ReportsPreciseModelDiagnostic(string sql, string form, string locationText)
     {
         var statement = (SqlQueryStatement)new SqlQueryParser().Parse(sql);
@@ -38,15 +45,13 @@ public class SqlExecutionSurfaceDiagnosticTests
         var diagnostic = statement.Diagnostics.Single(item => item.Code == "COHDBL001");
         diagnostic.Severity.ShouldBe(DiagnosticSeverity.Error);
         diagnostic.Message!.ShouldContain(form);
-        diagnostic.Message!.ShouldContain("only two-table INNER JOIN with an ON predicate");
+        diagnostic.Message!.ShouldContain("INNER, LEFT [OUTER] and CROSS JOIN");
         sql[diagnostic.Start!.Value..diagnostic.End!.Value].ShouldBe(locationText);
         statement.Diagnostics.ShouldNotContain(item => item.Code == "SQL0002");
     }
 
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Language] - JOIN: Reports the explicit execution boundary")]
-    [InlineData("SELECT * FROM t JOIN u;", "requires an ON predicate")]
-    [InlineData("SELECT * FROM t JOIN u ON t.id = u.id JOIN v ON u.id = v.id;", "exactly two tables")]
-    [InlineData("SELECT * FROM t, u;", "Comma-separated")]
+    [InlineData("SELECT * FROM t JOIN u;", "require ON or USING")]
     [InlineData("SELECT t.* FROM t JOIN u ON t.id = u.id;", "Qualified SQL wildcard")]
     [InlineData("SELECT dbo.t.* FROM dbo.t JOIN dbo.u ON dbo.t.id = dbo.u.id;", "Qualified SQL wildcard")]
     public void Parse_UnsupportedJoinShape_ReportsPreciseModelDiagnostic(string sql, string message)
