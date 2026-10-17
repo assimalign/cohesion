@@ -105,6 +105,64 @@ public sealed class ProtocolNegotiationTests
         Should.Throw<ProtocolException>(() => ProtocolReadyMessage.Decode(new ProtocolReadyMessage(ProtocolVersion.Current, []).Encode().Concat(new byte[]{0}).ToArray()));
     }
 
+    [Fact(DisplayName = "Cohesion Test [Database.Protocol] - null collections fail at construction and init")]
+    public void Construct_NullCollections_ShouldRejectEveryAssignmentPath()
+    {
+        // Arrange
+        var ready = new ProtocolReadyMessage(ProtocolVersion.Current, []);
+        var diagnostics = new ProtocolDiagnosticsMessage([]);
+        // Act / Assert
+        Should.Throw<ArgumentNullException>(() => new ProtocolReadyMessage(ProtocolVersion.Current, null!));
+        Should.Throw<ArgumentNullException>(() => new ProtocolDiagnosticsMessage(null!));
+        Should.Throw<ArgumentNullException>(() => new ProtocolReadyMessage(ProtocolVersion.Current, []) { Capabilities = null! });
+        Should.Throw<ArgumentNullException>(() => new ProtocolDiagnosticsMessage([]) { Entries = null! });
+        Should.Throw<ArgumentNullException>(() => ready with { Capabilities = null! });
+        Should.Throw<ArgumentNullException>(() => diagnostics with { Entries = null! });
+        ready.Capabilities.ShouldBeEmpty();
+        diagnostics.Entries.ShouldBeEmpty();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Protocol] - absent diagnostic strings round trip as null")]
+    [InlineData(null, null)]
+    [InlineData("", "")]
+    public void Decode_EmptyDiagnosticStrings_ShouldNormalizeToNull(string? code, string? message)
+    {
+        // Arrange
+        var diagnostic = new ProtocolDiagnostic(ProtocolDiagnosticSeverity.Warning, code, message, null, null, 1);
+        // Act
+        var decoded = ProtocolDiagnosticsMessage.Decode(new ProtocolDiagnosticsMessage([diagnostic]).Encode()).Entries.ShouldHaveSingleItem();
+        // Assert
+        decoded.Code.ShouldBeNull();
+        decoded.Message.ShouldBeNull();
+        decoded.ShouldBe(diagnostic with { Code = null, Message = null });
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Protocol] - hostile Ready names are rejected before string allocation")]
+    public void Decode_HostileReadyName_ShouldAllocateOnlyBoundedRejection()
+    {
+        // Arrange: one 16,000-byte ASCII name fits the Ready payload limit.
+        var buffer = new List<byte>();
+        ProtocolPayload.WriteUInt16(buffer, 2);
+        ProtocolPayload.WriteUInt16(buffer, 1);
+        ProtocolPayload.WriteUInt16(buffer, 1);
+        ProtocolPayload.WriteString(buffer, new string('a', 16000));
+        byte[] payload = buffer.ToArray();
+        for (int index = 0; index < 20; index++) { RejectHostileReady(payload); }
+        // Act: keep assertion-framework allocations outside the measured synchronous call.
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        bool rejected = RejectHostileReady(payload);
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        // Assert: an allocated UTF-16 name alone would exceed 32,000 bytes.
+        rejected.ShouldBeTrue();
+        allocated.ShouldBeLessThan(4096);
+    }
+
+    private static bool RejectHostileReady(byte[] payload)
+    {
+        try { ProtocolReadyMessage.Decode(payload); return false; }
+        catch (ProtocolException) { return true; }
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database.Protocol] - Diagnostics preserves every field and enforces bounds")]
     public void Decode_DiagnosticPayload_ShouldRoundTripAndRejectMalformed()
     {

@@ -45,6 +45,11 @@ internal static class ProtocolCapabilityCodec
         var unique = new HashSet<string>(StringComparer.Ordinal);
         for (int index = 0; index < count; index++)
         {
+            // Names are ASCII, so the encoded byte count is also the character count.
+            // Inspect the length before ReadString can allocate attacker-controlled text.
+            int lengthPosition = position;
+            int encodedLength = ProtocolPayload.ReadInt32(payload, ref lengthPosition);
+            if (encodedLength is < 1 or > 128) { throw new ProtocolException(ErrorMessages.CapabilityListInvalid); }
             names[index] = ProtocolPayload.ReadString(payload, ref position);
             ValidateName(names[index]);
             if (!unique.Add(names[index])) { throw new ProtocolException(ErrorMessages.CapabilityListInvalid); }

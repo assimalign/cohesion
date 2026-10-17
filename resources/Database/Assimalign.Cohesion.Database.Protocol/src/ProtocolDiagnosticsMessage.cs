@@ -6,8 +6,23 @@ namespace Assimalign.Cohesion.Database.Protocol;
 
 /// <summary>A bounded list of structured statement diagnostics.</summary>
 /// <param name="Entries">The diagnostics in source order.</param>
+/// <exception cref="ArgumentNullException">The collection is null, including an init assignment.</exception>
 public sealed record ProtocolDiagnosticsMessage(IReadOnlyList<ProtocolDiagnostic> Entries)
 {
+    private IReadOnlyList<ProtocolDiagnostic> _entries = Entries ?? throw new ArgumentNullException(nameof(Entries));
+
+    /// <summary>Gets or initializes the non-null collection.</summary>
+    /// <exception cref="ArgumentNullException">The assigned collection is null.</exception>
+    public IReadOnlyList<ProtocolDiagnostic> Entries
+    {
+        get => _entries;
+        init
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            _entries = value;
+        }
+    }
+
     /// <summary>The maximum diagnostics per statement message.</summary>
     public const int MaxEntryCount = 4096;
     /// <summary>The maximum encoded payload size, in bytes.</summary>
@@ -24,11 +39,11 @@ public sealed record ProtocolDiagnosticsMessage(IReadOnlyList<ProtocolDiagnostic
         foreach (var entry in Entries)
         {
             Validate(entry);
-            long size = 1L + 8 + Encoding.UTF8.GetByteCount(entry.Code) + Encoding.UTF8.GetByteCount(entry.Message) + 12;
+            long size = 1L + 8 + Encoding.UTF8.GetByteCount(entry.Code ?? string.Empty) + Encoding.UTF8.GetByteCount(entry.Message ?? string.Empty) + 12;
             if (size > MaxPayloadLength - buffer.Count) { throw new ProtocolException(ErrorMessages.DiagnosticPayloadInvalid); }
             buffer.Add((byte)entry.Severity);
-            ProtocolPayload.WriteString(buffer, entry.Code);
-            ProtocolPayload.WriteString(buffer, entry.Message);
+            ProtocolPayload.WriteString(buffer, entry.Code ?? string.Empty);
+            ProtocolPayload.WriteString(buffer, entry.Message ?? string.Empty);
             ProtocolPayload.WriteInt32(buffer, entry.Start ?? -1);
             ProtocolPayload.WriteInt32(buffer, entry.End ?? -1);
             ProtocolPayload.WriteInt32(buffer, entry.Line);
@@ -57,7 +72,7 @@ public sealed record ProtocolDiagnosticsMessage(IReadOnlyList<ProtocolDiagnostic
             int end = ProtocolPayload.ReadInt32(payload, ref position);
             int line = ProtocolPayload.ReadInt32(payload, ref position);
             if (start < -1 || end < -1) { throw new ProtocolException(ErrorMessages.DiagnosticPayloadInvalid); }
-            var entry = new ProtocolDiagnostic(severity, code, message, start == -1 ? null : start, end == -1 ? null : end, line);
+            var entry = new ProtocolDiagnostic(severity, code.Length == 0 ? null : code, message.Length == 0 ? null : message, start == -1 ? null : start, end == -1 ? null : end, line);
             Validate(entry);
             entries[index] = entry;
         }
@@ -68,7 +83,7 @@ public sealed record ProtocolDiagnosticsMessage(IReadOnlyList<ProtocolDiagnostic
     private static void Validate(ProtocolDiagnostic entry)
     {
         if (entry is null || entry.Severity is not (ProtocolDiagnosticSeverity.Warning or ProtocolDiagnosticSeverity.Error) ||
-            entry.Code is null || entry.Message is null || entry.Start < 0 || entry.End < 0 ||
+            entry.Start < 0 || entry.End < 0 ||
             entry.Start.HasValue != entry.End.HasValue || entry.End < entry.Start || entry.Line < 1)
         {
             throw new ProtocolException(ErrorMessages.DiagnosticPayloadInvalid);

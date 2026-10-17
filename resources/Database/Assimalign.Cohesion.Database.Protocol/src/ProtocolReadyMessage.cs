@@ -8,8 +8,22 @@ namespace Assimalign.Cohesion.Database.Protocol;
 /// <summary>The negotiated version and two-sided capability intersection.</summary>
 /// <param name="Version">The agreed version.</param>
 /// <param name="Capabilities">The agreed capability names, in server registration order.</param>
+/// <exception cref="ArgumentNullException">The collection is null, including an init assignment.</exception>
 public sealed record ProtocolReadyMessage(ProtocolVersion Version, IReadOnlyList<string> Capabilities)
 {
+    private IReadOnlyList<string> _capabilities = Capabilities ?? throw new ArgumentNullException(nameof(Capabilities));
+
+    /// <summary>Gets or initializes the non-null collection.</summary>
+    /// <exception cref="ArgumentNullException">The assigned collection is null.</exception>
+    public IReadOnlyList<string> Capabilities
+    {
+        get => _capabilities;
+        init
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            _capabilities = value;
+        }
+    }
     /// <summary>Encodes Ready; the 2.0 baseline remains empty.</summary>
     /// <returns>The payload.</returns>
     /// <exception cref="ProtocolException">The capabilities are malformed or invalid for the version.</exception>
