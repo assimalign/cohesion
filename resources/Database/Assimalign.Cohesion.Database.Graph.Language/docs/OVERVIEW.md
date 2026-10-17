@@ -14,13 +14,13 @@ var statement = (GqlQueryStatement)parser.Parse(
 The supported surface is finite `MATCH` paths, including named paths such as
 `MATCH p = (a)-[r:KNOWS]->(b) RETURN p`, ISO label expressions such as `(n:(A|B)&!C)`, `(n:%)` and
 `-[r:T|U]->`, every directed ISO edge in full and abbreviated form (`->`, `<-`, `-`, `<->`), scalar
-comparison/conjunction filters and labeled predicates (`n IS NOT LABELED A`, `n:A|B`), variable or
+Boolean, arithmetic, null/truth, list-membership and string filters and labeled predicates (`n IS NOT LABELED A`, `n:A|B`), variable or
 property projection, `INSERT`, `CREATE` as an insertion compatibility extension, and restricted or
 cascading deletion. Unsupported features, including the undirected tilde edges, produce
 `COHDBL001`; malformed supported syntax produces stable `GQL` diagnostics, and a Cypher arrow such
 as `(a)-->(b)`, which GQL reads as a comment, produces `GQL0008`. The parser does not throw for
 malformed query text. As in Neo4j, label expressions and predicates have no length or nesting
-limit: `:A:B:...`, `A|B|...` and `p AND q AND ...` are each one n-ary node of any length, and
+limit: `:A:B:...`, `A|B|...` and AND/OR/XOR runs are each one n-ary node of any length, and
 parentheses nest as deep as the parsing thread's stack allows; deeper text reports `GQL0009`
 instead of overflowing it.
 

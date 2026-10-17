@@ -31,7 +31,7 @@ public static class GqlLanguageProfile
         // Quantifiers
         "ANY", "NONE", "SINGLE",
         // Literals / Constants
-        "NULL", "TRUE", "FALSE",
+        "NULL", "TRUE", "FALSE", "UNKNOWN",
         // CASE
         "CASE", "WHEN", "THEN", "ELSE", "END",
         // Graph elements

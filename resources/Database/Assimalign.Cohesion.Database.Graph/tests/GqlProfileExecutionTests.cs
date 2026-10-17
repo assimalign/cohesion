@@ -75,6 +75,47 @@ public sealed class GqlProfileExecutionTests
             [
                 new("MATCH (a:Person) WHERE (a.age >= 18 AND a.age <= 42) AND a.age > 17 AND a.age < 43 AND a.name <> 'Isolated' AND a.active = TRUE RETURN a.name", [["Alice"]]),
                 new("MATCH (a:Person) WHERE a.absent = NULL RETURN a.name", []),
+                new("MATCH (a:Person) WHERE UNKNOWN RETURN a.name", []),
+                new("MATCH (a:Person) WHERE UNKNOWN IS UNKNOWN RETURN a.name", [["Alice"], ["Bob"], ["Isolated"]]),
+                new("MATCH (a:Person) WHERE a.age = 17 OR a.age = 42 RETURN a.name", [["Alice"], ["Bob"]]),
+                new("MATCH (a:Person) WHERE a.age > 20 XOR a.age = 30 RETURN a.name", [["Alice"]]),
+                new("MATCH (a:Person) WHERE NOT a.active RETURN a.name", [["Bob"]]),
+                new("MATCH (a:Person) WHERE a.active RETURN a.name", [["Alice"]]),
+                new("MATCH (a:Person) WHERE a.active IS NULL RETURN a.name", [["Isolated"]]),
+                new("MATCH (a:Person) WHERE a.age IS NOT NULL RETURN a.name", [["Alice"], ["Bob"], ["Isolated"]]),
+                new("MATCH (a:Person) WHERE a.active IS TRUE RETURN a.name", [["Alice"]]),
+                new("MATCH (a:Person) WHERE a.active IS NOT TRUE RETURN a.name", [["Bob"], ["Isolated"]]),
+                new("MATCH (a:Person) WHERE a.active IS FALSE RETURN a.name", [["Bob"]]),
+                new("MATCH (a:Person) WHERE a.active IS NOT FALSE RETURN a.name", [["Alice"], ["Isolated"]]),
+                new("MATCH (a:Person) WHERE a.active IS UNKNOWN RETURN a.name", [["Isolated"]]),
+                new("MATCH (a:Person) WHERE a.active IS NOT UNKNOWN RETURN a.name", [["Alice"], ["Bob"]]),
+                new("MATCH (a:Person) WHERE a.age IN [17, 42] RETURN a.name", [["Alice"], ["Bob"]]),
+                new("MATCH (a:Person) WHERE a.name STARTS WITH 'Al' RETURN a.name", [["Alice"]]),
+                new("MATCH (a:Person) WHERE a.name ENDS WITH 'ob' RETURN a.name", [["Bob"]]),
+                new("MATCH (a:Person) WHERE a.name CONTAINS 'sol' RETURN a.name", [["Isolated"]]),
+                new("MATCH (a:Person) WHERE a.name || 'x' = 'Alicex' RETURN a.name", [["Alice"]]),
+                new("MATCH (a:Person) WHERE a.name + 'x' = 'Bobx' RETURN a.name", [["Bob"]]),
+                new("MATCH (a:Person) WHERE a.age + 1 = 43 RETURN a.name", [["Alice"]]),
+                new("MATCH (a:Person) WHERE a.age - 2 = 40 RETURN a.name", [["Alice"]]),
+                new("MATCH (a:Person) WHERE a.age * 2 = 84 RETURN a.name", [["Alice"]]),
+                new("MATCH (a:Person) WHERE a.age / 5 = 8 RETURN a.name", [["Alice"]]),
+                new("MATCH (a:Person) WHERE -a.age / 5 = -8 AND -a.age % 5 = -2 RETURN a.name", [["Alice"]]),
+                new("MATCH (a:Person) WHERE a.age / -5 = -8 AND a.age % -5 = 2 RETURN a.name", [["Alice"]]),
+                new("MATCH (a:Person) WHERE a.age / 5.0 = 8.4 RETURN a.name", [["Alice"]]),
+                new("MATCH (a:Person) WHERE a.age % 5 = 2 RETURN a.name", [["Alice"], ["Bob"]]),
+                new("MATCH (a:Person) WHERE NOT (a.absent = 1) RETURN a.name", []),
+                new("MATCH (a:Person) WHERE a.absent = 1 OR a.age = 42 RETURN a.name", [["Alice"]]),
+                new("MATCH (a:Person) WHERE (2 IN [1, NULL]) IS UNKNOWN RETURN a.name", [["Alice"], ["Bob"], ["Isolated"]]),
+                new("MATCH (a:Person) WHERE (NULL IN []) IS FALSE RETURN a.name", [["Alice"], ["Bob"], ["Isolated"]]),
+                new("MATCH (a:Person) WHERE NOT (a.name < 1) RETURN a.name", []),
+                new("MATCH (a:Person) WHERE a.name <> 1 RETURN a.name", [["Alice"], ["Bob"], ["Isolated"]]),
+                new("MATCH (a:Person) WHERE (1 STARTS WITH '1') IS UNKNOWN RETURN a.name", [["Alice"], ["Bob"], ["Isolated"]]),
+                new("MATCH (a:Person) WHERE ('1' ENDS WITH 1) IS UNKNOWN RETURN a.name", [["Alice"], ["Bob"], ["Isolated"]]),
+                new("MATCH (a:Person) WHERE (NULL CONTAINS '1') IS UNKNOWN RETURN a.name", [["Alice"], ["Bob"], ["Isolated"]]),
+                new("MATCH (a:Person) WHERE a.name STARTS WITH 'al' RETURN a.name", []),
+                new("MATCH (a:Person) WHERE NOT a:Robot OR a:Missing RETURN a.name", [["Alice"], ["Bob"], ["Isolated"]]),
+                new("MATCH (a:Person) WHERE a:Missing OR a.age = 42 RETURN a.name", [["Alice"]]),
+                new("MATCH (a:Person) WHERE NOT a:Missing RETURN a.name", [["Alice"], ["Bob"], ["Isolated"]]),
             ],
             [GqlClauses.Show] =
             [
@@ -98,12 +139,14 @@ public sealed class GqlProfileExecutionTests
     public async Task Profile_AdvertisedClauses_AllHavePassingExecutionCasesAsync()
     {
         EnsureCoverage(GqlLanguageProfile.Instance.Clauses);
-        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        var token = cancellation.Token;
         foreach (string clause in GqlLanguageProfile.Instance.Clauses)
         {
             foreach (var executionCase in _cases[clause])
             {
+                // Each isolated case has the same deadline as before; extending the corpus
+                // must not consume the following case's execution budget.
+                using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+                var token = cancellation.Token;
                 var statement = new GqlQueryParser().Parse(executionCase.Statement).ShouldBeOfType<GqlQueryStatement>();
                 statement.Diagnostics.ShouldBeEmpty($"{clause}: {executionCase.Statement}");
                 UsesClause(clause, statement.GqlExpression).ShouldBeTrue($"The {clause} case must exercise its clause: {executionCase.Statement}");
@@ -133,7 +176,6 @@ public sealed class GqlProfileExecutionTests
     [InlineData("MATCH (a)-[r*1..3]->(b) RETURN a")]
     [InlineData("MATCH (a) RETURN count(a)")]
     [InlineData("MATCH (a) RETURN *")]
-    [InlineData("MATCH (a) WHERE a.age = 17 OR a.age = 42 RETURN a")]
     [InlineData("MATCH (a) WHERE a.age = $age RETURN a")]
     [InlineData("INSERT (:Person {tags: [1, 2]})")]
     [InlineData("MATCH (a) DELETE a RETURN a")]

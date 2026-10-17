@@ -9,4 +9,8 @@ public enum GqlLogicalOperator
     /// otherwise <see langword="true"/>.
     /// </summary>
     And,
+    /// <summary>True if any operand is true; otherwise unknown if any is unknown, otherwise false.</summary>
+    Or,
+    /// <summary>Unknown if any operand is unknown; otherwise the parity of the true operands.</summary>
+    Xor,
 }

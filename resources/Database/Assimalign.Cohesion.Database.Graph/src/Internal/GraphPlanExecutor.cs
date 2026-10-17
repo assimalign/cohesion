@@ -53,7 +53,7 @@ internal static class GraphPlanExecutor
             { await MatchAsync(database, operation, path, binding, matched, budget, token).ConfigureAwait(false); }
             bindings = matched;
         }
-        bindings = bindings.Where(binding => plan.Query.Predicate is null || GraphExpressionEvaluator.Evaluate(plan.Query.Predicate, binding) is true).ToList();
+        bindings = bindings.Where(binding => plan.Query.Predicate is null || GraphExpressionEvaluator.Boolean(GraphExpressionEvaluator.Evaluate(plan.Query.Predicate, binding), plan.Query.Predicate) is true).ToList();
         if (paths)
         {
             string variable = plan.Query.Projections[0].Variable;

@@ -162,18 +162,37 @@ internal sealed class GraphPlanner
                     case GqlPropertyExpression property:
                         RequireVariable(property.Variable, entity: true);
                         break;
-                    case GqlBinaryExpression { Operator: "=" or "<>" or "!=" or "<" or "<=" or ">" or ">=" } binary:
+                    case GqlBinaryExpression { Operator: "=" or "<>" or "!=" or "<" or "<=" or ">" or ">=" or "+" or "-" or "*" or "/" or "%" or "||" } binary:
                         pending.Push(binary.Right);
                         pending.Push(binary.Left);
                         break;
                     case GqlBinaryExpression { Operator: "AND" }:
-                        throw new GraphPlanningException("COHDBG001", "AND joins predicates in a GqlLogicalExpression; a GqlBinaryExpression holds one comparison.", expression?.Location);
+                        throw new GraphPlanningException("COHDBG001", ErrorMessages.LogicalNodeRequired, expression?.Location);
                     case GqlLogicalExpression logical:
                         if (!Enum.IsDefined(logical.Operator))
                         { throw new GraphPlanningException("COHDBG001", $"Logical operator {(int)logical.Operator} is not defined.", expression?.Location); }
                         if (logical.Operands is null || logical.Operands.Count < 2)
                         { throw new GraphPlanningException("COHDBG001", "A logical predicate needs at least two operands.", expression?.Location); }
                         for (int i = logical.Operands.Count - 1; i >= 0; i--) { pending.Push(logical.Operands[i]); }
+                        break;
+                    case GqlUnaryExpression { Operator: "NOT" or "+" or "-" } unary:
+                        pending.Push(unary.Operand);
+                        break;
+                    case GqlIsNullExpression test:
+                        pending.Push(test.Operand);
+                        break;
+                    case GqlTruthTestExpression test:
+                        pending.Push(test.Operand);
+                        break;
+                    case GqlInExpression membership:
+                        if (membership.List?.Items is null)
+                        { throw new GraphPlanningException("COHDBG001", ErrorMessages.MembershipListRequired, expression.Location); }
+                        for (int i = membership.List.Items.Count - 1; i >= 0; i--) { pending.Push(membership.List.Items[i]); }
+                        pending.Push(membership.Operand);
+                        break;
+                    case GqlStringPredicateExpression predicate when Enum.IsDefined(predicate.Operator):
+                        pending.Push(predicate.Right);
+                        pending.Push(predicate.Left);
                         break;
                     case GqlLabeledPredicate labeled:
                         ValidateLabeledPredicate(labeled);

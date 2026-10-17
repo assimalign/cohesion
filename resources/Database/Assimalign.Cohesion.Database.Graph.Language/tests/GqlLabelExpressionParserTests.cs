@@ -270,12 +270,10 @@ public sealed class GqlLabelExpressionParserTests
         => Parse(gql).Diagnostics.ShouldBeEmpty();
 
     /// <summary>
-    /// IS NULL and the truth tests stay with gql-where-expr: only IS [NOT] LABELED passes the
-    /// capability scan.
+    /// RETURN has no expressions until #1141; IS there remains a syntax error.
     /// </summary>
     /// <param name="gql">An IS that is not a WHERE labeled predicate.</param>
-    [Theory(DisplayName = "Cohesion Test [Graph.Language] - Labeled predicate: IS NULL and IS in RETURN keep their COHDBL001")]
-    [InlineData("MATCH (a) WHERE a.age IS NULL RETURN a")]
+    [Theory(DisplayName = "Cohesion Test [Graph.Language] - Labeled predicate: IS in RETURN remains outside the projection grammar")]
     [InlineData("MATCH (a) RETURN a IS LABELED A")]
     public void Parse_IsOutsideLabeledPredicate_ShouldStayUnsupported(string gql)
     {
@@ -283,8 +281,8 @@ public sealed class GqlLabelExpressionParserTests
         var diagnostic = Parse(gql).Diagnostics.ShouldHaveSingleItem();
 
         // Assert
-        diagnostic.Code.ShouldBe("COHDBL001");
-        diagnostic.Message.ShouldBe("The IS clause is not supported by the GQL surface of this database model.");
+        diagnostic.Code.ShouldBe("GQL0002");
+        diagnostic.Message.ShouldBe("Unexpected token; exactly one statement is accepted.");
         diagnostic.Start.ShouldBe(gql.IndexOf("IS", StringComparison.Ordinal));
     }
 

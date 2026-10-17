@@ -118,7 +118,7 @@ of `SALES` after `sales` is refused as existing, and a drop of `SALES` drops `sa
   whose name matched ignoring case. That cost a directory scan per open, create and drop, and on a
   case-sensitive file system it was ambiguous when `sales` and `Sales` both existed. The directory
   is now computed from the name by `DatabaseFileNames`, the function every model shares (the area
-  design, §3.3, has the rejected alternatives).
+  design, `3.3, has the rejected alternatives).
 - **One name rule on every OS.** 1 to 128 ASCII letters, digits, `_`, `-` and `.`; no leading,
   trailing or doubled dot; no Windows device name before the first dot. The rule used to be the
   platform's invalid file-name characters, so `a:b` was valid on Linux and refused on Windows.
@@ -304,6 +304,19 @@ rejected before it reaches the session and changes nothing. Each refusal is an `
 
 ## Planning, execution and bounds
 
+WHERE executes the scalar grammar in
+[Graph.Language](../../Assimalign.Cohesion.Database.Graph.Language/docs/DESIGN.md#scalar-where-expressions-1140):
+OR/XOR/NOT, null/truth tests, arithmetic, concatenation, list membership and string predicates.
+Only TRUE keeps a binding; evaluated non-Boolean conditions raise COHDBG013. CLR arithmetic
+faults become that same code in DatabaseException.Diagnostics, with code-free Message.
+Filtering finishes before result materialization or mutations, so the server sends value
+errors as ExecutionFailure before ResultHeader and the pooled scalar session remains usable.
+Promotion is Double for floating operands, otherwise Decimal for ulong/decimal, otherwise
+checked Int64 (division truncates toward zero). All recursive nodes check the stack; Boolean
+runs are n-ary. Index anchoring and required unknown-name inference descend only through AND.
+
+
+
 `GqlQueryParser` builds `GqlQueryStatement`; `GraphPlanner` resolves labels, relationship types,
 variable kinds and access paths; `GraphPlanExecutor` applies that plan. The planner considers
 literal inline properties and equality predicates joined by `AND` for every node position in a
@@ -336,7 +349,7 @@ entry, so no element carries it and a read warns (`COHDBG010`/`COHDBG011`).
 Label expressions and `WHERE` predicates have no length or nesting limit (#1139 follow-up, owner
 decision 2026-10-02: do what Neo4j does; the evidence is in the
 [language design](../../Assimalign.Cohesion.Database.Graph.Language/docs/DESIGN.md#chain-length-and-nesting-1139-follow-up)).
-A conjunction or disjunction of labels, and an `AND` chain of predicates, is one n-ary node, and the
+A conjunction or disjunction of labels, and an AND, OR or XOR chain of predicates, is one n-ary node, and the
 engine evaluates it with a loop that stops at the first operand that decides it, under three-valued
 logic for `AND` (false, otherwise unknown, otherwise true). Validation, name collection and the
 anchor's equality search walk with an explicit stack. Anchor selection reads the visible indexes
@@ -581,7 +594,7 @@ to exercise that enforcement path; compiled provisioning is not included.
 | `GQL0001`–`GQL0006` | Parser syntax/literal/bound errors; see language design. `GQL0005` is the 64-relationship path bound only |
 | `GQL0007` | Attempt to mutate catalog introspection results |
 | `GQL0008` | A Cypher arrow (`-->`, `--`) directly after a pattern element, which GQL reads as a comment |
-| `GQL0009` | Parentheses nested deeper than the parsing thread's stack; `GraphQueryRequest.FromGql` and the engine report it as `COHDBG008` |
+| `GQL0009` | Groups, unary expressions or IN lists nested deeper than the parsing thread's stack; `GraphQueryRequest.FromGql` and the engine report it as `COHDBG008` |
 | `COHDBG001` | Invalid pattern, variable binding, label expression, predicate or traversal specification, including an insertion that names `\|`, `!`, `%` or an either-direction edge, a binary `AND`, and a chain with fewer than two operands |
 | `COHDBG002` | Unknown label or relationship type in a schema write (`CreateIndexAsync`, `DropLabelAsync`, `DropRelationshipTypeAsync`), a failed statement. A read never reports it; see `COHDBG010` and `COHDBG011` |
 | `COHDBG003` | Schema/data mismatch, restricted deletion or invalid graph mutation |
@@ -594,6 +607,7 @@ to exercise that enforcement path; compiled provisioning is not included.
 | `COHDBG010` | **Warning**, not a failure: a read-only statement or `GetIndexesAsync` names a label the database does not have at the statement's snapshot. No node carries it, so the read returns the rows the expression still matches (none for a required label), reports this `DiagnosticSeverity.Warning` diagnostic in `DatabaseResult.Diagnostics` or `GraphSchemaResult<T>.Diagnostics`, and leaves an explicit transaction active. Neo4j's `UnknownLabelWarning`, GQLSTATUS 01N50. Not sent over protocol 1.0 |
 | `COHDBG011` | **Warning**, not a failure: the same for a relationship type the database does not have; no relationship has it. Neo4j's `UnknownRelationshipTypeWarning`, GQLSTATUS 01N51. Not sent over protocol 1.0 |
 | `COHDBG012` | The database is offline (#1243): a durable flush of its journal or data file failed. Every operation is refused with `DatabaseOfflineException` until `OpenDatabaseAsync` reopens it; `Unavailable` on the wire. The storage's `StorageOfflineException` (`COHDBS002`) is the inner exception ("Storage operations") |
+| `COHDBG013` | Scalar value error (#1140): non-Boolean WHERE/logical value, invalid arithmetic or concatenation types, zero divisor, overflow or non-finite result. Reused by #1146, #1147 and #1148; structured Diagnostic, code-free Message, composed as CODE: message on protocol 1.0 |
 | `COHDBI001` | `Database.Indexing`'s code, carried unchanged: opening a database whose property-index pages are in a B-tree page format this engine does not read (format 1, written before #1194) fails with "Database 'x' cannot be opened. COHDBI001: …", checked before recovery's scrub, so a cleanly closed database's files stay as they were (a crashed one has had only the storage layer's journal redo and undo, and keeps its journal) |
 | `COHDBS001` | `Database.Storage`'s code, carried unchanged: opening a database whose file set is in another storage format (#1251) fails with "Database 'x' cannot be opened. COHDBS001: …", the storage's `StorageFormatException` as its inner exception, refused before its journal is read, so the files stay as they were |
 
@@ -1040,7 +1054,7 @@ builder implements no root interface: no Hosting code consumed
 ## Concrete types (concrete-types plan, phase 4, #1260)
 
 The model is the second to adopt the root bases
-([plan](../../../../docs/programs/DATABASE_CONCRETE_TYPES_PLAN.md) §7). Its public types
+([plan](../../../../docs/programs/DATABASE_CONCRETE_TYPES_PLAN.md) `7). Its public types
 are sealed leaves; it has no public interface left, and no `Abstractions/` folder. Its
 child roots collapsed the same way: `GraphCatalog` and `GraphStore` are sealed types behind
 their `Open` factories.
@@ -1077,7 +1091,7 @@ their `Open` factories.
   `COHDBG007`, `COHDBG012`, the kernel calls and the translation of the kernel's exceptions. It
   keeps its per-statement rule (#1188): a failed statement aborts the explicit transaction through
   the base's `AbortAsync`, and a statement holds the session from its start to its end.
-- **What changed for a caller** (plan §6.4): a closed session fails every operation with "The
+- **What changed for a caller** (plan `6.4): a closed session fails every operation with "The
   session is closed." (was "The graph session is closed."); BEGIN refuses a closed session, then
   an active transaction or operation, then a canceled token, before the isolation-level and offline
   refusals, which came first; on an offline database BEGIN from the session that holds an open

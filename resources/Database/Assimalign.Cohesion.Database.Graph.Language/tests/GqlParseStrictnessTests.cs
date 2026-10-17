@@ -53,9 +53,6 @@ public sealed class GqlParseStrictnessTests
     /// <param name="marked">The statement; the reported span sits between '«' and '»'.</param>
     /// <param name="construct">The construct the message names.</param>
     [Theory(DisplayName = "Cohesion Test [Graph.Language] - Strictness: ISO constructs report one COHDBL001 at their span and no GQL0002")]
-    // IS outside a labeled predicate stays unsupported; the IS that RETURN names is the one
-    // construct, as before #1101.
-    [InlineData("MATCH (is) RETURN «is»", "IS")]
     // Undirected (tilde) edges (#1139 pins): the engine stores only directed relationships.
     [InlineData("MATCH (a)«~[r]~»(b) RETURN a", "UNDIRECTED EDGE")]
     [InlineData("MATCH (a)«<~[r:T]~»(b) RETURN a", "UNDIRECTED EDGE")]
