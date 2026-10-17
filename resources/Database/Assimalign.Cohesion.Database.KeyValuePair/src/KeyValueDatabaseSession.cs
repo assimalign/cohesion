@@ -166,7 +166,7 @@ public sealed class KeyValueDatabaseSession : DatabaseExecutionSession<KeyValueR
     internal ValueTask<DatabaseResult> ExecuteCommandTextAsync(string commandText, IReadOnlyDictionary<string, object?>? parameters = null, CancellationToken cancellationToken = default)
     {
         ThrowIfClosed();
-        ArgumentNullException.ThrowIfNull(commandText);
+        ArgumentException.ThrowIfNullOrWhiteSpace(commandText);
         cancellationToken.ThrowIfCancellationRequested();
         _database.ThrowIfOffline();
 

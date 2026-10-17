@@ -389,7 +389,11 @@ internal sealed class KeyValueDatabaseServerSession : DatabaseServerSession
 
         try
         {
-            result = await _databaseSession!.ExecuteCommandTextAsync(message.Statement, parameters, cancellationToken).ConfigureAwait(false);
+            // The wire reports empty text as a coded statement parse failure. The internal text
+            // entry retains its existing argument-validation and cancellation precedence.
+            result = string.IsNullOrWhiteSpace(message.Statement)
+                ? await _databaseSession!.ExecuteAsync(KeyValueCommandParser.Parse(message.Statement, parameters), cancellationToken).ConfigureAwait(false)
+                : await _databaseSession!.ExecuteCommandTextAsync(message.Statement, parameters, cancellationToken).ConfigureAwait(false);
         }
         catch (DatabaseParseException exception)
         {
