@@ -19,11 +19,17 @@ internal sealed partial class SqlPlanExecutor
     /// </summary>
     private async Task<DatabaseResult> ExecuteJoinAsync(SqlJoinPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
-        foreach (var binding in plan.Bindings.OrderBy(binding => binding.Table.ObjectId))
+        foreach (var table in plan.Bindings.Select(binding => binding.Source).OfType<SqlStoredTableSource>()
+            .Select(source => source.Table).OrderBy(table => table.ObjectId))
         {
             await statement.Coordinator.LockManager.AcquireAsync(statement.Transaction.Sequence,
-                LockResource.Object(binding.Table.ObjectId), LockMode.IntentShared, cancellationToken).ConfigureAwait(false);
-            EnsureCurrentDefinition(binding.Table);
+                LockResource.Object(table.ObjectId), LockMode.IntentShared, cancellationToken).ConfigureAwait(false);
+            EnsureCurrentDefinition(table);
+        }
+        // Require binding's image even when an empty outer input would skip virtual enumeration.
+        if (plan.Bindings.Any(binding => binding.Source is SqlSystemRelationSource))
+        {
+            _ = statement.RequireCatalogSnapshot();
         }
 
         var sharedColumns = new bool[plan.Columns.Count];
@@ -52,7 +58,7 @@ internal sealed partial class SqlPlanExecutor
     {
         var access = plan.Access;
         BTreeIndex? index = null;
-        if (access is not null && !_indexManager.TryGetIndex(plan.Bindings[access.InnerBinding].Table.ObjectId, access.Index.Name, out index))
+        if (access is not null && !_indexManager.TryGetIndex(((SqlStoredTableSource)plan.Bindings[access.InnerBinding].Source).Table.ObjectId, access.Index.Name, out index))
         {
             access = null; // A detached index changes cost, never the result.
         }
@@ -62,17 +68,17 @@ internal sealed partial class SqlPlanExecutor
         var innerBinding = plan.Bindings[inner];
         // Loop rows retain these values. Detach only when a projection delivers a selected cell;
         // predicates and discarded/unprojected binary columns never copy. Indexed inner reads own theirs.
-        Array.Fill(sharedColumns, true, outerBinding.Offset, outerBinding.Table.Columns.Count);
-        if (access is null) { Array.Fill(sharedColumns, true, innerBinding.Offset, innerBinding.Table.Columns.Count); }
+        Array.Fill(sharedColumns, true, outerBinding.Offset, outerBinding.Source.Columns.Count);
+        if (access is null) { Array.Fill(sharedColumns, true, innerBinding.Offset, innerBinding.Source.Columns.Count); }
         statement.Metrics.AccessPath = access is null ? "join-scan" : $"join-seek:{access.Index.Name}";
         List<object?[]>? buffered = null;
 
-        foreach (var (_, outer) in Scan(outerBinding.Table, statement, cancellationToken))
+        foreach (var outer in ReadRelation(outerBinding.Source, statement, cancellationToken))
         {
             IEnumerable<object?[]> candidates;
             if (access is null)
             {
-                buffered ??= Scan(innerBinding.Table, statement, cancellationToken).Select(row => row.Values).ToList();
+                buffered ??= ReadRelation(innerBinding.Source, statement, cancellationToken).ToList();
                 candidates = buffered;
             }
             else
@@ -82,7 +88,7 @@ internal sealed partial class SqlPlanExecutor
                 {
                     continue;
                 }
-                candidates = SeekRows(innerBinding.Table, new SqlIndexSeekPath(access.Index, values, null, null),
+                candidates = SeekRows(((SqlStoredTableSource)innerBinding.Source).Table, new SqlIndexSeekPath(access.Index, values, null, null),
                     index!, statement, cancellationToken).Select(row => row.Values);
             }
 
@@ -96,6 +102,15 @@ internal sealed partial class SqlPlanExecutor
             }
         }
     }
+
+    /// <summary>Reads a bound source without giving virtual rows an object lock or index path.</summary>
+    private IEnumerable<object?[]> ReadRelation(SqlRelationSource source, SqlStatementContext statement, CancellationToken cancellationToken)
+        => source switch
+        {
+            SqlStoredTableSource stored => Scan(stored.Table, statement, cancellationToken).Select(row => row.Values),
+            SqlSystemRelationSource system => ReadSystemRelation(system.View, statement, cancellationToken),
+            _ => throw new DatabaseException("Internal invariant: unknown SQL relation source."),
+        };
 
     /// <summary>
     /// Converts exact numeric keys to the indexed storage type. A NULL, rounded

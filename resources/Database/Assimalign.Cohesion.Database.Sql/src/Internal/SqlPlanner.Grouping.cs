@@ -16,7 +16,7 @@ internal sealed partial class SqlPlanner
     /// <summary>Binds aggregation above a normal filtered relation plan.</summary>
     private SqlGroupPlan PlanGroup(SqlSelectExpression select, SqlCatalogTable? table,
         SqlSystemViewDefinition? view, IReadOnlyList<SqlCatalogColumn> columns,
-        IReadOnlyList<SqlTableBinding>? bindings, SqlExpressionEvaluator evaluator)
+        IReadOnlyList<SqlRelationBinding>? bindings, IReadOnlyList<SqlRelationBinding> evaluatorBindings, SqlExpressionEvaluator evaluator)
     {
         foreach (var key in select.GroupBy)
         {
@@ -66,11 +66,11 @@ internal sealed partial class SqlPlanner
         // over the source row; HAVING, the projections and ORDER BY over the grouped row (keys,
         // then aggregate results, then the projected outputs that ordering may name). Both scopes
         // resolve columns through the join bindings alone, as grouped execution always has.
-        var sourceScope = new SqlExpressionEvaluator(columns, _parameters, bindings, defaultCollation: _catalog.DefaultCollation,
+        var sourceScope = new SqlExpressionEvaluator(columns, _parameters, evaluatorBindings, defaultCollation: _catalog.DefaultCollation,
             subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken);
         // A call over a key or an aggregate result resolves by the slot's type over the input row,
         // as the same call does outside a grouping: describe(COUNT(*)) is describe(BIGINT).
-        var groupScope = new SqlExpressionEvaluator(columns, _parameters, bindings, slots, _catalog.DefaultCollation,
+        var groupScope = new SqlExpressionEvaluator(columns, _parameters, evaluatorBindings, slots, _catalog.DefaultCollation,
             subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken, slotScope: sourceScope);
 
         var source = columns.Select((column, index) => PassThrough(column.Name, index, columns, sourceScope)).ToArray();
@@ -109,7 +109,7 @@ internal sealed partial class SqlPlanner
         var ordering = BindOrdering(select.OrderBy,
             groupScope.ForOrdering(projections, orderByProjections, keys.Length + boundAggregates.Length));
 
-        return new SqlGroupPlan(input, columns, bindings, keys, boundAggregates, projections,
+        return new SqlGroupPlan(input, columns, evaluatorBindings, keys, boundAggregates, projections,
             having, ordering, EvaluateCount(select.Limit, "LIMIT"), EvaluateCount(select.Offset, "OFFSET"),
             select.IsDistinct);
 

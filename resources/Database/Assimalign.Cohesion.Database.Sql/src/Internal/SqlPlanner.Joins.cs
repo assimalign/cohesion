@@ -11,8 +11,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 internal sealed partial class SqlPlanner
 {
-    /// <summary>Binds both stored inputs into one unambiguous column scope.</summary>
-    private IReadOnlyList<SqlTableBinding> BindJoin(SqlSelectExpression select, SqlCatalogTable left)
+    /// <summary>Binds both relation inputs into one unambiguous column scope.</summary>
+    private IReadOnlyList<SqlRelationBinding> BindJoin(SqlSelectExpression select, SqlRelationSource left)
     {
         // The language capability check rejects unsupported forms before planning.
         if (select.Joins.Count != 1 || select.Joins[0] is not { JoinType: SqlJoinType.Inner, Condition: not null })
@@ -22,7 +22,7 @@ internal sealed partial class SqlPlanner
 
         var leftReference = select.From!;
         var rightReference = select.Joins[0].Table;
-        var right = ResolveTable(rightReference);
+        var right = ResolveRelation(rightReference);
         string leftName = leftReference.Alias ?? left.Name;
         string rightName = rightReference.Alias ?? right.Name;
         if (string.Equals(leftName, rightName, StringComparison.OrdinalIgnoreCase)
@@ -32,7 +32,7 @@ internal sealed partial class SqlPlanner
             throw new SqlPlanningException("COHSQLE019", $"Duplicate table name or alias '{leftName}'; use distinct aliases for a self join.", select.Location);
         }
 
-        return [new SqlTableBinding(left, leftReference, 0), new SqlTableBinding(right, rightReference, left.Columns.Count)];
+        return [new SqlRelationBinding(left, leftReference, 0), new SqlRelationBinding(right, rightReference, left.Columns.Count)];
     }
 
     /// <summary>
@@ -41,7 +41,7 @@ internal sealed partial class SqlPlanner
     /// retained as a residual; disjunctions and computed keys use nested loops.
     /// </summary>
     private SqlJoinIndexPath? SelectJoinAccessPath(
-        IReadOnlyList<SqlTableBinding> bindings, SqlExpression condition, SqlExpressionEvaluator evaluator)
+        IReadOnlyList<SqlRelationBinding> bindings, SqlExpression condition, SqlExpressionEvaluator evaluator)
     {
         var equalities = new List<(int Left, int Right, Collation Collation)>();
         CollectJoinEqualities(condition, evaluator, equalities);
@@ -51,13 +51,17 @@ internal sealed partial class SqlPlanner
         {
             var innerBinding = bindings[inner];
             var outerBinding = bindings[1 - inner];
-            foreach (var index in _catalog.GetIndexes(innerBinding.Table.ObjectId).OrderBy(index => index.Name, StringComparer.OrdinalIgnoreCase))
+            if (innerBinding.Source is not SqlStoredTableSource stored)
+            {
+                continue;
+            }
+            foreach (var index in _catalog.GetIndexes(stored.Table.ObjectId).OrderBy(index => index.Name, StringComparer.OrdinalIgnoreCase))
             {
                 var outerOrdinals = new List<int>();
                 var innerColumns = new List<SqlCatalogColumn>();
                 foreach (string key in index.ColumnNames)
                 {
-                    int innerOrdinal = FindColumnOrdinal(innerBinding.Table, key);
+                    int innerOrdinal = FindColumnOrdinal(stored.Table, key);
                     int joinedOrdinal = innerBinding.Offset + innerOrdinal;
                     int outerOrdinal = -1;
                     foreach (var equality in equalities)
@@ -65,12 +69,12 @@ internal sealed partial class SqlPlanner
                         int candidate = equality.Left == joinedOrdinal ? equality.Right
                             : equality.Right == joinedOrdinal ? equality.Left : -1;
                         int local = candidate - outerBinding.Offset;
-                        if (local >= 0 && local < outerBinding.Table.Columns.Count
-                            && CanSeekJoinEquality(innerBinding.Table.Columns[innerOrdinal].Type.Type,
-                                outerBinding.Table.Columns[local].Type.Type)
-                            && (innerBinding.Table.Columns[innerOrdinal].Type.Type is not (DatabaseType.String or DatabaseType.Character or DatabaseType.Json)
+                        if (local >= 0 && local < outerBinding.Source.Columns.Count
+                            && CanSeekJoinEquality(innerBinding.Source.Columns[innerOrdinal].Type.Type,
+                                outerBinding.Source.Columns[local].Type.Type)
+                            && (innerBinding.Source.Columns[innerOrdinal].Type.Type is not (DatabaseType.String or DatabaseType.Character or DatabaseType.Json)
                                 || equality.Collation.IsIndexBacked
-                                    && equality.Collation == (innerBinding.Table.Columns[innerOrdinal].Collation ?? _catalog.DefaultCollation)))
+                                    && equality.Collation == (innerBinding.Source.Columns[innerOrdinal].Collation ?? _catalog.DefaultCollation)))
                         {
                             outerOrdinal = local;
                             break;
@@ -82,7 +86,7 @@ internal sealed partial class SqlPlanner
                         break;
                     }
                     outerOrdinals.Add(outerOrdinal);
-                    innerColumns.Add(innerBinding.Table.Columns[innerOrdinal]);
+                    innerColumns.Add(innerBinding.Source.Columns[innerOrdinal]);
                 }
 
                 if (outerOrdinals.Count == 0)

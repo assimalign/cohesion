@@ -50,7 +50,7 @@ internal sealed partial class SqlExpressionEvaluator
     private readonly IReadOnlyList<SqlCatalogColumn> _columns;
     private readonly SqlBindingContext _bindingContext;
     private readonly IReadOnlyDictionary<string, object?>? _parameters;
-    private readonly IReadOnlyList<SqlTableBinding>? _bindings;
+    private readonly IReadOnlyList<SqlRelationBinding>? _bindings;
     private readonly IReadOnlyDictionary<SqlExpression, int>? _valueOrdinals;
     private readonly Collation _defaultCollation;
     private readonly IReadOnlyDictionary<SqlExpression, SqlProjection>? _projectionSources;
@@ -85,7 +85,7 @@ internal sealed partial class SqlExpressionEvaluator
     private SqlTypingMemory? _typing;
 
     internal SqlExpressionEvaluator(IReadOnlyList<SqlCatalogColumn> columns, IReadOnlyDictionary<string, object?>? parameters,
-        IReadOnlyList<SqlTableBinding>? bindings = null,
+        IReadOnlyList<SqlRelationBinding>? bindings = null,
         IReadOnlyDictionary<SqlExpression, int>? valueOrdinals = null,
         Collation? defaultCollation = null,
         IReadOnlyDictionary<SqlExpression, SqlProjection>? projectionSources = null,
@@ -312,9 +312,9 @@ internal sealed partial class SqlExpressionEvaluator
                     continue;
                 }
 
-                for (int i = 0; i < binding.Table.Columns.Count; i++)
+                for (int i = 0; i < binding.Source.Columns.Count; i++)
                 {
-                    if (!string.Equals(binding.Table.Columns[i].Name, column.ColumnName, StringComparison.OrdinalIgnoreCase))
+                    if (!string.Equals(binding.Source.Columns[i].Name, column.ColumnName, StringComparison.OrdinalIgnoreCase))
                     {
                         continue;
                     }
@@ -518,7 +518,7 @@ internal sealed partial class SqlExpressionEvaluator
         => exception is not (OperationCanceledException or InsufficientExecutionStackException or OutOfMemoryException);
 
     /// <summary>An alias replaces the base relation name within the join scope.</summary>
-    private static bool MatchesQualifier(SqlTableBinding binding, SqlColumnReferenceExpression column)
+    private static bool MatchesQualifier(SqlRelationBinding binding, SqlColumnReferenceExpression column)
     {
         if (column.TableAlias is null)
         {
@@ -530,8 +530,8 @@ internal sealed partial class SqlExpressionEvaluator
             return column.SchemaName is null && string.Equals(alias, column.TableAlias, StringComparison.OrdinalIgnoreCase);
         }
 
-        return string.Equals(binding.Table.Name, column.TableAlias, StringComparison.OrdinalIgnoreCase)
-            && (column.SchemaName is null || string.Equals(binding.Table.Schema, column.SchemaName, StringComparison.OrdinalIgnoreCase));
+        return string.Equals(binding.Source.Name, column.TableAlias, StringComparison.OrdinalIgnoreCase)
+            && (column.SchemaName is null || string.Equals(binding.Source.Schema, column.SchemaName, StringComparison.OrdinalIgnoreCase));
     }
 
     private static string ColumnName(SqlColumnReferenceExpression column)

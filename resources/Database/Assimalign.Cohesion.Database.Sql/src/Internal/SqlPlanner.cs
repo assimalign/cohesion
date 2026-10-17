@@ -28,6 +28,7 @@ internal sealed partial class SqlPlanner
     private const string insertValuesClause = "INSERT ... VALUES";
 
     private readonly SqlCatalog _catalog;
+    private readonly SqlStatementContext? _statement;
     private readonly IReadOnlyDictionary<string, object?>? _parameters;
     private readonly CancellationToken _cancellationToken;
 
@@ -42,9 +43,11 @@ internal sealed partial class SqlPlanner
     /// <param name="parameters">The statement's parameter values.</param>
     /// <param name="functions">The engine's function catalog and the database; the standard library alone when null.</param>
     /// <param name="cancellationToken">The statement's token, including calls made while binding or evaluating counts and seek bounds.</param>
+    /// <param name="statement">The shared execution context whose catalog image is requested by relation binding; null for detached plan inspection.</param>
     internal SqlPlanner(SqlCatalog catalog, IReadOnlyDictionary<string, object?>? parameters, SqlFunctionEnvironment? functions = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, SqlStatementContext? statement = null)
     {
+        _statement = statement;
         _catalog = catalog;
         _parameters = parameters;
         _cancellationToken = cancellationToken;
@@ -99,14 +102,13 @@ internal sealed partial class SqlPlanner
             throw new SqlPlanningException("COHSQLE013", "SELECT requires a FROM table.", select.Location);
         }
 
-        // A virtual relation has column metadata, but no stored table or access path.
-        var systemView = SqlSystemViews.Find(select.From);
-        var table = systemView is null ? ResolveTable(select.From) : null;
-        var bindings = select.Joins.Count > 0 ? BindJoin(select, table!) : null;
-        var columns = bindings is null ? systemView?.Columns ?? table!.Columns
-            : bindings.SelectMany(binding => binding.Table.Columns).ToArray();
-        var evaluatorBindings = bindings ?? (_subqueryDepth > 0 && table is not null
-            ? new[] { new SqlTableBinding(table, select.From, 0) } : null);
+        var source = ResolveRelation(select.From);
+        var table = (source as SqlStoredTableSource)?.Table;
+        var systemView = (source as SqlSystemRelationSource)?.View;
+        var bindings = select.Joins.Count > 0 ? BindJoin(select, source) : null;
+        var columns = bindings is null ? source.Columns
+            : bindings.SelectMany(binding => binding.Source.Columns).ToArray();
+        var evaluatorBindings = bindings ?? new[] { new SqlRelationBinding(source, select.From, 0) };
         var evaluator = new SqlExpressionEvaluator(columns, _parameters, evaluatorBindings, defaultCollation: _catalog.DefaultCollation,
             subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken);
 
@@ -126,7 +128,7 @@ internal sealed partial class SqlPlanner
 
         if (select.GroupBy.Count > 0 || select.Having is not null || ProjectsOrOrdersByAggregate(select))
         {
-            return PlanGroup(select, table, systemView, columns, bindings, evaluator);
+            return PlanGroup(select, table, systemView, columns, bindings, evaluatorBindings, evaluator);
         }
 
         var projections = new List<SqlProjection>();
@@ -195,6 +197,17 @@ internal sealed partial class SqlPlanner
             EvaluateCount(select.Offset, "OFFSET"),
             select.IsDistinct,
             SelectAccessPath(table!, select.Where), orderByProjections);
+    }
+
+    /// <summary>Resolves a read source and requests the statement's one catalog image at binding time.</summary>
+    private SqlRelationSource ResolveRelation(SqlTableReference reference)
+    {
+        if (SqlSystemViews.Find(reference) is { } view)
+        {
+            _statement?.CaptureCatalogSnapshot(_catalog);
+            return new SqlSystemRelationSource(view);
+        }
+        return new SqlStoredTableSource(ResolveTable(reference));
     }
 
     /// <summary>A projection that passes a source column through, with the collation <c>DISTINCT</c> compares it under.</summary>

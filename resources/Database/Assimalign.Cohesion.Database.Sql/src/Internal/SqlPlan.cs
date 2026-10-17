@@ -24,7 +24,7 @@ internal abstract record SqlPlan;
 internal sealed record SqlGroupPlan(
     SqlPlan Input,
     IReadOnlyList<SqlCatalogColumn> SourceColumns,
-    IReadOnlyList<SqlTableBinding>? Bindings,
+    IReadOnlyList<SqlRelationBinding>? Bindings,
     IReadOnlyList<SqlBoundKey> Keys,
     IReadOnlyList<SqlGroupAggregate> Aggregates,
     IReadOnlyList<SqlProjection> Projections,
@@ -134,15 +134,15 @@ internal sealed record SqlSelectPlan(
     SqlAccessPath Access,
     IReadOnlyDictionary<SqlExpression, int>? OrderByProjections = null) : SqlPlan;
 
-/// <summary>A stored relation's identity and position in a joined row.</summary>
-internal sealed record SqlTableBinding(SqlCatalogTable Table, SqlTableReference Reference, int Offset);
+/// <summary>A relation's source, qualifier and position in a joined row.</summary>
+internal sealed record SqlRelationBinding(SqlRelationSource Source, SqlTableReference Reference, int Offset);
 
 /// <summary>
 /// A two-relation inner join. Source columns retain FROM-then-JOIN order even
 /// when the selected index reverses which relation drives the nested loop.
 /// </summary>
 internal sealed record SqlJoinPlan(
-    IReadOnlyList<SqlTableBinding> Bindings,
+    IReadOnlyList<SqlRelationBinding> Bindings,
     IReadOnlyList<SqlCatalogColumn> Columns,
     SqlBoundExpression Condition,
     IReadOnlyList<SqlProjection> Projections,

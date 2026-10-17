@@ -24,6 +24,8 @@ public sealed class SqlExplainTests
     [InlineData("SELECT t.id FROM t JOIN u ON t.id = u.id", "IndexSeek", true)]
     [InlineData("SELECT age, COUNT(*) FROM t GROUP BY age", "Group", false)]
     [InlineData("SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES", "SystemView", false)]
+    [InlineData("SELECT s.TABLE_NAME FROM INFORMATION_SCHEMA.TABLES s JOIN INFORMATION_SCHEMA.COLUMNS c ON s.TABLE_NAME = c.TABLE_NAME", "SystemView", false)]
+    [InlineData("SELECT t.id FROM t JOIN INFORMATION_SCHEMA.COLUMNS c ON t.id = c.ORDINAL_POSITION", "SystemView", false)]
     [InlineData("SELECT id FROM t WHERE id IN (SELECT id FROM u)", "Subqueries", false)]
     [InlineData("INSERT INTO t VALUES (3, 30)", "Insert", false)]
     [InlineData("INSERT INTO t SELECT id, age FROM t", "InsertSelect", false)]

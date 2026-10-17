@@ -36,19 +36,6 @@ public sealed partial class SqlQueryParser
 
         // JOINs
         var joins = ParseJoinClauses(ref lexer);
-        if (joins.Count > 0)
-        {
-            bool joinsSystemRelation = IsSystemJoinReference(from);
-            foreach (var join in joins)
-            {
-                joinsSystemRelation |= IsSystemJoinReference(join.Table);
-            }
-            if (joinsSystemRelation)
-            {
-                AddUnsupportedSurfaceDiagnostic(pos, _lastTokenEnd,
-                    "The SQL JOIN surface supports stored tables only; joins with INFORMATION_SCHEMA or COHESION_SCHEMA relations are not supported.");
-            }
-        }
         if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.Comma)
         {
             AddUnsupportedSurfaceDiagnostic(lexer.Current.Position, lexer.Current.Position + 1,
@@ -287,10 +274,6 @@ public sealed partial class SqlQueryParser
 
         return joins;
     }
-
-    private static bool IsSystemJoinReference(SqlTableReference? table) =>
-        string.Equals(table?.SchemaName, "INFORMATION_SCHEMA", StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(table?.SchemaName, "COHESION_SCHEMA", StringComparison.OrdinalIgnoreCase);
 
     private void AddUnsupportedSurfaceDiagnostic(int start, int end, string message)
     {

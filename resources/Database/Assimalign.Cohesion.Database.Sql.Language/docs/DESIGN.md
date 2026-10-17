@@ -38,6 +38,14 @@ for identifier rendering and unknown-function classification. The internal posit
 table stays internal. There is no shipped-to-shipped InternalsVisibleTo grant to reuse, so this
 is the issue's approved public-profile option; no visibility grant or public internal type is added.
 
+## System relation joins (#1106)
+
+The ordinary two-relation INNER JOIN grammar accepts stored tables and registered
+INFORMATION_SCHEMA/COHESION_SCHEMA sources in either position. No clause is added;
+all existing join-shape and read-only diagnostics remain. Engine binding owns source
+resolution and one lazy statement catalog capture, including child plans. DIALECT.md
+and the live JOIN conformance case cover system-to-system joins.
+
 ## EXPLAIN (#1104)
 
 `SqlExplainExpression` wraps a SELECT, INSERT, UPDATE or DELETE tree, retains the source text,

@@ -13,6 +13,9 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// </remarks>
 internal sealed class SqlStatementMetrics
 {
+    /// <summary>Catalog images captured by binding; zero when using a BEGIN-time image.</summary>
+    internal int CatalogSnapshotCaptures { get; set; }
+
     /// <summary>Whether the planner produced a plan, including one whose execution later failed.</summary>
     internal bool IsPlanned { get; set; }
 

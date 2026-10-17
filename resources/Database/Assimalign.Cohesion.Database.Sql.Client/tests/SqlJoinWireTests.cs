@@ -124,6 +124,36 @@ public sealed class SqlJoinWireTests
             cancellationToken: SqlClientTestHarness.Timeout())).ShouldHaveSingleItem()[0].ShouldBe(1);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - JOIN: system relations compose with stored and grouped inputs over the wire")]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task QueryAsync_SystemJoin_ShouldReturnExactTypedRowsOverTheWire(int shape)
+    {
+        // Arrange
+        await using var harness = await SqlClientTestHarness.StartAsync();
+        await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
+        await connection.ExecuteAsync("CREATE TABLE inventory_names (name TEXT)", cancellationToken: SqlClientTestHarness.Timeout());
+        await connection.ExecuteAsync("INSERT INTO inventory_names VALUES ('inventory_names')", cancellationToken: SqlClientTestHarness.Timeout());
+        string query = shape switch
+        {
+            0 => "SELECT t.TABLE_NAME, c.ORDINAL_POSITION FROM INFORMATION_SCHEMA.TABLES t JOIN INFORMATION_SCHEMA.COLUMNS c " +
+                "ON t.TABLE_NAME = c.TABLE_NAME WHERE t.TABLE_NAME = 'inventory_names' ORDER BY c.ORDINAL_POSITION",
+            1 => "SELECT t.TABLE_NAME, 1 AS n FROM inventory_names n JOIN INFORMATION_SCHEMA.TABLES t ON n.name = t.TABLE_NAME",
+            _ => "SELECT t.TABLE_NAME, COUNT(*) AS n FROM INFORMATION_SCHEMA.TABLES t JOIN INFORMATION_SCHEMA.COLUMNS c " +
+                "ON t.TABLE_NAME = c.TABLE_NAME WHERE t.TABLE_NAME = 'inventory_names' GROUP BY t.TABLE_NAME HAVING COUNT(*) = 1 ORDER BY t.TABLE_NAME",
+        };
+
+        // Act
+        var result = await connection.QueryAsync(query, cancellationToken: SqlClientTestHarness.Timeout());
+
+        // Assert
+        result.Columns.Select(column => column.Type).ShouldBe([DatabaseType.String, DatabaseType.Int64]);
+        var row = result.ShouldHaveSingleItem();
+        row[0].ShouldBe("inventory_names");
+        row[1].ShouldBe(1L);
+    }
+
     private static async Task SeedAsync(SqlConnection connection)
     {
         await connection.ExecuteAsync("CREATE TABLE usr.Users (Id INT PRIMARY KEY, FirstName TEXT, LastName TEXT)",

@@ -45,6 +45,8 @@ internal static class SqlSystemViews
     /// <summary>The name of <c>COHESION_SCHEMA.FUNCTIONS</c>, the engine's function catalog as rows.</summary>
     internal const string FunctionsView = "FUNCTIONS";
 
+    internal static IReadOnlyList<SqlSystemViewDefinition> Relations { get; } = Array.AsReadOnly(_views);
+
     internal static SqlSystemViewDefinition? Find(SqlTableReference reference)
     {
         foreach (var view in _views)

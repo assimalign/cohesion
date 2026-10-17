@@ -100,15 +100,15 @@ internal sealed partial class SqlPlanner
                 case SqlJoinPlan join:
                     int inner = join.Access?.InnerBinding ?? 1;
                     var outerBinding = join.Bindings[1 - inner];
-                    Add("TableScan", id, Target(outerBinding.Table));
+                    RelationScan(outerBinding.Source, id);
                     var innerBinding = join.Bindings[inner];
                     if (join.Access is { } seek)
                     {
                         string bounds = string.Join(" AND ", seek.InnerColumns.Select((column, i) =>
-                            $"{column.Name} = {outerBinding.Reference.Alias ?? outerBinding.Table.Name}.{outerBinding.Table.Columns[seek.OuterOrdinals[i]].Name}"));
-                        Add("IndexSeek", id, Target(innerBinding.Table), seek.Index.Name, bounds);
+                            $"{column.Name} = {outerBinding.Reference.Alias ?? outerBinding.Source.Name}.{outerBinding.Source.Columns[seek.OuterOrdinals[i]].Name}"));
+                        Add("IndexSeek", id, Target(innerBinding.Source), seek.Index.Name, bounds);
                     }
-                    else { Add("TableScan", id, Target(innerBinding.Table)); }
+                    else { RelationScan(innerBinding.Source, id); }
                     break;
                 case SqlGroupPlan group:
                     Visit(group.Input, id);
@@ -129,6 +129,9 @@ internal sealed partial class SqlPlanner
             }
         }
 
+        void RelationScan(SqlRelationSource source, int parent)
+            => Add(source is SqlSystemRelationSource ? "SystemView" : "TableScan", parent, Target(source));
+
         void Access(SqlCatalogTable table, SqlAccessPath access, int parent)
         {
             if (access is SqlScanPath) { Add("TableScan", parent, Target(table)); return; }
@@ -146,6 +149,7 @@ internal sealed partial class SqlPlanner
             => nodes.Add(new DatabasePlanNode { NodeId = nodes.Count, ParentId = parent, Operator = name, Target = target, Index = index, Detail = detail });
     }
 
+    private static string Target(SqlRelationSource source) => source.Schema + "." + source.Name;
     private static string Target(SqlCatalogTable table) => table.Schema + "." + table.Name;
     private static string Value(object? value) => value switch
     {
