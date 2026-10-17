@@ -18,6 +18,53 @@ namespace Assimalign.Cohesion.Database.Documents.Tests;
 
 public sealed class DocumentInsertTests
 {
+    [Theory(DisplayName = "Cohesion Test [Documents] - Object constructors: SELECT and INSERT resolve repeated names through one keyed object")]
+    [InlineData("{'a': 1, 'a': 2}", "{\"a\":2}")]
+    [InlineData("{'a': 1, 'a': NULL, 'A': 3}", "{\"a\":null,\"A\":3}")]
+    [InlineData("{'o': {'a': 1, 'a': 2}}", "{\"o\":{\"a\":2}}")]
+    [InlineData("{'a': MISSING, 'a': 2}", "{\"a\":2}")]
+    [InlineData("{'a': 1, 'a': MISSING}", "{\"a\":1}")]
+    public async Task Execute_RepeatedObjectMember_ShouldKeepLastIncludedValueAsync(string expression, string expected)
+    {
+        // Arrange
+        await using var engine = DocumentDatabaseEngine.Create("object", new());
+        var database = await engine.CreateDatabaseAsync("object", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        var items = await session.CreateCollectionAsync("items", CancellationToken.None);
+        await items.PutAsync(session, "seed", "{}"u8.ToArray(), cancellationToken: CancellationToken.None);
+
+        // Act
+        var selected = (await RowsAsync(session, $"SELECT {expression} AS o FROM items")).ShouldHaveSingleItem()[0].ShouldBeOfType<JsonElement>();
+        var inserted = await session.ExecuteAsync($"INSERT INTO items (KEY, VALUE) VALUES ('object', {expression})", cancellationToken: CancellationToken.None);
+
+        // Assert
+        selected.GetRawText().ShouldBe(expected);
+        inserted.AffectedCount.ShouldBe(1);
+        var stored = (await items.GetAsync(session, "object", CancellationToken.None)).ShouldNotBeNull();
+        Encoding.UTF8.GetString(stored.Content.Span).ShouldBe(expected);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Documents] - INSERT: invalid parameter JSON returns a coded failure before any mutation")]
+    public async Task Execute_DuplicateParameterProperties_ShouldReturnCodedFailureAsync()
+    {
+        // Arrange
+        await using var engine = DocumentDatabaseEngine.Create("object", new());
+        var database = await engine.CreateDatabaseAsync("object", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.CreateCollectionAsync("items", CancellationToken.None);
+        using var json = JsonDocument.Parse("{\"a\":1,\"a\":2}");
+
+        // Act
+        var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(
+            "INSERT INTO items (KEY, VALUE) VALUES ('first', 1), ('object', $doc)",
+            new Dictionary<string, object?> { ["doc"] = json.RootElement }, CancellationToken.None));
+
+        // Assert
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDOC008");
+        failure.InnerException.ShouldBeOfType<JsonException>();
+        (await RowsAsync(session, "SELECT * FROM items")).ShouldBeEmpty();
+    }
+
     [Fact(DisplayName = "Cohesion Test [Documents] - INSERT SELECT: keys bind output names and values preserve source JSON")]
     public async Task Execute_InsertSelect_ShouldCopySnapshotAndOmitMissingMembersAsync()
     {

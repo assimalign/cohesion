@@ -15,6 +15,29 @@ namespace Assimalign.Cohesion.Database.Documents.Client.Tests;
 
 public sealed class DocumentClientWireTests
 {
+    [Theory(DisplayName = "Cohesion Test [Documents.Client] - Object constructors resolve repeated names in SELECT and INSERT over both transports")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExecuteAsync_RepeatedObjectMember_ShouldStoreOneMember(bool tcp)
+    {
+        // Arrange
+        await using var harness = await DocumentClientTestHarness.StartAsync(tcp);
+        await using var connection = await harness.Client.ConnectAsync(harness.Token);
+        await connection.CreateCollectionAsync("items", harness.Token);
+        await connection.PutAsync("items", "seed", "{}"u8.ToArray(), cancellationToken: harness.Token);
+
+        // Act
+        var rows = await connection.QueryAsync("SELECT {'a':1, 'a':2} AS o FROM items", cancellationToken: harness.Token);
+        var affected = await connection.ExecuteAsync("INSERT INTO items (KEY, VALUE) VALUES ('object', {'a':1, 'a':2})", cancellationToken: harness.Token);
+
+        // Assert
+        rows.ShouldHaveSingleItem()[0].ShouldBeOfType<JsonElement>().GetRawText().ShouldBe("{\"a\":2}");
+        affected.ShouldBe(1);
+        var stored = (await connection.GetAsync("items", "object", harness.Token)).ShouldNotBeNull();
+        Encoding.UTF8.GetString(stored.Content.Span).ShouldBe("{\"a\":2}");
+        connection.IsOpen.ShouldBeTrue();
+    }
+
     [Theory(DisplayName = "Cohesion Test [Documents.Client] - Eighty-level documents survive whole and projected results")]
     [InlineData("SELECT * FROM items", true)]
     [InlineData("SELECT nested FROM items", false)]

@@ -361,6 +361,15 @@ the JSON object. A MISSING key or top-level VALUE fails the statement; MISSING m
 omitted and explicit NULL members are stored. Object construction has an OqlObjectExpression
 node so the required INSERT member rule uses the ordinary evaluator, without a second JSON parser.
 
+Object constructors build one ordinal, case-sensitive keyed object. Members are evaluated in
+source order; the last non-MISSING member with the same name wins, while explicit NULL replaces
+an earlier value. Thus `{'a':1, 'a':2}` yields `{"a":2}` in SELECT and INSERT VALUE alike.
+This follows Couchbase's keyed map construction
+([expression/cons_object.go:53-77](https://github.com/couchbase/query/blob/master/expression/cons_object.go#L53-L77)),
+including omission before assignment at lines 72-73. Raw JsonElement parameters still obey
+storage's duplicate-property refusal, translated to COHDOC008 for INSERT. #1128 extends this
+existing parser, evaluator and OqlObjectExpression node, retaining these constructor semantics.
+
 META is a declared function with its own OqlMetaExpression. It exposes id and the engine's
 monotonic version for stored rows, even when their content has absent members. An optional
 argument must be the source alias. Bare META, other members and virtual system sources fail

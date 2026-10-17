@@ -515,6 +515,9 @@ MISSING object members are omitted, while explicit NULL members are stored as JS
 in object constructors and in INSERT SELECT without VALUE. This follows Couchbase INSERT's
 NULL and MISSING object examples (examples 7 and 8 in the linked reference). For example,
 {'score': MISSING, 'amount': NULL} stores only amount:null. NULL itself is also a valid VALUE.
+Object constructors first build one ordinal keyed map: later non-MISSING members replace
+earlier values of the same name, so SELECT and INSERT both produce `{"a":2}` for
+`{'a':1, 'a':2}`. The language DESIGN records the Couchbase source and extension rule for #1128.
 
 [META](https://docs.couchbase.com/server/current/n1ql/n1ql-language-reference/metafun.html) reads
 metadata attached to the source document, so missing content fields never erase its identity.

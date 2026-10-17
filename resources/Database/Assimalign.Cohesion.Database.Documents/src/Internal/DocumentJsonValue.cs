@@ -1,3 +1,4 @@
+using System;
 using System.Buffers;
 using System.Collections.Generic;
 using System.Text.Json;
@@ -18,13 +19,19 @@ internal static class DocumentJsonValue
 
     internal static JsonElement Object(IEnumerable<KeyValuePair<string, object?>> members)
     {
+        // Couchbase expression/cons_object.go:53-77 constructs a keyed map and assigns
+        // non-MISSING members into it (72-73). Later assignments replace the same key.
+        var keyed = new Dictionary<string, object?>(StringComparer.Ordinal);
+        foreach (var member in members)
+        {
+            if (member.Value is not DocumentMissing) { keyed[member.Key] = member.Value; }
+        }
         var buffer = new ArrayBufferWriter<byte>();
         using (var writer = new Utf8JsonWriter(buffer, new JsonWriterOptions { MaxDepth = 128 }))
         {
             writer.WriteStartObject();
-            foreach (var member in members)
+            foreach (var member in keyed)
             {
-                if (member.Value is DocumentMissing) { continue; }
                 writer.WritePropertyName(member.Key);
                 Write(writer, member.Value);
             }
