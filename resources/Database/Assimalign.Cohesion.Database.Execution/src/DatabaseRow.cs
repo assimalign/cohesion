@@ -7,6 +7,37 @@ namespace Assimalign.Cohesion.Database.Execution;
 /// </summary>
 public abstract class DatabaseRow
 {
+    private readonly bool _supportsMissing;
+
+    /// <summary>Initializes a row with its optional MISSING capability.</summary>
+    /// <param name="supportsMissing">Whether the row can distinguish MISSING from NULL.</param>
+    protected DatabaseRow(bool supportsMissing = false)
+    {
+        _supportsMissing = supportsMissing;
+    }
+
+    /// <summary>Gets whether this row can distinguish MISSING from NULL.</summary>
+    public bool SupportsMissing => _supportsMissing;
+
+    /// <summary>Gets whether the field at the specified ordinal is MISSING.</summary>
+    /// <param name="ordinal">The zero-based column ordinal.</param>
+    /// <returns>True for an absent value; false for NULL or a present value.</returns>
+    /// <exception cref="NotSupportedException">This row does not support MISSING.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">The ordinal is outside the row.</exception>
+    public bool IsMissing(int ordinal)
+    {
+        if (!_supportsMissing) { throw new NotSupportedException(ErrorMessages.MissingNotSupported); }
+        ArgumentOutOfRangeException.ThrowIfNegative(ordinal);
+        ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(ordinal, FieldCount);
+        return IsMissingCore(ordinal);
+    }
+
+    /// <summary>Reports MISSING for a row that supports the capability.</summary>
+    /// <param name="ordinal">The validated zero-based column ordinal.</param>
+    /// <returns>True for an absent value; false for NULL or a present value.</returns>
+    /// <exception cref="NotSupportedException">The row has not implemented this capability.</exception>
+    protected virtual bool IsMissingCore(int ordinal) => throw new NotSupportedException(ErrorMessages.MissingNotSupported);
+
     /// <summary>
     /// Gets the number of fields in this row.
     /// </summary>
@@ -65,6 +96,6 @@ public abstract class DatabaseRow
     /// Gets the value of the field at the specified ordinal as an object.
     /// </summary>
     /// <param name="ordinal">The zero-based column ordinal.</param>
-    /// <returns>The boxed field value, or null if the field is null.</returns>
+    /// <returns>The boxed field value, or null if the field is NULL or MISSING. Use <see cref="IsMissing"/> on a supporting row to distinguish them.</returns>
     public abstract object? GetValue(int ordinal);
 }
