@@ -6,8 +6,9 @@
 owns `SqlProtocolMessageType`, ProtocolExecuteMessage, ProtocolResultHeaderMessage,
 and ProtocolResultCompleteMessage. The frame, startup, error, and lifecycle formats
 come from [Database.Protocol](../../Assimalign.Cohesion.Database.Protocol/docs/DESIGN.md).
-Protocol version remains **1.0**: identifiers, payload bytes, order, authentication,
-and error codes are unchanged for deployed clients. The model's Client package owns
+The shared startup version is **2.0** since #1126's Documents projection change;
+incompatible majors are refused before authentication. SQL identifiers, payload bytes,
+order, authentication and error codes are unchanged by that bump. The model's Client package owns
 parameter encoding and result materialization; the shared Client only runs exchanges.
 
 For source compatibility, this model exports C# static extension properties on the

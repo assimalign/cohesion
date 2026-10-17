@@ -280,7 +280,8 @@ typed `IDuplexConnectionFactory` options, composed statically. Typed endpoints a
 support in-memory transports. The endpoint selects the model; startup carries no
 model discriminator.
 
-SQL and Key-Value wire bytes stay at version 1.0. Moving APIs is a managed API
+The shared startup version is 2.0 since #1126's Documents projection change. SQL and
+Key-Value model payloads are unchanged by that bump. Moving APIs is a managed API
 migration: direct SQL callers import `Database.Sql.Client` and bind
 `SqlProtocol.Family`, or use the existing typed client. `DatabaseClientResult`
 and `DatabaseClientColumn` now live in the SQL client's namespace. New model
