@@ -88,7 +88,7 @@ public static class SqlLiteralText
     /// <exception cref="ArgumentNullException">The text is null.</exception>
     public static byte[] ParseBinary(string text) => Convert.FromHexString(text);
 
-    /// <summary>Reads a day-time interval: a qualified ISO field value, PostgreSQL unit string, or ISO 8601 duration.</summary>
+    /// <summary>Reads a day-time interval: a qualified ISO field value, PostgreSQL unit/clock string, or ISO 8601 duration.</summary>
     /// <param name="text">The unquoted text.</param>
     /// <param name="qualifier">An optional DAY, HOUR, MINUTE or SECOND field or descending TO range.</param>
     /// <returns>The exact duration, at 100 nanosecond resolution.</returns>
@@ -149,6 +149,35 @@ public static class SqlLiteralText
 
     private static decimal IsoInterval(ReadOnlySpan<char> text)
     {
+        // PostgreSQL datetime.c:4038-4108 recognizes basic and extended alternative dates.
+        // These carry year/month fields even when their values happen to be zero.
+        int dateEnd = text.IndexOf('T');
+        ReadOnlySpan<char> date = dateEnd < 0 ? text[1..] : text[1..dateEnd];
+        if (!date.IsEmpty && date.IndexOfAnyInRange('A', 'Z') < 0)
+        {
+            int datePosition = 0, fields = 0;
+            while (datePosition < date.Length)
+            {
+                int start = datePosition;
+                if (date[datePosition] == '-') { datePosition++; }
+                while (datePosition < date.Length && (char.IsAsciiDigit(date[datePosition]) || date[datePosition] == '.')) { datePosition++; }
+                _ = IntervalNumber(date[start..datePosition], true, true);
+                if (++fields > 3) { throw InvalidInterval(); }
+                if (datePosition == date.Length) { break; }
+                if (date[datePosition++] != '-' || datePosition == date.Length) { throw InvalidInterval(); }
+            }
+            if (dateEnd >= 0)
+            {
+                var timeText = text[(dateEnd + 1)..];
+                int timeFields = 0;
+                foreach (var part in timeText.Split(':'))
+                {
+                    if (++timeFields > 3) { throw InvalidInterval(); }
+                    _ = IntervalNumber(timeText[part], true, true);
+                }
+            }
+            RejectYearMonth("YEAR");
+        }
         // PostgreSQL datetime.c:3959-3977 also distinguishes date M (months) from time M (minutes).
         bool time = false, any = false, timeValue = false;
         int previous = -1, position = 1;
@@ -161,6 +190,7 @@ public static class SqlLiteralText
                 time = true; position++; continue;
             }
             int start = position;
+            if (text[position] == '-') { position++; }
             while (position < text.Length && (char.IsAsciiDigit(text[position]) || text[position] == '.')) { position++; }
             if (position == start || position == text.Length) { throw InvalidInterval(); }
             char unit = text[position++];
@@ -168,11 +198,11 @@ public static class SqlLiteralText
             if (unit == 'W' && !time)
             {
                 if (any || position != text.Length) { throw InvalidInterval(); }
-                return IntervalNumber(text[start..(position - 1)], false, true) * 7 * TimeSpan.TicksPerDay;
+                return IntervalNumber(text[start..(position - 1)], true, true) * 7 * TimeSpan.TicksPerDay;
             }
             int field = unit switch { 'D' when !time => 0, 'H' when time => 1, 'M' when time => 2, 'S' when time => 3, _ => -1 };
             if (field < 0 || field <= previous) { throw InvalidInterval(); }
-            ticks += IntervalNumber(text[start..(position - 1)], false, true) * FieldTicks(field);
+            ticks += IntervalNumber(text[start..(position - 1)], true, true) * FieldTicks(field);
             any = true; timeValue |= time; previous = field;
         }
         if (!any || time && !timeValue) { throw InvalidInterval(); }
@@ -188,12 +218,34 @@ public static class SqlLiteralText
         int seen = 0;
         while (position < span.Length)
         {
-            while (position < span.Length && span[position] == ' ') { position++; }
+            while (position < span.Length && char.IsWhiteSpace(span[position])) { position++; }
+            if (position == span.Length) { break; }
             int start = position;
             if (position < span.Length && span[position] is '+' or '-') { position++; }
             while (position < span.Length && (char.IsAsciiDigit(span[position]) || span[position] == '.')) { position++; }
             int numberStart = start, numberEnd = position;
-            while (position < span.Length && span[position] == ' ') { position++; }
+            if (position < span.Length && span[position] == ':')
+            {
+                // DecodeInterval sets the next implicit field to DAY after a clock, and keeps
+                // the clock's sign independent of the day's (PostgreSQL datetime.c:3504-3596).
+                while (position < span.Length && !char.IsWhiteSpace(span[position])) { position++; }
+                const int clockFields = (1 << 1) | (1 << 2) | (1 << 3);
+                if ((seen & clockFields) != 0) { throw InvalidInterval(); }
+                ticks += IntervalClock(span[numberStart..position]);
+                seen |= clockFields; any = true;
+                continue;
+            }
+            if (position < span.Length && span[position] == '-')
+            {
+                // SQL years-months, including a leading sign (PostgreSQL datetime.c:3669-3695).
+                int monthStart = ++position;
+                while (position < span.Length && char.IsAsciiDigit(span[position])) { position++; }
+                _ = IntervalNumber(span[numberStart..numberEnd], true, false);
+                decimal months = IntervalNumber(span[monthStart..position], false, false);
+                if (months >= 12 || position < span.Length && !char.IsWhiteSpace(span[position])) { throw InvalidInterval(); }
+                RejectYearMonth("YEAR");
+            }
+            while (position < span.Length && char.IsWhiteSpace(span[position])) { position++; }
             start = position;
             while (position < span.Length && char.IsAsciiLetter(span[position])) { position++; }
             string unit = span[start..position].ToString().ToUpperInvariant();
@@ -210,12 +262,57 @@ public static class SqlLiteralText
                 "MICROSECOND" or "MICROSECONDS" or "US" or "USEC" or "USECS" or "USECOND" or "USECONDS" => 6,
                 _ => -1,
             };
-            if (field < 0 || (seen & (1 << field)) != 0 || position < span.Length && span[position] != ' ') { throw InvalidInterval(); }
+            if (unit.Length == 0 && position < span.Length)
+            {
+                int end = position;
+                while (end < span.Length && !char.IsWhiteSpace(span[end])) { end++; }
+                if (span[position..end].Contains(':')) { field = 0; }
+            }
+            if (field < 0 || (seen & (1 << field)) != 0 || unit.Length > 0 && position < span.Length && !char.IsWhiteSpace(span[position])) { throw InvalidInterval(); }
             ticks += number * FieldTicks(field);
             seen |= 1 << field; any = true;
         }
         if (!any) { throw InvalidInterval(); }
         return ticks;
+    }
+
+    private static decimal IntervalClock(ReadOnlySpan<char> text)
+    {
+        // DecodeTimeCommon accepts hh:mm, hh:mm:ss[.fraction], and mm:ss.fraction;
+        // hours are unbounded, minutes are 0..59 and seconds 0..60 (datetime.c:2656-2740).
+        int sign = 1;
+        if (!text.IsEmpty && text[0] is '+' or '-') { sign = text[0] == '-' ? -1 : 1; text = text[1..]; }
+        int colon = text.IndexOf(':');
+        if (colon < 0) { throw InvalidInterval(); }
+        decimal first = IntervalNumber(text[..colon], false, false);
+        ReadOnlySpan<char> rest = text[(colon + 1)..];
+        int secondColon = rest.IndexOf(':');
+        decimal hours = first, minutes, seconds = 0;
+        if (secondColon >= 0)
+        {
+            minutes = ClockField(rest[..secondColon], fraction: false);
+            seconds = ClockField(rest[(secondColon + 1)..], fraction: true);
+        }
+        else if (rest.Contains('.'))
+        {
+            hours = 0; minutes = first;
+            seconds = ClockField(rest, fraction: true);
+        }
+        else { minutes = ClockField(rest, fraction: false); }
+        if (minutes >= 60 || seconds >= 61) { throw InvalidInterval(); }
+        return sign * (hours * TimeSpan.TicksPerHour + minutes * TimeSpan.TicksPerMinute + seconds * TimeSpan.TicksPerSecond);
+    }
+
+    private static decimal ClockField(ReadOnlySpan<char> text, bool fraction)
+    {
+        // DecodeTimeCommon's integer reader permits empty minute/second fields, and
+        // ParseFraction accepts a bare dot (PostgreSQL datetime.c:691-721, 2672-2715).
+        if (text.IsEmpty) { return 0; }
+        int dot = text.IndexOf('.');
+        if (!fraction || dot < 0) { return IntervalNumber(text, false, false); }
+        if (dot > 0 && !Digits(text[..dot]) || text.Length - dot - 1 > 7
+            || dot + 1 < text.Length && !Digits(text[(dot + 1)..])) { throw InvalidInterval(); }
+        return text.Length == 1 ? 0 : decimal.Parse(text, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture);
     }
 
     private static decimal IntervalNumber(ReadOnlySpan<char> text, bool allowSign, bool fraction)

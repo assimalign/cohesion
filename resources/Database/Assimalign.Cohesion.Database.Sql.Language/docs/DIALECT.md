@@ -1352,10 +1352,23 @@ once per field, following PostgreSQL datetime.c:188-250. ISO durations use P wit
 T with H/M/S in descending order, or a standalone PnW week duration, with an optional leading sign. All durations must fit
 TimeSpan exactly at 100 ns resolution; fractions have at most seven digits. Canonical
 text is optional minus, PT, total seconds and S. Year/month fields in every spelling
-(including YEAR TO MONTH, year/yr/mon/mons, quarter/decade/century/millennium units, P1Y and P1M) report COHDBL001;
+(including YEAR TO MONTH, year/yr/mon/mons, quarter/decade/century/millennium units, 1-2,
+P1Y2M, P0001-02-03T04:05:06 and the basic P00010203T040506) report COHDBL001;
 PT1M is one minute. Field precision, temporal precision, TIME WITH TIME ZONE,
 numeric/UUID/JSON/BYTEA typed strings and B/E/U& string prefixes also report COHDBL001.
 INTERVAL arithmetic and unary minus on INTERVAL remain owned by sql-functions (#1120).
+
+Unqualified PostgreSQL clock forms accept `1 day 02:03:04`, `1 02:03:04` and
+`02:03:04`, including fractional seconds. Days and clocks have independent signs:
+`-1 day -02:03:04` is -93784 seconds; `-1 02:03:04` is -79016 seconds
+(datetime.c:3504-3596). `hh:mm` means hours/minutes; a fraction in a two-field clock
+makes it minutes/seconds (`2:03.5` is 123.5 seconds). Clock hours may exceed 23;
+minutes are 0..59 and seconds 0..60, following DecodeTimeCommon
+(datetime.c:2656-2740). The complete duration must fit TimeSpan, including both endpoints;
+overflow is SQL0008. Empty minute/second fields mean zero and a seconds fraction may omit its integer or
+fractional digits (`02::04`, `02:03:.5`, `02:03:04.`), as those PostgreSQL readers allow.
+The pure day-time ISO form `P1DT2H` is supported, as PostgreSQL's
+DecodeISO8601Interval supports day and time designators (datetime.c:3990-4026, 4126-4138).
 
 The engine evaluates an integer literal as BIGINT and a fractional or exponent
 literal as an exact `System.Decimal`, whatever the target. A literal its type cannot

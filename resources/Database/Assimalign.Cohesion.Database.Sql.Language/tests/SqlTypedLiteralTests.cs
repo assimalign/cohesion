@@ -33,7 +33,27 @@ public sealed class SqlTypedLiteralTests
         ["INTERVAL '3' DAY", SqlLiteralType.Interval, "PT259200S"],
         ["INTERVAL '1:30' HOUR TO MINUTE", SqlLiteralType.Interval, "PT5400S"],
         ["INTERVAL '2 days 3 hours'", SqlLiteralType.Interval, "PT183600S"],
+        ["INTERVAL '1 day 02:03:04'", SqlLiteralType.Interval, "PT93784S"],
+        ["INTERVAL '1 02:03:04'", SqlLiteralType.Interval, "PT93784S"],
+        ["INTERVAL '02:03:04'", SqlLiteralType.Interval, "PT7384S"],
+        ["INTERVAL '-1 day -02:03:04'", SqlLiteralType.Interval, "-PT93784S"],
+        ["INTERVAL '-1 02:03:04'", SqlLiteralType.Interval, "-PT79016S"],
+        ["INTERVAL '1 +02:03:04.1234567'", SqlLiteralType.Interval, "PT93784.1234567S"],
+        ["INTERVAL '2:03'", SqlLiteralType.Interval, "PT7380S"],
+        ["INTERVAL '2:03.5'", SqlLiteralType.Interval, "PT123.5S"],
+        ["INTERVAL '02:03:.5'", SqlLiteralType.Interval, "PT7380.5S"],
+        ["INTERVAL '02:03:04.'", SqlLiteralType.Interval, "PT7384S"],
+        ["INTERVAL '02::04'", SqlLiteralType.Interval, "PT7204S"],
+        ["INTERVAL '02:03:'", SqlLiteralType.Interval, "PT7380S"],
+        ["INTERVAL '02:'", SqlLiteralType.Interval, "PT7200S"],
+        ["INTERVAL '25:03:04'", SqlLiteralType.Interval, "PT90184S"],
+        ["INTERVAL '00:00:60.5'", SqlLiteralType.Interval, "PT60.5S"],
+        ["INTERVAL '10675199 02:48:05.4775807'", SqlLiteralType.Interval, "PT922337203685.4775807S"],
+        ["INTERVAL '-10675199 -02:48:05.4775808'", SqlLiteralType.Interval, "-PT922337203685.4775808S"],
+        ["INTERVAL '256204778:48:05.4775807'", SqlLiteralType.Interval, "PT922337203685.4775807S"],
+        ["INTERVAL '-256204778:48:05.4775808'", SqlLiteralType.Interval, "-PT922337203685.4775808S"],
         ["INTERVAL 'P1DT2H'", SqlLiteralType.Interval, "PT93600S"],
+        ["INTERVAL 'P-1DT2H'", SqlLiteralType.Interval, "-PT79200S"],
         ["INTERVAL 'P1W'", SqlLiteralType.Interval, "PT604800S"],
         ["INTERVAL '2 weeks'", SqlLiteralType.Interval, "PT1209600S"],
         ["INTERVAL '1 millisecond 2 microseconds'", SqlLiteralType.Interval, "PT0.001002S"],
@@ -107,6 +127,19 @@ public sealed class SqlTypedLiteralTests
     [InlineData("INTERVAL '1.12345678' SECOND")]
     [InlineData("INTERVAL '999999999999999999999' DAY")]
     [InlineData("INTERVAL 'PT922337203685.4775808S'")]
+    [InlineData("INTERVAL '10675199 02:48:05.4775808'")]
+    [InlineData("INTERVAL '-10675199 -02:48:05.4775809'")]
+    [InlineData("INTERVAL '256204778:48:05.4775808'")]
+    [InlineData("INTERVAL '02:60:00'")]
+    [InlineData("INTERVAL '02:00:61'")]
+    [InlineData("INTERVAL '02:-03:04'")]
+    [InlineData("INTERVAL '02:03:04.12345678'")]
+    [InlineData("INTERVAL '1 day 02:03:04:05'")]
+    [InlineData("INTERVAL '1 day 2 02:03:04'")]
+    [InlineData("INTERVAL '02:03:04 1 hour'")]
+    [InlineData("INTERVAL '02:03:04 02:03:04'")]
+    [InlineData("INTERVAL '1-12'")]
+    [InlineData("INTERVAL 'P0001-xx-03T04:05:06'")]
     public void Parse_InvalidLiteral_ShouldReportContentDiagnostic(string text)
     {
         // Arrange / Act
@@ -142,6 +175,15 @@ public sealed class SqlTypedLiteralTests
     [InlineData("INTERVAL '2 mons'")]
     [InlineData("INTERVAL 'P1Y'")]
     [InlineData("INTERVAL 'P1M'")]
+    [InlineData("INTERVAL '1-2'")]
+    [InlineData("INTERVAL '-1-2'")]
+    [InlineData("INTERVAL '+1-2'")]
+    [InlineData("INTERVAL '1-2 3 04:05:06'")]
+    [InlineData("INTERVAL 'P1Y2M'")]
+    [InlineData("INTERVAL 'P0001-02-03T04:05:06'")]
+    [InlineData("INTERVAL 'P00010203T040506'")]
+    [InlineData("INTERVAL 'P-1Y2M'")]
+    [InlineData("INTERVAL 'P0001--02-03T04:05:06'")]
     [InlineData("INTERVAL '1 decade'")]
     [InlineData("INTERVAL '2 centuries'")]
     [InlineData("INTERVAL '1 quarter'")]

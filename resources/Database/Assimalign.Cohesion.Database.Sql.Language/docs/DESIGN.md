@@ -112,6 +112,12 @@ the parser implements today. Recognized clauses outside that set produce the sha
   its normalized value to this grammar; typed input reaches the strict readers directly.
   PostgreSQL gram.y:17806-17828 supplies the typed-string/interval split; datetime.c:3959-3977
   distinguishes date M from time M in ISO durations. X deliberately uses ISO binary semantics.
+  PostgreSQL clock intervals accept explicit or implicit days and independently signed clock
+  fields (datetime.c:3504-3596), with hh:mm, hh:mm:ss.fraction and mm:ss.fraction interpreted
+  by DecodeTimeCommon (datetime.c:2656-2740). Hours are unbounded within TimeSpan, while
+  seven fractional digits retain the dialect's 100 ns precision. SQL years-months
+  (datetime.c:3669-3695) and ISO alternative dates (datetime.c:4038-4108) are recognized and
+  refused as COHDBL001 rather than malformed SQL0008. Day-time ISO P1DT2H remains executable.
 - **String literal nodes carry the value, not the lexeme** — quotes stripped,
   doubled quotes unescaped — because every consumer (executor, planner, schema
   compiler) wants the value, and exactly one component (the parser) knows the
