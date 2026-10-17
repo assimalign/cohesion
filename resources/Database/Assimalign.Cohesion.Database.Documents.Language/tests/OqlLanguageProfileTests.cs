@@ -44,9 +44,6 @@ public class OqlLanguageProfileTests
     }
 
     [Theory]
-    [InlineData(OqlClauses.Define)]
-    [InlineData(OqlClauses.Element)]
-    [InlineData(OqlClauses.Flatten)]
     [InlineData(OqlClauses.Subquery)]
     public void Instance_UnimplementedClause_IsNotSupported(string clause)
     {

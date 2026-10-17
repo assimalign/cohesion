@@ -62,6 +62,14 @@ else if (args[0] == "verify")
     {
         throw new InvalidOperationException("Recovered index does not match committed documents.");
     }
+    await using var missing = (DatabaseResultSet)await session.ExecuteAsync("SELECT nested.absent AS absent FROM items WHERE nested.absent IS MISSING", cancellationToken: CancellationToken.None);
+    await using var missingCursor = missing.GetRowsAsync(CancellationToken.None).GetAsyncEnumerator();
+    if (!await missingCursor.MoveNextAsync() || !missingCursor.Current.SupportsMissing ||
+        !missingCursor.Current.IsMissing(0) || missingCursor.Current.IsNull(0) || missingCursor.Current.GetValue(0) is not null ||
+        await missingCursor.MoveNextAsync())
+    {
+        throw new InvalidOperationException("Recovered document does not retain SQL++ MISSING semantics.");
+    }
     Console.WriteLine("Committed JSON and index recovered; partial writes absent.");
 }
 else { throw new ArgumentException("Unknown fixture mode."); }

@@ -26,8 +26,10 @@ public sealed partial class OqlQueryParser
             {
                 Advance();
                 bool negate = Take("NOT");
-                Expect("NULL");
-                left = new OqlUnaryExpression(negate ? "IS NOT NULL" : "IS NULL", left, Span(start, Previous));
+                string predicate = Current.Text.ToUpperInvariant();
+                if (Is("NULL") || Is("MISSING") || Is("VALUED")) { Advance(); }
+                else { Error("OQL0002", "Expected NULL, MISSING, or VALUED.", Current); }
+                left = new OqlUnaryExpression($"IS {(negate ? "NOT " : string.Empty)}{predicate}", left, Span(start, Previous));
                 continue;
             }
             string op = Current.Text.ToUpperInvariant();
@@ -98,6 +100,11 @@ public sealed partial class OqlQueryParser
         if (Take("NULL") || Take("NIL"))
         {
             return new OqlLiteralExpression(null, Span(start, start));
+        }
+
+        if (Take("MISSING"))
+        {
+            return new OqlMissingExpression(Span(start, start));
         }
 
         if (Take("TRUE"))

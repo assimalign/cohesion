@@ -60,8 +60,18 @@ public sealed class DocumentResultSet : IReadOnlyList<DocumentRow>
     public IEnumerator<DocumentRow> GetEnumerator();
 }
 
-public sealed class DocumentRow : IReadOnlyList<object?>
+public sealed class DocumentRow : DatabaseRow, IReadOnlyList<object?>
 {
+    // SupportsMissing == true and IsMissing(int) are inherited from DatabaseRow.
+    public override int FieldCount { get; }
+    public override bool IsNull(int ordinal);
+    public override object? GetValue(int ordinal);
+    public override string? GetString(int ordinal);
+    public override ReadOnlyMemory<byte> GetBytes(int ordinal);
+    public override int GetInt32(int ordinal);
+    public override long GetInt64(int ordinal);
+    public override bool GetBoolean(int ordinal);
+    public override double GetDouble(int ordinal);
     public int Count { get; }
     public object? this[int index] { get; }
     public object? this[string name] { get; }

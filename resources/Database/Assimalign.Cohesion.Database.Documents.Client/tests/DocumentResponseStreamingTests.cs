@@ -40,7 +40,7 @@ public sealed class DocumentResponseStreamingTests
 
     [Theory(DisplayName = "Cohesion Test [Documents.Client] - Large query responses bound formatter allocations before the header")]
     [InlineData("SELECT * FROM items", DocumentProtocolMessageType.Document)]
-    [InlineData("SELECT text, marker FROM items", DocumentProtocolMessageType.ResultRow)]
+    [InlineData("SELECT text, marker FROM items", DocumentProtocolMessageType.Document)]
     public async Task QueryAsync_LargeResult_ShouldBoundFormatterAllocationsBeforeHeader(string statement, DocumentProtocolMessageType rowType)
     {
         // Arrange: 32 MiB of encoded rows exceeds the 8 MiB pre-header allocation budget.

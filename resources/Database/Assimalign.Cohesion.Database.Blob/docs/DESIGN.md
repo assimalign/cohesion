@@ -558,8 +558,8 @@ the server uses it to open storage with the declared content type before accepti
 The caller must retain exclusive access throughout and discard the exchange after failure.
 No concrete transport is referenced here.
 Public codecs use explicit binary operations and strict UTF-8, with no reflection or object
-serialization. Shared protocol version remains 1.0 because these are first-use Blob endpoint
-messages and SQL/Key-Value payloads and identifiers remain unchanged.
+serialization. The shared startup version is 2.0 since #1126's Documents projection change;
+Blob message identifiers and payloads are unchanged by that bump.
 
 `BlobProtocolTests` use `Connections.InMemory` for authenticated request/transfer exchanges in
 both directions. A generated non-seekable source and validating non-seekable destination move

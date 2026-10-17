@@ -68,12 +68,14 @@ public class ProtocolFamilyTests
 
     [Theory(DisplayName = "Cohesion Test [Database.Protocol] - Version: incompatible majors reject and compatible minors negotiate")]
     [InlineData(0, 0, false)]
-    [InlineData(1, 0, true)]
-    [InlineData(1, 99, true)]
-    [InlineData(2, 0, false)]
+    [InlineData(1, 0, false)]
+    [InlineData(1, 99, false)]
+    [InlineData(2, 0, true)]
+    [InlineData(2, 99, true)]
+    [InlineData(3, 0, false)]
     public void TryNegotiate_PeerVersion_ShouldEnforceMajor(ushort major, ushort minor, bool accepted)
     {
         ProtocolVersion.TryNegotiate(new ProtocolVersion(major, minor), out var negotiated).ShouldBe(accepted);
-        negotiated.ShouldBe(accepted ? new ProtocolVersion(1, 0) : default);
+        negotiated.ShouldBe(accepted ? new ProtocolVersion(2, 0) : default);
     }
 }

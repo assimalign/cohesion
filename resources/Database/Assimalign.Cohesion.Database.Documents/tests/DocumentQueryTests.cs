@@ -31,8 +31,15 @@ public sealed class DocumentQueryTests
         rows.Select(row => row.GetString(0)).ShouldBe(["first", "second", "third"]);
         rows[0].GetString(1).ShouldBe("Paris");
         rows[0].GetString(2).ShouldBe("nested");
-        rows[1].IsNull(1).ShouldBeTrue();
-        rows[2].IsNull(2).ShouldBeTrue();
+        rows[1].SupportsMissing.ShouldBeTrue();
+        rows[1].IsMissing(1).ShouldBeTrue();
+        rows[1].IsNull(1).ShouldBeFalse();
+        rows[1].GetValue(1).ShouldBeNull();
+        rows[2].IsMissing(1).ShouldBeTrue(); // Navigating through explicit null gives MISSING.
+        rows[2].IsMissing(2).ShouldBeTrue();
+        var explicitNull = (await RowsAsync(session, "SELECT profile FROM items WHERE name = 'third'")).Single();
+        explicitNull.IsMissing(0).ShouldBeFalse();
+        explicitNull.IsNull(0).ShouldBeTrue();
         var nested = await RowsAsync(session, "SELECT profile, tags FROM items WHERE name = 'first'");
         ((JsonElement)nested[0].GetValue(0)!).GetProperty("city").GetString().ShouldBe("Paris");
         ((JsonElement)nested[0].GetValue(1)!)[1].GetProperty("kind").GetString().ShouldBe("nested");
@@ -80,7 +87,8 @@ public sealed class DocumentQueryTests
         rows[0].GetString(0).ShouldBe("a");
         Enumerable.Range(1, 6).Select(rows[0].GetInt32).ShouldBe([3, 2, 8, 4, 2, 6]);
         var groups = await RowsAsync(session, "SELECT category, SUM(amount) AS total FROM items GROUP BY category");
-        groups[0].IsNull(0).ShouldBeTrue();
+        groups[0].IsMissing(0).ShouldBeTrue();
+        groups[0].IsNull(0).ShouldBeFalse();
         groups.Skip(1).Select(row => row.GetString(0)).ShouldBe(["a", "b"]);
         var empty = await RowsAsync(session, "SELECT COUNT(*) AS count, SUM(amount) AS total FROM items WHERE amount > 100");
         empty.Single().GetInt64(0).ShouldBe(0L);
@@ -299,9 +307,22 @@ public sealed class DocumentQueryTests
         await session.ExecuteAsync("CREATE INDEX by_score ON items (score)");
         const string query = "SELECT name FROM items WHERE score IS NULL OR score = 1";
         (await PlanAsync(database, query)).Access.ShouldBeOfType<DocumentScanPath>();
-        (await RowsAsync(session, query)).Select(row => row.GetString(0)).ShouldBe(["null", "missing", "number"]);
+        (await RowsAsync(session, query)).Select(row => row.GetString(0)).ShouldBe(["null", "number"]);
         (await RowsAsync(session, "SELECT name FROM items WHERE score = NULL")).ShouldBeEmpty();
+        (await PlanAsync(database, "SELECT name FROM items WHERE score = MISSING")).Access.ShouldBeOfType<DocumentScanPath>();
+        (await RowsAsync(session, "SELECT name FROM items WHERE score = MISSING")).ShouldBeEmpty();
         (await RowsAsync(session, "SELECT name FROM items WHERE NOT (score IS NULL)")).Single().GetString(0).ShouldBe("number");
+        foreach (var (predicate, expected) in new (string, string[])[]
+        {
+            ("score IS MISSING", ["missing"]),
+            ("score IS NOT VALUED", ["null", "missing"]),
+            ("score IS NULL", ["null"]),
+        })
+        {
+            string unaryQuery = $"SELECT name FROM items WHERE {predicate}";
+            (await PlanAsync(database, unaryQuery)).Access.ShouldBeOfType<DocumentScanPath>();
+            (await RowsAsync(session, unaryQuery)).Select(row => row.GetString(0)).ShouldBe(expected);
+        }
     }
 
     [Fact]

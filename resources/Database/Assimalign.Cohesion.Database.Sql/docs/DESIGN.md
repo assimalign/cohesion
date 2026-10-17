@@ -4253,8 +4253,9 @@ scalars at this layer; span-based row codecs below.
 This package owns the Sql request and tabular result codecs; the shared protocol
 contains only mechanism. [Wire format](WIRE-PROTOCOL.md) specifies every message and
 scalar component for independent clients. The server binds SqlProtocol.Family
-once on accept, retains wire version 1.0 and the existing bytes, and negotiates
-incompatible majors before authentication. Result materialization belongs to
+once on accept and retains its existing model payloads. The shared startup version advances
+to 2.0 for #1126's Documents projection change and rejects incompatible majors before
+authentication. Result materialization belongs to
 Database.Sql.Client. The TCP Listen(Uri) extension lives in the optional Database.Sql.Tcp composition package; this engine references only generic Connections.
 
 Payload offsets are zero-based and exclude the shared five-byte frame header. `Execute` (5)

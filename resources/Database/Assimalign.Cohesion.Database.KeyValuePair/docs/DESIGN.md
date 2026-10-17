@@ -779,8 +779,9 @@ boxed scalars only at the result-row boundary (the Execution family's shape).
 This package owns the KeyValuePair request and tabular result codecs; the shared protocol
 contains only mechanism. [Wire format](WIRE-PROTOCOL.md) specifies every message and
 scalar component for independent clients. The server binds KeyValueProtocol.Family
-once on accept, retains wire version 1.0 and the existing bytes, and negotiates
-incompatible majors before authentication. Result materialization belongs to
+once on accept and retains its existing model payloads. The shared startup version advances
+to 2.0 for #1126's Documents projection change and rejects incompatible majors before
+authentication. Result materialization belongs to
 Database.KeyValuePair.Client. Transport listeners remain supplied through generic IDuplexConnectionListener.
 
 Payload offsets are zero-based and exclude the shared five-byte frame header. `Execute` (5)

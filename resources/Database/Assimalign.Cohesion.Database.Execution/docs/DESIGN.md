@@ -35,6 +35,21 @@ The public names are `DatabaseResult`, `DatabaseResultSet`, `DatabaseResultStatu
 or compatibility shims. Model-specific language results retain names such as `SqlQueryResult`,
 `DocumentQueryResult` and `GraphPathsQueryResult`.
 
+## DatabaseRow MISSING exposure (#1126)
+
+MISSING is an optional capability (owner ruling, 2026-10-16). The protected constructor's
+`supportsMissing = false` value backs non-virtual `SupportsMissing`. The non-virtual
+`IsMissing(int)` throws NotSupportedException while unsupported, validates the ordinal,
+then calls protected virtual `IsMissingCore(int)`. The default core throws too, following
+database-area.md rules 4 and 6. This capability is the authorized shared boundary change;
+no public sentinel or model-specific type enters Execution.
+
+Only embedded and client Documents rows opt in. Their MISSING fields have IsMissing true,
+IsNull false, and GetValue null. Explicit NULL has IsMissing false and IsNull true. Every
+other model retains SupportsMissing false and IsMissing throws; it does not return false.
+Existing row members' NVI conversion remains #1264's work. Deviates from interface-first
+(database-area.md): the existing abstract row family remains the concrete-first seam.
+
 ## Session capabilities
 
 The capability bases live in the root `Database` assembly, which references this package:

@@ -10,7 +10,7 @@ Model packages own their message identifiers and payload codecs.
 - ProtocolFrameReader / ProtocolFrameWriter: the abstract frame reader and writer; their
   `Create` factories return the raw stream reader and writer for mechanism and diagnostics.
 - ProtocolPayload: big-endian integers and length-prefixed UTF-8 string primitives.
-- ProtocolVersion: deployed-compatible version 1.0 negotiation.
+- ProtocolVersion: version 2.0 startup negotiation, rejecting incompatible majors before authentication.
 - ProtocolErrorCode / ProtocolException: shared error taxonomy and framing failures.
 
 This child root has no dependencies on models, the area root, or transports. The

@@ -20,7 +20,7 @@ public enum DocumentProtocolMessageType : byte
     Complete = 66,
     /// <summary>Column names and types preceding query results.</summary>
     ResultHeader = 67,
-    /// <summary>One positional projection row as a JSON array.</summary>
+    /// <summary>Reserved identifier for retired projection arrays; not used by OQL execution.</summary>
     ResultRow = 68,
     /// <summary>A document or collection operation.</summary>
     Command = 69,
