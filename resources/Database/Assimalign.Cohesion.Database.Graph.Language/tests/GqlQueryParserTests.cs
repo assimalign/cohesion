@@ -12,6 +12,8 @@ public class GqlQueryParserTests
 {
     [Theory]
     [InlineData("MATCH (a:Person) RETURN a")]
+    [InlineData("OPTIONAL MATCH (a) RETURN a")]
+    [InlineData("MATCH (a) MATCH (b) RETURN a, b")]
     [InlineData("MATCH (a) RETURN DISTINCT a.name")]
     [InlineData("MATCH (a) RETURN ALL a.name")]
     [InlineData("MATCH (a) RETURN *")]
@@ -92,7 +94,6 @@ public class GqlQueryParserTests
     }
 
     [Theory]
-    [InlineData("OPTIONAL MATCH (a) RETURN a")]
     [InlineData("MANDATORY MATCH (a) RETURN a")]
     [InlineData("MATCH (a) RETURN a ORDER BY a.age")]
     [InlineData("MATCH (a) RETURN a LIMIT 5")]

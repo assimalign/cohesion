@@ -257,8 +257,8 @@ public sealed class GraphParameterTests
             var parameters = new Dictionary<string, object?> { ["name"] = name };
             var plan = await database.RunAsync(session, operation => ValueTask.FromResult(
                 new GraphPlanner(database, operation.Context.Snapshot).Plan(statement.GqlExpression, parameters)), CancellationToken.None);
-            plan.Matches.Single().Anchor.Property.ShouldBe(name is null ? null : "name");
-            plan.Matches.Single().Anchor.Value.ShouldBe(name);
+            plan.MatchClauses.Single().Paths.Single().Anchor.Property.ShouldBe(name is null ? null : "name");
+            plan.MatchClauses.Single().Paths.Single().Anchor.Value.ShouldBe(name);
             var rows = await RowsAsync(session, source, parameters);
             rows.Count.ShouldBe(name is null ? 0 : 1);
             if (name is not null) { rows[0][0].ShouldBe(name); }

@@ -80,6 +80,23 @@ public sealed class GraphExplainTests
         foreach (var type in types) { GraphPlanner.DescribeOperator(RuntimeHelpers.GetUninitializedObject(type)).ShouldNotBeNullOrEmpty(type.Name); }
     }
 
+    [Theory(DisplayName = "Cohesion Test [Graph] - EXPLAIN: multiple MATCH clauses describe ordered joins and optional null extension")]
+    [InlineData("EXPLAIN MATCH (a) OPTIONAL MATCH (a)->(b) WHERE b.x = 1 MATCH (b) RETURN a", "Match,OptionalMatch,Match")]
+    [InlineData("EXPLAIN OPTIONAL MATCH (a) RETURN a", "OptionalMatch")]
+    public async Task Execute_MatchClauses_ShouldDescribeJoinBoundariesAsync(string source, string operators)
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create("optional-explain", new());
+        var database = await engine.CreateDatabaseAsync("optional", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        // Act
+        var rows = await RowsAsync(session, source);
+        // Assert
+        rows.Where(row => Equals(row[1], 0) && row[2] is "Match" or "OptionalMatch").Select(row => row[2])
+            .ShouldBe(operators.Split(','));
+        rows.ShouldContain(row => Equals(row[2], "OptionalMatch") && ((string)row[5]!).Contains("nulls=", StringComparison.Ordinal));
+    }
+
     private static async Task<List<object?[]>> RowsAsync(GraphDatabaseSession session, string source)
     {
         await using var result = (await session.ExecuteAsync(source, cancellationToken: CancellationToken.None)).ShouldBeAssignableTo<DatabaseResultSet>();

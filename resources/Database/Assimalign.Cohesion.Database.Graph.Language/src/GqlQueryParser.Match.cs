@@ -8,18 +8,21 @@ public sealed partial class GqlQueryParser
     private GqlQueryExpression ParseQuery()
     {
         var start = Current;
-        IReadOnlyList<GqlPathPattern> matches = [];
+        List<GqlMatchClause> matches = [];
         IReadOnlyList<GqlPathPattern> creates = [];
-        GqlExpression? predicate = null;
         List<string> deletes = [];
         List<GqlProjection> projections = [];
         bool detach = false;
         bool returnStar = false;
         var quantifier = GqlSetQuantifier.All;
-        if (Take("MATCH"))
+        while (!Failed && (Is("MATCH") || Is("OPTIONAL")))
         {
-            matches = ParsePatterns(allowPathVariable: true);
+            bool optional = Take("OPTIONAL");
+            Expect("MATCH");
+            var paths = Failed ? [] : ParsePatterns(allowPathVariable: true);
+            GqlExpression? predicate = null;
             if (!Failed && Take("WHERE")) { predicate = ParsePredicate(); }
+            matches.Add(new GqlMatchClause(paths, predicate, optional));
         }
         if (!Failed && (Take("CREATE") || Take("INSERT"))) { creates = ParsePatterns(); }
         else if (!Failed && (Is("DETACH") || Is("DELETE")))
@@ -33,7 +36,7 @@ public sealed partial class GqlQueryParser
             if (Take("DISTINCT")) { quantifier = GqlSetQuantifier.Distinct; }
             else { Take("ALL"); }
             returnStar = Take(TokenType.Asterisk);
-            if (returnStar && !HasNamedBinding(matches) && !HasNamedBinding(creates))
+            if (returnStar && !matches.Exists(clause => HasNamedBinding(clause.Paths)) && !HasNamedBinding(creates))
             { Error("GQL0002", "RETURN * requires at least one named binding.", Previous); }
             if (!returnStar)
             {
@@ -56,7 +59,7 @@ public sealed partial class GqlQueryParser
         {
             Unsupported("RETURN AFTER DELETE", Previous);
         }
-        return new GqlQueryExpression(matches, predicate, creates, deletes.AsReadOnly(), detach,
+        return new GqlQueryExpression(matches.AsReadOnly(), creates, deletes.AsReadOnly(), detach,
             projections.AsReadOnly(), Span(start, Previous)) { SetQuantifier = quantifier, ReturnStar = returnStar };
     }
 

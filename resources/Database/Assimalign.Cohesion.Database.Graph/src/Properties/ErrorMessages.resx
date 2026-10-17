@@ -22,5 +22,9 @@
   <data name="ProjectionUnsupported" xml:space="preserve"><value>Unsupported graph projection.</value></data>
   <data name="DuplicateResultColumn" xml:space="preserve"><value>Result column '{0}' is declared more than once.</value></data>
   <data name="PathProjectionRequired" xml:space="preserve"><value>Path execution requires a read-only MATCH with exactly one path or bound entity projection.</value></data>
+  <data name="OptionalPathProjection" xml:space="preserve"><value>Path execution cannot project a variable bound only by OPTIONAL MATCH.</value></data>
+  <data name="MatchClausePathsRequired" xml:space="preserve"><value>A matching clause requires a non-null, non-empty path list.</value></data>
+  <data name="MatchLimitExceeded" xml:space="preserve"><value>The query exceeded 100000 path matches.</value></data>
+  <data name="InsertEndpointInvalid" xml:space="preserve"><value>An inserted endpoint must be a non-null node compatible with its existing binding.</value></data>
   <data name="ExecuteScalarRequired" xml:space="preserve"><value>Execute accepts scalar projections. Use ExecutePaths with a read-only MATCH to return a node, relationship, or path.</value></data>
 </root>

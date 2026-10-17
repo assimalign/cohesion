@@ -4,6 +4,29 @@ The target is ISO/IEC 39075:2024 with the subset and extensions recorded in [DES
 The supported-clause matrix there is authoritative; RETURN projects value expressions,
 named bindings or all bindings with `*`.
 
+## MATCH and OPTIONAL MATCH
+
+MATCH and OPTIONAL MATCH clauses execute in source order. Each WHERE belongs to its own
+clause and may reference variables introduced by that clause or earlier ones. MATCH keeps
+matching rows; OPTIONAL MATCH also keeps each unmatched input row, preserving earlier bindings
+and binding every newly declared node, relationship and named path to NULL. Its WHERE filters
+inside that optional match. A leading optional starts from one empty binding, so an empty match
+returns one all-null row. Comma-separated paths belong to one clause and succeed or null-extend
+together. Trail uniqueness is per path; a later clause may reuse a relationship.
+
+A NULL binding in a later pattern matches nothing. Property access, labeled predicates and
+ordinary comparisons over NULL yield NULL/UNKNOWN; IS NULL is TRUE. RETURN expressions and
+DISTINCT reuse the existing exact numeric and NULL rules. DELETE ignores NULL and counts only
+entities actually deleted. INSERT with a NULL endpoint fails with COHDBG003 and rolls back.
+Unknown optional labels/types yield NULL bindings and read-only COHDBG010/COHDBG011 warnings.
+
+ExecutePaths rejects a projected variable bound only by optional clauses with COHDBG001 while
+planning, even when every row would match. A mandatory binding remains projectable. Scalar
+Execute already represents NULL without a wire change. EXPLAIN describes ordered clause joins
+and optional filters/null extension. ISO `OPTIONAL { ... }` and `OPTIONAL ( ... )` block operands
+remain recognized but outside T1 (COHDBL001 naming OPTIONAL BLOCK OPERAND). MANDATORY MATCH
+remains COHDBL001. MATCH after INSERT or DELETE remains GQL0002 until statement composition.
+
 ## RETURN
 
 RETURN accepts optional DISTINCT/ALL and either `*` or comma-separated expressions with optional

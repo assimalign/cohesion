@@ -306,6 +306,32 @@ rejected before it reaches the session and changes nothing. Each refusal is an `
 
 ## Planning, execution and bounds
 
+MATCH and OPTIONAL MATCH execute as source-ordered joins over a nullable binding table. Each
+`GraphMatchClausePlan` records its paths, clause-local predicate, optional flag, newly declared
+variables and unsatisfiable flag. The planner validates WHERE immediately after that clause's
+declarations and chooses anchors from that clause's predicate only. Each input row runs all paths
+of a clause, then its WHERE; mandatory joins discard failures and optional joins preserve exactly
+one row with explicit NULL entries for all new variables when none survives. The initial table has
+one empty row, including for a leading OPTIONAL MATCH. Earlier variables are preserved, and
+trail uniqueness resets for every path. Both the 100,000 materialized-binding limit and the shared
+1,000,000 candidate-expansion budget apply across clauses. A null-bound node or relationship
+refuses a later pattern before reading candidates, including when it is not the selected anchor.
+
+Property access and RETURN expressions over null-extended variables yield NULL using #1140/#1141's
+existing three-valued and exact numeric rules. DELETE ignores NULL and does not count it. INSERT
+requires a non-null node endpoint (COHDBG003); statement rollback removes any prior writes, and a
+failure aborts an explicit transaction. Null extension itself succeeds and leaves transactions active.
+ExecutePaths rejects a variable bound only by optional clauses with COHDBG001 during planning,
+even when every row would match, because a Path frame requires a first node. A variable bound or
+subsequently constrained by a mandatory clause is projectable. These implement the owner's path
+default. The old GqlQueryExpression constructor/view is retained; the engine reads MatchClauses.
+No catalog format or wire encoding changes are involved.
+
+Behavior consulted, no code copied, relative to `C:/Source/repos/neo4j/neo4j`:
+`community/cypher/interpreted-runtime/src/main/scala/org/neo4j/cypher/internal/runtime/interpreted/pipes/OptionalExpandAllPipe.scala:54-68`
+null-extends an empty expansion or null source, and `:174` filters candidates before fallback;
+`OptionalPipe.scala:30-42` returns one row with explicit null bindings on empty input.
+
 RETURN (#1141) evaluates the same expressions as WHERE after matching and mutation. A standalone
 RETURN starts with the executor's one empty binding. The planner validates every projection and
 parameter before data access, expands star in first-declaration order (path assignment, then
@@ -561,8 +587,8 @@ yet keeps the caller's transaction and its earlier writes.
   `CheckForUnresolvedTokens` reports every unresolved `LabelName` and `RelTypeName` in the statement,
   under negation and disjunction included (`CheckForUnresolvedTokens.scala:61-88`), into a set keyed
   by name and source position (`InternalNotificationLogger.scala:43-49`). Graph pattern names carry
-  no source position, so a name is reported once per kind, at its first mention: the patterns' names
-  path by path (each path's labels, then its relationship types), then the `WHERE` clause's. A
+  no source position, so a name is reported once per kind, at its first mention, clause by clause:
+  each clause's patterns path by path (labels, then relationship types), then its `WHERE`. A
   warning for a name first met in a labeled predicate carries that predicate's span
   (`DiagnosticLocation.Absolute`); a pattern name's has none. `DatabaseResult.Diagnostics` stays null
   for a statement with nothing to report. The warning travels on a row result (`DatabaseResultSet`), on
@@ -587,9 +613,10 @@ yet keeps the caller's transaction and its earlier writes.
   forms alike, planning a label scan from the selections' `HasLabels` predicates
   (`cypher-planner/.../steps/leafplanner/labelScanLeafPlanner.scala:45`). A name under `!`, `|` or
   `IS NOT LABELED` can be true for an element without it, so it leaves the plan as it is. The flag
-  empties the whole statement, which holds only because every `MATCH` in the subset is mandatory:
-  when `gql-optional-match` lands, an optional pattern that requires an unknown name binds nulls
-  instead and must not set it.
+  empties the whole statement only for a mandatory clause. An unsatisfiable optional clause sets
+  its local flag, reads no candidates and binds its new variables to NULL. Its read-only warnings
+  still travel with scalar and path completion; required names in a later mandatory clause may
+  still empty the statement.
 - **Schema reads.** `GraphSchema.GetIndexesAsync(label)` returns `GraphSchemaResult<GraphIndexMetadata>`,
   a read-only list with a `Diagnostics` list: for an unknown label, no indexes and the same
   `COHDBG010` warning. Neo4j's schema API returns an empty list for a label token that does not exist
@@ -619,6 +646,7 @@ with both count fields null in T1.
 | Operators | Meaning |
 | --- | --- |
 | `Match`, `Insert`, `Delete`, `DetachDelete` | Statement intent; details include residual filtering and an unsatisfiable-match flag |
+| `Match`, `OptionalMatch` below the root | Ordered matching clauses when there are several clauses or an optional; details include the local filter, unsatisfiable flag and new bindings null-extended on optional failure |
 | `ExpandPath` | One chosen finite MATCH pattern |
 | `NodeScan`, `LabelScan`, `IndexSeek` | Its actual anchor node ordinal, label, property and equality value; a seek reports the catalog index name (or physical label/property identity if catalog metadata is absent) |
 | `Expand` | One relationship expansion, in executor order: right of the anchor, then left; includes edge ordinal, direction and type/label expression |

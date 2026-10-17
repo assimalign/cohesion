@@ -12,7 +12,7 @@ namespace Assimalign.Cohesion.Database.Graph;
 /// A named path retains traversal order; a node becomes a one-node path, and a relationship becomes
 /// a path containing its source and target nodes in stored direction. DISTINCT compares graph identity;
 /// RETURN * is accepted when exactly one named binding is in scope. Computed and multiple projections,
-/// catalog statements, and mutations are rejected before execution.
+/// catalog statements, mutations, and variables bound only by optional clauses are rejected while planning.
 /// </remarks>
 public sealed class GraphPathsQueryRequest : GraphRequest
 {

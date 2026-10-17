@@ -146,10 +146,10 @@ public sealed class GqlLabelDirectionExecutionTests
         await GraphSchema.Open(database, session).CreateIndexAsync("A", "by_k", "k");
 
         // Act
-        var disjunction = (await PlanAsync(database, session, "MATCH (n:A|B {k: 1}) RETURN n.name")).Matches.Single().Anchor;
-        var negation = (await PlanAsync(database, session, "MATCH (n:!A {k: 1}) RETURN n.name")).Matches.Single().Anchor;
-        var conjunction = (await PlanAsync(database, session, "MATCH (n:A&B {k: 1}) RETURN n.name")).Matches.Single().Anchor;
-        var predicate = (await PlanAsync(database, session, "MATCH (n) WHERE n:A AND n.k = 1 RETURN n.name")).Matches.Single().Anchor;
+        var disjunction = (await PlanAsync(database, session, "MATCH (n:A|B {k: 1}) RETURN n.name")).MatchClauses.Single().Paths.Single().Anchor;
+        var negation = (await PlanAsync(database, session, "MATCH (n:!A {k: 1}) RETURN n.name")).MatchClauses.Single().Paths.Single().Anchor;
+        var conjunction = (await PlanAsync(database, session, "MATCH (n:A&B {k: 1}) RETURN n.name")).MatchClauses.Single().Paths.Single().Anchor;
+        var predicate = (await PlanAsync(database, session, "MATCH (n) WHERE n:A AND n.k = 1 RETURN n.name")).MatchClauses.Single().Paths.Single().Anchor;
 
         // Assert
         disjunction.Property.ShouldBeNull();

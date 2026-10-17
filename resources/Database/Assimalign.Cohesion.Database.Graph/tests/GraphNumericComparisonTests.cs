@@ -33,7 +33,7 @@ public sealed class GraphNumericComparisonTests
     public void Evaluate_NumericPairs_ShouldAgreeWithDistinctAndHashing()
     {
         // Arrange
-        var bindings = new Dictionary<string, object>();
+        var bindings = new Dictionary<string, object?>();
         var comparer = GraphValueComparer.Instance;
 
         foreach (var (left, right, order) in _pairs)

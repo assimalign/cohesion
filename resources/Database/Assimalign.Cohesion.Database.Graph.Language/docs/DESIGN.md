@@ -87,13 +87,19 @@ flowchart LR
     Executor["Graph executor"] --> Planner
 ```
 
-`GqlQueryExpression` carries match paths, an optional predicate, insertion paths, deletion variables,
+`GqlQueryExpression` carries ordered `GqlMatchClause(Paths, Predicate, Optional)` records, insertion paths, deletion variables,
 a detach flag, expression projections, a `GqlSetQuantifier` (ALL by default), `ReturnStar`, and an optional `GqlCatalogSurface` for dedicated metadata statements.
 Catalog statements cannot carry graph clauses. `GqlPathPattern.Variable` optionally names a MATCH
 path; it is null for anonymous paths and insertion paths. Every path holds one more node than relationship. Anonymous nodes
 and relationships have a null variable. Relationship directions are relative to consecutive pattern
 nodes; incoming arrows reverse that relationship's endpoints. A scalar property reference always
 contains a variable and exactly one property key; qualified database names have no AST representation.
+
+The engine reads only `MatchClauses`. The original constructor constructs one mandatory clause
+when paths or a predicate are supplied, and none for an empty match without a predicate. `Matches`
+and `Predicate` expose the single mandatory clause only, returning empty/null for any optional or
+multi-clause shape. This implements the owner's AST default for hand-built statements; malformed
+clause/path lists are refused by the planner with COHDBG001.
 
 A node or relationship pattern's label specification (`:` or `IS`, then a label expression) is the
 init-only `LabelExpression`, a `GqlLabelExpression` tree of five sealed records: `GqlLabelName`,
@@ -124,8 +130,9 @@ The builtin-function table is empty because the executor implements no functions
 | Clause | Accepted subset | Execution |
 | --- | --- | --- |
 | `MATCH` | Comma-separated finite node/relationship chains; optional `variable =` path assignment, label expressions, scalar literal/parameter property maps; every ISO full and abbreviated edge except the tilde forms | Planner chooses an indexed anchor when available; executor matches bounded relationship-unique trails and binds named paths in traversal order |
+| `OPTIONAL MATCH` | The same graph patterns and clause-local WHERE, including a leading optional or several consecutive matching clauses | Left join against each running binding; an unmatched clause preserves that row and binds its new variables to NULL |
 | `WHERE` | Boolean and scalar expressions: comparisons, labels, AND/OR/XOR/NOT, IS null/truth tests, arithmetic, concatenation, IN lists and string predicates | Keeps TRUE only; see [DIALECT.md](DIALECT.md) and scalar expressions below |
-| `EXPLAIN` | One MATCH/RETURN, INSERT/CREATE, or MATCH [DETACH] DELETE statement | Shared description rows without executing any read expansion or write; Cohesion extension |
+| `EXPLAIN` | One query with ordered MATCH/OPTIONAL MATCH clauses and RETURN, INSERT/CREATE, or [DETACH] DELETE | Shared description rows without executing any read expansion or write; Cohesion extension |
 | `RETURN` | Optional DISTINCT/ALL, either `*` or value expressions with optional `AS` aliases; also standalone | Projects expressions, expands named bindings in declaration order, then eliminates duplicate tuples for DISTINCT; path requests require one entity or path column |
 | `INSERT` | Scalar literal/parameter node/path insertion, optionally following a match; a node takes a label conjunction (`:A&B`, `:A:B`), a relationship one type and a directed edge (`-[:T]->`, `<-[:T]-`) | Inserts nodes and relationships transactionally |
 | `CREATE` | Same insertion grammar as `INSERT`; compatibility extension | Same transactional insertion path |
@@ -152,7 +159,7 @@ The grammar is intentionally finite:
 
 ```text
 statement    := (query | EXPLAIN query | catalog) [';']
-query        := [ MATCH match-paths [ WHERE predicate ] ]
+query        := ( [OPTIONAL] MATCH match-paths [ WHERE predicate ] )*
                 ( (INSERT | CREATE) paths [ RETURN projections ]
                 | [ DETACH ] DELETE variables
                 | RETURN projections )
@@ -195,7 +202,8 @@ it introduce a label expression, so it remains usable as a name. `!` negates one
 writes it, so `!!A` is `GQL0002` and `!(!A)` parses. Each `(...)*` repetition in `label-spec`,
 `label-expr`, `label-term` builds one n-ary label node; Boolean runs build n-ary logical nodes. Scalar groups, signs, NOT and IN lists recurse with stack checks.
 
-A mutation or RETURN can start without `MATCH`; a deletion must bind variables through `MATCH`.
+A mutation or RETURN can start without `MATCH`; a deletion must bind variables through MATCH or
+OPTIONAL MATCH. A query may start with OPTIONAL MATCH.
 Standalone RETURN evaluates against one empty binding, so `RETURN 1 + 1 AS two` returns one row.
 Named assignment is a MATCH-only construct: `INSERT p = (...)` and `CREATE p = (...)` are
 unsupported. `MATCH p = (a)-[r:TYPE]->(b) RETURN p` captures the entire matched trail, including
@@ -209,6 +217,27 @@ bounds parentheses and negations, as in Neo4j (see "Chain length and nesting" be
 also imposes a materialized-binding limit, documented in the Graph engine design. Quantified paths
 are unsupported, so cycles cannot cause unbounded repetition of a path pattern. The executor's
 trail rule permits repeated nodes but forbids repeated relationship identities within one path.
+
+Matching clauses execute in source order; WHERE sees variables bound by its own or earlier clauses,
+never later clauses (COHDBG001). An optional WHERE filters candidate matches before null extension;
+comma-separated paths within that clause succeed together. One empty binding precedes the first
+clause, so an unmatched leading optional yields one row. New variables have explicit NULL entries,
+including named paths; existing bindings are retained. A NULL-bound variable in a later pattern
+matches nothing without a scan, property access is NULL, and labeled predicates are UNKNOWN.
+DELETE of NULL writes nothing and is not counted; INSERT with a NULL endpoint is COHDBG003.
+Trail uniqueness resets per path, including across clauses. ExecutePaths rejects an optional-only
+projected variable at plan time (COHDBG001), independently of the data; a mandatory-bound variable
+is safe. Scalar NULLs use the existing wire encoding.
+
+ISO 14.4's `OPTIONAL { ... }` and `OPTIONAL ( ... )` block operands remain recognized outside T1.
+Their one COHDBL001 names OPTIONAL BLOCK OPERAND, including after WHERE. MANDATORY MATCH remains
+unsupported. MATCH after INSERT or DELETE is GQL0002 until #1145 adds statement stages.
+Behavior consulted, no code copied, relative to `C:/Source/repos/neo4j/neo4j`:
+`community/cypher/interpreted-runtime/src/main/scala/org/neo4j/cypher/internal/runtime/interpreted/pipes/OptionalExpandAllPipe.scala:54-68`
+keeps a row with nulls for an empty expansion or null source; `:174` filters matches to TRUE before
+that fallback. `OptionalPipe.scala:30-42` constructs explicit null entries and one row on empty input.
+`GqlOptionalMatchParserTests`, the keyword corpus, `GqlProfileExecutionTests`, `GqlOptionalMatchTests`
+and `GraphOptionalMatchWireTests` pin these semantics and rejected forms.
 
 ### Dedicated catalog statement choice (C2)
 
@@ -312,7 +341,7 @@ the keyword-disposition corpus, `GqlProfileExecutionTests`, `GraphReturnTests` a
 
 | Code | Meaning |
 | --- | --- |
-| `COHDBL001` | Recognized construct outside the executable profile, reported once at its own span: optional matching, procedures, functions, substituted/whole-map parameters, collection literals, map projections, path quantifiers, ordering, set operations, NEXT/WITH, server/session scope, undirected (tilde) edges, path mode and path search prefixes, `NODETACH DELETE`, and `MERGE` |
+| `COHDBL001` | Recognized construct outside the executable profile, reported once at its own span: OPTIONAL block operands, MANDATORY MATCH, procedures, functions, substituted/whole-map parameters, collection literals, map projections, path quantifiers, ordering, set operations, NEXT/WITH, server/session scope, undirected (tilde) edges, path mode and path search prefixes, `NODETACH DELETE`, and `MERGE` |
 | `GQL0001` | Empty statement |
 | `GQL0002` | Malformed supported syntax, invalid statement composition, leftover tokens, or a character GQL does not use (`?`, `#`, `^`, ```, ...) |
 | `GQL0003` | Unterminated string, quoted name, or block comment |
@@ -440,7 +469,7 @@ node takes a pure conjunction (`:A`, `:A&B`, `:A:B`) and may introduce new label
 `%` select nodes and cannot label a new one, so they are `COHDBG001`. An inserted relationship
 needs one type. A labeled predicate (`n IS LABELED A|B`, `n IS NOT LABELED A`, `n:A|B`) resolves
 its names against the catalog of the variable's kind, a path variable is `COHDBG003`, and an
-unbound one `COHDBG001`; when gql-optional-match lands, a variable without a binding yields
+unbound one `COHDBG001`; a variable null-extended by OPTIONAL MATCH yields
 UNKNOWN. The #1140 conformance corpus adds the `NOT`/`OR` combinations
 with labeled predicates. A `:` directly after an element variable in a predicate is the labeled
 predicate; an operand that begins with `:` keeps shared-parameters' coded `:name` rejection, and

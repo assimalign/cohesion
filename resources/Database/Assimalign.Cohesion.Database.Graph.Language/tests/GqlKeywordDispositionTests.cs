@@ -24,6 +24,7 @@ public sealed class GqlKeywordDispositionTests
     {
         // Supported clauses
         ["MATCH"] = Parses("MATCH (a) RETURN a"),
+        ["OPTIONAL"] = Parses("OPTIONAL MATCH (a) RETURN a"),
         ["EXPLAIN"] = Parses("EXPLAIN MATCH (a) RETURN a"),
         ["RETURN"] = Parses("MATCH (a) RETURN a"),
         ["AS"] = Parses("MATCH (a) RETURN a.x AS y"),
@@ -46,7 +47,6 @@ public sealed class GqlKeywordDispositionTests
         ["LABEL"] = Parses("MATCH (a) RETURN a.label"),
         ["PATH"] = Parses("MATCH (a:PATH) RETURN a.path"),
         // Clauses, predicates and expressions outside the executable subset
-        ["OPTIONAL"] = Rejects("OPTIONAL MATCH (a) RETURN a", GqlClauses.OptionalMatch),
         ["MANDATORY"] = Rejects("MANDATORY MATCH (a) RETURN a", GqlClauses.MandatoryMatch),
         ["WITH"] = Rejects("MATCH (a) WITH a RETURN a", "WITH"),
         ["SET"] = Rejects("MATCH (a) SET a.x = 1", "SET"),

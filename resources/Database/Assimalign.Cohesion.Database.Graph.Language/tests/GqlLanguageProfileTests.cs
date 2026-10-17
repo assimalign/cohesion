@@ -21,6 +21,7 @@ public class GqlLanguageProfileTests
 
     [Theory]
     [InlineData(GqlClauses.Match)]
+    [InlineData(GqlClauses.OptionalMatch)]
     [InlineData(GqlClauses.Explain)]
     [InlineData(GqlClauses.Return)]
     [InlineData(GqlClauses.Create)]
@@ -60,13 +61,12 @@ public class GqlLanguageProfileTests
     public void Profile_AdvertisesOnlyExecutableClauses()
     {
         GqlLanguageProfile.Instance.Clauses.ShouldBe([
-            GqlClauses.Match, GqlClauses.Explain, GqlClauses.Return, GqlClauses.Create, GqlClauses.Insert,
+            GqlClauses.Match, GqlClauses.OptionalMatch, GqlClauses.Explain, GqlClauses.Return, GqlClauses.Create, GqlClauses.Insert,
             GqlClauses.Delete, GqlClauses.DetachDelete, GqlClauses.Where, GqlClauses.Show,
             GqlClauses.LabelExpression]);
     }
 
     [Theory]
-    [InlineData(GqlClauses.OptionalMatch)]
     [InlineData(GqlClauses.MandatoryMatch)]
     [InlineData(GqlClauses.Merge)]
     [InlineData(GqlClauses.OrderBy)]
