@@ -48,7 +48,10 @@ Other model clients do not depend on this package.
 
 LEFT null values, N-way, CROSS, comma and USING results use the existing SQL frames and
 production materializer. No nullability field or frame-writing change is introduced.
-Wire tests pin exact values and multiplicities and retain RIGHT/FULL/NATURAL exclusions.
+Wire tests run every join case over InMemory and loopback TCP, pin exact values and
+multiplicities, and retain RIGHT/FULL/NATURAL and qualified-wildcard exclusions. USING
+wildcard alias/ordinal ordering, decimal common-type values in both input orders, qualified
+types and cleared character lengths use the same production frames and materializer.
 
 ## System relation joins (#1106)
 
