@@ -281,7 +281,10 @@ public sealed class OqlExecutionConformanceTests
         {
             for (int ordinal = 0; ordinal < row.FieldCount; ordinal++)
             {
-                row.IsMissing(ordinal).ShouldBe(missing?.Contains((actual.Count, ordinal)) ?? false, context);
+                // MISSING is an optional row capability (#1126): a row that cannot report it, such as
+                // an EXPLAIN description row (#1104), has every field present.
+                bool isMissing = row.SupportsMissing && row.IsMissing(ordinal);
+                isMissing.ShouldBe(missing?.Contains((actual.Count, ordinal)) ?? false, context);
             }
             actual.Add(Enumerable.Range(0, rows.Columns.Count).Select(row.GetValue).ToArray());
         }
