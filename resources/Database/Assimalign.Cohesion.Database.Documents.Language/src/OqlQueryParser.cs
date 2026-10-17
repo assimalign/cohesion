@@ -230,6 +230,12 @@ public sealed partial class OqlQueryParser : QueryParser
                     openQuantifiers++;
                     index += 2;
                 }
+                else if (value == "CASE")
+                {
+                    // CASE shares END with quantified predicates. Its END must not expose
+                    // the rest of the unsupported predicate to independent capability scans.
+                    openQuantifiers++;
+                }
                 else if (value == "END")
                 {
                     openQuantifiers--;
@@ -293,6 +299,12 @@ public sealed partial class OqlQueryParser : QueryParser
             {
                 AddUnsupported(result, "EXISTS", token);
                 index += 2;
+                continue;
+            }
+
+            if (value == "IN" && index + 1 < _tokens.Count && _tokens[index + 1].Type != TokenType.LeftParen)
+            {
+                AddUnsupported(result, "IN array form", token);
                 continue;
             }
 
@@ -379,7 +391,7 @@ public sealed partial class OqlQueryParser : QueryParser
             TokenType.RightParen or TokenType.RightBracket or TokenType.RightBrace or TokenType.Parameter or
             TokenType.Integer or TokenType.Float or TokenType.String => true,
             TokenType.Keyword => index > 0 && _tokens[index - 1].Type == TokenType.Dot ||
-                token.Text.ToUpperInvariant() is "NULL" or "MISSING" or "NIL" or "TRUE" or "FALSE" or "VALUED" or "ASC" or "DESC",
+                token.Text.ToUpperInvariant() is "NULL" or "MISSING" or "NIL" or "TRUE" or "FALSE" or "VALUED" or "END" or "ASC" or "DESC",
             _ => false,
         };
     }

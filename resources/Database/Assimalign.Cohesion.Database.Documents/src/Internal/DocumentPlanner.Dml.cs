@@ -51,6 +51,9 @@ internal sealed partial class DocumentPlanner
     {
         switch (expression)
         {
+            case OqlInExpression or OqlBetweenExpression or OqlLikeExpression or OqlCaseExpression:
+                foreach (var child in PredicateChildren(expression)) { ValidateMetadata(child, alias, storedSource); }
+                break;
             case OqlMetaExpression meta:
                 if (!storedSource || meta.Member is not ("id" or "version") || meta.Arguments.Count > 1 ||
                     meta.Arguments.Count == 1 && (alias is null || meta.Arguments[0] is not OqlPathExpression { Segments.Count: 1 } path ||

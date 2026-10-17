@@ -15,6 +15,50 @@ namespace Assimalign.Cohesion.Database.Documents.Client.Tests;
 
 public sealed class DocumentClientWireTests
 {
+    [Theory(DisplayName = "Cohesion Test [Documents.Client] - Advertised predicates preserve in-process rows over both transports")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task QueryAsync_AdvertisedPredicates_ShouldPreserveConformanceRowsAsync(bool tcp)
+    {
+        // Arrange
+        await using var harness = await DocumentClientTestHarness.StartAsync(tcp);
+        await using var connection = await harness.Client.ConnectAsync(harness.Token);
+        await connection.CreateCollectionAsync("items", harness.Token);
+        await connection.PutAsync("items", "a", "{\"name\":\"alpha\",\"category\":\"a\",\"amount\":2}"u8.ToArray(), cancellationToken: harness.Token);
+        await connection.PutAsync("items", "b", "{\"name\":\"beta\",\"category\":\"a\",\"amount\":6}"u8.ToArray(), cancellationToken: harness.Token);
+        await connection.PutAsync("items", "c", "{\"name\":\"gamma\",\"category\":\"b\",\"amount\":4}"u8.ToArray(), cancellationToken: harness.Token);
+        await connection.PutAsync("items", "d", "{\"name\":\"delta\",\"category\":\"a\",\"amount\":null}"u8.ToArray(), cancellationToken: harness.Token);
+        (string Query, object?[][] Rows)[] cases =
+        [
+            ("SELECT name FROM items WHERE category IN ('b', 'z')", [["gamma"]]),
+            ("SELECT name FROM items WHERE amount NOT BETWEEN 3 AND 5", [["alpha"], ["beta"]]),
+            ("SELECT name FROM items WHERE name LIKE '%ta'", [["beta"], ["delta"]]),
+            ("SELECT name FROM items WHERE name LIKE 'b_ta' ESCAPE '!'", [["beta"]]),
+            ("SELECT CASE amount WHEN 2 THEN 'two' ELSE 'other' END AS kind FROM items", [["two"], ["other"], ["other"], ["other"]]),
+            ("SELECT name, CASE WHEN amount > 3 THEN 'big' WHEN amount IS NULL THEN 'none' ELSE 'small' END AS size FROM items",
+                [["alpha", "small"], ["beta", "big"], ["gamma", "big"], ["delta", "none"]]),
+            ("SELECT CASE WHEN amount > 3 THEN 'big' ELSE 'small' END AS size, COUNT(*) AS n FROM items GROUP BY CASE WHEN amount > 3 THEN 'big' ELSE 'small' END",
+                [["big", 2m], ["small", 2m]]),
+            ("SELECT SUM(CASE WHEN amount > 3 THEN 1 ELSE 0 END) AS big FROM items", [[2m]]),
+        ];
+        // Act / Assert
+        foreach (var (query, expected) in cases)
+        {
+            var rows = await connection.QueryAsync(query, cancellationToken: harness.Token);
+            rows.Count.ShouldBe(expected.Length, query);
+            for (int i = 0; i < expected.Length; i++) { rows[i].ToArray().ShouldBe(expected[i], query); }
+        }
+        var unknowns = await connection.QueryAsync("SELECT MISSING IN (1) AS i, 0 BETWEEN 1 AND MISSING AS b, NULL LIKE MISSING AS l, CASE MISSING WHEN 1 THEN 2 END AS c FROM items WHERE name = 'alpha'", cancellationToken: harness.Token);
+        var row = unknowns.ShouldHaveSingleItem();
+        for (int i = 0; i < 3; i++) { row.IsMissing(i).ShouldBeTrue(); row.IsNull(i).ShouldBeFalse(); }
+        row.IsNull(3).ShouldBeTrue();
+        var failure = await Should.ThrowAsync<DocumentClientException>(async () =>
+            await connection.QueryAsync("SELECT name LIKE 'z\\' FROM items", cancellationToken: harness.Token));
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDOC013");
+        (await connection.QueryAsync("SELECT name FROM items WHERE name LIKE 'a%'", cancellationToken: harness.Token))
+            .ShouldHaveSingleItem()[0].ShouldBe("alpha");
+    }
+
     [Theory(DisplayName = "Cohesion Test [Documents.Client] - Object constructors resolve repeated names in SELECT and INSERT over both transports")]
     [InlineData(false)]
     [InlineData(true)]

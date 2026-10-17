@@ -11,7 +11,7 @@ using Assimalign.Cohesion.Database.Execution.Internal;
 
 namespace Assimalign.Cohesion.Database.Documents.Internal;
 
-internal sealed class DocumentExpressionEvaluator
+internal sealed partial class DocumentExpressionEvaluator
 {
     private readonly string? _alias;
     private readonly IReadOnlyDictionary<string, object?>? _parameters;
@@ -43,6 +43,10 @@ internal sealed class DocumentExpressionEvaluator
                 OqlPathExpression path => ReadPath(path, document.Content),
                 OqlUnaryExpression unary => Unary(unary.Operator, Evaluate(unary.Operand, document, group)),
                 OqlBinaryExpression binary => Binary(binary, document, group),
+                OqlInExpression membership => In(membership, document, group),
+                OqlBetweenExpression between => Between(between, document, group),
+                OqlLikeExpression like => Like(like, document, group),
+                OqlCaseExpression conditional => Case(conditional, document, group),
                 OqlCallExpression call => Aggregate(call, group ?? throw new DocumentPlanningException("COHDOC001", "An aggregate requires a grouping context.")),
                 _ => throw new DocumentPlanningException("COHDOC001", "The OQL expression is not executable."),
             };
@@ -67,6 +71,9 @@ internal sealed class DocumentExpressionEvaluator
         System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
         switch (expression)
         {
+            case OqlInExpression or OqlBetweenExpression or OqlLikeExpression or OqlCaseExpression:
+                foreach (var child in DocumentPlanner.PredicateChildren(expression)) { ValidateInputs(child); }
+                break;
             case OqlLiteralExpression { Value: JsonElement } literal:
                 _ = Evaluate(literal, default);
                 break;

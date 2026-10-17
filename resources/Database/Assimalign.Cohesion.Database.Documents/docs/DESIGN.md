@@ -253,6 +253,7 @@ Message contains no code prefix. The Documents family is `COHDOCnnn`:
 | `COHDOC010` | Collection already exists (PostgreSQL SQLSTATE 42P07) |
 | `COHDOC011` | Collection is owned by the declared schema and cannot be dropped through a session |
 | `COHDOC012` | INSERT found a duplicate document key visible in its transaction |
+| `COHDOC013` | Invalid evaluated LIKE escape or a pattern ending in its escape character |
 
 `DocumentQueryRequest.FromOql` and a directly constructed typed query with parse errors
 throw `DatabaseParseException` carrying the complete, ordered parser diagnostics and the
@@ -320,7 +321,7 @@ remain unsupported and return the existing `COHDBL001` parse diagnostic. Virtual
 The supported clause matrix lives in the language package's
 [DESIGN.md](../../Assimalign.Cohesion.Database.Documents.Language/docs/DESIGN.md).
 SELECT, FROM, WHERE, GROUP BY, HAVING, ORDER BY, CREATE COLLECTION, DROP COLLECTION,
-CREATE INDEX, DROP INDEX, INSERT and VALUES are executed. OQL retains its name with a SQL++ basis.
+CREATE INDEX, DROP INDEX, INSERT, VALUES, IN, BETWEEN, LIKE and CASE are executed. OQL retains its name with a SQL++ basis.
 Retired ODMG constructs are rejected positionally; nested queries, deferred document mutations
 and server statements are rejected with `COHDBL001`. The parser advertises only clauses this executor
 supports.
@@ -377,6 +378,64 @@ type is introduced. Catalog format remains **version 1**: its index key extracti
 skips MISSING, NULL and non-scalars, the encoded keys are unchanged, and no persisted value
 changes meaning. The SQL++ query semantics therefore require no catalog format bump.
 Unary NULL/MISSING/VALUED tests never select an index seek.
+
+### Predicate truth tables (#1127)
+
+The new predicates preserve the SQL++ unknown values through projection and filtering.
+T/F/N/M mean TRUE/FALSE/NULL/MISSING. NOT maps T/F/N/M to F/T/N/M.
+
+| IN left operand and list | Result |
+| --- | --- |
+| MISSING, any nonempty list | M |
+| NULL, any nonempty list (including MISSING) | N |
+| Valued, matching structural item, with any NULL/MISSING items | T |
+| Valued, no match, NULL item (with or without MISSING) | N |
+| Valued, no match, MISSING item without NULL | M |
+| Valued, no match, only valued items | F |
+
+These priorities follow [couchbase/query expression/coll_in.go:58-159](https://github.com/couchbase/query/blob/master/expression/coll_in.go#L58-L159).
+List expressions evaluate in source order before membership is selected, including when
+the left operand is unknown, matching [array construction](https://github.com/couchbase/query/blob/master/expression/cons_array.go#L43-L59).
+No scalar coercion occurs: `1 IN ('1')` is FALSE. A single JsonElement array parameter in
+`tags IN (@expected)` is one structural item. Empty value lists are syntax errors.
+
+| BETWEEN operands (input, lower, upper) | Result |
+| --- | --- |
+| Any MISSING, including alongside NULL or an excluding bound | M |
+| No MISSING, any NULL, including an excluding bound | N |
+| Valued, same scalar kind, inclusive ordered bounds contain input | T |
+| Other valued combinations, including reversed bounds | F |
+
+Unknown propagation follows [expression/comp_between.go:41-72](https://github.com/couchbase/query/blob/master/expression/comp_between.go#L41-L72).
+It is deliberately evaluated before the Boolean comparisons, so `0 BETWEEN 1 AND MISSING`
+is MISSING. The existing OQL same-scalar-kind range rule is retained for valued operands.
+
+| LIKE operands (input, pattern, escape) | Result |
+| --- | --- |
+| Any MISSING, including alongside NULL/non-string | M |
+| No MISSING, any non-string or NULL | N |
+| All strings with a valid escape and pattern | T or F from ordinal Unicode-scalar matching |
+
+This follows [expression/comp_like.go:90-116](https://github.com/couchbase/query/blob/master/expression/comp_like.go#L90-L116).
+Backslash is the default escape; an empty escape disables escaping. A malformed evaluated
+escape or trailing pattern escape raises COHDOC013 with a fixed message and source span.
+The trailing-escape refusal also follows PostgreSQL `85f55534e80`,
+`src/backend/utils/adt/like_match.c:353-356`; the matcher algorithm is independent.
+Matching backtracks only to the latest `%`, with no Regex or recursive suffix exploration.
+
+CASE takes the first matching WHEN and evaluates only its THEN. Unknown conditions do not
+select a branch; simple CASE compares with structural `=` and therefore NULL/MISSING do
+not match themselves. Without a match the result is ELSE or NULL, including for a MISSING
+simple operand. A selected THEN/ELSE may itself yield MISSING. See
+[expression/case_simple.go:77-108](https://github.com/couchbase/query/blob/master/expression/case_simple.go#L77-L108)
+and [expression/case_searched.go:72-98](https://github.com/couchbase/query/blob/master/expression/case_searched.go#L72-L98).
+This SQL++ fallthrough supersedes the older issue body's blanket MISSING propagation for
+simple CASE. Grouping equivalence and recursive input, metadata and aggregate validation
+include every new node and every branch, even when runtime evaluation skips it.
+
+Positive BETWEEN on an indexed path with constant bounds supplies inclusive lower and
+upper seeks; the full predicate remains a residual filter. IN and LIKE may scan. No plan
+record, catalog format, persisted query encoding, public interface or wire shape changes.
 
 ### Collection DDL (#1130)
 

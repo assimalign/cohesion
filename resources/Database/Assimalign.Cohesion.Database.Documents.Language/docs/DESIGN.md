@@ -47,6 +47,10 @@ Lexical recognition preserves the established vocabulary so rejected constructs 
 | `VALUES` | Yes | One or more parenthesized key/value pairs for INSERT |
 | `FROM` | Yes | Exactly one unqualified collection or reserved `COHESION_SCHEMA` source and optional iteration variable, with or without `AS` |
 | `WHERE` | Yes | Scalar comparison and Boolean document filtering |
+| `IN` | Yes | Structural membership in a nonempty parenthesized value list, optionally NOT |
+| `BETWEEN` | Yes | Inclusive same-scalar-kind range, optionally NOT |
+| `LIKE` | Yes | Ordinal string patterns, optionally NOT, with Unicode scalar wildcards and ESCAPE |
+| `CASE` | Yes | Searched and simple conditional expressions, including aggregate arguments |
 | `GROUP BY` | Yes | One or more grouping expressions |
 | `HAVING` | Yes | Group filtering, including aggregate calls |
 | `ORDER BY` | Yes | One or more expressions, each optionally `ASC` or `DESC` |
@@ -63,8 +67,8 @@ Lexical recognition preserves the established vocabulary so rejected constructs 
 
 Callable functions are `META` and the aggregates `COUNT`, `SUM`, `AVG`, `MIN`, and `MAX`. Each aggregate takes one expression;
 `COUNT(*)` also counts documents. Aggregate placement, grouping consistency, and value semantics
-are validated by the Documents planner/executor. `DISTINCT`, `ALL`, `IN`, `EXISTS`, `LIKE`,
-`BETWEEN`, collection constructors/quantifiers, `ABS`, and other reserved but unimplemented
+are validated by the Documents planner/executor. `DISTINCT`, `ALL`, `EXISTS`,
+collection constructors/quantifiers, `ABS`, and other reserved but unimplemented
 operations produce `COHDBL001`. Unknown function calls likewise produce `COHDBL001` naming the
 function. Retired ODMG constructs remain recognized only to produce deliberate diagnostics.
 
@@ -123,6 +127,7 @@ Membership tests assert these lists without freezing arrays that later T1 items 
 | Disposition | Words |
 | --- | --- |
 | Reserved | MISSING, VALUED, KNOWN, UNKNOWN, NIL, UNDEFINED, SET, ARRAY, COLLECTION, FIRST, LAST, UNIQUE |
+| Predicate and conditional reservations (#1127) | CASE, WHEN, THEN, ELSE, END, ESCAPE |
 | Freed identifiers | DEFINE, ELEMENT, FLATTEN, STRUCT, LIST, BAG, LISTTOSET, TYPEOF |
 | Removed functions | ELEMENT, FLATTEN, FIRST, LAST, LISTTOSET, UNIQUE |
 
@@ -206,6 +211,10 @@ projection   := expression [AS identifier]
 ordering     := expression [ASC | DESC]
 path         := identifier ('.' identifier | '[' integer ']' | '[' string ']')*
 presence-test := expression IS [NOT] (NULL | MISSING | VALUED)
+membership   := expression [NOT] IN '(' expression (',' expression)* ')'
+range-test   := expression [NOT] BETWEEN expression AND expression
+pattern-test := expression [NOT] LIKE expression [ESCAPE expression]
+case         := CASE [expression] (WHEN expression THEN expression)+ [ELSE expression] END
 literal      := NULL | NIL | MISSING | TRUE | FALSE | number | string
 ```
 
@@ -245,12 +254,46 @@ fractional precision and overflow report `COHDOC007` (SQLSTATE 22003) at the lit
 The parser reports malformed numeric syntax as `OQL0004`; it adapts optional integer digits
 (`.5`) and leading zeros to JSON syntax without changing the number's value.
 
-Operator precedence, lowest first: `OR`, `AND`, comparisons and null tests, addition/subtraction,
+Operator precedence, lowest first: `OR`, `AND`, comparisons, presence tests and IN/BETWEEN/LIKE, addition/subtraction,
 multiplication/division/remainder, unary signs. `NOT` binds around comparisons, so
 `NOT age < 18` means `NOT (age < 18)`. Comparison operators are `=`, `!=`, `<>`, `<`, `<=`, `>`,
 and `>=`; the AST normalizes `<>` to `!=`. Presence tests are unary `IS [NOT] NULL`,
 `IS [NOT] MISSING` and `IS [NOT] VALUED` nodes with distinct operator strings.
 Arithmetic supports `+`, `-`, `*`, `/`, and `%`.
+Infix NOT belongs to IN, BETWEEN or LIKE at comparison precedence. BETWEEN bounds parse
+above AND: `a BETWEEN 1 AND 3 AND b = 2` is a conjunction of two predicates. Parentheses
+inside either bound can still group a Boolean expression. CASE is a primary expression.
+
+### Predicates and CASE (#1127)
+
+OqlInExpression retains a nonempty value list; even `x IN (d.tags)` compares x with the
+whole array as one structural item. The unparenthesized array form `x IN d.tags` stays
+COHDBL001 naming `IN array form` until oql-arrays. A nested SELECT still names SUBQUERY;
+quantified predicates retain one diagnostic at EVERY/ANY/SOME, without reporting their IN.
+The other public nodes are OqlBetweenExpression, OqlLikeExpression and OqlCaseExpression.
+Negated predicates preserve unknown results. The engine design records their truth tables.
+
+LIKE is ordinal and case-sensitive. `%` matches zero or more Unicode scalars; `_` matches
+exactly one, including a supplementary character or a newline. The default escape is
+backslash, matching [Couchbase's default](https://github.com/couchbase/query/blob/master/expression/comp_like.go#L41-L46).
+ESCAPE overrides it with one Unicode scalar; `ESCAPE ''` disables escaping. String literals
+do not consume backslashes, so `a LIKE 'x\%'` matches the literal x%. An escape quotes the
+next scalar, including `%`, `_` and itself. A literal escape longer than one scalar is an
+OQL0002 syntax error at that literal; an evaluated invalid escape or a trailing escape in
+the pattern gives COHDOC013. Non-string operands, patterns or escapes give NULL, unless
+another operand is MISSING. The hand-written matcher uses two pointers and only the latest
+percent as its backtracking point; it uses no Regex, reflection or suffix recursion.
+
+CASE tests branches in order and evaluates only the selected result. Searched WHEN selects
+Boolean TRUE; simple CASE uses structural equality, so NULL and MISSING do not match WHEN
+values, including themselves. An unmatched CASE returns ELSE or NULL when ELSE is absent.
+A selected result may itself be MISSING. These conditional rules follow
+[simple CASE](https://github.com/couchbase/query/blob/master/expression/case_simple.go#L77-L108)
+and [searched CASE](https://github.com/couchbase/query/blob/master/expression/case_searched.go#L72-L98).
+All branches still undergo parameter, numeric, metadata, aggregate and grouping validation.
+
+CASE, WHEN, THEN, ELSE, END and ESCAPE are now reserved. Existing fields remain accessible
+quoted or after a dot: `"end"` and `d.end` still work, as do `"case"` and `d.case`.
 
 The parser is a partial class, split into dispatch/token handling, SELECT clauses, DDL, DML, and
 expression parsing, following `SqlQueryParser`. Parser-produced list properties are read-only

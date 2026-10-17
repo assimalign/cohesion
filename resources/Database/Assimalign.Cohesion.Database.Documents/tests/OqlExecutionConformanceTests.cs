@@ -64,6 +64,26 @@ public sealed class OqlExecutionConformanceTests
                 new("SELECT name FROM items WHERE amount IS NOT VALUED", [["delta"]]),
                 new("SELECT name FROM items WHERE details.score IS VALUED", [["alpha"], ["beta"], ["gamma"]]),
             ],
+            [OqlClauses.In] =
+            [
+                new("SELECT name FROM items WHERE category IN ('b', 'z')", [["gamma"]]),
+            ],
+            [OqlClauses.Between] =
+            [
+                new("SELECT name FROM items WHERE amount NOT BETWEEN 3 AND 5", [["alpha"], ["beta"]]),
+            ],
+            [OqlClauses.Like] =
+            [
+                new("SELECT name FROM items WHERE name LIKE '%ta'", [["beta"], ["delta"]]),
+            ],
+            [OqlClauses.Case] =
+            [
+                new("SELECT name, CASE WHEN amount > 3 THEN 'big' WHEN amount IS NULL THEN 'none' ELSE 'small' END AS size FROM items",
+                    [["alpha", "small"], ["beta", "big"], ["gamma", "big"], ["delta", "none"]]),
+                new("SELECT CASE WHEN amount > 3 THEN 'big' ELSE 'small' END AS size, COUNT(*) AS n FROM items GROUP BY CASE WHEN amount > 3 THEN 'big' ELSE 'small' END",
+                    [["big", 2m], ["small", 2m]]),
+                new("SELECT SUM(CASE WHEN amount > 3 THEN 1 ELSE 0 END) AS big FROM items", [[2m]]),
+            ],
             [OqlClauses.GroupBy] =
             [
                 new("SELECT category, COUNT(*) AS total, COUNT(amount) AS present, SUM(amount) AS sum, AVG(amount) AS average, MIN(amount) AS minimum, MAX(amount) AS maximum FROM items GROUP BY category ORDER BY category",
@@ -261,6 +281,10 @@ public sealed class OqlExecutionConformanceTests
         OqlClauses.Select => expression is OqlSelectExpression { Projections.Count: > 0 },
         OqlClauses.From => expression is OqlSelectExpression { Collection.Length: > 0 },
         OqlClauses.Where => expression is OqlSelectExpression { Predicate: not null },
+        OqlClauses.In => expression is OqlSelectExpression { Predicate: OqlInExpression },
+        OqlClauses.Between => expression is OqlSelectExpression { Predicate: OqlBetweenExpression },
+        OqlClauses.Like => expression is OqlSelectExpression { Predicate: OqlLikeExpression },
+        OqlClauses.Case => expression is OqlSelectExpression select && select.Projections.Any(projection => ContainsCase(projection.Expression)),
         OqlClauses.GroupBy => expression is OqlSelectExpression { GroupBy.Count: > 0 },
         OqlClauses.Having => expression is OqlSelectExpression { Having: not null },
         OqlClauses.OrderBy => expression is OqlSelectExpression { OrderBy.Count: > 0 },
@@ -270,6 +294,9 @@ public sealed class OqlExecutionConformanceTests
         OqlClauses.DropIndex => expression is OqlDropIndexExpression,
         _ => false,
     };
+
+    private static bool ContainsCase(OqlExpression expression) => expression is OqlCaseExpression ||
+        expression is OqlCallExpression call && call.Arguments.Any(ContainsCase);
 
     private static async Task SeedAsync(DocumentCollection collection, DocumentDatabaseSession session, CancellationToken cancellationToken)
     {

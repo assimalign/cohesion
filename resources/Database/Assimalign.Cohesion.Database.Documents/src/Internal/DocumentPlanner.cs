@@ -217,6 +217,21 @@ internal sealed partial class DocumentPlanner
 
         void Collect(OqlExpression expression)
         {
+            if (expression is OqlBetweenExpression { Negated: false, Operand: OqlPathExpression rangePath } between &&
+                IsConstant(between.Lower) && IsConstant(between.Upper))
+            {
+                var rangeEvaluator = new DocumentExpressionEvaluator(query.Alias, _parameters);
+                var lower = rangeEvaluator.Evaluate(between.Lower, default);
+                var upper = rangeEvaluator.Evaluate(between.Upper, default);
+                string? name = IndexPath(rangePath, query.Alias);
+                if (name is not null && lower is bool or decimal or string && upper is bool or decimal or string)
+                {
+                    var legacy = LegacyIndexPath(rangePath, query.Alias);
+                    predicates.Add((name, legacy, ">=", lower));
+                    predicates.Add((name, legacy, "<=", upper));
+                }
+                return;
+            }
             if (expression is not OqlBinaryExpression binary) { return; }
             if (binary.Operator == "AND") { Collect(binary.Left); Collect(binary.Right); return; }
             if (binary.Operator is not ("=" or ">" or ">=" or "<" or "<=")) { return; }
@@ -306,6 +321,7 @@ internal sealed partial class DocumentPlanner
 
     private static bool IsConstant(OqlExpression expression) => expression switch
     {
+        OqlInExpression or OqlBetweenExpression or OqlLikeExpression or OqlCaseExpression => PredicateChildren(expression).All(IsConstant),
         OqlLiteralExpression or OqlMissingExpression or OqlParameterExpression => true,
         OqlObjectExpression obj => obj.Members.All(member => IsConstant(member.Value)),
         OqlUnaryExpression unary => IsConstant(unary.Operand),
@@ -315,6 +331,7 @@ internal sealed partial class DocumentPlanner
 
     internal static bool ContainsAggregate(OqlExpression expression) => expression switch
     {
+        OqlInExpression or OqlBetweenExpression or OqlLikeExpression or OqlCaseExpression => PredicateChildren(expression).Any(ContainsAggregate),
         OqlObjectExpression obj => obj.Members.Any(member => ContainsAggregate(member.Value)),
         OqlCallExpression => true,
         OqlBinaryExpression binary => ContainsAggregate(binary.Left) || ContainsAggregate(binary.Right),
@@ -326,6 +343,9 @@ internal sealed partial class DocumentPlanner
     {
         switch (expression)
         {
+            case OqlInExpression or OqlBetweenExpression or OqlLikeExpression or OqlCaseExpression:
+                foreach (var child in PredicateChildren(expression)) { Validate(child, allowAggregate); }
+                return;
             case OqlLiteralExpression or OqlMissingExpression or OqlParameterExpression or OqlPathExpression or OqlMetaExpression:
                 return;
             case OqlObjectExpression obj:
@@ -353,6 +373,11 @@ internal sealed partial class DocumentPlanner
     private static void ValidateGrouped(OqlExpression expression, OqlSelectExpression query)
     {
         if (query.GroupBy.Any(key => EquivalentExpression(key, expression, query.Alias))) { return; }
+        if (expression is OqlInExpression or OqlBetweenExpression or OqlLikeExpression or OqlCaseExpression)
+        {
+            foreach (var child in PredicateChildren(expression)) { ValidateGrouped(child, query); }
+            return;
+        }
         if (expression is OqlObjectExpression obj)
         {
             foreach (var member in obj.Members) { ValidateGrouped(member.Value, query); }
@@ -371,6 +396,11 @@ internal sealed partial class DocumentPlanner
 
     private static bool EquivalentExpression(OqlExpression left, OqlExpression right, string? alias) => (left, right) switch
     {
+        (OqlInExpression a, OqlInExpression b) => a.Negated == b.Negated && EquivalentChildren(a, b, alias),
+        (OqlBetweenExpression a, OqlBetweenExpression b) => a.Negated == b.Negated && EquivalentChildren(a, b, alias),
+        (OqlLikeExpression a, OqlLikeExpression b) => a.Negated == b.Negated && EquivalentChildren(a, b, alias),
+        (OqlCaseExpression a, OqlCaseExpression b) => (a.Operand is null) == (b.Operand is null) &&
+            (a.Otherwise is null) == (b.Otherwise is null) && a.Branches.Count == b.Branches.Count && EquivalentChildren(a, b, alias),
         (OqlPathExpression a, OqlPathExpression b) => PathSegments(a, alias).SequenceEqual(PathSegments(b, alias)),
         (OqlLiteralExpression a, OqlLiteralExpression b) => DocumentExpressionEvaluator.Compare(a.Value, b.Value) == 0,
         (OqlMetaExpression a, OqlMetaExpression b) => a.Member == b.Member,
@@ -387,4 +417,11 @@ internal sealed partial class DocumentPlanner
 
     private static IEnumerable<OqlPathSegment> PathSegments(OqlPathExpression path, string? alias)
         => path.Segments.Skip(alias is not null && path.Segments.Count > 0 && path.Segments[0].Name == alias ? 1 : 0);
+
+    private static bool EquivalentChildren(OqlExpression left, OqlExpression right, string? alias)
+    {
+        var a = PredicateChildren(left).ToArray();
+        var b = PredicateChildren(right).ToArray();
+        return a.Length == b.Length && a.Zip(b).All(pair => EquivalentExpression(pair.First, pair.Second, alias));
+    }
 }

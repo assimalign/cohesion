@@ -77,6 +77,11 @@ internal static class Program
             Check(presence.Count == 1 && presence[0].SupportsMissing && presence[0].IsMissing(0) &&
                 !presence[0].IsNull(0) && presence[0].GetValue(0) is null, "MISSING projection");
             Check(!presence[0].IsMissing(1) && presence[0].IsNull(1), "explicit NULL projection");
+            var predicates = await connection.QueryAsync("SELECT score IN (1, 3, NULL) AS i, score BETWEEN 2 AND 3 AS b, name LIKE '__' ESCAPE '' AS l, CASE WHEN score > 2 THEN 'big' ELSE 'small' END AS c FROM items", cancellationToken: token);
+            Check(predicates.Count == 1 && predicates[0][0] is true && predicates[0][1] is true &&
+                predicates[0][2] is true && predicates[0][3] is "big", "IN BETWEEN LIKE CASE");
+            var conditionalNull = await connection.QueryAsync("SELECT CASE absent WHEN 1 THEN 2 END AS c, 0 BETWEEN 1 AND MISSING AS b FROM items", cancellationToken: token);
+            Check(conditionalNull[0].IsNull(0) && conditionalNull[0].IsMissing(1), "CASE NULL and BETWEEN MISSING");
             var whole = await connection.QueryAsync("SELECT * FROM items", cancellationToken: token);
             Check(whole.IsDocumentQuery && whole.Documents[0].GetProperty("nested")[0].GetInt32() == 1, "whole documents");
             Check((await connection.QueryAsync("SELECT SUM(score) AS total FROM items HAVING SUM(score) > 0", cancellationToken: token))[0][0] is 3m, "aggregate");

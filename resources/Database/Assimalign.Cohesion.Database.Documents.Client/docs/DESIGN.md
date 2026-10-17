@@ -77,7 +77,11 @@ sequenceDiagram
 `DocumentResultSet` exposes ordinal/name-indexed rows, columns and `AffectedCount`. Queries use
 `-1`; collection and index DDL use zero. INSERT uses the inserted-document count and emits
 no Document frames. Duplicate keys preserve COHDOC012 as ExecutionFailure and the next
-statement can reuse the session. The advertised-clause suite covers VALUES, SELECT and META. `CREATE COLLECTION [IF NOT EXISTS]` and
+statement can reuse the session. The advertised-clause suite covers VALUES, SELECT and META.
+The advertised-predicate corpus also covers IN, BETWEEN, LIKE, searched/simple
+CASE, grouped CASE and CASE under SUM over InMemory and TCP. It preserves embedded rows,
+MISSING versus NULL, COHDOC013 and reuse after a malformed LIKE pattern.
+`CREATE COLLECTION [IF NOT EXISTS]` and
 `DROP COLLECTION [IF EXISTS]` use the existing Execute exchange and retain collection ownership
 and conditional no-op semantics. A schema-owned drop returns ExecutionFailure (6), and the
 connection remains usable. `IsDocumentQuery` distinguishes `SELECT *` even for an empty result.
