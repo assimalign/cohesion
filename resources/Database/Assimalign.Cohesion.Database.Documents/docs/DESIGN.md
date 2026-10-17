@@ -1010,3 +1010,9 @@ A flush only queues pipe bytes; immediate TCP disposal can discard a queued fata
 local drain uses the existing connection contract and adds no public transport member. A deferred
 send fixture deterministically verifies error delivery before disposal; TCP unknown-database
 coverage verifies the real transport path.
+
+Streaming regressions count all 128 rows and 130 wire frames and verify a distinct marker in
+each row. They limit allocations before the first header to 8 MiB, which detects pre-encoding
+a 32 MiB result. Separate encoder tests measure peak backing-array capacity directly under
+the same 8 MiB budget. Whole-process live-heap deltas are not used as a buffer metric because
+they include the loopback client's frame arrays and the engine's storage and runtime pools.

@@ -43,8 +43,9 @@ public sealed class DocumentResponseStreamingTests
     [InlineData("SELECT text, marker FROM items", DocumentProtocolMessageType.ResultRow)]
     public async Task QueryAsync_LargeResult_ShouldStreamWithinBufferBudget(string statement, DocumentProtocolMessageType rowType)
     {
-        // Arrange: 32 MiB of encoded rows exceeds the 8 MiB additional-buffer budget.
-        // Use a raw peer that discards each row, excluding client materialization from the metric.
+        // Arrange: 32 MiB of encoded rows exceeds the 8 MiB pre-header allocation budget.
+        // DocumentJsonValuesTests separately measures peak backing-buffer capacity directly.
+        // This raw peer discards rows while verifying every frame and its distinct marker.
         const int rowCount = 128;
         await using var harness = await DocumentClientTestHarness.StartAsync();
         await using (var session = await harness.Database.CreateSessionAsync(harness.Token))
@@ -81,13 +82,13 @@ public sealed class DocumentResponseStreamingTests
         (await channel.Reader.ReadFrameAsync(harness.Token)).ShouldNotBeNull().Type.ShouldBe(ProtocolMessageType.Pong);
 
         // Assert: counts prove the entire large result was exercised; no elapsed-time assertion.
-        _output.WriteLine($"Rows={buffers.RowCount}; frames={buffers.FrameCount}; peak frame={buffers.PeakFrameBytes}; peak additional buffer={buffers.PeakBufferBytes} bytes.");
+        _output.WriteLine($"Rows={buffers.RowCount}; frames={buffers.FrameCount}; peak frame={buffers.PeakFrameBytes}; allocated before header={buffers.BytesAllocatedBeforeHeader} bytes.");
         DocumentProtocolCompleteMessage.Decode(complete.Payload.Span).ResultCount.ShouldBe(rowCount);
         buffers.BaselineCount.ShouldBe(1);
         buffers.FrameCount.ShouldBe(rowCount + 2);
         buffers.RowCount.ShouldBe(rowCount);
         buffers.PeakFrameBytes.ShouldBeInRange(256 * 1024, 257 * 1024);
-        buffers.PeakBufferBytes.ShouldBeLessThan(8L * 1024 * 1024);
+        buffers.BytesAllocatedBeforeHeader.ShouldBeLessThan(8L * 1024 * 1024);
 
         async Task WriteAsync(ProtocolMessageType type, byte[] payload)
         {
