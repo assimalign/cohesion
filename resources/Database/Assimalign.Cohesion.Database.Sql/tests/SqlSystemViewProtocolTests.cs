@@ -111,17 +111,21 @@ public sealed class SqlSystemViewProtocolTests
     [InlineData("ALTER TABLE INFORMATION_SCHEMA.TABLES ADD COLUMN extra INT")]
     [InlineData("CREATE INDEX ix_metadata ON INFORMATION_SCHEMA.TABLES (TABLE_NAME)")]
     [InlineData("DROP INDEX IF EXISTS ix_metadata ON INFORMATION_SCHEMA.TABLES")]
-    public async Task Mutation_ShouldReturnStableDiagnosticAndKeepConnectionUsable(string sql)
+    public async Task Execute_CatalogMutation_ShouldReturnStableDiagnosticAndKeepConnectionUsableAsync(string sql)
     {
+        // Arrange
         await using var harness = await ServerTestHarness.StartAsync();
         await using var client = await harness.DialAsync();
         await client.HandshakeAsync();
 
+        // Act
         await client.SendAsync(ProtocolMessageType.Execute, ProtocolExecuteMessage.Create(sql).Encode());
         var frame = await client.ExpectAsync(ProtocolMessageType.Error);
         var error = ProtocolErrorMessage.Decode(frame.Payload.Span);
+
+        // Assert
         error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-        error.Message.ShouldBe("System view 'INFORMATION_SCHEMA.TABLES' is read-only.");
+        error.Message.ShouldBe("COHSQLE021: System view 'INFORMATION_SCHEMA.TABLES' is read-only.");
 
         var rows = await QueryAsync(client,
             "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'users'");

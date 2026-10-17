@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Sql.Internal;
+using Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Database.Types;
 
@@ -204,11 +205,13 @@ public sealed class SqlArithmeticFaultTests
         (await ScalarAsync(session, "SELECT COUNT(*) FROM numbers")).ShouldBe(2L);
     }
 
-    /// <summary>Oversized literals name themselves; the BIGINT minimum is writable as a literal; CAST keeps its contract.</summary>
+    /// <summary>Oversized literals name themselves; CAST carries its range code and span; the BIGINT minimum is writable as a literal.</summary>
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Arithmetic: numeric literals outside their type report the literal, and the BIGINT minimum is a literal")]
     public async Task Literal_OutsideItsType_ShouldNameTheLiteral()
     {
         // Arrange
+        const string castSql = "SELECT CAST(9223372036854775808 AS DECIMAL) FROM numbers WHERE id = 1";
+        var castLocation = ((SqlSelectExpression)SqlQueryRequest.FromSql(castSql).Statement.SqlExpression).Columns[0].Expression.Location!;
         await using var engine = CreateEngine();
         await using var session = await SeedAsync(engine);
 
@@ -218,12 +221,16 @@ public sealed class SqlArithmeticFaultTests
         var fractional = await Should.ThrowAsync<DatabaseException>(() =>
             ExecuteAsync(session, "SELECT 1e-30 FROM numbers WHERE id = 1"));
         var cast = await Should.ThrowAsync<DatabaseException>(() =>
-            ExecuteAsync(session, "SELECT CAST(9223372036854775808 AS DECIMAL) FROM numbers WHERE id = 1"));
+            ExecuteAsync(session, castSql));
 
         // Assert
         integer.DiagnosticDetail("COHSQLE002").ShouldBe("Numeric value out of range: integer literal 9223372036854775808 exceeds BIGINT.");
         fractional.DiagnosticDetail("COHSQLE002").ShouldBe("Numeric value out of range: numeric literal 1e-30 cannot be represented exactly as DECIMAL.");
-        cast.ShouldNotBeOfType<SqlEvaluationException>();
+        cast.ShouldBeOfType<SqlEvaluationException>();
+        var diagnostic = cast.Diagnostics.ShouldHaveSingleItem();
+        diagnostic.Code.ShouldBe(OutOfRange);
+        diagnostic.Start.ShouldBe(castLocation.Start);
+        diagnostic.End.ShouldBe(castLocation.End);
         cast.Message.ShouldStartWith("CAST to", Case.Sensitive);
         (await ScalarAsync(session, "SELECT -9223372036854775808 FROM numbers WHERE id = 1")).ShouldBe(long.MinValue);
         (await RowsAsync(session, "SELECT id FROM numbers WHERE big_value > -9223372036854775808 ORDER BY id"))
