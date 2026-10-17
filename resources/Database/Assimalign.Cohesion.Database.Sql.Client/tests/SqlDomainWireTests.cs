@@ -144,7 +144,7 @@ public sealed class SqlDomainWireTests
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - Domains: application cast failures keep their wire code and the connection stays usable")]
     [InlineData("npe", "COHSQLE007: Cast TEXT AS points failed: npe!")]
     [InlineData("oce", "COHSQLE007: Cast TEXT AS points failed: not this statement")]
-    [InlineData("bad", "COHSQLE022: CAST from String to points failed: not a number of points")]
+    [InlineData("bad", "COHSQLE022: CAST from TEXT to points failed: not a number of points")]
     public async Task QueryAsync_ThrowingApplicationCast_ShouldBeCodedAndKeepTheConnection(string input, string message)
     {
         // Arrange

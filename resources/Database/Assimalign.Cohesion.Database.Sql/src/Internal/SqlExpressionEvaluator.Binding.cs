@@ -159,6 +159,12 @@ internal sealed partial class SqlExpressionEvaluator
             left = BindCharacterComparand(binary.Left, left, binary.Right);
             right = BindCharacterComparand(binary.Right, right, binary.Left);
         }
+        if (binary.Operator == SqlBinaryOperator.Concat)
+        {
+            // JSONB shares byte[] with BYTEA; retain its declared identity for text output.
+            left = JsonBinaryToText(binary.Left, left);
+            right = JsonBinaryToText(binary.Right, right);
+        }
         collation = CollationOf(binary, [leftCollation, rightCollation]);
         return new SqlBoundBinary(binary.Operator, left, right,
             SqlBoundCollation.Of(leftCollation, rightCollation, _defaultCollation), binary.Location);
@@ -184,6 +190,12 @@ internal sealed partial class SqlExpressionEvaluator
             _ => bound,
         };
     }
+
+    private SqlBoundExpression JsonBinaryToText(SqlExpression syntax, SqlBoundExpression value)
+        => StaticTypeOf(syntax) == DatabaseType.JsonBinary
+            ? new SqlBoundCast(value, "TEXT", SqlType.Text, _functions.Types.ResolveCasts(null, SqlType.Text),
+                _functions.Database, _defaultCollation, sourceType: DatabaseType.JsonBinary)
+            : value;
 
     private SqlBoundExpression CharacterToText(SqlExpression syntax, SqlBoundExpression value)
         => StaticTypeOf(syntax) == DatabaseType.Character
@@ -249,7 +261,7 @@ internal sealed partial class SqlExpressionEvaluator
         }
 
         return new SqlBoundCast(operand, cast.TargetType, target, _functions.Types.ResolveCasts(SourceDomain(cast.Operand), target),
-            _functions.Database, _defaultCollation, cast.Location);
+            _functions.Database, _defaultCollation, cast.Location, StaticTypeOf(cast.Operand));
     }
 
     /// <summary>

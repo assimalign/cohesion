@@ -14,7 +14,7 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// <para>
 /// <b>One registry for the engine and the application</b> (phase E3, owner decision 68 of
 /// 2026-10-09). The engine's own conversions — text to a number, a number to text, an integer to
-/// a narrower one, text to a date — are casts created with this type's <see cref="Create"/> and
+/// a narrower one, text to a date — are entries of this type and
 /// registered through the same <see cref="SqlTypeCollection.AddCast"/> an application calls, so
 /// <c>CAST</c> resolves and runs an application's cast exactly as a built-in one. An application
 /// adds casts to or from its domains, and between two built-in types the standard library does not
@@ -39,7 +39,7 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// <para>
 /// <b>Failures.</b> A <see cref="FormatException"/>, <see cref="OverflowException"/> or
 /// <see cref="InvalidCastException"/> the conversion throws is the value's fault: the statement fails
-/// as a conversion failure naming the source and the target (<c>CAST from String to DATE failed:
+/// as a conversion failure naming the source and the target (<c>CAST from TEXT to DATE failed:
 /// ...</c>), the original as its inner exception, as the built-in casts fail. Anything else it throws,
 /// other than a <see cref="DatabaseException"/> (which passes unchanged), an exhausted stack or
 /// memory, is a fault of the conversion's code: <c>COHSQLE007</c> (<c>Cast TEXT AS cents failed:
@@ -55,7 +55,7 @@ public sealed class SqlCast
 {
     private readonly Func<object, object?> _convert;
 
-    private SqlCast(SqlType source, SqlType target, SqlCastContext context, Func<object, object?> convert)
+    internal SqlCast(SqlType source, SqlType target, SqlCastContext context, Func<object, object?> convert)
     {
         Source = source;
         Target = target;

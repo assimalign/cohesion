@@ -1239,19 +1239,18 @@ internal sealed partial class SqlPlanner
     {
         var types = evaluator.Functions.Types;
         var target = ResolveCastTarget(cast, types);
-        if (StaticOperandType(cast.Operand, evaluator, boundSubqueries, boundValues) is not { } declared || declared == DatabaseType.Null)
+        // Reuse the binder's CASE, arithmetic and aggregate result inference, while an
+        // expression whose result type depends on a parameter still checks at evaluation.
+        // PostgreSQL parse_expr.c:2764-2788 validates the transformed operand's type here.
+        if (CastTypeDependsOnParameter(cast.Operand, evaluator)) { return; }
+        var declared = StaticOperandType(cast.Operand, evaluator, boundSubqueries, boundValues)
+            ?? evaluator.StaticTypeOf(cast.Operand);
+        if (declared == DatabaseType.Null)
         {
             return;
         }
 
-        // The value the evaluator converts is the row's: a JSON value is text and a JSONB value bytes,
-        // so the cast is chosen as SqlCastConverter chooses it for that value.
-        var source = declared switch
-        {
-            DatabaseType.Json => DatabaseType.String,
-            DatabaseType.JsonBinary => DatabaseType.Binary,
-            _ => declared,
-        };
+        var source = declared;
         if (source == target.Storage.Type)
         {
             return;
@@ -1263,6 +1262,26 @@ internal sealed partial class SqlPlanner
             throw SqlEvaluationException.CannotCast(
                 sourceDomain is not null && sourceDomain.Storage.Type == declared ? sourceDomain.Name : SqlType.NameOf(declared), target);
         }
+    }
+
+    private static bool CastTypeDependsOnParameter(SqlExpression expression, SqlExpressionEvaluator evaluator)
+    {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+        return expression switch
+        {
+            SqlParameterExpression => true,
+            SqlCollateExpression collate => CastTypeDependsOnParameter(collate.Operand, evaluator),
+            SqlUnaryExpression { Operator: SqlUnaryOperator.Plus or SqlUnaryOperator.Negate } sign
+                => CastTypeDependsOnParameter(sign.Operand, evaluator),
+            SqlBinaryExpression { Operator: SqlBinaryOperator.Add or SqlBinaryOperator.Subtract or SqlBinaryOperator.Multiply
+                or SqlBinaryOperator.Divide or SqlBinaryOperator.Modulo } arithmetic
+                => CastTypeDependsOnParameter(arithmetic.Left, evaluator) || CastTypeDependsOnParameter(arithmetic.Right, evaluator),
+            SqlCaseExpression conditional => conditional.WhenClauses.Any(clause => CastTypeDependsOnParameter(clause.Result, evaluator))
+                || conditional.ElseResult is not null && CastTypeDependsOnParameter(conditional.ElseResult, evaluator),
+            SqlFunctionCallExpression call when evaluator.CallResultDependsOnArguments(call)
+                => call.Arguments.Any(argument => CastTypeDependsOnParameter(argument, evaluator)),
+            _ => false,
+        };
     }
 
     /// <summary>
@@ -1286,10 +1305,10 @@ internal sealed partial class SqlPlanner
     /// The type a sign's or a CAST's operand has whatever row it is evaluated on, when the plan can
     /// tell: a literal (an integer literal is BIGINT and a fractional one NUMERIC, the values they
     /// bind to), a column, a COLLATE or CAST, a predicate, a concatenation, a scalar call's resolved
-    /// result type, or a bound scalar subquery. Null when only the value can tell — a parameter
-    /// (which <see cref="ValidateExpression"/> checks against its supplied value instead for a
-    /// sign), arithmetic, an aggregate, CASE, NULL — or when the node is an ORDER BY value bound to
-    /// an output column.
+    /// result type, or a bound scalar subquery. Null for a parameter or NULL, an ORDER BY value
+    /// bound to an output column, or computed shapes (arithmetic, aggregates and CASE) whose richer
+    /// binder inference <see cref="ValidateCast"/> uses as a fallback. A sign over a parameter is
+    /// checked against its supplied value instead by <see cref="ValidateExpression"/>.
     /// </summary>
     private static DatabaseType? StaticOperandType(SqlExpression expression, SqlExpressionEvaluator evaluator,
         IReadOnlyDictionary<SqlExpression, DatabaseType>? boundSubqueries, IReadOnlyDictionary<SqlExpression, int>? boundValues)
@@ -1323,7 +1342,7 @@ internal sealed partial class SqlPlanner
             SqlIsNullExpression or SqlBetweenExpression or SqlInExpression or SqlLikeExpression or SqlExistsExpression => DatabaseType.Boolean,
             SqlSubqueryExpression when boundSubqueries is not null && boundSubqueries.TryGetValue(expression, out var type) => type,
             // A scalar call's resolved result type: UPPER and LOWER take their argument's type, so
-            // UPPER over text is text. An aggregate's is left to its value, as before.
+            // UPPER over text is text. CAST's binder fallback also types aggregate results.
             SqlFunctionCallExpression call => evaluator.StaticCallType(call, scalarOnly: true) is var result && result != DatabaseType.Null
                 ? result
                 : null,

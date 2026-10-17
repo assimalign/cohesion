@@ -36,8 +36,8 @@ matching map key can bind. `$0`, `$01` and names beyond Int64 remain exact strin
 `SqlType.Char(n)` and the parser reuse shared `SqlTypeModifiers` validation; bare CHAR is CHAR(1).
 `SqlCastConverter.ApplyModifiers` pads assignments, parameters, defaults, domain values and function
 results to n Unicode scalar values, rejects non-space assignment overflow with COHSQLE012, and
-truncates explicit casts. The E3 registry now has 75 standard casts: CHAR/text conversions plus
-the existing text conversion pairs mirrored for CHAR. CHAR-to-text strips trailing U+0020.
+truncates explicit casts. The registry has 124 standard casts after #1119, including CHAR/text conversions and
+the TEXT conversion pairs mirrored for CHAR. CHAR-to-text strips trailing U+0020.
 
 The private `SqlCharacter` value retains identity through expression evaluation, subqueries and
 INSERT SELECT while public rows and wire payloads expose padded CLR strings. `SqlValueComparer`
@@ -255,7 +255,7 @@ another cell, later row, function call, DEFAULT assignment or stored value.
 | --- | --- |
 | Bound literal, folded immutable call or caller parameter | The evaluator copies binary values when supplying a row, including INSERT/UPDATE rows. |
 | SQL function body or native scalar result | The call's delivered result is copied. Body/argument computation does not copy intermediate binary values. |
-| CASE, COALESCE, identity CAST or domain argument | Delivery follows the selected operand; predicate computation continues to share read-only values. Application casts copy their converted binary result. |
+| CASE, COALESCE, identity CAST or domain argument | Delivery follows the selected operand; predicate computation continues to share read-only values. Application and built-in casts copy their converted binary result. |
 | Converted literal DEFAULT, including an ADD COLUMN missing tail | DefaultValue copies the cached value once per supplied row. Expression defaults use evaluator delivery. |
 | Scalar subquery or grouped key/aggregate slot | Delivery copies the retained slot value for each use, including native aggregate results. |
 | Repeated projections and join fanout | An owned cell's first projection transfers it; repeated projections detach. Join delivery copies selected retained outer/buffered-inner columns; indexed inner rows decode afresh and transfer. Predicates, discarded candidates and unprojected columns never copy. |
@@ -1058,7 +1058,7 @@ flowchart LR
   registers first, cannot be replaced), and anything once the build began. Those are the only
   refusals, and they bind the standard library's registrations as they bind an application's: an
   application may add a cast between two built-in types the standard library does not convert
-  (`DOUBLE` to `TEXT`, `BOOLEAN` to `INTEGER`), as PostgreSQL's `CreateCast` checks who owns the
+  (`BOOLEAN` to `INTEGER`), as PostgreSQL's `CreateCast` checks who owns the
   types, not who registers (`src/backend/commands/functioncmds.c`). `Contains` answers as the
   frozen catalog's `Find` resolves, built-in aliases included. Build phase 2 adds the
   domains the declared schemas declare and freezes the collection into
@@ -1097,19 +1097,30 @@ flowchart LR
   A `SqlCast` maps a value of its source's storage type to its target's;
   `SqlCast.Create<TSource, TTarget>` maps the CLR types as the typed function shorthands do
   and refuses a CLR type that is not its SQL type's storage. The engine's conversions
-  (`SqlStandardCasts`) are entries created with the same `Create` and registered through the
-  same `AddCast`: the pairs `SqlCastConverter`'s switch had (text, BOOLEAN, the integers and
-  NUMERIC, and those to text, with their semantics), and new ones, REAL and DOUBLE from text and
-  the numbers, and DATE, TIME, TIMESTAMP, TIMESTAMPTZ, INTERVAL and UUID from text (DATE from
-  TIMESTAMP too), parsed as INSERT parses text for a column of the type. DATE, TIMESTAMP and
-  TIMESTAMPTZ text reads through one parser for both (`SqlTemporalText`): it starts with an ISO
-  8601 `yyyy-mm-dd` (text without a year would take the clock's), a `TIMESTAMP` keeps the clock
-  time written and ignores an offset (`timestamp_in`), and a `TIMESTAMPTZ` without an offset is
-  UTC, so neither depends on the host's time zone. Each carries PostgreSQL's context for the
-  pair. An application adds casts to or from its domains, which PostgreSQL warns it ignores
-  (`src/backend/commands/functioncmds.c`, "cast will be ignored because the source data type is
-  a domain"); here they are what the owner asked for (a cast from a domain is an open owner
-  question, below).
+  (`SqlStandardCasts`) register through the same AddCast and resolve in the same catalog.
+  Typed shorthands create ordinary storage pairs. JSON and JSONB share CLR string/byte[]
+  representations with TEXT/BYTEA, so their built-in entries use the assembly-local constructor;
+  no public API, visibility grant or new storage wrapper is needed. The bound CAST retains
+  the source SQL identity so JSON-to-scalar pairs are refused during planning, rather than
+  being accidentally treated as text casts. All 19 shared SQL types are covered by the
+  [dialect matrix](../../Assimalign.Cohesion.Database.Sql.Language/docs/DIALECT.md#explicit-conversion-cast-1022-e3).
+  CAST text reads temporal and interval input through public SqlLiteralText, independently of
+  SqlTemporalText's existing plain-string assignment reader. Zone-dependent conversions follow
+  the [timestamp normalization rule](../../Assimalign.Cohesion.Database.Sql.Language/docs/DIALECT.md#timestamp-normalization-1110).
+  Canonical output is shared with concatenation. REAL/DOUBLE exact conversions parse shortest
+  round-trip text before Decimal modifiers. NUMERIC-to-REAL parses the exact Decimal text directly
+  to Single, avoiding a DOUBLE midpoint and second rounding (PostgreSQL numeric.c:4691-4696).
+  Integer targets refuse fractions; non-finite floats are range failures, COHSQLE002/22003
+  (float.c:1267-1270). Backslash-free BYTEA input encodes the original text, including surrounding
+  whitespace (bytea.c:230-231); the hex form retains its separate trimmed-input grammar.
+  INTERVAL output uses PostgreSQL's postgres-style day units and omits a zero clock after days
+  (datetime.c:4675-4694,4875-4890). TimeSpan normalizes mixed-sign fields to one duration before
+  formatting, and every emitted form still passes through SqlLiteralText on input.
+  JSON input uses JsonDocument at depth 128 and strict UTF-8, with no reflection or JsonSerializer.
+  JSON text is preserved; JSONB is the same validated UTF-8 without normalization, so equality
+  stays byte equality. A future binary format needs a migration. INSERT's existing unvalidated
+  JSON-text acceptance is unchanged. Binary-producing casts detach delivery through the same
+  ownership path as application casts, including folded/shared constants and empty arrays.
 - **CAST** binds once per statement (`SqlBoundCast`): the target type, and one cast per storage
   type of the value it may convert, chosen in this order: from the operand's domain when the
   plan knows it (a domain column, or a `CAST` to a domain), then from the value's storage type;
@@ -1122,11 +1133,15 @@ flowchart LR
   refusal is the `SqlConstraintViolationException` of kind `DOMAIN` a write raises (its `Table`
   is empty; PostgreSQL raises 23514 for both). A row looks nothing up.
 - **A CAST no cast performs** is refused while planning when the plan knows the operand's type
-  (a literal, a column, a `CAST`, a predicate, a scalar call's result type, a bound subquery):
+  (a literal, a column, a `CAST`, a predicate, a call's result type, a bound subquery, or the
+  binder's inferred CASE, COALESCE, unary-sign or arithmetic result):
   `COHSQLE011` (SQLSTATE 42846), PostgreSQL's "cannot cast type ... to ..." from
   `transformTypeCast` (`src/backend/parser/parse_expr.c`), the same over an empty table as over a
-  populated one. A parameter's or NULL's type only its value reveals, so the evaluator raises the
-  same code for it. Before E3 the parser refused these targets outright; E3 made every built-in
+  populated one. CAST reuses the binder's existing result inference, including aggregate slots,
+  while parameter-dependent result types keep evaluation-time checks. Parameters in CASE conditions
+  do not make a statically typed result dynamic. NULLIF still has no bound result type: its existing
+  COHDBL001 language refusal precedes planning. PostgreSQL checks the transformed operand's type in
+  src/backend/parser/parse_expr.c:2764-2788. Before E3 the parser refused these targets outright; E3 made every built-in
   type a target, so the planner owns the refusal.
 - **Failures.** A `FormatException`, `OverflowException` or `InvalidCastException` a conversion
   throws is the value's fault: `CAST from X to T failed: ...`, with the original as its inner
@@ -1167,12 +1182,9 @@ a domain over a domain; casts in assignment
 coercion or overload resolution (an uncast string literal still does not reach a DATE
 parameter: PostgreSQL types it `unknown` and resolves it to the parameter, `parse_func.c`'s
 `func_select_candidate`, which the design's narrow lattice does not, and which is an owner
-question); built-in casts from the date, time, UUID and binary floating-point types to text, and
-from REAL and DOUBLE to NUMERIC (their text forms are a dialect decision; an application registers
-any of them through `AddCast` meanwhile); a volatility on `SqlCast`, which a phase that runs casts
+question); a volatility on `SqlCast`, which a phase that runs casts
 in a CHECK, an index or a generated expression, or applies `Implicit` contexts, needs first;
-PostgreSQL's text forms of INTERVAL (the engine reads .NET's `[d.]hh:mm:ss`, so `'12'` is twelve
-days, not seconds); and a `COHESION_SCHEMA` view of casts.
+a `COHESION_SCHEMA` view of casts; and JSON-to-scalar casts.
 
 ## Modifier admission (#1438)
 
@@ -1409,7 +1421,7 @@ Binary defaults use a quoted `\x` prefix followed by an even number of hexadecim
 the typed renderer writes uppercase digits. This follows PostgreSQL's bytea hex marker
 (`src/backend/utils/adt/bytea.c:201-224`), with no octal or whitespace alternative. DEFAULT
 conversion alone decodes the bytes and enforces the column's length bounds; general text-to-binary
-assignment and CAST are unchanged. The table-version cache keeps the converted bytes privately
+assignment is unchanged. #1119 adds explicit BYTEA CAST input independently. The table-version cache keeps the converted bytes privately
 and clones them whenever a default is delivered, including backfill of older rows, so caller
 mutation cannot change subsequent defaults.
 

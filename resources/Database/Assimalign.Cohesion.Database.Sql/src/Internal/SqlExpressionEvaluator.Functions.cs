@@ -243,6 +243,10 @@ internal sealed partial class SqlExpressionEvaluator
         return ResolvedCallType(call, scalarOnly);
     }
 
+    /// <summary>Whether a call's result type depends on its arguments, using non-throwing binder resolution.</summary>
+    internal bool CallResultDependsOnArguments(SqlFunctionCallExpression call)
+        => SqlStandardLibrary.IsCoalesce(call.FunctionName) || TypeCall(call).Function?.ReturnType.IsPseudo is true;
+
     /// <summary>
     /// The type of a slot's value: an ordering output's projection type, or a grouping key's or
     /// aggregate result's type over the input row. Out of <see cref="StaticTypeOf"/>'s frame, which

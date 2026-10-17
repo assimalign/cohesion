@@ -476,10 +476,8 @@ public sealed class SqlDomainTests
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Domains: an application registers a cast between built-in types the standard library leaves out, through the same AddCast")]
     public async Task AddCast_BetweenBuiltInTypes_ShouldFillTheStandardLibrarysGaps()
     {
-        // Arrange: DOUBLE to TEXT and BOOLEAN to INTEGER, which the standard library does not convert.
+        // Arrange: BOOLEAN to INTEGER, which the standard library does not convert.
         await using var engine = await BuildAsync(static types => types
-            .AddCast(SqlCast.Create<double, string>(SqlType.Double, SqlType.Text,
-                static value => value.ToString("R", CultureInfo.InvariantCulture), SqlCastContext.Assignment))
             .AddCast(SqlCast.Create<bool, int>(SqlType.Boolean, SqlType.Integer, static value => value ? 1 : 0, SqlCastContext.Explicit)));
         var database = await engine.CreateDatabaseAsync("metrics");
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
@@ -492,13 +490,13 @@ public sealed class SqlDomainTests
 
         // Act
         var rows = await RowsAsync(session, "SELECT CAST(ratio AS TEXT), CAST(TRUE AS INT), CAST(id = 2 AS INTEGER) FROM m");
-        var without = await Should.ThrowAsync<DatabaseException>(() => RowsAsync(plainSession, "SELECT CAST(ratio AS TEXT) FROM m"));
+        var without = await Should.ThrowAsync<DatabaseException>(() => RowsAsync(plainSession, "SELECT CAST(TRUE AS INTEGER) FROM m"));
 
         // Assert: the engine without the application's cast refuses the pair while planning.
         rows.ShouldBe([["0.25", 1, 0]]);
         engine.Types.FindCast(SqlType.Double, SqlType.Text).ShouldNotBeNull().Context.ShouldBe(SqlCastContext.Assignment);
-        plain.Types.FindCast(SqlType.Double, SqlType.Text).ShouldBeNull();
-        without.DiagnosticDetail("COHSQLE011").ShouldStartWith("Cannot CAST type DOUBLE to TEXT: ", Case.Sensitive);
+        plain.Types.FindCast(SqlType.Double, SqlType.Text).ShouldNotBeNull();
+        without.DiagnosticDetail("COHSQLE011").ShouldStartWith("Cannot CAST type BOOLEAN to INTEGER: ", Case.Sensitive);
     }
 
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Domains: a value of a domain cast to that domain is relabeled, not converted, and still checked")]
@@ -730,7 +728,7 @@ public sealed class SqlDomainTests
         npe.InnerException.ShouldBeOfType<NullReferenceException>();
         oce.DiagnosticDetail("COHSQLE007").ShouldBe("Cast TEXT AS points failed: not this statement");
         oce.InnerException.ShouldBeOfType<TaskCanceledException>();
-        bad.Message.ShouldBe("CAST from String to points failed: not a number of points");
+        bad.Message.ShouldBe("CAST from TEXT to points failed: not a number of points");
         bad.InnerException.ShouldBeOfType<FormatException>();
         after.ShouldBe([[7L]]);
 

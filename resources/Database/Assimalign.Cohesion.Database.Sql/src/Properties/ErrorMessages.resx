@@ -18,4 +18,28 @@
   <data name="ColumnNullNotAllowed" xml:space="preserve">
     <value>Column '{0}' does not allow NULL.</value>
   </data>
+  <data name="CastIntervalTimeRange" xml:space="preserve">
+    <value>INTERVAL must be at least zero and less than 24 hours for TIME.</value>
+  </data>
+  <data name="CastDoubleOverflow" xml:space="preserve">
+    <value>Text overflows DOUBLE.</value>
+  </data>
+  <data name="CastDoubleUnderflow" xml:space="preserve">
+    <value>Text underflows DOUBLE.</value>
+  </data>
+  <data name="CastIntegerRange" xml:space="preserve">
+    <value>A non-finite value is out of range for an integer target.</value>
+  </data>
+  <data name="CastIntegerWhole" xml:space="preserve">
+    <value>An integer target requires a finite whole number; truncation is not supported.</value>
+  </data>
+  <data name="CastBinaryText" xml:space="preserve">
+    <value>BYTEA text requires \x hexadecimal digits or backslash-free UTF-8 text.</value>
+  </data>
+  <data name="CastUtf8Text" xml:space="preserve">
+    <value>CAST text must be valid UTF-8.</value>
+  </data>
+  <data name="CastJsonText" xml:space="preserve">
+    <value>Invalid JSON text (maximum depth 128).</value>
+  </data>
 </root>

@@ -6,9 +6,9 @@ using Assimalign.Cohesion.Database.Sql.Language;
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 /// <summary>
-/// Reads text as a date, a timestamp or a timestamp with an offset, one reading for an INSERT into a
-/// column of the type (<see cref="SqlPlanExecutor.CoerceForColumn"/>) and for <c>CAST</c>
-/// (<see cref="SqlStandardCasts"/>), so neither depends on the host's clock or time zone.
+/// Reads plain-string assignment text as a date, a timestamp or a timestamp with an offset
+/// (<see cref="SqlPlanExecutor.CoerceForColumn"/>), independently of the host's clock or time zone.
+/// Explicit CAST uses the strict public <see cref="SqlLiteralText"/> readers directly.
 /// </summary>
 /// <remarks>
 /// <para>

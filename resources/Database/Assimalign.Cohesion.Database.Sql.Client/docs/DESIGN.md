@@ -78,6 +78,13 @@ COHDBL001 year-month exclusions arrive as ParseFailure and leave the connection 
 TIMESTAMP assignment returns Kind Unspecified; TIMESTAMPTZ preserves its offset, following the
 [dialect normalization rule](../../Assimalign.Cohesion.Database.Sql.Language/docs/DIALECT.md#timestamp-normalization-1110).
 
+## Explicit casts (#1119)
+
+The expanded built-in CAST matrix uses the existing scalar type tags and result metadata.
+Wire tests cover float, temporal, interval, UUID, BYTEA, JSON and JSONB values, canonical text,
+conversion refusals and connection reuse after a floating arithmetic overflow. JSONB remains
+validated UTF-8 bytes with byte equality; there is no new wire encoding.
+
 ## Typed projection
 
 Column names map to ordinals once, shared by every result record. First column

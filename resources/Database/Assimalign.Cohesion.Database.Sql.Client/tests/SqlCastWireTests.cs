@@ -557,16 +557,16 @@ public sealed class SqlCastWireTests
         failure.Message.ShouldContain(diagnostic, Case.Sensitive);
     }
 
-    /// <summary>Unsupported wire source types cannot escape conversion by targeting text.</summary>
+    /// <summary>New source families produce canonical text over the wire.</summary>
     /// <param name="source">The unsupported source identity.</param>
     /// <returns>The asynchronous test operation.</returns>
-    [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - CAST: unsupported source types are rejected over the wire")]
+    [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - CAST: new source families render canonical text over the wire")]
     [InlineData(DatabaseType.Float32)]
     [InlineData(DatabaseType.Float64)]
     [InlineData(DatabaseType.Guid)]
     [InlineData(DatabaseType.Binary)]
     [InlineData(DatabaseType.DateTime)]
-    public async Task QueryAsync_UnsupportedSource_ShouldReturnExecutionFailure(DatabaseType source)
+    public async Task QueryAsync_NewSourceFamily_ShouldReturnCanonicalText(DatabaseType source)
     {
         // Arrange
         await using var harness = await SqlClientTestHarness.StartAsync();
@@ -583,11 +583,98 @@ public sealed class SqlCastWireTests
         var command = new SqlCommand("SELECT CAST(@value AS VARCHAR(100)) AS converted FROM users WHERE id = 1")
             .WithParameter("value", value);
 
-        // Act / Assert
-        SqlClientException failure = await Should.ThrowAsync<SqlClientException>(async () =>
-            await connection.QueryAsync(command, SqlClientTestHarness.Timeout()));
+        // Act
+        var result = await connection.QueryAsync(command, SqlClientTestHarness.Timeout());
+
+        // Assert
+        result.Columns[0].Type.ShouldBe(DatabaseType.String);
+        string expected = source switch
+        {
+            DatabaseType.Float32 or DatabaseType.Float64 => "42",
+            DatabaseType.Guid => "00000000-0000-0000-0000-000000000000",
+            DatabaseType.Binary => "\\x2a",
+            DatabaseType.DateTime => "2026-01-01 00:00:00",
+            _ => throw new ArgumentOutOfRangeException(nameof(source)),
+        };
+        result.ShouldHaveSingleItem()[0].ShouldBe(expected);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - CAST: every new family preserves values and metadata on the wire")]
+    public async Task QueryAsync_NewCastFamilies_ShouldPreserveValuesAndMetadata()
+    {
+        // Arrange
+        await using var harness = await SqlClientTestHarness.StartAsync();
+        await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
+        string json = " {\"雪\": [1, true]} ";
+
+        // Act
+        var result = await connection.QueryAsync(
+            "SELECT CAST(CAST('1.25' AS DOUBLE PRECISION) AS DECIMAL), " +
+            "CAST(DATE '2024-01-01' AS TIMESTAMP WITH TIME ZONE), " +
+            "CAST(TIMESTAMPTZ '2024-01-01 01:00:00+02:00' AS TIMESTAMP), " +
+            "CAST(TIME '01:02:03.1234567' AS INTERVAL), CAST(INTERVAL '1 hour' AS TIME), " +
+            "CAST('00112233-4455-6677-8899-aabbccddeeff' AS UNIQUEIDENTIFIER), " +
+            "CAST('\\x00ff' AS BYTEA), CAST('雪' AS BINARY VARYING(3)), " +
+            $"CAST('{json}' AS JSON), CAST(CAST('{json}' AS JSON) AS JSONB), " +
+            $"CAST(CAST('{json}' AS JSONB) AS JSON), TRUE || '', DATE '2024-01-01' || '' " +
+            "FROM users WHERE id = 1", cancellationToken: SqlClientTestHarness.Timeout());
+
+        // Assert
+        result.Columns.Select(column => column.Type).ShouldBe(new[]
+        {
+            DatabaseType.Decimal, DatabaseType.DateTimeOffset, DatabaseType.DateTime, DatabaseType.TimeSpan,
+            DatabaseType.Time, DatabaseType.Guid, DatabaseType.Binary, DatabaseType.Binary,
+            DatabaseType.Json, DatabaseType.JsonBinary, DatabaseType.Json, DatabaseType.String, DatabaseType.String,
+        });
+        var row = result.ShouldHaveSingleItem();
+        row[0].ShouldBe(1.25m);
+        row[1].ShouldBe(new DateTimeOffset(2024, 1, 1, 0, 0, 0, TimeSpan.Zero));
+        row[2].ShouldBeOfType<DateTime>().ShouldBe(new DateTime(2023, 12, 31, 23, 0, 0));
+        row[2].ShouldBeOfType<DateTime>().Kind.ShouldBe(DateTimeKind.Unspecified);
+        row[3].ShouldBe(new TimeSpan(1, 2, 3).Add(TimeSpan.FromTicks(1234567)));
+        row[4].ShouldBe(new TimeOnly(1, 0));
+        row[5].ShouldBe(Guid.Parse("00112233-4455-6677-8899-aabbccddeeff"));
+        row[6].ShouldBe(new byte[] { 0, 255 });
+        row[7].ShouldBe(System.Text.Encoding.UTF8.GetBytes("雪"));
+        row[8].ShouldBe(json);
+        row[9].ShouldBe(System.Text.Encoding.UTF8.GetBytes(json));
+        row[10].ShouldBe(json);
+        row[11].ShouldBe("TRUE");
+        row[12].ShouldBe("2024-01-01");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - CAST: new conversion faults and float arithmetic preserve the connection")]
+    [InlineData("CAST('2024-02-30' AS DATE)")]
+    [InlineData("CAST('1e400' AS DOUBLE PRECISION)")]
+    [InlineData("CAST('1e-50' AS REAL)")]
+    [InlineData("CAST(CAST('1.5' AS DOUBLE PRECISION) AS INT)")]
+    [InlineData("CAST(CAST('1e300' AS DOUBLE PRECISION) AS REAL)")]
+    [InlineData("CAST(CAST('NaN' AS DOUBLE PRECISION) AS DECIMAL)")]
+    [InlineData("CAST(INTERVAL '25 hours' AS TIME)")]
+    [InlineData("CAST('1 year' AS INTERVAL)")]
+    [InlineData("CAST('\\xZZ' AS BYTEA)")]
+    [InlineData("CAST('{bad' AS JSON)")]
+    [InlineData("CAST('{bad' AS JSONB)")]
+    [InlineData("CAST('00112233-4455-6677-8899-aabbccddeefg' AS UUID)")]
+    [InlineData("CAST('\\x00ff' AS VARBINARY(1))")]
+    [InlineData("CAST(CAST('1' AS JSON) AS INTEGER)")]
+    [InlineData("CAST(X'00' AS JSONB)")]
+    [InlineData("CAST('1e300' AS DOUBLE PRECISION) + 1")]
+    public async Task QueryAsync_NewConversionFailure_ShouldKeepConnectionUsable(string expression)
+    {
+        // Arrange
+        await using var harness = await SqlClientTestHarness.StartAsync();
+        await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
+
+        // Act
+        var failure = await Should.ThrowAsync<SqlClientException>(async () => await connection.QueryAsync(
+            $"SELECT {expression} FROM users WHERE id = 1", cancellationToken: SqlClientTestHarness.Timeout()));
+        var recovered = await connection.QueryAsync("SELECT CAST('42' AS INT) FROM users WHERE id = 1", cancellationToken: SqlClientTestHarness.Timeout());
+
+        // Assert
         failure.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
-        failure.Message.ShouldContain("CAST", Case.Sensitive);
+        failure.ConnectionUsable.ShouldBeTrue();
+        recovered.ShouldHaveSingleItem()[0].ShouldBe(42);
     }
 
     /// <summary>Write storage cannot conceal failed conversions, and a failure leaves CAST usable on the same connection.</summary>

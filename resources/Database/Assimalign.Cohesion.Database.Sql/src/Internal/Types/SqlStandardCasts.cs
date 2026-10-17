@@ -1,42 +1,21 @@
 using System;
 using System.Globalization;
 
+using Assimalign.Cohesion.Database.Sql.Language;
+
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 /// <summary>
-/// The SQL engine's built-in casts: entries of the cast registry, created with the public
-/// <see cref="SqlCast.Create"/> and registered through the same <see cref="SqlTypeCollection.AddCast"/>
+/// The SQL engine's built-in casts: entries of the cast registry, registered through the same
+/// <see cref="SqlTypeCollection.AddCast"/>
 /// an application calls (phase E3), so <c>CAST</c> runs the engine's conversions exactly as it runs
 /// an application's.
 /// </summary>
 /// <remarks>
-/// <para>
-/// The pairs are the ones the engine converted before E3 (text, BOOLEAN, the integers and NUMERIC
-/// among themselves, and those to text), with no grouping and a value out of the target's range
-/// refused. Declared NUMERIC scales round before checking precision. E3 adds REAL and DOUBLE from text and the
-/// numeric types, and DATE, TIME, TIMESTAMP, TIMESTAMPTZ, INTERVAL and UUID from text (and DATE from
-/// TIMESTAMP), parsed as INSERT parses text for a column of the type, so a string reaches a typed
-/// function parameter through <c>CAST</c>. The contexts are PostgreSQL's for the same pairs
-/// (<c>src/include/catalog/pg_cast.dat</c>): widenings implicit, narrowings and conversions to text
-/// assignment, conversions from text explicit.
-/// </para>
-/// <para>
-/// Each conversion maps storage type to storage type; the engine applies the target's length,
-/// precision and scale afterwards (<see cref="SqlCastConverter.ApplyModifiers"/>). The built-in
-/// text-to-NUMERIC entry is target-aware in <see cref="SqlCastConverter.Convert"/>: it rounds the
-/// original digits to a declared scale before reducing them to Decimal, avoiding double rounding.
-/// Application casts retain their delegates and receive the usual modifiers afterwards. Each delegate fails only
-/// with a <see cref="FormatException"/>, an <see cref="OverflowException"/> or an
-/// <see cref="InvalidCastException"/>, the value's faults <c>CAST</c> reports as conversion failures;
-/// anything else a cast throws is a fault of its code (<c>COHSQLE007</c>), so a built-in that threw
-/// another type would be reported as one. DATE, TIMESTAMP and TIMESTAMPTZ text reads through
-/// <see cref="SqlTemporalText"/>, as INSERT reads it.
-/// </para>
-/// <para>
-/// Not here, for now (Sql DESIGN, "Not in E3"): the date, time, UUID and binary floating-point types
-/// to text, and REAL and DOUBLE to NUMERIC. An application registers any of them through the same
-/// <see cref="SqlTypeCollection.AddCast"/>.
-/// </para>
+/// Entries convert storage values; CAST applies target modifiers and domain checks afterwards.
+/// Exact numeric widenings are implicit, narrowings and output to character types assignment,
+/// and text input explicit. JSON/JSONB pairs are assignment casts. Literal text uses SqlLiteralText's strict
+/// grammar; assignment's SqlTemporalText reader retains its separate input acceptance.
 /// </remarks>
 internal static class SqlStandardCasts
 {
@@ -76,6 +55,25 @@ internal static class SqlStandardCasts
         SqlCast.Create<long, string>(SqlType.BigInt, SqlType.Text, static value => value.ToString(CultureInfo.InvariantCulture), Assignment),
         SqlCast.Create<decimal, string>(SqlType.Numeric, SqlType.Text, static value => value.ToString(CultureInfo.InvariantCulture), Assignment),
 
+        SqlCast.Create<float, string>(SqlType.Real, SqlType.Text, static value => SqlCastText.Format(value), Assignment),
+        SqlCast.Create<float, string>(SqlType.Real, SqlType.Character, static value => SqlCastText.Format(value), Assignment),
+        SqlCast.Create<double, string>(SqlType.Double, SqlType.Text, static value => SqlCastText.Format(value), Assignment),
+        SqlCast.Create<double, string>(SqlType.Double, SqlType.Character, static value => SqlCastText.Format(value), Assignment),
+        SqlCast.Create<DateOnly, string>(SqlType.Date, SqlType.Text, static value => SqlCastText.Format(value), Assignment),
+        SqlCast.Create<DateOnly, string>(SqlType.Date, SqlType.Character, static value => SqlCastText.Format(value), Assignment),
+        SqlCast.Create<TimeOnly, string>(SqlType.Time, SqlType.Text, static value => SqlCastText.Format(value), Assignment),
+        SqlCast.Create<TimeOnly, string>(SqlType.Time, SqlType.Character, static value => SqlCastText.Format(value), Assignment),
+        SqlCast.Create<DateTime, string>(SqlType.Timestamp, SqlType.Text, static value => SqlCastText.Format(value), Assignment),
+        SqlCast.Create<DateTime, string>(SqlType.Timestamp, SqlType.Character, static value => SqlCastText.Format(value), Assignment),
+        SqlCast.Create<DateTimeOffset, string>(SqlType.TimestampTz, SqlType.Text, static value => SqlCastText.Format(value), Assignment),
+        SqlCast.Create<DateTimeOffset, string>(SqlType.TimestampTz, SqlType.Character, static value => SqlCastText.Format(value), Assignment),
+        SqlCast.Create<TimeSpan, string>(SqlType.Interval, SqlType.Text, static value => SqlCastText.Format(value), Assignment),
+        SqlCast.Create<TimeSpan, string>(SqlType.Interval, SqlType.Character, static value => SqlCastText.Format(value), Assignment),
+        SqlCast.Create<Guid, string>(SqlType.Uuid, SqlType.Text, static value => SqlCastText.Format(value), Assignment),
+        SqlCast.Create<Guid, string>(SqlType.Uuid, SqlType.Character, static value => SqlCastText.Format(value), Assignment),
+        SqlCast.Create<byte[], string>(SqlType.Binary, SqlType.Text, static value => SqlCastText.Format(value), Assignment),
+        SqlCast.Create<byte[], string>(SqlType.Binary, SqlType.Character, static value => SqlCastText.Format(value), Assignment),
+
         // From text: explicit only.
         SqlCast.Create<string, bool>(SqlType.Text, SqlType.Boolean, static text => bool.TryParse(text.Trim(), out bool parsed)
             ? parsed
@@ -85,14 +83,27 @@ internal static class SqlStandardCasts
         SqlCast.Create<string, int>(SqlType.Text, SqlType.Integer, static text => checked((int)Whole(SqlCastConverter.ParseExactDecimal(text))), Explicit),
         SqlCast.Create<string, long>(SqlType.Text, SqlType.BigInt, static text => checked((long)Whole(SqlCastConverter.ParseExactDecimal(text))), Explicit),
         SqlCast.Create<string, decimal>(SqlType.Text, SqlType.Numeric, static text => SqlCastConverter.ParseExactDecimal(text), Explicit),
-        SqlCast.Create<string, float>(SqlType.Text, SqlType.Real, static text => ToReal(ParseFloat(text)), Explicit),
+        SqlCast.Create<string, float>(SqlType.Text, SqlType.Real, static text => ParseReal(text), Explicit),
         SqlCast.Create<string, double>(SqlType.Text, SqlType.Double, static text => ParseFloat(text), Explicit),
-        SqlCast.Create<string, DateOnly>(SqlType.Text, SqlType.Date, static text => SqlTemporalText.ParseDate(text), Explicit),
-        SqlCast.Create<string, TimeOnly>(SqlType.Text, SqlType.Time, static text => TimeOnly.Parse(text, CultureInfo.InvariantCulture), Explicit),
-        SqlCast.Create<string, DateTime>(SqlType.Text, SqlType.Timestamp, static text => SqlTemporalText.ParseTimestamp(text), Explicit),
-        SqlCast.Create<string, DateTimeOffset>(SqlType.Text, SqlType.TimestampTz, static text => SqlTemporalText.ParseTimestampTz(text), Explicit),
-        SqlCast.Create<string, TimeSpan>(SqlType.Text, SqlType.Interval, static text => TimeSpan.Parse(text, CultureInfo.InvariantCulture), Explicit),
-        SqlCast.Create<string, Guid>(SqlType.Text, SqlType.Uuid, static text => Guid.Parse(text), Explicit),
+        SqlCast.Create<string, DateOnly>(SqlType.Text, SqlType.Date, static text => SqlLiteralText.ParseDate(text.Trim()), Explicit),
+        SqlCast.Create<string, TimeOnly>(SqlType.Text, SqlType.Time, static text => SqlLiteralText.ParseTime(text.Trim()), Explicit),
+        SqlCast.Create<string, DateTime>(SqlType.Text, SqlType.Timestamp, static text => SqlLiteralText.ParseTimestamp(text.Trim()), Explicit),
+        SqlCast.Create<string, DateTimeOffset>(SqlType.Text, SqlType.TimestampTz, static text => SqlLiteralText.ParseTimestampWithTimeZone(text.Trim()), Explicit),
+        SqlCast.Create<string, TimeSpan>(SqlType.Text, SqlType.Interval, static text => SqlCastText.ParseInterval(text), Explicit),
+        SqlCast.Create<string, Guid>(SqlType.Text, SqlType.Uuid, static text => Guid.Parse(text.Trim()), Explicit),
+
+        SqlCast.Create<string, byte[]>(SqlType.Text, SqlType.Binary, static text => SqlCastText.ParseBinary(text), Explicit),
+        new(SqlType.Text, SqlType.Json, Explicit, static value => SqlCastText.ValidateJson(SqlCastText.CharacterInput(value))),
+        new(SqlType.Text, SqlType.Jsonb, Explicit, static value => SqlCastText.JsonBytes(SqlCastText.CharacterInput(value))),
+        SqlCast.Create<string, byte[]>(SqlType.Character, SqlType.Binary, static text => SqlCastText.ParseBinary(text), Explicit),
+        new(SqlType.Character, SqlType.Json, Explicit, static value => SqlCastText.ValidateJson(SqlCastText.CharacterInput(value))),
+        new(SqlType.Character, SqlType.Jsonb, Explicit, static value => SqlCastText.JsonBytes(SqlCastText.CharacterInput(value))),
+        new(SqlType.Json, SqlType.Text, Assignment, static value => (string)value),
+        new(SqlType.Json, SqlType.Character, Assignment, static value => (string)value),
+        new(SqlType.Jsonb, SqlType.Text, Assignment, static value => SqlCastText.JsonText((byte[])value)),
+        new(SqlType.Jsonb, SqlType.Character, Assignment, static value => SqlCastText.JsonText((byte[])value)),
+        new(SqlType.Json, SqlType.Jsonb, Assignment, static value => SqlCastText.JsonBytes((string)value)),
+        new(SqlType.Jsonb, SqlType.Json, Assignment, static value => SqlCastText.JsonText((byte[])value)),
 
         // To CHAR: PostgreSQL's I/O conversions to a string type are assignment casts.
         SqlCast.Create<bool, string>(SqlType.Boolean, SqlType.Character, static value => value ? "TRUE" : "FALSE", Assignment),
@@ -111,14 +122,14 @@ internal static class SqlStandardCasts
         SqlCast.Create<string, int>(SqlType.Character, SqlType.Integer, static text => checked((int)Whole(SqlCastConverter.ParseExactDecimal(text))), Explicit),
         SqlCast.Create<string, long>(SqlType.Character, SqlType.BigInt, static text => checked((long)Whole(SqlCastConverter.ParseExactDecimal(text))), Explicit),
         SqlCast.Create<string, decimal>(SqlType.Character, SqlType.Numeric, static text => SqlCastConverter.ParseExactDecimal(text), Explicit),
-        SqlCast.Create<string, float>(SqlType.Character, SqlType.Real, static text => ToReal(ParseFloat(text)), Explicit),
+        SqlCast.Create<string, float>(SqlType.Character, SqlType.Real, static text => ParseReal(text), Explicit),
         SqlCast.Create<string, double>(SqlType.Character, SqlType.Double, static text => ParseFloat(text), Explicit),
-        SqlCast.Create<string, DateOnly>(SqlType.Character, SqlType.Date, static text => SqlTemporalText.ParseDate(text), Explicit),
-        SqlCast.Create<string, TimeOnly>(SqlType.Character, SqlType.Time, static text => TimeOnly.Parse(text, CultureInfo.InvariantCulture), Explicit),
-        SqlCast.Create<string, DateTime>(SqlType.Character, SqlType.Timestamp, static text => SqlTemporalText.ParseTimestamp(text), Explicit),
-        SqlCast.Create<string, DateTimeOffset>(SqlType.Character, SqlType.TimestampTz, static text => SqlTemporalText.ParseTimestampTz(text), Explicit),
-        SqlCast.Create<string, TimeSpan>(SqlType.Character, SqlType.Interval, static text => TimeSpan.Parse(text, CultureInfo.InvariantCulture), Explicit),
-        SqlCast.Create<string, Guid>(SqlType.Character, SqlType.Uuid, static text => Guid.Parse(text), Explicit),
+        SqlCast.Create<string, DateOnly>(SqlType.Character, SqlType.Date, static text => SqlLiteralText.ParseDate(text.Trim()), Explicit),
+        SqlCast.Create<string, TimeOnly>(SqlType.Character, SqlType.Time, static text => SqlLiteralText.ParseTime(text.Trim()), Explicit),
+        SqlCast.Create<string, DateTime>(SqlType.Character, SqlType.Timestamp, static text => SqlLiteralText.ParseTimestamp(text.Trim()), Explicit),
+        SqlCast.Create<string, DateTimeOffset>(SqlType.Character, SqlType.TimestampTz, static text => SqlLiteralText.ParseTimestampWithTimeZone(text.Trim()), Explicit),
+        SqlCast.Create<string, TimeSpan>(SqlType.Character, SqlType.Interval, static text => SqlCastText.ParseInterval(text), Explicit),
+        SqlCast.Create<string, Guid>(SqlType.Character, SqlType.Uuid, static text => Guid.Parse(text.Trim()), Explicit),
 
         // Among the exact numbers: widenings implicit, narrowings assignment and range-checked.
         SqlCast.Create<sbyte, short>(SqlType.TinyInt, SqlType.SmallInt, static value => value, Implicit),
@@ -147,7 +158,9 @@ internal static class SqlStandardCasts
         SqlCast.Create<short, float>(SqlType.SmallInt, SqlType.Real, static value => value, Implicit),
         SqlCast.Create<int, float>(SqlType.Integer, SqlType.Real, static value => value, Implicit),
         SqlCast.Create<long, float>(SqlType.BigInt, SqlType.Real, static value => value, Implicit),
-        SqlCast.Create<decimal, float>(SqlType.Numeric, SqlType.Real, static value => (float)value, Implicit),
+        // PostgreSQL numeric.c:4691-4696 goes directly from numeric_out to float4in.
+        SqlCast.Create<decimal, float>(SqlType.Numeric, SqlType.Real,
+            static value => float.Parse(value.ToString(CultureInfo.InvariantCulture), NumberStyles.Float, CultureInfo.InvariantCulture), Implicit),
         SqlCast.Create<double, float>(SqlType.Double, SqlType.Real, static value => ToReal(value), Assignment),
         SqlCast.Create<sbyte, double>(SqlType.TinyInt, SqlType.Double, static value => value, Implicit),
         SqlCast.Create<short, double>(SqlType.SmallInt, SqlType.Double, static value => value, Implicit),
@@ -156,8 +169,31 @@ internal static class SqlStandardCasts
         SqlCast.Create<decimal, double>(SqlType.Numeric, SqlType.Double, static value => (double)value, Implicit),
         SqlCast.Create<float, double>(SqlType.Real, SqlType.Double, static value => value, Implicit),
 
-        // TIMESTAMP to DATE drops the time of day, as INSERT does for a DATE column.
+        SqlCast.Create<float, sbyte>(SqlType.Real, SqlType.TinyInt, static value => checked((sbyte)WholeFloat(value)), Assignment),
+        SqlCast.Create<float, short>(SqlType.Real, SqlType.SmallInt, static value => checked((short)WholeFloat(value)), Assignment),
+        SqlCast.Create<float, int>(SqlType.Real, SqlType.Integer, static value => checked((int)WholeFloat(value)), Assignment),
+        SqlCast.Create<float, long>(SqlType.Real, SqlType.BigInt, static value => checked((long)WholeFloat(value)), Assignment),
+        SqlCast.Create<float, decimal>(SqlType.Real, SqlType.Numeric, static value => SqlCastConverter.ParseExactDecimal(value.ToString("R", CultureInfo.InvariantCulture), allowLiteralSyntax: true), Assignment),
+
+        SqlCast.Create<double, sbyte>(SqlType.Double, SqlType.TinyInt, static value => checked((sbyte)WholeFloat(value)), Assignment),
+        SqlCast.Create<double, short>(SqlType.Double, SqlType.SmallInt, static value => checked((short)WholeFloat(value)), Assignment),
+        SqlCast.Create<double, int>(SqlType.Double, SqlType.Integer, static value => checked((int)WholeFloat(value)), Assignment),
+        SqlCast.Create<double, long>(SqlType.Double, SqlType.BigInt, static value => checked((long)WholeFloat(value)), Assignment),
+        SqlCast.Create<double, decimal>(SqlType.Double, SqlType.Numeric, static value => SqlCastConverter.ParseExactDecimal(value.ToString("R", CultureInfo.InvariantCulture), allowLiteralSyntax: true), Assignment),
+
+        // Datetime contexts: PostgreSQL pg_cast.dat:400-423; JSON/JSONB:558-561.
+        // Zone-dependent values follow DIALECT.md's timestamp normalization rule.
         SqlCast.Create<DateTime, DateOnly>(SqlType.Timestamp, SqlType.Date, static value => DateOnly.FromDateTime(value), Assignment),
+        SqlCast.Create<DateOnly, DateTime>(SqlType.Date, SqlType.Timestamp, static value => value.ToDateTime(TimeOnly.MinValue), Implicit),
+        SqlCast.Create<DateOnly, DateTimeOffset>(SqlType.Date, SqlType.TimestampTz, static value => new DateTimeOffset(value.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero), Implicit),
+        SqlCast.Create<DateTime, TimeOnly>(SqlType.Timestamp, SqlType.Time, static value => TimeOnly.FromDateTime(value), Assignment),
+        SqlCast.Create<DateTime, DateTimeOffset>(SqlType.Timestamp, SqlType.TimestampTz, static value => new DateTimeOffset(DateTime.SpecifyKind(value, DateTimeKind.Unspecified), TimeSpan.Zero), Implicit),
+        SqlCast.Create<DateTimeOffset, DateTime>(SqlType.TimestampTz, SqlType.Timestamp, static value => DateTime.SpecifyKind(value.UtcDateTime, DateTimeKind.Unspecified), Assignment),
+        SqlCast.Create<DateTimeOffset, DateOnly>(SqlType.TimestampTz, SqlType.Date, static value => DateOnly.FromDateTime(value.UtcDateTime), Assignment),
+        SqlCast.Create<DateTimeOffset, TimeOnly>(SqlType.TimestampTz, SqlType.Time, static value => TimeOnly.FromDateTime(value.UtcDateTime), Assignment),
+        SqlCast.Create<TimeOnly, TimeSpan>(SqlType.Time, SqlType.Interval, static value => value.ToTimeSpan(), Implicit),
+        SqlCast.Create<TimeSpan, TimeOnly>(SqlType.Interval, SqlType.Time, static value => value.Ticks >= 0 && value.Ticks < TimeSpan.TicksPerDay
+            ? new TimeOnly(value.Ticks) : throw new InvalidCastException(ErrorMessages.CastIntervalTimeRange), Assignment),
     ];
 
     /// <summary>Refuses a fractional value for an integer target: truncation is not supported.</summary>
@@ -168,12 +204,39 @@ internal static class SqlStandardCasts
 
     /// <summary>Reads text as a binary floating-point number: no grouping, as for the exact numbers.</summary>
     private static double ParseFloat(string text)
-        => double.Parse(text.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture);
+    {
+        string input = text.Trim();
+        double value = double.Parse(input, NumberStyles.Float, CultureInfo.InvariantCulture);
+        if (double.IsInfinity(value) && !input.Equals("Infinity", StringComparison.OrdinalIgnoreCase)
+            && !input.Equals("+Infinity", StringComparison.OrdinalIgnoreCase) && !input.Equals("-Infinity", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new OverflowException(ErrorMessages.CastDoubleOverflow);
+        }
+        if (value == 0)
+        {
+            int exponent = input.IndexOfAny(['e', 'E']);
+            ReadOnlySpan<char> mantissa = exponent < 0 ? input.AsSpan() : input.AsSpan(0, exponent);
+            if (mantissa.ContainsAnyInRange('1', '9')) { throw new OverflowException(ErrorMessages.CastDoubleUnderflow); }
+        }
+        return value;
+    }
+
+    private static double WholeFloat(double value)
+    {
+        // PostgreSQL float.c:1267-1270 classifies NaN and infinities as range errors.
+        if (!double.IsFinite(value)) { throw new OverflowException(ErrorMessages.CastIntegerRange); }
+        return Math.Truncate(value) == value ? value : throw new InvalidCastException(ErrorMessages.CastIntegerWhole);
+    }
 
     /// <summary>Narrows to REAL, refusing a finite value REAL overflows or underflows to zero, as PostgreSQL does.</summary>
-    private static float ToReal(double value)
+    // A first rounding to DOUBLE can land on a REAL midpoint; parse directly for the target.
+    private static float ParseReal(string text)
+        => CheckReal(ParseFloat(text), float.Parse(text.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture));
+
+    private static float ToReal(double value) => CheckReal(value, (float)value);
+
+    private static float CheckReal(double value, float narrowed)
     {
-        float narrowed = (float)value;
         if (float.IsInfinity(narrowed) && !double.IsInfinity(value))
         {
             throw new OverflowException($"Value {value.ToString(CultureInfo.InvariantCulture)} is out of range for REAL.");

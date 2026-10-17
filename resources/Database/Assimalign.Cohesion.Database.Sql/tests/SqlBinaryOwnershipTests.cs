@@ -112,6 +112,8 @@ public sealed class SqlBinaryOwnershipTests
     [InlineData("SELECT (SELECT b FROM t WHERE id = 1), X'00FF' FROM t;", SqlFunctionVolatility.Immutable)]
     [InlineData("SELECT shared_agg(id), shared_agg(id) FROM t GROUP BY id;", SqlFunctionVolatility.Immutable)]
     [InlineData("SELECT CAST(id AS BINARY), CAST(id AS BINARY) FROM t;", SqlFunctionVolatility.Immutable)]
+    [InlineData("SELECT CAST('\\x00ff' AS BYTEA), CAST('\\x00ff' AS BYTEA) FROM t;", SqlFunctionVolatility.Immutable)]
+    [InlineData("SELECT CAST(X'00FF' AS BYTEA), CAST(X'00FF' AS BYTEA) FROM t;", SqlFunctionVolatility.Immutable)]
     [InlineData("SELECT shared(1), X'00FF' FROM COHESION_SCHEMA.FUNCTIONS LIMIT 2;", SqlFunctionVolatility.Immutable)]
     public async Task Select_SharedBinaryProducer_ShouldCopyEachDeliveredValue(string sql, SqlFunctionVolatility volatility)
     {
@@ -142,6 +144,38 @@ public sealed class SqlBinaryOwnershipTests
         values.Count.ShouldBe(4);
         retained.ShouldBe(new byte[] { 0, 255 });
         (await ValuesAsync(session, sql)).ShouldAllBe(value => value.SequenceEqual(new byte[] { 0, 255 }));
+    }
+
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Binary CAST: binary and JSONB outputs own each cell, row and later execution")]
+    [InlineData("BYTEA", "\\x00ff", "00FF")]
+    [InlineData("BYTEA", "\\x", "")]
+    [InlineData("JSONB", "{\"雪\":1}", "7B22E99BAA223A317D")]
+    public async Task Select_BinaryProducingCast_ShouldDetachEveryDeliveredValue(string type, string text, string expectedHex)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("binary-cast", new SqlDatabaseEngineOptions());
+        var database = await engine.CreateDatabaseAsync("db");
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE t (id INT);", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT INTO t VALUES (1), (2);", cancellationToken: CancellationToken.None);
+        string sql = $"SELECT CAST('{text}' AS {type}), CAST('{text}' AS {type}) FROM t;";
+        byte[] expected = Convert.FromHexString(expectedHex);
+
+        // Act
+        var first = await ValuesAsync(session, sql);
+        var second = await ValuesAsync(session, sql);
+
+        // Assert
+        first.Count.ShouldBe(4);
+        second.Count.ShouldBe(4);
+        var all = first.Concat(second).ToArray();
+        for (int i = 0; i < all.Length; i++)
+        {
+            all[i].ShouldBe(expected);
+            for (int j = 0; j < i; j++) { all[i].ShouldNotBeSameAs(all[j]); }
+            if (all[i].Length > 0) { all[i][0] = 0x99; }
+        }
+        (await ValuesAsync(session, sql)).ShouldAllBe(value => value.SequenceEqual(expected));
     }
 
     private static async Task<List<byte[]>> ValuesAsync(SqlDatabaseSession session, string sql)
