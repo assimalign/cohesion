@@ -177,10 +177,10 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
         }
         finally
         {
+            await DrainTerminalResponseAsync(softStop).ConfigureAwait(false);
             // Detach from the abort signal before the lifetime source is disposed
             // so a late hard abort cannot race a disposed token source.
             await abortRegistration.DisposeAsync().ConfigureAwait(false);
-            await DrainTerminalResponseAsync(softStop).ConfigureAwait(false);
             await CleanupAsync().ConfigureAwait(false);
         }
     }
