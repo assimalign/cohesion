@@ -1782,6 +1782,14 @@ including its ownership metadata, through `SqlCatalog.ReserveTableAsync` and
 stays ad-hoc. The catalog persists descriptions;
 the engine continues to authorize session operations against schema-owned objects.
 
+## DML relation qualifiers (#1106)
+
+UPDATE SET values and UPDATE/DELETE predicates bind against the target relation, just as
+SELECT expressions do. An alias hides the base name; an unknown or hidden qualifier fails
+planning with located COHSQLE015 before any row changes, leaving an explicit transaction
+active. This follows PostgreSQL `src/backend/parser/parse_relation.c:3759`. Subqueries in
+UPDATE and DELETE retain the grammar's COHDBL001 refusal.
+
 ## Virtual system relations (C1)
 
 The catalog is the sole data source for six `INFORMATION_SCHEMA` relations and

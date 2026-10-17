@@ -761,7 +761,9 @@ internal sealed partial class SqlPlanner
     private SqlUpdatePlan PlanUpdate(SqlUpdateExpression update)
     {
         var table = ResolveTable(update.Table);
-        var evaluator = new SqlExpressionEvaluator(table.Columns, _parameters, defaultCollation: _catalog.DefaultCollation, functions: _functions, cancellationToken: _cancellationToken);
+        var evaluator = new SqlExpressionEvaluator(table.Columns, _parameters,
+            [new SqlRelationBinding(new SqlStoredTableSource(table), update.Table, 0)],
+            defaultCollation: _catalog.DefaultCollation, functions: _functions, cancellationToken: _cancellationToken);
 
         var assignments = new List<(int Ordinal, SqlBoundExpression Value)>(update.Assignments.Count);
         foreach (var assignment in update.Assignments)
@@ -802,7 +804,9 @@ internal sealed partial class SqlPlanner
         if (delete.Where is not null)
         {
             RejectAggregateInDmlWhere(delete.Where);
-            var evaluator = new SqlExpressionEvaluator(table.Columns, _parameters, defaultCollation: _catalog.DefaultCollation, functions: _functions, cancellationToken: _cancellationToken);
+            var evaluator = new SqlExpressionEvaluator(table.Columns, _parameters,
+                [new SqlRelationBinding(new SqlStoredTableSource(table), delete.Table, 0)],
+                defaultCollation: _catalog.DefaultCollation, functions: _functions, cancellationToken: _cancellationToken);
             ValidateExpression(delete.Where, evaluator);
             where = evaluator.Bind(delete.Where);
         }
