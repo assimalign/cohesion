@@ -36,7 +36,12 @@ internal sealed partial class SqlPlanner
                 return projection.ColumnOrdinal is int ordinal ? DerivedOrdinal(ordinal)
                     : projection.Expression is { } source ? ReadsDerived(source, false) : ReadsMerged(projection.Value);
             }
-            if (expression is SqlColumnReferenceExpression reference) { return DerivedOrdinal(scope.ResolveColumn(reference)); }
+            if (expression is SqlColumnReferenceExpression reference)
+            {
+                int ordinal = scope.ResolveColumn(reference);
+                return reference.TableAlias is null && reference.SchemaName is null && scope.MergedColumn(ordinal) is { } merged
+                    ? ReadsMerged(merged.Value) : DerivedOrdinal(ordinal);
+            }
             foreach (var child in Children(expression))
             {
                 if (ReadsDerived(child, outputs)) { return true; }

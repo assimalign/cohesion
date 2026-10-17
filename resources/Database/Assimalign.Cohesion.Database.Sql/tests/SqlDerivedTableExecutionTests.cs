@@ -27,6 +27,7 @@ public sealed class SqlDerivedTableExecutionTests
     [InlineData("SELECT t.id FROM t JOIN (SELECT id FROM t) d ON t.id = d.id ORDER BY t.id DESC LIMIT 1", 3)]
     [InlineData("SELECT t.id AS n FROM t JOIN (SELECT id FROM t) d ON t.id = d.id ORDER BY n DESC LIMIT 1", 3)]
     [InlineData("SELECT t.id FROM t JOIN (SELECT id FROM t) d ON t.id = d.id ORDER BY 1 DESC LIMIT 1", 3)]
+    [InlineData("SELECT t.id FROM t JOIN (SELECT CAST(id AS BIGINT) AS id FROM t) d USING (id) ORDER BY t.id DESC LIMIT 1", 3)]
     [InlineData("SELECT * FROM (SELECT t.id FROM t JOIN (SELECT id FROM t) x ON t.id = x.id ORDER BY t.id DESC LIMIT 1) d", 3)]
     [InlineData("SELECT * FROM (SELECT * FROM (SELECT id FROM t) x ORDER BY id DESC LIMIT 1) d", 3)]
     public async Task Execute_DerivedRelation_ShouldApplyRelationalOperators(string sql, object expected)
@@ -296,17 +297,24 @@ public sealed class SqlDerivedTableExecutionTests
     [Theory(DisplayName = "Cohesion Test [Sql] - Derived tables: output ordering retains the shared pin after binding")]
     [InlineData("SELECT q.years FROM (SELECT id AS years FROM t) q ORDER BY years")]
     [InlineData("SELECT q.years FROM (SELECT id AS years FROM t) q ORDER BY 1")]
+    [InlineData("SELECT q.years FROM (SELECT age AS years FROM t) q ORDER BY years;")]
+    [InlineData("SELECT q.years FROM (SELECT age AS years FROM t) q ORDER BY 1;")]
+    [InlineData("SELECT * FROM (SELECT id FROM u) d ORDER BY id;")]
     [InlineData("SELECT q.years FROM (SELECT id AS years FROM t) q ORDER BY q.years")]
     [InlineData("SELECT q.id + 1 AS n FROM t JOIN (SELECT id FROM t) q ON t.id = q.id ORDER BY n")]
     [InlineData("SELECT q.id FROM t JOIN (SELECT id FROM t) q ON t.id = q.id ORDER BY 1")]
     [InlineData("SELECT q.id, COUNT(*) FROM t JOIN (SELECT id FROM t) q ON t.id = q.id GROUP BY q.id ORDER BY q.id")]
+    [InlineData("SELECT id FROM t JOIN (SELECT CAST(id AS BIGINT) AS id FROM t) q USING (id) ORDER BY id")]
     public async Task Execute_DerivedOutputOrdering_ShouldRetainCapabilityRefusal(string sql)
     {
         // Arrange
         await using var engine = SqlDatabaseEngine.Create("derived-order", new());
         var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
-        await SeedAsync(session);
+        await session.ExecuteAsync("CREATE TABLE t (id INT, age INT);", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT INTO t VALUES (1, 10);", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE u (id INT);", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT INTO u VALUES (1);", cancellationToken: CancellationToken.None);
 
         // Act
         var result = await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None);

@@ -186,7 +186,8 @@ last descending, followed by DISTINCT and LIMIT/OFFSET. Explicit NULL placement
 and outer ordering keys bound to derived outputs remain capability errors. Stored-input
 keys still execute when a derived relation participates; ordering inside derived bodies
 also executes over nested derived inputs. The planner decides the pin after alias,
-ordinal and source bindings exist. The exact syntax contract
+ordinal and source bindings exist. An unqualified USING key follows the chosen merged
+value's source; a qualified stored-table key retains its physical binding. The exact syntax contract
 and execution evidence are in
 [DIALECT.md](../../Assimalign.Cohesion.Database.Sql.Language/docs/DIALECT.md).
 
