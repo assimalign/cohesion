@@ -820,11 +820,13 @@ public sealed partial class SqlQueryParser
 
     private SqlExpression ParseFunctionCallArgs(ref TokenLexer lexer, string name, int pos, bool quoted = false)
     {
-        if (!quoted && SqlUnsupportedVocabulary.IsFunction(name))
+        // PostgreSQL scan.l:773-783 preserves quoted case; namespace.c:1237 looks up that spelling.
+        // The vocabulary stores uppercase display names; quoted built-ins use lowercase lookup names.
+        if ((!quoted || string.Equals(name, name.ToLowerInvariant(), StringComparison.Ordinal)) && SqlUnsupportedVocabulary.IsFunction(name))
         {
             if (!SqlUnsupportedVocabulary.IsWindowFunction(name) || _preflightClauseStart < 0)
             {
-                AddUnsupportedSurfaceDiagnostic(pos, pos + name.Length,
+                AddUnsupportedSurfaceDiagnostic(pos, pos + name.Length + (quoted ? 2 : 0),
                     $"The SQL function {name.ToUpperInvariant()} is not supported.");
             }
             SkipParenthesized(ref lexer);

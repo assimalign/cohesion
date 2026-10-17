@@ -418,3 +418,10 @@ Every valid qualifier reports one COHDBL001 naming the declaration and complete 
 forms without precision. Invalid ranges remain SQL0003; malformed arguments remain SQL0005 and
 suppress a secondary unsupported diagnostic. Case and token trivia do not change admission.
 Delimited names retain their lexical identity so a domain named `"INTERVAL DAY"` is still a domain.
+
+## Quoted function recognition (#1103 review)
+
+The function-call branch checks quoted names against the same recognized unsupported table
+as unquoted calls. Quoted names must match the lowercase lookup spelling exactly; unquoted
+names match without regard to case. Parentheses distinguish calls from quoted columns.
+DIALECT documents the PostgreSQL scanner and function-lookup references and examples.

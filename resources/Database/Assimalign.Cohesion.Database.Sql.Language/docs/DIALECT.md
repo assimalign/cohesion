@@ -1945,3 +1945,19 @@ are refused before Build opens or changes the database. Scripts may create and l
 own tables, create their own indexes on typed tables, and run DML against typed tables.
 Scripts run inline, including data-scaling DDL, and force preceding typed migrations inline.
 SDK v6 artifacts do not carry scripts; extraction refuses Script calls with COHDBSDK110.
+
+## Quoted calls (#1103 review)
+
+A quoted identifier followed by parentheses is a function call. Recognized unsupported
+built-ins use their lowercase lookup spelling for quoted names: `"sqrt"(id)` reports
+parse-time `COHDBL001`, while `"SQRT"(id)` and `"Sqrt"(id)` are distinct names outside
+that vocabulary. Unquoted names match the vocabulary without regard to case. Quoting a name
+without parentheses keeps it a column reference, including `"sqrt"` and `"current_date"`.
+Declared executable calls such as `"abs"(id)` remain executable. Unknown function names
+continue to be resolved by the engine's function catalog during planning.
+
+PostgreSQL preserves delimited spelling in `src/backend/parser/scan.l:773-783`, folds
+unquoted identifiers at `scan.l:1067`, and looks up that name through
+`src/backend/parser/parse_func.c:1608` and `src/backend/catalog/namespace.c:1237`.
+This is the reference for the quoted unsupported-vocabulary comparison; it must not fold
+quoted names to match uppercase vocabulary entries.
