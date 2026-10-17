@@ -2357,6 +2357,19 @@ declared dialect and retain their existing unsupported-clause diagnostics.
 - **SELECT materializes.** Sorting and `DISTINCT` need the full result anyway at
   this stage; `SqlMaterializedResultSet` carries typed columns and evaluated
   rows. Streaming operators arrive with the planner build-out.
+- **Row-window counts retain Int64 semantics (#1100).** The planner accepts
+  nonnegative integers through `Int64.MaxValue`, as PostgreSQL evaluates its
+  offset and limit as Int64 (`src/backend/executor/nodeLimit.c:369-399`). After
+  ordering and `DISTINCT`, stored-table/join, system-view and grouped execution
+  use one private `ApplyRowWindow` helper. It clamps the offset to the materialized
+  row count and the limit to the remaining row count before checked Int32
+  conversions for `List.GetRange`. The collection bounds justify each conversion;
+  no count wraps or allocates according to the requested size, and the helper
+  never adds the two Int64 counts. A large limit keeps all remaining rows and a
+  large offset keeps none. Count evaluation and invalid-count diagnostics stay
+  in the planner. The live conformance corpus and Sql.Client wire tests cover
+  every plan shape, zero and small windows, the Int32 and UInt32 boundaries, and
+  `Int64.MaxValue`, including combined limit/offset counts.
 - **Transactions (MVCC session binding, §3.8).** Every statement — explicit
   transaction or auto-commit — runs under a `TransactionContext` from the
   database's transaction manager, whose sequences come from the storage's own

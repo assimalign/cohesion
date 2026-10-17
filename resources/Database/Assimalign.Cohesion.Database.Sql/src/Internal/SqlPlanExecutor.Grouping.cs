@@ -101,15 +101,6 @@ internal sealed partial class SqlPlanExecutor
         {
             projected = Deduplicate(projected, plan.Projections, evaluator);
         }
-        IEnumerable<object?[]> window = projected;
-        if (plan.Offset is long skip)
-        {
-            window = skip > int.MaxValue ? [] : window.Skip((int)skip);
-        }
-        if (plan.Limit is long take && take <= int.MaxValue)
-        {
-            window = window.Take((int)take);
-        }
         var columns = plan.Projections.Select((projection, ordinal) => new DatabaseColumn
         {
             Name = projection.Name,
@@ -118,7 +109,7 @@ internal sealed partial class SqlPlanExecutor
             MaxLength = projection.MaxLength,
             IsNullable = projection.IsNullable,
         }).ToArray();
-        return new SqlMaterializedResultSet(columns, window.ToList());
+        return new SqlMaterializedResultSet(columns, ApplyRowWindow(projected, plan.Limit, plan.Offset));
 
         // One accumulator per group, per aggregate call, per statement, owned here and never shared.
         SqlAggregateAccumulator[] CreateStates()
