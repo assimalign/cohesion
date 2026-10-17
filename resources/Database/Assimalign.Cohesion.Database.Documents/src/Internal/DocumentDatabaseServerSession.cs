@@ -182,6 +182,9 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
         finally
         {
             await DrainTerminalResponseAsync(softStop).ConfigureAwait(false);
+            // A token-aware write can resume the pump inline while cancellation callbacks are
+            // still running. Abort here too, before detaching a callback that has not run yet.
+            if (_terminalDrainSource?.IsCancellationRequested == true) { Abort(); }
             // Detach from the abort signal before the lifetime source is disposed
             // so a late hard abort cannot race a disposed token source.
             await abortRegistration.DisposeAsync().ConfigureAwait(false);

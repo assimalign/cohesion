@@ -10,7 +10,8 @@ using Assimalign.Cohesion.Connections.InMemory;
 namespace Assimalign.Cohesion.Database.Documents.Tests;
 
 // Blocks a selected flush (including writes through AsStream), or output completion.
-// Deliberately ignores cancellation: only connection abort releases the transport I/O.
+// Positive flush numbers ignore cancellation; a negative number observes the supplied token.
+// Output completion has no cancellation token: only connection abort releases that I/O.
 internal sealed class BlockingOutputListener : DuplexConnectionListener
 {
     private readonly InMemoryConnectionListener _inner = new();
@@ -93,11 +94,11 @@ internal sealed class BlockingOutputListener : DuplexConnectionListener
 
         internal void ReleaseOutput() => _released.TrySetResult();
 
-        private async Task BlockAsync()
+        private async Task BlockAsync(CancellationToken cancellationToken = default)
         {
             Interlocked.Increment(ref _pendingOperations);
             _blocked.TrySetResult();
-            try { await _released.Task; }
+            try { await _released.Task.WaitAsync(cancellationToken); }
             finally { Interlocked.Decrement(ref _pendingOperations); }
         }
 
@@ -123,9 +124,9 @@ internal sealed class BlockingOutputListener : DuplexConnectionListener
             public override async ValueTask<FlushResult> FlushAsync(CancellationToken cancellationToken = default)
             {
                 _owner.FlushTokenCanBeCanceled = cancellationToken.CanBeCanceled;
-                if (Interlocked.Increment(ref _owner._flushes) == _blockedFlush)
+                if (Interlocked.Increment(ref _owner._flushes) == Math.Abs(_blockedFlush))
                 {
-                    await _owner.BlockAsync();
+                    await _owner.BlockAsync(_blockedFlush < 0 ? cancellationToken : CancellationToken.None);
                     throw new ConnectionAbortedException("The controlled transport was aborted during its flush.");
                 }
                 return await _inner.FlushAsync(cancellationToken);
