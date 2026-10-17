@@ -1133,11 +1133,15 @@ flowchart LR
   refusal is the `SqlConstraintViolationException` of kind `DOMAIN` a write raises (its `Table`
   is empty; PostgreSQL raises 23514 for both). A row looks nothing up.
 - **A CAST no cast performs** is refused while planning when the plan knows the operand's type
-  (a literal, a column, a `CAST`, a predicate, a scalar call's result type, a bound subquery):
+  (a literal, a column, a `CAST`, a predicate, a call's result type, a bound subquery, or the
+  binder's inferred CASE, COALESCE, unary-sign or arithmetic result):
   `COHSQLE011` (SQLSTATE 42846), PostgreSQL's "cannot cast type ... to ..." from
   `transformTypeCast` (`src/backend/parser/parse_expr.c`), the same over an empty table as over a
-  populated one. A parameter's or NULL's type only its value reveals, so the evaluator raises the
-  same code for it. Before E3 the parser refused these targets outright; E3 made every built-in
+  populated one. CAST reuses the binder's existing result inference, including aggregate slots,
+  while parameter-dependent result types keep evaluation-time checks. Parameters in CASE conditions
+  do not make a statically typed result dynamic. NULLIF still has no bound result type: its existing
+  COHDBL001 language refusal precedes planning. PostgreSQL checks the transformed operand's type in
+  src/backend/parser/parse_expr.c:2764-2788. Before E3 the parser refused these targets outright; E3 made every built-in
   type a target, so the planner owns the refusal.
 - **Failures.** A `FormatException`, `OverflowException` or `InvalidCastException` a conversion
   throws is the value's fault: `CAST from X to T failed: ...`, with the original as its inner

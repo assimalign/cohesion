@@ -201,6 +201,14 @@ public sealed class SqlCastTests
     [InlineData("CAST(1.5 AS UUID)", "NUMERIC to UUID")]
     [InlineData("CAST(1 AS BINARY)", "BIGINT to BINARY")]
     [InlineData("CAST(CAST('1' AS JSON) AS INT)", "JSON to INTEGER")]
+    [InlineData("CAST(CASE WHEN TRUE THEN CAST('1' AS JSON) ELSE CAST('2' AS JSON) END AS INT)", "JSON to INTEGER")]
+    [InlineData("CAST(CASE id WHEN 1 THEN CAST('1' AS JSONB) ELSE CAST('2' AS JSONB) END AS INT)", "JSONB to INTEGER")]
+    [InlineData("CAST(CASE WHEN TRUE THEN CAST('1' AS JSON) END AS INT)", "JSON to INTEGER")]
+    [InlineData("CAST(COALESCE(NULL, CAST('1' AS JSON)) AS INT)", "JSON to INTEGER")]
+    [InlineData("CAST(UPPER(CASE WHEN TRUE THEN CAST('1' AS JSON) END) AS INT)", "JSON to INTEGER")]
+    [InlineData("CAST(1 + 2 AS DATE)", "BIGINT to DATE")]
+    [InlineData("CAST(-id AS DATE)", "BIGINT to DATE")]
+    [InlineData("CAST(+id AS DATE)", "INTEGER to DATE")]
     [InlineData("CAST(INTERVAL '1 hour' AS DATE)", "INTERVAL to DATE")]
     [InlineData("CAST(id AS DATE)", "INTEGER to DATE")]
     [InlineData("CAST(id = 1 AS DATE)", "BOOLEAN to DATE")]
@@ -245,8 +253,14 @@ public sealed class SqlCastTests
     /// A parameter's type only its value reveals, so a CAST of a parameter no cast converts plans, and
     /// fails with the same code when a row evaluates it.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - CAST: a parameter no cast converts fails with COHSQLE011 when a row evaluates it")]
-    public async Task Cast_ParameterWithoutACast_ShouldFailWhenEvaluated()
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - CAST: a parameter no cast converts fails with COHSQLE011 when a row evaluates it")]
+    [InlineData("@value", "INTEGER")]
+    [InlineData("CASE WHEN TRUE THEN @value ELSE NULL END", "INTEGER")]
+    [InlineData("COALESCE(NULL, @value)", "INTEGER")]
+    [InlineData("UPPER(@value)", "INTEGER")]
+    [InlineData("+@value", "INTEGER")]
+    [InlineData("@value + 0", "BIGINT")]
+    public async Task Cast_ParameterWithoutACast_ShouldFailWhenEvaluated(string expression, string source)
     {
         await using var engine = SqlDatabaseEngine.Create("cast-parameter", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("cast");
@@ -254,12 +268,78 @@ public sealed class SqlCastTests
         await SeedAsync(session);
         var parameters = new Dictionary<string, object?> { ["value"] = 5 };
 
-        await using var empty = (await ExecuteAsync(session, "SELECT CAST(@value AS DATE) FROM t WHERE id < 0;", parameters))
+        await using var empty = (await ExecuteAsync(session, $"SELECT CAST({expression} AS DATE) FROM t WHERE id < 0;", parameters))
             .ShouldBeAssignableTo<DatabaseResultSet>();
         (await ReadRowsAsync(empty)).ShouldBeEmpty();
-        var populated = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "SELECT CAST(@value AS DATE) FROM t;", parameters));
+        var populated = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, $"SELECT CAST({expression} AS DATE) FROM t;", parameters));
 
-        populated.DiagnosticDetail("COHSQLE011").ShouldStartWith("Cannot CAST type INTEGER to DATE: ", Case.Sensitive);
+        populated.DiagnosticDetail("COHSQLE011").ShouldStartWith($"Cannot CAST type {source} to DATE: ", Case.Sensitive);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - CAST: static CASE results reject unsupported pairs before any input rows")]
+    [InlineData("CASE WHEN @condition THEN CAST('1' AS JSON) ELSE CAST('2' AS JSON) END")]
+    [InlineData("CASE id WHEN 1 THEN CAST('1' AS JSON) ELSE CAST('2' AS JSON) END")]
+    [InlineData("COALESCE(NULL, CASE WHEN @condition THEN CAST('1' AS JSON) END)")]
+    public async Task Cast_StaticConditional_ShouldRejectBeforeReadingRows(string expression)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("cast-static-conditional", new());
+        var database = await engine.CreateDatabaseAsync("db");
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecuteAsync(session, "CREATE TABLE t (id INT);");
+        var parameters = new Dictionary<string, object?> { ["condition"] = true };
+
+        // Act
+        var empty = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, $"SELECT CAST({expression} AS INTEGER) FROM t;", parameters));
+        await ExecuteAsync(session, "INSERT INTO t VALUES (1);");
+        var populated = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, $"SELECT CAST({expression} AS INTEGER) FROM t;", parameters));
+
+        // Assert
+        empty.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE011");
+        empty.DiagnosticDetail("COHSQLE011").ShouldStartWith("Cannot CAST type JSON to INTEGER: ", Case.Sensitive);
+        populated.Message.ShouldBe(empty.Message);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - CAST: aggregate result types reject unsupported pairs while planning")]
+    [InlineData("CAST(MIN(CAST('1' AS JSON)) AS INT)", "JSON to INTEGER")]
+    [InlineData("CAST(COUNT(*) AS DATE)", "BIGINT to DATE")]
+    public async Task Cast_StaticAggregate_ShouldRejectBeforeReadingRows(string expression, string pair)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("cast-static-aggregate", new());
+        var database = await engine.CreateDatabaseAsync("db");
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecuteAsync(session, "CREATE TABLE t (id INT);");
+
+        // Act
+        var empty = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, $"SELECT {expression} FROM t;"));
+        await ExecuteAsync(session, "INSERT INTO t VALUES (1);");
+        var populated = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, $"SELECT {expression} FROM t;"));
+
+        // Assert
+        empty.DiagnosticDetail("COHSQLE011").ShouldStartWith($"Cannot CAST type {pair}: ", Case.Sensitive);
+        populated.Message.ShouldBe(empty.Message);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - CAST: NULLIF retains its unsupported language diagnostic before input rows")]
+    public async Task Cast_NullIfOperand_ShouldRetainUnsupportedDiagnostic()
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("cast-nullif", new());
+        var database = await engine.CreateDatabaseAsync("db");
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecuteAsync(session, "CREATE TABLE t (id INT);");
+        const string sql = "SELECT CAST(NULLIF(CAST('1' AS JSON), CAST('2' AS JSON)) AS INTEGER) FROM t;";
+
+        // Act
+        var empty = await Should.ThrowAsync<DatabaseParseException>(() => ExecuteAsync(session, sql));
+        await ExecuteAsync(session, "INSERT INTO t VALUES (1);");
+        var populated = await Should.ThrowAsync<DatabaseParseException>(() => ExecuteAsync(session, sql));
+
+        // Assert
+        empty.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBL001");
+        empty.Message.ShouldContain("NULLIF", Case.Sensitive);
+        populated.Message.ShouldBe(empty.Message);
     }
 
     /// <summary>

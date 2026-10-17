@@ -1756,9 +1756,13 @@ BINARY/VARBINARY. The shared type-name grammar owns all aliases and modifiers.
 
 Identity conversions still apply target bounds. A pair without a conversion fails
 with COHSQLE011, naming CAST and both SQL types. When the source is static (a
-column, typed literal, nested CAST, predicate, resolved scalar call or scalar
-subquery), planning rejects the pair before reading any rows, including empty
-input and NULL-valued columns. Parameter operands are checked when evaluated.
+column, typed literal, nested CAST, predicate, resolved call, scalar subquery, or a
+CASE, COALESCE, unary-sign or arithmetic result the binder can infer), planning rejects
+the pair before reading any rows, including empty input and NULL-valued columns.
+This uses the existing binder inference (PostgreSQL src/backend/parser/parse_expr.c:2764-2788).
+Parameter-dependent result types are checked when evaluated, including CASE result arms
+and polymorphic calls; parameters used only in CASE conditions leave its static result type
+intact. NULLIF retains its existing parse-time COHDBL001 unsupported-function diagnostic.
 A NULL operand returns NULL with target metadata; it does not bypass a statically
 unsupported pair or invalid target. SQL integer literals are Int64 and fractional
 literals are Decimal, including exponent and leading decimal-point forms. To
