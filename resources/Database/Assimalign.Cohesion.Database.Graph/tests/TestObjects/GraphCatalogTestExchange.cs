@@ -21,7 +21,7 @@ internal static partial class GraphCatalogTestExtensions
 }
 
 internal sealed record GraphCatalogTestResult(
-    IReadOnlyList<(string Name, DatabaseType Type)> Columns, IReadOnlyList<object?[]> Rows, long AffectedCount);
+    IReadOnlyList<(string Name, DatabaseType Type)> Columns, IReadOnlyList<object?[]> Rows, long AffectedCount, IReadOnlyList<ProtocolDiagnostic> Diagnostics);
 
 internal sealed class GraphCatalogTestExchange : DatabaseProtocolExchange<GraphCatalogTestResult>
 {
@@ -46,10 +46,16 @@ internal sealed class GraphCatalogTestExchange : DatabaseProtocolExchange<GraphC
         var columns = new List<(string Name, DatabaseType Type)>();
         var rows = new List<object?[]>();
         bool hasResultFrames = false;
+        IReadOnlyList<ProtocolDiagnostic> diagnostics = [];
+        bool hasDiagnostics = false;
         while (true)
         {
             var frame = await reader.ReadFrameAsync(cancellationToken)
                 ?? throw new ProtocolException("Catalog connection ended before completion.");
+            if (hasDiagnostics && frame.Type != ProtocolMessageType.Error && frame.Type != (ProtocolMessageType)GraphProtocolMessageType.ResultComplete)
+            {
+                throw new ProtocolException("Diagnostics must precede the terminal catalog response.");
+            }
             switch (frame.Type)
             {
                 case (ProtocolMessageType)GraphProtocolMessageType.ResultHeader:
@@ -65,7 +71,11 @@ internal sealed class GraphCatalogTestExchange : DatabaseProtocolExchange<GraphC
                     break;
                 case (ProtocolMessageType)GraphProtocolMessageType.ResultComplete:
                     var complete = GraphProtocolResultCompleteMessage.Decode(frame.Payload.Span);
-                    return new(columns, rows, complete.AffectedCount);
+                    return new(columns, rows, complete.AffectedCount, diagnostics);
+                case ProtocolMessageType.Diagnostics:
+                    diagnostics = ProtocolDiagnosticsMessage.Decode(frame.Payload.Span).Entries;
+                    hasDiagnostics = true;
+                    break;
                 case ProtocolMessageType.Error:
                     var error = ProtocolErrorMessage.Decode(frame.Payload.Span);
                     // The Graph server rejects catalog statements before emitting results,
@@ -75,7 +85,7 @@ internal sealed class GraphCatalogTestExchange : DatabaseProtocolExchange<GraphC
                     {
                         MarkResponseComplete();
                     }
-                    throw new DatabaseClientException(error.Code, error.Message);
+                    throw new DatabaseClientException(error.Code, error.Message, diagnostics, null);
                 default:
                     throw new ProtocolException("Unexpected catalog response.");
             }

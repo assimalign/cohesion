@@ -107,7 +107,7 @@ The SQL server preserves the existing `CODE: message` Error text. On a negotiate
 assert structured codes, while their wire counterparts keep their original text assertions.
 CAST value failures follow the same contract: invalid text carries COHSQLE022 (PostgreSQL
 22P02), numeric overflow COHSQLE002 (22003), and division by zero COHSQLE001 (22012).
-Protocol 1.0 clients retain the composed code prefix and ExecutionFailure category; a value
+Protocol 2.0 clients retain the composed code prefix and ExecutionFailure category; a value
 failure keeps the connection usable. In-process regression tests assert code and source span.
 
 Negative and fractional LIMIT/OFFSET counts retain COHSQLE018 in the composed wire text.
