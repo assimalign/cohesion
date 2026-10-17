@@ -46,7 +46,7 @@ public sealed partial class GqlQueryParser
         if (Failed) { return new GqlNodePattern(null, [], _noProperties); }
         string? variable = Current.Type is TokenType.Identifier or TokenType.QuotedIdentifier ? Identifier() : null;
         var labels = ParseLabelSpecification(node: true);
-        if (!Failed && (variable is not null || labels is not null) && Current.Type == TokenType.Parameter) { Unsupported("WHOLE-MAP PARAMETER", Current); }
+        if (!Failed && (variable is not null || labels is not null) && Current.Type == TokenType.Parameter) { RejectUnsupportedParameter("WHOLE-MAP PARAMETER"); }
         var properties = ParseProperties();
         Expect(TokenType.RightParen, "')'");
         RejectLineCommentAfterElement();
@@ -79,7 +79,7 @@ public sealed partial class GqlQueryParser
         Advance(); // '['
         string? variable = Current.Type is TokenType.Identifier or TokenType.QuotedIdentifier ? Identifier() : null;
         var labels = ParseLabelSpecification(node: false);
-        if (!Failed && (variable is not null || labels is not null) && Current.Type == TokenType.Parameter) { Unsupported("WHOLE-MAP PARAMETER", Current); }
+        if (!Failed && (variable is not null || labels is not null) && Current.Type == TokenType.Parameter) { RejectUnsupportedParameter("WHOLE-MAP PARAMETER"); }
         var properties = ParseProperties();
         Expect(TokenType.RightBracket, "']'");
         RejectLineCommentAfterElement();

@@ -43,8 +43,12 @@ public sealed class GqlParameterParserTests
     [Theory(DisplayName = "Cohesion Test [Graph.Language] - Parameters: future forms keep named capability diagnostics")]
     [InlineData("MATCH (a) WHERE a.k = $$name RETURN a", "SUBSTITUTED PARAMETER REFERENCE")]
     [InlineData("MATCH (n $props) RETURN n", "WHOLE-MAP PARAMETER")]
+    [InlineData("MATCH (n @props) RETURN n", "WHOLE-MAP PARAMETER")]
+    [InlineData("MATCH (a)-[r $props]->(b) RETURN r", "WHOLE-MAP PARAMETER")]
+    [InlineData("MATCH (a)-[r @props]->(b) RETURN r", "WHOLE-MAP PARAMETER")]
     [InlineData("INSERT (n $props)", "WHOLE-MAP PARAMETER")]
     [InlineData("MATCH (a) RETURN $p", "PARAMETER PROJECTION")]
+    [InlineData("MATCH (a) RETURN @p", "PARAMETER PROJECTION")]
     public void Parse_UnsupportedPosition_ShouldReportCapability(string source, string form)
     {
         // Act
@@ -70,5 +74,28 @@ public sealed class GqlParameterParserTests
     {
         // Act / Assert
         new GqlQueryParser().Parse(source).Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("GQL0002");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Graph.Language] - Parameters: malformed references precede capability errors at the sigil")]
+    [InlineData("RETURN $")]
+    [InlineData("RETURN @")]
+    [InlineData("MATCH (a) RETURN $")]
+    [InlineData("MATCH (a) RETURN @")]
+    [InlineData("MATCH (n $) RETURN n")]
+    [InlineData("MATCH (n @) RETURN n")]
+    [InlineData("MATCH (a)-[r $]->(b) RETURN r")]
+    [InlineData("MATCH (a)-[r @]->(b) RETURN r")]
+    public void Parse_BareSigilInUnsupportedPosition_ShouldReportSyntaxAtSigil(string source)
+    {
+        // Arrange
+        int sigil = source.IndexOfAny(['$', '@']);
+
+        // Act
+        var diagnostic = new GqlQueryParser().Parse(source).Diagnostics.ShouldHaveSingleItem();
+
+        // Assert
+        diagnostic.Code.ShouldBe("GQL0002");
+        diagnostic.Start.ShouldBe(sigil);
+        diagnostic.End.ShouldBe(sigil + 1);
     }
 }

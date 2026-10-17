@@ -117,7 +117,12 @@ public sealed partial class GqlQueryParser : QueryParser
         else if (Is("MATCH") || Is("CREATE") || Is("INSERT")) { expression = ParseQuery(); }
         else
         {
-            if (Is("DELETE") || Is("DETACH") || Is("WHERE") || Is("RETURN"))
+            if (Is("RETURN") && _tokens[_position + 1].Type == TokenType.Parameter)
+            {
+                Advance();
+                RejectUnsupportedParameter("PARAMETER PROJECTION");
+            }
+            else if (Is("DELETE") || Is("DETACH") || Is("WHERE") || Is("RETURN"))
             {
                 Error("GQL0002", "Expected MATCH, INSERT, or CREATE before this clause.", Current);
             }

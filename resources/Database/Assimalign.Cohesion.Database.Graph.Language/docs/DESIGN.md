@@ -9,6 +9,9 @@ the exact key `"1"`; GQL has no positional binding. `$name` is the ISO and Cyphe
 `@name` is a Cohesion cross-language spelling, neither ISO nor Cypher. Numeric names contain
 ASCII digits only. Bare `$`/`@`, numeric-name junk, and parameters in name or DELETE positions
 are GQL0002. Operand `?` and `:name` retain #1102's supported-form message and complete span.
+References are validated before projection or whole-map capability checks: a bare sigil in
+`RETURN $`, `RETURN @`, `(n $)` or an edge filler is GQL0002 at that sigil. Valid references
+in those unsupported positions retain their named COHDBL001 capability diagnostic.
 
 `GqlParameterExpression` exposes the bare `Name` and complete reference `Location`.
 **Breaking AST change:** `GqlNodePattern.Properties` and `GqlRelationshipPattern.Properties`

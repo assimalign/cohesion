@@ -30,7 +30,7 @@ public sealed partial class GqlQueryParser
         {
             do
             {
-                if (Current.Type == TokenType.Parameter) { Unsupported("PARAMETER PROJECTION", Current); break; }
+                if (Current.Type == TokenType.Parameter) { RejectUnsupportedParameter("PARAMETER PROJECTION"); break; }
                 string variable = Identifier();
                 string? property = Take(TokenType.Dot) ? Identifier(allowKeyword: true) : null;
                 string? alias = Take("AS") ? Identifier() : null;

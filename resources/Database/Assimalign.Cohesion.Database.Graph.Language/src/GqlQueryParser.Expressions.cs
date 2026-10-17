@@ -132,6 +132,13 @@ public sealed partial class GqlQueryParser
         return ParseScalar();
     }
 
+    private void RejectUnsupportedParameter(string form)
+    {
+        var parameter = Current;
+        _ = ParseScalar();
+        if (!Failed) { Unsupported(form, parameter); }
+    }
+
     private GqlExpression ParseScalar()
     {
         if (Current.Type != TokenType.Parameter) { return ParseLiteral(); }
