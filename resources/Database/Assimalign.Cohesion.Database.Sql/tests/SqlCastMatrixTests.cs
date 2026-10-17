@@ -9,6 +9,7 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Database.Execution;
+using Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
@@ -207,29 +208,52 @@ public sealed class SqlCastMatrixTests
     }
 
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - CAST: invalid strict text, exactness and range fail as database errors")]
-    [InlineData("CAST('2024-02-30' AS DATE)")]
-    [InlineData("CAST('1e400' AS DOUBLE PRECISION)")]
-    [InlineData("CAST('1e-400' AS DOUBLE PRECISION)")]
-    [InlineData("CAST('1e-50' AS REAL)")]
-    [InlineData("CAST(CAST('1.5' AS DOUBLE PRECISION) AS INT)")]
-    [InlineData("CAST(CAST('1e300' AS DOUBLE PRECISION) AS REAL)")]
-    [InlineData("CAST(CAST('NaN' AS DOUBLE PRECISION) AS DECIMAL)")]
-    [InlineData("CAST(CAST('Infinity' AS REAL) AS BIGINT)")]
-    [InlineData("CAST(CAST('1e-29' AS DOUBLE) AS NUMERIC)")]
-    [InlineData("CAST(INTERVAL '25 hours' AS TIME)")]
-    [InlineData("CAST(INTERVAL '-0.0000001 seconds' AS TIME)")]
-    [InlineData("CAST('1 year' AS INTERVAL)")]
-    [InlineData("CAST('12' AS INTERVAL)")]
-    [InlineData("CAST('2024-01-01 00:00:00+02:00' AS TIMESTAMP)")]
-    [InlineData("CAST('00:00:00.12345678' AS TIME)")]
-    [InlineData("CAST('\\xZZ' AS BYTEA)")]
-    [InlineData("CAST('\\x0' AS BYTEA)")]
-    [InlineData("CAST('a\\b' AS BYTEA)")]
-    [InlineData("CAST('{bad' AS JSON)")]
-    [InlineData("CAST('true false' AS JSONB)")]
-    [InlineData("CAST('00112233-4455-6677-8899-aabbccddeefg' AS UUID)")]
-    [InlineData("CAST('\\x00ff' AS VARBINARY(1))")]
-    public async Task Cast_InvalidInput_ShouldReturnConversionFailure(string expression)
+    [InlineData("CAST('2024-02-30' AS DATE)", "COHSQLE022")]
+    [InlineData("CAST('1e400' AS DOUBLE PRECISION)", "COHSQLE002")]
+    [InlineData("CAST('1e-400' AS DOUBLE PRECISION)", "COHSQLE002")]
+    [InlineData("CAST('1e-50' AS REAL)", "COHSQLE002")]
+    [InlineData("CAST(CAST('1.5' AS DOUBLE PRECISION) AS INT)", "COHSQLE011")]
+    [InlineData("CAST(CAST('1e300' AS DOUBLE PRECISION) AS REAL)", "COHSQLE002")]
+    [InlineData("CAST(CAST('NaN' AS DOUBLE PRECISION) AS DECIMAL)", "COHSQLE022")]
+    [InlineData("CAST(CAST('NaN' AS REAL) AS TINYINT)", "COHSQLE002")]
+    [InlineData("CAST(CAST('NaN' AS REAL) AS SMALLINT)", "COHSQLE002")]
+    [InlineData("CAST(CAST('NaN' AS REAL) AS INTEGER)", "COHSQLE002")]
+    [InlineData("CAST(CAST('NaN' AS REAL) AS BIGINT)", "COHSQLE002")]
+    [InlineData("CAST(CAST('Infinity' AS REAL) AS TINYINT)", "COHSQLE002")]
+    [InlineData("CAST(CAST('Infinity' AS REAL) AS SMALLINT)", "COHSQLE002")]
+    [InlineData("CAST(CAST('Infinity' AS REAL) AS INTEGER)", "COHSQLE002")]
+    [InlineData("CAST(CAST('Infinity' AS REAL) AS BIGINT)", "COHSQLE002")]
+    [InlineData("CAST(CAST('-Infinity' AS REAL) AS TINYINT)", "COHSQLE002")]
+    [InlineData("CAST(CAST('-Infinity' AS REAL) AS SMALLINT)", "COHSQLE002")]
+    [InlineData("CAST(CAST('-Infinity' AS REAL) AS INTEGER)", "COHSQLE002")]
+    [InlineData("CAST(CAST('-Infinity' AS REAL) AS BIGINT)", "COHSQLE002")]
+    [InlineData("CAST(CAST('NaN' AS DOUBLE) AS TINYINT)", "COHSQLE002")]
+    [InlineData("CAST(CAST('NaN' AS DOUBLE) AS SMALLINT)", "COHSQLE002")]
+    [InlineData("CAST(CAST('NaN' AS DOUBLE) AS INTEGER)", "COHSQLE002")]
+    [InlineData("CAST(CAST('NaN' AS DOUBLE) AS BIGINT)", "COHSQLE002")]
+    [InlineData("CAST(CAST('Infinity' AS DOUBLE) AS TINYINT)", "COHSQLE002")]
+    [InlineData("CAST(CAST('Infinity' AS DOUBLE) AS SMALLINT)", "COHSQLE002")]
+    [InlineData("CAST(CAST('Infinity' AS DOUBLE) AS INTEGER)", "COHSQLE002")]
+    [InlineData("CAST(CAST('Infinity' AS DOUBLE) AS BIGINT)", "COHSQLE002")]
+    [InlineData("CAST(CAST('-Infinity' AS DOUBLE) AS TINYINT)", "COHSQLE002")]
+    [InlineData("CAST(CAST('-Infinity' AS DOUBLE) AS SMALLINT)", "COHSQLE002")]
+    [InlineData("CAST(CAST('-Infinity' AS DOUBLE) AS INTEGER)", "COHSQLE002")]
+    [InlineData("CAST(CAST('-Infinity' AS DOUBLE) AS BIGINT)", "COHSQLE002")]
+    [InlineData("CAST(CAST('1e-29' AS DOUBLE) AS NUMERIC)", "COHSQLE002")]
+    [InlineData("CAST(INTERVAL '25 hours' AS TIME)", "COHSQLE011")]
+    [InlineData("CAST(INTERVAL '-0.0000001 seconds' AS TIME)", "COHSQLE011")]
+    [InlineData("CAST('1 year' AS INTERVAL)", "COHSQLE022")]
+    [InlineData("CAST('12' AS INTERVAL)", "COHSQLE022")]
+    [InlineData("CAST('2024-01-01 00:00:00+02:00' AS TIMESTAMP)", "COHSQLE022")]
+    [InlineData("CAST('00:00:00.12345678' AS TIME)", "COHSQLE022")]
+    [InlineData("CAST('\\xZZ' AS BYTEA)", "COHSQLE022")]
+    [InlineData("CAST('\\x0' AS BYTEA)", "COHSQLE022")]
+    [InlineData("CAST('a\\b' AS BYTEA)", "COHSQLE022")]
+    [InlineData("CAST('{bad' AS JSON)", "COHSQLE022")]
+    [InlineData("CAST('true false' AS JSONB)", "COHSQLE022")]
+    [InlineData("CAST('00112233-4455-6677-8899-aabbccddeefg' AS UUID)", "COHSQLE022")]
+    [InlineData("CAST('\\x00ff' AS VARBINARY(1))", "COHSQLE011")]
+    public async Task Cast_InvalidInput_ShouldReturnConversionFailure(string expression, string code)
     {
         // Arrange
         await using var engine = SqlDatabaseEngine.Create("cast-invalid", new SqlDatabaseEngineOptions());
@@ -237,13 +261,98 @@ public sealed class SqlCastMatrixTests
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await session.ExecuteAsync("CREATE TABLE t (id INT);", cancellationToken: CancellationToken.None);
         await session.ExecuteAsync("INSERT INTO t VALUES (1);", cancellationToken: CancellationToken.None);
+        var request = SqlQueryRequest.FromSql($"SELECT {expression} FROM t;");
+        var cast = ((SqlSelectExpression)request.Statement.SqlExpression).Columns.Single().Expression;
 
         // Act
-        var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync($"SELECT {expression} FROM t;", cancellationToken: CancellationToken.None));
+        var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(request, cancellationToken: CancellationToken.None));
 
         // Assert
+        var diagnostic = error.Diagnostics.ShouldHaveSingleItem();
+        diagnostic.Code.ShouldBe(code);
+        diagnostic.Start.ShouldBe(cast.Location!.Start);
+        diagnostic.End.ShouldBe(cast.Location.End);
         error.Message.ShouldContain("CAST", Case.Sensitive);
-        error.Message.ShouldNotContain("COHSQLE007", Case.Sensitive);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - CAST: BYTEA preserves UTF-8 payload whitespace and keeps hex input rules")]
+    [InlineData(" a ", "206120")]
+    [InlineData("   ", "202020")]
+    [InlineData("\t\r\n", "090D0A")]
+    [InlineData(" \t雪😀\r\n ", "2009E99BAAF09F98800D0A20")]
+    [InlineData("\\x", "")]
+    [InlineData(" \\x00fF ", "00FF")]
+    [InlineData("\\x202020", "202020")]
+    public async Task Cast_BinaryText_ShouldPreservePayload(string text, string hex)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("cast-binary-text", new());
+        var database = await engine.CreateDatabaseAsync("db");
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE t (id INT);", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT INTO t VALUES (1);", cancellationToken: CancellationToken.None);
+
+        // Act
+        await using var result = (await session.ExecuteAsync("SELECT CAST(@v AS BYTEA) FROM t;",
+            new Dictionary<string, object?> { ["v"] = text }, cancellationToken: CancellationToken.None)).ShouldBeAssignableTo<DatabaseResultSet>();
+
+        // Assert
+        (await ReadAsync(result)).ShouldHaveSingleItem().ShouldBe(Convert.FromHexString(hex));
+    }
+
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - CAST: NUMERIC and TEXT round directly to REAL at binary midpoints")]
+    [InlineData("1.000000059604644775390625", 1f)]
+    [InlineData("1.0000000596046448", 1.0000001f)]
+    [InlineData("-1.0000000596046448", -1.0000001f)]
+    [InlineData("1.000000059604644775390626", 1.0000001f)]
+    [InlineData("-1.000000059604644775390626", -1.0000001f)]
+    public async Task Cast_RealMidpoint_ShouldRoundOnce(string text, float expected)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("cast-real-rounding", new());
+        var database = await engine.CreateDatabaseAsync("db");
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE t (v NUMERIC);", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync($"INSERT INTO t VALUES ({text});", cancellationToken: CancellationToken.None);
+
+        // Act
+        await using var result = (await session.ExecuteAsync($"SELECT CAST({text} AS REAL), CAST('{text}' AS REAL), CAST(v AS REAL) FROM t;",
+            cancellationToken: CancellationToken.None)).ShouldBeAssignableTo<DatabaseResultSet>();
+
+        // Assert
+        var row = (await RowsAsync(result)).ShouldHaveSingleItem();
+        foreach (var value in row) { BitConverter.SingleToInt32Bits(value.ShouldBeOfType<float>()).ShouldBe(BitConverter.SingleToInt32Bits(expected)); }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - CAST: INTERVAL emits postgres day and clock fields and round trips")]
+    [InlineData("1 day 02:03:04", "1 day 02:03:04")]
+    [InlineData("1 day", "1 day")]
+    [InlineData("2 days", "2 days")]
+    [InlineData("-1 day", "-1 days")]
+    [InlineData("-1 day -02:03:04", "-1 days -02:03:04")]
+    [InlineData("-2 days -02:03:04.1234567", "-2 days -02:03:04.1234567")]
+    [InlineData("2 days -02:03:04", "1 day 21:56:56")]
+    [InlineData("-2 days +02:03:04", "-1 days -21:56:56")]
+    [InlineData("1 day -25 hours", "-01:00:00")]
+    [InlineData("0 seconds", "00:00:00")]
+    [InlineData("-0.0000001 seconds", "-00:00:00.0000001")]
+    public async Task Cast_IntervalText_ShouldUsePostgresStyle(string input, string expected)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("cast-interval-text", new());
+        var database = await engine.CreateDatabaseAsync("db");
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE t (v INTERVAL);", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync($"INSERT INTO t VALUES (INTERVAL '{input}');", cancellationToken: CancellationToken.None);
+
+        // Act
+        await using var result = (await session.ExecuteAsync("SELECT CAST(v AS TEXT), v || '', CAST(CAST(v AS TEXT) AS INTERVAL) FROM t;",
+            cancellationToken: CancellationToken.None)).ShouldBeAssignableTo<DatabaseResultSet>();
+
+        // Assert
+        var row = (await RowsAsync(result)).ShouldHaveSingleItem();
+        row.ShouldBe(new object?[] { expected, expected, SqlLiteralText.ParseInterval(input) });
+        SqlLiteralText.ParseInterval(expected).ShouldBe(SqlLiteralText.ParseInterval(input));
     }
 
     public static IEnumerable<object[]> Aliases()

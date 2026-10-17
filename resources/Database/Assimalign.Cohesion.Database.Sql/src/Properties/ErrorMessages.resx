@@ -27,6 +27,9 @@
   <data name="CastDoubleUnderflow" xml:space="preserve">
     <value>Text underflows DOUBLE.</value>
   </data>
+  <data name="CastIntegerRange" xml:space="preserve">
+    <value>A non-finite value is out of range for an integer target.</value>
+  </data>
   <data name="CastIntegerWhole" xml:space="preserve">
     <value>An integer target requires a finite whole number; truncation is not supported.</value>
   </data>

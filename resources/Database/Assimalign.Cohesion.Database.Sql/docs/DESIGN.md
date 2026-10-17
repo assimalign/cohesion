@@ -1108,7 +1108,14 @@ flowchart LR
   SqlTemporalText's existing plain-string assignment reader. Zone-dependent conversions follow
   the [timestamp normalization rule](../../Assimalign.Cohesion.Database.Sql.Language/docs/DIALECT.md#timestamp-normalization-1110).
   Canonical output is shared with concatenation. REAL/DOUBLE exact conversions parse shortest
-  round-trip text before Decimal modifiers; integer targets refuse fractions and non-finite values.
+  round-trip text before Decimal modifiers. NUMERIC-to-REAL parses the exact Decimal text directly
+  to Single, avoiding a DOUBLE midpoint and second rounding (PostgreSQL numeric.c:4691-4696).
+  Integer targets refuse fractions; non-finite floats are range failures, COHSQLE002/22003
+  (float.c:1267-1270). Backslash-free BYTEA input encodes the original text, including surrounding
+  whitespace (bytea.c:230-231); the hex form retains its separate trimmed-input grammar.
+  INTERVAL output uses PostgreSQL's postgres-style day units and omits a zero clock after days
+  (datetime.c:4675-4694,4875-4890). TimeSpan normalizes mixed-sign fields to one duration before
+  formatting, and every emitted form still passes through SqlLiteralText on input.
   JSON input uses JsonDocument at depth 128 and strict UTF-8, with no reflection or JsonSerializer.
   JSON text is preserved; JSONB is the same validated UTF-8 without normalization, so equality
   stays byte equality. A future binary format needs a migration. INSERT's existing unvalidated

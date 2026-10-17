@@ -1784,12 +1784,15 @@ supply a floating operand, cast text to REAL or DOUBLE first.
   -Infinity. Finite text that overflows to infinity or nonzero text that underflows
   to zero fails. DOUBLE to REAL applies the same finite overflow and nonzero
   underflow checks; exact numeric to float rounds to the represented binary value.
+  NUMERIC-to-REAL parses the exact Decimal text directly to Single, without an intermediate
+  DOUBLE conversion (PostgreSQL src/backend/utils/adt/numeric.c:4691-4696).
   Float to integer requires a finite whole number in range, without rounding or
-  truncation. Float to NUMERIC parses its shortest round-trip text (including an
+  truncation. NaN and either infinity to any integer target fail with COHSQLE002/22003
+  (src/backend/utils/adt/float.c:1267-1270). Float to NUMERIC parses its shortest round-trip text (including an
   exponent when present) exactly as Decimal before applying declared scale/precision;
   non-finite values and values Decimal cannot represent fail.
 - **Character input:** surrounding whitespace is trimmed for numeric, Boolean,
-  temporal, interval, UUID and BYTEA input. Exact numeric text uses
+  temporal, interval, UUID and hexadecimal BYTEA input. Exact numeric text uses
   `[+-]?[0-9]+(\.[0-9]+)?`; grouping, exponent notation, empty and invalid text fail.
   Integer and unscaled NUMERIC input must fit Decimal exactly; a declared NUMERIC
   scale rounds the original digits first, as described below. Boolean input is
@@ -1800,15 +1803,22 @@ supply a floating operand, cast text to REAL or DOUBLE first.
   NaN, Infinity, -Infinity and -0 (the zero sign is preserved). DATE is yyyy-MM-dd;
   TIME is HH:mm:ss[.f]; TIMESTAMP is yyyy-MM-dd HH:mm:ss[.f]; TIMESTAMPTZ appends
   a +/-HH:mm offset. Fractions retain up to seven significant fractional digits,
-  omitting trailing zeros. INTERVAL is a signed HH:mm:ss[.f] clock, preceded by
-  signed d days when nonzero; negative durations give both day and clock negative
-  signs. These forms round-trip even at the temporal and interval extrema.
+  omitting trailing zeros. INTERVAL follows PostgreSQL's postgres style: positive one
+  uses `1 day`, other nonzero day counts use `days` (including `-1 days`), followed by a
+  signed HH:mm:ss[.f] clock only when nonzero. Zero is `00:00:00`; negative durations
+  give both day and clock negative signs. TimeSpan first normalizes mixed-sign fields:
+  `2 days -02:03:04` becomes `1 day 21:56:56`. These forms round-trip through
+  SqlLiteralText even at the temporal and interval extrema. PostgreSQL's emission rules
+  are src/backend/utils/adt/datetime.c:4675-4694,4875-4890.
   UUID is lowercase hyphenated; BYTEA is `\x` followed by lowercase hex digits,
   including `\x` for empty bytes. `||` renders each non-null operand with this
   built-in CAST-to-TEXT formatting, so `TRUE || ''` is TRUE and
   `DATE '2024-01-01' || ''` is 2024-01-01. NULL still propagates.
 - **BYTEA input:** accepts `\x` plus an even number of hex digits, or the UTF-8
-  bytes of backslash-free text. Invalid hex, an unpaired Unicode surrogate, any
+  bytes of the original backslash-free text, preserving leading/trailing whitespace and
+  whitespace-only payloads (PostgreSQL src/backend/utils/adt/bytea.c:230-231).
+  Hex input retains its separate rules: surrounding whitespace is trimmed, its digits
+  must be contiguous, and `\x` alone produces empty bytes. Invalid hex, an unpaired Unicode surrogate, any
   other backslash form and a binary length overflow fail; bytes never truncate.
 - **JSON and JSONB:** casts into either validate one JSON value using
   System.Text.Json JsonDocument with MaxDepth 128; comments, trailing commas,

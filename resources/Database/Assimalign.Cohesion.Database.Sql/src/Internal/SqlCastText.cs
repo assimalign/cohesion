@@ -38,7 +38,12 @@ internal static class SqlCastText
         var time = new TimeOnly((long)(ticks % TimeSpan.TicksPerDay));
         string sign = value.Ticks < 0 ? "-" : string.Empty;
         string clock = sign + Format(time);
-        return days == 0 ? clock : string.Create(CultureInfo.InvariantCulture, $"{sign}{days} days {clock}");
+        if (days == 0) { return clock; }
+        // PostgreSQL datetime.c:4675-4694,4875-4890: only positive one is singular;
+        // omit the clock when the day field already expresses the whole interval.
+        string unit = value.Ticks > 0 && days == 1 ? "day" : "days";
+        string day = string.Create(CultureInfo.InvariantCulture, $"{sign}{days} {unit}");
+        return time.Ticks == 0 ? day : day + " " + clock;
     }
 
     internal static TimeSpan ParseInterval(string text)
@@ -54,7 +59,8 @@ internal static class SqlCastText
         string input = text.Trim();
         if (input.StartsWith("\\x", StringComparison.Ordinal)) { return SqlLiteralText.ParseBinary(input[2..]); }
         if (input.Contains('\\')) { throw new FormatException(ErrorMessages.CastBinaryText); }
-        return Encode(input);
+        // PostgreSQL bytea.c:230-231 copies every unescaped byte, including whitespace.
+        return Encode(text);
     }
 
     internal static string ValidateJson(string text)

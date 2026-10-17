@@ -158,7 +158,9 @@ internal static class SqlStandardCasts
         SqlCast.Create<short, float>(SqlType.SmallInt, SqlType.Real, static value => value, Implicit),
         SqlCast.Create<int, float>(SqlType.Integer, SqlType.Real, static value => value, Implicit),
         SqlCast.Create<long, float>(SqlType.BigInt, SqlType.Real, static value => value, Implicit),
-        SqlCast.Create<decimal, float>(SqlType.Numeric, SqlType.Real, static value => (float)value, Implicit),
+        // PostgreSQL numeric.c:4691-4696 goes directly from numeric_out to float4in.
+        SqlCast.Create<decimal, float>(SqlType.Numeric, SqlType.Real,
+            static value => float.Parse(value.ToString(CultureInfo.InvariantCulture), NumberStyles.Float, CultureInfo.InvariantCulture), Implicit),
         SqlCast.Create<double, float>(SqlType.Double, SqlType.Real, static value => ToReal(value), Assignment),
         SqlCast.Create<sbyte, double>(SqlType.TinyInt, SqlType.Double, static value => value, Implicit),
         SqlCast.Create<short, double>(SqlType.SmallInt, SqlType.Double, static value => value, Implicit),
@@ -220,8 +222,11 @@ internal static class SqlStandardCasts
     }
 
     private static double WholeFloat(double value)
-        => double.IsFinite(value) && Math.Truncate(value) == value
-            ? value : throw new InvalidCastException(ErrorMessages.CastIntegerWhole);
+    {
+        // PostgreSQL float.c:1267-1270 classifies NaN and infinities as range errors.
+        if (!double.IsFinite(value)) { throw new OverflowException(ErrorMessages.CastIntegerRange); }
+        return Math.Truncate(value) == value ? value : throw new InvalidCastException(ErrorMessages.CastIntegerWhole);
+    }
 
     /// <summary>Narrows to REAL, refusing a finite value REAL overflows or underflows to zero, as PostgreSQL does.</summary>
     // A first rounding to DOUBLE can land on a REAL midpoint; parse directly for the target.
