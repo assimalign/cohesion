@@ -69,6 +69,7 @@
   </data>
   <data name="SubqueryColumnCount" xml:space="preserve">
     <value>{0} subquery requires exactly one output column; found {1}.</value>
+  </data>
   <data name="IdentityIntegerRequired" xml:space="preserve"><value>IDENTITY requires a built-in integer type</value></data>
   <data name="IdentityAlreadyDeclared" xml:space="preserve"><value>a table may have only one identity column</value></data>
   <data name="IdentityZeroIncrement" xml:space="preserve"><value>INCREMENT must not be zero</value></data>
