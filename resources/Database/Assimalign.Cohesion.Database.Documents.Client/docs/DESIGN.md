@@ -31,7 +31,11 @@ SELECT lists arrive as objects in projection order. SELECT VALUE/RAW uses the ex
 whole-value header mode and exposes a single `value` column and its JSON values in Documents.
 DISTINCT completion counts follow duplicate removal; object/array constructors need no codec
 extension. A lone SELECT * preserves stored bytes on the wire, including scalar roots.
-VALUE MISSING uses the engine's documented JSON-null default at the wire boundary.
+VALUE/RAW MISSING becomes NULL during engine projection, before DISTINCT and projected ordering,
+so embedded and wire rows agree on IsMissing=false and completion counts. Embedded MISSING
+object members remain omitted and MISSING array elements become NULL.
+GetBytes preserves exact bare-frame JSON bytes (a lone SELECT *, or VALUE/RAW). Named string
+columns return unquoted UTF-8 and named NULL/MISSING columns return empty bytes, matching the engine.
 
 ## Exchange and result ownership
 
@@ -90,16 +94,18 @@ MISSING versus NULL, COHDOC013 and reuse after a malformed LIKE pattern.
 `CREATE COLLECTION [IF NOT EXISTS]` and
 `DROP COLLECTION [IF EXISTS]` use the existing Execute exchange and retain collection ownership
 and conditional no-op semantics. A schema-owned drop returns ExecutionFailure (6), and the
-connection remains usable. `IsDocumentQuery` distinguishes `SELECT *` even for an empty result.
+connection remains usable. `IsDocumentQuery` means one bare JSON value per frame
+(a lone SELECT *, or VALUE/RAW), even for an empty result.
 `Documents` holds owned `JsonElement` values in that case; positional queries leave it empty.
-Whole-document rows contain the same owned JsonElement as Documents, including scalar roots.
+Bare-value rows contain the same owned JsonElement as Documents, including scalar and constructed values;
+the row also owns the original frame bytes for GetBytes.
 Projected rows expose JSON numbers as `decimal`, strings, booleans, null, and nested object/array values as
 owned `JsonElement`. Projected Document-frame objects omit MISSING members and retain explicit
 null members (for example, `"x":null`). The header supplies each column's ordinal even when its member is omitted.
 `DocumentRow` is a sealed DatabaseRow leaf with SupportsMissing true: IsMissing distinguishes
 omission from explicit NULL, IsNull is false for MISSING, and GetValue/indexers return null
 for either. An internal undefined JsonElement marks absence without crossing an assembly
-boundary as a sentinel type. Whole-document rows retain their original JSON and are never MISSING.
+boundary as a sentinel type. Bare-value rows retain their original JSON and are never MISSING.
 The engine requires unique projection names; duplicate header names and unknown or duplicate
 object members are malformed responses. This follows the authorized concrete-first row capability.
 

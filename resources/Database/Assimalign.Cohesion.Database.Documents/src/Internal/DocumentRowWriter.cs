@@ -28,7 +28,7 @@ internal sealed class DocumentRowWriter : IDisposable
         if (bareValue)
         {
             if (row is DocumentQueryResult.DocumentQueryRow { RawContent.IsEmpty: false } document) { return document.RawContent; }
-            // JSON has no MISSING root. VALUE MISSING uses null while in-process rows retain IsMissing.
+            // VALUE/RAW roots have already normalized MISSING to NULL in the engine.
             return Value(row.GetValue(0));
         }
         return Projection(row, columns);

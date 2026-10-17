@@ -255,6 +255,7 @@ Message contains no code prefix. The Documents family is `COHDOCnnn`:
 | `COHDOC012` | INSERT found a duplicate document key visible in its transaction |
 | `COHDOC013` | Invalid evaluated LIKE escape or a pattern ending in its escape character |
 | `COHDOC014` | DISTINCT ORDER BY expression is absent from the projection |
+| `COHDOC015` | A SELECT array or object constructor exceeds the 256-level result limit |
 
 `DocumentQueryRequest.FromOql` and a directly constructed typed query with parse errors
 throw `DatabaseParseException` carrying the complete, ordered parser diagnostics and the
@@ -339,9 +340,12 @@ wrapping it under the source name. Object, array and scalar roots (`42`, `"text"
 are valid JSON. Raw bytes travel with rows through DISTINCT and ordering and are owned by the
 result. No catalog format or wire version changes are required.
 
-The implemented default for a top-level VALUE MISSING is JSON null on the wire; embedded rows
-retain IsMissing. JSON has no MISSING root, so this keeps one frame per result and the Complete
-count equal to the result count. This default needs owner review.
+The owner ruling normalizes a top-level VALUE/RAW MISSING to NULL inside the engine during
+projection, before DISTINCT, ORDER BY over that projection, and completion counting. In-process,
+InMemory and TCP results therefore agree: IsMissing is false and a MISSING/NULL mix deduplicates
+to one NULL row. This preserves Couchbase's observable bare-MISSING JSON null output
+(query `execution/project_initial.go:128-167`, `value/missing.go:66-68` at 179bff61402a),
+while embedded object members still omit MISSING and array elements still become NULL.
 
 Evaluation proceeds through WHERE, GROUP BY/HAVING, projection, DISTINCT, then ORDER BY;
 future paging follows DISTINCT. Duplicate removal uses grouping's total-order equality and
@@ -353,8 +357,17 @@ compares member values through Collate rather than the NULL-propagating Equals f
 Under DISTINCT, ORDER BY must match a projected expression after alias rewriting, following
 PostgreSQL `src/backend/parser/parse_clause.c:3018` in the reference clone; otherwise COHDOC014
 reports `SELECT DISTINCT requires every ORDER BY expression to appear in the projection.`
+Its span is the rejected ORDER BY expression, excluding ASC/DESC.
 Constructors recurse through validation and grouping; array MISSING elements become NULL,
 while object MISSING members are omitted. Duplicate object names retain #1131's keyed semantics.
+SELECT constructors accept nested stored values and parameters up to the result writer's
+256-level limit, including the outer object for named projections. An over-limit array or object
+raises COHDOC015, naming the constructor at its expression span. INSERT retains the 128-level storage limit and COHDOC008 INSERT diagnostic.
+
+GetBytes returns unquoted UTF-8 for named string columns and empty bytes for named NULL/MISSING
+columns; named JSON objects/arrays return JSON bytes. A bare VALUE/RAW row returns JSON bytes
+(including quotes for strings and null for NULL), and a lone SELECT * returns exact stored bytes.
+The in-process row and Documents.Client share this contract.
 
 Projection supports whole documents, nested field paths, zero-based array element
 paths, literals, parameters, arithmetic, and aggregates. `SELECT *` returns one
@@ -544,7 +557,8 @@ It changes no documents or catalog entries, including when its explicit transact
 
 | Operators | Meaning |
 | --- | --- |
-| `Select`, `Project`, `ProjectValue`, `Distinct`, `Group` | The physical query and its logical projection or grouping stage; details include filters and ordering |
+| `Select`, `Project`, `ProjectValue`, `Group` | The physical query and its logical projection or grouping stage; details include filters and ordering |
+| `Distinct` | A separate parent node above Project, ProjectValue or Group, preserving the underlying stage |
 | `CollectionScan` | Candidate retrieval from the named collection |
 | `IndexSeek` | The chosen catalog index name, collection and inclusive/exclusive path bounds |
 | `Insert`, `InsertSelect` | Document creation from VALUES or a fully materialized query; SELECT children describe the source access |
@@ -557,7 +571,8 @@ records, including #1130's collection DDL records; shipped descriptions use clos
 Documents wire differs from SQL and Graph. The implemented default for #1104/#190 is one JSON
 document per description row, with `node_id`, `parent_id`, `operator`, `target`, `index`, `detail`,
 `estimated_rows` and `actual_rows` as members in shared column order. Absent optional values
-are explicit JSON nulls. Existing ResultHeader (one `document` Json column, whole-document mode),
+are explicit JSON nulls. DocumentRowWriter performs the same row-to-frame mapping used for query
+rows. Existing ResultHeader (one `document` Json column, whole-document mode),
 Document and Complete frames carry it. No new frame kind or positional-row contract is added.
 The typed client exposes these values in `Documents` and each row's document value. #190's
 advertised-clause suite and the description parity cases cover InMemory and TCP. This default
@@ -1037,7 +1052,8 @@ then Complete. Index DDL returns only Complete. Commands return their table's re
 Complete. A statement failure terminates the response with Failure, including after partial
 rows or documents. The client discards accumulated results, throws the typed error and may reuse
 the session. Failure has no following Complete.
-ResultHeader's wholeDocuments flag distinguishes source JSON values from projected objects;
+ResultHeader's wholeDocuments flag means one bare JSON value per frame (a lone SELECT *, or
+VALUE/RAW), including scalar and constructed values; false means named projection objects;
 for projections a missing property maps to MISSING by header ordinal. ResultRow remains a
 defined codec but is not emitted or accepted by OQL execution. The existing raw-JSON
 Document payload carries the major-2 projection contract on both negotiated 2.0 and 2.1 sessions. Shared Error terminates the

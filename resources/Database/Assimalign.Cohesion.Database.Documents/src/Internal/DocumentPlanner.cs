@@ -418,7 +418,7 @@ internal sealed partial class DocumentPlanner
         throw new DocumentPlanningException("COHDOC001", "An OQL grouped query may only read grouping expressions outside aggregate calls.", expression.Location);
     }
 
-    private static bool EquivalentExpression(OqlExpression left, OqlExpression right, string? alias) => (left, right) switch
+    internal static bool EquivalentExpression(OqlExpression left, OqlExpression right, string? alias) => (left, right) switch
     {
         (OqlInExpression a, OqlInExpression b) => a.Negated == b.Negated && EquivalentChildren(a, b, alias),
         (OqlBetweenExpression a, OqlBetweenExpression b) => a.Negated == b.Negated && EquivalentChildren(a, b, alias),

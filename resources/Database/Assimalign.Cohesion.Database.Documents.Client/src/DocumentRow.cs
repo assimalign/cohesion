@@ -9,16 +9,18 @@ using Assimalign.Cohesion.Database.Execution;
 
 namespace Assimalign.Cohesion.Database.Documents.Client;
 
-/// <summary>A projection row with ordinal and column-name access.</summary>
+/// <summary>A document query row with ordinal and column-name access.</summary>
 public sealed class DocumentRow : DatabaseRow, IReadOnlyList<object?>
 {
     private readonly object?[] _values;
     private readonly IReadOnlyDictionary<string, int> _ordinals;
+    private readonly ReadOnlyMemory<byte> _rawContent;
 
-    internal DocumentRow(object?[] values, IReadOnlyDictionary<string, int> ordinals) : base(supportsMissing: true)
+    internal DocumentRow(object?[] values, IReadOnlyDictionary<string, int> ordinals, ReadOnlyMemory<byte> rawContent = default) : base(supportsMissing: true)
     {
         _values = values;
         _ordinals = ordinals;
+        _rawContent = rawContent;
     }
 
     /// <summary>Gets the number of values.</summary>
@@ -57,8 +59,12 @@ public sealed class DocumentRow : DatabaseRow, IReadOnlyList<object?>
         var value => Convert.ToString(value, CultureInfo.InvariantCulture),
     };
 
-    /// <inheritdoc />
-    public override ReadOnlyMemory<byte> GetBytes(int ordinal) => GetValue(ordinal) switch
+    /// <summary>Gets JSON bytes for a bare-value row; named strings use unquoted UTF-8 and named NULL/MISSING values use empty bytes.</summary>
+    /// <param name="ordinal">The zero-based column ordinal.</param>
+    /// <returns>The original bare-frame bytes, named JSON or string bytes, or empty bytes.</returns>
+    /// <exception cref="IndexOutOfRangeException">The ordinal is outside the row.</exception>
+    /// <exception cref="InvalidOperationException">A named value is neither JSON, a string nor NULL/MISSING.</exception>
+    public override ReadOnlyMemory<byte> GetBytes(int ordinal) => ordinal == 0 && !_rawContent.IsEmpty ? _rawContent : GetValue(ordinal) switch
     {
         null => ReadOnlyMemory<byte>.Empty,
         JsonElement json => Encoding.UTF8.GetBytes(json.GetRawText()),

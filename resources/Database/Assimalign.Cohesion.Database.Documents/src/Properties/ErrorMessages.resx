@@ -61,4 +61,6 @@
   <data name="ValueProjectionInvalid" xml:space="preserve">
     <value>SELECT VALUE requires exactly one expression without an alias or star.</value>
   </data>
+  <data name="RowBytesInvalid" xml:space="preserve"><value>Field {0} is not JSON or a string.</value></data>
+  <data name="SelectConstructorDepthExceeded" xml:space="preserve"><value>SELECT {0} constructor values must be nested no deeper than 256 levels.</value></data>
 </root>

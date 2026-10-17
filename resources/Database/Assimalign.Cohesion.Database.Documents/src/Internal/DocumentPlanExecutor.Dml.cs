@@ -24,21 +24,21 @@ internal static partial class DocumentPlanExecutor
         {
             await using var result = (DatabaseResultSet)(select.Source switch
             {
-                DocumentPlan source => await ExecuteSelectAsync(database, operation, source, parameters, cancellationToken).ConfigureAwait(false),
-                DocumentSystemCollectionPlan source => ExecuteSystemCollection(database, operation, source, parameters, cancellationToken),
+                DocumentPlan source => await ExecuteSelectAsync(database, operation, source, parameters, cancellationToken, forInsert: true).ConfigureAwait(false),
+                DocumentSystemCollectionPlan source => ExecuteSystemCollection(database, operation, source, parameters, cancellationToken, forInsert: true),
                 _ => throw new DocumentPlanningException("COHDOC001", ErrorMessages.InsertValuesContext, statement.Location),
             });
             await foreach (var row in result.GetRowsAsync(cancellationToken).ConfigureAwait(false))
             {
                 object? Read(int ordinal) => row.IsMissing(ordinal) ? DocumentMissing.Instance : row.GetValue(ordinal);
                 object? value = select.ValueOrdinal is int valueOrdinal ? Read(valueOrdinal) :
-                    DocumentJsonValue.Object(result.Columns.Select(column => new KeyValuePair<string, object?>(column.Name, Read(column.Ordinal))));
+                    DocumentJsonValue.Object(result.Columns.Select(column => new KeyValuePair<string, object?>(column.Name, Read(column.Ordinal))), forInsert: true);
                 Add(Read(select.KeyOrdinal), value);
             }
         }
         else
         {
-            var evaluator = new DocumentExpressionEvaluator(null, parameters, cancellationToken);
+            var evaluator = new DocumentExpressionEvaluator(null, parameters, cancellationToken, forInsert: true);
             foreach (var pair in statement.Values)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -65,12 +65,13 @@ internal static partial class DocumentPlanExecutor
                 throw new DocumentPlanningException("COHDOC008", ErrorMessages.InsertValueMissing, statement.Location);
             }
             var id = new DocumentId(text);
-            var content = DocumentJsonValue.Encode(value);
+            byte[] content;
             try
             {
+                content = DocumentJsonValue.Encode(value);
                 DocumentStorage.ValidateContent(content);
             }
-            catch (JsonException exception)
+            catch (Exception exception) when (exception is JsonException or InvalidOperationException)
             {
                 throw new DocumentPlanningException("COHDOC008", ErrorMessages.InsertJsonInvalid, statement.Location, exception);
             }

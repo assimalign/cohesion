@@ -10,14 +10,14 @@ internal static class DocumentJsonValue
     internal static byte[] Encode(object? value)
     {
         var buffer = new ArrayBufferWriter<byte>();
-        using (var writer = new Utf8JsonWriter(buffer, new JsonWriterOptions { MaxDepth = 128 }))
+        using (var writer = new Utf8JsonWriter(buffer, new JsonWriterOptions { MaxDepth = 256 }))
         {
             Write(writer, value);
         }
         return buffer.WrittenSpan.ToArray();
     }
 
-    internal static JsonElement Object(IEnumerable<KeyValuePair<string, object?>> members)
+    internal static JsonElement Object(IEnumerable<KeyValuePair<string, object?>> members, bool forInsert = false, int maxDepth = 256)
     {
         // Couchbase expression/cons_object.go:53-77 constructs a keyed map and assigns
         // non-MISSING members into it (72-73). Later assignments replace the same key.
@@ -26,33 +26,53 @@ internal static class DocumentJsonValue
         {
             if (member.Value is not DocumentMissing) { keyed[member.Key] = member.Value; }
         }
-        var buffer = new ArrayBufferWriter<byte>();
-        using (var writer = new Utf8JsonWriter(buffer, new JsonWriterOptions { MaxDepth = 128 }))
+        try
         {
-            writer.WriteStartObject();
-            foreach (var member in keyed)
+            var buffer = new ArrayBufferWriter<byte>();
+            using (var writer = new Utf8JsonWriter(buffer, new JsonWriterOptions { MaxDepth = forInsert ? 128 : maxDepth }))
             {
-                writer.WritePropertyName(member.Key);
-                Write(writer, member.Value);
+                writer.WriteStartObject();
+                foreach (var member in keyed)
+                {
+                    writer.WritePropertyName(member.Key);
+                    Write(writer, member.Value);
+                }
+                writer.WriteEndObject();
             }
-            writer.WriteEndObject();
+            using var json = JsonDocument.Parse(buffer.WrittenMemory, new JsonDocumentOptions { MaxDepth = forInsert ? 128 : maxDepth });
+            return json.RootElement.Clone();
         }
-        using var json = JsonDocument.Parse(buffer.WrittenMemory, new JsonDocumentOptions { MaxDepth = 128 });
-        return json.RootElement.Clone();
+        catch (InvalidOperationException exception)
+        {
+            throw Depth("object", forInsert, exception);
+        }
     }
 
-    internal static JsonElement Array(IEnumerable<object?> elements)
+    internal static JsonElement Array(IEnumerable<object?> elements, bool forInsert = false, int maxDepth = 256)
     {
-        var buffer = new ArrayBufferWriter<byte>();
-        using (var writer = new Utf8JsonWriter(buffer, new JsonWriterOptions { MaxDepth = 128 }))
+        try
         {
-            writer.WriteStartArray();
-            foreach (var element in elements) { Write(writer, element is DocumentMissing ? null : element); }
-            writer.WriteEndArray();
+            var buffer = new ArrayBufferWriter<byte>();
+            using (var writer = new Utf8JsonWriter(buffer, new JsonWriterOptions { MaxDepth = forInsert ? 128 : maxDepth }))
+            {
+                writer.WriteStartArray();
+                foreach (var element in elements) { Write(writer, element is DocumentMissing ? null : element); }
+                writer.WriteEndArray();
+            }
+            using var json = JsonDocument.Parse(buffer.WrittenMemory, new JsonDocumentOptions { MaxDepth = forInsert ? 128 : maxDepth });
+            return json.RootElement.Clone();
         }
-        using var json = JsonDocument.Parse(buffer.WrittenMemory, new JsonDocumentOptions { MaxDepth = 128 });
-        return json.RootElement.Clone();
+        catch (InvalidOperationException exception)
+        {
+            throw Depth("array", forInsert, exception);
+        }
     }
+
+    private static DocumentPlanningException Depth(string constructor, bool forInsert, Exception exception)
+        => forInsert
+            ? new DocumentPlanningException("COHDOC008", ErrorMessages.InsertJsonInvalid, innerException: exception)
+            : new DocumentPlanningException("COHDOC015", string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                ErrorMessages.SelectConstructorDepthExceeded, constructor), innerException: exception);
 
     private static void Write(Utf8JsonWriter writer, object? value)
     {
@@ -62,13 +82,7 @@ internal static class DocumentJsonValue
             case bool boolean: writer.WriteBooleanValue(boolean); break;
             case decimal number: writer.WriteNumberValue(number); break;
             case string text: writer.WriteStringValue(text); break;
-            case JsonElement json:
-                try { json.WriteTo(writer); }
-                catch (System.InvalidOperationException exception)
-                {
-                    throw new DocumentPlanningException("COHDOC008", ErrorMessages.InsertJsonInvalid, innerException: exception);
-                }
-                break;
+            case JsonElement json: json.WriteTo(writer); break;
             default: throw new DocumentPlanningException("COHDOC008", ErrorMessages.InsertValueMissing);
         }
     }

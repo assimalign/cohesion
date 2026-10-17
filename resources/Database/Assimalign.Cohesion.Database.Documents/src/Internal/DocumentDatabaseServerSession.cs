@@ -571,28 +571,11 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
             await WriteResultFrameAsync(DocumentProtocolMessageType.ResultHeader,
                 new DocumentProtocolResultHeaderMessage([("document", (byte)DatabaseType.Json)], true).Encode(), cancellationToken).ConfigureAwait(false);
             long count = 0;
-            using var buffer = new MemoryStream();
-            using var writer = new Utf8JsonWriter(buffer);
+            using var writer = new DocumentRowWriter();
             await foreach (var row in description.GetRowsAsync(cancellationToken).ConfigureAwait(false))
             {
-                buffer.SetLength(0);
-                writer.Reset(buffer);
-                writer.WriteStartObject();
-                foreach (var column in description.Columns)
-                {
-                    writer.WritePropertyName(column.Name);
-                    switch (row.GetValue(column.Ordinal))
-                    {
-                        case null: writer.WriteNullValue(); break;
-                        case int value: writer.WriteNumberValue(value); break;
-                        case long value: writer.WriteNumberValue(value); break;
-                        case string value: writer.WriteStringValue(value); break;
-                    }
-                }
-                writer.WriteEndObject();
-                writer.Flush();
                 await WriteResultFrameAsync(DocumentProtocolMessageType.Document,
-                    new DocumentProtocolResultMessage(buffer.ToArray()).Encode(), cancellationToken).ConfigureAwait(false);
+                    new DocumentProtocolResultMessage(writer.Write(row, description.Columns, bareValue: false)).Encode(), cancellationToken).ConfigureAwait(false);
                 count++;
             }
             await WriteResultFrameAsync(DocumentProtocolMessageType.Complete,

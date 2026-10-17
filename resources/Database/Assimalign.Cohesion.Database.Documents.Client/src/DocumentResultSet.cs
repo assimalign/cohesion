@@ -11,7 +11,7 @@ public sealed class DocumentResultSet : IReadOnlyList<DocumentRow>
     private readonly IReadOnlyList<DocumentRow> _rows;
 
     internal DocumentResultSet(IReadOnlyList<DocumentColumn> columns, IReadOnlyList<object?[]> rows, long affectedCount,
-        bool wholeDocuments, IReadOnlyList<JsonElement> documents)
+        bool wholeDocuments, IReadOnlyList<JsonElement> documents, IReadOnlyList<ReadOnlyMemory<byte>>? rawDocuments = null)
     {
         Columns = columns;
         AffectedCount = affectedCount;
@@ -25,7 +25,7 @@ public sealed class DocumentResultSet : IReadOnlyList<DocumentRow>
         var materialized = new DocumentRow[rows.Count];
         for (int index = 0; index < rows.Count; index++)
         {
-            materialized[index] = new DocumentRow(rows[index], ordinals);
+            materialized[index] = new DocumentRow(rows[index], ordinals, rawDocuments?[index] ?? default);
         }
         _rows = materialized;
     }

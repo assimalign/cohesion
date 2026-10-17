@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Runtime.CompilerServices;
+using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -42,7 +43,7 @@ internal sealed class DocumentQueryResult : DatabaseResultSet
         for (int index = 0; index < _rows.Count; index++)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            yield return new DocumentQueryRow(_rows[index], _rawDocuments?[index] ?? default);
+            yield return new DocumentQueryRow(_rows[index], _rawDocuments?[index] ?? default, BareValue);
         }
         await Task.CompletedTask.ConfigureAwait(false);
     }
@@ -51,16 +52,19 @@ internal sealed class DocumentQueryResult : DatabaseResultSet
     internal sealed class DocumentQueryRow : DatabaseRow
     {
         private readonly object?[] _values;
+        private readonly bool _bareValue;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="DocumentQueryRow"/> class.
         /// </summary>
         /// <param name="values">The field values of the row in column order.</param>
         /// <param name="rawContent">The original stored bytes for a lone-star result.</param>
-        public DocumentQueryRow(object?[] values, ReadOnlyMemory<byte> rawContent) : base(supportsMissing: true)
+        /// <param name="bareValue">Whether the row contains one bare JSON value.</param>
+        public DocumentQueryRow(object?[] values, ReadOnlyMemory<byte> rawContent, bool bareValue = false) : base(supportsMissing: true)
         {
             _values = values;
             RawContent = rawContent;
+            _bareValue = bareValue;
         }
 
         internal ReadOnlyMemory<byte> RawContent { get; }
@@ -76,7 +80,13 @@ internal sealed class DocumentQueryResult : DatabaseResultSet
             var value => Convert.ToString(value, CultureInfo.InvariantCulture),
         };
         public override ReadOnlyMemory<byte> GetBytes(int ordinal)
-            => ordinal == 0 && !RawContent.IsEmpty ? RawContent : DocumentJsonValue.Encode(GetValue(ordinal));
+            => ordinal == 0 && !RawContent.IsEmpty ? RawContent : _bareValue ? DocumentJsonValue.Encode(GetValue(ordinal)) : GetValue(ordinal) switch
+            {
+                null => ReadOnlyMemory<byte>.Empty,
+                JsonElement json => Encoding.UTF8.GetBytes(json.GetRawText()),
+                string text => Encoding.UTF8.GetBytes(text),
+                _ => throw new DatabaseException(string.Format(CultureInfo.InvariantCulture, ErrorMessages.RowBytesInvalid, ordinal)),
+            };
         public override int GetInt32(int ordinal) => Convert.ToInt32(Required(ordinal), CultureInfo.InvariantCulture);
         public override long GetInt64(int ordinal) => Convert.ToInt64(Required(ordinal), CultureInfo.InvariantCulture);
         public override double GetDouble(int ordinal) => Convert.ToDouble(Required(ordinal), CultureInfo.InvariantCulture);

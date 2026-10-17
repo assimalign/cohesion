@@ -13,7 +13,6 @@ internal sealed partial class DocumentPlanner
     internal static string DescribeOperator(object plan) => plan switch
     {
         DocumentPlan => "Select",
-        DocumentLogicalPlan { Query.IsDistinct: true } => "Distinct",
         DocumentLogicalPlan { Query.IsValue: true, IsGrouped: false } => "ProjectValue",
         DocumentLogicalPlan { IsGrouped: true } => "Group",
         DocumentLogicalPlan => "Project",
@@ -75,17 +74,24 @@ internal sealed partial class DocumentPlanner
         }
         if (select is not null)
         {
+            if (select.Logical.Query.IsDistinct)
+            {
+                int distinctId = nodes.Count;
+                Add("Distinct", sourceParent);
+                sourceParent = distinctId;
+            }
+            int projectionId = nodes.Count;
             Add(DescribeOperator(select.Logical), sourceParent);
             switch (select.Access)
             {
                 case DocumentScanPath:
-                    Add("CollectionScan", sourceParent + 1);
+                    Add("CollectionScan", projectionId);
                     break;
                 case DocumentIndexPath seek:
                     var bounds = new List<string>();
                     if (seek.Lower is { } lower) { bounds.Add($"{seek.Index.Path} {(lower.Inclusive ? ">=" : ">")} {Value(lower.Value)}"); }
                     if (seek.Upper is { } upper) { bounds.Add($"{seek.Index.Path} {(upper.Inclusive ? "<=" : "<")} {Value(upper.Value)}"); }
-                    Add("IndexSeek", sourceParent + 1, seek.Index.Name, string.Join(" AND ", bounds));
+                    Add("IndexSeek", projectionId, seek.Index.Name, string.Join(" AND ", bounds));
                     break;
                 default:
                     throw new UnreachableException();

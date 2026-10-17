@@ -38,10 +38,10 @@ internal static partial class DocumentPlanExecutor
     }
 
     private static async ValueTask<DatabaseResult> ExecuteSelectAsync(DocumentDatabase database, DocumentOperation operation,
-        DocumentPlan plan, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
+        DocumentPlan plan, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken, bool forInsert = false)
     {
         var query = plan.Logical.Query;
-        var evaluator = new DocumentExpressionEvaluator(query.Alias, parameters, cancellationToken);
+        var evaluator = new DocumentExpressionEvaluator(query.Alias, parameters, cancellationToken, forInsert);
         IReadOnlyList<DocumentCatalogEntry> candidates = plan.Access is DocumentIndexPath seek
             ? await database.Catalog.SearchIndexAsync(plan.Collection.Id, seek.Index.Name,
                 seek.Lower?.Value, seek.Lower?.Inclusive ?? false, seek.Upper?.Value, seek.Upper?.Inclusive ?? false,
@@ -66,9 +66,9 @@ internal static partial class DocumentPlanExecutor
     }
 
     private static DatabaseResult ExecuteSystemCollection(DocumentDatabase database, DocumentOperation operation,
-        DocumentSystemCollectionPlan plan, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
+        DocumentSystemCollectionPlan plan, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken, bool forInsert = false)
     {
-        var evaluator = new DocumentExpressionEvaluator(plan.Logical.Query.Alias, parameters, cancellationToken);
+        var evaluator = new DocumentExpressionEvaluator(plan.Logical.Query.Alias, parameters, cancellationToken, forInsert);
         var matches = new List<DocumentEvaluationContext>();
         foreach (var document in DocumentSystemCollections.Enumerate(database, operation.Context.Snapshot, plan.Name, cancellationToken))
         {
@@ -124,7 +124,9 @@ internal static partial class DocumentPlanExecutor
             foreach (var row in output)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                row.OrderKeys = query.OrderBy.Select(order => evaluator.Evaluate(order.Expression, row.Document, row.Group)).ToArray();
+                row.OrderKeys = query.OrderBy.Select(order => query.IsValue &&
+                    DocumentPlanner.EquivalentExpression(query.Projections[0].Expression, order.Expression, query.Alias)
+                        ? row.Values[0] : evaluator.Evaluate(order.Expression, row.Document, row.Group)).ToArray();
             }
             output.Sort((left, right) =>
             {
@@ -148,7 +150,9 @@ internal static partial class DocumentPlanExecutor
 
         void Project(DocumentEvaluationContext document, IReadOnlyList<DocumentEvaluationContext>? group)
         {
-            var values = logical.Projections.Select(projection => evaluator.Evaluate(projection.Expression, document, group)).ToArray();
+            var values = logical.Projections.Select(projection => evaluator.EvaluateProjection(projection.Expression, document, group, query.IsValue)).ToArray();
+            // Normalize the JSON root before DISTINCT, projected ordering and counting.
+            if (query.IsValue && values[0] is DocumentMissing) { values[0] = null; }
             output.Add(new EvaluatedRow(values, document, group, output.Count));
         }
     }
