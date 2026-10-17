@@ -148,8 +148,8 @@ internal sealed partial class SqlPlanExecutor
     /// catalog the engine wrote. One that does not convert binds as a <see cref="SqlBoundFailure"/>
     /// that converts it again, and so fails, each time the default is used, as it did before the
     /// value was bound: the table still opens, and reads and writes that never need the default
-    /// still succeed. Converted values are shared inside the engine; the materialized result
-    /// boundary snapshots binary cells so a caller cannot mutate the cached value.
+    /// still succeed. Converted binary constants are copied when delivered into a row, so a
+    /// missing stored tail cannot expose the cached value to a caller.
     /// </remarks>
     /// <param name="column">The column.</param>
     /// <param name="defaultValue">The value text of the column's DEFAULT literal (<see cref="SqlPersistedExpression.LoadDefaultValue"/>).</param>
@@ -223,8 +223,8 @@ internal sealed partial class SqlPlanExecutor
     private static object? DefaultValue(SqlBoundExpression bound, CancellationToken cancellationToken = default)
     {
         object? value = bound.Kind == SqlBoundExpressionKind.Constant
-            ? ((SqlBoundConstant)bound).Value
-            : SqlExpressionEvaluator.ForExecution(null, cancellationToken).Evaluate(bound, []);
+            ? SqlBinaryValue.CopyShared(((SqlBoundConstant)bound).Value)
+            : SqlExpressionEvaluator.ForExecution(null, cancellationToken).Evaluate(bound, [], copySharedBinary: true);
         return value;
     }
 

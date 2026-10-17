@@ -300,6 +300,13 @@ internal static class SqlRowCodec
         }
     }
 
+    private static byte[] ReadBinary(ref DatabaseKeyReader reader)
+    {
+        byte[] value = reader.ReadBinary();
+        // ReadEscaped owns nonempty payloads; its empty List.ToArray uses Array.Empty<byte>().
+        return value.Length == 0 ? new byte[0] : value;
+    }
+
     /// <summary>
     /// Reads one live column's component: NULL, or a value of the column's storage type, which
     /// <see cref="AppendValue"/> chose from the same column type. The typed read checks the
@@ -328,7 +335,7 @@ internal static class SqlRowCodec
             DatabaseType.Decimal => reader.ReadDecimal(),
             DatabaseType.Character => new SqlCharacter(reader.ReadString(out _)),
             DatabaseType.String or DatabaseType.Json => reader.ReadString(out _),
-            DatabaseType.Binary or DatabaseType.JsonBinary => reader.ReadBinary(),
+            DatabaseType.Binary or DatabaseType.JsonBinary => ReadBinary(ref reader),
             DatabaseType.Date => reader.ReadDate(),
             DatabaseType.Time => reader.ReadTime(),
             DatabaseType.DateTime => reader.ReadDateTime(),

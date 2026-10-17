@@ -87,7 +87,7 @@ internal sealed partial class SqlPlanExecutor
             for (int i = 0; i < plan.Projections.Count; i++)
             {
                 row[projectionStart + i] = NormalizeGroupValue(
-                    evaluator.Evaluate(plan.Projections[i].Value!, row), plan.Projections[i].Type);
+                    evaluator.Evaluate(plan.Projections[i].Value!, row, copySharedBinary: true), plan.Projections[i].Type);
             }
             matches.Add(row);
         }

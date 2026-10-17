@@ -217,21 +217,30 @@ static operand typing preserve its storage type, and access-path extraction uses
 evaluator as residual predicates. Literal DEFAULT binding preserves the type before coercion,
 including compiled-schema and domain validation; mismatched typed defaults fail before mutation.
 Omitted values, explicit DEFAULT and ADD COLUMN missing tails use the same bound constant.
-Every materialized result snapshots each binary cell before execution returns. This single
-output boundary covers table scans and index reads, projections and SQL/application functions,
-literal and expression DEFAULTs, joins, groups, subqueries and system views. GetValue and
-GetBytes then expose only result-owned bytes. Cells and rows have separate copies even when
-their source is one bound constant; a caller changing an input parameter after execution
-cannot change the completed result. Internal evaluation and DEFAULT delivery share bytes;
-they do not add copies to expression or storage paths.
+Binary ownership is established where a shared value enters a row. Materialized results
+transfer those rows without copying their cells. GetValue and GetBytes expose the delivered
+bytes, so a caller changing a parameter after execution or a returned cell cannot change
+another cell, later row, function call, DEFAULT assignment or stored value.
 
-The benchmark's opt-in `--cases QB --rows 100000 --iterations 5` projects four 256-byte
-X literals per row and reads every GetValue. On Windows arm64, Release .NET 10 JIT with
-DOTNET_TieredCompilation=0, one warm-up and five measured iterations, the median allocation
-increased from 927.9 to 2047.9 bytes per row: +1120 bytes, exactly four 280-byte arrays
-(1024 payload bytes plus 96 array overhead). The measuring thread did not hop in either
-run; process-wide allocation agreed within 0.1 byte per row. This is the deliberate cost
-of independent mutable result cells; no timing claim is made on the shared build host.
+| Source | Delivery ownership |
+| --- | --- |
+| Bound literal, folded immutable call or caller parameter | The evaluator copies binary values when supplying a row, including INSERT/UPDATE rows. |
+| SQL function body or native scalar result | The call's delivered result is copied. Body/argument computation does not copy intermediate binary values. |
+| CASE, COALESCE, identity CAST or domain argument | Delivery follows the selected operand; predicate computation continues to share read-only values. Application casts copy their converted binary result. |
+| Converted literal DEFAULT, including an ADD COLUMN missing tail | DefaultValue copies the cached value once per supplied row. Expression defaults use evaluator delivery. |
+| Scalar subquery or grouped key/aggregate slot | Delivery copies the retained slot value for each use, including native aggregate results. |
+| Repeated projections and join fanout | An owned cell's first projection transfers it; repeated projections detach. Join delivery copies selected retained outer/buffered-inner columns; indexed inner rows decode afresh and transfer. Predicates, discarded candidates and unprojected columns never copy. |
+| Stored Binary/JsonBinary component, by scan or seek | SqlRowCodec reads a fresh nonempty array and transfers it. Only the decoder's shared empty array is replaced at this source. |
+| System/catalog views | Enumerators emit strings and immutable scalars, including rendered DEFAULT text; none exposes a catalog byte array. Binary expressions over these views use the same evaluator delivery. |
+
+The scan and index-seek paths both call DecodeRow/SqlRowCodec.Decode. Even an index-covered
+projection fetches the stored row; this engine has no heap-free index-only materialization.
+DatabaseKeyReader.ReadBinary delegates to KeyComponentEncoding.ReadEscaped, whose nonempty
+List.ToArray result is new on each read. Its empty result is Array.Empty<byte>(); SQL replaces
+only that shared empty value. No storage/index value cache retains decoded binary payloads.
+SqlBinaryOwnershipTests verifies repeated reads and covered seeks, and separately calls the
+row codec twice before result construction for Binary and JsonBinary. The ownership and
+measurement record is [BINARY_OWNERSHIP_REVIEW.md](BINARY_OWNERSHIP_REVIEW.md).
 
 COLUMN_DEFAULT renders the resolved temporal/binary value with a typed prefix, including
 plain-string defaults persisted previously. Other expression defaults keep their canonical text.
@@ -341,7 +350,7 @@ flowchart TD
   the column and every INSERT omitting it reads, where each use converted the text
   before. A DEFAULT that does not convert, which DDL never stores, binds as a
   `SqlBoundFailure` that fails each use as before, so the table still opens. Bound
-  trees and converted values are shared; binary cells are copied at the result boundary.
+  trees and converted values are shared; binary defaults are copied when delivered into a row.
   Failure nodes construct a new exception per throw, so sharing the cache across threads is safe.
 - **Allocation.** Literals and parameters are boxed once per statement instead of per
   row; predicates return shared boxed Booleans; `COUNT(*)` accumulates a shared boxed

@@ -19,6 +19,7 @@ internal static class SqlCastConverter
     /// <param name="value">The operand's value.</param>
     /// <param name="cast">The bound CAST.</param>
     /// <param name="cancellationToken">The statement's cancellation token, for a domain check's context.</param>
+    /// <param name="copySharedBinary">Whether a converted binary result is being delivered into a row.</param>
     /// <returns>The converted value; null for NULL.</returns>
     /// <exception cref="DatabaseException">
     /// The conversion failed on the value; a <see cref="DatabaseException"/> a
@@ -29,7 +30,7 @@ internal static class SqlCastConverter
     /// (<c>COHSQLE007</c>).
     /// </exception>
     /// <exception cref="SqlConstraintViolationException">The value violates the domain target's check.</exception>
-    internal static object? Convert(object? value, SqlBoundCast cast, CancellationToken cancellationToken)
+    internal static object? Convert(object? value, SqlBoundCast cast, CancellationToken cancellationToken, bool copySharedBinary = false)
     {
         object? converted = null;
         if (value is not null)
@@ -53,6 +54,7 @@ internal static class SqlCastConverter
                         && SqlStandardCasts.Contains(registered)
                         ? ParseNumericText(value is SqlCharacter fixedText ? fixedText.Text : (string)value, cast.Target.Storage)
                         : registered.Apply(value);
+                    if (copySharedBinary) { converted = SqlBinaryValue.CopyShared(converted); }
                 }
                 else if (source != DatabaseType.Null)
                 {

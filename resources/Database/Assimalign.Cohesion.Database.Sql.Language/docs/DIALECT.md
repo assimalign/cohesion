@@ -1374,6 +1374,9 @@ In-process binary row values are result-owned snapshots. Changing a returned byt
 (including the backing array of GetBytes) cannot change another output cell, later row,
 function call, default-driven INSERT or stored/indexed value. Binary parameters are
 snapshotted into completed results before execution returns.
+Shared constants, function results, parameters, defaults and retained execution slots copy
+when supplying a row value. Fresh stored payloads transfer directly; repeated uses detach
+at their source. Result materialization adds no blanket binary copy.
 
 The engine evaluates an integer literal as BIGINT and a fractional or exponent
 literal as an exact `System.Decimal`, whatever the target. A literal its type cannot
