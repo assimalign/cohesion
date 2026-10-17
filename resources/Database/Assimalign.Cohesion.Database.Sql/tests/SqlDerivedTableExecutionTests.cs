@@ -264,6 +264,7 @@ public sealed class SqlDerivedTableExecutionTests
 
         // Act
         var result = await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None);
+        if (result is DatabaseResultSet unexpectedRows) { await unexpectedRows.DisposeAsync(); }
 
         // Assert
         result.Status.ShouldBe(DatabaseResultStatus.Error);
@@ -285,6 +286,7 @@ public sealed class SqlDerivedTableExecutionTests
 
         // Act
         var result = await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None);
+        if (result is DatabaseResultSet unexpectedRows) { await unexpectedRows.DisposeAsync(); }
 
         // Assert
         var diagnostic = result.Diagnostics.ShouldHaveSingleItem();
@@ -318,6 +320,7 @@ public sealed class SqlDerivedTableExecutionTests
 
         // Act
         var result = await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None);
+        if (result is DatabaseResultSet unexpectedRows) { await unexpectedRows.DisposeAsync(); }
 
         // Assert
         var diagnostic = result.Diagnostics.ShouldHaveSingleItem();
