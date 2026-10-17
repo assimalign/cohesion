@@ -334,7 +334,7 @@ public sealed class GqlLabelChainExecutionTests
             negations = new GqlLabelNegation(negations);
             predicate = new GqlLogicalExpression(GqlLogicalOperator.And, [predicate, always]);
         }
-        var empty = new Dictionary<string, object?>();
+        var empty = new Dictionary<string, GqlExpression>();
         GqlQueryStatement[] statements =
         [
             new(new GqlQueryExpression([new GqlPathPattern([new GqlNodePattern("n", [], empty) { LabelExpression = negations }], [])],

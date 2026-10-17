@@ -15,6 +15,30 @@ namespace Assimalign.Cohesion.Database.Graph.Tests;
 
 public sealed class GraphServerProtocolTests
 {
+    [Theory(DisplayName = "Cohesion Test [Database.Graph] - Server: an unbound parameter is a reusable execution failure on either exchange")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Execute_UnboundParameter_ShouldFailAndKeepSessionReady(bool paths)
+    {
+        // Arrange
+        await WithServerAsync(async (channel, token) =>
+        {
+            // Act
+            await WriteAsync(channel, (ProtocolMessageType)(paths ? GraphProtocolMessageType.ExecutePaths : GraphProtocolMessageType.Execute),
+                GraphProtocolExecuteMessage.Create(paths ? "MATCH (n {k: $missing}) RETURN n" : "MATCH (n {k: $missing}) RETURN n.k").Encode(), token);
+            var error = await ReadErrorAsync(channel, token);
+
+            // Assert
+            error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
+            error.Message.ShouldContain("COHDBG001", Case.Sensitive);
+            await WriteAsync(channel, (ProtocolMessageType)GraphProtocolMessageType.ExecutePaths,
+                GraphProtocolExecuteMessage.Create("MATCH (n) RETURN n").Encode(), token);
+            var complete = await ReadAsync(channel, token);
+            complete.Type.ShouldBe((ProtocolMessageType)GraphProtocolMessageType.PathsComplete);
+            GraphProtocolPathsCompleteMessage.Decode(complete.Payload.Span).PathCount.ShouldBe(0);
+        });
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database.Graph] - Server: reserved transaction frame terminates the session")]
     public async Task Transaction_ReservedFrame_ShouldRejectAndClose()
     {

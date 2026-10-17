@@ -18,6 +18,8 @@ internal sealed class GraphPathsExchange
     private IReadOnlyList<ProtocolDiagnostic> _diagnostics = [];
     private bool _hasDiagnostics;
 
+    internal DatabaseClientException? Rejection { get; private set; }
+
     /// <summary>
     /// Initializes a new instance of the <see cref="GraphPathsExchange"/> class.
     /// </summary>
@@ -36,6 +38,17 @@ internal sealed class GraphPathsExchange
             cancellationToken).ConfigureAwait(false);
         await writer.FlushAsync(cancellationToken).ConfigureAwait(false);
         _initial = await ReadAsync(reader, cancellationToken).ConfigureAwait(false);
+        if (_initial.Type == ProtocolMessageType.Error)
+        {
+            var error = ProtocolErrorMessage.Decode(_initial.Payload.Span);
+            if (error.Code is ProtocolErrorCode.ParseFailure or ProtocolErrorCode.ExecutionFailure)
+            {
+                // A terminal rejection before path output is a complete, healthy exchange.
+                // Finish the shared stream before GraphConnection raises the retained failure.
+                Rejection = new DatabaseClientException(error.Code, error.Message);
+                return;
+            }
+        }
         ValidateFrame(_initial);
     }
 
@@ -44,6 +57,7 @@ internal sealed class GraphPathsExchange
     {
         ProtocolFrame frame = _initial;
         _initial = default;
+        if (Rejection is not null) { return; }
         long count = 0;
         byte[] length = new byte[sizeof(int)];
         while (true)
@@ -68,7 +82,12 @@ internal sealed class GraphPathsExchange
 
     private static void ValidateFrame(ProtocolFrame frame)
     {
-        if (frame.Type == (ProtocolMessageType)GraphProtocolMessageType.Path)
+        if (frame.Type == ProtocolMessageType.Error)
+        {
+            var error = ProtocolErrorMessage.Decode(frame.Payload.Span);
+            throw new DatabaseClientException(error.Code, error.Message);
+        }
+        else if (frame.Type == (ProtocolMessageType)GraphProtocolMessageType.Path)
         {
             _ = GraphProtocolPathMessage.Decode(frame.Payload.Span);
         }
@@ -86,6 +105,7 @@ internal sealed class GraphPathsExchange
     {
         ProtocolFrame frame = await reader.ReadFrameAsync(cancellationToken).ConfigureAwait(false)
             ?? throw new ProtocolException("The server closed the connection before completing the graph path exchange.");
+<<<<<<< HEAD
         if (frame.Type == ProtocolMessageType.Diagnostics)
         {
             if (_hasDiagnostics) { throw new ProtocolException(ErrorMessages.GraphDiagnosticsDuplicate); }
@@ -103,6 +123,8 @@ internal sealed class GraphPathsExchange
             ProtocolErrorMessage error = ProtocolErrorMessage.Decode(frame.Payload.Span);
             throw new DatabaseClientException(error.Code, error.Message, _diagnostics, null);
         }
+=======
+>>>>>>> 774c0596e
         return frame;
     }
 }

@@ -117,7 +117,12 @@ public sealed partial class GqlQueryParser : QueryParser
         else if (Is("MATCH") || Is("CREATE") || Is("INSERT")) { expression = ParseQuery(); }
         else
         {
-            if (Is("DELETE") || Is("DETACH") || Is("WHERE") || Is("RETURN"))
+            if (Is("RETURN") && _tokens[_position + 1].Type == TokenType.Parameter)
+            {
+                Advance();
+                RejectUnsupportedParameter("PARAMETER PROJECTION");
+            }
+            else if (Is("DELETE") || Is("DETACH") || Is("WHERE") || Is("RETURN"))
             {
                 Error("GQL0002", "Expected MATCH, INSERT, or CREATE before this clause.", Current);
             }
@@ -227,9 +232,10 @@ public sealed partial class GqlQueryParser : QueryParser
                 Unsupported("NESTED PROPERTY ACCESS", token);
                 continue;
             }
-            if (token.Type == TokenType.Parameter)
+            if (token.Type == TokenType.Parameter && token.Text == "$" &&
+                i + 1 < _tokens.Count && _tokens[i + 1].Type == TokenType.Parameter && Adjacent(i, i + 1))
             {
-                Unsupported("PARAMETER", token);
+                UnsupportedConstruct("SUBSTITUTED PARAMETER REFERENCE", token, _tokens[++i]);
                 continue;
             }
             if (token.Type is not (TokenType.Keyword or TokenType.Identifier or TokenType.Function)) { continue; }

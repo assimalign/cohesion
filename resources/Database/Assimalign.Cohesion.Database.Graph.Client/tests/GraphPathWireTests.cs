@@ -151,27 +151,60 @@ public sealed class GraphPathWireTests
 
     /// <summary>Requests with scalar or mutation projections fail explicitly and cannot perform writes through ExecutePaths.</summary>
     /// <param name="statement">The unsupported path query shape.</param>
-    [Theory(DisplayName = "Cohesion Test [Graph.Client] - Invalid path requests fail explicitly and discard their streams")]
+    [Theory(DisplayName = "Cohesion Test [Graph.Client] - Invalid path requests fail explicitly and retain their session")]
     [InlineData("MATCH (a) RETURN a.name")]
     [InlineData("MATCH (a) RETURN a, a.name")]
     [InlineData("CREATE (a:Injected) RETURN a")]
     [InlineData("MATCH (a) DELETE a")]
-    public async Task QueryPathsAsync_InvalidShape_ShouldRejectAndDiscard(string statement)
+    public async Task QueryPathsAsync_InvalidShape_ShouldRejectAndReuseExactSession(string statement)
     {
         // Arrange
         await using var harness = await GraphClientTestHarness.StartAsync();
         await using var connection = await harness.Client.ConnectAsync(harness.Token);
-        Guid oldId = harness.Server.Sessions.ShouldHaveSingleItem().Id;
+        Guid sessionId = harness.Server.Sessions.ShouldHaveSingleItem().Id;
 
         // Act / Assert
         var error = await Should.ThrowAsync<GraphClientException>(async () =>
             await CollectAsync(connection.QueryPathsAsync(statement, cancellationToken: harness.Token)));
         error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-        connection.IsOpen.ShouldBeFalse();
-        // Streaming failures conservatively discard even when the server was able to reject before output.
-        await using var fresh = await harness.Client.ConnectAsync(harness.Token);
-        (await fresh.QueryAsync("SHOW LABELS", cancellationToken: harness.Token)).ShouldBeEmpty();
-        harness.Server.Sessions.ShouldContain(session => session.Id != oldId);
+        connection.IsOpen.ShouldBeTrue();
+        (await connection.QueryAsync("SHOW LABELS", cancellationToken: harness.Token)).ShouldBeEmpty();
+        harness.Server.Sessions.ShouldHaveSingleItem().Id.ShouldBe(sessionId);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Graph.Client] - Initial path rejections retain the connection and pooled session over InMemory and TCP")]
+    [InlineData(false, "MATCH (n {k: $missing}) RETURN n", ProtocolErrorCode.ExecutionFailure, "COHDBG001")]
+    [InlineData(true, "MATCH (n {k: $missing}) RETURN n", ProtocolErrorCode.ExecutionFailure, "COHDBG001")]
+    [InlineData(false, "MATCH (n {k: @missing}) RETURN n", ProtocolErrorCode.ExecutionFailure, "COHDBG001")]
+    [InlineData(true, "MATCH (n {k: @missing}) RETURN n", ProtocolErrorCode.ExecutionFailure, "COHDBG001")]
+    [InlineData(false, "MATCH (n) RETURN $", ProtocolErrorCode.ParseFailure, "GQL0002")]
+    [InlineData(true, "MATCH (n) RETURN $", ProtocolErrorCode.ParseFailure, "GQL0002")]
+    public async Task QueryPathsAsync_InitialRejection_ShouldReuseConnectionAndPooledSession(
+        bool tcp, string statement, ProtocolErrorCode code, string diagnostic)
+    {
+        // Arrange
+        await using var harness = await GraphClientTestHarness.StartAsync(tcp);
+        Guid sessionId;
+        await using (var connection = await harness.Client.ConnectAsync(harness.Token))
+        {
+            await connection.ExecuteAsync("INSERT (:Keep)", cancellationToken: harness.Token);
+            sessionId = harness.Server.Sessions.ShouldHaveSingleItem().Id;
+
+            // Act
+            var error = await Should.ThrowAsync<GraphClientException>(async () =>
+                await CollectAsync(connection.QueryPathsAsync(statement, cancellationToken: harness.Token)));
+
+            // Assert
+            error.Code.ShouldBe(code);
+            error.Message.ShouldContain(diagnostic, Case.Sensitive);
+            connection.IsOpen.ShouldBeTrue();
+            (await connection.QueryAsync("SHOW LABELS", cancellationToken: harness.Token)).ShouldHaveSingleItem()[2].ShouldBe("Keep");
+            harness.Server.Sessions.ShouldHaveSingleItem().Id.ShouldBe(sessionId);
+        }
+
+        await using var reused = await harness.Client.ConnectAsync(harness.Token);
+        (await reused.QueryAsync("SHOW LABELS", cancellationToken: harness.Token)).ShouldHaveSingleItem()[2].ShouldBe("Keep");
+        harness.Server.Sessions.ShouldHaveSingleItem().Id.ShouldBe(sessionId);
     }
 
     /// <summary>Abandoning a response larger than the bounded handoff cancels and discards its session.</summary>

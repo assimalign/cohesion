@@ -8,9 +8,11 @@ internal sealed class DocumentCommandResult : DatabaseResult
 {
     internal static DocumentCommandResult Success { get; } = new();
 
-    private DocumentCommandResult() { }
+    private readonly long _affectedCount;
+
+    internal DocumentCommandResult(long affectedCount = 0) => _affectedCount = affectedCount;
 
     public override DatabaseResultStatus Status => DatabaseResultStatus.Success;
-    public override long AffectedCount => 0;
-    public override IReadOnlyList<Diagnostic>? Diagnostics => null;
+    public override long AffectedCount => _affectedCount;
+    public override IReadOnlyList<Diagnostic> Diagnostics => [];
 }

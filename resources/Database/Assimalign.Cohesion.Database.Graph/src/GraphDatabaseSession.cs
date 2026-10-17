@@ -309,7 +309,7 @@ public sealed class GraphDatabaseSession : DatabaseLanguageSession<GraphRequest>
                     throw new GraphPlanningException("COHDBG001", "EXPLAIN returns rows and cannot run on ExecutePaths.", request.Statement.GqlExpression.Location);
                 }
                 var planner = new GraphPlanner(_database, operation.Context.Snapshot);
-                var plan = planner.Plan(request.Statement.GqlExpression);
+                var plan = planner.Plan(request.Statement.GqlExpression, request.Parameters);
                 return ValueTask.FromResult<DatabaseResult>(planner.Describe(plan));
             }
             return GraphPlanExecutor.ExecuteAsync(_database, operation, request.Statement,

@@ -126,7 +126,7 @@ public sealed class GqlLabelExpressionParserTests
         statement.Diagnostics.ShouldBeEmpty();
         var node = statement.GqlExpression.Matches.Single().Nodes.Single();
         node.LabelExpression.ShouldBe(Or(Name("A"), Name("B")));
-        node.Properties["k"].ShouldBe(1L);
+        node.Properties["k"].ShouldBeOfType<GqlLiteralExpression>().Value.ShouldBe(1L);
     }
 
     [Fact(DisplayName = "Cohesion Test [Graph.Language] - Label expressions: ToString renders GQL with only the parentheses precedence needs")]

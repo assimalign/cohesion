@@ -31,6 +31,7 @@ internal sealed partial class DocumentPlanner
 
     internal DocumentStatementPlan Plan(OqlExpression expression) => expression switch
     {
+        OqlInsertExpression insert => PlanInsert(insert),
         OqlSelectExpression select when DocumentSystemCollections.Find(select.Collection) is string name =>
             new DocumentSystemCollectionPlan(CreateLogicalPlan(select), name),
         OqlSelectExpression select => Plan(select),
@@ -120,6 +121,11 @@ internal sealed partial class DocumentPlanner
 
     internal static DocumentLogicalPlan CreateLogicalPlan(OqlSelectExpression query)
     {
+        foreach (var expression in query.Projections.Select(p => p.Expression).Concat(query.GroupBy)
+            .Concat(query.OrderBy.Select(o => o.Expression)).Concat(new[] { query.Predicate, query.Having }).OfType<OqlExpression>())
+        {
+            ValidateMetadata(expression, query.Alias, DocumentSystemCollections.Find(query.Collection) is null);
+        }
         if (query.Projections.Count == 0) { throw new DocumentPlanningException("COHDOC001", "OQL SELECT requires a projection.", query.Location); }
         // An explicit projection alias is visible to ORDER BY. Other paths
         // continue to address source documents, including unprojected fields.
@@ -146,6 +152,7 @@ internal sealed partial class DocumentPlanner
                 OqlStarExpression => "document",
                 OqlPathExpression path => path.Segments.LastOrDefault().Name ?? $"column{projections.Count + 1}",
                 OqlCallExpression call => call.Name.ToLowerInvariant(),
+                OqlMetaExpression meta => meta.Member!,
                 _ => $"column{projections.Count + 1}",
             };
             if (projections.Any(existing => string.Equals(existing.Name, name, StringComparison.Ordinal)))
@@ -300,6 +307,7 @@ internal sealed partial class DocumentPlanner
     private static bool IsConstant(OqlExpression expression) => expression switch
     {
         OqlLiteralExpression or OqlMissingExpression or OqlParameterExpression => true,
+        OqlObjectExpression obj => obj.Members.All(member => IsConstant(member.Value)),
         OqlUnaryExpression unary => IsConstant(unary.Operand),
         OqlBinaryExpression binary => IsConstant(binary.Left) && IsConstant(binary.Right),
         _ => false,
@@ -307,6 +315,7 @@ internal sealed partial class DocumentPlanner
 
     internal static bool ContainsAggregate(OqlExpression expression) => expression switch
     {
+        OqlObjectExpression obj => obj.Members.Any(member => ContainsAggregate(member.Value)),
         OqlCallExpression => true,
         OqlBinaryExpression binary => ContainsAggregate(binary.Left) || ContainsAggregate(binary.Right),
         OqlUnaryExpression unary => ContainsAggregate(unary.Operand),
@@ -317,7 +326,10 @@ internal sealed partial class DocumentPlanner
     {
         switch (expression)
         {
-            case OqlLiteralExpression or OqlMissingExpression or OqlParameterExpression or OqlPathExpression:
+            case OqlLiteralExpression or OqlMissingExpression or OqlParameterExpression or OqlPathExpression or OqlMetaExpression:
+                return;
+            case OqlObjectExpression obj:
+                foreach (var member in obj.Members) { Validate(member.Value, allowAggregate); }
                 return;
             case OqlStarExpression when allowStar:
                 return;
@@ -329,7 +341,7 @@ internal sealed partial class DocumentPlanner
                 "IS MISSING" or "IS NOT MISSING" or "IS VALUED" or "IS NOT VALUED":
                 Validate(unary.Operand, allowAggregate);
                 return;
-            case OqlCallExpression call when allowAggregate && OqlLanguageProfile.Instance.Functions.Contains(call.Name, StringComparer.OrdinalIgnoreCase):
+            case OqlCallExpression call when allowAggregate && call.Name != "META" && OqlLanguageProfile.Instance.Functions.Contains(call.Name, StringComparer.OrdinalIgnoreCase):
                 if (call.Arguments.Count != 1) { throw new DocumentPlanningException("COHDOC001", $"OQL aggregate '{call.Name}' requires one argument.", call.Location); }
                 Validate(call.Arguments[0], allowAggregate: false, allowStar: call.Name == "COUNT");
                 return;
@@ -340,8 +352,13 @@ internal sealed partial class DocumentPlanner
 
     private static void ValidateGrouped(OqlExpression expression, OqlSelectExpression query)
     {
-        if (expression is OqlCallExpression or OqlLiteralExpression or OqlMissingExpression or OqlParameterExpression) { return; }
         if (query.GroupBy.Any(key => EquivalentExpression(key, expression, query.Alias))) { return; }
+        if (expression is OqlObjectExpression obj)
+        {
+            foreach (var member in obj.Members) { ValidateGrouped(member.Value, query); }
+            return;
+        }
+        if (expression is OqlCallExpression or OqlLiteralExpression or OqlMissingExpression or OqlParameterExpression) { return; }
         if (expression is OqlBinaryExpression binary)
         {
             ValidateGrouped(binary.Left, query);
@@ -356,6 +373,10 @@ internal sealed partial class DocumentPlanner
     {
         (OqlPathExpression a, OqlPathExpression b) => PathSegments(a, alias).SequenceEqual(PathSegments(b, alias)),
         (OqlLiteralExpression a, OqlLiteralExpression b) => DocumentExpressionEvaluator.Compare(a.Value, b.Value) == 0,
+        (OqlMetaExpression a, OqlMetaExpression b) => a.Member == b.Member,
+        (OqlObjectExpression a, OqlObjectExpression b) => a.Members.Count == b.Members.Count &&
+            a.Members.Zip(b.Members).All(pair => pair.First.Key == pair.Second.Key &&
+                EquivalentExpression(pair.First.Value, pair.Second.Value, alias)),
         (OqlMissingExpression, OqlMissingExpression) => true,
         (OqlParameterExpression a, OqlParameterExpression b) => a.Name == b.Name,
         (OqlBinaryExpression a, OqlBinaryExpression b) => a.Operator == b.Operator &&

@@ -102,6 +102,25 @@ internal static class Program
             Check(updated.Version.Value > saved.Version.Value, "versioned update");
             Check(await connection.DeleteAsync("items", "one", updated.Version, token), "versioned delete");
             Check(await connection.GetAsync("items", "one", token) is null, "missing document");
+            Check(await connection.ExecuteAsync("INSERT INTO items (KEY, VALUE) VALUES ('e', {'score': MISSING, 'amount': NULL}), ('f', 1)", cancellationToken: token) == 2, "INSERT affected count");
+            var metadata = await connection.QueryAsync("SELECT META().id AS id, META().version AS v FROM items ORDER BY id", cancellationToken: token);
+            Check(metadata.Count == 2 && (string)metadata[0]["id"]! == "e" && (decimal)metadata[1]["v"]! > (decimal)metadata[0]["v"]!, "META identity and version");
+            var insertedDocument = await connection.GetAsync("items", "e", token);
+            Check(insertedDocument.HasValue, "INSERT readback");
+            using var inserted = System.Text.Json.JsonDocument.Parse(insertedDocument.GetValueOrDefault().Content);
+            Check(!inserted.RootElement.TryGetProperty("score", out _) && inserted.RootElement.GetProperty("amount").ValueKind == System.Text.Json.JsonValueKind.Null, "INSERT MISSING member");
+            Check(await connection.ExecuteAsync("CREATE COLLECTION archive", cancellationToken: token) == 0, "INSERT SELECT collection");
+            Check(await connection.ExecuteAsync("INSERT INTO archive (KEY k, VALUE v) SELECT META(d).id AS k, d AS v FROM items d", cancellationToken: token) == 2, "INSERT SELECT affected count");
+            try
+            {
+                await connection.ExecuteAsync("INSERT INTO items (KEY, VALUE) VALUES ('e', 0)", cancellationToken: token);
+                throw new InvalidOperationException("Duplicate INSERT succeeded.");
+            }
+            catch (DocumentClientException exception)
+            {
+                Check(exception.Code == ProtocolErrorCode.ExecutionFailure && exception.Diagnostics.Any(d => d.Code == "COHDOC012"), "INSERT duplicate diagnostic");
+            }
+            Check(await connection.ExecuteAsync("DROP COLLECTION archive", cancellationToken: token) == 0, "reuse after duplicate");
             Check(await connection.ExecuteAsync("DROP COLLECTION items", cancellationToken: token) == 0, "OQL drop collection");
             Check(await connection.ExecuteAsync("DROP COLLECTION IF EXISTS items", cancellationToken: token) == 0, "absent collection");
             Check((await connection.GetCollectionsAsync(token)).Count == 0, "drop collection");

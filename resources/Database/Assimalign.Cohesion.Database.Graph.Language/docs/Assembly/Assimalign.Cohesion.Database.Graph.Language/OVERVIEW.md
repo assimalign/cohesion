@@ -21,4 +21,9 @@ substring tests. `GqlInExpression` has an `Operand` and a `GqlListExpression` wh
 read-only `Items` are supported only on IN's right side. Programmatically constructed ASTs
 receive planner shape validation too.
 
+`GqlParameterExpression` stores a bare, case-sensitive `Name` and the complete reference's
+`Location` for `$name` and `@name`. Node and relationship pattern `Properties` now take
+`IReadOnlyDictionary<string, GqlExpression>`; wrap each constant in `GqlLiteralExpression`
+or supply a parameter expression. This is a breaking AST change.
+
 See [DESIGN.md](../../DESIGN.md) for ISO scope, source locations, diagnostic codes and conformance.

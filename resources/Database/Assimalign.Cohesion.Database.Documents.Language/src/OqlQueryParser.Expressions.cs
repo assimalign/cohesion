@@ -2,9 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
-using Assimalign.Cohesion.Database.Language;
+using System.Text.Json;
 
 using Assimalign.Cohesion.Database.Execution.Internal;
+using Assimalign.Cohesion.Database.Language;
 
 namespace Assimalign.Cohesion.Database.Documents.Language;
 
@@ -86,6 +87,23 @@ public sealed partial class OqlQueryParser
             return new OqlUnaryExpression("-", ParseExpression(6), Span(start, Previous));
         }
 
+        if (Take(TokenType.LeftBrace))
+        {
+            List<KeyValuePair<string, OqlExpression>> members = [];
+            if (Current.Type != TokenType.RightBrace)
+            {
+                do
+                {
+                    string name;
+                    if (Current.Type == TokenType.String) { name = Unquote(Current.Text); Advance(); }
+                    else { name = Identifier(allowKeyword: true); }
+                    Expect(TokenType.Colon, "':'");
+                    members.Add(new(name, ParseExpression()));
+                } while (!Failed && Take(TokenType.Comma));
+            }
+            Expect(TokenType.RightBrace, "'}'");
+            return new OqlObjectExpression(members.AsReadOnly(), Span(start, Previous));
+        }
         if (Take(TokenType.LeftParen))
         {
             var expression = ParseExpression();
@@ -134,12 +152,22 @@ public sealed partial class OqlQueryParser
         if (Current.Type is TokenType.Integer or TokenType.Float)
         {
             Advance();
-            if (!decimal.TryParse(start.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out decimal number))
+            // Keep every digit until the engine applies the storage numeric domain. Only
+            // adapt OQL's optional integer digits to JSON number syntax here.
+            int exponent = start.Text.IndexOfAny(['e', 'E']);
+            string significand = (exponent < 0 ? start.Text : start.Text[..exponent]).TrimStart('0');
+            if (significand.Length == 0 || significand[0] == '.') { significand = "0" + significand; }
+            string text = significand + (exponent < 0 ? string.Empty : start.Text[exponent..]);
+            try
             {
-                Error("OQL0004", "The numeric literal is invalid or outside the decimal range.", start);
+                using var json = JsonDocument.Parse(text);
+                return new OqlLiteralExpression(json.RootElement.Clone(), Span(start, start));
             }
-
-            return new OqlLiteralExpression(number, Span(start, start));
+            catch (JsonException)
+            {
+                Error("OQL0004", "The numeric literal is invalid.", start);
+                return new OqlLiteralExpression(null, Span(start, start));
+            }
         }
         if (Current.Type is TokenType.Identifier or TokenType.QuotedIdentifier or TokenType.Function)
         {
@@ -159,6 +187,11 @@ public sealed partial class OqlQueryParser
                 }
 
                 Expect(TokenType.RightParen, "')'");
+                if (function == "META")
+                {
+                    string? member = Take(TokenType.Dot) ? Identifier(allowKeyword: true) : null;
+                    return new OqlMetaExpression(arguments.AsReadOnly(), member, Span(start, Previous));
+                }
                 if (arguments.Count != 1 || function != "COUNT" && arguments[0] is OqlStarExpression)
                 {
                     Error("OQL0006", "Aggregates require one expression; only COUNT accepts '*'.", start);

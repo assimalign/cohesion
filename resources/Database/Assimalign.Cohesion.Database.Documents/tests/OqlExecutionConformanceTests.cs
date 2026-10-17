@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -27,10 +28,21 @@ public sealed class OqlExecutionConformanceTests
                      [1, 0, "Project", "items", null, null, null, null],
                      [2, 1, "CollectionScan", "items", null, null, null, null]]),
             ],
+            [OqlClauses.Insert] =
+            [
+                InsertCase(),
+                new("INSERT INTO items (KEY, VALUE) VALUES ('object', {'absent': MISSING, 'null_value': NULL})", [[true, true]],
+                    VerificationStatement: "SELECT absent IS MISSING AS absent_value, null_value IS NULL AS null_value FROM items WHERE META().id = 'object'",
+                    ExpectedAffectedCount: 1),
+            ],
+            [OqlClauses.Values] =
+            [
+                InsertCase(),
+            ],
             [OqlClauses.Select] =
             [
                 new("SELECT d.name AS label, d.details.score + @increment AS adjusted, d.tags[0] AS tag FROM items AS d WHERE d.name = 'alpha'",
-                    [["alpha", 3m, "blue"]]),
+                    [["alpha", 3m, "blue"]], Parameters: new Dictionary<string, object?> { ["increment"] = 2 }),
                 new("SELECT COUNT(*) AS total, COUNT(amount) AS present, SUM(amount) AS sum, AVG(amount) AS average, MIN(amount) AS minimum, MAX(amount) AS maximum FROM items",
                     [[4m, 3m, 12m, 4m, 2m, 6m]]),
                 new("SELECT COUNT(*) AS total, SUM(amount) AS sum, AVG(amount) AS average, MIN(amount) AS minimum, MAX(amount) AS maximum FROM items WHERE amount > 100",
@@ -44,7 +56,7 @@ public sealed class OqlExecutionConformanceTests
             [OqlClauses.Where] =
             [
                 new("SELECT name FROM items WHERE (amount >= @minimum AND amount < 6) OR amount IS NULL",
-                    [["gamma"], ["delta"]]),
+                    [["gamma"], ["delta"]], Parameters: new Dictionary<string, object?> { ["minimum"] = 3 }),
                 new("SELECT name FROM items WHERE details.score IS NULL AND NOT (amount IS NOT NULL)", []),
                 new("SELECT name FROM items WHERE details.score IS MISSING", [["delta"]]),
                 new("SELECT name FROM items WHERE amount IS MISSING", []),
@@ -128,14 +140,13 @@ public sealed class OqlExecutionConformanceTests
                 }
 
                 // Act: text takes the production parse, planner, transaction and executor path.
-                var parameters = new Dictionary<string, object?> { ["increment"] = 2, ["minimum"] = 3 };
-                var result = await session.ExecuteAsync(execution.Statement, parameters, cancellationToken);
+                var result = await session.ExecuteAsync(execution.Statement, execution.Parameters, cancellationToken);
 
                 // Assert: DDL must change catalog state; queries must return the exact values and order.
                 result.Status.ShouldBe(DatabaseResultStatus.Success, context);
                 if (execution.VerificationStatement is string verification)
                 {
-                    result.AffectedCount.ShouldBe(0L, context);
+                    result.AffectedCount.ShouldBe(execution.ExpectedAffectedCount, context);
                     result = await session.ExecuteAsync(verification, cancellationToken: cancellationToken);
                 }
                 await VerifyRowsAsync(result, execution.ExpectedRows, context, cancellationToken, execution.Missing);
@@ -181,11 +192,12 @@ public sealed class OqlExecutionConformanceTests
     private static readonly IReadOnlyDictionary<string, FunctionCase> _functionCases =
         new Dictionary<string, FunctionCase>(StringComparer.OrdinalIgnoreCase)
         {
-            ["COUNT"] = new("COUNT(*)", 4m),
-            ["SUM"] = new("SUM(amount)", 12m),
-            ["AVG"] = new("AVG(amount)", 4m),
-            ["MIN"] = new("MIN(amount)", 2m),
-            ["MAX"] = new("MAX(amount)", 6m),
+            ["META"] = new("META().id", [["a"], ["b"], ["c"], ["d"]]),
+            ["COUNT"] = new("COUNT(*)", [[4m]]),
+            ["SUM"] = new("SUM(amount)", [[12m]]),
+            ["AVG"] = new("AVG(amount)", [[4m]]),
+            ["MIN"] = new("MIN(amount)", [[2m]]),
+            ["MAX"] = new("MAX(amount)", [[6m]]),
         };
 
     [Fact(DisplayName = "Cohesion Test [Documents] - Functions: every declaration has live execution evidence")]
@@ -204,7 +216,7 @@ public sealed class OqlExecutionConformanceTests
         {
             var execution = _functionCases[name];
             var result = await session.ExecuteAsync($"SELECT {execution.Expression} FROM items", cancellationToken: CancellationToken.None);
-            await VerifyRowsAsync(result, [[execution.Expected]], name, CancellationToken.None);
+            await VerifyRowsAsync(result, execution.ExpectedRows, name, CancellationToken.None);
         }
     }
 
@@ -228,7 +240,7 @@ public sealed class OqlExecutionConformanceTests
         cases.Except(declarations, StringComparer.OrdinalIgnoreCase).ShouldBeEmpty();
     }
 
-    private sealed record FunctionCase(string Expression, object Expected);
+    private sealed record FunctionCase(string Expression, object?[][] ExpectedRows);
 
     private static void VerifyCoverage(QueryLanguageProfile profile)
     {
@@ -244,6 +256,8 @@ public sealed class OqlExecutionConformanceTests
     private static bool ContainsClause(OqlExpression expression, string clause) => clause switch
     {
         OqlClauses.Explain => expression is OqlExplainExpression,
+        OqlClauses.Insert => expression is OqlInsertExpression,
+        OqlClauses.Values => expression is OqlInsertExpression { Values.Count: > 0 },
         OqlClauses.Select => expression is OqlSelectExpression { Projections.Count: > 0 },
         OqlClauses.From => expression is OqlSelectExpression { Collection.Length: > 0 },
         OqlClauses.Where => expression is OqlSelectExpression { Predicate: not null },
@@ -296,5 +310,15 @@ public sealed class OqlExecutionConformanceTests
     }
 
     private sealed record ExecutionCase(string Statement, object?[][] ExpectedRows,
-        string[]? Setup = null, string? VerificationStatement = null, (int Row, int Column)[]? Missing = null);
+        string[]? Setup = null, string? VerificationStatement = null, (int Row, int Column)[]? Missing = null,
+        long ExpectedAffectedCount = 0, IReadOnlyDictionary<string, object?>? Parameters = null);
+
+    private static ExecutionCase InsertCase()
+    {
+        using var e = JsonDocument.Parse("""{"name":"epsilon","category":"z"}""");
+        using var f = JsonDocument.Parse("""{"name":"phi","category":"z"}""");
+        return new("INSERT INTO items (KEY, VALUE) VALUES ('e', $e), ('f', $f)", [["e", "epsilon"], ["f", "phi"]],
+            VerificationStatement: "SELECT META(d).id AS id, d.name AS name FROM items d WHERE d.category = 'z' ORDER BY id",
+            ExpectedAffectedCount: 2, Parameters: new Dictionary<string, object?> { ["e"] = e.RootElement.Clone(), ["f"] = f.RootElement.Clone() });
+    }
 }

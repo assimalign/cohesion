@@ -188,7 +188,7 @@ public sealed class GqlWhereExpressionTests
         foreach (var predicate in invalid)
         {
             var query = new GqlQueryExpression(
-                [new GqlPathPattern([new GqlNodePattern("a", [], new Dictionary<string, object?>())], [])],
+                [new GqlPathPattern([new GqlNodePattern("a", [], new Dictionary<string, GqlExpression>())], [])],
                 predicate, [], [], false, [new GqlProjection("a", "x")]);
             var error = await Should.ThrowAsync<DatabaseException>(async () =>
                 await session.ExecuteAsync(new GraphQueryRequest(new GqlQueryStatement(query)), CancellationToken.None));

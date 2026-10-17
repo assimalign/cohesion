@@ -38,6 +38,8 @@ internal sealed class DocumentOperation
         _transaction = transaction;
     }
 
+    internal DocumentDatabaseSession Session => _session;
+
     internal TransactionContext Context { get; private set; }
 
     internal async ValueTask InitializeAsync(CancellationToken cancellationToken)

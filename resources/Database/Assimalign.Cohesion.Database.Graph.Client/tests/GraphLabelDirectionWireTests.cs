@@ -133,9 +133,8 @@ public sealed class GraphLabelDirectionWireTests
     }
 
     /// <summary>
-    /// On a path query the same parse failure reaches the caller as GQL0008. Streaming failures
-    /// conservatively discard their lease (GraphPathWireTests), so a fresh rental serves the next
-    /// query; the server side stays ready, as GraphServerProtocolTests proves with Ping.
+    /// On a path query the same parse failure reaches the caller as GQL0008. The terminal
+    /// rejection precedes path output, so the same connection serves the next query.
     /// </summary>
     [Fact(DisplayName = "Cohesion Test [Graph.Client] - Cypher arrows: --> on QueryPathsAsync is a GQL0008 parse failure")]
     public async Task QueryPathsAsync_CypherArrow_ShouldFailAsGql0008()
@@ -158,8 +157,8 @@ public sealed class GraphLabelDirectionWireTests
         // Assert
         error.Code.ShouldBe(ProtocolErrorCode.ParseFailure);
         error.Message.ShouldContain("GQL0008", Case.Sensitive);
-        await using var fresh = await harness.Client.ConnectAsync(harness.Token);
-        (await fresh.QueryAsync("MATCH (a:Person)<-(b) RETURN b.name", cancellationToken: harness.Token))
+        connection.IsOpen.ShouldBeTrue();
+        (await connection.QueryAsync("MATCH (a:Person)<-(b) RETURN b.name", cancellationToken: harness.Token))
             .ShouldHaveSingleItem()[0].ShouldBe("Alice");
     }
 }

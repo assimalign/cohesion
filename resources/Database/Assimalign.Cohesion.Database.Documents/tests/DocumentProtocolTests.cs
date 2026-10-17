@@ -17,6 +17,51 @@ namespace Assimalign.Cohesion.Database.Documents.Tests;
 
 public sealed class DocumentProtocolTests
 {
+    [Fact(DisplayName = "Cohesion Test [Documents] - INSERT: completion counts writes and emits no Document frames")]
+    public async Task Execute_Insert_ShouldCompleteWithAffectedCountAndNoDocumentFramesAsync()
+    {
+        // Arrange
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var token = timeout.Token;
+        await using var listener = new InMemoryConnectionListener();
+        await using var engine = DocumentDatabaseEngine.Create("insert-wire", new());
+        var database = await engine.CreateDatabaseAsync("documents", token);
+        await using var setup = await database.CreateSessionAsync(token);
+        var collection = await setup.CreateCollectionAsync("items", token);
+        await using var server = DocumentDatabaseServer.Create(engine, new() { Listener = listener });
+        await server.StartAsync(token);
+        await using var peer = await listener.CreateFactory().ConnectAsync(listener.EndPoint, token);
+        await using var channel = new ProtocolChannel(peer.AsStream(), DocumentProtocol.Family, leaveOpen: true);
+        await WriteAsync(channel, ProtocolMessageType.Startup,
+            new ProtocolStartupMessage(ProtocolVersion.Current, "documents", "tester").Encode(), token);
+        (await ReadAsync(channel, token)).Type.ShouldBe(ProtocolMessageType.Authenticate);
+        await WriteAsync(channel, ProtocolMessageType.AuthenticateResponse, [], token);
+        (await ReadAsync(channel, token)).Type.ShouldBe(ProtocolMessageType.Ready);
+        // Act
+        await WriteAsync(channel, (ProtocolMessageType)DocumentProtocolMessageType.Execute,
+            DocumentProtocolExecuteMessage.Create("INSERT INTO items (KEY, VALUE) VALUES ('e', {'name':'epsilon'}), ('f', {'name':'phi'})").Encode(), token);
+        var frame = await ReadAsync(channel, token);
+        // Assert: Complete is the first and only frame for a successful write.
+        frame.Type.ShouldBe((ProtocolMessageType)DocumentProtocolMessageType.Complete);
+        var complete = DocumentProtocolCompleteMessage.Decode(frame.Payload.Span);
+        complete.ResultCount.ShouldBe(0);
+        complete.AffectedCount.ShouldBe(2);
+        (await collection.GetAsync(setup, "e", token)).ShouldNotBeNull();
+        (await collection.GetAsync(setup, "f", token)).ShouldNotBeNull();
+        await WriteAsync(channel, (ProtocolMessageType)DocumentProtocolMessageType.Execute,
+            DocumentProtocolExecuteMessage.Create("INSERT INTO items (KEY, VALUE) VALUES ('e', 1)").Encode(), token);
+        frame = await ReadAsync(channel, token);
+        frame.Type.ShouldBe((ProtocolMessageType)DocumentProtocolMessageType.Failure);
+        DocumentProtocolFailureMessage.Decode(frame.Payload.Span).Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
+        await WriteAsync(channel, (ProtocolMessageType)DocumentProtocolMessageType.Execute,
+            DocumentProtocolExecuteMessage.Create("INSERT INTO items (KEY, VALUE) VALUES ('g', NULL)").Encode(), token);
+        frame = await ReadAsync(channel, token);
+        frame.Type.ShouldBe((ProtocolMessageType)DocumentProtocolMessageType.Complete);
+        DocumentProtocolCompleteMessage.Decode(frame.Payload.Span).AffectedCount.ShouldBe(1);
+        await WriteAsync(channel, ProtocolMessageType.Terminate, [], token);
+        await server.StopAsync(token);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Documents] - Collection DDL: locked drops return ExecutionFailure and preserve the wire session")]
     [InlineData("DROP COLLECTION owned")]
     [InlineData("DROP COLLECTION IF EXISTS owned")]

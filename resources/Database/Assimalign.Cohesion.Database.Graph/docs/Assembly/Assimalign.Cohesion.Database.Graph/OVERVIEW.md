@@ -17,6 +17,10 @@
   yields distinct visited nodes, excluding the start.
 - `GraphQueryRequest.FromGql(text)` parses a request and throws `DatabaseParseException` for an
   error diagnostic. `GraphDatabaseSession.ExecuteAsync(string)` uses the same parser.
+- `GraphRequest.Parameters` supplies scalar bindings for `$name` and `@name` in property maps
+  and WHERE operands. Bare names match ordinally and case-sensitively after removing one sigil.
+  Missing bindings fail planning with `COHDBG001`, invalid values with `COHDBG003`, and
+  normalized-key collisions with `COHDBG014`. Runtime scalar types are preserved.
 - A read that names a label or relationship type the database does not have succeeds: the name
   matches nothing, and the result's `Diagnostics` carries a `COHDBG010` (label) or `COHDBG011`
   (relationship type) warning. The read does not abort an explicit transaction.

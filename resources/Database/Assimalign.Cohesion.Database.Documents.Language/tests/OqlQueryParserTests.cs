@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using System.Text.Json;
 using Assimalign.Cohesion.Database.Types;
 using Shouldly;
 using Xunit;
@@ -68,7 +69,7 @@ public sealed class OqlQueryParserTests
     [InlineData("SELECT * FROM people /* unfinished", "OQL0003")]
     [InlineData("SELECT * FROM people /* outer /* inner */", "OQL0003")]
     [InlineData("SELECT 1e FROM people", "OQL0004")]
-    [InlineData("SELECT 1e100 FROM people", "OQL0004")]
+    [InlineData("SELECT 1. FROM people", "OQL0002")]
     [InlineData("SELECT COUNT() FROM people", "OQL0006")]
     [InlineData("SELECT SUM(*) FROM people", "OQL0006")]
     [InlineData("SELECT MAX(a,b) FROM people", "OQL0006")]
@@ -178,7 +179,7 @@ public sealed class OqlQueryParserTests
         var call = select.Projections[1].Expression.ShouldBeOfType<OqlCallExpression>();
         call.Name.ShouldBe("COUNT");
         call.Arguments.ShouldHaveSingleItem().ShouldBeOfType<OqlStarExpression>();
-        select.Having.ShouldBeOfType<OqlBinaryExpression>().Right.ShouldBeOfType<OqlLiteralExpression>().Value.ShouldBe(2m);
+        select.Having.ShouldBeOfType<OqlBinaryExpression>().Right.ShouldBeOfType<OqlLiteralExpression>().Value.ShouldBeOfType<JsonElement>().GetDecimal().ShouldBe(2m);
     }
 
     [Fact]
@@ -197,7 +198,7 @@ public sealed class OqlQueryParserTests
         var expressions = ParseSelect("SELECT 'it''s', 1.25e2, TRUE, NULL FROM people").Projections;
 
         expressions[0].Expression.ShouldBeOfType<OqlLiteralExpression>().Value.ShouldBe("it's");
-        expressions[1].Expression.ShouldBeOfType<OqlLiteralExpression>().Value.ShouldBe(125m);
+        expressions[1].Expression.ShouldBeOfType<OqlLiteralExpression>().Value.ShouldBeOfType<JsonElement>().GetRawText().ShouldBe("1.25e2");
         expressions[2].Expression.ShouldBeOfType<OqlLiteralExpression>().Value.ShouldBe(true);
         expressions[3].Expression.ShouldBeOfType<OqlLiteralExpression>().Value.ShouldBeNull();
     }

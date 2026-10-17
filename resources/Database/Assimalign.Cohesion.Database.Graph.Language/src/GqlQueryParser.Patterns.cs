@@ -7,8 +7,8 @@ namespace Assimalign.Cohesion.Database.Graph.Language;
 
 public sealed partial class GqlQueryParser
 {
-    private static readonly IReadOnlyDictionary<string, object?> _noProperties =
-        new ReadOnlyDictionary<string, object?>(new Dictionary<string, object?>(StringComparer.Ordinal));
+    private static readonly IReadOnlyDictionary<string, GqlExpression> _noProperties =
+        new ReadOnlyDictionary<string, GqlExpression>(new Dictionary<string, GqlExpression>(StringComparer.Ordinal));
 
     private IReadOnlyList<GqlPathPattern> ParsePatterns(bool allowPathVariable = false)
     {
@@ -46,6 +46,7 @@ public sealed partial class GqlQueryParser
         if (Failed) { return new GqlNodePattern(null, [], _noProperties); }
         string? variable = Current.Type is TokenType.Identifier or TokenType.QuotedIdentifier ? Identifier() : null;
         var labels = ParseLabelSpecification(node: true);
+        if (!Failed && (variable is not null || labels is not null) && Current.Type == TokenType.Parameter) { RejectUnsupportedParameter("WHOLE-MAP PARAMETER"); }
         var properties = ParseProperties();
         Expect(TokenType.RightParen, "')'");
         RejectLineCommentAfterElement();
@@ -78,6 +79,7 @@ public sealed partial class GqlQueryParser
         Advance(); // '['
         string? variable = Current.Type is TokenType.Identifier or TokenType.QuotedIdentifier ? Identifier() : null;
         var labels = ParseLabelSpecification(node: false);
+        if (!Failed && (variable is not null || labels is not null) && Current.Type == TokenType.Parameter) { RejectUnsupportedParameter("WHOLE-MAP PARAMETER"); }
         var properties = ParseProperties();
         Expect(TokenType.RightBracket, "']'");
         RejectLineCommentAfterElement();
@@ -121,9 +123,9 @@ public sealed partial class GqlQueryParser
             "or put a space before the comment.", comment with { Text = "--", End = comment.Start + 2 });
     }
 
-    private IReadOnlyDictionary<string, object?> ParseProperties()
+    private IReadOnlyDictionary<string, GqlExpression> ParseProperties()
     {
-        Dictionary<string, object?> properties = new(StringComparer.Ordinal);
+        Dictionary<string, GqlExpression> properties = new(StringComparer.Ordinal);
         if (Take(TokenType.LeftBrace))
         {
             if (Current.Type != TokenType.RightBrace)
@@ -134,13 +136,13 @@ public sealed partial class GqlQueryParser
                     string name = Identifier(allowKeyword: true);
                     Expect(TokenType.Colon, "':'");
                     if (Failed) { break; }
-                    var value = ParseLiteral();
-                    if (!properties.TryAdd(name, value.Value)) { Error("GQL0006", $"Duplicate property '{name}'.", start); }
+                    var value = ParseScalar();
+                    if (!properties.TryAdd(name, value)) { Error("GQL0006", $"Duplicate property '{name}'.", start); }
                 } while (!Failed && Take(TokenType.Comma));
             }
             Expect(TokenType.RightBrace, "'}'");
         }
-        return new ReadOnlyDictionary<string, object?>(properties);
+        return new ReadOnlyDictionary<string, GqlExpression>(properties);
     }
 }
 

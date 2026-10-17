@@ -75,7 +75,9 @@ sequenceDiagram
 ```
 
 `DocumentResultSet` exposes ordinal/name-indexed rows, columns and `AffectedCount`. Queries use
-`-1`; collection and index DDL use zero. `CREATE COLLECTION [IF NOT EXISTS]` and
+`-1`; collection and index DDL use zero. INSERT uses the inserted-document count and emits
+no Document frames. Duplicate keys preserve COHDOC012 as ExecutionFailure and the next
+statement can reuse the session. The advertised-clause suite covers VALUES, SELECT and META. `CREATE COLLECTION [IF NOT EXISTS]` and
 `DROP COLLECTION [IF EXISTS]` use the existing Execute exchange and retain collection ownership
 and conditional no-op semantics. A schema-owned drop returns ExecutionFailure (6), and the
 connection remains usable. `IsDocumentQuery` distinguishes `SELECT *` even for an empty result.
@@ -122,6 +124,11 @@ Collection refusals preserve `COHDOC002` (missing DROP), `COHDOC010` (duplicate 
 `COHDOC011` (schema-owned DROP) through both OQL and Command exchanges. Their OQL diagnostics
 carry the statement span; command diagnostics have no source location. All are ExecutionFailure
 and preserve the session, including conditional schema-owned drops.
+
+INSERT rejects numeric literals and JsonElement parameters outside the exact decimal domain
+with COHDOC007 before normalization, including underflow and excess fractional precision.
+VALUES and computed SELECT inputs preserve the collection on failure over both InMemory and
+TCP; the diagnostic span and the reusable session survive the wire unchanged.
 
 `DocumentClientException` is a sealed `DatabaseException` leaf, like Graph's model exception.
 It uses the inherited diagnostic carrier, so callers catching the area root see the same diagnostics.
@@ -172,8 +179,8 @@ analysis and execution of the published binary are gates; IL2xxx/IL3xxx warnings
 
 Documents.Client is inventoried and built in the Database workflow, but remains NuGet-only like
 Graph.Client. Documents.Security remains deferred. Transactions, remote database administration,
-replication and model-specific security policies are outside this wire slice. Later OQL writes
-can return their affected count through the existing completion field. Wire negotiation remains
+replication and model-specific security policies are outside this wire slice. OQL INSERT
+returns its affected count through the existing completion field. Wire negotiation remains
 the shared protocol's responsibility, with no model-specific version exchange. The startup major
 is now 2.1, retaining the incompatible 2.0 projection contract; old-major peers receive the existing coded
 startup refusal and close before authentication. #1105 (protocol 1.1 capability negotiation,
@@ -184,7 +191,7 @@ wave 4) supersedes per-feature version bumps when implemented.
 - JSON preserves whole documents and nested values; projected rows use a header plus Document (65)
   objects. MISSING omits a member; explicit NULL emits `"x":null`. Graph's typed scalar/path
   encodings do not represent this contract.
-- Commands add CRUD, versions and collection names because OQL has no document-write syntax yet.
+- Commands add CRUD, expected versions and collection names alongside OQL INSERT.
 - A dedicated terminal Failure carries diagnostics and gives the pool explicit reuse evidence.
   Bounded failure text/cardinality keeps error responses below the frame limit.
 - The typed exception uses the root diagnostic carrier and owns its protocol code, like Graph;

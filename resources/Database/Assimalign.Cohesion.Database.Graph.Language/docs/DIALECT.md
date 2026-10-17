@@ -4,6 +4,20 @@ The target is ISO/IEC 39075:2024 with the subset and extensions recorded in [DES
 The supported-clause matrix there is authoritative; RETURN still projects bound variables
 and properties only.
 
+## Named scalar parameters
+
+Node/relationship property maps in MATCH, INSERT and CREATE, and WHERE scalar operands accept
+`$name` and `@name`. `$name` is the ISO/Cypher spelling; `@name` is a Cohesion extension.
+Names bind by their exact, case-sensitive bare name; one leading sigil on a map key is ignored.
+`$1` binds key `"1"`, never a positional slot. Supplied NULL is bound; unused values are ignored.
+Normalized-key collisions fail with COHDBG014, missing bindings with COHDBG001, and unsupported
+or non-finite values with COHDBG003, all while planning. EXPLAIN applies the same checks.
+Runtime scalar types are preserved (including Int32 and Decimal); schema type matching uses the
+typed graph API's promotion. List/map values remain unsupported. See
+[DESIGN.md](DESIGN.md#named-scalar-parameters-1102-1138) for the complete contract and hand-offs.
+`$$name`, `(n $props)` and `RETURN $p` remain COHDBL001; bare sigils and parameters in
+identifier/DELETE positions are GQL0002. #1102's `?` and `:name` diagnostics are unchanged.
+
 ## WHERE expressions
 
 WHERE accepts AND, OR, XOR, NOT, comparisons, bare Boolean properties, IS [NOT]
