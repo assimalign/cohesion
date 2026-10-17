@@ -53,7 +53,7 @@ internal sealed class SqlQueryExecutor
 
         var parameters = NormalizeParameters(request.Parameters);
         _definitions.EnsureDefinitions(cancellationToken);
-        var planner = new SqlPlanner(_catalog, parameters, _definitions.Functions, cancellationToken);
+        var planner = new SqlPlanner(_catalog, parameters, _definitions.Functions, cancellationToken, statement);
         SqlPlan plan;
         try
         {

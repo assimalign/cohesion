@@ -13,6 +13,8 @@ public class SqlExecutionSurfaceDiagnosticTests
     [InlineData("SELECT * FROM t JOIN u ON t.id = u.id;")]
     [InlineData("SELECT * FROM t INNER JOIN u ON t.id = u.id;")]
     [InlineData("select * from t inner /* trivia */ join u on t.id = u.id;")]
+    [InlineData("SELECT * FROM INFORMATION_SCHEMA.TABLES t JOIN u ON t.TABLE_NAME = u.name;")]
+    [InlineData("SELECT * FROM t JOIN COHESION_SCHEMA.INDEXES i ON t.name = i.TABLE_NAME;")]
     public void Parse_InnerJoin_ReportsNoError(string sql)
     {
         SqlLanguageProfile.Instance.Supports(SqlClauses.Join).ShouldBeTrue();
@@ -47,8 +49,6 @@ public class SqlExecutionSurfaceDiagnosticTests
     [InlineData("SELECT * FROM t, u;", "Comma-separated")]
     [InlineData("SELECT t.* FROM t JOIN u ON t.id = u.id;", "Qualified SQL wildcard")]
     [InlineData("SELECT dbo.t.* FROM dbo.t JOIN dbo.u ON dbo.t.id = dbo.u.id;", "Qualified SQL wildcard")]
-    [InlineData("SELECT * FROM INFORMATION_SCHEMA.TABLES t JOIN u ON t.TABLE_NAME = u.name;", "stored tables only")]
-    [InlineData("SELECT * FROM t JOIN COHESION_SCHEMA.INDEXES i ON t.name = i.TABLE_NAME;", "stored tables only")]
     public void Parse_UnsupportedJoinShape_ReportsPreciseModelDiagnostic(string sql, string message)
     {
         var statement = (SqlQueryStatement)new SqlQueryParser().Parse(sql);

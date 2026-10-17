@@ -410,7 +410,13 @@ public sealed class SqlLanguageConformanceTests
             [.. _seed, "CREATE TABLE profiles (user_id INT REFERENCES t(id), email TEXT);",
                 "INSERT INTO profiles VALUES (1, 'ada@example.test'), (3, 'alan@example.test');"],
             expression => expression is SqlSelectExpression { Joins.Count: 1 } select && select.Joins[0].JoinType == SqlJoinType.Inner,
-            async (_, result) => CheckRows(await ReadRowsAsync(result), [["Ada", "ada@example.test"], ["Alan", "alan@example.test"]])),
+            async (session, result) =>
+            {
+                CheckRows(await ReadRowsAsync(result), [["Ada", "ada@example.test"], ["Alan", "alan@example.test"]]);
+                await ExpectRowsAsync(session, "SELECT c.COLUMN_NAME FROM INFORMATION_SCHEMA.TABLES t " +
+                    "JOIN INFORMATION_SCHEMA.COLUMNS c ON t.TABLE_NAME = c.TABLE_NAME WHERE t.TABLE_NAME = 'profiles' ORDER BY c.ORDINAL_POSITION;",
+                    [["user_id"], ["email"]]);
+            }),
         [SqlClauses.Where] = Query("SELECT id FROM t WHERE age > 40 AND name LIKE 'G%' ORDER BY id;", expression => expression is SqlSelectExpression { Where: not null },
             [[2]]),
         [SqlClauses.Collate] = Query("SELECT id FROM t WHERE name = 'ada' COLLATE case_insensitive;",

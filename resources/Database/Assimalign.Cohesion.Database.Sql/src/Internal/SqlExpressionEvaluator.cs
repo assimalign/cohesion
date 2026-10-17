@@ -50,7 +50,9 @@ internal sealed partial class SqlExpressionEvaluator
     private readonly IReadOnlyList<SqlCatalogColumn> _columns;
     private readonly SqlBindingContext _bindingContext;
     private readonly IReadOnlyDictionary<string, object?>? _parameters;
-    private readonly IReadOnlyList<SqlTableBinding>? _bindings;
+    // Either the original single-relation reference or the join bindings. Reuse one
+    // reference slot so ordinary queries allocate neither a wrapper nor a larger evaluator.
+    private readonly object? _relations;
     private readonly IReadOnlyDictionary<SqlExpression, int>? _valueOrdinals;
     private readonly Collation _defaultCollation;
     private readonly IReadOnlyDictionary<SqlExpression, SqlProjection>? _projectionSources;
@@ -85,7 +87,7 @@ internal sealed partial class SqlExpressionEvaluator
     private SqlTypingMemory? _typing;
 
     internal SqlExpressionEvaluator(IReadOnlyList<SqlCatalogColumn> columns, IReadOnlyDictionary<string, object?>? parameters,
-        IReadOnlyList<SqlTableBinding>? bindings = null,
+        IReadOnlyList<SqlRelationBinding>? bindings = null,
         IReadOnlyDictionary<SqlExpression, int>? valueOrdinals = null,
         Collation? defaultCollation = null,
         IReadOnlyDictionary<SqlExpression, SqlProjection>? projectionSources = null,
@@ -95,12 +97,13 @@ internal sealed partial class SqlExpressionEvaluator
         CancellationToken cancellationToken = default,
         SqlExpressionEvaluator? slotScope = null,
         SqlBindingContext bindingContext = SqlBindingContext.Table,
-        bool[]? sharedColumns = null)
+        bool[]? sharedColumns = null,
+        SqlTableReference? relation = null)
     {
         _columns = columns;
         _bindingContext = bindingContext;
         _parameters = parameters;
-        _bindings = bindings;
+        _relations = (object?)bindings ?? relation;
         _valueOrdinals = valueOrdinals;
         _defaultCollation = defaultCollation ?? Collation.Binary;
         _projectionSources = projectionSources;
@@ -165,8 +168,9 @@ internal sealed partial class SqlExpressionEvaluator
             ordinals[expression] = projectionStart + index;
             sources[expression] = projections[index];
         }
-        return new SqlExpressionEvaluator(_columns, _parameters, _bindings, ordinals,
-            _defaultCollation, sources, _subquerySlots, _subqueryValues, _functions, _cancellationToken, _typing?.SlotScope, _bindingContext);
+        return new SqlExpressionEvaluator(_columns, _parameters, _relations as IReadOnlyList<SqlRelationBinding>, ordinals,
+            _defaultCollation, sources, _subquerySlots, _subqueryValues, _functions, _cancellationToken, _typing?.SlotScope, _bindingContext,
+            relation: _relations as SqlTableReference);
     }
 
     /// <summary>
@@ -302,19 +306,19 @@ internal sealed partial class SqlExpressionEvaluator
 
     internal int ResolveColumn(SqlColumnReferenceExpression column)
     {
-        if (_bindings is not null)
+        if (_relations is IReadOnlyList<SqlRelationBinding> bindings)
         {
             int resolved = -1;
-            foreach (var binding in _bindings)
+            foreach (var binding in bindings)
             {
                 if (!MatchesQualifier(binding, column))
                 {
                     continue;
                 }
 
-                for (int i = 0; i < binding.Table.Columns.Count; i++)
+                for (int i = 0; i < binding.Source.Columns.Count; i++)
                 {
-                    if (!string.Equals(binding.Table.Columns[i].Name, column.ColumnName, StringComparison.OrdinalIgnoreCase))
+                    if (!string.Equals(binding.Source.Columns[i].Name, column.ColumnName, StringComparison.OrdinalIgnoreCase))
                     {
                         continue;
                     }
@@ -331,6 +335,11 @@ internal sealed partial class SqlExpressionEvaluator
             return resolved >= 0 ? resolved : throw new SqlPlanningException("COHSQLE015", $"Unknown column '{ColumnName(column)}'.", column.Location);
         }
 
+        if (_relations is SqlTableReference reference && !MatchesQualifier(reference, column))
+        {
+            throw new SqlPlanningException("COHSQLE015", $"Unknown column '{ColumnName(column)}'.", column.Location);
+        }
+
         for (int i = 0; i < _columns.Count; i++)
         {
             if (string.Equals(_columns[i].Name, column.ColumnName, StringComparison.OrdinalIgnoreCase))
@@ -339,7 +348,7 @@ internal sealed partial class SqlExpressionEvaluator
             }
         }
 
-        throw new SqlPlanningException("COHSQLE015", $"Unknown column '{column.ColumnName}'.", column.Location);
+        throw new SqlPlanningException("COHSQLE015", $"Unknown column '{ColumnName(column)}'.", column.Location);
     }
 
     /// <summary>
@@ -517,21 +526,24 @@ internal sealed partial class SqlExpressionEvaluator
     private static bool IsDeferrable(Exception exception)
         => exception is not (OperationCanceledException or InsufficientExecutionStackException or OutOfMemoryException);
 
-    /// <summary>An alias replaces the base relation name within the join scope.</summary>
-    private static bool MatchesQualifier(SqlTableBinding binding, SqlColumnReferenceExpression column)
+    /// <summary>An alias hides the base name in every statement (PostgreSQL parse_relation.c:3759).</summary>
+    private static bool MatchesQualifier(SqlRelationBinding binding, SqlColumnReferenceExpression column)
+        => MatchesQualifier(binding.Reference, column);
+
+    private static bool MatchesQualifier(SqlTableReference reference, SqlColumnReferenceExpression column)
     {
         if (column.TableAlias is null)
         {
             return column.SchemaName is null;
         }
 
-        if (binding.Reference.Alias is { } alias)
+        if (reference.Alias is { } alias)
         {
             return column.SchemaName is null && string.Equals(alias, column.TableAlias, StringComparison.OrdinalIgnoreCase);
         }
 
-        return string.Equals(binding.Table.Name, column.TableAlias, StringComparison.OrdinalIgnoreCase)
-            && (column.SchemaName is null || string.Equals(binding.Table.Schema, column.SchemaName, StringComparison.OrdinalIgnoreCase));
+        return string.Equals(reference.TableName, column.TableAlias, StringComparison.OrdinalIgnoreCase)
+            && (column.SchemaName is null || string.Equals(reference.SchemaName ?? SqlPlanner.DefaultSchema, column.SchemaName, StringComparison.OrdinalIgnoreCase));
     }
 
     private static string ColumnName(SqlColumnReferenceExpression column)

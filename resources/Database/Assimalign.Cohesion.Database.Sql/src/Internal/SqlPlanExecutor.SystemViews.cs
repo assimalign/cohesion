@@ -20,12 +20,7 @@ internal sealed partial class SqlPlanExecutor
         var matches = new List<object?[]>();
         statement.Metrics.AccessPath = "system-view";
 
-        // Native registrations are frozen; SQL definitions use the statement/transaction catalog snapshot.
-        var rows = plan.View.Name == SqlSystemViews.FunctionsView
-            ? EnumerateFunctionRows(_definitions.Functions.Catalog, statement.CatalogSnapshot)
-            : plan.View.Schema == "COHESION_SCHEMA" && plan.View.Name is "TYPES" or "DOMAINS"
-                ? EnumerateTypeRows(plan.View.Name == "DOMAINS", statement.CatalogSnapshot)
-                : EnumerateSystemViewRows(plan.View, statement, cancellationToken);
+        var rows = ReadSystemRelation(plan.View, statement, cancellationToken);
         foreach (var values in rows)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -56,16 +51,25 @@ internal sealed partial class SqlPlanExecutor
         return new SqlMaterializedResultSet(columns, ApplyRowWindow(projected, plan.Limit, plan.Offset));
     }
 
+    private IEnumerable<object?[]> ReadSystemRelation(
+        SqlSystemViewDefinition view, SqlStatementContext statement, CancellationToken cancellationToken)
+    {
+        var snapshot = statement.RequireCatalogSnapshot();
+        return view.Schema == "COHESION_SCHEMA" ? view.Name switch
+        {
+            SqlSystemViews.FunctionsView => EnumerateFunctionRows(_definitions.Functions.Catalog, snapshot),
+            "TYPES" => EnumerateTypeRows(false, snapshot),
+            "DOMAINS" => EnumerateTypeRows(true, snapshot),
+            _ => EnumerateSystemViewRows(view, statement, cancellationToken),
+        } : EnumerateSystemViewRows(view, statement, cancellationToken);
+    }
+
     private static IEnumerable<object?[]> EnumerateSystemViewRows(
         SqlSystemViewDefinition view, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         // Tables, columns, constraints, and indexes all come from the same
         // immutable catalog snapshot as the statement, including FK targets.
-        var catalog = statement.CatalogSnapshot;
-        if (catalog is null)
-        {
-            yield break;
-        }
+        var catalog = statement.RequireCatalogSnapshot();
         string database = statement.DatabaseName;
         foreach (var table in catalog.Tables)
         {
@@ -191,7 +195,7 @@ internal sealed partial class SqlPlanExecutor
         }
     }
 
-    private IEnumerable<object?[]> EnumerateTypeRows(bool domainsOnly, SqlCatalogSnapshot? snapshot)
+    private IEnumerable<object?[]> EnumerateTypeRows(bool domainsOnly, SqlCatalogSnapshot snapshot)
     {
         foreach (var type in _definitions.Functions.Types)
         {
@@ -202,14 +206,14 @@ internal sealed partial class SqlPlanExecutor
             }
             else { yield return [type.Name, type.BaseType?.Name ?? type.Name, type.IsDomain ? "YES" : "NO", "NO"]; }
         }
-        foreach (var domain in snapshot?.Domains ?? [])
+        foreach (var domain in snapshot.Domains)
         {
             yield return domainsOnly ? [domain.Name, domain.BaseType, "YES"] : [domain.Name, domain.BaseType, "YES", "YES"];
         }
     }
 
     /// <summary>Frozen native overloads, persisted SQL overloads from the catalog snapshot, and special forms.</summary>
-    private static IEnumerable<object?[]> EnumerateFunctionRows(SqlFunctionCatalog catalog, SqlCatalogSnapshot? snapshot)
+    private static IEnumerable<object?[]> EnumerateFunctionRows(SqlFunctionCatalog catalog, SqlCatalogSnapshot snapshot)
     {
         foreach (var function in catalog)
         {
@@ -250,7 +254,7 @@ internal sealed partial class SqlPlanExecutor
             ];
         }
 
-        foreach (var function in snapshot?.Functions ?? [])
+        foreach (var function in snapshot.Functions)
         {
             yield return [function.Name, "SCALAR", string.Join(", ", function.ParameterTypes),
                 (long)function.ParameterTypes.Count, function.ReturnType, function.Volatility,

@@ -1,7 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -405,7 +403,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
                     // snapshot must see writers that committed while the statement waited for a lock
                     // (a cascade's index deletes did, until #1370 matched them by stamps).
                     var scope = new SqlStatementContext(transaction.Context, _coordinator, _provisioningSchema,
-                        _database.Name.ToString(), transaction.CatalogSnapshot ?? CaptureSystemViewSnapshot(request));
+                        _database.Name.ToString(), transaction.CatalogSnapshot);
                     _lastStatementMetrics = scope.Metrics;
                     return await ExecuteDataOrExplainAsync(request, scope, cancellationToken).ConfigureAwait(false);
                 }
@@ -447,7 +445,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         try
         {
             var scope = new SqlStatementContext(context, _coordinator, _provisioningSchema,
-                _database.Name.ToString(), CaptureSystemViewSnapshot(request), _ddlLockOwner, ProvisioningProgress, scriptReceipt);
+                _database.Name.ToString(), null, _ddlLockOwner, ProvisioningProgress, scriptReceipt);
             _lastStatementMetrics = scope.Metrics;
             var result = await ExecuteDataOrExplainAsync(request, scope, cancellationToken).ConfigureAwait(false);
             if (scriptReceipt is { } receipt && !IsSelfCommitting(request) && result.Status == DatabaseResultStatus.Success)
@@ -490,7 +488,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         SqlSystemViews.EnsureReadOnly(explain.Statement);
         var parameters = SqlQueryExecutor.NormalizeParameters(request.Parameters);
         _database.Definitions.EnsureDefinitions(cancellationToken);
-        var planner = new SqlPlanner(_database.Catalog, parameters, _database.Definitions.Functions, cancellationToken);
+        var planner = new SqlPlanner(_database.Catalog, parameters, _database.Definitions.Functions, cancellationToken, scope);
         try
         {
             var plan = planner.Plan(explain.Statement);
@@ -628,43 +626,4 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
     private static DatabaseResult TransactionDiagnostic(string code, string message)
         => new SqlQueryResult(DatabaseResultStatus.Error, affectedCount: 0,
             [new Diagnostic { Code = code, Message = message, Severity = DiagnosticSeverity.Error }]);
-
-    // Ordinary DML does not enumerate the catalog just to construct a context.
-    // Explicit Snapshot transactions capture at BEGIN even if their first metadata
-    // SELECT comes later; read committed and auto-commit capture at statement start.
-    private SqlCatalogSnapshot? CaptureSystemViewSnapshot(SqlQueryRequest request)
-        => UsesSystemView(request.Statement.SqlExpression)
-            ? _executor.CaptureCatalogSnapshot() : null;
-
-    /// <summary>Captures metadata once for nested SELECTs and INSERT sources as well as the outer relation.</summary>
-    private static bool UsesSystemView(SqlQueryExpression query)
-    {
-        RuntimeHelpers.EnsureSufficientExecutionStack();
-        if (query is SqlInsertExpression { SelectSource: not null } insert)
-        {
-            return UsesSystemView(insert.SelectSource);
-        }
-        if (query is not SqlSelectExpression select)
-        {
-            return false;
-        }
-        return select.From is not null && SqlSystemViews.Find(select.From) is not null
-            || select.Columns.Any(column => UsesSystemViewExpression(column.Expression))
-            || select.Joins.Any(join => UsesSystemViewExpression(join.Condition))
-            || UsesSystemViewExpression(select.Where) || select.GroupBy.Any(UsesSystemViewExpression)
-            || UsesSystemViewExpression(select.Having) || select.OrderBy.Any(order => UsesSystemViewExpression(order.Expression));
-    }
-
-    private static bool UsesSystemViewExpression(SqlExpression? expression)
-    {
-        RuntimeHelpers.EnsureSufficientExecutionStack();
-        return expression switch
-        {
-            null => false,
-            SqlSubqueryExpression scalar => UsesSystemView(scalar.Select),
-            SqlExistsExpression exists => UsesSystemView(exists.Subquery),
-            SqlInExpression { Subquery: not null } member => UsesSystemView(member.Subquery) || UsesSystemViewExpression(member.Operand),
-            _ => SqlPlanner.Children(expression).Any(UsesSystemViewExpression),
-        };
-    }
 }

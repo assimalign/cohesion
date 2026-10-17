@@ -43,7 +43,7 @@ internal sealed partial class SqlPlanner
         var (projections, columns, bindings) = plan switch
         {
             SqlSubqueryPlan subquery => (InsertSourceProjections(subquery.Input),
-                (IReadOnlyList<SqlCatalogColumn>?)null, (IReadOnlyList<SqlTableBinding>?)null),
+                (IReadOnlyList<SqlCatalogColumn>?)null, (IReadOnlyList<SqlRelationBinding>?)null),
             SqlSelectPlan select => (select.Projections, select.Table.Columns, null),
             SqlJoinPlan join => (join.Projections, join.Columns, join.Bindings),
             SqlSystemViewPlan view => (view.Projections, view.View.Columns, null),

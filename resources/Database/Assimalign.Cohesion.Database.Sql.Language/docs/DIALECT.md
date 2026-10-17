@@ -18,7 +18,8 @@ The earlier 32/48 figure included `JOIN`, `GROUP BY`, `HAVING`, and `SUBQUERY`,
 removed in Phase 12e (#1019–#1021), plus a no-op `CAST` removed in Phase 13.
 Phase 14 restores `CAST` with actual conversion, type metadata, and wire execution
 coverage (#1022). Phase 15 restores `JOIN` for two stored-table inner joins with
-an `ON` predicate, including server/client execution (#1019). Phase 16 restores
+an `ON` predicate, including server/client execution (#1019); #1106 extends the same
+clause to registered system relations. Phase 16 restores
 `GROUP BY` and `HAVING`, including aggregation over the supported inner join
 and server/client execution (#1020). Phase 17 adds executable column and expression
 `COLLATE`, including persisted defaults, collation-aware index seeks, grouping,
@@ -40,11 +41,11 @@ complete ISO SQL support; the boundaries below are part of the contract.
 
 | Statement | Status | Notes |
 |---|---|---|
-| `SELECT` | Supported subset, measured | One stored table or virtual system relation, or a two stored-table `INNER JOIN ... ON`; `DISTINCT`, projections and aliases, scalar expressions, `WHERE`, grouping, multi-expression `ORDER BY ASC/DESC`, nonnegative integer `LIMIT`/`OFFSET`. `COUNT(*)`, `COUNT(expr)`, `SUM`, `AVG`, `MIN`, and `MAX` execute in grouped and ungrouped queries. See the aggregate contract below. `SELECT` without `FROM` is rejected by the planner. |
+| `SELECT` | Supported subset, measured | One stored table or virtual system relation, or a two-relation `INNER JOIN ... ON` over either source kind; `DISTINCT`, projections and aliases, scalar expressions, `WHERE`, grouping, multi-expression `ORDER BY ASC/DESC`, nonnegative integer `LIMIT`/`OFFSET`. `COUNT(*)`, `COUNT(expr)`, `SUM`, `AVG`, `MIN`, and `MAX` execute in grouped and ungrouped queries. See the aggregate contract below. `SELECT` without `FROM` is rejected by the planner. |
 | `EXPLAIN` | Supported extension, measured | SELECT, INSERT (including query sources), UPDATE or DELETE returns the chosen plan as ordinary rows without executing it. DDL, transaction control, nested EXPLAIN and EXPLAIN ANALYZE report `COHDBL001`. |
 | `INSERT` / `VALUES` | Supported subset, measured | Optional column list, multi-row literal/scalar `VALUES` including whole-item `DEFAULT`, `INSERT ... DEFAULT VALUES` (one row of defaults, with an optional column list), and transactional `INSERT ... SELECT` with the same destination coercion, defaults, and constraints. `VALUES` expressions have no columns in scope: a column reference reports `COHSQLE005` before anything executes (see [VALUES and counts have no column scope](#values-and-counts-have-no-column-scope-1165)). Subqueries inside `VALUES` are excluded; use `INSERT ... SELECT`. |
-| `UPDATE` | Supported | multi-column `SET`, including `c = DEFAULT`, and `WHERE`; no aggregate in either (see [Grouping and aggregate functions](#grouping-and-aggregate-functions-1020)) |
-| `DELETE` | Supported | optional `WHERE`, without an aggregate |
+| `UPDATE` | Supported | multi-column `SET`, including `c = DEFAULT`, and `WHERE`; qualified references in both use the target name or its alias, which hides the base name (PostgreSQL `parse_relation.c:3759`); hidden/unknown qualifiers fail with located `COHSQLE015` before any write and leave an explicit transaction active; no aggregate in either (see [Grouping and aggregate functions](#grouping-and-aggregate-functions-1020)) |
+| `DELETE` | Supported | optional `WHERE`, without an aggregate; qualified references use the target name or its alias, which hides the base name (PostgreSQL `parse_relation.c:3759`); hidden/unknown qualifiers fail with located `COHSQLE015` before any write and leave an explicit transaction active |
 | `CREATE TABLE` | Supported | `IF NOT EXISTS`, column definitions with parameterized types, `COLLATE <name>`, `NOT NULL`/`NULL`, `DEFAULT <literal>`, column and table `PRIMARY KEY`, `REFERENCES`/`FOREIGN KEY`, `CHECK`, and `UNIQUE`; optional `CONSTRAINT <name>` |
 | `ALTER TABLE` | Supported subset, measured | ADD/DROP COLUMN and ADD/DROP CONSTRAINT execute. Full-definition `ALTER COLUMN c TYPE [NULL | NOT NULL] [DEFAULT literal]` accepts nullability, length and precision changes that preserve storage type, scale, collation, domain and DEFAULT; tightening and every CHAR length change check existing live values and refuse changes requiring a rewrite. PostgreSQL `TYPE ... USING`, `SET` and `DROP` variants remain unsupported (49a). ADD COLUMN literal defaults backfill old-row reads and apply to subsequent inserts that omit the column; explicit NULL follows nullability. Nullable additions without a default read NULL. NOT NULL additions to populated tables require a non-null default. Invalid defaults and nonliteral expressions reject before mutation. Column COLLATE persists and governs default comparisons. See the default, atomicity and MVCC contract below (#1023). DROP COLUMN changes only the catalog: it rewrites no row, survives a crash at any point on one definition, and SELECTs running beside it read every value in its own column; see the DROP COLUMN contract below (#1241). |
 | `DROP TABLE` | Supported | `IF EXISTS`; returns after catalog unpublication, with page reclamation asynchronous after older readers finish; the name may be recreated immediately |
@@ -54,7 +55,7 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `ORDER BY` | Supported subset, measured | Multiple source-column/scalar-expression keys, projection aliases (bare or nested in expressions), and one-based select-list ordinals execute with ASC/DESC. Unqualified aliases take precedence over same-named source columns; qualified references bind to the source. Composes with DISTINCT, LIMIT/OFFSET, supported joins, grouped/aggregate queries, and system relations. Zero, negative, out-of-range, and non-integer numeric ordinals error; `1 + 1` remains a constant expression. Explicit NULLS FIRST/LAST, derived-table output ordering, and GROUP BY ordinals report `COHDBL001`. See the ordering contract below (#1024). |
 | `CAST` | Supported subset, measured | Exact signed integer, decimal, boolean, and string conversions, text to the date, time, UUID and binary floating-point types, and an application's casts, to and from its domains and between built-in types the engine does not convert (E3's cast registry), in projections, predicates, ordering, and DML expressions, including the SQL server/client. See the exact pair and error contract below. CAST in DEFAULT or CHECK remains rejected. |
 | `COLLATE` | Supported subset, measured | Column and expression overrides: `binary`, `case_insensitive`, `case_accent_insensitive`, plus compatibility `invariant` with scan execution only. Effective collation governs comparisons, `LIKE`, ordering, grouping, `DISTINCT`, and unique keys. See the collation contract below. |
-| `JOIN` | Supported subset, measured | Two stored-table `INNER JOIN ... ON` or bare `JOIN ... ON`, with index assistance where the mandatory equality predicate matches an applicable secondary-index prefix. `LEFT [OUTER]`, `RIGHT [OUTER]`, `FULL [OUTER]`, `CROSS`, additional joins beyond two tables, joins without `ON`, comma joins, and joins of virtual system relations report `COHDBL001`. See the precise contract below. |
+| `JOIN` | Supported subset, measured | Two-relation `INNER JOIN ... ON` over stored tables and/or system relations or bare `JOIN ... ON`, with index assistance where the mandatory equality predicate matches an applicable secondary-index prefix. `LEFT [OUTER]`, `RIGHT [OUTER]`, `FULL [OUTER]`, `CROSS`, additional joins beyond two tables, joins without `ON`, and comma joins report `COHDBL001`. See the precise contract below. |
 | `GROUP BY` / `HAVING` | Supported subset, measured | One or more grouping expressions; `WHERE` filters input rows and `HAVING` filters groups after aggregation. Composes with supported two-table inner joins, `ORDER BY`, `LIMIT`, and `OFFSET`, including server/client execution. Ungrouped, unaggregated projected columns are errors. `DISTINCT`/`ALL` aggregate modifiers, grouping extensions, windows, and ordered-set aggregates report `COHDBL001`. |
 | Subqueries / `INSERT ... SELECT` | Supported subset, measured | Uncorrelated scalar, `IN`/`NOT IN`, and `EXISTS`/`NOT EXISTS` queries in supported SELECT expressions, plus transactional insert-source queries. All use the outer statement snapshot; nesting is limited to 32 subquery levels, within the statement's expression nesting limit (256 levels by default, `SQL0006`). Correlated queries, derived tables, quantified comparisons, subqueries in UPDATE/DELETE, VALUES, CHECK/DEFAULT, and LIMIT/OFFSET expressions report `COHDBL001`. See the subquery contract below. |
 | `TOP` / `SELECT ALL` / `FETCH` | Recognized, not supported | row-limit and select modifiers rejected with `COHDBL001` |
@@ -598,7 +599,8 @@ SQL defaults do not apply to Documents, Graph, Key-Value, or Blob comparisons.
 
 `SqlClauses.Join` represents the executable subset `INNER JOIN ... ON`, including
 bare `JOIN ... ON`. `SqlLanguageProfile.SupportsJoin` advertises only
-`SqlJoinType.Inner`. A SELECT can join exactly two stored tables; aliases and
+`SqlJoinType.Inner`. A SELECT can join exactly two relations, each a stored table or a registered
+`INFORMATION_SCHEMA`/`COHESION_SCHEMA` relation; aliases and
 schema-qualified references such as the following execute, including over the
 SQL server/client:
 
@@ -617,11 +619,14 @@ callers requiring stable paging must provide a sufficient ordering key.
 Column references can be unqualified, table/alias-qualified, or schema/table-qualified.
 An unqualified name present in both inputs is an ambiguous-column error, even
 when the inputs have no rows. Explicit aliases distinguish repeated table inputs.
+Source qualifiers are validated for single-relation reads too; an explicit alias
+replaces the base relation name.
 Unqualified `*` expands both inputs in FROM-then-JOIN column order. Qualified
 wildcards such as `u.*` and `usr.Users.*` are outside the executable subset and
 report `COHDBL001`.
 
-The planner uses a secondary index on either input when mandatory `ON` equalities
+System relations take no object locks and have no index paths. The planner uses
+a secondary index on either stored input when mandatory `ON` equalities
 between columns bind a leading index-key prefix. It prefers the longest prefix,
 then a unique index, then index name, then the right input. It still evaluates
 the complete `ON` predicate after fetching snapshot-visible candidate rows.
@@ -643,7 +648,6 @@ multiplicity.
 
 LEFT, RIGHT, and FULL outer joins, CROSS joins, NATURAL joins, USING, absent ON,
 comma joins, and joins beyond two tables do not execute and report `COHDBL001`.
-Joins involving `INFORMATION_SCHEMA` or `COHESION_SCHEMA` are also excluded.
 No outer-join null-extension behavior is advertised. These are explicit
 ISO/IEC 9075 subset boundaries, not additional named clauses in the 49-clause count.
 
@@ -1033,8 +1037,10 @@ exactly one column; EXISTS accepts any valid select list.
 
 Every child query uses the containing statement's MVCC snapshot and transaction
 context; it never creates another read view. Inner and outer stored rows
-therefore observe the same instant. A child that reads a virtual system relation
-uses the statement's catalog snapshot. Materialization retains the output type
+therefore observe the same instant. Children and INSERT sources can join system
+relations with each other or with stored tables. Their relation bindings request the
+containing statement's one catalog image, including system relations in JOIN targets.
+Materialization retains the output type
 and collation, including NULL and empty scalar results.
 
 `INSERT ... SELECT` maps the result columns to the specified destination list,
@@ -1213,6 +1219,27 @@ than the thread has, such as a pattern of 200,000 `%a` segments over a value of
 
 ## System-view matrix (C1)
 
+All 11 registered system relations participate in the supported two-relation INNER JOIN,
+with each other or with stored tables, on either side. Aliases, three-part column
+references, ambiguity checks and all supported SELECT operators use the same relation
+binding. New registered system relations inherit joining without join-specific code.
+
+The binder requests one immutable catalog image when it first resolves a system relation.
+Every child query and INSERT source shares that image; no outer-AST prediction is needed.
+Snapshot transactions supply their BEGIN-time image; ReadCommitted and automatic statements
+capture on first system-relation binding. A stored-only statement needs no catalog capture.
+Future derived tables, CTEs, set operands, view bodies and UPDATE/DELETE subqueries inherit
+this binding rule when their syntax becomes executable. Their current admission boundaries
+remain as stated above.
+
+The every-relation conformance theory seeds a domain with `CREATE DOMAIN`. Its self-join
+key is the first (catalog-name) column for TABLES, COLUMNS, TABLE_CONSTRAINTS,
+KEY_COLUMN_USAGE, REFERENTIAL_CONSTRAINTS, CHECK_CONSTRAINTS, INDEXES and OBJECT_OWNERSHIP;
+FUNCTIONS, TYPES and DOMAINS use IS_SQL_DEFINED. Equality preserves each key's multiplicity:
+for key groups of size k the self join yields the sum of k squared rows. Catalog-name keys
+are constant within the database and therefore yield n squared rows. Function/type/domain
+names are not constant and are deliberately not used as that cross-product key.
+
 The SQL engine exposes the following virtual relations through ordinary `SELECT`,
 including the wire protocol. View names require their schema and are
 case-insensitive. This is the MVP subset of ISO 9075-11 column names and type
@@ -1229,7 +1256,9 @@ conventions, not the complete ISO view layouts. Columns below are listed in
 | `INFORMATION_SCHEMA.CHECK_CONSTRAINTS` | `CONSTRAINT_CATALOG`, `CONSTRAINT_SCHEMA`, `CONSTRAINT_NAME`, `CHECK_CLAUSE` | Explicit checks; `CHECK_CLAUSE` is the persisted canonical predicate (see [Persisted definitions are canonical](#persisted-definitions-are-canonical)) |
 | `COHESION_SCHEMA.INDEXES` | `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `INDEX_NAME`, `COLUMN_NAME`, `ORDINAL_POSITION`, `IS_UNIQUE`, `IS_PRIMARY_KEY` | Cohesion extension: one row per index key column |
 | `COHESION_SCHEMA.OBJECT_OWNERSHIP` | `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `OBJECT_TYPE`, `OBJECT_NAME`, `OWNER`, `OWNING_SCHEMA` | Cohesion extension: one row per table or index; `OWNER` is `Adhoc` or `Schema` |
-| `COHESION_SCHEMA.FUNCTIONS` | `FUNCTION_NAME`, `FUNCTION_KIND`, `PARAMETER_TYPES`, `PARAMETER_COUNT`, `RETURN_TYPE`, `VOLATILITY`, `NULL_BEHAVIOR`, `IS_BUILT_IN` | Cohesion extension (E2): one row per function overload of the engine's catalog, built-ins first in registration order, then one row per special form. `FUNCTION_KIND` is `SCALAR`, `AGGREGATE` or `SPECIAL FORM`; `PARAMETER_TYPES` lists the parameter types (`TEXT ...` for a variadic tail, `*` for an aggregate called as `name(*)`, empty for none); `VOLATILITY` is `IMMUTABLE`, `STABLE` or `VOLATILE` for a scalar and NULL for an aggregate, which is never folded or admitted in a CHECK; `NULL_BEHAVIOR` is `RETURNS NULL ON NULL INPUT` or `CALLED ON NULL INPUT`. A special form's type, count, volatility and NULL-behavior columns are NULL. The rows are the engine's, the same in every database of it |
+| `COHESION_SCHEMA.FUNCTIONS` | `FUNCTION_NAME`, `FUNCTION_KIND`, `PARAMETER_TYPES`, `PARAMETER_COUNT`, `RETURN_TYPE`, `VOLATILITY`, `NULL_BEHAVIOR`, `IS_BUILT_IN`, `IS_SQL_DEFINED` | Cohesion extension (E2): one row per function overload of the engine's catalog, built-ins first in registration order, then one row per special form. `FUNCTION_KIND` is `SCALAR`, `AGGREGATE` or `SPECIAL FORM`; `PARAMETER_TYPES` lists the parameter types (`TEXT ...` for a variadic tail, `*` for an aggregate called as `name(*)`, empty for none); `VOLATILITY` is `IMMUTABLE`, `STABLE` or `VOLATILE` for a scalar and NULL for an aggregate, which is never folded or admitted in a CHECK; `NULL_BEHAVIOR` is `RETURNS NULL ON NULL INPUT` or `CALLED ON NULL INPUT`. A special form's type, count, volatility and NULL-behavior columns are NULL. Native rows are frozen at engine build; SQL-defined rows come from the statement catalog image |
+| `COHESION_SCHEMA.TYPES` | `TYPE_NAME`, `BASE_TYPE`, `IS_DOMAIN`, `IS_SQL_DEFINED` | Native types and domains plus SQL domains in the catalog image |
+| `COHESION_SCHEMA.DOMAINS` | `DOMAIN_NAME`, `BASE_TYPE`, `IS_SQL_DEFINED` | Native domains and SQL domains in the catalog image |
 
 Identifier, descriptive, expression, and `YES`/`NO` columns have shared type
 `String`. Ordinals, lengths, precision, radix, and scale have shared type `Int64`;
@@ -1268,8 +1297,8 @@ All relations are read-only. DML and supported table/index DDL targeting them,
 including colliding `CREATE TABLE` statements and `IF [NOT] EXISTS` forms, fail
 with `System view '<SCHEMA>.<VIEW>' is read-only.` The wire error code is
 `ExecutionFailure`. User-defined `CREATE VIEW` / `DROP VIEW` remain unsupported.
-The snapshot rules, ISO-subset limitations, and the rationale for the two
-extension views are recorded in the
+The snapshot rules, ISO-subset limitations, and the rationale for the Cohesion
+extension relations are recorded in the
 [SQL engine design](../../Assimalign.Cohesion.Database.Sql/docs/DESIGN.md#virtual-system-relations-c1).
 
 ## Expressions

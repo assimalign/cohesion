@@ -44,6 +44,11 @@ flowchart LR
 
 Other model clients do not depend on this package.
 
+## System relation joins (#1106)
+
+Stored/system, system/system and grouped catalog joins use the existing SQL exchange.
+Wire tests pin exact rows and String/Int64 metadata; there is no protocol format change.
+
 ## SQL-owned exchange
 
 `SqlClient.Create` binds the pool to `SqlProtocol.Family`.

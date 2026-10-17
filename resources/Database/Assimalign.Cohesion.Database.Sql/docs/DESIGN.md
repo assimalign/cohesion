@@ -187,8 +187,8 @@ Scalar children require one output column and at most one row; an empty result
 is a typed null. IN children require one column and preserve SQL three-valued
 membership, including unknown for nonmatches against a null-containing set and
 false for membership in an empty set. EXISTS tests row existence. Output types
-and string collations cross the materialization boundary. Nested system-view
-queries trigger one statement catalog capture, just like outer system views.
+and string collations cross the materialization boundary. Nested system-relation joins request the shared catalog image through the same
+relation resolver as outer system sources. INSERT sources use that resolver too.
 
 `SqlInsertSelectPlan` holds the destination binding and a query source. Its
 executor reads the entire source before staging any destination writes, so
@@ -753,10 +753,10 @@ flowchart LR
   `RETURN_TYPE`; `VOLATILITY` (NULL for an aggregate, which is never folded or admitted in
   a CHECK, so a tool does not read `SUM` as non-deterministic); `NULL_BEHAVIOR` (`RETURNS
   NULL ON NULL INPUT` or `CALLED ON NULL INPUT`, ISO's routine characteristics); and
-  `IS_BUILT_IN`. A special form has
-  no signature, so its type, volatility and NULL-behavior columns are NULL. The catalog is
-  the engine's, so every database of the engine lists the same rows; the view reads the
-  frozen catalog, not the statement's catalog snapshot. It is read-only like every system
+  `IS_BUILT_IN` and `IS_SQL_DEFINED`. A special form has
+  no signature, so its type, volatility and NULL-behavior columns are NULL. Native rows
+  come from the frozen engine catalog; SQL-defined rows use the statement's catalog image.
+  It is read-only like every system
   relation (see [Virtual system relations](#virtual-system-relations-c1)).
 - **Special forms** (decision 66). `COALESCE`, `NULLIF`, `CASE`, `CAST` and `EXTRACT` are
   grammar, not catalog functions, and `Add` refuses their names. `COALESCE` evaluates
@@ -1782,10 +1782,18 @@ including its ownership metadata, through `SqlCatalog.ReserveTableAsync` and
 stays ad-hoc. The catalog persists descriptions;
 the engine continues to authorize session operations against schema-owned objects.
 
+## DML relation qualifiers (#1106)
+
+UPDATE SET values and UPDATE/DELETE predicates bind against the target relation, just as
+SELECT expressions do. An alias hides the base name; an unknown or hidden qualifier fails
+planning with located COHSQLE015 before any row changes, leaving an explicit transaction
+active. This follows PostgreSQL `src/backend/parser/parse_relation.c:3759`. Subqueries in
+UPDATE and DELETE retain the grammar's COHDBL001 refusal.
+
 ## Virtual system relations (C1)
 
 The catalog is the sole data source for six `INFORMATION_SCHEMA` relations and
-two Cohesion extensions. Their complete MVP column matrix is in
+five Cohesion extensions. Their complete MVP column matrix is in
 [DIALECT.md](../../Assimalign.Cohesion.Database.Sql.Language/docs/DIALECT.md#system-view-matrix-c1).
 Every row describes an object in the session's current database. The catalog
 name columns contain that database's name; schema qualification continues to
@@ -1794,8 +1802,15 @@ select a SQL namespace, never another database. `TABLES` lists stored tables as
 
 ### The relation seam and statement snapshot
 
-`SqlPlanner` recognizes the reserved, schema-qualified view names before
-`ResolveTable`. It binds their declared columns into a separate
+`SqlPlanner.ResolveRelation` is the single read-source caller of `SqlSystemViews.Find`.
+It resolves a closed `SqlRelationSource` value over existing stored-table or virtual-column
+metadata, with no source allocation. `SqlRelationBinding` adds the reference and joined-row
+offset for joins; a single-relation evaluator retains the original AST reference in the same
+reference slot, avoiding a binding wrapper or array. Qualifier lookup, joins and grouping use that
+metadata; only stored sources acquire object locks or supply secondary-index paths. An
+indexed stored input can be probed with virtual rows as the outer input on either logical
+side. Adding a registered system relation needs no join-specific code. Single-source
+system queries retain a separate
 `SqlSystemViewPlan`, carrying the view identity, projection, predicate, ordering,
 distinct/count mode, and limit/offset. `SqlSelectPlan` still means a stored
 table, and `SqlCatalogTable` has no virtual/system flag. This keeps physical
@@ -1815,7 +1830,17 @@ available over `SqlDatabaseServer` without a separate protocol operation.
 catalog's existing metadata lock. The capture is read-only, carries no storage
 handle, and has no disposal lifetime. A snapshot transaction
 retains the capture taken at begin; auto-commit and `ReadCommitted` statements
-capture at statement start. All system rows for that statement use that one
+capture when the binder first resolves a system relation. `SqlStatementContext` is an internal
+readonly struct: it fixes the MVCC row snapshot at construction and stores the lazy catalog
+image in the existing shared `SqlStatementMetrics` state. Every context copy and nested plan
+uses that same state,
+so subqueries and INSERT sources (and future derived tables, CTEs, set operands, view
+bodies and UPDATE/DELETE predicate queries) inherit capture without an AST walk. Ordinary
+stored-only statements never capture metadata or allocate a context/source/binding wrapper;
+the Release ReadCommitted allocation regression retains the pre-join per-query budget.
+Executing a system plan without a catalog
+image is an internal-invariant `DatabaseException`, even with empty inputs.
+All system rows for that statement use that one
 capture, including referenced-key resolution. Catalog publication cannot split
 a table from its constraints or indexes during a metadata read. Later statements
 see completed DDL according to their isolation level, so `DROP TABLE` removes
@@ -1867,9 +1892,9 @@ is an additional metadata query when a client needs provisioning ownership.
 overload of the engine's catalog, the standard library first and the application's
 registrations after it, then one row per special form (`COALESCE`, `NULLIF`, `CASE`,
 `CAST`, `EXTRACT`), so a tool sees the whole call vocabulary in one relation; its columns
-are in [Functions (E2)](#functions-e2). It is the one relation that does not describe the
-session's database: the catalog is the engine's, frozen at its build, so every database of
-the engine lists the same rows and no catalog snapshot is read. ISO's `ROUTINES` and
+are in [Functions (E2)](#functions-e2). Native registrations are frozen at engine build;
+persisted SQL functions come from the same statement catalog image as every other system
+relation. TYPES and DOMAINS combine frozen native types with the image's SQL domains. ISO's `ROUTINES` and
 `PARAMETERS` describe schema objects a session creates, which engine functions are not
 (they are code, not persisted, and no DDL drops them), and PostgreSQL's `pg_proc` is a
 vendor catalog; the design of record names the relation `sys.functions`, and it lives in
@@ -2393,7 +2418,7 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   limit of up to 4096 admits trees that no default thread can walk. So every walker
   that recurses over an expression tree calls
   `RuntimeHelpers.EnsureSufficientExecutionStack()` before it descends: the
-  session's system-relation scan (`UsesSystemView`), the planner's validators and
+  binder's system-relation resolver (`ResolveRelation`), the planner's validators and
   binders (`ValidateFunctionCalls`, `ValidateExpression`, `StaticOperandType`,
   `ContainsAggregate`, `ContainsCast`, `ReferencesAnyColumn`, `RejectColumnReferences`,
   `ContainsStar`, the sargable and join

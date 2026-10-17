@@ -28,6 +28,7 @@ internal sealed partial class SqlPlanner
     private const string insertValuesClause = "INSERT ... VALUES";
 
     private readonly SqlCatalog _catalog;
+    private readonly SqlStatementMetrics? _statementMetrics;
     private readonly IReadOnlyDictionary<string, object?>? _parameters;
     private readonly CancellationToken _cancellationToken;
 
@@ -42,9 +43,11 @@ internal sealed partial class SqlPlanner
     /// <param name="parameters">The statement's parameter values.</param>
     /// <param name="functions">The engine's function catalog and the database; the standard library alone when null.</param>
     /// <param name="cancellationToken">The statement's token, including calls made while binding or evaluating counts and seek bounds.</param>
+    /// <param name="statement">The shared execution context whose catalog image is requested by relation binding; null for detached plan inspection.</param>
     internal SqlPlanner(SqlCatalog catalog, IReadOnlyDictionary<string, object?>? parameters, SqlFunctionEnvironment? functions = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, SqlStatementContext? statement = null)
     {
+        _statementMetrics = statement?.Metrics;
         _catalog = catalog;
         _parameters = parameters;
         _cancellationToken = cancellationToken;
@@ -99,16 +102,14 @@ internal sealed partial class SqlPlanner
             throw new SqlPlanningException("COHSQLE013", "SELECT requires a FROM table.", select.Location);
         }
 
-        // A virtual relation has column metadata, but no stored table or access path.
-        var systemView = SqlSystemViews.Find(select.From);
-        var table = systemView is null ? ResolveTable(select.From) : null;
-        var bindings = select.Joins.Count > 0 ? BindJoin(select, table!) : null;
-        var columns = bindings is null ? systemView?.Columns ?? table!.Columns
-            : bindings.SelectMany(binding => binding.Table.Columns).ToArray();
-        var evaluatorBindings = bindings ?? (_subqueryDepth > 0 && table is not null
-            ? new[] { new SqlTableBinding(table, select.From, 0) } : null);
-        var evaluator = new SqlExpressionEvaluator(columns, _parameters, evaluatorBindings, defaultCollation: _catalog.DefaultCollation,
-            subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken);
+        var source = ResolveRelation(select.From);
+        var table = source.Table;
+        var systemView = source.View;
+        var bindings = select.Joins.Count > 0 ? BindJoin(select, source) : null;
+        var columns = bindings is null ? source.Columns
+            : bindings.SelectMany(binding => binding.Source.Columns).ToArray();
+        var evaluator = new SqlExpressionEvaluator(columns, _parameters, bindings, defaultCollation: _catalog.DefaultCollation,
+            subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken, relation: select.From);
 
         if (bindings is not null)
         {
@@ -195,6 +196,17 @@ internal sealed partial class SqlPlanner
             EvaluateCount(select.Offset, "OFFSET"),
             select.IsDistinct,
             SelectAccessPath(table!, select.Where), orderByProjections);
+    }
+
+    /// <summary>Resolves a read source and requests the statement's one catalog image at binding time.</summary>
+    private SqlRelationSource ResolveRelation(SqlTableReference reference)
+    {
+        if (SqlSystemViews.Find(reference) is { } view)
+        {
+            _statementMetrics?.CaptureCatalogSnapshot(_catalog);
+            return new SqlRelationSource(view);
+        }
+        return new SqlRelationSource(ResolveTable(reference));
     }
 
     /// <summary>A projection that passes a source column through, with the collation <c>DISTINCT</c> compares it under.</summary>
@@ -748,7 +760,8 @@ internal sealed partial class SqlPlanner
     private SqlUpdatePlan PlanUpdate(SqlUpdateExpression update)
     {
         var table = ResolveTable(update.Table);
-        var evaluator = new SqlExpressionEvaluator(table.Columns, _parameters, defaultCollation: _catalog.DefaultCollation, functions: _functions, cancellationToken: _cancellationToken);
+        var evaluator = new SqlExpressionEvaluator(table.Columns, _parameters,
+            defaultCollation: _catalog.DefaultCollation, functions: _functions, cancellationToken: _cancellationToken, relation: update.Table);
 
         var assignments = new List<(int Ordinal, SqlBoundExpression Value)>(update.Assignments.Count);
         foreach (var assignment in update.Assignments)
@@ -789,7 +802,8 @@ internal sealed partial class SqlPlanner
         if (delete.Where is not null)
         {
             RejectAggregateInDmlWhere(delete.Where);
-            var evaluator = new SqlExpressionEvaluator(table.Columns, _parameters, defaultCollation: _catalog.DefaultCollation, functions: _functions, cancellationToken: _cancellationToken);
+            var evaluator = new SqlExpressionEvaluator(table.Columns, _parameters,
+                defaultCollation: _catalog.DefaultCollation, functions: _functions, cancellationToken: _cancellationToken, relation: delete.Table);
             ValidateExpression(delete.Where, evaluator);
             where = evaluator.Bind(delete.Where);
         }
