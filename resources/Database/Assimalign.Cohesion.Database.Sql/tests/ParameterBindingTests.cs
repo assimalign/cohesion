@@ -77,6 +77,8 @@ public sealed class ParameterBindingTests
     [InlineData("$1", "1")]
     [InlineData("@1", "$1")]
     [InlineData("$01", "01")]
+    [InlineData("$0", "0")]
+    [InlineData("$9223372036854775808", "9223372036854775808")]
     [InlineData("$_x", "_x")]
     public async Task Execute_ParameterSpelling_ShouldBindSameValueAsync(string reference, string key)
     {

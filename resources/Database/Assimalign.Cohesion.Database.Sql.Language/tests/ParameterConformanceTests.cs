@@ -62,6 +62,8 @@ public sealed class ParameterConformanceTests
     [InlineData("$1")]
     [InlineData("@1")]
     [InlineData("$01")]
+    [InlineData("$0")]
+    [InlineData("$9223372036854775808")]
     public void Parse_ValidParameterName_ShouldPreserveAstName(string form)
     {
         // Arrange
