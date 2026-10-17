@@ -83,6 +83,12 @@ public sealed class GqlWhereExpressionTests
     [InlineData("'a' || 1")]
     [InlineData("-(-9223372036854775808)")]
     [InlineData("1e308 * 1e308")]
+    [InlineData("a.age IN [42, 1 / 0]")]
+    [InlineData("a.age IN [1 / 0, 42]")]
+    [InlineData("1 IN [1, 'a' + 1]")]
+    [InlineData("1 IN ['a' + 1, 1]")]
+    [InlineData("NULL IN [1 / 0]")]
+    [InlineData("-9223372036854775808 / -1 = 0")]
     public async Task Execute_ValueError_ShouldCodeAndRecoverAsync(string predicate)
     {
         // Arrange
@@ -188,6 +194,24 @@ public sealed class GqlWhereExpressionTests
                 await session.ExecuteAsync(new GraphQueryRequest(new GqlQueryStatement(query)), CancellationToken.None));
             error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG001");
         }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Graph] - WHERE: integral remainder by minus one is representable zero")]
+    [InlineData(long.MinValue)]
+    [InlineData(-42L)]
+    [InlineData(0L)]
+    [InlineData(42L)]
+    [InlineData(long.MaxValue)]
+    public void Evaluate_RemainderByMinusOne_ShouldReturnInt64Zero(long dividend)
+    {
+        // Arrange
+        var expression = new GqlBinaryExpression(new GqlLiteralExpression(dividend), "%", new GqlLiteralExpression(-1L));
+
+        // Act
+        var result = GraphExpressionEvaluator.Evaluate(expression, new Dictionary<string, object>());
+
+        // Assert
+        result.ShouldBeOfType<long>().ShouldBe(0L);
     }
 
     private static object? Arithmetic(object left, object right) => GraphExpressionEvaluator.Evaluate(

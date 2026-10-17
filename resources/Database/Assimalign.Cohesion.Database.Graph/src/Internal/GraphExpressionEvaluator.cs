@@ -108,10 +108,14 @@ internal static class GraphExpressionEvaluator
     private static object? In(GqlInExpression membership, IReadOnlyDictionary<string, object> bindings)
     {
         var value = Evaluate(membership.Operand, bindings);
-        bool unknown = false;
-        foreach (var item in membership.List.Items)
+        var candidates = new object?[membership.List.Items.Count];
+        for (int index = 0; index < candidates.Length; index++)
         {
-            var candidate = Evaluate(item, bindings);
+            candidates[index] = Evaluate(membership.List.Items[index], bindings);
+        }
+        bool unknown = false;
+        foreach (var candidate in candidates)
+        {
             if (value is null || candidate is null) { unknown = true; }
             else if (Equal(value, candidate)) { return true; }
         }
@@ -173,6 +177,9 @@ internal static class GraphExpressionEvaluator
         }
         long x = Convert.ToInt64(left, CultureInfo.InvariantCulture);
         long y = Convert.ToInt64(right, CultureInfo.InvariantCulture);
+        // PostgreSQL src/backend/utils/adt/int8.c:584-590 handles the representable remainder
+        // separately because the machine operation can overflow for Int64.MinValue % -1.
+        if (op == "%" && y == -1) { return 0L; }
         checked
         {
             return op switch { "+" => x + y, "-" => x - y, "*" => x * y, "/" => x / y, _ => x % y };

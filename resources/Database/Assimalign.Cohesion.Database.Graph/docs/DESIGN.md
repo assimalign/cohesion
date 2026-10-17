@@ -312,8 +312,15 @@ faults become that same code in DatabaseException.Diagnostics, with code-free Me
 Filtering finishes before result materialization or mutations, so the server sends value
 errors as ExecutionFailure before ResultHeader and the pooled scalar session remains usable.
 Promotion is Double for floating operands, otherwise Decimal for ulong/decimal, otherwise
-checked Int64 (division truncates toward zero). All recursive nodes check the stack; Boolean
-runs are n-ary. Index anchoring and required unknown-name inference descend only through AND.
+checked Int64 (division truncates toward zero).
+Integral remainder by -1 is always 0, including Int64.MinValue, while its division by -1
+keeps COHDBG013 (PostgreSQL `src/backend/utils/adt/int8.c:584-594`).
+All recursive nodes check the stack; Boolean runs are n-ary. Index anchoring and required
+unknown-name inference descend only through AND.
+IN evaluates the entire list before comparing membership, preserving errors after a matching
+item. A match still wins over NULL; without a match, a NULL operand or item yields UNKNOWN
+(the empty list is always FALSE). This follows Neo4j's `ListLiteral.scala:36-45` and
+`CachedIn.scala:38-49` under `community/cypher/interpreted-runtime/src/main/scala/org/neo4j/cypher/internal/runtime/interpreted/commands/`.
 
 
 

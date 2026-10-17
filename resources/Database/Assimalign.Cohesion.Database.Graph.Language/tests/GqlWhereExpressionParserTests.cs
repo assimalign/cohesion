@@ -9,6 +9,24 @@ namespace Assimalign.Cohesion.Database.Graph.Language.Tests;
 
 public sealed class GqlWhereExpressionParserTests
 {
+    [Theory(DisplayName = "Cohesion Test [Graph.Language] - WHERE: OR and XOR share GQL precedence and associate left")]
+    [InlineData("TRUE OR TRUE XOR TRUE", GqlLogicalOperator.Xor, GqlLogicalOperator.Or)]
+    [InlineData("TRUE XOR TRUE OR TRUE", GqlLogicalOperator.Or, GqlLogicalOperator.Xor)]
+    public void Parse_MixedDisjunctions_ShouldAssociateLeft(string text, GqlLogicalOperator outer, GqlLogicalOperator inner)
+    {
+        // Arrange / Act
+        var expression = Predicate(text).ShouldBeOfType<GqlLogicalExpression>();
+
+        // Assert
+        expression.Operator.ShouldBe(outer);
+        expression.Operands.Count.ShouldBe(2);
+        var opening = expression.Operands[0].ShouldBeOfType<GqlLogicalExpression>();
+        opening.Operator.ShouldBe(inner);
+        opening.Operands.Count.ShouldBe(2);
+        opening.Operands.ShouldAllBe(operand => operand is GqlLiteralExpression);
+        expression.Operands[1].ShouldBeOfType<GqlLiteralExpression>().Value.ShouldBe(true);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Graph.Language] - WHERE: logical and arithmetic precedence preserve AST shape")]
     public void Parse_OperatorPrecedence_ShouldPreserveShape()
     {

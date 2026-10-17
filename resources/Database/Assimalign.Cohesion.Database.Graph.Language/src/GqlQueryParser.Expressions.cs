@@ -42,7 +42,7 @@ public sealed partial class GqlQueryParser
             string op = Current.Text.ToUpperInvariant();
             int precedence = op switch
             {
-                "OR" => 1, "XOR" => 2, "AND" => 3,
+                "OR" or "XOR" => 1, "AND" => 3,
                 "=" or "<>" or "!=" or "<" or "<=" or ">" or ">=" or "<-" or
                     "IN" or "STARTS" or "ENDS" or "CONTAINS" or "IS" => 5,
                 "||" => 6, "+" or "-" => 7, "*" or "/" or "%" => 8,

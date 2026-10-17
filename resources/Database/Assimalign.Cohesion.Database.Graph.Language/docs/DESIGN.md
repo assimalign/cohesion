@@ -134,8 +134,7 @@ label-expr   := label-term ('|' label-term)*
 label-term   := label-factor ('&' label-factor)*
 label-factor := '!' label-primary | label-primary
 label-primary:= label | '%' | '(' label-expr ')'
-predicate    := xor-expr ('OR' xor-expr)*
-xor-expr     := and-expr ('XOR' and-expr)*
+predicate    := and-expr (('OR' | 'XOR') and-expr)*
 and-expr     := not-expr ('AND' not-expr)*
 not-expr     := NOT not-expr | test
 test         := comparison [IS [NOT] (NULL | TRUE | FALSE | UNKNOWN)]
@@ -457,18 +456,22 @@ Precedence from weakest to strongest; binary runs associate left, comparisons do
 
 | Level | Operators |
 | --- | --- |
-| 1 | OR |
-| 2 | XOR |
-| 3 | AND |
-| 4 | NOT |
-| 5 | Comparisons, IN, string predicates, followed by optional IS [NOT] NULL/TRUE/FALSE/UNKNOWN |
-| 6 | String concatenation `\|\|` |
-| 7 | Binary + and - (including + on two strings) |
-| 8 | * / % |
-| 9 | Unary + and - |
-| 10 | Literals, properties, labeled predicates and parentheses |
+| 1 | OR, XOR (one left-associated level) |
+| 2 | AND |
+| 3 | NOT |
+| 4 | Comparisons, IN, string predicates, followed by optional IS [NOT] NULL/TRUE/FALSE/UNKNOWN |
+| 5 | String concatenation `\|\|` |
+| 6 | Binary + and - (including + on two strings) |
+| 7 | * / % |
+| 8 | Unary + and - |
+| 9 | Literals, properties, labeled predicates and parentheses |
 
 `NOT a.x = 1 OR a.y = 2 AND a.z = 3` is OR(NOT(=), AND(=, =)).
+OR and XOR share a level in the [openGQL grammar, GQL.g4:2062](https://github.com/opengql/grammar/blob/main/GQL.g4#L2062).
+Thus `TRUE OR TRUE XOR TRUE` is `(TRUE OR TRUE) XOR TRUE` (FALSE), and
+`TRUE XOR TRUE OR TRUE` is `(TRUE XOR TRUE) OR TRUE` (TRUE).
+[Neo4j's GQL conformance table, GE07](https://neo4j.com/docs/cypher-manual/current/appendix/gql-conformance/supported-optional/)
+records Cypher's different XOR precedence; this parser follows GQL.
 Signed numeric literals fold, including -9223372036854775808. In expression context the
 shared lexer's left arrow in `a.age<-1` means `a.age < -1`. ISO's `--` always starts
 a line comment: `a.x--1` leaves a bare property predicate; write `a.x - -1` to subtract
@@ -494,7 +497,9 @@ The first applicable row selects both conversions and the result type:
 | Otherwise supported integral types | Int64 |
 
 Int64 arithmetic is checked. Int64 / truncates toward zero; % is its corresponding remainder
-with the dividend's sign. Decimal stays Decimal; floating arithmetic stays Double and rejects
+with the dividend's sign. Every integral remainder by -1 is 0, including Int64.MinValue;
+Int64.MinValue / -1 still overflows (PostgreSQL `src/backend/utils/adt/int8.c:584-594`,
+relative to C:/Source/repos/postgres/postgres). Decimal stays Decimal; floating arithmetic stays Double and rejects
 non-finite results. Division/remainder by zero, overflow, invalid numeric signs, mixed
 string/number + and invalid concatenation types carry COHDBG013. Two strings make + an alias
 for `||`, without conversion. Arithmetic with NULL is NULL. Cohesion SQL promotes every
@@ -512,7 +517,8 @@ the canonical function belongs to #1147.
 Local Neo4j references, relative to C:/Source/repos/neo4j/neo4j (behavior consulted, no code copied):
 
 - `community/cypher/front-end/parser/v25/parser/src/main/antlr4/org/neo4j/cypher/internal/parser/v25/Cypher25Parser.g4:546-600`
-  orders OR, XOR, AND, NOT and spells IN and the string predicates.
+  spells IN and the string predicates. Its separate OR/XOR levels are Cypher-specific;
+  GQL's shared level above governs this parser.
 - `community/cypher/front-end/expressions/src/main/scala/org/neo4j/cypher/internal/expressions/PredicateExpressions.scala:227-231,269-295`
   models membership and the three string predicates, whose signatures accept any operand types.
 - `community/cypher/interpreted-runtime/src/main/scala/org/neo4j/cypher/internal/runtime/interpreted/commands/predicates/Predicate.scala:447-483`
@@ -521,6 +527,11 @@ Local Neo4j references, relative to C:/Source/repos/neo4j/neo4j (behavior consul
   returns FALSE for an empty list. IN otherwise returns TRUE for a matching non-null item;
   with no match, NULL in the searched value or list makes UNKNOWN, otherwise FALSE.
   Thus NULL IN [] is false and 2 IN [1, NULL] is unknown.
+- `community/cypher/interpreted-runtime/src/main/scala/org/neo4j/cypher/internal/runtime/interpreted/commands/expressions/ListLiteral.scala:36-45`
+  evaluates every list item before returning the list; `CachedIn.scala:38-49` consumes that
+  evaluated list before testing membership. Cohesion likewise evaluates the complete list
+  before comparing, so `42 IN [42, 1 / 0]` raises COHDBG013 in either item order.
+  A match still wins over NULL: `1 IN [1, NULL]` is TRUE, `1 IN [2, NULL]` is UNKNOWN.
 - `community/values/src/main/java/org/neo4j/values/utils/ValueBooleanLogic.java:170-186`
   checks the empty list before the searched NULL value;
   `community/values/src/main/java/org/neo4j/values/utils/InCache.java:94-118` lets a matching
