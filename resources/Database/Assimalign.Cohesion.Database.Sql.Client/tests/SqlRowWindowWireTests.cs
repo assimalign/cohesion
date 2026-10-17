@@ -84,7 +84,7 @@ public sealed class SqlRowWindowWireTests
         // Assert
         error.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
         error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-        error.Message.ShouldBe($"{clause} requires a non-negative integer.");
+        error.Message.ShouldBe($"COHSQLE018: {clause} requires a non-negative integer.");
         error.ConnectionUsable.ShouldBeTrue();
         var rows = await connection.QueryAsync("SELECT id FROM users ORDER BY id", cancellationToken: SqlClientTestHarness.Timeout());
         rows.Select(row => row[0]).ShouldBe(new object?[] { 1, 2 });
