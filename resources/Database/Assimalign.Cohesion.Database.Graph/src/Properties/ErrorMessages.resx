@@ -11,4 +11,8 @@
   <data name="LogicalNodeRequired" xml:space="preserve"><value>AND joins predicates in a GqlLogicalExpression; a GqlBinaryExpression holds a scalar operation.</value></data>
   <data name="MembershipListRequired" xml:space="preserve"><value>IN requires a list.</value></data>
   <data name="UnsupportedStringPredicate" xml:space="preserve"><value>Unsupported string predicate.</value></data>
+  <data name="ParameterCollision" xml:space="preserve"><value>Parameter '{0}' has more than one binding after removing its sigil.</value></data>
+  <data name="ParameterUnbound" xml:space="preserve"><value>Parameter '{0}' is not bound.</value></data>
+  <data name="ParameterScalarRequired" xml:space="preserve"><value>A parameter requires a supported finite graph scalar value.</value></data>
+  <data name="PropertyScalarRequired" xml:space="preserve"><value>A property map value must be a scalar literal or named parameter.</value></data>
 </root>

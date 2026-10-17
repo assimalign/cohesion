@@ -34,7 +34,7 @@ not an edge.
 | Library areas | 21 |
 | Resource areas | 18 |
 | Declared project references | 741 |
-| Declared shared-source links | 35 |
+| Declared shared-source links | 37 |
 
 ## Ambiguous project names
 
@@ -682,10 +682,10 @@ _More than twelve projects: the table below is the area's graph (see the node ce
 | `Assimalign.Cohesion.Database.Documents.Storage` | `Assimalign.Cohesion.Database.Storage`<br>`Assimalign.Cohesion.Database.Transactions` | — | — | — |
 | `Assimalign.Cohesion.Database.Embedded` | `Assimalign.Cohesion.Database` | — | — | — |
 | `Assimalign.Cohesion.Database.Execution` | `Assimalign.Cohesion.Database.Types` | — | — | — |
-| `Assimalign.Cohesion.Database.Graph` | `Assimalign.Cohesion.Connections`<br>`Assimalign.Cohesion.Database`<br>`Assimalign.Cohesion.Database.Graph.Catalog`<br>`Assimalign.Cohesion.Database.Graph.Language`<br>`Assimalign.Cohesion.Database.Graph.Storage` | — | `Assimalign.Cohesion.Database` | — |
+| `Assimalign.Cohesion.Database.Graph` | `Assimalign.Cohesion.Connections`<br>`Assimalign.Cohesion.Database`<br>`Assimalign.Cohesion.Database.Graph.Catalog`<br>`Assimalign.Cohesion.Database.Graph.Language`<br>`Assimalign.Cohesion.Database.Graph.Storage` | — | `Assimalign.Cohesion.Database`<br>`Assimalign.Cohesion.Database.Execution` | — |
 | `Assimalign.Cohesion.Database.Graph.Catalog` | `Assimalign.Cohesion.Database`<br>`Assimalign.Cohesion.Database.Graph.Storage`<br>`Assimalign.Cohesion.Database.Storage`<br>`Assimalign.Cohesion.Database.Transactions`<br>`Assimalign.Cohesion.Database.Types` | — | — | — |
 | `Assimalign.Cohesion.Database.Graph.Client` | `Assimalign.Cohesion.Connections`<br>`Assimalign.Cohesion.Database`<br>`Assimalign.Cohesion.Database.Client`<br>`Assimalign.Cohesion.Database.Graph`<br>`Assimalign.Cohesion.Database.Protocol`<br>`Assimalign.Cohesion.Database.Types` | — | — | — |
-| `Assimalign.Cohesion.Database.Graph.Language` | `Assimalign.Cohesion.Database.Language` | — | — | — |
+| `Assimalign.Cohesion.Database.Graph.Language` | `Assimalign.Cohesion.Database.Language` | — | `Assimalign.Cohesion.Database.Execution` | — |
 | `Assimalign.Cohesion.Database.Graph.Security` | — | — | — | — |
 | `Assimalign.Cohesion.Database.Graph.Storage` | `Assimalign.Cohesion.Database.Indexing`<br>`Assimalign.Cohesion.Database.Storage`<br>`Assimalign.Cohesion.Database.Transactions` | — | — | — |
 | `Assimalign.Cohesion.Database.Hosting` | `Assimalign.Cohesion.Configuration`<br>`Assimalign.Cohesion.Configuration.CommandLine`<br>`Assimalign.Cohesion.Configuration.EnvironmentVariables`<br>`Assimalign.Cohesion.Configuration.Json`<br>`Assimalign.Cohesion.Database`<br>`Assimalign.Cohesion.DependencyInjection`<br>`Assimalign.Cohesion.FileSystem.Physical`<br>`Assimalign.Cohesion.Hosting`<br>`Assimalign.Cohesion.Hosting.Health`<br>`Assimalign.Cohesion.Hosting.Resources`<br>`Assimalign.Cohesion.Hosting.Telemetry`<br>`Assimalign.Cohesion.Logging` | `Assimalign.Cohesion.Web.Health`<br>`Assimalign.Cohesion.Web.Hosting` | — | — |

@@ -9,9 +9,9 @@ namespace Assimalign.Cohesion.Database.Graph.Language;
 /// <see cref="LabelExpression"/> is a single name (<c>:T</c> or <c>IS T</c>).
 /// </param>
 /// <param name="Direction">The direction relative to the source pattern's node order.</param>
-/// <param name="Properties">The literal property constraints.</param>
+/// <param name="Properties">The literal or parameter property constraints.</param>
 public sealed record GqlRelationshipPattern(string? Variable, string? Type,
-    GqlPatternDirection Direction, IReadOnlyDictionary<string, object?> Properties)
+    GqlPatternDirection Direction, IReadOnlyDictionary<string, GqlExpression> Properties)
 {
     /// <summary>
     /// Gets the ISO/IEC 39075 label expression the relationship's type must satisfy, such as

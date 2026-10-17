@@ -54,10 +54,26 @@ before ResultHeader. GraphClientWireTests pins division by zero, overflow and in
 then reuse of the exact authenticated pooled session followed by SHOW LABELS. A combined
 OR/IN/string/arithmetic case compares wire rows with in-process rows. No wire fields change.
 
+## Named scalar parameters (#1138)
+
+QueryAsync, ExecuteAsync and QueryPathsAsync send the existing named scalar map unchanged.
+The server now binds `$name` and `@name` in node/relationship property maps and WHERE operands
+using exact bare names after removing one sigil. Values keep their runtime scalar types.
+An unbound parameter returns ExecutionFailure carrying COHDBG001; materialized statement
+rejections and terminal path rejections before any path output complete the exchange and allow
+reuse of that authenticated session. Later path failures
+retain the streaming lifetime rules below. No frame or codec change is needed on wire 2.0.
+
 ## Path lifetime
 
 GraphPathsExchange derives from DatabaseStreamingExchange. OpenCoreAsync sends ExecutePaths and
-validates the initial Path or PathsComplete frame. CopyToCoreAsync validates each existing path
+validates the initial Path or PathsComplete frame. A terminal ParseFailure or ExecutionFailure
+before any path frame is retained as the rejected statement's error, and CopyToCoreAsync completes
+without content. GraphConnection consumes EOF, which joins the shared worker and releases the
+active exchange, then raises GraphClientException with the retained code and message. The healthy
+connection can execute another statement immediately and returns to the pool when disposed.
+This completion handling stays entirely in Graph.Client; the shared streaming and pool code is unchanged.
+For successful responses, CopyToCoreAsync validates each existing path
 payload and verifies the final path count. Its private stream handoff prefixes each payload
 with its length to preserve boundaries through bounded byte buffering; this is entirely within
 the client and does not alter the graph wire protocol. GraphConnection decodes those same
@@ -65,10 +81,10 @@ payloads into GraphPath values.
 
 The shared ExecuteStreamingAsync owns frame I/O, applies backpressure, and keeps the connection
 busy through completion. Consuming EOF verifies terminal completion before another operation.
-Disposing an unfinished enumeration cancels the worker and discards the rental. Stream errors,
-including an initial server rejection, discard the connection under the existing shared
-streaming contract. This is intentionally stricter than materialized statement rejection;
-DatabaseStreamingExchange has no failed-response completion capability.
+Disposing an unfinished enumeration cancels the worker and discards the rental. Failures after
+path output, malformed frames, transport failures, cancellation and non-statement errors discard
+the connection under the existing shared streaming contract. InMemory and TCP tests verify an
+unbound parameter rejection followed by SHOW LABELS on the same connection and pooled session.
 
 The client holds a bounded number of path payloads for materialization plus the shared bounded
 byte buffer. The engine currently materializes its path result, so end-to-end server memory still

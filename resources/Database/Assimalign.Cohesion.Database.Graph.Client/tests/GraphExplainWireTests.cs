@@ -37,8 +37,8 @@ public sealed class GraphExplainWireTests
         }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Graph.Client] - EXPLAIN: ExecutePaths refuses descriptions and a new rental executes rows")]
-    public async Task QueryPathsAsync_Explain_ShouldFailWithCodedErrorAndPermitNewRentalAsync()
+    [Fact(DisplayName = "Cohesion Test [Graph.Client] - EXPLAIN: ExecutePaths refuses descriptions and retains the connection")]
+    public async Task QueryPathsAsync_Explain_ShouldFailWithCodedErrorAndReuseConnectionAsync()
     {
         // Arrange
         await using var harness = await GraphClientTestHarness.StartAsync();
@@ -50,8 +50,7 @@ public sealed class GraphExplainWireTests
         });
         // Assert
         error.Message.ShouldContain("COHDBG001", Case.Sensitive);
-        connection.IsOpen.ShouldBeFalse();
-        await using var fresh = await harness.Client.ConnectAsync(harness.Token);
-        (await fresh.QueryAsync("EXPLAIN MATCH (n) RETURN n", cancellationToken: harness.Token)).ShouldNotBeEmpty();
+        connection.IsOpen.ShouldBeTrue();
+        (await connection.QueryAsync("EXPLAIN MATCH (n) RETURN n", cancellationToken: harness.Token)).ShouldNotBeEmpty();
     }
 }

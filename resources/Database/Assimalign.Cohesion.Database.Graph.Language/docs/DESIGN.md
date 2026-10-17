@@ -1,14 +1,47 @@
 # Assimalign.Cohesion.Database.Graph.Language — Design
 
-## Parameter-form diagnostics (#1102)
+## Named scalar parameters (#1102, #1138)
 
 The [shared parameter contract](../../Assimalign.Cohesion.Database.Language/docs/DESIGN.md#parameter-contract-1102)
-defines the eventual GQL binding rules; #1138 owns that parsing and execution work.
-Parameter tokens retain COHDBL001 PARAMETER here. Operand `?` and `:name` report one
-GQL0002, with QueryDiagnostics' shared supported-form message and the complete span.
-A trailing stray `?` retains the generic character message. Label predicates, labels
-and property-map colons are unaffected. ParameterConformanceTests measures this boundary.
+governs `$name` and `@name`: strip one sigil from references and map keys, then match bare names
+ordinally and case-sensitively, independently of the caller's dictionary comparer. `$1` binds
+the exact key `"1"`; GQL has no positional binding. `$name` is the ISO and Cypher spelling;
+`@name` is a Cohesion cross-language spelling, neither ISO nor Cypher. Numeric names contain
+ASCII digits only. Bare `$`/`@`, numeric-name junk, and parameters in name or DELETE positions
+are GQL0002. Operand `?` and `:name` retain #1102's supported-form message and complete span.
+References are validated before projection or whole-map capability checks: a bare sigil in
+`RETURN $`, `RETURN @`, `(n $)` or an edge filler is GQL0002 at that sigil. Valid references
+in those unsupported positions retain their named COHDBL001 capability diagnostic.
 
+`GqlParameterExpression` exposes the bare `Name` and complete reference `Location`.
+**Breaking AST change:** `GqlNodePattern.Properties` and `GqlRelationshipPattern.Properties`
+are now `IReadOnlyDictionary<string, GqlExpression>`. Each map entry must be a
+`GqlLiteralExpression` or `GqlParameterExpression`; hand-built ASTs must wrap literals.
+WHERE accepts parameters wherever it accepts scalar operands, including IN list items.
+
+Planning snapshots and normalizes the supplied map, rejects duplicate normalized keys with
+COHDBG014 even if unused, and validates every referenced value before reading data or taking
+the writer lock. Missing bindings use COHDBG001, including under EXPLAIN and in skipped Boolean
+branches or empty matches. Supplied null is bound; unused entries need no value conversion.
+Values retain their CLR runtime scalar type and use `GraphDatabase.TypeOf` promotion for
+schema matching, as the typed API does: Int32 remains Int32 on read-back. Decimal is supported
+through parameters and compares numerically with integers. Only null, Boolean, string, integral,
+Decimal and finite floating values are supported. Other values, including lists/maps, use
+COHDBG003 in maps, WHERE and indexed anchors, before storage is called. No reflection or
+runtime code generation is involved.
+
+`$$name` (ISO substituted reference) and whole-map `(n $props)` remain COHDBL001 naming the
+form. `RETURN $p` remains COHDBL001 PARAMETER PROJECTION until #1141; paging parameters
+belong to #1142. #1146 lifts list/map parameters in value positions; property maps remain scalar.
+`GqlParameterParserTests`, `GraphParameterTests`, the clause execution corpus and client/server
+wire tests pin this boundary. Parameters add no profile clause.
+
+Local Neo4j reference (behavior consulted, no code copied), relative to
+`C:/Source/repos/neo4j/neo4j`: `community/cypher/runtime-util/src/main/scala/org/neo4j/cypher/internal/runtime/createParameterArray.scala:29-44`
+checks name presence separately from a supplied null and retains the retrieved value;
+`community/cypher/interpreted-runtime/src/main/scala/org/neo4j/cypher/internal/runtime/interpreted/commands/expressions/ParameterFromSlot.scala:27-29`
+reads that bound value during evaluation. Cohesion additionally requires the shared named-map
+contract and validates scalars while planning.
 
 ## Standard decision (#193)
 
@@ -90,11 +123,11 @@ The builtin-function table is empty because the executor implements no functions
 
 | Clause | Accepted subset | Execution |
 | --- | --- | --- |
-| `MATCH` | Comma-separated finite node/relationship chains; optional `variable =` path assignment, label expressions, literal property maps; every ISO full and abbreviated edge except the tilde forms | Planner chooses an indexed anchor when available; executor matches bounded relationship-unique trails and binds named paths in traversal order |
+| `MATCH` | Comma-separated finite node/relationship chains; optional `variable =` path assignment, label expressions, scalar literal/parameter property maps; every ISO full and abbreviated edge except the tilde forms | Planner chooses an indexed anchor when available; executor matches bounded relationship-unique trails and binds named paths in traversal order |
 | `WHERE` | Boolean and scalar expressions: comparisons, labels, AND/OR/XOR/NOT, IS null/truth tests, arithmetic, concatenation, IN lists and string predicates | Keeps TRUE only; see [DIALECT.md](DIALECT.md) and scalar expressions below |
 | `EXPLAIN` | One MATCH/RETURN, INSERT/CREATE, or MATCH [DETACH] DELETE statement | Shared description rows without executing any read expansion or write; Cohesion extension |
 | `RETURN` | Bound node/relationship/path variables or scalar properties, optional `AS` aliases | Projects elements or scalar values in source order; the engine path-request API requires exactly one bound entity or path projection |
-| `INSERT` | Literal node/path insertion, optionally following a match; a node takes a label conjunction (`:A&B`, `:A:B`), a relationship one type and a directed edge (`-[:T]->`, `<-[:T]-`) | Inserts nodes and relationships transactionally |
+| `INSERT` | Scalar literal/parameter node/path insertion, optionally following a match; a node takes a label conjunction (`:A&B`, `:A:B`), a relationship one type and a directed edge (`-[:T]->`, `<-[:T]-`) | Inserts nodes and relationships transactionally |
 | `CREATE` | Same insertion grammar as `INSERT`; compatibility extension | Same transactional insertion path |
 | `DELETE` | Bound node/relationship variables following a match | Refuses deleting a node that still has incident relationships |
 | `DETACH DELETE` | Bound node/relationship variables following a match | Deletes incident relationships with the node in one transaction |
@@ -148,7 +181,9 @@ sum          := product (('+' | '-') product)*
 product      := signed (('*' | '/' | '%') signed)*
 signed       := ('+' | '-') signed | operand
 labeled      := variable (IS [NOT] LABELED | ':') label-expr
-operand      := variable '.' property | scalar-literal | labeled | '(' predicate ')'
+operand      := variable '.' property | scalar-literal | parameter | labeled | '(' predicate ')'
+parameter    := ('$' | '@') (identifier | ASCII-digits)
+properties   := '{' [property ':' (scalar-literal | parameter) (',' property ':' (scalar-literal | parameter))*] '}'
 projection   := variable ['.' property] [AS alias]
 catalog      := SHOW (LABELS | RELATIONSHIP TYPES | PROPERTY KEYS | INDEXES | OBJECT OWNERSHIP)
 ```
@@ -207,7 +242,7 @@ on Execute, including `EXPLAIN MATCH (a:Person) RETURN a`. ExecutePaths rejects 
 
 | Code | Meaning |
 | --- | --- |
-| `COHDBL001` | Recognized construct outside the executable profile, reported once at its own span: optional matching, procedures, functions, parameters, collection literals, quantifiers, ordering, set operations, server/session scope, undirected (tilde) edges, path mode and path search prefixes, `NODETACH DELETE`, and `MERGE` |
+| `COHDBL001` | Recognized construct outside the executable profile, reported once at its own span: optional matching, procedures, functions, substituted/whole-map/projection parameters, collection literals, quantifiers, ordering, set operations, server/session scope, undirected (tilde) edges, path mode and path search prefixes, `NODETACH DELETE`, and `MERGE` |
 | `GQL0001` | Empty statement |
 | `GQL0002` | Malformed supported syntax, invalid statement composition, leftover tokens, or a character GQL does not use (`?`, `#`, `^`, ```, ...) |
 | `GQL0003` | Unterminated string, quoted name, or block comment |

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using Assimalign.Cohesion.Database.Execution.Internal;
 using Assimalign.Cohesion.Database.Language;
 
 namespace Assimalign.Cohesion.Database.Graph.Language;
@@ -128,7 +129,24 @@ public sealed partial class GqlQueryParser
             if (!Failed && Current.Type == TokenType.Dot) { Unsupported("NESTED PROPERTY ACCESS", Current); }
             return new GqlPropertyExpression(variable, property, Span(start, Previous));
         }
-        return ParseLiteral();
+        return ParseScalar();
+    }
+
+    private void RejectUnsupportedParameter(string form)
+    {
+        var parameter = Current;
+        _ = ParseScalar();
+        if (!Failed) { Unsupported(form, parameter); }
+    }
+
+    private GqlExpression ParseScalar()
+    {
+        if (Current.Type != TokenType.Parameter) { return ParseLiteral(); }
+        var parameter = Current;
+        Advance();
+        if (!ParameterBindings.IsValidReference(parameter.Text))
+        { Error("GQL0002", "Expected a named parameter after $ or @.", parameter); }
+        return new GqlParameterExpression(ParameterBindings.BareName(parameter.Text), Span(parameter, parameter));
     }
 
     private GqlLiteralExpression ParseLiteral()

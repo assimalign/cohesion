@@ -36,12 +36,13 @@ including GQL; it is not an ISO GQL or openCypher spelling.
 | --- | --- | --- |
 | SQL | `$name`, `@name`, `$_x`, `$1`, `@1` | Parsing and execution under this contract |
 | OQL | `$name`, `@name`, `$_x`, `$1`, `@1` | Parsing and execution under this contract |
-| GQL | `$name`, `@name`, `$_x`, `$1`, `@1` (contract) | #1138 owns parsing/binding; parameter tokens remain `COHDBL001 PARAMETER` until it lands |
+| GQL | `$name`, `@name`, `$_x`, `$1`, `@1` | Parsing and scalar binding in property maps and WHERE (#1138); RETURN parameters remain COHDBL001 until #1141 |
 
 SQL uses `SQL0003`, OQL `OQL0002` and GQL `GQL0002` for unsupported forms.
 `QueryDiagnostics.UnsupportedParameterForm` owns their shared message. SQL unbound
 parameters carry `COHSQLE020`, normalized-key collisions `COHSQLE023`; OQL uses
-`COHDOC005` and `COHDOC009` respectively, through `DatabaseException.Diagnostics`.
+`COHDOC005` and `COHDOC009` respectively, through `DatabaseException.Diagnostics`. GQL uses `COHDBG001` for unbound references and
+`COHDBG014` for collisions; unsupported scalar values use `COHDBG003`.
 The wire protocol is unchanged. PostgreSQL's scanner separately recognizes `$` plus
 ASCII digits (`decdigit`, `src/backend/parser/scan.l:377`, `:398`) and rejects numeric-name
 junk (`:415-420`, `:969-983`, local reference clone); Cohesion extends that grammar to named sigils and
@@ -49,7 +50,7 @@ uses the request map's exact digit spelling rather than PostgreSQL's positional 
 
 D15 remains open. The implemented default is the stateless, link-compiled internal
 `ParameterBindings` source in `Database.Execution/shared/`, consumed explicitly by SQL,
-Documents and their language parsers. #1138 can link the same source for Graph. It
+Documents, Graph and their language parsers. It
 adds no public bind API or visibility grant, and Execution still references only Types.
 
 ## Design intent

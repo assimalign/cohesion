@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Assimalign.Cohesion.Database.Execution.Internal;
 using Assimalign.Cohesion.Database.Graph.Language;
 using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Database.Types;
@@ -32,6 +33,9 @@ internal sealed record GraphPlan(GqlQueryExpression Query, IReadOnlyList<GraphPa
     /// </remarks>
     internal bool MatchesNothing { get; init; }
 
+    /// <summary>The normalized, execution-local snapshot of named scalar bindings.</summary>
+    internal IReadOnlyDictionary<string, object?>? Parameters { get; init; }
+
     /// <summary>
     /// Gets the <c>COHDBG010</c>/<c>COHDBG011</c> warnings of a read-only statement that names a
     /// label or relationship type the database does not have, in first-mention order; empty for a
@@ -44,6 +48,7 @@ internal sealed partial class GraphPlanner
 {
     private readonly GraphDatabase _database;
     private readonly TransactionSnapshot _snapshot;
+    private IReadOnlyDictionary<string, object?>? _parameters;
 
     /// <summary>Initializes a new instance of the <see cref="GraphPlanner"/> class.</summary>
     /// <param name="database">The graph database whose catalog and store resolve labels, relationship types, and indexes.</param>
@@ -62,12 +67,15 @@ internal sealed partial class GraphPlanner
     /// <c>query.readOnly</c> (<c>cypher-planner/.../compiler/planner/CheckForUnresolvedTokens.scala:53</c>).
     /// </summary>
     /// <param name="query">The statement to plan.</param>
+    /// <param name="parameters">The named bindings; normalization and validation precede execution.</param>
     /// <returns>The plan.</returns>
     /// <exception cref="DatabaseException">The statement is invalid (<c>COHDBG001</c>, <c>COHDBG003</c>).</exception>
-    internal GraphPlan Plan(GqlQueryExpression query)
+    internal GraphPlan Plan(GqlQueryExpression query, IReadOnlyDictionary<string, object?>? parameters = null)
     {
         try
         {
+            _parameters = ParameterBindings.Normalize(parameters, name => new GraphPlanningException(
+                "COHDBG014", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ParameterCollision, name), query.Location));
             return PlanCore(query);
         }
         catch (GraphPlanningException exception) when (exception.Diagnostics[0].Start is null && query.Location is not null)
@@ -80,7 +88,7 @@ internal sealed partial class GraphPlanner
     {
         var variables = new Dictionary<string, BindingKind>(StringComparer.Ordinal);
         var paths = new List<GraphPathPlan>();
-        var anchors = new AnchorSources(_database, _snapshot, query.Predicate);
+        var anchors = new AnchorSources(_database, _snapshot, query.Predicate, _parameters);
         var tokens = new GraphTokenResolver(_database.Catalog, _snapshot);
         bool matchesNothing = false;
         foreach (var path in query.Matches)
@@ -103,6 +111,7 @@ internal sealed partial class GraphPlanner
         return new GraphPlan(query, paths)
         {
             MatchesNothing = matchesNothing,
+            Parameters = _parameters,
             Warnings = readOnly ? tokens.Warnings : [],
         };
 
@@ -158,6 +167,9 @@ internal sealed partial class GraphPlanner
                 switch (expression)
                 {
                     case GqlLiteralExpression:
+                        break;
+                    case GqlParameterExpression parameter:
+                        GraphExpressionEvaluator.Parameter(parameter, _parameters);
                         break;
                     case GqlPropertyExpression property:
                         RequireVariable(property.Variable, entity: true);
@@ -314,13 +326,14 @@ internal sealed partial class GraphPlanner
     }
 
     /// <summary>
-    /// Validates a pattern's literal property map. Storage cannot hold an empty or all-whitespace
+    /// Validates a pattern's scalar literal/parameter property map. Storage cannot hold an empty or all-whitespace
     /// key, and an ISO delimited name such as <c>{" ": 1}</c> can spell one, so insertion rejects
     /// it here, before anything is written, instead of letting the store throw.
     /// </summary>
-    private static void ValidateProperties(IReadOnlyDictionary<string, object?>? properties, bool creating)
+    private void ValidateProperties(IReadOnlyDictionary<string, GqlExpression>? properties, bool creating)
     {
         if (properties is null) { throw new GraphPlanningException("COHDBG001", "A pattern requires a property map.", null); }
+        foreach (var value in properties.Values) { GraphExpressionEvaluator.Scalar(value, _parameters); }
         if (!creating) { return; }
         foreach (string key in properties.Keys)
         {
@@ -393,7 +406,7 @@ internal sealed partial class GraphPlanner
     // plus the indexes its labels own, never their product: Neo4j's leaf planner likewise groups the
     // predicates once and visits only each label's own index descriptors
     // (cypher-planner .../leafplanner/index/NodeIndexLeafPlanner.scala:184, :201, :248-261, :279-296).
-    private static GraphAnchor ChooseAnchor(GqlPathPattern path, AnchorSources sources)
+    private GraphAnchor ChooseAnchor(GqlPathPattern path, AnchorSources sources)
     {
         for (int i = 0; i < path.Nodes.Count; i++)
         {
@@ -427,12 +440,13 @@ internal sealed partial class GraphPlanner
     }
 
     /// <summary>Each key's first non-null inline value and its position among the node's non-null values.</summary>
-    private static Dictionary<string, FirstValue> FirstValues(IReadOnlyDictionary<string, object?> properties)
+    private Dictionary<string, FirstValue> FirstValues(IReadOnlyDictionary<string, GqlExpression> properties)
     {
         var values = new Dictionary<string, FirstValue>(StringComparer.Ordinal);
         foreach (var property in properties)
         {
-            if (property.Value is not null) { values.TryAdd(property.Key, new FirstValue(values.Count, property.Value)); }
+            var value = GraphExpressionEvaluator.Scalar(property.Value, _parameters);
+            if (value is not null) { values.TryAdd(property.Key, new FirstValue(values.Count, value)); }
         }
         return values;
     }
@@ -442,7 +456,7 @@ internal sealed partial class GraphPlanner
 
     /// <summary>
     /// What anchor selection reads from outside the pattern, each read at most once per plan: the
-    /// visible indexes grouped by label, and every variable's <c>variable.key = literal</c>
+    /// visible indexes grouped by label, and every variable's <c>variable.key = literal-or-parameter</c>
     /// equalities from the <c>WHERE</c> chain.
     /// </summary>
     private sealed class AnchorSources
@@ -450,6 +464,7 @@ internal sealed partial class GraphPlanner
         private static readonly Dictionary<string, FirstValue> _none = new(StringComparer.Ordinal);
         private readonly GraphDatabase _database;
         private readonly TransactionSnapshot _snapshot;
+        private readonly IReadOnlyDictionary<string, object?>? _parameters;
         private readonly GqlExpression? _predicate;
         private Dictionary<string, List<string>>? _indexedKeys;
         private Dictionary<string, Dictionary<string, FirstValue>>? _equalities;
@@ -458,11 +473,13 @@ internal sealed partial class GraphPlanner
         /// <param name="database">The database whose store lists the visible indexes.</param>
         /// <param name="snapshot">The snapshot the index list observes.</param>
         /// <param name="predicate">The statement's <c>WHERE</c> predicate, if any.</param>
-        public AnchorSources(GraphDatabase database, TransactionSnapshot snapshot, GqlExpression? predicate)
+        /// <param name="parameters">The normalized bindings used for scalar equality values.</param>
+        public AnchorSources(GraphDatabase database, TransactionSnapshot snapshot, GqlExpression? predicate, IReadOnlyDictionary<string, object?>? parameters)
         {
             _database = database;
             _snapshot = snapshot;
             _predicate = predicate;
+            _parameters = parameters;
         }
 
         /// <summary>The indexed property keys of each label with at least one visible index.</summary>
@@ -494,7 +511,7 @@ internal sealed partial class GraphPlanner
         /// explicit stack. Anchors are chosen before the predicate is validated, so a malformed
         /// hand-built chain or a null name is skipped here and rejected by validation.
         /// </summary>
-        private static Dictionary<string, Dictionary<string, FirstValue>> Collect(GqlExpression? predicate)
+        private Dictionary<string, Dictionary<string, FirstValue>> Collect(GqlExpression? predicate)
         {
             var collected = new Dictionary<string, Dictionary<string, FirstValue>>(StringComparer.Ordinal);
             if (predicate is null) { return collected; }
@@ -508,8 +525,10 @@ internal sealed partial class GraphPlanner
                     continue;
                 }
                 if (expression is not GqlBinaryExpression { Operator: "=" } binary) { continue; }
-                if (binary.Left is GqlPropertyExpression left && binary.Right is GqlLiteralExpression right) { Add(left, right.Value); }
-                else if (binary.Right is GqlPropertyExpression property && binary.Left is GqlLiteralExpression literal) { Add(property, literal.Value); }
+                if (binary.Left is GqlPropertyExpression left && binary.Right is GqlLiteralExpression or GqlParameterExpression)
+                { Add(left, GraphExpressionEvaluator.Scalar(binary.Right, _parameters)); }
+                else if (binary.Right is GqlPropertyExpression property && binary.Left is GqlLiteralExpression or GqlParameterExpression)
+                { Add(property, GraphExpressionEvaluator.Scalar(binary.Left, _parameters)); }
             }
             return collected;
 

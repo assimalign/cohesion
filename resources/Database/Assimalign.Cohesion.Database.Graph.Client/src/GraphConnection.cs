@@ -37,7 +37,7 @@ public sealed class GraphConnection : IAsyncDisposable
 
     /// <summary>Executes a scalar projection or catalog statement and materializes its rows.</summary>
     /// <param name="statement">The GQL statement.</param>
-    /// <param name="parameters">Named scalar parameters, when supported by the server language.</param>
+    /// <param name="parameters">Scalar bindings for $name and @name. Bare names match case-sensitively; one leading sigil on a map key is ignored.</param>
     /// <param name="cancellationToken">Cancellation token for the exchange.</param>
     /// <returns>The columns, rows, and affected count.</returns>
     /// <exception cref="ArgumentException">The statement is empty.</exception>
@@ -51,7 +51,7 @@ public sealed class GraphConnection : IAsyncDisposable
 
     /// <summary>Executes a graph mutation and returns its affected entity count.</summary>
     /// <param name="statement">The GQL statement.</param>
-    /// <param name="parameters">Named scalar parameters, when supported by the server language.</param>
+    /// <param name="parameters">Scalar bindings for $name and @name. Bare names match case-sensitively; one leading sigil on a map key is ignored.</param>
     /// <param name="cancellationToken">Cancellation token for the exchange.</param>
     /// <returns>The affected count, or -1 for a row-returning statement.</returns>
     /// <exception cref="ArgumentException">The statement is empty.</exception>
@@ -65,14 +65,15 @@ public sealed class GraphConnection : IAsyncDisposable
 
     /// <summary>Streams paths selected by a single bound path, node, or relationship variable.</summary>
     /// <param name="statement">A MATCH statement returning one bound path or entity variable.</param>
-    /// <param name="parameters">Named scalar parameters, when supported by the server language.</param>
+    /// <param name="parameters">Scalar bindings for $name and @name. Bare names match case-sensitively; one leading sigil on a map key is ignored.</param>
     /// <param name="cancellationToken">Cancellation token for the full enumeration.</param>
     /// <returns>Paths retaining node and relationship identities, labels, types, and properties.</returns>
     /// <exception cref="ArgumentException">The statement is empty.</exception>
     /// <exception cref="ObjectDisposedException">The connection is disposed.</exception>
     /// <exception cref="InvalidOperationException">Another exchange is active.</exception>
     /// <exception cref="OperationCanceledException">The exchange is canceled, which marks the connection broken.</exception>
-    /// <exception cref="GraphClientException">The query or stream failed; its connection is discarded.</exception>
+    /// <exception cref="GraphClientException">The server rejected the query or the stream failed.
+    /// A terminal statement rejection before path output keeps the connection; other stream failures discard it.</exception>
     /// <remarks>Enumerate to completion to verify the server's terminal path count. Disposing an
     /// unfinished enumeration cancels the exchange and prevents reuse of that session.</remarks>
     public async IAsyncEnumerable<GraphPath> QueryPathsAsync(string statement,
@@ -127,6 +128,11 @@ public sealed class GraphConnection : IAsyncDisposable
                     try
                     {
                         path = await ReadPathAsync(stream, length, cancellationToken).ConfigureAwait(false);
+                        if (path is null && exchange.Rejection is { } rejection)
+                        {
+                            // EOF has joined the shared worker and released the active exchange.
+                            throw new GraphClientException(rejection.Code, rejection.Message, rejection);
+                        }
                     }
                     catch (Exception exception) when (GraphClientEventSource.CaptureFailure(exception, out failure))
                     {

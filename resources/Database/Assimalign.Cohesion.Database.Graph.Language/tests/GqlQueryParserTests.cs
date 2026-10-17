@@ -22,6 +22,8 @@ public class GqlQueryParserTests
     [InlineData("MATCH (a:Person {name: 'Alice'}), (b:Person {name: 'Bob'}) INSERT (a)-[r:KNOWS]->(b) RETURN r")]
     [InlineData("MATCH (a) WHERE a.age >= 18 AND a.name <> 'Bob' RETURN a.name AS name")]
     [InlineData("MATCH (a) WHERE (a.active = TRUE AND (a.score < 10.5)) RETURN a")]
+    [InlineData("MATCH (a) WHERE a.age = $age RETURN a")]
+    [InlineData("MATCH (a) WHERE @age = a.age RETURN a")]
     [InlineData("MATCH (a) WHERE a.left = a.right RETURN a")]
     [InlineData("MATCH (a) WHERE NULL = a.absent RETURN a")]
     [InlineData("INSERT (a:Person {name: 'Alice', age: -42, active: TRUE, optional: NULL})")]
@@ -93,7 +95,6 @@ public class GqlQueryParserTests
     [InlineData("MATCH (a) RETURN *")]
     [InlineData("MATCH (a)-[r*1..3]->(b) RETURN a")]
     [InlineData("MATCH (a)-[r]->{1,3}(b) RETURN a")]
-    [InlineData("MATCH (a) WHERE a.age = $age RETURN a")]
     [InlineData("INSERT (:Person {tags: [1, 2]})")]
     [InlineData("MATCH (a) DELETE a RETURN a")]
     [InlineData("CALL foo()")]
@@ -120,11 +121,11 @@ public class GqlQueryParserTests
         var path = query.Matches[0];
         path.Nodes.Select(node => node.Variable).ShouldBe(["a", "b", "c"]);
         path.Nodes[0].Labels.ShouldBe(["Person"]);
-        path.Nodes[0].Properties["name"].ShouldBe("Alice");
+        path.Nodes[0].Properties["name"].ShouldBeOfType<GqlLiteralExpression>().Value.ShouldBe("Alice");
         path.Relationships[0].Variable.ShouldBe("r");
         path.Relationships[0].Type.ShouldBe("KNOWS");
         path.Relationships[0].Direction.ShouldBe(GqlPatternDirection.Incoming);
-        path.Relationships[0].Properties["weight"].ShouldBe(2L);
+        path.Relationships[0].Properties["weight"].ShouldBeOfType<GqlLiteralExpression>().Value.ShouldBe(2L);
         path.Relationships[1].Direction.ShouldBe(GqlPatternDirection.Undirected);
         path.Nodes[0].LabelExpression.ShouldBe(new GqlLabelName("Person"));
         path.Relationships[0].LabelExpression.ShouldBe(new GqlLabelName("KNOWS"));
@@ -189,10 +190,10 @@ public class GqlQueryParserTests
     {
         var properties = Parse("INSERT (:P {min: -9223372036854775808, max: 9223372036854775807, text: 'a''b', n: -2.5e2})")
             .GqlExpression.Creates.Single().Nodes.Single().Properties;
-        properties["min"].ShouldBe(long.MinValue);
-        properties["max"].ShouldBe(long.MaxValue);
-        properties["text"].ShouldBe("a'b");
-        properties["n"].ShouldBe(-250d);
+        properties["min"].ShouldBeOfType<GqlLiteralExpression>().Value.ShouldBe(long.MinValue);
+        properties["max"].ShouldBeOfType<GqlLiteralExpression>().Value.ShouldBe(long.MaxValue);
+        properties["text"].ShouldBeOfType<GqlLiteralExpression>().Value.ShouldBe("a'b");
+        properties["n"].ShouldBeOfType<GqlLiteralExpression>().Value.ShouldBe(-250d);
     }
 
     [Fact]
@@ -238,7 +239,7 @@ public class GqlQueryParserTests
             var parsed = (GqlQueryStatement)parser.Parse(source);
             parsed.Diagnostics.ShouldBeEmpty();
             parsed.GqlExpression.Text.ShouldBe(source);
-            parsed.GqlExpression.Creates[0].Nodes[0].Properties["number"].ShouldBe((long)index);
+            parsed.GqlExpression.Creates[0].Nodes[0].Properties["number"].ShouldBeOfType<GqlLiteralExpression>().Value.ShouldBe((long)index);
         })));
     }
 
