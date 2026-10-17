@@ -270,4 +270,56 @@ public sealed class GraphClientWireTests
         (await current.QueryAsync("SHOW LABELS", cancellationToken: harness.Token)).ShouldBeEmpty();
         harness.Server.Sessions.ShouldHaveSingleItem().Id.ShouldBe(sessionId);
     }
+
+    [Theory(DisplayName = "Cohesion Test [Graph.Client] - WHERE: value errors complete before a header and retain the pooled session")]
+    [InlineData("a.age / 0")]
+    [InlineData("a.age % 0")]
+    [InlineData("9223372036854775807 + a.age")]
+    [InlineData("'a' + 1")]
+    [InlineData("a.age")]
+    public async Task QueryAsync_WhereValueError_ShouldReuseExactSession(string predicate)
+    {
+        // Arrange
+        await using var harness = await GraphClientTestHarness.StartAsync();
+        Guid sessionId;
+        await using (var connection = await harness.Client.ConnectAsync(harness.Token))
+        {
+            await connection.ExecuteAsync("INSERT (:Person {age: 42})", cancellationToken: harness.Token);
+            sessionId = harness.Server.Sessions.ShouldHaveSingleItem().Id;
+
+            // Act
+            var error = await Should.ThrowAsync<GraphClientException>(async () =>
+                await connection.QueryAsync("MATCH (a:Person) WHERE " + predicate + " RETURN a.age", cancellationToken: harness.Token));
+
+            // Assert: only a failure before ResultHeader certifies completion and permits reuse.
+            error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
+            error.Message.ShouldStartWith("COHDBG013: ", Case.Sensitive);
+            connection.IsOpen.ShouldBeTrue();
+        }
+        await using var reused = await harness.Client.ConnectAsync(harness.Token);
+        (await reused.QueryAsync("SHOW LABELS", cancellationToken: harness.Token)).Count.ShouldBe(1);
+        harness.Server.Sessions.ShouldHaveSingleItem().Id.ShouldBe(sessionId);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Graph.Client] - WHERE: OR, IN, string predicates and arithmetic agree with in-process execution")]
+    public async Task QueryAsync_FullWhereExpression_ShouldMatchEngineRows()
+    {
+        // Arrange
+        await using var harness = await GraphClientTestHarness.StartAsync();
+        await using var connection = await harness.Client.ConnectAsync(harness.Token);
+        await connection.ExecuteAsync("INSERT (:Person {name: 'Alice', age: 42}), (:Person {name: 'Bob', age: 17}), (:Person {name: 'Cara', age: 30})",
+            cancellationToken: harness.Token);
+        const string query = "MATCH (a:Person) WHERE a.age IN [17, 42] AND (a.name STARTS WITH 'Al' OR a.age + 1 = 18) RETURN a.name";
+        await using var session = await harness.Database.CreateSessionAsync(harness.Token);
+        await using var direct = (Assimalign.Cohesion.Database.Execution.DatabaseResultSet)await session.ExecuteAsync(query, cancellationToken: harness.Token);
+        List<string> expected = [];
+        await foreach (var row in direct.GetRowsAsync(harness.Token)) { expected.Add(row.GetString(0)!); }
+
+        // Act
+        var result = await connection.QueryAsync(query, cancellationToken: harness.Token);
+
+        // Assert
+        expected.ShouldBe(["Alice", "Bob"]);
+        result.Select(row => (string)row[0]!).ShouldBe(expected);
+    }
 }

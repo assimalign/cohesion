@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
+  <data name="ArithmeticFailure" xml:space="preserve"><value>Graph arithmetic failed: division by zero, overflow or a non-finite result.</value></data>
+  <data name="BooleanRequired" xml:space="preserve"><value>A Boolean expression requires TRUE, FALSE or NULL.</value></data>
+  <data name="NumericRequired" xml:space="preserve"><value>A numeric sign requires a numeric operand.</value></data>
+  <data name="ArithmeticOperands" xml:space="preserve"><value>Arithmetic requires numeric operands; string concatenation requires two strings.</value></data>
+  <data name="LogicalNodeRequired" xml:space="preserve"><value>AND joins predicates in a GqlLogicalExpression; a GqlBinaryExpression holds a scalar operation.</value></data>
+  <data name="MembershipListRequired" xml:space="preserve"><value>IN requires a list.</value></data>
+  <data name="UnsupportedStringPredicate" xml:space="preserve"><value>Unsupported string predicate.</value></data>
+</root>

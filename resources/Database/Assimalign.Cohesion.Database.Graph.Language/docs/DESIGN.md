@@ -73,7 +73,7 @@ when both are set, the planner requires `Labels` to name exactly the conjunction
 the single name (`COHDBG001` otherwise). `GqlPatternDirection.LeftOrRight` is the ISO left-or-right
 direction. A `WHERE` labeled predicate is `GqlLabeledPredicate` (variable, expression, `IsNegated`),
 a Boolean primary beside the comparisons. A `WHERE` conjunction is one n-ary `GqlLogicalExpression`
-(`Operator` `GqlLogicalOperator.And`, `Operands`); `GqlBinaryExpression` holds one comparison, and the
+(`Operator` And, Or or Xor, `Operands`); `GqlBinaryExpression` holds a comparison or arithmetic/concatenation, and the
 planner rejects a binary node whose operator is `AND` (`COHDBG001`).
 
 The label records compare structurally: two trees are equal when they have the same kinds in the
@@ -91,7 +91,7 @@ The builtin-function table is empty because the executor implements no functions
 | Clause | Accepted subset | Execution |
 | --- | --- | --- |
 | `MATCH` | Comma-separated finite node/relationship chains; optional `variable =` path assignment, label expressions, literal property maps; every ISO full and abbreviated edge except the tilde forms | Planner chooses an indexed anchor when available; executor matches bounded relationship-unique trails and binds named paths in traversal order |
-| `WHERE` | Scalar `=`, `<>`, `!=`, `<`, `<=`, `>`, `>=` comparisons and labeled predicates (`n IS [NOT] LABELED A`, `n:A`) joined by `AND`, one n-ary chain of any length; predicate parentheses of any depth the stack allows | Filters bound properties against literal or property operands, and bound elements by label expression |
+| `WHERE` | Boolean and scalar expressions: comparisons, labels, AND/OR/XOR/NOT, IS null/truth tests, arithmetic, concatenation, IN lists and string predicates | Keeps TRUE only; see [DIALECT.md](DIALECT.md) and scalar expressions below |
 | `RETURN` | Bound node/relationship/path variables or scalar properties, optional `AS` aliases | Projects elements or scalar values in source order; the engine path-request API requires exactly one bound entity or path projection |
 | `INSERT` | Literal node/path insertion, optionally following a match; a node takes a label conjunction (`:A&B`, `:A:B`), a relationship one type and a directed edge (`-[:T]->`, `<-[:T]-`) | Inserts nodes and relationships transactionally |
 | `CREATE` | Same insertion grammar as `INSERT`; compatibility extension | Same transactional insertion path |
@@ -134,10 +134,19 @@ label-expr   := label-term ('|' label-term)*
 label-term   := label-factor ('&' label-factor)*
 label-factor := '!' label-primary | label-primary
 label-primary:= label | '%' | '(' label-expr ')'
-predicate    := comparison ('AND' comparison)*
-comparison   := operand comparison-operator operand | labeled | '(' predicate ')'
+predicate    := and-expr (('OR' | 'XOR') and-expr)*
+and-expr     := not-expr ('AND' not-expr)*
+not-expr     := NOT not-expr | test
+test         := comparison [IS [NOT] (NULL | TRUE | FALSE | UNKNOWN)]
+comparison   := concat [comparison-operator concat
+                     | IN '[' [predicate (',' predicate)*] ']'
+                     | (STARTS WITH | ENDS WITH | CONTAINS) concat]
+concat       := sum ('||' sum)*
+sum          := product (('+' | '-') product)*
+product      := signed (('*' | '/' | '%') signed)*
+signed       := ('+' | '-') signed | operand
 labeled      := variable (IS [NOT] LABELED | ':') label-expr
-operand      := variable '.' property | scalar-literal
+operand      := variable '.' property | scalar-literal | labeled | '(' predicate ')'
 projection   := variable ['.' property] [AS alias]
 catalog      := SHOW (LABELS | RELATIONSHIP TYPES | PROPERTY KEYS | INDEXES | OBJECT OWNERSHIP)
 ```
@@ -146,7 +155,7 @@ The repeated-colon form of `label-spec` applies to node patterns only; a relatio
 `LABELED` is positional, like the path mode words: only after `IS` or `IS NOT` in a predicate does
 it introduce a label expression, so it remains usable as a name. `!` negates one primary, as ISO
 writes it, so `!!A` is `GQL0002` and `!(!A)` parses. Each `(...)*` repetition in `label-spec`,
-`label-expr`, `label-term` and `predicate` builds one n-ary node; parentheses are the only recursion.
+`label-expr`, `label-term` builds one n-ary label node; Boolean runs build n-ary logical nodes. Scalar groups, signs, NOT and IN lists recurse with stack checks.
 
 A mutation can start without `MATCH`; a read or deletion must bind variables through `MATCH`.
 Named assignment is a MATCH-only construct: `INSERT p = (...)` and `CREATE p = (...)` are
@@ -182,14 +191,14 @@ The parser describes only the metadata subject; it never accesses or caches cata
 | --- | --- |
 | `COHDBL001` | Recognized construct outside the executable profile, reported once at its own span: optional matching, procedures, functions, parameters, collection literals, quantifiers, ordering, set operations, server/session scope, undirected (tilde) edges, path mode and path search prefixes, `NODETACH DELETE`, and `MERGE` |
 | `GQL0001` | Empty statement |
-| `GQL0002` | Malformed supported syntax, invalid statement composition, leftover tokens, or a character GQL does not use (`?`, `#`, `^`, `§`, ...) |
+| `GQL0002` | Malformed supported syntax, invalid statement composition, leftover tokens, or a character GQL does not use (`?`, `#`, `^`, ```, ...) |
 | `GQL0003` | Unterminated string, quoted name, or block comment |
 | `GQL0004` | Invalid or out-of-range numeric literal |
 | `GQL0005` | Pattern length limit exceeded: a path pattern holds at most 64 relationships. Label expressions and predicates have no length or nesting limit (#1139 follow-up) |
 | `GQL0006` | Duplicate literal property key |
 | `GQL0007` | `Graph catalog introspection is read-only.`: mutation composed with `SHOW` |
 | `GQL0008` | A `--` comment begins exactly where a node pattern's `)` or an edge pattern's `]` ends, in `MATCH`, `INSERT` or `CREATE`: a Cypher arrow (`-->`, `--`) that would hide the rest of the line. Reported at the `--`; the message names `->`, `<-` and `-` |
-| `GQL0009` | The statement nests parentheses (in a label expression or a predicate) deeper than the parsing thread's stack can follow. Reported at the `(` that could not be entered; the parse stops there and reports nothing else. The same text parses on a thread with more stack, so the engine's `GraphQueryRequest.FromGql` reports it as `COHDBG008`, statement too complex, not as a parse error |
+| `GQL0009` | The statement nests groups, unary expressions or IN lists deeper than the parsing thread's stack can follow. Reported at the group, unary or list token that could not be entered; the parse stops there and reports nothing else. The same text parses on a thread with more stack, so the engine's `GraphQueryRequest.FromGql` reports it as `COHDBG008`, statement too complex, not as a parse error |
 
 Locations use zero-based absolute UTF-16 offsets with exclusive ends and one-based line numbers.
 A line breaks at LF, CR, NEL (U+0085), LS (U+2028) or PS (U+2029), and CR LF is one break
@@ -309,7 +318,7 @@ node takes a pure conjunction (`:A`, `:A&B`, `:A:B`) and may introduce new label
 needs one type. A labeled predicate (`n IS LABELED A|B`, `n IS NOT LABELED A`, `n:A|B`) resolves
 its names against the catalog of the variable's kind, a path variable is `COHDBG003`, and an
 unbound one `COHDBG001`; when gql-optional-match lands, a variable without a binding yields
-UNKNOWN. Whichever of this item and gql-where-expr lands second adds the `NOT`/`OR` combinations
+UNKNOWN. The #1140 conformance corpus adds the `NOT`/`OR` combinations
 with labeled predicates. A `:` directly after an element variable in a predicate is the labeled
 predicate; an operand that begins with `:` keeps shared-parameters' coded `:name` rejection, and
 whichever of the two lands second adds the other's case.
@@ -410,9 +419,9 @@ Cohesion now does the same:
   quadratic in a plain chain's length, and merging a later group would cost a copy of its operands
   per enclosing group; the meaning is identical because `&`, `|` and `AND` are associative. Flattening
   never crosses a precedence level: `A|B&C` is `Or(A, And(B, C))` and `!A&B` is `And(Not(A), B)`.
-- **Nesting.** The grammar recurses only through parentheses. Before each descent the parser calls
+- **Nesting.** The label grammar recurses through parentheses; scalar expressions also recurse through NOT, signs and IN lists. Before each such descent the parser calls
   `RuntimeHelpers.TryEnsureSufficientExecutionStack`; on a thread out of stack it reports `GQL0009` at
-  that `(` and stops, instead of overflowing. Every recursive engine walk (label evaluation and
+  the group, unary or list token and stops, instead of overflowing. Every recursive engine walk (label evaluation and
   predicate evaluation) calls `RuntimeHelpers.EnsureSufficientExecutionStack`, and the engine reports
   the exhausted stack as `COHDBG008`. The walks that need no recursion do not recurse: shape
   validation, name collection, anchor equalities, `ToString`, structural equality and hashing use an
@@ -432,6 +441,108 @@ rule, precedence after flattening, the renderer round trip, 10,000 nested groups
 `GQL0009` on a small one. The engine's `GqlLabelChainExecutionTests` and Graph.Client's
 `GraphLabelChainWireTests` pin execution, insertion, `COHDBG008` and `COHDBG009` in process and over
 the wire.
+
+## Scalar WHERE expressions (#1140)
+
+The public AST adds GqlUnaryExpression, GqlIsNullExpression, GqlTruthTestExpression,
+GqlInExpression, GqlStringPredicateExpression (with its operator enum) and GqlListExpression.
+Lists occur only as IN's right operand; their items are scalar expressions. Lists elsewhere
+and list-valued parameters belong to #1146. The planner validates every child with an explicit
+stack and rejects malformed hand-built shapes with COHDBG001. Index anchoring and required
+unknown-name inference descend only through AND. Neither OR/XOR nor NOT can supply an
+anchor or make an unknown label empty the whole plan.
+
+Precedence from weakest to strongest; binary runs associate left, comparisons do not chain:
+
+| Level | Operators |
+| --- | --- |
+| 1 | OR, XOR (one left-associated level) |
+| 2 | AND |
+| 3 | NOT |
+| 4 | Comparisons, IN, string predicates, followed by optional IS [NOT] NULL/TRUE/FALSE/UNKNOWN |
+| 5 | String concatenation `\|\|` |
+| 6 | Binary + and - (including + on two strings) |
+| 7 | * / % |
+| 8 | Unary + and - |
+| 9 | Literals, properties, labeled predicates and parentheses |
+
+`NOT a.x = 1 OR a.y = 2 AND a.z = 3` is OR(NOT(=), AND(=, =)).
+OR and XOR share a level in the [openGQL grammar, GQL.g4:2062](https://github.com/opengql/grammar/blob/main/GQL.g4#L2062).
+Thus `TRUE OR TRUE XOR TRUE` is `(TRUE OR TRUE) XOR TRUE` (FALSE), and
+`TRUE XOR TRUE OR TRUE` is `(TRUE XOR TRUE) OR TRUE` (TRUE).
+[Neo4j's GQL conformance table, GE07](https://neo4j.com/docs/cypher-manual/current/appendix/gql-conformance/supported-optional/)
+records Cypher's different XOR precedence; this parser follows GQL.
+Signed numeric literals fold, including -9223372036854775808. In expression context the
+shared lexer's left arrow in `a.age<-1` means `a.age < -1`. ISO's `--` always starts
+a line comment: `a.x--1` leaves a bare property predicate; write `a.x - -1` to subtract
+a negative literal. The pattern-only GQL0008 rule is unchanged.
+
+AND, OR, XOR and NOT accept Boolean or NULL. AND stops on FALSE, OR stops on TRUE;
+otherwise any NULL makes the result UNKNOWN. UNKNOWN is also accepted as a Boolean literal,
+represented by NULL, as in the openGQL grammar's BOOLEAN_LITERAL production (GQL.g4:2974-2978).
+XOR is UNKNOWN if any operand is NULL,
+otherwise true for an odd number of true operands. WHERE retains only TRUE; an evaluated
+non-Boolean operand raises COHDBG013. IS NULL tests any scalar; IS TRUE/FALSE/UNKNOWN
+tests Boolean/NULL, always returning Boolean, inverted by NOT. Comparisons with NULL are
+UNKNOWN. Incomparable non-null types are unequal (= false, <> true); their ordering is
+UNKNOWN, so NOT does not turn such an ordering into a match.
+
+Numeric promotion is a Cohesion extension for the typed API's stored CLR types.
+The first applicable row selects both conversions and the result type:
+
+| Operands | Arithmetic result |
+| --- | --- |
+| Either float or double | Double |
+| Otherwise either ulong or decimal | Decimal |
+| Otherwise supported integral types | Int64 |
+
+Int64 arithmetic is checked. Int64 / truncates toward zero; % is its corresponding remainder
+with the dividend's sign. Every integral remainder by -1 is 0, including Int64.MinValue;
+Int64.MinValue / -1 still overflows (PostgreSQL `src/backend/utils/adt/int8.c:584-594`,
+relative to C:/Source/repos/postgres/postgres). Decimal stays Decimal; floating arithmetic stays Double and rejects
+non-finite results. Division/remainder by zero, overflow, invalid numeric signs, mixed
+string/number + and invalid concatenation types carry COHDBG013. Two strings make + an alias
+for `||`, without conversion. Arithmetic with NULL is NULL. Cohesion SQL promotes every
+non-integral operand to Decimal; GQL deliberately uses Double for floating operands.
+
+**Standards and spellings.** The [ISO contents preview, sections 19 and 20](https://cdn.standards.iteh.ai/sist-preview/76120/a5695073ca0a485c9929f50970f4c862/ISO-IEC-39075-2024.pdf)
+lists comparisons, null predicates and Boolean/numeric/string expressions, with no IN or
+string-search predicate. The [openGQL grammar](https://github.com/opengql/grammar/blob/main/GQL.g4),
+productions for sections 19.2 and 20.1, also contains neither IN nor STARTS WITH/ENDS WITH/CONTAINS.
+These four spellings are therefore recorded as Cohesion compatibility extensions. This checks
+the public contents and grammar, not the paywalled normative text. ISO string concatenation
+is `||`; string + is the Cypher alias. % is the Cypher spelling of the ISO MOD operation;
+the canonical function belongs to #1147.
+
+Local Neo4j references, relative to C:/Source/repos/neo4j/neo4j (behavior consulted, no code copied):
+
+- `community/cypher/front-end/parser/v25/parser/src/main/antlr4/org/neo4j/cypher/internal/parser/v25/Cypher25Parser.g4:546-600`
+  spells IN and the string predicates. Its separate OR/XOR levels are Cypher-specific;
+  GQL's shared level above governs this parser.
+- `community/cypher/front-end/expressions/src/main/scala/org/neo4j/cypher/internal/expressions/PredicateExpressions.scala:227-231,269-295`
+  models membership and the three string predicates, whose signatures accept any operand types.
+- `community/cypher/interpreted-runtime/src/main/scala/org/neo4j/cypher/internal/runtime/interpreted/commands/predicates/Predicate.scala:447-483`
+  returns UNKNOWN unless both string-predicate operands are text.
+- `community/cypher/interpreted-runtime/src/main/scala/org/neo4j/cypher/internal/runtime/interpreted/commands/predicates/CachedIn.scala:37-58`
+  returns FALSE for an empty list. IN otherwise returns TRUE for a matching non-null item;
+  with no match, NULL in the searched value or list makes UNKNOWN, otherwise FALSE.
+  Thus NULL IN [] is false and 2 IN [1, NULL] is unknown.
+- `community/cypher/interpreted-runtime/src/main/scala/org/neo4j/cypher/internal/runtime/interpreted/commands/expressions/ListLiteral.scala:36-45`
+  evaluates every list item before returning the list; `CachedIn.scala:38-49` consumes that
+  evaluated list before testing membership. Cohesion likewise evaluates the complete list
+  before comparing, so `42 IN [42, 1 / 0]` raises COHDBG013 in either item order.
+  A match still wins over NULL: `1 IN [1, NULL]` is TRUE, `1 IN [2, NULL]` is UNKNOWN.
+- `community/values/src/main/java/org/neo4j/values/utils/ValueBooleanLogic.java:170-186`
+  checks the empty list before the searched NULL value;
+  `community/values/src/main/java/org/neo4j/values/utils/InCache.java:94-118` lets a matching
+  value win before returning UNKNOWN for a NULL item with no match.
+
+Arithmetic chains have no parser count limit. A long left-deep arithmetic AST can exhaust the
+evaluation stack and reports COHDBG008. NOT, groups and nested IN lists also retain the
+GQL0009/COHDBG008 backstops without a fixed language depth limit. GqlWhereExpressionParserTests,
+GqlWhereExpressionTests, GqlProfileExecutionTests and GraphClientWireTests cover ASTs, truth
+tables, typed numeric promotion, anchors, exclusions, stack failures, exact rows and protocol
+1.0 statement failure completion before ResultHeader.
 
 ## AOT posture and extension discipline
 

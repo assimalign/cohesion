@@ -3,7 +3,7 @@
 `Assimalign.Cohesion.Database.Graph` is the embedded property-graph engine. It creates, opens,
 enumerates and drops logical databases, opens database-bound sessions, and implements the frozen
 node, relationship and traversal operations of `GraphDatabase`. A session executes the bounded GQL
-subset described in [Graph.Language](../../Assimalign.Cohesion.Database.Graph.Language/docs/DESIGN.md).
+subset, including Boolean, arithmetic, null/truth and string WHERE expressions, described in [Graph.Language](../../Assimalign.Cohesion.Database.Graph.Language/docs/DESIGN.md).
 
 ```csharp
 await using var engine = GraphDatabaseEngine.Create("people-graph", new() { RootPath = "graphs" });

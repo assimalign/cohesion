@@ -10,7 +10,7 @@ namespace Assimalign.Cohesion.Database.Graph.Language;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The parser builds one node per run of <c>AND</c> at one level of the predicate grammar, as
+/// The parser builds one node per run of <c>AND</c>, <c>OR</c> or <c>XOR</c> at one level of the predicate grammar, as
 /// Neo4j's n-ary <c>Ands</c> holds a conjunction, so a chain of any length is one level of the
 /// tree and no comparison count applies. A parenthesized chain that opens a chain of the same
 /// operator merges into it: <c>(p AND q) AND r</c> is the same node as <c>p AND q AND r</c>. A
@@ -20,7 +20,7 @@ namespace Assimalign.Cohesion.Database.Graph.Language;
 /// engine <c>COHDBG008</c> instead of overflowing it.
 /// </para>
 /// <para>
-/// The engine evaluates the operands first to last and stops at the first false one. A hand-built
+/// The engine evaluates operands first to last: AND stops at false, OR at true, and XOR propagates unknown. A hand-built
 /// node with an undefined operator, a null operand list, a null operand or fewer than two operands
 /// is rejected by the planner with <c>COHDBG001</c>.
 /// </para>

@@ -49,6 +49,11 @@ errors"). GraphClientException keeps that code, and the core exception, which ke
 transport's exception, is its inner exception. A canceled dial throws OperationCanceledException
 unchanged (GraphClientDialFailureTests).
 
+WHERE scalar value errors (#1140) arrive as ExecutionFailure text `COHDBG013: message`
+before ResultHeader. GraphClientWireTests pins division by zero, overflow and invalid conditions,
+then reuse of the exact authenticated pooled session followed by SHOW LABELS. A combined
+OR/IN/string/arithmetic case compares wire rows with in-process rows. No wire fields change.
+
 ## Path lifetime
 
 GraphPathsExchange derives from DatabaseStreamingExchange. OpenCoreAsync sends ExecutePaths and
@@ -139,7 +144,7 @@ carrying its start's activity id whether its caller read every path or stopped e
 ## Concrete types (concrete-types plan, phase 5, #1261)
 
 The package has no public interface left and no `Abstractions/` folder
-([plan](../../../../docs/programs/DATABASE_CONCRETE_TYPES_PLAN.md) §7, "P5, as landed").
+([plan](../../../../docs/programs/DATABASE_CONCRETE_TYPES_PLAN.md) `7, "P5, as landed").
 
 | Type | Shape | Was |
 |---|---|---|

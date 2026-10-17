@@ -198,9 +198,19 @@ public sealed partial class GqlQueryParser : QueryParser
                 continue;
             }
 
-            if (token.Type is TokenType.Asterisk or TokenType.DotDot)
+            if (token.Type is TokenType.Asterisk or TokenType.DotDot && !inPredicate)
             {
                 Unsupported("QUANTIFIED PATTERN OR STAR PROJECTION", token);
+                continue;
+            }
+            if (token.Type == TokenType.Tilde && inPredicate && i > 0 && _tokens[i - 1].Type == TokenType.Equals && Adjacent(i - 1, i))
+            {
+                Unsupported("REGULAR EXPRESSION =~", token);
+                continue;
+            }
+            if (inPredicateOrReturn && token.Type == TokenType.Dot && i >= 2 && _tokens[i - 2].Type == TokenType.Dot)
+            {
+                Unsupported("NESTED PROPERTY ACCESS", token);
                 continue;
             }
             if (token.Type == TokenType.Parameter)
@@ -219,9 +229,9 @@ public sealed partial class GqlQueryParser : QueryParser
                 inPredicate = value == "WHERE";
             }
 
-            // n IS [NOT] LABELED A in WHERE is ISO's <labeled predicate>; IS NULL and the truth
-            // tests stay unsupported (gql-where-expr), and so does any IS in RETURN, whose subset
-            // has no expressions. In a pattern, (n IS A) is a label expression and needs no case
+            // n IS [NOT] LABELED A in WHERE is ISO's <labeled predicate>; IS NULL and truth
+            // tests are scalar predicates (#1140). RETURN has no expressions until #1141.
+            // In a pattern, (n IS A) is a label expression and needs no case
             // here: words inside a pattern are names.
             if (value == "IS" && inPredicate)
             {
@@ -233,12 +243,14 @@ public sealed partial class GqlQueryParser : QueryParser
                     continue;
                 }
             }
-            if (inPredicateOrReturn && i + 1 < _tokens.Count && _tokens[i + 1].Type == TokenType.LeftParen &&
-                value is not ("WHERE" or "AND" or "RETURN"))
+            if (inPredicateOrReturn && token.Type is TokenType.Identifier or TokenType.Function &&
+                i + 1 < _tokens.Count && _tokens[i + 1].Type == TokenType.LeftParen &&
+                !GqlUnsupportedVocabulary.TryFind(value, out _))
             {
                 Unsupported($"FUNCTION {token.Text}", token);
                 continue;
             }
+            if (value == "WITH" && inPredicate && i > 0 && (IsWordAt(i - 1, "STARTS") || IsWordAt(i - 1, "ENDS"))) { continue; }
             if (patternDepth != 0 && !inPredicateOrReturn) { continue; }
             if (!GqlUnsupportedVocabulary.TryFind(value, out var word)) { continue; }
 
