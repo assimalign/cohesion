@@ -639,6 +639,8 @@ of the common type when available. Length, precision and scale remain only when 
 types and modifiers agree; CHAR(3)/VARCHAR(10) clears the length. Qualified references retain
 their own types and modifiers; right qualified references become nullable under LEFT.
 Pairs with no common type fail planning with COHSQLE015, even on empty inputs.
+Identical domains retain their domain identity; differing domains or a domain/base pair
+resolve through their base types (PostgreSQL parse_coerce.c:1360-1387).
 Unqualified merged names are unambiguous; qualified left.id and right.id still bind.
 SELECT * orders merged columns once, in USING order, then remaining left columns,
 then remaining right columns. A later USING applies this rule to its accumulated

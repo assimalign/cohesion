@@ -317,6 +317,39 @@ public sealed class SqlNWayJoinTests
         Check(await ReadAsync(result), [[merged, merged, "a  ", "a"]]);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Sql] - USING: identical domains retain casts while mixed inputs use the base type")]
+    [InlineData("JOIN")]
+    [InlineData("LEFT JOIN")]
+    public async Task Join_UsingDomainTypes_ShouldPreserveOnlyAnIdenticalDomain(string join)
+    {
+        // Arrange
+        var domain = SqlType.CreateDomain("join_id", SqlType.Integer);
+        var builder = SqlDatabaseEngine.CreateBuilder("using-domain");
+        builder.Types.Add(domain).AddCast(SqlCast.Create<int, string>(domain, SqlType.Text,
+            static value => "domain", SqlCastContext.Explicit));
+        builder.Types.Add(SqlType.CreateDomain("join_code", SqlType.Char(3)));
+        await using var engine = await builder.BuildAsync(CancellationToken.None);
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecAsync(session, "CREATE TABLE a (id join_id);");
+        await ExecAsync(session, "CREATE TABLE b (id join_id);");
+        await ExecAsync(session, "CREATE TABLE c (id INT);");
+        await ExecAsync(session, "INSERT INTO a VALUES (1);");
+        await ExecAsync(session, "INSERT INTO b VALUES (1);");
+        await ExecAsync(session, "INSERT INTO c VALUES (1);");
+
+        // Act / Assert
+        Check(await RowsAsync(session, $"SELECT CAST(id AS TEXT), CAST(a.id AS TEXT), CAST(b.id AS TEXT) FROM a {join} b USING (id);"),
+            [["domain", "domain", "domain"]]);
+        Check(await RowsAsync(session, $"SELECT CAST(id AS TEXT), CAST(a.id AS TEXT), CAST(c.id AS TEXT) FROM a {join} c USING (id);"),
+            [["1", "domain", "1"]]);
+        await ExecAsync(session, "CREATE TABLE codes (id join_code);");
+        await ExecAsync(session, "CREATE TABLE texts (id CHAR(3));");
+        await using var lengths = (await session.ExecuteAsync($"SELECT *, codes.id, texts.id FROM codes {join} texts USING (id);",
+            cancellationToken: CancellationToken.None)).ShouldBeAssignableTo<DatabaseResultSet>();
+        lengths.Columns.Select(column => column.MaxLength).ShouldBe(new int?[] { null, 3, 3 });
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sql] - USING: incompatible types fail planning even on empty inputs")]
     [InlineData("JOIN")]
     [InlineData("LEFT JOIN")]

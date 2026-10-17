@@ -12,8 +12,10 @@ unqualified lookup and derives wildcard order independently of physical slots. I
 column binds a separate common-typed expression for unqualified lookup and wildcard output;
 qualified columns retain their original types. LEFT uses the coerced left value; INNER prefers
 an unchanged common-typed input. Common-type selection follows PostgreSQL parse_clause.c:1676-1733
-and parse_coerce.c:1393-1437. Differing types or modifiers clear length, precision and scale
-(parse_coerce.c:1648-1678); incompatible categories or missing implicit casts fail planning with
+and parse_coerce.c:1393-1437. Identical domains preserve their identity and registered casts;
+mixed domain/base inputs use the common base type (parse_coerce.c:1360-1387).
+Differing types or modifiers clear length, precision and scale (parse_coerce.c:1648-1678);
+incompatible categories or missing implicit casts fail planning with
 COHSQLE015, including on empty inputs. Later USING and ON steps consume these merged expressions.
 Computed merged keys do not acquire physical index probes. Ordinary equality and collation
 precedence remain unchanged. Grouping compares bound column values so qualified inputs and

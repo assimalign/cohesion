@@ -63,6 +63,8 @@ internal sealed partial class SqlPlanner
                         var leftColumn = previous?.Column ?? allColumns[leftOrdinal];
                         var rightColumn = allColumns[rightOrdinal];
                         var common = UsingType(leftColumn.Type, rightColumn.Type, name, select);
+                        bool sameDomain = string.Equals(leftColumn.DomainName, rightColumn.DomainName, StringComparison.OrdinalIgnoreCase);
+                        if (!sameDomain) { common = new DatabaseTypeInfo(common.Type); }
                         var leftValue = previous?.Value ?? new SqlBoundColumn(leftOrdinal);
                         var rightValue = new SqlBoundColumn(rightOrdinal);
                         // PostgreSQL parse_clause.c:1676-1709,1718-1733: choose a common type,
@@ -85,7 +87,9 @@ internal sealed partial class SqlPlanner
                         var owner = bindings.Last(binding => binding.Offset <= leftOrdinal);
                         owner.UsingColumns ??= [];
                         owner.UsingColumns[leftOrdinal] = new SqlUsingColumn(
-                            new SqlCatalogColumn(name, common, leftColumn.IsNullable, collation: leftColumn.Collation), value);
+                            new SqlCatalogColumn(name, common, leftColumn.IsNullable, collation: leftColumn.Collation,
+                                // PostgreSQL parse_coerce.c:1360-1387 preserves identical domains.
+                                domainName: sameDomain ? leftColumn.DomainName : null), value);
                         merged.Add(leftOrdinal);
                         right.HiddenColumns.Add(rightOrdinal - right.Offset);
                     }
