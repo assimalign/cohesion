@@ -225,7 +225,7 @@ public sealed class DocumentDatabaseSession : DatabaseLanguageSession<DocumentQu
     /// <param name="parse">Parses the statement text into its request.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>The statement's result.</returns>
-    private async ValueTask<DatabaseResult> ExecuteStatementAsync(Func<DocumentQueryRequest> parse, CancellationToken cancellationToken)
+    internal async ValueTask<DatabaseResult> ExecuteStatementAsync(Func<DocumentQueryRequest> parse, CancellationToken cancellationToken)
     {
         ThrowIfNotOpen();
         _database.ThrowIfOffline();

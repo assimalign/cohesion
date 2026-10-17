@@ -56,7 +56,7 @@ internal sealed class WorkspacePage : ContentPage
             mode.IsEnabled = model.HasWireServer;
             Entry port = Ui.Entry("0 = auto", 100, "0");
             Entry external = Ui.Entry("host:port", 190, "127.0.0.1:5740");
-            Label status = Ui.Text(model.HasWireServer ? "not started" : "Embedded only: Documents has no wire server or client yet", 12, color: Ui.Muted);
+            Label status = Ui.Text(model.HasWireServer ? "not started" : "Embedded Documents editor", 12, color: Ui.Muted);
             status.LineBreakMode = LineBreakMode.WordWrap;
             mode.SelectedIndexChanged += (_, _) => UpdateRow(model);
 

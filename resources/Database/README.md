@@ -121,7 +121,8 @@ Each model follows the same matrix: root (engine + public interface), plus `.Lan
 | SQL | `Assimalign.Cohesion.Database.Sql` | Ships the SQL engine, compiled-schema migration renderer/provisioner, the model's wire-protocol server (`SqlDatabaseServer`), its own protocol family, and the model builder verbs; declared dialect in `Sql.Language` |
 | SQL TCP composition | `Assimalign.Cohesion.Database.Sql.Tcp` | Optional `SqlDatabaseServerOptions.Listen(Uri)` endpoint convenience; references SQL and Connections.Tcp while the engine stays transport-independent |
 | SQL schema | `Assimalign.Cohesion.Database.Sql.Schema` | Thin SQL schema declarations, compiled relational object shapes, canonical serialization, validation, and migration planning; shared by SQL and SDK Tasks, with direct references only to the area root and `Database.Types` |
-| Documents | `Assimalign.Cohesion.Database.Documents` | Session-bound JSON document engine, OQL query/index-DDL planning and execution, collection ownership, and transactional index management |
+| Documents | `Assimalign.Cohesion.Database.Documents` | Session-bound JSON document engine, OQL query/index-DDL planning and execution, collection ownership, transactional index management and a database-bound wire server |
+| Documents client | `Assimalign.Cohesion.Database.Documents.Client` | NuGet-only pooled OQL rows/documents, versioned CRUD, collection commands and coded diagnostics |
 | Documents language | `Assimalign.Cohesion.Database.Documents.Language` | Declared OQL query/index-DDL subset, AST, diagnostics, and conformance corpus |
 | Documents catalog | `Assimalign.Cohesion.Database.Documents.Catalog` | Versioned collections, document metadata, and eagerly maintained shared B+Tree indexes |
 | Documents storage | `Assimalign.Cohesion.Database.Documents.Storage` | UTF-8 JSON serialization and stamped chunk chains over shared storage and transactions |

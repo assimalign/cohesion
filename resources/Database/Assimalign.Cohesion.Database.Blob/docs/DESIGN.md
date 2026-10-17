@@ -1088,3 +1088,7 @@ framing, handshake and model messages are unchanged.
 `BlobDatabaseSession` derives directly from `DatabaseSession` for lifecycle, state and
 explicit transactions. Blob operations use its container API. It has no execute member
 and inherits no unsupported query-language operation.
+
+ProtocolPayload string decoding uses strict UTF-8. The shared startup/error reader refuses invalid
+sequences with ProtocolException; the server reports fatal ProtocolViolation and closes the session.
+Blob metadata already uses its own strict, length-bounded reader; content remains opaque bytes.

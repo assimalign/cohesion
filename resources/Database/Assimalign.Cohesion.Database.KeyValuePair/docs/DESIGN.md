@@ -1064,3 +1064,7 @@ returning `ValueTask<IDuplexConnection>`; the base handles shared accept dispatc
 connection tracking. Custom byte-pipe connections derive from `DuplexConnection` or implement
 `IDuplexConnection`. Built-in duplex listeners already satisfy the new contract. Database wire
 framing, handshake and model messages are unchanged.
+
+ProtocolPayload string decoding uses strict UTF-8. The shared startup/error reader refuses invalid
+sequences with ProtocolException; the server reports fatal ProtocolViolation and closes the session.
+Model statement, parameter-name and result-header strings use that same shared strict reader.

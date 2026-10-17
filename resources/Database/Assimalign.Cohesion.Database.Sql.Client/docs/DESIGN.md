@@ -91,6 +91,10 @@ CAST value failures follow the same contract: invalid text carries COHSQLE022 (P
 Protocol 1.0 clients retain the composed code prefix and ExecutionFailure category; a value
 failure keeps the connection usable. In-process regression tests assert code and source span.
 
+Negative and fractional LIMIT/OFFSET counts retain COHSQLE018 in the composed wire text.
+The Int64 row-window tests (#1100) assert that prefix alongside ExecutionFailure and connection
+reuse, aligning their expected text with the carrier convention added by #1103.
+
 `SqlClientException : DatabaseException` maps stable wire codes to SQL error kinds
 and retains the original code. The shared pool invalidates incomplete exchanges,
 including cancellation and decoder failure. Completed parse/execution failures

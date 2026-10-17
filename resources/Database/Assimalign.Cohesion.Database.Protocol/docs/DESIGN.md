@@ -43,7 +43,8 @@ packet-beta
 ```
 
 `ProtocolPayload` provides signed i32/i64, unsigned u16, and strings encoded as
-`i32 UTF8-byte-length + UTF8 bytes`. Negative lengths and out-of-bounds reads fail
+`i32 UTF8-byte-length + UTF8 bytes`. Invalid UTF-8 (including truncated sequences, overlong
+encodings and surrogate code points), negative lengths and out-of-bounds reads fail
 with ProtocolException. Codecs are direct span operations, with no reflection,
 Microsoft.Extensions dependencies, serialization discovery, or generated runtime code.
 
@@ -247,3 +248,9 @@ coverage through Connections.InMemory. Models do not add payload policy to this 
 ProtocolException is this child root's independent exception type. Servers translate
 it to the shared wire taxonomy; the client core translates it to DatabaseClientException.
 Transports remain outside this package and outside engine packages.
+
+All model endpoints reject invalid shared payload strings; no model intentionally relies on
+replacement decoding in ProtocolPayload.
+SQL, Graph, KeyValuePair and Documents use it for model statement text and protocol identifiers.
+Blob already uses a strict bounded metadata reader and uses this reader in its shared handshake.
+Decoder failures become ProtocolException and the server sends fatal ProtocolViolation, then closes.

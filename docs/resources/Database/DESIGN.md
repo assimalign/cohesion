@@ -194,7 +194,7 @@ facts it depicts are stated here in prose so the section stands without it:
 - **Engines share the kernel and never reference each other.** Both reach `Database.Storage`,
   `Database.Transactions`, and `Database.Indexing`; neither depends on the other. Writes serialize
   per database at the apply gate, so a write in one model never contends with a write in another.
-- **SQL, KeyValuePair, Blob, and Graph ship servers and clients today.** Graph serves scalar
+- **All five models ship servers and clients.** Graph serves scalar
   `MATCH` results, `CREATE`, `DELETE`, `DETACH DELETE`, and the existing read-only `SHOW` surface
   through the engine's database-bound session. Its separate `ExecutePaths` request returns real
   engine paths for a single bound node, relationship, or named MATCH path projection, preserving
@@ -203,8 +203,10 @@ facts it depicts are stated here in prose so the section stands without it:
   client decides connection reuse from the exchange's terminal-frame state. Explicit Graph
   transactions remain in-process only: GQL transaction statements are unsupported and reserved
   `Transaction` byte 9 is rejected with `ProtocolViolation`. Blob bounds each content frame and
-  acknowledges chunks. Documents publishes its nested JSON protocol family but still needs its
-  production server/client. `Graph.Client` ships as a NuGet package, outside `App.Database`.
+  acknowledges chunks. Documents serves OQL rows and whole JSON values, document CRUD and collection commands;
+  its completion carries both result and affected counts and its terminal Failure preserves diagnostic
+  codes while leaving the session reusable. `Documents.Client` and `Graph.Client` are NuGet-only,
+  outside `App.Database`.
 - **Transport selection belongs to the composition root.** All engine servers accept
   `IDuplexConnectionListener`; `Database.Sql.Tcp` supplies the existing `Listen(Uri)` convenience
   for consumers that choose TCP. Engine packages reference no concrete transport.
@@ -249,8 +251,7 @@ B3 of `docs/programs/DATABASE_ENGINE_EXTENSIBILITY_DESIGN.md`: `AddKeyValue`, `A
 `AddDocuments` and `AddBlob` take `(name, builder => ...)`, and each builder offers `Options`
 (values only, copied when the engine is built), `AddDatabase(name)` (opened, or created, before
 the build returns, and never dropped while declared), `AddServer(options => ...)` beside
-`AddServer(engine => ...)` where the model has a server (KeyValue, Graph and Blob; Documents has
-none), `AddWorker` and `Build`/`BuildAsync`. The engine name is written once: no options type
+`AddServer(engine => ...)` in all five models, `AddWorker` and `Build`/`BuildAsync`. The engine name is written once: no options type
 carries one, and a standalone engine is `XDatabaseEngine.Create(name, options)`, which copies its
 options too. Composition roots register ordered lifecycle services through the
 concrete `DatabaseApplicationBuilder.AddService` verb in `Database.Hosting`; the root
@@ -460,7 +461,7 @@ durable record of its events. The decisions every source shares:
   writes the end in it, and the `Stop` closes the `Start`'s activity. The pairs: the root's
   `StatementStart`/`Stop`, `WorkerPassStart`/`Stop` and `EngineDisposeStart`/`Stop`; Storage's
   `RecoveryStart`/`Stop` and `CheckpointStart`/`Stop` (`Success` or `Error`: neither can be
-  cancelled); Graph's and Documents' `IndexRecoveryStart`/`Stop`; and the four client pairs
+  cancelled); Graph's and Documents' `IndexRecoveryStart`/`Stop`; and the five client pairs
   (`CommandStart`/`Stop`, `QueryStart`/`Stop`, `TransferStart`/`Stop`). The one exception is the
   Transactions `LockWaitStop`, whose `outcome` (`Granted`, `Cancelled`, `Ended`, `Deadlock`, `Abandoned`) is a
   domain outcome finer than a status. Lifetimes that cross flows (`Opened`/`Closed`) are not pairs
@@ -491,13 +492,14 @@ project's `docs/DESIGN.md`, "Diagnostics", linked), and the batch that added or 
 | `Assimalign.Cohesion.Database.Client` | `DatabaseClientEventSource` | [Database.Client](../../../resources/Database/Assimalign.Cohesion.Database.Client/docs/DESIGN.md#diagnostics) | B4 | Connections, dial and handshake failures, broken connections, pool rent and return, coded exchange failures; 4 counters |
 | `Assimalign.Cohesion.Database.Sql.Client` | `SqlClientEventSource` | [Database.Sql.Client](../../../resources/Database/Assimalign.Cohesion.Database.Sql.Client/docs/DESIGN.md#diagnostics) | B4 | Commands, observer failures |
 | `Assimalign.Cohesion.Database.KeyValuePair.Client` | `KeyValueClientEventSource` | [Database.KeyValuePair.Client](../../../resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Client/docs/DESIGN.md#diagnostics) | B4 | Commands, observer failures |
+| `Assimalign.Cohesion.Database.Documents.Client` | `DocumentClientEventSource` | [Documents.Client](../../../resources/Database/Assimalign.Cohesion.Database.Documents.Client/docs/DESIGN.md#diagnostics) | #190 | Queries and commands; throttled coded failures |
 | `Assimalign.Cohesion.Database.Graph.Client` | `GraphClientEventSource` | [Database.Graph.Client](../../../resources/Database/Assimalign.Cohesion.Database.Graph.Client/docs/DESIGN.md#diagnostics) | B4 | Queries |
 | `Assimalign.Cohesion.Database.Blob.Client` | `BlobClientEventSource` | [Database.Blob.Client](../../../resources/Database/Assimalign.Cohesion.Database.Blob.Client/docs/DESIGN.md#diagnostics) | B4 | Transfers, list cleanup failures |
 | `Assimalign.Cohesion.Database.Sql` | `SqlDatabaseEventSource` | [Database.Sql](../../../resources/Database/Assimalign.Cohesion.Database.Sql/docs/DESIGN.md#diagnostics) | B5; D | The server and its sessions; statement access paths, complexity refusals, DDL self-commits, typed extension registration; provisioning pairs and deferred step progress/outcomes (D complete; id 17 retired) |
 | `Assimalign.Cohesion.Database.KeyValuePair` | `KeyValueDatabaseEventSource` | [Database.KeyValuePair](../../../resources/Database/Assimalign.Cohesion.Database.KeyValuePair/docs/DESIGN.md#diagnostics) | B5 | The server and its sessions |
 | `Assimalign.Cohesion.Database.Graph` | `GraphDatabaseEventSource` | [Database.Graph](../../../resources/Database/Assimalign.Cohesion.Database.Graph/docs/DESIGN.md#diagnostics) | B5 | The server and its sessions, index recovery on open, wire-path parse failures |
 | `Assimalign.Cohesion.Database.Blob` | `BlobDatabaseEventSource` | [Database.Blob](../../../resources/Database/Assimalign.Cohesion.Database.Blob/docs/DESIGN.md#diagnostics) | B5 | The server and its sessions, per-database and engine-wide refusals, transfer failures |
-| `Assimalign.Cohesion.Database.Documents` | `DocumentDatabaseEventSource` | [Database.Documents](../../../resources/Database/Assimalign.Cohesion.Database.Documents/docs/DESIGN.md#diagnostics) | B5 | Index recovery on open |
+| `Assimalign.Cohesion.Database.Documents` | `DocumentDatabaseEventSource` | [Database.Documents](../../../resources/Database/Assimalign.Cohesion.Database.Documents/docs/DESIGN.md#diagnostics) | B5 / #190 | Index recovery on open; server lifecycle, throttled failures and session counters |
 | `Assimalign.Cohesion.Database.Hosting` | `DatabaseHostingEventSource` | [Database.Hosting](../../../resources/Database/Assimalign.Cohesion.Database.Hosting/docs/DESIGN.md#diagnostics) | existed; D | Reopening offline databases; the application's build, start, post-rollback startup failure, stop, disposal failures, commands, admin endpoint and observed database health transitions (D complete) |
 
 The integration pass after B5 applied the failure and ending rules above to every source, and the

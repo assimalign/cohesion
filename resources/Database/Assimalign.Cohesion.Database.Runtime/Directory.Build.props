@@ -95,9 +95,8 @@
               KeyValuePair.Security - stays excluded until it ships.)
             - Blob.Security - a deferred model satellite; the Blob engine,
               catalog, storage, and client ship above.
-            - Documents.Client and Documents.Security -
-              deferred satellites; the Documents query and storage engine ships above.
-            - Graph.Client - shipped as a NuGet-only client package, never a member
+            - Documents.Security - a deferred satellite; the Documents engine ships above.
+            - Documents.Client and Graph.Client - shipped as NuGet-only client packages, never members
               of the App.Database shared framework (resource-areas.md).
             - Graph.Security - a deferred satellite; the Graph
               engine, GQL subset, catalog, and adjacency storage ship above.

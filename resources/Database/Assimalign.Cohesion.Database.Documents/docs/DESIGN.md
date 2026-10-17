@@ -217,7 +217,7 @@ throws (`AbstractTransactionOperationsMerger.cs:906-916`). A failed request ther
 nothing of its own, and the merge never makes one request's failure another's. Citations are to
 PostgreSQL `85f55534e80`, Neo4j `54a7dcf7c25` and RavenDB `83399cb8bc8`.
 
-Documents has no wire server or client yet, so the contract is exercised in process only
+Documents wire commands use automatic statement transactions; explicit transactions remain in process only
 (`DocumentTransactionFailureTests`).
 
 Collections created by these APIs have `DatabaseObjectOwner.Adhoc`. A collection
@@ -241,8 +241,11 @@ Message contains no code prefix. The Documents family is `COHDOCnnn`:
 `DocumentQueryRequest.FromOql` and a directly constructed typed query with parse errors
 throw `DatabaseParseException` carrying the complete, ordered parser diagnostics and the
 existing first-error Message. No recovery AST reaches the planner. Protocol 1.0's Documents
-server, when supplied by #190, must compose `CODE: message` for ExecutionFailure from this
-carrier, as the SQL and Graph servers do.
+server reads `DatabaseException.Diagnostics` for every database exception, including parse,
+plan, evaluator and system-collection rejections. It composes `CODE: message` from the first
+Error diagnostic, as the SQL and Graph servers do, preserving a message that already contains
+that code and colon. Parser exceptions carry every parser diagnostic. Failed results likewise
+carry their diagnostics through the exception used by the terminal Failure path.
 
 ## OQL query and DDL semantics
 
@@ -586,7 +589,7 @@ commit flush failed gets `DatabaseTransactionCommitUnconfirmedException`, its me
 with `COHDBD002` (owner decision 24). Every later operation —
 a new session, an OQL statement or typed request, a collection call, BEGIN, and the COMMIT or
 ROLLBACK of a transaction open at the failure — is refused with `DatabaseOfflineException`, code
-`COHDBD002`, carrying the storage's `StorageOfflineException`. The engine has no wire server.
+`COHDBD002`, carrying the storage's `StorageOfflineException`. The wire server returns this refusal as an Unavailable failure with structured COHDBD002 diagnostics.
 The workers skip the database; closing its sessions and transactions writes nothing. A storage
 bracket whose commit record was written before its flush failed is reported as unconfirmed,
 never refused (`StorageOfflineException.CommitRecordWritten`). The engine stays `Running`;
@@ -637,7 +640,7 @@ The current engine materializes query inputs/results and whole JSON values in
 managed memory. Chunk persistence handles documents larger than a page but does
 not promise a bounded heap independent of document/query size. Database-wide
 writer locking is conservative; there is no query-cost statistics model, join,
-subquery, external sort, document protocol server/client, replication, security, hosting wiring,
+subquery, external sort, replication, model-specific security,
 ApplicationModel integration, or compiled-schema provisioning.
 
 Co-located tests cover nested/mixed JSON, expected-version writes, explicit commit
@@ -662,78 +665,148 @@ engine-owned implementation of the shared storage flush duty.
 
 ## Document wire family
 
-`DocumentProtocol.Family` contributes the Documents message vocabulary to the shared
-`ProtocolChannel`. The channel is permanently bound to this family at the endpoint; neither a
-request nor the startup payload can change the model. The shared package owns framing, startup,
-authentication, errors, liveness and termination. Documents owns OQL requests, JSON parameter
-objects and JSON results. This mirrors the shared lexer/parser mechanism and model language profile.
-There is no document server or document client in this increment. The public family and codecs
-are the surface for that work. `DocumentProtocolTests` exercises a complete startup/authentication,
-OQL request, engine execution, nested result and termination exchange over `Connections.InMemory`.
+`DocumentDatabaseServer.Create(engine, options)` binds its listener on Start and owns it through
+Stop. An `AddServer(options => ...)` builder registration creates the same server; the factory
+verb remains available. Options are snapshotted: listener, authenticator (AllowAll by default),
+MaxSessions (100), AuthenticationTimeout (10 seconds), IdleTimeout (30 minutes), and
+ShutdownDrainTimeout (30 seconds). Timer durations must fit the runtime timer range, or be
+`Timeout.InfiniteTimeSpan`. Stop cancels accepts and idle/handshake reads, drains active operations,
+then aborts them when the drain budget expires. Rejected-peer cleanup is tracked through Stop.
+Readiness is the shared DatabaseServer state after a successful bind. The engine remains owned
+by the composition root; an engine-built server is disposed by that engine.
 
-The envelope remains protocol **1.0**: unsigned 32-bit big-endian payload length, one message-type
-byte, then exactly that many payload bytes. The length excludes the five-byte header and is at
-most 16,777,216. Shared codes 1–4 and 10–13 retain their meaning; 14–63 are reserved. The Documents
-endpoint admits only its family below and the shared codes. Code 64 on another model's endpoint
-belongs to that endpoint's vocabulary. A channel and a client pool cannot switch families.
-Unknown major versions are rejected with shared `UnsupportedVersion`; the negotiated minor is
-the smaller supported/requested minor. No deployed SQL or Key-Value frame changes.
+Each connection binds one database at the shared handshake (A5/R1). Authentication precedes
+opening its engine session. Unknown databases, refused authentication, incompatible shared
+versions and malformed requests receive coded shared Error frames and close. Ping/Pong and
+Terminate use the shared protocol. Requests cannot select another database or model.
 
-All lengths and counts below are signed big-endian integers. A string is an `int32` byte length
-followed by that many UTF-8 bytes; a negative length is invalid. No padding is present.
+The server uses the session's internal `ExecuteStatementAsync` to parse and then invoke typed
+execution, so the root traces each executed statement once. OQL's SELECT/WHERE/GROUP BY/HAVING/
+ORDER BY, parameters, nested paths, aggregates, CREATE INDEX and DROP INDEX use the same executor
+as embedded execution. `SELECT *` returns whole JSON values; projections return positional rows.
+Document and collection commands use the existing session-bound operations and automatic
+transactions. No transaction-control member or frame is exposed over this wire.
 
-| Byte | Direction | Payload |
-| --- | --- | --- |
-| 64 (`Execute`) | Client → server | Statement string; `int32` parameter-byte length; exactly that many UTF-8 JSON bytes containing one object |
-| 65 (`Document`) | Server → client | Exactly one complete UTF-8 JSON value occupying the entire payload, with no inner length prefix |
-| 66 (`Complete`) | Server → client | Exactly eight bytes: nonnegative `int64` count of Document frames emitted for this request |
+### Envelope and payload layout
 
-Payload offsets are zero-based and exclude the shared five-byte frame header. For `Execute`, bytes
-0–3 are the signed 32-bit big-endian statement byte length `S`; the `S` UTF-8 statement bytes begin
-at byte 4; bytes `4 + S`–`7 + S` are the signed 32-bit big-endian parameter byte length `P`; and
-the `P` JSON-object bytes begin at byte `8 + S` and consume the rest of the payload. A `Document`
-payload is its complete JSON value from byte 0 through the payload end, without an inner length.
-A `Complete` payload has one exact fixed layout: bytes 0–7 (bits 0–63) are the nonnegative signed
-64-bit result count in big-endian order, and no bytes follow it. The packet view below shows that
-exact fixed `Complete` layout; the variable-length `Execute` and `Document` layouts remain in prose.
+The shared envelope is unchanged: `u32be payloadLength`, `u8 messageType`, payload bytes. The length
+excludes the five-byte header and is at most 16,777,216. Shared handshake negotiation remains at
+protocol 1.0; there is no Documents-specific version exchange (#1095 / #1105). Documents has not
+shipped, so the completion change needs no legacy reader or compatibility shim.
+
+All integers below are big-endian. `str(x)` means `i32 byteLength` followed by that many UTF-8
+bytes. `json(x)` means `i32 byteLength` followed by one complete UTF-8 JSON value. Negative lengths,
+truncation, invalid enums/flags and trailing bytes are rejected. Offsets exclude the envelope.
+
+Before #190 the family was Execute=64, Document=65, Complete=66; Complete held only an i64
+result count. Execute and Document retain their byte layouts. The full family is now:
+
+| Byte | Name | Direction | Exact payload in byte order |
+| --- | --- | --- | --- |
+| 64 | Execute | Client to server | `str(statement), json(parameters)`; parameters must be an object |
+| 65 | Document | Server to client | Raw JSON value occupying the whole payload, no inner length |
+| 66 | Complete | Server to client | `i64 resultCount, i64 affectedCount` (exactly 16 bytes) |
+| 67 | ResultHeader | Server to client | `u8 wholeDocuments, i32 columnCount`, then columnCount repetitions of `str(name), u8 DatabaseType` |
+| 68 | ResultRow | Server to client | Raw JSON array occupying the whole payload; exactly one value per column |
+| 69 | Command | Client to server | `u8 operation`, then the operation-specific fields below |
+| 70 | StoredDocument | Server to client | `str(id), u64 version, json(content)` |
+| 71 | Collection | Server to client | `str(name)` |
+| 72 | Failure | Server to client | `u16 ProtocolErrorCode, str(message), i32 diagnosticCount`, then diagnosticCount diagnostic records below |
+
+For Execute, statement length S is at offset 0, its bytes at 4, parameter length P at 4+S,
+and parameter bytes at 8+S. For Complete, resultCount occupies offsets 0..7 and affectedCount
+8..15. ResultHeader's flag occupies offset 0 (0=rows, 1=documents), columnCount offsets 1..4,
+and columns begin at 5. columnCount must be positive; wholeDocuments requires exactly one column.
+StoredDocument's ID length I is at 0, its bytes at 4, version at 4+I..11+I, content length at
+12+I..15+I, and content at 16+I. Collection's name length N is at 0, with N name bytes at 4.
+Failure's code is at 0..1, message length M at 2..5, message bytes at 6, diagnostic count at
+6+M..9+M, and records begin at 10+M. ResultRow and Document are raw JSON from offset 0 to the end.
+
+Complete's fixed layout carries both result cardinality and write effect:
 
 ```mermaid
 packet-beta
 0-63: "Result count (nonnegative i64, big-endian)"
+64-127: "Affected count (i64, -1 for queries)"
 ```
 
-Parameters are named object members and may themselves contain nested values. An empty parameter
-set is `{}`. A result can be an object, array, string, number, Boolean or null; absent properties
-stay absent. The codec preserves the original bytes, including whitespace and Unicode spelling.
-JSON comments, trailing commas, multiple top-level values, malformed UTF-8 and nesting deeper
-than 256 levels are invalid. Extra bytes after the Execute parameter object or Complete count
-are protocol violations. Objects and arrays stay intact; there is no schema header or positional
-field vocabulary.
+A Command's operation is at offset 0; its remaining bytes are exactly:
 
-After the shared Ready message the client sends one Execute and waits for zero or more Document
-messages followed by exactly one Complete. A shared Error instead terminates the current exchange;
-no Complete follows it. Statements are serialized on a connection. An empty result has Complete
-count zero. The family does not fragment an individual JSON value: each result must fit one frame;
-only Blob imposes a chunked byte-stream exchange. Session implementations must verify the completion
-count against the number of results received and reject out-of-order messages.
+| Operation byte | Operation | Fields after operation | Result frames | Affected count |
+| --- | --- | --- | --- | --- |
+| 1 | Get | `str(collection), str(id)` | Zero or one StoredDocument | -1 |
+| 2 | Put | `str(collection), str(id), expectedVersion, json(content)` | One StoredDocument | 1 |
+| 3 | Delete | `str(collection), str(id), expectedVersion` | None | 0 or 1 |
+| 4 | CreateCollection | `str(collection)` | One Collection | 0 |
+| 5 | GetCollection | `str(collection)` | One Collection | -1 |
+| 6 | DropCollection | `str(collection)` | None | 0 |
+| 7 | ListCollections | No fields (one-byte payload) | Zero or more Collection, ordinal name order | -1 |
 
-The sequence shows the model-owned result exchange within the shared session lifecycle:
+`expectedVersion` is `u8 present`: 0 means no following version; 1 means exactly eight following
+bytes containing a u64 version. The complete UInt64 domain is retained. Collection and document
+identities cannot be blank. Get of a missing document returns no StoredDocument. Put returns the
+stored bytes and assigned version; conditional put/delete use the engine's optimistic-concurrency
+rules. Collection DDL affects zero documents. ResultCount counts row/document/collection result
+frames, excluding the header and completion; query AffectedCount is -1, index DDL zero.
 
-```mermaid
-sequenceDiagram
-    participant Client as Document consumer
-    participant Channel as Shared protocol channel
-    participant Session as Document endpoint
-    Client->>Channel: Startup / authentication
-    Channel->>Session: Shared session handshake
-    Session-->>Client: Ready
-    Client->>Session: Execute (OQL, JSON parameters)
-    loop Each matching document
-        Session-->>Client: Document (nested JSON value)
-    end
-    Session-->>Client: Complete (result count)
-    Client->>Session: Terminate
-```
+Each diagnostic record is `str(code), str(message), i32 start, i32 end, i32 line, i32 severity,
+i32 location`. For code length C and message length D, code length starts at 0, code bytes at 4,
+message length at 4+C, message bytes at 8+C, and the five i32 fields start at 8+C+D, 12+C+D,
+16+C+D, 20+C+D and 24+C+D; the record length is 28+C+D. Empty code/message represent null;
+-1 represents nullable start/end/severity/location; line is one-based. Severity and location use
+Database.Types enum values. Failure accepts only ParseFailure, ExecutionFailure and Unavailable.
+The Failure diagnostics come from the exception carrier, preserving code, message, severity,
+location kind and nullable Start/End/Line fields. Older offline and unconfirmed-commit exceptions
+with an empty carrier retain their existing unlocated COHDBD002 fallback; a supplied carrier
+always takes precedence. Other uncoded engine failures have an empty diagnostics list.
+The server limits failure/diagnostic messages to 4096 UTF-16 characters,
+diagnostic codes to 256 characters and the list to 256 entries. Truncated text is marked and
+omitted entries are announced in the failure message. Surrogate pairs are not split; all retained
+locations and normal diagnostic codes remain intact. Even worst-case UTF-8 expansion fits the
+frame. The client never infers codes from error-message prose.
+
+### Exchange boundaries and JSON
+
+After Ready, Execute returns ResultHeader followed by matching ResultRow or Document frames,
+then Complete. Index DDL returns only Complete. Commands return their table's result frames and
+Complete. A statement failure terminates the response with Failure, including after partial
+rows or documents. The client discards accumulated results, throws the typed error and may reuse
+the session. Failure has no following Complete.
+Shared Error terminates the session. The client rejects wrong ordering, row width, identity,
+collection ordering, count or affected-count semantics before accepting completion.
+
+The server streams the header and each row/document frame directly, then Complete. It retains
+one encoded frame at a time and reuses one JSON writer/buffer for the result, resetting it only
+after the preceding frame write and flush complete. Its buffer accepts at most 16 MiB of committed JSON
+and bounds scratch capacity to six frame lengths plus 4096 bytes (the JSON writer may request
+six bytes per UTF-16 character before escaping). The formatter's storage is independent of row
+count; an end-to-end response-memory bound also requires transport backpressure. Default TCP
+applies backpressure, so additional server response memory stays bounded beyond the engine's
+materialized result. InMemory disables output-pipe backpressure
+(`libraries/Connections/Assimalign.Cohesion.Connections.InMemory/src/Internal/InMemoryConnection.cs:63`).
+With InMemory and a reader that stops reading, queued transport bytes grow with the result.
+Providing bounded InMemory output is a Connections follow-up. Collection listings also stream
+per name under the same transport constraint.
+Put preflights its complete response size before mutation, preserving refusal before commit.
+Every individual value must fit one frame. Transport failure or cancellation after mutation
+may leave its outcome unknown.
+
+SQL writes header/rows directly (`SqlDatabaseServerSession.cs:431-449`); its serialization
+failures currently reach the fatal pump catch. Graph writes header/rows directly and catches
+streaming statement failures (`GraphDatabaseServerSession.cs:417-446,518-532`). Documents follows
+Graph's terminal statement-error rule with its model Failure and explicit client reuse evidence.
+
+JSON supports any root kind and nested values. Stored numbers must be exactly representable as
+System.Decimal, as in embedded operations; a numeric-domain refusal is a reusable statement failure.
+The wire permits depth at most 256, without comments, trailing
+commas, malformed UTF-8 or multiple roots. Stored document codecs preserve exact bytes, including
+whitespace and Unicode spelling. Projected numbers become decimals; objects/arrays remain owned
+JsonElement values. Whole-document results retain JSON values in `DocumentResultSet.Documents`;
+OQL serialization may change whitespace and escape spelling. Put/Get retain exact stored bytes.
+The [client design](../../Assimalign.Cohesion.Database.Documents.Client/docs/DESIGN.md) shows the
+full exchange diagram, API ownership, pool evidence and telemetry. Real server/client tests run
+all advertised clauses and commands on both InMemory and TCP; the NativeAOT consumer and Studio
+smoke independently exercise the transport surface.
 
 
 ## Phase 29: deferred hosting composition
@@ -759,8 +832,7 @@ engine-level shape:
   name (ignoring case) is refused at the call, and the built engine refuses to drop a declared
   database with `DatabaseObjectLockedException` (owner decision 56 of 2026-10-09), worded as the
   SQL engine words it.
-- The model has no server of its own, so there is no `AddServer(options => ...)`; a server
-  factory still composes any `DatabaseServer` over the engine.
+- `AddServer(options => ...)` composes DocumentDatabaseServer; the factory overload also composes a `DatabaseServer` over this exact engine.
 - `Build()` bridges `BuildAsync(CancellationToken)` on the thread pool; the token is observed
   before the engine is created and before each declared database. Factories and declarations
   reject mutation after the first build attempt.
@@ -810,8 +882,7 @@ The model is the third to adopt the root bases
 ([plan](../../../../docs/programs/DATABASE_CONCRETE_TYPES_PLAN.md) §7), after KeyValuePair and
 Graph. Its public types are sealed leaves; it has no public interface left, and no
 `Abstractions/` folder. Its child root collapsed the same way: `DocumentCatalog` is a sealed
-type behind its `Open` factory. Documents has no wire server, so it has no server or server
-session leaf.
+type behind its `Open` factory. DocumentDatabaseServer is a sealed DatabaseServer leaf; its session is internal sealed and calls the internal statement entry.
 
 | Type | Base | Was |
 |---|---|---|
@@ -913,15 +984,22 @@ create telemetry, with no per-call options allocation or additional model event.
 The model raises its own events through one internal event source, named for the assembly:
 `Assimalign.Cohesion.Database.Documents`
 (`src/Internal/EventSource/DocumentDatabaseEventSource.cs`; database event-sources plan, batch
-B5). The model has no wire server, and its sessions, statements, transactions and storage are
-reported by the root (`Assimalign.Cohesion.Database`), Transactions and Storage sources, so this
-source writes only what the model owns: the recovery of a reopened database's secondary indexes.
-The Graph model writes the same two events, as its ids 10 and 11.
+B5). Engine sessions, statements, transactions and storage remain reported by the root, Transactions and Storage sources. This source owns index recovery and the wire server lifecycle. Recovery IDs 1-2 are preserved; Graph uses 10-11 for those events.
 
 | Id | Event | Level | Payload |
 | --- | --- | --- | --- |
 | 1 | `IndexRecoveryStart` | Informational | `database`, `abortedWriters` (the writers the journal's analysis found aborted) |
 | 2 | `IndexRecoveryStop` | Informational | `database`, `status` (`Success`, or `Error` for a recovery that threw), `durationMilliseconds` (written when the recovery ends, whatever ended it) |
+| 3 | `SessionAccepted` | Verbose, Sessions | engineName, sessionId, activeSessions |
+| 4 | `SessionRejected` | Warning | engineName, reason, activeSessions, maxSessions, suppressedCount |
+| 5 | `HandshakeRefused` | Warning | sessionId, database, principal, code, detail, suppressedCount |
+| 6 | `HandshakeTimedOut` | Warning | sessionId, timeoutMilliseconds, suppressedCount |
+| 7 | `SessionClosed` | Verbose, Sessions | sessionId, reason, durationMilliseconds |
+| 8 | `SessionProtocolViolation` | Warning | sessionId, exceptionMessage, suppressedCount |
+| 9 | `SessionFaulted` | Error | sessionId, exceptionType, exceptionMessage, suppressedCount |
+| 10 | `SessionCleanupFailed` | Warning | sessionId, exceptionType, exceptionMessage, suppressedCount |
+| 11 | `SessionsAborted` | Warning | engineName, sessions, drainTimeoutMilliseconds, suppressedCount |
+| 12 | `StatementParseFailed` | Error | sessionId, database, code, exceptionType, suppressedCount |
 
 Every open of an existing database writes both around `DocumentCatalog.RecoverIndexesAsync`,
 from the constructor that recovers it; a create writes neither. The stop is written from a
@@ -930,11 +1008,18 @@ flow (event-source.md rule 8): without it, every later event on that flow, the r
 among them, would be nested under a recovery that never ended. The root's failed open reports the
 failure itself; the stop's `status` follows the area's ending convention
 (`docs/resources/Database/DESIGN.md`, "Diagnostics"), so an operator reads a failed recovery from
-the stop alone. No counters. The start reads its timestamp only while it is written.
+the stop alone. The start reads its timestamp only while it is written.
 `DocumentDatabaseEventSourceTests` checks the name, the strict manifest, a reopen with an aborted
 writer, a create, and that neither write allocates while nobody listens; a recovery that throws
 is not driven by a test yet (no fault-injection seam reaches `RecoverIndexesAsync`), so its
 `Error` stop is checked by a direct write.
+
+The server maintains current-server-sessions, total-server-sessions and total-rejected-sessions
+polling counters even while events are disabled. Counter objects are created only when enabled.
+Warnings/errors are throttled once per second per event ID; the next emitted event reports the
+suppressed count. Names and diagnostic text are bounded. Parse failures log code and exception
+type, never OQL text or parameter values. Client events and shared connection events are documented
+in Documents.Client DESIGN.md; both sources have strict-manifest and lifecycle coverage.
 
 ## Session execution (#1576, 2026-10-16)
 
@@ -943,6 +1028,33 @@ and text execution; a foreign-model request fails compilation. `DocumentQueryReq
 `Statement` and optional `Parameters` over the memberless `DatabaseRequest` root. Results
 use the model-neutral `DatabaseResult` family. Lifecycle and explicit transactions remain
 on `DatabaseSession`.
+
+JSON result and parameter writers use `JsonElement.WriteTo` so the configured writer depth
+of 256 applies, including values deeper than 64 levels. The other wire readers explicitly set
+256. Embedded stored-document validation and query reads explicitly use 128; system-collection
+JSON uses fixed, one-level objects and cannot carry arbitrary nested content.
+
+Before writing a terminal shared Error, the server starts one ShutdownDrainTimeout deadline.
+That same deadline covers the error write, its flush, transport output completion and the wait
+for connection closure. Expiry aborts the connection to release blocked transport I/O; the pump
+joins that I/O before releasing the session and its counter. The hard-abort registration stays
+attached through the drain, and shutdown can interrupt output completion and the closure wait.
+A flush only queues pipe bytes; immediate TCP disposal can discard a queued fatal frame. This
+local drain uses the existing connection contract and adds no public transport member. A deferred
+send fixture deterministically verifies error delivery before disposal; TCP unknown-database
+coverage verifies the real transport path.
+Controlled-output regressions block the terminal frame write (ignoring or observing cancellation),
+explicit flush and asynchronous completion separately, and assert session completion and
+registry/counter release within the 100 ms budget plus a 500 ms scheduling margin. A separate unwind gate verifies that an abort
+does not release the session before pending output completion returns.
+
+Streaming regressions count all 128 rows and 130 wire frames and verify a distinct marker in
+each row. They limit allocations before the first header to 8 MiB, which detects pre-encoding
+a 32 MiB result. Separate encoder tests measure peak backing-array capacity directly under
+the same 8 MiB budget. Whole-process live-heap deltas are not used as a buffer metric because
+they include the loopback client's frame arrays and the engine's storage and runtime pools.
+These checks cover formatter storage and allocations before the header, not transport queue
+growth when a reader stalls; they do not establish an end-to-end InMemory memory bound.
 
 ## Diagnostic completion (#1103 review)
 

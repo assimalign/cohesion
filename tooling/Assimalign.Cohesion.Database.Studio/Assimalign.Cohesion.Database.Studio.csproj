@@ -62,6 +62,7 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Client" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Documents" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Documents.Client" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Graph" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Graph.Client" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.KeyValuePair" />

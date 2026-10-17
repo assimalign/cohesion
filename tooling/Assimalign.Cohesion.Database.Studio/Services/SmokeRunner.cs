@@ -222,7 +222,45 @@ internal sealed class SmokeRunner
             await SamplesAsync(scope, embedded).ConfigureAwait(false);
         }
 
-        Skip("documents/wire", "all", "Documents has no wire server or client (Documents.Client/src is empty)");
+        await StepAsync("documents/wire", "oql-documents-mutations-catalog-errors", async () =>
+        {
+            using var timeout = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(30));
+            var token = timeout.Token;
+            var listener = Connections.Tcp.TcpConnectionListener.Create(options => options.EndPoint = new IPEndPoint(IPAddress.Loopback, 0));
+            await using var server = Documents.DocumentDatabaseServer.Create(engines.Documents, new() { Listener = listener });
+            await server.StartAsync(token).ConfigureAwait(false);
+            await using var client = Documents.Client.DocumentClient.Create(new()
+            {
+                Settings = new Client.DatabaseConnectionSettings { Database = databaseName, EndPoint = listener.EndPoint },
+                ConnectionFactory = new Connections.Tcp.TcpConnectionFactory(),
+            });
+            await using var connection = await client.ConnectAsync(token).ConfigureAwait(false);
+            Require(await connection.CreateCollectionAsync("wire_items", token).ConfigureAwait(false) == "wire_items", "create collection failed");
+            Require(await connection.GetCollectionAsync("wire_items", token).ConfigureAwait(false) == "wire_items", "get collection failed");
+            Documents.Document saved = await connection.PutAsync("wire_items", "one", "{\"name\":\"wire\",\"score\":9}"u8.ToArray(), cancellationToken: token).ConfigureAwait(false);
+            Require((await connection.GetAsync("wire_items", "one", token).ConfigureAwait(false))?.Version == saved.Version, "get did not preserve version");
+            var rows = await connection.QueryAsync("SELECT name, score FROM wire_items WHERE score > @min ORDER BY score DESC",
+                new Dictionary<string, object?> { ["min"] = 5 }, token).ConfigureAwait(false);
+            Require(rows.Count == 1 && rows[0]["name"] is "wire" && rows.AffectedCount == -1, "OQL row query failed");
+            var whole = await connection.QueryAsync("SELECT * FROM wire_items", cancellationToken: token).ConfigureAwait(false);
+            Require(whole.Documents.Count == 1 && whole.Documents[0].GetProperty("score").GetInt32() == 9, "whole document query failed");
+            var catalog = await connection.QueryAsync("SELECT OBJECT_NAME FROM COHESION_SCHEMA.OBJECT_OWNERSHIP", cancellationToken: token).ConfigureAwait(false);
+            Require(catalog.Any(row => row[0] is "wire_items"), "collection catalog missing wire collection");
+            try
+            {
+                await connection.QueryAsync("SELECT * FROM wire_items LIMIT 1", cancellationToken: token).ConfigureAwait(false);
+                throw new InvalidOperationException("unsupported OQL unexpectedly succeeded");
+            }
+            catch (Documents.Client.DocumentClientException exception)
+            {
+                Require(exception.Code == Protocol.ProtocolErrorCode.ParseFailure && exception.Diagnostics.Any(d => d.Code == "COHDBL001"), "diagnostic code lost on wire");
+            }
+            Require(await connection.DeleteAsync("wire_items", "one", saved.Version, token).ConfigureAwait(false), "delete after statement failure failed");
+            Require(await connection.GetAsync("wire_items", "one", token).ConfigureAwait(false) is null, "deleted document still visible");
+            await connection.DropCollectionAsync("wire_items", token).ConfigureAwait(false);
+            Require(!(await connection.GetCollectionsAsync(token).ConfigureAwait(false)).Contains("wire_items"), "dropped collection still visible");
+            return true;
+        }).ConfigureAwait(false);
     }
 
     // ---------------------------------------------------------------- Graph

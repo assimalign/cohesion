@@ -75,7 +75,7 @@ public sealed class DocumentProtocolTests
                 count++;
             }
             await WriteAsync(server, (ProtocolMessageType)DocumentProtocolMessageType.Complete,
-                new DocumentProtocolCompleteMessage(count).Encode(), token);
+                new DocumentProtocolCompleteMessage(count, -1).Encode(), token);
             (await ReadAsync(server, token)).Type.ShouldBe(ProtocolMessageType.Terminate);
         }
     }

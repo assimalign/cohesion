@@ -18,17 +18,17 @@ internal static class DocumentProtocolJson
             var reader = new Utf8JsonReader(json, new JsonReaderOptions { MaxDepth = 256 });
             if (!reader.Read() || (requireObject && reader.TokenType != JsonTokenType.StartObject))
             {
-                throw new ProtocolException("Expected a JSON parameter object or complete JSON result.");
+                throw new ProtocolException(ErrorMessages.JsonValueMissing);
             }
             reader.Skip();
             if (reader.Read())
             {
-                throw new ProtocolException("A document payload must contain exactly one JSON value.");
+                throw new ProtocolException(ErrorMessages.JsonValuesMultiple);
             }
         }
         catch (Exception exception) when (exception is JsonException or DecoderFallbackException)
         {
-            throw new ProtocolException("Malformed document JSON payload.", exception);
+            throw new ProtocolException(ErrorMessages.JsonPayloadMalformed, exception);
         }
     }
 }

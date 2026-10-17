@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+<resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+<resheader name="version"><value>2.0</value></resheader>
+<resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
+<resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
+  <data name="JsonScalarInvalid" xml:space="preserve"><value>OQL values must be JSON scalars or JsonElement values; numbers must fit System.Decimal.</value></data>
+  <data name="ParameterNameDuplicate" xml:space="preserve"><value>Duplicate document parameter name.</value></data>
+  <data name="StatementInvalid" xml:space="preserve"><value>The OQL statement has error diagnostics.</value></data>
+  <data name="StatementFailed" xml:space="preserve"><value>The document statement did not complete successfully.</value></data>
+  <data name="ResultTooLarge" xml:space="preserve"><value>A document result exceeds the maximum frame size.</value></data>
+  <data name="ServerShuttingDown" xml:space="preserve"><value>The server is shutting down.</value></data>
+  <data name="JsonValueMissing" xml:space="preserve"><value>Expected a JSON parameter object or complete JSON result.</value></data>
+  <data name="JsonValuesMultiple" xml:space="preserve"><value>A document payload must contain exactly one JSON value.</value></data>
+  <data name="JsonPayloadMalformed" xml:space="preserve"><value>Malformed document JSON payload.</value></data>
+  <data name="PayloadTrailingBytes" xml:space="preserve"><value>Trailing bytes in document payload.</value></data>
+  <data name="CollectionNameMissing" xml:space="preserve"><value>A collection name is required.</value></data>
+  <data name="OperationMissing" xml:space="preserve"><value>Missing document operation.</value></data>
+  <data name="VersionMarkerInvalid" xml:space="preserve"><value>Invalid document version marker.</value></data>
+  <data name="ContentLengthInvalid" xml:space="preserve"><value>Invalid document content length.</value></data>
+  <data name="OperationFieldsInvalid" xml:space="preserve"><value>Invalid fields for the document operation.</value></data>
+  <data name="CompletionCountsInvalid" xml:space="preserve"><value>Invalid document completion counts.</value></data>
+  <data name="CompletionPayloadInvalid" xml:space="preserve"><value>Malformed document completion payload.</value></data>
+  <data name="ParameterLengthInvalid" xml:space="preserve"><value>Malformed document parameter length.</value></data>
+  <data name="DiagnosticCountInvalid" xml:space="preserve"><value>Invalid document diagnostic count.</value></data>
+  <data name="DiagnosticFieldsInvalid" xml:space="preserve"><value>Invalid document diagnostic location or severity.</value></data>
+  <data name="FailureCodeInvalid" xml:space="preserve"><value>Invalid document statement failure code.</value></data>
+  <data name="ResultColumnsInvalid" xml:space="preserve"><value>Invalid document result columns.</value></data>
+  <data name="ResultColumnInvalid" xml:space="preserve"><value>Invalid document result column.</value></data>
+  <data name="ResultKindInvalid" xml:space="preserve"><value>Invalid document result kind.</value></data>
+  <data name="DocumentIdentityMissing" xml:space="preserve"><value>A stored document requires an identity.</value></data>
+  <data name="ListenerMissing" xml:space="preserve"><value>A connection listener is required.</value></data>
+  <data name="SessionLimitInvalid" xml:space="preserve"><value>The session limit must be positive.</value></data>
+  <data name="TimeoutInvalid" xml:space="preserve"><value>Server timeouts must be nonnegative timer durations or Timeout.InfiniteTimeSpan.</value></data>
+  <data name="DiagnosticTruncated" xml:space="preserve"><value> [truncated]</value></data>
+  <data name="DiagnosticsOmitted" xml:space="preserve"><value> Additional diagnostics were omitted to fit the wire response.</value></data>
+  <data name="ServerSessionFaulted" xml:space="preserve"><value>An unexpected server error terminated the session.</value></data>
+  <data name="StartupExpected" xml:space="preserve"><value>Expected a startup frame but received {0}.</value></data>
+  <data name="ProtocolVersionUnsupported" xml:space="preserve"><value>Protocol major version {0} is not supported; the server speaks {1}.</value></data>
+  <data name="DatabaseNotFound" xml:space="preserve"><value>The server's engine has no database named '{0}'.</value></data>
+  <data name="AuthenticationResponseExpected" xml:space="preserve"><value>Expected an authenticate response but received {0}.</value></data>
+  <data name="AuthenticationFailed" xml:space="preserve"><value>Authentication failed for principal '{0}'.</value></data>
+  <data name="IdleTimeoutExceeded" xml:space="preserve"><value>The session was closed after exceeding the idle timeout.</value></data>
+  <data name="ReadyFrameUnexpected" xml:space="preserve"><value>Unexpected {0} frame in the ready state.</value></data>
+  <data name="SessionLimitReached" xml:space="preserve"><value>The server is at its session limit.</value></data>
+</root>

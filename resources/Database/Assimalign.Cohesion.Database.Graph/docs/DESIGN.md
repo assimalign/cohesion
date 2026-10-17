@@ -638,6 +638,13 @@ the engine then reports Faulted until disposal; a `DatabaseEngineWorker`, the on
 attaches since phase 4 of the concrete-types plan, records a failed pass instead and its loop lets
 nothing escape. Before #1268 one unexpected exception ended a worker for good.
 `GraphWorkerResilienceTests` covers each case, a group flush's drain and its fsync both. It also
+isolates its worker races from other test collections. The header-write fault regression commits
+all setup writes with size-triggered checkpoints disabled, then arms the fault before enabling
+the existing journal-size trigger. It waits for the header-failure counter and offline state,
+and enables the healthy database's trigger only after capturing its committed journal length.
+This prevents a timed checkpoint from taking the database offline before the setup INSERT;
+the refusal, unchanged-file, single-fault and eleven-recovered-node assertions remain intact.
+The suite also
 checks that a database whose checkpoints keep failing leaves the other database a pace a
 worker-wide backoff cannot reach: over a shared six-second window more than twice the backoff's
 checkpoints, the floor that fails every worker-wide backoff or stall of one backoff a pass, with
@@ -1235,6 +1242,10 @@ and text execution; a foreign-model request fails compilation. `GraphRequest` ow
 `Statement` and optional `Parameters` over the memberless `DatabaseRequest` root. Results
 use the model-neutral `DatabaseResult` family. Lifecycle and explicit transactions remain
 on `DatabaseSession`.
+
+ProtocolPayload string decoding uses strict UTF-8. The shared startup/error reader refuses invalid
+sequences with ProtocolException; the server reports fatal ProtocolViolation and closes the session.
+Model statement, parameter-name and result-header strings use that same shared strict reader.
 
 ## Diagnostic completion (#1103 review)
 
