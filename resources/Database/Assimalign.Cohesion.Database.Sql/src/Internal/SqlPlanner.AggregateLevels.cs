@@ -66,6 +66,9 @@ internal sealed partial class SqlPlanner
                 int level = AggregateLevel(nested, scopes);
                 if (level < 0) { unresolved = true; }
                 else { Include(level - depth); }
+                // Its level already summarizes every dependency in its arguments. Walking
+                // them again here would double the work for every nested aggregate.
+                return;
             }
             var query = expression switch
             {

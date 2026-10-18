@@ -293,7 +293,8 @@ Aggregate levels use the lowest variable or aggregate dependency, descending int
 nested query bodies and adjusting levels as PostgreSQL `parse_agg.c:646-690,762,850`
 does. Outer-only aggregates report COHDBL001 before grouped-column validation,
 including explicitly and implicitly grouped ancestors; a nested local dependency
-keeps a mixed aggregate local. Arguments of an aggregate of the grouped level
+keeps a mixed aggregate local. A nested aggregate's dependency summary is consumed
+once, avoiding repeated argument walks. Arguments of an aggregate of the grouped level
 read source rows, including its ungrouped columns (`parse_agg.c:1385-1405`).
 Grouped outer columns compare bound grouping values and types, including USING
 merges and coercions (`parse_clause.c:1722`), rather than physical lookup ordinals.
