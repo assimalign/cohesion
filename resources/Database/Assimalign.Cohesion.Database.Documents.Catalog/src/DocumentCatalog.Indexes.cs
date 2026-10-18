@@ -336,8 +336,10 @@ public sealed partial class DocumentCatalog
     private async ValueTask CheckUniqueAsync(List<IndexChange> changes,
         TransactionContext context, CancellationToken cancellationToken)
     {
+        // Commit marks the context Committed before releasing the writer lock,
+        // but coordinator untracking follows release. Such a writer is already visible.
         var latest = new TransactionSnapshot(context.Sequence, TransactionSequence.None,
-            new TransactionSequence(ulong.MaxValue), _coordinator.GetOpenContexts().Select(item => item.Sequence));
+            new TransactionSequence(ulong.MaxValue), _coordinator.GetOpenContexts().Where(item => item.State != TransactionState.Committed).Select(item => item.Sequence));
         foreach (var change in changes)
         {
             if (!change.CheckUnique || change.NewKey is not { } key) { continue; }

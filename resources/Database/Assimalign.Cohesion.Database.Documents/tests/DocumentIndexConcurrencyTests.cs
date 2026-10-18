@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Assimalign.Cohesion.Database.Documents.Catalog;
@@ -39,11 +40,21 @@ public sealed class DocumentIndexConcurrencyTests
             pending.IsCompleted.ShouldBeFalse();
             blocked++;
 
-            // Act: the waiting writer resumes with its old snapshot after this commit.
-            await writer.CommitAsync(timeout.Token);
-            if (sameDocument) { await Should.ThrowAsync<DatabaseTransactionAbortedException>(async () => await pending); }
-            else { await Should.ThrowAsync<DocumentConstraintViolationException>(async () => await pending); }
-            refused++;
+            // Act: hold commit after lock release and before coordinator untracking.
+            using var gate = new DocumentCommitEventGate(database.Name, writer.Context.Sequence.Value);
+            var committing = Task.Run(async () => await writer.CommitAsync(timeout.Token), timeout.Token);
+            try
+            {
+                await gate.Entered.WaitAsync(timeout.Token);
+                database.Coordinator.GetOpenContexts().Any(context => context.Sequence == writer.Context.Sequence &&
+                    context.State == TransactionState.Committed).ShouldBeTrue();
+                if (sameDocument) { await Should.ThrowAsync<DatabaseTransactionAbortedException>(async () => await pending.WaitAsync(timeout.Token)); }
+                else { await Should.ThrowAsync<DocumentConstraintViolationException>(async () => await pending.WaitAsync(timeout.Token)); }
+                refused++;
+            }
+            finally { gate.Release(); await committing; }
+            gate.Calls.ShouldBe(1);
+            gate.TimedOut.ShouldBeFalse();
             await stale.RollbackAsync(timeout.Token);
             await one.DeleteAsync(first, id, cancellationToken: timeout.Token);
         } while ((elapsed.Elapsed < TimeSpan.FromSeconds(1) || blocked < 2) && elapsed.Elapsed < TimeSpan.FromSeconds(20));

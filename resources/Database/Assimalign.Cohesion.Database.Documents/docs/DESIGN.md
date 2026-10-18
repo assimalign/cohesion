@@ -96,7 +96,11 @@ Serializable is rejected rather than silently weakened.
 
 The shared lock manager serializes writers per logical database. Before changing
 a document, collection, or index, the operation compares its snapshot with the
-latest state under that lock. An intervening change raises
+latest state under that lock. Committed contexts are excluded from the in-flight set even
+while the coordinator still tracks them: the manager marks them committed before releasing
+the writer lock, and the coordinator untracks them afterward. A deterministic commit-event
+gate pins that handoff for both UNIQUE arbitration and stale-document conflicts (#1135).
+An intervening change raises
 `DatabaseTransactionAbortedException`. A commit or rollback the transaction kernel
 refuses or aborts crosses the model boundary the same way (see "Failed statements in
 explicit transactions" below for the end contract). An operation that ends up granted

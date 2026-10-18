@@ -80,8 +80,9 @@ The fields below appear consecutively beginning at offset 18. No trailing fields
 
 Kinds 1 and 2 remain v1. Every index uses v2, including single-path nonunique indexes.
 V1 index records are refused before the recovery scrub writes anything, with found/supported
-versions and a recreate remedy. There is no upgrade path or legacy reader. Older engines
-refuse the v2 physical registrations before their scrub; never open a v2 catalog in an older engine.
+versions and a recreate remedy. There is no upgrade path or legacy reader. The preceding v1 index reader
+refuses v2 physical registrations at its pre-scrub fence. Engines predating that fence must
+never open these files, as the compatibility section below records.
 Key-path lists are immutable and compare by value, including catalog conflict checks.
 
 Kind 3 content chunks use the format in
@@ -124,7 +125,9 @@ Concatenation preserves MISSING &lt; NULL &lt; FALSE &lt; TRUE &lt; number &lt; 
 The complete key must fit the shared 1024-byte limit; oversize fails before publication.
 
 UNIQUE checks are immediate, under the caller's database writer lock, before the physical
-statement bracket. A latest-state snapshot includes the caller's own earlier writes; a cursor
+statement bracket. A latest-state snapshot includes the caller's own earlier writes and
+excludes committed contexts from its in-flight set, including during the interval between
+writer-lock release and coordinator untracking. A cursor
 probes equal keys while excluding the document's own previous entry. Build detects duplicate
 encoded keys before creating any tree or registration. Keys containing NULL or MISSING never
 conflict (PostgreSQL's NULLS DISTINCT default, `doc/src/sgml/ref/create_index.sgml:340-347`),

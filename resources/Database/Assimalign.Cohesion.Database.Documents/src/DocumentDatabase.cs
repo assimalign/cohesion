@@ -438,8 +438,10 @@ public sealed class DocumentDatabase : DatabaseInstance
 
     // Called only under the database writer lock, after all earlier writers
     // finished. Preserve the caller's own uncommitted writes in the latest view.
+    // A committed context can remain coordinator-tracked after its writer lock releases;
+    // it must not remain in the snapshot's in-flight set during that handoff.
     internal TransactionSnapshot LatestSnapshot(TransactionContext context) => new(context.Sequence,
-        TransactionSequence.None, new TransactionSequence(ulong.MaxValue), Coordinator.GetOpenContexts().Select(item => item.Sequence));
+        TransactionSequence.None, new TransactionSequence(ulong.MaxValue), Coordinator.GetOpenContexts().Where(item => item.State != TransactionState.Committed).Select(item => item.Sequence));
 
     internal static void ThrowConflict() => throw new DatabaseTransactionAbortedException("The document catalog changed since this transaction's snapshot. Retry the transaction.");
     internal static DocumentContentReference Content(DocumentCatalogEntry entry) => new(entry.HeadLocation, entry.Length, entry.Checksum);
