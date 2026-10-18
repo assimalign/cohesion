@@ -87,7 +87,9 @@ flowchart LR
     Executor["Graph executor"] --> Planner
 ```
 
-`GqlQueryExpression` carries ordered `GqlMatchClause(Paths, Predicate, Optional)` records, insertion paths, deletion variables,
+`GqlQueryExpression.Stages` carries source-ordered MATCH, LET, FILTER, FOR/UNWIND, INSERT/CREATE, DELETE, RETURN/WITH and NEXT nodes. `Segments` splits that list at explicit NEXT boundaries. The original constructors retain a single-segment facade for hand-built ASTs. Stage records retain Cypher spellings for conformance checks.
+
+The flat single-segment facade carries ordered `GqlMatchClause(Paths, Predicate, Optional)` records, insertion paths, deletion variables,
 a detach flag, expression projections, a `GqlSetQuantifier` (ALL by default), `ReturnStar`, and an optional `GqlCatalogSurface` for dedicated metadata statements.
 Catalog statements cannot carry graph clauses. `GqlPathPattern.Variable` optionally names a MATCH
 path; it is null for anonymous paths and insertion paths. Every path holds one more node than relationship. Anonymous nodes
