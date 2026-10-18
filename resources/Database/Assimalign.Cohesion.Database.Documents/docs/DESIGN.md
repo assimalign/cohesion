@@ -261,6 +261,9 @@ OQL0007 for the same count rule at parse and plan time:
 | `COHDOC017` | UPDATE targets duplicate or prefix-overlap after alias normalization |
 | `COHDOC018` | UPDATE produces invalid stored JSON or exceeds storage's 128-level depth |
 | `COHDOC019` | A scalar function argument is outside its domain (SQRT, POWER or a fractional ROUND/TRUNC scale) |
+| `COHDOC020` | A UNIQUE index found a duplicate valued scalar key (23505) |
+| `COHDOC021` | A UNIQUE key contains an array or object |
+| `COHDOC022` | An index has fewer than one or more than 32 paths |
 
 `DocumentQueryRequest.FromOql` and a directly constructed typed query with parse errors
 throw `DatabaseParseException` carrying the complete, ordered parser diagnostics and the
@@ -281,7 +284,7 @@ through two virtual document collections:
 
 | Source | Document properties | Cardinality |
 | --- | --- | --- |
-| `COHESION_SCHEMA.INDEXES` | `COLLECTION_CATALOG`, `COLLECTION_NAME`, `INDEX_NAME`, `PATH`, `IS_UNIQUE` | One document per visible index definition; `IS_UNIQUE` is Boolean false for the current nonunique indexes |
+| `COHESION_SCHEMA.INDEXES` | `COLLECTION_CATALOG`, `COLLECTION_NAME`, `INDEX_NAME`, `PATH`, `PATHS`, `IS_UNIQUE` | One document per visible definition; PATHS is the ordered path array, PATH its leading element, and IS_UNIQUE the actual flag |
 | `COHESION_SCHEMA.OBJECT_OWNERSHIP` | `COLLECTION_CATALOG`, `COLLECTION_NAME`, `OBJECT_TYPE`, `OBJECT_NAME`, `OWNER`, `OWNING_SCHEMA` | One document per visible collection; `OBJECT_TYPE` is `COLLECTION` |
 
 `COLLECTION_CATALOG` is the bound database name. `OWNER` preserves SQL's `Adhoc`
@@ -515,9 +518,9 @@ an absent value has `IsMissing(ordinal) == true`, `IsNull(ordinal) == false`, an
 `GetValue(ordinal) == null`. Explicit NULL has the reverse predicates. SELECT * keeps the
 whole source value. SQL, Graph and KeyValuePair leaves keep the default unsupported capability.
 The evaluator's sentinel remains internal to Documents; no catalog value or public sentinel
-type is introduced. Catalog format remains **version 1**: its index key extraction already
-skips MISSING, NULL and non-scalars, the encoded keys are unchanged, and no persisted value
-changes meaning. The SQL++ query semantics therefore require no catalog format bump.
+type is introduced. Index definitions and physical registrations use v2 (#1135); collections,
+documents and content retain their current versions. Leading MISSING omits an index entry;
+trailing MISSING and NULL have distinct component tags. See the catalog's key-layout contract.
 Unary NULL/MISSING/VALUED tests never select an index seek.
 
 ### Predicate truth tables (#1127)
@@ -751,8 +754,8 @@ retain their current versions. Startup validates metadata and tree formats befor
 scrub. V1 index catalogs are refused with a recreate remedy; no legacy reader or upgrade exists.
 
 
-`CREATE INDEX <index-name> ON <collection> (<path>)` and
-`DROP INDEX <index-name> ON <collection>` are OQL statements. `DocumentPlanner` binds them to
+`CREATE [UNIQUE] INDEX [IF NOT EXISTS] <index-name> ON <collection> (<path>, ...)` and
+`DROP INDEX [IF EXISTS] <index-name> ON <collection>` are OQL statements. `DocumentPlanner` binds them to
 catalog-operation plans and `DocumentPlanExecutor` executes those plans under the statement's
 `TransactionContext`. This replaced the former extension-member entry point and gives
 `DocumentDatabase` and `DocumentDatabaseSession` no index-management members; there is no runtime
@@ -771,16 +774,32 @@ in its transaction; queries never lazily build trees. Dropping an index removes 
 definition in the same transaction, so subsequent physical plans stop selecting it while older
 snapshots retain their defined visibility.
 
+Conditional creation preserves an existing same-named definition regardless of its paths or
+UNIQUE flag. Conditional removal ignores an absent name. Under schema ownership, an existing
+index still refuses removal, while an absent conditional DROP is a no-op. Snapshot conflicts
+are checked before no-ops. Indexes and documents remain in the same logical transaction.
+INSERT, UPSERT, UPDATE, DELETE and CRUD share eager atomic maintenance of every index.
+UNIQUE violations use the catalog-owned public DocumentConstraintViolationException, COHDOC020
+(23505); non-scalar UNIQUE components use COHDOC021. NULL and MISSING components never conflict.
+Checks are immediate per row, so a swap can fail; a failed explicit transaction requires caller
+RollbackAsync before session reuse (#1225). The wire sends ExecutionFailure (6) and remains usable.
+Randomized fixed-seed tests compare scans, one/two/three-path seeks and post-DROP scans over mixed
+shapes, scales, parameters and contradictory bounds. The process fixture checks raw entries in
+both trees after committed/abandoned UPDATE, UPSERT, DELETE and Put, then probes uniqueness twice.
+
 Successful index DDL returns a command `DatabaseResult` with `Success` status and an affected count
 of zero; index definition changes are not document-row mutations.
 
 `ChooseAccess` takes a predicate and source alias independently of SELECT, so SELECT, UPDATE and DELETE
 share the same physical access selection. The planner uses applicable equality/range predicates on indexed paths,
-including parameter values, reversed operands, and conjunctive bounds. Equality
-is preferred over a range; ties choose ordinal index name. The executor reapplies
+including parameters, reversed operands and conjunctive bounds. Choice ranks longest leading
+equality prefix, then a range on the next path, then UNIQUE, then ordinal index name. A bound
+only on a non-leading path scans. Equality-prefix and trailing-range seeks use prefix successors;
+EXPLAIN names the index and prints all equality and range components. Single-path descriptions
+retain their existing inclusive/exclusive scalar-bound spelling. The executor reapplies
 the full predicate to candidates, preserving mixed-shape semantics. See the
 [catalog design](../../Assimalign.Cohesion.Database.Documents.Catalog/docs/DESIGN.md)
-for supported scalar keys, visibility filtering, and restart recovery. META expressions are
+for composite key collation, NULL/MISSING rules, uniqueness arbitration, visibility and restart recovery. META expressions are
 not document paths: META(alias).id comparisons stay residual filters over a scan or a content
 index chosen by another conjunct. T1 has no key-lookup access path.
 

@@ -70,7 +70,7 @@ internal static partial class DocumentPlanExecutor
     private static ValueTask<IReadOnlyList<DocumentCatalogEntry>> ReadCandidatesAsync(DocumentDatabase database,
         DocumentOperation operation, DocumentCollectionMetadata collection, DocumentAccessPath access, CancellationToken cancellationToken)
         => access is DocumentIndexPath seek
-            ? database.Catalog.SearchIndexAsync(collection.Id, seek.Index.Name,
+            ? database.Catalog.SearchIndexAsync(collection.Id, seek.Index.Name, seek.EqualityPrefix ?? [],
                 seek.Lower?.Value, seek.Lower?.Inclusive ?? false, seek.Upper?.Value, seek.Upper?.Inclusive ?? false,
                 operation.Context.Snapshot, cancellationToken)
             : ValueTask.FromResult(database.Catalog.GetDocuments(collection.Id, null, operation.Context.Snapshot));
@@ -214,7 +214,9 @@ internal static partial class DocumentPlanExecutor
         DocumentCreateIndexPlan plan, CancellationToken cancellationToken)
     {
         await PrepareIndexChangeAsync(database, operation, plan.Collection, "CREATE INDEX", cancellationToken).ConfigureAwait(false);
-        await database.Catalog.CreateIndexAsync(plan.Collection.Id, plan.IndexName, plan.Path,
+        if (plan.IfNotExists && database.Catalog.GetIndexes(plan.Collection.Id, operation.Context.Snapshot).Any(index => index.Name == plan.IndexName))
+        { return DocumentCommandResult.Success; }
+        await database.Catalog.CreateIndexAsync(plan.Collection.Id, plan.IndexName, plan.Paths, plan.IsUnique,
             operation.Context, cancellationToken).ConfigureAwait(false);
         return DocumentCommandResult.Success;
     }
@@ -222,23 +224,21 @@ internal static partial class DocumentPlanExecutor
     private static async ValueTask<DatabaseResult> ExecuteDropIndexAsync(DocumentDatabase database, DocumentOperation operation,
         DocumentDropIndexPlan plan, CancellationToken cancellationToken)
     {
-        await PrepareIndexChangeAsync(database, operation, plan.Collection, "DROP INDEX", cancellationToken).ConfigureAwait(false);
+        await PrepareIndexChangeAsync(database, operation, plan.Collection, "DROP INDEX", cancellationToken, plan.IfExists ? plan.IndexName : null).ConfigureAwait(false);
+        if (plan.IfExists && !database.Catalog.GetIndexes(plan.Collection.Id, operation.Context.Snapshot).Any(index => index.Name == plan.IndexName))
+        { return DocumentCommandResult.Success; }
         await database.Catalog.DeleteIndexAsync(plan.Collection.Id, plan.IndexName,
             operation.Context, cancellationToken).ConfigureAwait(false);
         return DocumentCommandResult.Success;
     }
 
     private static async ValueTask PrepareIndexChangeAsync(DocumentDatabase database, DocumentOperation operation,
-        DocumentCollectionMetadata collection, string operationName, CancellationToken cancellationToken)
+        DocumentCollectionMetadata collection, string operationName, CancellationToken cancellationToken, string? absentNoOp = null)
     {
         await database.LockWriterAsync(operation.Context, cancellationToken).ConfigureAwait(false);
         if (collection != database.Catalog.FindCollection(collection.Name, database.LatestSnapshot(operation.Context)))
         {
             DocumentDatabase.ThrowConflict();
-        }
-        if (collection.Owner == DatabaseObjectOwner.Schema)
-        {
-            throw new DatabaseObjectLockedException(collection.Name, collection.OwningSchema!, operationName);
         }
         if (!database.Catalog.GetDocuments(collection.Id, null, operation.Context.Snapshot)
                 .SequenceEqual(database.Catalog.GetDocuments(collection.Id, null, database.LatestSnapshot(operation.Context))) ||
@@ -247,6 +247,9 @@ internal static partial class DocumentPlanExecutor
         {
             DocumentDatabase.ThrowConflict();
         }
+        if (collection.Owner == DatabaseObjectOwner.Schema &&
+            (absentNoOp is null || database.Catalog.GetIndexes(collection.Id, operation.Context.Snapshot).Any(index => index.Name == absentNoOp)))
+        { throw new DatabaseObjectLockedException(collection.Name, collection.OwningSchema!, operationName); }
     }
 
     private static DatabaseType GetType(object? value) => value switch

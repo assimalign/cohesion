@@ -1,3 +1,6 @@
+using System.Collections.Generic;
+using System.Linq;
+
 using Assimalign.Cohesion.Database.Language;
 
 namespace Assimalign.Cohesion.Database.Documents.Language;
@@ -38,25 +41,66 @@ public sealed partial class OqlQueryParser
         IsWord(_tokens[position], "IF") &&
         (IsWord(_tokens[position + 1], "NOT") || IsWord(_tokens[position + 1], "EXISTS"));
 
-    private bool IsCollectionExistenceToken(int position) =>
-        (IsDdlStatement("CREATE", "COLLECTION") || IsDdlStatement("DROP", "COLLECTION")) &&
-        StartsExistenceModifier(2) &&
-        (position == 3 || position == 4 && IsWord(_tokens[3], "NOT"));
+    private bool IsDdlExistenceToken(int position)
+    {
+        bool unique = IsIndexStatement("CREATE") && _tokens.Count > 2 && IsWord(_tokens[1], "UNIQUE");
+        int start = unique ? 3 : 2;
+        return (IsDdlStatement("CREATE", "COLLECTION") || IsDdlStatement("DROP", "COLLECTION") ||
+            IsIndexStatement("CREATE") || IsIndexStatement("DROP")) && StartsExistenceModifier(start) &&
+            (position == start + 1 || position == start + 2 && IsWord(_tokens[start + 1], "NOT"));
+    }
+
+    private bool IsIndexKeyToken(int position)
+    {
+        if (!IsIndexStatement("CREATE")) { return false; }
+        int depth = 0;
+        for (int i = 0; i <= position; i++)
+        {
+            if (_tokens[i].Type == TokenType.LeftParen) { depth++; }
+            if (_tokens[i].Type == TokenType.RightParen && --depth == 0) { return false; }
+        }
+        return depth > 0;
+    }
 
     private OqlCreateIndexExpression ParseCreateIndex()
     {
         var start = Current;
         Advance(); // CREATE
+        bool unique = Take("UNIQUE");
         Expect("INDEX");
-
+        bool ifNotExists = ParseIfExists(negated: true);
         string indexName = Identifier();
         Expect("ON");
         string collection = CollectionName();
         Expect(TokenType.LeftParen, "'('");
-        var path = ParseDocumentPath();
-        Expect(TokenType.RightParen, "')'");
+        var paths = new List<OqlPathExpression>();
+        do
+        {
+            var token = Current;
+            if (paths.Count == 32) { Error("OQL0009", "An index supports at most 32 key paths.", token); break; }
+            if (Is("ALL") || Is("DISTINCT"))
+            {
+                string form = Is("ALL") ? "ALL array index key" : "DISTINCT ARRAY array index key";
+                _diagnostics.Add(QueryDiagnostics.UnsupportedClause(form, Profile.Language, Span(token, token)));
+                break;
+            }
+            OqlPathExpression path;
+            if (Take(TokenType.LeftBracket))
+            {
+                var property = Current;
+                Expect(TokenType.String, "a quoted root property");
+                Expect(TokenType.RightBracket, "']'");
+                path = ParsePath(token, Unquote(property.Text));
+            }
+            else { path = ParseDocumentPath(); }
+            if (Failed) { break; }
+            if (paths.Any(prior => prior.Segments.SequenceEqual(path.Segments)))
+            { Error("OQL0002", "Index key paths must be distinct.", token); break; }
+            paths.Add(path);
+        } while (Take(TokenType.Comma));
+        if (!Failed) { Expect(TokenType.RightParen, "')'"); }
 
-        return new OqlCreateIndexExpression(indexName, collection, path, Span(start, Previous));
+        return new OqlCreateIndexExpression(indexName, collection, paths, unique, ifNotExists, Span(start, Previous));
     }
 
     private OqlDropIndexExpression ParseDropIndex()
@@ -64,11 +108,11 @@ public sealed partial class OqlQueryParser
         var start = Current;
         Advance(); // DROP
         Expect("INDEX");
-
+        bool ifExists = ParseIfExists(negated: false);
         string indexName = Identifier();
         Expect("ON");
         string collection = CollectionName();
 
-        return new OqlDropIndexExpression(indexName, collection, Span(start, Previous));
+        return new OqlDropIndexExpression(indexName, collection, ifExists, Span(start, Previous));
     }
 }

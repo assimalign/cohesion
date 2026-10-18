@@ -22,10 +22,10 @@ internal sealed record DocumentUpsertPlan(DocumentCollectionMetadata Collection,
     DocumentStatementPlan? Source = null, int KeyOrdinal = 0, int? ValueOrdinal = null) : DocumentStatementPlan;
 internal sealed record DocumentCreateCollectionPlan(OqlCreateCollectionExpression Statement) : DocumentStatementPlan;
 internal sealed record DocumentDropCollectionPlan(OqlDropCollectionExpression Statement) : DocumentStatementPlan;
-internal sealed record DocumentCreateIndexPlan(DocumentCollectionMetadata Collection, string IndexName, string Path) : DocumentStatementPlan;
-internal sealed record DocumentDropIndexPlan(DocumentCollectionMetadata Collection, string IndexName) : DocumentStatementPlan;
+internal sealed record DocumentCreateIndexPlan(DocumentCollectionMetadata Collection, string IndexName, IReadOnlyList<string> Paths, bool IsUnique, bool IfNotExists) : DocumentStatementPlan;
+internal sealed record DocumentDropIndexPlan(DocumentCollectionMetadata Collection, string IndexName, bool IfExists) : DocumentStatementPlan;
 internal sealed record DocumentProjection(string Name, OqlExpression Expression, DatabaseType Type);
 internal abstract record DocumentAccessPath;
 internal sealed record DocumentScanPath : DocumentAccessPath;
-internal sealed record DocumentIndexPath(DocumentIndexMetadata Index, DocumentSeekBound? Lower, DocumentSeekBound? Upper) : DocumentAccessPath;
+internal sealed record DocumentIndexPath(DocumentIndexMetadata Index, DocumentSeekBound? Lower, DocumentSeekBound? Upper, IReadOnlyList<object>? EqualityPrefix = null) : DocumentAccessPath;
 internal readonly record struct DocumentSeekBound(object Value, bool Inclusive);
