@@ -76,7 +76,7 @@ all carried occurrences, including entities inside lists, maps and paths. New la
 use INSERT's catalog discovery and schema validation; later MATCH stages see them.
 
 Only literal whole maps are supported: `$p` and `properties(other)` as whole-map operands
-are COHDBL001. Literal composite properties are COHDBL001; computed composite property values
+are COHDBL001. Literal composite properties, including parenthesized literals, are COHDBL001; computed composite property values
 are COHDBG003. MERGE, including both ON CREATE SET and ON MATCH SET, remains one COHDBL001
 naming MERGE. `+=` must touch; GQL combines it into one operator token without changing the
 shared lexer. SHOW remains read-only (GQL0007).

@@ -64,7 +64,9 @@ public sealed partial class GqlQueryParser
                         string property = Identifier(allowKeyword: true);
                         Expect(TokenType.Equals, "'='");
                         if (Current.Type is TokenType.LeftBrace or TokenType.LeftBracket) { _ = ParseScalar(); break; }
-                        items.Add(new GqlSetPropertyItem(variable, property, ParsePredicate(), Span(startItem, Previous)));
+                        var value = ParsePredicate();
+                        if (!Failed) { RejectCompositePropertyLiteral(value); }
+                        items.Add(new GqlSetPropertyItem(variable, property, value, Span(startItem, Previous)));
                     }
                     else if (Is("IS") || Current.Type == TokenType.Colon)
                     {
@@ -85,7 +87,13 @@ public sealed partial class GqlQueryParser
                             else { Unsupported("WHOLE-MAP EXPRESSION", Current); }
                             break;
                         }
-                        items.Add(new GqlSetPropertiesItem(variable, ParseProperties(), merge, Span(startItem, Previous)));
+                        var properties = ParseProperties();
+                        if (!Failed)
+                        {
+                            foreach (var value in properties.Values)
+                            { RejectCompositePropertyLiteral(value); if (Failed) { break; } }
+                        }
+                        items.Add(new GqlSetPropertiesItem(variable, properties, merge, Span(startItem, Previous)));
                     }
                 } while (!Failed && Take(TokenType.Comma));
                 stages.Add(new GqlSetStage(items.AsReadOnly(), Span(clauseStart, Previous)));
@@ -227,6 +235,13 @@ public sealed partial class GqlQueryParser
             !segmentWrites && (stages.Count == 0 || stages[^1] is not GqlReturnStage { IsWith: false })))
         { Error("GQL0002", "A read segment requires RETURN; a linear statement may also end with INSERT, CREATE, DELETE, SET or REMOVE.", Current); }
         return new GqlQueryExpression(stages.AsReadOnly(), Span(start, Previous));
+    }
+
+    private void RejectCompositePropertyLiteral(GqlExpression value)
+    {
+        // Parentheses do not turn a list/map literal into a computed scalar value.
+        if (value is GqlListExpression or GqlMapExpression)
+        { _diagnostics.Add(QueryDiagnostics.UnsupportedClause("LIST OR MAP LITERAL IN PROPERTY VALUE", Profile.Language, value.Location ?? Span(Current, Current))); }
     }
 
     private GqlExpression ParsePageValue()
