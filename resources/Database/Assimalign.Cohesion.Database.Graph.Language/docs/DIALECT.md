@@ -192,6 +192,8 @@ zero-divisor behavior. NULL input returns NULL before signature kind/domain chec
 
 CAST supports INT/INTEGER, INT64/BIGINT, REAL, FLOAT/FLOAT64/DOUBLE [PRECISION], DECIMAL/NUMERIC,
 STRING/CHAR/VARCHAR, BOOL/BOOLEAN, DATE, ZONED DATETIME and TIMESTAMP WITH TIME ZONE.
+INT32, SMALLINT, FLOAT32, TIMESTAMP WITHOUT TIME ZONE and LOCAL DATETIME are recognized
+unsupported targets (one COHDBL001 naming the complete type).
 It follows Cohesion SQL's shared conversions: a fractional-to-integer or invalid-value cast
 raises COHDBG013. Cypher toString/toInteger/toFloat/toBoolean are extensions: toInteger truncates
 fractions, Boolean converts to 1/0, and unparsable conversion strings give NULL. Numeric
@@ -208,9 +210,14 @@ cannot become stored graph properties; the statement fails with COHDBG013 and ro
 Unknown calls use GQL0010 naming the function. Scalar/aggregate parsed arity uses GQL0002;
 hand-built invalid arity and unbound arguments use plan-time COHDBG001. Provable wrong kinds
 use plan-time COHDBG003; dynamic wrong kinds and value failures use COHDBG013. EXPLAIN checks
-signatures without evaluating calls. Function names remain valid variables and keys.
+signatures without evaluating calls. Ordinary function names remain valid variables and keys.
+CURRENT_DATE, CURRENT_TIMESTAMP, CURRENT_TIME, LOCAL_TIME and LOCAL_TIMESTAMP are ISO reserved
+words: every unquoted binding site is GQL0002; quoted names bind and are referenced quoted.
+CAST is contextual: followed by `(` it starts CAST; elsewhere it is an identifier, as in
+`MATCH (cast:Movie) RETURN cast.title`.
 Recognized unsupported calls (reduce, temporal constructors, head/last/tail/reverse/range,
-ELEMENTS) keep COHDBL001 in call position, preserving variables such as date.
+ELEMENTS, CARDINALITY, LTRIM/RTRIM/BTRIM, LEFT/RIGHT, LOG10 and Cypher
+toStringList/toIntegerList/toFloatList/toBooleanList) keep COHDBL001 in call position, preserving variables such as date.
 CURRENT_TIME/LOCAL_TIME/LOCAL_TIMESTAMP and procedures/CALL also remain COHDBL001.
 Runtime errors precede ResultHeader and retain the pooled session. Every declared function
 and alias has live evidence in the profile coverage guard.

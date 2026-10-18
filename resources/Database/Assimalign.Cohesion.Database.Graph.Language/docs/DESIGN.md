@@ -573,9 +573,12 @@ decision, including within these composites.
 `GqlFunctionCallExpression(Function, Arguments)` resolves scalar names to `GqlScalarFunction`;
 `GqlCastExpression(Operand, Target)` resolves explicit conversions to `GqlCastType`. Both copy
 or retain immutable expression children. CURRENT_DATE and CURRENT_TIMESTAMP use function nodes
-whose `IsNiladic` flag is true; their spelling has no parentheses and takes precedence over
-unquoted variable lookup. Other registered function words remain legal variables, path names,
-labels, keys and aliases. Scalar dispatch is separate from aggregate dispatch; adding a scalar
+whose `IsNiladic` flag is true; their spelling has no parentheses. All niladic temporal
+spellings (also CURRENT_TIME, LOCAL_TIME and LOCAL_TIMESTAMP) are ISO reserved words:
+unquoted binding sites fail with GQL0002; quoted names bind and are referenced quoted.
+CAST is contextual: only CAST followed by `(` starts a conversion; `MATCH (cast:Movie)
+RETURN cast.title` binds normally. Other registered function words remain legal variables,
+path names, labels, keys and aliases. Scalar dispatch is separate from aggregate dispatch; adding a scalar
 cannot silently create COLLECT_LIST. Names are case-insensitive, bindings remain ordinal.
 
 The static language signatures check parsed arity with **GQL0002**, exactly where #1147 checks
@@ -584,7 +587,9 @@ calls use **GQL0010** naming the function. Recognized unsupported calls keep COH
 FUNCTION and the spelling; these table entries apply only before `(` in value positions, so
 `date` and `duration` remain legal variables. `id(n)` specifically directs callers to element_id.
 CURRENT_TIME, LOCAL_TIME and LOCAL_TIMESTAMP are recognized unsupported niladic expressions.
-Procedures/CALL, reduce, temporal constructors, ELEMENTS, head/last/tail/reverse/range, list
+CARDINALITY, LTRIM/RTRIM/BTRIM, LEFT/RIGHT, LOG10 and Cypher toStringList/toIntegerList/
+toFloatList/toBooleanList are recognized unsupported calls. Procedures/CALL, reduce, temporal
+constructors, ELEMENTS, head/last/tail/reverse/range, list
 comprehensions and slicing remain outside this subset.
 
 The table distinguishes ISO clause 20 forms, direct Cypher aliases, and Cohesion extensions.
@@ -632,7 +637,8 @@ explicitly Cohesion extensions. ISO supplies LEFT/RIGHT rather than SUBSTRING; t
 CAST targets are INT/INTEGER (Int32), INT64/BIGINT (Int64), REAL (Single), FLOAT/FLOAT64/
 DOUBLE [PRECISION] (Double), DECIMAL/NUMERIC, STRING/CHAR/VARCHAR (unbounded string), BOOL/
 BOOLEAN, DATE, ZONED DATETIME and TIMESTAMP WITH TIME ZONE (DateTimeOffset). Type modifiers,
-LIST, DURATION, BYTES and ZONED TIME are outside this subset; recognized unsupported target
+LIST, DURATION, BYTES, ZONED TIME, INT32, SMALLINT, FLOAT32, TIMESTAMP WITHOUT TIME ZONE
+and LOCAL DATETIME are outside this subset; recognized unsupported target
 families use COHDBL001, unknown target spellings use GQL0002. Numeric-to-integer CAST rejects
 fractions, including fractional text; it never truncates or rounds. It follows SQL #1119's
 shared storage types and value rules. Numeric text is invariant without grouping, and exact

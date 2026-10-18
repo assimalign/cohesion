@@ -73,12 +73,38 @@ public sealed class GqlFunctionParserTests
     [InlineData("MATCH date=(date:date)-[duration:duration]->(time) RETURN date, duration, time")]
     [InlineData("MATCH (abs)-[size]->(trim) RETURN abs, size, trim")]
     [InlineData("MATCH (stddev_samp)-[percentile_cont]->(date) RETURN stddev_samp, percentile_cont, date")]
+    [InlineData("MATCH (cast:Movie) RETURN cast.title")]
+    [InlineData("MATCH cast=()-[cast]->() RETURN cast")]
+    [InlineData("LET cast=1 RETURN cast AS cast")]
+    [InlineData("FOR cast IN [1] RETURN cast")]
+    [InlineData("UNWIND [1] AS cast RETURN cast")]
     public void Parse_FunctionWordsAndNesting_ShouldPreserveBindings(string source)
     {
         // Arrange / Act
         var statement = new GqlQueryParser().Parse(source);
         // Assert
         statement.Diagnostics.ShouldBeEmpty();
+    }
+
+    public static IEnumerable<object[]> TemporalBindings()
+    {
+        foreach (string name in new[] { "CURRENT_DATE", "CURRENT_TIMESTAMP", "CURRENT_TIME", "LOCAL_TIME", "LOCAL_TIMESTAMP" })
+        {
+            foreach (string template in new[] { "MATCH ({0}:Movie) RETURN {0}", "MATCH ()-[{0}:T]->() RETURN {0}", "MATCH {0}=() RETURN {0}", "LET {0}=1 RETURN {0}", "RETURN 1 AS {0}", "FOR {0} IN [1] RETURN {0}", "UNWIND [1] AS {0} RETURN {0}" })
+            { yield return [name, template]; }
+        }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Graph.Language] - Functions: reserved temporal bindings require quoting")]
+    [MemberData(nameof(TemporalBindings))]
+    public void Parse_TemporalBinding_ShouldRejectUnquotedAndAcceptQuoted(string name, string template)
+    {
+        // Arrange / Act
+        var rejected = new GqlQueryParser().Parse(string.Format(template, name));
+        var quoted = new GqlQueryParser().Parse(string.Format(template, "\"" + name + "\""));
+        // Assert
+        rejected.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("GQL0002");
+        quoted.Diagnostics.ShouldBeEmpty();
     }
 
     [Theory(DisplayName = "Cohesion Test [Graph.Language] - Functions: scalar and aggregate arity use the same parse diagnostic")]
@@ -153,6 +179,11 @@ public sealed class GqlFunctionParserTests
     [InlineData("DURATION")]
     [InlineData("BYTES")]
     [InlineData("ZONED TIME")]
+    [InlineData("INT32")]
+    [InlineData("SMALLINT")]
+    [InlineData("FLOAT32")]
+    [InlineData("TIMESTAMP WITHOUT TIME ZONE")]
+    [InlineData("LOCAL DATETIME")]
     public void Parse_UnsupportedCastTarget_ShouldNameCast(string target)
     {
         // Arrange / Act

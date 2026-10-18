@@ -57,9 +57,21 @@ public sealed partial class GqlQueryParser
                 if (Take("TIME")) { Unsupported("CAST ZONED TIME", type); }
                 else { Expect("DATETIME"); }
                 break;
-            case "TIMESTAMP": Expect("WITH"); Expect("TIME"); Expect("ZONE"); break;
+            case "TIMESTAMP":
+                if (Take("WITHOUT"))
+                {
+                    Expect("TIME"); Expect("ZONE");
+                    if (!Failed) { Unsupported("CAST TIMESTAMP WITHOUT TIME ZONE", type); }
+                }
+                else { Expect("WITH"); Expect("TIME"); Expect("ZONE"); }
+                break;
             case "DOUBLE": Take("PRECISION"); break;
-            case "LIST": case "DURATION": case "BYTES": case "TIME": case "LOCAL":
+            case "LOCAL":
+                if (Take("DATETIME")) { Unsupported("CAST LOCAL DATETIME", type); }
+                else { Unsupported("CAST LOCAL", type); }
+                break;
+            case "INT32": case "SMALLINT": case "FLOAT32":
+            case "LIST": case "DURATION": case "BYTES": case "TIME":
                 Unsupported("CAST " + target, type); break;
             default:
                 if (kind == GqlCastType.Timestamp) { Error("GQL0002", $"Unknown CAST target '{target}'.", type); }

@@ -310,8 +310,8 @@ public sealed partial class GqlQueryParser : QueryParser
                     if (!valuePosition || i + 1 >= _tokens.Count || _tokens[i + 1].Type != TokenType.LeftParen) { continue; }
                     break;
                 case GqlWordPosition.ValueExpression:
-                    if (!valuePosition) { continue; }
-                    break;
+                    // ParseOperand owns niladic expressions so binding sites fail as syntax.
+                    continue;
                 case GqlWordPosition.PathMode:
                     // TRAIL (a)... is a path mode; trail = (a)... names a path.
                     if (patternDepth != 0 || valuePosition || !StartsPathPattern(i + 1, ref end)) { continue; }
@@ -529,8 +529,11 @@ public sealed partial class GqlQueryParser : QueryParser
         Is("LET") || Is("FILTER") || Is("FOR") || Is("UNWIND") || Is("WITH");
 
     private bool IsVariableToken => IsVariableLexeme(Current);
-    private static bool IsVariableLexeme(Lexeme token) => token.Type is TokenType.Identifier or TokenType.Function or TokenType.QuotedIdentifier ||
-        token.Type == TokenType.Keyword && token.Text.ToUpperInvariant() is "NEXT" or "FOR";
+    private static bool IsVariableLexeme(Lexeme token) => !IsReservedTemporal(token) &&
+        (token.Type is TokenType.Identifier or TokenType.Function or TokenType.QuotedIdentifier ||
+        token.Type == TokenType.Keyword && token.Text.ToUpperInvariant() is "NEXT" or "FOR");
+    private static bool IsReservedTemporal(Lexeme token) => token.Type is not (TokenType.String or TokenType.QuotedIdentifier) &&
+        token.Text.ToUpperInvariant() is "CURRENT_DATE" or "CURRENT_TIMESTAMP" or "CURRENT_TIME" or "LOCAL_TIME" or "LOCAL_TIMESTAMP";
     private bool IsQueryStartAt(int index) => IsWordAt(index, "MATCH") || IsWordAt(index, "OPTIONAL") || IsWordAt(index, "CREATE") ||
         IsWordAt(index, "INSERT") || IsWordAt(index, "RETURN") || IsWordAt(index, "LET") || IsWordAt(index, "FILTER") ||
         IsWordAt(index, "FOR") || IsWordAt(index, "UNWIND") || IsWordAt(index, "WITH");
@@ -584,7 +587,7 @@ public sealed partial class GqlQueryParser : QueryParser
             if (token.Text.Length <= 2) { Error("GQL0002", "An identifier cannot be empty.", token); }
             return token.Text.Length >= 2 ? token.Text[1..^1] : string.Empty;
         }
-        if ((token.Type is TokenType.Identifier or TokenType.Function || token.Type == TokenType.Keyword && token.Text.ToUpperInvariant() is "NEXT" or "FOR" || allowKeyword && token.Type == TokenType.Keyword) &&
+        if ((allowKeyword || !IsReservedTemporal(token)) && (token.Type is TokenType.Identifier or TokenType.Function || token.Type == TokenType.Keyword && token.Text.ToUpperInvariant() is "NEXT" or "FOR" || allowKeyword && token.Type == TokenType.Keyword) &&
             token.Text.Length > 0 && (char.IsLetter(token.Text[0]) || token.Text[0] == '_'))
         {
             Advance();

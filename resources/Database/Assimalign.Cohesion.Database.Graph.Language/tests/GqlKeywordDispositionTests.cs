@@ -122,6 +122,17 @@ public sealed class GqlKeywordDispositionTests
         ["SIMPLE"] = Rejects("MATCH SIMPLE (a)-[]->(b) RETURN a", "SIMPLE PATH MODE"),
         ["ACYCLIC"] = Rejects("MATCH ACYCLIC (a)-[]->(b) RETURN a", "ACYCLIC PATH MODE"),
         ["~"] = Rejects("MATCH (a)~[r]~(b) RETURN a", GqlUnsupportedVocabulary.UndirectedEdge),
+        ["CARDINALITY"] = Rejects("RETURN cardinality(1)", "FUNCTION cardinality"),
+        ["LTRIM"] = Rejects("RETURN ltrim(1)", "FUNCTION ltrim"),
+        ["RTRIM"] = Rejects("RETURN rtrim(1)", "FUNCTION rtrim"),
+        ["BTRIM"] = Rejects("RETURN btrim(1)", "FUNCTION btrim"),
+        ["LEFT"] = Rejects("RETURN left(1)", "FUNCTION left"),
+        ["RIGHT"] = Rejects("RETURN right(1)", "FUNCTION right"),
+        ["LOG10"] = Rejects("RETURN log10(1)", "FUNCTION log10"),
+        ["TOSTRINGLIST"] = Rejects("RETURN toStringList(1)", "FUNCTION toStringList"),
+        ["TOINTEGERLIST"] = Rejects("RETURN toIntegerList(1)", "FUNCTION toIntegerList"),
+        ["TOFLOATLIST"] = Rejects("RETURN toFloatList(1)", "FUNCTION toFloatList"),
+        ["TOBOOLEANLIST"] = Rejects("RETURN toBooleanList(1)", "FUNCTION toBooleanList"),
         ["ID"] = Rejects("RETURN id(1)", "FUNCTION id (use element_id)"),
         ["REDUCE"] = Rejects("RETURN reduce(1)", "FUNCTION reduce"),
         ["DATE"] = Rejects("RETURN date(1)", "FUNCTION date"),
@@ -268,6 +279,19 @@ public sealed class GqlKeywordDispositionTests
     private static void RequireCoverage(IEnumerable<string> words, IReadOnlyDictionary<string, KeywordCase> corpus)
         => words.Where(word => !corpus.ContainsKey(word))
             .ShouldBeEmpty("Every keyword and recognized-unsupported entry needs a keyword-disposition case.");
+
+    [Fact(DisplayName = "Cohesion Test [Graph.Language] - Keyword disposition: unsupported function names remain identifiers outside calls")]
+    public void Parse_UnsupportedFunctionNames_ShouldPreserveBindings()
+    {
+        // Arrange / Act / Assert
+        foreach (var word in GqlUnsupportedVocabulary.Words.Where(word => word.Position == GqlWordPosition.FunctionCall))
+        {
+            string name = word.Spelling.ToLowerInvariant();
+            new GqlQueryParser().Parse($"MATCH ({name}:{name}) RETURN {name}.{name} AS {name}").Diagnostics.ShouldBeEmpty();
+            new GqlQueryParser().Parse($"LET {name}=1 RETURN {name}").Diagnostics.ShouldBeEmpty();
+            new GqlQueryParser().Parse($"FOR {name} IN [1] RETURN {name}").Diagnostics.ShouldBeEmpty();
+        }
+    }
 
     private static string[] Words()
         => GqlLanguageProfile.Instance.Keywords.ToArray()

@@ -10,6 +10,11 @@ The original single-segment facade remains available for hand-built ASTs.
 `GqlQueryExpression.MatchClauses` groups source-ordered `GqlMatchClause(Paths, Predicate, Optional)`
 records, followed by insertions, deletion variables and
 projections, `SetQuantifier` (GqlSetQuantifier.All or Distinct), and `ReturnStar`.
+`GqlFunctionCallExpression(Function, Arguments)` represents scalar calls resolved to
+`GqlScalarFunction`; niladic CURRENT_DATE/CURRENT_TIMESTAMP have empty arguments and IsNiladic.
+`GqlCastExpression(Operand, Target)` represents explicit conversion to a `GqlCastType` scalar.
+Both nodes retain source locations and immutable children, and receive planner validation
+when constructed through the public AST.
 `GqlAggregateExpression(Function, Operand, Distinct)` distinguishes aggregates from scalar
 expressions. `GqlAggregateFunction` names Count, Sum, Avg, Min, Max and CollectList; collect
 parses as CollectList. A null operand means COUNT(*). `GroupBy` is null for implicit grouping,
