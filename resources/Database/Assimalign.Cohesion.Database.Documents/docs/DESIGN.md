@@ -377,6 +377,8 @@ paths, literals, parameters, arithmetic, and aggregates. `SELECT *` returns one
 `JsonElement` values; scalars become null, Boolean, decimal, or string. Mixed-type
 columns advertise `DatabaseType.Null` as unknown rather than guessing a schema.
 An explicit alias resolves duplicate projected column names; otherwise they fail.
+An ordinal HashSet checks projection-name uniqueness in linear time and the planner observes
+statement cancellation while validating projections.
 No POCO reflection, schema inference, or runtime code generation is involved.
 Query JSON parsing uses the same 128-level nesting limit as storage validation
 and index extraction, so every accepted document can be queried at its stored depth.
@@ -560,6 +562,11 @@ reports `Collection 'x' does not exist.`; Schema ownership permits content updat
 
 Targets are compared by ordinal property names and integer indexes after stripping the optional
 source alias. Repeated paths, prefix overlaps and SET/UNSET overlaps fail planning (COHDOC017).
+A segment trie detects all three in time linear in the total number of target segments, checking
+statement cancellation at each target and segment. This follows PostgreSQL's one-pass assignment
+lookup principle (`src/backend/rewrite/rewriteHandler.c:840-870` in the reference clone); the
+document-specific trie also detects prefix overlaps. Bounded regressions plan 200,000 distinct
+UPDATE targets and SELECT projection names, and a deterministic enumeration cancels planning.
 Root replacement (`SET d = ...`) and UNSET ending in an array index fail planning (COHDOC016).
 An aliased array root can be updated through an index, for example `SET d[0].name = 'new'`.
 At execution, name segments require objects; missing intermediate objects are created as `{}`

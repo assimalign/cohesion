@@ -39,7 +39,7 @@ internal sealed partial class DocumentPlanner
         OqlDeleteExpression delete => PlanDelete(delete),
         OqlUpdateExpression update => PlanUpdate(update),
         OqlSelectExpression select when DocumentSystemCollections.Find(select.Collection) is string name =>
-            new DocumentSystemCollectionPlan(CreateLogicalPlan(select), name),
+            new DocumentSystemCollectionPlan(CreateLogicalPlan(select, _cancellationToken), name),
         OqlSelectExpression select => Plan(select),
         OqlCreateCollectionExpression createCollection => PlanCreateCollection(createCollection),
         OqlDropCollectionExpression dropCollection => PlanDropCollection(dropCollection),
@@ -50,7 +50,7 @@ internal sealed partial class DocumentPlanner
 
     internal DocumentPlan Plan(OqlSelectExpression query)
     {
-        var logical = CreateLogicalPlan(query);
+        var logical = CreateLogicalPlan(query, _cancellationToken);
         var collection = ResolveCollection(query.Collection, query.Location);
         return new DocumentPlan(logical, collection, ChooseAccess(query.Predicate, query.Alias, _catalog.GetIndexes(collection.Id, _snapshot)));
     }
@@ -125,11 +125,12 @@ internal sealed partial class DocumentPlanner
             ?? throw new DocumentPlanningException("COHDOC002", $"Collection '{name}' does not exist.", location);
     }
 
-    internal static DocumentLogicalPlan CreateLogicalPlan(OqlSelectExpression query)
+    internal static DocumentLogicalPlan CreateLogicalPlan(OqlSelectExpression query, CancellationToken cancellationToken = default)
     {
         foreach (var expression in query.Projections.Select(p => p.Expression).Concat(query.GroupBy)
             .Concat(query.OrderBy.Select(o => o.Expression)).Concat(new[] { query.Predicate, query.Having }).OfType<OqlExpression>())
         {
+            cancellationToken.ThrowIfCancellationRequested();
             ValidateMetadata(expression, query.Alias, DocumentSystemCollections.Find(query.Collection) is null);
         }
         if (query.Projections.Count == 0) { throw new DocumentPlanningException("COHDOC001", "OQL SELECT requires a projection.", query.Location); }
@@ -154,8 +155,10 @@ internal sealed partial class DocumentPlanner
         foreach (var key in query.GroupBy) { Validate(key, allowAggregate: false); }
         if (query.Having is not null && !grouped) { throw new DocumentPlanningException("COHDOC001", "OQL HAVING requires grouping or an aggregate.", query.Having.Location); }
         var projections = new List<DocumentProjection>();
+        var names = new HashSet<string>(StringComparer.Ordinal);
         foreach (var projection in query.Projections)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             Validate(projection.Expression, allowAggregate: true, allowStar: !grouped);
             if (grouped) { ValidateGrouped(projection.Expression, query); }
             string name = query.IsValue ? "value" : projection.Alias ?? projection.Expression switch
@@ -166,7 +169,7 @@ internal sealed partial class DocumentPlanner
                 OqlMetaExpression meta => meta.Member!,
                 _ => $"column{projections.Count + 1}",
             };
-            if (projections.Any(existing => string.Equals(existing.Name, name, StringComparison.Ordinal)))
+            if (!names.Add(name))
             {
                 throw new DocumentPlanningException("COHDOC003", $"OQL projection name '{name}' occurs more than once; specify unique aliases.", projection.Expression.Location);
             }

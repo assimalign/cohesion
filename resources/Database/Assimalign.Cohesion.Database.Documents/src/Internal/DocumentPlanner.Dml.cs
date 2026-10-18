@@ -1,6 +1,5 @@
 using System.Collections.Generic;
 using System.Globalization;
-using System.Linq;
 
 using Assimalign.Cohesion.Database.Documents.Language;
 
@@ -13,6 +12,7 @@ internal sealed partial class DocumentPlanner
         DocumentSystemCollections.EnsureReadOnly(update.Collection, update.Location);
         var collection = ResolveCollection(update.Collection, update.Location);
         var targets = new List<DocumentUpdateTarget>();
+        var paths = new UpdatePathNode();
         foreach (var assignment in update.Assignments)
         {
             Add(assignment.Path, assignment.Value);
@@ -34,23 +34,50 @@ internal sealed partial class DocumentPlanner
 
         void Add(OqlPathExpression path, OqlExpression? value)
         {
-            var segments = PathSegments(path, update.Alias).ToArray();
-            if (segments.Length == 0 ||
-                segments.Any(segment => (segment.Name is null) == (segment.Index is null) || segment.Index < 0) ||
+            _cancellationToken.ThrowIfCancellationRequested();
+            var segments = new List<OqlPathSegment>();
+            foreach (var segment in PathSegments(path, update.Alias))
+            {
+                _cancellationToken.ThrowIfCancellationRequested();
+                if ((segment.Name is null) == (segment.Index is null) || segment.Index < 0)
+                {
+                    throw new DocumentPlanningException("COHDOC016", ErrorMessages.UpdateTargetInvalid, path.Location);
+                }
+                segments.Add(segment);
+            }
+            if (segments.Count == 0 ||
                 value is null && segments[^1].Index is not null)
             {
                 throw new DocumentPlanningException("COHDOC016", ErrorMessages.UpdateTargetInvalid, path.Location);
             }
-            foreach (var existing in targets)
+            var node = paths;
+            foreach (var segment in segments)
             {
-                int common = System.Math.Min(existing.Segments.Count, segments.Length);
-                if (existing.Segments.Take(common).SequenceEqual(segments.Take(common)))
+                _cancellationToken.ThrowIfCancellationRequested();
+                if (node.IsTarget)
                 {
                     throw new DocumentPlanningException("COHDOC017", ErrorMessages.UpdateTargetsOverlap, path.Location);
                 }
+                if (!node.Children.TryGetValue(segment, out var child))
+                {
+                    child = new UpdatePathNode();
+                    node.Children.Add(segment, child);
+                }
+                node = child;
             }
-            targets.Add(new DocumentUpdateTarget(path, segments, value));
+            if (node.IsTarget || node.Children.Count > 0)
+            {
+                throw new DocumentPlanningException("COHDOC017", ErrorMessages.UpdateTargetsOverlap, path.Location);
+            }
+            node.IsTarget = true;
+            targets.Add(new DocumentUpdateTarget(path, segments.AsReadOnly(), value));
         }
+    }
+
+    private sealed class UpdatePathNode
+    {
+        internal Dictionary<OqlPathSegment, UpdatePathNode> Children { get; } = new();
+        internal bool IsTarget { get; set; }
     }
 
     private DocumentDeletePlan PlanDelete(OqlDeleteExpression delete)
