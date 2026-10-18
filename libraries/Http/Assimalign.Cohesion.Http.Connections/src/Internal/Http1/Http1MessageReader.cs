@@ -42,7 +42,7 @@ internal static class Http1MessageReader
     /// <param name="timeProvider">The monotonic clock threaded to the request body's data-rate enforcement.</param>
     /// <param name="readTimeout">
     /// The read-timeout controller. Signalled when the request line begins and once the header
-    /// section has been fully received; its token bounds every head read.
+    /// section has been fully received; its deadline bounds every head read.
     /// </param>
     /// <param name="connectionToken">
     /// The ambient connection token used as the request's abort token and to bound the body read.
@@ -79,8 +79,6 @@ internal static class Http1MessageReader
         CancellationToken connectionToken,
         CancellationToken connectionClosed = default)
     {
-        CancellationToken readToken = readTimeout.Token;
-
         // RFC 9112 §3 — the request line is size-bounded; an over-long line is 414 (RFC 9110
         // §15.5.15). Signal the timeout controller on the first byte so the keep-alive idle window
         // tightens to the request-headers deadline (Slowloris defence).
@@ -90,7 +88,7 @@ internal static class Http1MessageReader
             HttpStatusCode.RequestUriTooLong,
             _requestLineSubject,
             readTimeout.OnRequestLineStarted,
-            readToken).ConfigureAwait(false);
+            readTimeout).ConfigureAwait(false);
 
         if (requestLine is null)
         {
@@ -196,7 +194,7 @@ internal static class Http1MessageReader
             requestPath = target.Path;
         }
 
-        HttpHeaderCollection headers = await ReadHeadersAsync(input, limits, readToken).ConfigureAwait(false);
+        HttpHeaderCollection headers = await ReadHeadersAsync(input, limits, readTimeout).ConfigureAwait(false);
 
         // The header section is fully received; disarm the request-headers deadline so the body
         // read is not bounded by it. The body is read lazily after dispatch, bounded instead by the
@@ -342,6 +340,7 @@ internal static class Http1MessageReader
             // chunked body's framing lines and trailer section. No body byte is read here — the
             // request is dispatched at head.
             requestBody = new Http1RequestBodyStream(
+                input,
                 stream,
                 framing,
                 solicitContinue,
@@ -450,7 +449,7 @@ internal static class Http1MessageReader
     private static async ValueTask<HttpHeaderCollection> ReadHeadersAsync(
         PipeReader input,
         Http1ConnectionListenerOptions.Http1Limits limits,
-        CancellationToken cancellationToken)
+        Http1ReadTimeout readTimeout)
     {
         HttpHeaderCollection headers = new();
 
@@ -467,7 +466,7 @@ internal static class Http1MessageReader
                 HttpStatusCode.RequestHeaderFieldsTooLarge,
                 _requestHeaderSectionSubject,
                 onFirstByte: null,
-                cancellationToken).ConfigureAwait(false);
+                readTimeout).ConfigureAwait(false);
 
             if (line is null)
             {
@@ -640,8 +639,10 @@ internal static class Http1MessageReader
     /// The line is found by scanning the octets the pipe has already buffered, and only the octets
     /// through its CRLF are consumed. Everything behind it (the next field line, the body, a pipelined
     /// request, a CONNECT tunnel's first octets) stays in the pipe for the next reader, so the head
-    /// never over-reads. Until a CRLF arrives nothing is consumed and every buffered octet is marked
-    /// examined, so the next read waits for more.
+    /// never over-reads. A line that has not ended yet is moved out of the pipe into a pooled buffer
+    /// bounded by the cap, so a transport whose pause threshold is below the cap keeps receiving and
+    /// the CRLF can arrive. The cap counts the octets already moved, and a CR moved at the end of one
+    /// read still pairs with an LF at the start of the next.
     /// </remarks>
     /// <param name="input">The connection's pipe reader.</param>
     /// <param name="maxLineSize">The maximum number of payload octets the line may contain.</param>
@@ -651,7 +652,7 @@ internal static class Http1MessageReader
     /// Invoked once when the first byte of the line is read; used to signal the read-timeout phase
     /// transition. May be <see langword="null"/>.
     /// </param>
-    /// <param name="cancellationToken">A token to cancel the read.</param>
+    /// <param name="readTimeout">The controller bounding both buffered and pending reads.</param>
     /// <returns>The decoded line, or <see langword="null"/> on a clean end-of-stream before any byte.</returns>
     /// <exception cref="Http1LimitExceededException">Thrown when the line exceeds <paramref name="maxLineSize"/>.</exception>
     private static async ValueTask<string?> ReadLineAsync(
@@ -660,109 +661,132 @@ internal static class Http1MessageReader
         HttpStatusCode overflowStatus,
         string subject,
         Action? onFirstByte,
-        CancellationToken cancellationToken)
+        Http1ReadTimeout readTimeout)
     {
         bool signaledFirstByte = false;
 
-        while (true)
+        // The octets of a line that spans reads, already consumed from the pipe. Rented on the first
+        // split; most lines arrive whole and never touch it.
+        byte[]? pending = null;
+        int pendingLength = 0;
+
+        try
         {
-            ReadResult result = await input.ReadAsync(cancellationToken).ConfigureAwait(false);
-            ReadOnlySequence<byte> buffer = result.Buffer;
-
-            if (!signaledFirstByte && !buffer.IsEmpty)
+            while (true)
             {
-                signaledFirstByte = true;
-                onFirstByte?.Invoke();
-            }
+                ReadResult result = await readTimeout.ReadAsync(input).ConfigureAwait(false);
+                ReadOnlySequence<byte> buffer = result.Buffer;
 
-            LineScan scan = ScanLine(buffer, maxLineSize, out ReadOnlySequence<byte> line, out SequencePosition lineEnd);
-            if (scan == LineScan.Complete)
-            {
-                // RFC 9110 §5.5 — obs-text (%x80-FF) is a field-value octet; Latin-1 keeps it.
-                string value = line.IsSingleSegment
-                    ? Encoding.Latin1.GetString(line.FirstSpan)
-                    : Encoding.Latin1.GetString(line);
-
-                input.AdvanceTo(lineEnd);
-                return value;
-            }
-
-            input.AdvanceTo(buffer.Start, buffer.End);
-
-            if (scan == LineScan.TooLong)
-            {
-                throw new Http1LimitExceededException(
-                    overflowStatus,
-                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.HttpLineTooLarge, subject, maxLineSize));
-            }
-
-            if (result.IsCompleted)
-            {
-                if (buffer.IsEmpty)
+                if (!signaledFirstByte && !buffer.IsEmpty)
                 {
-                    return null;
+                    signaledFirstByte = true;
+                    onFirstByte?.Invoke();
                 }
 
-                throw new EndOfStreamException(ErrorMessages.HttpLineTruncated);
-            }
+                // A CRLF split across reads: the CR was moved with the rest of the line.
+                if (pendingLength > 0 && pending![pendingLength - 1] == (byte)'\r' && StartsWithLineFeed(buffer))
+                {
+                    input.AdvanceTo(buffer.GetPosition(1));
+                    return Encoding.Latin1.GetString(pending, 0, pendingLength - 1);
+                }
 
-            if (result.IsCanceled)
+                // Every moved octet is payload now, a trailing CR included: the octet after it is not LF.
+                int remaining = maxLineSize - pendingLength;
+                ReadOnlySequence<byte> line = default;
+                SequencePosition lineEnd = default;
+                Http1LineReader.LineScan scan = remaining < 0
+                    ? Http1LineReader.LineScan.TooLong
+                    : Http1LineReader.ScanLine(buffer, remaining, out line, out lineEnd);
+
+                if (scan == Http1LineReader.LineScan.Complete)
+                {
+                    // RFC 9110 §5.5 — obs-text (%x80-FF) is a field-value octet; Latin-1 keeps it.
+                    string value;
+                    if (pendingLength == 0)
+                    {
+                        value = line.IsSingleSegment
+                            ? Encoding.Latin1.GetString(line.FirstSpan)
+                            : Encoding.Latin1.GetString(line);
+                    }
+                    else
+                    {
+                        Append(ref pending, ref pendingLength, line, maxLineSize);
+                        value = Encoding.Latin1.GetString(pending!, 0, pendingLength);
+                    }
+
+                    input.AdvanceTo(lineEnd);
+                    return value;
+                }
+
+                if (scan == Http1LineReader.LineScan.TooLong)
+                {
+                    input.AdvanceTo(buffer.Start, buffer.End);
+                    throw new Http1LimitExceededException(
+                        overflowStatus,
+                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.HttpLineTooLarge, subject, maxLineSize));
+                }
+
+                if (result.IsCompleted)
+                {
+                    input.AdvanceTo(buffer.Start, buffer.End);
+                    if (buffer.IsEmpty && pendingLength == 0)
+                    {
+                        return null;
+                    }
+
+                    throw new EndOfStreamException(ErrorMessages.HttpLineTruncated);
+                }
+
+                // Incomplete: the scan proved the buffered octets fit the cap (one more than it only
+                // when the last is a CR), so moving them keeps the pending line within cap + 1.
+                Append(ref pending, ref pendingLength, buffer, maxLineSize);
+                input.AdvanceTo(buffer.End);
+
+                if (result.IsCanceled)
+                {
+                    throw new OperationCanceledException(readTimeout.Token);
+                }
+            }
+        }
+        finally
+        {
+            if (pending is not null)
             {
-                throw new OperationCanceledException(cancellationToken);
+                ArrayPool<byte>.Shared.Return(pending);
             }
         }
     }
 
-    /// <summary>
-    /// Looks for the line's CRLF among the buffered octets, no further than a line of
-    /// <paramref name="maxLineSize"/> payload octets could reach.
-    /// </summary>
-    /// <remarks>
-    /// The line is too long as soon as the buffered octets prove it: <paramref name="maxLineSize"/>
-    /// + 2 octets with no CRLF among them, or <paramref name="maxLineSize"/> + 1 octets whose last is
-    /// not a CR the next octet could pair with. That rejects an over-long line at the same octet the
-    /// byte-at-a-time reader did, without waiting for more of it.
-    /// </remarks>
-    private static LineScan ScanLine(
-        in ReadOnlySequence<byte> buffer,
-        int maxLineSize,
-        out ReadOnlySequence<byte> line,
-        out SequencePosition lineEnd)
+    private static bool StartsWithLineFeed(in ReadOnlySequence<byte> buffer)
     {
-        long window = Math.Min(buffer.Length, (long)maxLineSize + 2);
-        SequenceReader<byte> reader = new(buffer.Slice(0, window));
-
-        if (reader.TryReadTo(out line, "\r\n"u8, advancePastDelimiter: true))
-        {
-            lineEnd = reader.Position;
-            return LineScan.Complete;
-        }
-
-        line = default;
-        lineEnd = default;
-
-        if (buffer.Length >= (long)maxLineSize + 2)
-        {
-            return LineScan.TooLong;
-        }
-
-        if (buffer.Length == (long)maxLineSize + 1)
-        {
-            // TryReadTo leaves the reader where it started on a miss.
-            reader.Advance(maxLineSize);
-            if (reader.TryPeek(out byte last) && last != (byte)'\r')
-            {
-                return LineScan.TooLong;
-            }
-        }
-
-        return LineScan.Incomplete;
+        SequenceReader<byte> reader = new(buffer);
+        return reader.TryPeek(out byte first) && first == (byte)'\n';
     }
 
-    private enum LineScan
+    // Appends octets to the pending line, growing the pooled buffer geometrically up to the cap
+    // (plus the one trailing CR the scan allows).
+    private static void Append(ref byte[]? pending, ref int pendingLength, in ReadOnlySequence<byte> octets, int maxLineSize)
     {
-        Incomplete,
-        Complete,
-        TooLong,
+        if (octets.IsEmpty)
+        {
+            return;
+        }
+
+        int required = pendingLength + (int)octets.Length;
+        if (pending is null || pending.Length < required)
+        {
+            int capacity = Math.Max(required, Math.Min(maxLineSize + 1, pending is null ? 256 : pending.Length * 2));
+            byte[] grown = ArrayPool<byte>.Shared.Rent(capacity);
+            if (pending is not null)
+            {
+                pending.AsSpan(0, pendingLength).CopyTo(grown);
+                ArrayPool<byte>.Shared.Return(pending);
+            }
+
+            pending = grown;
+        }
+
+        octets.CopyTo(pending.AsSpan(pendingLength));
+        pendingLength = required;
     }
 }

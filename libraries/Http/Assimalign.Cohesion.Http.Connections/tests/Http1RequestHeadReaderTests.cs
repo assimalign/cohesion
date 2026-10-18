@@ -1,8 +1,12 @@
 using System;
 using System.Collections.Generic;
+using System.IO.Pipelines;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Connections;
+using Assimalign.Cohesion.Http.Connections.Internal;
 using Assimalign.Cohesion.Http.Connections.Tests.TestObjects;
 
 using Shouldly;
@@ -14,10 +18,51 @@ namespace Assimalign.Cohesion.Http.Connections.Tests;
 /// <summary>
 /// Pins the request-head reader's line boundaries now that it scans the connection pipe's buffered
 /// octets for each CRLF instead of reading one octet at a time: a line may hold exactly its cap, a
-/// CRLF may arrive split across reads, and a CR at the cap waits for the LF that may follow it.
+/// CRLF may arrive split across reads, a CR at the cap waits for the LF that may follow it, and a
+/// line longer than the transport's pause threshold still arrives.
 /// </summary>
 public class Http1RequestHeadReaderTests
 {
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1 Head Reader: A header line longer than the pipe's pause threshold should not stall the sender")]
+    public async Task ReadRequestAsync_OnPauseThresholdBelowLineSize_ShouldReleasePartialLine()
+    {
+        // Arrange — a reader that kept the incomplete line in the pipe would pause the producer
+        // before the CRLF could arrive. The CR and LF also arrive in separate writes.
+        Pipe input = new(new PipeOptions(pauseWriterThreshold: 8, resumeWriterThreshold: 4));
+        Pipe output = new();
+        using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(10));
+        using Http1ReadTimeout readTimeout = new(CancellationToken.None, TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(10));
+        Http1ConnectionListenerOptions options = new();
+        string longValue = new('v', 40);
+
+        Task<Http1Context?> read = Http1MessageReader.ReadRequestAsync(
+            input.Reader,
+            new DuplexPipeStream(input.Reader, output.Writer),
+            HttpConnectionInfo.Empty,
+            HttpScheme.Http,
+            options.Limits,
+            [],
+            featureCapacity: 4,
+            TimeProvider.System,
+            readTimeout,
+            CancellationToken.None).AsTask();
+
+        // Act
+        foreach (string fragment in new[] { "GET /long HTTP/1.1\r\nHost: api.test\r\nX-Long: ", longValue, "\r", "\n\r", "\n" })
+        {
+            await input.Writer.WriteAsync(Encoding.ASCII.GetBytes(fragment), timeout.Token);
+        }
+
+        Http1Context? context = await read.WaitAsync(timeout.Token);
+
+        // Assert
+        context.ShouldNotBeNull();
+        context.Request.Path.Value.ShouldBe("/long");
+        context.Request.Headers.GetValue(new HttpHeaderKey("X-Long")).ShouldBe(longValue);
+        await input.Writer.CompleteAsync();
+        await input.Reader.CompleteAsync();
+    }
+
     private const int RequestLineCap = 32;
 
     [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http1 Head Reader: A request line of exactly the cap should be served and one octet over answered with 414")]

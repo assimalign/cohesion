@@ -262,7 +262,7 @@ public class Http1ChunkedFramingAlignmentTests
         output.Split("HTTP/1.1 ").Length.ShouldBe(2);
     }
 
-    private static CountingInputStream Peer(string wire) => new(Encoding.Latin1.GetBytes(wire), (byte)'a', 0);
+    private static CountingInputReader Peer(string wire) => new(Encoding.Latin1.GetBytes(wire), (byte)'a', 0);
 
     private static async Task<byte[]> ReadToEndAsync(Stream body)
     {
@@ -285,7 +285,7 @@ public class Http1ChunkedFramingAlignmentTests
     private static async Task<Http1RequestBodyStream> InterruptReadAsync(Pipe peer, string sentBeforeCancel)
     {
         await peer.Writer.WriteAsync(Encoding.ASCII.GetBytes(sentBeforeCancel));
-        Http1RequestBodyStream body = CreateChunkedBody(peer.Reader.AsStream());
+        Http1RequestBodyStream body = CreateChunkedBody(peer.Reader);
 
         using CancellationTokenSource cancellation = new();
         byte[] buffer = new byte[256];
@@ -301,7 +301,7 @@ public class Http1ChunkedFramingAlignmentTests
         return body;
     }
 
-    private static Http1RequestBodyStream CreateChunkedBody(Stream peer)
+    private static Http1RequestBodyStream CreateChunkedBody(PipeReader peer)
     {
         Http1ConnectionListenerOptions.Http1Limits limits = new()
         {
@@ -310,6 +310,7 @@ public class Http1ChunkedFramingAlignmentTests
 
         return new Http1RequestBodyStream(
             peer,
+            peer.AsStream(leaveOpen: true),
             Http1RequestBodyFraming.Chunked,
             solicitContinue: false,
             interception: null,

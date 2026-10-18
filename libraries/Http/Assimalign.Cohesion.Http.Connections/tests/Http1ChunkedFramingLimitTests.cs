@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.IO.Pipelines;
 using System.Linq;
 using System.Text;
 using System.Threading;
@@ -43,7 +44,7 @@ public class Http1ChunkedFramingLimitTests
     public void ReadAsync_OnEndlessChunkExtension_ShouldRejectAsMalformedAtTheLineCap()
     {
         // Arrange
-        CountingInputStream peer = new(Encoding.ASCII.GetBytes("1;"), (byte)'a', EndlessRun);
+        CountingInputReader peer = new(Encoding.ASCII.GetBytes("1;"), (byte)'a', EndlessRun);
         Http1RequestBodyStream body = CreateChunkedBody(peer);
 
         // Act
@@ -60,7 +61,7 @@ public class Http1ChunkedFramingLimitTests
     public void ReadAsync_OnOverlongTrailerLine_ShouldRejectWithFieldsTooLargeAtTheLineCap()
     {
         // Arrange
-        CountingInputStream peer = new(Encoding.ASCII.GetBytes("0\r\nX-Checksum: "), (byte)'a', EndlessRun);
+        CountingInputReader peer = new(Encoding.ASCII.GetBytes("0\r\nX-Checksum: "), (byte)'a', EndlessRun);
         Http1RequestBodyStream body = CreateChunkedBody(peer);
 
         // Act
@@ -78,7 +79,7 @@ public class Http1ChunkedFramingLimitTests
     {
         // Arrange — the same name repeated: every field line counts, not every distinct name.
         const string fieldLine = "X-Repeat: v\r\n";
-        CountingInputStream peer = new(
+        CountingInputReader peer = new(
             Encoding.ASCII.GetBytes("0\r\n" + string.Concat(Enumerable.Repeat(fieldLine, 5000)) + "\r\n"),
             (byte)'a',
             0);
@@ -104,7 +105,7 @@ public class Http1ChunkedFramingLimitTests
         }
 
         section.Append("\r\n");
-        CountingInputStream peer = new(Encoding.ASCII.GetBytes(section.ToString()), (byte)'a', 0);
+        CountingInputReader peer = new(Encoding.ASCII.GetBytes(section.ToString()), (byte)'a', 0);
         Http1RequestBodyStream body = CreateChunkedBody(peer, limits =>
         {
             limits.MaxRequestHeaderCount = 10_000;
@@ -146,7 +147,7 @@ public class Http1ChunkedFramingLimitTests
     public void DrainAsync_OnUnreadBodyWithEndlessChunkExtension_ShouldStopAtTheLineCap()
     {
         // Arrange — the application never read the body; the transport drains it for keep-alive.
-        CountingInputStream peer = new(Encoding.ASCII.GetBytes("5;"), (byte)'a', EndlessRun);
+        CountingInputReader peer = new(Encoding.ASCII.GetBytes("5;"), (byte)'a', EndlessRun);
         Http1RequestBodyStream body = CreateChunkedBody(peer);
 
         // Act
@@ -183,7 +184,7 @@ public class Http1ChunkedFramingLimitTests
         // 2,000 octets of data. The budget is twice the line cap and each chunk leaves about one line
         // cap unpaid, so the third line breaks it.
         const int chunks = 2000;
-        CountingInputStream peer = new(
+        CountingInputReader peer = new(
             Encoding.ASCII.GetBytes(string.Concat(Enumerable.Repeat(sizeLine + "\r\nx\r\n", chunks)) + "0\r\n\r\n"),
             (byte)'a',
             0);
@@ -219,7 +220,7 @@ public class Http1ChunkedFramingLimitTests
         }
 
         wire.Append("0\r\n\r\n");
-        Http1RequestBodyStream body = CreateChunkedBody(new CountingInputStream(Encoding.ASCII.GetBytes(wire.ToString()), (byte)'a', 0));
+        Http1RequestBodyStream body = CreateChunkedBody(new CountingInputReader(Encoding.ASCII.GetBytes(wire.ToString()), (byte)'a', 0));
 
         // Act
         long delivered = 0;
@@ -323,7 +324,7 @@ public class Http1ChunkedFramingLimitTests
         }
 
         section.Append("\r\n");
-        CountingInputStream peer = new(Encoding.ASCII.GetBytes(section.ToString()), (byte)'a', 0);
+        CountingInputReader peer = new(Encoding.ASCII.GetBytes(section.ToString()), (byte)'a', 0);
         HttpTrailerCollection trailers = new(isSupported: true);
         Http1RequestBodyStream body = CreateChunkedBody(peer, limits =>
         {
@@ -338,7 +339,7 @@ public class Http1ChunkedFramingLimitTests
     }
 
     private static Http1RequestBodyStream CreateChunkedBody(
-        Stream peer,
+        PipeReader peer,
         Action<Http1ConnectionListenerOptions.Http1Limits>? configure = null,
         HttpTrailerCollection? trailers = null)
     {
@@ -352,6 +353,7 @@ public class Http1ChunkedFramingLimitTests
 
         return new Http1RequestBodyStream(
             peer,
+            peer.AsStream(leaveOpen: true),
             Http1RequestBodyFraming.Chunked,
             solicitContinue: false,
             interception: null,
