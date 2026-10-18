@@ -31,6 +31,54 @@ public class WebApplicationServerDrainTests
 {
     private static readonly TimeSpan _timeout = TimeSpan.FromSeconds(30);
 
+    [Fact(DisplayName = "Cohesion Test [Web.Server] - Server/Drain: Connection cancellation lifetimes should be independent and both observe an expired drain budget")]
+    public async Task StopAsync_WithTwoConnections_ShouldRelayCancellationToBothLifetimes()
+    {
+        // Arrange
+        TaskCompletionSource entered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        int enteredCount = 0;
+        CancellationToken[] tokens = new CancellationToken[2];
+        FakeHttpContext firstExchange = new();
+        FakeHttpContext secondExchange = new();
+        FakeHttpConnectionContext firstContext = new(new[] { firstExchange }, parkAfterExchanges: true);
+        FakeHttpConnectionContext secondContext = new(new[] { secondExchange }, parkAfterExchanges: true);
+        FakeHttpConnection first = new(firstContext);
+        FakeHttpConnection second = new(secondContext);
+        FakePipeline pipeline = new(async (exchange, token) =>
+        {
+            tokens[ReferenceEquals(exchange, firstExchange) ? 0 : 1] = token;
+            if (Interlocked.Increment(ref enteredCount) == 2) { entered.TrySetResult(); }
+            await Task.Delay(Timeout.InfiniteTimeSpan, token);
+        });
+        WebApplicationServer server = CreateServer(pipeline, new FakeHttpConnectionListener(first, second));
+        await server.StartAsync();
+
+        try
+        {
+            await entered.Task.WaitAsync(_timeout);
+            tokens[0].ShouldNotBe(tokens[1]);
+            using CancellationTokenSource budget = new();
+            Task stop = server.StopAsync(budget.Token);
+            await Task.WhenAll(firstContext.GracefulCloseRequested, secondContext.GracefulCloseRequested).WaitAsync(_timeout);
+            tokens.ShouldAllBe(token => !token.IsCancellationRequested);
+
+            // Act
+            budget.Cancel();
+            await stop.WaitAsync(_timeout);
+
+            // Assert
+            tokens.ShouldAllBe(token => token.IsCancellationRequested);
+            firstExchange.CancelCount.ShouldBe(1);
+            secondExchange.CancelCount.ShouldBe(1);
+            first.DisposeCount.ShouldBe(1);
+            second.DisposeCount.ShouldBe(1);
+        }
+        finally
+        {
+            await server.StopAsync().WaitAsync(_timeout);
+        }
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web Server] - Server/Drain: StopAsync begins the graceful close and lets the exchange in flight finish and send its response")]
     public async Task StopAsync_WithExchangeInFlight_ShouldBeginGracefulCloseAndDeliverTheResponse()
     {

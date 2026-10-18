@@ -347,6 +347,15 @@ the map never leaks a completed entry.
 A connection's receive loop dispatches by protocol, one exchange at a time for
 HTTP/1.1 and one task per stream for HTTP/2 and HTTP/3.
 
+Each connection relays the server's abort token through one connection-owned linked
+source. Request-head deadlines, exchange cancellation and sends register their
+request-level links on this source, rather than contending across all connections
+on the server-wide source's registration lock. The relay propagates the same abort
+signal and lives through every exchange and context/connection disposal. It does
+not incorporate peer closure: the transport still reports peer loss separately
+from server shutdown. Graceful draining and its direct connection-abort registration
+keep their existing lifetimes.
+
 **HTTP/1.1 stays sequential — the transport requires it.** An HTTP/1.1 connection
 carries one exchange at a time, and its transport does the connection-level work for
 the *next* request inside the receive enumerator's `MoveNextAsync`: it checks the
