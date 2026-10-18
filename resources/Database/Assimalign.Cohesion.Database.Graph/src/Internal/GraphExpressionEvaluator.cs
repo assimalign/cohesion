@@ -128,6 +128,7 @@ internal static partial class GraphExpressionEvaluator
         null => null,
         GraphNode node => node.Properties.TryGetValue(name, out var value) ? value : null,
         GraphRelationship relationship => relationship.Properties.TryGetValue(name, out var value) ? value : null,
+        IReadOnlyDictionary<string, object?> map => map.TryGetValue(name, out var value) ? value : null,
         _ => throw new GraphPlanningException("COHDBG003", "Property access requires a node or relationship."),
     };
     private static object? Unary(GqlUnaryExpression unary, IReadOnlyDictionary<string, object?> bindings, IReadOnlyDictionary<string, object?>? parameters)

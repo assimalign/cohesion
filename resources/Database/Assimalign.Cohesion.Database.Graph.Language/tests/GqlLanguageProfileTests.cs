@@ -24,6 +24,10 @@ public class GqlLanguageProfileTests
     [InlineData(GqlClauses.OptionalMatch)]
     [InlineData(GqlClauses.Explain)]
     [InlineData(GqlClauses.Return)]
+    [InlineData(GqlClauses.OrderBy)]
+    [InlineData(GqlClauses.Offset)]
+    [InlineData(GqlClauses.Skip)]
+    [InlineData(GqlClauses.Limit)]
     [InlineData(GqlClauses.Case)]
     [InlineData(GqlClauses.Create)]
     [InlineData(GqlClauses.Insert)]
@@ -62,7 +66,7 @@ public class GqlLanguageProfileTests
     public void Profile_AdvertisesOnlyExecutableClauses()
     {
         GqlLanguageProfile.Instance.Clauses.ShouldBe([
-            GqlClauses.Match, GqlClauses.OptionalMatch, GqlClauses.Explain, GqlClauses.Return, GqlClauses.Case, GqlClauses.Create, GqlClauses.Insert,
+            GqlClauses.Match, GqlClauses.OptionalMatch, GqlClauses.Explain, GqlClauses.Return, GqlClauses.OrderBy, GqlClauses.Offset, GqlClauses.Skip, GqlClauses.Limit, GqlClauses.Case, GqlClauses.Create, GqlClauses.Insert,
             GqlClauses.Delete, GqlClauses.DetachDelete, GqlClauses.Where, GqlClauses.Show,
             GqlClauses.LabelExpression]);
     }
@@ -70,7 +74,6 @@ public class GqlLanguageProfileTests
     [Theory]
     [InlineData(GqlClauses.MandatoryMatch)]
     [InlineData(GqlClauses.Merge)]
-    [InlineData(GqlClauses.OrderBy)]
     [InlineData(GqlClauses.SetOperation)]
     [InlineData(GqlClauses.Call)]
     public void FutureClauses_AreNotAdvertised(string clause)

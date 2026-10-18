@@ -127,14 +127,14 @@ public sealed class GqlLineCommentTests
     {
         // Arrange
         string separator = Terminator(terminator);
-        string gql = "MATCH (a) -- note" + separator + "RETURN a" + separator + "LIMIT 2";
+        string gql = "MATCH (a) -- note" + separator + "RETURN a" + separator + "CALL p";
 
         // Act
         var diagnostic = Parse(gql).Diagnostics.ShouldHaveSingleItem();
 
         // Assert
         diagnostic.Code.ShouldBe("COHDBL001");
-        diagnostic.Start.ShouldBe(gql.IndexOf("LIMIT", StringComparison.Ordinal));
+        diagnostic.Start.ShouldBe(gql.IndexOf("CALL", StringComparison.Ordinal));
         diagnostic.Line.ShouldBe(3);
     }
 

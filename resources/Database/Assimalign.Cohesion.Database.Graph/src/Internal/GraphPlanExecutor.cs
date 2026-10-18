@@ -41,7 +41,7 @@ internal static class GraphPlanExecutor
                 string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ParameterCollision, name), statement.GqlExpression.Location));
             return GraphCatalogIntrospection.Execute(database, operation, statement.GqlExpression, surface, token);
         }
-        var plan = new GraphPlanner(database, operation.Context.Snapshot).Plan(statement.GqlExpression, parameters, paths);
+        var plan = new GraphPlanner(database, operation.Context.Snapshot).Plan(statement.GqlExpression, parameters, paths, token);
         parameters = plan.Parameters;
         // Validate result shape before locking a writer, expanding a MATCH or applying mutations.
         if (scalarsOnly && plan.Projections.Any(projection => projection.Kind != GraphProjectionKind.Scalar))
@@ -98,25 +98,6 @@ internal static class GraphPlanExecutor
             }
             bindings = matched;
         }
-        if (paths)
-        {
-            string variable = ((GqlVariableExpression)plan.Projections[0].Expression).Variable;
-            var results = new List<GraphPath>(bindings.Count);
-            var seen = plan.Distinct is null ? null : new HashSet<object?>(GraphValueComparer.Instance);
-            foreach (var binding in bindings)
-            {
-                token.ThrowIfCancellationRequested();
-                if (seen is not null && !seen.Add(binding[variable])) { continue; }
-                results.Add(binding[variable] switch
-                {
-                    GraphPath path => path,
-                    GraphNode node => new GraphPath([node], []),
-                    GraphRelationship relationship => ProjectRelationship(database, operation, relationship),
-                    _ => throw new GraphPlanningException("COHDBG001", "Path execution requires a path or bound entity projection.", plan.Query.Location),
-                });
-            }
-            return new GraphPathsQueryResult(results.AsReadOnly(), plan.Warnings);
-        }
         long affected = 0;
         foreach (var binding in bindings)
         {
@@ -147,7 +128,7 @@ internal static class GraphPlanExecutor
         if (plan.Projections.Count == 0) { return new GraphMutationResult(affected, plan.Warnings); }
         var columns = plan.Projections.Select((projection, i) => new DatabaseColumn
         { Name = projection.Name, Ordinal = i, Type = DatabaseType.Null }).ToArray();
-        var rows = new List<object?[]>(bindings.Count);
+        var rows = new List<GraphOrderedRow>(bindings.Count);
         var distinct = plan.Distinct is null ? null : new HashSet<object?[]>(GraphRowComparer.Instance);
         bool unsignedColumnsAdded = false;
         foreach (var binding in bindings)
@@ -166,13 +147,30 @@ internal static class GraphPlanExecutor
                     }
                 }
             }
-            GraphResultRowEncoder.Validate(row, compositeColumns);
-            if (distinct is null || distinct.Add(row)) { rows.Add(row); }
+            if (!paths) { GraphResultRowEncoder.Validate(row, compositeColumns); }
+            if (distinct is null || distinct.Add(row))
+            { rows.Add(new GraphOrderedRow(row, GraphSortPage.Keys(plan, binding, row, token), rows.Count)); }
         }
         // A stored unsigned property is learned from the rows. Recheck earlier rows if its
         // header flag changed their framing; scalar-only results never need this pass.
-        if (unsignedColumnsAdded) { foreach (var row in rows) { GraphResultRowEncoder.Validate(row, compositeColumns); } }
-        return new GraphQueryResult(columns, rows.ToArray(), plan.Warnings, compositeColumns);
+        if (unsignedColumnsAdded) { foreach (var row in rows) { GraphResultRowEncoder.Validate(row.Values, compositeColumns); } }
+        var paged = GraphSortPage.Apply(rows, plan.SortPage, token);
+        if (paths)
+        {
+            var results = paged.Select(row =>
+            {
+                token.ThrowIfCancellationRequested();
+                return row[0] switch
+                {
+                    GraphPath path => path,
+                    GraphNode node => new GraphPath([node], []),
+                    GraphRelationship relationship => ProjectRelationship(database, operation, relationship),
+                    _ => throw new GraphPlanningException("COHDBG001", ErrorMessages.PathProjectionRequired, plan.Query.Location),
+                };
+            }).ToArray();
+            return new GraphPathsQueryResult(results, plan.Warnings);
+        }
+        return new GraphQueryResult(columns, paged, plan.Warnings, compositeColumns);
     }
 
     internal static async ValueTask MatchAsync(GraphDatabase database, GraphOperation operation, GraphPathPlan plan,

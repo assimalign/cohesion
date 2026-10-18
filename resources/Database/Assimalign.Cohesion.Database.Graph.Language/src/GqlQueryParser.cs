@@ -117,7 +117,11 @@ public sealed partial class GqlQueryParser : QueryParser
         else if (Is("MATCH") || Is("OPTIONAL") || Is("CREATE") || Is("INSERT") || Is("RETURN")) { expression = ParseQuery(); }
         else
         {
-            if (Is("DELETE") || Is("DETACH") || Is("WHERE"))
+            if (Is("ORDER") || Is("OFFSET") || Is("SKIP") || Is("LIMIT"))
+            {
+                Unsupported("STANDALONE ORDER BY AND PAGE STATEMENT", Current);
+            }
+            else if (Is("DELETE") || Is("DETACH") || Is("WHERE"))
             {
                 Error("GQL0002", "Expected MATCH, INSERT, or CREATE before this clause.", Current);
             }

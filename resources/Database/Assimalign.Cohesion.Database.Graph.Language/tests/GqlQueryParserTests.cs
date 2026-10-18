@@ -95,10 +95,6 @@ public class GqlQueryParserTests
 
     [Theory]
     [InlineData("MANDATORY MATCH (a) RETURN a")]
-    [InlineData("MATCH (a) RETURN a ORDER BY a.age")]
-    [InlineData("MATCH (a) RETURN a LIMIT 5")]
-    [InlineData("MATCH (a) RETURN a OFFSET 5")]
-    [InlineData("MATCH (a) RETURN a SKIP 5")]
     [InlineData("MATCH (a) WITH a RETURN a")]
     [InlineData("MATCH (a) SET a.age = 5")]
     [InlineData("MATCH (a) REMOVE a.age")]
@@ -219,11 +215,11 @@ public class GqlQueryParserTests
     [Fact]
     public void DiagnosticSpan_UsesAbsoluteUtf16OffsetAndOneBasedLine()
     {
-        const string source = "MATCH (a)\nRETURN a LIMIT 2";
+        const string source = "MATCH (a)\nRETURN a CALL p";
         var diagnostic = Parse(source).Diagnostics.Single();
         diagnostic.Code.ShouldBe("COHDBL001");
-        diagnostic.Start.ShouldBe(source.IndexOf("LIMIT", StringComparison.Ordinal));
-        diagnostic.End.ShouldBe(diagnostic.Start + 5);
+        diagnostic.Start.ShouldBe(source.IndexOf("CALL", StringComparison.Ordinal));
+        diagnostic.End.ShouldBe(diagnostic.Start + 4);
         diagnostic.Line.ShouldBe(2);
         diagnostic.Location.ShouldBe(DiagnosticLocation.Absolute);
     }

@@ -97,6 +97,20 @@ public sealed class GraphExplainTests
         rows.Single(row => Equals(row[2], "OptionalMatch"))[5].ShouldBe(optionalDetail);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Graph] - EXPLAIN: sort and paging describe keys and validated counts")]
+    public async Task Execute_OrderPaging_ShouldDescribeStageAsync()
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create("sort-explain", new());
+        var database = await engine.CreateDatabaseAsync("graph", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        // Act
+        var rows = await RowsAsync(session, "EXPLAIN RETURN 1 AS value ORDER BY value DESC NULLS LAST OFFSET 2 LIMIT 3");
+        // Assert
+        rows.Single(row => Equals(row[2], "SortPage"))[5].ShouldBe("offset=2; limit=3");
+        rows.Single(row => Equals(row[2], "SortKey"))[5].ShouldBe("expression=value; direction=Descending; nulls=Last");
+    }
+
     private static async Task<List<object?[]>> RowsAsync(GraphDatabaseSession session, string source)
     {
         await using var result = (await session.ExecuteAsync(source, cancellationToken: CancellationToken.None)).ShouldBeAssignableTo<DatabaseResultSet>();

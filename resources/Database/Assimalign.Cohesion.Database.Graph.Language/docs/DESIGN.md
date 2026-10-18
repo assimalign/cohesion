@@ -31,8 +31,8 @@ non-finite leaf values use COHDBG003. Pattern property maps remain scalar-only. 
 runtime code generation is involved.
 
 `$$name` (ISO substituted reference) and whole-map `(n $props)` remain COHDBL001 naming the
-form. `RETURN $p` is a live value expression since #1141; paging parameters
-belong to #1142. #1146 lifts list/map parameters in value positions; property maps remain scalar.
+form. `RETURN $p` is a live value expression since #1141; paging parameters execute in #1142's
+shared ordering/paging stage. #1146 lifts list/map parameters in value positions; property maps remain scalar.
 `GqlParameterParserTests`, `GraphParameterTests`, the clause execution corpus and client/server
 wire tests pin this boundary. Parameters add no profile clause.
 
@@ -134,6 +134,10 @@ The builtin-function table is empty because the executor implements no functions
 | `WHERE` | Boolean and scalar expressions: comparisons, labels, AND/OR/XOR/NOT, IS null/truth tests, arithmetic, concatenation, IN lists and string predicates | Keeps TRUE only; see [DIALECT.md](DIALECT.md) and scalar expressions below |
 | `EXPLAIN` | One query with ordered MATCH/OPTIONAL MATCH clauses and RETURN, INSERT/CREATE, or [DETACH] DELETE | Shared description rows without executing any read expansion or write; Cohesion extension |
 | `RETURN` | Optional DISTINCT/ALL, either `*` or value expressions with optional `AS` aliases; also standalone | Projects expressions, expands named bindings in declaration order, then eliminates duplicate tuples for DISTINCT; path requests require one entity or path column |
+| `ORDER BY` | One or more expression keys with optional ASC/ASCENDING/DESC/DESCENDING and NULLS FIRST/LAST after RETURN | Orders projected rows and paths by the total order below, after DISTINCT |
+| `OFFSET` | Unsigned Int64 literal or named parameter after RETURN | Drops the first count rows after ordering |
+| `SKIP` | Cypher spelling of OFFSET | The same offset stage; cannot accompany another OFFSET/SKIP |
+| `LIMIT` | Unsigned Int64 literal or named parameter after RETURN | Truncates after full materialization, ordering and offset; never reduces mutations or the match cap |
 | `CASE` | Simple and searched CASE, COALESCE and NULLIF case abbreviations | First matching alternative, lazy selected branch; absent ELSE yields NULL |
 | `INSERT` | Scalar literal/parameter node/path insertion, optionally following a match; a node takes a label conjunction (`:A&B`, `:A:B`), a relationship one type and a directed edge (`-[:T]->`, `<-[:T]-`) | Inserts nodes and relationships transactionally |
 | `CREATE` | Same insertion grammar as `INSERT`; compatibility extension | Same transactional insertion path |
@@ -161,9 +165,9 @@ The grammar is intentionally finite:
 ```text
 statement    := (query | EXPLAIN query | catalog) [';']
 query        := ( [OPTIONAL] MATCH match-paths [ WHERE predicate ] )*
-                ( (INSERT | CREATE) paths [ RETURN projections ]
+                ( (INSERT | CREATE) paths [ RETURN projections return-tail ]
                 | [ DETACH ] DELETE variables
-                | RETURN projections )
+                | RETURN projections return-tail )
 match-paths  := match-path (',' match-path)*
 match-path   := [ variable '=' ] path
 paths        := path (',' path)*
@@ -200,6 +204,11 @@ parameter    := ('$' | '@') (identifier | ASCII-digits)
 properties   := '{' [property ':' (scalar-literal | parameter) (',' property ':' (scalar-literal | parameter))*] '}'
 projections  := [DISTINCT | ALL] ('*' | projection (',' projection)*)
 projection   := predicate [AS alias]
+return-tail  := [ORDER BY sort-item (',' sort-item)*] [paging]
+sort-item    := predicate [ASC | ASCENDING | DESC | DESCENDING] [NULLS (FIRST | LAST)]
+paging       := (OFFSET | SKIP) page-value [LIMIT page-value]
+              | LIMIT page-value
+page-value   := unsigned-int64 | parameter
 catalog      := SHOW (LABELS | RELATIONSHIP TYPES | PROPERTY KEYS | INDEXES | OBJECT OWNERSHIP)
 ```
 
@@ -400,11 +409,11 @@ NULLIF use that rule with the owner's exact numeric comparison (0.1m differs fro
 DISTINCT uses the same structure and exact numbers but groups corresponding NULLs, with
 matching structural hashes. Ordering comparisons are lexicographic for lists; maps compare
 count, sorted ordinal keys, then corresponding values. An encountered NULL or incomparable
-value yields UNKNOWN. ORDER BY itself remains unsupported until #1142; its future total
-ordering uses the same container rules with NULL after all non-NULL values, rather than
+value yields UNKNOWN. ORDER BY (#1142) uses total
+ordering with the same container rules and NULL after all non-NULL nested values, rather than
 using predicate UNKNOWN as an order. For the scalar/composite family the ascending type
 order is map, list, string, Boolean, number, NULL; nested sorting uses that total order and
-the owner's exact numeric comparisons. This is the #1142 hand-off, not an advertised ORDER BY.
+the owner's exact numeric comparisons. Explicit NULLS placement applies to a whole sort key.
 
 Behavior consulted, no code copied, relative to C:/Source/repos/neo4j/neo4j:
 community/cypher/interpreted-runtime/src/main/scala/org/neo4j/cypher/internal/runtime/interpreted/commands/expressions/CaseExpression.scala:33-40
@@ -436,11 +445,65 @@ orders maps before lists, while storable/ValueGroup.java:62-65 orders text, Bool
 The selected exact numeric rule is the owner
 decision, including within these composites.
 
+## Ordering and paging (#1142)
+
+RETURN accepts `return-tail` in both row and path requests. `GqlQueryExpression.OrderBy`
+contains `GqlSortItem(Expression, Direction, NullOrdering)`; Offset and Limit contain literal
+or parameter expressions. ASC and ALL are the defaults. NULLS, FIRST and LAST are contextual
+words, absent from Profile.Keywords, so `first` and `last` remain valid variable names.
+OFFSET and Cypher SKIP share one slot. OFFSET/SKIP must precede LIMIT, as in ISO and Cypher; LIMIT followed by OFFSET/SKIP, duplicate clauses
+and ORDER BY following paging are GQL0002 at the offending token. A negative, floating or
+string literal is GQL0002 expecting an unsigned integer or parameter; overflow is GQL0004.
+Dynamic values must have an integral CLR type in [0, Int64.MaxValue]; NULL, negatives,
+floating values and other graph values fail with COHDBG013 before reads or writes. Non-finite and unsupported CLR values fail with COHDBG003 during binding. Missing parameters
+remain COHDBG001. Both `$name` and `@name` follow the shared named-binding contract.
+
+The owner default follows Cypher: NULL last ascending, first descending. NULLS FIRST/LAST
+overrides that direction-dependent placement. This diverges from Cohesion SQL's NULL-first ASC
+default. Strings compare ordinally; numbers use the owner's exact comparison everywhere,
+including 0.1m versus 0.1d and adjacent integers above 2^53. The complete ascending family
+order is map, node, relationship, list, path, string, Boolean, number, NULL. Lists compare
+lexicographically; maps compare count, sorted ordinal keys, then corresponding values;
+nested values use the same total order with NULL last. Entities compare IDs; paths compare
+their starting node, relationship sequence and length. Equal sort keys retain input order.
+
+ORDER BY sees RETURN aliases and projected expressions. Without DISTINCT it may also use
+unprojected bindings. With DISTINCT, every referenced binding must come from a projected
+value, including a projected entity under any alias or a structurally matching computed expression (literal type and value both match); a hidden
+binding is COHDBG001 at planning even on an empty graph. Aliases remain unavailable to other
+RETURN items. CASE, COALESCE and composite expressions are ordinary sort keys. A label test on an alias that may produce an entity is validated at runtime; a non-entity value raises COHDBG003.
+
+Mutations run for every matched binding before projection. DISTINCT precedes sorting, then
+OFFSET precedes LIMIT. LIMIT 0 returns no rows; large offsets return no rows without overflow.
+The owner default is full materialization: LIMIT 1 over more than 100,000 matches still fails
+COHDBG004. Sorting does not change wire or catalog formats. Standalone ORDER BY/page statements
+before RETURN remain COHDBL001 naming STANDALONE ORDER BY AND PAGE STATEMENT (T2).
+WITH ordering/paging remains #1145's hand-off, and aggregate aliases follow #1147's grouping stage.
+
+Behavior consulted, no code copied, relative to `C:/Source/repos/neo4j/neo4j`:
+`community/values/src/main/java/org/neo4j/values/AnyValueComparator.java:44-85`,
+`virtual/VirtualValueGroup.java:26-32`, `virtual/MapValue.java:538-564`, and
+`virtual/PathValue.java:171-189` under the same values tree define the total family/container
+order. Neo4j's [ORDER BY documentation](https://neo4j.com/docs/cypher-manual/current/clauses/order-by/)
+records NULL placement and RETURN alias/hidden-variable visibility, including DISTINCT.
+`community/cypher/front-end/ast/src/main/scala/org/neo4j/cypher/internal/ast/Clause.scala:1965-2025`
+checks ORDER BY in the projected scope, retaining the incoming scope only without DISTINCT or aggregation.
+`Cypher25Parser.g4:138-164` under `community/cypher/front-end/parser/v25/parser/src/main/antlr4/org/neo4j/cypher/internal/parser/v25/`
+fixes paging order and accepts both direction spellings.
+`NormalizeWithAndReturnClauses.scala:253-347` under
+`community/cypher/front-end/rewriting/src/main/scala/org/neo4j/cypher/internal/rewriting/rewriters/preparatoryRewriters/`
+uses typed AST hash keys and rewrites projected entity references.
+`SemanticExpressionCheck.scala:552-564` under
+`community/cypher/front-end/ast/src/main/scala/org/neo4j/cypher/internal/ast/semantics/`
+permits label operands that may be entities. Behavior consulted, no code copied.
+GqlOrderPagingParserTests, GqlKeywordDispositionTests, GqlProfileExecutionTests,
+GqlOrderPagingTests and GraphOrderPagingWireTests pin the executable surface.
+
 ## Diagnostics and conformance (#194, #195)
 
 | Code | Meaning |
 | --- | --- |
-| `COHDBL001` | Recognized construct outside the executable profile, reported once at its own span: OPTIONAL block operands, MANDATORY MATCH, procedures, functions, substituted/whole-map parameters, composite properties, comprehensions, slicing, map projections, path quantifiers, ordering, set operations, NEXT/WITH, server/session scope, undirected (tilde) edges, path mode and path search prefixes, `NODETACH DELETE`, and `MERGE` |
+| `COHDBL001` | Recognized construct outside the executable profile, reported once at its own span: OPTIONAL block operands, MANDATORY MATCH, procedures, functions, substituted/whole-map parameters, composite properties, comprehensions, slicing, map projections, path quantifiers, standalone ORDER BY/page statements, set operations, NEXT/WITH, server/session scope, undirected (tilde) edges, path mode and path search prefixes, `NODETACH DELETE`, and `MERGE` |
 | `GQL0001` | Empty statement |
 | `GQL0002` | Malformed supported syntax, invalid statement composition, leftover tokens, or a character GQL does not use (`?`, `#`, `^`, ```, ...) |
 | `GQL0003` | Unterminated string, quoted name, or block comment |

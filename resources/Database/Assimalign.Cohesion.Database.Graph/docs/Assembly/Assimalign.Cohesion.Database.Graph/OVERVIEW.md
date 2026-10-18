@@ -17,6 +17,10 @@
   yields distinct visited nodes, excluding the start.
 - `GraphQueryRequest.FromGql(text)` parses a request and throws `DatabaseParseException` for an
   error diagnostic. `GraphDatabaseSession.ExecuteAsync(string)` uses the same parser.
+  RETURN may order by expressions/aliases with explicit null placement and page with
+  OFFSET/SKIP and LIMIT. `GraphPathsQueryRequest` applies the same stage before returning
+  `GraphPathsQueryResult.Paths`. Paging follows full materialization and every mutation;
+  invalid dynamic counts fail before execution with `COHDBG013`.
 - `GraphRequest.Parameters` supplies scalar, list and map bindings for `$name` and `@name` in
   WHERE/RETURN operands; pattern property maps remain scalar-only. Bare names match ordinally and case-sensitively after removing one sigil.
   Missing bindings fail planning with `COHDBG001`, invalid values with `COHDBG003`, and

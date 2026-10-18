@@ -527,9 +527,48 @@ existing public interfaces and does not infer paths from scalar rows.
 The [supported-clause matrix](../../Assimalign.Cohesion.Database.Graph.Language/docs/DESIGN.md#supported-clause-matrix)
 is the single executable-language inventory: MATCH, OPTIONAL MATCH, WHERE, RETURN, INSERT, CREATE (compatibility
 extension), DELETE, DETACH DELETE, SHOW (catalog extension) and LABEL EXPRESSION. Functions, variable-length paths, aggregations,
-ordering, graph selection and language DDL are not advertised. Label/type/index management is the
+graph selection and language DDL are not advertised. ORDER BY, OFFSET, SKIP and LIMIT execute
+after RETURN, as described below. Label/type/index management is the
 session-bound C# schema API. The ISO decision and conformance corpus are documented alongside the
 parser; this is a bounded ISO subset, not a full conformance claim.
+
+### Ordering and paging (#1142)
+
+GraphPlanner binds sort keys against projected names and source bindings. DISTINCT admits only
+projected values, including a projected entity under any alias. Structural expression matching
+ignores source spans and requires literal type and value to match. A per-plan structural hash
+index caches subtree hashes, keeping ORDER BY planning linear in expression size and observing
+cancellation while indexing and validating. Computed aliases that may hold entities permit label
+tests, with runtime COHDBG003 for a non-entity value, following #1140.
+GraphSortPagePlan records keys and validated non-negative Int64 offset/limit counts, including
+named parameters; invalid dynamic graph counts are COHDBG013 before reads or writer locking;
+non-finite and unsupported CLR inputs are COHDBG003 during binding.
+EXPLAIN maps SortPage and SortKey records explicitly and never executes the stage.
+
+The executor materializes all matches and applies every mutation before projecting. The common
+row/path tail eliminates duplicates, caches each sort key once, sorts, offsets and limits before
+converting entity/path columns to GraphPath results. Paging never reduces the mutation set or
+the 100,000-match / 1,000,000-candidate bounds: LIMIT 1 over the cap remains COHDBG004 (owner
+default). The cap test uses 317 nodes in a cross-product; the performance case orders 10,000
+bindings and checks the first ten rows. Each map key, including maps nested inside lists or
+maps, gets canonical ordinal key/value arrays during key materialization. Map comparisons use
+those arrays without re-sorting or allocating.
+Mixed numeric comparisons cross-multiply fixed 192-bit limbs (the maximum product is 162 bits)
+and compare binary exponents, preserving exact CLR numeric order without heap allocation.
+Sorting checks cancellation before it starts and throughout comparisons (including nested
+values), and unwraps List.Sort's comparer cancellation
+so statement rollback and session/transaction state follow the ordinary cancellation path.
+Sorting uses static comparison with no reflection.
+
+NULL defaults to last ASC / first DESC, with per-key NULLS FIRST/LAST overrides (owner default,
+diverging from Cohesion SQL's NULL-first ASC). Exact numeric comparison agrees with equality,
+IN and DISTINCT. The total ascending family order is map, node, relationship, list, path,
+string, Boolean, number, NULL. Lists are lexicographic; maps compare count, sorted ordinal keys,
+then values; nested NULL sorts last. Strings compare ordinally and entities by identity.
+Neo4j behavior references and full language rules are recorded in
+[Graph.Language ordering design](../../Assimalign.Cohesion.Database.Graph.Language/docs/DESIGN.md#ordering-and-paging-1142).
+Standalone ORDER BY/page statements remain COHDBL001 (owner default, T2). WITH and aggregate
+ordering remain #1145/#1147 hand-offs. No public interface, catalog or wire format changes.
 
 ### Conformance corpus timing (#1140 fix pass)
 
@@ -767,7 +806,7 @@ to exercise that enforcement path; compiled provisioning is not included.
 | `COHDBG010` | **Warning**, not a failure: a read-only statement or `GetIndexesAsync` names a label the database does not have at the statement's snapshot. No node carries it, so the read returns the rows the expression still matches (none for a required label), reports this `DiagnosticSeverity.Warning` diagnostic in `DatabaseResult.Diagnostics` or `GraphSchemaResult<T>.Diagnostics`, and leaves an explicit transaction active. Neo4j's `UnknownLabelWarning`, GQLSTATUS 01N50. Not sent over protocol 2.0 |
 | `COHDBG011` | **Warning**, not a failure: the same for a relationship type the database does not have; no relationship has it. Neo4j's `UnknownRelationshipTypeWarning`, GQLSTATUS 01N51. Not sent over protocol 2.0 |
 | `COHDBG012` | The database is offline (#1243): a durable flush of its journal or data file failed. Every operation is refused with `DatabaseOfflineException` until `OpenDatabaseAsync` reopens it; `Unavailable` on the wire. The storage's `StorageOfflineException` (`COHDBS002`) is the inner exception ("Storage operations") |
-| `COHDBG013` | Value error (#1140): non-Boolean conditions, invalid arithmetic, concatenation, container, index or field types, zero divisor, overflow or non-finite result. Reused by #1146, #1147 and #1148; structured Diagnostic, code-free Message, composed as CODE: message on protocol 2.0 |
+| `COHDBG013` | Value error (#1140): non-Boolean conditions, invalid arithmetic, concatenation, container, index or field types, invalid paging counts, zero divisor, overflow or non-finite result. Reused by #1142, #1146, #1147 and #1148; structured Diagnostic, code-free Message, composed as CODE: message on protocol 2.0 |
 | `COHDBG014` | Multiple map keys normalize to the same bare parameter name |
 | `COHDBG015` | Duplicate final result column name, implicit or explicit, under ordinal case-sensitive comparison; rejected during planning before execution |
 | `COHDBG016` | A composite result requires graph.composite-values; ExecutionFailure before ResultHeader, preserving the authenticated session |

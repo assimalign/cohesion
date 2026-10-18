@@ -64,6 +64,30 @@ Unbound projection variables/parameters are COHDBG001; `p.name` on a path is COH
 `RETURN a {.name}` is COHDBL001 naming MAP PROJECTION. NEXT, WITH (including WITH DISTINCT)
 and return-after-delete remain COHDBL001. CASE and composite values are described below.
 
+## ORDER BY, OFFSET, SKIP and LIMIT
+
+After RETURN, `ORDER BY expression [ASC|ASCENDING|DESC|DESCENDING] [NULLS FIRST|LAST]` accepts multiple keys,
+RETURN aliases and projected expressions. ASC is the default. NULL sorts last in ASC and
+first in DESC (Cypher); explicit placement overrides it. This differs from Cohesion SQL's
+NULL-first ASC. NULLS, FIRST and LAST are contextual words and remain available as names.
+Strings sort ordinally and numbers compare exactly. The ascending family order is map,
+node, relationship, list, path, string, Boolean, number, NULL. Lists are lexicographic;
+maps compare count, sorted ordinal keys, then corresponding values. Nested NULL sorts last.
+Equal keys retain input order. CASE, COALESCE and composite values can supply keys.
+
+Without DISTINCT, keys may use unprojected bindings; with DISTINCT they must reference
+projected values (COHDBG001 otherwise). DISTINCT precedes sorting. OFFSET (Cypher SKIP)
+then drops rows and LIMIT truncates them. OFFSET/SKIP must precede LIMIT; LIMIT followed by OFFSET/SKIP, duplicate
+OFFSET/SKIP/LIMIT and ordering after paging are GQL0002. Counts are unsigned Int64 literals
+or `$name`/`@name` parameters. Invalid literal forms are GQL0002 and overflow is GQL0004.
+Parameters must hold non-negative integral values in the signed 64-bit range; invalid
+graph values, including NULL and floating types, fail COHDBG013 before reads or writes. Non-finite and unsupported CLR values fail COHDBG003 during binding.
+
+Paging never reduces mutation inputs. Full materialization still applies: LIMIT 1 over
+more than 100,000 matches raises COHDBG004. Row and path requests share this stage.
+Standalone ORDER BY/page statements before RETURN remain COHDBL001. WITH and aggregate
+ordering are the #1145 and #1147 hand-offs. See [ordering design](DESIGN.md#ordering-and-paging-1142).
+
 ## CASE and composite values
 
 Simple and searched CASE select the first TRUE comparison/predicate; WHEN NULL never
@@ -85,7 +109,7 @@ FALSE; otherwise a NULL field comparison yields UNKNOWN. IN, simple CASE and NUL
 reuse this rule and exact numbers (0.1m differs from 0.1d, 1 equals 1.0). DISTINCT groups
 corresponding NULLs structurally. Lists order lexicographically; maps compare count, sorted
 ordinal keys, then values. Encountered NULL/incomparable values yield UNKNOWN in predicates.
-ORDER BY remains outside the current profile. CASE/composite values containing possible
+ORDER BY uses the total order above. CASE/composite values containing possible
 entities fail the static wire Execute gate before mutations, including on empty matches.
 
 Simple CASE accepts comma-separated WHEN operands, comparison parts (=, <>, !=, <, <=, >, >=),

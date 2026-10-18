@@ -227,7 +227,7 @@ public sealed class GraphQueryTests
         await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var database = await engine.CreateDatabaseAsync("capability");
         await using var session = await database.CreateSessionAsync();
-        var parsed = (GqlQueryStatement)new GqlQueryParser().Parse("MATCH (a) RETURN a LIMIT 2");
+        var parsed = (GqlQueryStatement)new GqlQueryParser().Parse("MATCH (a) RETURN a CALL p");
         var exception = await Should.ThrowAsync<DatabaseParseException>(async () => await session.ExecuteAsync(new GraphQueryRequest(parsed)));
         exception.Message.ShouldContain("COHDBL001");
     }

@@ -5,7 +5,8 @@ enumerates and drops logical databases, opens database-bound sessions, and imple
 node, relationship and traversal operations of `GraphDatabase`. A session executes the bounded GQL
 subset, including source-ordered MATCH/OPTIONAL MATCH with null extension, named scalar/list/map parameters, Boolean/arithmetic WHERE and RETURN expressions,
 CASE, COALESCE, NULLIF, list/map constructors and field/index access,
-RETURN DISTINCT/ALL, star, aliases and standalone RETURN, described in [Graph.Language](../../Assimalign.Cohesion.Database.Graph.Language/docs/DESIGN.md).
+RETURN DISTINCT/ALL, star, aliases and standalone RETURN, ORDER BY with explicit null placement,
+OFFSET/SKIP and LIMIT, described in [Graph.Language](../../Assimalign.Cohesion.Database.Graph.Language/docs/DESIGN.md).
 
 ```csharp
 await using var engine = GraphDatabaseEngine.Create("people-graph", new() { RootPath = "graphs" });
