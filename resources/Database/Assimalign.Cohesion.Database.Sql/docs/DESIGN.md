@@ -657,6 +657,8 @@ type. INTERVAL field extraction retains normalized TimeSpan components, a docume
 PostgreSQL departure. Integer arithmetic with NULL retains BIGINT metadata.
 Until #1121, CREATE/ALTER TABLE planning refuses Stable/Volatile DEFAULT calls with
 COHDBL001 before any schema mutation, including calls nested under evaluator forms.
+ADD COLUMN retains its literal-only rule, but Stable/Volatile calls receive this same
+named refusal before its general nonliteral-DEFAULT rejection.
 
 String-producing scalars cap output and Unicode work buffers at 1,048,576 UTF-16 units.
 UPPER/LOWER apply the same bound; LENGTH/CHAR_LENGTH count without allocating a rune

@@ -2180,7 +2180,8 @@ BeginTransactionAsync for explicit transactions, statement start for auto-commit
 Planning a seek and evaluating every row, child query and later statement in the
 transaction use the same instant. COMMIT/ROLLBACK ends that lifetime. The engine's
 existing internal TimeProvider seam remains internal (owner decision 42); DEFAULT
-expression admission is #1121 and will reuse this carrier. CREATE TABLE and ALTER TABLE refuse every Stable or Volatile call in DEFAULT with COHDBL001 naming the function, before publishing any schema change. #1121 will lift this refusal.
+expression admission is #1121 and will reuse this carrier. CREATE TABLE and ALTER TABLE refuse every Stable or Volatile call in DEFAULT with COHDBL001 naming the function, before publishing any schema change, including ALTER TABLE ADD COLUMN. Other ADD
+COLUMN function defaults remain literal-only. #1121 will lift the volatility refusal.
 
 Numeric domain errors, nonfinite finite-input results, negative SUBSTRING lengths,
 numeric overflow and temporal range overflow use COHSQLE002; MOD by zero uses

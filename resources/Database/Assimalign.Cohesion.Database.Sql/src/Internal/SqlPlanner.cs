@@ -997,6 +997,12 @@ internal sealed partial class SqlPlanner
         }
         if (!SqlPersistedExpression.IsDefaultLiteral(expression))
         {
+            // ADD COLUMN stays literal-only, but newly executable clocks and UUIDs retain
+            // the same named refusal as CREATE/ALTER COLUMN rather than a generic literal error.
+            if (!allowFunction && expression is SqlFunctionCallExpression)
+            {
+                ValidateDefaultVolatility(expression, ScopelessEvaluator);
+            }
             if (!allowFunction || expression is not SqlFunctionCallExpression)
             {
                 throw new SqlPlanningException("COHSQLE013", $"Column '{definition.ColumnName}': only literal DEFAULT values are supported.", definition.DefaultValue?.Location);

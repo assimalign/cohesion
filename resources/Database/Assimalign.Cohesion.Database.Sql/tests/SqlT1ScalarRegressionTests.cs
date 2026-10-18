@@ -135,6 +135,10 @@ public sealed class SqlT1ScalarRegressionTests
         await session.ExecuteAsync($"CREATE TABLE existing (v {type})", cancellationToken: CancellationToken.None);
         var alter = await Should.ThrowAsync<DatabaseException>(() => session.ExecuteAsync($"ALTER TABLE existing ALTER COLUMN v {type} DEFAULT {expression}", cancellationToken: CancellationToken.None).AsTask());
         alter.Diagnostics[0].Code.ShouldBe("COHDBL001");
+        var add = await Should.ThrowAsync<DatabaseException>(() => session.ExecuteAsync($"ALTER TABLE existing ADD COLUMN extra {type} DEFAULT {expression}", cancellationToken: CancellationToken.None).AsTask());
+        add.Diagnostics[0].Code.ShouldBe("COHDBL001");
+        database.Catalog.TryGetTable("dbo", "existing", out var table).ShouldBeTrue();
+        table.Columns.Count.ShouldBe(1);
         await session.ExecuteAsync("INSERT INTO existing DEFAULT VALUES", cancellationToken: CancellationToken.None);
         (await Rows(session, "SELECT v FROM existing")).ShouldBe([[null]]);
     }
