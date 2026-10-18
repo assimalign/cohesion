@@ -54,6 +54,8 @@ internal static class GraphOrderComparer
             (GraphPath a, GraphPath b) => Paths(a, b, token),
             (string a, string b) => StringComparer.Ordinal.Compare(a, b),
             (bool a, bool b) => a.CompareTo(b),
+            (DateOnly a, DateOnly b) => a.CompareTo(b),
+            (DateTimeOffset a, DateTimeOffset b) => a.CompareTo(b),
             (int a, int b) => a.CompareTo(b),
             (short a, short b) => a.CompareTo(b),
             (sbyte a, sbyte b) => a.CompareTo(b),
@@ -78,7 +80,9 @@ internal static class GraphOrderComparer
         GraphPath => 4,
         string => 5,
         bool => 6,
-        null => 8,
+        DateOnly => 8,
+        DateTimeOffset => 9,
+        null => 10,
         _ => 7,
     };
 

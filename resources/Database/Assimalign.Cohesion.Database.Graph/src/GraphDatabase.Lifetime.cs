@@ -29,8 +29,9 @@ public sealed partial class GraphDatabase
         GraphOperation? operation = null;
         try
         {
+            var transactionStart = explicitTransaction?.TransactionStart ?? (Engine.EngineOptions.TimeProvider ?? TimeProvider.System).GetUtcNow();
             var context = explicitTransaction?.Context ?? await Coordinator.BeginAsync(IsolationLevel.Snapshot, token).ConfigureAwait(false);
-            operation = new GraphOperation(this, session, context, explicitTransaction);
+            operation = new GraphOperation(this, session, context, explicitTransaction, transactionStart);
             await operation.InitializeAsync(token).ConfigureAwait(false);
             session.Track(operation);
             return operation;

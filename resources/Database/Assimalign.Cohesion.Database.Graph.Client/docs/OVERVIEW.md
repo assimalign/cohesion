@@ -17,6 +17,8 @@ flowchart LR
 
 `QueryAsync` returns scalar, list and map RETURN expressions (also standalone, DISTINCT/ALL and aliased) and the existing SHOW catalog rows as
 `GraphResultSet`, with column metadata and rows accessible by ordinal or name.
+Core scalar functions, CAST and UTC transaction-start temporal readers preserve their result values and declared types.
+List/map accessors use composite negotiation; entity-valued function results retain the Execute gate.
 Aggregates support implicit or ISO GROUP BY and ordering by aggregate aliases. Count is Int64;
 COLLECT_LIST and its collect alias return lists through graph.composite-values negotiation.
 `ExecuteAsync` sends CREATE, INSERT, DELETE, and DETACH DELETE to the engine and returns its

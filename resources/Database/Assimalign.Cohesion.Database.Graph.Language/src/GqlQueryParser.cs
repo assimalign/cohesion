@@ -293,7 +293,7 @@ public sealed partial class GqlQueryParser : QueryParser
                 i + 1 < _tokens.Count && _tokens[i + 1].Type == TokenType.LeftParen &&
                 !GqlUnsupportedVocabulary.TryFind(value, out _) && token.Type != TokenType.Function)
             {
-                Unsupported($"FUNCTION {token.Text}", token);
+                Error("GQL0010", $"Unknown function '{token.Text}'.", token);
                 continue;
             }
             if (value == "WITH" && valuePosition && i > 0 && (IsWordAt(i - 1, "STARTS") || IsWordAt(i - 1, "ENDS"))) { continue; }
@@ -306,6 +306,12 @@ public sealed partial class GqlQueryParser : QueryParser
             string construct = word.Construct;
             switch (word.Position)
             {
+                case GqlWordPosition.FunctionCall:
+                    if (!valuePosition || i + 1 >= _tokens.Count || _tokens[i + 1].Type != TokenType.LeftParen) { continue; }
+                    break;
+                case GqlWordPosition.ValueExpression:
+                    if (!valuePosition) { continue; }
+                    break;
                 case GqlWordPosition.PathMode:
                     // TRAIL (a)... is a path mode; trail = (a)... names a path.
                     if (patternDepth != 0 || valuePosition || !StartsPathPattern(i + 1, ref end)) { continue; }

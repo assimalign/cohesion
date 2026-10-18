@@ -114,8 +114,18 @@ public sealed partial class GqlQueryParser
         var start = Current;
         if (Is("CASE")) { return ParseCase(); }
         if (Is("COALESCE") || Is("NULLIF")) { return ParseCaseAbbreviation(); }
+        if (Current.Type == TokenType.Function && Is("CAST")) { return ParseCast(); }
+        if (Current.Type == TokenType.Function && (Is("CURRENT_DATE") || Is("CURRENT_TIMESTAMP")))
+        {
+            Advance();
+            return new GqlFunctionCallExpression(start.Text.Equals("CURRENT_DATE", StringComparison.OrdinalIgnoreCase) ? GqlScalarFunction.CurrentDate : GqlScalarFunction.CurrentTimestamp, [], Span(start, Previous));
+        }
         if (Current.Type == TokenType.Function && _tokens[_position + 1].Type == TokenType.LeftParen)
-        { return ParseAggregate(); }
+        {
+            if (start.Text.ToUpperInvariant() is "COUNT" or "SUM" or "AVG" or "MIN" or "MAX" or "COLLECT_LIST" or "COLLECT")
+            { return ParseAggregate(); }
+            return ParseFunction();
+        }
         if (Current.Type == TokenType.LeftBracket) { return ParseList(); }
         if (Current.Type == TokenType.LeftBrace) { return ParseMap(); }
         if (IsVariableToken)

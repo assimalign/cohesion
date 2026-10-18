@@ -67,7 +67,7 @@ internal static class GraphGrouping
     }
 
     internal static List<Dictionary<string, object?>> Apply(GraphGroupingPlan plan,
-        IReadOnlyList<Dictionary<string, object?>> bindings, IReadOnlyDictionary<string, object?>? parameters, CancellationToken token)
+        IReadOnlyList<Dictionary<string, object?>> bindings, GraphEvaluationContext context, IReadOnlyDictionary<string, object?>? parameters, CancellationToken token)
     {
         var groups = new Dictionary<object?[], Group>(GraphRowComparer.Instance);
         var ordered = new List<Group>();
@@ -78,14 +78,14 @@ internal static class GraphGrouping
             token.ThrowIfCancellationRequested();
             var key = new object?[plan.Keys.Count];
             for (int i = 0; i < key.Length; i++)
-            { token.ThrowIfCancellationRequested(); key[i] = GraphExpressionEvaluator.Evaluate(plan.Keys[i], binding, parameters); }
+            { token.ThrowIfCancellationRequested(); key[i] = GraphExpressionEvaluator.Evaluate(plan.Keys[i], binding, context, parameters); }
             if (!groups.TryGetValue(key, out var group)) { group = AddGroup(key); }
             for (int i = 0; i < group.Accumulators.Length; i++)
             {
                 token.ThrowIfCancellationRequested();
                 var aggregate = plan.Aggregates[i];
                 group.Accumulators[i].Add(aggregate.Operand is null ? 1L
-                    : GraphExpressionEvaluator.Evaluate(aggregate.Operand, binding, parameters), token);
+                    : GraphExpressionEvaluator.Evaluate(aggregate.Operand, binding, context, parameters), token);
             }
         }
         var result = new List<Dictionary<string, object?>>(ordered.Count);

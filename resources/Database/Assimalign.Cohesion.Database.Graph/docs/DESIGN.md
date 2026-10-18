@@ -592,10 +592,50 @@ The [supported-clause matrix](../../Assimalign.Cohesion.Database.Graph.Language/
 is the single executable-language inventory: MATCH, OPTIONAL MATCH, WHERE, LET, FILTER, FOR/UNWIND, RETURN/NEXT, WITH, INSERT, CREATE (compatibility
 extension), DELETE, DETACH DELETE, SHOW (catalog extension), GROUP BY and LABEL EXPRESSION.
 COUNT, SUM, AVG, MIN, MAX, COLLECT_LIST and collect execute with implicit or explicit grouping.
-Scalar functions, graph selection and language DDL are not advertised. ORDER BY, OFFSET, SKIP and LIMIT execute
+Core scalar functions and CAST execute as described below; graph selection and language DDL are not advertised. ORDER BY, OFFSET, SKIP and LIMIT execute
 after RETURN, as described below. Label/type/index management is the
 session-bound C# schema API. The ISO decision and conformance corpus are documented alongside the
 parser; this is a bounded ISO subset, not a full conformance claim.
+
+### Core functions, planning and the transaction clock (#1148)
+
+The [language function table](../../Assimalign.Cohesion.Database.Graph.Language/docs/DESIGN.md#core-scalar-functions-and-cast-1148)
+is the spelling/signature record. Immutable function and CAST AST nodes participate in every
+expression walk, projection/entity shape proof, structural grouping key and EXPLAIN rendering.
+Static enum switches define signatures and evaluators, preserving NativeAOT without reflection.
+Parsed scalar arity shares aggregates' GQL0002 rule; hand-built invalid calls are COHDBG001.
+Provably incompatible kinds (including group lists) fail planning with COHDBG003 naming the
+function; dynamic wrong kinds and conversion/domain failures use COHDBG013. Unknown calls
+are GQL0010. Strict NULL arguments return NULL before kind/domain checks.
+
+Capture: GraphDatabaseSession.BeginTransactionCoreAsync reads one UTC instant from the existing
+EngineOptions.TimeProvider or TimeProvider.System before Coordinator.BeginAsync. Autocommit
+captures at that same point in GraphDatabase.BeginOperationAsync; an explicit transaction
+reuses its saved instant. Carrier: GraphDatabaseTransaction.TransactionStart and
+GraphOperation.TransactionStart, independently of TransactionContext, which ReadCommitted
+replaces for each statement snapshot. Reader: an explicit GraphEvaluationContext argument
+at every evaluator call, including MATCH maps, projection stages, grouping and sort keys.
+Every stage and statement of a transaction shares the instant. CURRENT_DATE reads its UTC date;
+CURRENT_TIMESTAMP reads the UTC DateTimeOffset. This mirrors SQL #1120's recorded seam; no
+public option, interface, assembly reference or visibility grant is added.
+
+abs/ceil/floor/round preserve numeric CLR types (unsigned inputs become Decimal), unlike
+Neo4j's Float ceil/floor/round results. Round ties go away from zero. Exact comparisons remain
+unchanged. sqrt/ln/log domain errors are COHDBG013. Strings use Unicode code points for length
+and zero-based Cypher substring, invariant casing, and bounded ordinal replacement. CAST shares
+SQL's fractional rejection; Cypher conversions truncate and return NULL for unparsable text.
+DateOnly and DateTimeOffset gain predicate and total ordering; total order places dates and then
+timestamps after numbers, before NULL. PropertyScalar checks storage admissibility, so computed
+temporal properties raise COHDBG013 inside the transaction rather than a storage ArgumentException.
+
+Function result shapes drive Execute's static entity gate before writer admission or mutation.
+nodes/edges/relationships and startNode/endNode entity outputs are rejected there; scalar
+reads such as nodes(p)[0].name pass. LET endpoint bindings retain their proven Node kind for
+ExecutePaths. labels/keys/properties use existing negotiated composite values, with ordinal
+labels/keys and snapshot-correct endpoint nodes. Materialized value failures precede ResultHeader,
+allowing exact pooled-session reuse. No catalog, storage or wire format change is needed.
+GraphFunctionTests, GraphFunctionWireTests and the profile's one-live-case-per-name guard pin
+these behaviors and both temporal regressions.
 
 ### Aggregates and grouping (#1147)
 
@@ -897,9 +937,10 @@ to exercise that enforcement path; compiled provisioning is not included.
 | `GQL0007` | Attempt to mutate catalog introspection results |
 | `GQL0008` | A Cypher arrow (`-->`, `--`) directly after a pattern element, which GQL reads as a comment |
 | `GQL0009` | Groups, unary expressions, CASE or collection constructors nested deeper than the parsing thread's stack; `GraphQueryRequest.FromGql` and the engine report it as `COHDBG008` |
-| `COHDBG001` | Invalid pattern, variable binding, label expression, predicate or traversal specification, including an insertion that names `\|`, `!`, `%` or an either-direction edge, a binary `AND`, and a chain with fewer than two operands |
+| `GQL0010` | Unknown function spelling, reported while parsing |
+| `COHDBG001` | Invalid hand-built function arity or unbound argument; invalid pattern, variable binding, label expression, predicate or traversal specification, including an insertion that names `\|`, `!`, `%` or an either-direction edge, a binary `AND`, and a chain with fewer than two operands |
 | `COHDBG002` | Unknown label or relationship type in a schema write (`CreateIndexAsync`, `DropLabelAsync`, `DropRelationshipTypeAsync`), a failed statement. A read never reports it; see `COHDBG010` and `COHDBG011` |
-| `COHDBG003` | Schema/data mismatch, restricted deletion or invalid graph mutation |
+| `COHDBG003` | Proven incompatible function argument kind; schema/data mismatch, restricted deletion or invalid graph mutation |
 | `COHDBG004` | Path materialization, candidate-expansion or 64-hop trail limit exceeded |
 | `COHDBG005` | Session/database binding mismatch |
 | `COHDBG006` | Storage failure translated at the engine boundary |
@@ -909,7 +950,7 @@ to exercise that enforcement path; compiled provisioning is not included.
 | `COHDBG010` | **Warning**, not a failure: a read-only statement or `GetIndexesAsync` names a label the database does not have at the statement's snapshot. No node carries it, so the read returns the rows the expression still matches (none for a required label), reports this `DiagnosticSeverity.Warning` diagnostic in `DatabaseResult.Diagnostics` or `GraphSchemaResult<T>.Diagnostics`, and leaves an explicit transaction active. Neo4j's `UnknownLabelWarning`, GQLSTATUS 01N50. Not sent over protocol 2.0 |
 | `COHDBG011` | **Warning**, not a failure: the same for a relationship type the database does not have; no relationship has it. Neo4j's `UnknownRelationshipTypeWarning`, GQLSTATUS 01N51. Not sent over protocol 2.0 |
 | `COHDBG012` | The database is offline (#1243): a durable flush of its journal or data file failed. Every operation is refused with `DatabaseOfflineException` until `OpenDatabaseAsync` reopens it; `Unavailable` on the wire. The storage's `StorageOfflineException` (`COHDBS002`) is the inner exception ("Storage operations") |
-| `COHDBG013` | Value error (#1140): non-Boolean conditions, invalid arithmetic, concatenation, container, index or field types, invalid paging counts, zero divisor, overflow or non-finite result. Reused by #1142, #1146, #1147 and #1148; structured Diagnostic, code-free Message, composed as CODE: message on protocol 2.0 |
+| `COHDBG013` | Value error (#1140): non-Boolean conditions, invalid arithmetic, concatenation, container, index or field types, invalid paging counts, function/CAST kind or value failures, unsupported computed property values, zero divisor, overflow or non-finite result. Reused by #1142, #1146, #1147 and #1148; structured Diagnostic, code-free Message, composed as CODE: message on protocol 2.0 |
 | `COHDBG014` | Multiple map keys normalize to the same bare parameter name |
 | `COHDBG015` | Duplicate final result column name, implicit or explicit, under ordinal case-sensitive comparison; rejected during planning before execution |
 | `COHDBG016` | A composite result requires graph.composite-values; ExecutionFailure before ResultHeader, preserving the authenticated session |

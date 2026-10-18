@@ -46,11 +46,32 @@ internal static class GqlUnsupportedVocabulary
         new("ROLLBACK", "ROLLBACK", GqlWordPosition.Clause),
         new("FINISH", "FINISH", GqlWordPosition.Clause),
         new("HAVING", "HAVING", GqlWordPosition.Clause),
+        // Function-only words remain legal variables and property names.
+        new("ID", "FUNCTION id (use element_id)", GqlWordPosition.FunctionCall),
+        new("REDUCE", "FUNCTION reduce", GqlWordPosition.FunctionCall),
+        new("DATE", "FUNCTION date", GqlWordPosition.FunctionCall),
+        new("DATETIME", "FUNCTION datetime", GqlWordPosition.FunctionCall),
+        new("DURATION", "FUNCTION duration", GqlWordPosition.FunctionCall),
+        new("TIME", "FUNCTION time", GqlWordPosition.FunctionCall),
+        new("LOCALTIME", "FUNCTION localtime", GqlWordPosition.FunctionCall),
+        new("ZONED_DATETIME", "FUNCTION zoned_datetime", GqlWordPosition.FunctionCall),
+        new("ZONED_TIME", "FUNCTION zoned_time", GqlWordPosition.FunctionCall),
+        new("LOCAL_DATETIME", "FUNCTION local_datetime", GqlWordPosition.FunctionCall),
+        new("LOCALDATETIME", "FUNCTION localdatetime", GqlWordPosition.FunctionCall),
+        new("HEAD", "FUNCTION head", GqlWordPosition.FunctionCall),
+        new("LAST", "FUNCTION last", GqlWordPosition.FunctionCall),
+        new("TAIL", "FUNCTION tail", GqlWordPosition.FunctionCall),
+        new("REVERSE", "FUNCTION reverse", GqlWordPosition.FunctionCall),
+        new("RANGE", "FUNCTION range", GqlWordPosition.FunctionCall),
+        new("ELEMENTS", "FUNCTION elements", GqlWordPosition.FunctionCall),
+        new("CURRENT_TIME", "CURRENT_TIME", GqlWordPosition.ValueExpression),
+        new("LOCAL_TIME", "LOCAL_TIME", GqlWordPosition.ValueExpression),
+        new("LOCAL_TIMESTAMP", "LOCAL_TIMESTAMP", GqlWordPosition.ValueExpression),
         // ISO statistical aggregates are recognized for a later tier.
-        new("STDDEV_SAMP", "STDDEV_SAMP", GqlWordPosition.Clause),
-        new("STDDEV_POP", "STDDEV_POP", GqlWordPosition.Clause),
-        new("PERCENTILE_CONT", "PERCENTILE_CONT", GqlWordPosition.Clause),
-        new("PERCENTILE_DISC", "PERCENTILE_DISC", GqlWordPosition.Clause),
+        new("STDDEV_SAMP", "STDDEV_SAMP", GqlWordPosition.FunctionCall),
+        new("STDDEV_POP", "STDDEV_POP", GqlWordPosition.FunctionCall),
+        new("PERCENTILE_CONT", "PERCENTILE_CONT", GqlWordPosition.FunctionCall),
+        new("PERCENTILE_DISC", "PERCENTILE_DISC", GqlWordPosition.FunctionCall),
         new("DATABASE", "DATABASE", GqlWordPosition.Clause),
         new("GRAPH", "GRAPH", GqlWordPosition.Clause),
         new("SCHEMA", "SCHEMA", GqlWordPosition.Clause),
@@ -112,6 +133,12 @@ internal enum GqlWordPosition
     /// word of the statement it is the whole statement's construct.
     /// </summary>
     Clause,
+
+    /// <summary>Only an invocation in a value expression, followed by an opening parenthesis.</summary>
+    FunctionCall,
+
+    /// <summary>A reserved niladic datetime expression in a value position.</summary>
+    ValueExpression,
 
     /// <summary>
     /// Directly before <c>DELETE</c>, as in <c>MATCH (n) NODETACH DELETE n</c>. Elsewhere it is a

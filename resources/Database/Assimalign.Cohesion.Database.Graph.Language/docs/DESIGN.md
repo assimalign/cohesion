@@ -126,8 +126,7 @@ only the parser hands a list it built to a node without copying it.
 
 Only these clauses occur in `GqlLanguageProfile.Clauses`. The larger reserved keyword table is
 retained for tokenization and targeted unsupported diagnostics; it does not advertise capabilities.
-The function table advertises the executable aggregates: count, sum, avg, min, max,
-collect_list and its Cypher alias collect. Ordinary scalar functions remain outside this subset.
+The function table advertises the aggregates and core scalar functions listed below, including their accepted aliases.
 
 | Clause | Accepted subset | Execution |
 | --- | --- | --- |
@@ -216,6 +215,8 @@ labeled      := variable (IS [NOT] LABELED | ':') label-expr
 operand      := primary ( '[' predicate ']' | '.' field )*
 primary      := variable ['.' property] | scalar-literal | parameter | labeled | '(' predicate ')'
               | aggregate '(' ([DISTINCT | ALL] predicate | '*') ')'
+              | scalar-function '(' [predicate (',' predicate)*] ')'
+              | CAST '(' predicate AS cast-target ')' | CURRENT_DATE | CURRENT_TIMESTAMP
               | '[' [predicate (',' predicate)*] ']'
               | '{' [field ':' predicate (',' field ':' predicate)*] '}'
               | CASE [predicate] (WHEN predicate THEN predicate)+ [ELSE predicate] END
@@ -482,7 +483,7 @@ the keyword-disposition corpus, `GqlProfileExecutionTests`, `GraphReturnTests` a
 ## Conditional expressions and composite values (#1146)
 
 CASE, WHEN, THEN, ELSE, END, COALESCE and NULLIF sit in Profile.Keywords; the function
-registry stays empty. The keyword-disposition corpus has a live positive parse for each,
+registry independently advertises aggregates and the core scalar set (#1148). The keyword-disposition corpus has a live positive parse for each,
 and GqlProfileExecutionTests measures both CASE forms and both abbreviations. CASE is
 advertised as one clause. COALESCE and NULLIF parse into case-abbreviation AST nodes,
 never registry function calls. The public AST also adds GqlCaseExpression and its ordered
@@ -566,6 +567,132 @@ Its :44-85 places NULL last and sequences before scalars; virtual/VirtualValueGr
 orders maps before lists, while storable/ValueGroup.java:62-65 orders text, Boolean and numbers.
 The selected exact numeric rule is the owner
 decision, including within these composites.
+
+## Core scalar functions and CAST (#1148)
+
+`GqlFunctionCallExpression(Function, Arguments)` resolves scalar names to `GqlScalarFunction`;
+`GqlCastExpression(Operand, Target)` resolves explicit conversions to `GqlCastType`. Both copy
+or retain immutable expression children. CURRENT_DATE and CURRENT_TIMESTAMP use function nodes
+whose `IsNiladic` flag is true; their spelling has no parentheses and takes precedence over
+unquoted variable lookup. Other registered function words remain legal variables, path names,
+labels, keys and aliases. Scalar dispatch is separate from aggregate dispatch; adding a scalar
+cannot silently create COLLECT_LIST. Names are case-insensitive, bindings remain ordinal.
+
+The static language signatures check parsed arity with **GQL0002**, exactly where #1147 checks
+aggregate arity. Hand-built calls are checked again during planning with COHDBG001. Unknown
+calls use **GQL0010** naming the function. Recognized unsupported calls keep COHDBL001 naming
+FUNCTION and the spelling; these table entries apply only before `(` in value positions, so
+`date` and `duration` remain legal variables. `id(n)` specifically directs callers to element_id.
+CURRENT_TIME, LOCAL_TIME and LOCAL_TIMESTAMP are recognized unsupported niladic expressions.
+Procedures/CALL, reduce, temporal constructors, ELEMENTS, head/last/tail/reverse/range, list
+comprehensions and slicing remain outside this subset.
+
+The table distinguishes ISO clause 20 forms, direct Cypher aliases, and Cohesion extensions.
+**Every scalar is strict:** a NULL argument returns NULL before kind or domain checks; every
+argument expression still evaluates. Niladic datetime readers are the only exception. All
+referenced bindings and signatures validate even in skipped branches or empty matches.
+
+| ISO canonical or extension | Accepted alias / status | Arguments | Non-NULL result |
+| --- | --- | --- | --- |
+| `element_id` | ISO 20.10; `elementId` is a 1:1 Cypher alias | node or relationship | database-local stable string identity; entity expressions also accepted as a Cohesion extension to ISO's variable operand |
+| `labels` | Cypher spelling, Cohesion extension | node | ordinal label list |
+| `type` | Cypher spelling, Cohesion extension | relationship | type string |
+| `properties` | Cypher spelling, Cohesion extension | node, relationship or map | read-only property map copy |
+| `keys` | Cypher spelling, Cohesion extension | node, relationship or map | ordinal key list |
+| `startNode`, `endNode` | Cypher spellings, Cohesion extensions | relationship | stored source/target node from the same statement snapshot |
+| `path_length` | ISO 20.22; `length` is a 1:1 Cypher alias | path | Int64 relationship count |
+| `nodes` | Cypher spelling, Cohesion extension | path | nodes in traversal order |
+| `relationships` | Cypher spelling, Cohesion extension; `edges` is a Cohesion alias | path | relationships in traversal order, retaining stored direction |
+| `lower`, `upper` | ISO 20.25; `toLower`, `toUpper` are 1:1 Cypher aliases | string | invariant-case string |
+| `trim` | ISO 20.25 subset | string | string with leading/trailing U+0020 spaces removed |
+| `substring` | Cypher spelling, Cohesion extension | string, numeric start [, length] | string sliced by Unicode code points, **zero-based**; past-end gives empty string |
+| `replace` | Cypher spelling, Cohesion extension | string, search string, replacement string | ordinal replacement; empty search preserves input |
+| `char_length`, `character_length` | ISO 20.22 synonyms | string | Int64 Unicode code-point count |
+| `size` | ISO 20.22 for lists; Cypher string overload is a Cohesion extension | list or string | Int64 item/code-point count |
+| `abs`, `ceil`, `ceiling`, `floor` | ISO 20.22; CEIL/CEILING are synonyms | number | input numeric type; unsigned inputs become Decimal |
+| `round` | Cypher spelling, Cohesion extension | number [, nonnegative whole precision] | input numeric type; unsigned inputs become Decimal; half **away from zero** |
+| `sqrt` | ISO 20.22 | nonnegative number | finite Double; negative input is COHDBG013 |
+| `ln`, `log` | ISO 20.22 LN(value), LOG(base,value); Cypher log(value) is a Cohesion overload | positive number(s); log base positive and unequal to 1 | finite Double; invalid domain is COHDBG013 |
+| `mod` | ISO 20.22 canonical function for Cypher `%` | two numbers | Double if floating, Decimal if Decimal/UInt64, otherwise checked Int64 |
+| `CAST(value AS type)` | ISO 20.8, shared SQL conversion rules | scalar or NULL | requested scalar target; invalid value is COHDBG013 |
+| `toString` | Cypher spelling, Cohesion extension | number, Boolean, string or temporal | invariant text; Boolean is lowercase |
+| `toInteger` | Cypher spelling, Cohesion extension | number, Boolean or string | Int64, truncating fractions toward zero; unparsable text gives NULL |
+| `toFloat` | Cypher spelling, Cohesion extension | number or string | finite Double; unparsable text gives NULL |
+| `toBoolean` | Cypher spelling, Cohesion extension | Boolean, integer or string | Boolean; zero is false; unparsable text gives NULL |
+| `CURRENT_DATE` | ISO 20.27, no parentheses | none | UTC DateOnly at transaction start |
+| `CURRENT_TIMESTAMP` | ISO 20.27, no parentheses | none | UTC DateTimeOffset at transaction start |
+
+ISO status was checked against the [published clause-20 contents preview](https://cdn.standards.iteh.ai/sist-preview/76120/a5695073ca0a485c9929f50970f4c862/ISO-IEC-39075-2024.pdf)
+and [openGQL's clause-20 grammar](https://github.com/opengql/grammar/blob/main/GQL.g4#L2256-L2645),
+not the paywalled normative text. Labels/type/keys/properties/startNode/endNode, substring,
+replace and the four toX conversions have no corresponding function production there and are
+explicitly Cohesion extensions. ISO supplies LEFT/RIGHT rather than SUBSTRING; the SQL
+`SUBSTRING(s FROM i FOR n)` spelling is not accepted here. Cypher substring always starts at 0. Like Neo4j, floating coordinates truncate toward zero before checking the resulting nonnegative Int32 range; negative resulting coordinates or out-of-range indexes/lengths are COHDBG013.
+
+CAST targets are INT/INTEGER (Int32), INT64/BIGINT (Int64), REAL (Single), FLOAT/FLOAT64/
+DOUBLE [PRECISION] (Double), DECIMAL/NUMERIC, STRING/CHAR/VARCHAR (unbounded string), BOOL/
+BOOLEAN, DATE, ZONED DATETIME and TIMESTAMP WITH TIME ZONE (DateTimeOffset). Type modifiers,
+LIST, DURATION, BYTES and ZONED TIME are outside this subset; recognized unsupported target
+families use COHDBL001, unknown target spellings use GQL0002. Numeric-to-integer CAST rejects
+fractions, including fractional text; it never truncates or rounds. It follows SQL #1119's
+shared storage types and value rules. Numeric text is invariant without grouping, and exact
+numeric text cannot silently round into a whole integer. Temporal text follows SQL's invariant
+ISO date/time grammar, absent offset means UTC, and dates convert to midnight UTC. Boolean
+CAST accepts Boolean or TRUE/FALSE text; CAST to string renders Boolean uppercase. Cypher
+conversions deliberately differ from CAST: toInteger truncates, accepts Boolean as 1/0, and
+toInteger/toFloat/toBoolean return NULL for unparsable text. String/Decimal range overflow and non-finite
+results still fail with COHDBG013. Like Neo4j, toInteger saturates finite floating values outside Int64 range; CAST rejects them. toString retains a fractional digit for floating integers and uses Cypher scientific-notation thresholds. This implements the main-session ruling over the older
+issue-body default that requested CAST semantics for toInteger/toFloat.
+
+Math retains exact integer identity above 2^53. abs/ceil/floor/round retain the input CLR
+numeric type (all unsigned inputs become Decimal). Neo4j instead returns Float for ceil,
+floor and round; this is a documented Cohesion divergence. Round uses half away from zero,
+including negative ties, rather than Neo4j's unary ties toward positive infinity. Approximate round
+uses the value's round-trip decimal form with bounded digit work, including precisions above 15.
+SQRT/LOG/LN domain errors, zero divisors, overflow, invalid dynamic kinds, and excessive string
+results use COHDBG013; they never return NaN or infinity. REPLACE bounds expanded UTF-8 bytes
+before allocating. Existing composite limits apply to every function's output.
+
+Planning rejects provably incompatible entity/path/group, literal, parameter and carried value
+kinds with COHDBG003 naming the function. Unbound arguments use COHDBG001 naming the function;
+dynamic property kinds are checked at execution with COHDBG013. EXPLAIN runs the same signature
+and scope checks without evaluation. Properties(map) preserves nested composite/entity/group shapes while stored entity properties remain scalar; wrappers cannot bypass wire admission. Function identity and CAST target participate in expression
+hashing/equality, so equivalent function GROUP BY keys match RETURN items. Child, group,
+composite, entity, scalar, rendering and validation walks all recognize both new nodes.
+
+GraphDatabaseSession captures one UTC instant from `EngineOptions.TimeProvider ?? TimeProvider.System`
+**before Coordinator.BeginAsync**, once per explicit transaction. Autocommit captures at the same
+point in GraphDatabase.BeginOperationAsync. GraphDatabaseTransaction and GraphOperation carry the
+instant; GraphEvaluationContext passes it explicitly to every evaluator reader, including MATCH
+maps, grouping and sorting. It never lives on TransactionContext: ReadCommitted replaces that
+context per statement. Every row, stage and statement of one transaction sees the same instant;
+each autocommit statement captures its own. This mirrors SQL #1120's capture/carrier/reader seam.
+The existing clock remains internal; no public option or visibility grant is added. Graph wire
+has no transaction controls, so each wire statement is autocommit.
+
+Temporal values compare and sort by DateOnly date or DateTimeOffset instant, including nested
+composite sort keys. Total ordering puts dates then timestamps after numbers and before NULL;
+DATE and timestamp are incomparable in predicates. Temporal results cannot become stored graph
+properties: PropertyScalar reports COHDBG013 before the storage encoder, and the statement rolls
+back rather than leaking ArgumentException. No stored type, catalog version or wire encoding changes.
+
+The wire Execute gate rejects entity-valued nodes/edges/relationships/startNode/endNode results
+before writer locking or mutation, even on empty input. Scalar access through those results is
+legal, and LET s=startNode(r) followed by RETURN s can use ExecutePaths when the binding is
+mandatory. List/map functions labels/keys/properties use #1146's existing composite capability;
+unnegotiated possible composites are COHDBG016. Scalar, CAST and temporal results use existing
+components. Runtime errors materialize before ResultHeader and preserve the authenticated session.
+
+Conformance lives in GqlFunctionParserTests, GqlKeywordDispositionTests, GraphFunctionTests,
+GraphFunctionWireTests and GqlProfileExecutionTests' bidirectional Profile.Functions guard.
+Local behavior references (consulted, no implementation code copied), relative to
+C:/Source/repos/neo4j/neo4j: community/cypher/runtime-util/src/main/java/org/neo4j/cypher/operations/CypherFunctions.java:328-346,385-456
+(numeric return types and rounding), :1748-1784 (substring), :1920-1935 (labels), :2486-2524
+(path lists), :2675-2692 (size), :2730-2743 (length), :2764-2785,2814-2822,2881-2905 (conversions), :3485-3553 (numeric substring coordinates);
+community/values/src/main/java/org/neo4j/values/storable/StringWrappingStringValue.java:99-116
+(code-point slicing). Cohesion's CAST uses the local SQL precedent in
+Sql/src/Internal/Types/SqlStandardCasts.cs:175-194,224-229 and Sql.Language/src/SqlLiteralText.cs:14-85;
+the clock shape is recorded in Sql/docs/DESIGN.md, Planning, execution and bounds.
 
 ## Aggregates and grouping (#1147)
 
@@ -700,7 +827,7 @@ GqlOrderPagingTests and GraphOrderPagingWireTests pin the executable surface.
 
 | Code | Meaning |
 | --- | --- |
-| `COHDBL001` | Recognized construct outside the executable profile, reported once at its own span: OPTIONAL block operands, MANDATORY MATCH, procedures, scalar functions, HAVING and statistical aggregates (STDDEV_SAMP/POP, PERCENTILE_CONT/DISC), substituted/whole-map parameters, composite properties, comprehensions, slicing, map projections, questioned paths, subpath variables, parenthesized-path WHERE, nested quantifiers, standalone ORDER BY/page statements, set operations, FOR ordinality/offset suffixes, NEXT YIELD, server/session scope, undirected (tilde) edges, path mode and path search prefixes, `NODETACH DELETE`, and `MERGE` |
+| `COHDBL001` | Recognized construct outside the executable profile, reported once at its own span: OPTIONAL block operands, MANDATORY MATCH, procedures, excluded functions and datetime forms, unsupported CAST targets, HAVING and statistical aggregates (STDDEV_SAMP/POP, PERCENTILE_CONT/DISC), substituted/whole-map parameters, composite properties, comprehensions, slicing, map projections, questioned paths, subpath variables, parenthesized-path WHERE, nested quantifiers, standalone ORDER BY/page statements, set operations, FOR ordinality/offset suffixes, NEXT YIELD, server/session scope, undirected (tilde) edges, path mode and path search prefixes, `NODETACH DELETE`, and `MERGE` |
 | `GQL0001` | Empty statement |
 | `GQL0002` | Malformed supported syntax, invalid statement composition, leftover tokens, or a character GQL does not use (`?`, `#`, `^`, ```, ...) |
 | `GQL0003` | Unterminated string, quoted name, or block comment |
@@ -710,6 +837,7 @@ GqlOrderPagingTests and GraphOrderPagingWireTests pin the executable surface.
 | `GQL0007` | `Graph catalog introspection is read-only.`: mutation composed with `SHOW` |
 | `GQL0008` | A `--` comment begins exactly where a node/subpath pattern's `)`, an edge pattern's `]`, or a postfix quantifier's `}`, `+` or `*` ends, in `MATCH`, `INSERT` or `CREATE`: a Cypher arrow (`-->`, `--`) that would hide the rest of the line. Reported at the `--`; the message names `->`, `<-` and `-` |
 | `GQL0009` | The statement nests groups, unary expressions, CASE, subscripts or collection constructors deeper than the parsing thread's stack can follow. Reported at the group, unary, constructor or subscript token that could not be entered; the parse stops there and reports nothing else. The same text parses on a thread with more stack, so the engine's `GraphQueryRequest.FromGql` reports it as `COHDBG008`, statement too complex, not as a parse error |
+| `GQL0010` | Unknown function call; the message names the unregistered spelling |
 
 Locations use zero-based absolute UTF-16 offsets with exclusive ends and one-based line numbers.
 A line breaks at LF, CR, NEL (U+0085), LS (U+2028) or PS (U+2029), and CR LF is one break
@@ -1024,7 +1152,7 @@ productions for sections 19.2 and 20.1, also contains neither IN nor STARTS WITH
 These four spellings are therefore recorded as Cohesion compatibility extensions. This checks
 the public contents and grammar, not the paywalled normative text. ISO string concatenation
 is `||`; string + is the Cypher alias. % is the Cypher spelling of the ISO MOD operation;
-the canonical function belongs to #1147.
+the canonical MOD function executes in #1148.
 
 Local Neo4j references, relative to C:/Source/repos/neo4j/neo4j (behavior consulted, no code copied):
 
@@ -1068,7 +1196,7 @@ keyword recognition alone never enables it.
 
 Profile.Functions is the executable built-in set, checked by the engine's one function-
 coverage guard: every declared name has a passing live case and every live case has a
-declared name. GQL declares count, sum, avg, min, max, collect_list and collect. OQL removes ABS (already recognized by its
+declared name. GQL declares the aggregates and the core scalar names and aliases in the function table above. OQL removes ABS (already recognized by its
 unsupported table), and its parser/planner membership checks read the profile. OQL's
 [temporary ODMG exemptions were removed by #1126](../../Assimalign.Cohesion.Database.Documents.Language/docs/DESIGN.md#function-declaration-and-diagnostic-delivery-1103).
 

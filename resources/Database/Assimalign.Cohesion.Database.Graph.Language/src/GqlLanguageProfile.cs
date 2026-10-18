@@ -1,3 +1,4 @@
+using Assimalign.Cohesion.Database.Graph.Language.Internal;
 using Assimalign.Cohesion.Database.Language;
 
 namespace Assimalign.Cohesion.Database.Graph.Language;
@@ -45,7 +46,11 @@ public static class GqlLanguageProfile
         "SHOW",
     ];
 
-    private static readonly string[] _functions = ["count", "sum", "avg", "min", "max", "collect_list", "collect"];
+    private static readonly string[] _functions =
+    [
+        .. GqlScalarFunctions.Signatures.Keys, "cast",
+        "count", "sum", "avg", "min", "max", "collect_list", "collect",
+    ];
 
     private static readonly string[] _clauses =
     [
