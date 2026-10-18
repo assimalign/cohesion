@@ -146,7 +146,14 @@ One `TransactionCoordinator` per database owns MVCC, logical undo, journal durab
 management and physical statement brackets. A conservative database writer lock serializes writers
 through their logical commit or rollback; readers use snapshots. Metadata and affected graph
 records are checked against the latest committed view after lock acquisition, so a stale writer
-cannot create an orphan endpoint or bypass a newer schema constraint.
+cannot create an orphan endpoint or bypass a newer schema constraint. The engine's latest
+snapshot excludes committed contexts still tracked between lock release and untracking
+(#1665), mirroring Documents' filter (db1a2e3bf) while preserving caller-owned writes and
+excluding every other tracked context; node/relationship metadata conflicts, label/type
+in-use checks and property-metadata validation all use it. Catalog/store latest snapshots
+already filter to active contexts for property-key deletion, metadata/record conflicts
+and index creation/population/deletion. PostgreSQL likewise ends transaction visibility
+before lock release (`src/backend/access/transam/xact.c:2425-2430`).
 
 Node creation and label/key metadata participate in the same logical transaction. Relationship
 creation writes its record and both adjacency entries in one physical bracket. Deleting a node
