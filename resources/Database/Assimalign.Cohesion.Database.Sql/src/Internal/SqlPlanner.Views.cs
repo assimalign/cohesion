@@ -153,6 +153,7 @@ internal sealed partial class SqlPlanner
         IReadOnlyList<SqlRelationBinding>? bindings, SqlRelationReference? relation, SqlExpressionEvaluator scope,
         IReadOnlyDictionary<SqlExpression, int>? outputs = null)
     {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
         if (outputs?.ContainsKey(expression) == true) { return; } // Output dependencies were captured at projection binding.
         if (expression is SqlCastExpression cast && SqlDefinitionBinder.ResolveType(cast.TargetType, _functions, cast.Location) is { IsDomain: true } domain)
         { ViewDefinitionBinding!.Dependencies.Add(SqlDefinitionBinder.DomainKey(domain.Name)); }

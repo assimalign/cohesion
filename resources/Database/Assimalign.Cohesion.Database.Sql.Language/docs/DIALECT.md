@@ -2684,8 +2684,8 @@ pin in the same change.
 | `COHSQLE029` | Error | CREATE SCHEMA names an existing namespace without IF NOT EXISTS (PostgreSQL SQLSTATE 42P06) |
 | `COHSQLE030` | Error | DROP SCHEMA RESTRICT finds dependent objects; the message offers CASCADE (PostgreSQL SQLSTATE 2BP01) |
 | `COHSQLE031` | Error | DROP SCHEMA targets dbo, which code-first provisioning requires |
-| `COHSQLE033` | Error | Invalid persisted view declaration/replacement, changed recorded column identity, or oversized view record |
 | `COHSQLE032` | Error | DISTINCT/ALL/input ORDER BY on a scalar function, or DISTINCT input ordering whose keys are absent from the arguments (PostgreSQL 42809 / 42P10) |
+| `COHSQLE033` | Error | Invalid persisted view declaration/replacement, changed recorded column identity, or oversized view record |
 
 Positions are absolute character offsets into the statement text; line/column
 presentation is computed by tooling from the source (offset → line mapping), not

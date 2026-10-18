@@ -14,6 +14,26 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed partial class SqlViewTests
 {
+    [Fact(DisplayName = "Cohesion Test [Sql] - Views: correlated scalar output retains its enclosing column facets")]
+    public async Task Execute_CorrelatedScalarMetadata_ShouldUseChildBindingScope()
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("view-correlated-facets", new());
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecuteAsync(session, "CREATE TABLE t (amount DECIMAL(5,2))");
+        await ExecuteAsync(session, "CREATE TABLE u (id INT)");
+        await ExecuteAsync(session, "INSERT INTO t VALUES (1.25)");
+        await ExecuteAsync(session, "INSERT INTO u VALUES (1)");
+        // Act
+        await ExecuteAsync(session, "CREATE VIEW v AS SELECT (SELECT t.amount FROM u) AS y FROM t");
+        var metadata = await RowsAsync(session, "SELECT NUMERIC_PRECISION, NUMERIC_SCALE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'v'");
+        var rows = await RowsAsync(session, "SELECT y FROM v");
+        // Assert
+        metadata.ShouldHaveSingleItem().ShouldBe([5L, 2L]);
+        rows.ShouldHaveSingleItem().ShouldBe([1.25m]);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Sql] - Views: parameters and table targets report the view diagnostic")]
     public async Task Execute_InvalidViewTargets_ShouldReportViewCode()
     {

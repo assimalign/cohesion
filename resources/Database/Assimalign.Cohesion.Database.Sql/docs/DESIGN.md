@@ -2398,7 +2398,9 @@ DDL-generation fast path. No snapshot generation API or friend grant was added f
 Views freeze names/types/modifiers/domains/collations and creation-time nullability for COLUMNS,
 with current nullability on query binding. Scalar-subquery slots and function outputs preserve
 complete precision, scale and length before contract comparison (PostgreSQL
-`src/backend/nodes/nodeFuncs.c:345`, `src/backend/commands/view.c:300`). ALTER COLUMN refuses
+`src/backend/nodes/nodeFuncs.c:345`, `src/backend/commands/view.c:300`). Scalar output descriptors are captured inside the child
+lexical scope before restoring the parent, including correlated column projections. ALTER
+COLUMN refuses
 changes to type, length, precision or scale for any column a view reads, both in the executor
 and catalog publication (COHSQLD002; PostgreSQL `src/backend/commands/tablecmds.c:15612-15624`).
 OR REPLACE may append columns only, following PostgreSQL `src/backend/commands/view.c:266-325`.
