@@ -757,9 +757,8 @@ public sealed class SqlExpressionDepthTests
     }
 
     /// <summary>
-    /// The correlation check over a subquery's clauses iterates, so its stack never depends on
-    /// the tree: a chain thousands of levels deep, which the parser builds in a loop, is checked
-    /// on a thread with little stack, and references are still reported in source order.
+    /// Deep and long subquery expressions parse within the configured limit on a small stack.
+    /// Outer references remain in the syntax tree for the engine's lexical scope binder.
     /// </summary>
     [Fact(DisplayName = "Cohesion Test [Sql.Language] - Nesting: correlated subqueries parse deep and long expressions within the configured limit")]
     public void Parse_DeepSubqueryUnderHighLimit_ShouldAcceptOuterReferences()

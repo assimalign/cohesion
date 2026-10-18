@@ -264,7 +264,7 @@ public sealed class SqlSubqueryWireTests
         (await QueryAsync(connection, "SELECT id FROM users ORDER BY id")).Select(row => row[0]).ShouldBe(new object?[] { 1, 2 });
     }
 
-    /// <summary>Unqualified names that require an outer scope receive the same capability diagnostic as qualified correlation.</summary>
+    /// <summary>Unqualified names resolve to the enclosing scope and return its values over the wire.</summary>
     [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - Subquery: unqualified outer references execute over the wire")]
     public async Task QueryAsync_UnqualifiedCorrelation_ShouldReturnBoundOuterValuesOverTheWire()
     {

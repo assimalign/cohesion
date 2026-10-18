@@ -214,6 +214,8 @@ public sealed class SqlInsertValuesValidationTests
     [InlineData("SELECT a FROM v WHERE id IN (SELECT id FROM w LIMIT a)", "a", "LIMIT")]
     [InlineData("SELECT a FROM v WHERE id IN (SELECT id FROM w LIMIT id)", "id", "LIMIT")]
     [InlineData("SELECT a FROM v WHERE id IN (SELECT id FROM w LIMIT w.id)", "w.id", "LIMIT")]
+    [InlineData("SELECT a FROM v WHERE id IN (SELECT id FROM w LIMIT v.a)", "v.a", "LIMIT")]
+    [InlineData("SELECT a FROM v WHERE EXISTS (SELECT id FROM w OFFSET v.a)", "v.a", "OFFSET")]
     [InlineData("SELECT a FROM v WHERE EXISTS (SELECT id FROM w OFFSET id)", "id", "OFFSET")]
     public async Task ExecuteAsync_ColumnReferenceInCount_ShouldFailWhilePlanning(string sql, string reference, string clause)
     {

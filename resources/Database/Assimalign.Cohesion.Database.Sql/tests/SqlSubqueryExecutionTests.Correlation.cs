@@ -132,7 +132,7 @@ public sealed partial class SqlSubqueryExecutionTests
         (await RowsAsync(session, "SELECT s.id, l.k FROM sales s LEFT JOIN labels l " +
             "ON s.k = l.k AND EXISTS (SELECT x.k FROM labels x WHERE x.k = s.k AND x.k = l.k) " +
             "WHERE EXISTS (SELECT x.k FROM labels x WHERE x.k = s.k) ORDER BY s.id;"))
-            .Select(row => row[0]).ShouldBe(new object?[] { 1, 2, 3 });
+            .Select(row => row[1]).ShouldBe(new object?[] { 1, 1, 2 });
         (await RowsAsync(session, "SELECT s.k, SUM(s.amount), (SELECT l.threshold FROM labels l WHERE l.k = s.k) " +
             "FROM sales s GROUP BY s.k HAVING SUM(s.amount) > (SELECT l.threshold FROM labels l WHERE l.k = s.k) ORDER BY s.k;"))
             .ShouldHaveSingleItem().ShouldBe(new object?[] { 1, 10m, 9 });
@@ -141,7 +141,7 @@ public sealed partial class SqlSubqueryExecutionTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Correlation: invalid grouped outer names ambiguous scopes and outer-only aggregates fail during binding")]
-    [InlineData("SELECT c.id, (SELECT x.id FROM choices x WHERE x.id = c.id) FROM candidates c GROUP BY c.id + 1;", "COHSQLE017", "id")]
+    [InlineData("SELECT (SELECT x.id FROM choices x WHERE x.id = c.id) FROM candidates c GROUP BY c.id + 1;", "COHSQLE017", "Outer column 'id'")]
     [InlineData("SELECT (SELECT SUM(c.id) FROM choices x) FROM candidates c;", "COHDBL001", "outer")]
     [InlineData("SELECT c.id FROM candidates c WHERE EXISTS (SELECT x.id FROM choices x WHERE SUM(c.id) > 0);", "COHDBL001", "outer")]
     [InlineData("SELECT c.id FROM candidates c WHERE EXISTS (SELECT x.id FROM choices x JOIN choices y ON SUM(c.id) > 0);", "COHDBL001", "outer")]
@@ -181,7 +181,7 @@ public sealed partial class SqlSubqueryExecutionTests
         await SeedMembershipAsync(session);
 
         // Act / Assert
-        (await RowsAsync(session, "SELECT CASE WHEN c.id = 1 THEN 9 ELSE (SELECT x.id FROM choices x WHERE c.id = 2) END " +
+        (await RowsAsync(session, "SELECT CASE WHEN c.id = 1 THEN 9 ELSE (SELECT x.id FROM choices x WHERE c.id = 1) END " +
             "FROM candidates c WHERE c.id = 1;" )).ShouldHaveSingleItem()[0].ShouldBe(9L);
         var error = await Should.ThrowAsync<DatabaseException>(() => RowsAsync(session,
             "SELECT c.id, (SELECT x.id FROM choices x WHERE x.id = c.id OR c.id = 3) FROM candidates c WHERE c.id IS NOT NULL ORDER BY c.id;"));
