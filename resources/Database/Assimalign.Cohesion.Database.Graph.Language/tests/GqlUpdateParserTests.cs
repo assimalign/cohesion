@@ -13,6 +13,8 @@ public sealed class GqlUpdateParserTests
     [InlineData("SET a.age = 5", "property")]
     [InlineData("SET a.age = $age", "property")]
     [InlineData("SET a.x = b.y", "property")]
+    [InlineData("SET a.flag = b IS LABELED Graph", "property")]
+    [InlineData("SET a.flag = b IS NOT LABELED Schema", "property")]
     [InlineData("SET a.age = a.age + 1", "property")]
     [InlineData("SET a = {name:'A'}", "replace")]
     [InlineData("SET a += {age:1}", "merge")]

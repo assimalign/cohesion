@@ -287,7 +287,8 @@ public sealed partial class GqlQueryParser : QueryParser
             // here: words inside a pattern are names.
             if (value == "IS" && valuePosition)
             {
-                if (inUpdate && i > 0 && IsVariableLexeme(_tokens[i - 1]))
+                if (inUpdate && i > 1 && IsVariableLexeme(_tokens[i - 1]) &&
+                    (IsWordAt(i - 2, "SET") || IsWordAt(i - 2, "REMOVE") || _tokens[i - 2].Type == TokenType.Comma))
                 { label = LabelScan.ExpectPrimary; continue; }
                 int labeled = IsWordAt(i + 1, "NOT") ? i + 2 : i + 1;
                 if (IsWordAt(labeled, GqlLabelVocabulary.Labeled))

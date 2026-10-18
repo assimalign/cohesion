@@ -124,6 +124,9 @@ only the parser hands a list it built to a node without copying it.
 
 ## SET and REMOVE (#1149)
 
+SET/REMOVE recognize `IS` as a label assignment only immediately after an item target.
+Scalar SET values retain `IS [NOT] LABELED`, including contextual label names such as Graph and Schema.
+
 `GqlSetStage` and `GqlRemoveStage` carry ordered public item variants for scalar properties,
 literal-map replacement/merge and node labels. `SetItems` and `RemoveItems` provide flattened
 inspection facades. ISO sections 13.3 and 13.4 supply property, all-property and label items;
