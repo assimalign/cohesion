@@ -75,10 +75,10 @@ internal static class GraphValueExpressions
     }
 
     // Access consumes a container level; accessing an entity produces a scalar property.
-    internal static bool MayReturn(GqlExpression expression, IReadOnlyDictionary<string, object?>? parameters, bool entity)
+    internal static bool MayReturn(GqlExpression expression, IReadOnlyDictionary<string, object?>? parameters, bool entity, Func<string, int, bool, bool>? variableShape = null, int initialAccesses = 0)
     {
         var pending = new Stack<(GqlExpression Expression, int Accesses)>();
-        pending.Push((expression, 0));
+        pending.Push((expression, initialAccesses));
         while (pending.TryPop(out var item))
         {
             var (value, accesses) = item;
@@ -93,8 +93,8 @@ internal static class GraphValueExpressions
                     else if (aggregate.Function is GqlAggregateFunction.Min or GqlAggregateFunction.Max && aggregate.Operand is not null)
                     { pending.Push((aggregate.Operand, accesses)); }
                     break;
-                case GqlVariableExpression:
-                    if (entity && accesses == 0) { return true; }
+                case GqlVariableExpression variable:
+                    if (variableShape is not null ? variableShape(variable.Variable, accesses, entity) : entity && accesses == 0) { return true; }
                     break;
                 case GqlMemberExpression member: pending.Push((member.Operand, accesses + 1)); break;
                 case GqlSubscriptExpression subscript: pending.Push((subscript.Operand, accesses + 1)); break;

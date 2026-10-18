@@ -56,6 +56,9 @@ internal sealed class GraphTokenResolver
     /// </summary>
     internal IReadOnlyList<Diagnostic> Warnings => _warnings is null ? [] : _warnings.AsReadOnly();
 
+    internal void IntroduceLabel(string name) => _labels[name] = true;
+    internal void IntroduceRelationshipType(string name) => _types[name] = true;
+
     /// <summary>Whether the database has the label; records its warning the first time it does not.</summary>
     /// <param name="name">The label name.</param>
     /// <param name="location">The source span that names it, when the AST has one.</param>

@@ -1597,3 +1597,9 @@ Diagnostic overflow is preflighted before output and retains a source-order pref
 COHDBP001 with exact retained/omitted counts; the original Error category/message or
 successful result is preserved and the session stays reusable. Both the 4,096-entry
 and 1 MiB bounds include the notice. See [wire policy](../../Assimalign.Cohesion.Database.Sql/docs/WIRE-PROTOCOL.md#negotiated-statement-diagnostics-1105).
+
+## Linear composition (#1145)
+
+The planner validates each source-ordered stage against its incoming scope. LET and FOR add value bindings; a RETURN/NEXT or WITH boundary retains only referenceable projected columns, including entity kinds, optionality, composite possibilities and Int64 COUNT metadata. MATCH anchors prefer carried entities. An INSERT introduces its label and relationship-type names for later stages without retaining negative token-cache entries. Unknown names empty only their MATCH stage.
+
+The executor materializes every stage eagerly in source order and acquires the writer lock before any stage when the statement contains a write. Each stage shares the 100,000-row bound; FOR fan-out uses the same AddBinding guard as path matching. Candidate expansion has its separate budget. Statements observe their own writes at both supported isolation levels. NEXT after a write without RETURN seeds one empty binding. The pipeline uses typed dispatch without reflection or runtime code generation.
