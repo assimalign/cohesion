@@ -2383,7 +2383,8 @@ under the cache lock. Persisted calls bind to their recorded signatures. CREATE 
 choices in the actual input, grouping and output-alias ordering scopes. Cached plans use scans
 for both stored-table access and joins, so index replacement cannot reuse a stale key path.
 LIMIT/OFFSET/FETCH retain bound expressions evaluated once at each relation execution's startup,
-following PostgreSQL `src/backend/executor/nodeLimit.c:348`. Runtime evaluation supplies the
+following PostgreSQL `src/backend/executor/nodeLimit.c:348`. Count descriptors are optional references,
+so absent windows do not enlarge the ordinary stored-query plan or its allocation budget. Runtime evaluation supplies the
 current statement's transaction instant and cancellation. Binding never folds application calls.
 Catalog opens parse all views; every body binding failure is deferred to a read of that view, so
 unrelated queries, metadata and DROP remain usable. The existing bind-time system-relation

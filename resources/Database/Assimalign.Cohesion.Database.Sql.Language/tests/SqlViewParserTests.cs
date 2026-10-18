@@ -22,7 +22,7 @@ public sealed class SqlViewParserTests
         var error = statement.Diagnostics.Where(item => item.Severity == DiagnosticSeverity.Error).ShouldHaveSingleItem();
         error.Code.ShouldBe("COHDBL001");
         error.Message!.ShouldContain(construct, Case.Sensitive);
-        error.Message.ShouldNotContain("VIEW", Case.Sensitive);
+        error.Message!.ShouldNotContain("VIEW", Case.Sensitive);
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - View grammar: typed complete statements")]

@@ -6,7 +6,7 @@ using Assimalign.Cohesion.Database.Language;
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 /// <summary>A bound row count, initialized once for each execution of a relation.</summary>
-internal readonly record struct SqlRowCount(SqlBoundExpression? Expression, string Clause, Location? Location, long Count = 0)
+internal sealed record SqlRowCount(SqlBoundExpression? Expression, string Clause, Location? Location, long Count = 0)
 {
     internal SqlRowCount Initialize(SqlExpressionEvaluator evaluator)
     {
