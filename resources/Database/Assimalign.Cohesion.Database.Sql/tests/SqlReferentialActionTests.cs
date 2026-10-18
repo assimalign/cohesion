@@ -215,6 +215,201 @@ public sealed class SqlReferentialActionTests
         (await Rows(session, "SELECT id FROM t")).ShouldBeEmpty();
     }
 
+    [Theory(DisplayName = "Cohesion Test [Sql] - SET actions: CASCADE reaches grandchildren and retains unaffected references")]
+    [InlineData("SET NULL")]
+    [InlineData("SET DEFAULT")]
+    public async Task Delete_CascadeThenSetAction_ShouldUpdateGrandchildren(string action)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("cascade-set", new());
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE p (id INT PRIMARY KEY)", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE c (id INT PRIMARY KEY, pid INT REFERENCES p(id) ON DELETE CASCADE)", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync($"CREATE TABLE g (id INT PRIMARY KEY, cid INT DEFAULT 20 REFERENCES c(id) ON DELETE {action})", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT INTO p VALUES (1), (2)", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT INTO c VALUES (10, 1), (20, 2)", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT INTO g VALUES (100, 10), (200, 20)", cancellationToken: CancellationToken.None);
+
+        // Act
+        await session.ExecuteAsync("DELETE FROM p WHERE id = 1", cancellationToken: CancellationToken.None);
+
+        // Assert
+        (await Rows(session, "SELECT id FROM c")).Single()[0].ShouldBe(20);
+        var rows = await Rows(session, "SELECT id, cid FROM g ORDER BY id");
+        rows[0].ShouldBe(new object?[] { 100, action == "SET NULL" ? null : 20 });
+        rows[1].ShouldBe(new object?[] { 200, 20 });
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - SET actions: fixed snapshots crosscheck the cascaded grandchild before mutation")]
+    [InlineData("SET NULL", IsolationLevel.Snapshot)]
+    [InlineData("SET DEFAULT", IsolationLevel.Snapshot)]
+    [InlineData("SET NULL", IsolationLevel.Serializable)]
+    [InlineData("SET DEFAULT", IsolationLevel.Serializable)]
+    public async Task Delete_NewerGrandchildVersion_ShouldFailFixedSnapshotCrosscheck(string action, IsolationLevel isolation)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("cascade-set-snapshot", new());
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var parent = await database.CreateSessionAsync(CancellationToken.None);
+        await using var writer = await database.CreateSessionAsync(CancellationToken.None);
+        await parent.ExecuteAsync("CREATE TABLE p (id INT PRIMARY KEY)", cancellationToken: CancellationToken.None);
+        await parent.ExecuteAsync("CREATE TABLE c (id INT PRIMARY KEY, pid INT REFERENCES p(id) ON DELETE CASCADE)", cancellationToken: CancellationToken.None);
+        await parent.ExecuteAsync($"CREATE TABLE g (id INT PRIMARY KEY, cid INT DEFAULT 20 REFERENCES c(id) ON DELETE {action})", cancellationToken: CancellationToken.None);
+        await parent.ExecuteAsync("INSERT INTO p VALUES (1), (2)", cancellationToken: CancellationToken.None);
+        await parent.ExecuteAsync("INSERT INTO c VALUES (10, 1), (20, 2)", cancellationToken: CancellationToken.None);
+        var transaction = await database.Coordinator.BeginAsync(isolation, CancellationToken.None);
+        await writer.ExecuteAsync("INSERT INTO g VALUES (100, 10)", cancellationToken: CancellationToken.None);
+
+        // Act / Assert
+        // The session refuses Serializable BEGIN; exercise its fixed-snapshot executor context directly.
+        var failure = await Should.ThrowAsync<TransactionAbortedException>(() =>
+            new SqlQueryExecutor(database.DataStorage, database.Catalog, database.IndexManager, database.Definitions)
+                .ExecuteAsync(SqlQueryRequest.FromSql("DELETE FROM p WHERE id = 1"), new SqlStatementContext(transaction, database.Coordinator), CancellationToken.None));
+        failure.Message.ShouldContain($"ON DELETE {action} reached", Case.Sensitive);
+        failure.Message.ShouldContain("first-updater-wins", Case.Sensitive);
+        await database.Coordinator.RollbackAsync(transaction, CancellationToken.None);
+        (await Rows(writer, "SELECT id FROM p ORDER BY id")).Select(row => row[0]).ShouldBe(new object?[] { 1, 2 });
+        (await Rows(writer, "SELECT id FROM c ORDER BY id")).Select(row => row[0]).ShouldBe(new object?[] { 10, 20 });
+        (await Rows(writer, "SELECT cid FROM g")).Single()[0].ShouldBe(10);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - SET actions: self references change only direct surviving children")]
+    [InlineData("SET NULL")]
+    [InlineData("SET DEFAULT")]
+    public async Task Delete_SelfReferencingSetAction_ShouldUpdateOnlyDirectChildren(string action)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("self-set", new());
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync($"CREATE TABLE t (id INT PRIMARY KEY, pid INT DEFAULT 0 REFERENCES t(id) ON DELETE {action})", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT INTO t VALUES (0, NULL), (1, NULL), (2, 1), (3, 2), (4, 3)", cancellationToken: CancellationToken.None);
+
+        // Act / Assert
+        await session.ExecuteAsync("DELETE FROM t WHERE id = 1", cancellationToken: CancellationToken.None);
+        var rows = await Rows(session, "SELECT id, pid FROM t ORDER BY id");
+        rows.Select(row => row[0]).ShouldBe(new object?[] { 0, 2, 3, 4 });
+        rows[1][1].ShouldBe(action == "SET NULL" ? null : 0);
+        rows[2][1].ShouldBe(2);
+        rows[3][1].ShouldBe(3);
+        await session.ExecuteAsync("DELETE FROM t WHERE id IN (2, 3)", cancellationToken: CancellationToken.None);
+        rows = await Rows(session, "SELECT id, pid FROM t ORDER BY id");
+        rows.Select(row => row[0]).ShouldBe(new object?[] { 0, 4 });
+        rows[1][1].ShouldBe(action == "SET NULL" ? null : 0);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sql] - SET DEFAULT: a self reference cannot default back to the deleted root")]
+    public async Task Delete_SelfDefaultToDeletedRoot_ShouldRejectAtomically()
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("self-deleted-default", new());
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE t (id INT PRIMARY KEY, pid INT DEFAULT 1 REFERENCES t(id) ON DELETE SET DEFAULT)", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT INTO t VALUES (1, NULL), (2, 1)", cancellationToken: CancellationToken.None);
+
+        // Act / Assert
+        await Should.ThrowAsync<SqlConstraintViolationException>(() => session.ExecuteAsync("DELETE FROM t WHERE id = 1", cancellationToken: CancellationToken.None).AsTask());
+        (await Rows(session, "SELECT id FROM t ORDER BY id")).Select(row => row[0]).ShouldBe(new object?[] { 1, 2 });
+        (await Rows(session, "SELECT pid FROM t WHERE id = 2")).Single()[0].ShouldBe(1);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - SET DEFAULT: absent defaults assign NULL or fail NOT NULL atomically")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Delete_NoColumnDefault_ShouldFollowNullability(bool required)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("absent-default", new());
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE p (id INT PRIMARY KEY)", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync($"CREATE TABLE c (pid INT {(required ? "NOT NULL" : "")} REFERENCES p(id) ON DELETE SET DEFAULT)", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT INTO p VALUES (1), (2)", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT INTO c VALUES (1), (2)", cancellationToken: CancellationToken.None);
+
+        // Act / Assert
+        if (required)
+        {
+            var failure = await Should.ThrowAsync<DatabaseException>(() => session.ExecuteAsync("DELETE FROM p", cancellationToken: CancellationToken.None).AsTask());
+            failure.Diagnostics.Single().Code.ShouldBe("COHSQLE024");
+            failure.Message.ShouldBe("Column 'pid' does not allow NULL and has no default.");
+            (await Rows(session, "SELECT id FROM p ORDER BY id")).Select(row => row[0]).ShouldBe(new object?[] { 1, 2 });
+            (await Rows(session, "SELECT pid FROM c ORDER BY pid")).Select(row => row[0]).ShouldBe(new object?[] { 1, 2 });
+        }
+        else
+        {
+            await session.ExecuteAsync("DELETE FROM p", cancellationToken: CancellationToken.None);
+            (await Rows(session, "SELECT id FROM p")).ShouldBeEmpty();
+            (await Rows(session, "SELECT pid FROM c")).Select(row => row[0]).ShouldBe(new object?[] { null, null });
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sql] - SET DEFAULT: 100,000 children with a second self reference validate in linear work")]
+    public async Task Delete_HundredThousandChildren_ShouldCompleteWithinTimeout()
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("linear-set-default", new());
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE p (id INT PRIMARY KEY)", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE c (id INT PRIMARY KEY, pid INT DEFAULT 0 REFERENCES p(id) ON DELETE SET DEFAULT, anchor INT REFERENCES c(id), FOREIGN KEY(pid) REFERENCES p(id))", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("CREATE INDEX ix_pid ON c(pid)", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT INTO p VALUES (0), (1)", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT INTO c VALUES (0, 0, NULL)", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE digit (id INT)", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT INTO digit VALUES (0), (1), (2), (3), (4), (5), (6), (7), (8), (9)", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT INTO c SELECT a.id + 10 * b.id + 100 * c.id + 1000 * d.id + 10000 * e.id + 1, 1, 0 FROM digit a CROSS JOIN digit b CROSS JOIN digit c CROSS JOIN digit d CROSS JOIN digit e", cancellationToken: TestTimeout.Token(120));
+
+        // Act: the suite hang bound is five minutes; this delete has a one-minute ceiling.
+        var timer = System.Diagnostics.Stopwatch.StartNew();
+        var result = await session.ExecuteAsync("DELETE FROM p WHERE id = 1", cancellationToken: TestTimeout.Token(60));
+        timer.Stop();
+
+        // Assert
+        result.AffectedCount.ShouldBe(1);
+        timer.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(60));
+        (await Rows(session, "SELECT COUNT(*) FROM c WHERE pid = 0")).Single()[0].ShouldBe(100_001L);
+        (await Rows(session, "SELECT COUNT(*) FROM c WHERE pid = 1")).Single()[0].ShouldBe(0L);
+        (await Rows(session, "SELECT COUNT(*) FROM c WHERE anchor = 0")).Single()[0].ShouldBe(100_000L);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - SET actions: cancellation during child validation preserves every row")]
+    [InlineData("SET NULL")]
+    [InlineData("SET DEFAULT")]
+    public async Task Delete_CanceledChildValidation_ShouldRemainAtomic(string action)
+    {
+        // Arrange: cancel deterministically from a CHECK after collection has completed.
+        using var cancellation = new CancellationTokenSource();
+        bool armed = false;
+        int calls = 0;
+        var builder = SqlDatabaseEngine.CreateBuilder("cancel-set-action");
+        builder.Functions.Add(SqlScalarFunction.Create("validate_child", (int _) =>
+        {
+            if (armed && ++calls == 128) { cancellation.Cancel(); }
+            return true;
+        }, SqlFunctionVolatility.Immutable));
+        await using var engine = await builder.BuildAsync(CancellationToken.None);
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE p (id INT PRIMARY KEY)", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync($"CREATE TABLE c (id INT PRIMARY KEY, pid INT DEFAULT 0 REFERENCES p(id) ON DELETE {action}, CHECK(validate_child(id)))", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT INTO p VALUES (0), (1)", cancellationToken: CancellationToken.None);
+        string values = string.Join(", ", Enumerable.Range(1, 1_000).Select(id => $"({id}, 1)"));
+        await session.ExecuteAsync("INSERT INTO c VALUES " + values, cancellationToken: CancellationToken.None);
+        armed = true;
+
+        // Act / Assert
+        await Should.ThrowAsync<OperationCanceledException>(() => session.ExecuteAsync("DELETE FROM p WHERE id = 1", cancellationToken: cancellation.Token).AsTask());
+        calls.ShouldBe(128);
+        armed = false;
+        (await Rows(session, "SELECT COUNT(*) FROM p")).Single()[0].ShouldBe(2L);
+        (await Rows(session, "SELECT COUNT(*) FROM c WHERE pid = 1")).Single()[0].ShouldBe(1_000L);
+        await session.ExecuteAsync("DELETE FROM p WHERE id = 1", cancellationToken: CancellationToken.None);
+        (await Rows(session, action == "SET NULL" ? "SELECT COUNT(*) FROM c WHERE pid IS NULL" : "SELECT COUNT(*) FROM c WHERE pid = 0")).Single()[0].ShouldBe(1_000L);
+    }
+
     private static async Task<List<object?[]>> Rows(SqlDatabaseSession session, string sql)
     {
         await using var result = (await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None)).ShouldBeAssignableTo<DatabaseResultSet>();

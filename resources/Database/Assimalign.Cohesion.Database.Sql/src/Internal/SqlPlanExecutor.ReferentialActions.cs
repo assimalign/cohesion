@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Transactions;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
@@ -18,7 +19,7 @@ internal sealed partial class SqlPlanExecutor
         SqlCatalogTable table, IReadOnlyList<string> columns, object?[] keys, SqlStatementContext statement,
         CancellationToken cancellationToken,
         Dictionary<(ulong ObjectId, ulong Location), SqlConstraintDelete>? deletions,
-        Dictionary<(ulong ObjectId, ulong Location), SqlConstraintUpdate>? updates, TransactionSnapshot? snapshot = null)
+        SqlConstraintUpdates? updates, TransactionSnapshot? snapshot = null)
     {
         foreach (var row in FindConstraintRows(table, columns, keys, statement, cancellationToken, snapshot))
         {
@@ -26,18 +27,52 @@ internal sealed partial class SqlPlanExecutor
             if (deletions?.ContainsKey(key) != true && updates?.ContainsKey(key) != true) { yield return row; }
         }
         if (updates is null) { yield break; }
-        foreach (var update in updates.Values)
+        foreach (var row in updates.Find(table, columns, keys, _catalog.DefaultCollation, cancellationToken))
         {
-            if (update.Table.ObjectId == table.ObjectId && columns.Select((column, index) =>
-                ValuesEqual(update.NewValues[FindColumnOrdinal(table, column)], keys[index],
-                    table.Columns[FindColumnOrdinal(table, column)].Collation ?? _catalog.DefaultCollation)).All(equal => equal))
-            {
-                yield return (update.Location, update.NewValues);
-            }
+            yield return row;
         }
     }
 
-    private async Task<Dictionary<(ulong ObjectId, ulong Location), SqlConstraintUpdate>> CollectReferentialUpdatesAsync(
+    // Built after all SET assignments are collected. Each table/key projection is indexed once,
+    // using the same numeric, binary and collation equality as constraint probes.
+    private sealed class SqlConstraintUpdates
+    {
+        private readonly Dictionary<(ulong ObjectId, ulong Location), SqlConstraintUpdate> _rows;
+        private readonly Dictionary<ulong, SqlConstraintUpdate[]> _tables;
+        private readonly Dictionary<(ulong ObjectId, string Columns), Dictionary<object?[], List<((PageId PageId, int SlotIndex) Location, object?[] Values)>>> _indexes = [];
+
+        internal SqlConstraintUpdates(Dictionary<(ulong ObjectId, ulong Location), SqlConstraintUpdate> rows)
+        {
+            _rows = rows;
+            _tables = rows.Values.GroupBy(row => row.Table.ObjectId).ToDictionary(group => group.Key, group => group.ToArray());
+        }
+
+        internal IEnumerable<SqlConstraintUpdate> Values => _rows.Values;
+        internal bool ContainsKey((ulong ObjectId, ulong Location) key) => _rows.ContainsKey(key);
+
+        internal IEnumerable<((PageId PageId, int SlotIndex) Location, object?[] Values)> Find(
+            SqlCatalogTable table, IReadOnlyList<string> columns, object?[] keys, Collation defaultCollation, CancellationToken cancellationToken)
+        {
+            if (!_tables.TryGetValue(table.ObjectId, out var rows)) { return []; }
+            var projection = (table.ObjectId, string.Join("\0", columns));
+            if (!_indexes.TryGetValue(projection, out var index))
+            {
+                int[] ordinals = columns.Select(column => FindColumnOrdinal(table, column)).ToArray();
+                index = new(new GroupKeyComparer(ordinals.Select(ordinal => table.Columns[ordinal].Collation ?? defaultCollation).ToArray()));
+                foreach (var row in rows)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    object?[] key = ordinals.Select(ordinal => row.NewValues[ordinal]).ToArray();
+                    if (!index.TryGetValue(key, out var matches)) { index.Add(key, matches = []); }
+                    matches.Add((row.Location, row.NewValues));
+                }
+                _indexes.Add(projection, index);
+            }
+            return index.TryGetValue(keys, out var found) ? found : [];
+        }
+    }
+
+    private async Task<SqlConstraintUpdates> CollectReferentialUpdatesAsync(
         Dictionary<(ulong ObjectId, ulong Location), SqlConstraintDelete> deletions,
         SqlStatementContext statement, CancellationToken cancellationToken)
     {
@@ -86,6 +121,7 @@ internal sealed partial class SqlPlanExecutor
             }
         }
 
+        var indexed = new SqlConstraintUpdates(updates);
         var references = new List<SqlParentReference>();
         var released = new List<SqlParentReference>();
         foreach (var group in updates.Values.GroupBy(update => update.Table))
@@ -94,11 +130,15 @@ internal sealed partial class SqlPlanExecutor
             var bound = _definitions.Get(table, cancellationToken);
             foreach (var update in group)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 CheckDomains(bound, update.NewValues, ExecutionEvaluator(null, cancellationToken), update.Assigned.ToArray());
-                ValidateParentUpdate(table, update.OldValues, update.NewValues, statement, cancellationToken, deletions, updates);
+                ValidateParentUpdate(table, update.OldValues, update.NewValues, statement, cancellationToken, deletions, indexed);
             }
+            // PostgreSQL ri_triggers.c:2800-2813 uses current parent visibility for ReadCommitted
+            // RI writes while transaction snapshots retain their crosscheck.
             ValidateRows(table, group.Select(update => update.NewValues).ToList(), statement, cancellationToken,
-                references: references, deletions: deletions, updates: updates);
+                current: statement.Transaction.IsolationLevel == IsolationLevel.ReadCommitted,
+                references: references, deletions: deletions, updates: indexed);
             CollectReleasedReferences(table, group.Select(update => update.OldValues).ToList(), released, statement, cancellationToken);
         }
         await AcquireParentRowLocksAsync(references, statement, cancellationToken).ConfigureAwait(false);
@@ -110,11 +150,12 @@ internal sealed partial class SqlPlanExecutor
             var hashes = new List<ulong>();
             foreach (var update in group)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 CollectUniqueKeyHashes(indexes, group.Key, update.OldValues, hashes);
                 CollectUniqueKeyHashes(indexes, group.Key, update.NewValues, hashes);
             }
             await AcquireUniqueKeyLocksAsync(statement, group.Key.ObjectId, hashes, cancellationToken).ConfigureAwait(false);
         }
-        return updates;
+        return indexed;
     }
 }

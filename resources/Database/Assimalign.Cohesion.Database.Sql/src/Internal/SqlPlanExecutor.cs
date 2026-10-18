@@ -550,6 +550,7 @@ internal sealed partial class SqlPlanExecutor
             // tombstones, versions and index changes one rollback unit.
             foreach (var update in updates.Values)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 EnsureLatestVersion(update.Table, update.Location.PageId, update.Location.SlotIndex, statement.Transaction.Sequence);
             }
             foreach (var deletion in deletions.Values)
@@ -561,12 +562,14 @@ internal sealed partial class SqlPlanExecutor
             }
             foreach (var update in updates.Values)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 TombstoneVersion(statement, bracket, update.Location.PageId, update.Location.SlotIndex);
                 await TombstoneIndexEntriesAsync(statement, GetLiveIndexes(update.Table), update.Table, update.OldValues,
                     SqlRecordLocation.Pack(update.Location.PageId, update.Location.SlotIndex), cancellationToken).ConfigureAwait(false);
             }
             foreach (var update in updates.Values)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var location = _storage.InsertRow(bracket, update.Table.ObjectId,
                     SqlRowCodec.Encode(update.Table, update.NewValues, statement.Transaction.Sequence));
                 statement.Coordinator.VersionStore.RecordCreated(statement.Transaction.Sequence, location.PageId, location.SlotIndex);

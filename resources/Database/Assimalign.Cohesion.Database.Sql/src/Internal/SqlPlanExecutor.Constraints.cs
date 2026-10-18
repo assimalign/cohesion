@@ -454,7 +454,7 @@ internal sealed partial class SqlPlanExecutor
     private void ValidateRows(SqlCatalogTable table, IReadOnlyList<object?[]> rows, SqlStatementContext statement,
         CancellationToken cancellationToken, bool current = false, List<SqlParentReference>? references = null,
         Dictionary<(ulong ObjectId, ulong Location), SqlConstraintDelete>? deletions = null,
-        Dictionary<(ulong ObjectId, ulong Location), SqlConstraintUpdate>? updates = null)
+        SqlConstraintUpdates? updates = null)
     {
         // The table version's CHECK predicates were parsed and bound once, when the catalog
         // loaded or the DDL that produced this version ran; a write only evaluates the bound
@@ -468,6 +468,7 @@ internal sealed partial class SqlPlanExecutor
                 var check = bound.GetCheck(constraint);
                 foreach (var row in rows)
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
                     // SQL UNKNOWN satisfies CHECK; only FALSE rejects a row.
                     object? result = evaluator.Evaluate(check.Bound, row);
                     if (result is not null and not bool)
@@ -493,18 +494,27 @@ internal sealed partial class SqlPlanExecutor
                     throw new DatabaseException($"Referenced table '{constraint.ReferencedSchema}.{constraint.ReferencedTable}' does not exist.");
                 }
             }
+            HashSet<object?[]>? selfKeys = null;
+            if (parent.ObjectId == table.ObjectId)
+            {
+                int[] ordinals = constraint.ReferencedColumns!.Select(column => FindColumnOrdinal(table, column)).ToArray();
+                selfKeys = new(new GroupKeyComparer(ordinals.Select(ordinal => table.Columns[ordinal].Collation ?? _catalog.DefaultCollation).ToArray()));
+                foreach (var candidate in rows)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    selfKeys.Add(ordinals.Select(ordinal => candidate[ordinal]).ToArray());
+                }
+            }
             foreach (var row in rows)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 object?[] keys = constraint.Columns.Select(column => row[FindColumnOrdinal(table, column)]).ToArray();
                 if (keys.Any(value => value is null))
                 {
                     continue; // MATCH SIMPLE
                 }
 
-                bool selfMatch = parent.ObjectId == table.ObjectId && rows.Any(candidate =>
-                    constraint.ReferencedColumns!.Select((column, i) => ValuesEqual(candidate[FindColumnOrdinal(table, column)], keys[i],
-                        table.Columns[FindColumnOrdinal(table, column)].Collation ?? _catalog.DefaultCollation)).All(equal => equal));
-                if (selfMatch)
+                if (selfKeys?.Contains(keys) == true)
                 {
                     continue;
                 }
@@ -534,7 +544,7 @@ internal sealed partial class SqlPlanExecutor
     private void ValidateParentUpdate(SqlCatalogTable table, object?[] oldValues, object?[] newValues,
         SqlStatementContext statement, CancellationToken cancellationToken,
         Dictionary<(ulong ObjectId, ulong Location), SqlConstraintDelete>? deletions = null,
-        Dictionary<(ulong ObjectId, ulong Location), SqlConstraintUpdate>? updates = null)
+        SqlConstraintUpdates? updates = null)
     {
         foreach (var (child, constraint) in IncomingReferences(table))
         {
@@ -836,7 +846,7 @@ internal sealed partial class SqlPlanExecutor
     }
 
     private void ValidateRestrictedDeletes(Dictionary<(ulong ObjectId, ulong Location), SqlConstraintDelete> deletions,
-        Dictionary<(ulong ObjectId, ulong Location), SqlConstraintUpdate> updates, SqlStatementContext statement, CancellationToken cancellationToken)
+        SqlConstraintUpdates updates, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         // Validate against the complete deletion set so physical row order and
         // constraint declaration order cannot change the outcome of one statement.

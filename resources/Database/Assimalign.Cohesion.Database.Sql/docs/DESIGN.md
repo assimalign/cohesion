@@ -3781,7 +3781,13 @@ depth limit. Once its deletion set is complete, SET actions collect and lock sur
 child replacements through the same latest-state reads and snapshot crosscheck. A version
 newer than a fixed snapshot fails first-updater-wins with the actual SET action in its diagnostic.
 A row in the deletion set is never updated. Constraint checks see final replacements and
-exclude deleted versions, including when SET DEFAULT resolves a new parent. Re-keying
+exclude deleted versions, including when SET DEFAULT resolves a new parent. ReadCommitted
+referential updates validate parents through current visibility after waiting for a writer
+(PostgreSQL src/backend/utils/adt/ri_triggers.c:2800-2813); Snapshot and Serializable keep
+the fixed-snapshot crosscheck. Pending replacements are grouped once by table ObjectId and
+indexed lazily by constraint key using SQL equality and collation. Self-reference candidate
+keys are hashed once per constraint, so validation is linear in the candidate rows.
+Collection, validation and physical replacement loops observe statement cancellation. Re-keying
 a referenced child retains UPDATE's incoming-reference restriction. All old index entries
 and row versions are tombstoned before replacement versions and indexes are inserted in
 the one statement bracket; a CHECK, NOT NULL, FK or UNIQUE failure undoes the entire delete.
