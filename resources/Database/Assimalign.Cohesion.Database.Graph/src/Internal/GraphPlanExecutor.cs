@@ -199,15 +199,25 @@ internal static class GraphPlanExecutor
         {
             token.ThrowIfCancellationRequested();
             operation.EnsureActive();
-            var candidates = new List<Dictionary<string, object?>>();
+            var candidates = new List<MatchCandidate>();
             if (!clause.MatchesNothing)
             {
-                candidates.Add(binding);
+                candidates.Add(new MatchCandidate(binding, null));
                 foreach (var path in clause.Paths)
                 {
-                    var expanded = new List<Dictionary<string, object?>>();
+                    var expanded = new List<MatchCandidate>();
                     foreach (var candidate in candidates)
-                    { await MatchAsync(database, operation, path, candidate, expanded, budget, parameters, token).ConfigureAwait(false); }
+                    {
+                        await MatchCoreAsync(database, operation, path, candidate.Bindings, (row, nodes, relationships) =>
+                        {
+                            var deferred = candidate.Deferred;
+                            for (int i = 0; i < nodes.Length; i++)
+                            { deferred = DeferProperties(path.Pattern.Nodes[i].Properties, nodes[i].Properties, row, deferred); }
+                            for (int i = 0; i < relationships.Length; i++)
+                            { deferred = DeferProperties(path.Pattern.Relationships[i].Properties, relationships[i].Properties, row, deferred); }
+                            AddBinding(expanded, new MatchCandidate(row, deferred));
+                        }, budget, parameters, token, deferUnbound: true).ConfigureAwait(false);
+                    }
                     candidates = expanded;
                 }
             }
@@ -215,9 +225,12 @@ internal static class GraphPlanExecutor
             foreach (var candidate in candidates)
             {
                 token.ThrowIfCancellationRequested();
+                // Cross-part maps include anonymous elements, whose stored values travel
+                // with the row until the complete clause can evaluate their predicates.
+                if (!DeferredPropertiesMatch(candidate, parameters)) { continue; }
                 if (clause.Predicate is not null && GraphExpressionEvaluator.Boolean(
-                    GraphExpressionEvaluator.Evaluate(clause.Predicate, candidate, parameters), clause.Predicate) is not true) { continue; }
-                AddBinding(matched, candidate);
+                    GraphExpressionEvaluator.Evaluate(clause.Predicate, candidate.Bindings, parameters), clause.Predicate) is not true) { continue; }
+                AddBinding(matched, candidate.Bindings);
                 found = true;
             }
             if (!found && clause.Optional)
@@ -228,6 +241,31 @@ internal static class GraphPlanExecutor
             }
         }
         return matched;
+    }
+
+    private sealed record MatchCandidate(Dictionary<string, object?> Bindings, DeferredProperty? Deferred);
+    private sealed record DeferredProperty(GqlExpression Expression, object? Value, bool Exists, DeferredProperty? Previous);
+
+    private static DeferredProperty? DeferProperties(IReadOnlyDictionary<string, GqlExpression> expected,
+        IReadOnlyDictionary<string, object?> actual, IReadOnlyDictionary<string, object?> bindings, DeferredProperty? deferred)
+    {
+        foreach (var property in expected)
+        {
+            if (!GraphValueExpressions.ReferencesUnbound(property.Value, bindings)) { continue; }
+            bool exists = actual.TryGetValue(property.Key, out var value);
+            deferred = new DeferredProperty(property.Value, value, exists, deferred);
+        }
+        return deferred;
+    }
+
+    private static bool DeferredPropertiesMatch(MatchCandidate candidate, IReadOnlyDictionary<string, object?>? parameters)
+    {
+        for (var property = candidate.Deferred; property is not null; property = property.Previous)
+        {
+            if (!property.Exists || !GraphExpressionEvaluator.Equal(
+                GraphExpressionEvaluator.PropertyScalar(property.Expression, candidate.Bindings, parameters), property.Value)) { return false; }
+        }
+        return true;
     }
 
     private static List<Dictionary<string, object?>> ProjectBindings(GraphPlan plan, GqlReturnStage stage,
@@ -271,8 +309,13 @@ internal static class GraphPlanExecutor
         return result;
     }
 
-    internal static async ValueTask MatchAsync(GraphDatabase database, GraphOperation operation, GraphPathPlan plan,
+    internal static ValueTask MatchAsync(GraphDatabase database, GraphOperation operation, GraphPathPlan plan,
         Dictionary<string, object?> input, List<Dictionary<string, object?>> output, ExpansionBudget budget, IReadOnlyDictionary<string, object?>? parameters, CancellationToken token)
+        => MatchCoreAsync(database, operation, plan, input, (bindings, _, _) => AddBinding(output, bindings), budget, parameters, token);
+
+    private static async ValueTask MatchCoreAsync(GraphDatabase database, GraphOperation operation, GraphPathPlan plan,
+        Dictionary<string, object?> input, Action<Dictionary<string, object?>, GraphNode[], GraphRelationship[]> acceptMatch,
+        ExpansionBudget budget, IReadOnlyDictionary<string, object?>? parameters, CancellationToken token, bool deferUnbound = false)
     {
         token.ThrowIfCancellationRequested();
         operation.EnsureActive();
@@ -331,10 +374,10 @@ internal static class GraphPlanExecutor
                 if (path.Variable is { } pathVariable)
                 { bindings.Add(pathVariable, new GraphPath(Array.AsReadOnly(positions), Array.AsReadOnly(relationships))); }
                 for (int i = 0; i < positions.Length; i++)
-                { if (!PropertiesMatch(path.Nodes[i].Properties, positions[i].Properties, bindings, parameters)) { return; } }
+                { if (!PropertiesMatch(path.Nodes[i].Properties, positions[i].Properties, bindings, parameters, deferUnbound)) { return; } }
                 for (int i = 0; i < relationships.Length; i++)
-                { if (!PropertiesMatch(path.Relationships[i].Properties, relationships[i].Properties, bindings, parameters)) { return; } }
-                AddBinding(output, bindings);
+                { if (!PropertiesMatch(path.Relationships[i].Properties, relationships[i].Properties, bindings, parameters, deferUnbound)) { return; } }
+                acceptMatch(bindings, positions, relationships);
                 return;
             }
             var current = steps[step];
@@ -368,7 +411,7 @@ internal static class GraphPlanExecutor
         }
     }
 
-    private static void AddBinding(List<Dictionary<string, object?>> output, Dictionary<string, object?> binding)
+    private static void AddBinding<T>(List<T> output, T binding)
     {
         if (output.Count >= MaximumMatches) { throw new GraphPlanningException("COHDBG004", ErrorMessages.MatchLimitExceeded); }
         output.Add(binding);

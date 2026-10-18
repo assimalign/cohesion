@@ -182,8 +182,11 @@ internal sealed partial class GraphPlanner
                 optional = clause.Optional;
                 int firstDeclaration = declarations.Count;
                 bool clauseMatchesNothing = false;
+                // A MATCH declares every pattern part before checking any properties
+                // (Neo4j SemanticPatternCheck.scala:101-103).
+                foreach (var path in clause.Paths) { Declare(path, creating: false); }
                 foreach (var path in clause.Paths)
-                { if (!Validate(path, creating: false)) { clauseMatchesNothing = true; } }
+                { if (!Validate(path, creating: false, declared: true)) { clauseMatchesNothing = true; } }
                 ValidateExpression(clause.Predicate);
                 clauseMatchesNothing |= RequiresUnknownName(clause.Predicate);
                 var anchors = new AnchorSources(_database, _snapshot, clause.Predicate, _parameters);
@@ -460,15 +463,13 @@ internal sealed partial class GraphPlanner
             _ => throw new GraphPlanningException("COHDBG001", ErrorMessages.ProjectionUnsupported, expression.Location),
         };
 
-        // Returns false when a MATCH pattern requires a name the database does not have.
-        bool Validate(GqlPathPattern path, bool creating, IReadOnlySet<string>? propertyScope = null)
+        void Declare(GqlPathPattern path, bool creating)
         {
             token.ThrowIfCancellationRequested();
             if (path?.Nodes is null || path.Relationships is null || path.Nodes.Count == 0 ||
                 path.Relationships.Count != path.Nodes.Count - 1 || path.Relationships.Count > 64 ||
                 path.Nodes.Any(node => node is null) || path.Relationships.Any(relationship => relationship is null))
             { throw new GraphPlanningException("COHDBG001", "A finite path requires one more node than relationships and at most 64 hops.", query.Location); }
-            bool satisfiable = true;
             if (path.Variable is { } variable)
             {
                 if (creating || !variables.TryAdd(variable, BindingKind.Path))
@@ -480,13 +481,19 @@ internal sealed partial class GraphPlanner
             {
                 var node = path.Nodes[i];
                 Bind(node.Variable, BindingKind.Node);
-                satisfiable &= ValidateNodeLabels(node, creating, tokens);
                 if (i == path.Relationships.Count) { continue; }
                 var relationship = path.Relationships[i];
                 Bind(relationship.Variable, BindingKind.Relationship);
-                satisfiable &= ValidateRelationship(relationship, creating, tokens);
             }
-            // MATCH properties are predicates on the complete bound pattern, including
+        }
+        // Returns false when a MATCH pattern requires a name the database does not have.
+        bool Validate(GqlPathPattern path, bool creating, IReadOnlySet<string>? propertyScope = null, bool declared = false)
+        {
+            if (!declared) { Declare(path, creating); }
+            bool satisfiable = true;
+            foreach (var node in path.Nodes) { satisfiable &= ValidateNodeLabels(node, creating, tokens); }
+            foreach (var relationship in path.Relationships) { satisfiable &= ValidateRelationship(relationship, creating, tokens); }
+            // MATCH properties are predicates on the complete bound clause, including
             // forward references (Neo4j PropertyPredicateNormalizer.scala:35-41).
             foreach (var node in path.Nodes) { ValidateStageProperties(node.Properties, creating, propertyScope); }
             foreach (var relationship in path.Relationships) { ValidateStageProperties(relationship.Properties, creating, propertyScope); }

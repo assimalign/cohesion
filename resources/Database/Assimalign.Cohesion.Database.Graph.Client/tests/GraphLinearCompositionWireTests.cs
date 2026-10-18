@@ -104,6 +104,36 @@ public sealed class GraphLinearCompositionWireTests
         (await connection.QueryAsync("RETURN 7", cancellationToken: harness.Token)).ShouldHaveSingleItem()[0].ShouldBe(7L);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Graph.Client] - MATCH: cross-part map predicates complete on the exact wire session")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task QueryAsync_CrossPartProperties_ShouldEvaluateCompleteClauseAsync(bool tcp)
+    {
+        // Arrange
+        await using var harness = await GraphClientTestHarness.StartAsync(tcp);
+        await using var connection = await harness.Client.ConnectAsync(harness.Token);
+        await connection.ExecuteAsync("INSERT (:P {k:1})-[:T {w:1}]->(:P {k:1}), (:P {k:2})-[:T {w:2}]->(:P {k:3})", cancellationToken: harness.Token);
+        var sessionId = harness.Server.Sessions.ShouldHaveSingleItem().Id;
+        var cases = new (string Source, long Count)[] {
+            ("MATCH (a:P {k:b.k}),(b:P)", 6),
+            ("MATCH (b:P),(a:P {k:b.k})", 6),
+            ("MATCH (a:P),(b:P) WHERE a.k=b.k", 6),
+            ("MATCH (:P {k:b.k + 0}),(b:P)", 6),
+            ("MATCH ()-[:T {w:b.k}]->(),(b:P)", 3),
+            ("MATCH (b:P) WITH b MATCH (:P {k:c.k})->(b),(c:P)", 3),
+            ("OPTIONAL MATCH (:P {k:b.k}),(b:P {k:99})", 1),
+        };
+        // Act / Assert
+        foreach (var item in cases)
+        {
+            string source = item.Source + " RETURN count(*) AS c";
+            (await connection.QueryAsync(source, cancellationToken: harness.Token)).ShouldHaveSingleItem().ToArray().ShouldBe(new object?[] { item.Count });
+            (await connection.QueryAsync("EXPLAIN " + source, cancellationToken: harness.Token)).ShouldNotBeEmpty();
+        }
+        (await connection.QueryAsync("RETURN 7", cancellationToken: harness.Token)).ShouldHaveSingleItem()[0].ShouldBe(7L);
+        harness.Server.Sessions.ShouldHaveSingleItem().Id.ShouldBe(sessionId);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Graph.Client] - Composition: carried entities retain ExecutePaths gating and optionality")]
     [InlineData(false)]
     [InlineData(true)]

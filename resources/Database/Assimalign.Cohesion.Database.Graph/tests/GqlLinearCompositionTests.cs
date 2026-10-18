@@ -330,6 +330,51 @@ public sealed class GqlLinearCompositionTests
         (await Rows(session, "RETURN 7")).Rows.ShouldHaveSingleItem()[0].ShouldBe(7L);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Graph] - MATCH: every pattern part declares before clause-wide map predicates execute")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Execute_CrossPartProperties_ShouldAgreeWithScansAndWhereAsync(bool indexed)
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create("linear", new());
+        var database = await engine.CreateDatabaseAsync("graph", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync("INSERT (:P {k:1,name:'Alice'})-[:T {w:1}]->(:P {k:1,name:'Bob'}), (:P {k:2,name:'Cara'})-[:T {w:2}]->(:P {k:3,name:'Dan'})", cancellationToken: CancellationToken.None);
+        if (indexed) { await GraphSchema.Open(database, session).CreateIndexAsync("P", "by_k", "k", CancellationToken.None); }
+        var cases = new (string Source, long Count)[] {
+            ("MATCH (a:P {k:b.k}),(b:P)", 6),
+            ("MATCH (b:P),(a:P {k:b.k})", 6),
+            ("MATCH (a:P),(b:P) WHERE a.k=b.k", 6),
+            ("MATCH (:P {k:b.k + 0}),(b:P)", 6),
+            ("MATCH (:P {k:b.k,name:'Alice'}),(b:P)", 2),
+            ("MATCH (a:P {k:b.k}),(b:P {k:1})", 4),
+            ("LET k=1 MATCH (:P {k:b.k}),(b:P {k:k})", 4),
+            ("MATCH (a:P {k:b.k}),(b:P {k:$k})", 4),
+            ("MATCH (:P {k:c.k})->(b:P),(c:P)", 3),
+            ("MATCH (b:P) WITH b MATCH (:P {k:c.k})->(b),(c:P)", 3),
+            ("MATCH ()-[r:T {w:b.k}]->(),(b:P)", 3),
+            ("MATCH ()-[:T {w:b.k}]->(),(b:P)", 3),
+            ("MATCH (a:P {k:c.k}),(b:P {k:a.k}),(c:P {k:b.k})", 10),
+            ("MATCH (a:P {k:99}) OPTIONAL MATCH (:P {k:b.k}),(b:P)", 0),
+            ("OPTIONAL MATCH (:P {k:b.k}),(b:P {k:99})", 1),
+        };
+        // Act / Assert
+        foreach (var item in cases)
+        {
+            string source = item.Source + " RETURN count(*) AS c";
+            var parameters = new Dictionary<string, object?> { ["k"] = 1L };
+            (await Rows(session, source, parameters)).Rows.ShouldHaveSingleItem().ShouldBe(new object?[] { item.Count });
+            (await Rows(session, "EXPLAIN " + source, parameters)).Rows.ShouldNotBeEmpty();
+        }
+        foreach (string prefix in new[] { "", "EXPLAIN " })
+        {
+            var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(
+                prefix + "MATCH (a:P {k:b.k}) MATCH (b:P) RETURN a.name", cancellationToken: CancellationToken.None));
+            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG001");
+        }
+        (await Rows(session, "RETURN 7")).Rows.ShouldHaveSingleItem()[0].ShouldBe(7L);
+    }
+
     private static async Task<(string[] Names, DatabaseType[] Types, List<object?[]> Rows)> Rows(GraphDatabaseSession session,
         string source, IReadOnlyDictionary<string, object?>? parameters = null)
     {
