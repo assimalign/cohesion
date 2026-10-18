@@ -42,6 +42,34 @@ public sealed class GqlAggregateParserTests
         statement.GqlExpression.OrderBy.ShouldHaveSingleItem().Expression.ShouldBeOfType<GqlVariableExpression>().Variable.ShouldBe("n");
     }
 
+    [Fact(DisplayName = "Cohesion Test [GQL] - Aggregates: ISO empty grouping set is an explicit empty key list")]
+    public void Parse_EmptyGroupingSet_ShouldPreserveEmptyKeyList()
+    {
+        // Arrange / Act
+        var statement = (GqlQueryStatement)new GqlQueryParser().Parse("MATCH (a) RETURN count(*) GROUP BY () ORDER BY count(*)");
+        // Assert
+        statement.Diagnostics.ShouldBeEmpty();
+        statement.GqlExpression.GroupBy.ShouldNotBeNull().ShouldBeEmpty();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [GQL] - Aggregates: function-named comprehension variables retain the capability diagnostic")]
+    [InlineData("count")]
+    [InlineData("sum")]
+    [InlineData("avg")]
+    [InlineData("min")]
+    [InlineData("max")]
+    [InlineData("collect_list")]
+    [InlineData("collect")]
+    public void Parse_FunctionNamedComprehension_ShouldReportCapabilityDiagnostic(string name)
+    {
+        // Arrange / Act
+        var statement = new GqlQueryParser().Parse($"RETURN [{name} IN [1,2] | {name}]");
+        // Assert
+        var error = statement.Diagnostics.ShouldHaveSingleItem();
+        error.Code.ShouldBe("COHDBL001");
+        error.Message.ShouldNotBeNull().ShouldContain("LIST COMPREHENSION", Case.Sensitive);
+    }
+
     [Theory(DisplayName = "Cohesion Test [GQL] - Aggregates: function names remain legal variables and property owners")]
     [InlineData("MATCH (count:Person) WHERE count.age = 42 RETURN count.name")]
     [InlineData("MATCH count = (sum)-[avg:max]->(collect) WHERE sum:Person RETURN count, avg, collect")]

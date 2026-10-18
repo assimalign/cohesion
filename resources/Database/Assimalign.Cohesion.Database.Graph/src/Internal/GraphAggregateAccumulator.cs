@@ -29,6 +29,7 @@ internal sealed class GraphAggregateAccumulator
     private object? _orderedExtreme;
     private long _listBytes = 5;
     private int _listValues = 1;
+    private int _sumScale;
 
     internal GraphAggregateAccumulator(GqlAggregateExpression expression)
     {
@@ -81,10 +82,11 @@ internal sealed class GraphAggregateAccumulator
             if (_decimal || !average && _unsigned)
             {
                 if (_outsideDecimal) { throw new OverflowException(ErrorMessages.ArithmeticFailure); }
-                return DecimalValue(_exactSum + _floatingDecimalSum, average ? _count : 1);
+                return average ? DecimalValue(_exactSum + _floatingDecimalSum, _count)
+                    : ExactDecimalValue(_exactSum + _floatingDecimalSum, _sumScale);
             }
             if (average) { return Finite(_average); }
-            if (_floating) { return Finite((double)_exactSum / (double)_scale + _floatingSum); }
+            if (_floating) { return Finite((double)(_exactSum / _scale) + _floatingSum); }
             return checked((long)(_exactSum / _scale));
         }
         catch (ArithmeticException error)
@@ -94,7 +96,8 @@ internal sealed class GraphAggregateAccumulator
     private void AddNumber(object value)
     {
         if (!GraphValueComparer.IsNumber(value))
-        { throw new GraphPlanningException("COHDBG013", ErrorMessages.NumericRequired, _expression.Location); }
+        { throw new GraphPlanningException("COHDBG013", string.Format(CultureInfo.CurrentCulture,
+            ErrorMessages.AggregateNumericRequired, _expression.Function.ToString().ToUpperInvariant()), _expression.Location); }
         double number = Convert.ToDouble(value, CultureInfo.InvariantCulture);
         // Neo4j AvgFunction.scala:69-70 uses incrementalAverage. Weighted terms avoid
         // overflowing the difference for opposite finite Double extremes.
@@ -105,8 +108,10 @@ internal sealed class GraphAggregateAccumulator
         {
             _floating = true;
             _floatingSum += number;
-            try { _floatingDecimalSum += Scaled(Convert.ToDecimal(value, CultureInfo.InvariantCulture)); }
-            catch (OverflowException) { _outsideDecimal = true; }
+            // The Double boundary rounds Decimal.MaxValue up to 2^96. Check it before
+            // conversion so large floating-only aggregates never throw per input row.
+            if (number >= (double)decimal.MaxValue || number <= (double)decimal.MinValue) { _outsideDecimal = true; }
+            else { _floatingDecimalSum += Scaled(Convert.ToDecimal(value, CultureInfo.InvariantCulture)); }
         }
         else
         {
@@ -116,13 +121,25 @@ internal sealed class GraphAggregateAccumulator
         }
     }
 
-    private static BigInteger Scaled(decimal value)
+    private BigInteger Scaled(decimal value)
     {
         Span<int> bits = stackalloc int[4];
         decimal.GetBits(value, bits);
         BigInteger coefficient = (BigInteger)(uint)bits[0] | (BigInteger)(uint)bits[1] << 32 | (BigInteger)(uint)bits[2] << 64;
         if (bits[3] < 0) { coefficient = -coefficient; }
-        return coefficient * BigInteger.Pow(10, 28 - ((bits[3] >> 16) & 0xff));
+        int scale = (bits[3] >> 16) & 0xff;
+        _sumScale = Math.Max(_sumScale, scale);
+        return coefficient * BigInteger.Pow(10, 28 - scale);
+    }
+
+    private static decimal ExactDecimalValue(BigInteger numerator, int scale)
+    {
+        BigInteger coefficient = numerator / BigInteger.Pow(10, 28 - scale);
+        bool negative = coefficient.Sign < 0;
+        coefficient = BigInteger.Abs(coefficient);
+        if (coefficient > _decimalMax) { throw new OverflowException(ErrorMessages.ArithmeticFailure); }
+        return new decimal((int)(uint)(coefficient & uint.MaxValue), (int)(uint)((coefficient >> 32) & uint.MaxValue),
+            (int)(uint)((coefficient >> 64) & uint.MaxValue), negative, (byte)scale);
     }
 
     // Keep the exact sum until final promotion, then round once to Decimal's available

@@ -8,7 +8,8 @@ namespace Assimalign.Cohesion.Database.Graph.Internal;
 
 internal static class GraphGrouping
 {
-    internal static GraphGroupingPlan? Plan(GqlQueryExpression query, IReadOnlyList<GraphProjectionPlan> projections, CancellationToken token)
+    internal static GraphGroupingPlan? Plan(GqlQueryExpression query, IReadOnlyList<GraphProjectionPlan> projections, CancellationToken token,
+        Action<GqlExpression>? validateKey = null)
     {
         var shape = new GraphExpressionShape(token);
         var aggregates = new HashSet<GqlExpression>(shape);
@@ -16,6 +17,7 @@ internal static class GraphGrouping
         var aggregateList = new List<GqlAggregateExpression>();
         var keyList = new List<GqlExpression>();
         var candidates = new List<GqlExpression>();
+        var groupingNames = new Dictionary<string, GqlExpression?>(StringComparer.Ordinal);
         foreach (var projection in projections)
         {
             bool aggregated = false;
@@ -34,13 +36,30 @@ internal static class GraphGrouping
                 foreach (var child in GraphValueExpressions.Children(item.Expression)) { pending.Push((child, inside)); }
             }
             if (!aggregated) { candidates.Add(projection.Expression); }
+            groupingNames.Add(projection.Name, aggregated ? null : projection.Expression);
         }
         if (query.GroupBy is null && aggregateList.Count == 0) { return null; }
         foreach (var candidate in candidates)
         { token.ThrowIfCancellationRequested(); if (keys.Add(candidate)) { keyList.Add(candidate); } }
         if (projections.Count == 0) { throw new GraphPlanningException("COHDBG001", ErrorMessages.GroupByMismatch, query.Location); }
-        if (query.GroupBy is not null && (query.GroupBy.Count != keys.Count || !keys.SetEquals(query.GroupBy)))
-        { throw new GraphPlanningException("COHDBG001", ErrorMessages.GroupByMismatch, query.Location); }
+        if (query.GroupBy is not null)
+        {
+            var explicitKeys = new List<GqlExpression>();
+            foreach (var key in query.GroupBy)
+            {
+                token.ThrowIfCancellationRequested();
+                if (key is null) { throw new GraphPlanningException("COHDBG001", ErrorMessages.GroupByMismatch, query.Location); }
+                GqlExpression resolved = key;
+                // Neo4j AggregationChecker.scala:117-144 exempts non-aggregate grouping
+                // aliases and diagnoses an aggregate alias. Expressions retain input scope.
+                if (key is GqlVariableExpression name && groupingNames.TryGetValue(name.Variable, out var item))
+                { resolved = item ?? throw new GraphPlanningException("COHDBG001", ErrorMessages.AggregatePlacement, key.Location); }
+                validateKey?.Invoke(resolved);
+                explicitKeys.Add(resolved);
+            }
+            if (explicitKeys.Count != keys.Count || !keys.SetEquals(explicitKeys))
+            { throw new GraphPlanningException("COHDBG001", ErrorMessages.GroupByMismatch, query.Location); }
+        }
         var scope = new GraphGroupingScope(keyList, aggregateList, shape, token);
         var plan = new GraphGroupingPlan(keyList.AsReadOnly(), aggregateList.AsReadOnly(), scope);
         foreach (var projection in projections) { scope.Validate(projection.Expression); }

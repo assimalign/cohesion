@@ -91,6 +91,7 @@ public sealed class GraphAggregateTests
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await session.ExecuteAsync(seed, cancellationToken: CancellationToken.None);
         await session.ExecuteAsync("MATCH (a:Person {name:'Alice'}), (b:Person {name:'Isolated'}) INSERT (a)-[:KNOWS]->(b)", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("MATCH (a:Person {name:'Bob'}), (b:Person {name:'Isolated'}) INSERT (a)-[:KNOWS]->(b)", cancellationToken: CancellationToken.None);
         const string prefix = "MATCH (a:Person)-[:KNOWS]->(b) RETURN a.name, count(*) AS n";
         // Act
         var implicitRows = await Rows(session, prefix + " ORDER BY n DESC LIMIT 1");
@@ -98,14 +99,62 @@ public sealed class GraphAggregateTests
         // Assert
         implicitRows.ShouldHaveSingleItem().ShouldBe(new object?[] { "Alice", 2L });
         explicitRows.ShouldHaveSingleItem().ShouldBe(implicitRows[0]);
+        (await Rows(session, prefix + " ORDER BY n LIMIT 1")).ShouldHaveSingleItem().ShouldBe(new object?[] { "Bob", 1L });
         var composed = await Rows(session, "MATCH (a:Person) RETURN a.active AS flag, count(*) + sum(a.age) AS n GROUP BY a.active ORDER BY n + 1 DESC");
         composed.Select(row => row[1]).ShouldBe(new object?[] { 43L, 31L, 18L });
-        (await Rows(session, "MATCH (a:Person) RETURN a, count(*) AS n ORDER BY a.age")).Select(row => row[1]).ShouldBe(new object?[] { 1L, 1L, 1L });
+        (await Rows(session, "MATCH (a:Person) RETURN a, count(*) AS n ORDER BY a.age"))
+            .Select(row => row[0].ShouldBeOfType<GraphNode>().Properties["name"]).ShouldBe(new object?[] { "Bob", "Isolated", "Alice" });
         (await Rows(session, "MATCH (a:Person) RETURN a AS person, count(*) AS a ORDER BY a + 1")).Select(row => row[1]).ShouldBe(new object?[] { 1L, 1L, 1L });
         (await Rows(session, "MATCH (a:Person) RETURN CASE WHEN a.active IS NULL THEN 0 ELSE 1 END AS k, count(*) GROUP BY CASE WHEN a.active IS NULL THEN 0 ELSE 1 END ORDER BY k"))
             .Select(row => row[1]).ShouldBe(new object?[] { 1L, 2L });
         (await Rows(session, "MATCH (a:Person) RETURN count(*) AS n ORDER BY count(*) + 1")).ShouldHaveSingleItem()[0].ShouldBe(3L);
         (await Rows(session, "MATCH (a:Person) RETURN 1 AS k GROUP BY 1")).ShouldHaveSingleItem()[0].ShouldBe(1L);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Graph] - Aggregates: implicit, ISO alias and expression grouping retain every NULL and Boolean group")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Execute_GroupingSpellings_ShouldReturnAllGroupsAsync(bool ordered)
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create("grouping-spellings", new());
+        var database = await engine.CreateDatabaseAsync("graph", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync(seed, cancellationToken: CancellationToken.None);
+        const string source = "MATCH (a:Person) RETURN a.active AS active, count(*) AS n";
+        string order = ordered ? " ORDER BY active DESC NULLS LAST" : "";
+        object?[][] expected = [[true, 1L], [false, 1L], [null, 1L]];
+        // Act / Assert
+        foreach (string grouping in new[] { "", " GROUP BY active", " GROUP BY a.active" })
+        {
+            var rows = await Rows(session, source + grouping + order);
+            if (ordered) { rows.Select(row => (row[0], row[1])).ShouldBe(expected.Select(row => (row[0], row[1]))); }
+            else { rows.Select(row => (row[0], row[1])).ShouldBe(expected.Select(row => (row[0], row[1])), ignoreOrder: true); }
+        }
+        (await Rows(session, "MATCH (a:Person) RETURN count(*) GROUP BY ()")).ShouldHaveSingleItem().ShouldBe(new object?[] { 3L });
+        (await Rows(session, "MATCH (a:Nobody) RETURN count(*) GROUP BY ()")).ShouldHaveSingleItem().ShouldBe(new object?[] { 0L });
+        // A grouping name takes precedence over a same-named input variable.
+        (await Rows(session, "MATCH (a:Person) RETURN a.active AS a, count(*) AS n GROUP BY a ORDER BY a DESC NULLS LAST"))
+            .Select(row => (row[0], row[1])).ShouldBe(expected.Select(row => (row[0], row[1])));
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Graph] - Aggregates: ORDER BY recomputes expressions against shadowing aliases")]
+    [InlineData("a.v", "a.v + 1", 0)]
+    [InlineData("a.v", "a.v", 0)]
+    [InlineData("a.v + 1", "a.v + 1", 1)]
+    public async Task Execute_ShadowingAlias_ShouldOrderProjectedScopeAsync(string projection, string order, long increment)
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create("aggregate-shadowing", new());
+        var database = await engine.CreateDatabaseAsync("graph", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await Insert(session, [3L, 2L, 1L]);
+        // Act / Assert: RETURN uses input a; ORDER BY uses the projected map a.
+        foreach (string aggregate in new[] { "", ", count(*) AS n" })
+        {
+            var rows = await Rows(session, $"MATCH (a) RETURN {projection} AS old, {{v: -a.v}} AS a{aggregate} ORDER BY {order}");
+            rows.Select(row => row[0]).ShouldBe(new object?[] { 3L + increment, 2L + increment, 1L + increment });
+        }
     }
 
     [Fact(DisplayName = "Cohesion Test [Graph] - Aggregates: numeric keys and DISTINCT compare exact values across runtime types")]
@@ -133,6 +182,8 @@ public sealed class GraphAggregateTests
     {
         { [(sbyte)1, (short)2, 3, 4L, (byte)5, (ushort)6, 7U], 28L, 4d },
         { [1L, 2f, 3d], 6d, 2d },
+        { [13L, 0d], 13d, 6.5d },
+        { [40L, 60L, 0.5d], 100.5d, 33.5d },
         { [1m, 2L, 3m], 6m, 2m },
         { [1m, 2d, 3L], 6m, 2m },
         { [ulong.MaxValue, 1L], (decimal)ulong.MaxValue + 1m, ((double)ulong.MaxValue + 1d) / 2 },
@@ -172,6 +223,28 @@ public sealed class GraphAggregateTests
             .ShouldHaveSingleItem()[0].ShouldBe(decimal.MaxValue);
         (await Rows(session, "MATCH (a) RETURN avg($v)", new Dictionary<string, object?> { ["v"] = double.MaxValue }))
             .ShouldHaveSingleItem()[0].ShouldBe(double.MaxValue);
+        (await Rows(session, "MATCH (a) RETURN avg($v)", new Dictionary<string, object?> { ["v"] = 1.0e30 }))
+            .ShouldHaveSingleItem()[0].ShouldBe(1.0e30);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Graph] - Aggregates: large floating inputs do not throw Decimal overflow per row")]
+    public void Accumulate_LargeFloatingAverage_ShouldAvoidConversionExceptions()
+    {
+        // Arrange
+        var accumulator = new GraphAggregateAccumulator(new GqlAggregateExpression(GqlAggregateFunction.Avg, new GqlLiteralExpression(1.0e30)));
+        int threadId = Environment.CurrentManagedThreadId;
+        int overflows = 0;
+        EventHandler<System.Runtime.ExceptionServices.FirstChanceExceptionEventArgs> observe = (_, args) =>
+        {
+            if (Environment.CurrentManagedThreadId == threadId && args.Exception is OverflowException) { overflows++; }
+        };
+        // Act
+        AppDomain.CurrentDomain.FirstChanceException += observe;
+        try { for (int i = 0; i < 256; i++) { accumulator.Add(1.0e30, CancellationToken.None); } }
+        finally { AppDomain.CurrentDomain.FirstChanceException -= observe; }
+        // Assert
+        overflows.ShouldBe(0);
+        accumulator.Finish().ShouldBeOfType<double>().ShouldBe(1.0e30);
     }
 
     [Theory(DisplayName = "Cohesion Test [Graph] - Aggregates: invalid placement and grouping fail with structured planner diagnostics")]
@@ -185,6 +258,10 @@ public sealed class GraphAggregateTests
     [InlineData("MATCH (a) RETURN a.v + count(*)")]
     [InlineData("MATCH (a) RETURN a.v ORDER BY count(*)")]
     [InlineData("MATCH (a) RETURN count(*) ORDER BY sum(a.v)")]
+    [InlineData("MATCH (a) RETURN a.v, count(*) GROUP BY ()")]
+    [InlineData("MATCH (a) RETURN a.v AS v, count(*) AS n GROUP BY v, n")]
+    [InlineData("MATCH (a) RETURN a.v AS v, count(*) AS a GROUP BY a")]
+    [InlineData("MATCH (a), (b) RETURN a.v + b.v AS old, {v: -a.v} AS a, count(*) AS n ORDER BY a.v + b.v")]
     public async Task Execute_InvalidAggregateScope_ShouldRejectBeforeExecutionAsync(string source)
     {
         // Arrange
@@ -198,6 +275,52 @@ public sealed class GraphAggregateTests
             error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG001");
             error.Diagnostics[0].Start.ShouldNotBeNull();
         }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Graph] - Aggregates: invalid operands are validated before reading even empty input")]
+    [InlineData("MATCH (a:Nobody) RETURN sum($missing)", "COHDBG001")]
+    [InlineData("MATCH (a) RETURN count(b)", "COHDBG001")]
+    [InlineData("MATCH p = (a)->(b) RETURN count(p.x)", "COHDBG003")]
+    [InlineData("MATCH p = (a)-->(b) RETURN count(p.x)", "GQL0008")]
+    public async Task Execute_InvalidAggregateOperand_ShouldReportPlanningDiagnosticAsync(string source, string code)
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create("aggregate-operands", new());
+        var database = await engine.CreateDatabaseAsync("graph", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync(seed, cancellationToken: CancellationToken.None);
+        // Act / Assert
+        foreach (string prefix in new[] { "", "EXPLAIN " })
+        {
+            var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(prefix + source, cancellationToken: CancellationToken.None));
+            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(code);
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Graph] - Aggregates: exact SUM retains input scale for Decimal and UInt64")]
+    public async Task Execute_ExactSum_ShouldPreservePresentedScaleAsync()
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create("sum-scale", new());
+        var database = await engine.CreateDatabaseAsync("graph", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await Insert(session, [0.1m, 0.1m, 0.1m]);
+        // Act / Assert
+        decimal fractional = (await Rows(session, "MATCH (a) RETURN sum(a.v)")).ShouldHaveSingleItem()[0].ShouldBeOfType<decimal>();
+        fractional.ShouldBe(0.3m);
+        ((decimal.GetBits(fractional)[3] >> 16) & 0xff).ShouldBe(1);
+        await Insert(session, [1.20m]);
+        decimal mixedScale = (await Rows(session, "MATCH (a) RETURN sum(a.v)")).ShouldHaveSingleItem()[0].ShouldBeOfType<decimal>();
+        mixedScale.ShouldBe(1.50m);
+        ((decimal.GetBits(mixedScale)[3] >> 16) & 0xff).ShouldBe(2);
+        decimal scaledZero = (await Rows(session, "MATCH (a) RETURN sum($d)",
+            new Dictionary<string, object?> { ["d"] = 0.00m })).ShouldHaveSingleItem()[0].ShouldBeOfType<decimal>();
+        ((decimal.GetBits(scaledZero)[3] >> 16) & 0xff).ShouldBe(2);
+        await session.ExecuteAsync("MATCH (a) DELETE a", cancellationToken: CancellationToken.None);
+        await Insert(session, [1UL, 2UL]);
+        decimal integral = (await Rows(session, "MATCH (a) RETURN sum(a.v)")).ShouldHaveSingleItem()[0].ShouldBeOfType<decimal>();
+        integral.ShouldBe(3m);
+        ((decimal.GetBits(integral)[3] >> 16) & 0xff).ShouldBe(0);
     }
 
     [Theory(DisplayName = "Cohesion Test [Graph] - Aggregates: invalid numeric operands and overflow use the value-error code")]
@@ -215,6 +338,11 @@ public sealed class GraphAggregateTests
         // Act / Assert
         var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(source, cancellationToken: CancellationToken.None));
         error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG013");
+        if (!numeric)
+        {
+            error.Diagnostics[0].Message.ShouldBe(source.Contains("sum(", StringComparison.Ordinal)
+                ? "SUM requires numeric operands." : "AVG requires numeric operands.");
+        }
         (await Rows(session, "RETURN count(*)")).ShouldHaveSingleItem()[0].ShouldBe(1L);
     }
 

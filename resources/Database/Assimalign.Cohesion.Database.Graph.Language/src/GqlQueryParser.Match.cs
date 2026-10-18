@@ -66,7 +66,9 @@ public sealed partial class GqlQueryParser
             {
                 Expect("BY");
                 groupBy = [];
-                do { groupBy.Add(ParsePredicate()); } while (!Failed && Take(TokenType.Comma));
+                if (Current.Type == TokenType.LeftParen && _tokens[_position + 1].Type == TokenType.RightParen)
+                { Advance(); Advance(); }
+                else { do { groupBy.Add(ParsePredicate()); } while (!Failed && Take(TokenType.Comma)); }
             }
             if (!Failed && Take("ORDER"))
             {

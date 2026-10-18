@@ -18,7 +18,9 @@ internal static partial class GraphExpressionEvaluator
         {
             // ORDER BY aliases shadow source variable names, including grouped entities.
             if (expression is GqlVariableExpression name && grouped.TryGetValue(name.Variable, out var aliased)) { return aliased; }
-            if (grouped.ValuesByExpression.TryGetValue(expression, out var computed)) { return computed; }
+            // ORDER BY's plan excludes reuse through redefined names;
+            // RETURN keeps the complete original grouped-expression cache.
+            if (grouped.TryGetComputed(expression, out var computed)) { return computed; }
         }
         try
         {

@@ -69,15 +69,20 @@ and return-after-delete remain COHDBL001. CASE and composite values are describe
 RETURN accepts COUNT(*), COUNT(expr), SUM, AVG, MIN, MAX and COLLECT_LIST, with optional
 DISTINCT or ALL inside the parentheses. Cypher collect is an exact alias of COLLECT_LIST.
 COUNT(DISTINCT *) and COUNT(ALL *) are GQL0002. Every non-aggregated RETURN item is an implicit grouping key;
-ISO `GROUP BY` must list exactly those expressions, in any order. Duplicate RETURN keys
+ISO `GROUP BY` must list exactly those items' names, in any order; equivalent input expressions
+are also accepted. Plain variables resolve to RETURN names first; aggregate aliases are COHDBG001.
+`GROUP BY ()` denotes no keys and raises the usual mismatch error if non-aggregate items exist. Duplicate RETURN keys
 count once. Mixed aggregate expressions may compose grouping keys or read grouped entities' properties,
 as described in [DESIGN.md](DESIGN.md#aggregates-and-grouping-1147). GROUP BY without an
-aggregate eliminates duplicate keys. Aliases bind only the later ORDER BY stage.
+aggregate eliminates duplicate keys. RETURN aliases bind plain grouping names and the later
+ORDER BY stage, where they shadow input variables; RETURN expressions retain input scope.
 
 NULLs are skipped. COUNT(*) counts rows and COUNT(expr) counts non-null values. Count is
 always Int64, including zero and wire column metadata. SUM returns Int64 for integral
 inputs, Double when any retained input is floating, and Decimal when any is Decimal or
-UInt64 (Decimal takes precedence). AVG returns Double for integers/floats and Decimal when
+UInt64 (Decimal takes precedence). Exact Decimal sums retain the largest input scale, with
+integral inputs at scale zero. Mixed integer/floating sums promote the exact integer total once.
+AVG returns Double for integers/floats and Decimal when
 any retained input is Decimal. Numeric errors use COHDBG013. MIN/MAX preserve the chosen
 input's type and use ORDER BY's exact numeric and composite ordering. DISTINCT inside an
 aggregate and grouping use RETURN's exact equality, including NULLs inside lists/maps.

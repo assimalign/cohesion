@@ -132,7 +132,7 @@ internal static class GraphPlanExecutor
             ? DatabaseType.Int64 : DatabaseType.Null }).ToArray();
         var rows = new List<GraphOrderedRow>(bindings.Count);
         var distinct = plan.Distinct is null ? null : new HashSet<object?[]>(GraphRowComparer.Instance);
-        bool unsignedColumnsAdded = false;
+        bool valueColumnsAdded = false;
         foreach (var binding in bindings)
         {
             token.ThrowIfCancellationRequested();
@@ -141,10 +141,12 @@ internal static class GraphPlanExecutor
             {
                 for (int i = 0; i < row.Length; i++)
                 {
-                    if (row[i] is byte or ushort or uint or ulong)
+                    bool unsigned = row[i] is byte or ushort or uint or ulong;
+                    if (unsigned && !compositeValues)
+                    { throw new GraphPlanningException("COHDBG016", ErrorMessages.CompositeCapabilityRequired, plan.Query.Location); }
+                    if (unsigned || compositeValues && row[i] is decimal)
                     {
-                        if (!compositeValues) { throw new GraphPlanningException("COHDBG016", ErrorMessages.CompositeCapabilityRequired, plan.Query.Location); }
-                        unsignedColumnsAdded |= !compositeColumns[i];
+                        valueColumnsAdded |= !compositeColumns[i];
                         compositeColumns[i] = true;
                     }
                 }
@@ -153,9 +155,9 @@ internal static class GraphPlanExecutor
             if (distinct is null || distinct.Add(row))
             { rows.Add(new GraphOrderedRow(row, GraphSortPage.Keys(plan, binding, row, token), rows.Count)); }
         }
-        // A stored unsigned property is learned from the rows. Recheck earlier rows if its
-        // header flag changed their framing; scalar-only results never need this pass.
-        if (unsignedColumnsAdded) { foreach (var row in rows) { GraphResultRowEncoder.Validate(row.Values, compositeColumns); } }
+        // Unsigned and Decimal values are learned from rows. Recheck earlier rows when
+        // a header flag changes their framing; untagged results never need this pass.
+        if (valueColumnsAdded) { foreach (var row in rows) { GraphResultRowEncoder.Validate(row.Values, compositeColumns); } }
         var paged = GraphSortPage.Apply(rows, plan.SortPage, token);
         if (paths)
         {

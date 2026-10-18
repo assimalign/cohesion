@@ -1,12 +1,35 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using Assimalign.Cohesion.Database.Graph.Language;
 
 namespace Assimalign.Cohesion.Database.Graph.Internal;
 
 internal static class GraphValueExpressions
 {
+    internal static bool ReferencesAny(GqlExpression root, IReadOnlySet<string> names, CancellationToken token)
+    {
+        var pending = new Stack<GqlExpression>();
+        pending.Push(root);
+        while (pending.TryPop(out var expression))
+        {
+            token.ThrowIfCancellationRequested();
+            // Aggregate operands always belong to the original input scope.
+            if (expression is GqlAggregateExpression) { continue; }
+            string? name = expression switch
+            {
+                GqlVariableExpression variable => variable.Variable,
+                GqlPropertyExpression property => property.Variable,
+                GqlLabeledPredicate labeled => labeled.Variable,
+                _ => null,
+            };
+            if (name is not null && names.Contains(name)) { return true; }
+            foreach (var child in Children(expression)) { pending.Push(child); }
+        }
+        return false;
+    }
+
     internal static IEnumerable<GqlExpression> Children(GqlExpression expression)
     {
         switch (expression)

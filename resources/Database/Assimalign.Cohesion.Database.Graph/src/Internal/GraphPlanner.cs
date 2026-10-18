@@ -18,7 +18,8 @@ internal sealed record GraphProjectionPlan(GqlExpression Expression, string Name
 internal sealed record GraphDistinctPlan(IReadOnlyList<GraphProjectionPlan> Keys);
 internal sealed record GraphGroupingPlan(IReadOnlyList<GqlExpression> Keys, IReadOnlyList<GqlAggregateExpression> Aggregates, GraphGroupingScope Scope);
 internal sealed record GraphSortKeyPlan(GqlSortItem Item, int ProjectionIndex);
-internal sealed record GraphSortPagePlan(IReadOnlyList<GraphSortKeyPlan> Keys, long Offset, long? Limit);
+internal sealed record GraphSortPagePlan(IReadOnlyList<GraphSortKeyPlan> Keys, long Offset, long? Limit,
+    IReadOnlySet<GqlExpression>? GroupedExpressions = null);
 
 /// <summary>A validated statement with each MATCH pattern's anchor.</summary>
 /// <param name="Query">The validated statement.</param>
@@ -184,23 +185,32 @@ internal sealed partial class GraphPlanner
         }
         if (query.OrderBy is null || projections.Count == 0 && (query.OrderBy.Count != 0 || query.Offset is not null || query.Limit is not null))
         { throw new GraphPlanningException("COHDBG001", ErrorMessages.SortShapeInvalid, query.Location); }
-        if (query.GroupBy is not null)
-        {
-            foreach (var key in query.GroupBy)
-            {
-                if (key is null) { throw new GraphPlanningException("COHDBG001", ErrorMessages.GroupByMismatch, query.Location); }
-                ValidateExpression(key);
-            }
-        }
-        grouping = GraphGrouping.Plan(query, projections, token);
+        grouping = GraphGrouping.Plan(query, projections, token, key => ValidateExpression(key));
         orderAliases = new Dictionary<string, int>(StringComparer.Ordinal);
         orderProjections = new Dictionary<GqlExpression, int>(new GraphExpressionShape(token));
+        var shadowed = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var projection in projections)
+        {
+            if (projection.Expression is not GqlVariableExpression identity || identity.Variable != projection.Name)
+            { shadowed.Add(projection.Name); }
+        }
         for (int i = 0; i < projections.Count; i++)
         {
             token.ThrowIfCancellationRequested();
             orderAliases.Add(projections[i].Name, i);
-            orderProjections.TryAdd(projections[i].Expression, i);
+            // Neo4j NormalizeWithAndReturnClauses.scala:315-342 also guards expression
+            // reuse against redefined variables; RETURN still evaluates in input scope.
+            if (!GraphValueExpressions.ReferencesAny(projections[i].Expression, shadowed, token))
+            { orderProjections.TryAdd(projections[i].Expression, i); }
             if (projections[i].Expression is GqlVariableExpression entity) { projectedEntities.Add(entity.Variable); }
+        }
+        var groupedExpressions = new HashSet<GqlExpression>(new GraphExpressionShape(token));
+        if (grouping is not null)
+        {
+            foreach (var expression in grouping.Keys.Concat<GqlExpression>(grouping.Aggregates))
+            {
+                if (!GraphValueExpressions.ReferencesAny(expression, shadowed, token)) { groupedExpressions.Add(expression); }
+            }
         }
         var sortKeys = new List<GraphSortKeyPlan>();
         foreach (var item in query.OrderBy)
@@ -209,7 +219,7 @@ internal sealed partial class GraphPlanner
             if (item?.Expression is null || !Enum.IsDefined(item.Direction) || !Enum.IsDefined(item.NullOrdering))
             { throw new GraphPlanningException("COHDBG001", ErrorMessages.SortShapeInvalid, query.Location); }
             ValidateExpression(item.Expression, allowAggregates: grouping is not null);
-            if (grouping is not null) { grouping.Scope.Validate(item.Expression, orderAliases); }
+            if (grouping is not null) { grouping.Scope.Validate(item.Expression, orderAliases, groupedExpressions); }
             int projectionIndex = item.Expression is GqlVariableExpression alias && orderAliases.TryGetValue(alias.Variable, out int aliased)
                 ? aliased : orderProjections.TryGetValue(item.Expression, out int projectedIndex) ? projectedIndex : -1;
             sortKeys.Add(new GraphSortKeyPlan(item, projectionIndex));
@@ -224,7 +234,7 @@ internal sealed partial class GraphPlanner
             Grouping = grouping,
             Distinct = query.SetQuantifier == GqlSetQuantifier.Distinct ? new GraphDistinctPlan(projections.AsReadOnly()) : null,
             SortPage = sortKeys.Count != 0 || query.Offset is not null || limit is not null
-                ? new GraphSortPagePlan(sortKeys.AsReadOnly(), offset, limit) : null,
+                ? new GraphSortPagePlan(sortKeys.AsReadOnly(), offset, limit, groupedExpressions) : null,
             Parameters = _parameters,
             Warnings = readOnly ? tokens.Warnings : [],
         };

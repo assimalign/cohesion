@@ -118,6 +118,8 @@ public sealed class GqlWhereExpressionParserTests
     [InlineData("{k:", "}", "1")]
     [InlineData("COALESCE(NULL,", ")", "1")]
     [InlineData("NULLIF(1,", ")", "1")]
+    [InlineData("count(", ")", "1")]
+    [InlineData("sum(DISTINCT ", ")", "1")]
     public void Parse_RecursiveNodes_ShouldReportStackExhaustion(string open, string close, string leaf)
     {
         // Arrange

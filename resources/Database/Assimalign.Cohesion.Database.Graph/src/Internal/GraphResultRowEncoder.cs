@@ -37,7 +37,7 @@ internal sealed class GraphResultRowEncoder : IDisposable
         {
             var value = row.GetValue(i);
             bool tagged = _compositeColumns![i];
-            if (tagged && (GraphCompositeValues.IsComposite(value) || value is byte or ushort or uint or ulong))
+            if (tagged && (GraphCompositeValues.IsComposite(value) || value is byte or ushort or uint or ulong or decimal))
             {
                 _writer!.Write((byte)1);
                 long lengthOffset = _stream.Position; _writer.Write(0);
@@ -64,7 +64,7 @@ internal sealed class GraphResultRowEncoder : IDisposable
             for (int i = 0; i < row.Length; i++)
             {
                 var value = row[i];
-                size += compositeColumns[i] && (GraphCompositeValues.IsComposite(value) || value is byte or ushort or uint or ulong)
+                size += compositeColumns[i] && (GraphCompositeValues.IsComposite(value) || value is byte or ushort or uint or ulong or decimal)
                     ? 5L + GraphValueCodec.Measure(value) : GraphValueCodec.ScalarLength(value) + (compositeColumns[i] ? 1L : 0);
             }
             if (size > GraphValueCodec.MaxPayloadLength) { throw new DatabaseTypeException(ErrorMessages.CompositeLimit); }

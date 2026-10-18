@@ -29,14 +29,15 @@ internal sealed class GraphGroupingScope
         foreach (var aggregate in aggregates) { token.ThrowIfCancellationRequested(); _aggregates.Add(aggregate); }
     }
 
-    internal void Validate(GqlExpression root, IReadOnlyDictionary<string, int>? aliases = null)
+    internal void Validate(GqlExpression root, IReadOnlyDictionary<string, int>? aliases = null,
+        IReadOnlySet<GqlExpression>? reusable = null)
     {
         var pending = new Stack<GqlExpression>();
         pending.Push(root);
         while (pending.TryPop(out var expression))
         {
             _token.ThrowIfCancellationRequested();
-            if (_keys.Contains(expression) || _aggregates.Contains(expression)) { continue; }
+            if (_keys.Contains(expression) && (reusable is null || reusable.Contains(expression)) || _aggregates.Contains(expression)) { continue; }
             string? name = expression switch
             {
                 GqlVariableExpression variable => variable.Variable,
