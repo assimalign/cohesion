@@ -69,6 +69,17 @@ internal static class Program
             Check(await connection.GetCollectionAsync("items", token) == "items", "get collection");
             var saved = await connection.PutAsync("items", "one", "{\"name\":\"東京\",\"score\":3,\"nested\":[1,null]}"u8.ToArray(), cancellationToken: token);
             Check(saved.Version.Value > 0, "put version");
+            var functions = (await connection.QueryAsync("SELECT LOWER('A') AS s, ROUND(-2.5) AS n, ROUND(4.9999999999999999999999999999,-1) AS edge, MILLIS_TO_STR(0) AS d, TYPE(score) AS t, ARRAY_LENGTH(nested) AS a, IFMISSING(absent,1) AS c, LENGTH('😀a') AS l FROM items", cancellationToken: token)).Single();
+            Check((string)functions["s"]! == "a", "scalar string");
+            Check((decimal)functions["n"]! == -3m, "scalar rounding");
+            Check((decimal)functions["edge"]! == 0m, "scalar exact negative-scale rounding");
+            Check((string)functions["d"]! == "1970-01-01T00:00:00.000Z", "scalar date");
+            Check((string)functions["t"]! == "number", "scalar type");
+            Check(functions["a"] is long arrayLength && arrayLength == 2, "scalar array Int64");
+            Check((decimal)functions["c"]! == 1m, "scalar conditional");
+            Check(functions["l"] is long length && length == 2, "scalar code points Int64");
+            var count = await connection.QueryAsync("SELECT COUNT(*) AS n FROM items", cancellationToken: token);
+            Check(count.Columns[0].Type == Assimalign.Cohesion.Database.Types.DatabaseType.Int64 && count.Single()[0] is long number && number == 1, "COUNT Int64");
             Check((await connection.GetAsync("items", "one", token))?.Version == saved.Version, "get version");
             var rows = await connection.QueryAsync("SELECT name, score + @offset AS n FROM items WHERE score >= 2 ORDER BY n DESC",
                 new Dictionary<string, object?> { ["offset"] = 4 }, token);
