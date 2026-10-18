@@ -176,7 +176,7 @@ public sealed partial class SqlCteExecutionTests
         // Assert
         rows.Select(row => row[2]).ShouldBe(["With", "Materialize", "Constant", "Select", "CteScan"]);
         rows.Single(row => Equals(row[2], "Constant"))[5]
-            .ShouldBe("filter=True; order_keys=1; distinct=True; limit=1; offset=0");
+            .ShouldBe("filter=True; order_keys=1; order_by=[DESC NULLS LAST]; distinct=True; limit=1; offset=0");
         session.LastStatementMetrics!.RecordsExamined.ShouldBe(0);
     }
 }

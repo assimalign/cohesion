@@ -51,7 +51,6 @@ internal static class SqlUnsupportedVocabulary
         new("RESTART", "ALTER COLUMN RESTART", SqlWordPosition.Rule),
         new("COLLATION", "user-defined collations (CREATE COLLATION)", SqlWordPosition.Rule),
         new("FULLTEXT", "collation-aware full-text indexes", SqlWordPosition.Rule),
-        new("NULLS", "NULLS FIRST and NULLS LAST", SqlWordPosition.Rule),
         new("GROUPING", "GROUPING", SqlWordPosition.Rule),
         new("ROLLUP", "ROLLUP", SqlWordPosition.Rule),
         new("CUBE", "CUBE", SqlWordPosition.Rule),
@@ -128,8 +127,7 @@ internal enum SqlWordPosition
     /// <summary>
     /// Where a dedicated rule recognizes it: <c>WITH</c> as a statement prefix; <c>ALL</c> after
     /// <c>SELECT</c> or a comparison operator;
-    /// <c>COLLATION</c> and <c>FULLTEXT</c> after <c>CREATE</c>; <c>NULLS FIRST</c>/<c>LAST</c> in
-    /// <c>ORDER BY</c>; <c>GROUPING SETS</c> and the <c>GROUPING</c>, <c>ROLLUP</c>, <c>CUBE</c> and
+    /// <c>COLLATION</c> and <c>FULLTEXT</c> after <c>CREATE</c>; <c>GROUPING SETS</c> and the <c>GROUPING</c>, <c>ROLLUP</c>, <c>CUBE</c> and
     /// <c>GROUPING_ID</c> calls; <c>PERCENT</c> and <c>WITH TIES</c> after FETCH or TOP;
     /// <c>FILTER (...)</c> and <c>WITHIN GROUP</c> after a call;
     /// <c>ANY</c> and <c>SOME</c> between a comparison operator and <c>(</c>; <c>LATERAL</c> after

@@ -289,13 +289,13 @@ internal sealed partial class SqlPlanExecutor
         }
     }
 
-    private static int CompareOrderingValues(object? left, object? right, Collation collation) => (left, right) switch
+    private static int CompareOrderingValues(object? left, object? right, int direction, int nullComparison, Collation collation)
     {
-        (null, null) => 0,
-        (null, _) => -1,
-        (_, null) => 1,
-        _ => SqlValueComparer.Compare(left, right, collation),
-    };
+        // NULL placement is independent of direction; the default was resolved during binding.
+        if (left is null) { return right is null ? 0 : nullComparison; }
+        if (right is null) { return -nullComparison; }
+        return direction * Math.Sign(SqlValueComparer.Compare(left, right, collation));
+    }
 
     private static List<object?[]> SortRows(List<object?[]> rows, IReadOnlyList<SqlBoundOrdering> orderBy,
         SqlExpressionEvaluator evaluator, CancellationToken cancellationToken)
@@ -310,25 +310,19 @@ internal sealed partial class SqlPlanExecutor
         for (int i = 0; i < orderBy.Count; i++)
         {
             int index = i;
-            var collation = orderBy[index].Collation.Resolve(evaluator.SubqueryValues);
+            var ordering = orderBy[index];
+            var collation = ordering.Collation.Resolve(evaluator.SubqueryValues);
+            int direction = ordering.IsDescending ? -1 : 1;
+            int nullComparison = ordering.NullsFirst ? -1 : 1;
             var comparer = Comparer<object?>.Create((left, right) =>
             {
                 PollCancellation();
-                return CompareOrderingValues(left, right, collation);
+                return CompareOrderingValues(left, right, direction, nullComparison, collation);
             });
 
-            if (ordered is null)
-            {
-                ordered = orderBy[index].IsDescending
-                    ? keyed.OrderByDescending(x => x.Keys[index], comparer)
-                    : keyed.OrderBy(x => x.Keys[index], comparer);
-            }
-            else
-            {
-                ordered = orderBy[index].IsDescending
-                    ? ordered.ThenByDescending(x => x.Keys[index], comparer)
-                    : ordered.ThenBy(x => x.Keys[index], comparer);
-            }
+            ordered = ordered is null
+                ? keyed.OrderBy(x => x.Keys[index], comparer)
+                : ordered.ThenBy(x => x.Keys[index], comparer);
         }
 
         try

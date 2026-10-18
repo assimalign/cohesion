@@ -194,15 +194,18 @@ internal sealed partial class SqlPlanExecutor
         for (int i = 0; i < orderBy.Count; i++)
         {
             int key = i;
-            var collation = orderBy[i].Collation.Resolve(_subqueryValues);
+            var ordering = orderBy[i];
+            var collation = ordering.Collation.Resolve(_subqueryValues);
+            int direction = ordering.IsDescending ? -1 : 1;
+            int nullComparison = ordering.NullsFirst ? -1 : 1;
             var comparer = Comparer<object?>.Create((left, right) =>
             {
                 if ((operations++ & 31) == 0) { cancellationToken.ThrowIfCancellationRequested(); }
-                return CompareOrderingValues(left, right, collation);
+                return CompareOrderingValues(left, right, direction, nullComparison, collation);
             });
             sorted = sorted is null
-                ? orderBy[i].IsDescending ? keyed.OrderByDescending(item => item.Keys[key], comparer) : keyed.OrderBy(item => item.Keys[key], comparer)
-                : orderBy[i].IsDescending ? sorted.ThenByDescending(item => item.Keys[key], comparer) : sorted.ThenBy(item => item.Keys[key], comparer);
+                ? keyed.OrderBy(item => item.Keys[key], comparer)
+                : sorted.ThenBy(item => item.Keys[key], comparer);
         }
         List<object?[]> projected;
         try { projected = (sorted is null ? keyed : sorted.AsEnumerable()).Select(item => item.Output).ToList(); }

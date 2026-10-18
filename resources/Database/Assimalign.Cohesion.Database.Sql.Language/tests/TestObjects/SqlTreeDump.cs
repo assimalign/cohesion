@@ -110,7 +110,7 @@ internal static class SqlTreeDump
                 AppendList(builder, function.Arguments);
                 foreach (var order in function.OrderBy)
                 {
-                    builder.Append(order.IsDescending ? ", DESC " : ", ASC ");
+                    builder.Append(order.NullPlacement).Append(' ').Append(order.IsDescending ? ", DESC " : ", ASC ");
                     Append(builder, order.Expression);
                 }
                 builder.Append(')');
@@ -173,7 +173,7 @@ internal static class SqlTreeDump
             foreach (var order in set.OrderBy)
             {
                 Append(builder, order.Expression);
-                builder.Append(order.IsDescending ? " desc;" : " asc;");
+                builder.Append(order.NullPlacement).Append(' ').Append(order.IsDescending ? " desc;" : " asc;");
             }
             builder.Append("], limitSyntax=").Append(set.LimitSyntaxKind).Append(", limit=");
             Append(builder, set.Limit);
@@ -222,7 +222,7 @@ internal static class SqlTreeDump
         foreach (var order in select.OrderBy)
         {
             Append(builder, order.Expression);
-            builder.Append(order.IsDescending ? " desc; " : " asc; ");
+            builder.Append(order.NullPlacement).Append(' ').Append(order.IsDescending ? " desc; " : " asc; ");
         }
         builder.Append("], limitSyntax=").Append(select.LimitSyntaxKind).Append(", limit=");
         Append(builder, select.Limit);

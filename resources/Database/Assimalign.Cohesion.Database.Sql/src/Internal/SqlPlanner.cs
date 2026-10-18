@@ -220,7 +220,6 @@ internal sealed partial class SqlPlanner
 
         var orderByProjections = BindOrderByProjections(select, projections, outputOrdinals?.Count ?? columns.Count);
         CaptureViewOrdering(select, columns, bindings, evaluator, orderByProjections);
-        if (bindings is not null && select.OrderBy.Count > 0) { RejectDerivedOrdering(select, projections, orderByProjections, evaluator, bindings); }
         foreach (var orderBy in select.OrderBy)
         {
             ValidateExpression(orderBy.Expression, evaluator, _subqueryTypes, orderByProjections);
@@ -338,7 +337,7 @@ internal sealed partial class SqlPlanner
         {
             if (scope.HasOutputValues) { ValidateOrderingCalls(orderBy[index].Expression, scope); }
             var key = scope.Bind(orderBy[index].Expression, out SqlBoundCollation collation);
-            ordering[index] = new SqlBoundOrdering(key, orderBy[index].IsDescending, collation);
+            ordering[index] = new SqlBoundOrdering(key, orderBy[index].IsDescending, NullsFirst(orderBy[index]), collation);
         }
 
         return ordering;

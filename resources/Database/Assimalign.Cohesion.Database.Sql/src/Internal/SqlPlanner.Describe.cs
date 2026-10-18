@@ -87,15 +87,15 @@ internal sealed partial class SqlPlanner
             };
             string? detail = current switch
             {
-                SqlJoinPlan { Steps.Count: 0 } p => QueryDetail(p.Where is not null, p.OrderBy.Count, p.IsDistinct, p.Limit, p.Offset),
-                SqlConstantPlan p => QueryDetail(p.Where is not null, p.OrderBy.Count, p.IsDistinct, p.Limit, p.Offset),
-                SqlSetOperationPlan p => QueryDetail(false, p.OrderBy.Count, !p.IsAll, p.Limit, p.Offset),
-                SqlSelectPlan p => QueryDetail(p.Where is not null, p.OrderBy.Count, p.IsDistinct, p.Limit, p.Offset),
-                SqlSystemViewPlan p => QueryDetail(p.Where is not null, p.OrderBy.Count, p.IsDistinct, p.Limit, p.Offset),
+                SqlJoinPlan { Steps.Count: 0 } p => QueryDetail(p.Where is not null, p.OrderBy, p.IsDistinct, p.Limit, p.Offset),
+                SqlConstantPlan p => QueryDetail(p.Where is not null, p.OrderBy, p.IsDistinct, p.Limit, p.Offset),
+                SqlSetOperationPlan p => QueryDetail(false, p.OrderBy, !p.IsAll, p.Limit, p.Offset),
+                SqlSelectPlan p => QueryDetail(p.Where is not null, p.OrderBy, p.IsDistinct, p.Limit, p.Offset),
+                SqlSystemViewPlan p => QueryDetail(p.Where is not null, p.OrderBy, p.IsDistinct, p.Limit, p.Offset),
                 SqlJoinPlan p => string.Join("; ", p.Steps.Select(step => $"{step.Kind}: {(step.Access is null ? "buffered inputs" : "correlated equality-prefix seek")}")) + "; " +
-                    QueryDetail(p.Where is not null, p.OrderBy.Count, p.IsDistinct, p.Limit, p.Offset),
+                    QueryDetail(p.Where is not null, p.OrderBy, p.IsDistinct, p.Limit, p.Offset),
                 SqlGroupPlan p => $"keys={p.Keys.Count}; aggregates={p.Aggregates.Count}; having={p.Having is not null}; " +
-                    QueryDetail(false, p.OrderBy.Count, p.IsDistinct, p.Limit, p.Offset),
+                    QueryDetail(false, p.OrderBy, p.IsDistinct, p.Limit, p.Offset),
                 SqlInsertPlan p => $"values rows={p.Rows.Count}",
                 SqlUpdatePlan p => $"assignments={p.Assignments.Count}; filter={p.Where is not null}",
                 SqlDeletePlan p => $"filter={p.Where is not null}",
@@ -217,6 +217,10 @@ internal sealed partial class SqlPlanner
         _ => Convert.ToString(value, CultureInfo.InvariantCulture) ?? "NULL",
     };
 
-    private static string QueryDetail(bool filter, int orderKeys, bool distinct, SqlRowCount? limit, SqlRowCount? offset)
-        => FormattableString.Invariant($"filter={filter}; order_keys={orderKeys}; distinct={distinct}; limit={limit}; offset={offset}");
+    private static string QueryDetail(bool filter, IReadOnlyList<SqlBoundOrdering> orderBy, bool distinct, SqlRowCount? limit, SqlRowCount? offset)
+    {
+        string ordering = string.Join(", ", orderBy.Select(key =>
+            $"{(key.IsDescending ? "DESC" : "ASC")} NULLS {(key.NullsFirst ? "FIRST" : "LAST")}"));
+        return FormattableString.Invariant($"filter={filter}; order_keys={orderBy.Count}; order_by=[{ordering}]; distinct={distinct}; limit={limit}; offset={offset}");
+    }
 }

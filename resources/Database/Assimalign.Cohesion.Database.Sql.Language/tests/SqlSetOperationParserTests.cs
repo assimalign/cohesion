@@ -73,7 +73,7 @@ public sealed class SqlSetOperationParserTests
     public void Parse_PrecedenceAndTail_ShouldOwnCombinedWindow()
     {
         // Arrange / Act
-        var query = Parse("SELECT a FROM t EXCEPT SELECT a FROM u UNION SELECT a FROM v INTERSECT SELECT a FROM w ORDER BY a LIMIT 2 OFFSET 1")
+        var query = Parse("SELECT a FROM t EXCEPT SELECT a FROM u UNION SELECT a FROM v INTERSECT SELECT a FROM w ORDER BY a NULLS LAST LIMIT 2 OFFSET 1")
             .ShouldBeOfType<SqlSetOperationExpression>();
 
         // Assert
@@ -82,7 +82,7 @@ public sealed class SqlSetOperationParserTests
         query.Right.ShouldBeOfType<SqlSetOperationExpression>().Operator.ShouldBe(SqlSetOperator.Intersect);
         query.Left.OrderBy.ShouldBeEmpty();
         query.Right.Limit.ShouldBeNull();
-        query.OrderBy.ShouldHaveSingleItem();
+        query.OrderBy.ShouldHaveSingleItem().NullPlacement.ShouldBe(SqlNullPlacement.Last);
         query.Limit.ShouldNotBeNull();
         query.Offset.ShouldNotBeNull();
         Parse("SELECT a FROM t UNION SELECT TOP 1 a FROM u OFFSET 1").ShouldBeOfType<SqlSetOperationExpression>()
@@ -98,7 +98,6 @@ public sealed class SqlSetOperationParserTests
     [InlineData("SELECT a FROM t EXCEPT ALL CORRESPONDING SELECT a FROM u", "COHDBL001")]
     [InlineData("SELECT id FROM t UNION SELECT id FROM u WINDOW w AS ();", "COHDBL001")]
     [InlineData("SELECT a FROM t WHERE a = ALL (SELECT a FROM u UNION SELECT a FROM v)", "COHDBL001")]
-    [InlineData("SELECT a FROM t UNION SELECT a FROM u ORDER BY a NULLS LAST", "COHDBL001")]
     public void Parse_RejectedSetForm_ShouldReportCode(string sql, string code)
     {
         // Arrange / Act

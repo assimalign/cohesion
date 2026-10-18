@@ -102,7 +102,6 @@ public sealed class SqlKeywordDispositionTests
         ["ORDER"] = Parses("SELECT a FROM t ORDER BY a"),
         ["ASC"] = Parses("SELECT a FROM t ORDER BY a ASC"),
         ["DESC"] = Parses("SELECT a FROM t ORDER BY a DESC"),
-        ["NULLS"] = Rejects("SELECT a FROM t ORDER BY a NULLS FIRST", "NULLS FIRST and NULLS LAST"),
         ["LIMIT"] = Parses("SELECT a FROM t LIMIT 1"),
         ["OFFSET"] = Parses("SELECT a FROM t LIMIT 1 OFFSET 1"),
         ["FETCH"] = Parses("SELECT a FROM t FETCH NEXT 1 ROWS ONLY"),

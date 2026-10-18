@@ -389,7 +389,7 @@ internal static class SqlPersistedExpression
             Same(a.FunctionName, b.FunctionName) && a.Arguments.Count == b.Arguments.Count &&
             (a.Quantifier == SqlSetQuantifier.Distinct) == (b.Quantifier == SqlSetQuantifier.Distinct) &&
             a.HasWithinGroupOrdering == b.HasWithinGroupOrdering &&
-            SameList(a.OrderBy, b.OrderBy, (x, y) => x.IsDescending == y.IsDescending),
+            SameList(a.OrderBy, b.OrderBy, (x, y) => x.IsDescending == y.IsDescending && x.NullPlacement == y.NullPlacement),
         (SqlCaseExpression a, SqlCaseExpression b) => (a.Input is null) == (b.Input is null) &&
             (a.ElseResult is null) == (b.ElseResult is null) && a.WhenClauses.Count == b.WhenClauses.Count,
         (SqlCastExpression a, SqlCastExpression b) => a.TargetTypeInfo is { } x && b.TargetTypeInfo is { } y
@@ -408,7 +408,7 @@ internal static class SqlPersistedExpression
             !SameList(left.CommonTables, right.CommonTables, (a, b) => Same(a.Name, b.Name) &&
                 SameList(a.Columns, b.Columns, Same) && SameQuery(a.Body, b.Body)) ||
             left.LimitSyntaxKind != right.LimitSyntaxKind ||
-            !SameList(left.OrderBy, right.OrderBy, (a, b) => a.IsDescending == b.IsDescending && AreEquivalent(a.Expression, b.Expression)) ||
+            !SameList(left.OrderBy, right.OrderBy, (a, b) => a.IsDescending == b.IsDescending && a.NullPlacement == b.NullPlacement && AreEquivalent(a.Expression, b.Expression)) ||
             !AreEquivalent(left.Limit, right.Limit) || !AreEquivalent(left.Offset, right.Offset))
         {
             return false;

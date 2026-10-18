@@ -86,22 +86,59 @@ public sealed class SqlOrderByParserTests
         binary.Right.ShouldBeOfType<SqlLiteralExpression>().Value.ShouldBe("1");
     }
 
-    /// <summary>Reports the exact unsupported NULL placement modifier rather than ignoring it.</summary>
-    [Theory(DisplayName = "Cohesion Test [Database.Sql.Language] - ORDER BY: Rejects explicit NULL placement")]
-    [InlineData("SELECT age FROM t ORDER BY age NULLS FIRST;", "NULLS FIRST")]
-    [InlineData("SELECT age FROM t ORDER BY age DESC NULLS LAST;", "NULLS LAST")]
-    [InlineData("SELECT age AS years FROM t ORDER BY years ASC nulls /* trivia */ first;", "nulls /* trivia */ first")]
-    [InlineData("SELECT age FROM t ORDER BY 1 NULLS LAST, age DESC;", "NULLS LAST")]
-    [InlineData("SELECT age, COUNT(*) FROM t GROUP BY age ORDER BY 2 DESC NULLS FIRST;", "NULLS FIRST")]
-    [InlineData("SELECT age FROM t WHERE EXISTS (SELECT id FROM u ORDER BY 1 NULLS LAST);", "NULLS LAST")]
-    public void Parse_ExplicitNullPlacement_ReportsPreciseModelDiagnostic(string sql, string location)
+    [Theory(DisplayName = "Cohesion Test [Database.Sql.Language] - ORDER BY: retains explicit NULL placement")]
+    [InlineData("SELECT age FROM t ORDER BY age NULLS FIRST;", SqlNullPlacement.First)]
+    [InlineData("SELECT age FROM t ORDER BY age ASC NULLS LAST;", SqlNullPlacement.Last)]
+    [InlineData("SELECT age FROM t ORDER BY age DESC NULLS FIRST;", SqlNullPlacement.First)]
+    [InlineData("SELECT age FROM t ORDER BY age DESC NULLS LAST;", SqlNullPlacement.Last)]
+    [InlineData("SELECT age AS years FROM t ORDER BY years ASC nulls /* trivia */ first;", SqlNullPlacement.First)]
+    [InlineData("SELECT age FROM t ORDER BY 1 NULLS LAST, age DESC;", SqlNullPlacement.Last)]
+    [InlineData("SELECT age, COUNT(*) FROM t GROUP BY age ORDER BY 2 DESC NULLS FIRST;", SqlNullPlacement.First)]
+    [InlineData("SELECT age FROM t WHERE EXISTS (SELECT id FROM u ORDER BY 1 NULLS LAST);", SqlNullPlacement.Last)]
+    [InlineData("SELECT age FROM t ORDER BY age;", SqlNullPlacement.Default)]
+    public void Parse_ExplicitNullPlacement_ShouldPreservePlacement(string sql, SqlNullPlacement expected)
     {
-        var statement = new SqlQueryParser().Parse(sql);
+        // Arrange / Act
+        var statement = (SqlQueryStatement)new SqlQueryParser().Parse(sql);
+        // Assert
+        statement.Diagnostics.ShouldBeEmpty();
+        var select = statement.SqlExpression.ShouldBeOfType<SqlSelectExpression>();
+        var query = select.Where is SqlExistsExpression exists ? exists.Subquery : select;
+        query.OrderBy[0].NullPlacement.ShouldBe(expected);
+    }
 
-        var diagnostic = statement.Diagnostics.Single(item => item.Code == "COHDBL001");
-        diagnostic.Severity.ShouldBe(DiagnosticSeverity.Error);
-        diagnostic.Message!.ShouldContain("NULLS FIRST and NULLS LAST are not supported");
-        sql[diagnostic.Start!.Value..diagnostic.End!.Value].ShouldBe(location);
+    [Theory(DisplayName = "Cohesion Test [Database.Sql.Language] - ORDER BY: malformed NULL placement reports SQL0003")]
+    [InlineData("NULLS")]
+    [InlineData("NULLS MIDDLE")]
+    public void Parse_MalformedNullPlacement_ShouldReportSyntaxError(string suffix)
+    {
+        // Arrange / Act
+        var statement = new SqlQueryParser().Parse($"SELECT a FROM t ORDER BY a {suffix};");
+        // Assert
+        statement.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "SQL0003");
+        statement.Diagnostics.ShouldNotContain(diagnostic => diagnostic.Code == "COHDBL001");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Sql.Language] - ORDER BY: canonical text preserves written placement and identifier quoting")]
+    [InlineData("SELECT a FROM t ORDER BY a NULLS FIRST", "SELECT a FROM t ORDER BY a NULLS FIRST")]
+    [InlineData("SELECT a FROM t ORDER BY a DESC NULLS LAST", "SELECT a FROM t ORDER BY a DESC NULLS LAST")]
+    [InlineData("SELECT a FROM t ORDER BY a ASC NULLS LAST", "SELECT a FROM t ORDER BY a NULLS LAST")]
+    [InlineData("SELECT a FROM t ORDER BY a DESC NULLS FIRST", "SELECT a FROM t ORDER BY a DESC NULLS FIRST")]
+    [InlineData("SELECT a FROM t ORDER BY a", "SELECT a FROM t ORDER BY a")]
+    [InlineData("SELECT nulls, first, last FROM t ORDER BY last", "SELECT \"nulls\", first, last FROM t ORDER BY last")]
+    public void Render_NullPlacement_ShouldPreserveSyntaxAndQuoting(string sql, string expected)
+    {
+        // Arrange
+        var parsed = (SqlQueryStatement)new SqlQueryParser().Parse(sql + ";");
+        parsed.Diagnostics.ShouldBeEmpty();
+        var query = parsed.SqlExpression.ShouldBeOfType<SqlSelectExpression>();
+        // Act
+        string rendered = SqlExpressionRenderer.Render(query);
+        var restored = (SqlQueryStatement)new SqlQueryParser().Parse(rendered + ";");
+        // Assert
+        rendered.ShouldBe(expected);
+        restored.Diagnostics.ShouldBeEmpty();
+        SqlTreeDump.Dump(restored.SqlExpression.ShouldBeOfType<SqlSelectExpression>()).ShouldBe(SqlTreeDump.Dump(query));
     }
 
     /// <summary>Restricts select-list ordinal syntax to ORDER BY.</summary>
@@ -125,6 +162,7 @@ public sealed class SqlOrderByParserTests
     /// <summary>Preserves supported subquery composition and identifiers near ordering boundaries.</summary>
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Language] - ORDER BY: Keeps supported subqueries and ordinary names")]
     [InlineData("SELECT nulls AS first FROM t ORDER BY nulls;")]
+    [InlineData("SELECT nulls, first, last FROM t ORDER BY last;")]
     [InlineData("SELECT age AS years FROM t WHERE id IN (SELECT id AS local_id FROM u ORDER BY local_id LIMIT 2) ORDER BY years;")]
     [InlineData("SELECT age AS years FROM t WHERE EXISTS (SELECT id FROM u ORDER BY 1 DESC LIMIT 1) ORDER BY 1;")]
     [InlineData("SELECT age, (SELECT MAX(id) FROM u) AS greatest FROM t ORDER BY greatest, age;")]
@@ -137,7 +175,7 @@ public sealed class SqlOrderByParserTests
         statement.Diagnostics.ShouldNotContain(item => item.Severity == DiagnosticSeverity.Error);
     }
 
-    /// <summary>Retains ordering syntax; the planner's bindings decide the shared #1112 pin.</summary>
+    /// <summary>Retains derived output ordering syntax for ordinary alias and ordinal binding.</summary>
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Language] - ORDER BY: Retains derived output keys for binding")]
     [InlineData("SELECT q.years FROM (SELECT age AS years FROM t) q ORDER BY years;")]
     [InlineData("SELECT q.years FROM (SELECT age AS years FROM t) q ORDER BY 1;")]

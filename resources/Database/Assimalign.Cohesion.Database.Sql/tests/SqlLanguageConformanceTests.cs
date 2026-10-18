@@ -487,15 +487,17 @@ public sealed class SqlLanguageConformanceTests
             expression => expression is SqlSelectExpression { GroupBy.Count: 1 }, [[false, 1L, 36m], [true, 2L, 86m]]),
         [SqlClauses.Having] = Query("SELECT age > 40, COUNT(*), SUM(age) FROM t WHERE age > 35 GROUP BY age > 40 HAVING SUM(age) > 50;",
             expression => expression is SqlSelectExpression { Having: not null }, [[true, 2L, 86m]]),
-        [SqlClauses.OrderBy] = new("SELECT id, age AS years FROM ordering_rows ORDER BY years + 1 ASC, 1 DESC;", _orderingSeed,
-            expression => expression is SqlSelectExpression { OrderBy.Count: 2 },
+        [SqlClauses.OrderBy] = new("SELECT id, age AS years FROM ordering_rows ORDER BY years + 1 ASC NULLS LAST, 1 DESC;",
+            ["CREATE TABLE ordering_rows (id INT PRIMARY KEY, age INT);",
+             "INSERT INTO ordering_rows VALUES (40, 20), (10, NULL), (50, 20), (20, NULL), (30, 10);"],
+            expression => expression is SqlSelectExpression { OrderBy.Count: 2 } select && select.OrderBy[0].NullPlacement == SqlNullPlacement.Last,
             async (session, result) =>
             {
-                object?[][] expected = [[30, 10], [10, 10], [50, 20], [40, 20], [20, 30]];
-                RequireReordering(await RowsAsync(session, "SELECT id, age FROM ordering_rows;"), _orderingInsertionRows, expected);
+                object?[][] expected = [[30, 10], [50, 20], [40, 20], [20, null], [10, null]];
+                RequireReordering(await RowsAsync(session, "SELECT id, age FROM ordering_rows;"),
+                    [[40, 20], [10, null], [50, 20], [20, null], [30, 10]], expected);
                 CheckRows(await ReadRowsAsync(result), expected);
-                // Retain the previous verified source-expression subset beside the restored forms.
-                await ExpectRowsAsync(session, "SELECT id, age FROM ordering_rows ORDER BY age + 1 ASC, id DESC;", expected);
+                await ExpectRowsAsync(session, "SELECT id, age FROM ordering_rows ORDER BY age + 1 ASC NULLS LAST, id DESC;", expected);
             }),
         [SqlClauses.Limit] = Query("SELECT id FROM t ORDER BY id LIMIT 2;", expression => expression is SqlSelectExpression { LimitSyntaxKind: SqlLimitSyntaxKind.Limit },
             [[1], [2]]),

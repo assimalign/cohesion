@@ -133,8 +133,9 @@ internal sealed record SqlBoundKey(SqlBoundExpression Value, SqlBoundCollation C
 /// <summary>One bound <c>ORDER BY</c> key.</summary>
 /// <param name="Key">The bound key, over the source row, or over the row extended by the completed outputs when the plan orders by them.</param>
 /// <param name="IsDescending">Whether the key sorts descending.</param>
+/// <param name="NullsFirst">True when NULL sorts before non-NULL values; binding resolves the default placement.</param>
 /// <param name="Collation">The collation the key's values compare under.</param>
-internal sealed record SqlBoundOrdering(SqlBoundExpression Key, bool IsDescending, SqlBoundCollation Collation);
+internal sealed record SqlBoundOrdering(SqlBoundExpression Key, bool IsDescending, bool NullsFirst, SqlBoundCollation Collation);
 
 /// <summary>One projected output column of a SELECT.</summary>
 /// <param name="Name">The output column name (alias, column name, or a synthesized name).</param>

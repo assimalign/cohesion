@@ -484,18 +484,18 @@ public sealed partial class SqlQueryParser
             Advance(ref lexer);
         }
 
+        var nullPlacement = SqlNullPlacement.Default;
         if (!IsAtEnd(ref lexer) && lexer.Current.Type is TokenType.Identifier or TokenType.Keyword &&
             CurrentText(ref lexer).Equals("NULLS", StringComparison.OrdinalIgnoreCase) &&
-            TryPeekToken(lexer, out string placement, out int end) &&
+            TryPeekToken(lexer, out string placement, out _) &&
             (placement.Equals("FIRST", StringComparison.OrdinalIgnoreCase) ||
              placement.Equals("LAST", StringComparison.OrdinalIgnoreCase)))
         {
-            AddUnsupportedSurfaceDiagnostic(lexer.Current.Position, end,
-                "SQL ORDER BY NULLS FIRST and NULLS LAST are not supported; NULL sorts first in ASC and last in DESC.");
+            nullPlacement = placement.Equals("FIRST", StringComparison.OrdinalIgnoreCase) ? SqlNullPlacement.First : SqlNullPlacement.Last;
             Advance(ref lexer);
             Advance(ref lexer);
         }
 
-        return new SqlOrderByColumn(expr, isDescending);
+        return new SqlOrderByColumn(expr, isDescending, nullPlacement);
     }
 }

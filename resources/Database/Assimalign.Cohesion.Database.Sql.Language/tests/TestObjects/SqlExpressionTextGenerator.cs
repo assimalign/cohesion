@@ -71,7 +71,7 @@ internal sealed class SqlExpressionTextGenerator
         }
         int rootPaging = _random.Next(4);
         return builder.Append(rootPaging == 3 ? " SELECT TOP 2 x, y FROM " : " SELECT x, y FROM ").Append(names[count - 1])
-            .Append(" ORDER BY x DESC").Append(Paging(rootPaging)).ToString();
+            .Append(" ORDER BY x DESC").Append(Pick("", " NULLS FIRST", " NULLS LAST")).Append(Paging(rootPaging)).ToString();
     }
 
     private string Paging(int kind) => kind switch
