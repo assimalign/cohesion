@@ -187,6 +187,7 @@ internal sealed partial class SqlPlanExecutor
             if (declaring)
             {
                 SqlPlanner.ValidateExpression(expression, scope);
+                SqlPlanner.ValidateDefaultType(expression, scope, column.Type.Type, column.Name);
             }
             return new SqlBoundDefault(scope.Bind(expression), column);
         }

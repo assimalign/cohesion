@@ -8,6 +8,7 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Database.Execution;
+using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Sql.Schema;
 using Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Types;
@@ -135,7 +136,9 @@ public sealed class SqlAlterTableExecutionTests
         await ExecuteAsync(session, "ALTER TABLE t ALTER stored DROP NOT NULL");
         await ExecuteAsync(session, "UPDATE t SET stored = NULL");
         (await RowsAsync(session, "SELECT IS_NULLABLE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 't' AND COLUMN_NAME = 'stored'"))[0][0].ShouldBe("YES");
-        await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "ALTER TABLE t ALTER id DROP NOT NULL"));
+        var error = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "ALTER TABLE t ALTER id DROP NOT NULL"));
+        error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "SQL0003");
+        error.Message.ShouldContain("Conflicting NULL/NOT NULL declarations for column 'id'.", Case.Sensitive);
     }
 
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - ALTER identity: SET DEFAULT and DROP NOT NULL name the protected column")]
@@ -217,12 +220,12 @@ public sealed class SqlAlterTableExecutionTests
     }
 
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - RENAME: collisions leave definition and generation unchanged")]
-    [InlineData("ALTER TABLE t RENAME TO u")]
-    [InlineData("ALTER TABLE t RENAME TO t")]
-    [InlineData("ALTER TABLE t RENAME a TO a")]
-    [InlineData("ALTER TABLE t RENAME a TO b")]
-    [InlineData("ALTER TABLE INFORMATION_SCHEMA.t RENAME TO TABLES")]
-    public async Task ExecuteAsync_Collision_ShouldLeaveCatalogUnchanged(string sql)
+    [InlineData("ALTER TABLE t RENAME TO u", "COHSQLE013", "Table 'dbo.u' already exists.")]
+    [InlineData("ALTER TABLE t RENAME TO t", "COHSQLE013", "Table 'dbo.t' already exists.")]
+    [InlineData("ALTER TABLE t RENAME a TO a", "COHSQLE013", "Column 'a' already exists on 't'.")]
+    [InlineData("ALTER TABLE t RENAME a TO b", "COHSQLE013", "Column 'b' already exists on 't'.")]
+    [InlineData("ALTER TABLE INFORMATION_SCHEMA.t RENAME TO TABLES", "COHSQLE021", "System view 'INFORMATION_SCHEMA.TABLES' is read-only.")]
+    public async Task ExecuteAsync_Collision_ShouldLeaveCatalogUnchanged(string sql, string code, string message)
     {
         // Arrange
         await using var engine = SqlDatabaseEngine.Create("rename-collision", new SqlDatabaseEngineOptions());
@@ -234,7 +237,9 @@ public sealed class SqlAlterTableExecutionTests
         ulong generation = database.Catalog.DdlGeneration;
 
         // Act / Assert
-        await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, sql));
+        var error = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, sql));
+        error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == code);
+        error.Message.ShouldContain(message, Case.Sensitive);
         database.Catalog.DdlGeneration.ShouldBe(generation);
         await ExecuteAsync(session, "INSERT INTO t VALUES (1, 2)");
         (await RowsAsync(session, "SELECT * FROM t"))[0].ShouldBe(new object?[] { 1, 2 });
@@ -325,6 +330,136 @@ public sealed class SqlAlterTableExecutionTests
         database.Catalog.TryGetTable("my schema", "next table", out var table).ShouldBeTrue();
         table.Constraints.Single().CheckExpression!.ShouldContain("'old name'", Case.Sensitive);
         table.FindColumn("label")!.DefaultLiteral.ShouldBe("'old name'");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - SET DEFAULT: incompatible function result refuses before publication")]
+    public async Task ExecuteAsync_IncompatibleFunctionDefault_ShouldRetainDefaultAndGeneration()
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("alter-function-type", new SqlDatabaseEngineOptions());
+        var database = await engine.CreateDatabaseAsync("db", cancellationToken: CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecuteAsync(session, "CREATE FUNCTION wrong_type() RETURNS DATE IMMUTABLE RETURN DATE '2024-01-01'");
+        await ExecuteAsync(session, "CREATE TABLE t(id INT, v INT DEFAULT 7)");
+        database.Catalog.TryGetTable("dbo", "t", out var before).ShouldBeTrue();
+        ulong generation = database.Catalog.DdlGeneration;
+
+        // Act
+        var error = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "ALTER TABLE t ALTER v SET DEFAULT wrong_type()"));
+
+        // Assert
+        error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE013");
+        error.Message.ShouldContain("Column 'v': DEFAULT result type Date is incompatible with column type Int32.", Case.Sensitive);
+        database.Catalog.TryGetTable("dbo", "t", out var after).ShouldBeTrue();
+        after.ShouldBeSameAs(before);
+        after.FindColumn("v")!.DefaultLiteral.ShouldBe("7");
+        database.Catalog.DdlGeneration.ShouldBe(generation);
+        await ExecuteAsync(session, "INSERT INTO t(id) VALUES (1)");
+        (await RowsAsync(session, "SELECT v FROM t"))[0][0].ShouldBe(7);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - ALTER domain DEFAULT: DROP inherits and explicit NULL survives reopen")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Restart_DomainDefaultFacets_ShouldInheritAndPreserveNullOverride(bool notNull)
+    {
+        // Arrange
+        var storage = new CrashCaptureSqlStorageStrategy();
+        await using (var engine = SqlDatabaseEngine.Create("alter-domain-default", new SqlDatabaseEngineOptions { StorageStrategy = storage }))
+        {
+            var database = await engine.CreateDatabaseAsync("db", cancellationToken: CancellationToken.None);
+            await using var session = await database.CreateSessionAsync(CancellationToken.None);
+            await ExecuteAsync(session, "CREATE DOMAIN d AS INT DEFAULT 7 " + (notNull ? "NOT NULL" : ""));
+            await ExecuteAsync(session, "CREATE TABLE t(id INT)");
+            await ExecuteAsync(session, "INSERT INTO t VALUES (1)");
+            await ExecuteAsync(session, "ALTER TABLE t ADD v d DEFAULT 9");
+
+            // Act
+            await ExecuteAsync(session, "ALTER TABLE t ALTER v DROP DEFAULT");
+            await ExecuteAsync(session, "INSERT INTO t(id) VALUES (2)");
+            await ExecuteAsync(session, "ALTER TABLE t ALTER v SET DEFAULT NULL");
+
+            // Assert
+            database.Catalog.TryGetTable("dbo", "t", out var table).ShouldBeTrue();
+            table.FindColumn("v")!.DefaultLiteral.ShouldBe("NULL");
+            table.FindColumn("v")!.MissingValueLiteral.ShouldBe("9");
+            (await RowsAsync(session, "SELECT v FROM t ORDER BY id")).Select(row => row[0]).ShouldBe(new object?[] { 9, 7 });
+            if (notNull) { await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "INSERT INTO t(id) VALUES (3)")); }
+            else { await ExecuteAsync(session, "INSERT INTO t(id) VALUES (3)"); }
+        }
+        await using var reopened = SqlDatabaseEngine.Create("alter-domain-default-reopen", new SqlDatabaseEngineOptions { StorageStrategy = storage.CaptureDurableImages() });
+        var restored = await reopened.OpenDatabaseAsync("db", CancellationToken.None);
+        await using var reader = await restored.CreateSessionAsync(CancellationToken.None);
+        restored.Catalog.TryGetTable("dbo", "t", out var restoredTable).ShouldBeTrue();
+        restoredTable.FindColumn("v")!.DefaultLiteral.ShouldBe("NULL");
+        restoredTable.FindColumn("v")!.MissingValueLiteral.ShouldBe("9");
+        if (notNull) { await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(reader, "INSERT INTO t(id) VALUES (4)")); }
+        else
+        {
+            await ExecuteAsync(reader, "INSERT INTO t(id) VALUES (4)");
+            (await RowsAsync(reader, "SELECT v FROM t WHERE id = 4"))[0][0].ShouldBeNull();
+        }
+        await ExecuteAsync(reader, "ALTER TABLE t ALTER v DROP DEFAULT");
+        await ExecuteAsync(reader, "INSERT INTO t(id) VALUES (5)");
+        (await RowsAsync(reader, "SELECT v FROM t WHERE id = 5"))[0][0].ShouldBe(7);
+        (await RowsAsync(reader, "SELECT v FROM t WHERE id = 1"))[0][0].ShouldBe(9);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - RENAME: persisted deep CHECKs use the ceiling WHERE carrier")]
+    public async Task Restart_DeepCheckRenames_ShouldPreserveAndEnforceDefinition()
+    {
+        // Arrange
+        using var stack = new SqlDepthTestThread(16 * 1024);
+        void ExecuteOnStack(SqlDatabaseSession session, string sql)
+            => stack.Run(() => { ExecuteAsync(session, sql).GetAwaiter().GetResult(); return true; }).Failure.ShouldBeNull();
+        var storage = new CrashCaptureSqlStorageStrategy();
+        await using (var engine = SqlDatabaseEngine.Create("rename-deep", new SqlDatabaseEngineOptions { StorageStrategy = storage, ExpressionNestingLimit = 1024 }))
+        {
+            var database = await engine.CreateDatabaseAsync("db", cancellationToken: CancellationToken.None);
+            await using var session = await database.CreateSessionAsync(CancellationToken.None);
+            string predicate = string.Concat(Enumerable.Repeat("t.a + (", 300)) + "t.a" + new string(')', 300) + " > 0";
+            ExecuteOnStack(session, $"CREATE TABLE t(a INT, b INT, CONSTRAINT ck CHECK ({predicate}))");
+            ExecuteOnStack(session, "INSERT INTO t VALUES (1, 2)");
+
+            // Act
+            ExecuteOnStack(session, "ALTER TABLE t RENAME TO u");
+            ExecuteOnStack(session, "ALTER TABLE u RENAME a TO c");
+        }
+        // Assert: an engine using the default admission limit also rewrites the persisted CHECK.
+        await using var reopened = SqlDatabaseEngine.Create("rename-deep-reopen", new SqlDatabaseEngineOptions { StorageStrategy = storage.CaptureDurableImages() });
+        var (restored, failure) = stack.Run(() => reopened.OpenDatabaseAsync("db", CancellationToken.None).GetAwaiter().GetResult());
+        failure.ShouldBeNull();
+        await using var reader = await restored!.CreateSessionAsync(CancellationToken.None);
+        ExecuteOnStack(reader, "ALTER TABLE u RENAME b TO d");
+        ExecuteOnStack(reader, "ALTER TABLE u RENAME TO v");
+        (await RowsAsync(reader, "SELECT c, d FROM v"))[0].ShouldBe(new object?[] { 1, 2 });
+        stack.Run(() => { ExecuteAsync(reader, "INSERT INTO v VALUES (-1, 2)").GetAwaiter().GetResult(); return true; }).Failure.ShouldBeOfType<SqlConstraintViolationException>();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - RENAME: all republished children bind before their next write")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExecuteAsync_RenameParent_ShouldBindEveryPublishedChild(bool column)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("rename-child-bind", new SqlDatabaseEngineOptions());
+        var database = await engine.CreateDatabaseAsync("db", cancellationToken: CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecuteAsync(session, "CREATE TABLE p(id INT PRIMARY KEY)");
+        await ExecuteAsync(session, "CREATE TABLE c1(id INT REFERENCES p(id), v INT DEFAULT ABS(-1), CHECK (v > 0))");
+        await ExecuteAsync(session, "CREATE TABLE c2(id INT REFERENCES p(id), v INT DEFAULT ABS(-2), CHECK (v > 0))");
+        await ExecuteAsync(session, "INSERT INTO p VALUES (1)");
+        long before = database.Definitions.BindCount;
+
+        // Act
+        await ExecuteAsync(session, column ? "ALTER TABLE p RENAME id TO k" : "ALTER TABLE p RENAME TO q");
+        long after = database.Definitions.BindCount;
+        await ExecuteAsync(session, "INSERT INTO c1(id) VALUES (1)");
+        await ExecuteAsync(session, "INSERT INTO c2(id) VALUES (1)");
+
+        // Assert
+        after.ShouldBeGreaterThanOrEqualTo(before + 3);
+        database.Definitions.BindCount.ShouldBe(after);
     }
 
     internal static async Task SeedRenameAsync(SqlDatabaseSession session)

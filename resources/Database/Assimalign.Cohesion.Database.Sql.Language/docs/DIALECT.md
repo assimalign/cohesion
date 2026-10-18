@@ -515,7 +515,9 @@ the script; historical targets are forward-only and cannot be silently rewritten
 Renames preserve object IDs, physical column ordinals, row versions and index trees. Index
 column lists, primary keys, local and incoming/self-referencing FKs and CHECK definitions
 change together in one catalog transaction. Generated constraint and index names stay unchanged.
-CHECK rewriting replaces only column-reference identifier tokens in its single-table scope;
+CHECK rewriting parses stored text in the WHERE carrier at the persisted-definition ceiling,
+including definitions created under a raised nesting limit. It replaces only column-reference
+identifier tokens in its single-table scope;
 strings, function names, type names and collations retain their meaning. Persisted DEFAULTs
 have no column scope; SQL function bodies bind their own parameters and cannot contain table
 subqueries. They therefore require no table-name rewrite. There are no stored view queries on
@@ -523,12 +525,18 @@ this base; #1124 owns their dependency guard. INFORMATION_SCHEMA and COHESION_SC
 the published names and facets immediately. A query using an old name reports an unknown object.
 
 SET DEFAULT accepts the same literal, signed/typed literal and scalar-function-call forms as
-CREATE TABLE on this base. Conversion and bounds are checked before publication; broader
-expression defaults remain #1121. DROP DEFAULT affects later omitted-column writes. A NOT NULL
+CREATE TABLE on this base. Function result types must satisfy INSERT assignment compatibility
+(COHSQLE013 naming the column, before any metadata change; PostgreSQL heap.c:3409). Literal
+conversion and bounds are checked before publication; broader expression defaults remain #1121.
+DROP DEFAULT re-inherits a domain default, and SET DEFAULT NULL persists an explicit NULL override
+when the domain has a default (rewriteHandler.c:1305-1313; heap.c:2466-2475).
+DROP DEFAULT affects later omitted-column writes. A NOT NULL
 column without a default requires an explicit value. Neither action changes old rows: ADD
 COLUMN freezes its missing value once, including NULL when it had no default. An old row still
 reads that value after changing/dropping the insert default and after restart. Explicit stored
-NULL stays NULL. This is PostgreSQL's separate missing attribute value
+NULL stays NULL. A later column narrowing validates and binds the frozen literal under the new
+type before publication, even with no live rows; an unconvertible literal refuses the change
+with a coded error naming the column. This is PostgreSQL's separate missing attribute value
 (src/backend/access/common/heaptuple.c:151-180) and column-default operation
 (src/backend/commands/tablecmds.c:8201-8268).
 
@@ -542,7 +550,11 @@ replacement, so queued DML retries consistently.
 The target lock precedes incoming-child Exclusive locks sorted by ObjectId. Related DDL may
 form a cycle; the existing lock manager aborts a victim and releases its locks so a retry succeeds.
 DML bound before a same-name change fails with "changed while the statement was waiting";
-a queued writer behind RENAME TO reports the old table does not exist. Every action retains
+a queued writer behind RENAME TO reports the old table does not exist. Lock-free SELECT planning
+checks the DDL generation around table and index binding, including joins; an overlapping
+publication discards the plan or binding error and retries before execution.
+Name collisions report COHSQLE013 naming the conflicting table or column; PK DROP NOT NULL
+reports SQL0003 naming the column. Every action retains
 schema ownership checks and is refused with COHSQLT003 inside an explicit transaction; that
 failure leaves the transaction usable. SQL record-space format 17 and table extension 6 persist
 the split. Earlier formats are refused; there is no compatibility reader or upgrade path.
@@ -2419,7 +2431,8 @@ with the same name. Type aliases and function-name casing do not change that ide
 CREATE TABLE defaults additionally admit column-free scalar function calls, bound once and
 executed for each omitted value. Domain defaults, ADD COLUMN, typed DefaultSql and SDK defaults
 remain literal-only. ADD COLUMN retains the existing missing-tail representation; a volatile
-expression there would change historical rows on each read. ALTER cannot change defaults.
+expression there would change historical rows on each read. ALTER SET/DROP DEFAULT changes only
+the insert default, as specified under ALTER TABLE renames and column facets.
 
 | Code | Meaning |
 | --- | --- |

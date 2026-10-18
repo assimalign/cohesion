@@ -28,6 +28,7 @@ internal sealed partial class SqlPlanner
     private const string insertValuesClause = "INSERT ... VALUES";
 
     private readonly SqlCatalog _catalog;
+
     private readonly SqlStatementMetrics? _statementMetrics;
     private readonly IReadOnlyDictionary<string, object?>? _parameters;
     private readonly CancellationToken _cancellationToken;
@@ -54,7 +55,36 @@ internal sealed partial class SqlPlanner
         _functions = functions ?? SqlFunctionEnvironment.Standard;
     }
 
+    private SqlPlanner(SqlPlanner previous)
+        : this(previous._catalog, previous._parameters, previous._functions, previous._cancellationToken)
+    {
+        _statementMetrics = previous._statementMetrics;
+    }
+
     internal SqlPlan Plan(SqlQueryExpression expression)
+    {
+        var planner = this;
+        while (true)
+        {
+            _cancellationToken.ThrowIfCancellationRequested();
+            ulong generation = _catalog.DdlGeneration;
+            try
+            {
+                var plan = planner.PlanOnce(expression);
+                if (_catalog.DdlGeneration == generation) { return plan; }
+            }
+            catch (DatabaseException) when (_catalog.DdlGeneration != generation)
+            {
+                // A concurrent publication may pair an old table with new index key names.
+                // Discard both successful and failed mixed-generation plans before execution.
+            }
+            // Fresh per-plan state includes scopes, CTEs and subquery slots. Stable planning
+            // allocates no catalog capture and retains the stored-query allocation budget.
+            planner = new SqlPlanner(this);
+        }
+    }
+
+    private SqlPlan PlanOnce(SqlQueryExpression expression)
     {
         try
         {
@@ -1008,8 +1038,20 @@ internal sealed partial class SqlPlanner
             var scope = new SqlExpressionEvaluator([], null, defaultCollation: _catalog.DefaultCollation, functions: _functions, cancellationToken: _cancellationToken);
             SqlPersistedExpression.Bind(expression, scope);
             ValidateExpression(expression, scope);
+            ValidateDefaultType(expression, scope, type.Storage.Type, columnName);
         }
         return SqlPersistedExpression.Canonicalize(expression, $"DEFAULT of column '{columnName}' on table '{table}'");
+    }
+
+    // PostgreSQL heap.c:3409 admits defaults with the same assignment coercion as INSERT.
+    internal static void ValidateDefaultType(SqlExpression expression, SqlExpressionEvaluator scope, DatabaseType target, string column)
+    {
+        var source = scope.StaticTypeOf(expression);
+        if (!CanAssignInsertType(source, target))
+        {
+            throw new SqlPlanningException("COHSQLE013", string.Format(CultureInfo.CurrentCulture,
+                ErrorMessages.DefaultTypeIncompatible, column, source, target), expression.Location);
+        }
     }
 
     private IReadOnlyList<string> DefaultCalls(string? text)
@@ -1112,9 +1154,20 @@ internal sealed partial class SqlPlanner
         {
             throw new SqlPlanningException("SQL0003", string.Format(CultureInfo.CurrentCulture, ErrorMessages.ColumnNullabilityConflict, name));
         }
+        var type = SqlType.ForStorage(previous.Type);
+        if ((value is not null || dropDefault) && previous.DomainName is { } domainName)
+        {
+            if (!_functions.Types.TryGetDomain(domainName, out var domain))
+            {
+                throw SqlEvaluationException.UnknownType(domainName, $"Column '{name}'");
+            }
+            type = domain;
+        }
+        // Removing the column override re-inherits the domain default (rewriteHandler.c:1311).
+        // A NULL override remains explicit when it hides a domain default (heap.c:2466-2475).
         string? text = value is not null
-            ? ResolveDefaultLiteral(value, SqlType.ForStorage(previous.Type), name, $"{table.Schema}.{table.Name}")
-            : dropDefault ? null : previous.DefaultLiteral;
+            ? ResolveDefaultLiteral(value, type, name, $"{table.Schema}.{table.Name}")
+            : dropDefault ? type.DefaultLiteral : previous.DefaultLiteral;
         return new SqlAlterColumnPlan(table, new SqlCatalogColumn(previous.Name, previous.Type, nullable ?? previous.IsNullable,
             text, previous.Collation, previous.DomainName, value is not null ? DefaultCalls(text) : dropDefault ? [] : previous.DefaultFunctionCalls,
             previous.Identity, previous.MissingValueLiteral), AllowDefaultChange: value is not null || dropDefault);

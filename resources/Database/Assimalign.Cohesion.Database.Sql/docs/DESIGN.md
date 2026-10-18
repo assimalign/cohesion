@@ -2180,10 +2180,16 @@ declared dialect and retain their existing unsupported-clause diagnostics.
 
 SET/DROP NOT NULL reuse the full-definition column executor, retaining live-row validation,
 PK/identity protection and one replacement publication. SET/DROP DEFAULT share CREATE's
-admission and conversion path, including signed/typed literals and scalar function calls;
+admission and conversion path, including signed/typed literals and scalar function calls.
+Function results satisfy INSERT's assignment rule before publication (COHSQLE013 naming the
+column; PostgreSQL heap.c:3409). Facets resolve the column's actual domain: DROP re-inherits its
+default and explicit NULL keeps the override marker (rewriteHandler.c:1305-1313; heap.c:2466-2475);
 only these facet plans permit a default change. The immutable column carries both its current
 insert default and a frozen missing-value literal. ADD captures the latter, and every subsequent
-replacement preserves it. SqlBoundTable binds separate default and missing-value arrays;
+replacement preserves it. A type narrowing validates the frozen literal even when no live rows
+remain, then binds it under the replacement type in the same DDL publication; a conversion
+failure is coded and names the column. Retained invisible versions therefore still decode.
+SqlBoundTable binds separate default and missing-value arrays;
 all row decode paths use the frozen array. Reads never run an insert-time function default.
 
 Rename takes the target Exclusive lock, then incoming child Exclusive locks in ObjectId order,
@@ -2194,7 +2200,15 @@ transaction, then publish the complete cache directory and generation. IDs, phys
 rows, identity counters and physical index registrations remain stable. Generated object names
 stay unchanged. Table-name changes with retained declared-script object claims refuse with
 COHSQLD002 naming the script, preserving forward-only receipt verification. CHECK column-reference tokens are rewritten and canonically rendered/rebound
-before commit; strings and function/type/collation names are untouched. DEFAULTs bind without
+before commit, using the WHERE carrier and CeilingParserOptions for every persisted CHECK.
+Strings and function/type/collation names are untouched. Every republished child version is bound
+before the DDL returns. Name collisions report COHSQLE013 with the conflicting name.
+The planner brackets the complete binding pass with the catalog's DDL generation, including
+nested queries, joins and EXPLAIN. If publication overlaps planning, it discards the plan or its
+binding error and retries with fresh scopes, CTE state and subquery slots before execution.
+Stable planning allocates no catalog capture, preserving the stored-query allocation budget.
+The system views retain their separate transaction-time snapshot. A lock-free SELECT racing
+a rename therefore uses one generation of table and index metadata. DEFAULTs bind without
 column scope and function bodies bind only parameters; persisted row expressions exclude table
 subqueries, so this base has no dependent canonical FROM text. Future views add their guard in
 #1124. SQL format 17 / table extension 6 persist the default/missing split without a legacy reader.

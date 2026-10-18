@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Text;
 using System.Threading;
@@ -26,7 +27,20 @@ internal sealed partial class SqlPlanExecutor
         }
         await AcquireObjectLockAsync(statement, plan.Table.Schema, plan.Table.Name, "ALTER TABLE RENAME", cancellationToken).ConfigureAwait(false);
         EnsureCurrentDefinition(plan.Table);
-        if (plan.ColumnName is not null) { FindColumnOrdinal(plan.Table, plan.ColumnName); }
+        if (plan.ColumnName is not null)
+        {
+            FindColumnOrdinal(plan.Table, plan.ColumnName);
+            if (plan.Table.FindColumn(plan.NewName) is not null)
+            {
+                throw new SqlPlanningException("COHSQLE013", string.Format(CultureInfo.CurrentCulture,
+                    ErrorMessages.RenameColumnCollision, plan.NewName, plan.Table.Name));
+            }
+        }
+        else if (_catalog.TryGetTable(plan.Table.Schema, plan.NewName, out _))
+        {
+            throw new SqlPlanningException("COHSQLE013", string.Format(CultureInfo.CurrentCulture,
+                ErrorMessages.RenameTableCollision, plan.Table.Schema, plan.NewName));
+        }
         if (plan.ColumnName is null)
         {
             // Forward-only script receipts retain authored targets; changing those historical
@@ -59,10 +73,6 @@ internal sealed partial class SqlPlanExecutor
         string RenameColumn(string name) => plan.ColumnName is not null && string.Equals(name, plan.ColumnName, StringComparison.OrdinalIgnoreCase) ? plan.NewName : name;
         var columns = plan.Table.Columns.Select(column => new SqlCatalogColumn(RenameColumn(column.Name), column.Type,
             column.IsNullable, column.DefaultLiteral, column.Collation, column.DomainName, column.DefaultFunctionCalls, column.Identity, column.MissingValueLiteral)).ToArray();
-        if (columns.Select(column => column.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count() != columns.Length)
-        {
-            throw new SqlPlanningException("COHSQLE013", $"Column '{plan.NewName}' already exists on '{plan.Table.Name}'.");
-        }
         // Bind rewritten definitions before any mutation. Renaming never re-resolves a recorded call.
         foreach (var constraint in plan.Table.Constraints.Where(constraint => constraint.Kind == SqlCatalogConstraintKind.Check))
         {
@@ -80,6 +90,12 @@ internal sealed partial class SqlPlanExecutor
             : publication is null ? _catalog.RenameColumnAsync(plan.Table, plan.ColumnName, plan.NewName, checks, cancellationToken)
                 : _catalog.RenameColumnAsync(plan.Table, plan.ColumnName, plan.NewName, checks, publication, cancellationToken)).ConfigureAwait(false);
         _definitions.Get(updated, CancellationToken.None);
+        foreach (var child in children)
+        {
+            // The catalog republishes each incoming FK owner in the same commit.
+            _catalog.TryGetTable(child.Schema, child.Name, out var published);
+            _definitions.Get(published, CancellationToken.None);
+        }
         return new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0);
     }
 
@@ -87,11 +103,11 @@ internal sealed partial class SqlPlanExecutor
     {
         // Re-lex only column-reference nodes in the CHECK's single-table scope. Names used as
         // functions, types, collations or literal contents are never candidates for replacement.
-        const string prefix = "SELECT ";
+        const string prefix = "SELECT * FROM __cohesion_expression WHERE ";
         string source = prefix + constraint.CheckExpression!;
-        var select = (SqlSelectExpression)SqlQueryRequest.FromSql(source).Statement.SqlExpression;
+        var select = (SqlSelectExpression)SqlQueryRequest.FromSql(source, null, SqlQueryRequest.CeilingParserOptions).Statement.SqlExpression;
         var replacements = new SortedDictionary<int, (int Length, string Text)>();
-        Visit(select.Columns[0].Expression);
+        Visit(select.Where!);
         var result = new StringBuilder(source);
         foreach (var (start, replacement) in replacements.Reverse())
         {

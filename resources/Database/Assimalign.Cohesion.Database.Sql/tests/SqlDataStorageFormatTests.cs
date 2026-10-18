@@ -65,7 +65,7 @@ public sealed class SqlDataStorageFormatTests : IDisposable
     }
 
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Data-storage format: a new database is created on format 17 and reopens (#1099, #1194, #1241, E3)")]
-    public async Task Create_NewDatabase_ShouldBeOnFormatSixteenAndReopen()
+    public async Task Create_NewDatabase_ShouldBeOnFormatSeventeenAndReopen()
     {
         // Arrange + Act: create, write temporal keys, close.
         await CreateDatabaseAsync(formatVersion: null);
