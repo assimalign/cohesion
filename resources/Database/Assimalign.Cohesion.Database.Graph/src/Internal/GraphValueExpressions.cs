@@ -146,6 +146,82 @@ internal static class GraphValueExpressions
         return false;
     }
 
+    // Proof is stricter than MayReturn: every possible non-NULL result must have
+    // the same entity kind. Accesses retain this proof through projection boundaries.
+    internal static GraphEntityShape EntityShape(GqlExpression expression, Func<string, int, GraphEntityShape> variableShape,
+        int accesses, CancellationToken token)
+    {
+        var pending = new Stack<(GqlExpression Expression, int Depth, bool NonNull)>();
+        pending.Push((expression, accesses, false));
+        var kind = GraphProjectionKind.Scalar;
+        bool optional = false;
+        while (pending.TryPop(out var item))
+        {
+            token.ThrowIfCancellationRequested();
+            var (value, depth, nonNull) = item;
+            switch (value)
+            {
+                case GqlVariableExpression variable:
+                    if (!Merge(variableShape(variable.Variable, depth), nonNull)) { return default; }
+                    break;
+                case GqlPropertyExpression property:
+                    if (!Merge(variableShape(property.Variable, depth + 1), nonNull)) { return default; }
+                    break;
+                case GqlMemberExpression member:
+                    pending.Push((member.Operand, depth + 1, nonNull));
+                    break;
+                case GqlSubscriptExpression subscript:
+                    optional |= !nonNull;
+                    pending.Push((subscript.Operand, depth + 1, nonNull));
+                    break;
+                case GqlAggregateExpression { Function: GqlAggregateFunction.CollectList, Operand: { } operand }:
+                    if (depth == 0) { return default; }
+                    // COLLECT omits NULL operands, but retains NULLs inside a collected list.
+                    pending.Push((operand, depth - 1, nonNull || depth == 1));
+                    break;
+                case GqlAggregateExpression { Function: GqlAggregateFunction.Min or GqlAggregateFunction.Max, Operand: { } operand }:
+                    optional |= !nonNull;
+                    pending.Push((operand, depth, nonNull));
+                    break;
+                case GqlListExpression list:
+                    if (depth == 0 || list.Items.Count == 0) { return default; }
+                    foreach (var child in list.Items) { pending.Push((child, depth - 1, nonNull)); }
+                    break;
+                case GqlMapExpression map:
+                    if (depth == 0 || map.Entries.Count == 0) { return default; }
+                    optional |= !nonNull;
+                    foreach (var entry in map.Entries) { pending.Push((entry.Value, depth - 1, nonNull)); }
+                    break;
+                case GqlLiteralExpression { Value: null }:
+                    optional |= !nonNull;
+                    break;
+                case GqlCaseExpression conditional:
+                    optional |= conditional.Otherwise is null && !nonNull;
+                    foreach (var child in ResultChildren(value)) { pending.Push((child, depth, nonNull)); }
+                    break;
+                case GqlNullIfExpression nullIf:
+                    optional |= !nonNull;
+                    pending.Push((nullIf.Left, depth, nonNull));
+                    break;
+                case GqlCoalesceExpression coalesce:
+                    foreach (var child in coalesce.Operands) { pending.Push((child, depth, nonNull)); }
+                    break;
+                default:
+                    return default;
+            }
+        }
+        return new GraphEntityShape(kind, optional);
+
+        bool Merge(GraphEntityShape shape, bool nonNull)
+        {
+            if (shape.Kind is not (GraphProjectionKind.Node or GraphProjectionKind.Relationship) ||
+                kind != GraphProjectionKind.Scalar && kind != shape.Kind) { return false; }
+            kind = shape.Kind;
+            optional |= shape.Optional && !nonNull;
+            return true;
+        }
+    }
+
     // A missing/NULL element has no known scalar type. Mixed container/scalar
     // branches defer container validation to evaluation (COHDBG013).
     internal static bool IsKnownScalar(GqlExpression expression, IReadOnlyDictionary<string, object?>? parameters,

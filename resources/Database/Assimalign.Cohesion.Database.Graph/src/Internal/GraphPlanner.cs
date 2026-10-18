@@ -21,8 +21,12 @@ internal sealed record GraphProjectionPlan(GqlExpression Expression, string Name
     internal DatabaseType Type { get; init; }
     internal bool Optional { get; init; }
 }
-internal sealed record GraphStagePlan(GqlStage Stage, GraphPlan Plan);
-internal sealed record GraphBindingShape(bool[] Entities, bool[] Composites, bool[] Scalars, DatabaseType Type);
+internal sealed record GraphStagePlan(GqlStage Stage, GraphPlan Plan)
+{
+    internal GraphProjectionKind ElementKind { get; init; }
+}
+internal readonly record struct GraphEntityShape(GraphProjectionKind Kind, bool Optional);
+internal sealed record GraphBindingShape(bool[] Entities, bool[] Composites, bool[] Scalars, GraphEntityShape[] EntityKinds, DatabaseType Type);
 internal sealed record GraphDistinctPlan(IReadOnlyList<GraphProjectionPlan> Keys);
 internal sealed record GraphGroupingPlan(IReadOnlyList<GqlExpression> Keys, IReadOnlyList<GqlAggregateExpression> Aggregates, GraphGroupingScope Scope);
 internal sealed record GraphSortKeyPlan(GqlSortItem Item, int ProjectionIndex);
@@ -339,7 +343,10 @@ internal sealed partial class GraphPlanner
                     ? new GraphSortPagePlan(sortKeys.AsReadOnly(), offset, limit, groupedExpressions) : null,
                 Parameters = _parameters,
             };
-            planned.Add(new GraphStagePlan(stage, stagePlan));
+            planned.Add(new GraphStagePlan(stage, stagePlan)
+            {
+                ElementKind = stage is GqlForStage forStage ? ProjectionKind(new GqlVariableExpression(forStage.Variable)) : GraphProjectionKind.Scalar,
+            });
             if (stage is GqlDeleteStage deletion)
             {
                 foreach (string variable in deletion.Variables)
@@ -387,18 +394,24 @@ internal sealed partial class GraphPlanner
             var entities = new bool[GraphValueCodec.MaxDepth + 2];
             var composites = new bool[entities.Length];
             var scalars = new bool[entities.Length];
+            var kinds = new GraphEntityShape[entities.Length];
             for (int i = 0; i < entities.Length; i++)
             {
                 token.ThrowIfCancellationRequested();
                 entities[i] = MayReturn(expression, true, i + accesses);
                 composites[i] = MayReturn(expression, false, i + accesses);
+                kinds[i] = GraphValueExpressions.EntityShape(expression, (name, depth) =>
+                    shapes.TryGetValue(name, out var shape) && depth < shape.EntityKinds.Length ? shape.EntityKinds[depth]
+                    : depth == 0 && variables.TryGetValue(name, out var kind) && kind is BindingKind.Node or BindingKind.Relationship
+                        ? new GraphEntityShape(kind == BindingKind.Node ? GraphProjectionKind.Node : GraphProjectionKind.Relationship, !mandatoryVariables.Contains(name))
+                        : default, i + accesses, token);
                 scalars[i] = GraphValueExpressions.IsKnownScalar(expression, _parameters,
                     (name, depth) => shapes.TryGetValue(name, out var shape) ? depth < shape.Scalars.Length && shape.Scalars[depth]
                         : variables.TryGetValue(name, out var kind) && kind is BindingKind.Node or BindingKind.Relationship && depth == 1,
                     i + accesses);
                 if (!entities[i] && !composites[i]) { break; }
             }
-            return new GraphBindingShape(entities, composites, scalars, accesses == 0 ? ExpressionType(expression) : DatabaseType.Null);
+            return new GraphBindingShape(entities, composites, scalars, kinds, accesses == 0 ? ExpressionType(expression) : DatabaseType.Null);
         }
 
         DatabaseType ExpressionType(GqlExpression expression) => expression switch
@@ -413,13 +426,16 @@ internal sealed partial class GraphPlanner
             if (string.IsNullOrEmpty(variable) || variables.ContainsKey(variable))
             { throw new GraphPlanningException("COHDBG003", ErrorMessages.ValueBindingAlreadyBound, expression.Location); }
             var shape = Shape(expression, element ? 1 : 0);
-            var kind = element ? BindingKind.Value : ToBindingKind(ProjectionKind(expression));
+            // UNWIND declares the list's proven inner type (Neo4j Clause.scala:1723-1724).
+            var kind = ToBindingKind(element ? shape.EntityKinds[0].Kind : ProjectionKind(expression));
             deletedVariables.Remove(variable);
             variables.Add(variable, kind);
             shapes.Add(variable, shape);
             declarations.Add(variable);
             if (kind is BindingKind.Node or BindingKind.Relationship or BindingKind.Path) { boundVariables.Add(variable); }
-            if (expression is not GqlVariableExpression named || mandatoryVariables.Contains(named.Variable)) { mandatoryVariables.Add(variable); }
+            if (element && kind is BindingKind.Node or BindingKind.Relationship
+                ? !shape.EntityKinds[0].Optional
+                : expression is not GqlVariableExpression named || mandatoryVariables.Contains(named.Variable)) { mandatoryVariables.Add(variable); }
         }
 
         long? PageValue(GqlExpression? expression)

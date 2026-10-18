@@ -134,6 +134,58 @@ public sealed class GraphLinearCompositionWireTests
         harness.Server.Sessions.ShouldHaveSingleItem().Id.ShouldBe(sessionId);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Graph.Client] - FOR and UNWIND: proven entity kinds survive wire MATCH and DELETE")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task QueryAsync_EntityElements_ShouldCarryKindsAndPreserveSessionAsync(bool tcp)
+    {
+        // Arrange
+        await using var harness = await GraphClientTestHarness.StartAsync(tcp);
+        await using var connection = await harness.Client.ConnectAsync(harness.Token);
+        await connection.ExecuteAsync("INSERT (:P {name:'Alice'})-[:T {name:'AB'}]->(:P {name:'Bob'}), (:P {name:'Cara'})-[:T {name:'CD'}]->(:P {name:'Dan'})", cancellationToken: harness.Token);
+        var sessionId = harness.Server.Sessions.ShouldHaveSingleItem().Id;
+        // Act / Assert
+        foreach (string loop in new[] { "FOR n IN ns", "UNWIND ns AS n" })
+        {
+            foreach (string boundary in new[] { "WITH n", "RETURN n NEXT" })
+            {
+                foreach (string list in new[] { "collect(a)", "[a]" })
+                {
+                    string source = "MATCH (a:P) WITH " + list + " AS ns " + loop + " " + boundary + " MATCH (n) RETURN n.name ORDER BY n.name";
+                    (await connection.QueryAsync(source, cancellationToken: harness.Token)).Select(row => row[0]).ShouldBe(new object?[] { "Alice", "Bob", "Cara", "Dan" });
+                    (await connection.QueryAsync("EXPLAIN " + source, cancellationToken: harness.Token)).ShouldNotBeEmpty();
+                }
+                string edges = "MATCH ()-[r:T]->() WITH collect(r) AS ns " + loop + " " + boundary + " MATCH ()-[n]->() RETURN n.name ORDER BY n.name";
+                (await connection.QueryAsync(edges, cancellationToken: harness.Token)).Select(row => row[0]).ShouldBe(new object?[] { "AB", "CD" });
+                (await connection.QueryAsync("EXPLAIN " + edges, cancellationToken: harness.Token)).ShouldNotBeEmpty();
+            }
+        }
+        const string pathsSource = "MATCH (a:P) WITH collect(a) AS ns UNWIND ns AS n RETURN n NEXT MATCH (n) RETURN n";
+        var names = new List<object?>();
+        await foreach (var path in connection.QueryPathsAsync(pathsSource, cancellationToken: harness.Token))
+        { names.Add(path.Nodes.ShouldHaveSingleItem().Properties["name"]); }
+        names.OrderBy(name => name).ShouldBe(new object?[] { "Alice", "Bob", "Cara", "Dan" });
+        var gate = await Should.ThrowAsync<GraphClientException>(async () => await connection.QueryAsync(pathsSource, cancellationToken: harness.Token));
+        gate.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG001");
+        foreach (string source in new[] { "FOR n IN [1] WITH n DETACH DELETE n", "MATCH (a:P) WITH [a,1] AS ns UNWIND ns AS n MATCH (n) RETURN n.name" })
+        {
+            foreach (string prefix in new[] { "", "EXPLAIN " })
+            {
+                var error = await Should.ThrowAsync<GraphClientException>(async () => await connection.QueryAsync(prefix + source, cancellationToken: harness.Token));
+                error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG003");
+                (await connection.QueryAsync("RETURN 7", cancellationToken: harness.Token)).ShouldHaveSingleItem()[0].ShouldBe(7L);
+            }
+        }
+        const string deleteEdges = "MATCH ()-[r:T]->() WITH collect(r) AS ns UNWIND ns AS n RETURN n NEXT DELETE n";
+        const string deleteNodes = "MATCH (a:P) WITH collect(a) AS ns FOR n IN ns WITH n DETACH DELETE n";
+        (await connection.QueryAsync("EXPLAIN " + deleteEdges, cancellationToken: harness.Token)).ShouldNotBeEmpty();
+        (await connection.QueryAsync("EXPLAIN " + deleteNodes, cancellationToken: harness.Token)).ShouldNotBeEmpty();
+        (await connection.ExecuteAsync(deleteEdges, cancellationToken: harness.Token)).ShouldBe(2);
+        (await connection.ExecuteAsync(deleteNodes, cancellationToken: harness.Token)).ShouldBe(4);
+        (await connection.QueryAsync("MATCH (a:P) RETURN count(*)", cancellationToken: harness.Token)).ShouldHaveSingleItem()[0].ShouldBe(0L);
+        harness.Server.Sessions.ShouldHaveSingleItem().Id.ShouldBe(sessionId);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Graph.Client] - Composition: carried entities retain ExecutePaths gating and optionality")]
     [InlineData(false)]
     [InlineData(true)]

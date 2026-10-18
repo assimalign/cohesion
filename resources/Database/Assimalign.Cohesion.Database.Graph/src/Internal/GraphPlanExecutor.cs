@@ -91,6 +91,10 @@ internal static class GraphPlanExecutor
                         foreach (object? item in list)
                         {
                             token.ThrowIfCancellationRequested();
+                            var kind = plan.Stages[stageIndex].ElementKind;
+                            if (item is not null && (kind == GraphProjectionKind.Node && item is not GraphNode ||
+                                kind == GraphProjectionKind.Relationship && item is not GraphRelationship))
+                            { throw new GraphPlanningException("COHDBG013", ErrorMessages.EntityBindingRequired, loop.List.Location); }
                             var row = new Dictionary<string, object?>(binding, StringComparer.Ordinal) { [loop.Variable] = item };
                             AddBinding(expandedRows, row);
                         }
@@ -106,31 +110,8 @@ internal static class GraphPlanExecutor
                     }
                     break;
                 case GqlDeleteStage deletion:
-                {
-                    // Delete relationships first, so explicit DELETE r,a can remove a connected node.
-                    var relationships = new HashSet<GraphRelationshipId>();
-                    var nodes = new HashSet<GraphNodeId>();
-                    foreach (var binding in bindings)
-                    {
-                        foreach (string variable in stagePlan.Query.DeleteVariables)
-                        {
-                            if (binding[variable] is GraphNode node) { nodes.Add(node.Id); }
-                            else if (binding[variable] is GraphRelationship relationship) { relationships.Add(relationship.Id); }
-                        }
-                    }
-                    foreach (var id in relationships)
-                    {
-                        if (database.Store.FindRelationship(id.Value, operation.Context.Snapshot) is not null) { affected++; }
-                        await database.Store.DeleteRelationshipAsync(id.Value, operation.Context, token).ConfigureAwait(false);
-                    }
-                    foreach (var id in nodes)
-                    {
-                        if (database.Store.FindNode(id.Value, operation.Context.Snapshot) is not null) { affected++; }
-                        await database.Store.DeleteNodeAsync(id.Value, stagePlan.Query.DetachDelete, operation.Context, token).ConfigureAwait(false);
-                    }
-                    foreach (var binding in bindings) { foreach (string variable in deletion.Variables) { binding.Remove(variable); } }
+                    affected += await DeleteAsync(database, operation, deletion, bindings, token).ConfigureAwait(false);
                     break;
-                }
                 case GqlReturnStage projection when stageIndex != plan.Stages.Count - 1:
                     bindings = ProjectBindings(stagePlan, projection, bindings, parameters, token);
                     break;
@@ -188,6 +169,41 @@ internal static class GraphPlanExecutor
             return new GraphPathsQueryResult(results, plan.Warnings);
         }
         return new GraphQueryResult(columns, paged, plan.Warnings, compositeColumns);
+    }
+
+    internal static async ValueTask<long> DeleteAsync(GraphDatabase database, GraphOperation operation, GqlDeleteStage deletion,
+        List<Dictionary<string, object?>> bindings, CancellationToken token)
+    {
+        // Validate every target before deleting anything, including carried runtime values.
+        var relationships = new HashSet<GraphRelationshipId>();
+        var nodes = new HashSet<GraphNodeId>();
+        foreach (var binding in bindings)
+        {
+            token.ThrowIfCancellationRequested();
+            foreach (string variable in deletion.Variables)
+            {
+                if (!binding.TryGetValue(variable, out var value))
+                { throw new GraphPlanningException("COHDBG013", ErrorMessages.EntityBindingRequired, deletion.Location); }
+                if (value is GraphNode node) { nodes.Add(node.Id); }
+                else if (value is GraphRelationship relationship) { relationships.Add(relationship.Id); }
+                else if (value is not null)
+                { throw new GraphPlanningException("COHDBG013", ErrorMessages.EntityBindingRequired, deletion.Location); }
+            }
+        }
+        long affected = 0;
+        // Delete relationships first, so explicit DELETE r,a can remove a connected node.
+        foreach (var id in relationships)
+        {
+            if (database.Store.FindRelationship(id.Value, operation.Context.Snapshot) is not null) { affected++; }
+            await database.Store.DeleteRelationshipAsync(id.Value, operation.Context, token).ConfigureAwait(false);
+        }
+        foreach (var id in nodes)
+        {
+            if (database.Store.FindNode(id.Value, operation.Context.Snapshot) is not null) { affected++; }
+            await database.Store.DeleteNodeAsync(id.Value, deletion.Detach, operation.Context, token).ConfigureAwait(false);
+        }
+        foreach (var binding in bindings) { foreach (string variable in deletion.Variables) { binding.Remove(variable); } }
+        return affected;
     }
 
     private static async ValueTask<List<Dictionary<string, object?>>> MatchClauseAsync(GraphDatabase database, GraphOperation operation,
@@ -324,9 +340,17 @@ internal static class GraphPlanExecutor
         // Explicit NULL is already bound. It cannot match an element and must never become
         // an unbound full-scan anchor, including at a non-anchor position in the same path.
         foreach (var node in path.Nodes)
-        { if (node.Variable is { } name && input.TryGetValue(name, out var value) && value is null) { return; } }
+        {
+            if (node.Variable is not { } name || !input.TryGetValue(name, out var value)) { continue; }
+            if (value is null) { return; }
+            if (value is not GraphNode) { throw new GraphPlanningException("COHDBG013", ErrorMessages.EntityBindingRequired); }
+        }
         foreach (var edge in path.Relationships)
-        { if (edge.Variable is { } name && input.TryGetValue(name, out var value) && value is null) { return; } }
+        {
+            if (edge.Variable is not { } name || !input.TryGetValue(name, out var value)) { continue; }
+            if (value is null) { return; }
+            if (value is not GraphRelationship) { throw new GraphPlanningException("COHDBG013", ErrorMessages.EntityBindingRequired); }
+        }
         IReadOnlyList<StoredGraphNode> candidates;
         if (path.Nodes[anchor.NodeIndex].Variable is { } variable && input.TryGetValue(variable, out var existing) && existing is GraphNode bound)
         {

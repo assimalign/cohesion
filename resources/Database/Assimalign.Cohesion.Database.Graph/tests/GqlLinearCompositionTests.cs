@@ -375,6 +375,133 @@ public sealed class GqlLinearCompositionTests
         (await Rows(session, "RETURN 7")).Rows.ShouldHaveSingleItem()[0].ShouldBe(7L);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Graph] - FOR and UNWIND: proven entity elements retain kinds through WITH and NEXT")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Execute_EntityLists_ShouldCarryKindsIntoMatchAndDeleteAsync(bool unwind)
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create("linear", new());
+        var database = await engine.CreateDatabaseAsync("graph", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync("INSERT (:P {name:'Alice'})-[:T {name:'AB'}]->(:P {name:'Bob'}), (:P {name:'Cara'})-[:T {name:'CD'}]->(:P {name:'Dan'})", cancellationToken: CancellationToken.None);
+        string loop = unwind ? "UNWIND ns AS n" : "FOR n IN ns";
+        // Act / Assert
+        foreach (string list in new[] { "WITH collect(a) AS ns", "WITH [a] AS ns", "LET ns=[a] WITH ns", "WITH [[a]] AS nested FOR ns IN nested" })
+        {
+            foreach (string boundary in new[] { "", "WITH n", "RETURN n NEXT", "WITH n AS carried WITH carried AS n" })
+            {
+                string source = "MATCH (a:P) " + list + " " + loop + " " + boundary + " MATCH (n) RETURN n.name ORDER BY n.name";
+                (await Rows(session, source)).Rows.Select(row => row[0]).ShouldBe(new object?[] { "Alice", "Bob", "Cara", "Dan" });
+                (await Rows(session, "EXPLAIN " + source)).Rows.ShouldNotBeEmpty();
+            }
+        }
+        foreach (string boundary in new[] { "WITH ns", "RETURN ns NEXT" })
+        {
+            string source = "MATCH (a:P) WITH collect(a) AS ns " + boundary + " " + loop + " MATCH (n) RETURN n.name ORDER BY n.name";
+            (await Rows(session, source)).Rows.Select(row => row[0]).ShouldBe(new object?[] { "Alice", "Bob", "Cara", "Dan" });
+        }
+        foreach (string list in new[] { "collect(r)", "[r]", "CASE WHEN TRUE THEN [r] ELSE [r] END" })
+        {
+            foreach (string boundary in new[] { "WITH n", "RETURN n NEXT" })
+            {
+                string source = "MATCH ()-[r:T]->() WITH " + list + " AS ns " + loop + " " + boundary + " MATCH ()-[n]->() RETURN n.name ORDER BY n.name";
+                (await Rows(session, source)).Rows.Select(row => row[0]).ShouldBe(new object?[] { "AB", "CD" });
+                (await Rows(session, "EXPLAIN " + source)).Rows.ShouldNotBeEmpty();
+            }
+        }
+        string deleteEdges = "MATCH ()-[r:T]->() WITH collect(r) AS ns " + loop + " RETURN n NEXT DELETE n";
+        string deleteNodes = "MATCH (a:P) WITH collect(a) AS ns " + loop + " WITH n DETACH DELETE n";
+        (await Rows(session, "EXPLAIN " + deleteEdges)).Rows.ShouldNotBeEmpty();
+        (await Rows(session, "EXPLAIN " + deleteNodes)).Rows.ShouldNotBeEmpty();
+        (await Rows(session, "MATCH (a:P) RETURN count(*)")).Rows.ShouldHaveSingleItem()[0].ShouldBe(4L);
+        await using (var transaction = await session.BeginTransactionAsync(CancellationToken.None))
+        {
+            (await session.ExecuteAsync(deleteNodes, cancellationToken: CancellationToken.None)).AffectedCount.ShouldBe(4);
+            (await Rows(session, "MATCH ()-[r:T]->() RETURN count(*)")).Rows.ShouldHaveSingleItem()[0].ShouldBe(0L);
+            await transaction.RollbackAsync(CancellationToken.None);
+        }
+        (await session.ExecuteAsync(deleteEdges, cancellationToken: CancellationToken.None)).AffectedCount.ShouldBe(2);
+        (await session.ExecuteAsync(deleteNodes, cancellationToken: CancellationToken.None)).AffectedCount.ShouldBe(4);
+        (await Rows(session, "MATCH (a:P) RETURN count(*)")).Rows.ShouldHaveSingleItem()[0].ShouldBe(0L);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Graph] - FOR: mixed or scalar elements keep Value binding rejections")]
+    [InlineData("UNWIND [1] AS n MATCH (n) RETURN n", "COHDBG003")]
+    [InlineData("FOR n IN [1] WITH n DETACH DELETE n", "COHDBG003")]
+    [InlineData("MATCH (a:P) WITH [a,1] AS ns UNWIND ns AS n MATCH (n) RETURN n.name", "COHDBG003")]
+    [InlineData("MATCH (a:P) WITH CASE WHEN TRUE THEN [a] ELSE [1] END AS ns FOR n IN ns MATCH (n) RETURN 1", "COHDBG003")]
+    [InlineData("MATCH (a:P) WITH COALESCE([a],[1]) AS ns FOR n IN ns DELETE n", "COHDBG003")]
+    [InlineData("MATCH (a:P)-[r:T]->() WITH [a,r] AS ns FOR n IN ns DELETE n", "COHDBG003")]
+    [InlineData("MATCH (a:P) WITH collect(a) AS ns UNWIND ns AS n MATCH ()-[n]->() RETURN 1", "COHDBG003")]
+    [InlineData("MATCH ()-[r:T]->() WITH collect(r) AS ns FOR n IN ns MATCH (n) RETURN 1", "COHDBG003")]
+    [InlineData("FOR n IN $ns RETURN n NEXT MATCH (n) RETURN n.name", "COHDBG003")]
+    public async Task Execute_UnprovenEntityElements_ShouldRejectDuringPlanningAsync(string source, string code)
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create("linear", new());
+        var database = await engine.CreateDatabaseAsync("graph", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        // Act / Assert
+        foreach (string prefix in new[] { "", "EXPLAIN " })
+        {
+            var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(prefix + source,
+                new Dictionary<string, object?> { ["ns"] = new object?[] { 1L } }, CancellationToken.None));
+            error.Diagnostics[0].Code.ShouldBe(code);
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Graph] - FOR: nullable entity elements retain optional path rejection")]
+    public async Task Execute_NullableEntityElements_ShouldPreserveNullAndPathRulesAsync()
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create("linear", new());
+        var database = await engine.CreateDatabaseAsync("graph", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync("INSERT (:P)", cancellationToken: CancellationToken.None);
+        const string source = "MATCH (a:P) WITH [a,NULL] AS ns FOR n IN ns WITH n";
+        // Act / Assert
+        (await Rows(session, source + " MATCH (n) RETURN count(*)")).Rows.ShouldHaveSingleItem()[0].ShouldBe(1L);
+        var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(
+            GraphPathsQueryRequest.FromGql(source + " RETURN n"), CancellationToken.None));
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG001");
+        (await session.ExecuteAsync(source + " DETACH DELETE n", cancellationToken: CancellationToken.None)).AffectedCount.ShouldBe(1);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Graph] - Carried runtime entities: MATCH and DELETE report coded kind errors before mutation")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Execute_WrongRuntimeEntityKind_ShouldFailWithValueDiagnosticAsync(bool relationship)
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create("linear", new());
+        var database = await engine.CreateDatabaseAsync("graph", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync("INSERT (:P)-[:T]->(:P)", cancellationToken: CancellationToken.None);
+        var node = (await Rows(session, "MATCH (a:P) RETURN a")).Rows[0][0];
+        var edge = (await Rows(session, "MATCH ()-[r:T]->() RETURN r")).Rows[0][0];
+        // Act / Assert
+        await database.RunAsync(session, async operation =>
+        {
+            string source = relationship ? "MATCH ()-[n]->() RETURN 1" : "MATCH (n) RETURN 1";
+            var plan = new GraphPlanner(database, operation.Context.Snapshot).Plan(GraphQueryRequest.FromGql(source).Statement.GqlExpression);
+            foreach (var value in new[] { (object?)1L, relationship ? node : edge })
+            {
+                var budget = new GraphPlanExecutor.ExpansionBudget();
+                var error = await Should.ThrowAsync<DatabaseException>(async () => await GraphPlanExecutor.MatchAsync(database, operation,
+                    plan.MatchClauses[0].Paths[0], new(StringComparer.Ordinal) { ["n"] = value }, [], budget, null, CancellationToken.None));
+                error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG013");
+                budget.Consumed.ShouldBe(0);
+            }
+            var deletion = await Should.ThrowAsync<DatabaseException>(async () => await GraphPlanExecutor.DeleteAsync(database, operation,
+                new GqlDeleteStage(["n"]) { Detach = true }, [new(StringComparer.Ordinal) { ["n"] = node }, new(StringComparer.Ordinal) { ["n"] = 1L }], CancellationToken.None));
+            deletion.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG013");
+            return true;
+        }, CancellationToken.None);
+        (await Rows(session, "MATCH (a:P) RETURN count(*)")).Rows.ShouldHaveSingleItem()[0].ShouldBe(2L);
+        (await Rows(session, "RETURN 7")).Rows.ShouldHaveSingleItem()[0].ShouldBe(7L);
+    }
+
     private static async Task<(string[] Names, DatabaseType[] Types, List<object?[]> Rows)> Rows(GraphDatabaseSession session,
         string source, IReadOnlyDictionary<string, object?>? parameters = null)
     {
