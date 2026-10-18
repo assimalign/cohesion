@@ -25,7 +25,9 @@ public sealed class GraphFunctionTests
     [InlineData("substring('xy',0.9,1.9)", "x")]
     [InlineData("substring('xy',-0.5)", "xy")]
     [InlineData("replace('abcabc','ab','X')", "XcXc")]
-    [InlineData("replace('abc','','X')", "abc")]
+    [InlineData("replace('abc','','X')", "XaXbXcX")]
+    [InlineData("replace('','','X')", "X")]
+    [InlineData("replace('abc','','')", "abc")]
     [InlineData("trim('  x  ')", "x")]
     [InlineData("char_length('A😀B')", 3L)]
     [InlineData("size('A😀B')", 3L)]
@@ -72,6 +74,14 @@ public sealed class GraphFunctionTests
     [InlineData("CAST('42' AS BIGINT)", 42L)]
     [InlineData("CAST('2.5' AS DOUBLE)", 2.5d)]
     [InlineData("CAST('2.5' AS REAL)", 2.5f)]
+    [InlineData("CAST(CAST('1.0000000596046447753906250001' AS DECIMAL) AS REAL)", 1.0000001f)]
+    [InlineData("CAST('1.0000000596046447753906250001' AS REAL)", 1.0000001f)]
+    [InlineData("CAST(CAST('2026-10-18T00:00:00Z' AS ZONED DATETIME) AS STRING)", "2026-10-18 00:00:00+00:00")]
+    [InlineData("CAST(CAST('2026-10-18T01:02:03.1234000+02:00' AS ZONED DATETIME) AS STRING)", "2026-10-18 01:02:03.1234+02:00")]
+    [InlineData("CAST('0e-1000' AS DOUBLE)", 0d)]
+    [InlineData("CAST('-0e-1000' AS REAL)", -0f)]
+    [InlineData("CAST('5e-324' AS DOUBLE)", double.Epsilon)]
+    [InlineData("CAST('1.4e-45' AS REAL)", float.Epsilon)]
     [InlineData("CAST(' true ' AS BOOLEAN)", true)]
     [InlineData("CAST(NULL AS INTEGER)", null)]
     [InlineData("substring(NULL,'bad',-1)", null)]
@@ -134,6 +144,13 @@ public sealed class GraphFunctionTests
     [InlineData("RETURN toInteger('9223372036854775807.1')")]
     [InlineData("RETURN toInteger('9223372036854775808')")]
     [InlineData("RETURN CAST(1e-100 AS DECIMAL)")]
+    [InlineData("RETURN CAST('1e-1000' AS DOUBLE)")]
+    [InlineData("RETURN CAST('-1e-1000' AS DOUBLE)")]
+    [InlineData("RETURN CAST('1e-1000' AS REAL)")]
+    [InlineData("RETURN CAST('1e-100' AS REAL)")]
+    [InlineData("RETURN CAST('-1e-100' AS REAL)")]
+    [InlineData("RETURN CAST(1e-100 AS REAL)")]
+    [InlineData("RETURN CAST(-1e-100 AS REAL)")]
     [InlineData("RETURN CAST('NaN' AS FLOAT)")]
     [InlineData("RETURN CAST('2026-02-30' AS DATE)")]
     [InlineData("RETURN CAST('2026-10-18T12:00:00.' AS ZONED DATETIME)")]
@@ -167,6 +184,8 @@ public sealed class GraphFunctionTests
         var parameters = new Dictionary<string, object?> { ["s"] = new string('a', 1000), ["r"] = new string('\0', 10000) };
         var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("INSERT (:Unwritten) RETURN replace($s,'a',$r)", parameters, CancellationToken.None));
         error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG013");
+        error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("INSERT (:Unwritten) RETURN replace($s,'',$r)", parameters, CancellationToken.None));
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG013");
         (await RowsAsync(session, "MATCH (n:Unwritten) RETURN n")).ShouldBeEmpty();
     }
 
@@ -181,6 +200,12 @@ public sealed class GraphFunctionTests
     [InlineData("endNode(a)", "EndNode", "COHDBG003")]
     [InlineData("upper(1)", "Upper", "COHDBG003")]
     [InlineData("labels(missing)", "labels", "COHDBG001")]
+    [InlineData("upper(toString(abs(missing)))", "Abs", "COHDBG001")]
+    [InlineData("upper(CAST(missing AS STRING))", "CAST", "COHDBG001")]
+    [InlineData("edges(a)", "edges", "COHDBG003")]
+    [InlineData("toBoolean(1.5)", "toBoolean", "COHDBG003")]
+    [InlineData("toBoolean(CAST(1 AS DECIMAL))", "toBoolean", "COHDBG003")]
+    [InlineData("CAST(TRUE AS INTEGER)", "CAST", "COHDBG003")]
     public async Task Execute_ProvenSignatureError_ShouldPlanBeforeWritesAsync(string expression, string function, string code)
     {
         // Arrange
@@ -210,6 +235,7 @@ public sealed class GraphFunctionTests
         var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(new GraphQueryRequest(statement), CancellationToken.None));
         // Assert
         error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG001"); error.Message.ShouldContain("Abs");
+        GraphProjectionText.Describe(new GqlFunctionCallExpression(GqlScalarFunction.Relationships, [new GqlVariableExpression("p")])).ShouldBe("edges(p)");
         GraphProjectionText.Describe(new GqlCastExpression(new GqlFunctionCallExpression(GqlScalarFunction.CharLength, [new GqlLiteralExpression("abc")]), GqlCastType.Int64))
             .ShouldBe("CAST(char_length('abc') AS BIGINT)");
     }
@@ -315,29 +341,31 @@ public sealed class GraphFunctionTests
     public async Task Execute_TransactionClock_ShouldShareCapturedUtcInstantAsync(IsolationLevel isolation)
     {
         // Arrange
-        var clock = new ManualTimeProvider();
+        var clock = new AdvancingTimeProvider();
         await using var engine = GraphDatabaseEngine.Create("clock-functions", new() { TimeProvider = clock });
         var database = await engine.CreateDatabaseAsync("graph", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
-        var first = clock.GetUtcNow();
-        await session.ExecuteAsync("INSERT (:Day {day:toString(CURRENT_DATE)})", cancellationToken: CancellationToken.None);
-        (await RowsAsync(session, "MATCH (n:Day {day:toString(CURRENT_DATE)}) RETURN n.day")).ShouldHaveSingleItem()[0].ShouldBe("2026-10-07");
-        // Act / Assert: autocommit reads its own instant; every row/stage reuses it.
+        // Act / Assert: each read advances; every row and stage must reuse the capture.
+        var first = clock.NextUtcNow;
+        long reads = clock.Reads;
         var rows = await RowsAsync(session, "FOR x IN [1,2] LET t=CURRENT_TIMESTAMP WITH t RETURN t NEXT LET u=CURRENT_TIMESTAMP RETURN t,u,CURRENT_DATE");
         rows.Count.ShouldBe(2);
         rows.ShouldAllBe(row => Equals(row[0], first) && Equals(row[1], first) && Equals(row[2], DateOnly.FromDateTime(first.UtcDateTime)));
-        clock.Advance(TimeSpan.FromDays(1));
-        (await RowsAsync(session, "RETURN CURRENT_TIMESTAMP")).ShouldHaveSingleItem()[0].ShouldBe(clock.GetUtcNow());
-        var captured = clock.GetUtcNow();
+        clock.Reads.ShouldBe(reads + 1);
+        var next = clock.NextUtcNow;
+        (await RowsAsync(session, "INSERT (:Day {day:toString(CURRENT_DATE)}) RETURN CURRENT_TIMESTAMP")).ShouldHaveSingleItem()[0].ShouldBe(next);
+        var captured = clock.NextUtcNow;
+        reads = clock.Reads;
         await using (var transaction = await session.BeginTransactionAsync(isolation, CancellationToken.None))
         {
-            clock.Advance(TimeSpan.FromDays(1));
-            (await RowsAsync(session, "RETURN CURRENT_TIMESTAMP,CURRENT_DATE")).ShouldHaveSingleItem().ShouldBe(new object?[] { captured, DateOnly.FromDateTime(captured.UtcDateTime) });
-            clock.Advance(TimeSpan.FromDays(1));
+            clock.Reads.ShouldBe(reads + 1);
+            (await RowsAsync(session, "FOR x IN [1,2] RETURN CURRENT_TIMESTAMP,CURRENT_DATE")).ShouldAllBe(row => Equals(row[0], captured) && Equals(row[1], DateOnly.FromDateTime(captured.UtcDateTime)));
             (await RowsAsync(session, "RETURN CURRENT_TIMESTAMP")).ShouldHaveSingleItem()[0].ShouldBe(captured);
+            clock.Reads.ShouldBe(reads + 1);
             await transaction.CommitAsync(CancellationToken.None);
         }
-        (await RowsAsync(session, "RETURN CURRENT_TIMESTAMP")).ShouldHaveSingleItem()[0].ShouldBe(clock.GetUtcNow());
+        next = clock.NextUtcNow;
+        (await RowsAsync(session, "RETURN CURRENT_TIMESTAMP")).ShouldHaveSingleItem()[0].ShouldBe(next);
     }
 
     [Fact(DisplayName = "Cohesion Test [Graph] - Functions: temporal values sort and compare while property writes fail with a coded error")]
@@ -357,9 +385,94 @@ public sealed class GraphFunctionTests
         foreach (string value in new[] { "CURRENT_TIMESTAMP", "CURRENT_DATE", "CAST('2026-10-18' AS DATE)" })
         {
             var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync($"INSERT (:Unwritten {{at:{value}}})", cancellationToken: CancellationToken.None));
-            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG013");
+            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG003");
         }
         (await RowsAsync(session, "MATCH (n:Unwritten) RETURN n")).ShouldBeEmpty();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Graph] - Functions: path list elements remain mandatory through aliases")]
+    [InlineData("nodes", false)]
+    [InlineData("relationships", false)]
+    [InlineData("edges", false)]
+    [InlineData("nodes", true)]
+    [InlineData("relationships", true)]
+    [InlineData("edges", true)]
+    public async Task ExecutePaths_PathListElements_ShouldKeepNonNullProofAsync(string function, bool alias)
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create("path-list-functions", new());
+        var database = await engine.CreateDatabaseAsync("graph", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync("INSERT (:A)-[:T]->(:B)", cancellationToken: CancellationToken.None);
+        string stages = alias ? $"LET xs={function}(p) WITH xs FOR n IN xs LET value=n RETURN value" : $"FOR n IN {function}(p) RETURN n";
+        // Act
+        var result = (GraphPathsQueryResult)await session.ExecuteAsync(GraphPathsQueryRequest.FromGql("MATCH p=()-[:T]->() " + stages), CancellationToken.None);
+        // Assert
+        result.Paths.Count.ShouldBe(function == "nodes" ? 2 : 1);
+        result.Paths.ShouldAllBe(path => path.Nodes.Count == (function == "nodes" ? 1 : 2));
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Graph] - Functions: proven temporal property kinds reject INSERT and MATCH before writes")]
+    [InlineData("CURRENT_DATE")]
+    [InlineData("CURRENT_TIMESTAMP")]
+    [InlineData("CAST('2026-10-18' AS DATE)")]
+    [InlineData("t")]
+    public async Task Execute_TemporalPropertyKind_ShouldFailPlanningWithoutDataAsync(string value)
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create("temporal-property-functions", new());
+        var database = await engine.CreateDatabaseAsync("graph", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        // Act / Assert
+        foreach (string prefix in new[] { "", "EXPLAIN " })
+        {
+            foreach (string clause in new[] { $"INSERT (:Unwritten {{at:{value}}})", $"INSERT (:Unwritten)-[:T {{at:{value}}}]->()", $"INSERT (:Unwritten) MATCH (n {{at:{value}}}) RETURN n", $"INSERT (:Unwritten) MATCH ()-[r {{at:{value}}}]->() RETURN r" })
+            {
+                var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(prefix + "LET t=CURRENT_DATE " + clause, cancellationToken: CancellationToken.None));
+                error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG003");
+            }
+        }
+        (await RowsAsync(session, "MATCH (n:Unwritten) RETURN n")).ShouldBeEmpty();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Graph] - Functions: CAST identifiers and quoted temporal bindings retain values")]
+    public async Task Execute_FunctionWordBindings_ShouldReferenceBoundValuesAsync()
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create("function-word-bindings", new());
+        var database = await engine.CreateDatabaseAsync("graph", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync("INSERT (:Movie {title:'Film'})", cancellationToken: CancellationToken.None);
+        // Act / Assert
+        (await RowsAsync(session, "MATCH (cast:Movie) RETURN cast.title")).ShouldHaveSingleItem()[0].ShouldBe("Film");
+        foreach (string name in new[] { "CURRENT_DATE", "CURRENT_TIMESTAMP", "CURRENT_TIME", "LOCAL_TIME", "LOCAL_TIMESTAMP" })
+        {
+            (await RowsAsync(session, $"LET \"{name}\"=42 RETURN \"{name}\"")).ShouldHaveSingleItem()[0].ShouldBe(42L);
+            (await RowsAsync(session, $"FOR \"{name}\" IN [42] RETURN \"{name}\"")).ShouldHaveSingleItem()[0].ShouldBe(42L);
+        }
+        var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("RETURN CAST('bad' AS INTEGER)", cancellationToken: CancellationToken.None));
+        error.Message.ShouldContain("INTEGER", Case.Sensitive);
+        error.Message.ShouldNotContain("Int32", Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Graph] - Functions: temporal families sort between paths and strings in ValueGroup order")]
+    public async Task Execute_TemporalFamilies_ShouldFollowNeo4jOrderAsync()
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create("temporal-family-order", new());
+        var database = await engine.CreateDatabaseAsync("graph", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync("INSERT ()-[:T]->()", cancellationToken: CancellationToken.None);
+        // Act
+        var rows = await RowsAsync(session, "MATCH p=()-[:T]->() FOR v IN [NULL,1,TRUE,'a',CURRENT_DATE,CURRENT_TIMESTAMP,p,[]] RETURN v ORDER BY v");
+        var nested = await RowsAsync(session, "FOR v IN [[CURRENT_DATE],[CURRENT_TIMESTAMP],['a']] RETURN v ORDER BY v");
+        // Assert
+        rows.Count.ShouldBe(8);
+        rows[0][0].ShouldBeOfType<object?[]>(); rows[1][0].ShouldBeOfType<GraphPath>();
+        rows[2][0].ShouldBeOfType<DateTimeOffset>(); rows[3][0].ShouldBeOfType<DateOnly>();
+        rows[4][0].ShouldBe("a"); rows[5][0].ShouldBe(true); rows[6][0].ShouldBe(1L); rows[7][0].ShouldBeNull();
+        nested[0][0].ShouldBeOfType<object?[]>()[0].ShouldBeOfType<DateTimeOffset>();
+        nested[1][0].ShouldBeOfType<object?[]>()[0].ShouldBeOfType<DateOnly>();
     }
 
     private static async Task<List<object?[]>> RowsAsync(GraphDatabaseSession session, string source, IReadOnlyDictionary<string, object?>? parameters = null)

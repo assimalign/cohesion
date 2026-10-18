@@ -26,7 +26,7 @@ internal static partial class GraphExpressionEvaluator
             };
         }
         catch (Exception error) when (error is ArithmeticException or FormatException or InvalidCastException or ArgumentException)
-        { throw new GraphPlanningException("COHDBG013", string.Format(CultureInfo.CurrentCulture, ErrorMessages.CastValueFailure, cast.Target), cast.Location, error); }
+        { throw new GraphPlanningException("COHDBG013", string.Format(CultureInfo.CurrentCulture, ErrorMessages.CastValueFailure, GraphScalarFunctions.Name(cast.Target)), cast.Location, error); }
     }
 
     // SQL #1119 rejects fractional integers rather than rounding or truncating.
@@ -43,15 +43,30 @@ internal static partial class GraphExpressionEvaluator
         return checked((long)exact);
     }
 
-    private static double Floating(object value) => value is string text
-        ? Finite(double.Parse(text, NumberStyles.Float, CultureInfo.InvariantCulture))
-        : IsNumber(value) ? Finite(Convert.ToDouble(value, CultureInfo.InvariantCulture)) : throw new InvalidCastException(ErrorMessages.NumericRequired);
+    // SQL SqlStandardCasts.cs:206-249 checks the mantissa for text underflow and
+    // the original numeric value when narrowing to REAL.
+    private static double Floating(object value)
+    {
+        double number = value is string text ? double.Parse(text, NumberStyles.Float, CultureInfo.InvariantCulture)
+            : IsNumber(value) ? Convert.ToDouble(value, CultureInfo.InvariantCulture) : throw new InvalidCastException(ErrorMessages.NumericRequired);
+        if (number == 0 && value is string source)
+        {
+            int exponent = source.IndexOfAny(['e', 'E']);
+            ReadOnlySpan<char> mantissa = exponent < 0 ? source.AsSpan() : source.AsSpan(0, exponent);
+            if (mantissa.ContainsAnyInRange('1', '9')) { throw new OverflowException(ErrorMessages.NumericRequired); }
+        }
+        return Finite(number);
+    }
 
     private static float Real(object value)
     {
+        double original = Floating(value);
+        // SQL SqlStandardCasts.cs:161 parses decimal text directly, avoiding double rounding
+        // (PostgreSQL src/backend/utils/adt/numeric.c:4691-4696).
         float number = value is string text ? float.Parse(text, NumberStyles.Float, CultureInfo.InvariantCulture)
+            : value is decimal exact ? float.Parse(exact.ToString(CultureInfo.InvariantCulture), NumberStyles.Float, CultureInfo.InvariantCulture)
             : IsNumber(value) ? Convert.ToSingle(value, CultureInfo.InvariantCulture) : throw new InvalidCastException(ErrorMessages.NumericRequired);
-        if (!float.IsFinite(number)) { throw new OverflowException(ErrorMessages.NumericRequired); }
+        if (!float.IsFinite(number) || number == 0 && original != 0) { throw new OverflowException(ErrorMessages.NumericRequired); }
         return number;
     }
 

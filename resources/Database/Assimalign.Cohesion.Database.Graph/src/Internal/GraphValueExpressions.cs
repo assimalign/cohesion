@@ -219,7 +219,8 @@ internal static class GraphValueExpressions
                     pending.Push((call.Arguments[0], depth, nonNull));
                     break;
                 case GqlFunctionCallExpression call:
-                    bool nullable = call.Function is GqlScalarFunction.StartNode or GqlScalarFunction.EndNode && call.Arguments is [GqlVariableExpression input]
+                    bool nullable = depth == 1 && call.Function is GqlScalarFunction.Nodes or GqlScalarFunction.Relationships
+                        ? false : call.Function is GqlScalarFunction.StartNode or GqlScalarFunction.EndNode && call.Arguments is [GqlVariableExpression input]
                         ? variableShape(input.Variable, 0).Optional : true;
                     if (!Merge(new GraphEntityShape(GraphScalarFunctions.Entity(call.Function, depth), nullable), nonNull)) { return default; }
                     break;

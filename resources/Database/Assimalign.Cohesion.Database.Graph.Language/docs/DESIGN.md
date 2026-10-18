@@ -564,7 +564,7 @@ dispatches omitted bounds to slicing operations, consulted but excluded here.
 community/values/src/main/java/org/neo4j/values/AnyValueComparator.java:87-118 and :146-155
 separates ternary orderability from total sorting (NULL and mixed groups are unordered in predicates).
 Its :44-85 places NULL last and sequences before scalars; virtual/VirtualValueGroup.java:26-32
-orders maps before lists, while storable/ValueGroup.java:62-65 orders text, Boolean and numbers.
+orders maps before lists, while storable/ValueGroup.java:56-65 orders zoned timestamps, dates, text, Boolean and numbers.
 The selected exact numeric rule is the owner
 decision, including within these composites.
 
@@ -596,6 +596,10 @@ The table distinguishes ISO clause 20 forms, direct Cypher aliases, and Cohesion
 **Every scalar is strict:** a NULL argument returns NULL before kind or domain checks; every
 argument expression still evaluates. Niladic datetime readers are the only exception. All
 referenced bindings and signatures validate even in skipped branches or empty matches.
+The main expression walk checks each reference once and carries its enclosing function for
+diagnostics; nested calls do not rewalk descendants. KnownFunctionKind distinguishes integral
+from non-integral numbers for toBoolean, rejects Boolean numeric CAST and temporal MATCH/INSERT
+property values with COHDBG003 before writes.
 
 | ISO canonical or extension | Accepted alias / status | Arguments | Non-NULL result |
 | --- | --- | --- | --- |
@@ -606,12 +610,12 @@ referenced bindings and signatures validate even in skipped branches or empty ma
 | `keys` | Cypher spelling, Cohesion extension | node, relationship or map | ordinal key list |
 | `startNode`, `endNode` | Cypher spellings, Cohesion extensions | relationship | stored source/target node from the same statement snapshot |
 | `path_length` | ISO 20.22; `length` is a 1:1 Cypher alias | path | Int64 relationship count |
-| `nodes` | Cypher spelling, Cohesion extension | path | nodes in traversal order |
-| `relationships` | Cypher spelling, Cohesion extension; `edges` is a Cohesion alias | path | relationships in traversal order, retaining stored direction |
+| `nodes` | Cypher spelling, Cohesion extension | path | non-null nodes in traversal order; aliases retain the element proof |
+| `relationships` | Cypher spelling, Cohesion extension; `edges` is a Cohesion alias | path | non-null relationships in traversal order, retaining stored direction; aliases retain the proof |
 | `lower`, `upper` | ISO 20.25; `toLower`, `toUpper` are 1:1 Cypher aliases | string | invariant-case string |
 | `trim` | ISO 20.25 subset | string | string with leading/trailing U+0020 spaces removed |
 | `substring` | Cypher spelling, Cohesion extension | string, numeric start [, length] | string sliced by Unicode code points, **zero-based**; past-end gives empty string |
-| `replace` | Cypher spelling, Cohesion extension | string, search string, replacement string | ordinal replacement; empty search preserves input |
+| `replace` | Cypher spelling, Cohesion extension | string, search string, replacement string | ordinal replacement; empty search inserts replacement at every boundary, including both ends |
 | `char_length`, `character_length` | ISO 20.22 synonyms | string | Int64 Unicode code-point count |
 | `size` | ISO 20.22 for lists; Cypher string overload is a Cohesion extension | list or string | Int64 item/code-point count |
 | `abs`, `ceil`, `ceiling`, `floor` | ISO 20.22; CEIL/CEILING are synonyms | number | input numeric type; unsigned inputs become Decimal |
@@ -642,9 +646,12 @@ and LOCAL DATETIME are outside this subset; recognized unsupported target
 families use COHDBL001, unknown target spellings use GQL0002. Numeric-to-integer CAST rejects
 fractions, including fractional text; it never truncates or rounds. It follows SQL #1119's
 shared storage types and value rules. Numeric text is invariant without grouping, and exact
-numeric text cannot silently round into a whole integer. Temporal text follows SQL's invariant
+numeric text cannot silently round into a whole integer. DOUBLE/REAL reject nonzero underflow
+to zero from text or numeric input with COHDBG013. DECIMAL-to-REAL parses invariant decimal
+text directly to avoid double rounding, matching SQL SqlStandardCasts.cs:161,206-249. Temporal text follows SQL's invariant
 ISO date/time grammar, absent offset means UTC, and dates convert to midnight UTC. Boolean
-CAST accepts Boolean or TRUE/FALSE text; CAST to string renders Boolean uppercase. Cypher
+CAST accepts Boolean or TRUE/FALSE text; CAST to string renders Boolean uppercase. Timestamp
+text uses SQL SqlCastText.cs:27's FFFFFFF fraction, omitting the fraction at whole seconds. Cypher
 conversions deliberately differ from CAST: toInteger truncates, accepts Boolean as 1/0, and
 toInteger/toFloat/toBoolean return NULL for unparsable text. String/Decimal range overflow and non-finite
 results still fail with COHDBG013. Like Neo4j, toInteger saturates finite floating values outside Int64 range; CAST rejects them. toString retains a fractional digit for floating integers and uses Cypher scientific-notation thresholds. This implements the main-session ruling over the older
@@ -657,7 +664,9 @@ including negative ties, rather than Neo4j's unary ties toward positive infinity
 uses the value's round-trip decimal form with bounded digit work, including precisions above 15.
 SQRT/LOG/LN domain errors, zero divisors, overflow, invalid dynamic kinds, and excessive string
 results use COHDBG013; they never return NaN or infinity. REPLACE bounds expanded UTF-8 bytes
-before allocating. Existing composite limits apply to every function's output.
+before allocating, including empty-search insertion (replace('abc','','X') is 'XaXbXcX';
+Neo4j community/values/src/main/java/org/neo4j/values/storable/StringValue.java:197).
+toBoolean's integral-only numeric signature follows CypherFunctions.java:2775. Existing composite limits apply to every function's output.
 
 Planning rejects provably incompatible entity/path/group, literal, parameter and carried value
 kinds with COHDBG003 naming the function. Unbound arguments use COHDBG001 naming the function;
@@ -677,10 +686,10 @@ The existing clock remains internal; no public option or visibility grant is add
 has no transaction controls, so each wire statement is autocommit.
 
 Temporal values compare and sort by DateOnly date or DateTimeOffset instant, including nested
-composite sort keys. Total ordering puts dates then timestamps after numbers and before NULL;
+composite sort keys. Total ordering puts zoned timestamps then dates between paths and strings;
 DATE and timestamp are incomparable in predicates. Temporal results cannot become stored graph
-properties: PropertyScalar reports COHDBG013 before the storage encoder, and the statement rolls
-back rather than leaking ArgumentException. No stored type, catalog version or wire encoding changes.
+properties: planning rejects proven temporal property kinds with COHDBG003; dynamic temporal values
+raise COHDBG013 before the storage encoder, and the statement rolls back rather than leaking ArgumentException. No stored type, catalog version or wire encoding changes.
 
 The wire Execute gate rejects entity-valued nodes/edges/relationships/startNode/endNode results
 before writer locking or mutation, even on empty input. Scalar access through those results is
@@ -792,7 +801,7 @@ The owner default follows Cypher: NULL last ascending, first descending. NULLS F
 overrides that direction-dependent placement. This diverges from Cohesion SQL's NULL-first ASC
 default. Strings compare ordinally; numbers use the owner's exact comparison everywhere,
 including 0.1m versus 0.1d and adjacent integers above 2^53. The complete ascending family
-order is map, node, relationship, list, path, string, Boolean, number, NULL. Lists compare
+order is map, node, relationship, list, path, zoned timestamp, date, string, Boolean, number, NULL. Lists compare
 lexicographically; maps compare count, sorted ordinal keys, then corresponding values;
 nested values use the same total order with NULL last. Entities compare IDs; paths compare
 their starting node, relationship sequence and length. Equal sort keys retain input order.

@@ -7,8 +7,9 @@ namespace Assimalign.Cohesion.Database.Graph.Internal;
 [Flags]
 internal enum GraphFunctionKind
 {
-    Unknown = 0, Node = 1, Relationship = 2, Path = 4, String = 8, Number = 16,
+    Unknown = 0, Node = 1, Relationship = 2, Path = 4, String = 8, Integral = 16,
     Boolean = 32, List = 64, Map = 128, Date = 256, Timestamp = 512,
+    NonIntegral = 1024, Number = Integral | NonIntegral,
     Scalar = String | Number | Boolean | Date | Timestamp,
 }
 
@@ -20,6 +21,7 @@ internal static class GraphScalarFunctions
         GqlScalarFunction.ElementId => "element_id", GqlScalarFunction.PathLength => "path_length",
         GqlScalarFunction.CharLength => "char_length", GqlScalarFunction.CurrentDate => "CURRENT_DATE",
         GqlScalarFunction.CurrentTimestamp => "CURRENT_TIMESTAMP",
+        GqlScalarFunction.Relationships => "edges",
         _ => function.ToString(),
     };
 
@@ -45,7 +47,7 @@ internal static class GraphScalarFunctions
         GqlScalarFunction.Size => GraphFunctionKind.List | GraphFunctionKind.String,
         GqlScalarFunction.ToInteger => GraphFunctionKind.Number | GraphFunctionKind.String | GraphFunctionKind.Boolean,
         GqlScalarFunction.ToFloat => GraphFunctionKind.Number | GraphFunctionKind.String,
-        GqlScalarFunction.ToBoolean => GraphFunctionKind.Number | GraphFunctionKind.String | GraphFunctionKind.Boolean,
+        GqlScalarFunction.ToBoolean => GraphFunctionKind.Integral | GraphFunctionKind.String | GraphFunctionKind.Boolean,
         GqlScalarFunction.ToString => GraphFunctionKind.Scalar,
         _ => GraphFunctionKind.Number,
     };
@@ -60,6 +62,8 @@ internal static class GraphScalarFunctions
         GqlScalarFunction.ToBoolean => GraphFunctionKind.Boolean,
         GqlScalarFunction.CurrentDate => GraphFunctionKind.Date,
         GqlScalarFunction.CurrentTimestamp => GraphFunctionKind.Timestamp,
+        GqlScalarFunction.PathLength or GqlScalarFunction.CharLength or GqlScalarFunction.Size or GqlScalarFunction.ToInteger => GraphFunctionKind.Integral,
+        GqlScalarFunction.ToFloat or GqlScalarFunction.Sqrt or GqlScalarFunction.Log => GraphFunctionKind.NonIntegral,
         _ => GraphFunctionKind.Number,
     };
 
@@ -70,7 +74,8 @@ internal static class GraphScalarFunctions
         string => GraphFunctionKind.String, bool => GraphFunctionKind.Boolean, System.Collections.IList when value is not byte[] => GraphFunctionKind.List,
         System.Collections.Generic.IReadOnlyDictionary<string, object?> => GraphFunctionKind.Map,
         DateOnly => GraphFunctionKind.Date, DateTimeOffset => GraphFunctionKind.Timestamp,
-        _ => GraphValueComparer.IsNumber(value) ? GraphFunctionKind.Number : GraphFunctionKind.Unknown,
+        byte or sbyte or short or ushort or int or uint or long or ulong => GraphFunctionKind.Integral,
+        _ => GraphValueComparer.IsNumber(value) ? GraphFunctionKind.NonIntegral : GraphFunctionKind.Unknown,
     };
 
     internal static GraphProjectionKind Entity(GqlScalarFunction function, int depth) => (function, depth) switch

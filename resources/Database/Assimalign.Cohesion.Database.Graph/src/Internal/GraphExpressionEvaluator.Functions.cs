@@ -13,24 +13,31 @@ internal static partial class GraphExpressionEvaluator
     private static object? Function(GqlFunctionCallExpression call, IReadOnlyDictionary<string, object?> bindings,
         GraphEvaluationContext context, IReadOnlyDictionary<string, object?>? parameters)
     {
-        string name = GraphScalarFunctions.Name(call.Function);
         if (!GraphScalarFunctions.ValidArity(call))
-        { throw new GraphPlanningException("COHDBG001", string.Format(CultureInfo.CurrentCulture, ErrorMessages.FunctionArity, name), call.Location); }
+        { throw new GraphPlanningException("COHDBG001", string.Format(CultureInfo.CurrentCulture, ErrorMessages.FunctionArity, GraphScalarFunctions.Name(call.Function)), call.Location); }
         if (call.IsNiladic)
         {
             return call.Function == GqlScalarFunction.CurrentDate
                 ? (object)DateOnly.FromDateTime(context.TransactionStart.UtcDateTime)
                 : context.TransactionStart.ToUniversalTime();
         }
-        var arguments = call.Arguments.Select(argument => Evaluate(argument, bindings, context, parameters)).ToArray();
-        // Strict, NULL-first signatures: a NULL argument suppresses kind/domain checks.
-        if (arguments.Any(value => value is null)) { return null; }
-        for (int i = 0; i < arguments.Length; i++)
+        object? firstArgument = null, second = null, third = null;
+        bool hasNull = false;
+        for (int i = 0; i < call.Arguments.Count; i++)
         {
-            if ((GraphScalarFunctions.Argument(call.Function, i) & GraphScalarFunctions.Kind(arguments[i])) == 0)
-            { throw new GraphPlanningException("COHDBG013", string.Format(CultureInfo.CurrentCulture, ErrorMessages.FunctionKind, name, i + 1), call.Location); }
+            object? value = Evaluate(call.Arguments[i], bindings, context, parameters);
+            hasNull |= value is null;
+            switch (i) { case 0: firstArgument = value; break; case 1: second = value; break; case 2: third = value; break; }
         }
-        object first = arguments[0]!;
+        // Strict, NULL-first signatures: a NULL argument suppresses kind/domain checks.
+        if (hasNull) { return null; }
+        for (int i = 0; i < call.Arguments.Count; i++)
+        {
+            object? value = i switch { 0 => firstArgument, 1 => second, _ => third };
+            if ((GraphScalarFunctions.Argument(call.Function, i) & GraphScalarFunctions.Kind(value)) == 0)
+            { throw new GraphPlanningException("COHDBG013", string.Format(CultureInfo.CurrentCulture, ErrorMessages.FunctionKind, GraphScalarFunctions.Name(call.Function), i + 1), call.Location); }
+        }
+        object first = firstArgument!;
         try
         {
             return call.Function switch
@@ -48,23 +55,23 @@ internal static partial class GraphExpressionEvaluator
                 GqlScalarFunction.Lower => ((string)first).ToLowerInvariant(),
                 GqlScalarFunction.Upper => ((string)first).ToUpperInvariant(),
                 GqlScalarFunction.Trim => ((string)first).Trim(' '),
-                GqlScalarFunction.Substring => Substring((string)first, arguments[1]!, arguments.Length == 3 ? arguments[2] : null),
-                GqlScalarFunction.Replace => Replace((string)first, (string)arguments[1]!, (string)arguments[2]!),
+                GqlScalarFunction.Substring => Substring((string)first, second!, third),
+                GqlScalarFunction.Replace => Replace((string)first, (string)second!, (string)third!),
                 GqlScalarFunction.CharLength => (long)((string)first).EnumerateRunes().Count(),
                 GqlScalarFunction.Size => first is string text ? (long)text.EnumerateRunes().Count() : ((object?[])first).LongLength,
-                GqlScalarFunction.Abs or GqlScalarFunction.Ceil or GqlScalarFunction.Floor or GqlScalarFunction.Round => Numeric(call.Function, first, arguments.Length == 2 ? NonnegativeInteger(arguments[1]!) : 0),
+                GqlScalarFunction.Abs or GqlScalarFunction.Ceil or GqlScalarFunction.Floor or GqlScalarFunction.Round => Numeric(call.Function, first, second is not null ? NonnegativeInteger(second) : 0),
                 GqlScalarFunction.Sqrt => Finite(Math.Sqrt(Convert.ToDouble(first, CultureInfo.InvariantCulture))),
-                GqlScalarFunction.Log => Logarithm(first, arguments.Length == 2 ? arguments[1] : null),
-                GqlScalarFunction.Mod => Arithmetic("%", first, arguments[1]!),
+                GqlScalarFunction.Log => Logarithm(first, second),
+                GqlScalarFunction.Mod => Arithmetic("%", first, second!),
                 GqlScalarFunction.ToString => ScalarText(first, cypher: true),
                 GqlScalarFunction.ToInteger => CypherInteger(first),
                 GqlScalarFunction.ToFloat => first is string input ? CypherFloat(input) : Finite(Convert.ToDouble(first, CultureInfo.InvariantCulture)),
                 GqlScalarFunction.ToBoolean => CypherBoolean(first),
-                _ => throw new GraphPlanningException("COHDBG001", string.Format(CultureInfo.CurrentCulture, ErrorMessages.FunctionArity, name), call.Location),
+                _ => throw new GraphPlanningException("COHDBG001", string.Format(CultureInfo.CurrentCulture, ErrorMessages.FunctionArity, GraphScalarFunctions.Name(call.Function)), call.Location),
             };
         }
         catch (Exception error) when (error is ArithmeticException or FormatException or InvalidCastException or ArgumentException)
-        { throw new GraphPlanningException("COHDBG013", string.Format(CultureInfo.CurrentCulture, ErrorMessages.FunctionValue, name), call.Location, error); }
+        { throw new GraphPlanningException("COHDBG013", string.Format(CultureInfo.CurrentCulture, ErrorMessages.FunctionValue, GraphScalarFunctions.Name(call.Function)), call.Location, error); }
     }
 
     private static double Logarithm(object first, object? second)
@@ -116,7 +123,20 @@ internal static partial class GraphExpressionEvaluator
 
     private static string Replace(string text, string search, string replacement)
     {
-        if (search.Length == 0) { return text; }
+        if (search.Length == 0)
+        {
+            // Neo4j StringValue.java:197 delegates to Java String.replace: insert at
+            // every UTF-16 boundary, including before and after the input.
+            if (replacement.Length == 0) { return text; }
+            long expanded = GraphValueCodec.ScalarLength(text) + 5L + (text.Length + 1L) * (GraphValueCodec.ScalarLength(replacement) - 4L);
+            long characters = text.Length + (text.Length + 1L) * replacement.Length;
+            if (expanded > GraphValueCodec.MaxPayloadLength || characters > GraphValueCodec.MaxPayloadLength)
+            { throw new ArithmeticException(ErrorMessages.CompositeLimit); }
+            var result = new StringBuilder((int)characters);
+            result.Append(replacement);
+            foreach (char character in text) { result.Append(character).Append(replacement); }
+            return result.ToString();
+        }
         long bytes = GraphValueCodec.ScalarLength(text) + 5L;
         long growth = GraphValueCodec.ScalarLength(replacement) - (long)GraphValueCodec.ScalarLength(search);
         if (growth > 0)
@@ -321,7 +341,7 @@ internal static partial class GraphExpressionEvaluator
         DateOnly date => date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
         DateTimeOffset timestamp => cypher
             ? timestamp.ToString("yyyy-MM-dd'T'HH:mm:ss.FFFFFFFzzz", CultureInfo.InvariantCulture).Replace("+00:00", "Z", StringComparison.Ordinal)
-            : timestamp.ToString("yyyy-MM-dd HH:mm:ss.fffffffzzz", CultureInfo.InvariantCulture),
+            : timestamp.ToString("yyyy-MM-dd HH:mm:ss.FFFFFFFzzz", CultureInfo.InvariantCulture),
         float or double when cypher => CypherFloatingText(value),
         _ when IsNumber(value) => Convert.ToString(value, CultureInfo.InvariantCulture)!,
         _ => throw new InvalidCastException(ErrorMessages.CastValueInvalid),

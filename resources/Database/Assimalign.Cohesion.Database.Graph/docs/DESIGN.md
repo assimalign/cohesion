@@ -606,7 +606,11 @@ Static enum switches define signatures and evaluators, preserving NativeAOT with
 Parsed scalar arity shares aggregates' GQL0002 rule; hand-built invalid calls are COHDBG001.
 Provably incompatible kinds (including group lists) fail planning with COHDBG003 naming the
 function; dynamic wrong kinds and conversion/domain failures use COHDBG013. Unknown calls
-are GQL0010. Strict NULL arguments return NULL before kind/domain checks.
+are GQL0010. Strict NULL arguments return NULL before kind/domain checks. The main walk
+checks each reference once, carrying the enclosing function; evaluation uses fixed argument
+locals and formats function names only on errors. KnownFunctionKind proves non-integral
+toBoolean arguments, Boolean numeric CAST and temporal MATCH/INSERT properties incompatible
+(COHDBG003), including EXPLAIN and empty inputs.
 
 Capture: GraphDatabaseSession.BeginTransactionCoreAsync reads one UTC instant from the existing
 EngineOptions.TimeProvider or TimeProvider.System before Coordinator.BeginAsync. Autocommit
@@ -617,21 +621,26 @@ replaces for each statement snapshot. Reader: an explicit GraphEvaluationContext
 at every evaluator call, including MATCH maps, projection stages, grouping and sort keys.
 Every stage and statement of a transaction shares the instant. CURRENT_DATE reads its UTC date;
 CURRENT_TIMESTAMP reads the UTC DateTimeOffset. This mirrors SQL #1120's recorded seam; no
-public option, interface, assembly reference or visibility grant is added.
+public option, interface, assembly reference or visibility grant is added. The test clock
+advances on every GetUtcNow read so per-row or per-stage capture fails the regression.
 
 abs/ceil/floor/round preserve numeric CLR types (unsigned inputs become Decimal), unlike
 Neo4j's Float ceil/floor/round results. Round ties go away from zero. Exact comparisons remain
 unchanged. sqrt/ln/log domain errors are COHDBG013. Strings use Unicode code points for length
-and zero-based Cypher substring, invariant casing, and bounded ordinal replacement. CAST shares
-SQL's fractional rejection; Cypher conversions truncate and return NULL for unparsable text.
-DateOnly and DateTimeOffset gain predicate and total ordering; total order places dates and then
-timestamps after numbers, before NULL. PropertyScalar checks storage admissibility, so computed
-temporal properties raise COHDBG013 inside the transaction rather than a storage ArgumentException.
+and zero-based Cypher substring, invariant casing, and bounded ordinal replacement. Empty-search
+replacement inserts at every boundary, including both ends, as Neo4j StringValue.java:197
+does; the expanded size is checked before allocation. CAST shares
+SQL's fractional rejection, nonzero floating underflow checks (SqlStandardCasts.cs:206-249),
+direct decimal-text REAL conversion (:161) and optional timestamp fraction (SqlCastText.cs:27); Cypher conversions truncate and return NULL for unparsable text.
+DateOnly and DateTimeOffset gain predicate and total ordering; total order places zoned timestamps then
+dates between paths and strings (Neo4j storable/ValueGroup.java:56-65). PropertyScalar checks storage admissibility, so computed
+dynamic temporal properties raise COHDBG013 inside the transaction rather than a storage ArgumentException.
 
 Function result shapes drive Execute's static entity gate before writer admission or mutation.
 nodes/edges/relationships and startNode/endNode entity outputs are rejected there; scalar
 reads such as nodes(p)[0].name pass. LET endpoint bindings retain their proven Node kind for
-ExecutePaths. labels/keys/properties use existing negotiated composite values, with ordinal
+ExecutePaths. Depth-one nodes/edges/relationships elements are proven non-null, including
+through LET/WITH aliases and FOR expansion. labels/keys/properties use existing negotiated composite values, with ordinal
 labels/keys and snapshot-correct endpoint nodes. Materialized value failures precede ResultHeader,
 allowing exact pooled-session reuse. No catalog, storage or wire format change is needed.
 GraphFunctionTests, GraphFunctionWireTests and the profile's one-live-case-per-name guard pin

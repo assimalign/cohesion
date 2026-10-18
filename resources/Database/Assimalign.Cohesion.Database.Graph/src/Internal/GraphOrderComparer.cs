@@ -70,7 +70,8 @@ internal static class GraphOrderComparer
         };
     }
 
-    // AnyValueComparator.java:44-85 and VirtualValueGroup.java:26-32, local Neo4j values tree.
+    // AnyValueComparator.java:44-85, VirtualValueGroup.java:26-32 and
+    // storable/ValueGroup.java:56-65, local Neo4j values tree.
     private static int Group(object? value) => value switch
     {
         PreparedMap => 0,
@@ -78,12 +79,12 @@ internal static class GraphOrderComparer
         GraphRelationship => 2,
         object?[] => 3,
         GraphPath => 4,
-        string => 5,
-        bool => 6,
-        DateOnly => 8,
-        DateTimeOffset => 9,
+        DateTimeOffset => 5,
+        DateOnly => 6,
+        string => 7,
+        bool => 8,
         null => 10,
-        _ => 7,
+        _ => 9,
     };
 
     private static int Lists(object?[] left, object?[] right, CancellationToken token)

@@ -587,7 +587,8 @@ internal sealed partial class GraphPlanner
                 ValidateExpression(expression);
                 if (expression is not (GqlLiteralExpression or GqlParameterExpression))
                 {
-                    if (MayReturn(expression, true) || MayReturn(expression, false))
+                    if (MayReturn(expression, true) || MayReturn(expression, false) ||
+                        (KnownFunctionKind(expression, false) & (GraphFunctionKind.Date | GraphFunctionKind.Timestamp)) != 0)
                     { throw new GraphPlanningException("COHDBG003", ErrorMessages.PropertyScalarRequired, expression.Location); }
                 }
             }
@@ -618,11 +619,12 @@ internal sealed partial class GraphPlanner
         void ValidateExpression(GqlExpression? root, bool allowAggregates = false, bool ordering = false)
         {
             if (root is null) { return; }
-            var pending = new Stack<GqlExpression?>();
-            pending.Push(root);
-            while (pending.TryPop(out var expression))
+            var pending = new Stack<(GqlExpression? Expression, GqlExpression? Function)>();
+            pending.Push((root, null));
+            while (pending.TryPop(out var item))
             {
                 token.ThrowIfCancellationRequested();
+                var (expression, function) = item;
                 if (ordering && orderProjections is not null && expression is not null)
                 {
                     if (orderProjections.ContainsKey(expression)) { continue; }
@@ -657,24 +659,39 @@ internal sealed partial class GraphPlanner
                     if (query.SetQuantifier == GqlSetQuantifier.Distinct && referenced is not null && !projectedEntities.Contains(referenced))
                     { throw new GraphPlanningException("COHDBG001", ErrorMessages.DistinctSortNotProjected, expression.Location); }
                 }
+                string? reference = expression switch
+                {
+                    GqlVariableExpression variable => variable.Variable,
+                    GqlPropertyExpression property => property.Variable,
+                    GqlMemberExpression { Operand: GqlVariableExpression owner } => owner.Variable,
+                    GqlLabeledPredicate labeled => labeled.Variable,
+                    _ => null,
+                };
+                if (function is not null && reference is not null && !variables.ContainsKey(reference))
+                {
+                    string name = function is GqlFunctionCallExpression enclosing ? GraphScalarFunctions.Name(enclosing.Function) : "CAST";
+                    throw new GraphPlanningException("COHDBG001", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.FunctionUnbound, name, reference), expression!.Location);
+                }
                 switch (expression)
                 {
                     case GqlFunctionCallExpression call:
                         ValidateFunction(call, ordering);
-                        foreach (var argument in call.Arguments.Reverse()) { pending.Push(argument); }
+                        function = call;
+                        foreach (var argument in call.Arguments.Reverse()) { pending.Push((argument, function)); }
                         break;
                     case GqlCastExpression cast:
-                        ValidateFunctionReferences([cast.Operand], "CAST", ordering);
+                        function = cast;
                         if (!Enum.IsDefined(cast.Target)) { throw new GraphPlanningException("COHDBG001", ErrorMessages.CastValueInvalid, cast.Location); }
-                        if ((KnownFunctionKind(cast.Operand, ordering) & (GraphFunctionKind.Node | GraphFunctionKind.Relationship | GraphFunctionKind.Path | GraphFunctionKind.List | GraphFunctionKind.Map)) != 0)
+                        if ((KnownFunctionKind(cast.Operand, ordering) & (GraphFunctionKind.Node | GraphFunctionKind.Relationship | GraphFunctionKind.Path | GraphFunctionKind.List | GraphFunctionKind.Map)) != 0 ||
+                            KnownFunctionKind(cast.Operand, ordering) == GraphFunctionKind.Boolean && cast.Target is GqlCastType.Int32 or GqlCastType.Int64 or GqlCastType.Float32 or GqlCastType.Float64 or GqlCastType.Decimal)
                         { throw new GraphPlanningException("COHDBG003", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.FunctionKind, "CAST", 1), cast.Location); }
-                        pending.Push(cast.Operand);
+                        pending.Push((cast.Operand, function));
                         break;
                     case GqlAggregateExpression aggregate:
                         if (!allowAggregates || !Enum.IsDefined(aggregate.Function) ||
                             aggregate.Operand is null && (aggregate.Function != GqlAggregateFunction.Count || aggregate.Distinct))
                         { throw new GraphPlanningException("COHDBG001", ErrorMessages.AggregatePlacement, aggregate.Location); }
-                        if (aggregate.Operand is not null) { pending.Push(aggregate.Operand); }
+                        if (aggregate.Operand is not null) { pending.Push((aggregate.Operand, function)); }
                         break;
                     case GqlLiteralExpression literal:
                         if (forValue && literal.Value is byte[]) { break; }
@@ -700,8 +717,8 @@ internal sealed partial class GraphPlanner
                         ValidateMemberOwner(owner.Variable, member);
                         break;
                     case GqlBinaryExpression { Operator: "=" or "<>" or "!=" or "<" or "<=" or ">" or ">=" or "+" or "-" or "*" or "/" or "%" or "||" } binary:
-                        pending.Push(binary.Right);
-                        pending.Push(binary.Left);
+                        pending.Push((binary.Right, function));
+                        pending.Push((binary.Left, function));
                         break;
                     case GqlBinaryExpression { Operator: "AND" }:
                         throw new GraphPlanningException("COHDBG001", ErrorMessages.LogicalNodeRequired, expression?.Location);
@@ -710,33 +727,33 @@ internal sealed partial class GraphPlanner
                         { throw new GraphPlanningException("COHDBG001", $"Logical operator {(int)logical.Operator} is not defined.", expression?.Location); }
                         if (logical.Operands is null || logical.Operands.Count < 2)
                         { throw new GraphPlanningException("COHDBG001", "A logical predicate needs at least two operands.", expression?.Location); }
-                        for (int i = logical.Operands.Count - 1; i >= 0; i--) { pending.Push(logical.Operands[i]); }
+                        for (int i = logical.Operands.Count - 1; i >= 0; i--) { pending.Push((logical.Operands[i], function)); }
                         break;
                     case GqlUnaryExpression { Operator: "NOT" or "+" or "-" } unary:
-                        pending.Push(unary.Operand);
+                        pending.Push((unary.Operand, function));
                         break;
                     case GqlIsNullExpression test:
-                        pending.Push(test.Operand);
+                        pending.Push((test.Operand, function));
                         break;
                     case GqlTruthTestExpression test:
-                        pending.Push(test.Operand);
+                        pending.Push((test.Operand, function));
                         break;
                     case GqlInExpression membership:
-                        pending.Push(membership.List);
-                        pending.Push(membership.Operand);
+                        pending.Push((membership.List, function));
+                        pending.Push((membership.Operand, function));
                         break;
                     case GqlMemberExpression member:
                         if (IsGroup(member.Operand, ordering: ordering))
                         { throw new GraphPlanningException("COHDBG003", ErrorMessages.MemberBindingRequired, member.Location); }
-                        foreach (var child in GraphValueExpressions.Children(member).Reverse()) { pending.Push(child); }
+                        foreach (var child in GraphValueExpressions.Children(member).Reverse()) { pending.Push((child, function)); }
                         break;
                     case GqlListExpression or GqlMapExpression or GqlCaseExpression or GqlCoalesceExpression or
                         GqlNullIfExpression or GqlSubscriptExpression:
-                        foreach (var child in GraphValueExpressions.Children(expression).Reverse()) { pending.Push(child); }
+                        foreach (var child in GraphValueExpressions.Children(expression).Reverse()) { pending.Push((child, function)); }
                         break;
                     case GqlStringPredicateExpression predicate when Enum.IsDefined(predicate.Operator):
-                        pending.Push(predicate.Right);
-                        pending.Push(predicate.Left);
+                        pending.Push((predicate.Right, function));
+                        pending.Push((predicate.Left, function));
                         break;
                     case GqlLabeledPredicate labeled:
                         ValidateLabeledPredicate(labeled);
@@ -750,29 +767,15 @@ internal sealed partial class GraphPlanner
         }
         void ValidateFunction(GqlFunctionCallExpression call, bool ordering)
         {
-            string name = GraphScalarFunctions.Name(call.Function);
             if (!GraphScalarFunctions.ValidArity(call))
-            { throw new GraphPlanningException("COHDBG001", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.FunctionArity, name), call.Location); }
-            ValidateFunctionReferences(call.Arguments, name, ordering);
+            { throw new GraphPlanningException("COHDBG001", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.FunctionArity, GraphScalarFunctions.Name(call.Function)), call.Location); }
             // NULL-first applies to statically known NULLs as well as runtime NULLs.
             if (call.Arguments.Any(argument => argument is GqlLiteralExpression { Value: null } || argument is GqlParameterExpression p && GraphExpressionEvaluator.Parameter(p, _parameters) is null)) { return; }
             for (int i = 0; i < call.Arguments.Count; i++)
             {
                 var kind = KnownFunctionKind(call.Arguments[i], ordering);
                 if (kind != GraphFunctionKind.Unknown && (kind & GraphScalarFunctions.Argument(call.Function, i)) == 0)
-                { throw new GraphPlanningException("COHDBG003", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.FunctionKind, name, i + 1), call.Arguments[i].Location); }
-            }
-        }
-        void ValidateFunctionReferences(IEnumerable<GqlExpression> arguments, string function, bool ordering)
-        {
-            var pending = new Stack<GqlExpression>(arguments);
-            while (pending.TryPop(out var argument))
-            {
-                token.ThrowIfCancellationRequested();
-                string? variable = argument switch { GqlVariableExpression v => v.Variable, GqlPropertyExpression p => p.Variable, GqlLabeledPredicate l => l.Variable, _ => null };
-                if (variable is not null && !variables.ContainsKey(variable) && !(ordering && orderAliases?.ContainsKey(variable) == true))
-                { throw new GraphPlanningException("COHDBG001", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.FunctionUnbound, function, variable), argument.Location); }
-                foreach (var child in GraphValueExpressions.Children(argument)) { if (child is not null) { pending.Push(child); } }
+                { throw new GraphPlanningException("COHDBG003", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.FunctionKind, GraphScalarFunctions.Name(call.Function), i + 1), call.Arguments[i].Location); }
             }
         }
         GraphFunctionKind KnownFunctionKind(GqlExpression expression, bool ordering)
@@ -785,7 +788,8 @@ internal sealed partial class GraphPlanner
                 case GqlCastExpression cast: return cast.Target switch
                 {
                     GqlCastType.String => GraphFunctionKind.String, GqlCastType.Boolean => GraphFunctionKind.Boolean,
-                    GqlCastType.Date => GraphFunctionKind.Date, GqlCastType.Timestamp => GraphFunctionKind.Timestamp, _ => GraphFunctionKind.Number,
+                    GqlCastType.Date => GraphFunctionKind.Date, GqlCastType.Timestamp => GraphFunctionKind.Timestamp,
+                    GqlCastType.Int32 or GqlCastType.Int64 => GraphFunctionKind.Integral, _ => GraphFunctionKind.NonIntegral,
                 };
                 case GqlAggregateExpression aggregate:
                     return aggregate.Function == GqlAggregateFunction.CollectList ? GraphFunctionKind.List
@@ -813,12 +817,13 @@ internal sealed partial class GraphPlanner
                         {
                             DatabaseType.String => GraphFunctionKind.String, DatabaseType.Boolean => GraphFunctionKind.Boolean,
                             DatabaseType.Date => GraphFunctionKind.Date, DatabaseType.DateTimeOffset => GraphFunctionKind.Timestamp,
-                            DatabaseType.Int64 or DatabaseType.Int32 or DatabaseType.Float32 or DatabaseType.Float64 or DatabaseType.Decimal => GraphFunctionKind.Number,
+                            DatabaseType.Int64 or DatabaseType.Int32 => GraphFunctionKind.Integral,
+                            DatabaseType.Float32 or DatabaseType.Float64 or DatabaseType.Decimal => GraphFunctionKind.NonIntegral,
                             _ => GraphFunctionKind.Unknown,
                         };
                     }
-                    return RequireVariable(variable.Variable) switch
-                    { BindingKind.Node => GraphFunctionKind.Node, BindingKind.Relationship => GraphFunctionKind.Relationship, BindingKind.Path => GraphFunctionKind.Path, _ => GraphFunctionKind.Unknown };
+                    return variables.TryGetValue(variable.Variable, out var binding) ? binding switch
+                    { BindingKind.Node => GraphFunctionKind.Node, BindingKind.Relationship => GraphFunctionKind.Relationship, BindingKind.Path => GraphFunctionKind.Path, _ => GraphFunctionKind.Unknown } : GraphFunctionKind.Unknown;
                 default:
                     if (IsGroup(expression, ordering: ordering)) { return GraphFunctionKind.List; }
                     var entity = GraphValueExpressions.EntityShape(expression, (name, depth) =>

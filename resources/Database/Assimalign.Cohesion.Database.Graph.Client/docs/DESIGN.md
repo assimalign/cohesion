@@ -70,8 +70,10 @@ mutations, including when wrapped in lists/CASE or accessed to an entity. Scalar
 them are supported. A mandatory LET s=startNode(r) can be projected as a bare entity through
 QueryPathsAsync. Graph wire has no explicit transactions; datetime functions therefore share
 one captured UTC instant per statement. Their date/instant values sort without numeric coercion.
-Function and CAST failures arrive as COHDBG013 ExecutionFailure before ResultHeader and retain
-the same authenticated pooled session. Unknown calls are GQL0010 ParseFailure. GraphFunctionWireTests
+Function and CAST value failures, including floating underflow, arrive as COHDBG013 ExecutionFailure
+before ResultHeader and retain the same authenticated pooled session. Proven incompatible kinds
+(non-integral toBoolean, Boolean numeric CAST and temporal property maps) arrive as plan-time
+COHDBG003 before writes. Unknown calls are GQL0010 ParseFailure. GraphFunctionWireTests
 pins exact values, types, raw-frame ordering, entity rejection before mutation, capability
 refusal and pooled-session reuse over InMemory and TCP.
 
