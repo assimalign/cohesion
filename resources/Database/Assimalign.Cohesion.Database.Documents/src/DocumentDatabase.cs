@@ -78,7 +78,7 @@ public sealed class DocumentDatabase : DatabaseInstance
         {
             DocumentCatalog.EnsureIndexFormat(storage);
         }
-        catch (Indexing.IndexFormatException exception)
+        catch (Exception exception) when (exception is Indexing.IndexFormatException or DocumentCatalogException)
         {
             Coordinator.DisposeAsync().AsTask().GetAwaiter().GetResult();
             throw new DatabaseException($"Database '{name}' cannot be opened. {exception.Message}", exception);

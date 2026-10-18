@@ -16,7 +16,7 @@ internal static class DocumentCatalogCodec
         binary.Write(writer.Value);
         binary.Write(0UL);
         binary.Write((byte)(record.Collection is not null ? 1 : record.Document is not null ? 2 : 4));
-        binary.Write((byte)1);
+        binary.Write((byte)(record.Index is not null ? 2 : 1));
         if (record.Collection is { } collection)
         {
             binary.Write(collection.Id.ToByteArray());
@@ -38,7 +38,9 @@ internal static class DocumentCatalogCodec
             var index = record.Index!.Value;
             binary.Write(index.CollectionId.ToByteArray());
             WriteString(binary, index.Name);
-            WriteString(binary, index.Path);
+            binary.Write(index.Paths.Count);
+            foreach (string path in index.Paths) { WriteString(binary, path); }
+            binary.Write(index.IsUnique);
             binary.Write(index.ObjectId);
         }
         return stream.ToArray();
@@ -54,10 +56,7 @@ internal static class DocumentCatalogCodec
             reader.ReadUInt64();
             byte kind = reader.ReadByte();
             byte version = reader.ReadByte();
-            if (version != 1)
-            {
-                throw new DocumentCatalogException($"Unsupported document catalog format version {version}.");
-            }
+            EnsureVersion(kind, version);
             var id = new Guid(reader.ReadBytes(16));
             string name = ReadString(reader) ?? throw new DocumentCatalogException("Catalog names cannot be null.");
             CatalogRecord result;
@@ -85,14 +84,22 @@ internal static class DocumentCatalogCodec
                     result = new CatalogRecord(null, new DocumentCatalogEntry(id, name, documentVersion, head, length, checksum));
                     break;
                 case 4:
-                    string path = ReadString(reader) ?? throw new DocumentCatalogException("Index paths cannot be null.");
+                    int count = reader.ReadInt32();
+                    if (count is < 1 or > 32) { throw new DocumentCatalogException("Invalid index path count."); }
+                    var paths = new string[count];
+                    for (int i = 0; i < count; i++)
+                    {
+                        paths[i] = ReadString(reader) ?? throw new DocumentCatalogException("Index paths cannot be null.");
+                        DocumentIndexKeys.ValidatePath(paths[i]);
+                    }
+                    byte flags = reader.ReadByte();
+                    if (flags > 1) { throw new DocumentCatalogException("Invalid index flags."); }
                     ulong objectId = reader.ReadUInt64();
-                    DocumentIndexKeys.ValidatePath(path);
                     if (objectId == 0)
                     {
                         throw new DocumentCatalogException("Index identities cannot be zero.");
                     }
-                    result = new CatalogRecord(null, null, new DocumentIndexMetadata(id, name, path, objectId));
+                    result = new CatalogRecord(null, null, new DocumentIndexMetadata(id, name, paths, flags == 1, objectId));
                     break;
                 default:
                     throw new DocumentCatalogException($"Unexpected document metadata record kind {kind}.");
@@ -106,6 +113,15 @@ internal static class DocumentCatalogCodec
         catch (Exception error) when (error is IOException or ArgumentException or OverflowException)
         {
             throw new DocumentCatalogException("Malformed document catalog metadata.", error);
+        }
+    }
+
+    internal static void EnsureVersion(byte kind, byte version)
+    {
+        byte supported = (byte)(kind is 4 or 5 ? 2 : 1);
+        if (version != supported)
+        {
+            throw new DocumentCatalogException($"Document catalog kind {kind} format: found {version}, supported {supported}. Recreate the database with this engine; no upgrade or legacy reader is supported.");
         }
     }
 

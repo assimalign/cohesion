@@ -19,6 +19,7 @@ public sealed partial class DocumentCatalog
 {
     private readonly Dictionary<(Guid CollectionId, string Name), List<Reference>> _indexDefinitions = new();
     private readonly Dictionary<ulong, (PageId Page, int Slot, long Root)> _registrations = new();
+    private readonly Dictionary<ulong, bool> _uniqueIndexes = new();
     private BTreeIndexManager _indexes = null!;
 
     /// <summary>Lists visible index definitions in ordinal name order.</summary>
@@ -80,6 +81,7 @@ public sealed partial class DocumentCatalog
             }
         }
         var metadata = new DocumentIndexMetadata(collectionId, name, path, (ulong)_storage.ReserveTransactionSequence());
+        _uniqueIndexes[metadata.ObjectId] = metadata.IsUnique;
         var encoded = DocumentCatalogCodec.Encode(new CatalogRecord(null, null, metadata), context.Sequence);
         var entries = new List<(IndexKey Key, Reference Reference)>();
         lock (_sync)
@@ -299,10 +301,12 @@ public sealed partial class DocumentCatalog
     private void OpenIndexes()
     {
         _registrations.Clear();
+        _uniqueIndexes.Clear();
         var registrations = new List<BTreeIndexRegistration>();
-        foreach (var (registration, page, slot) in ReadRegistrations(_storage))
+        foreach (var (registration, page, slot, isUnique) in ReadRegistrations(_storage))
         {
             registrations.Add(registration);
+            _uniqueIndexes.Add(registration.ObjectId, isUnique);
             _registrations.Add(registration.ObjectId, (page, slot, registration.RootPageId));
         }
         _indexes = BTreeIndexManager.Create(new BTreeIndexManagerOptions
@@ -313,9 +317,9 @@ public sealed partial class DocumentCatalog
         });
     }
 
-    private static List<(BTreeIndexRegistration Registration, PageId Page, int Slot)> ReadRegistrations(DocumentStorage storage)
+    private static List<(BTreeIndexRegistration Registration, PageId Page, int Slot, bool IsUnique)> ReadRegistrations(DocumentStorage storage)
     {
-        var registrations = new List<(BTreeIndexRegistration, PageId, int)>();
+        var registrations = new List<(BTreeIndexRegistration, PageId, int, bool)>();
         var objectIds = new HashSet<ulong>();
         using var iterator = storage.GetUnitIterator(1);
         while (iterator.MoveNext())
@@ -323,18 +327,20 @@ public sealed partial class DocumentCatalog
             var unit = iterator.Current;
             using var stream = new MemoryStream(unit.Data.ToArray(), writable: false);
             using var reader = new BinaryReader(stream, new UTF8Encoding(false, true));
-            if (reader.ReadUInt64() != 0 || reader.ReadUInt64() != 0 || reader.ReadByte() != 5 || reader.ReadByte() != 1)
+            if (reader.ReadUInt64() != 0 || reader.ReadUInt64() != 0 || reader.ReadByte() != 5)
             {
                 throw new DocumentCatalogException("Invalid physical index registration header.");
             }
+            DocumentCatalogCodec.EnsureVersion(5, reader.ReadByte());
             ulong objectId = reader.ReadUInt64();
             long root = reader.ReadInt64();
             string name = DocumentCatalogCodec.ReadString(reader) ?? throw new DocumentCatalogException("Missing physical index name.");
-            if (objectId == 0 || root <= 0 || stream.Position != stream.Length || !objectIds.Add(objectId))
+            byte flags = reader.ReadByte();
+            if (flags > 1 || objectId == 0 || root <= 0 || stream.Position != stream.Length || !objectIds.Add(objectId))
             {
                 throw new DocumentCatalogException("Invalid physical index registration.");
             }
-            registrations.Add((new BTreeIndexRegistration(objectId, new IndexDefinition(name), root), unit.PageId, unit.SlotIndex));
+            registrations.Add((new BTreeIndexRegistration(objectId, new IndexDefinition(name), root), unit.PageId, unit.SlotIndex, flags == 1));
         }
         return registrations;
     }
@@ -352,10 +358,11 @@ public sealed partial class DocumentCatalog
             writer.Write(0UL);
             writer.Write(0UL);
             writer.Write((byte)5);
-            writer.Write((byte)1);
+            writer.Write((byte)2);
             writer.Write(registration.ObjectId);
             writer.Write(registration.RootPageId);
             DocumentCatalogCodec.WriteString(writer, registration.Definition.Name);
+            writer.Write(_uniqueIndexes.GetValueOrDefault(registration.ObjectId));
             var bytes = stream.ToArray();
             if (_registrations.ContainsKey(registration.ObjectId))
             {

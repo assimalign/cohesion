@@ -17,7 +17,7 @@ using Xunit;
 
 namespace Assimalign.Cohesion.Database.Documents.Catalog.Tests;
 
-public sealed class DocumentCatalogTests
+public sealed partial class DocumentCatalogTests
 {
     [Fact]
     public async Task CollectionOwnershipAndVersionsSurviveReopen()
@@ -276,7 +276,7 @@ public sealed class DocumentCatalogTests
         registrations.MoveNext().ShouldBeTrue();
         var registration = registrations.Current.Data;
         registration.Span[16].ShouldBe((byte)5);
-        registration.Span[17].ShouldBe((byte)1);
+        registration.Span[17].ShouldBe((byte)2);
         BinaryPrimitives.ReadUInt64LittleEndian(registration.Span[18..]).ShouldBe(metadata.ObjectId);
         long rootPage = BinaryPrimitives.ReadInt64LittleEndian(registration.Span[26..]);
         registrations.MoveNext().ShouldBeFalse();

@@ -746,6 +746,11 @@ is recorded for owner review; P8 (#1264) later absorbs the description into its 
 
 ## Index planning and writes
 
+Index definition and physical registration records use catalog v2 (#1135); other record kinds
+retain their current versions. Startup validates metadata and tree formats before the recovery
+scrub. V1 index catalogs are refused with a recreate remedy; no legacy reader or upgrade exists.
+
+
 `CREATE INDEX <index-name> ON <collection> (<path>)` and
 `DROP INDEX <index-name> ON <collection>` are OQL statements. `DocumentPlanner` binds them to
 catalog-operation plans and `DocumentPlanExecutor` executes those plans under the statement's

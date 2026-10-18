@@ -61,7 +61,7 @@ rejected for mutation: maintaining its obsolete index set would miss newly commi
 The engine performs this check. Catalog methods are lower-level composition seams, like Blob's
 catalog, and do not acquire model locks themselves.
 
-## Record format, version 1
+## Record format, per-kind versions
 
 Every record starts with UInt64 writer at offset 0, UInt64 deleter at 8, byte kind at 16, byte
 format version at 17. All integers are little-endian. Strings are Int32 UTF-8 byte length followed
@@ -75,8 +75,14 @@ The fields below appear consecutively beginning at offset 18. No trailing fields
 | --- | --- | --- |
 | 1 collection | 0 | GUID collection identity; string name; byte owner; nullable string owning schema |
 | 2 document | 0 | GUID collection identity; string document identity; UInt64 version; UInt64 head; Int64 byte length; UInt32 IEEE CRC-32 |
-| 4 index definition | 0 | GUID collection identity; string index name; string field path; UInt64 physical generation identity |
-| 5 physical registration | 1 | UInt64 physical generation identity; Int64 root page; string index name |
+| 4 index definition (v2) | 0 | GUID collection identity; string index name; Int32 path count (1..32); ordered path strings; byte unique flag (0 or 1); UInt64 physical generation identity |
+| 5 physical registration (v2) | 1 | UInt64 physical generation identity; Int64 root page; string index name; byte unique flag (0 or 1) |
+
+Kinds 1 and 2 remain v1. Every index uses v2, including single-path nonunique indexes.
+V1 index records are refused before the recovery scrub writes anything, with found/supported
+versions and a recreate remedy. There is no upgrade path or legacy reader. Older engines
+refuse the v2 physical registrations before their scrub; never open a v2 catalog in an older engine.
+Key-path lists are immutable and compare by value, including catalog conflict checks.
 
 Kind 3 content chunks use the format in
 [Documents.Storage](../../Assimalign.Cohesion.Database.Documents.Storage/docs/DESIGN.md).
@@ -165,14 +171,14 @@ it verifies recovery and index scrub without claiming physical durable-flush sup
 
 Adding/removing fields, changing scalar type, or replacing an object with an array is supported
 without schema migration. Each change creates a new version and updates affected scalar indexes.
-On-disk record-layout changes require a new format version and explicit migration support;
+On-disk record-layout changes require a new format version with no migration or legacy reader;
 unknown versions are rejected.
 
 The index trees' pages are not catalog records: `Database.Indexing` owns their B-tree page
 format (2 since #1194, entries ordered by key, entry location and writer) and checks each tree's
 root page when the catalog attaches it. Opening the catalog happens after the coordinator's
 recovery scrub, so `DocumentCatalog.EnsureIndexFormat(storage)` makes the same check first,
-reading only the registration records (which carry no MVCC stamps, so the scrub does not change
+reading the metadata and registration records (which carry no MVCC stamps, so the scrub does not change
 them) and each root page. The Documents engine calls it before recovery and refuses a database
 whose indexes an engine before #1194 wrote with "Database 'x' cannot be opened. COHDBI001: …",
 the `IndexFormatException` as its inner exception. A cleanly closed database is left

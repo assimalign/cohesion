@@ -81,6 +81,10 @@ public sealed partial class DocumentCatalog
     public static void EnsureIndexFormat(DocumentStorage storage)
     {
         ArgumentNullException.ThrowIfNull(storage);
+        using (var iterator = storage.GetUnitIterator(0))
+        {
+            while (iterator.MoveNext()) { DocumentCatalogCodec.Decode(iterator.Current.Data.Span); }
+        }
         BTreeIndexManager.EnsureFormat(storage, ReadRegistrations(storage).Select(entry => entry.Registration));
     }
 
