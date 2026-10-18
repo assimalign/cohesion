@@ -81,7 +81,7 @@ public sealed class SqlReturningParserTests
 
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - RETURNING: contextual names preserve ordinary identifiers")]
     [InlineData("UPDATE t AS old SET age = 1 RETURNING old.age;")]
-    [InlineData("UPDATE t output SET age = 1")]
+    [InlineData("UPDATE t output SET age = 1;")]
     [InlineData("UPDATE t output SET age = 1 RETURNING output.age;")]
     [InlineData("UPDATE t AS new SET age = 1 RETURNING new.age;")]
     [InlineData("DELETE FROM old RETURNING old.age;")]
