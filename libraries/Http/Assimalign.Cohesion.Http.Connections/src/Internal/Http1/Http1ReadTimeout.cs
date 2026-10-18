@@ -1,12 +1,15 @@
 using System;
+using System.Diagnostics;
+using System.IO.Pipelines;
 using System.Threading;
+using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 /// <summary>
 /// Drives the two-phase timeout that reclaims idle keep-alive and slow-header (Slowloris)
-/// HTTP/1.1 connections. A single <see cref="CancellationTokenSource"/>, linked to the ambient
-/// connection token, is armed with the keep-alive timeout while the transport waits for the next
+/// HTTP/1.1 connections. A <see cref="CancellationTokenSource"/>, linked to the ambient
+/// connection token, is created only when a pipe read waits, armed with the keep-alive timeout for the next
 /// request to begin, re-armed with the request-headers timeout once the first request byte
 /// arrives, and disarmed once the header section has been fully received (so the body read is not
 /// bounded by the header timeout).
@@ -36,14 +39,20 @@ internal sealed class Http1ReadTimeout : IDisposable
     private const int headersPhase = 1;
     private const int idleCancelledPhase = 2;
 
+    // Serializes creating the token source with a graceful close cancelling it.
+    private readonly object _sync = new();
     private readonly CancellationToken _connectionToken;
-    private readonly CancellationTokenSource _cts;
+    private CancellationTokenSource? _cts;
     private readonly TimeSpan _requestHeadersTimeout;
+    private TimeSpan _timeout;
+    private long _phaseStarted;
+    private bool _headReceived;
+    private bool _deadlineElapsed;
 
     private int _phase;
 
     /// <summary>
-    /// Initializes the controller and arms the keep-alive (idle-wait) deadline.
+    /// Initializes the controller and starts the keep-alive (idle-wait) deadline.
     /// </summary>
     /// <param name="connectionToken">The ambient connection/shutdown token to link to.</param>
     /// <param name="keepAliveTimeout">The idle-wait budget before the next request begins.</param>
@@ -52,15 +61,57 @@ internal sealed class Http1ReadTimeout : IDisposable
     {
         _connectionToken = connectionToken;
         _requestHeadersTimeout = requestHeadersTimeout;
-        _cts = CancellationTokenSource.CreateLinkedTokenSource(connectionToken);
-        Arm(keepAliveTimeout);
+        _timeout = keepAliveTimeout;
+        _phaseStarted = Stopwatch.GetTimestamp();
     }
 
     /// <summary>
-    /// Gets the token to pass to every read on the connection stream. Cancelled when the current
+    /// Gets the token for a pending head read. Cancelled when the current
     /// phase's deadline elapses (or when the ambient connection token is cancelled).
     /// </summary>
-    public CancellationToken Token => _cts.Token;
+    public CancellationToken Token
+    {
+        get
+        {
+            // Only a pending read (or cancellation) needs a source. A graceful close can race its
+            // creation, so publish and cancel under the same monitor. No lock on buffered reads.
+            lock (_sync)
+            {
+                if (_cts is null)
+                {
+                    _cts = CancellationTokenSource.CreateLinkedTokenSource(_connectionToken);
+                    if (Volatile.Read(ref _phase) == idleCancelledPhase || _deadlineElapsed)
+                    {
+                        _cts.Cancel();
+                    }
+                    else if (!_headReceived)
+                    {
+                        _cts.CancelAfter(GetRemainingTimeout());
+                    }
+                }
+                return _cts.Token;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Reads buffered input without creating a timer. Elapsed time still counts from the start of
+    /// the current phase; a pending read arms only the remaining allowance, never a fresh deadline.
+    /// </summary>
+    internal ValueTask<ReadResult> ReadAsync(PipeReader input)
+    {
+        _connectionToken.ThrowIfCancellationRequested();
+        if (_cts is { } source)
+        {
+            return input.ReadAsync(source.Token);
+        }
+        if (Volatile.Read(ref _phase) == idleCancelledPhase || GetRemainingTimeout() == TimeSpan.Zero)
+        {
+            _deadlineElapsed = true;
+            return ValueTask.FromCanceled<ReadResult>(Token);
+        }
+        return input.TryRead(out ReadResult result) ? new ValueTask<ReadResult>(result) : input.ReadAsync(Token);
+    }
 
     /// <summary>
     /// Gets a value indicating whether the transport has entered the header-reading phase (the
@@ -74,7 +125,8 @@ internal sealed class Http1ReadTimeout : IDisposable
     /// token &#8212; is what fired. True only when this controller's deadline elapsed and the
     /// connection is not being shut down.
     /// </summary>
-    public bool TimedOut => _cts.IsCancellationRequested && !_connectionToken.IsCancellationRequested;
+    public bool TimedOut => !_connectionToken.IsCancellationRequested
+        && (_deadlineElapsed || Volatile.Read(ref _phase) == idleCancelledPhase || _cts?.IsCancellationRequested == true);
 
     /// <summary>
     /// Transitions from the keep-alive idle wait to the request-headers deadline. Invoked by the
@@ -86,7 +138,9 @@ internal sealed class Http1ReadTimeout : IDisposable
         // stays ended (the read observes the cancellation and the connection is reclaimed).
         if (Interlocked.CompareExchange(ref _phase, headersPhase, idlePhase) == idlePhase)
         {
-            Arm(_requestHeadersTimeout);
+            _phaseStarted = Stopwatch.GetTimestamp();
+            _timeout = _requestHeadersTimeout;
+            _cts?.CancelAfter(_requestHeadersTimeout);
         }
     }
 
@@ -101,7 +155,10 @@ internal sealed class Http1ReadTimeout : IDisposable
     {
         if (Interlocked.CompareExchange(ref _phase, idleCancelledPhase, idlePhase) == idlePhase)
         {
-            _cts.Cancel();
+            lock (_sync)
+            {
+                _cts?.Cancel();
+            }
         }
     }
 
@@ -111,23 +168,23 @@ internal sealed class Http1ReadTimeout : IDisposable
     /// </summary>
     public void OnHeadReceived()
     {
-        Disarm();
+        _headReceived = true;
+        _cts?.CancelAfter(Timeout.InfiniteTimeSpan);
     }
 
-    private void Arm(TimeSpan timeout)
+    private TimeSpan GetRemainingTimeout()
     {
-        // CancelAfter(InfiniteTimeSpan) disables the timer; a positive timeout (re)schedules it.
-        _cts.CancelAfter(timeout == Timeout.InfiniteTimeSpan ? Timeout.InfiniteTimeSpan : timeout);
-    }
-
-    private void Disarm()
-    {
-        _cts.CancelAfter(Timeout.InfiniteTimeSpan);
+        if (_timeout == Timeout.InfiniteTimeSpan)
+        {
+            return Timeout.InfiniteTimeSpan;
+        }
+        TimeSpan remaining = _timeout - Stopwatch.GetElapsedTime(_phaseStarted);
+        return remaining > TimeSpan.Zero ? remaining : TimeSpan.Zero;
     }
 
     /// <inheritdoc />
     public void Dispose()
     {
-        _cts.Dispose();
+        _cts?.Dispose();
     }
 }
