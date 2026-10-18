@@ -10,6 +10,29 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed partial class SqlViewTests
 {
+    [Theory(DisplayName = "Cohesion Test [Sql] - Views: capturing full set operand metadata retains identical domain identities")]
+    [InlineData("CAST(id AS positive)")]
+    [InlineData("domain_value(id)")]
+    public async Task Execute_DomainSetOperand_ShouldKeepDomainWithTypeFacets(string projection)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("view-domain-set", new());
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await SeedAsync(session);
+        await ExecuteAsync(session, "CREATE DOMAIN positive AS DECIMAL(5,2) CHECK (VALUE > 0)");
+        await ExecuteAsync(session, "CREATE FUNCTION domain_value(x INT) RETURNS positive IMMUTABLE RETURN CAST(x AS positive)");
+
+        // Act
+        await ExecuteAsync(session, "CREATE VIEW v AS SELECT " + projection + " AS n FROM t UNION SELECT " + projection + " FROM t");
+
+        // Assert
+        var column = database.Catalog.Views.ShouldHaveSingleItem().Columns.ShouldHaveSingleItem();
+        column.DomainName.ShouldBe("positive");
+        column.Type.Precision.ShouldBe(5);
+        column.Type.Scale.ShouldBe(2);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sql] - Views: catalog refusal diagnostics reach the client and preserve the connection")]
     [InlineData(false)]
     [InlineData(true)]

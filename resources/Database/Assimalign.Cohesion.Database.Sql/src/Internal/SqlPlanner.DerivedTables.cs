@@ -17,8 +17,17 @@ internal sealed partial class SqlPlanner
 
     private SqlProjectionMetadata? CaptureProjectionMetadata(SqlCollationCandidate candidate, SqlCatalogColumn? source = null,
         SqlExpression? expression = null, SqlExpressionEvaluator? evaluator = null)
-        => ViewDefinitionBinding is not null || InDerivedBody || _commonTableState?.BindingOperands is not null || _queryScopes?.SetOperandDepth > 0
-            ? new(candidate, source, expression is null ? null : evaluator!.OutputTypeInfo(expression)) : null;
+    {
+        if (ViewDefinitionBinding is null && !InDerivedBody && _commonTableState?.BindingOperands is null && !(_queryScopes?.SetOperandDepth > 0)) { return null; }
+        SqlType? declared = expression is null ? null : UnwrapCollation(expression) switch
+        {
+            SqlCastExpression cast => SqlDefinitionBinder.ResolveType(cast.TargetType, _functions, cast.Location),
+            SqlFunctionCallExpression call when !SqlStandardLibrary.IsEvaluatorForm(call.FunctionName) => evaluator!.ResolveFunction(call)?.ReturnType,
+            _ => null,
+        };
+        return new(candidate, source, expression is null ? null : evaluator!.OutputTypeInfo(expression),
+            source?.DomainName ?? (declared is { IsDomain: true } ? declared.Name : null));
+    }
 
     private SqlRelationSource BindDerivedTable(SqlDerivedTableReference derived, SqlSelectExpression? owner)
     {
