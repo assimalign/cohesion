@@ -244,6 +244,14 @@ public sealed partial class DocumentQueryTests
         var ownership = await Should.ThrowAsync<DatabaseObjectLockedException>(async () => await session.ExecuteAsync("DROP INDEX IF EXISTS ix ON items"));
         ownership.Message.ShouldContain("Sales"); ownership.Message.ShouldContain("DROP INDEX");
         (await RowsAsync(session, "SELECT INDEX_NAME FROM COHESION_SCHEMA.INDEXES")).ShouldHaveSingleItem().GetString(0).ShouldBe("ix");
+        await using (var stale = await session.BeginTransactionAsync())
+        {
+            await using var concurrent = await database.CreateSessionAsync();
+            var content = await concurrent.GetCollectionAsync("items");
+            await PutAsync(content, concurrent, "changed", "{\"a\":1,\"b\":2}");
+            await Should.ThrowAsync<DatabaseObjectLockedException>(async () => await session.ExecuteAsync("DROP INDEX IF EXISTS ix ON items"));
+            await stale.RollbackAsync();
+        }
         var path = new OqlPathExpression([new("a",null)]);
         var invalid = new OqlCreateIndexExpression("wide", "items", Enumerable.Repeat(path,33).ToArray(), false, false);
         var cap = Should.Throw<DatabaseException>(() => new DocumentPlanner(database.Catalog, context.Snapshot, null).Plan(invalid));

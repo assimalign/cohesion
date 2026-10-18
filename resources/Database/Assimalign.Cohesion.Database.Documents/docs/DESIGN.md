@@ -781,7 +781,10 @@ snapshots retain their defined visibility.
 Conditional creation preserves an existing same-named definition regardless of its paths or
 UNIQUE flag. Conditional removal ignores an absent name. Under schema ownership, an existing
 index still refuses removal, while an absent conditional DROP is a no-op. Snapshot conflicts
-are checked before no-ops. Indexes and documents remain in the same logical transaction.
+are checked before no-ops. After collection-identity checks, a present schema-owned index
+retains its ownership refusal before document/index-set conflict checks; an absent conditional
+DROP still checks those conflicts before returning its no-op. Indexes and documents remain
+in the same logical transaction.
 INSERT, UPSERT, UPDATE, DELETE and CRUD share eager atomic maintenance of every index.
 UNIQUE violations use the catalog-owned public DocumentConstraintViolationException, COHDOC020
 (23505); non-scalar UNIQUE components use COHDOC021. NULL and MISSING components never conflict.

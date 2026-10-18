@@ -240,6 +240,9 @@ internal static partial class DocumentPlanExecutor
         {
             DocumentDatabase.ThrowConflict();
         }
+        if (collection.Owner == DatabaseObjectOwner.Schema &&
+            (absentNoOp is null || database.Catalog.GetIndexes(collection.Id, operation.Context.Snapshot).Any(index => index.Name == absentNoOp)))
+        { throw new DatabaseObjectLockedException(collection.Name, collection.OwningSchema!, operationName); }
         if (!database.Catalog.GetDocuments(collection.Id, null, operation.Context.Snapshot)
                 .SequenceEqual(database.Catalog.GetDocuments(collection.Id, null, database.LatestSnapshot(operation.Context))) ||
             !database.Catalog.GetIndexes(collection.Id, operation.Context.Snapshot)
@@ -247,9 +250,6 @@ internal static partial class DocumentPlanExecutor
         {
             DocumentDatabase.ThrowConflict();
         }
-        if (collection.Owner == DatabaseObjectOwner.Schema &&
-            (absentNoOp is null || database.Catalog.GetIndexes(collection.Id, operation.Context.Snapshot).Any(index => index.Name == absentNoOp)))
-        { throw new DatabaseObjectLockedException(collection.Name, collection.OwningSchema!, operationName); }
     }
 
     private static DatabaseType GetType(object? value) => value switch
