@@ -39,18 +39,7 @@ internal sealed record GraphPlan(GqlQueryExpression Query, IReadOnlyList<GraphMa
     internal GraphDistinctPlan? Distinct { get; init; }
     internal GraphGroupingPlan? Grouping { get; init; }
     internal GraphSortPagePlan? SortPage { get; init; }
-    /// <summary>
-    /// Gets whether the statement requires a label or relationship type the database does not
-    /// have: a MATCH node pattern's conjunction (<c>:A</c>, <c>:A&amp;B</c>), a MATCH relationship
-    /// pattern's type, or a non-negated labeled predicate with a pure conjunction among the
-    /// <c>WHERE</c> clause's top-level <c>AND</c> operands (<c>WHERE n:A</c>,
-    /// <c>WHERE n.k = 1 AND n IS LABELED A</c>). No element can satisfy it, so the statement
-    /// matches no row and the executor reads nothing.
-    /// </summary>
-    /// <remarks>
-    /// Only a mandatory clause may set this flag. An unsatisfiable optional clause records its
-    /// own flag and null-extends its input without reading candidates.
-    /// </remarks>
+    /// <summary>Gets whether any mandatory MATCH stage is statically unsatisfiable. Execution uses the per-clause flags.</summary>
     internal bool MatchesNothing { get; init; }
 
     /// <summary>The normalized, execution-local snapshot of named scalar bindings.</summary>
@@ -113,6 +102,7 @@ internal sealed partial class GraphPlanner
         var query = statement;
         var stages = statement.Stages;
         var planned = new List<GraphStagePlan>();
+        var deletedVariables = new HashSet<string>(StringComparer.Ordinal);
         var shapes = new Dictionary<string, GraphBindingShape>(StringComparer.Ordinal);
         bool writes = stages.Any(stage => stage is GqlInsertStage or GqlDeleteStage);
         if (pathsRequest && writes)
@@ -131,9 +121,10 @@ internal sealed partial class GraphPlanner
         var tokens = new GraphTokenResolver(_database.Catalog, _snapshot);
         bool matchesNothing = false;
         bool optional = false;
+        bool forValue = false;
         if (statement.MatchClauses is null)
         { throw new GraphPlanningException("COHDBG001", ErrorMessages.MatchClausePathsRequired, statement.Location); }
-        if (stages.Count == 0 || statement.OrderBy is null)
+        if (stages.Count == 0 || statement.OrderBy is null || stages[^1] is GqlReturnStage { IsWith: true })
         { throw new GraphPlanningException("COHDBG001", ErrorMessages.PatternOrReturnRequired, statement.Location); }
         for (int stageIndex = 0; stageIndex < stages.Count; stageIndex++)
         {
@@ -151,6 +142,8 @@ internal sealed partial class GraphPlanner
             switch (stage)
             {
                 case GqlLetStage let:
+                    if (let.Bindings is null || let.Bindings.Count == 0 || let.Bindings.Any(item => item?.Expression is null || string.IsNullOrEmpty(item.Alias)))
+                    { throw new GraphPlanningException("COHDBG001", ErrorMessages.StageUnsupported, stage.Location ?? statement.Location); }
                     foreach (var binding in let.Bindings)
                     {
                         ValidateExpression(binding.Expression);
@@ -158,10 +151,14 @@ internal sealed partial class GraphPlanner
                     }
                     break;
                 case GqlFilterStage filter:
+                    if (filter.Predicate is null) { throw new GraphPlanningException("COHDBG001", ErrorMessages.StageUnsupported, stage.Location ?? statement.Location); }
                     ValidateExpression(filter.Predicate);
                     break;
                 case GqlForStage loop:
+                    if (loop.List is null || string.IsNullOrEmpty(loop.Variable)) { throw new GraphPlanningException("COHDBG001", ErrorMessages.StageUnsupported, stage.Location ?? statement.Location); }
+                    forValue = true;
                     ValidateExpression(loop.List);
+                    forValue = false;
                     AddValue(loop.Variable, loop.List, element: true);
                     break;
                 case GqlNextStage:
@@ -171,166 +168,174 @@ internal sealed partial class GraphPlanner
                     if (stages[stageIndex - 1] is not GqlReturnStage) { ClearScope(); }
                     break;
             }
-        foreach (var clause in query.MatchClauses)
-        {
-            token.ThrowIfCancellationRequested();
-            if (clause?.Paths is null || clause.Paths.Count == 0)
-            { throw new GraphPlanningException("COHDBG001", ErrorMessages.MatchClausePathsRequired, query.Location); }
-            optional = clause.Optional;
-            int firstDeclaration = declarations.Count;
-            bool clauseMatchesNothing = false;
-            foreach (var path in clause.Paths)
-            { if (!Validate(path, creating: false)) { clauseMatchesNothing = true; } }
-            ValidateExpression(clause.Predicate);
-            clauseMatchesNothing |= RequiresUnknownName(clause.Predicate);
-            var anchors = new AnchorSources(_database, _snapshot, clause.Predicate, _parameters);
-            var paths = new List<GraphPathPlan>();
-            foreach (var path in clause.Paths)
+            foreach (var clause in query.MatchClauses)
             {
-                paths.Add(new GraphPathPlan(path, ChooseAnchor(path, anchors, boundVariables)));
-                foreach (var node in path.Nodes)
-                { if (node.Variable is { } variable) { boundVariables.Add(variable); } }
-                foreach (var relationship in path.Relationships)
-                { if (relationship.Variable is { } variable) { boundVariables.Add(variable); } }
+                token.ThrowIfCancellationRequested();
+                if (clause?.Paths is null || clause.Paths.Count == 0)
+                { throw new GraphPlanningException("COHDBG001", ErrorMessages.MatchClausePathsRequired, query.Location); }
+                optional = clause.Optional;
+                int firstDeclaration = declarations.Count;
+                bool clauseMatchesNothing = false;
+                foreach (var path in clause.Paths)
+                { if (!Validate(path, creating: false)) { clauseMatchesNothing = true; } }
+                ValidateExpression(clause.Predicate);
+                clauseMatchesNothing |= RequiresUnknownName(clause.Predicate);
+                var anchors = new AnchorSources(_database, _snapshot, clause.Predicate, _parameters);
+                var paths = new List<GraphPathPlan>();
+                foreach (var path in clause.Paths)
+                {
+                    paths.Add(new GraphPathPlan(path, ChooseAnchor(path, anchors, boundVariables)));
+                    foreach (var node in path.Nodes)
+                    { if (node.Variable is { } variable) { boundVariables.Add(variable); } }
+                    foreach (var relationship in path.Relationships)
+                    { if (relationship.Variable is { } variable) { boundVariables.Add(variable); } }
+                }
+                clauses.Add(new GraphMatchClausePlan(paths, clause.Predicate, optional,
+                    declarations.Skip(firstDeclaration).ToArray(), clauseMatchesNothing));
+                matchesNothing |= !optional && clauseMatchesNothing;
             }
-            clauses.Add(new GraphMatchClausePlan(paths, clause.Predicate, optional,
-                declarations.Skip(firstDeclaration).ToArray(), clauseMatchesNothing));
-            matchesNothing |= !optional && clauseMatchesNothing;
-        }
-        optional = false;
-        foreach (var path in query.Creates) { Validate(path, creating: true); }
-        foreach (var variable in query.DeleteVariables) { RequireVariable(variable, entity: true); }
-        if (stage is GqlInsertStage)
-        {
-            foreach (var path in query.Creates)
+            optional = false;
+            foreach (var path in query.Creates) { Validate(path, creating: true); }
+            foreach (var variable in query.DeleteVariables) { RequireVariable(variable, entity: true); }
+            if (stage is GqlInsertStage)
             {
-                foreach (var node in path.Nodes) { foreach (var name in GraphLabelEvaluator.InsertLabels(node)) { tokens.IntroduceLabel(name); } }
-                foreach (var edge in path.Relationships) { tokens.IntroduceRelationshipType(GraphLabelEvaluator.InsertType(edge)); }
+                foreach (var path in query.Creates)
+                {
+                    foreach (var node in path.Nodes)
+                    {
+                        foreach (var name in GraphLabelEvaluator.InsertLabels(node)) { tokens.IntroduceLabel(name); }
+                        if (node.Variable is { } nodeVariable) { boundVariables.Add(nodeVariable); }
+                    }
+                    foreach (var edge in path.Relationships)
+                    {
+                        tokens.IntroduceRelationshipType(GraphLabelEvaluator.InsertType(edge));
+                        if (edge.Variable is { } edgeVariable) { boundVariables.Add(edgeVariable); }
+                    }
+                }
             }
-        }
-        if (!Enum.IsDefined(query.SetQuantifier) || query.ReturnStar && (query.Projections.Count != 0 || declarations.Count == 0) ||
-            query.SetQuantifier == GqlSetQuantifier.Distinct && !query.ReturnStar && query.Projections.Count == 0)
-        { throw new GraphPlanningException("COHDBG001", ErrorMessages.ReturnShapeInvalid, query.Location); }
-        var items = query.ReturnStar
-            ? declarations.Select(variable => new GqlProjection(new GqlVariableExpression(variable)))
-            : query.Projections;
-        foreach (var projection in items)
-        {
-            token.ThrowIfCancellationRequested();
-            if (projection?.Expression is null)
-            { throw new GraphPlanningException("COHDBG001", ErrorMessages.ProjectionExpressionRequired, query.Location); }
-            ValidateExpression(projection.Expression, allowAggregates: true);
-            var kind = ProjectionKind(projection.Expression);
-            projections.Add(new GraphProjectionPlan(projection.Expression,
-                projection.Alias ?? GraphProjectionText.Describe(projection.Expression), kind)
+            if (stage is GqlReturnStage && !query.ReturnStar && query.Projections.Count == 0 || !Enum.IsDefined(query.SetQuantifier) || query.ReturnStar && (query.Projections.Count != 0 || declarations.Count == 0) ||
+                query.SetQuantifier == GqlSetQuantifier.Distinct && !query.ReturnStar && query.Projections.Count == 0)
+            { throw new GraphPlanningException("COHDBG001", ErrorMessages.ReturnShapeInvalid, query.Location); }
+            var items = query.ReturnStar
+                ? declarations.Select(variable => new GqlProjection(new GqlVariableExpression(variable)))
+                : query.Projections;
+            foreach (var projection in items)
             {
-                MayBeComposite = MayReturn(projection.Expression, entity: false),
-                Type = ExpressionType(projection.Expression),
-                Optional = projection.Expression is GqlVariableExpression named && !mandatoryVariables.Contains(named.Variable),
-            });
-        }
-        if (stage is GqlReturnStage && stageIndex > 0 && stages[stageIndex - 1] is GqlDeleteStage)
-        { throw new GraphPlanningException("COHDBG001", ErrorMessages.DeleteProjectionUnsupported, query.Location); }
-        if (pathsRequest && stageIndex == stages.Count - 1)
-        {
-            if (projections.Count != 1 || projections[0].Kind == GraphProjectionKind.Scalar || projections[0].Expression is not GqlVariableExpression)
-            { throw new GraphPlanningException("COHDBG001", ErrorMessages.PathProjectionRequired, query.Location); }
-            if (projections[0].Optional)
-            { throw new GraphPlanningException("COHDBG001", ErrorMessages.OptionalPathProjection, query.Location); }
-        }
-        var names = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var projection in projections)
-        {
-            token.ThrowIfCancellationRequested();
-            if (!names.Add(projection.Name))
-            {
-                throw new GraphPlanningException("COHDBG015", string.Format(System.Globalization.CultureInfo.CurrentCulture,
-                    ErrorMessages.DuplicateResultColumn, projection.Name), projection.Expression.Location ?? query.Location);
+                token.ThrowIfCancellationRequested();
+                if (projection?.Expression is null)
+                { throw new GraphPlanningException("COHDBG001", ErrorMessages.ProjectionExpressionRequired, query.Location); }
+                ValidateExpression(projection.Expression, allowAggregates: true);
+                var kind = ProjectionKind(projection.Expression);
+                projections.Add(new GraphProjectionPlan(projection.Expression,
+                    projection.Alias ?? GraphProjectionText.Describe(projection.Expression), kind)
+                {
+                    MayBeComposite = MayReturn(projection.Expression, entity: false),
+                    Type = ExpressionType(projection.Expression),
+                    Optional = projection.Expression is GqlVariableExpression named && !mandatoryVariables.Contains(named.Variable),
+                });
             }
-        }
-        if (query.OrderBy is null || projections.Count == 0 && (query.OrderBy.Count != 0 || query.Offset is not null || query.Limit is not null))
-        { throw new GraphPlanningException("COHDBG001", ErrorMessages.SortShapeInvalid, query.Location); }
-        grouping = GraphGrouping.Plan(query, projections, token, key => ValidateExpression(key));
-        orderAliases = new Dictionary<string, int>(StringComparer.Ordinal);
-        orderProjections = new Dictionary<GqlExpression, int>(new GraphExpressionShape(token));
-        var shadowed = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var projection in projections)
-        {
-            if (projection.Expression is not GqlVariableExpression identity || identity.Variable != projection.Name)
-            { shadowed.Add(projection.Name); }
-        }
-        for (int i = 0; i < projections.Count; i++)
-        {
-            token.ThrowIfCancellationRequested();
-            orderAliases.Add(projections[i].Name, i);
-            // Neo4j NormalizeWithAndReturnClauses.scala:315-342 also guards expression
-            // reuse against redefined variables; RETURN still evaluates in input scope.
-            if (!GraphValueExpressions.ReferencesAny(projections[i].Expression, shadowed, token))
-            { orderProjections.TryAdd(projections[i].Expression, i); }
-            if (projections[i].Expression is GqlVariableExpression entity) { projectedEntities.Add(entity.Variable); }
-        }
-        var groupedExpressions = new HashSet<GqlExpression>(new GraphExpressionShape(token));
-        if (grouping is not null)
-        {
-            foreach (var expression in grouping.Keys.Concat<GqlExpression>(grouping.Aggregates))
+            if (stage is GqlReturnStage && stageIndex > 0 && stages[stageIndex - 1] is GqlDeleteStage)
+            { throw new GraphPlanningException("COHDBG001", ErrorMessages.DeleteProjectionUnsupported, query.Location); }
+            if (pathsRequest && stageIndex == stages.Count - 1)
             {
-                if (!GraphValueExpressions.ReferencesAny(expression, shadowed, token)) { groupedExpressions.Add(expression); }
+                if (projections.Count != 1 || projections[0].Kind is not (GraphProjectionKind.Node or GraphProjectionKind.Relationship or GraphProjectionKind.Path) || projections[0].Expression is not GqlVariableExpression)
+                { throw new GraphPlanningException("COHDBG001", ErrorMessages.PathProjectionRequired, query.Location); }
+                if (projections[0].Optional)
+                { throw new GraphPlanningException("COHDBG001", ErrorMessages.OptionalPathProjection, query.Location); }
             }
-        }
-        var sortKeys = new List<GraphSortKeyPlan>();
-        foreach (var item in query.OrderBy)
-        {
-            token.ThrowIfCancellationRequested();
-            if (item?.Expression is null || !Enum.IsDefined(item.Direction) || !Enum.IsDefined(item.NullOrdering))
+            var names = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var projection in projections)
+            {
+                token.ThrowIfCancellationRequested();
+                if (!names.Add(projection.Name))
+                {
+                    throw new GraphPlanningException("COHDBG015", string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                        ErrorMessages.DuplicateResultColumn, projection.Name), projection.Expression.Location ?? query.Location);
+                }
+            }
+            if (query.OrderBy is null || projections.Count == 0 && (query.OrderBy.Count != 0 || query.Offset is not null || query.Limit is not null))
             { throw new GraphPlanningException("COHDBG001", ErrorMessages.SortShapeInvalid, query.Location); }
-            ValidateExpression(item.Expression, allowAggregates: grouping is not null);
-            if (grouping is not null) { grouping.Scope.Validate(item.Expression, orderAliases, groupedExpressions); }
-            int projectionIndex = item.Expression is GqlVariableExpression alias && orderAliases.TryGetValue(alias.Variable, out int aliased)
-                ? aliased : orderProjections.TryGetValue(item.Expression, out int projectedIndex) ? projectedIndex : -1;
-            sortKeys.Add(new GraphSortKeyPlan(item, projectionIndex));
-        }
-        long offset = PageValue(query.Offset) ?? 0;
-        long? limit = PageValue(query.Limit);
-        if (stage is GqlReturnStage { Predicate: { } predicate })
-        {
-            ValidateExpression(predicate, allowAggregates: grouping is not null);
-            if (grouping is not null) { grouping.Scope.Validate(predicate, orderAliases, groupedExpressions); }
-        }
-        var stagePlan = new GraphPlan(query, clauses.AsReadOnly())
-        {
-            MatchesNothing = matchesNothing,
-            Projections = projections.AsReadOnly(),
-            Grouping = grouping,
-            Distinct = query.SetQuantifier == GqlSetQuantifier.Distinct ? new GraphDistinctPlan(projections.AsReadOnly()) : null,
-            SortPage = sortKeys.Count != 0 || query.Offset is not null || limit is not null
-                ? new GraphSortPagePlan(sortKeys.AsReadOnly(), offset, limit, groupedExpressions) : null,
-            Parameters = _parameters,
-        };
-        planned.Add(new GraphStagePlan(stage, stagePlan));
-        if (stage is GqlDeleteStage deletion)
-        {
-            foreach (string variable in deletion.Variables)
-            { variables.Remove(variable); declarations.Remove(variable); shapes.Remove(variable); mandatoryVariables.Remove(variable); boundVariables.Remove(variable); }
-        }
-        if (stage is GqlReturnStage projectionStage)
-        {
-            var carried = projections.Select((projection, index) =>
+            grouping = GraphGrouping.Plan(query, projections, token, key => ValidateExpression(key));
+            orderAliases = new Dictionary<string, int>(StringComparer.Ordinal);
+            orderProjections = new Dictionary<GqlExpression, int>(new GraphExpressionShape(token));
+            var shadowed = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var projection in projections)
             {
-                var source = projectionStage.ReturnStar ? projection.Expression as GqlVariableExpression : projectionStage.Projections[index].Expression as GqlVariableExpression;
-                string? name = projectionStage.ReturnStar ? projection.Name : projectionStage.Projections[index].Alias ?? source?.Variable;
-                return (Name: name, Projection: projection, Shape: Shape(projection.Expression));
-            }).ToArray();
-            ClearScope();
-            foreach (var item in carried)
-            {
-                if (item.Name is null) { continue; }
-                variables.Add(item.Name, ToBindingKind(item.Projection.Kind));
-                declarations.Add(item.Name);
-                boundVariables.Add(item.Name);
-                shapes.Add(item.Name, item.Shape);
-                if (!item.Projection.Optional) { mandatoryVariables.Add(item.Name); }
+                if (projection.Expression is not GqlVariableExpression identity || identity.Variable != projection.Name)
+                { shadowed.Add(projection.Name); }
             }
-        }
+            for (int i = 0; i < projections.Count; i++)
+            {
+                token.ThrowIfCancellationRequested();
+                orderAliases.Add(projections[i].Name, i);
+                // Neo4j NormalizeWithAndReturnClauses.scala:315-342 also guards expression
+                // reuse against redefined variables; RETURN still evaluates in input scope.
+                if (!GraphValueExpressions.ReferencesAny(projections[i].Expression, shadowed, token))
+                { orderProjections.TryAdd(projections[i].Expression, i); }
+                if (projections[i].Expression is GqlVariableExpression entity) { projectedEntities.Add(entity.Variable); }
+            }
+            var groupedExpressions = new HashSet<GqlExpression>(new GraphExpressionShape(token));
+            if (grouping is not null)
+            {
+                foreach (var expression in grouping.Keys.Concat<GqlExpression>(grouping.Aggregates))
+                {
+                    if (!GraphValueExpressions.ReferencesAny(expression, shadowed, token)) { groupedExpressions.Add(expression); }
+                }
+            }
+            var sortKeys = new List<GraphSortKeyPlan>();
+            foreach (var item in query.OrderBy)
+            {
+                token.ThrowIfCancellationRequested();
+                if (item?.Expression is null || !Enum.IsDefined(item.Direction) || !Enum.IsDefined(item.NullOrdering))
+                { throw new GraphPlanningException("COHDBG001", ErrorMessages.SortShapeInvalid, query.Location); }
+                ValidateExpression(item.Expression, allowAggregates: grouping is not null);
+                if (grouping is not null) { grouping.Scope.Validate(item.Expression, orderAliases, groupedExpressions); }
+                int projectionIndex = item.Expression is GqlVariableExpression alias && orderAliases.TryGetValue(alias.Variable, out int aliased)
+                    ? aliased : orderProjections.TryGetValue(item.Expression, out int projectedIndex) ? projectedIndex : -1;
+                sortKeys.Add(new GraphSortKeyPlan(item, projectionIndex));
+            }
+            long offset = PageValue(query.Offset) ?? 0;
+            long? limit = PageValue(query.Limit);
+            if (stage is GqlReturnStage { Predicate: { } predicate })
+            {
+                ValidateExpression(predicate);
+                if (grouping is not null) { grouping.Scope.Validate(predicate, orderAliases, groupedExpressions); }
+            }
+            var stagePlan = new GraphPlan(query, clauses.AsReadOnly())
+            {
+                MatchesNothing = matchesNothing,
+                Projections = projections.AsReadOnly(),
+                Grouping = grouping,
+                Distinct = query.SetQuantifier == GqlSetQuantifier.Distinct ? new GraphDistinctPlan(projections.AsReadOnly()) : null,
+                SortPage = sortKeys.Count != 0 || query.Offset is not null || limit is not null
+                    ? new GraphSortPagePlan(sortKeys.AsReadOnly(), offset, limit, groupedExpressions) : null,
+                Parameters = _parameters,
+            };
+            planned.Add(new GraphStagePlan(stage, stagePlan));
+            if (stage is GqlDeleteStage deletion)
+            {
+                foreach (string variable in deletion.Variables)
+                { deletedVariables.Add(variable); variables.Remove(variable); declarations.Remove(variable); shapes.Remove(variable); mandatoryVariables.Remove(variable); boundVariables.Remove(variable); }
+            }
+            if (stage is GqlReturnStage projectionStage && stageIndex != stages.Count - 1)
+            {
+                var carried = projections.Select((projection, index) =>
+                {
+                    var source = projectionStage.ReturnStar ? projection.Expression as GqlVariableExpression : projectionStage.Projections[index].Expression as GqlVariableExpression;
+                    string? name = projectionStage.ReturnStar ? projection.Name : projectionStage.Projections[index].Alias ?? source?.Variable;
+                    return (Name: name, Projection: projection, Shape: Shape(projection.Expression));
+                }).ToArray();
+                ClearScope();
+                foreach (var item in carried)
+                {
+                    if (item.Name is null) { continue; }
+                    variables.Add(item.Name, ToBindingKind(item.Projection.Kind));
+                    declarations.Add(item.Name);
+                    boundVariables.Add(item.Name);
+                    shapes.Add(item.Name, item.Shape);
+                    if (!item.Projection.Optional) { mandatoryVariables.Add(item.Name); }
+                }
+            }
         }
         var final = planned[^1].Plan;
         return final with
@@ -356,7 +361,12 @@ internal sealed partial class GraphPlanner
             var entities = new bool[GraphValueCodec.MaxDepth + 2];
             var composites = new bool[entities.Length];
             for (int i = 0; i < entities.Length; i++)
-            { entities[i] = MayReturn(expression, true, i + accesses); composites[i] = MayReturn(expression, false, i + accesses); }
+            {
+                token.ThrowIfCancellationRequested();
+                entities[i] = MayReturn(expression, true, i + accesses);
+                composites[i] = MayReturn(expression, false, i + accesses);
+                if (!entities[i] && !composites[i]) { break; }
+            }
             return new GraphBindingShape(entities, composites, accesses == 0 ? ExpressionType(expression) : DatabaseType.Null);
         }
 
@@ -373,6 +383,7 @@ internal sealed partial class GraphPlanner
             { throw new GraphPlanningException("COHDBG003", ErrorMessages.ValueBindingAlreadyBound, expression.Location); }
             var shape = Shape(expression, element ? 1 : 0);
             var kind = element ? BindingKind.Value : ToBindingKind(ProjectionKind(expression));
+            deletedVariables.Remove(variable);
             variables.Add(variable, kind);
             shapes.Add(variable, shape);
             declarations.Add(variable);
@@ -453,6 +464,7 @@ internal sealed partial class GraphPlanner
         }
         void ValidateStageProperties(IReadOnlyDictionary<string, GqlExpression> properties, bool creating)
         {
+            if (properties is null) { throw new GraphPlanningException("COHDBG001", ErrorMessages.PropertyScalarRequired, query.Location); }
             foreach (var expression in properties.Values)
             {
                 ValidateExpression(expression);
@@ -470,14 +482,15 @@ internal sealed partial class GraphPlanner
             if (variables.TryGetValue(variable, out var previous) && previous != kind)
             { throw new GraphPlanningException("COHDBG003", $"Variable '{variable}' has incompatible graph bindings.", query.Location); }
             if (!variables.ContainsKey(variable)) { declarations.Add(variable); }
+            deletedVariables.Remove(variable);
             variables[variable] = kind;
             if (!optional) { mandatoryVariables.Add(variable); }
         }
         BindingKind RequireVariable(string variable, bool entity = false)
         {
-            if (variable is null || !variables.TryGetValue(variable, out var kind)) { throw new GraphPlanningException("COHDBG001", $"Variable '{variable}' is not bound.", query.Location); }
+            if (variable is null || !variables.TryGetValue(variable, out var kind)) { throw new GraphPlanningException(variable is not null && deletedVariables.Contains(variable) ? "COHDBG003" : "COHDBG001", $"Variable '{variable}' is not bound.", query.Location); }
             if (entity && kind is BindingKind.Path or BindingKind.Value)
-            { throw new GraphPlanningException("COHDBG003", $"Path variable '{variable}' cannot be deleted or used as a property owner.", query.Location); }
+            { throw new GraphPlanningException("COHDBG003", ErrorMessages.EntityBindingRequired, query.Location); }
             return kind;
         }
         // Walks the predicate with an explicit stack, in source order: an AND chain of any length
@@ -530,6 +543,7 @@ internal sealed partial class GraphPlanner
                         if (aggregate.Operand is not null) { pending.Push(aggregate.Operand); }
                         break;
                     case GqlLiteralExpression literal:
+                        if (forValue && literal.Value is byte[]) { break; }
                         try { GraphDatabase.TypeOf(literal.Value); }
                         catch (DatabaseException error)
                         { throw new GraphPlanningException("COHDBG003", ErrorMessages.LiteralScalarRequired, literal.Location, error); }
@@ -541,6 +555,7 @@ internal sealed partial class GraphPlanner
                         break;
                     case GqlParameterExpression parameter:
                         object? bound = GraphExpressionEvaluator.Parameter(parameter, _parameters);
+                        if (forValue && bound is byte[]) { break; }
                         if (snapshotted.Add(parameter.Name))
                         { ((Dictionary<string, object?>)_parameters!)[parameter.Name] = GraphCompositeValues.Snapshot(bound, parameter.Location); }
                         break;
@@ -600,7 +615,7 @@ internal sealed partial class GraphPlanner
             if (labeled.Variable is null) { throw new GraphPlanningException("COHDBG001", "A labeled predicate requires a variable.", labeled.Location); }
             var kind = RequireVariable(labeled.Variable);
             if (kind is BindingKind.Path or BindingKind.Value)
-            { throw new GraphPlanningException("COHDBG003", $"Path variable '{labeled.Variable}' has no labels; a labeled predicate tests a node or relationship.", labeled.Location); }
+            { throw new GraphPlanningException("COHDBG003", ErrorMessages.EntityBindingRequired, labeled.Location); }
             if (labeled.LabelExpression is null) { throw new GraphPlanningException("COHDBG001", "A labeled predicate requires a label expression.", labeled.Location); }
             foreach (string name in GraphLabelEvaluator.Distinct(GraphLabelEvaluator.Names(labeled.LabelExpression)))
             {
@@ -781,13 +796,13 @@ internal sealed partial class GraphPlanner
 
     private static GqlQueryExpression StageQuery(GqlStage stage, Assimalign.Cohesion.Database.Language.Location? location) => stage switch
     {
-        GqlMatchStage match => new([match.Clause], [], [], false, [], stage.Location ?? location),
-        GqlInsertStage insert => new([], null, insert.Paths, [], false, [], stage.Location ?? location),
-        GqlDeleteStage delete => new([], null, [], delete.Variables, delete.Detach, [], stage.Location ?? location),
-        GqlReturnStage project => new([], null, [], [], false, project.Projections, stage.Location ?? location)
+        GqlMatchStage match => new([match.Clause], [], [], false, [], location ?? stage.Location),
+        GqlInsertStage insert => new([], null, insert.Paths, [], false, [], location ?? stage.Location),
+        GqlDeleteStage delete => new([], null, [], delete.Variables, delete.Detach, [], location ?? stage.Location),
+        GqlReturnStage project => new([], null, [], [], false, project.Projections, location ?? stage.Location)
         { SetQuantifier = project.SetQuantifier, ReturnStar = project.ReturnStar, GroupBy = project.GroupBy,
             OrderBy = project.OrderBy, Offset = project.Offset, Limit = project.Limit },
-        GqlLetStage or GqlForStage or GqlFilterStage or GqlNextStage => new([], null, [], [], false, [], stage.Location ?? location),
+        GqlLetStage or GqlForStage or GqlFilterStage or GqlNextStage => new([], null, [], [], false, [], location ?? stage.Location),
         _ => throw new GraphPlanningException("COHDBG001", ErrorMessages.StageUnsupported, stage?.Location ?? location),
     };
 

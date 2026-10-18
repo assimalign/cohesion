@@ -74,10 +74,10 @@ public sealed class GqlQueryExpression : GqlExpression
             { foreach (var clause in MatchClauses) { stages.Add(new GqlMatchStage(clause)); } }
             if (Creates.Count != 0) { stages.Add(new GqlInsertStage(Creates)); }
             if (DeleteVariables.Count != 0) { stages.Add(new GqlDeleteStage(DeleteVariables, DetachDelete)); }
-            if (Projections.Count != 0 || ReturnStar)
+            if (Projections.Count != 0 || ReturnStar || SetQuantifier != GqlSetQuantifier.All || GroupBy is not null || OrderBy is null || OrderBy.Count != 0 || Offset is not null || Limit is not null)
             {
                 stages.Add(new GqlReturnStage(Projections) { SetQuantifier = SetQuantifier, ReturnStar = ReturnStar,
-                    GroupBy = GroupBy, OrderBy = OrderBy, Offset = Offset, Limit = Limit });
+                    GroupBy = GroupBy, OrderBy = OrderBy!, Offset = Offset, Limit = Limit });
             }
             return stages.AsReadOnly();
         }

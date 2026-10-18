@@ -18,7 +18,7 @@ internal static class GraphCatalogIntrospection
         {
             throw new GraphPlanningException("GQL0007", "Graph catalog introspection is read-only.", query.Location);
         }
-        if (query.MatchClauses is null || query.MatchClauses.Count != 0 || query.Projections.Count != 0 ||
+        if (query.Stages.Count != 0 || query.MatchClauses is null || query.MatchClauses.Count != 0 || query.Projections.Count != 0 ||
             query.ReturnStar || query.SetQuantifier != GqlSetQuantifier.All || query.OrderBy is null ||
             query.OrderBy.Count != 0 || query.Offset is not null || query.Limit is not null)
         {

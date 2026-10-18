@@ -61,6 +61,15 @@ internal static partial class GraphExpressionEvaluator
         }
     }
 
+    internal static object? PropertyScalar(GqlExpression expression, IReadOnlyDictionary<string, object?> bindings,
+        IReadOnlyDictionary<string, object?>? parameters)
+    {
+        var value = Evaluate(expression, bindings, parameters);
+        if (GraphCompositeValues.IsComposite(value) || value is GraphNode or GraphRelationship or GraphPath)
+        { throw new GraphPlanningException("COHDBG003", ErrorMessages.PropertyScalarRequired, expression.Location); }
+        return value;
+    }
+
     internal static object? Scalar(GqlExpression expression, IReadOnlyDictionary<string, object?>? parameters)
     {
         object? value = expression switch

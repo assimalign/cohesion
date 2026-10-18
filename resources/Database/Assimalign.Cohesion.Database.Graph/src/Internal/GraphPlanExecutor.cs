@@ -26,13 +26,8 @@ internal static class GraphPlanExecutor
             if (error.Code == GraphStatementTooComplex.ParserCode) { throw GraphStatementTooComplex.FromParse(error); }
             throw new DatabaseParseException($"GQL parse error {error.Code}: {error.Message}", statement.Diagnostics);
         }
-        if (paths)
-        {
-            var query = statement.GqlExpression;
-            if (query.CatalogSurface is not null || query.MatchClauses is null || query.MatchClauses.Count == 0 || query.Creates.Count != 0 ||
-                query.DeleteVariables.Count != 0 || query.DetachDelete)
-            { throw new GraphPlanningException("COHDBG001", ErrorMessages.PathProjectionRequired, query.Location); }
-        }
+        if (paths && statement.GqlExpression.CatalogSurface is not null)
+        { throw new GraphPlanningException("COHDBG001", ErrorMessages.PathProjectionRequired, statement.GqlExpression.Location); }
         if (statement.GqlExpression.CatalogSurface is { } surface)
         {
             // Catalog requests have no parameter operands, but the shared contract still rejects
@@ -46,90 +41,108 @@ internal static class GraphPlanExecutor
         // Validate result shape before locking a writer, expanding a MATCH or applying mutations.
         if (scalarsOnly && plan.Projections.Any(projection => projection.Kind != GraphProjectionKind.Scalar))
         { throw new GraphPlanningException("COHDBG001", ErrorMessages.ExecuteScalarRequired, plan.Query.Location); }
-        var compositeColumns = plan.Projections.Select(projection => GraphValueExpressions.MayReturn(projection.Expression, parameters, entity: false)).ToArray();
+        var compositeColumns = plan.Projections.Select(projection => projection.MayBeComposite).ToArray();
         long headerLength = 4;
         foreach (var projection in plan.Projections) { headerLength += 5L + System.Text.Encoding.UTF8.GetByteCount(projection.Name); }
         if (headerLength > GraphValueCodec.MaxPayloadLength)
         { throw new GraphPlanningException("COHDBG013", ErrorMessages.CompositeLimit, plan.Query.Location); }
         if (!compositeValues && compositeColumns.Any(value => value))
         { throw new GraphPlanningException("COHDBG016", ErrorMessages.CompositeCapabilityRequired, plan.Query.Location); }
-        if (plan.Query.Creates.Count > 0 || plan.Query.DeleteVariables.Count > 0)
-        { await database.LockWriterAsync(operation.Context, token).ConfigureAwait(false); }
-        // An unsatisfiable mandatory clause empties the statement without reads (#1228).
-        // An optional clause carries its own flag and null-extends the running rows below.
-        var bindings = plan.MatchesNothing
-            ? new List<Dictionary<string, object?>>()
-            : new List<Dictionary<string, object?>> { new(StringComparer.Ordinal) };
+        if (plan.Writes) { await database.LockWriterAsync(operation.Context, token).ConfigureAwait(false); }
+        var bindings = new List<Dictionary<string, object?>> { new(StringComparer.Ordinal) };
         var budget = new ExpansionBudget();
-        foreach (var clause in plan.MatchClauses)
-        {
-            var matched = new List<Dictionary<string, object?>>();
-            foreach (var binding in bindings)
-            {
-                token.ThrowIfCancellationRequested();
-                operation.EnsureActive();
-                var candidates = new List<Dictionary<string, object?>>();
-                if (!clause.MatchesNothing)
-                {
-                    candidates.Add(binding);
-                    foreach (var path in clause.Paths)
-                    {
-                        var expanded = new List<Dictionary<string, object?>>();
-                        foreach (var candidate in candidates)
-                        { await MatchAsync(database, operation, path, candidate, expanded, budget, parameters, token).ConfigureAwait(false); }
-                        candidates = expanded;
-                    }
-                }
-                bool found = false;
-                foreach (var candidate in candidates)
-                {
-                    token.ThrowIfCancellationRequested();
-                    if (clause.Predicate is not null && GraphExpressionEvaluator.Boolean(
-                        GraphExpressionEvaluator.Evaluate(clause.Predicate, candidate, parameters), clause.Predicate) is not true) { continue; }
-                    AddBinding(matched, candidate);
-                    found = true;
-                }
-                if (!found && clause.Optional)
-                {
-                    var extended = new Dictionary<string, object?>(binding, StringComparer.Ordinal);
-                    foreach (string variable in clause.NewVariables) { extended.Add(variable, null); }
-                    AddBinding(matched, extended);
-                }
-            }
-            bindings = matched;
-        }
         long affected = 0;
-        foreach (var binding in bindings)
+        for (int stageIndex = 0; stageIndex < plan.Stages.Count; stageIndex++)
         {
-            foreach (var path in plan.Query.Creates)
-            { affected += await CreateAsync(database, operation, path, binding, parameters, token).ConfigureAwait(false); }
-        }
-        // Delete relationships first, so explicit DELETE r,a can remove a connected node.
-        var relationships = new HashSet<GraphRelationshipId>();
-        var nodes = new HashSet<GraphNodeId>();
-        foreach (var binding in bindings)
-        {
-            foreach (string variable in plan.Query.DeleteVariables)
+            token.ThrowIfCancellationRequested();
+            operation.EnsureActive();
+            var stage = plan.Stages[stageIndex].Stage;
+            var stagePlan = plan.Stages[stageIndex].Plan;
+            switch (stage)
             {
-                if (binding[variable] is GraphNode node) { nodes.Add(node.Id); }
-                else if (binding[variable] is GraphRelationship relationship) { relationships.Add(relationship.Id); }
+                case GqlMatchStage:
+                    foreach (var clause in stagePlan.MatchClauses)
+                    { bindings = await MatchClauseAsync(database, operation, clause, bindings, budget, parameters, token).ConfigureAwait(false); }
+                    break;
+                case GqlLetStage let:
+                    foreach (var binding in bindings)
+                    {
+                        token.ThrowIfCancellationRequested();
+                        foreach (var assignment in let.Bindings)
+                        { binding.Add(assignment.Alias!, GraphExpressionEvaluator.Evaluate(assignment.Expression, binding, parameters)); }
+                    }
+                    break;
+                case GqlFilterStage filter:
+                    bindings = bindings.Where(binding =>
+                    {
+                        token.ThrowIfCancellationRequested();
+                        return GraphExpressionEvaluator.Boolean(GraphExpressionEvaluator.Evaluate(filter.Predicate, binding, parameters), filter.Predicate) is true;
+                    }).ToList();
+                    break;
+                case GqlForStage loop:
+                    var expandedRows = new List<Dictionary<string, object?>>();
+                    foreach (var binding in bindings)
+                    {
+                        token.ThrowIfCancellationRequested();
+                        object? value = GraphExpressionEvaluator.Evaluate(loop.List, binding, parameters);
+                        if (value is null) { continue; }
+                        if (value is not System.Collections.IList list || value is byte[])
+                        { throw new GraphPlanningException("COHDBG013", ErrorMessages.ForListRequired, loop.List.Location); }
+                        foreach (object? item in list)
+                        {
+                            token.ThrowIfCancellationRequested();
+                            var row = new Dictionary<string, object?>(binding, StringComparer.Ordinal) { [loop.Variable] = item };
+                            AddBinding(expandedRows, row);
+                        }
+                    }
+                    bindings = expandedRows;
+                    break;
+                case GqlInsertStage insertion:
+                    foreach (var binding in bindings)
+                    {
+                        token.ThrowIfCancellationRequested();
+                        foreach (var path in insertion.Paths)
+                        { affected += await CreateAsync(database, operation, path, binding, parameters, token).ConfigureAwait(false); }
+                    }
+                    break;
+                case GqlDeleteStage deletion:
+                {
+                    // Delete relationships first, so explicit DELETE r,a can remove a connected node.
+                    var relationships = new HashSet<GraphRelationshipId>();
+                    var nodes = new HashSet<GraphNodeId>();
+                    foreach (var binding in bindings)
+                    {
+                        foreach (string variable in stagePlan.Query.DeleteVariables)
+                        {
+                            if (binding[variable] is GraphNode node) { nodes.Add(node.Id); }
+                            else if (binding[variable] is GraphRelationship relationship) { relationships.Add(relationship.Id); }
+                        }
+                    }
+                    foreach (var id in relationships)
+                    {
+                        if (database.Store.FindRelationship(id.Value, operation.Context.Snapshot) is not null) { affected++; }
+                        await database.Store.DeleteRelationshipAsync(id.Value, operation.Context, token).ConfigureAwait(false);
+                    }
+                    foreach (var id in nodes)
+                    {
+                        if (database.Store.FindNode(id.Value, operation.Context.Snapshot) is not null) { affected++; }
+                        await database.Store.DeleteNodeAsync(id.Value, stagePlan.Query.DetachDelete, operation.Context, token).ConfigureAwait(false);
+                    }
+                    foreach (var binding in bindings) { foreach (string variable in deletion.Variables) { binding.Remove(variable); } }
+                    break;
+                }
+                case GqlReturnStage projection when stageIndex != plan.Stages.Count - 1:
+                    bindings = ProjectBindings(stagePlan, projection, bindings, parameters, token);
+                    break;
+                case GqlNextStage when plan.Stages[stageIndex - 1].Stage is not GqlReturnStage:
+                    bindings = [new(StringComparer.Ordinal)];
+                    break;
             }
-        }
-        foreach (var id in relationships)
-        {
-            if (database.Store.FindRelationship(id.Value, operation.Context.Snapshot) is not null) { affected++; }
-            await database.Store.DeleteRelationshipAsync(id.Value, operation.Context, token).ConfigureAwait(false);
-        }
-        foreach (var id in nodes)
-        {
-            if (database.Store.FindNode(id.Value, operation.Context.Snapshot) is not null) { affected++; }
-            await database.Store.DeleteNodeAsync(id.Value, plan.Query.DetachDelete, operation.Context, token).ConfigureAwait(false);
         }
         if (plan.Projections.Count == 0) { return new GraphMutationResult(affected, plan.Warnings); }
         if (plan.Grouping is { } grouping) { bindings = GraphGrouping.Apply(grouping, bindings, parameters, token); }
         var columns = plan.Projections.Select((projection, i) => new DatabaseColumn
-        { Name = projection.Name, Ordinal = i, Type = projection.Expression is GqlAggregateExpression { Function: GqlAggregateFunction.Count }
-            ? DatabaseType.Int64 : DatabaseType.Null }).ToArray();
+        { Name = projection.Name, Ordinal = i, Type = projection.Type }).ToArray();
         var rows = new List<GraphOrderedRow>(bindings.Count);
         var distinct = plan.Distinct is null ? null : new HashSet<object?[]>(GraphRowComparer.Instance);
         bool valueColumnsAdded = false;
@@ -175,6 +188,85 @@ internal static class GraphPlanExecutor
             return new GraphPathsQueryResult(results, plan.Warnings);
         }
         return new GraphQueryResult(columns, paged, plan.Warnings, compositeColumns);
+    }
+
+    private static async ValueTask<List<Dictionary<string, object?>>> MatchClauseAsync(GraphDatabase database, GraphOperation operation,
+        GraphMatchClausePlan clause, List<Dictionary<string, object?>> bindings, ExpansionBudget budget,
+        IReadOnlyDictionary<string, object?>? parameters, CancellationToken token)
+    {
+        var matched = new List<Dictionary<string, object?>>();
+        foreach (var binding in bindings)
+        {
+            token.ThrowIfCancellationRequested();
+            operation.EnsureActive();
+            var candidates = new List<Dictionary<string, object?>>();
+            if (!clause.MatchesNothing)
+            {
+                candidates.Add(binding);
+                foreach (var path in clause.Paths)
+                {
+                    var expanded = new List<Dictionary<string, object?>>();
+                    foreach (var candidate in candidates)
+                    { await MatchAsync(database, operation, path, candidate, expanded, budget, parameters, token).ConfigureAwait(false); }
+                    candidates = expanded;
+                }
+            }
+            bool found = false;
+            foreach (var candidate in candidates)
+            {
+                token.ThrowIfCancellationRequested();
+                if (clause.Predicate is not null && GraphExpressionEvaluator.Boolean(
+                    GraphExpressionEvaluator.Evaluate(clause.Predicate, candidate, parameters), clause.Predicate) is not true) { continue; }
+                AddBinding(matched, candidate);
+                found = true;
+            }
+            if (!found && clause.Optional)
+            {
+                var extended = new Dictionary<string, object?>(binding, StringComparer.Ordinal);
+                foreach (string variable in clause.NewVariables) { extended.Add(variable, null); }
+                AddBinding(matched, extended);
+            }
+        }
+        return matched;
+    }
+
+    private static List<Dictionary<string, object?>> ProjectBindings(GraphPlan plan, GqlReturnStage stage,
+        List<Dictionary<string, object?>> bindings, IReadOnlyDictionary<string, object?>? parameters, CancellationToken token)
+    {
+        if (plan.Grouping is { } grouping) { bindings = GraphGrouping.Apply(grouping, bindings, parameters, token); }
+        var rows = new List<GraphOrderedRow>(bindings.Count);
+        var scopes = new Dictionary<object?[], Dictionary<string, object?>>();
+        var distinct = plan.Distinct is null ? null : new HashSet<object?[]>(GraphRowComparer.Instance);
+        foreach (var binding in bindings)
+        {
+            token.ThrowIfCancellationRequested();
+            var values = plan.Projections.Select(projection => GraphExpressionEvaluator.Evaluate(projection.Expression, binding, parameters)).ToArray();
+            if (distinct is not null && !distinct.Add(values)) { continue; }
+            var scope = plan.Grouping is null && plan.Distinct is null
+                ? new Dictionary<string, object?>(binding, StringComparer.Ordinal) : new Dictionary<string, object?>(StringComparer.Ordinal);
+            for (int i = 0; i < values.Length; i++) { scope[plan.Projections[i].Name] = values[i]; }
+            scopes.Add(values, scope);
+            rows.Add(new GraphOrderedRow(values, GraphSortPage.Keys(plan, binding, values, token), rows.Count));
+        }
+        var paged = GraphSortPage.Apply(rows, plan.SortPage, token);
+        var result = new List<Dictionary<string, object?>>(paged.Length);
+        foreach (var values in paged)
+        {
+            token.ThrowIfCancellationRequested();
+            if (stage.Predicate is { } predicate && GraphExpressionEvaluator.Boolean(
+                GraphExpressionEvaluator.Evaluate(predicate, scopes[values], parameters), predicate) is not true) { continue; }
+            // Grouped bindings store expression keys. Every boundary re-keys the carried
+            // output by variable name so later stages see an ordinary binding table.
+            var carried = new Dictionary<string, object?>(StringComparer.Ordinal);
+            for (int i = 0; i < values.Length; i++)
+            {
+                string? name = stage.ReturnStar ? plan.Projections[i].Name
+                    : stage.Projections[i].Alias ?? (stage.Projections[i].Expression as GqlVariableExpression)?.Variable;
+                if (name is not null) { carried.Add(name, values[i]); }
+            }
+            AddBinding(result, carried);
+        }
+        return result;
     }
 
     internal static async ValueTask MatchAsync(GraphDatabase database, GraphOperation operation, GraphPathPlan plan,
@@ -257,7 +349,7 @@ internal static class GraphPlanExecutor
                 if (database.Store.FindNode(next, operation.Context.Snapshot) is not { } target) { continue; }
                 var copy = new Dictionary<string, object?>(bindings, StringComparer.Ordinal);
                 var relationship = GraphDatabase.Materialize(edge);
-                if (!Accept(pattern.Variable, relationship, copy) || !PropertiesMatch(pattern.Properties, relationship.Properties, parameters)) { continue; }
+                if (!Accept(pattern.Variable, relationship, copy) || !PropertiesMatch(pattern.Properties, relationship.Properties, copy, parameters)) { continue; }
                 var node = GraphDatabase.Materialize(target);
                 if (!AcceptNode(path.Nodes[current.To], node, copy, parameters)) { continue; }
                 var nextPositions = (GraphNode[])positions.Clone();
@@ -288,7 +380,7 @@ internal static class GraphPlanExecutor
     }
 
     private static bool AcceptNode(GqlNodePattern pattern, GraphNode node, Dictionary<string, object?> bindings, IReadOnlyDictionary<string, object?>? parameters)
-        => GraphLabelEvaluator.Accepts(pattern, node.Labels) && PropertiesMatch(pattern.Properties, node.Properties, parameters) && Accept(pattern.Variable, node, bindings);
+        => GraphLabelEvaluator.Accepts(pattern, node.Labels) && PropertiesMatch(pattern.Properties, node.Properties, bindings, parameters) && Accept(pattern.Variable, node, bindings);
     private static bool Accept(string? variable, object entity, Dictionary<string, object?> bindings)
     {
         if (variable is null) { return true; }
@@ -300,8 +392,8 @@ internal static class GraphPlanExecutor
         bindings.Add(variable, entity);
         return true;
     }
-    private static bool PropertiesMatch(IReadOnlyDictionary<string, GqlExpression> expected, IReadOnlyDictionary<string, object?> actual, IReadOnlyDictionary<string, object?>? parameters)
-        => expected.All(item => actual.TryGetValue(item.Key, out var value) && GraphExpressionEvaluator.Equal(GraphExpressionEvaluator.Scalar(item.Value, parameters), value));
+    private static bool PropertiesMatch(IReadOnlyDictionary<string, GqlExpression> expected, IReadOnlyDictionary<string, object?> actual, IReadOnlyDictionary<string, object?> bindings, IReadOnlyDictionary<string, object?>? parameters)
+        => expected.All(item => actual.TryGetValue(item.Key, out var value) && GraphExpressionEvaluator.Equal(GraphExpressionEvaluator.PropertyScalar(item.Value, bindings, parameters), value));
 
     private static async ValueTask<long> CreateAsync(GraphDatabase database, GraphOperation operation, GqlPathPattern path,
         Dictionary<string, object?> bindings, IReadOnlyDictionary<string, object?>? parameters, CancellationToken token)
@@ -319,7 +411,7 @@ internal static class GraphPlanExecutor
             }
             else
             {
-                nodes[i] = await database.CreateNodeCoreAsync(operation, GraphLabelEvaluator.InsertLabels(pattern), EvaluateProperties(pattern.Properties, parameters), token).ConfigureAwait(false);
+                nodes[i] = await database.CreateNodeCoreAsync(operation, GraphLabelEvaluator.InsertLabels(pattern), EvaluateProperties(pattern.Properties, bindings, parameters), token).ConfigureAwait(false);
                 Accept(pattern.Variable, nodes[i], bindings);
                 affected++;
             }
@@ -332,7 +424,7 @@ internal static class GraphPlanExecutor
             // The planner admits only Outgoing and Incoming here.
             bool outgoing = pattern.Direction == GqlPatternDirection.Outgoing;
             var relationship = await database.CreateRelationshipCoreAsync(operation, nodes[outgoing ? i : i + 1].Id,
-                nodes[outgoing ? i + 1 : i].Id, GraphLabelEvaluator.InsertType(pattern), EvaluateProperties(pattern.Properties, parameters), token).ConfigureAwait(false);
+                nodes[outgoing ? i + 1 : i].Id, GraphLabelEvaluator.InsertType(pattern), EvaluateProperties(pattern.Properties, bindings, parameters), token).ConfigureAwait(false);
             Accept(pattern.Variable, relationship, bindings);
             affected++;
         }
@@ -340,8 +432,8 @@ internal static class GraphPlanExecutor
     }
 
     private static IReadOnlyDictionary<string, object?> EvaluateProperties(
-        IReadOnlyDictionary<string, GqlExpression> properties, IReadOnlyDictionary<string, object?>? parameters)
-        => properties.ToDictionary(item => item.Key, item => GraphExpressionEvaluator.Scalar(item.Value, parameters), StringComparer.Ordinal);
+        IReadOnlyDictionary<string, GqlExpression> properties, IReadOnlyDictionary<string, object?> bindings, IReadOnlyDictionary<string, object?>? parameters)
+        => properties.ToDictionary(item => item.Key, item => GraphExpressionEvaluator.PropertyScalar(item.Value, bindings, parameters), StringComparer.Ordinal);
 
     internal sealed class ExpansionBudget
     {
