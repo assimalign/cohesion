@@ -226,7 +226,7 @@ comment, and a string literal or block comment may span lines. `//` is not a
 comment: `/` is the division operator, so `//` is a syntax error.
 
 A recognized clause outside the profile keeps its `COHDBL001`, for example
-`RETURNING` or `FETCH`. The parser stops at such a clause by design, so the text
+`RETURNING` or `WINDOW`. The parser stops at such a clause by design, so the text
 from that clause on adds no second diagnostic. Text the parser stopped at before
 it reached the clause still reports `SQL0003`: `DELETE FROM t WHRE id = 1
 RETURNING *` reports both, so fixing `RETURNING` does not reveal a new error. A
@@ -985,6 +985,11 @@ OFFSET alone accepts an optional ROW or ROWS suffix. FETCH defaults to one row w
 its count is omitted; FIRST and NEXT, and ROW and ROWS, have identical semantics.
 FIRST remains contextual and unreserved.
 
+FETCH counts follow PostgreSQL's primary-expression (`c_expr`) or signed numeric
+constant grammar: bare `1+1` receives SQL0003, while `(1+1)` is accepted and renders
+as `(1 + 1)`. Names, parameters, function calls and CASE expressions are primary
+expressions; signs on other operands and infix operators require parentheses.
+
 The D1 SQL Server lexical aliases are `SELECT [DISTINCT] TOP (expression) ...` and
 `SELECT [DISTINCT] TOP n ...`. Unparenthesized TOP consumes exactly one integer
 literal or parameter token; a signed count or other expression requires parentheses.
@@ -994,7 +999,7 @@ Without ORDER BY, the count still applies but the choice of rows has no ordering
 Each SELECT accepts one limit spelling and one OFFSET. LIMIT and OFFSET can appear in
 either order, including PostgreSQL FETCH before OFFSET; rendering uses ISO OFFSET before FETCH. LIMIT with FETCH, TOP with LIMIT/OFFSET/FETCH,
 duplicate limits/offsets, or FETCH without ONLY receive SQL0003. PERCENT, WITH TIES
-and UPDATE/DELETE TOP receive COHDBL001 naming the form. A paging clause cannot mask
+and INSERT/UPDATE/DELETE TOP receive COHDBL001 naming the form. A paging clause cannot mask
 a later unsupported WINDOW clause, and WITH TIES never becomes a CTE diagnostic.
 
 These spellings execute at every accepted SELECT position: scalar, IN and EXISTS
@@ -1012,7 +1017,8 @@ spellings; older databases are refused without an upgrade path.
 PostgreSQL's local reference grammar accepts both LIMIT/OFFSET orders at
 `src/backend/parser/gram.y:13537-13558`, FETCH's default count at `:13623-13631`,
 and OFFSET's ROW/ROWS suffix at `:13652-13658`. The ISO features measured here are
-F857/F858/F860 and F861/F862/F865; F866 (PERCENT) and F867 (WITH TIES) remain excluded.
+F857/F858/F860 and F861/F862/F865; FETCH count grammar is at `:13674-13696`.
+F866 (PERCENT) and F867 (WITH TIES) remain excluded.
 
 `LIMIT`, `FETCH`, `TOP` and `OFFSET` accept nonnegative integer counts through
 `9223372036854775807` (`Int64.MaxValue`). After ordering and `DISTINCT`, `OFFSET`
@@ -1251,8 +1257,8 @@ clauses nest below it, so the [expression nesting limit](#expression-nesting-lim
 
 `ANY`/`ALL`/`SOME` quantified comparisons, nested or recursive CTEs, lateral joins,
 and subqueries in UPDATE SET, INSERT VALUES, CHECK/DEFAULT,
-or LIMIT/OFFSET expressions remain excluded with `COHDBL001`. Ordinary numeric
-LIMIT/OFFSET clauses on queries containing subqueries do execute. CHECK remains
+or LIMIT/OFFSET/FETCH/TOP expressions remain excluded with `COHDBL001`. Ordinary numeric
+LIMIT/OFFSET/FETCH/TOP clauses on queries containing subqueries do execute. CHECK remains
 a deterministic row-local expression and still rejects every subquery form.
 These subset boundaries do not add named clauses to the 51-clause denominator.
 
@@ -2445,8 +2451,9 @@ rejects with `COHDBL001`: `RECURSIVE`, `[NOT] MATERIALIZED`, `SEARCH`/`CYCLE`,
 the `GROUPING`, `ROLLUP`, `CUBE` and `GROUPING_ID` calls, `FILTER (...)` and
 `WITHIN GROUP` after a call, the `ANY`/`SOME` (and `ALL`) quantified comparisons,
 `LATERAL`, `~`, `SEQUENCE`, `SERIAL`, `BIGSERIAL`, `SMALLSERIAL`, `OVERRIDING`,
-`MINVALUE`, `MAXVALUE`, `CYCLE`, `CACHE`, and `RESTART`. Identifiers spelled like these
-recognized-unsupported words, including the newly added `MATERIALIZED` and `SEARCH`,
+`MINVALUE`, `MAXVALUE`, `CYCLE`, `CACHE`, `RESTART`, plus `PERCENT` and `WITH TIES` after
+FETCH or TOP. Identifiers spelled like these recognized-unsupported words,
+including `MATERIALIZED`, `SEARCH`, `percent` and `ties`,
 render quoted in canonical SQL. `WITH` remains a profile keyword; its nested-form
 refusal is a dedicated parser rule. The table also holds the recognized
 non-executing functions listed above, including the window and niladic datetime names (#1103). Profile keywords

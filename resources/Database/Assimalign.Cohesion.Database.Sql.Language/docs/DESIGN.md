@@ -133,7 +133,11 @@ so tools and conformance distinguish the syntax family. No extra plan or executo
 FIRST stays contextual. Unparenthesized TOP consumes one integer or parameter, while
 TOP (expression) uses the ordinary pagination subquery ban. Canonical output uses
 LIMIT before OFFSET, FETCH FIRST n ROWS ONLY and TOP (n), preserving the syntax kind
-rather than source trivia. Renderer fuzz roots and WITH bodies generate all families.
+rather than source trivia. FETCH consumes a primary expression or signed numeric constant,
+following PostgreSQL src/backend/parser/gram.y:13674-13696; compound counts require
+parentheses, which canonical rendering restores. Renderer fuzz roots and WITH bodies
+generate all families, including parenthesized compound FETCH counts. INSERT, UPDATE and
+DELETE TOP are recognized DML TOP exclusions with COHDBL001.
 PERCENT and TIES are contextual unsupported entries; their identifier quoting requires
 the engine format-19 gate. PostgreSQL gram.y:13537-13658 supplies the offset/fetch grammar.
 

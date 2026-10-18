@@ -57,11 +57,11 @@ internal sealed class SqlExpressionTextGenerator
             .Append(" ORDER BY x DESC").Append(Paging(rootPaging)).ToString();
     }
 
-    private static string Paging(int kind) => kind switch
+    private string Paging(int kind) => kind switch
     {
         0 => " LIMIT 2 OFFSET 1",
         1 => " OFFSET 1 LIMIT 2",
-        2 => " OFFSET 1 ROWS FETCH NEXT 2 ROWS ONLY",
+        2 => " OFFSET 1 ROWS FETCH NEXT " + Pick("2", "(1 + 1)", "(2 * (1 + 1))", "(-@n)", "ABS(-2)") + " ROWS ONLY",
         _ => string.Empty,
     };
 

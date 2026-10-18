@@ -150,7 +150,7 @@ public sealed partial class SqlQueryParser
                 else { AddSyntaxDiagnostic(ref lexer, "Expected FIRST or NEXT after FETCH."); }
                 limit = IsKeyword(ref lexer, "ROW") || IsKeyword(ref lexer, "ROWS")
                     ? new SqlLiteralExpression("1", SqlLiteralType.Integer, Location.Create(1, 1, start, end))
-                    : ParsePaginationExpression(ref lexer, "FETCH");
+                    : ParseFetchCount(ref lexer);
                 limitSyntaxKind = SqlLimitSyntaxKind.Fetch;
                 RejectPagingSuffix(ref lexer, "FETCH");
                 if (IsKeyword(ref lexer, "ROW") || IsKeyword(ref lexer, "ROWS")) { Advance(ref lexer); }
@@ -169,6 +169,23 @@ public sealed partial class SqlQueryParser
             columns, from, where, groupBy, having, orderBy,
             limit, offset, isDistinct, null,
             Location.Create(1, 1, pos, _lastTokenEnd), limitSyntaxKind);
+    }
+
+    private SqlExpression ParseFetchCount(ref TokenLexer lexer)
+    {
+        // PostgreSQL src/backend/parser/gram.y:13674-13696: c_expr or a signed numeric
+        // constant. A compound expression needs parentheses; a sign cannot prefix a name.
+        var next = lexer;
+        if (lexer.Current.Type == TokenType.Minus && AdvancePastComments(ref next) &&
+            next.Current.Type is TokenType.Integer or TokenType.Float)
+        {
+            int position = lexer.Current.Position;
+            Advance(ref lexer);
+            var operand = ParseOperand(ref lexer, OperandRule.Primary);
+            return new SqlUnaryExpression(operand, SqlUnaryOperator.Negate,
+                Location.Create(1, 1, position, _lastTokenEnd));
+        }
+        return ParsePaginationExpression(ref lexer, "FETCH", primaryOnly: true);
     }
 
     private SqlExpression ParseTopCount(ref TokenLexer lexer)

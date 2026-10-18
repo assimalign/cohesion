@@ -24,6 +24,7 @@ public sealed class SqlPagingWireTests
         string[] queries =
         [
             "SELECT id, name FROM t ORDER BY id OFFSET 1 ROWS FETCH NEXT 2 ROWS ONLY",
+            "SELECT id, name FROM t ORDER BY id OFFSET 1 ROWS FETCH NEXT (1+1) ROWS ONLY",
             "SELECT id, name FROM t ORDER BY id OFFSET 1 LIMIT 2",
             "SELECT id, name FROM t ORDER BY id LIMIT 2 OFFSET 1",
             "SELECT TOP (2) id, name FROM t WHERE id > 10 ORDER BY id",
@@ -48,6 +49,7 @@ public sealed class SqlPagingWireTests
     [InlineData("SELECT TOP (1) id FROM users FETCH FIRST 1 ROW ONLY", "SQL0003")]
     [InlineData("SELECT id FROM users OFFSET 1 OFFSET 2", "SQL0003")]
     [InlineData("SELECT id FROM users FETCH FIRST 1 ROW", "SQL0003")]
+    [InlineData("SELECT id FROM users FETCH FIRST 1+1 ROWS ONLY", "SQL0003")]
     [InlineData("SELECT TOP id FROM users", "SQL0003")]
     [InlineData("SELECT id FROM users FETCH FIRST 10 PERCENT ROWS ONLY", "COHDBL001")]
     [InlineData("SELECT id FROM users ORDER BY id FETCH FIRST 1 ROW WITH TIES", "COHDBL001")]
@@ -55,6 +57,8 @@ public sealed class SqlPagingWireTests
     [InlineData("SELECT TOP (1) WITH TIES * FROM users ORDER BY id", "COHDBL001")]
     [InlineData("DELETE TOP (1) FROM users", "COHDBL001")]
     [InlineData("UPDATE TOP (1) users SET id = 5", "COHDBL001")]
+    [InlineData("INSERT TOP (1) INTO users SELECT id FROM users", "COHDBL001")]
+    [InlineData("INSERT TOP (1) users SELECT id FROM users", "COHDBL001")]
     [InlineData("SELECT id FROM users FETCH FIRST (SELECT id FROM users) ROWS ONLY", "COHDBL001")]
     [InlineData("SELECT TOP (SELECT id FROM users) id FROM users", "COHDBL001")]
     [InlineData("SELECT TOP 1 id FROM users WINDOW w AS ()", "COHDBL001")]
@@ -74,6 +78,10 @@ public sealed class SqlPagingWireTests
         // Assert
         error.Code.ShouldBe(code == "COHSQLE018" ? ProtocolErrorCode.ExecutionFailure : ProtocolErrorCode.ParseFailure);
         error.Message.ShouldContain(code, Case.Sensitive);
+        if (sql.StartsWith("DELETE TOP") || sql.StartsWith("UPDATE TOP") || sql.StartsWith("INSERT TOP"))
+        {
+            error.Message.ShouldContain("DML TOP", Case.Sensitive);
+        }
         error.ConnectionUsable.ShouldBeTrue();
         var rows = await connection.QueryAsync("SELECT id FROM users ORDER BY id", cancellationToken: SqlClientTestHarness.Timeout());
         rows.Select(row => row[0]).ShouldBe(new object?[] { 1, 2 });

@@ -462,7 +462,14 @@ public static class SqlExpressionRenderer
         }
         if (select.LimitSyntaxKind == SqlLimitSyntaxKind.Fetch)
         {
-            builder.Append(" FETCH FIRST ").Append(Expression(select.Limit!)).Append(" ROWS ONLY");
+            var count = select.Limit!;
+            bool signedNumeric = count is SqlUnaryExpression
+            {
+                Operator: SqlUnaryOperator.Negate,
+                Operand: SqlLiteralExpression { LiteralType: SqlLiteralType.Integer or SqlLiteralType.Float },
+            };
+            builder.Append(" FETCH FIRST ").Append(signedNumeric ? Expression(count) : Operand(count, primaryLevel))
+                .Append(" ROWS ONLY");
         }
         return builder.ToString();
     }

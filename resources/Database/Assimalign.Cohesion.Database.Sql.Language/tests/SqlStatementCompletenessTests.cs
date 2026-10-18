@@ -210,6 +210,7 @@ public sealed class SqlStatementCompletenessTests
     [InlineData("INSERT INTO t (id) VALUES (1) ^ON CONFLICT DO NOTHING;", "ON")]
     [InlineData("INSERT INTO t (id, a) VALUES (1, 2) ^ON DUPLICATE KEY UPDATE a = 3;", "ON")]
     [InlineData("SELECT id FROM t WHERE name LIKE 'a!%' ^ESCAPE '!';", "ESCAPE")]
+    [InlineData("SELECT id FROM t LIMIT 1 ^FETCH FIRST 1 ROW ONLY;", "FETCH")]
     [InlineData("SELECT id FROM t WHERE a ^IS DISTINCT FROM b;", "IS DISTINCT FROM")]
     [InlineData("SELECT id FROM t WHERE a ^IS NOT DISTINCT FROM b;", "IS NOT DISTINCT FROM")]
     [InlineData("SELECT id FROM t WHERE flag ^IS TRUE;", "IS TRUE")]

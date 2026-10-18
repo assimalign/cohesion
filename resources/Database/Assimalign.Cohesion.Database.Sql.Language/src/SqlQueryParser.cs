@@ -1004,7 +1004,8 @@ public sealed partial class SqlQueryParser : QueryParser
 
             if (IsKeyword(ref lexer, "TOP") &&
                 (string.Equals(previousToken, "DELETE", StringComparison.OrdinalIgnoreCase) ||
-                 string.Equals(previousToken, "UPDATE", StringComparison.OrdinalIgnoreCase)))
+                 string.Equals(previousToken, "UPDATE", StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(previousToken, "INSERT", StringComparison.OrdinalIgnoreCase)))
             {
                 clause = "DML TOP";
                 location = tokenLocation;

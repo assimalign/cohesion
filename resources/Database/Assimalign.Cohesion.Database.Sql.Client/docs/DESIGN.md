@@ -77,6 +77,8 @@ Other model clients do not depend on this package.
 OFFSET/FETCH, OFFSET before LIMIT and TOP use the existing SQL execute exchange and
 result metadata. SqlPagingWireTests verifies exact windows and column names/types over
 InMemory and TCP, plus coded parse/count refusals and subsequent connection reuse.
+INSERT, UPDATE and DELETE TOP retain COHDBL001 naming DML TOP; bare FETCH arithmetic
+receives SQL0003, matching the language grammar.
 No wire or client API changes.
 
 ## Expanded joins (#1109)

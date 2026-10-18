@@ -22,6 +22,12 @@ public sealed class SqlPagingParserTests
             ("SELECT id FROM t LIMIT 2 OFFSET 1", SqlLimitSyntaxKind.Limit),
             ("SELECT id FROM t FETCH NEXT 2 ROWS ONLY OFFSET 1 ROW", SqlLimitSyntaxKind.Fetch),
             ("SELECT id FROM t FETCH FIRST $1 ROWS ONLY", SqlLimitSyntaxKind.Fetch),
+            ("SELECT id FROM t FETCH FIRST (1 + 1) ROWS ONLY", SqlLimitSyntaxKind.Fetch),
+            ("SELECT id FROM t FETCH FIRST ABS(-2) ROWS ONLY", SqlLimitSyntaxKind.Fetch),
+            ("SELECT id FROM t FETCH FIRST CASE WHEN id > 0 THEN 2 ELSE 1 END ROWS ONLY", SqlLimitSyntaxKind.Fetch),
+            ("SELECT id FROM t FETCH FIRST +2 ROWS ONLY", SqlLimitSyntaxKind.Fetch),
+            ("SELECT id FROM t FETCH FIRST -1 ROWS ONLY", SqlLimitSyntaxKind.Fetch),
+            ("SELECT id FROM t FETCH FIRST -1.5 ROWS ONLY", SqlLimitSyntaxKind.Fetch),
             ("SELECT TOP (2) id FROM t ORDER BY id", SqlLimitSyntaxKind.Top),
             ("SELECT TOP 2 * FROM t", SqlLimitSyntaxKind.Top),
             ("SELECT DISTINCT TOP (@n) name FROM t", SqlLimitSyntaxKind.Top),
@@ -98,6 +104,14 @@ public sealed class SqlPagingParserTests
     [InlineData("SELECT id FROM t FETCH FIRST 1 ROW")]
     [InlineData("SELECT id FROM t FETCH 1 ROW ONLY")]
     [InlineData("SELECT id FROM t FETCH FIRST 1 ONLY")]
+    [InlineData("SELECT id FROM t FETCH FIRST 1+1 ROWS ONLY")]
+    [InlineData("SELECT id FROM t FETCH FIRST 2*2 ROWS ONLY")]
+    [InlineData("SELECT id FROM t FETCH FIRST -1+1 ROWS ONLY")]
+    [InlineData("SELECT id FROM t FETCH FIRST -id ROWS ONLY")]
+    [InlineData("SELECT id FROM t FETCH FIRST +@n ROWS ONLY")]
+    [InlineData("SELECT id FROM t FETCH FIRST -(1 + 1) ROWS ONLY")]
+    [InlineData("SELECT id FROM t FETCH FIRST 1 COLLATE binary ROWS ONLY")]
+    [InlineData("SELECT id FROM t FETCH FIRST -1 COLLATE binary ROWS ONLY")]
     [InlineData("SELECT TOP id FROM t")]
     [InlineData("SELECT TOP -1 id FROM t")]
     [InlineData("SELECT TOP 1.5 id FROM t")]
@@ -116,9 +130,12 @@ public sealed class SqlPagingParserTests
     [InlineData("SELECT * FROM t ORDER BY id FETCH FIRST 1 ROW WITH TIES", "WITH TIES")]
     [InlineData("SELECT TOP (10) PERCENT * FROM t", "PERCENT")]
     [InlineData("SELECT TOP (1) WITH TIES * FROM t ORDER BY id", "WITH TIES")]
-    [InlineData("DELETE TOP (1) FROM t", "TOP")]
-    [InlineData("UPDATE TOP (1) t SET id = 2", "TOP")]
+    [InlineData("DELETE TOP (1) FROM t", "DML TOP")]
+    [InlineData("UPDATE TOP (1) t SET id = 2", "DML TOP")]
+    [InlineData("INSERT TOP (1) INTO u SELECT id FROM t", "DML TOP")]
+    [InlineData("INSERT TOP (1) u SELECT id FROM t", "DML TOP")]
     [InlineData("SELECT * FROM t FETCH FIRST (SELECT id FROM t) ROWS ONLY", "FETCH")]
+    [InlineData("SELECT * FROM t FETCH FIRST (1 + (SELECT id FROM t)) ROWS ONLY", "FETCH")]
     [InlineData("SELECT TOP (SELECT id FROM t) * FROM t", "TOP")]
     [InlineData("SELECT TOP 1 id FROM t WINDOW w AS ()", "WINDOW")]
     [InlineData("SELECT * FROM t FETCH FIRST ROW ONLY WINDOW w AS ()", "WINDOW")]
