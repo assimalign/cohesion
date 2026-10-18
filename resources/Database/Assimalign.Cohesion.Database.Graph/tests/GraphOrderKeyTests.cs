@@ -57,6 +57,9 @@ public sealed class GraphOrderKeyTests
         nested.Clear();
         source.Clear();
         GraphOrderComparer.Compare(left, right).ShouldBe(0);
+        // Warm the measured loop past tiered compilation's call-count threshold, as the mixed-numeric
+        // test's oracle loop does, so one-time runtime work on this thread is not counted.
+        for (int i = 0; i < 1000; i++) { GraphOrderComparer.Compare(left, right); }
         long before = GC.GetAllocatedBytesForCurrentThread();
         // Act
         int order = 0;
