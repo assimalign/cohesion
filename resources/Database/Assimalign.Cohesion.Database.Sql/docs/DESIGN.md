@@ -234,7 +234,12 @@ and execution evidence are in
 
 Non-recursive WITH (#1116) binds every definition in declaration order and resolves
 unqualified read names before the catalog. Targets and schema-qualified reads keep
-catalog resolution; a self-reference sees the stored table. A dependency closure
+catalog resolution; self-references and names matching later siblings fall back to
+stored tables. Only a missing future relation receives COHSQLE026 (PostgreSQL
+src/backend/parser/parse_relation.c:1463-1487). CTE bindings have schema-less
+qualifier identities and conflict with same-named relations like aliases
+(parse_relation.c:120-168,241-279,461-470). A qualified column may still correlate
+to an enclosing stored relation, including a DML target. A dependency closure
 selects reachable definitions while still binding unused ones.
 An iterative read-reference walk establishes reachability before binding count
 values or seek bounds. Unused bodies still bind names, types and functions, while
@@ -243,13 +248,25 @@ retain the existing count evaluation and index selection paths.
 CTE scope fields live in one optional state object, allocated only for WITH;
 stored-only execution retains its existing allocation budget. Each definition uses
 the existing SqlDerivedRelation output contract, preserving types and collation
-provenance. One executor cache materializes each relation by identity for the whole
-statement. SqlWithPlan pre-materializes reachable definitions before the input's
+provenance. One executor cache materializes uncorrelated relations by identity for the
+whole statement; correlated derived relations rematerialize per outer frame. SqlWithPlan pre-materializes reachable definitions before the input's
 first write, under the same statement context. Binary values detach on retention
 and delivery. EXPLAIN maps WITH and constant-source plans. Scalar/aggregate bodies
-without FROM use one implicit row. No interface, project reference or internal grant
-is added. The unreleased data-storage format advances 15 -> 16 without an upgrade
-path; no catalog record or wire payload changes.
+without FROM use one implicit row only at the definition's exact SELECT root;
+nested queries keep their ordinary FROM requirement and diagnostics. All bodies,
+including unused constant bodies, reject aggregates in WHERE during planning
+(COHSQLE017; PostgreSQL src/backend/parser/parse_agg.c:407).
+No interface, project reference or internal grant is added.
+
+Data-storage format 16 is retained because the new SEARCH and MATERIALIZED
+vocabulary entries change canonical persisted identifier text: a CHECK previously
+stored as `search >= 0` now stores `"search" >= 0`. DEFAULT expressions and SQL
+function bodies use the same renderer. SqlSchemaProvisioner compares persisted
+CHECK text ordinally with the newly canonicalized declaration, so a format-15
+catalog would report constraint drift despite an equivalent expression tree.
+SqlCteStorageFormatTests persists both old spellings through the SQL-independent
+catalog, demonstrates that exact Verify drift, and pins the format-15 open refusal.
+No catalog tuple layout or wire payload changes; there is no upgrade path.
 
 DEFAULT assignment (#1193) uses this same insertion path. The planner binds a whole
 `SqlDefaultExpression` to an internal `SqlBoundDefaultItem` at its target ordinal;
@@ -405,6 +422,10 @@ SQL's combined operators, not a shared or independently executable algebra:
 | `Select`, `TableScan`, `IndexSeek` | Bound projection/filter/order/distinct/window above the chosen table access; seeks name the catalog index and equality-prefix/range bounds |
 | `NestedLoopJoin`, `JoinStep` | N-way written-order join; each JoinStep describes its kind and has its own scan or correlated index seek child |
 | `Group` | Group keys, aggregates, HAVING and result modifiers above the actual input plan |
+| `With` | Reachable CTE materializations in declaration order, followed by the enclosing input |
+| `Materialize` | One named CTE's complete definition plan, evaluated once per statement |
+| `CteScan` | Read of an already materialized schema-less CTE relation |
+| `Constant` | One implicit input row for a FROM-less definition body; detail includes filter, order_keys, distinct, limit and offset |
 | `SystemView` | A qualified virtual relation; no fabricated stored-table access |
 | `DerivedTable` | Aliased materialized query source with its complete child plan; a single source has a Select parent |
 | `Subqueries` | Uncorrelated child plans in execution order, followed by the enclosing input |
@@ -1398,8 +1419,9 @@ SqlSchemaValidationException (InvalidDocument, schema.format), naming both forma
 rebuild/recreate remedy. SQL checks applied markers and pending targets before opening the data
 file set, and checks a replacement document before Apply/Verify compares hashes or plans work.
 The gate reads only the format; it never validates a pre-normalization hash or reconciles an old
-identity. Both catalog records retain a versioned document; the current record-space format 16
-gates Character identity and its index keys, without changing these document envelopes.
+identity. Both catalog records retain a versioned document. Record-space format 12
+introduced Character identity and its trimmed index keys; format 16 gates canonical
+identifier quoting, without changing these document envelopes.
 
 FLOAT(p) selects Float32 for 1..24 bits and Float64 for 25..53 bits; bare FLOAT stays Float64.
 The shared resolver supplies that storage identity everywhere, including domain bases, function

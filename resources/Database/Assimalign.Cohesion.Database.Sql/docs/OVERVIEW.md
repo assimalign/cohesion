@@ -39,6 +39,8 @@ shared storage, with DDL flowing through the relational catalog
 - **SQL execution** — the declared dialect (`Database.Sql.Language/docs/DIALECT.md`)
   planned with rules and executed over stored, system and derived relations: `SELECT` with `WHERE`,
   projection, aliased derived sources, `ORDER BY`, `LIMIT/OFFSET`, `DISTINCT`, grouping and aggregates;
+  non-recursive `WITH` before SELECT/INSERT/UPDATE/DELETE, with ordered SELECT definitions
+  materialized once per statement and optional complete output column lists;
   `INSERT` (multi-row, whole-item `DEFAULT`, `DEFAULT VALUES`, nullability);
   `UPDATE` (including `SET c = DEFAULT`)/`DELETE` with correlated and uncorrelated WHERE subqueries and accurate
   affected counts; `CREATE/ALTER/DROP TABLE`. DROP unpublishes immediately and the

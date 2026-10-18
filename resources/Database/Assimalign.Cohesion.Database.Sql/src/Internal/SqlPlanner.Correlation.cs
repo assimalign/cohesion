@@ -18,8 +18,8 @@ internal sealed partial class SqlPlanner
         _queryScopes ??= new();
         IReadOnlyList<SqlCatalogColumn> columns;
         IReadOnlyList<SqlRelationBinding>? bindings = null;
-        SqlRelationReference reference;
-        if (select is not null)
+        SqlRelationReference? reference;
+        if (select is not null && select.From.Count > 0)
         {
             reference = select.From[0].Table;
             var source = ResolveRelation(reference, select);
@@ -28,6 +28,11 @@ internal sealed partial class SqlPlanner
             {
                 bindings = BindJoin(select, source, out columns, out _, out _, metadataOnly: true);
             }
+        }
+        else if (select is not null)
+        {
+            reference = null;
+            columns = [];
         }
         else
         {

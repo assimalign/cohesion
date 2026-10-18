@@ -78,6 +78,7 @@ internal sealed partial class SqlPlanner
             string? detail = current switch
             {
                 SqlJoinPlan { Steps.Count: 0 } p => QueryDetail(p.Where is not null, p.OrderBy.Count, p.IsDistinct, p.Limit, p.Offset),
+                SqlConstantPlan p => QueryDetail(p.Where is not null, p.OrderBy.Count, p.IsDistinct, p.Limit, p.Offset),
                 SqlSelectPlan p => QueryDetail(p.Where is not null, p.OrderBy.Count, p.IsDistinct, p.Limit, p.Offset),
                 SqlSystemViewPlan p => QueryDetail(p.Where is not null, p.OrderBy.Count, p.IsDistinct, p.Limit, p.Offset),
                 SqlJoinPlan p => string.Join("; ", p.Steps.Select(step => $"{step.Kind}: {(step.Access is null ? "buffered inputs" : "correlated equality-prefix seek")}")) + "; " +

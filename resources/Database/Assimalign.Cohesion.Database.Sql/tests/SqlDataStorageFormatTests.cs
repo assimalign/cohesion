@@ -96,6 +96,7 @@ public sealed class SqlDataStorageFormatTests : IDisposable
     [InlineData(12)]
     [InlineData(13)]
     [InlineData(14)]
+    [InlineData(15)]
     public async Task Open_OlderFormat_ShouldBeRefusedWithoutTouchingFiles(int version)
     {
         // Arrange: a closed database whose catalog marker says an older format —
@@ -468,6 +469,7 @@ public sealed class SqlDataStorageFormatTests : IDisposable
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Data-storage format: a client whose startup names a refused database gets the refusal over the wire (#1099, B2)")]
     [InlineData(3, false)]
     [InlineData(14, false)]
+    [InlineData(15, false)]
     [InlineData(7, true)]
     [InlineData(1, true)]
     public async Task Handshake_OlderFormatDatabase_ShouldSendRefusalToClient(int version, bool removeCounterGeneration)

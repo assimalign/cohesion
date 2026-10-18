@@ -135,6 +135,7 @@ internal sealed partial class SqlPlanner
             string name = reference.Alias ?? source.Name;
             if (bindings.Any(binding => string.Equals(name, binding.Reference.Alias ?? binding.Source.Name, StringComparison.OrdinalIgnoreCase) &&
                 (reference.Alias is not null || binding.Reference.Alias is not null ||
+                    source.Derived is { IsCommonTable: true } || binding.Source.Derived is { IsCommonTable: true } ||
                     string.Equals(source.Schema, binding.Source.Schema, StringComparison.OrdinalIgnoreCase))))
             {
                 throw new SqlPlanningException("COHSQLE019", $"Duplicate table name or alias '{name}'; use distinct aliases for a self join.", select.Location);

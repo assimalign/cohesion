@@ -15,7 +15,7 @@ using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
-public sealed class SqlCteExecutionTests
+public sealed partial class SqlCteExecutionTests
 {
     [Theory(DisplayName = "Cohesion Test [Sql] - WITH: chained joins, subqueries and grouping execute")]
     [InlineData("WITH a AS (SELECT id FROM t WHERE id > 1 ORDER BY id LIMIT 2), b (n) AS (SELECT id FROM a) SELECT b.n FROM b JOIN t ON b.n = t.id ORDER BY b.n DESC LIMIT 1", 3L)]

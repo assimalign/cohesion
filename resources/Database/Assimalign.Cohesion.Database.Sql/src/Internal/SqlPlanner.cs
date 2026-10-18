@@ -112,9 +112,13 @@ internal sealed partial class SqlPlanner
     /// <summary>Binds a SELECT whose subqueries have already been lowered to value slots.</summary>
     private SqlPlan PlanSelectCore(SqlSelectExpression select)
     {
+        if (select.Where is not null && ContainsAggregate(select.Where))
+        {
+            throw new SqlPlanningException("COHSQLE017", "Aggregate functions are not allowed in WHERE; use HAVING to filter groups.", select.Where?.Location);
+        }
         if (select.From.Count == 0)
         {
-            if (_commonTableState?.BindingBody == true) { return PlanConstantCommonTable(select); }
+            if (ReferenceEquals(_commonTableState?.BindingBody, select)) { return PlanConstantCommonTable(select); }
             throw new SqlPlanningException("COHSQLE013", "SELECT requires a FROM table.", select.Location);
         }
 
@@ -133,10 +137,6 @@ internal sealed partial class SqlPlanner
             subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken,
             outerScope: OuterScope, outerDependencies: OuterDependencies, relation: select.From[0].Table);
 
-        if (select.Where is not null && ContainsAggregate(select.Where))
-        {
-            throw new SqlPlanningException("COHSQLE017", "Aggregate functions are not allowed in WHERE; use HAVING to filter groups.", select.Where?.Location);
-        }
         if (select.GroupBy.Count > 0 || select.Having is not null || ProjectsOrOrdersByAggregate(select))
         {
             return PlanGroup(select, table, systemView, columns, bindings, evaluator, steps);
@@ -244,16 +244,19 @@ internal sealed partial class SqlPlanner
                 state.Dependencies!.Add(commonTable);
                 return new SqlRelationSource(commonTable);
             }
-            if (state.Future?.Contains(named.TableName) == true)
-            {
-                throw new SqlPlanningException("COHSQLE026", string.Format(CultureInfo.CurrentCulture,
-                    ErrorMessages.CteForwardReference, named.TableName), owner?.Location);
-            }
         }
         if (SqlSystemViews.Find(named) is { } view)
         {
             _statementMetrics?.CaptureCatalogSnapshot(_catalog);
             return new SqlRelationSource(view);
+        }
+        // Future CTEs are a missing-relation hint, not a catalog shadow (PostgreSQL
+        // src/backend/parser/parse_relation.c:1463-1487).
+        if (named.SchemaName is null && _commonTableState?.Future?.Contains(named.TableName) == true &&
+            !_catalog.TryGetTable(DefaultSchema, named.TableName, out _))
+        {
+            throw new SqlPlanningException("COHSQLE026", string.Format(CultureInfo.CurrentCulture,
+                ErrorMessages.CteForwardReference, named.TableName), owner?.Location);
         }
         return new SqlRelationSource(ResolveTable(named));
     }

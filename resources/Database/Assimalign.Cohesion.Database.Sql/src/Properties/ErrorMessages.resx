@@ -55,6 +55,7 @@
   <data name="SubqueryNestingDepth" xml:space="preserve">
     <value>Subquery nesting exceeds the supported maximum depth of 32.</value>
   </data>
+  <data name="MissingFromClauseEntry" xml:space="preserve"><value>Missing FROM-clause entry for column '{0}'.</value></data>
   <data name="UnknownColumn" xml:space="preserve">
     <value>Unknown column '{0}'.</value>
   </data>

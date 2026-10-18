@@ -1172,14 +1172,24 @@ references, including `WITH recent AS (...), top AS (SELECT ... FROM recent) SEL
 
 Each body sees earlier definitions. Unqualified reads resolve a CTE before a stored
 table; a schema-qualified name bypasses that scope. A non-recursive self-reference
-resolves the stored table. DML targets always resolve through the catalog, so
+resolves the stored table, as does a name matching a later sibling when a stored
+table exists. A CTE has no schema-qualified column identity: `t.id` or an alias
+can name its output, while `dbo.t.id` requires a stored FROM entry or an enclosing
+stored relation through correlation (otherwise COHSQLE015, missing FROM-clause
+entry). A CTE and a stored relation with the same unaliased name conflict
+(COHSQLE019); alias one to distinguish them. DML targets always resolve through the catalog, so
 `WITH t AS (SELECT 1 AS id) DELETE FROM t` deletes from stored t. A target naming
 only a CTE fails as an unknown table. Scalar and aggregate SELECT bodies may omit
 FROM and operate on one implicit row; a wildcard still requires a relation.
+This implicit row applies only to the definition's SELECT root. Subqueries and
+derived tables nested in that body retain the ordinary FROM requirement and
+ordinary diagnostics. Constant bodies run the same planning checks, including
+COHSQLE017 for aggregates in WHERE even when the definition is unused.
 The ordinary top-level SELECT-without-FROM exclusion remains.
 
 Every definition is bound before execution, including unused definitions. Duplicate
-names and references to later siblings use `COHSQLE026` before any row is read.
+names and unresolved references to later siblings use `COHSQLE026` before any row
+is read; a same-named stored table is resolved before the forward-reference hint.
 An empty output column list is `SQL0003`; a supplied list must have exactly the
 body's output width (`COHSQLE013`). Names use the catalog's case-insensitive rules.
 Column renaming preserves types, bounds, nullability, domains and collations.
@@ -2232,13 +2242,16 @@ parses inside a supported clause or reports exactly one `COHDBL001` naming its
 construct. The table holds the clause keywords the preflight scan rejects,
 `UNION` through `USING` in the statement matrix. It also holds every other word or
 operator outside the profile's keywords that a dedicated rule recognizes and
-rejects with `COHDBL001`: recursive or nested `WITH`, `SELECT ALL`, `CREATE`/`DROP VIEW`,
+rejects with `COHDBL001`: `RECURSIVE`, `[NOT] MATERIALIZED`, `SEARCH`/`CYCLE`,
+`SELECT ALL`, `CREATE`/`DROP VIEW`,
 `CREATE COLLATION`, `CREATE FULLTEXT`, `NULLS FIRST`/`LAST`, `GROUPING SETS` and
 the `GROUPING`, `ROLLUP`, `CUBE` and `GROUPING_ID` calls, `FILTER (...)` and
 `WITHIN GROUP` after a call, the `ANY`/`SOME` (and `ALL`) quantified comparisons,
 `LATERAL`, `~`, `SEQUENCE`, `SERIAL`, `BIGSERIAL`, `SMALLSERIAL`, `OVERRIDING`,
 `MINVALUE`, `MAXVALUE`, `CYCLE`, `CACHE`, and `RESTART`. Identifiers spelled like these
-recognized-unsupported words render quoted in canonical SQL. It also holds the recognized
+recognized-unsupported words, including the newly added `MATERIALIZED` and `SEARCH`,
+render quoted in canonical SQL. `WITH` remains a profile keyword; its nested-form
+refusal is a dedicated parser rule. The table also holds the recognized
 non-executing functions listed above, including the window and niladic datetime names (#1103). Profile keywords
 that start an unsupported form by another rule, such as `LEFT` or `CROSS`, need no entry.
 A recognized construct is skipped once it is reported, so the text after it adds
@@ -2424,7 +2437,7 @@ quoted names to match uppercase vocabulary entries.
 | `COHSQLE022` | A CAST input has invalid text representation | 22P02 |
 | `COHSQLE024` | A column that disallows NULL receives NULL, including DEFAULT with no declared default | 23502 (`not_null_violation`) |
 | `COHSQLE025` | An identity definition, explicit assignment, ALTER, backfill or allocation violates its generation contract | 428C9 (`generated_always`) for explicit ALWAYS assignments; identity range and definition failures share the local code |
-| `COHSQLE026` | Duplicate CTE name or reference to a later sibling, before reading rows | 42712 / 42P01 |
+| `COHSQLE026` | Duplicate CTE name or missing relation matching a later sibling, before reading rows | 42712 / 42P01 |
 
 NOT NULL failures carry one error diagnostic naming the column, with no source span at
 execution time. The existing missing-default and explicit-NULL message texts are unchanged.

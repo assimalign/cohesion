@@ -16,7 +16,7 @@ internal sealed partial class SqlPlanner
     private bool InDerivedBody => _queryScopes?.Scopes.Any(scope => scope.Derived is not null) ?? false;
 
     private SqlProjectionMetadata? CaptureProjectionMetadata(SqlCollationCandidate candidate, SqlCatalogColumn? source = null)
-        => InDerivedBody || _commonTableState?.BindingBody == true ? new(candidate, source) : null;
+        => InDerivedBody || _commonTableState?.BindingBody is not null ? new(candidate, source) : null;
 
     private SqlRelationSource BindDerivedTable(SqlDerivedTableReference derived, SqlSelectExpression? owner)
     {
@@ -113,6 +113,7 @@ internal sealed partial class SqlPlanner
         try
         {
             var source = ResolveRelation(reference, owner);
+            if (source.Derived is { IsCommonTable: true } && column.SchemaName is not null) { return false; }
             var scope = new SqlExpressionEvaluator(source.Columns, _parameters, relation: reference);
             scope.ResolveColumn(column);
             return true;

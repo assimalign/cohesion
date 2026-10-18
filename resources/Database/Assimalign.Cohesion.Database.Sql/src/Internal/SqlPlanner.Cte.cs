@@ -13,7 +13,8 @@ internal sealed partial class SqlPlanner
     private SqlPlan PlanConstantCommonTable(SqlSelectExpression select)
     {
         var evaluator = new SqlExpressionEvaluator([], _parameters, defaultCollation: _catalog.DefaultCollation,
-            subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken);
+            subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken,
+            outerScope: OuterScope, outerDependencies: OuterDependencies);
         if (select.Columns.Any(column => column.Expression is SqlStarExpression))
         {
             throw new SqlPlanningException("COHSQLE013", ErrorMessages.CteConstantQuery, select.Location);
@@ -72,7 +73,7 @@ internal sealed partial class SqlPlanner
             {
                 state.Future.Remove(definition.Name); // Self-reference falls through to the stored relation.
                 state.Dependencies = new(ReferenceEqualityComparer.Instance);
-                state.BindingBody = true;
+                state.BindingBody = definition.Body;
                 state.BindingUnused = !state.Referenced.Contains(definition);
                 ValidateFunctionCalls(definition.Body);
                 var query = PlanSelect(definition.Body);
@@ -81,7 +82,7 @@ internal sealed partial class SqlPlanner
                 state.Relations[definition.Name] = relation;
                 ordered.Add(relation);
             }
-            state.BindingBody = false;
+            state.BindingBody = null;
             state.BindingUnused = previous.BindingUnused;
             state.Dependencies = new(ReferenceEqualityComparer.Instance);
             var input = statement is SqlSelectExpression select ? PlanSubqueries(select) : PlanStatementCore(statement);
@@ -113,7 +114,7 @@ internal sealed partial class SqlPlanner
         internal Dictionary<string, SqlDerivedRelation>? Relations { get; set; }
         internal HashSet<string>? Future { get; set; }
         internal HashSet<SqlDerivedRelation>? Dependencies { get; set; }
-        internal bool BindingBody { get; set; }
+        internal SqlSelectExpression? BindingBody { get; set; }
         internal bool BindingUnused { get; set; }
     }
 }
