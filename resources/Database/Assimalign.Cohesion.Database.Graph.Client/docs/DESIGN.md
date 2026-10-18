@@ -59,7 +59,11 @@ OR/IN/string/arithmetic case compares wire rows with in-process rows. No wire fi
 ## Aggregates (#1147)
 
 Aggregates (#1147) round-trip count and integral sums as Int64, floating averages as Double,
-and Decimal sums/averages as Decimal. COLLECT_LIST (Cypher collect) uses the negotiated
+and Decimal sums/averages as Decimal. Exact SUM preserves the largest input Decimal scale,
+including scale zero for UInt64, through negotiated Graph value tag 7 (decimal.GetBits).
+Scalar Decimal columns receive the existing marked-column framing after materialization.
+Unnegotiated scalar tuples keep the shared numeric encoding. Mixed integer/floating
+sums preserve the integral total before promotion. COLLECT_LIST (Cypher collect) uses the negotiated
 graph.composite-values list encoding. GROUP BY and implicit grouping run before ordering,
 including aggregate aliases. Aggregate overflow is COHDBG013 before ResultHeader; terminal
 failure permits reuse of the exact authenticated pooled session. ExecutePaths retains the

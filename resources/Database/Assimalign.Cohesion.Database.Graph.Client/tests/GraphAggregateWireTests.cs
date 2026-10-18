@@ -32,11 +32,25 @@ public sealed class GraphAggregateWireTests
         row[5].ShouldBeOfType<object?[]>().ShouldBe(new object?[] { true, false });
         var decimals = await connection.QueryAsync("MATCH (a:Person) RETURN sum($d) AS total, avg($d) AS mean", new Dictionary<string, object?> { ["d"] = 0.1m }, harness.Token);
         decimals.ShouldHaveSingleItem()[0].ShouldBeOfType<decimal>().ShouldBe(0.3m);
+        ((decimal.GetBits((decimal)decimals[0][0]!)[3] >> 16) & 0xff).ShouldBe(1);
         decimals[0][1].ShouldBeOfType<decimal>().ShouldBe(0.1m);
+        var scaled = await connection.QueryAsync("MATCH (a:Person) RETURN sum(CASE WHEN a.age=42 THEN $wide ELSE $narrow END)",
+            new Dictionary<string, object?> { ["wide"] = 1.20m, ["narrow"] = 0.1m }, harness.Token);
+        decimal mixedScale = scaled.ShouldHaveSingleItem()[0].ShouldBeOfType<decimal>();
+        mixedScale.ShouldBe(1.40m);
+        ((decimal.GetBits(mixedScale)[3] >> 16) & 0xff).ShouldBe(2);
+        var unsigned = await connection.QueryAsync("MATCH (a:Person) RETURN sum(CASE WHEN a.age=42 THEN $one WHEN a.age=17 THEN $two ELSE NULL END)",
+            new Dictionary<string, object?> { ["one"] = 1UL, ["two"] = 2UL }, harness.Token);
+        decimal integral = unsigned.ShouldHaveSingleItem()[0].ShouldBeOfType<decimal>();
+        integral.ShouldBe(3m);
+        ((decimal.GetBits(integral)[3] >> 16) & 0xff).ShouldBe(0);
+        var mixed = await connection.QueryAsync("MATCH (a:Person) RETURN sum(CASE WHEN a.age=42 THEN 13 ELSE 0.0 END), sum(CASE WHEN a.age=42 THEN 40 WHEN a.age=17 THEN 60 ELSE 0.5 END)", cancellationToken: harness.Token);
+        mixed.ShouldHaveSingleItem()[0].ShouldBeOfType<double>().ShouldBe(13d);
+        mixed[0][1].ShouldBeOfType<double>().ShouldBe(100.5d);
         var empty = await connection.QueryAsync("MATCH (a:Person {name:'Nobody'}) RETURN count(*) AS n, collect(a.name) AS names", cancellationToken: harness.Token);
         empty.Columns[0].Type.ShouldBe(DatabaseType.Int64);
         empty.ShouldHaveSingleItem()[0].ShouldBeOfType<long>().ShouldBe(0L); empty[0][1].ShouldBeOfType<object?[]>().ShouldBeEmpty();
-        var grouped = await connection.QueryAsync("MATCH (a:Person) RETURN a.active, count(*) AS n GROUP BY a.active ORDER BY a.active NULLS LAST LIMIT 2", cancellationToken: harness.Token);
+        var grouped = await connection.QueryAsync("MATCH (a:Person) RETURN a.active AS active, count(*) AS n GROUP BY active ORDER BY active NULLS LAST LIMIT 2", cancellationToken: harness.Token);
         grouped.Count.ShouldBe(2); grouped[0].ToArray().ShouldBe(new object?[] { false, 1L }); grouped[1].ToArray().ShouldBe(new object?[] { true, 1L });
     }
 
@@ -106,6 +120,7 @@ public sealed class GraphAggregateWireTests
             ("RETURN collect_list(1)", "COHDBG016"),
             ("RETURN collect(1)", "COHDBG016"),
             ("RETURN sum('text')", "COHDBG013"),
+            ("RETURN avg('text')", "COHDBG013"),
             ("MATCH (a:Value) RETURN sum(9223372036854775807)", "COHDBG013"),
         })
         {
@@ -113,6 +128,8 @@ public sealed class GraphAggregateWireTests
             var frame = await Read(); frame.Type.ShouldBe(ProtocolMessageType.Error);
             var error = ProtocolErrorMessage.Decode(frame.Payload.Span);
             error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure); error.Message.ShouldStartWith(code + ": ", Case.Sensitive);
+            if (source is "RETURN sum('text')" or "RETURN avg('text')")
+            { error.Message.ShouldBe(code + (source.Contains("sum(", StringComparison.Ordinal) ? ": SUM requires numeric operands." : ": AVG requires numeric operands.")); }
         }
         await Execute("RETURN count(*) AS n");
         var header = await Read(); header.Type.ShouldBe((ProtocolMessageType)GraphProtocolMessageType.ResultHeader);
