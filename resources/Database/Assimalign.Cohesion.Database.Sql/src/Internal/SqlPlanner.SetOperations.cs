@@ -120,7 +120,7 @@ internal sealed partial class SqlPlanner
             {
                 throw new SqlPlanningException("COHSQLE018", ErrorMessages.SetOrderOutput, order.Expression.Location);
             }
-            ordering.Add(new SqlBoundOrdering(new SqlBoundSlot(ordinal), order.IsDescending, projections[ordinal].Collation));
+            ordering.Add(new SqlBoundOrdering(new SqlBoundSlot(ordinal), order.IsDescending, NullsFirst(order), projections[ordinal].Collation));
         }
         // PostgreSQL prepunion.c:1380-1420: pull compatible UNION children into
         // one Append-like node. Reuse the left list so a flat chain never copies its prefix.

@@ -105,7 +105,7 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `CREATE INDEX` | Supported | `CREATE [UNIQUE] INDEX [IF NOT EXISTS] <name> ON <table> (<column> [, ...])` — plain column lists only (no `ASC`/`DESC`, expressions, or `INCLUDE`; each is an additive extension) |
 | `DROP INDEX` | Supported | `DROP INDEX [IF EXISTS] <name> ON <table>` — the `ON <table>` qualifier is required: index names are scoped per table |
 | `CASE` | Supported, measured | Simple and searched forms, multiple branches, `ELSE`, implicit null result, and row expressions; branch expressions remain limited to the executable scalar subset. |
-| `ORDER BY` | Supported subset, measured | Multiple source-column/scalar-expression keys, projection aliases (bare or nested in expressions), and one-based select-list ordinals execute with ASC/DESC. Unqualified aliases take precedence over same-named source columns; qualified references bind to the source. Composes with DISTINCT, LIMIT/OFFSET, supported joins, grouped/aggregate queries, and system relations. Zero, negative, out-of-range, and non-integer numeric ordinals error; `1 + 1` remains a constant expression. Explicit NULLS FIRST/LAST, derived-table output ordering, and GROUP BY ordinals report `COHDBL001`. See the ordering contract below (#1024). |
+| `ORDER BY` | Supported subset, measured | Multiple source-column/scalar-expression keys, projection aliases (bare or nested in expressions), and one-based select-list ordinals execute with ASC/DESC. Unqualified aliases take precedence over same-named source columns; qualified references bind to the source. Composes with DISTINCT, LIMIT/OFFSET, supported joins, grouped/aggregate queries, and system relations. Zero, negative, out-of-range, and non-integer numeric ordinals error; `1 + 1` remains a constant expression. Explicit NULLS FIRST/LAST and derived-table output ordering execute; GROUP BY ordinals report `COHDBL001`. See the ordering contract below (#1024). |
 | `CAST` | Supported subset, measured | Built-in conversions across all 19 shared types according to the [conversion matrix](#explicit-conversion-cast-1022-e3), plus application-registered casts (E3's cast registry), in projections, predicates, ordering, and DML expressions, including the SQL server/client. See the exact pair and error contract below. CAST executes in DEFAULT; CHECK still rejects CAST. |
 | `COLLATE` | Supported subset, measured | Column and expression overrides: `binary`, `case_insensitive`, `case_accent_insensitive`, plus compatibility `invariant` with scan execution only. Effective collation governs comparisons, `LIKE`, ordering, grouping, `DISTINCT`, and unique keys. See the collation contract below. |
 | `JOIN` / `USING` | Supported subset, measured | N-way INNER (or bare JOIN), LEFT [OUTER], CROSS and comma joins over stored/system/derived sources. INNER/LEFT require ON or USING; CROSS accepts neither. RIGHT/FULL, NATURAL, LATERAL and qualified wildcards remain excluded. See the precise contract below. |
@@ -589,7 +589,10 @@ grouping and `HAVING` when present. It accepts source columns, executable scalar
 expressions, output aliases, and one-based select-list ordinals. These keys
 compose with `DISTINCT`, pagination, the supported N-way joins, grouped
 and ungrouped aggregates, and virtual system relations. Mixed ASC/DESC keys
-compare from left to right. NULL sorts first in ASC and last in DESC. Rows with
+compare from left to right. Each key accepts optional `NULLS FIRST` or `NULLS LAST`
+after its ASC/DESC direction; explicit placement is independent of direction. When
+omitted, NULL sorts first in ASC and last in DESC, preserving this dialect's default
+(the opposite of PostgreSQL). Rows with
 equal keys have no promised relative order; add a tie-breaking key for stable
 paging. The same expression and column collation rules apply to aliases and
 ordinals as to the values they reference.
@@ -623,10 +626,19 @@ GROUP BY keys report `COHDBL001`; `GROUP BY 1 + 1` remains a constant grouping
 expression. WHERE/HAVING predicates and LIMIT/OFFSET values retain their normal
 expression meanings and never refer to select-list positions.
 
-**Explicit boundaries:** `NULLS FIRST` and `NULLS LAST` report `COHDBL001`.
-Derived tables execute, while outer ordering over their outputs retains the shared
-#1112/#1113 `COHDBL001` pin until the ordering extension lands. Ordering inside
-a derived body already executes. Supported correlated and uncorrelated scalar
+**NULL placement and composition (#1112):** aliases, ordinals, derived-table outputs,
+combined set-operation results and aggregate input ordering share the same per-key
+placement. `STRING_AGG(name, ',' ORDER BY x NULLS LAST)` and
+`LISTAGG(name, ',') WITHIN GROUP (ORDER BY x NULLS LAST)` execute.
+NULLS, FIRST and LAST stay unreserved identifiers; NULLS becomes a modifier only
+when followed by FIRST/LAST after an ordering key. `ORDER BY a NULLS` and
+`ORDER BY a NULLS MIDDLE` report SQL0003. Rendering retains explicit placement,
+including one equal to the default, and emits nothing for omitted placement.
+NULLS remains quoted as an identifier; FIRST and LAST remain unquoted.
+The grammar follows PostgreSQL `src/backend/parser/gram.y:8493-8495`; its explicit
+placement binding is in `parse_clause.c:3508-3513`. Cohesion keeps its existing
+default rather than PostgreSQL's direction default (`parse_clause.c:3503-3507`).
+Supported correlated and uncorrelated scalar
 subquery expressions, including projected scalar subquery aliases, and ordering
 inside supported subqueries keep the same ordering rules. Alias names in
 GROUP BY and HAVING remain outside the projection-alias binding scope; repeat
@@ -913,7 +925,9 @@ remains SQL0002; DELETE ... USING and CREATE INDEX ... USING are syntax errors.
 Predicates (`=`, `<>`, `<`, `<=`, `>`, `>=`, `BETWEEN`, `IN`, and join
 conditions), `ORDER BY`, `DISTINCT`, `GROUP BY`, and `MIN`/`MAX` share one
 non-null value comparator. NULL retains SQL three-valued predicate semantics;
-grouping combines NULL keys and ascending ordering places NULL first.
+grouping combines NULL keys. Ordering places NULL first ascending and last descending
+by default; per-key NULLS FIRST/LAST overrides that placement independently of the
+non-NULL value order.
 
 - **Binary:** unsigned byte-by-byte lexicographic order. The first differing
   byte decides; a proper prefix sorts before its extension. Equality requires
@@ -934,7 +948,8 @@ grouping combines NULL keys and ascending ordering places NULL first.
   `NaN = NaN` is TRUE and `NaN <> NaN` is FALSE. The numeric order is
   `NaN < -infinity < finite values < +infinity`; like-signed infinities are
   equal. Positive and negative zero are equal in predicates and form one
-  DISTINCT/grouping class. NaN is a value, not NULL. These deliberate rules
+  DISTINCT/grouping class. Under ASC NULLS LAST the order is NaN, -infinity,
+  finite values, +infinity, NULL; DESC NULLS FIRST reverses it. NaN is a value, not NULL. These deliberate rules
   apply to Float32, Float64, and mixed numeric comparisons.
 - **Temporal values:** `TIMESTAMP` compares wall-clock ticks and ignores the
   host `DateTimeKind`; `TIMESTAMPTZ` compares instants and ignores the offset.
@@ -1023,7 +1038,8 @@ its data with the engine that wrote it (which can still open it), drop the
 database (`DropDatabaseAsync`), create it again and reload the data. A database
 whose creation was interrupted before its format was recorded reads as format 1
 and needs only the drop and create. Upgrading databases across format versions
-is tracked by #1152. New databases are created on format 23.
+is tracked by #1152. New databases are created on format 24. Format 24 admits explicit NULL placement in
+stored view bodies; earlier formats are refused at open, with no upgrade reader.
 
 From format 4 on, the catalog stores the format marker in a record that engines
 before format 4 do not recognize, so those engines refuse to open a format-4
@@ -1138,7 +1154,7 @@ a later unsupported WINDOW clause, and WITH TIES never becomes a CTE diagnostic.
 
 These spellings execute at every accepted SELECT position: scalar, IN and EXISTS
 children, derived/CTE bodies and INSERT SELECT sources, retaining the existing
-derived-output outer-ordering restriction. Subqueries used as counts remain
+ordinary derived-output ordering rules. Subqueries used as counts remain
 COHDBL001 naming LIMIT, OFFSET, FETCH or TOP. Counts use the existing single
 EvaluateCount validator and Limit/Offset plan fields; negative or noninteger values
 receive COHSQLE018 naming the written clause. SqlSelectExpression.LimitSyntaxKind
@@ -1370,7 +1386,7 @@ operator is SQL0003. TOP stays on its SELECT operand, so
 Combined ORDER BY accepts first-operand output names (implicit names included) and positive
 one-based ordinals only. Expressions, qualified names, absent output names and invalid ordinals
 fail planning with COHSQLE018; ambiguous names use COHSQLE019. Combined OFFSET/FETCH shares
-the ordinary Int64 count validation. Explicit NULL placement retains COHDBL001.
+the ordinary Int64 count validation. Explicit NULLS FIRST/LAST follows the ordinary ordering contract.
 
 Both inputs must have the same column count (COHSQLE013 names both counts).
 Types are checked before reading any row. The USING common-type rule selects a category-compatible
@@ -1583,10 +1599,9 @@ Typos and nonexistent or hidden qualifiers retain located `COHSQLE015`.
 An enclosing-query reference from a derived table nested in a subquery resolves
 through the ordinary outer scope chain and executes for that outer row. Independent
 derived bodies retain one materialization per statement. Set operations inside derived
-bodies retain #1114's capability pin. Outer ORDER BY keys bound to derived outputs,
-including aliases and ordinals that project them, retain the shared #1112 pin at
-planning. Keys bound to stored inputs execute, as does ordering within derived
-bodies containing further derived inputs. These extensions
+bodies execute. Outer ORDER BY keys bound to derived outputs, including aliases and
+ordinals, execute with the same NULL placement rules as stored inputs (#1112). Ordering
+within derived bodies containing further derived inputs also executes. These extensions
 add no named clause, catalog format or wire payload. PostgreSQL's local reference
 uses `RangeSubselect` in `src/backend/parser/gram.y:13938-13956` and isolates its
 namespace in `parse_clause.c:407-457`. The required alias and full-width column
@@ -2699,7 +2714,7 @@ such as `WINDOW` in the statement matrix. UNION, INTERSECT and EXCEPT remain pro
 operator outside the profile's keywords that a dedicated rule recognizes and
 rejects with `COHDBL001`: `RECURSIVE`, `[NOT] MATERIALIZED`, `SEARCH`/`CYCLE`,
 `SELECT ALL`,
-`CREATE COLLATION`, `CREATE FULLTEXT`, `NULLS FIRST`/`LAST`, `GROUPING SETS` and
+`CREATE COLLATION`, `CREATE FULLTEXT`, `GROUPING SETS` and
 the `GROUPING`, `ROLLUP`, `CUBE` and `GROUPING_ID` calls, `FILTER (...)` and
 `WITHIN GROUP` after a non-LISTAGG call, LISTAGG ON OVERFLOW (contextual), the `ANY`/`SOME` (and `ALL`) quantified comparisons,
 `LATERAL`, `~`, `SEQUENCE`, `SERIAL`, `BIGSERIAL`, `SMALLSERIAL`, `OVERRIDING`,

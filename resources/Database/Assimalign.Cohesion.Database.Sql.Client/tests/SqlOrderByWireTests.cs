@@ -298,9 +298,6 @@ public sealed class SqlOrderByWireTests
     /// <summary>Excluded ordering forms return the capability diagnostic and preserve the connection.</summary>
     /// <param name="statement">The excluded form.</param>
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - ORDER BY: excluded forms report COHDBL001 over the wire")]
-    [InlineData("SELECT id FROM users ORDER BY id NULLS FIRST")]
-    [InlineData("SELECT id FROM users ORDER BY id NULLS LAST")]
-    [InlineData("SELECT derived.id FROM (SELECT id FROM users) derived ORDER BY derived.id")]
     [InlineData("SELECT id, COUNT(*) FROM users GROUP BY 1")]
     public async Task QueryAsync_UnsupportedOrdering_ShouldReportCapabilityDiagnosticOverTheWire(string statement)
     {
@@ -310,11 +307,29 @@ public sealed class SqlOrderByWireTests
 
         // Act / Assert
         var error = await Should.ThrowAsync<SqlClientException>(() => QueryAsync(connection, statement));
-        error.Kind.ShouldBe(statement.Contains("derived.id", System.StringComparison.Ordinal)
-            ? SqlClientErrorKind.ExecutionFailure : SqlClientErrorKind.ParseFailure);
+        error.Kind.ShouldBe(SqlClientErrorKind.ParseFailure);
         error.Message.ShouldContain("COHDBL001", Case.Sensitive);
         error.ConnectionUsable.ShouldBeTrue();
         (await QueryAsync(connection, "SELECT name FROM users WHERE id = 1")).ShouldHaveSingleItem()[0].ShouldBe("ada");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - ORDER BY: explicit NULL placement and derived outputs execute over the wire")]
+    [InlineData("priority ASC NULLS FIRST, id", "10,50,30,20,40")]
+    [InlineData("priority ASC NULLS LAST, id", "30,20,40,10,50")]
+    [InlineData("priority DESC NULLS FIRST, id", "10,50,20,40,30")]
+    [InlineData("priority DESC NULLS LAST, id", "20,40,30,10,50")]
+    public async Task QueryAsync_NullPlacement_ShouldReturnOrderedRows(string ordering, string expected)
+    {
+        // Arrange
+        await using var harness = await SqlClientTestHarness.StartAsync();
+        await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
+        await SeedAsync(connection);
+        // Act
+        var rows = await QueryAsync(connection, "SELECT id FROM ordering_rows ORDER BY " + ordering);
+        var derived = await QueryAsync(connection, "SELECT d.id FROM (SELECT id, priority FROM ordering_rows) d ORDER BY " + ordering);
+        // Assert
+        string.Join(",", rows.Select(row => row[0])).ShouldBe(expected);
+        string.Join(",", derived.Select(row => row[0])).ShouldBe(expected);
     }
 
     private static async Task SeedAsync(SqlConnection connection)

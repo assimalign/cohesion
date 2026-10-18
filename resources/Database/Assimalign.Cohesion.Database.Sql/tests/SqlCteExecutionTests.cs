@@ -60,10 +60,10 @@ public sealed partial class SqlCteExecutionTests
         session.LastStatementMetrics!.RecordsExamined.ShouldBe(3);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql] - WITH: ordinary derived output ordering retains its capability boundary")]
-    [InlineData("WITH a AS (SELECT id FROM t) SELECT d.id FROM a JOIN (SELECT id FROM t) d ON a.id = d.id ORDER BY d.id;")]
-    [InlineData("WITH a AS (SELECT d.id FROM (SELECT id FROM t) d ORDER BY d.id) SELECT * FROM a;")]
-    public async Task Execute_OrderedDerivedInput_ShouldKeepDerivedOrderingPin(string sql)
+    [Theory(DisplayName = "Cohesion Test [Sql] - WITH: derived output ordering executes in CTE bodies and consumers")]
+    [InlineData("WITH a AS (SELECT id FROM t) SELECT d.id FROM a JOIN (SELECT id FROM t) d ON a.id = d.id ORDER BY d.id DESC NULLS LAST;", 6L)]
+    [InlineData("WITH a AS (SELECT d.id FROM (SELECT id FROM t) d ORDER BY d.id DESC NULLS LAST) SELECT * FROM a;", 3L)]
+    public async Task Execute_OrderedDerivedInput_ShouldReturnOrderedRows(string sql, long examined)
     {
         // Arrange
         await using var engine = SqlDatabaseEngine.Create("cte-derived-order", new());
@@ -72,12 +72,11 @@ public sealed partial class SqlCteExecutionTests
         await SeedAsync(session);
 
         // Act
-        var result = await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None);
+        var rows = await RowsAsync(session, sql);
 
         // Assert
-        result.Status.ShouldBe(DatabaseResultStatus.Error);
-        result.Diagnostics.ShouldNotBeNull().ShouldContain(diagnostic => diagnostic.Code == "COHDBL001");
-        session.LastStatementMetrics!.RecordsExamined.ShouldBe(0);
+        rows.Select(row => row[0]).ShouldBe([3, 2, 1]);
+        session.LastStatementMetrics!.RecordsExamined.ShouldBe(examined);
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - WITH: referenced bodies retain index seeks and evaluated row windows")]

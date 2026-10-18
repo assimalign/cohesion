@@ -198,11 +198,11 @@ internal sealed partial class SqlPlanExecutor
             var comparer = Comparer<object?>.Create((left, right) =>
             {
                 if ((operations++ & 31) == 0) { cancellationToken.ThrowIfCancellationRequested(); }
-                return CompareOrderingValues(left, right, collation);
+                return CompareOrderingValues(left, right, orderBy[key], collation);
             });
             sorted = sorted is null
-                ? orderBy[i].IsDescending ? keyed.OrderByDescending(item => item.Keys[key], comparer) : keyed.OrderBy(item => item.Keys[key], comparer)
-                : orderBy[i].IsDescending ? sorted.ThenByDescending(item => item.Keys[key], comparer) : sorted.ThenBy(item => item.Keys[key], comparer);
+                ? keyed.OrderBy(item => item.Keys[key], comparer)
+                : sorted.ThenBy(item => item.Keys[key], comparer);
         }
         List<object?[]> projected;
         try { projected = (sorted is null ? keyed : sorted.AsEnumerable()).Select(item => item.Output).ToList(); }

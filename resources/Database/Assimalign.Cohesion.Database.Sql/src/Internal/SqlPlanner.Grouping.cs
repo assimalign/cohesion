@@ -58,7 +58,6 @@ internal sealed partial class SqlPlanner
 
         var orderByProjections = BindOrderByProjections(select, projections, columns.Count);
         CaptureViewOrdering(select, columns, bindings, evaluator, orderByProjections);
-        if (bindings is not null && select.OrderBy.Count > 0) { RejectDerivedOrdering(select, projections, orderByProjections, evaluator, bindings); }
         foreach (var order in select.OrderBy)
         {
             BindSlots(order.Expression, orderByProjections);
@@ -239,7 +238,7 @@ internal sealed partial class SqlPlanner
                 && (a.Quantifier == SqlSetQuantifier.Distinct) == (b.Quantifier == SqlSetQuantifier.Distinct)
                 && a.HasWithinGroupOrdering == b.HasWithinGroupOrdering
                 && a.Arguments.Count == b.Arguments.Count && a.OrderBy.Count == b.OrderBy.Count
-                && a.OrderBy.Select(key => key.IsDescending).SequenceEqual(b.OrderBy.Select(key => key.IsDescending)),
+                && a.OrderBy.Select(key => (key.IsDescending, key.NullPlacement)).SequenceEqual(b.OrderBy.Select(key => (key.IsDescending, key.NullPlacement))),
             (SqlCollateExpression a, SqlCollateExpression b) => Collation.FromName(a.CollationName) == Collation.FromName(b.CollationName),
             (SqlCastExpression a, SqlCastExpression b) => a.TargetTypeInfo?.Type == b.TargetTypeInfo?.Type
                 && a.TargetTypeInfo?.MaxLength == b.TargetTypeInfo?.MaxLength

@@ -33,6 +33,15 @@ The SQL front-end (area architecture: [resources/Database/DESIGN.md](../../../..
 §3.3). The dialect is deliberately fundamental — basic SQL, declared precisely —
 and structured to be extended without churning what exists (open/closed).
 
+## NULL placement (#1112)
+
+SqlOrderByColumn retains SqlNullPlacement.Default/First/Last independently of direction.
+The shared rule serves query tails and aggregate inputs, using contextual lookahead so
+NULLS, FIRST and LAST stay unreserved. Rendering emits explicit placement verbatim in
+canonical uppercase and never supplies an omitted modifier. The tree dump and structural
+query/call comparisons include placement, preserving persisted view round trips.
+No profile clause or keyword is added. DIALECT.md specifies syntax, defaults and errors.
+
 ## Aggregate modifiers and string aggregation (#1115)
 
 SqlFunctionCallExpression retains a SqlSetQuantifier and ordered input keys for every call;
@@ -109,8 +118,8 @@ catalog binding: only actual sibling references require LATERAL, enclosing-query
 references resolve through the lexical scope chain, and unknown/hidden names retain COHSQLE015.
 Correlated and uncorrelated UPDATE/DELETE WHERE children use ordinary subquery grammar;
 UPDATE SET and lateral references remain explicit capability refusals.
-The planner applies the shared #1112 outer-ordering pin only to keys bound to
-derived outputs, including projection aliases and ordinals. Ordering inside derived
+Outer ordering binds derived outputs, including projection aliases and ordinals, with
+the same per-key NULL placement as stored inputs (#1112). Ordering inside derived
 bodies executes, including over nested derived inputs. Set-operation bodies execute through the query-body variant (#1114).
 
 ## Identity grammar (#1123)
@@ -343,7 +352,7 @@ rename happened before external consumers existed.
 ## Non-goals (current dialect)
 
 CORRESPONDING, recursive/nested or data-modifying CTEs, window functions, views, LATERAL,
-outer ordering keys bound to derived outputs, UPDATE SET subqueries, `ON UPDATE`,
+UPDATE SET subqueries, `ON UPDATE`,
 `MERGE`, `RETURNING`, savepoints, isolation-level syntax, and cost-hint syntax.
 Each is an additive dialect extension when its engine feature
 lands.

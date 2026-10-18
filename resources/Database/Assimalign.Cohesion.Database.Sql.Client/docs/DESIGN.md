@@ -91,6 +91,13 @@ names and values. InMemory and TCP cases exercise UNION ALL, INTERSECT and EXCEP
 combined OFFSET/FETCH, IN bodies and reusable coded parse/planning failures. Result metadata
 still carries no nullability field. No client API or wire format changes.
 
+## Explicit NULL placement (#1112)
+
+The existing execute exchange carries results ordered with per-key NULLS FIRST/LAST,
+including outer ordering over derived outputs. Wire tests assert all four direction and
+placement combinations; GROUP BY ordinals keep COHDBL001 with a reusable connection.
+No protocol or client API change is needed.
+
 ## Pagination (#1107)
 
 OFFSET/FETCH, OFFSET before LIMIT and TOP use the existing SQL execute exchange and

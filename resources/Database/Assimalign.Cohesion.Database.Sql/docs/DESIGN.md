@@ -232,12 +232,15 @@ to an output becomes a slot read (`SqlBoundSlot`) at the ordinal after the sourc
 row, and the key's collation follows the projection's source, fixed before any row
 is sorted ([Bound expressions](#bound-expressions-e1)). Nothing reconstructs language
 AST nodes or requires cross-assembly internal access. Sorting is stable, with NULL first ascending and
-last descending, followed by DISTINCT and LIMIT/OFFSET. Explicit NULL placement
-and outer ordering keys bound to derived outputs remain capability errors. Stored-input
-keys still execute when a derived relation participates; ordering inside derived bodies
-also executes over nested derived inputs. The planner decides the pin after alias,
-ordinal and source bindings exist. An unqualified USING key follows the chosen merged
-value's source; a qualified stored-table key retains its physical binding. The exact syntax contract
+last descending by default, followed by DISTINCT and LIMIT/OFFSET. Explicit NULLS FIRST/LAST
+overrides placement per key independently of direction (#1112). Binding resolves the default
+to SqlBoundOrdering.NullsFirst; the shared comparer applies direction only to non-NULL
+values. Ordinary, correlated, grouped and aggregate-input ordering use this comparer,
+including DISTINCT aggregate representative selection. Outer derived-table outputs use
+ordinary alias, ordinal and source bindings. Structural aggregate/query equality includes
+placement. Format 24 fences the newly storable NULLS text in view bodies; formats through
+23 are refused at open, without an upgrade reader. Canonical rendering preserves explicit
+modifiers rather than normalizing them to defaults. The exact syntax contract
 and execution evidence are in
 [DIALECT.md](../../Assimalign.Cohesion.Database.Sql.Language/docs/DIALECT.md).
 
@@ -452,7 +455,7 @@ their existing mutation plans consume typed slots. Children read the pre-stateme
 snapshot and session writes, and failure occurs before mutations. The existing
 FK/cascade and transaction paths remain responsible for mutation atomicity.
 Correlated predicates evaluate for each candidate row before target mutations begin.
-The #1112 ordering and #1114 set-operation shared pins remain in place. There is
+Outer derived-output ordering and combined set operations execute (#1112/#1114). There is
 no catalog representation change, so no format bump or upgrade path is needed.
 
 ## EXPLAIN operator vocabulary (#1104)
@@ -1644,7 +1647,7 @@ SqlNamespaceNames.Default is the shared spelling used by runtime and SDK renderi
 creates a SQL namespace only; a compiled schema's name remains its ownership identity and never
 selects a namespace. dbo is an Adhoc namespace record seeded only by StampNewCatalog, and SQL
 refuses its removal because provisioning requires it. Creation commits dbo before the final format
-marker, so every crash image accepted as format 23 contains dbo; earlier images retain the
+marker, so every crash image accepted as format 24 contains dbo; earlier images retain the
 format-1 interrupted-creation refusal. Opening a database seeds or commits nothing.
 
 Provisioning belongs to this model (owner decisions 49 to 58 of 2026-10-09, B1 of
@@ -2136,7 +2139,7 @@ utility.c:1480-1483 and namespace.c:526-531.
 
 AUTHORIZATION and nested schema elements are rejected with COHDBL001. Atomic nested statements
 would require a separate DDL execution contract because each existing statement self-commits.
-Record-space format 23 has no upgrade reader: export older databases, recreate and explicitly
+Record-space format 24 has no upgrade reader: export older databases, recreate and explicitly
 CREATE SCHEMA for non-dbo table namespaces before importing. Namespace records are not synthesized.
 
 The area root carries only the model-independent ownership contracts (`DatabaseObjectOwner`,
@@ -2611,7 +2614,7 @@ PostgreSQL references: tablecmds.c:3903-4062 (column identity), :4329-4385 (rela
   format, no upgrade path.** The catalog stores the format version of the whole
   data file set, rows and the index trees that ride it (a kind-4 record for
   versions 1–3, a kind-8 record from version 4). The engine reads and writes
-  format 23 only: format 6's stamped rows in per-object page chains whose index keys use the
+  format 24 only: format 6's stamped rows in per-object page chains whose index keys use the
   temporal identity encoding (#1099, below), in index trees of B-tree page format
   2, which order entries by key, entry reference and writer (#1194,
   `Database.Indexing` DESIGN), decoded through each table's physical column
@@ -3241,7 +3244,11 @@ description + exported registrations), the engine binds them.
   boundary (`IndexUniqueViolationException` translated — the child-root error
   policy); the statement's bracket has rolled back, the session stays usable.
   Unique keys treat nulls as values (stricter than ANSI; consistent with the
-  codec's nulls-first ordering — documented dialect decision).
+  codec's nulls-first ordering — documented dialect decision). Every ORDER BY sorts in
+  memory after its access path; indexes never supply result order. Physical index order
+  places NaN last and distinguishes signed zeros, while the value comparator places NaN
+  below other non-NULL numerics and equates signed zeros. Future sort elision needs
+  comparator equivalence as well as matching NULL placement.
 - **A failed statement's pages are restored where no seek sees them half done** (#1371).
   A multi-row `INSERT` (or `INSERT ... SELECT`, `ExecuteInsertRowsAsync` in
   `SqlPlanExecutor.InsertSelect.cs`) inserts every earlier row and its entries, splitting
@@ -4884,7 +4891,7 @@ RESTART, generation-mode changes and identity backfill on populated tables remai
 identity tables through the ordinary SQL executor.
 
 RIGHT/FULL OUTER, NATURAL and LATERAL joins, qualified wildcards, UPDATE SET
-subqueries, outer ordering keys bound to derived outputs, explicit NULL placement, `Serializable`
+subqueries, `Serializable`
 isolation (rejected at begin), cost-based optimization (selection stays
 rule-based), index seeks for UPDATE/DELETE target collection, and index-only
 result production (a seek always fetches the row). (Row-level MVCC visibility

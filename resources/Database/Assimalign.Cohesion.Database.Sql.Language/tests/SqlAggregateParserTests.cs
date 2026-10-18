@@ -79,6 +79,8 @@ public class SqlAggregateParserTests
     [InlineData("COUNT(ALL amount)", SqlSetQuantifier.All, 0)]
     [InlineData("SUM(ALL amount)", SqlSetQuantifier.All, 0)]
     [InlineData("SUM(amount ORDER BY id)", SqlSetQuantifier.Default, 1)]
+    [InlineData("STRING_AGG(name, ',' ORDER BY id NULLS LAST)", SqlSetQuantifier.Default, 1)]
+    [InlineData("LISTAGG(name, ',') WITHIN GROUP (ORDER BY id DESC NULLS FIRST)", SqlSetQuantifier.Default, 1)]
     [InlineData("STRING_AGG(name, ', ')", SqlSetQuantifier.Default, 0)]
     [InlineData("STRING_AGG(name, ', ' ORDER BY id DESC, name)", SqlSetQuantifier.Default, 2)]
     [InlineData("STRING_AGG(DISTINCT name, ',' ORDER BY name)", SqlSetQuantifier.Distinct, 1)]

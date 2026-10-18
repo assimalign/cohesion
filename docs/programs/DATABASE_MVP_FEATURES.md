@@ -149,8 +149,9 @@ Structural fixes that must land before engine work, because every engine inherit
 > Referencing a duplicated output alias is ambiguous. Aggregate arguments retain their source scope.
 > Standalone positive integers identify output columns; zero, negatives, out-of-range values and non-integer
 > numeric literals error. `ORDER BY 1 + 1` is a constant expression, not ordinal 2. NULL sorts first in ASC
-> and last in DESC. Explicit NULLS FIRST/LAST, GROUP BY ordinals, and derived-table output ordering report
-> `COHDBL001`; supported scalar subqueries remain executable. Phase 13's alias/ordinal gap is closed by
+> and last in DESC by default. Per-key NULLS FIRST/LAST overrides it independently of direction,
+> including derived outputs, set results and aggregate inputs. GROUP BY ordinals report `COHDBL001`;
+> supported scalar subqueries remain executable. Phase 13's alias/ordinal gap is closed by
 > execution cases whose complete results differ from insertion and scan order.
 > UNIQUE treats NULL as an equal index key: a second NULL is a violation.
 > These failing partial forms are not counted as execution evidence. Detailed boundaries

@@ -158,11 +158,14 @@ public static class SqlExpressionRenderer
         _ => throw new NotSupportedException($"Expression node '{expression.GetType().Name}' has no SQL spelling."),
     };
 
+    private static string Ordering(SqlOrderByColumn key) => Expression(key.Expression) + (key.IsDescending ? " DESC" : "") +
+        (key.NullPlacement switch { SqlNullPlacement.First => " NULLS FIRST", SqlNullPlacement.Last => " NULLS LAST", _ => "" });
+
     private static string AggregateCall(SqlFunctionCallExpression call)
     {
         string quantifier = call.Quantifier switch { SqlSetQuantifier.Distinct => "DISTINCT ", SqlSetQuantifier.All => "ALL ", _ => "" };
         string ordering = call.OrderBy.Count == 0 ? "" : "ORDER BY " + string.Join(", ", call.OrderBy.Select(key =>
-            Expression(key.Expression) + (key.IsDescending ? " DESC" : "")));
+            Ordering(key)));
         bool listaggName = call.FunctionName.Equals("LISTAGG", StringComparison.OrdinalIgnoreCase);
         bool listagg = call.HasWithinGroupOrdering;
         // A delimited mixed/upper-case LISTAGG is an ordinary call in the parser.
@@ -502,11 +505,7 @@ public static class SqlExpressionRenderer
     {
         for (int index = 0; index < query.OrderBy.Count; index++)
         {
-            builder.Append(index == 0 ? " ORDER BY " : ", ").Append(Expression(query.OrderBy[index].Expression));
-            if (query.OrderBy[index].IsDescending)
-            {
-                builder.Append(" DESC");
-            }
+            builder.Append(index == 0 ? " ORDER BY " : ", ").Append(Ordering(query.OrderBy[index]));
         }
         if (query.LimitSyntaxKind == SqlLimitSyntaxKind.Limit)
         {

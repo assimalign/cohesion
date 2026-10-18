@@ -71,9 +71,6 @@
   <data name="SetOrderAmbiguous" xml:space="preserve">
     <value>Ambiguous combined-result ORDER BY column '{0}'.</value>
   </data>
-  <data name="DerivedOutputOrdering" xml:space="preserve">
-    <value>SQL derived-table SUBQUERY output ordering awaits the ordering extension.</value>
-  </data>
   <data name="SetColumnCount" xml:space="preserve">
     <value>{0} inputs have {1} and {2} columns; both counts must match.</value>
   </data>

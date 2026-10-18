@@ -10,52 +10,12 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 internal sealed partial class SqlPlanner
 {
-    /// <summary>The #1112 pin follows resolved key dependencies, including output aliases and ordinals.</summary>
-    private void RejectDerivedOrdering(SqlSelectExpression select, IReadOnlyList<SqlProjection> projections,
-        IReadOnlyDictionary<SqlExpression, int> outputSlots, SqlExpressionEvaluator scope,
-        IReadOnlyList<SqlRelationBinding>? bindings)
+    private static bool NullsFirst(SqlOrderByColumn order) => order.NullPlacement switch
     {
-        if (ViewDefinitionBinding is not null || InDerivedBody || bindings is null || !bindings.Any(binding => binding.Source.Derived is { IsCommonTable: false, CatalogView: null })) { return; }
-        foreach (var order in select.OrderBy)
-        {
-            if (ReadsDerived(order.Expression, true))
-            {
-                throw new SqlUnsupportedQueryException(ErrorMessages.DerivedOutputOrdering, location: order.Expression.Location);
-            }
-        }
-
-        bool DerivedOrdinal(int ordinal) => bindings.Any(binding => binding.Source.Derived is { IsCommonTable: false, CatalogView: null } &&
-            ordinal >= binding.Offset && ordinal < binding.Offset + binding.Source.Columns.Count);
-
-        bool ReadsDerived(SqlExpression expression, bool outputs)
-        {
-            RuntimeHelpers.EnsureSufficientExecutionStack();
-            if (outputs && outputSlots.TryGetValue(expression, out int index))
-            {
-                var projection = projections[index];
-                return projection.ColumnOrdinal is int ordinal ? DerivedOrdinal(ordinal)
-                    : projection.Expression is { } source ? ReadsDerived(source, false) : ReadsMerged(projection.Value);
-            }
-            if (expression is SqlColumnReferenceExpression reference)
-            {
-                int ordinal = scope.ResolveColumn(reference);
-                return reference.TableAlias is null && reference.SchemaName is null && scope.MergedColumn(ordinal) is { } merged
-                    ? ReadsMerged(merged.Value) : DerivedOrdinal(ordinal);
-            }
-            foreach (var child in Children(expression))
-            {
-                if (ReadsDerived(child, outputs)) { return true; }
-            }
-            return false;
-        }
-
-        bool ReadsMerged(SqlBoundExpression? value) => value switch
-        {
-            SqlBoundColumn column => DerivedOrdinal(column.Ordinal),
-            SqlBoundCast cast => ReadsMerged(cast.Operand),
-            _ => false,
-        };
-    }
+        SqlNullPlacement.First => true,
+        SqlNullPlacement.Last => false,
+        _ => !order.IsDescending,
+    };
 
     /// <summary>
     /// Binds ORDER BY aliases and standalone numeric ordinals to completed output

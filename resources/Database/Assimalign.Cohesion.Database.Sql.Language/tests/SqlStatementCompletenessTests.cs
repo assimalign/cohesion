@@ -400,7 +400,7 @@ public sealed class SqlStatementCompletenessTests
     [InlineData("DELETE FROM t WHERE id = 1 RETURNING *;", new[] { "COHDBL001" })]
     [InlineData("DELETE FROM t WHERE id = 1 RETURNING *; DELETE FROM t;", new[] { "COHDBL001" })]
     [InlineData("DELETE FROM t WHRE id = 1 RETURNING *;", new[] { "SQL0003", "COHDBL001" })]
-    // Derived output ordering is classified by the planner; its execution test retains this exact pin.
+    // Derived output ordering is classified by the planner; its execution test verifies resolved output ordering.
     [InlineData("SELECT * FROM (SELECT id FROM u) d ORDER BY id;", new string[0])]
     [InlineData("SELECT * FROM t JOIN (SELECT id FROM u) q ON t.id = q.id;", new string[0])]
     public void Parse_UnsupportedClause_ShouldOwnOnlyTheTextAfterIt(string sql, string[] expected)

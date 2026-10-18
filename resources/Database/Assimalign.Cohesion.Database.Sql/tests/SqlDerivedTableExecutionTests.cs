@@ -291,7 +291,7 @@ public sealed class SqlDerivedTableExecutionTests
         rows.Select(row => row[0]).ShouldBe(new object?[] { 1, 2, 3 });
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql] - Derived tables: output ordering retains the shared pin after binding")]
+    [Theory(DisplayName = "Cohesion Test [Sql] - Derived tables: output ordering executes after binding")]
     [InlineData("SELECT q.years FROM (SELECT id AS years FROM t) q ORDER BY years")]
     [InlineData("SELECT q.years FROM (SELECT id AS years FROM t) q ORDER BY 1")]
     [InlineData("SELECT q.years FROM (SELECT age AS years FROM t) q ORDER BY years;")]
@@ -302,7 +302,7 @@ public sealed class SqlDerivedTableExecutionTests
     [InlineData("SELECT q.id FROM t JOIN (SELECT id FROM t) q ON t.id = q.id ORDER BY 1")]
     [InlineData("SELECT q.id, COUNT(*) FROM t JOIN (SELECT id FROM t) q ON t.id = q.id GROUP BY q.id ORDER BY q.id")]
     [InlineData("SELECT id FROM t JOIN (SELECT CAST(id AS BIGINT) AS id FROM t) q USING (id) ORDER BY id")]
-    public async Task Execute_DerivedOutputOrdering_ShouldRetainCapabilityRefusal(string sql)
+    public async Task Execute_DerivedOutputOrdering_ShouldReturnOrderedOutput(string sql)
     {
         // Arrange
         await using var engine = SqlDatabaseEngine.Create("derived-order", new());
@@ -314,13 +314,11 @@ public sealed class SqlDerivedTableExecutionTests
         await session.ExecuteAsync("INSERT INTO u VALUES (1);", cancellationToken: CancellationToken.None);
 
         // Act
-        var result = await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None);
-        if (result is DatabaseResultSet unexpectedRows) { await unexpectedRows.DisposeAsync(); }
+        var rows = await RowsAsync(session, sql);
 
         // Assert
-        var diagnostic = result.Diagnostics.ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("COHDBL001");
-        diagnostic.Message!.ShouldContain("derived-table SUBQUERY", Case.Sensitive);
+        rows.ShouldHaveSingleItem()[0].ShouldBe(sql.Contains("age AS", StringComparison.Ordinal) ? 10 :
+            sql.Contains("+ 1 AS", StringComparison.Ordinal) ? 2 : sql.Contains("CAST(id AS BIGINT)", StringComparison.Ordinal) ? (object)1L : 1);
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Derived tables: USING composes across materialization and preserves shared domains")]
