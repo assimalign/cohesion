@@ -65,27 +65,7 @@ internal static class SqlUnsupportedVocabulary
         new("ANY", "ANY quantified comparison", SqlWordPosition.Rule),
         new("SOME", "SOME quantified comparison", SqlWordPosition.Rule),
         new("LATERAL", "LATERAL subquery", SqlWordPosition.Rule),
-        // Recognized functions awaiting execution; each is a parse-time COHDBL001 pin.
-        new("NULLIF", "NULLIF", SqlWordPosition.Function),
-        new("TRIM", "TRIM", SqlWordPosition.Function),
-        new("LTRIM", "LTRIM", SqlWordPosition.Function),
-        new("RTRIM", "RTRIM", SqlWordPosition.Function),
-        new("SUBSTRING", "SUBSTRING", SqlWordPosition.Function),
-        new("REPLACE", "REPLACE", SqlWordPosition.Function),
-        new("CONCAT", "CONCAT", SqlWordPosition.Function),
-        new("CEILING", "CEILING", SqlWordPosition.Function),
-        new("FLOOR", "FLOOR", SqlWordPosition.Function),
-        new("ROUND", "ROUND", SqlWordPosition.Function),
-        new("POWER", "POWER", SqlWordPosition.Function),
-        new("SQRT", "SQRT", SqlWordPosition.Function),
-        new("MOD", "MOD", SqlWordPosition.Function),
-        new("NOW", "NOW", SqlWordPosition.Function),
-        new("CURRENT_DATE", "CURRENT_DATE", SqlWordPosition.NiladicFunction),
-        new("CURRENT_TIME", "CURRENT_TIME", SqlWordPosition.NiladicFunction),
-        new("CURRENT_TIMESTAMP", "CURRENT_TIMESTAMP", SqlWordPosition.NiladicFunction),
-        new("LOCALTIME", "LOCALTIME", SqlWordPosition.NiladicFunction),
-        new("LOCALTIMESTAMP", "LOCALTIMESTAMP", SqlWordPosition.NiladicFunction),
-        new("EXTRACT", "EXTRACT", SqlWordPosition.Function),
+        // Window functions awaiting execution.
         new("ROW_NUMBER", "ROW_NUMBER", SqlWordPosition.WindowFunction),
         new("RANK", "RANK", SqlWordPosition.WindowFunction),
         new("DENSE_RANK", "DENSE_RANK", SqlWordPosition.WindowFunction),
@@ -109,9 +89,8 @@ internal static class SqlUnsupportedVocabulary
         string.Equals(word.Spelling, name, System.StringComparison.OrdinalIgnoreCase));
 
     /// <summary>Whether a name has the ISO niladic datetime spelling.</summary>
-    internal static bool IsNiladicFunction(string name) => System.Array.Exists(Words, word =>
-        word.Position == SqlWordPosition.NiladicFunction &&
-        string.Equals(word.Spelling, name, System.StringComparison.OrdinalIgnoreCase));
+    internal static bool IsNiladicFunction(string name) => name.ToUpperInvariant() is
+        "CURRENT_DATE" or "CURRENT_TIME" or "CURRENT_TIMESTAMP" or "LOCALTIME" or "LOCALTIMESTAMP";
 
     /// <summary>Finds the clause a <see cref="SqlWordPosition.Clause"/> keyword names.</summary>
     /// <param name="keyword">The keyword as written.</param>

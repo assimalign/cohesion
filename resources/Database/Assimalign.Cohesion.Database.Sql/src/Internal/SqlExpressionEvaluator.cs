@@ -133,11 +133,12 @@ internal sealed partial class SqlExpressionEvaluator
     /// the token cannot be canceled, so such a statement allocates none.
     /// </returns>
     internal static SqlExpressionEvaluator ForExecution(SqlSubqueryValues? subqueryValues, CancellationToken cancellationToken = default,
-        bool[]? sharedColumns = null)
-        => subqueryValues is null && !cancellationToken.CanBeCanceled && sharedColumns is null
+        bool[]? sharedColumns = null, DateTimeOffset? transactionStart = null)
+        => subqueryValues is null && !cancellationToken.CanBeCanceled && sharedColumns is null && transactionStart is null
             ? RowEvaluator
             : new SqlExpressionEvaluator(Array.Empty<SqlCatalogColumn>(), null, subqueryValues: subqueryValues,
-                cancellationToken: cancellationToken, sharedColumns: sharedColumns);
+                cancellationToken: cancellationToken, sharedColumns: sharedColumns,
+                functions: transactionStart is { } instant ? SqlFunctionEnvironment.Standard.At(instant) : null);
 
     /// <summary>Transfers an owned column, or detaches a binary value retained by a join loop.</summary>
     internal object? DeliverColumn(object?[] row, int ordinal)
@@ -268,8 +269,10 @@ internal sealed partial class SqlExpressionEvaluator
             case SqlBoundExpressionKind.IsNull:
                 var isNull = (SqlBoundIsNull)expression;
                 return Box(EvaluateCore(isNull.Operand, row) is null != isNull.IsNegated);
+            case SqlBoundExpressionKind.SpecialForm:
+                return EvaluateSpecialForm((SqlBoundSpecialForm)expression, row, copySharedBinary);
             case SqlBoundExpressionKind.Coalesce:
-                return Coalesce(((SqlBoundCoalesce)expression).Arguments, row, copySharedBinary);
+                return Coalesce((SqlBoundCoalesce)expression, row, copySharedBinary);
             case SqlBoundExpressionKind.Between:
                 return EvaluateBetween((SqlBoundBetween)expression, row);
             case SqlBoundExpressionKind.In:
@@ -738,7 +741,7 @@ internal sealed partial class SqlExpressionEvaluator
     /// <returns><see langword="true"/> when the sign evaluates over the value.</returns>
     internal static bool IsSignOperand(SqlUnaryOperator sign, object value) => sign == SqlUnaryOperator.Plus
         ? value is sbyte or byte or short or ushort or int or uint or long or ulong or float or double or decimal
-        : value is sbyte or short or int or long or float or double or decimal;
+        : value is sbyte or short or int or long or float or double or decimal or TimeSpan;
 
     /// <summary>
     /// Evaluates an <c>AND</c> or <c>OR</c> chain with SQL three-valued logic over nullable
@@ -843,6 +846,7 @@ internal sealed partial class SqlExpressionEvaluator
                     double value => -value,
                     float value => -(double)value,
                     decimal value => -value,
+                    TimeSpan value => value.Negate(),
                     _ => throw SqlEvaluationException.InvalidOperandType("-", OperandTypeName(operand)),
                 },
                 // ISO unary plus: a number passes through with its type unchanged.
@@ -1006,7 +1010,7 @@ internal sealed partial class SqlExpressionEvaluator
             {
                 if (EvaluateCore(when.Condition, row) is true)
                 {
-                    return EvaluateCore(when.Result, row, copySharedBinary);
+                    return SqlTemporalArithmetic.Promote(EvaluateCore(when.Result, row, copySharedBinary), expression.ResultType);
                 }
             }
             else
@@ -1016,12 +1020,12 @@ internal sealed partial class SqlExpressionEvaluator
                 if (input is not null && candidate is not null && Compare(input, candidate,
                     when.Collation.Resolve(_subqueryValues)) == 0)
                 {
-                    return EvaluateCore(when.Result, row, copySharedBinary);
+                    return SqlTemporalArithmetic.Promote(EvaluateCore(when.Result, row, copySharedBinary), expression.ResultType);
                 }
             }
         }
 
-        return expression.ElseResult is null ? null : EvaluateCore(expression.ElseResult, row, copySharedBinary);
+        return expression.ElseResult is null ? null : SqlTemporalArithmetic.Promote(EvaluateCore(expression.ElseResult, row, copySharedBinary), expression.ResultType);
     }
 
     /// <summary>
@@ -1065,7 +1069,7 @@ internal sealed partial class SqlExpressionEvaluator
         }
 
         // One frame converts, calls and checks (SqlScalarFunction.InvokeResolved), and holds no buffer.
-        return function.InvokeResolved(value, call.FirstTarget, call.Database, call.Collation.Resolve(_subqueryValues), _cancellationToken);
+        return function.InvokeResolved(value, call.FirstTarget, call.Database, call.Collation.Resolve(_subqueryValues), _cancellationToken, _functions.TransactionStart ?? call.TransactionStart);
     }
 
     /// <summary>
@@ -1075,7 +1079,7 @@ internal sealed partial class SqlExpressionEvaluator
     /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
     private object? InvokeScalarNone(SqlBoundCall call)
-        => call.Function.InvokeResolved(new SqlArguments([], call.Database, call.Collation.Resolve(_subqueryValues), _cancellationToken));
+        => call.Function.InvokeResolved(new SqlArguments([], call.Database, call.Collation.Resolve(_subqueryValues), _cancellationToken, _functions.TransactionStart ?? call.TransactionStart));
 
     /// <summary>Evaluates the arguments of a call with more than one, then calls it.</summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
@@ -1136,24 +1140,24 @@ internal sealed partial class SqlExpressionEvaluator
         var collation = call.Collation.Resolve(_subqueryValues);
         if (values.Length > SqlValueBuffer.Length)
         {
-            return InvokeScalarPooled(call, values, collation, _cancellationToken);
+            return InvokeScalarPooled(call, values, collation, _cancellationToken, _functions.TransactionStart ?? call.TransactionStart);
         }
 
         SqlValueBuffer buffer = default;
         Span<SqlValue> arguments = buffer[..values.Length];
         ConvertArguments(call, values, arguments);
-        return function.InvokeResolved(new SqlArguments(arguments, call.Database, collation, _cancellationToken));
+        return function.InvokeResolved(new SqlArguments(arguments, call.Database, collation, _cancellationToken, _functions.TransactionStart ?? call.TransactionStart));
     }
 
     private static object? InvokeScalarPooled(SqlBoundCall call, ReadOnlySpan<object?> values, Collation collation,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, DateTimeOffset? transactionStart)
     {
         SqlValue[] rented = ArrayPool<SqlValue>.Shared.Rent(values.Length);
         try
         {
             Span<SqlValue> arguments = rented.AsSpan(0, values.Length);
             ConvertArguments(call, values, arguments);
-            return call.Function.InvokeResolved(new SqlArguments(arguments, call.Database, collation, cancellationToken));
+            return call.Function.InvokeResolved(new SqlArguments(arguments, call.Database, collation, cancellationToken, transactionStart));
         }
         finally
         {
@@ -1178,15 +1182,16 @@ internal sealed partial class SqlExpressionEvaluator
     }
 
     /// <summary>The first non-NULL argument, evaluated left to right and no further.</summary>
-    private object? Coalesce(SqlBoundExpression[] arguments, object?[] row, bool copySharedBinary)
+    private object? Coalesce(SqlBoundCoalesce expression, object?[] row, bool copySharedBinary)
     {
+        var arguments = expression.Arguments;
         for (int index = 0; index < arguments.Length; index++)
         {
             object? value = EvaluateCore(arguments[index], row, copySharedBinary);
 
             if (value is not null)
             {
-                return value;
+                return SqlTemporalArithmetic.Promote(value, expression.ResultType);
             }
         }
 
@@ -1247,6 +1252,10 @@ internal sealed partial class SqlExpressionEvaluator
     /// </summary>
     private static object Arithmetic(SqlBinaryOperator op, object left, object right)
     {
+        if (left is DateOnly or DateTime or DateTimeOffset or TimeOnly or TimeSpan || right is DateOnly or DateTime or DateTimeOffset or TimeOnly or TimeSpan)
+        {
+            return SqlTemporalArithmetic.Evaluate(op, left, right);
+        }
         if (!IsArithmeticNumber(left) || !IsArithmeticNumber(right))
         {
             throw new SqlPlanningException("COHSQLE003", "Arithmetic requires numeric operands.");

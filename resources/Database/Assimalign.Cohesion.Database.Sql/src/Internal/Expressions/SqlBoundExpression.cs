@@ -60,6 +60,9 @@ internal enum SqlBoundExpressionKind : byte
     /// <summary><see cref="SqlBoundCoalesce"/>: <c>COALESCE</c>, which evaluates its arguments lazily.</summary>
     Coalesce,
 
+    /// <summary>NULLIF and EXTRACT evaluator forms.</summary>
+    SpecialForm,
+
     /// <summary><see cref="SqlBoundLogical"/>: an <c>AND</c> or <c>OR</c> chain.</summary>
     Logical,
 

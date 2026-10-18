@@ -64,7 +64,7 @@ internal sealed partial class SqlExpressionEvaluator
     /// </summary>
     /// <param name="call">The call to <c>COALESCE</c>.</param>
     /// <exception cref="SqlEvaluationException">The call passes no operand or a <c>*</c> (<c>COHSQLE006</c>).</exception>
-    internal static void CheckCoalesce(SqlFunctionCallExpression call)
+    internal static void CheckEvaluatorForm(SqlFunctionCallExpression call)
     {
         var arguments = call.Arguments;
         bool star = false;
@@ -72,10 +72,12 @@ internal sealed partial class SqlExpressionEvaluator
         {
             star |= arguments[index] is SqlStarExpression;
         }
-        if (arguments.Count == 0 || star)
+        if (arguments.Count == 0 || star || !SqlStandardLibrary.IsCoalesce(call.FunctionName) && arguments.Count != 2)
         {
-            throw SqlEvaluationException.FunctionSignatureMismatch(call.FunctionName, "1 or more arguments",
-                SqlFunctionResolver.DescribeArguments(arguments), SqlStandardLibrary.CoalesceUsage);
+            bool coalesce = SqlStandardLibrary.IsCoalesce(call.FunctionName);
+            throw SqlEvaluationException.FunctionSignatureMismatch(call.FunctionName, coalesce ? "1 or more arguments" : "exactly 2 arguments",
+                SqlFunctionResolver.DescribeArguments(arguments), coalesce ? SqlStandardLibrary.CoalesceUsage :
+                    call.FunctionName.Equals("EXTRACT", StringComparison.OrdinalIgnoreCase) ? "EXTRACT(field FROM temporal)" : "NULLIF(value, value)");
         }
     }
 
@@ -121,14 +123,15 @@ internal sealed partial class SqlExpressionEvaluator
             SqlColumnReferenceExpression column => ColumnMetadata(column).Type.MaxLength,
             SqlCastExpression cast => TryResolveCastTarget(cast)?.Storage.MaxLength,
             SqlCollateExpression collate => MaximumLengthOf(collate.Operand),
-            SqlFunctionCallExpression call when !SqlStandardLibrary.IsCoalesce(call.FunctionName)
+            SqlFunctionCallExpression call when !SqlStandardLibrary.IsEvaluatorForm(call.FunctionName)
                 => ResolveFunction(call)?.ReturnType.Storage.MaxLength,
             _ => null,
         };
     }
 
     private static DatabaseType AlternativeType(DatabaseType first, DatabaseType next)
-        => first is DatabaseType.Character or DatabaseType.String && next is DatabaseType.Character or DatabaseType.String && first != next
+        => SqlTemporalArithmetic.IsCalendar(first) && SqlTemporalArithmetic.IsCalendar(next) ? SqlTemporalArithmetic.CommonCalendarType(first, next)
+            : first is DatabaseType.Character or DatabaseType.String && next is DatabaseType.Character or DatabaseType.String && first != next
             ? DatabaseType.String : first == DatabaseType.Null ? next : first;
 
     /// <summary>
@@ -199,7 +202,7 @@ internal sealed partial class SqlExpressionEvaluator
                 return DatabaseType.String;
             case SqlBinaryExpression { Operator: SqlBinaryOperator.Add or SqlBinaryOperator.Subtract or SqlBinaryOperator.Multiply
                 or SqlBinaryOperator.Divide or SqlBinaryOperator.Modulo } arithmetic:
-                return ArithmeticType(StaticTypeOf(arithmetic.Left), StaticTypeOf(arithmetic.Right));
+                return ArithmeticType(arithmetic.Operator, StaticTypeOf(arithmetic.Left), StaticTypeOf(arithmetic.Right));
             case SqlBinaryExpression or SqlLogicalExpression or SqlIsNullExpression or SqlBetweenExpression
                 or SqlInExpression or SqlLikeExpression or SqlExistsExpression:
                 return DatabaseType.Boolean;
@@ -229,6 +232,8 @@ internal sealed partial class SqlExpressionEvaluator
     /// <returns>The static type, or <see cref="DatabaseType.Null"/>.</returns>
     internal DatabaseType StaticCallType(SqlFunctionCallExpression call, bool scalarOnly = false)
     {
+        if (call.FunctionName.Equals("EXTRACT", StringComparison.OrdinalIgnoreCase)) { return DatabaseType.Decimal; }
+        if (call.FunctionName.Equals("NULLIF", StringComparison.OrdinalIgnoreCase)) { return call.Arguments.Count > 0 ? StaticTypeOf(call.Arguments[0]) : DatabaseType.Null; }
         if (SqlStandardLibrary.IsCoalesce(call.FunctionName))
         {
             DatabaseType alternative = DatabaseType.Null;
@@ -244,7 +249,7 @@ internal sealed partial class SqlExpressionEvaluator
 
     /// <summary>Whether a call's result type depends on its arguments, using non-throwing binder resolution.</summary>
     internal bool CallResultDependsOnArguments(SqlFunctionCallExpression call)
-        => SqlStandardLibrary.IsCoalesce(call.FunctionName) || TypeCall(call).Function?.ReturnType.IsPseudo is true;
+        => SqlStandardLibrary.IsEvaluatorForm(call.FunctionName) || TypeCall(call).Function?.ReturnType.IsPseudo is true;
 
     /// <summary>
     /// The type of a slot's value: an ordering output's projection type, or a grouping key's or
@@ -440,8 +445,10 @@ internal sealed partial class SqlExpressionEvaluator
     }
 
     /// <summary>The arithmetic result type the evaluator computes: DECIMAL over any decimal or approximate operand, BIGINT over integers.</summary>
-    private static DatabaseType ArithmeticType(DatabaseType left, DatabaseType right)
+    internal static DatabaseType ArithmeticType(SqlBinaryOperator op, DatabaseType left, DatabaseType right)
     {
+        if (SqlTemporalArithmetic.IsTemporal(left) || SqlTemporalArithmetic.IsTemporal(right))
+        { return SqlTemporalArithmetic.ResultType(op, left, right); }
         static bool Inexact(DatabaseType type) => type is DatabaseType.Decimal or DatabaseType.Float32 or DatabaseType.Float64;
         static bool Integer(DatabaseType type) => type is DatabaseType.Int8 or DatabaseType.Int16 or DatabaseType.Int32 or DatabaseType.Int64;
 

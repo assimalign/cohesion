@@ -265,10 +265,10 @@ public sealed class SqlInsertValuesValidationTests
     /// <param name="sql">The statement.</param>
     /// <param name="function">The function as written.</param>
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - INSERT VALUES/LIMIT: a niladic datetime function reports the function, not a column")]
-    [InlineData("INSERT INTO v (id, a) VALUES (2, CURRENT_TIMESTAMP)", "CURRENT_TIMESTAMP")]
-    [InlineData("INSERT INTO v (id, name) VALUES (2, 'x'), (3, CAST(current_date AS VARCHAR(20)))", "current_date")]
-    [InlineData("INSERT INTO v (id, name) VALUES (2, CAST(CURRENT_TIME AS VARCHAR(20)))", "CURRENT_TIME")]
-    [InlineData("SELECT a FROM v LIMIT CURRENT_DATE", "CURRENT_DATE")]
+    [InlineData("INSERT INTO v (id, a) VALUES (2, RANK())", "RANK")]
+    [InlineData("INSERT INTO v (id, name) VALUES (2, 'x'), (3, CAST(RANK() AS VARCHAR(20)))", "RANK")]
+    [InlineData("INSERT INTO v (id, name) VALUES (2, CAST(LEAD(1) AS VARCHAR(20)))", "LEAD")]
+    [InlineData("SELECT a FROM v LIMIT NTILE(1)", "NTILE")]
     public async Task ExecuteAsync_NiladicDateTimeFunctionWithoutScope_ShouldReportUnsupportedFunction(string sql, string function)
     {
         // Arrange

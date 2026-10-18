@@ -88,6 +88,13 @@ Identity DDL, omitted-column INSERT and typed generated results use the existing
 exchange and integer codec. ALWAYS violations carry COHSQLE025 as ExecutionFailure and leave
 the connection usable. No client API or protocol shape changes.
 
+## T1 scalar and clock wire behavior (#1120)
+
+The 42 scalar names and temporal arithmetic use existing SQL value and metadata
+frames. Wire tests cover every family, UTC transaction clock equality and a coded
+SQRT domain failure followed by successful reuse of the same connection. No wire
+format or client API changes.
+
 ## SQL-owned exchange
 
 `SqlClient.Create` binds the pool to `SqlProtocol.Family`.

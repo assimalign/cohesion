@@ -292,7 +292,7 @@ internal static class SqlDefinitionBinder
         void Visit(SqlExpression node)
         {
             RuntimeHelpers.EnsureSufficientExecutionStack();
-            if (node is SqlFunctionCallExpression call && !SqlStandardLibrary.IsCoalesce(call.FunctionName))
+            if (node is SqlFunctionCallExpression call && !SqlStandardLibrary.IsEvaluatorForm(call.FunctionName))
             {
                 calls.Add(Key(scope.ResolveFunction(call) ?? throw Refuse($"Unknown function '{call.FunctionName}'.", call.Location)));
             }
@@ -309,7 +309,7 @@ internal static class SqlDefinitionBinder
         void Visit(SqlExpression node)
         {
             RuntimeHelpers.EnsureSufficientExecutionStack();
-            if (node is SqlFunctionCallExpression call && !SqlStandardLibrary.IsCoalesce(call.FunctionName))
+            if (node is SqlFunctionCallExpression call && !SqlStandardLibrary.IsEvaluatorForm(call.FunctionName))
             {
                 if (position == identities.Count || !identities[position].StartsWith("F:" + SqlObjectIdentity.Quote(call.FunctionName.ToUpperInvariant()) + "(", StringComparison.Ordinal))
                 {

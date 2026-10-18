@@ -279,7 +279,7 @@ before it binds the statement or reads a row: projections, predicates, joins,
 grouping, ordering, `LIMIT`/`OFFSET`, subqueries, DML values and `CHECK`. The
 statement therefore fails the same way over an empty table as over a populated
 one; the evaluator used to find the name per row, so an empty table succeeded.
-Recognized names that do not execute yet, such as `NULLIF` and `TRIM` (see
+Recognized window names that do not execute yet, such as `RANK` and `LEAD` (see
 [Builtin functions](#builtin-functions)), are not unknown. They reject at parse time
 with one named `COHDBL001` and are absent from the executable profile (#1103).
 
@@ -1487,6 +1487,22 @@ The snapshot rules, ISO-subset limitations, and the rationale for the Cohesion
 extension relations are recorded in the
 [SQL engine design](../../Assimalign.Cohesion.Database.Sql/docs/DESIGN.md#virtual-system-relations-c1).
 
+## Temporal operators (#1120)
+
+TIMESTAMP and TIMESTAMPTZ support +/- day-time INTERVAL and subtraction from
+either timestamp type to produce INTERVAL. DATE +/- INTERVAL produces TIMESTAMP;
+DATE +/- integer produces DATE; DATE - DATE produces INTEGER days. INTERVAL supports
++/- INTERVAL and unary minus. Literal, column and parameter operands behave alike.
+Every other temporal arithmetic pair fails planning (COHSQLE003), including empty
+inputs; values outside years 1..9999 fail evaluation with COHSQLE002.
+
+DATE compares with TIMESTAMP/TIMESTAMPTZ at midnight; a zone-less TIMESTAMP reads
+as +00:00 when meeting TIMESTAMPTZ, using #1110's normalization rule. Equal temporal
+values have equal hashes in DISTINCT and GROUP BY. CASE/COALESCE promote calendar
+alternatives to TIMESTAMP, or to TIMESTAMPTZ when an instant is an alternative.
+Index bounds use the existing coercion check; a stable clock-derived bound uses
+the same captured instant as residual predicates and projections.
+
 ## Expressions
 
 Parameters follow the [shared parameter contract](../../Assimalign.Cohesion.Database.Language/docs/DESIGN.md#parameter-contract-1102).
@@ -1810,7 +1826,7 @@ lengths can compare equal under the index's collation.
   spaces, with the CHAR side converted to text. CHAR-to-TEXT/VARCHAR casts strip trailing spaces;
   CHAR-to-CHAR casts repad to the target length. Concatenation converts CHAR to text first, so
   `CAST('a' AS CHAR(3)) || 'b'` yields `'ab'`. LENGTH ignores padding and counts Unicode scalar
-  values for CHAR (the existing TEXT/VARCHAR LENGTH counts UTF-16 code units).
+  values for CHAR (TEXT/VARCHAR LENGTH also counts Unicode scalars, #1120).
   LIKE sees the stored padded left operand; its pattern is text, so a CHAR pattern is stripped.
   Thus CHAR(3) 'a' fails LIKE 'a', but matches LIKE 'a  ' and LIKE 'a%'. There is no separate
   pattern operator class or OCTET_LENGTH builtin in this dialect. The compatibility invariant
@@ -1951,7 +1967,7 @@ the pair before reading any rows, including empty input and NULL-valued columns.
 This uses the existing binder inference (PostgreSQL src/backend/parser/parse_expr.c:2764-2788).
 Parameter-dependent result types are checked when evaluated, including CASE result arms
 and polymorphic calls; parameters used only in CASE conditions leave its static result type
-intact. NULLIF retains its existing parse-time COHDBL001 unsupported-function diagnostic.
+intact. NULLIF now executes as an evaluator form; its result participates in the same CAST signature checks (#1120).
 A NULL operand returns NULL with target metadata; it does not bypass a statically
 unsupported pair or invalid target. SQL integer literals are Int64 and fractional
 literals are Decimal, including exponent and leading decimal-point forms. To
@@ -2076,49 +2092,128 @@ storage coercion; nested arithmetic therefore sees the converted numeric value.
 
 ## Builtin functions
 
-The profile's function list is the executable built-in set: `COUNT`, `SUM`, `AVG`,
-`MIN`, `MAX`, `ABS`, `LENGTH`, `UPPER`, `LOWER`, `COALESCE` and `CAST`. It is
-not part of the 51-clause denominator. The engine's function catalog (E2) also runs
-the functions the application registered on the
-engine builder (`SqlDatabaseEngineBuilder.Functions`), which every database of the engine
-calls exactly as it calls the built-ins. Executable built-in scalars are `UPPER`, `LOWER`,
-`LENGTH` and `ABS`, beside the special form `COALESCE`; built-in aggregates are `COUNT`,
-`SUM`, `AVG`, `MIN` and `MAX`, under the contract below. The planner checks every call
-against its function's overloads before it reads a row, the evaluator checks again before
-it computes one, and opening a database checks every stored CHECK (#1189). A call outside
-them reports `COHSQLE006` (see Function arguments under
-[Statement completeness](#statement-completeness-1068)):
+The executable profile contains the 42 T1 scalar names below, the five aggregates
+COUNT/SUM/AVG/MIN/MAX and CAST. COALESCE, NULLIF, CASE, CAST and EXTRACT remain
+evaluator special forms, outside the catalog calling convention (owner decision 66).
+SUBSTRING, TRIM and POSITION grammar normalizes to calls; directional TRIM becomes
+LTRIM or RTRIM. Applications and built-ins use the same reflection-free catalog.
+Arity and argument-type errors report COHSQLE006 while planning, including empty
+inputs; the message names the accepted signatures. UPPER/LOWER no longer pass
+non-text values through, and LENGTH no longer stringifies them.
 
-| Function | Kind | Arguments | Accepted call forms |
-|---|---|---|---|
-| `COALESCE` | Scalar | 1 or more | `COALESCE(value [, value ...])` |
-| `UPPER`, `LOWER`, `LENGTH` | Scalar | Exactly 1 | `UPPER(value)`, `LOWER(value)`, `LENGTH(value)` |
-| `ABS` | Scalar | Exactly 1 | `ABS(numeric)` |
-| `COUNT` | Aggregate | Exactly 1, or `*` | `COUNT(*)`, `COUNT(value)` |
-| `SUM`, `AVG` | Aggregate | Exactly 1 | `SUM(numeric)`, `AVG(numeric)` |
-| `MIN`, `MAX` | Aggregate | Exactly 1 | `MIN(value)`, `MAX(value)` |
+In this table, `text` includes CHAR (trailing ASCII spaces are removed when converting
+CHAR to TEXT), `integer` includes all signed widths, and `numeric` includes every
+integer width, REAL, DOUBLE PRECISION and DECIMAL. Strict means NULL if any argument
+is NULL. I means IMMUTABLE, S means STABLE, V means VOLATILE. Integer numeric
+results widen to BIGINT unless a row explicitly says otherwise; DECIMAL and
+approximate inputs otherwise keep their type. Text searches and character sets
+use ordinal Unicode scalar matching.
 
-`*` is an argument only of `COUNT`: `SUM(*)` and `UPPER(*)` report `COHSQLE006`.
-**`COALESCE` takes one or more operands, a recorded deviation from ISO.** ISO/IEC
-9075-2's `<case abbreviation>` spells `COALESCE` with two or more value expressions;
-PostgreSQL's grammar (`COALESCE '(' expr_list ')'`) accepts one or more, and the
-dialect follows PostgreSQL. `COALESCE(x)` is `x`, so accepting it changes no result
-and keeps PostgreSQL text running; `COALESCE()` is an error in all three. The
-argument-type, result-type and NULL rules of the T1 functions (#1120) extend these
-same signatures. `ABS` accepts every numeric
-storage type: integer arguments return BIGINT (so `ABS` of the INT minimum is
-exact), REAL returns REAL, DOUBLE returns DOUBLE, and DECIMAL returns DECIMAL.
-`ABS` of the BIGINT minimum reports `COHSQLE002`.
-`COALESCE`, `NULLIF`, `CASE`, `CAST` and `EXTRACT` are grammar, not catalog functions:
-`COALESCE` evaluates its operands lazily, so one after the first non-NULL operand never
-runs, and an application cannot register a function under any of those names or under a
-keyword.
+| Function and signature | Result | NULL rule | Volatility | Origin / deviations |
+| --- | --- | --- | --- | --- |
+| COALESCE(value [, value ...]) | Common alternative type | First non-NULL; lazy | I | ISO / PG; permits one operand |
+| NULLIF(a, b) | Type of a | NULL if equal; otherwise a | I | ISO / PG |
+| UPPER(text) | TEXT | Strict | I | ISO / PG; invariant case conversion |
+| LOWER(text) | TEXT | Strict | I | ISO / PG; invariant case conversion |
+| LENGTH(text) | BIGINT | Strict | I | PG; Unicode scalars |
+| CHAR_LENGTH(text) | BIGINT | Strict | I | ISO / PG; Unicode scalars |
+| CHARACTER_LENGTH(text) | BIGINT | Strict | I | ISO / PG; Unicode scalars |
+| TRIM(text [, chars]); TRIM([LEADING/TRAILING/BOTH] [chars] FROM text) | TEXT | Strict | I | ISO / PG; default ASCII space |
+| LTRIM(text [, chars]) | TEXT | Strict | I | PG; default ASCII space |
+| RTRIM(text [, chars]) | TEXT | Strict | I | PG; default ASCII space |
+| SUBSTRING(text FROM integer [FOR integer]); SUBSTRING(text, integer [, integer]) | TEXT | Strict | I | ISO / PG; one-based, negative length fails; regex form excluded |
+| REPLACE(text, from_text, to_text) | TEXT | Strict | I | PG; empty search leaves input unchanged |
+| CONCAT(value [, value ...]) | TEXT | Skip NULLs; all NULLs gives empty text | I | PG; uses the existing CAST-to-TEXT formatter, including BOOLEAN TRUE/FALSE |
+| CONCAT_WS(separator, value [, value ...]) | TEXT | NULL separator gives NULL; skip other NULLs | I | PG; uses the existing CAST-to-TEXT formatter, including BOOLEAN TRUE/FALSE |
+| POSITION(sub IN text) | BIGINT | Strict | I | ISO / PG; one-based scalar position, zero when absent |
+| STRPOS(text, sub) | BIGINT | Strict | I | PG; POSITION with reversed arguments |
+| LEFT(text, integer) | TEXT | Strict | I | PG; negative count omits trailing scalars |
+| RIGHT(text, integer) | TEXT | Strict | I | PG; negative count omits leading scalars |
+| LPAD(text, integer [, fill]) | TEXT | Strict | I | PG; nonpositive length gives empty text; default space |
+| RPAD(text, integer [, fill]) | TEXT | Strict | I | PG; nonpositive length gives empty text; default space |
+| REVERSE(text) | TEXT | Strict | I | PG; reverses Unicode scalars |
+| ABS(numeric) | Numeric result | Strict | I | ISO / PG; BIGINT minimum overflows |
+| ROUND(numeric); ROUND(exact_numeric, integer_scale) | Numeric result | Strict | I | ISO / PG; exact halves away from zero, approximate halves to even; negative exact scale supported |
+| FLOOR(numeric) | Numeric result | Strict | I | ISO / PG |
+| CEILING(numeric) | Numeric result | Strict | I | ISO / PG |
+| CEIL(numeric) | Numeric result | Strict | I | PG alias of CEILING |
+| POWER(numeric, numeric) | DECIMAL for exact base/integer exponent; base approximate type for integer exponent; otherwise DOUBLE PRECISION | Strict | I | ISO / PG; fractional exponent returns DOUBLE PRECISION |
+| SQRT(numeric) | DOUBLE PRECISION | Strict | I | ISO / PG; PG numeric-result deviation |
+| MOD(numeric, numeric) | BIGINT for integers; DECIMAL for exact decimal; DOUBLE PRECISION for approximate | Strict | I | ISO / PG; zero divisor fails |
+| SIGN(numeric) | BIGINT | Strict | I | ISO / PG |
+| EXP(numeric) | DOUBLE PRECISION | Strict | I | ISO / PG; PG numeric-result deviation |
+| LN(numeric) | DOUBLE PRECISION | Strict | I | ISO / PG; PG numeric-result deviation |
+| LOG10(numeric) | DOUBLE PRECISION | Strict | I | PG; PG numeric-result deviation |
+| CURRENT_DATE | DATE | Never NULL | S | ISO / PG; UTC transaction date |
+| CURRENT_TIME | TIME | Never NULL | S | ISO / PG; UTC; TIME WITH TIME ZONE is unavailable |
+| CURRENT_TIMESTAMP | TIMESTAMPTZ at +00:00 | Never NULL | S | ISO / PG; transaction start |
+| LOCALTIME | TIME | Never NULL | S | ISO / PG; UTC transaction wall clock |
+| LOCALTIMESTAMP | TIMESTAMP | Never NULL | S | ISO / PG; UTC wall clock, Kind Unspecified |
+| NOW() | TIMESTAMPTZ at +00:00 | Never NULL | S | PG; CURRENT_TIMESTAMP alias |
+| EXTRACT(field FROM temporal) | DECIMAL | Strict | I | ISO / PG; fields below |
+| DATE_TRUNC(field_text, temporal) | Input temporal type | Strict | I | PG; DATE stays DATE, a PG deviation |
+| GEN_RANDOM_UUID() | UUID version 4, per call | Never NULL | V | PG |
+
+EXTRACT fields are YEAR, QUARTER, MONTH, WEEK (ISO week number), DAY, DOW
+(Sunday zero), DOY, HOUR, MINUTE, SECOND (with fractional seconds) and EPOCH.
+DATE admits only calendar fields and EPOCH; TIME admits hour/minute/second/epoch;
+day-time INTERVAL additionally admits day. Incompatible fields fail planning.
+DATE_TRUNC accepts year/quarter/month/week/day/hour/minute/second/millisecond/
+microsecond; TIME and INTERVAL admit day and finer units. Invalid field values
+fail with COHSQLE006. There is no session time zone.
+
+The five bare CURRENT_*/LOCAL* forms require no parentheses: empty parentheses
+report SQL0003. A precision argument on CURRENT_TIME, CURRENT_TIMESTAMP,
+LOCALTIME or LOCALTIMESTAMP reports COHDBL001 naming the precision argument,
+including in DEFAULT grammar. NOW is written NOW(). Missing separators, unknown
+EXTRACT fields and missing closing parentheses report SQL0003.
+
+All six clock forms read the instant captured at transaction start: BEGIN or
+BeginTransactionAsync for explicit transactions, statement start for auto-commit.
+Planning a seek and evaluating every row, child query and later statement in the
+transaction use the same instant. COMMIT/ROLLBACK ends that lifetime. The engine's
+existing internal TimeProvider seam remains internal (owner decision 42); DEFAULT
+expression admission is #1121 and will reuse this carrier. Shared defaults without a statement instant reject clock evaluation with COHDBL001; they never sample a separate row clock.
+
+Numeric domain errors, nonfinite finite-input results, negative SUBSTRING lengths,
+numeric overflow and temporal range overflow use COHSQLE002; MOD by zero uses
+COHSQLE001. CHECK accepts only immutable functions, so clocks and random UUIDs are
+refused before mutation. Volatile calls never become seek bounds.
+
+Every scalar position uses these rules, including JOIN ON, grouping/HAVING,
+ordering and INSERT/UPDATE expressions. LENGTH, CHAR_LENGTH, CHARACTER_LENGTH,
+SUBSTRING, LEFT, RIGHT, LPAD, RPAD, REVERSE, POSITION and STRPOS count Unicode
+scalar values and never split a surrogate pair. CAST/VARCHAR(n) bounds use the
+same character unit.
+
+The newly executable names and new T1 names are reserved for built-ins at every
+arity: TRIM, LTRIM, RTRIM, SUBSTRING, REPLACE, CONCAT, CONCAT_WS, POSITION, STRPOS,
+LEFT, RIGHT, LPAD, RPAD, REVERSE, CHAR_LENGTH, CHARACTER_LENGTH, ROUND, FLOOR,
+CEILING, CEIL, POWER, SQRT, MOD, SIGN, EXP, LN, LOG10, CURRENT_DATE, CURRENT_TIME,
+CURRENT_TIMESTAMP, LOCALTIME, LOCALTIMESTAMP, NOW, DATE_TRUNC, GEN_RANDOM_UUID.
+NULLIF and EXTRACT remain reserved special forms. Existing application overloads
+of UPPER/LOWER/LENGTH/ABS at arities the standard library does not take remain
+possible. Function words still bind as ordinary identifiers without a call;
+unquoted niladic names read their values and need quoting to name a column.
+Existing join-keyword restrictions on LEFT/RIGHT aliases remain. Canonical expression rendering quotes BOTH/LEADING/TRAILING when used as identifiers, preserving TRIM round trips. Applying an
+existing compiled schema with newly quoted function-named columns is a no-op.
+
+The five aggregates keep their existing signatures: COUNT(*)/COUNT(value),
+SUM(numeric), AVG(numeric), MIN(value), MAX(value). Only COUNT accepts `*`.
+Window functions remain recognized-unsupported (COHDBL001). LOG(base, x), trig,
+regex functions, TO_CHAR and other unknown names remain COHSQLE016.
+
+PostgreSQL implementation references (local reference clone):
+`src/backend/parser/gram.y:16249-16371,17203` (special grammar),
+`src/backend/utils/adt/varlena.c:586-678,916-940,4695,4735` (scalar string semantics),
+and `src/backend/utils/adt/timestamp.c:1619-1621,1677,1691` (transaction clocks).
+No reference implementation code is copied.
 
 **Registered functions.** An application function has a name (an identifier), parameter
 types, a result type, a volatility and a NULL rule. A name and parameter-type list is
 registered once, and a name is either scalar or aggregate. A built-in cannot be replaced: an
 overload of a built-in's name is accepted only for a number of arguments the built-in does
-not take (`upper(TEXT, BIGINT)` beside `UPPER(value)`). A name in the recognized-unsupported vocabulary (`TRIM`, `NOW`, `ROUND`, ...), a type name (`INT`, `DATE`), `ANY`,
+not take (`upper(TEXT, BIGINT)` beside `UPPER(TEXT)`). The new T1 built-in names above, a name in the recognized-unsupported vocabulary (`RANK`, `LEAD`, ...), a type name (`INT`, `DATE`), `ANY`,
 `SOME`, `LOCALTIME` and `LOCALTIMESTAMP` cannot be registered. An argument converts to its
 parameter's type along INT8 → INT16 → INT32 → INT64 → NUMERIC → DOUBLE, or REAL → DOUBLE;
 nothing converts from text, so a DATE or UUID parameter takes a column or a parameter of
@@ -2175,22 +2270,15 @@ A call found in neither the engine catalog nor the profile's executable and reco
 unsupported lists fails at plan time with `COHSQLE016`, `Unknown function '<name>'.`
 before any row is read (#1068). Recognized unsupported functions fail at parse time with
 exactly one `COHDBL001` naming the function, even over an empty table (#1103):
-`NULLIF`, `TRIM`, `LTRIM`, `RTRIM`, `SUBSTRING`, `REPLACE`, `CONCAT`, `CEILING`,
-`FLOOR`, `ROUND`, `POWER`, `SQRT`, `MOD`, `NOW`, `CURRENT_DATE`, `CURRENT_TIME`,
-`CURRENT_TIMESTAMP`, `LOCALTIME`, `LOCALTIMESTAMP`, `EXTRACT`, and the nine window
-functions `ROW_NUMBER`, `RANK`, `DENSE_RANK`, `LEAD`, `LAG`, `FIRST_VALUE`,
-`LAST_VALUE`, `NTH_VALUE` and `NTILE`. Window rejection also works when these names
+the nine window functions ROW_NUMBER, RANK, DENSE_RANK, LEAD, LAG, FIRST_VALUE,
+LAST_VALUE, NTH_VALUE and NTILE. Window rejection also works when these names
 lex as identifiers. An OVER clause keeps its existing clause diagnostic.
 
-The ISO datetime value functions `CURRENT_DATE`, `CURRENT_TIME`, `CURRENT_TIMESTAMP`,
-`LOCALTIME` and `LOCALTIMESTAMP` receive that diagnostic with or without parentheses.
-An unqualified, unquoted name in that set never binds a column; quote the identifier to read a
-same-named column. PostgreSQL likewise parses these value functions separately from column
-references (`src/backend/parser/gram.y:16180-16214`, `17315-17329`, `18019-18049` in the local
-reference clone). Schema rendering quotes both executable function names and the
-recognized-unsupported vocabulary, including `rank`, `current_date` and `localtime`.
-Reapplying the same compiled schema remains a no-op; quoting does not change its identity.
-
+The ISO datetime value functions execute as described in the T1 table above.
+Their unqualified, unquoted spellings never bind a column; quote an identifier
+to read a same-named column. Schema rendering quotes both executable function
+names and recognized-unsupported vocabulary. Existing compiled schemas reapply
+without a migration solely because an identifier now needs delimiters.
 `SqlLanguageConformanceTests` is the single function-coverage guard: every declared
 function needs a passing live case, and a case for a retired name fails too. A feature
 that starts executing a function adds its name and live case and flips its `COHDBL001`
@@ -2416,8 +2504,8 @@ SDK v7 artifacts do not carry scripts; extraction refuses Script calls with COHD
 ## Quoted calls (#1103 review)
 
 A quoted identifier followed by parentheses is a function call. Recognized unsupported
-built-ins use their lowercase lookup spelling for quoted names: `"sqrt"(id)` reports
-parse-time `COHDBL001`, while `"SQRT"(id)` and `"Sqrt"(id)` are distinct names outside
+built-ins use their lowercase lookup spelling for quoted names: `"rank"(id)` reports
+parse-time `COHDBL001`, while `"RANK"(id)` and `"Rank"(id)` are distinct names outside
 that vocabulary. Unquoted names match the vocabulary without regard to case. Quoting a name
 without parentheses keeps it a column reference, including `"sqrt"` and `"current_date"`.
 Declared executable calls such as `"abs"(id)` remain executable. Unknown function names

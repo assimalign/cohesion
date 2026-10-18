@@ -1,3 +1,4 @@
+using System;
 using System.Threading;
 
 using Assimalign.Cohesion.Database.Types;
@@ -27,9 +28,10 @@ internal sealed class SqlBoundCall : SqlBoundExpression
     /// <param name="database">The database whose statement makes the call.</param>
     /// <param name="cancellationToken">The operation binding this call; not retained by the node.</param>
     internal SqlBoundCall(SqlScalarFunction function, SqlBoundExpression[] arguments, DatabaseType[]? targets,
-        SqlBoundCollation collation, DatabaseName database, CancellationToken cancellationToken)
+        SqlBoundCollation collation, DatabaseName database, CancellationToken cancellationToken, DateTimeOffset? transactionStart = null)
         : base(SqlBoundExpressionKind.Call)
     {
+        TransactionStart = transactionStart;
         Function = function;
         Arguments = arguments;
         Targets = targets;
@@ -44,6 +46,8 @@ internal sealed class SqlBoundCall : SqlBoundExpression
 
     /// <summary>Gets the overload the call resolved to.</summary>
     internal SqlScalarFunction Function { get; }
+
+    internal DateTimeOffset? TransactionStart { get; }
 
     /// <summary>Gets the bound arguments.</summary>
     internal SqlBoundExpression[] Arguments { get; }

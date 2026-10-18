@@ -1,3 +1,6 @@
+using System;
+using System.Threading;
+
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 /// <summary>
@@ -8,6 +11,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// </summary>
 internal sealed class SqlFunctionEnvironment
 {
+    private SqlFunctionEnvironment? _clockEnvironment;
+
     /// <summary>Initializes an environment.</summary>
     /// <param name="catalog">The engine's function catalog.</param>
     /// <param name="database">The database; empty for a scope outside any database.</param>
@@ -19,10 +24,22 @@ internal sealed class SqlFunctionEnvironment
         Types = types ?? SqlTypeCatalog.Standard;
     }
 
-    /// <summary>
-    /// Gets the standard library outside any database: the environment of a binding scope created
-    /// without one, as tests and the engine created by <see cref="SqlDatabaseEngine.Create"/> use.
-    /// </summary>
+    /// <summary>Gets the transaction instant of this immutable binding environment, when supplied.</summary>
+    internal DateTimeOffset? TransactionStart { get; private init; }
+
+    // A transaction's statements share the immutable environment for its instant. A competing
+    // transaction may replace this one-entry cache, but cannot change a retained statement's clock.
+    internal SqlFunctionEnvironment At(DateTimeOffset instant)
+    {
+        if (TransactionStart == instant) { return this; }
+        var cached = Volatile.Read(ref _clockEnvironment);
+        if (cached?.TransactionStart == instant) { return cached; }
+        var environment = new SqlFunctionEnvironment(Catalog, Database, Types) { TransactionStart = instant };
+        Volatile.Write(ref _clockEnvironment, environment);
+        return environment;
+    }
+
+    /// <summary>Gets the standard library outside any database or executing transaction.</summary>
     internal static SqlFunctionEnvironment Standard { get; } = new(SqlFunctionCatalog.Standard, default, SqlTypeCatalog.Standard);
 
     /// <summary>Gets the engine's function catalog.</summary>

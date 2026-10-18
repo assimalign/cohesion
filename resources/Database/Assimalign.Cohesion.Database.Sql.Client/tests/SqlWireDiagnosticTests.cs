@@ -21,7 +21,7 @@ public sealed class SqlWireDiagnosticTests
         // Arrange
         await using var harness = await SqlClientTestHarness.StartAsync(tcp: tcp);
         await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
-        const string sql = "SELECT NULLIF(1, 2), CURRENT_DATE FROM users;";
+        const string sql = "SELECT CURRENT_DATE(), LOCALTIME() FROM users;";
         var parsed = new SqlQueryParser().Parse(sql).Diagnostics.Where(item => item.Severity is DiagnosticSeverity.Warning or DiagnosticSeverity.Error).ToArray();
         // Act
         var parse = await Should.ThrowAsync<SqlClientException>(async () => await connection.QueryAsync(sql, cancellationToken: SqlClientTestHarness.Timeout()));

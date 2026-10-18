@@ -25,6 +25,8 @@ internal static class SqlValueComparer
     {
         if (left is SqlCharacter firstCharacter) { left = firstCharacter.Text; }
         if (right is SqlCharacter secondCharacter) { right = secondCharacter.Text; }
+        if (left is DateOnly firstDate && right is DateTime or DateTimeOffset) { left = firstDate.ToDateTime(TimeOnly.MinValue); }
+        if (right is DateOnly secondDate && left is DateTime or DateTimeOffset) { right = secondDate.ToDateTime(TimeOnly.MinValue); }
         if (left is DateTime firstTimestamp && right is DateTime secondTimestamp)
         {
             return firstTimestamp.Ticks.CompareTo(secondTimestamp.Ticks);
@@ -133,6 +135,7 @@ internal static class SqlValueComparer
         {
             SqlCharacter character => collation.GetHashCode(character.Text),
             string text => collation.GetHashCode(text),
+            DateOnly date => date.ToDateTime(TimeOnly.MinValue).Ticks.GetHashCode(),
             DateTime timestamp => timestamp.Ticks.GetHashCode(),
             DateTimeOffset instant => instant.UtcTicks.GetHashCode(),
             _ => value.GetHashCode(),

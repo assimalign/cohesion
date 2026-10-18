@@ -150,7 +150,7 @@ public abstract class SqlScalarFunction : SqlFunction
     /// <exception cref="OverflowException">An integer does not fit the parameter's type.</exception>
     /// <exception cref="DatabaseException">The function failed (<c>COHSQLE007</c>), or the database exception it threw.</exception>
     internal object? InvokeResolved(object? value, DatabaseType target, DatabaseName database, Collation collation,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, DateTimeOffset? transactionStart = null)
     {
         var argument = SqlValue.FromObject(value);
         if (target != DatabaseType.Null && (target != argument.Type || target == DatabaseType.Character))
@@ -158,7 +158,7 @@ public abstract class SqlScalarFunction : SqlFunction
             argument = SqlFunctionResolver.Coerce(argument, target, this, 0);
         }
 
-        var arguments = new SqlArguments(new ReadOnlySpan<SqlValue>(in argument), database, collation, cancellationToken);
+        var arguments = new SqlArguments(new ReadOnlySpan<SqlValue>(in argument), database, collation, cancellationToken, transactionStart);
         SqlValue result;
         try
         {

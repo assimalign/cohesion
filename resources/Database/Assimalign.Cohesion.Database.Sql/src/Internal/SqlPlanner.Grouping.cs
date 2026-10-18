@@ -298,6 +298,9 @@ internal sealed partial class SqlPlanner
         },
         SqlFunctionCallExpression call when SqlStandardLibrary.IsCoalesce(call.FunctionName)
             => CoalesceGroupType(call.Arguments, columns, evaluator),
+        SqlFunctionCallExpression call when call.FunctionName.Equals("NULLIF", StringComparison.OrdinalIgnoreCase)
+            => GroupExpressionType(call.Arguments[0], columns, evaluator),
+        SqlFunctionCallExpression call when SqlStandardLibrary.IsEvaluatorForm(call.FunctionName) => evaluator.StaticCallType(call),
         SqlFunctionCallExpression call => CallResultType(call, columns, evaluator),
         SqlUnaryExpression { Operator: SqlUnaryOperator.Not } => DatabaseType.Boolean,
         // Unary plus returns its operand unchanged; only negation widens exact integers.
@@ -311,9 +314,7 @@ internal sealed partial class SqlPlanner
         SqlBinaryExpression binary when binary.Operator == SqlBinaryOperator.Concat => DatabaseType.String,
         SqlBinaryExpression binary when binary.Operator is SqlBinaryOperator.Add or SqlBinaryOperator.Subtract
             or SqlBinaryOperator.Multiply or SqlBinaryOperator.Divide or SqlBinaryOperator.Modulo
-            => GroupExpressionType(binary.Left, columns, evaluator) is DatabaseType.Decimal or DatabaseType.Float32 or DatabaseType.Float64
-                || GroupExpressionType(binary.Right, columns, evaluator) is DatabaseType.Decimal or DatabaseType.Float32 or DatabaseType.Float64
-                    ? DatabaseType.Decimal : DatabaseType.Int64,
+            => SqlExpressionEvaluator.ArithmeticType(binary.Operator, GroupExpressionType(binary.Left, columns, evaluator), GroupExpressionType(binary.Right, columns, evaluator)),
         SqlLogicalExpression or SqlBinaryExpression or SqlIsNullExpression or SqlBetweenExpression or SqlInExpression
             or SqlLikeExpression => DatabaseType.Boolean,
         SqlCaseExpression @case => CaseGroupType(@case, columns, evaluator),
@@ -390,6 +391,7 @@ internal sealed partial class SqlPlanner
         if (left == DatabaseType.Null || left == right) { return right; }
         if (right == DatabaseType.Null) { return left; }
         if (left is DatabaseType.Character or DatabaseType.String && right is DatabaseType.Character or DatabaseType.String) { return DatabaseType.String; }
+        if (SqlTemporalArithmetic.IsCalendar(left) && SqlTemporalArithmetic.IsCalendar(right)) { return SqlTemporalArithmetic.CommonCalendarType(left, right); }
         static int Rank(DatabaseType type) => type switch
         {
             DatabaseType.Int8 => 1, DatabaseType.Int16 => 2, DatabaseType.Int32 => 3, DatabaseType.Int64 => 4,

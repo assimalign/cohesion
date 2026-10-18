@@ -51,7 +51,7 @@ internal sealed partial class SqlPlanner
         _catalog = catalog;
         _parameters = parameters;
         _cancellationToken = cancellationToken;
-        _functions = functions ?? SqlFunctionEnvironment.Standard;
+        _functions = statement is { } context ? (functions ?? SqlFunctionEnvironment.Standard).At(context.TransactionStart) : functions ?? SqlFunctionEnvironment.Standard;
     }
 
     internal SqlPlan Plan(SqlQueryExpression expression)
@@ -1306,7 +1306,7 @@ internal sealed partial class SqlPlanner
             case SqlInExpression { Values: null } when !isBound:
                 throw new SqlPlanningException("COHDBL001", "IN subqueries are supported only in SELECT expressions and INSERT ... SELECT.", expression.Location);
             case SqlUnaryExpression { Operator: SqlUnaryOperator.Negate or SqlUnaryOperator.Plus } sign
-                when StaticOperandType(sign.Operand, evaluator, boundSubqueries, boundValues) is { } type && !IsNumeric(type):
+                when StaticOperandType(sign.Operand, evaluator, boundSubqueries, boundValues) is { } type && !IsNumeric(type) && !(sign.Operator == SqlUnaryOperator.Negate && type == DatabaseType.TimeSpan):
                 // A sign over a value the plan already knows is not a number fails here, the same
                 // over an empty table as over a populated one; the evaluator raises the same code
                 // for an operand only a row's value reveals.
@@ -1330,6 +1330,17 @@ internal sealed partial class SqlPlanner
         foreach (var child in Children(expression))
         {
             ValidateExpression(child, evaluator, boundSubqueries, boundValues);
+        }
+
+        if (expression is SqlBinaryExpression { Operator: SqlBinaryOperator.Add or SqlBinaryOperator.Subtract or SqlBinaryOperator.Multiply or SqlBinaryOperator.Divide or SqlBinaryOperator.Modulo } arithmetic)
+        {
+            var left = evaluator.StaticTypeOf(arithmetic.Left);
+            var right = evaluator.StaticTypeOf(arithmetic.Right);
+            if ((SqlTemporalArithmetic.IsTemporal(left) || SqlTemporalArithmetic.IsTemporal(right)) &&
+                left != DatabaseType.Null && right != DatabaseType.Null && SqlTemporalArithmetic.ResultType(arithmetic.Operator, left, right) == DatabaseType.Null)
+            {
+                throw new SqlPlanningException("COHSQLE003", $"Invalid temporal arithmetic operands: {SqlType.NameOf(left)} {arithmetic.Operator} {SqlType.NameOf(right)}.", arithmetic.Location);
+            }
         }
 
         // After its arguments, as PostgreSQL resolves a call, so an argument's error is reported
@@ -1416,10 +1427,8 @@ internal sealed partial class SqlPlanner
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static void ResolveCall(SqlFunctionCallExpression call, SqlExpressionEvaluator evaluator)
     {
-        if (!SqlStandardLibrary.IsCoalesce(call.FunctionName))
-        {
-            evaluator.ResolveFunction(call);
-        }
+        if (SqlStandardLibrary.IsEvaluatorForm(call.FunctionName)) { evaluator.ValidateEvaluatorForm(call); }
+        else { evaluator.ResolveFunction(call); }
     }
 
     /// <summary>
@@ -1542,7 +1551,7 @@ internal sealed partial class SqlPlanner
     private bool ContainsVolatileCall(SqlExpression expression)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
-        if (expression is SqlFunctionCallExpression call && !SqlStandardLibrary.IsCoalesce(call.FunctionName))
+        if (expression is SqlFunctionCallExpression call && !SqlStandardLibrary.IsEvaluatorForm(call.FunctionName))
         {
             try
             {

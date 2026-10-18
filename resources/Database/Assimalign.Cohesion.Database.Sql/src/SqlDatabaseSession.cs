@@ -170,6 +170,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
                 "Use IsolationLevel.Snapshot or IsolationLevel.ReadCommitted.");
         }
 
+        var transactionStart = (_database.Engine.EngineOptions.TimeProvider ?? TimeProvider.System).GetUtcNow();
         TransactionContext context;
         try
         {
@@ -181,7 +182,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         }
 
         return new SqlDatabaseTransaction(_coordinator, context, _database,
-            isolationLevel == IsolationLevel.Snapshot ? _executor.CaptureCatalogSnapshot() : null);
+            isolationLevel == IsolationLevel.Snapshot ? _executor.CaptureCatalogSnapshot() : null, transactionStart);
     }
 
     /// <inheritdoc />
@@ -403,7 +404,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
                     // snapshot must see writers that committed while the statement waited for a lock
                     // (a cascade's index deletes did, until #1370 matched them by stamps).
                     var scope = new SqlStatementContext(transaction.Context, _coordinator, _provisioningSchema,
-                        _database.Name.ToString(), transaction.CatalogSnapshot);
+                        _database.Name.ToString(), transaction.CatalogSnapshot, transactionStart: transaction.TransactionStart);
                     _lastStatementMetrics = scope.Metrics;
                     return await ExecuteDataOrExplainAsync(request, scope, cancellationToken).ConfigureAwait(false);
                 }
@@ -431,6 +432,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
 
         // Auto-commit semantics: a one-statement manager transaction, so
         // visibility and conflict semantics are identical to the explicit path.
+        var transactionStart = (_database.Engine.EngineOptions.TimeProvider ?? TimeProvider.System).GetUtcNow();
         TransactionContext context;
         try
         {
@@ -445,7 +447,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         try
         {
             var scope = new SqlStatementContext(context, _coordinator, _provisioningSchema,
-                _database.Name.ToString(), null, _ddlLockOwner, ProvisioningProgress, scriptReceipt);
+                _database.Name.ToString(), null, _ddlLockOwner, ProvisioningProgress, scriptReceipt, transactionStart);
             _lastStatementMetrics = scope.Metrics;
             var result = await ExecuteDataOrExplainAsync(request, scope, cancellationToken).ConfigureAwait(false);
             if (scriptReceipt is { } receipt && !IsSelfCommitting(request) && result.Status == DatabaseResultStatus.Success)

@@ -14,16 +14,13 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Every built-in keeps the permissive behavior it had before typed signatures (owner decision 67):
-/// <c>UPPER</c> and <c>LOWER</c> pass a non-string through, <c>LENGTH</c> measures any value's text,
-/// <c>ABS</c> widens exact integers to BIGINT and rejects a non-number only when it runs. Tightening
-/// them to PostgreSQL's typed overloads is a separate, visible change.
+/// T1 signatures reject incompatible inputs while planning, before reading any row (#1120).
 /// </para>
 /// <para>
 /// The special forms (<c>COALESCE</c>, <c>NULLIF</c>, <c>CASE</c>, <c>CAST</c>, <c>EXTRACT</c>) are
 /// not functions: they stay evaluator nodes, as in PostgreSQL's grammar, because a calling
 /// convention that evaluates every argument first would change which errors surface (owner decision
-/// 66). Only <c>COALESCE</c> executes today.
+/// 66). The evaluator executes these forms directly.
 /// </para>
 /// </remarks>
 internal static class SqlStandardLibrary
@@ -42,6 +39,48 @@ internal static class SqlStandardLibrary
         new SqlLowerFunction(),
         new SqlLengthFunction(),
         new SqlAbsFunction(),
+        new SqlBuiltinScalarFunction("CHAR_LENGTH", [SqlType.Text], SqlType.BigInt),
+        new SqlBuiltinScalarFunction("CHARACTER_LENGTH", [SqlType.Text], SqlType.BigInt),
+        new SqlBuiltinScalarFunction("TRIM", [SqlType.Text], SqlType.Text),
+        new SqlBuiltinScalarFunction("TRIM", [SqlType.Text, SqlType.Text], SqlType.Text),
+        new SqlBuiltinScalarFunction("LTRIM", [SqlType.Text], SqlType.Text),
+        new SqlBuiltinScalarFunction("LTRIM", [SqlType.Text, SqlType.Text], SqlType.Text),
+        new SqlBuiltinScalarFunction("RTRIM", [SqlType.Text], SqlType.Text),
+        new SqlBuiltinScalarFunction("RTRIM", [SqlType.Text, SqlType.Text], SqlType.Text),
+        new SqlBuiltinScalarFunction("SUBSTRING", [SqlType.Text, SqlType.BigInt], SqlType.Text),
+        new SqlBuiltinScalarFunction("SUBSTRING", [SqlType.Text, SqlType.BigInt, SqlType.BigInt], SqlType.Text),
+        new SqlBuiltinScalarFunction("REPLACE", [SqlType.Text, SqlType.Text, SqlType.Text], SqlType.Text),
+        new SqlBuiltinScalarFunction("CONCAT", [SqlType.Any], SqlType.Text, nullBehavior: SqlNullBehavior.CalledOnNullInput, variadic: SqlType.Any),
+        new SqlBuiltinScalarFunction("CONCAT_WS", [SqlType.Text, SqlType.Any], SqlType.Text, nullBehavior: SqlNullBehavior.CalledOnNullInput, variadic: SqlType.Any),
+        new SqlBuiltinScalarFunction("POSITION", [SqlType.Text, SqlType.Text], SqlType.BigInt),
+        new SqlBuiltinScalarFunction("STRPOS", [SqlType.Text, SqlType.Text], SqlType.BigInt),
+        new SqlBuiltinScalarFunction("LEFT", [SqlType.Text, SqlType.BigInt], SqlType.Text),
+        new SqlBuiltinScalarFunction("RIGHT", [SqlType.Text, SqlType.BigInt], SqlType.Text),
+        new SqlBuiltinScalarFunction("LPAD", [SqlType.Text, SqlType.BigInt], SqlType.Text),
+        new SqlBuiltinScalarFunction("LPAD", [SqlType.Text, SqlType.BigInt, SqlType.Text], SqlType.Text),
+        new SqlBuiltinScalarFunction("RPAD", [SqlType.Text, SqlType.BigInt], SqlType.Text),
+        new SqlBuiltinScalarFunction("RPAD", [SqlType.Text, SqlType.BigInt, SqlType.Text], SqlType.Text),
+        new SqlBuiltinScalarFunction("REVERSE", [SqlType.Text], SqlType.Text),
+        new SqlBuiltinScalarFunction("ROUND", [SqlType.AnyElement], SqlType.AnyElement),
+        new SqlBuiltinScalarFunction("ROUND", [SqlType.AnyElement, SqlType.BigInt], SqlType.AnyElement),
+        new SqlBuiltinScalarFunction("FLOOR", [SqlType.AnyElement], SqlType.AnyElement),
+        new SqlBuiltinScalarFunction("CEILING", [SqlType.AnyElement], SqlType.AnyElement),
+        new SqlBuiltinScalarFunction("CEIL", [SqlType.AnyElement], SqlType.AnyElement),
+        new SqlBuiltinScalarFunction("POWER", [SqlType.AnyElement, SqlType.AnyNumeric], SqlType.AnyElement),
+        new SqlBuiltinScalarFunction("SQRT", [SqlType.AnyNumeric], SqlType.Double),
+        new SqlBuiltinScalarFunction("MOD", [SqlType.AnyElement, SqlType.AnyNumeric], SqlType.AnyElement),
+        new SqlBuiltinScalarFunction("SIGN", [SqlType.AnyNumeric], SqlType.BigInt),
+        new SqlBuiltinScalarFunction("EXP", [SqlType.AnyNumeric], SqlType.Double),
+        new SqlBuiltinScalarFunction("LN", [SqlType.AnyNumeric], SqlType.Double),
+        new SqlBuiltinScalarFunction("LOG10", [SqlType.AnyNumeric], SqlType.Double),
+        new SqlBuiltinScalarFunction("CURRENT_DATE", [], SqlType.Date, SqlFunctionVolatility.Stable),
+        new SqlBuiltinScalarFunction("CURRENT_TIME", [], SqlType.Time, SqlFunctionVolatility.Stable),
+        new SqlBuiltinScalarFunction("CURRENT_TIMESTAMP", [], SqlType.TimestampTz, SqlFunctionVolatility.Stable),
+        new SqlBuiltinScalarFunction("LOCALTIME", [], SqlType.Time, SqlFunctionVolatility.Stable),
+        new SqlBuiltinScalarFunction("LOCALTIMESTAMP", [], SqlType.Timestamp, SqlFunctionVolatility.Stable),
+        new SqlBuiltinScalarFunction("NOW", [], SqlType.TimestampTz, SqlFunctionVolatility.Stable),
+        new SqlBuiltinScalarFunction("DATE_TRUNC", [SqlType.Text, SqlType.AnyElement], SqlType.AnyElement),
+        new SqlBuiltinScalarFunction("GEN_RANDOM_UUID", [], SqlType.Uuid, SqlFunctionVolatility.Volatile),
         new SqlCountFunction(rows: true),
         new SqlCountFunction(rows: false),
         new SqlSumFunction(average: false),
@@ -58,6 +97,9 @@ internal static class SqlStandardLibrary
     /// the date-time value functions written without parentheses.
     /// </summary>
     private static readonly string[] _reservedWords = ["ANY", "SOME", "LOCALTIME", "LOCALTIMESTAMP"];
+
+    internal static bool IsEvaluatorForm(string name) => IsCoalesce(name) ||
+        name.Equals("NULLIF", StringComparison.OrdinalIgnoreCase) || name.Equals("EXTRACT", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Registers the built-ins through the public registration path.</summary>
     /// <param name="functions">The collection, empty.</param>
@@ -142,7 +184,7 @@ internal static class SqlStandardLibrary
 
     /// <summary>
     /// Whether the SQL dialect declares an executable function or recognizes an unsupported
-    /// spelling (<c>NULLIF</c>, <c>TRIM</c>, <c>NOW</c>, ...). Unsupported calls already carry a
+    /// spelling (<c>RANK</c>, <c>LEAD</c>, ...). Unsupported calls already carry a
     /// parse-time COHDBL001; only names in neither list are unknown (#1068, #1103). Read on
     /// the failure path only, for a name the catalog does not hold.
     /// </summary>
@@ -166,8 +208,8 @@ internal static class SqlStandardLibrary
     /// <summary>
     /// Checks a function name: an identifier (a letter or underscore, then letters, digits and
     /// underscores, as the lexer reads one) that is neither a special form, a SQL keyword, a name
-    /// the dialect reserves for a built-in that does not execute yet (<c>TRIM</c>, <c>NOW</c>,
-    /// <c>ROUND</c>, ...), a type name (<c>INT</c>, <c>DATE</c>, ...) nor a quantifier or
+    /// the dialect reserves for a built-in that does not execute yet (<c>RANK</c>, <c>LEAD</c>,
+    /// <c>NTILE</c>, ...), a type name (<c>INT</c>, <c>DATE</c>, ...) nor a quantifier or
     /// date-time value function (<c>ANY</c>, <c>SOME</c>, <c>LOCALTIMESTAMP</c>, ...). A reserved
     /// name an application took would fail its build the day the engine ships the built-in, and a
     /// type or quantifier name collides with grammar the dialect will parse.
@@ -208,6 +250,10 @@ internal static class SqlStandardLibrary
             {
                 throw new ArgumentException($"'{name}' is reserved by the SQL dialect and cannot name a function.", nameof(name));
             }
+        }
+        if (_functions.Any(function => function is SqlBuiltinScalarFunction && string.Equals(function.Name, name, StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new ArgumentException($"'{name}' is reserved for a SQL built-in function and cannot be registered by an application.", nameof(name));
         }
         if (SqlTypeNames.TryResolve(name, out _))
         {

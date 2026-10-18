@@ -1231,7 +1231,7 @@ internal sealed partial class SqlPlanExecutor
 
             switch (expression)
             {
-                case SqlFunctionCallExpression call when !SqlStandardLibrary.IsCoalesce(call.FunctionName):
+                case SqlFunctionCallExpression call when !SqlStandardLibrary.IsEvaluatorForm(call.FunctionName):
                     return _scope.ResolveFunction(call) is SqlScalarFunction function && !SqlStandardLibrary.Contains(function)
                         ? (call, _scope.StaticCallType(call))
                         : (null, DatabaseType.Null);
@@ -1260,7 +1260,7 @@ internal sealed partial class SqlPlanExecutor
         [MethodImpl(MethodImplOptions.NoInlining)]
         private SqlScalarFunction? CheckFunction(SqlFunctionCallExpression call)
         {
-            if (SqlStandardLibrary.IsCoalesce(call.FunctionName))
+            if (SqlStandardLibrary.IsEvaluatorForm(call.FunctionName))
             {
                 return null;
             }

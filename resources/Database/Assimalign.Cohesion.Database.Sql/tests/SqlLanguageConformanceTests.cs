@@ -333,8 +333,11 @@ public sealed class SqlLanguageConformanceTests
     }
 
     // The single function guard: add execution evidence here whenever the profile gains a name.
-    private static readonly IReadOnlyDictionary<string, FunctionCase> _functionCases =
-        new Dictionary<string, FunctionCase>(StringComparer.OrdinalIgnoreCase)
+    private static readonly IReadOnlyDictionary<string, FunctionCase> _functionCases = CreateFunctionCases();
+
+    private static IReadOnlyDictionary<string, FunctionCase> CreateFunctionCases()
+    {
+        var cases =        new Dictionary<string, FunctionCase>(StringComparer.OrdinalIgnoreCase)
         {
             ["COUNT"] = new("COUNT(*)", 3L),
             ["SUM"] = new("SUM(age)", 122m),
@@ -348,24 +351,35 @@ public sealed class SqlLanguageConformanceTests
             ["LENGTH"] = new("LENGTH('Ada')", 3L),
             ["ABS"] = new("ABS(-2)", 2L),
         };
+        foreach (var item in SqlT1ScalarTests.Cases())
+        {
+            cases[(string)item[0]!] = new FunctionCase((string)item[1]!, item[2], (DatabaseType)item[4]!, "scalar_rows");
+        }
+        return cases;
+    }
 
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Functions: every declared function has passing live evidence")]
     public async Task Profile_DeclaredFunctions_ShouldExecuteEveryCase()
     {
         // Arrange
         RequireFunctionCoverage(SqlLanguageProfile.Instance.Functions.ToArray(), _functionCases.Keys);
-        await using var engine = SqlDatabaseEngine.Create("sql-functions", new());
+        await using var engine = SqlDatabaseEngine.Create("sql-functions", new() { TimeProvider = new ScalarClock(SqlT1ScalarTests.Instant) });
         var database = await engine.CreateDatabaseAsync("functions", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         foreach (string setup in _seed) { await ExecuteAsync(session, setup); }
+
+        await ExecuteAsync(session, "CREATE TABLE scalar_rows (s TEXT, i BIGINT, n DECIMAL, d DATE);");
+        await ExecuteAsync(session, "INSERT INTO scalar_rows VALUES ('A😀b', -2, 2.5, DATE '2024-03-04');");
 
         // Act / Assert
         foreach (string name in SqlLanguageProfile.Instance.Functions.ToArray())
         {
             var execution = _functionCases[name];
-            var rows = await RowsAsync(session, $"SELECT {execution.Expression} FROM t");
+            await using var result = (await ExecuteAsync(session, $"SELECT {execution.Expression} FROM {execution.Source}")).ShouldBeAssignableTo<DatabaseResultSet>();
+            result.Columns[0].Type.ShouldBe(execution.Type ?? SqlValue.FromObject(execution.Expected).Type, name);
+            var rows = await ReadRowsAsync(result);
             rows.ShouldNotBeEmpty(name);
-            foreach (var row in rows) { row[0].ShouldBe(execution.Expected, name); }
+            foreach (var row in rows) { SqlT1ScalarTests.VerifyValue(row[0], execution.Expected); }
         }
     }
 
@@ -389,7 +403,7 @@ public sealed class SqlLanguageConformanceTests
         cases.Except(declarations, StringComparer.OrdinalIgnoreCase).ShouldBeEmpty("Retired functions cannot retain positive cases.");
     }
 
-    private sealed record FunctionCase(string Expression, object Expected);
+    private sealed record FunctionCase(string Expression, object? Expected, DatabaseType? Type = null, string Source = "t");
 
     private static Dictionary<string, ExecutionCase> CreateCases() => new(StringComparer.Ordinal)
     {

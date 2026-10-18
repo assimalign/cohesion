@@ -37,10 +37,11 @@ public sealed class SqlUnsupportedFunctionTests
     public void Parse_NiladicDatetime_ShouldRequireQuotedColumnName(string name)
     {
         // Arrange / Act / Assert
-        foreach (string expression in new[] { name, name + "()" })
+        new SqlQueryParser().Parse($"SELECT {name} FROM t;").Diagnostics.ShouldBeEmpty();
+        foreach (string expression in new[] { name + "()" })
         {
             var diagnostic = new SqlQueryParser().Parse($"SELECT {expression} FROM t;").Diagnostics.ShouldHaveSingleItem();
-            diagnostic.Code.ShouldBe("COHDBL001");
+            diagnostic.Code.ShouldBe("SQL0003");
             diagnostic.Severity.ShouldBe(DiagnosticSeverity.Error);
             diagnostic.Message.ShouldNotBeNull().ShouldContain(name, Case.Sensitive);
         }

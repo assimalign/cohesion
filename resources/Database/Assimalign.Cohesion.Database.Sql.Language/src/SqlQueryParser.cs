@@ -888,6 +888,10 @@ public sealed partial class SqlQueryParser : QueryParser
         }
 
         var value = lexer.Current.Value;
+        if (value.Equals("LEFT", StringComparison.OrdinalIgnoreCase) || value.Equals("RIGHT", StringComparison.OrdinalIgnoreCase))
+        {
+            if (TryPeekToken(lexer, out string next, out _) && next == "(") { return false; }
+        }
         return value.Equals("WHERE", StringComparison.OrdinalIgnoreCase) ||
                value.Equals("SET", StringComparison.OrdinalIgnoreCase) ||
                value.Equals("VALUES", StringComparison.OrdinalIgnoreCase) ||

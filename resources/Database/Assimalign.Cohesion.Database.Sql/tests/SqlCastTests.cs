@@ -205,7 +205,7 @@ public sealed class SqlCastTests
     [InlineData("CAST(CASE id WHEN 1 THEN CAST('1' AS JSONB) ELSE CAST('2' AS JSONB) END AS INT)", "JSONB to INTEGER")]
     [InlineData("CAST(CASE WHEN TRUE THEN CAST('1' AS JSON) END AS INT)", "JSON to INTEGER")]
     [InlineData("CAST(COALESCE(NULL, CAST('1' AS JSON)) AS INT)", "JSON to INTEGER")]
-    [InlineData("CAST(UPPER(CASE WHEN TRUE THEN CAST('1' AS JSON) END) AS INT)", "JSON to INTEGER")]
+    [InlineData("CAST(NULLIF(CAST('1' AS JSON), CAST('2' AS JSON)) AS INT)", "JSON to INTEGER")]
     [InlineData("CAST(1 + 2 AS DATE)", "BIGINT to DATE")]
     [InlineData("CAST(-id AS DATE)", "BIGINT to DATE")]
     [InlineData("CAST(+id AS DATE)", "INTEGER to DATE")]
@@ -257,7 +257,7 @@ public sealed class SqlCastTests
     [InlineData("@value", "INTEGER")]
     [InlineData("CASE WHEN TRUE THEN @value ELSE NULL END", "INTEGER")]
     [InlineData("COALESCE(NULL, @value)", "INTEGER")]
-    [InlineData("UPPER(@value)", "INTEGER")]
+    [InlineData("NULLIF(@value, NULL)", "INTEGER")]
     [InlineData("+@value", "INTEGER")]
     [InlineData("@value + 0", "BIGINT")]
     public async Task Cast_ParameterWithoutACast_ShouldFailWhenEvaluated(string expression, string source)
@@ -321,8 +321,8 @@ public sealed class SqlCastTests
         populated.Message.ShouldBe(empty.Message);
     }
 
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - CAST: NULLIF retains its unsupported language diagnostic before input rows")]
-    public async Task Cast_NullIfOperand_ShouldRetainUnsupportedDiagnostic()
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - CAST: NULLIF result participates in plan-time cast validation")]
+    public async Task Cast_NullIfOperand_ShouldValidateResultCast()
     {
         // Arrange
         await using var engine = SqlDatabaseEngine.Create("cast-nullif", new());
@@ -332,13 +332,12 @@ public sealed class SqlCastTests
         const string sql = "SELECT CAST(NULLIF(CAST('1' AS JSON), CAST('2' AS JSON)) AS INTEGER) FROM t;";
 
         // Act
-        var empty = await Should.ThrowAsync<DatabaseParseException>(() => ExecuteAsync(session, sql));
+        var empty = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, sql));
         await ExecuteAsync(session, "INSERT INTO t VALUES (1);");
-        var populated = await Should.ThrowAsync<DatabaseParseException>(() => ExecuteAsync(session, sql));
+        var populated = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, sql));
 
         // Assert
-        empty.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBL001");
-        empty.Message.ShouldContain("NULLIF", Case.Sensitive);
+        empty.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE011");
         populated.Message.ShouldBe(empty.Message);
     }
 

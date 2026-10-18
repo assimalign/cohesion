@@ -16,6 +16,11 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// </summary>
 internal readonly struct SqlStatementContext
 {
+    private readonly long _transactionStartTicks;
+    // Normal statements carry only their database name. Provisioning needs both names and
+    // uses a shared immutable pair, leaving room for the clock without growing normal contexts.
+    private readonly object _names;
+
     internal SqlStatementContext(
         TransactionContext transaction,
         TransactionCoordinator coordinator,
@@ -24,14 +29,15 @@ internal readonly struct SqlStatementContext
         SqlCatalogSnapshot? catalogSnapshot = null,
         TransactionSequence? ddlLockOwner = null,
         Action<long, long?>? provisioningProgress = null,
-        SqlCatalogScriptPublication? scriptReceipt = null)
+        SqlCatalogScriptPublication? scriptReceipt = null,
+        DateTimeOffset? transactionStart = null)
     {
+        _transactionStartTicks = (transactionStart ?? DateTimeOffset.UtcNow).UtcTicks;
+        _names = provisioningSchema is null ? databaseName : new ProvisioningNames(provisioningSchema, databaseName);
         Transaction = transaction;
         Coordinator = coordinator;
         Snapshot = transaction.Snapshot;
         Metrics = new SqlStatementMetrics();
-        ProvisioningSchema = provisioningSchema;
-        DatabaseName = databaseName;
         Metrics.CatalogSnapshot = catalogSnapshot;
         DdlLockOwner = ddlLockOwner ?? transaction.Sequence;
         ProvisioningProgress = provisioningProgress;
@@ -42,6 +48,8 @@ internal readonly struct SqlStatementContext
     /// Gets the MVCC transaction context the statement executes under.
     /// </summary>
     internal TransactionContext Transaction { get; }
+
+    internal DateTimeOffset TransactionStart => new(_transactionStartTicks, TimeSpan.Zero);
 
     // Schema steps keep their table locks until the entire apply and compensation end,
     // while each statement's data/catalog brackets retain their existing commit lifetime.
@@ -69,10 +77,10 @@ internal readonly struct SqlStatementContext
     internal SqlStatementMetrics Metrics { get; }
 
     /// <summary>Gets the applying compiled schema's name, or null for a live-session statement.</summary>
-    internal string? ProvisioningSchema { get; }
+    internal string? ProvisioningSchema => (_names as ProvisioningNames)?.Schema;
 
     /// <summary>Gets the current database's catalog identifier for metadata rows.</summary>
-    internal string DatabaseName { get; }
+    internal string DatabaseName => _names is string name ? name : ((ProvisioningNames)_names).Database;
 
     /// <summary>Gets the catalog directory paired with this statement's visibility lifetime.</summary>
     internal SqlCatalogSnapshot? CatalogSnapshot => Metrics.CatalogSnapshot;
@@ -83,4 +91,16 @@ internal readonly struct SqlStatementContext
 
     /// <summary>Captures lazily in the existing shared statement state; context copies use the same image.</summary>
     internal void CaptureCatalogSnapshot(SqlCatalog catalog) => Metrics.CaptureCatalogSnapshot(catalog);
+
+    private sealed class ProvisioningNames
+    {
+        internal ProvisioningNames(string schema, string database)
+        {
+            Schema = schema;
+            Database = database;
+        }
+
+        internal string Schema { get; }
+        internal string Database { get; }
+    }
 }

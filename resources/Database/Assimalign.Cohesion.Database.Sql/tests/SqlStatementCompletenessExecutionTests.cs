@@ -259,15 +259,15 @@ public sealed class SqlStatementCompletenessExecutionTests
         await SeedAsync(session, withRows: false);
 
         // Act
-        var empty = await Should.ThrowAsync<DatabaseParseException>(() => RowsAsync(session, "SELECT NULLIF(id, 1) FROM t;"));
+        var empty = await Should.ThrowAsync<DatabaseParseException>(() => RowsAsync(session, "SELECT RANK() FROM t;"));
         await ExecuteAsync(session, _rows[0]);
-        var populated = await Should.ThrowAsync<DatabaseParseException>(() => RowsAsync(session, "SELECT NULLIF(id, 1) FROM t;"));
+        var populated = await Should.ThrowAsync<DatabaseParseException>(() => RowsAsync(session, "SELECT RANK() FROM t;"));
 
         // Assert
         foreach (var failure in new[] { empty, populated })
         {
             failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBL001");
-            failure.Message.ShouldContain("NULLIF", Case.Sensitive);
+            failure.Message.ShouldContain("RANK", Case.Sensitive);
             failure.Message.ShouldNotContain("Unknown function", Case.Sensitive);
         }
     }

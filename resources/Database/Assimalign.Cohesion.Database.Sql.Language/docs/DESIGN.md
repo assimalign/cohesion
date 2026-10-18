@@ -27,10 +27,14 @@ and structured to be extended without churning what exists (open/closed).
 
 ## Executable functions and vocabulary (#1103)
 
+The #1120 profile executes all 42 T1 scalar names, including bare datetime values.
+SUBSTRING/TRIM/POSITION normalize onto calls; NULLIF/EXTRACT remain evaluator forms.
+Canonical rendering preserves the standard separators and niladic syntax. Precision
+arguments retain a reusable COHDBL001 rejection; malformed forms use SQL0003.
+Function tokens share identifier/qualifier parsing, so additions preserve ordinary names.
+
 The profile's Functions list contains only executable built-ins, including the CAST special
-form. Non-executing recognized functions live in SqlUnsupportedVocabulary, with call,
-niladic datetime and window positions. Each call reports one named COHDBL001; the five ISO
-niladic datetime forms also reject without parentheses and cannot bind unquoted columns.
+form. Non-executing window functions remain in SqlUnsupportedVocabulary and report named COHDBL001 diagnostics. Bare datetime forms execute and cannot bind unquoted columns.
 The engine's single function-coverage guard requires a passing live case for every declaration.
 
 `SqlLanguageProfile.RecognizedUnsupportedVocabulary` exposes a read-only snapshot of spellings
@@ -385,7 +389,7 @@ output (the rule is in [DIALECT.md](DIALECT.md#persisted-definitions-are-canonic
   compare the complete SqlTreeDump, including ordered definition names, column
   lists and bodies; generated query roots exercise WITH as well as scalar grammar.
   SEARCH and MATERIALIZED now render as quoted identifiers, including in persisted
-  CHECK/DEFAULT/function text; the engine's format-16 gate prevents format-15
+  CHECK/DEFAULT/function text; the engine's format-17 gate prevents format-15
   canonical CHECK text from reporting provisioning drift under the new renderer.
   A parser change that
   would read stored canonical text differently fails that suite. The engine also
