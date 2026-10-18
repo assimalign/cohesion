@@ -20,17 +20,23 @@ public sealed partial class SqlDatabaseEventSourceTests
         await using var engine = SqlDatabaseEngine.Create("view-stack", new());
         var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
-        await session.ExecuteAsync("CREATE TABLE t (id INT)", cancellationToken: CancellationToken.None);
-        await session.ExecuteAsync("CREATE VIEW root AS SELECT id FROM t", cancellationToken: CancellationToken.None);
-        string source = "t";
-        for (int index = 128; index > 0; index--)
+        using var setup = new SqlDepthTestThread(8 * 1024);
+        setup.Run(() =>
         {
-            await session.ExecuteAsync($"CREATE VIEW v{index} AS SELECT id FROM {source}", cancellationToken: CancellationToken.None);
-            source = "v" + index;
-        }
-        await session.ExecuteAsync("CREATE OR REPLACE VIEW root AS SELECT id FROM v1", cancellationToken: CancellationToken.None);
+            session.ExecuteAsync("CREATE TABLE t (id INT)", cancellationToken: CancellationToken.None).GetAwaiter().GetResult();
+            session.ExecuteAsync("CREATE VIEW root AS SELECT id FROM t", cancellationToken: CancellationToken.None).GetAwaiter().GetResult();
+            string source = "t";
+            // Optimized frames are much smaller; exceed the explicit stack on every OS.
+            for (int index = 512; index > 0; index--)
+            {
+                session.ExecuteAsync($"CREATE VIEW v{index} AS SELECT id FROM {source}", cancellationToken: CancellationToken.None).GetAwaiter().GetResult();
+                source = "v" + index;
+            }
+            session.ExecuteAsync("CREATE OR REPLACE VIEW root AS SELECT id FROM v1", cancellationToken: CancellationToken.None).GetAwaiter().GetResult();
+            return true;
+        }).Failure.ShouldBeNull();
         var planner = new SqlPlanner(database.Catalog, null, database.Definitions.Functions);
-        using var thread = new SqlDepthTestThread(512);
+        using var thread = new SqlDepthTestThread(256);
         using var recorder = new EventSourceRecorder(SqlDatabaseEventSource.Log, EventLevel.Verbose);
 
         // Act
