@@ -64,7 +64,7 @@ internal sealed partial class SqlPlanExecutor
         } : EnumerateSystemViewRows(view, statement, cancellationToken);
     }
 
-    private static IEnumerable<object?[]> EnumerateSystemViewRows(
+    private IEnumerable<object?[]> EnumerateSystemViewRows(
         SqlSystemViewDefinition view, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         // Tables, columns, constraints, and indexes all come from the same
@@ -81,6 +81,28 @@ internal sealed partial class SqlPlanExecutor
             }
             yield break;
         }
+        foreach (var stored in catalog.Views)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            switch (view.Name)
+            {
+                case "TABLES": yield return [database, stored.Schema, stored.Name, "VIEW"]; break;
+                case "VIEWS": yield return [database, stored.Schema, stored.Name, stored.Definition, "NONE", "NO"]; break;
+                case "OBJECT_OWNERSHIP": yield return [database, stored.Schema, stored.Name, "VIEW", stored.Name, SystemOwner(stored.Owner), stored.OwningSchema]; break;
+                case "COLUMNS":
+                    var liveColumns = new SqlPlanner(_catalog, null, _definitions.Functions, cancellationToken).ViewColumns(stored, catalog, _definitions.NativeFunctions);
+                    for (int i = 0; i < liveColumns.Count; i++)
+                    {
+                        var column = liveColumns[i];
+                        yield return [database, stored.Schema, stored.Name, column.Name, (long)i + 1, null, column.IsNullable ? "YES" : "NO", SystemDataType(column.Type.Type),
+                            column.Type.Type is DatabaseType.String or DatabaseType.Character ? (long?)column.Type.MaxLength : null,
+                            null, SystemNumericPrecision(column.Type), SystemNumericRadix(column.Type.Type), SystemNumericScale(column.Type),
+                            SystemDateTimePrecision(column.Type.Type), "NO", null, null, null, null, null, null];
+                    }
+                    break;
+            }
+        }
+        if (view.Name == "VIEWS") { yield break; }
         foreach (var table in catalog.Tables)
         {
             cancellationToken.ThrowIfCancellationRequested();

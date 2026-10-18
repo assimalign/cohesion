@@ -19,6 +19,7 @@ internal sealed partial class SqlPlanner
         {
             throw new SqlPlanningException("COHSQLE013", ErrorMessages.CteConstantQuery, select.Location);
         }
+        if (ViewDefinitionBinding is not null) { CaptureViewSelect(select, [], null, null, evaluator); }
         if (select.GroupBy.Count > 0 || select.Having is not null || ProjectsOrOrdersByAggregate(select))
         {
             return PlanGroup(select, null, null, [], null, evaluator, []);

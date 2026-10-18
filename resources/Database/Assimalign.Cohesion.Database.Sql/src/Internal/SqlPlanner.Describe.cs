@@ -33,6 +33,8 @@ internal sealed partial class SqlPlanner
         SqlDeletePlan => "Delete",
         SqlCreateTablePlan => "CreateTable",
         SqlCreateSchemaPlan => "CreateSchema",
+        SqlCreateViewPlan => "CreateView",
+        SqlDropViewPlan => "DropView",
         SqlDropTablePlan => "DropTable",
         SqlDropSchemaPlan => "DropSchema",
         SqlAddColumnPlan => "AddColumn",
@@ -174,7 +176,7 @@ internal sealed partial class SqlPlanner
             if (source.Derived is { } derived)
             {
                 int id = nodes.Count;
-                Add("DerivedTable", parent, derived.Name);
+                Add(derived.CatalogView is null ? "DerivedTable" : "View", parent, Target(source));
                 Visit(derived.Query, id);
             }
             else { Add(source.View is not null ? "SystemView" : "TableScan", parent, Target(source)); }

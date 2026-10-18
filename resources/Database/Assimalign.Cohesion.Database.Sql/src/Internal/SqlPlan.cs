@@ -15,6 +15,12 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// </summary>
 internal abstract record SqlPlan;
 
+/// <summary>Publishes a canonical read-only view.</summary>
+internal sealed record SqlCreateViewPlan(SqlCatalogView View, bool OrReplace) : SqlPlan;
+
+/// <summary>Drops a persisted view and optionally its dependent views.</summary>
+internal sealed record SqlDropViewPlan(string Schema, string Name, bool IfExists, bool Cascade) : SqlPlan;
+
 /// <summary>Creates an empty SQL namespace.</summary>
 internal sealed record SqlCreateSchemaPlan(string Name, bool IfNotExists) : SqlPlan;
 

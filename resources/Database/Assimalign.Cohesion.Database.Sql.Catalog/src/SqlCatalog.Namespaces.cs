@@ -58,9 +58,9 @@ public sealed partial class SqlCatalog
             SqlCatalogJsonContext.Default.SqlCatalogNamespace, cancellationToken, publication, SqlObjectIdentity.Schema(schema.Name));
     }
 
-    /// <summary>Drops a SQL namespace and, with CASCADE, its tables, indexes and incoming foreign keys in one transaction.</summary>
+    /// <summary>Drops a SQL namespace and, with CASCADE, its tables, indexes, views, external dependent views and incoming foreign keys in one transaction.</summary>
     /// <param name="name">The SQL namespace name.</param>
-    /// <param name="cascade">Whether dependent tables and incoming constraints are removed; false means RESTRICT.</param>
+    /// <param name="cascade">Whether dependent tables, views and incoming constraints are removed; false means RESTRICT.</param>
     /// <param name="cancellationToken">Cancels before publication.</param>
     /// <returns>A completed operation after the durable commit.</returns>
     /// <remarks>The SQL executor owns DDL interlocks, object locks and ownership checks. This catalog operation serializes publication only.</remarks>
@@ -73,7 +73,7 @@ public sealed partial class SqlCatalog
 
     /// <summary>Drops a SQL namespace and records its declared-script statement atomically.</summary>
     /// <param name="name">The SQL namespace name.</param>
-    /// <param name="cascade">Whether dependent tables and incoming constraints are removed.</param>
+    /// <param name="cascade">Whether dependent tables, views and incoming constraints are removed.</param>
     /// <param name="publication">The expected target, preceding receipt and catalog generation. An absent target records an absence receipt.</param>
     /// <param name="cancellationToken">Cancels before publication.</param>
     /// <returns>A completed operation after the durable commit.</returns>
@@ -107,6 +107,16 @@ public sealed partial class SqlCatalog
                 throw new SqlCatalogException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.NamespaceMissing, name));
             }
             var objects = ObjectsInNamespace(name);
+            var ids = objects.Select(slot => slot.Table.ObjectId).ToHashSet();
+            var droppedViews = _views.Where(pair => pair.Value.Value.Schema.Equals(name, StringComparison.OrdinalIgnoreCase) || pair.Value.Value.TableDependencies.Any(ids.Contains)).ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase);
+            bool added;
+            do
+            {
+                added = false;
+                foreach (var pair in _views)
+                { if (pair.Value.Value.Dependencies.Any(droppedViews.ContainsKey)) { added |= droppedViews.TryAdd(pair.Key, pair.Value); } }
+            } while (added);
+            if (!cascade && droppedViews.Count != 0) { RefuseViewDependency(droppedViews.Values.First().Value); }
             if (!cascade && objects.Length != 0)
             {
                 throw new SqlCatalogException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.NamespaceDependentObjects, schema.Value.Name));
@@ -140,8 +150,10 @@ public sealed partial class SqlCatalog
             var tableSlots = replacements.Select(item => new TableSlot(item.Table, UpsertRecord(transaction, item.Old.Location, item.Record))).ToArray();
             var registrationsLocation = _registrationsLocation;
             if (indexes.Length != 0) { registrationsLocation = UpsertRecord(transaction, registrationsLocation, EncodeRegistrations(registrations)); }
+            foreach (var view in droppedViews.Values) { _storage.DeleteRow(transaction, view.Location.PageId, view.Location.SlotIndex); }
             _storage.DeleteRow(transaction, schema.Location.PageId, schema.Location.SlotIndex);
             CommitCatalogChange(transaction, publication: publication, actualObject: SqlObjectIdentity.Schema(schema.Value.Name));
+            foreach (var key in droppedViews.Keys) { _views.Remove(key); }
             _namespaces.Remove(name);
             _namespaceCapture = null;
             foreach (var slot in objects)

@@ -29,6 +29,14 @@ internal static class SqlPersistedExpression
     // required to be exactly that predicate (no other clause may ride along).
     private const string carrierTable = "__persisted";
 
+    internal static SqlQueryBodyExpression LoadQuery(string text, string subject)
+    {
+        var request = SqlQueryRequest.FromSql(text, null, SqlQueryRequest.CeilingParserOptions);
+        if (request.Statement.SqlExpression is not SqlQueryBodyExpression query)
+        { throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ViewLoadInvalid, subject, DamagedCatalogHint)); }
+        return query;
+    }
+
     /// <summary>
     /// What a persisted definition that does not load means, and what to do about it. Canonical
     /// text always reloads, so such a definition was not written by this engine's DDL.

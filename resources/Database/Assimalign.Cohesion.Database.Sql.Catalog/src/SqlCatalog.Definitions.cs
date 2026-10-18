@@ -254,6 +254,8 @@ public sealed partial class SqlCatalog
                 }
                 requestedParameterTypes ??= function.ParameterTypes;
             }
+            var dependentView = _views.Values.Select(value => value.Value).FirstOrDefault(view => view.Dependencies.Contains(actualObject, StringComparer.OrdinalIgnoreCase) || view.FunctionCalls.Contains(actualObject, StringComparer.OrdinalIgnoreCase));
+            if (dependentView is not null) { RefuseViewDependency(dependentView); }
             using var transaction = _storage.BeginTransaction();
             _storage.DeleteRow(transaction, slot.Location.PageId, slot.Location.SlotIndex);
             CommitCatalogChange(transaction, publication: publication, actualObject: actualObject,

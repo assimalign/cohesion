@@ -48,6 +48,7 @@ internal sealed partial class SqlPlanner
                     {
                         ValidateExpression(on, scope, _subqueryTypes);
                         condition = scope.Bind(on);
+                        if (ViewDefinitionBinding is not null) { CaptureViewJoin(on, bindings.Skip(start).ToArray(), scope); }
                         CollectJoinEqualities(on, scope, equalities);
                     }
                 }
@@ -64,6 +65,12 @@ internal sealed partial class SqlPlanner
                         }
                         int leftOrdinal = FindUsing(visible, name, "left");
                         int rightOrdinal = FindUsing(Enumerable.Range(right.Offset, right.Source.Columns.Count), name, "right");
+                        if (ViewDefinitionBinding is not null)
+                        {
+                            var leftSource = bindings.Last(binding => binding.Offset <= leftOrdinal);
+                            RecordViewColumn(leftSource.Source, leftOrdinal - leftSource.Offset);
+                            RecordViewColumn(right.Source, rightOrdinal - right.Offset);
+                        }
                         var previous = scope.MergedColumn(leftOrdinal);
                         var leftColumn = previous?.Column ?? allColumns[leftOrdinal];
                         var rightColumn = allColumns[rightOrdinal];

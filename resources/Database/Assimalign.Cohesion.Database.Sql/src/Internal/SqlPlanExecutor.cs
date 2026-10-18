@@ -69,7 +69,7 @@ internal sealed partial class SqlPlanExecutor
     private SqlExpressionEvaluator ExecutionEvaluator(SqlSubqueryValues? subqueryValues, CancellationToken cancellationToken,
         bool[]? sharedColumns = null)
         => SqlExpressionEvaluator.ForExecution(subqueryValues,
-            _definitions.Functions.RunsApplicationCode ? cancellationToken : default, sharedColumns);
+            _definitions.Functions.RunsApplicationCode ? cancellationToken : default, sharedColumns, ViewTransactionStart);
 
     /// <summary>
     /// A registered index paired with its live tree and resolved key ordinals —
@@ -130,6 +130,10 @@ internal sealed partial class SqlPlanExecutor
                 return await ExecuteDeleteAsync(delete, statement, cancellationToken).ConfigureAwait(false);
             case SqlCreateTablePlan create:
                 return await ExecuteCreateTableAsync(create, statement, cancellationToken).ConfigureAwait(false);
+            case SqlCreateViewPlan createView:
+                return await ExecuteCreateViewAsync(createView, statement, cancellationToken).ConfigureAwait(false);
+            case SqlDropViewPlan dropView:
+                return await ExecuteDropViewAsync(dropView, statement, cancellationToken).ConfigureAwait(false);
             case SqlCreateSchemaPlan createSchema:
                 return await ExecuteCreateSchemaAsync(createSchema, statement, cancellationToken).ConfigureAwait(false);
             case SqlDropTablePlan drop:
@@ -980,6 +984,7 @@ internal sealed partial class SqlPlanExecutor
         SqlCatalogTable current = ReadCurrentTable(before);
         EnsureCanChange(current.Owner, current.Name, current.OwningSchema, "ALTER TABLE DROP COLUMN", statement);
         EnsureSameIdentity(before, current);
+        EnsureNoViewReads(current, plan.ColumnName);
         EnsureCanDropColumn(current, plan.ColumnName, cancellationToken);
 
         // Bind the projected version before publication, while folding still belongs to the
@@ -1033,6 +1038,7 @@ internal sealed partial class SqlPlanExecutor
         EnsureCanChange(current.Owner, current.Name, current.OwningSchema, "DROP TABLE", statement);
         EnsureSameIdentity(table, current);
         table = current;
+        EnsureNoViewReads(table);
         if (IncomingReferences(table).Any(reference => reference.Child.ObjectId != table.ObjectId))
         {
             throw new DatabaseException($"Table '{table.Name}' is referenced by a foreign key and cannot be dropped.");

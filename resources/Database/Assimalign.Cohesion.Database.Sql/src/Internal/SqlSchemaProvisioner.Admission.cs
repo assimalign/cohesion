@@ -5,6 +5,8 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Sql.Language;
+using Assimalign.Cohesion.Database.Sql.Catalog;
+using Assimalign.Cohesion.Database.Sql.Catalog.Internal;
 using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
@@ -30,6 +32,20 @@ internal sealed partial class SqlSchemaProvisioner
                 && migration.Tables.Contains(table.ObjectId))
             {
                 tables.Add(table.ObjectId);
+            }
+            if (_catalog.TryGetView(reference.SchemaName ?? referenceSchema, reference.TableName, out var view))
+            {
+                var directory = _catalog.Views.ToDictionary(value => SqlObjectIdentity.View(value.Schema, value.Name), System.StringComparer.OrdinalIgnoreCase);
+                var pending = new Stack<SqlCatalogView>();
+                var seen = new HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
+                pending.Push(view);
+                while (pending.TryPop(out var current))
+                {
+                    if (!seen.Add(SqlObjectIdentity.View(current.Schema, current.Name))) { continue; }
+                    foreach (ulong id in current.TableDependencies) { if (migration.Tables.Contains(id)) { tables.Add(id); } }
+                    foreach (string key in current.Dependencies)
+                    { if (directory.TryGetValue(key, out var dependency)) { pending.Push(dependency); } }
+                }
             }
         }
         if (request.Statement.SqlExpression is SqlDropSchemaExpression drop)
@@ -187,6 +203,9 @@ internal sealed partial class SqlSchemaProvisioner
                         yield return parent;
                     }
                 }
+                break;
+            case SqlCreateViewExpression createView:
+                foreach (var table in References(createView.Query)) { yield return table; }
                 break;
             case SqlCreateTableExpression create:
                 foreach (var constraint in create.Constraints)

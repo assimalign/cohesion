@@ -19,6 +19,11 @@ public sealed partial class SqlQueryParser
         var pos = lexer.Current.Position;
         Advance(ref lexer); // consume CREATE
 
+        if (IsKeyword(ref lexer, "VIEW") || IsKeyword(ref lexer, "OR") || IsWord(ref lexer, "MATERIALIZED") ||
+            IsWord(ref lexer, "RECURSIVE") || IsWord(ref lexer, "TEMP") || IsWord(ref lexer, "TEMPORARY"))
+        {
+            return ParseCreateView(ref lexer, pos);
+        }
         if (IsWord(ref lexer, "SCHEMA"))
         {
             return ParseCreateSchema(ref lexer, pos);
@@ -681,6 +686,7 @@ public sealed partial class SqlQueryParser
         var pos = lexer.Current.Position;
         Advance(ref lexer); // consume DROP
 
+        if (IsKeyword(ref lexer, "VIEW")) { return ParseDropView(ref lexer, pos); }
         if (IsWord(ref lexer, "SCHEMA"))
         {
             return ParseDropSchema(ref lexer, pos);

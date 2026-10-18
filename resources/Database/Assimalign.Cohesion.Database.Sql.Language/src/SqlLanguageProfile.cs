@@ -82,6 +82,8 @@ public static class SqlLanguageProfile
         SqlClauses.CreateIndex,
         SqlClauses.AlterTable,
         SqlClauses.DropTable,
+        SqlClauses.CreateView,
+        SqlClauses.DropView,
         SqlClauses.DropSchema,
         SqlClauses.DropIndex,
         SqlClauses.From,

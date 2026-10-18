@@ -114,6 +114,7 @@ internal sealed partial class SqlPlanner
     private SqlPlan PlanStatementCore(SqlQueryExpression expression)
     {
         SqlSystemViews.EnsureReadOnly(expression);
+        EnsureViewTargetReadOnly(expression);
         ValidateFunctionCalls(expression);
         return expression switch
         {
@@ -123,6 +124,8 @@ internal sealed partial class SqlPlanner
             SqlInsertExpression insert => PlanInsert(insert),
             SqlUpdateExpression update => PlanUpdate(update),
             SqlDeleteExpression delete => PlanDelete(delete),
+            SqlCreateViewExpression create => PlanCreateView(create),
+            SqlDropViewExpression drop => new SqlDropViewPlan(drop.View.SchemaName ?? DefaultSchema, drop.View.TableName, drop.IfExists, drop.Cascade),
             SqlCreateTableExpression create => PlanCreateTable(create),
             SqlCreateSchemaExpression create => new SqlCreateSchemaPlan(create.Name, create.IfNotExists),
             SqlDropTableExpression drop => PlanDropTable(drop),
@@ -169,6 +172,7 @@ internal sealed partial class SqlPlanner
             subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken,
             outerScope: OuterScope, outerDependencies: OuterDependencies, relation: select.From[0].Table);
 
+        if (ViewDefinitionBinding is not null) { CaptureViewSelect(select, columns, bindings, outputOrdinals, evaluator); }
         if (select.GroupBy.Count > 0 || select.Having is not null || ProjectsOrOrdersByAggregate(select))
         {
             return PlanGroup(select, table, systemView, columns, bindings, evaluator, steps);
@@ -279,13 +283,22 @@ internal sealed partial class SqlPlanner
         }
         if (SqlSystemViews.Find(named) is { } view)
         {
+            ViewDefinitionBinding?.SystemRelations.Add(named);
             _statementMetrics?.CaptureCatalogSnapshot(_catalog);
             return new SqlRelationSource(view);
         }
+        // Tables and views share a namespace. Resolve the stored case first so ordinary
+        // queries allocate no encoded view identity, even when the catalog contains views.
+        if (TryReadTable(named.SchemaName ?? DefaultSchema, named.TableName, out var readTable))
+        {
+            ViewDefinitionBinding?.Tables.Add(readTable.ObjectId);
+            return new SqlRelationSource(ResolveTable(named));
+        }
+        if (TryReadView(named.SchemaName ?? DefaultSchema, named.TableName, out var storedView)) { return BindCatalogView(storedView); }
         // Future CTEs are a missing-relation hint, not a catalog shadow (PostgreSQL
         // src/backend/parser/parse_relation.c:1463-1487).
         if (named.SchemaName is null && _commonTableState?.Future?.Contains(named.TableName) == true &&
-            !_catalog.TryGetTable(DefaultSchema, named.TableName, out _))
+            !TryReadTable(DefaultSchema, named.TableName, out _))
         {
             throw new SqlPlanningException("COHSQLE026", string.Format(CultureInfo.CurrentCulture,
                 ErrorMessages.CteForwardReference, named.TableName), owner?.Location);
@@ -321,11 +334,23 @@ internal sealed partial class SqlPlanner
         var ordering = new SqlBoundOrdering[orderBy.Count];
         for (int index = 0; index < ordering.Length; index++)
         {
+            if (scope.HasOutputValues) { ValidateOrderingCalls(orderBy[index].Expression, scope); }
             var key = scope.Bind(orderBy[index].Expression, out SqlBoundCollation collation);
             ordering[index] = new SqlBoundOrdering(key, orderBy[index].IsDescending, collation);
         }
 
         return ordering;
+    }
+
+    private static bool ValidateOrderingCalls(SqlExpression expression, SqlExpressionEvaluator scope)
+    {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+        if (scope.IsBoundValue(expression)) { return scope.IsOutputValue(expression); }
+        if (expression is SqlSubqueryExpression or SqlExistsExpression) { return false; }
+        bool usesOutput = false;
+        foreach (var child in Children(expression)) { usesOutput |= ValidateOrderingCalls(child, scope); }
+        if (usesOutput && expression is SqlFunctionCallExpression call) { ResolveCall(call, scope); }
+        return usesOutput;
     }
 
     // ── Access-path selection (rule-based, by design) ──────────────────
@@ -341,7 +366,7 @@ internal sealed partial class SqlPlanner
     /// </summary>
     private SqlAccessPath SelectAccessPath(SqlCatalogTable table, SqlExpression? where, SqlExpressionEvaluator? scope = null)
     {
-        if (where is null || _commonTableState?.BindingUnused == true)
+        if (ViewDefinitionBinding is not null || where is null || _commonTableState?.BindingUnused == true)
         {
             return SqlScanPath.Instance;
         }
@@ -1255,7 +1280,7 @@ internal sealed partial class SqlPlanner
     {
         string schema = reference.SchemaName ?? DefaultSchema;
 
-        if (SqlNamespaces.Find(_catalog, schema) is null || !_catalog.TryGetTable(schema, reference.TableName, out var table))
+        if (!HasReadNamespace(schema) || !TryReadTable(schema, reference.TableName, out var table))
         {
             throw new SqlPlanningException("COHSQLE014", string.Format(CultureInfo.CurrentCulture, ErrorMessages.TableMissing, schema, reference.TableName));
         }
@@ -1462,10 +1487,22 @@ internal sealed partial class SqlPlanner
         // After its arguments, as PostgreSQL resolves a call, so an argument's error is reported
         // first. The planner's walk (ValidateFunctionCalls) checked every call's count already; this
         // chooses the overload by the arguments' types, with the scope's columns in hand.
-        if (expression is SqlFunctionCallExpression call)
+        if (expression is SqlFunctionCallExpression call &&
+            (boundValues is null || !ContainsBoundOutput(call, boundValues)))
         {
             ResolveCall(call, evaluator);
         }
+        // Calls using output aliases resolve when BindOrdering supplies the completed
+        // projection's types. The input scope cannot choose their overloads yet.
+    }
+
+    private static bool ContainsBoundOutput(SqlExpression expression, IReadOnlyDictionary<SqlExpression, int> outputs)
+    {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+        if (outputs.ContainsKey(expression)) { return true; }
+        foreach (var child in Children(expression))
+        { if (ContainsBoundOutput(child, outputs)) { return true; } }
+        return false;
     }
 
     internal static void ValidateTemporalArithmetic(SqlBinaryExpression arithmetic, SqlExpressionEvaluator evaluator)

@@ -622,9 +622,11 @@ public sealed partial class SqlQueryParser : QueryParser
     {
         SqlCreateTableExpression => "CREATE TABLE",
         SqlCreateSchemaExpression => "CREATE SCHEMA",
+        SqlCreateViewExpression => "CREATE VIEW",
         SqlCreateIndexExpression => "CREATE INDEX",
         SqlDropTableExpression => "DROP TABLE",
         SqlDropSchemaExpression => "DROP SCHEMA",
+        SqlDropViewExpression => "DROP VIEW",
         SqlDropIndexExpression => "DROP INDEX",
         _ => expression.CommandType switch
         {
@@ -991,6 +993,18 @@ public sealed partial class SqlQueryParser : QueryParser
                 location = null!;
                 return false;
             }
+            if (firstToken.Equals("CREATE", StringComparison.OrdinalIgnoreCase) && IsKeyword(ref lexer, "VIEW"))
+            {
+                // Header syntax is checked by ParseCreateView; AS starts the query's scan.
+                while (lexer.MoveNext())
+                {
+                    if (IsKeyword(ref lexer, "AS")) { break; }
+                }
+                firstToken = "SELECT";
+                previousToken = null;
+                previousPreviousToken = null;
+                continue;
+            }
             withStatement |= IsKeyword(ref lexer, "WITH");
             if (IsKeyword(ref lexer, "WITH")) { inWithDefinitions = true; }
             if (withStatement && fromScopes.Count == 0 &&
@@ -1117,25 +1131,6 @@ public sealed partial class SqlQueryParser : QueryParser
 
             if (lexer.Current.Type == TokenType.Keyword)
             {
-                bool isCreateView =
-                    previousToken?.Equals("CREATE", StringComparison.OrdinalIgnoreCase) == true;
-                bool isDropView =
-                    previousToken?.Equals("DROP", StringComparison.OrdinalIgnoreCase) == true;
-
-                if (token.Equals("VIEW", StringComparison.OrdinalIgnoreCase) &&
-                    (isCreateView || isDropView))
-                {
-                    clause = isCreateView
-                        ? SqlClauses.CreateView
-                        : SqlClauses.DropView;
-                    location = Location.Create(
-                        1,
-                        1,
-                        previousPosition,
-                        lexer.Current.Position + lexer.Current.Value.Length);
-                    return true;
-                }
-
                 if (token.Equals("UPDATE", StringComparison.OrdinalIgnoreCase) &&
                     previousToken?.Equals("ON", StringComparison.OrdinalIgnoreCase) == true)
                 {

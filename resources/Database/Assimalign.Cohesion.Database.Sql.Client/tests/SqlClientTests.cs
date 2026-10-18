@@ -17,6 +17,25 @@ namespace Assimalign.Cohesion.Database.Sql.Client.Tests;
 /// </summary>
 public class SqlClientTests
 {
+    [Fact(DisplayName = "Cohesion Test [Sql.Client] - Views: persisted reads metadata and errors use the existing wire contract")]
+    public async Task QueryAsync_ViewStatements_ShouldReadJoinAndKeepConnectionUsable()
+    {
+        // Arrange
+        await using var harness = await SqlClientTestHarness.StartAsync();
+        await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
+        await connection.ExecuteAsync("CREATE VIEW active_users AS SELECT id, name FROM users", cancellationToken: SqlClientTestHarness.Timeout());
+        // Act
+        var rows = await connection.QueryAsync("SELECT active_users.name FROM users JOIN active_users ON users.id = active_users.id ORDER BY active_users.id", cancellationToken: SqlClientTestHarness.Timeout());
+        var metadata = await connection.QueryAsync("SELECT CHECK_OPTION, IS_UPDATABLE FROM INFORMATION_SCHEMA.VIEWS WHERE TABLE_NAME = 'active_users'", cancellationToken: SqlClientTestHarness.Timeout());
+        var error = await Should.ThrowAsync<SqlClientException>(async () => await connection.ExecuteAsync("DELETE FROM active_users", cancellationToken: SqlClientTestHarness.Timeout()));
+        var after = await connection.QueryAsync("SELECT COUNT(*) AS n FROM active_users", cancellationToken: SqlClientTestHarness.Timeout());
+        // Assert
+        rows.Count.ShouldBe(2);
+        metadata.ShouldHaveSingleItem().GetString("IS_UPDATABLE").ShouldBe("NO");
+        error.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
+        after.ShouldHaveSingleItem().GetInt64("n").ShouldBe(2L);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - Query: SELECT materializes typed columns and rows")]
     public async Task QueryAsync_Select_ShouldMaterializeTypedColumnsAndRows()
     {

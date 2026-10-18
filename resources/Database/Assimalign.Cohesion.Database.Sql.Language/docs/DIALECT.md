@@ -64,7 +64,7 @@ nullable definitions and DEFAULT; retaining the type and NOT NULL preserves gene
 
 ## Statement matrix
 
-With CREATE SCHEMA and DROP SCHEMA (#1030) and UNION, INTERSECT and EXCEPT (#1114), the profile measures **47 of 56 declared clauses** against the live SQL engine.
+With persisted CREATE/DROP VIEW (#1124), CREATE/DROP SCHEMA (#1030) and set operations (#1114), the profile measures **49 of 56 declared clauses** against the live SQL engine.
 Phase 22 measured 33 of 49.
 The earlier 32/48 figure included `JOIN`, `GROUP BY`, `HAVING`, and `SUBQUERY`,
 removed in Phase 12e (#1019–#1021), plus a no-op `CAST` removed in Phase 13.
@@ -85,14 +85,14 @@ projection aliases, including aliases inside scalar expressions, and select-list
 ordinals through the SQL server/client (#1024). At Phase 22 the count remained 33/49 because
 `ALTER TABLE` and `ORDER BY` were already advertised for smaller executable subsets.
 
-The **9 excluded clauses** are recursive CTEs (`RECURSIVE`), window clauses (`WINDOW`,
-`OVER`, `PARTITION`), views (`CREATE VIEW`, `DROP VIEW`), `NATURAL`,
+The **7 excluded clauses** are recursive CTEs (`RECURSIVE`), window clauses (`WINDOW`,
+`OVER`, `PARTITION`), `NATURAL`,
 `ALL` and `RETURNING`. Counts describe named clauses, not
 complete ISO SQL support; the boundaries below are part of the contract.
 
 | Statement | Status | Notes |
 |---|---|---|
-| `SELECT` | Supported subset, measured | Stored tables, virtual system relations and aliased derived queries, with written-order N-way INNER/LEFT/CROSS joins and comma items over these source kinds; `DISTINCT`, projections and aliases, scalar expressions, `WHERE`, grouping, multi-expression `ORDER BY ASC/DESC`, nonnegative integer `LIMIT`/`OFFSET`, ISO `FETCH FIRST`/`NEXT`, and the SQL Server `TOP` lexical alias. `COUNT(*)`, `COUNT(expr)`, `SUM`, `AVG`, `MIN`, and `MAX` execute in grouped and ungrouped queries. See the aggregate contract below. Top-level `SELECT` without `FROM` is rejected by the planner; CTE bodies can use one implicit row. |
+| `SELECT` | Supported subset, measured | Stored tables, persisted read-only views, virtual system relations and aliased derived queries, with written-order N-way INNER/LEFT/CROSS joins and comma items over these source kinds; `DISTINCT`, projections and aliases, scalar expressions, `WHERE`, grouping, multi-expression `ORDER BY ASC/DESC`, nonnegative integer `LIMIT`/`OFFSET`, ISO `FETCH FIRST`/`NEXT`, and the SQL Server `TOP` lexical alias. `COUNT(*)`, `COUNT(expr)`, `SUM`, `AVG`, `MIN`, and `MAX` execute in grouped and ungrouped queries. See the aggregate contract below. Top-level `SELECT` without `FROM` is rejected by the planner; CTE bodies can use one implicit row. |
 | `EXPLAIN` | Supported extension, measured | SELECT, INSERT (including query sources), UPDATE or DELETE returns the chosen plan as ordinary rows without executing it. DDL, transaction control, nested EXPLAIN and EXPLAIN ANALYZE report `COHDBL001`. |
 | `INSERT` / `VALUES` | Supported subset, measured | Optional column list, multi-row literal/scalar `VALUES` including whole-item `DEFAULT`, `INSERT ... DEFAULT VALUES` (one row of defaults, with an optional column list), and transactional `INSERT ... SELECT` with the same destination coercion, defaults, and constraints. `VALUES` expressions have no columns in scope: a column reference reports `COHSQLE005` before anything executes (see [VALUES and counts have no column scope](#values-and-counts-have-no-column-scope-1165)). Subqueries inside `VALUES` are excluded; use `INSERT ... SELECT`. |
 | `UPDATE` | Supported | multi-column `SET`, including `c = DEFAULT`, and `WHERE` (including correlated and uncorrelated subqueries); qualified references in both use the target name or its alias, which hides the base name (PostgreSQL `parse_relation.c:3759`); hidden/unknown qualifiers fail with located `COHSQLE015` before any write and leave an explicit transaction active; aggregates in SET and outside child queries in WHERE are rejected; aggregates inside WHERE subqueries execute (see [Grouping and aggregate functions](#grouping-and-aggregate-functions-1020)) |
@@ -119,12 +119,63 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `WITH` (CTEs) | Supported subset, measured | Ordered non-recursive SELECT bodies before SELECT, INSERT, UPDATE or DELETE; optional output column lists; also INSERT INTO t WITH ... SELECT |
 | `WITH RECURSIVE` | Recognized, not supported | `COHDBL001` at RECURSIVE |
 | Window functions / `OVER` / `WINDOW` | Recognized, not supported | function names lexed; clauses rejected with `COHDBL001` |
-| `CREATE VIEW` / `DROP VIEW` | Recognized, not supported | rejected with `COHDBL001` |
+| `CREATE [OR REPLACE] VIEW` / `DROP VIEW` | Yes | Persisted read-only views; DROP defaults to RESTRICT and supports CASCADE |
 | `CONSTRAINT` / `FOREIGN KEY` / `REFERENCES` / `CHECK` / `UNIQUE` constraints | Supported subset, measured | Column and table declarations normalize into constraint definitions; UNIQUE lowers to a unique catalog index. NULL is an equal index key: a second NULL violates a single-column UNIQUE constraint. Foreign-key NULL values are allowed; CHECK accepts UNKNOWN and rejects FALSE. CHECK expressions must be deterministic Boolean row expressions with the engine's scalar functions (built-in or registered, `IMMUTABLE` only), each called with arguments its signature accepts (`COHSQLE006` otherwise); parameters and aggregates are excluded. CHECK predicates and DEFAULT expressions are stored as canonical text and parsed once per table version; see [Persisted definitions are canonical](#persisted-definitions-are-canonical). |
 | `ON DELETE CASCADE` / `RESTRICT` / `NO ACTION` / `SET NULL` / `SET DEFAULT` | Supported | omitted deletion action defaults to `NO ACTION`; a cascade deletes its whole transitive closure with no depth limit, so a self-referencing chain deletes however long it is (#1164), and a cycle deletes each row once; `DROP TABLE ... CASCADE` is not supported |
 | `ON UPDATE` | Recognized, not supported | absent from the profile; rejected with `COHDBL001` |
 | `START TRANSACTION` / `BEGIN [WORK\|TRANSACTION]` / `COMMIT [WORK\|TRANSACTION]` / `END` / `ROLLBACK [WORK\|TRANSACTION]` | Supported | Spellings map to the existing BEGIN/COMMIT/ROLLBACK session commands (+0 clauses). Like every SQL statement, a valid spelling without `;` receives informational SQL0100, with no error or warning; with `;` it has no parser diagnostics. START and WORK are contextual, so columns named start/work remain valid. END takes no suffix; without a transaction its COHSQLT002 message names COMMIT. END WORK/TRANSACTION, AND [NO] CHAIN, modes, ROLLBACK [WORK] TO [SAVEPOINT], BEGIN TRAN/named transactions and COMMIT PREPARED stay SQL0003. ABORT [WORK\|TRANSACTION], SAVEPOINT, RELEASE, SET TRANSACTION and PREPARE TRANSACTION stay SQL0002 (#1012); TRANSACTION alone is not a statement. |
 | `MERGE`, `TRUNCATE`, `GRANT` | Not in the dialect | `SQL0002` |
+
+## Persisted read-only views (#1124)
+
+`CREATE [OR REPLACE] VIEW [schema.]name [(column, ...)] AS query` stores a
+canonical SELECT or set-operation body. A body can have its own non-recursive WITH,
+subqueries, joins and grouping. Projection `*` is expanded at every query level,
+including derived queries, CTEs and set operands, so later ADD COLUMN does not
+change the view. An explicit column list must match the output count exactly
+(the ISO rule); output names must be unique. Parameters are refused at CREATE.
+Bodies receive the same SELECT-subset diagnostics as standalone queries.
+
+Tables and views share a relation namespace. Colliding CREATE TABLE is refused
+even with IF NOT EXISTS. Views retain schema identity: `dbo.v.column` and
+same-name views in two schemas work independently. Views are read sources in
+FROM, either JOIN input, subqueries and INSERT SELECT. Outer WHERE, GROUP BY,
+ORDER BY, LIMIT and FETCH work over view columns. Each reference materializes
+its body once under the caller's statement snapshot, costing O(body rows);
+there is no merging or predicate pushdown. Body ordering/windowing follows the
+existing derived-body rules. Overloaded functions in ORDER BY expressions use the
+completed projection types when their arguments name output aliases.
+
+OR REPLACE retains every existing column's name, order, type, type modifiers,
+domain and collation and permits appended columns only. Incompatible replacement
+and dependency cycles fail atomically. Definitions are parsed once per immutable
+view and bound once per catalog generation; recorded function identities keep a
+later overload from changing a stored call. Output nullability is derived from
+current bound sources, rather than frozen at CREATE.
+
+INSERT, UPDATE, DELETE, ALTER TABLE, CREATE INDEX and DROP TABLE require a table
+and refuse a view, naming its kind. DROP VIEW refuses a table, including IF EXISTS.
+DROP TABLE and DROP FUNCTION/DOMAIN refuse dependent views; DROP COLUMN and
+RENAME COLUMN refuse columns a view reads. RENAME TABLE also refuses dependents
+because canonical bodies retain textual relation names. DROP SCHEMA RESTRICT
+counts views. DROP SCHEMA CASCADE removes contained views and external views
+that depend on its tables or views. DROP VIEW [IF EXISTS] defaults to RESTRICT;
+CASCADE removes dependent views. Dependency failures name the view (COHSQLD002).
+View-specific declaration/replacement failures and oversized records use COHSQLE032; ordinary query binding diagnostics still apply, including COHSQLE013 for a column-list count mismatch.
+
+Views appear in TABLES (`TABLE_TYPE = 'VIEW'`), COLUMNS, VIEWS and OBJECT_OWNERSHIP.
+VIEWS returns canonical VIEW_DEFINITION, CHECK_OPTION `NONE` and IS_UPDATABLE `NO`.
+Session-created views are Adhoc; declared scripts use Schema ownership and atomic
+`V:` publication/absence receipts. View DDL requires auto-commit (COHSQLT003 inside
+an explicit transaction). SQL record-space format **22** adds catalog kind **17**;
+older formats are refused without an upgrade reader. The complete encoded record,
+including text, columns and dependencies, is limited to **8,092 bytes**; CREATE
+refuses a larger record before publishing anything.
+
+MATERIALIZED, RECURSIVE, TEMP/TEMPORARY, IF NOT EXISTS, WITH (options), and
+WITH [LOCAL|CASCADED] CHECK OPTION are excluded with COHDBL001 at CREATE.
+Recursive, materialized and updatable views remain future work. DROP VIEW CASCADE
+is included by the owner ruling for this item, superseding the original T2 exclusion.
 
 ## SQL namespaces (#1030)
 
@@ -425,7 +476,7 @@ without a form fails the test, as does a new statement kind.
 Every SQL expression the catalog persists is stored as **canonical SQL rendered
 from its parsed tree**, never as the text the user wrote: a `CHECK` predicate, a
 column literal and expression `DEFAULT` (#1121), and
-view queries (#1124), which must use the same path. `SqlExpressionRenderer` (this
+persisted view queries (#1124), which use the same path. `SqlExpressionRenderer` (this
 package) produces the canonical text; the engine's one persistence helper renders
 it, proves before anything is stored that the text parses back to the declared
 tree, and is the only code that reads it back. The canonical form is a function of
@@ -597,8 +648,7 @@ including definitions created under a raised nesting limit. It replaces only col
 identifier tokens in its single-table scope;
 strings, function names, type names and collations retain their meaning. Persisted DEFAULTs
 have no column scope; SQL function bodies bind their own parameters and cannot contain table
-subqueries. They therefore require no table-name rewrite. There are no stored view queries on
-this base; #1124 owns their dependency guard. INFORMATION_SCHEMA and COHESION_SCHEMA expose
+subqueries. They therefore require no table-name rewrite. Renaming a table or a referenced column is refused while a persisted view reads it, naming the dependent view (#1124). INFORMATION_SCHEMA and COHESION_SCHEMA expose
 the published names and facets immediately. A query using an old name reports an unknown object.
 
 SET DEFAULT accepts the same literal and variable-free expression forms as
@@ -966,7 +1016,7 @@ its data with the engine that wrote it (which can still open it), drop the
 database (`DropDatabaseAsync`), create it again and reload the data. A database
 whose creation was interrupted before its format was recorded reads as format 1
 and needs only the drop and create. Upgrading databases across format versions
-is tracked by #1152. New databases are created on format 21.
+is tracked by #1152. New databases are created on format 22.
 
 From format 4 on, the catalog stores the format marker in a record that engines
 before format 4 do not recognize, so those engines refuse to open a format-4
@@ -1678,15 +1728,16 @@ conventions, not the complete ISO view layouts. Columns below are listed in
 
 | Relation | Columns, in order | Rows |
 |---|---|---|
-| `INFORMATION_SCHEMA.TABLES` | `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `TABLE_TYPE` | Stored tables in the current database; `TABLE_TYPE = 'BASE TABLE'` |
+| `INFORMATION_SCHEMA.TABLES` | `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `TABLE_TYPE` | Stored tables (`BASE TABLE`) and persisted user views (`VIEW`) in the current database |
+| `INFORMATION_SCHEMA.VIEWS` | `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `VIEW_DEFINITION`, `CHECK_OPTION`, `IS_UPDATABLE` | Persisted canonical body; `NONE`, `NO` for every read-only view |
 | `INFORMATION_SCHEMA.SCHEMATA` | `CATALOG_NAME`, `SCHEMA_NAME`, `SCHEMA_OWNER`, `DEFAULT_CHARACTER_SET_CATALOG`, `DEFAULT_CHARACTER_SET_SCHEMA`, `DEFAULT_CHARACTER_SET_NAME`, `SQL_PATH` | Persisted namespaces, including empty namespaces and dbo, from the statement's captured catalog. Owner principal, default character set and SQL path are NULL because those SQL facilities are not implemented. |
-| `INFORMATION_SCHEMA.COLUMNS` | `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `COLUMN_NAME`, `ORDINAL_POSITION`, `COLUMN_DEFAULT`, `IS_NULLABLE`, `DATA_TYPE`, `CHARACTER_MAXIMUM_LENGTH`, `CHARACTER_OCTET_LENGTH`, `NUMERIC_PRECISION`, `NUMERIC_PRECISION_RADIX`, `NUMERIC_SCALE`, `DATETIME_PRECISION`, `IS_IDENTITY`, `IDENTITY_GENERATION`, `IDENTITY_START`, `IDENTITY_INCREMENT`, `IDENTITY_MAXIMUM`, `IDENTITY_MINIMUM`, `IDENTITY_CYCLE` | One row per live table column; ordinals start at one and have no gap where a column was dropped. All 19 DATA_TYPE names parse in DDL and CAST; aliases report canonical identity and modifiers. COLUMN_DEFAULT renders resolved temporal and binary literal values with typed prefixes, including defaults declared as plain strings; other defaults retain canonical SQL |
+| `INFORMATION_SCHEMA.COLUMNS` | `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `COLUMN_NAME`, `ORDINAL_POSITION`, `COLUMN_DEFAULT`, `IS_NULLABLE`, `DATA_TYPE`, `CHARACTER_MAXIMUM_LENGTH`, `CHARACTER_OCTET_LENGTH`, `NUMERIC_PRECISION`, `NUMERIC_PRECISION_RADIX`, `NUMERIC_SCALE`, `DATETIME_PRECISION`, `IS_IDENTITY`, `IDENTITY_GENERATION`, `IDENTITY_START`, `IDENTITY_INCREMENT`, `IDENTITY_MAXIMUM`, `IDENTITY_MINIMUM`, `IDENTITY_CYCLE` | One row per live table or view column; view names, types, domains and collations are frozen, while nullability follows the captured source image. Ordinals start at one and have no gap where a table column was dropped. All 19 DATA_TYPE names parse in DDL and CAST; aliases report canonical identity and modifiers. COLUMN_DEFAULT renders resolved temporal and binary literal values with typed prefixes, including defaults declared as plain strings; other defaults retain canonical SQL |
 | `INFORMATION_SCHEMA.TABLE_CONSTRAINTS` | `CONSTRAINT_CATALOG`, `CONSTRAINT_SCHEMA`, `CONSTRAINT_NAME`, `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `CONSTRAINT_TYPE`, `IS_DEFERRABLE`, `INITIALLY_DEFERRED` | Primary keys, unique indexes/constraints, foreign keys, and explicit checks; both deferral fields are `NO` |
 | `INFORMATION_SCHEMA.KEY_COLUMN_USAGE` | `CONSTRAINT_CATALOG`, `CONSTRAINT_SCHEMA`, `CONSTRAINT_NAME`, `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `COLUMN_NAME`, `ORDINAL_POSITION` | One row per primary, unique, or foreign-key column, in constraint order |
 | `INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS` | `CONSTRAINT_CATALOG`, `CONSTRAINT_SCHEMA`, `CONSTRAINT_NAME`, `UNIQUE_CONSTRAINT_CATALOG`, `UNIQUE_CONSTRAINT_SCHEMA`, `UNIQUE_CONSTRAINT_NAME`, `MATCH_OPTION`, `UPDATE_RULE`, `DELETE_RULE` | Foreign keys with the referenced key identity; `MATCH_OPTION = 'NONE'`, `UPDATE_RULE = 'RESTRICT'`, delete rule `RESTRICT`, `CASCADE`, `NO ACTION`, `SET NULL` or `SET DEFAULT` |
 | `INFORMATION_SCHEMA.CHECK_CONSTRAINTS` | `CONSTRAINT_CATALOG`, `CONSTRAINT_SCHEMA`, `CONSTRAINT_NAME`, `CHECK_CLAUSE` | Explicit checks; `CHECK_CLAUSE` is the persisted canonical predicate (see [Persisted definitions are canonical](#persisted-definitions-are-canonical)) |
 | `COHESION_SCHEMA.INDEXES` | `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `INDEX_NAME`, `COLUMN_NAME`, `ORDINAL_POSITION`, `IS_UNIQUE`, `IS_PRIMARY_KEY` | Cohesion extension: one row per index key column |
-| `COHESION_SCHEMA.OBJECT_OWNERSHIP` | `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `OBJECT_TYPE`, `OBJECT_NAME`, `OWNER`, `OWNING_SCHEMA` | Cohesion extension: one row per table or index; `OWNER` is `Adhoc` or `Schema` |
+| `COHESION_SCHEMA.OBJECT_OWNERSHIP` | `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `OBJECT_TYPE`, `OBJECT_NAME`, `OWNER`, `OWNING_SCHEMA` | Cohesion extension: one row per table, view or index; `OWNER` is `Adhoc` or `Schema` |
 | `COHESION_SCHEMA.FUNCTIONS` | `FUNCTION_NAME`, `FUNCTION_KIND`, `PARAMETER_TYPES`, `PARAMETER_COUNT`, `RETURN_TYPE`, `VOLATILITY`, `NULL_BEHAVIOR`, `IS_BUILT_IN`, `IS_SQL_DEFINED` | Cohesion extension (E2): one row per function overload of the engine's catalog, built-ins first in registration order, then one row per special form. `FUNCTION_KIND` is `SCALAR`, `AGGREGATE` or `SPECIAL FORM`; `PARAMETER_TYPES` lists the parameter types (`TEXT ...` for a variadic tail, `*` for an aggregate called as `name(*)`, empty for none); `VOLATILITY` is `IMMUTABLE`, `STABLE` or `VOLATILE` for a scalar and NULL for an aggregate, which is never folded or admitted in a CHECK; `NULL_BEHAVIOR` is `RETURNS NULL ON NULL INPUT` or `CALLED ON NULL INPUT`. A special form's type, count, volatility and NULL-behavior columns are NULL. Native rows are frozen at engine build; SQL-defined rows come from the statement catalog image |
 | `COHESION_SCHEMA.TYPES` | `TYPE_NAME`, `BASE_TYPE`, `IS_DOMAIN`, `IS_SQL_DEFINED` | Native types and domains plus SQL domains in the catalog image |
 | `COHESION_SCHEMA.DOMAINS` | `DOMAIN_NAME`, `BASE_TYPE`, `IS_SQL_DEFINED` | Native domains and SQL domains in the catalog image |
@@ -1727,7 +1778,7 @@ ORDER BY ORDINAL_POSITION;
 All relations are read-only. DML and supported table/index DDL targeting them,
 including colliding `CREATE TABLE` statements and `IF [NOT] EXISTS` forms, fail
 with `System view '<SCHEMA>.<VIEW>' is read-only.` The wire error code is
-`ExecutionFailure`. User-defined `CREATE VIEW` / `DROP VIEW` remain unsupported.
+`ExecutionFailure`. Persisted user views execute through the same read-only relation path (#1124).
 The snapshot rules, ISO-subset limitations, and the rationale for the Cohesion
 extension relations are recorded in the
 [SQL engine design](../../Assimalign.Cohesion.Database.Sql/docs/DESIGN.md#virtual-system-relations-c1).
@@ -2599,7 +2650,7 @@ construct. The table holds the clause keywords the preflight scan rejects,
 such as `WINDOW` in the statement matrix. UNION, INTERSECT and EXCEPT remain profile keywords and execute; CORRESPONDING is rejected contextually after an operator and optional quantifier, without reserving that identifier. It also holds every other word or
 operator outside the profile's keywords that a dedicated rule recognizes and
 rejects with `COHDBL001`: `RECURSIVE`, `[NOT] MATERIALIZED`, `SEARCH`/`CYCLE`,
-`SELECT ALL`, `CREATE`/`DROP VIEW`,
+`SELECT ALL`,
 `CREATE COLLATION`, `CREATE FULLTEXT`, `NULLS FIRST`/`LAST`, `GROUPING SETS` and
 the `GROUPING`, `ROLLUP`, `CUBE` and `GROUPING_ID` calls, `FILTER (...)` and
 `WITHIN GROUP` after a call, the `ANY`/`SOME` (and `ALL`) quantified comparisons,

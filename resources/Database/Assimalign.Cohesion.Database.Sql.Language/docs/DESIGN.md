@@ -670,3 +670,13 @@ CHECK predicates and absent DROP definitions, including the structured carrier a
 Wire diagnostic overflow does not change parser admission or its complete in-process
 carrier. The endpoint bounds delivery with an explicit COHDBP001 prefix/omission notice
 while retaining the original failure and session; DIALECT.md records this wire behavior.
+
+## Persisted view statements (#1124)
+
+SqlCreateViewExpression and SqlDropViewExpression are typed CREATE/DROP nodes;
+view bodies use the existing SqlQueryBodyExpression grammar, including WITH and
+set operations. VIEW remains a keyword; REPLACE is accepted as its function token.
+View modifiers remain contextual so persisted identifier quoting does not change.
+Capability scanning treats the body after AS as a query, preserving the same
+unsupported-SELECT diagnostic at declaration time. DROP VIEW RESTRICT and CASCADE
+are parsed independently of the foreign-key action capability flags.

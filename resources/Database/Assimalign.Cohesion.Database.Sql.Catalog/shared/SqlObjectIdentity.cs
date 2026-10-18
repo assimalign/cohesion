@@ -17,6 +17,10 @@ internal static class SqlObjectIdentity
 
     internal static string Domain(string name) => "D:" + Quote(name);
 
+    internal static string View(string schema, string view) => "V:" + Quote(schema) + "." + Quote(view);
+
+    internal static string Column(ulong table, string column) => "C:" + table.ToString(System.Globalization.CultureInfo.InvariantCulture) + ":" + Quote(column);
+
     internal static string Schema(string name) => "S:" + Quote(name);
 
     internal static string Signature(string name, IEnumerable<string> parameterTypes)

@@ -122,9 +122,10 @@ public sealed partial class SqlCatalog
             {
                 throw new SqlCatalogException($"Table '{expected.Schema}.{expected.Name}' changed while the statement was waiting. Retry the statement.");
             }
+            EnsureNoViewReads(expected, columnName, rename: true);
             if (columnName is null)
             {
-                if (_tables.ContainsKey((expected.Schema, newName)))
+                if (_tables.ContainsKey((expected.Schema, newName)) || _views.ContainsKey(SqlObjectIdentity.View(expected.Schema, newName)))
                 {
                     throw new SqlCatalogException($"Table '{expected.Schema}.{newName}' already exists.");
                 }

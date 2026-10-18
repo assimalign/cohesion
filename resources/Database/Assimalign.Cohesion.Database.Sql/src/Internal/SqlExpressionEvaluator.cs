@@ -118,7 +118,7 @@ internal sealed partial class SqlExpressionEvaluator
         _sharedColumns = sharedColumns;
         _functions = functions ?? SqlFunctionEnvironment.Standard;
         _cancellationToken = cancellationToken;
-        _foldConstants = foldConstants;
+        _foldConstants = foldConstants && !_functions.IsView;
         _typing = slotScope is null && outerScope is null ? null : new SqlTypingMemory(slotScope)
         {
             OuterScope = outerScope, OuterDependencies = outerDependencies,
@@ -154,6 +154,11 @@ internal sealed partial class SqlExpressionEvaluator
 
     /// <summary>Gets the engine's function catalog and the database that calls in this scope bind against.</summary>
     internal SqlFunctionEnvironment Functions => _functions;
+
+    // Grouping and ordering already resolved these nodes to completed value slots.
+    internal bool IsBoundValue(SqlExpression expression) => _valueOrdinals?.ContainsKey(expression) == true;
+    internal bool HasOutputValues => _projectionSources is not null;
+    internal bool IsOutputValue(SqlExpression expression) => _projectionSources?.ContainsKey(expression) == true;
 
     /// <summary>
     /// Creates the scope ordering keys bind in: references to ordering aliases and ordinals resolve
