@@ -60,9 +60,16 @@ internal static partial class DocumentPlanExecutor
             operation.EnsureActive();
             var document = database.ReadDocument(entry);
             using var json = JsonDocument.Parse(document.Content, new JsonDocumentOptions { MaxDepth = 128 });
-            var context = new DocumentEvaluationContext(json.RootElement.Clone(), entry.Id, entry.Version,
+            var context = new DocumentEvaluationContext(json.RootElement, entry.Id, entry.Version,
                 query.Unnest.Count == 0 && query.Projections.Count == 1 && query.Projections[0].Expression is OqlStarExpression ? document.Content : default);
-            CollectMatches(plan.Logical, context, matches, evaluator, operation, cancellationToken);
+            if (query.Unnest.Count == 0)
+            {
+                if (evaluator.Matches(query.Predicate, context)) { matches.Add(context with { Content = json.RootElement.Clone() }); }
+            }
+            else
+            {
+                CollectMatches(plan.Logical, context with { Content = json.RootElement.Clone() }, matches, evaluator, operation, cancellationToken);
+            }
         }
 
         return ExecuteRows(plan.Logical, matches, evaluator, cancellationToken);
@@ -95,6 +102,11 @@ internal static partial class DocumentPlanExecutor
     private static void CollectMatches(DocumentLogicalPlan logical, DocumentEvaluationContext source,
         List<DocumentEvaluationContext> matches, DocumentExpressionEvaluator evaluator, DocumentOperation operation, CancellationToken cancellationToken)
     {
+        if (logical.Query.Unnest.Count == 0)
+        {
+            if (evaluator.Matches(logical.Query.Predicate, source)) { matches.Add(source); }
+            return;
+        }
         using var rows = Expand(logical.Query, source, evaluator, operation, cancellationToken).GetEnumerator();
         // Test the completed window before advancing, including within one source document.
         while (!PageComplete(logical, matches.Count) && rows.MoveNext())
@@ -150,20 +162,15 @@ internal static partial class DocumentPlanExecutor
     }
 
     // Use the planner's fixed result types, including function, operator and META results.
-    // Stars have a nominal Json type but can observe heterogeneous scalar roots, while
-    // Null also denotes an unknown type; only literal NULL/MISSING is fixed in that case.
+    // Synthetic UNNEST stars always produce objects; plain stars can have scalar roots.
     private static bool PageComplete(DocumentLogicalPlan logical, int matched)
-        => !logical.IsGrouped && !logical.Query.IsDistinct && logical.Query.OrderBy.Count == 0 &&
-            logical.Projections.All(projection => projection.Expression is not OqlStarExpression &&
-                (projection.Type != DatabaseType.Null || projection.Expression is
-                    OqlLiteralExpression { Value: null or JsonElement { ValueKind: JsonValueKind.Null } } or OqlMissingExpression)) &&
+        => logical.CanStopEarly &&
             logical.Limit is long limit && Math.Max(0L, matched - logical.Offset) >= limit;
 
     private static DatabaseResult ExecuteRows(DocumentLogicalPlan logical, List<DocumentEvaluationContext> matches,
         DocumentExpressionEvaluator evaluator, CancellationToken cancellationToken)
     {
         var query = logical.Query;
-        var variables = DocumentPlanner.UnnestVariables(query);
         var output = new List<EvaluatedRow>();
         if (logical.IsGrouped)
         {
@@ -206,8 +213,7 @@ internal static partial class DocumentPlanExecutor
             foreach (var row in output)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                row.OrderKeys = query.OrderBy.Select(order => query.IsValue &&
-                    DocumentPlanner.EquivalentExpression(query.Projections[0].Expression, order.Expression, query.Alias, variables)
+                row.OrderKeys = query.OrderBy.Select((order, index) => query.IsValue && logical.ProjectedOrdering[index]
                         ? row.Values[0] : evaluator.Evaluate(order.Expression, row.Document, row.Group)).ToArray();
             }
             output.Sort((left, right) =>

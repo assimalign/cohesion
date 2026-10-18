@@ -338,7 +338,8 @@ Each evaluation tuple carries its owned FROM value, identity/version/raw metadat
 persistent chain of named UNNEST bindings. Quantifiers add an inner frame only while evaluating
 SATISFIES; their collection expression sees the enclosing tuple. The nearest named variable
 wins, then the explicit FROM alias, then document fields. Names use ordinal comparison.
-FROM and UNNEST form one binding list with unique names (OQL0010 in text, COHDOC023 for a
+FROM and UNNEST form one binding list with unique names, reserving the unaliased collection
+name for duplicate checks (OQL0010 in text, COHDOC023 for a
 direct AST); quantifiers may shadow outer bindings. META on a quantified or UNNEST variable
 is invalid, including a quantified name that shadows the FROM alias.
 
@@ -350,7 +351,9 @@ NULL. Groups, HAVING, aggregate arguments and ordering evaluate these tuples; CO
 an Int64 count of rows. LIMIT's early-stop window counts matching expanded rows and checks
 before advancing to the next element, including multiple rows from the same document.
 Projection aliases retain precedence in ORDER BY. Group-key and VALUE-order equivalence
-distinguish a variable t from the document field d.t.
+distinguish a variable t from the document field d.t and preserve quantifier scope when
+matching compound group keys. Persistent quantifier scope frames and UNNEST variable names
+are computed once per plan; VALUE-order equivalence is also resolved before iterating rows.
 
 With UNNEST, star constructs an object with the explicit FROM alias (or collection name) and
 each array variable, omitting MISSING bindings. For an unaliased system source, the full
@@ -358,8 +361,8 @@ COHESION_SCHEMA name is the object key. The collection name does not become a pa
 broader implicit-keyspace alias semantics remain a follow-up. Synthetic stars use the existing
 whole-document result mode and row writer, with empty RawContent, so the wire receives the
 constructed object. A lone star without UNNEST still preserves stored bytes.
-An array variable colliding with the implicit source member follows the object constructor's
-last non-MISSING rule; no additional path alias is introduced.
+An array variable colliding with the unaliased collection name is a duplicate binding;
+no additional path alias is introduced.
 
 Quantified element results use Couchbase's true/not-true test, as recorded in the
 [language contract](../../Assimalign.Cohesion.Database.Documents.Language/docs/DESIGN.md#array-bindings-and-quantified-predicates-1136).
@@ -374,7 +377,13 @@ conjunct can still select an index with UNNEST. Array-index pushdown remains def
 EXPLAIN inserts Unnest/LeftUnnest nodes, naming each variable in Detail, between projection
 and access while retaining the existing Select detail string.
 
-Each stored document is cloned once and shared across its expanded rows. Path navigation
+With UNNEST each stored document is cloned once and shared across its expanded rows.
+Without UNNEST, WHERE reads the borrowed root and only matching documents are cloned;
+no expansion iterator or stack is created. Path navigation keeps the root as a JsonElement
+and consults variable frames only when bindings exist, avoiding a boxed root per path.
+Synthetic stars have a fixed object result type, so unsorted, ungrouped, non-DISTINCT LIMIT
+queries stop expansion and projection at the completed window. Constant array and object
+constructors cache their owned JSON per evaluator and result-depth limit. Path navigation
 does not revalidate JSON subtrees already validated by storage; parameter JSON normalizes
 once per evaluator. UNNEST, quantifiers and array IN enumerate arrays without indexing them
 repeatedly. Expansion checks cancellation and transaction activity for every row; predicate

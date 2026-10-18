@@ -40,7 +40,7 @@ public sealed partial class OqlQueryParser
 
         List<OqlUnnestExpression> unnest = [];
         var variables = new HashSet<string>(StringComparer.Ordinal);
-        if (alias is not null) { variables.Add(alias); }
+        variables.Add(alias ?? collection);
         while (!Failed && IsUnnestClause())
         {
             var bindingStart = Current;
@@ -54,7 +54,14 @@ public sealed partial class OqlQueryParser
             if (Take("AS")) { variableToken = Current; variable = Identifier(); }
             else if (Current.Type is TokenType.Identifier or TokenType.QuotedIdentifier or TokenType.Function && !IsUnnestClause() && !IsReturningClause())
             { variable = Identifier(); }
-            else if (expression is OqlPathExpression { Segments.Count: > 0 } path) { variable = path.Segments[^1].Name; }
+            else if (expression is OqlPathExpression { Segments.Count: > 0 } path)
+            {
+                variable = path.Segments[^1].Name;
+                int pathEnd = _position - 1;
+                while (pathEnd > 0 && _tokens[pathEnd].End > path.Location!.End) { pathEnd--; }
+                if (_tokens[pathEnd].Type == TokenType.RightBracket) { pathEnd--; }
+                variableToken = _tokens[pathEnd];
+            }
             if (!Failed && variable is null) { Error("OQL0002", "UNNEST requires an alias for an expression without a final path name.", variableToken); }
             if (!Failed && !variables.Add(variable!)) { Error("OQL0010", ErrorMessages.BindingNameDuplicate, variableToken); }
             unnest.Add(new OqlUnnestExpression(expression, variable ?? string.Empty, left, Span(bindingStart, Previous)));
@@ -111,10 +118,12 @@ public sealed partial class OqlQueryParser
             groups.AsReadOnly(), having, ordering.AsReadOnly(), distinct, value, limit, offset, Span(start, Previous), unnest.AsReadOnly());
     }
 
-    private bool IsUnnestClause() => Is("UNNEST") ||
-        (Is("INNER") || Is("LEFT")) && _position + 1 < _tokens.Count &&
-        (IsWord(_tokens[_position + 1], "UNNEST") || Is("LEFT") && IsWord(_tokens[_position + 1], "OUTER") &&
-            _position + 2 < _tokens.Count && IsWord(_tokens[_position + 2], "UNNEST"));
+    private bool IsUnnestClause() => IsUnnestClause(_position);
+
+    private bool IsUnnestClause(int index) => IsWord(_tokens[index], "UNNEST") ||
+        (IsWord(_tokens[index], "INNER") || IsWord(_tokens[index], "LEFT")) && index + 1 < _tokens.Count &&
+        (IsWord(_tokens[index + 1], "UNNEST") || IsWord(_tokens[index], "LEFT") && IsWord(_tokens[index + 1], "OUTER") &&
+            index + 2 < _tokens.Count && IsWord(_tokens[index + 2], "UNNEST"));
 
     private bool HasCommaCount()
     {

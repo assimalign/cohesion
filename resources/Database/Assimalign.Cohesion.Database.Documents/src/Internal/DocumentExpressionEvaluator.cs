@@ -23,6 +23,7 @@ internal sealed partial class DocumentExpressionEvaluator
     private readonly Dictionary<OqlLikeExpression, int[]> _likePatterns = new();
     private readonly IReadOnlyDictionary<string, object?>? _parameters;
     private readonly Dictionary<string, object?> _normalizedParameters = new(StringComparer.Ordinal);
+    private Dictionary<(OqlExpression, int), (bool Constant, object? Value)>? _constructors;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="DocumentExpressionEvaluator"/> class.
@@ -55,9 +56,7 @@ internal sealed partial class DocumentExpressionEvaluator
                 OqlParameterExpression parameter => Parameter(parameter.Name),
                 OqlStarExpression => Star(document),
                 OqlMetaExpression meta => meta.Member == "id" ? document.Id : (decimal)document.Version,
-                OqlArrayExpression array => DocumentJsonValue.Array(array.Elements.Select(element => Evaluate(element, document, group)), _writeVerb, _constructorMaxDepth),
-                OqlObjectExpression obj => DocumentJsonValue.Object(obj.Members.Select(member =>
-                    new KeyValuePair<string, object?>(member.Key, Evaluate(member.Value, document, group))), _writeVerb, _constructorMaxDepth),
+                OqlArrayExpression or OqlObjectExpression => Construct(expression, document, group),
                 OqlPathExpression path => ReadPath(path, document),
                 OqlUnaryExpression unary => Unary(unary.Operator, Evaluate(unary.Operand, document, group)),
                 OqlBinaryExpression binary => Binary(binary, document, group),
@@ -169,6 +168,21 @@ internal sealed partial class DocumentExpressionEvaluator
         return value;
     }
 
+    private object Construct(OqlExpression expression, DocumentEvaluationContext document, IReadOnlyList<DocumentEvaluationContext>? group)
+    {
+        _constructors ??= new();
+        var key = (expression, _constructorMaxDepth);
+        bool known = _constructors.TryGetValue(key, out var cached);
+        if (known && cached.Constant) { return cached.Value!; }
+        bool constant = known ? cached.Constant : DocumentPlanner.IsConstant(expression);
+        object value = expression is OqlArrayExpression array
+            ? DocumentJsonValue.Array(array.Elements.Select(element => Evaluate(element, document, group)), _writeVerb, _constructorMaxDepth)
+            : DocumentJsonValue.Object(((OqlObjectExpression)expression).Members.Select(member =>
+                new KeyValuePair<string, object?>(member.Key, Evaluate(member.Value, document, group))), _writeVerb, _constructorMaxDepth);
+        if (!known) { _constructors.Add(key, (constant, constant ? value : null)); }
+        return value;
+    }
+
     private object? ParameterValue(string name)
     {
         if (_parameters is null || !_parameters.TryGetValue(ParameterBindings.BareName(name), out var value))
@@ -213,19 +227,19 @@ internal sealed partial class DocumentExpressionEvaluator
     {
         int start = path.Segments.Count > 0 && _alias is not null &&
             string.Equals(path.Segments[0].Name, _alias, StringComparison.Ordinal) ? 1 : 0;
-        object? root = ReadJson(document.Content);
-        if (path.Segments.Count > 0)
+        var current = document.Content;
+        if (document.Bindings is not null && path.Segments.Count > 0)
         {
             for (var frame = document.Bindings; frame is not null; frame = frame.Parent)
             {
                 if (frame.Name != path.Segments[0].Name) { continue; }
                 start = 1;
-                root = frame.Value is JsonElement json ? ReadJson(json) : frame.Value;
+                if (frame.Value is not JsonElement json)
+                { return start == path.Segments.Count ? frame.Value : DocumentMissing.Instance; }
+                current = json;
                 break;
             }
         }
-        if (start == path.Segments.Count) { return root; }
-        if (root is not JsonElement current) { return DocumentMissing.Instance; }
         for (int i = start; i < path.Segments.Count; i++)
         {
             var segment = path.Segments[i];

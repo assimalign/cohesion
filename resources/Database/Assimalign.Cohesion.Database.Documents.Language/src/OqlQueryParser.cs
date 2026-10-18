@@ -266,6 +266,9 @@ public sealed partial class OqlQueryParser : QueryParser
             // as use. SET is exempt only at the assignment-clause token after that header;
             // SET(...) elsewhere still refuses.
             if (index > statementStart && (index < updateHeaderEnd || index == updateClause)) { continue; }
+            // An unsupported source expansion owns the remainder of UPDATE. Syntax parsing
+            // locates it after the destination, rather than guessing from expression names.
+            if (index == updateHeaderEnd && updateClause < 0 && IsUnnestClause(index)) { break; }
 
             // FETCH FIRST is one unsupported spelling. LIMIT ALL is an invalid count.
             // Only a recognized clause head owns the next word; a path or alias does not.
@@ -346,19 +349,14 @@ public sealed partial class OqlQueryParser : QueryParser
             // The binding itself is not array membership. WITHIN remains deferred.
             if (value is "ANY" or "SOME" or "EVERY" && index + 2 < _tokens.Count && IsWord(_tokens[index + 2], "WITHIN"))
             { continue; }
-            if (value == "UNNEST" && statementWithoutQuery && index > 0 && EndsOperand(index - 1))
-            {
-                result.Add(("UNNEST in UPDATE or DELETE", token));
-                break;
-            }
             if (value == "MERGE" && index > 0 && index + 1 < _tokens.Count && IsWord(_tokens[index + 1], "INTO") &&
-                (IsWord(_tokens[index - 1], "SATISFIES") || _tokens[index - 1].Type == TokenType.LeftParen))
+                (IsWord(_tokens[index - 1], "SATISFIES") || IsWord(_tokens[index - 1], "THEN") ||
+                    IsWord(_tokens[index - 1], "ELSE") || _tokens[index - 1].Type == TokenType.LeftParen))
             {
                 // A nested MERGE statement owns its text, while a field named merge
                 // remains an ordinary expression in SATISFIES.
                 AddUnsupported(result, "MERGE", token);
-                openQuantifiers++;
-                continue;
+                break;
             }
 
             // EXISTS is supported only in the positional DDL modifier. Keep malformed
@@ -501,8 +499,7 @@ public sealed partial class OqlQueryParser : QueryParser
         _position = start + 1;
         CollectionName();
         if (Take("AS")) { Identifier(); }
-        else if (IsUpdateAlias() && (!Is("UNNEST") || _position + 1 < _tokens.Count &&
-            (IsWord(_tokens[_position + 1], "SET") || IsWord(_tokens[_position + 1], "UNSET")))) { Identifier(); }
+        else if (IsUpdateAlias()) { Identifier(); }
         var result = (_position, Is("SET") || Is("UNSET") ? _position : -1);
         _position = saved;
         _diagnostics.RemoveRange(diagnostics, _diagnostics.Count - diagnostics);

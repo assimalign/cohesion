@@ -92,7 +92,11 @@ counts expanded rows. With UNNEST, `SELECT *` returns synthetic `{"d":...,"t":..
 without a FROM alias the source member is named items, while paths keep existing resolution.
 A plain star without UNNEST preserves stored bytes. ORDER BY projection aliases outrank
 UNNEST variables. Variables shadow fields; quantified bindings may shadow enclosing variables.
-Duplicate names in one binding list give OQL0010. Direct AST duplicates give COHDOC023.
+Duplicate names in one binding list give OQL0010. The unaliased collection name is reserved
+for this check: `FROM items LEFT UNNEST tags items` is a duplicate, while paths still do not
+resolve an implicit items variable. Inferred duplicate aliases span the final path-name token.
+Direct AST duplicates give COHDOC023. Group-key equivalence preserves lexical binding scope;
+a quantified t cannot match an outer t in a grouping expression.
 
 `ANY | SOME | EVERY x IN array SATISFIES predicate END` executes with one scoped variable.
 SOME is ANY. Each predicate result undergoes SQL++ Truth conversion; NULL/MISSING results
@@ -103,6 +107,9 @@ and [EVERY](https://github.com/couchbase/query/blob/master/expression/coll_every
 UNNEST, INNER, LEFT, OUTER, EVERY and SATISFIES stay contextual names. END remains reserved.
 UNNEST in UPDATE/DELETE, FLATTEN calls, multi-binding quantifiers, ARRAY/FIRST comprehensions, NEST,
 JOIN, WITHIN and ANY AND EVERY remain deferred with COHDBL001.
+The DML refusal applies at an UNNEST clause, so `DELETE FROM items WHERE ANY x IN tags
+SATISFIES unnest END` and UPDATE predicates/values may read a field named unnest. A MERGE INTO
+inside a CASE result in SATISFIES receives one COHDBL001 naming MERGE.
 
 UPSERT INTO collection [AS alias] (KEY, VALUE) VALUES (key, value) [, ...] and
 UPSERT INTO collection (KEY outputName [, VALUE outputName]) SELECT ... execute with

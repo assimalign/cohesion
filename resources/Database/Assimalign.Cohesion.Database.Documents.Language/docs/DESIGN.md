@@ -320,26 +320,30 @@ Collection, Variable and IsLeft. The SELECT constructor accepts this list. The p
 to ANY. A path-headed variable resolves before document fields, with the innermost binding
 winning. Quantifier collections evaluate in the enclosing scope, then SATISFIES adds the
 inner variable. Otherwise an unqualified path addresses the FROM document. The unaliased
-collection name only keys a synthetic star; it does not become an implicit variable.
+collection name keys a synthetic star and is reserved for duplicate binding checks; it does
+not become an implicit path variable.
 The full source name keys an unaliased COHESION_SCHEMA synthetic star too.
 
-The FROM alias and its UNNEST bindings form one list with unique ordinal names. Quantifier
+The explicit FROM alias (or unaliased collection name) and its UNNEST bindings form one list with unique ordinal names. Quantifier
 variables may shadow outer variables and document fields. Duplicate names in one binding
 list give OQL0010; a direct SELECT AST receives COHDOC023. Multi-binding quantifiers remain
 deferred. An omitted UNNEST alias defaults to the final named path step; expressions without
-one require an explicit alias. UNNEST, INNER, LEFT, OUTER, EVERY and SATISFIES are contextual,
+one require an explicit alias. An inferred duplicate spans the final path-name token, including
+bracket-string paths and parenthesized paths. UNNEST, INNER, LEFT, OUTER, EVERY and SATISFIES are contextual,
 preserving existing fields and AS-less aliases named every or satisfies. END was already
 reserved. ANY and SOME retain their existing reservations. UNNEST in UPDATE/DELETE, FLATTEN calls,
 JOIN, NEST, WITHIN, ANY AND EVERY and ARRAY/FIRST comprehensions remain COHDBL001.
+UPDATE/DELETE reject UNNEST only where their grammar expects a clause; a field named unnest
+in SATISFIES remains an expression. MERGE INTO in a CASE result under SATISFIES reports the
+single MERGE construct before its internal mutation tokens are scanned.
 
 INNER UNNEST emits array elements in order and emits nothing for MISSING, NULL, scalar,
 object or empty-array operands. LEFT UNNEST preserves those inputs with a MISSING binding;
 an actual null array element remains NULL. Chaining expands each preceding tuple. With
 UNNEST, star is a synthetic object keyed by FROM and UNNEST variable names, omitting MISSING.
 Without UNNEST, a lone star retains the original stored value and exact bytes.
-If an array variable matches the implicit source object's member name, the synthetic object
-uses the existing constructor rule: the last non-MISSING member wins. This does not make
-the implicit source name a path variable.
+An array variable matching the unaliased collection name is a duplicate binding, even though
+the implicit source name does not resolve in paths.
 
 ANY/SOME return TRUE on the first true SQL++ Truth conversion, otherwise FALSE. EVERY returns
 FALSE on the first not-true conversion, otherwise TRUE. NULL and MISSING SATISFIES results

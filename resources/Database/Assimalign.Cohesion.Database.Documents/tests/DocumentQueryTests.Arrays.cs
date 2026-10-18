@@ -11,6 +11,7 @@ using Xunit;
 
 using Assimalign.Cohesion.Database.Documents.Internal;
 using Assimalign.Cohesion.Database.Documents.Language;
+using Assimalign.Cohesion.Database.Documents.Tests.TestObjects;
 
 namespace Assimalign.Cohesion.Database.Documents.Tests;
 
@@ -88,9 +89,9 @@ public sealed partial class DocumentQueryTests
         Encoding.UTF8.GetString((await RowsAsync(session, "SELECT * FROM items WHERE META().id = 'a'")).Single().GetBytes(0).Span).ShouldBe(json);
         // An unaliased source still reads an actual field named items, not an implicit variable.
         (await RowsAsync(session, "SELECT items.tags FROM items UNNEST tags t")).ShouldAllBe(row => row.IsMissing(0));
-        var collision = await RowsAsync(session, "SELECT * FROM items LEFT UNNEST tags items");
-        collision[0].GetValue(0).ShouldBeOfType<JsonElement>().GetProperty("items").GetString().ShouldBe("blue");
-        collision[2].GetValue(0).ShouldBeOfType<JsonElement>().GetProperty("items").ValueKind.ShouldBe(JsonValueKind.Object);
+        var collision = await Should.ThrowAsync<DatabaseException>(async () =>
+            await session.ExecuteAsync("SELECT * FROM items LEFT UNNEST tags items", cancellationToken: CancellationToken.None));
+        collision.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("OQL0010");
         (await RowsAsync(session, "SELECT \" \" FROM items d UNNEST d.tags AS \" \""))
             .Select(row => row.GetValue(0)).ShouldBe(new object?[] { "blue", null });
     }
@@ -162,6 +163,145 @@ public sealed partial class DocumentQueryTests
         }
         (await RowsAsync(session, "SELECT 1 FROM items d UNNEST d.tags t WHERE ANY t IN [3] SATISFIES t = 3 END AND t = 2"))
             .Count.ShouldBe(1);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Documents] - Grouping: quantifier bindings cannot match outer grouping names")]
+    [InlineData(false, "t", "")]
+    [InlineData(true, "t", "")]
+    [InlineData(false, "t", "UNNEST [-1] t")]
+    [InlineData(false, "d", "")]
+    public async Task Execute_GroupKeyShadowing_ShouldRejectUngroupedFieldAsync(bool reverse, string variable, string unnest)
+    {
+        // Arrange
+        await using var engine = DocumentDatabaseEngine.Create("group-scope", new());
+        var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        var collection = await session.CreateCollectionAsync("items", CancellationToken.None);
+        await PutAsync(collection, session, "a", reverse ? "{\"x\":-1,\"t\":1,\"d\":1}" : "{\"x\":1,\"t\":-1,\"d\":-1}");
+        await PutAsync(collection, session, "b", reverse ? "{\"x\":1,\"t\":-1,\"d\":-1}" : "{\"x\":-1,\"t\":1,\"d\":1}");
+        string expression = $"ANY {variable} IN [0] SATISFIES s.x + {variable} > 0 END";
+        string source = $"FROM items s {unnest} GROUP BY s.x + {variable}";
+
+        // Act / Assert: SELECT, HAVING and ORDER BY use the same lexical match.
+        foreach (string query in new[]
+        {
+            $"SELECT {expression} AS yes, COUNT(*) AS n {source}",
+            $"SELECT COUNT(*) AS n {source} HAVING {expression}",
+            $"SELECT COUNT(*) AS n {source} ORDER BY {expression}",
+        })
+        {
+            var exception = await Should.ThrowAsync<DatabaseException>(async () =>
+                await session.ExecuteAsync(query, cancellationToken: CancellationToken.None));
+            var diagnostic = exception.Diagnostics.ShouldHaveSingleItem();
+            diagnostic.Code.ShouldBe("COHDOC001");
+            query[diagnostic.Start!.Value..diagnostic.End!.Value].ShouldBe("s.x");
+        }
+        // Corresponding local quantifiers still match, including repeated-name nesting.
+        (await RowsAsync(session, $"SELECT {expression} AS yes, COUNT(*) AS n FROM items s GROUP BY {expression}"))
+            .Count.ShouldBe(2);
+        (await RowsAsync(session, "SELECT ANY t IN [1] SATISFIES ANY t IN [2] SATISFIES t = 2 END END AS yes, COUNT(*) AS n FROM items s " +
+            "GROUP BY ANY t IN [1] SATISFIES ANY t IN [2] SATISFIES t = 2 END END"))
+            .ShouldHaveSingleItem().GetValue(1).ShouldBe(2L);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Documents] - UNNEST: composite and UNIQUE document keys cannot bind array variables")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Plan_UnnestCompositeKey_ShouldScanDocumentRowsAsync(bool unique)
+    {
+        // Arrange
+        await using var engine = DocumentDatabaseEngine.Create("array-indexes", new());
+        var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        var collection = await session.CreateCollectionAsync("items", CancellationToken.None);
+        await PutAsync(collection, session, "a", "{\"t\":\"other\",\"name\":\"y\",\"tags\":[\"x\",\"x\"]}");
+        await PutAsync(collection, session, "b", "{\"t\":\"x\",\"name\":\"y\",\"tags\":[\"other\"]}");
+        await PutAsync(collection, session, "c", "{\"t\":\"third\",\"name\":\"z\",\"tags\":[\"x\"]}");
+        await session.ExecuteAsync($"CREATE {(unique ? "UNIQUE " : "")}INDEX by_t_name ON items (t, name)", cancellationToken: CancellationToken.None);
+        const string query = "SELECT META(d).id AS id FROM items d UNNEST d.tags t WHERE t = 'x' AND d.name = 'y'";
+
+        // Act / Assert
+        (await PlanAsync(database, query)).Access.ShouldBeOfType<DocumentScanPath>();
+        (await RowsAsync(session, query)).Select(row => row.GetValue(0)).ShouldBe(new object?[] { "a", "a" });
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Documents] - DML: contextual unnest fields remain expressions in SATISFIES")]
+    public async Task Execute_UnnestField_ShouldAllowQuantifiedMutationsAsync()
+    {
+        // Arrange
+        await using var engine = DocumentDatabaseEngine.Create("array-fields", new());
+        var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        var collection = await session.CreateCollectionAsync("items", CancellationToken.None);
+        await PutAsync(collection, session, "a", "{\"tags\":[1],\"unnest\":true}");
+        await PutAsync(collection, session, "b", "{\"tags\":[1],\"unnest\":true}");
+
+        // Act / Assert
+        var updated = await session.ExecuteAsync("UPDATE items SET found = ANY x IN tags SATISFIES unnest END WHERE ANY x IN tags SATISFIES unnest END", cancellationToken: CancellationToken.None);
+        updated.AffectedCount.ShouldBe(2);
+        (await RowsAsync(session, "SELECT found FROM items")).ShouldAllBe(row => row.GetBoolean(0));
+        var deleted = await session.ExecuteAsync("DELETE FROM items WHERE ANY x IN tags SATISFIES unnest END", cancellationToken: CancellationToken.None);
+        deleted.AffectedCount.ShouldBe(2);
+        (await RowsAsync(session, "SELECT * FROM items")).ShouldBeEmpty();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Documents] - Arrays: predicates observe cancellation after element reads begin")]
+    [InlineData("ANY x IN tags SATISFIES FALSE END")]
+    [InlineData("EVERY x IN tags SATISFIES TRUE END")]
+    [InlineData("2 IN tags")]
+    public void Evaluate_ArrayExpansionCancellation_ShouldStopWithinElements(string predicate)
+    {
+        // Arrange
+        using var cancellation = new CancellationTokenSource();
+        using var source = new CountingJsonMemory("{\"tags\":[" + string.Join(',', Enumerable.Repeat("1", 200000)) + "]}", cancellation);
+        using var document = JsonDocument.Parse(source.Memory);
+        var query = (OqlSelectExpression)((OqlQueryStatement)new OqlQueryParser().Parse($"SELECT {predicate} FROM items")).OqlExpression;
+        var evaluator = new DocumentExpressionEvaluator(null, null, cancellation.Token);
+        source.Arm(64);
+
+        // Act
+        Should.Throw<OperationCanceledException>(() => evaluator.Evaluate(query.Projections[0].Expression, new DocumentEvaluationContext(document.RootElement)));
+
+        // Assert: cancellation originated inside the borrowed JSON array, well before exhaustion.
+        cancellation.IsCancellationRequested.ShouldBeTrue();
+        source.Reads.ShouldBeInRange(64, 70);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Documents] - Constructors: constant arrays and objects are cached per evaluator")]
+    [InlineData("[1, @value, {a:[2,3]}]")]
+    [InlineData("{a:[1, @value], b:{c:2}}")]
+    public void Evaluate_ConstantConstructor_ShouldReuseOwnedJson(string expression)
+    {
+        // Arrange
+        var query = (OqlSelectExpression)((OqlQueryStatement)new OqlQueryParser().Parse($"SELECT {expression} FROM items")).OqlExpression;
+        var evaluator = new DocumentExpressionEvaluator(null, new Dictionary<string, object?> { ["value"] = 5 });
+
+        // Act
+        var first = (JsonElement)evaluator.Evaluate(query.Projections[0].Expression, default)!;
+        var second = (JsonElement)evaluator.Evaluate(query.Projections[0].Expression, default)!;
+
+        // Assert: JsonElement equality identifies the same owned JSON document and offset.
+        second.Equals(first).ShouldBeTrue();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Documents] - Paths: an unbound row does not box its JSON root")]
+    public void Evaluate_UnboundPath_ShouldAllocateOnlyLeafValues()
+    {
+        // Arrange
+        using var document = JsonDocument.Parse("{\"flag\":true}");
+        var query = (OqlSelectExpression)((OqlQueryStatement)new OqlQueryParser().Parse("SELECT d.flag FROM items d")).OqlExpression;
+        var evaluator = new DocumentExpressionEvaluator("d", null);
+        var context = new DocumentEvaluationContext(document.RootElement);
+        var path = query.Projections[0].Expression;
+        evaluator.Evaluate(path, context).ShouldBe(true);
+
+        // Act
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 10000; i++) { _ = evaluator.Evaluate(path, context); }
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        // Assert: the Boolean leaf costs one 24-byte box; the root stays a struct.
+        allocated.ShouldBeLessThanOrEqualTo(240_000L);
     }
 
     [Theory(DisplayName = "Cohesion Test [Documents] - Arrays: metadata aggregates and missing inputs fail before empty execution")]
@@ -281,12 +421,14 @@ public sealed partial class DocumentQueryTests
         (await RowsAsync(session, "SELECT META().id FROM items")).ShouldHaveSingleItem().GetValue(0).ShouldBe("a");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Documents] - Arrays: a direct AST cannot repeat a binding")]
-    public void Plan_DirectDuplicateBinding_ShouldReportDocumentCode()
+    [Theory(DisplayName = "Cohesion Test [Documents] - Arrays: a direct AST cannot repeat a binding")]
+    [InlineData("d", "d")]
+    [InlineData(null, "items")]
+    public void Plan_DirectDuplicateBinding_ShouldReportDocumentCode(string? alias, string variable)
     {
         // Arrange
-        var query = new OqlSelectExpression("items", "d", [new OqlProjection(new OqlStarExpression(), null)],
-            null, [], null, [], false, false, unnest: [new OqlUnnestExpression(new OqlArrayExpression([]), "d")]);
+        var query = new OqlSelectExpression("items", alias, [new OqlProjection(new OqlStarExpression(), null)],
+            null, [], null, [], false, false, unnest: [new OqlUnnestExpression(new OqlArrayExpression([]), variable)]);
         // Act
         var exception = Should.Throw<DocumentPlanningException>(() => DocumentPlanner.CreateLogicalPlan(query));
         // Assert
@@ -305,6 +447,21 @@ public sealed partial class DocumentQueryTests
         await PutAsync(collection, session, "a", "{\"tags\":[" + string.Join(',', Enumerable.Repeat("1", 200000)) + "]}");
         // Act / Assert
         (await RowsAsync(session, "SELECT 1 FROM items d UNNEST d.tags t LIMIT 2 OFFSET 1")).Count.ShouldBe(2);
+        const string star = "SELECT * FROM items d UNNEST d.tags t LIMIT 1";
+        (await RowsAsync(session, star)).ShouldHaveSingleItem();
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        var execution = session.ExecuteAsync(star, cancellationToken: CancellationToken.None);
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        execution.IsCompletedSuccessfully.ShouldBeTrue();
+        await using var result = (Assimalign.Cohesion.Database.Execution.DatabaseResultSet)await execution;
+        int count = 0;
+        await foreach (var row in result.GetRowsAsync(CancellationToken.None))
+        { row.GetValue(0).ShouldBeOfType<JsonElement>().GetProperty("t").GetInt32().ShouldBe(1); count++; }
+        count.ShouldBe(1);
+        // One source read, its owned clone and one synthetic object measured 33.6 MB;
+        // bound the complete operation independently of the 200,000 expanded rows.
+        Console.WriteLine($"200,000-element UNNEST star LIMIT 1 allocated {allocated:N0} bytes.");
+        allocated.ShouldBeLessThan(40_000_000L);
         using var cancellation = new CancellationTokenSource();
         cancellation.CancelAfter(TimeSpan.FromMilliseconds(10));
         await Should.ThrowAsync<OperationCanceledException>(async () =>

@@ -50,6 +50,11 @@ public sealed class OqlArrayParserTests
     [InlineData("SELECT CASE WHEN ANY x IN a SATISFIES x END THEN 1 END FROM c")]
     [InlineData("SELECT * FROM c WHERE ANY x IN a SATISFIES CASE WHEN x THEN TRUE ELSE FALSE END END")]
     [InlineData("UPDATE c unnest SET a = 1")]
+    [InlineData("UPDATE c SET unnest = TRUE WHERE ANY x IN tags SATISFIES unnest END")]
+    [InlineData("UPDATE c SET a = ANY x IN tags SATISFIES unnest END")]
+    [InlineData("DELETE FROM c WHERE ANY x IN tags SATISFIES unnest END")]
+    [InlineData("DELETE FROM c unnest WHERE unnest.tags IN [[1]]")]
+    [InlineData("DELETE FROM c WHERE ANY x IN tags SATISFIES unnest + 1 END")]
     public void Parse_SupportedArrayForm_ShouldParse(string query)
     {
         // Arrange / Act
@@ -96,6 +101,11 @@ public sealed class OqlArrayParserTests
     [InlineData("SELECT ANY x IN [1] SATISFIES TRUE«»", "OQL0002", null)]
     [InlineData("SELECT * FROM c d UNNEST d.a AS «d»", "OQL0010", null)]
     [InlineData("SELECT * FROM c d UNNEST d.a x UNNEST x.b AS «x»", "OQL0010", null)]
+    [InlineData("SELECT * FROM items LEFT UNNEST tags «items»", "OQL0010", null)]
+    [InlineData("SELECT * FROM items d UNNEST d.tags UNNEST d.«tags» WHERE TRUE", "OQL0010", null)]
+    [InlineData("SELECT * FROM items d UNNEST d.tags UNNEST d.«tags»", "OQL0010", null)]
+    [InlineData("SELECT * FROM items d UNNEST d.tags UNNEST (d.«tags») WHERE TRUE", "OQL0010", null)]
+    [InlineData("SELECT * FROM items d UNNEST d.tags UNNEST d[«'tags'»] WHERE TRUE", "OQL0010", null)]
     [InlineData("SELECT ANY x IN [1], «x» IN [2] SATISFIES TRUE END FROM c", "OQL0010", null)]
     [InlineData("SELECT ANY x IN [1]«,» y IN [2] SATISFIES TRUE END FROM c", "COHDBL001", "multi-binding quantifier")]
     [InlineData("SELECT «ARRAY» t FOR t IN d.tags END FROM c d", "COHDBL001", "ARRAY")]
@@ -107,9 +117,13 @@ public sealed class OqlArrayParserTests
     [InlineData("DELETE FROM c d «UNNEST» d.a t", "COHDBL001", "UNNEST")]
     [InlineData("UPDATE c d SET a = 1 «UNNEST» d.a t", "COHDBL001", "UNNEST")]
     [InlineData("UPDATE c «UNNEST» tags t SET a = 1", "COHDBL001", "UNNEST")]
+    [InlineData("DELETE FROM c LEFT OUTER «UNNEST» tags t", "COHDBL001", "UNNEST")]
+    [InlineData("UPDATE c LEFT «UNNEST» tags t SET a = 1", "COHDBL001", "UNNEST")]
     [InlineData("SELECT ANY x IN a SATISFIES «FIRST»(x) END FROM c", "COHDBL001", "FIRST")]
     [InlineData("SELECT EVERY x IN a SATISFIES («SELECT» b FROM c) END FROM c", "COHDBL001", "SUBQUERY")]
     [InlineData("SELECT EVERY x IN a SATISFIES «MERGE» INTO c USING d ON TRUE WHEN MATCHED THEN UPDATE SET a = 1 END FROM c", "COHDBL001", "MERGE")]
+    [InlineData("SELECT ANY x IN [1] SATISFIES CASE WHEN TRUE THEN «MERGE» INTO c USING d ON TRUE WHEN MATCHED THEN UPDATE SET a = 1 END END FROM c", "COHDBL001", "MERGE")]
+    [InlineData("SELECT ANY x IN [1] SATISFIES CASE WHEN FALSE THEN FALSE ELSE «MERGE» INTO c USING d ON TRUE WHEN MATCHED THEN UPDATE SET a = 1 END END FROM c", "COHDBL001", "MERGE")]
     public void Parse_InvalidArrayForm_ShouldLocateDiagnostic(string marked, string code, string? construct)
     {
         // Arrange

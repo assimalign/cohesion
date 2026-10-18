@@ -8,7 +8,8 @@ namespace Assimalign.Cohesion.Database.Documents.Internal;
 // The logical stage validates document semantics; the physical stage binds a
 // collection and chooses candidate retrieval without changing those semantics.
 internal abstract record DocumentStatementPlan;
-internal sealed record DocumentLogicalPlan(OqlSelectExpression Query, IReadOnlyList<DocumentProjection> Projections, bool IsGrouped, long? Limit, long Offset);
+internal sealed record DocumentLogicalPlan(OqlSelectExpression Query, IReadOnlyList<DocumentProjection> Projections, bool IsGrouped,
+    long? Limit, long Offset, IReadOnlySet<string>? UnnestVariables, bool CanStopEarly, IReadOnlyList<bool> ProjectedOrdering);
 internal sealed record DocumentPlan(DocumentLogicalPlan Logical, DocumentCollectionMetadata Collection, DocumentAccessPath Access) : DocumentStatementPlan;
 internal sealed record DocumentSystemCollectionPlan(DocumentLogicalPlan Logical, string Name) : DocumentStatementPlan;
 internal sealed record DocumentDeletePlan(DocumentCollectionMetadata Collection, OqlDeleteExpression Statement, DocumentAccessPath Access) : DocumentStatementPlan;

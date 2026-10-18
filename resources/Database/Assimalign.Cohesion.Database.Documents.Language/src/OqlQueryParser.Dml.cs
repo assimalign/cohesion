@@ -13,6 +13,7 @@ public sealed partial class OqlQueryParser
         string? alias = null;
         if (Take("AS")) { alias = Identifier(); }
         else if (IsUpdateAlias()) { alias = Identifier(); }
+        RejectDmlUnnest();
         List<OqlUpdateAssignment> assignments = [];
         List<OqlPathExpression> unset = [];
         if (Take("SET"))
@@ -30,11 +31,13 @@ public sealed partial class OqlQueryParser
         {
             do { unset.Add(ParseDocumentPath()); } while (!Failed && Take(TokenType.Comma));
         }
+        RejectDmlUnnest();
         if (!Failed && assignments.Count == 0 && unset.Count == 0)
         {
             Error("OQL0002", "UPDATE requires at least one SET assignment or UNSET path.", Current);
         }
         OqlExpression? predicate = !Failed && Take("WHERE") ? ParseExpression() : null;
+        RejectDmlUnnest();
         // UPDATE paging remains unsupported independently of SELECT capabilities.
         if (!Failed && (Is("LIMIT") || Is("OFFSET")))
         {
@@ -44,6 +47,8 @@ public sealed partial class OqlQueryParser
     }
 
     private bool IsUpdateAlias() => Current.Type is TokenType.Identifier or TokenType.QuotedIdentifier or TokenType.Function &&
+        (!IsUnnestClause() || _position + 1 < _tokens.Count &&
+            (IsWord(_tokens[_position + 1], "SET") || IsWord(_tokens[_position + 1], "UNSET"))) &&
         !Is("LIMIT") && !(Is("USE") && _position + 1 < _tokens.Count && IsWord(_tokens[_position + 1], "KEYS")) &&
         (!IsReturningClause() || Is("RETURNING") && _position + 1 < _tokens.Count &&
             (IsWord(_tokens[_position + 1], "SET") || IsWord(_tokens[_position + 1], "UNSET")));
@@ -60,17 +65,29 @@ public sealed partial class OqlQueryParser
             alias = Identifier();
         }
         else if (Current.Type is TokenType.Identifier or TokenType.QuotedIdentifier or TokenType.Function &&
+            (!IsUnnestClause() || _position + 1 < _tokens.Count &&
+                (IsWord(_tokens[_position + 1], "WHERE") || _tokens[_position + 1].Type is TokenType.Eof or TokenType.Semicolon)) &&
             !Is("LIMIT") && !IsReturningClause())
         {
             alias = Identifier();
         }
-        OqlExpression? predicate = Take("WHERE") ? ParseExpression() : null;
+        RejectDmlUnnest();
+        OqlExpression? predicate = !Failed && Take("WHERE") ? ParseExpression() : null;
+        RejectDmlUnnest();
         // DELETE paging remains unsupported independently of SELECT capabilities.
         if (!Failed && (Is("LIMIT") || Is("OFFSET")))
         {
             _diagnostics.Add(QueryDiagnostics.UnsupportedClause("DELETE " + Current.Text.ToUpperInvariant(), Profile.Language, Span(Current, Current)));
         }
         return new OqlDeleteExpression(collection, alias, predicate, Span(start, Previous));
+    }
+
+    private void RejectDmlUnnest()
+    {
+        if (Failed || !IsUnnestClause()) { return; }
+        if (Take("LEFT")) { Take("OUTER"); }
+        else { Take("INNER"); }
+        _diagnostics.Add(QueryDiagnostics.UnsupportedClause("UNNEST in UPDATE or DELETE", Profile.Language, Span(Current, Current)));
     }
 
     private OqlExpression ParseWrite(bool upsert = false)
