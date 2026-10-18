@@ -155,8 +155,10 @@ Referential SET NULL and SET DEFAULT update only matching foreign-key columns, u
 ordinary domain, nullability, CHECK, outgoing/incoming FK, MVCC and index machinery.
 NO ACTION and RESTRICT check the complete statement deletion set. A row also reached
 by CASCADE is deleted once and receives no SET action. Any child failure rolls back the
-whole delete. SET DEFAULT with no default supplies NULL; each expression default uses the
-delete transaction's clock. Unique NULLs remain equal. SET DEFAULT uses the ordinary assignment
+whole delete. Snapshot-isolated SET actions reject child versions newer than the transaction
+snapshot; their first-updater-wins diagnostic names the action. SET DEFAULT with no default
+supplies NULL; each expression default uses the delete transaction's clock. Unique NULLs
+remain equal. SET DEFAULT uses the ordinary assignment
 path for identity columns: BY DEFAULT allocates, and GENERATED ALWAYS retains its COHSQLE025
 UPDATE refusal. PostgreSQL-style column lists after SET NULL/SET DEFAULT and ON UPDATE actions
 report COHDBL001. Schema-owned typed foreign

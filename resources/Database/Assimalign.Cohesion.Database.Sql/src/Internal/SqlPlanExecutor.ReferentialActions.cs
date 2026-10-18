@@ -61,7 +61,8 @@ internal sealed partial class SqlPlanExecutor
                     if (!updates.TryGetValue(key, out var update))
                     {
                         await AcquireRowWriteLocksAsync(statement, child.ObjectId, [match.Location], cancellationToken).ConfigureAwait(false);
-                        EnsureSnapshotSeesCascadeRow(child, match.Location, statement);
+                        EnsureSnapshotSeesCascadeRow(child, match.Location, statement,
+                            constraint.OnDelete == SqlCatalogReferentialAction.SetNull ? "SET NULL" : "SET DEFAULT");
                         await AcquireIncomingReferenceIntentLocksAsync(child, statement, cancellationToken).ConfigureAwait(false);
                         await AcquireOutgoingReferenceIntentLocksAsync(child, statement, cancellationToken).ConfigureAwait(false);
                         EnsureCurrentDefinition(child);

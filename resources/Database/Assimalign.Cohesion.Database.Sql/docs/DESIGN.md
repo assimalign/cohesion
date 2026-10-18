@@ -3779,8 +3779,9 @@ ON DELETE supports CASCADE, RESTRICT, NO ACTION, SET NULL and SET DEFAULT (#1121
 Omitted SQL actions are NO ACTION; nondeferrable RESTRICT and NO ACTION both validate
 the complete statement result. The cascade walk collects only CASCADE edges, with no
 depth limit. Once its deletion set is complete, SET actions collect and lock surviving
-child replacements through the same latest-state reads and snapshot crosscheck. A row
-in the deletion set is never updated. Constraint checks see final replacements and
+child replacements through the same latest-state reads and snapshot crosscheck. A version
+newer than a fixed snapshot fails first-updater-wins with the actual SET action in its diagnostic.
+A row in the deletion set is never updated. Constraint checks see final replacements and
 exclude deleted versions, including when SET DEFAULT resolves a new parent. Re-keying
 a referenced child retains UPDATE's incoming-reference restriction. All old index entries
 and row versions are tombstoned before replacement versions and indexes are inserted in

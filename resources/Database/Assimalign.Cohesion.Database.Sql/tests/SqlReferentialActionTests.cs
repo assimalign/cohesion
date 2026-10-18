@@ -12,11 +12,37 @@ using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Schema;
 using Assimalign.Cohesion.Database.Types;
+using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed class SqlReferentialActionTests
 {
+    [Theory(DisplayName = "Cohesion Test [Sql] - SET actions: snapshot conflicts name the action and preserve parent and child rows")]
+    [InlineData("SET NULL")]
+    [InlineData("SET DEFAULT")]
+    public async Task Delete_NewerChildVersion_ShouldFailSnapshotCrosscheck(string action)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("set-action-snapshot", new());
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var parent = await database.CreateSessionAsync(CancellationToken.None);
+        await using var child = await database.CreateSessionAsync(CancellationToken.None);
+        await parent.ExecuteAsync("CREATE TABLE p (id INT PRIMARY KEY)", cancellationToken: CancellationToken.None);
+        await parent.ExecuteAsync($"CREATE TABLE c (id INT PRIMARY KEY, pid INT DEFAULT 2 REFERENCES p(id) ON DELETE {action})", cancellationToken: CancellationToken.None);
+        await parent.ExecuteAsync("INSERT INTO p VALUES (1), (2)", cancellationToken: CancellationToken.None);
+        await using var transaction = await parent.BeginTransactionAsync(IsolationLevel.Snapshot, CancellationToken.None);
+        await child.ExecuteAsync("INSERT INTO c VALUES (10, 1)", cancellationToken: CancellationToken.None);
+
+        // Act / Assert
+        var failure = await Should.ThrowAsync<DatabaseTransactionAbortedException>(() => parent.ExecuteAsync("DELETE FROM p WHERE id = 1", cancellationToken: CancellationToken.None).AsTask());
+        failure.Message.ShouldContain($"ON DELETE {action} reached", Case.Sensitive);
+        failure.Message.ShouldContain("first-updater-wins", Case.Sensitive);
+        await transaction.RollbackAsync(CancellationToken.None);
+        (await Rows(child, "SELECT id FROM p ORDER BY id")).Select(row => row[0]).ShouldBe(new object?[] { 1, 2 });
+        (await Rows(child, "SELECT id, pid FROM c")).Single().ShouldBe(new object?[] { 10, 1 });
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sql] - SET DEFAULT: identity follows ordinary UPDATE DEFAULT rules")]
     [InlineData(false)]
     [InlineData(true)]

@@ -6,11 +6,6 @@ using Xunit;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
-[CollectionDefinition("SQL referential action locks", DisableParallelization = true)]
-public sealed class SqlReferentialActionLockCollection
-{
-}
-
 [Collection("SQL referential action locks")]
 public sealed class SqlReferentialActionLockTests
 {

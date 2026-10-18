@@ -723,9 +723,11 @@ internal sealed partial class SqlPlanExecutor
     /// <param name="table">The child row's table.</param>
     /// <param name="location">The child row's location, exclusively locked by the statement.</param>
     /// <param name="statement">The executing statement.</param>
+    /// <param name="action">The referential action named by a snapshot conflict.</param>
     /// <exception cref="TransactionAbortedException">The transaction's snapshot does not see the child version's writer, or the version is gone.</exception>
     /// <exception cref="StorageCorruptionException">The slot holds a record too short for its version stamps (#1362).</exception>
-    private void EnsureSnapshotSeesCascadeRow(SqlCatalogTable table, (PageId PageId, int SlotIndex) location, SqlStatementContext statement)
+    private void EnsureSnapshotSeesCascadeRow(SqlCatalogTable table, (PageId PageId, int SlotIndex) location, SqlStatementContext statement,
+        string action = "CASCADE")
     {
         if (statement.Transaction.IsolationLevel == IsolationLevel.ReadCommitted)
         {
@@ -735,7 +737,7 @@ internal sealed partial class SqlPlanExecutor
         if (!_storage.TryReadRecord(location.PageId, location.SlotIndex, table.ObjectId, out var record))
         {
             throw new TransactionAbortedException(
-                $"Write-write conflict on '{table.Schema}.{table.Name}': ON DELETE CASCADE reached a row version that was rolled back after the walk found it, " +
+                $"Write-write conflict on '{table.Schema}.{table.Name}': ON DELETE {action} reached a row version that was rolled back after the walk found it, " +
                 "which this transaction's snapshot does not see (first-updater-wins). Retry the transaction.");
         }
 
@@ -751,7 +753,7 @@ internal sealed partial class SqlPlanExecutor
         if (!statement.Snapshot.IsVisible(writer))
         {
             throw new TransactionAbortedException(
-                $"Write-write conflict on '{table.Schema}.{table.Name}': ON DELETE CASCADE reached a row version written by transaction {writer}, " +
+                $"Write-write conflict on '{table.Schema}.{table.Name}': ON DELETE {action} reached a row version written by transaction {writer}, " +
                 "which this transaction's snapshot does not see (first-updater-wins). Retry the transaction.");
         }
     }
