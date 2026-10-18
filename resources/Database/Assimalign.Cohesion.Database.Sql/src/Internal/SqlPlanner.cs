@@ -178,42 +178,7 @@ internal sealed partial class SqlPlanner
             return PlanGroup(select, table, systemView, columns, bindings, evaluator, steps);
         }
 
-<<<<<<< HEAD
         var projections = BindProjections(select.Columns, columns, evaluator, outputOrdinals);
-=======
-        var projections = new List<SqlProjection>(select.Columns.Count);
-        foreach (var column in select.Columns)
-        {
-            if (column.Expression is SqlStarExpression)
-            {
-                for (int i = 0; i < (outputOrdinals?.Count ?? columns.Count); i++)
-                {
-                    int ordinal = outputOrdinals is null ? i : outputOrdinals[i];
-                    projections.Add(PassThrough(columns[ordinal].Name, ordinal, columns, evaluator, merged: true));
-                }
-            }
-            else if (column.Expression is SqlColumnReferenceExpression reference && !evaluator.IsOuterColumn(reference))
-            {
-                int ordinal = evaluator.ResolveColumn(reference);
-                projections.Add(PassThrough(column.Alias ?? columns[ordinal].Name, ordinal, columns, evaluator,
-                    merged: reference.TableAlias is null && reference.SchemaName is null));
-            }
-            else
-            {
-                ValidateExpression(column.Expression, evaluator, _subqueryTypes);
-                var value = evaluator.Bind(column.Expression, out SqlBoundCollation collation, out var candidate);
-                projections.Add(new SqlProjection(
-                    column.Alias ?? (column.Expression is SqlColumnReferenceExpression outerColumn
-                        ? outerColumn.ColumnName : $"column{projections.Count + 1}"), null, column.Expression,
-                    GroupExpressionType(column.Expression, columns, evaluator)) { Value = value, Collation = collation,
-                        Metadata = CaptureProjectionMetadata(candidate,
-                            UnwrapCollation(column.Expression) is SqlColumnReferenceExpression projectedColumn ? evaluator.ColumnMetadata(projectedColumn) : null,
-                            column.Expression, evaluator),
-                        MaxLength = evaluator.MaximumLengthOf(column.Expression),
-                        IsNullable = column.Expression is not SqlColumnReferenceExpression nullableColumn || evaluator.ColumnMetadata(nullableColumn).IsNullable });
-            }
-        }
->>>>>>> 3d863da13
 
         SqlBoundExpression? where = null;
         if (select.Where is not null)
