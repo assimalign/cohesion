@@ -34,7 +34,7 @@ public sealed partial class SqlQueryParser
             {
                 return RejectWithForm(ref lexer, $"data-modifying CTE body ({CurrentText(ref lexer)})");
             }
-            if (!StartsQuery(lexer))
+            if (!StartsQuery(lexer, queryExpected: true))
             {
                 AddExpectedDiagnostic(ref lexer, "SELECT in the common table expression body");
                 return EmptyWithQuery();
@@ -54,7 +54,7 @@ public sealed partial class SqlQueryParser
             return RejectWithForm(ref lexer, "SEARCH/CYCLE");
         }
         SqlQueryExpression statement;
-        if (StartsQuery(lexer)) { statement = ParseQueryExpression(ref lexer); }
+        if (StartsQuery(lexer, queryExpected: true)) { statement = ParseQueryExpression(ref lexer); }
         else if (!insertSource && IsKeyword(ref lexer, "INSERT")) { statement = ParseInsert(ref lexer); }
         else if (!insertSource && IsKeyword(ref lexer, "UPDATE")) { statement = ParseUpdate(ref lexer); }
         else if (!insertSource && IsKeyword(ref lexer, "DELETE")) { statement = ParseDelete(ref lexer); }

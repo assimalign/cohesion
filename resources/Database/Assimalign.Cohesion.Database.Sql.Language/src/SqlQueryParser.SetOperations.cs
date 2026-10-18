@@ -7,14 +7,14 @@ namespace Assimalign.Cohesion.Database.Sql.Language;
 
 public sealed partial class SqlQueryParser
 {
-    private bool StartsQuery(TokenLexer lexer)
+    private bool StartsQuery(TokenLexer lexer, bool queryExpected = false)
     {
         int depth = _parenthesisDepth;
         while (lexer.Current.Type == TokenType.LeftParen)
         {
-            // Classification must not rescan an unbounded run at every expression
-            // parenthesis. Past the budget, let the guarded query parser report SQL0006.
-            if (++depth > _nestingLimit) { return true; }
+            // Bound lookahead without changing the enclosing grammar's parenthesis count.
+            // Its guarded parser owns the depth diagnostic once classification stops.
+            if (++depth > _nestingLimit) { return queryExpected; }
             if (!AdvancePastComments(ref lexer)) { return false; }
         }
         return IsKeyword(ref lexer, "SELECT") || IsKeyword(ref lexer, "WITH");

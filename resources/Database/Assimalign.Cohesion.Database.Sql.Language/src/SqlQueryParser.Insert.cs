@@ -22,7 +22,7 @@ public sealed partial class SqlQueryParser
 
         // Optional column list: (col1, col2, ...)
         IReadOnlyList<string>? columns = null;
-        if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.LeftParen && !StartsQuery(lexer))
+        if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.LeftParen && !StartsQuery(lexer, queryExpected: true))
         {
             // A query source may start with SELECT through nested query parentheses.
             columns = ParseInsertColumnList(ref lexer);
@@ -54,7 +54,7 @@ public sealed partial class SqlQueryParser
         {
             selectSource = (SqlQueryBodyExpression)ParseWith(ref lexer, insertSource: true);
         }
-        else if (!IsAtEnd(ref lexer) && StartsQuery(lexer))
+        else if (!IsAtEnd(ref lexer) && StartsQuery(lexer, queryExpected: true))
         {
             selectSource = ParseQueryExpression(ref lexer);
         }

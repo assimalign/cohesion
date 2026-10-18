@@ -1037,7 +1037,7 @@ public sealed partial class SqlQueryParser
         SqlQueryBodyExpression? subquery = null;
         if (Expect(ref lexer, TokenType.LeftParen, "'(' after EXISTS"))
         {
-            if (StartsQuery(lexer))
+            if (StartsQuery(lexer, queryExpected: true))
             {
                 subquery = ParseSubquery(ref lexer);
             }

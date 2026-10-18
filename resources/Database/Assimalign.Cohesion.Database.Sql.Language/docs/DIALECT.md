@@ -1243,6 +1243,7 @@ derived tables, CTE definitions and INSERT query sources, including correlated o
 by canonical rendering. Top-level SELECT operands still require FROM; the top-level operands
 of a CTE definition may use its implicit row. Each subquery counts once toward the existing
 32-level subquery limit; set nodes count individually toward the expression depth limit.
+Query lookahead is bounded; excess grouping parentheses retain their first-offending-token span.
 All operands share one statement snapshot and catalog capture, see their transaction's own
 writes, and retain existing INSERT atomicity and scalar-cardinality checks.
 

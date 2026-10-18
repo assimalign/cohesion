@@ -123,6 +123,27 @@ public sealed class SqlSetOperationParserTests
         statement.Diagnostics.ShouldContain(item => item.Code == "SQL0006");
     }
 
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Set operations: expected query bodies keep bounded parenthesis diagnostics")]
+    [InlineData("INSERT INTO t {0}")]
+    [InlineData("EXPLAIN {0}")]
+    [InlineData("WITH q AS ({0}) SELECT * FROM q")]
+    [InlineData("SELECT * FROM ({0}) d")]
+    [InlineData("SELECT a FROM t WHERE EXISTS ({0})")]
+    public void Parse_DeepExpectedQuery_ShouldUseParenthesisGuard(string template)
+    {
+        // Arrange
+        string body = new string('(', 300) + "SELECT a FROM t UNION SELECT a FROM u" + new string(')', 300);
+        SqlQueryStatement? parsed = null;
+        var thread = new Thread(() => parsed = new SqlQueryParser().Parse(string.Format(template, body)).ShouldBeOfType<SqlQueryStatement>(), 8 * 1024 * 1024);
+
+        // Act
+        thread.Start();
+        thread.Join();
+
+        // Assert
+        parsed.ShouldNotBeNull().Diagnostics.ShouldContain(item => item.Code == "SQL0006");
+    }
+
     private static SqlQueryBodyExpression Parse(string sql)
     {
         var statement = new SqlQueryParser().Parse(sql).ShouldBeOfType<SqlQueryStatement>();

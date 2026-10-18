@@ -334,7 +334,7 @@ public sealed partial class SqlQueryParser
         }
 
         Advance(ref lexer);
-        if (!StartsQuery(lexer))
+        if (!StartsQuery(lexer, queryExpected: true))
         {
             AddSyntaxDiagnostic(ref lexer, "Expected SELECT in a derived table.");
             return new SqlTableReference("?", null, null);

@@ -811,7 +811,7 @@ public sealed partial class SqlQueryParser : QueryParser
         Advance(ref lexer);
         SqlQueryExpression statement;
         if (IsWord(ref lexer, "WITH")) { statement = ParseWith(ref lexer); }
-        else if (StartsQuery(lexer)) { statement = ParseQueryExpression(ref lexer); }
+        else if (StartsQuery(lexer, queryExpected: true)) { statement = ParseQueryExpression(ref lexer); }
         else if (IsWord(ref lexer, "INSERT")) { statement = ParseInsert(ref lexer); }
         else if (IsWord(ref lexer, "UPDATE")) { statement = ParseUpdate(ref lexer); }
         else if (IsWord(ref lexer, "DELETE")) { statement = ParseDelete(ref lexer); }
