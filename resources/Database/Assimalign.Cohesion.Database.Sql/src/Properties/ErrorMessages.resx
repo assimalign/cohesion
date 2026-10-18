@@ -94,7 +94,14 @@
   <data name="ScalarSubqueryCardinality" xml:space="preserve"><value>Scalar subquery returned more than one row; at most one row is allowed.</value></data>
   <data name="SubqueryFrameMissing" xml:space="preserve"><value>Internal invariant: the subquery evaluation frame is unavailable.</value></data>
   <data name="DefaultTypeIncompatible" xml:space="preserve"><value>Column '{0}': DEFAULT result type {1} is incompatible with column type {2}.</value></data>
+  <data name="DefaultVariablesForbidden" xml:space="preserve"><value>Column '{0}': DEFAULT requires a variable-free scalar expression without columns, parameters, subqueries or aggregates.</value></data>
+  <data name="DefaultExpressionFailure" xml:space="preserve"><value>Column '{0}': {1}</value></data>
+  <data name="DefaultStorageFailure" xml:space="preserve"><value>Column '{0}': DEFAULT value cannot be stored as {1}</value></data>
+  <data name="VolatileDefaultBackfill" xml:space="preserve"><value>Column '{0}': ADD COLUMN with a VOLATILE DEFAULT on a populated table requires a table rewrite (#1447).</value></data>
+  <data name="CompiledDeleteActionInvalid" xml:space="preserve"><value>Schema-owned foreign keys cannot use ON DELETE {0}; compiled schemas support RESTRICT and CASCADE.</value></data>
+  <data name="DeleteActionUnknown" xml:space="preserve"><value>Unknown referential delete action.</value></data>
   <data name="RenameTableCollision" xml:space="preserve"><value>Table '{0}.{1}' already exists.</value></data>
   <data name="RenameColumnCollision" xml:space="preserve"><value>Column '{0}' already exists on '{1}'.</value></data>
   <data name="MissingValueConversion" xml:space="preserve"><value>Column '{0}': frozen missing value cannot be stored as {1}</value></data>
+  <data name="DefaultMustBeFinite" xml:space="preserve"><value>Floating-point defaults must be finite.</value></data>
 </root>

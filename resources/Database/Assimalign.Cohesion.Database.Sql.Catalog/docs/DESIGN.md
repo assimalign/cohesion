@@ -84,7 +84,7 @@ would tell every caller the value is changeable and then guard that promise at
 runtime.
 
 Table metadata extension version 2 introduced one collation identifier per column
-after the existing constraints. Current format 19 requires the complete table extension 6 record,
+after the existing constraints. Current format 20 requires the complete table extension 6 record,
 including resolved-call vectors, identity facets and frozen missing-value literals described below. Column additions,
 drops, and restart preserve explicit overrides. An index inherits its key
 columns' effective collations; the SQL engine verifies index eligibility and
@@ -164,7 +164,7 @@ codec, the key encoding and every comparison read, so they do not consult the do
   column (the primary key's implicit NOT NULL).
 - **Persistence: table extension version 4** (data-storage format 7). After the dropped
   ordinals, one optional string per live column, NULL for a column of a built-in type,
-  which this catalog always writes. Current format 19 also requires the call vectors, identity facets and extension 6 missing-value literals;
+  which this catalog always writes. Current format 20 also requires the call vectors, identity facets and extension 6 missing-value literals;
   the format gate refuses earlier databases rather than loading their definitions. A persisted blank
   name fails the load with `SqlCatalogException`, as does a blank `domainName` at the
   column's constructor (`ArgumentException`).
@@ -407,7 +407,8 @@ Table records append a versioned extension after ownership: its current version 
 `6` (#1122), followed by constraint count and each immutable foreign-key/check definition.
 Later fields retain collations, physical layout, domains, call vectors and identity facets. A reference
 stores its ordered local and target columns, target SQL namespace/table, and
-`RESTRICT` or `CASCADE` delete action. A check stores its predicate as canonical
+one of five delete actions in its action byte: `RESTRICT` (0), `CASCADE` (1),
+`NO ACTION` (2), `SET NULL` (3), or `SET DEFAULT` (4). A check stores its predicate as canonical
 SQL text and resolved function calls (below). Records ending after the original primary keys
 or ownership suffix lack format 10's required fields and are refused. Unknown extension versions and malformed
 definitions fail closed.
@@ -438,14 +439,21 @@ same columns. Older index records have no marker and load as ordinary indexes.
 
 ## Persisted SQL expressions are canonical text
 
+SQL record-space format 20 adds persisted NoAction, SetNull and SetDefault values beside
+Restrict and Cascade in the existing action byte (#1121). Earlier formats' action guard refuses
+these values, so the engine refuses format-19 and older catalogs before opening their data files;
+there is no compatibility reader. Table extension 6 is unchanged: expression defaults and
+their resolved call vectors use the existing canonical text fields; stable ADD COLUMN
+results are independent frozen literals in MissingValueLiteral.
+
 Record-space format 16 gates canonical identifier quoting for SEARCH and MATERIALIZED
 (#1116). The engine renderer now quotes those identifiers in CHECK, DEFAULT and SQL
 function text; format-15 CHECK text would report provisioning drift on ordinal canonical
 comparison. Catalog tuple layouts are unchanged; the SQL engine owns the open-time gate.
-Current format 19 likewise gates canonical quoting for PERCENT and TIES (#1107),
+Format 19 likewise gates canonical quoting for PERCENT and TIES (#1107),
 without changing catalog tuple layouts or adding an upgrade reader.
 
-Every SQL expression this catalog stores — table CHECKs, column literal and function-call
+Every SQL expression this catalog stores — table CHECKs, column literal and expression
 DEFAULTs, domain CHECKs and literal DEFAULTs, and SQL function bodies — is
 **canonical SQL that the engine rendered from the parsed
 tree** (`SqlExpressionRenderer`, Sql.Language), never the text a user wrote. A check
@@ -453,8 +461,7 @@ declared as `QTY>0   and qty<100` is stored as `QTY > 0 AND qty < 100`; a defaul
 declared as `'it''s'` or `+5` is stored as `'it''s'` or `5`, the SQL literal rather
 than its bare value. New persisted expressions must follow the same rule; storing
 source text is not an option, because a stored definition must mean the same thing
-under every later parser. Future general expression defaults and view queries use this
-same path; CREATE TABLE function-call defaults are already supported in format 10.
+under every later parser. Expression defaults use this same path; future view queries will too.
 
 Each expression also stores an ordered preorder vector of resolved function identities:
 normalized name and parameter-type signature, including pseudo-types and variadic shape.

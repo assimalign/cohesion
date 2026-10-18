@@ -39,7 +39,7 @@ internal sealed class CancellationFunctions
             builder.Functions.Add(new Aggregate(this, $"cancel_add{arity}", arity, "add"));
         }
         builder.Functions.Add(new Scalar(this, "cancel_fixed", 1, immutable: true));
-        builder.Functions.Add(new Scalar(this, "cancel_default", 1, immutable: true));
+        builder.Functions.Add(new Scalar(this, "cancel_default", 1));
         builder.Functions.Add(new Aggregate(this, "cancel_seed", 1, "seed"));
         builder.Functions.Add(new Aggregate(this, "cancel_finish", 1, "finish"));
         builder.Functions.Add(new Scalar(this, "cancel_check", 1, check: true, immutable: true));
@@ -58,6 +58,7 @@ internal sealed class CancellationFunctions
             "CREATE DOMAIN sql_domain AS INT CHECK (cancel_check(VALUE))",
             "CREATE FUNCTION wrapper(p INT) RETURNS INT RETURN cancel_scalar1(p)",
             "CREATE FUNCTION fixed_wrapper(p INT) RETURNS INT IMMUTABLE RETURN cancel_fixed(p)",
+            "CREATE FUNCTION volatile_default(p INT) RETURNS INT VOLATILE RETURN cancel_fixed(p)",
             "CREATE FUNCTION constant_body(p INT) RETURNS INT RETURN cancel_fixed(1)",
             "CREATE FUNCTION collated_body(p TEXT) RETURNS INT RETURN cancel_fixed(1)",
             "CREATE DOMAIN constant_domain AS TEXT CHECK (cancel_check(1))",
@@ -75,7 +76,7 @@ internal sealed class CancellationFunctions
             "INSERT INTO sql_values VALUES (0, 0)",
             "CREATE TABLE table_check (v INT CHECK (cancel_check(v)))",
             "CREATE TABLE function_default (id INT, v INT DEFAULT cancel_default(1))",
-            "CREATE TABLE fixed_default (id INT, v INT DEFAULT cancel_fixed(1))",
+            "CREATE TABLE fixed_default (id INT, v INT DEFAULT volatile_default(1))",
             "CREATE TABLE fixed_check (v INT CHECK (cancel_check(1)))",
         })
         {

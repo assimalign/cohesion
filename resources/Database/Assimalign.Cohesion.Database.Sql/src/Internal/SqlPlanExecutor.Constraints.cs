@@ -18,6 +18,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 internal sealed partial class SqlPlanExecutor
 {
     private sealed record SqlConstraintDelete(SqlCatalogTable Table, (PageId PageId, int SlotIndex) Location, object?[] Values);
+    private sealed record SqlConstraintUpdate(SqlCatalogTable Table, (PageId PageId, int SlotIndex) Location,
+        object?[] OldValues, object?[] NewValues, HashSet<int> Assigned);
 
     /// <summary>
     /// One row on the cascade walk's path (<see cref="CollectCascadeDeletesAsync"/>),
@@ -450,7 +452,9 @@ internal sealed partial class SqlPlanExecutor
     /// tables exclusively, so there is no row to lock against.
     /// </param>
     private void ValidateRows(SqlCatalogTable table, IReadOnlyList<object?[]> rows, SqlStatementContext statement,
-        CancellationToken cancellationToken, bool current = false, List<SqlParentReference>? references = null)
+        CancellationToken cancellationToken, bool current = false, List<SqlParentReference>? references = null,
+        Dictionary<(ulong ObjectId, ulong Location), SqlConstraintDelete>? deletions = null,
+        SqlConstraintUpdates? updates = null)
     {
         // The table version's CHECK predicates were parsed and bound once, when the catalog
         // loaded or the DDL that produced this version ran; a write only evaluates the bound
@@ -464,6 +468,7 @@ internal sealed partial class SqlPlanExecutor
                 var check = bound.GetCheck(constraint);
                 foreach (var row in rows)
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
                     // SQL UNKNOWN satisfies CHECK; only FALSE rejects a row.
                     object? result = evaluator.Evaluate(check.Bound, row);
                     if (result is not null and not bool)
@@ -489,24 +494,33 @@ internal sealed partial class SqlPlanExecutor
                     throw new DatabaseException($"Referenced table '{constraint.ReferencedSchema}.{constraint.ReferencedTable}' does not exist.");
                 }
             }
+            HashSet<object?[]>? selfKeys = null;
+            if (parent.ObjectId == table.ObjectId)
+            {
+                int[] ordinals = constraint.ReferencedColumns!.Select(column => FindColumnOrdinal(table, column)).ToArray();
+                selfKeys = new(new GroupKeyComparer(ordinals.Select(ordinal => table.Columns[ordinal].Collation ?? _catalog.DefaultCollation).ToArray()));
+                foreach (var candidate in rows)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    selfKeys.Add(ordinals.Select(ordinal => candidate[ordinal]).ToArray());
+                }
+            }
             foreach (var row in rows)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 object?[] keys = constraint.Columns.Select(column => row[FindColumnOrdinal(table, column)]).ToArray();
                 if (keys.Any(value => value is null))
                 {
                     continue; // MATCH SIMPLE
                 }
 
-                bool selfMatch = parent.ObjectId == table.ObjectId && rows.Any(candidate =>
-                    constraint.ReferencedColumns!.Select((column, i) => ValuesEqual(candidate[FindColumnOrdinal(table, column)], keys[i],
-                        table.Columns[FindColumnOrdinal(table, column)].Collation ?? _catalog.DefaultCollation)).All(equal => equal));
-                if (selfMatch)
+                if (selfKeys?.Contains(keys) == true)
                 {
                     continue;
                 }
 
-                var matches = FindConstraintRows(parent, constraint.ReferencedColumns!, keys, statement, cancellationToken,
-                    current ? ConstraintCurrentSnapshot(statement) : null).ToList();
+                var matches = FinalConstraintRows(parent, constraint.ReferencedColumns!, keys, statement, cancellationToken,
+                    deletions, updates, current ? ConstraintCurrentSnapshot(statement) : null).ToList();
                 if (matches.Count == 0)
                 {
                     throw Violation(table, constraint, keys);
@@ -528,7 +542,9 @@ internal sealed partial class SqlPlanExecutor
     }
 
     private void ValidateParentUpdate(SqlCatalogTable table, object?[] oldValues, object?[] newValues,
-        SqlStatementContext statement, CancellationToken cancellationToken)
+        SqlStatementContext statement, CancellationToken cancellationToken,
+        Dictionary<(ulong ObjectId, ulong Location), SqlConstraintDelete>? deletions = null,
+        SqlConstraintUpdates? updates = null)
     {
         foreach (var (child, constraint) in IncomingReferences(table))
         {
@@ -539,7 +555,8 @@ internal sealed partial class SqlPlanExecutor
             }
             bool changed = constraint.ReferencedColumns!.Select((column, i) => !ValuesEqual(newValues[FindColumnOrdinal(table, column)], keys[i],
                 table.Columns[FindColumnOrdinal(table, column)].Collation ?? _catalog.DefaultCollation)).Any(value => value);
-            if (changed && FindConstraintRows(child, constraint.Columns, keys, statement, cancellationToken, ConstraintCurrentSnapshot(statement)).Any())
+            if (changed && FinalConstraintRows(child, constraint.Columns, keys, statement, cancellationToken,
+                deletions, updates, ConstraintCurrentSnapshot(statement)).Any())
             {
                 throw Violation(child, constraint, keys);
             }
@@ -716,9 +733,11 @@ internal sealed partial class SqlPlanExecutor
     /// <param name="table">The child row's table.</param>
     /// <param name="location">The child row's location, exclusively locked by the statement.</param>
     /// <param name="statement">The executing statement.</param>
+    /// <param name="action">The referential action named by a snapshot conflict.</param>
     /// <exception cref="TransactionAbortedException">The transaction's snapshot does not see the child version's writer, or the version is gone.</exception>
     /// <exception cref="StorageCorruptionException">The slot holds a record too short for its version stamps (#1362).</exception>
-    private void EnsureSnapshotSeesCascadeRow(SqlCatalogTable table, (PageId PageId, int SlotIndex) location, SqlStatementContext statement)
+    private void EnsureSnapshotSeesCascadeRow(SqlCatalogTable table, (PageId PageId, int SlotIndex) location, SqlStatementContext statement,
+        string action = "CASCADE")
     {
         if (statement.Transaction.IsolationLevel == IsolationLevel.ReadCommitted)
         {
@@ -728,7 +747,7 @@ internal sealed partial class SqlPlanExecutor
         if (!_storage.TryReadRecord(location.PageId, location.SlotIndex, table.ObjectId, out var record))
         {
             throw new TransactionAbortedException(
-                $"Write-write conflict on '{table.Schema}.{table.Name}': ON DELETE CASCADE reached a row version that was rolled back after the walk found it, " +
+                $"Write-write conflict on '{table.Schema}.{table.Name}': ON DELETE {action} reached a row version that was rolled back after the walk found it, " +
                 "which this transaction's snapshot does not see (first-updater-wins). Retry the transaction.");
         }
 
@@ -744,7 +763,7 @@ internal sealed partial class SqlPlanExecutor
         if (!statement.Snapshot.IsVisible(writer))
         {
             throw new TransactionAbortedException(
-                $"Write-write conflict on '{table.Schema}.{table.Name}': ON DELETE CASCADE reached a row version written by transaction {writer}, " +
+                $"Write-write conflict on '{table.Schema}.{table.Name}': ON DELETE {action} reached a row version written by transaction {writer}, " +
                 "which this transaction's snapshot does not see (first-updater-wins). Retry the transaction.");
         }
     }
@@ -758,7 +777,7 @@ internal sealed partial class SqlPlanExecutor
     /// </summary>
     private static object?[]? CascadeKeys(SqlCatalogTable table, object?[] values, SqlCatalogConstraint constraint)
     {
-        if (constraint.OnDelete == SqlCatalogReferentialAction.Restrict)
+        if (constraint.OnDelete != SqlCatalogReferentialAction.Cascade)
         {
             return null;
         }
@@ -827,7 +846,7 @@ internal sealed partial class SqlPlanExecutor
     }
 
     private void ValidateRestrictedDeletes(Dictionary<(ulong ObjectId, ulong Location), SqlConstraintDelete> deletions,
-        SqlStatementContext statement, CancellationToken cancellationToken)
+        SqlConstraintUpdates updates, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         // Validate against the complete deletion set so physical row order and
         // constraint declaration order cannot change the outcome of one statement.
@@ -837,7 +856,7 @@ internal sealed partial class SqlPlanExecutor
         {
             foreach (var (child, constraint) in IncomingReferences(deletion.Table))
             {
-                if (constraint.OnDelete != SqlCatalogReferentialAction.Restrict)
+                if (constraint.OnDelete is not (SqlCatalogReferentialAction.Restrict or SqlCatalogReferentialAction.NoAction))
                 {
                     continue;
                 }
@@ -846,7 +865,8 @@ internal sealed partial class SqlPlanExecutor
                 {
                     continue;
                 }
-                foreach (var match in FindConstraintRows(child, constraint.Columns, keys, statement, cancellationToken, ConstraintCurrentSnapshot(statement)))
+                foreach (var match in FinalConstraintRows(child, constraint.Columns, keys, statement, cancellationToken,
+                    deletions, updates, ConstraintCurrentSnapshot(statement)))
                 {
                     if (!deletions.ContainsKey((child.ObjectId, SqlRecordLocation.Pack(match.Location.PageId, match.Location.SlotIndex))))
                     {
@@ -1020,7 +1040,15 @@ internal sealed partial class SqlPlanExecutor
             }
 
             result.Add(new SqlCatalogConstraint(name, SqlCatalogConstraintKind.Reference, definition.Columns, schema, referenced.TableName,
-                definition.ReferencedColumns, onDelete: definition.OnDelete == SqlReferentialAction.Cascade ? SqlCatalogReferentialAction.Cascade : SqlCatalogReferentialAction.Restrict));
+                definition.ReferencedColumns, onDelete: definition.OnDelete switch
+                {
+                    SqlReferentialAction.Restrict => SqlCatalogReferentialAction.Restrict,
+                    SqlReferentialAction.Cascade => SqlCatalogReferentialAction.Cascade,
+                    SqlReferentialAction.NoAction => SqlCatalogReferentialAction.NoAction,
+                    SqlReferentialAction.SetNull => SqlCatalogReferentialAction.SetNull,
+                    SqlReferentialAction.SetDefault => SqlCatalogReferentialAction.SetDefault,
+                    _ => throw new DatabaseException(ErrorMessages.DeleteActionUnknown),
+                }));
         }
         return result;
     }

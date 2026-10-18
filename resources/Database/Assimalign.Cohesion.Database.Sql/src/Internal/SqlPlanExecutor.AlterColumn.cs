@@ -27,8 +27,8 @@ internal sealed partial class SqlPlanExecutor
         if (previous.Type.Type != column.Type.Type || previous.Type.Scale != column.Type.Scale ||
             !string.Equals(previous.DomainName, column.DomainName, StringComparison.OrdinalIgnoreCase) ||
             (previous.Collation ?? _catalog.DefaultCollation).Id != (column.Collation ?? _catalog.DefaultCollation).Id ||
-            !plan.AllowDefaultChange && !string.Equals(SqlSchemaProvisioner.CanonicalDefault(previous.DefaultLiteral),
-                SqlSchemaProvisioner.CanonicalDefault(column.DefaultLiteral), StringComparison.Ordinal))
+            !plan.AllowDefaultChange && !string.Equals(previous.DefaultLiteral,
+                column.DefaultLiteral, StringComparison.Ordinal))
         {
             throw new SqlPlanningException("COHSQLE013", $"ALTER COLUMN '{column.Name}' requiring a storage-type, domain, collation, scale or default rewrite is not supported. Use an explicit table-copy migration; in-place rewrites are tracked by #1447.");
         }
@@ -36,9 +36,10 @@ internal sealed partial class SqlPlanExecutor
         {
             throw new DatabaseException("A primary-key column cannot become nullable.");
         }
+        SqlBoundExpression? declaredDefault = null;
         if (column.DefaultLiteral is not null)
         {
-            BindDefaultExpression(column, $"DEFAULT of column '{column.Name}' on '{plan.Table.Name}'", _definitions.Functions, _catalog.DefaultCollation, cancellationToken, declaring: true);
+            declaredDefault = BindDefaultExpression(column, $"DEFAULT of column '{column.Name}' on '{plan.Table.Name}'", _definitions.Functions, _catalog.DefaultCollation, cancellationToken, declaring: true);
         }
 
         if (column.MissingValueLiteral is { } missing &&
@@ -93,7 +94,9 @@ internal sealed partial class SqlPlanExecutor
         columns[ordinal] = column;
         var replacement = new SqlCatalogTable(plan.Table.ObjectId, plan.Table.Schema, plan.Table.Name, columns,
             plan.Table.PrimaryKeyColumns, plan.Table.Owner, plan.Table.OwningSchema, plan.Table.Constraints, plan.Table.DroppedColumnOrdinals);
-        _definitions.Get(replacement, cancellationToken);
+        var defaults = _definitions.Get(plan.Table, cancellationToken).DefaultValues.ToArray();
+        defaults[ordinal] = declaredDefault;
+        _definitions.GetDeclared(replacement, defaults, cancellationToken);
         await SelfCommitAsync(statement, (statement.ScriptReceipt is null ? _catalog.PublishTableAsync(replacement, [], PublishedRegistrations([]),
             replaceExisting: true, cancellationToken) : _catalog.PublishTableAsync(replacement, [], PublishedRegistrations([]),
             replaceExisting: true, statement.ScriptReceipt, cancellationToken))).ConfigureAwait(false);

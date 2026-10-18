@@ -1,3 +1,4 @@
+using System;
 using System.Linq;
 using System.Threading.Tasks;
 
@@ -11,6 +12,28 @@ namespace Assimalign.Cohesion.Database.Sql.Client.Tests;
 /// <summary>Verifies ADD COLUMN defaults and atomic errors through the SQL server and typed client.</summary>
 public sealed class SqlAddColumnWireTests
 {
+    [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - Delete actions and clock defaults: effects and TIMESTAMP types cross connections")]
+    public async Task ExecuteAsync_SetNullAndClockDefault_ShouldRoundTripAcrossConnections()
+    {
+        // Arrange
+        await using var harness = await SqlClientTestHarness.StartAsync();
+        await using var writer = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
+        await using var reader = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
+        await ExecuteAsync(writer, "CREATE TABLE p (id INT PRIMARY KEY)");
+        await ExecuteAsync(writer, "CREATE TABLE c (pid INT REFERENCES p(id) ON DELETE SET NULL, stamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP)");
+        await ExecuteAsync(writer, "INSERT INTO p VALUES (1)");
+        await ExecuteAsync(writer, "INSERT INTO c (pid) VALUES (1)");
+
+        // Act
+        await ExecuteAsync(writer, "DELETE FROM p");
+
+        // Assert
+        var rows = await QueryAsync(reader, "SELECT pid, stamp FROM c");
+        rows.ShouldHaveSingleItem()[0].ShouldBeNull();
+        rows.Columns[1].Type.ShouldBe(DatabaseType.DateTime);
+        rows[0][1].ShouldBeOfType<DateTime>().Kind.ShouldBe(DateTimeKind.Unspecified);
+    }
+
     /// <summary>Existing rows and omitted-column inserts receive the same typed default.</summary>
     /// <param name="notNull">Whether the added column rejects explicit null values.</param>
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - ADD COLUMN: old and new rows receive literal defaults over the wire")]
@@ -58,27 +81,22 @@ public sealed class SqlAddColumnWireTests
         updated[0][1].ShouldBe(7);
     }
 
-    /// <summary>A nonliteral default fails with the CREATE TABLE diagnostic before publishing a column.</summary>
-    [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - ADD COLUMN: nonliteral defaults reject atomically over the wire")]
-    public async Task ExecuteAsync_NonliteralDefault_ShouldRejectAndLeaveTableUnchanged()
+    /// <summary>An expression default backfills old rows and supplies omitted inserts.</summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - ADD COLUMN: expression defaults execute over the wire")]
+    public async Task ExecuteAsync_NonliteralDefault_ShouldBackfillAndInsert()
     {
         // Arrange
         await using var harness = await SqlClientTestHarness.StartAsync();
         await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
         await SeedAsync(connection);
 
-        // Act / Assert: this statement previously succeeded while silently discarding its expression.
-        var error = await Should.ThrowAsync<SqlClientException>(() => ExecuteAsync(connection,
-            "ALTER TABLE additions ADD COLUMN extra INT DEFAULT (1 + 2)"));
-        error.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
-        error.Message.ShouldContain("Column 'extra': only literal DEFAULT values are supported.", Case.Sensitive);
-        error.ConnectionUsable.ShouldBeTrue();
-        await AssertUnchangedAsync(connection);
+        // Act
+        await ExecuteAsync(connection, "ALTER TABLE additions ADD COLUMN extra INT DEFAULT (1 + 2)");
+        await ExecuteAsync(connection, "INSERT INTO additions (id, label) VALUES (3, 'new')");
 
-        // The failed attempt must not reserve the name or leave a partly changed row layout.
-        await ExecuteAsync(connection, "ALTER TABLE additions ADD COLUMN extra INT DEFAULT 7");
+        // Assert
         (await QueryAsync(connection, "SELECT extra FROM additions ORDER BY id"))
-            .Select(row => row[0]).ShouldBe(new object?[] { 7, 7 });
+            .Select(row => row[0]).ShouldBe(new object?[] { 3, 3, 3 });
     }
 
     /// <summary>Invalid literal conversions reject atomically rather than publishing unusable metadata.</summary>

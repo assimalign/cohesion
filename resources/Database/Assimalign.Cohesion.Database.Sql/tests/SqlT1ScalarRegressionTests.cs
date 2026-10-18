@@ -109,7 +109,7 @@ public sealed class SqlT1ScalarRegressionTests
         (await SqlT1ScalarTests.ReadAsync(result)).ShouldBe([[true, true, true, true, true, "b ", "a  "]]);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql] - DEFAULT: stable and volatile functions fail before DDL mutation")]
+    [Theory(DisplayName = "Cohesion Test [Sql] - DEFAULT: stable and volatile functions execute for CREATE and ALTER")]
     [InlineData("CURRENT_TIMESTAMP", "TIMESTAMPTZ")]
     [InlineData("NOW()", "TIMESTAMPTZ")]
     [InlineData("CURRENT_DATE", "DATE")]
@@ -119,7 +119,7 @@ public sealed class SqlT1ScalarRegressionTests
     [InlineData("GEN_RANDOM_UUID()", "UUID")]
     [InlineData("NULLIF(NOW(), NOW())", "TIMESTAMPTZ")]
     [InlineData("wrapped_now()", "TIMESTAMPTZ")]
-    public async Task Create_NonImmutableDefault_ShouldRefuseWithoutPublishing(string expression, string type)
+    public async Task Create_NonImmutableDefault_ShouldExecuteOnAssignment(string expression, string type)
     {
         // Arrange
         await using var engine = SqlDatabaseEngine.Create("default-volatility", new());
@@ -128,19 +128,16 @@ public sealed class SqlT1ScalarRegressionTests
         await session.ExecuteAsync("CREATE FUNCTION wrapped_now() RETURNS TIMESTAMPTZ STABLE RETURN NOW()", cancellationToken: CancellationToken.None);
 
         // Act / Assert
-        var create = await Should.ThrowAsync<DatabaseException>(() => session.ExecuteAsync($"CREATE TABLE refused (v {type} DEFAULT {expression})", cancellationToken: CancellationToken.None).AsTask());
-        create.Diagnostics[0].Code.ShouldBe("COHDBL001");
-        create.Message.ShouldContain(expression == "NULLIF(NOW(), NOW())" ? "NOW" : expression.Split('(')[0], Case.Insensitive);
-        (await Rows(session, "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'refused'")).ShouldBeEmpty();
+        await session.ExecuteAsync($"CREATE TABLE defaults (v {type} DEFAULT {expression})", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT INTO defaults DEFAULT VALUES", cancellationToken: CancellationToken.None);
+        (await Rows(session, "SELECT v FROM defaults")).Count.ShouldBe(1);
         await session.ExecuteAsync($"CREATE TABLE existing (v {type})", cancellationToken: CancellationToken.None);
-        var alter = await Should.ThrowAsync<DatabaseException>(() => session.ExecuteAsync($"ALTER TABLE existing ALTER COLUMN v {type} DEFAULT {expression}", cancellationToken: CancellationToken.None).AsTask());
-        alter.Diagnostics[0].Code.ShouldBe("COHDBL001");
-        var add = await Should.ThrowAsync<DatabaseException>(() => session.ExecuteAsync($"ALTER TABLE existing ADD COLUMN extra {type} DEFAULT {expression}", cancellationToken: CancellationToken.None).AsTask());
-        add.Diagnostics[0].Code.ShouldBe("COHDBL001");
+        await session.ExecuteAsync($"ALTER TABLE existing ALTER COLUMN v SET DEFAULT {expression}", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync($"ALTER TABLE existing ADD COLUMN extra {type} DEFAULT {expression}", cancellationToken: CancellationToken.None);
         database.Catalog.TryGetTable("dbo", "existing", out var table).ShouldBeTrue();
-        table.Columns.Count.ShouldBe(1);
+        table.Columns.Count.ShouldBe(2);
         await session.ExecuteAsync("INSERT INTO existing DEFAULT VALUES", cancellationToken: CancellationToken.None);
-        (await Rows(session, "SELECT v FROM existing")).ShouldBe([[null]]);
+        (await Rows(session, "SELECT v FROM existing")).Count.ShouldBe(1);
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Temporal arithmetic: unsupported operators and pairs fail on empty input")]

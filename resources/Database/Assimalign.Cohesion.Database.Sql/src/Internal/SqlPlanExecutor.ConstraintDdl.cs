@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -19,11 +20,13 @@ internal sealed partial class SqlPlanExecutor
         // Every DEFAULT must convert to its column before anything is reserved, as ADD COLUMN
         // requires: a default the column cannot store would otherwise be published and fail
         // every later INSERT that omits the column.
-        foreach (var column in plan.Columns)
+        var defaults = new SqlBoundExpression?[plan.Columns.Count];
+        for (int ordinal = 0; ordinal < plan.Columns.Count; ordinal++)
         {
+            var column = plan.Columns[ordinal];
             if (column.DefaultLiteral is not null)
             {
-                BindDefaultExpression(column, $"DEFAULT of column '{column.Name}' on table '{plan.Schema}.{plan.Name}'", _definitions.Functions, _catalog.DefaultCollation, cancellationToken, declaring: true);
+                defaults[ordinal] = BindDefaultExpression(column, $"DEFAULT of column '{column.Name}' on table '{plan.Schema}.{plan.Name}'", _definitions.Functions, _catalog.DefaultCollation, cancellationToken, declaring: true);
             }
         }
 
@@ -62,7 +65,7 @@ internal sealed partial class SqlPlanExecutor
 
         // Bind the persisted definitions of the version about to be published, from their
         // stored text, so no write to the new table ever parses them.
-        _definitions.Get(table, cancellationToken);
+        _definitions.GetDeclared(table, defaults, cancellationToken);
         await PublishConstrainedTableAsync(table, plan.Constraints, statement, cancellationToken, replaceExisting: false, publication).ConfigureAwait(false);
     }
 
@@ -250,16 +253,31 @@ internal sealed partial class SqlPlanExecutor
         // Validate even on an empty table: publishing an unusable default would
         // defer the failure until a later INSERT. No catalog or row writes occur
         // until every default and existing-row constraint has been checked.
-        if (plan.Column.DefaultLiteral is not null)
+        var column = plan.Column;
+        SqlBoundExpression? boundDefault = null;
+        if (column.DefaultLiteral is not null)
         {
-            if (!SqlPersistedExpression.IsDefaultLiteral(SqlPersistedExpression.Load(plan.Column.DefaultLiteral, "ADD COLUMN DEFAULT")))
+            var expression = SqlPersistedExpression.Load(column.DefaultLiteral, "ADD COLUMN DEFAULT");
+            var scope = new SqlExpressionEvaluator([], null, defaultCollation: _catalog.DefaultCollation,
+                functions: _definitions.Functions, cancellationToken: cancellationToken);
+            SqlDefinitionBinder.PinCalls(expression, scope, column.DefaultFunctionCalls);
+            SqlPersistedExpression.Bind(expression, scope);
+            var volatility = DefaultVolatility(expression, scope);
+            if (volatility == SqlFunctionVolatility.Volatile &&
+                Scan(table, statement, cancellationToken, ConstraintCurrentSnapshot(statement)).Any())
             {
-                throw SqlDefinitionBinder.Refuse("ADD COLUMN requires a literal DEFAULT; expression defaults require row materialization, which this metadata-only addition does not perform.");
+                throw new SqlPlanningException("COHSQLE027", string.Format(CultureInfo.CurrentCulture, ErrorMessages.VolatileDefaultBackfill, column.Name));
             }
-            BindDefaultExpression(plan.Column, $"DEFAULT of column '{plan.Column.Name}' on table '{plan.Schema}.{plan.Name}'", _definitions.Functions, _catalog.DefaultCollation, cancellationToken, declaring: true);
+            boundDefault = BindDefaultExpression(column, $"DEFAULT of column '{column.Name}' on table '{plan.Schema}.{plan.Name}'",
+                _definitions.Functions, _catalog.DefaultCollation, cancellationToken, declaring: true);
+            string? missing = volatility == SqlFunctionVolatility.Volatile ? null
+                : SqlPersistedExpression.IsDefaultLiteral(expression) ? column.DefaultLiteral
+                : FrozenDefaultLiteral(DeclaredDefaultValue(boundDefault, column, cancellationToken, statement.TransactionStart), column.Type.Type);
+            column = new SqlCatalogColumn(column.Name, column.Type, column.IsNullable, column.DefaultLiteral, column.Collation,
+                column.DomainName, column.DefaultFunctionCalls, column.Identity, missing);
         }
 
-        var columns = table.Columns.Append(plan.Column).ToArray();
+        var columns = table.Columns.Append(column).ToArray();
         var primaryDefinition = plan.Constraints.FirstOrDefault(c => c.Kind == SqlConstraintKind.PrimaryKey);
         if (primaryDefinition is not null && table.PrimaryKeyColumns.Count > 0)
         {
@@ -277,13 +295,14 @@ internal sealed partial class SqlPlanExecutor
         constraints = BindConstraints(provisional, plan.Constraints);
         var replacement = new SqlCatalogTable(table.ObjectId, table.Schema, table.Name, columns, primary, table.Owner, table.OwningSchema,
             table.Constraints.Concat(constraints).ToArray(), table.DroppedColumnOrdinals);
+        _definitions.GetDeclared(replacement, [.. _definitions.Get(table, cancellationToken).DefaultValues, boundDefault], cancellationToken);
         if (plan.Column.IsNullable && plan.Constraints.Count == 0)
         {
             // Existing columns and constraints are unchanged. A nullable field's missing
             // value is one immutable literal, so validate it once instead of scanning rows.
             var definition = _definitions.Get(replacement, cancellationToken);
             var row = new object?[columns.Length];
-            row[^1] = definition.DefaultValues[^1] is { } literal ? DefaultValue(literal, cancellationToken) : null;
+            row[^1] = definition.MissingValues[^1] is { } literal ? DefaultValue(literal, cancellationToken) : null;
             try
             {
                 CheckDomains(definition, row, ExecutionEvaluator(null, cancellationToken), [columns.Length - 1]);
@@ -298,7 +317,7 @@ internal sealed partial class SqlPlanExecutor
                 }
             }
             _definitions.Adopt(await SelfCommitAsync(statement,
-                (statement.ScriptReceipt is null ? _catalog.AddColumnAsync(plan.Schema, plan.Name, plan.Column, cancellationToken) : _catalog.AddColumnAsync(plan.Schema, plan.Name, plan.Column, statement.ScriptReceipt, cancellationToken))).ConfigureAwait(false), replacement, cancellationToken);
+                (statement.ScriptReceipt is null ? _catalog.AddColumnAsync(plan.Schema, plan.Name, column, cancellationToken) : _catalog.AddColumnAsync(plan.Schema, plan.Name, column, statement.ScriptReceipt, cancellationToken))).ConfigureAwait(false), replacement, cancellationToken);
             return new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0);
         }
         // Backfill is logical: missing trailing fields resolve from the immutable
@@ -315,7 +334,7 @@ internal sealed partial class SqlPlanExecutor
         foreach (var row in rows)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            row[^1] = CoerceForColumn(row[^1], plan.Column);
+            row[^1] = CoerceForColumn(row[^1], column);
             if (added is not null)
             {
                 CheckDomains(bound!, row, evaluator!, added);
@@ -328,7 +347,7 @@ internal sealed partial class SqlPlanExecutor
         {
             // The catalog publishes its own copy of the replacement definition, built from the
             // same column and constraint instances, so it adopts the replacement's bindings.
-            _definitions.Adopt(await SelfCommitAsync(statement, (statement.ScriptReceipt is null ? _catalog.AddColumnAsync(plan.Schema, plan.Name, plan.Column, cancellationToken) : _catalog.AddColumnAsync(plan.Schema, plan.Name, plan.Column, statement.ScriptReceipt, cancellationToken))).ConfigureAwait(false),
+            _definitions.Adopt(await SelfCommitAsync(statement, (statement.ScriptReceipt is null ? _catalog.AddColumnAsync(plan.Schema, plan.Name, column, cancellationToken) : _catalog.AddColumnAsync(plan.Schema, plan.Name, column, statement.ScriptReceipt, cancellationToken))).ConfigureAwait(false),
                 replacement, cancellationToken);
         }
         else

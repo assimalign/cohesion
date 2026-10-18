@@ -87,7 +87,7 @@ public sealed class SqlAlterTableExecutionTests
     [InlineData("2147483648")]
     [InlineData("'bad'")]
     [InlineData("DATE '2024-01-01'")]
-    [InlineData("(1 + 2)")]
+    [InlineData("(1 / 0)")]
     public async Task ExecuteAsync_InvalidDefault_ShouldKeepDefinition(string value)
     {
         // Arrange

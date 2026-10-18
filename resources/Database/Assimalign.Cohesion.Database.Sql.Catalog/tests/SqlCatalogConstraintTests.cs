@@ -13,15 +13,20 @@ namespace Assimalign.Cohesion.Database.Sql.Catalog.Tests;
 
 public sealed class SqlCatalogConstraintTests
 {
-    [Fact]
-    public async Task Constraints_AfterUncheckpointedReopen_ShouldRetainDefinitionsAndAlterations()
+    [Theory(DisplayName = "Cohesion Test [Sql.Catalog] - Constraints: all five delete actions survive WAL recovery")]
+    [InlineData(SqlCatalogReferentialAction.Restrict)]
+    [InlineData(SqlCatalogReferentialAction.Cascade)]
+    [InlineData(SqlCatalogReferentialAction.NoAction)]
+    [InlineData(SqlCatalogReferentialAction.SetNull)]
+    [InlineData(SqlCatalogReferentialAction.SetDefault)]
+    public async Task Constraints_AfterUncheckpointedReopen_ShouldRetainDefinitionsAndAlterations(SqlCatalogReferentialAction action)
     {
         using var data = new MemoryStream();
         using var journal = new MemoryStream();
         using var storage = SqlStorage.Create(new NonClosingStream(data), new NonClosingStream(journal), new MemoryStream(), "constraints");
         SqlCatalog catalog = SqlCatalog.Open(storage);
         var reference = new SqlCatalogConstraint("fk_parent", SqlCatalogConstraintKind.Reference,
-            ["parent_id"], "dbo", "parent", ["id"], onDelete: SqlCatalogReferentialAction.Cascade);
+            ["parent_id"], "dbo", "parent", ["id"], onDelete: action);
         var check = new SqlCatalogConstraint("ck_positive", SqlCatalogConstraintKind.Check,
             ["qty"], checkExpression: "qty > 0");
         await catalog.CreateTableAsync("dbo", "child",
@@ -41,7 +46,7 @@ public sealed class SqlCatalogConstraintTests
         table.Constraints[0].ReferencedSchema.ShouldBe("dbo");
         table.Constraints[0].ReferencedTable.ShouldBe("parent");
         table.Constraints[0].ReferencedColumns.ShouldBe(["id"]);
-        table.Constraints[0].OnDelete.ShouldBe(SqlCatalogReferentialAction.Cascade);
+        table.Constraints[0].OnDelete.ShouldBe(action);
         table.Constraints[1].CheckExpression.ShouldBe("qty > 0");
         table.FindColumn("extra").ShouldNotBeNull();
 

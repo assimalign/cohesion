@@ -20,6 +20,12 @@ public enum SqlCatalogReferentialAction : byte
     Restrict = 0,
     /// <summary>Deletes dependent rows in the same transaction.</summary>
     Cascade,
+    /// <summary>Checks dependent rows at statement end.</summary>
+    NoAction,
+    /// <summary>Assigns NULL to the referencing columns.</summary>
+    SetNull,
+    /// <summary>Assigns each referencing column's default.</summary>
+    SetDefault,
 }
 
 /// <summary>Describes a foreign-key or check constraint persisted with its owning table.</summary>
@@ -53,7 +59,7 @@ public sealed class SqlCatalogConstraint
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentNullException.ThrowIfNull(columns);
         if (kind is not SqlCatalogConstraintKind.Reference and not SqlCatalogConstraintKind.Check ||
-            onDelete is not SqlCatalogReferentialAction.Restrict and not SqlCatalogReferentialAction.Cascade)
+            onDelete is < SqlCatalogReferentialAction.Restrict or > SqlCatalogReferentialAction.SetDefault)
         {
             throw new ArgumentException("The constraint kind or referential action is invalid.");
         }

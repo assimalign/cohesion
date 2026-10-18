@@ -409,7 +409,7 @@ internal sealed partial class SqlExpressionEvaluator
         // A sign over a constant is a constant, as PostgreSQL's grammar reads "-5" as the constant
         // -5 (doNegate, src/backend/parser/gram.y): computed once here, so an immutable call over it
         // folds too (ABS(-5)). One that fails is kept, and fails only when a row reaches it, as before.
-        return unary.Operator is SqlUnaryOperator.Negate or SqlUnaryOperator.Plus && operand.Kind == SqlBoundExpressionKind.Constant
+        return _foldConstants && (unary.Operator is SqlUnaryOperator.Negate or SqlUnaryOperator.Plus) && operand.Kind == SqlBoundExpressionKind.Constant
             ? FoldSign(bound)
             : bound;
     }
@@ -644,7 +644,7 @@ internal sealed partial class SqlExpressionEvaluator
         BindParameterCoercions(scalar, arguments, callCollation);
         var bound = new SqlBoundCall(scalar, arguments, SqlFunctionResolver.CoercionTargets(scalar, arguments.Length),
             callCollation, _functions.Database, _cancellationToken, _functions.TransactionStart);
-        return scalar.Volatility == SqlFunctionVolatility.Immutable && fixedArguments ? Fold(bound) : bound;
+        return _foldConstants && scalar.Volatility == SqlFunctionVolatility.Immutable && fixedArguments ? Fold(bound) : bound;
     }
 
     /// <summary>Applies declared CHAR bounds and domain checks before scalar or aggregate STRICT dispatch.</summary>

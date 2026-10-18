@@ -51,6 +51,13 @@ The SQL client owns parameter encoding, response decoding and materialization,
 typed commands/results, and error/telemetry mapping. It delegates dialing,
 startup/authentication, framing, and pooling to the shared client.
 
+Expression defaults and referential SET actions (#1121) use existing result frames.
+Client coverage verifies arithmetic ADD COLUMN backfill, SET NULL visibility on a second
+connection, and CURRENT_TIMESTAMP assigned to TIMESTAMP with DateTime metadata and value.
+Cancellation coverage distinguishes volatile defaults evaluated during writes from immutable
+defaults evaluated during DDL; both use the current operation token, and failed immutable
+declarations publish no table.
+
 ## Family position
 
 The SQL client references shared mechanics and its model's codecs:

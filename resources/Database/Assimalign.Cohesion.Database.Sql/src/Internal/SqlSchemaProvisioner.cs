@@ -23,6 +23,13 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// </summary>
 internal sealed partial class SqlSchemaProvisioner
 {
+    private static CompiledSchemaReferentialAction CompiledDeleteAction(SqlCatalogReferentialAction action) => action switch
+    {
+        SqlCatalogReferentialAction.Restrict => CompiledSchemaReferentialAction.Restrict,
+        SqlCatalogReferentialAction.Cascade => CompiledSchemaReferentialAction.Cascade,
+        _ => throw new SqlSchemaMigrationException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.CompiledDeleteActionInvalid, action)),
+    };
+
     private readonly SqlDatabase _database;
     private readonly SqlCatalog _catalog;
     private readonly SemaphoreSlim _applyGate = new(1, 1);
@@ -620,7 +627,7 @@ internal sealed partial class SqlSchemaProvisioner
                     constraint.Kind == SqlCatalogConstraintKind.Reference ? CompiledSchemaConstraintKind.Reference : CompiledSchemaConstraintKind.Check,
                     constraint.Columns, constraint.ReferencedTable, constraint.ReferencedColumns,
                     constraint.CheckExpression is null ? null : new CompiledSchemaExpression(DeclaredCheckText(desiredTable, constraint)),
-                    constraint.OnDelete == SqlCatalogReferentialAction.Cascade ? CompiledSchemaReferentialAction.Cascade : CompiledSchemaReferentialAction.Restrict)).ToArray()));
+                    CompiledDeleteAction(constraint.OnDelete))).ToArray()));
         }
 
         return new SqlCompiledSchema(
@@ -714,7 +721,7 @@ internal sealed partial class SqlSchemaProvisioner
                     !NamesEqual(persisted.ReferencedColumns, constraint.ReferencedColumns) ||
                     !string.Equals(persisted.ReferencedTable, constraint.ReferencedObject, StringComparison.OrdinalIgnoreCase) ||
                     (persisted.Kind == SqlCatalogConstraintKind.Reference && !string.Equals(persisted.ReferencedSchema, "dbo", StringComparison.OrdinalIgnoreCase)) ||
-                    (persisted.OnDelete == SqlCatalogReferentialAction.Cascade) != (constraint.OnDelete == CompiledSchemaReferentialAction.Cascade) ||
+                    CompiledDeleteAction(persisted.OnDelete) != constraint.OnDelete ||
                     !string.Equals(persisted.CheckExpression, CanonicalCheck(constraint.Expression?.CanonicalText), StringComparison.Ordinal))
                 {
                     return $"table '{expected.Name}': constraint '{constraint.Name}' differs from its declaration";

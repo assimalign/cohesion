@@ -22,6 +22,12 @@ public enum SqlReferentialAction
     Restrict,
     /// <summary>Delete referencing children with their parent.</summary>
     Cascade,
+    /// <summary>Checks dependent rows at statement end.</summary>
+    NoAction,
+    /// <summary>Assigns NULL to the referencing columns.</summary>
+    SetNull,
+    /// <summary>Assigns each referencing column's default.</summary>
+    SetDefault,
 }
 
 /// <summary>Describes a parsed constraint, normalized for column and table declarations.</summary>
@@ -33,7 +39,7 @@ public sealed class SqlConstraintDefinition
         IReadOnlyList<string> columns,
         SqlTableReference? referencedTable = null,
         IReadOnlyList<string>? referencedColumns = null,
-        SqlReferentialAction onDelete = SqlReferentialAction.Restrict,
+        SqlReferentialAction onDelete = SqlReferentialAction.NoAction,
         SqlExpression? checkExpression = null,
         string? checkExpressionText = null)
     {
@@ -62,7 +68,7 @@ public sealed class SqlConstraintDefinition
     /// <summary>Gets the parent key columns in matching order.</summary>
     public IReadOnlyList<string> ReferencedColumns { get; }
 
-    /// <summary>Gets the parent deletion action; omitted actions default to restrict.</summary>
+    /// <summary>Gets the parent deletion action; omitted actions default to NO ACTION.</summary>
     public SqlReferentialAction OnDelete { get; }
 
     /// <summary>Gets the predicate of a check constraint.</summary>

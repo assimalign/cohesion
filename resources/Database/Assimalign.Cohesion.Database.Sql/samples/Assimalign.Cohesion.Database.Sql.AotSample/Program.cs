@@ -227,6 +227,21 @@ internal static class Program
         await session.ExecuteAsync("ALTER TABLE altered_guard ALTER value SET NOT NULL");
         Check("in process: ALTER rename and frozen missing values", await RowsAsync(session, "SELECT value FROM altered_guard ORDER BY id"), [[7], [-9]]);
         Check("in process: T1 scalars and transaction clock", await RowsAsync(session, t1Scalars), _t1Scalars);
+        await session.ExecuteAsync("CREATE TABLE action_parent (id INT PRIMARY KEY)", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE action_child (pid INT DEFAULT (1 + 1) REFERENCES action_parent(id) ON DELETE SET DEFAULT)", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE null_child (pid INT REFERENCES action_parent(id) ON DELETE SET NULL)", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT INTO action_parent VALUES (1), (2)", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT INTO action_child VALUES (1)", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT INTO null_child VALUES (1)", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("DELETE FROM action_parent WHERE id = 1", cancellationToken: CancellationToken.None);
+        Check("in process: SET DEFAULT expression", await RowsAsync(session, "SELECT pid FROM action_child"), [[2]]);
+        Check("in process: SET NULL", await RowsAsync(session, "SELECT pid FROM null_child"), [[null]]);
+        await session.ExecuteAsync("CREATE TABLE expression_clock (id INT DEFAULT CAST('3' AS INT), stamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP)", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("BEGIN", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT INTO expression_clock DEFAULT VALUES", cancellationToken: CancellationToken.None);
+        Check("in process: expression DEFAULT transaction clock", await RowsAsync(session,
+            "SELECT id, stamp = CAST(CURRENT_TIMESTAMP AS TIMESTAMP) FROM expression_clock"), [[3, true]]);
+        await session.ExecuteAsync("COMMIT", cancellationToken: CancellationToken.None);
         Check("in process: strict typed literals", await RowsAsync(session, typedLiterals), _typedLiterals);
         Check("in process: ISO type names and SQL Server lexical aliases", await RowsAsync(session, typeAliases), _typeAliases);
         Check("in process: CHAR storage, cast, length, concat, LIKE and seek", await RowsAsync(session, Characters), _characters);

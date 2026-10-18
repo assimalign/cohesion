@@ -233,6 +233,6 @@ public sealed class SqlTypedLiteralTests
         statement.Diagnostics.ShouldBeEmpty();
         statement.SqlExpression.ShouldBeOfType<SqlSelectExpression>().Columns.Single().Expression.ShouldBeOfType<SqlColumnReferenceExpression>().ColumnName.ShouldBe(name);
         new SqlQueryParser().Parse("SELECT X '00';").Diagnostics.ShouldContain(d => d.Code == "SQL0003");
-        new SqlQueryParser().Parse("CREATE TABLE t (c TEXT DEFAULT -'x');").Diagnostics.ShouldContain(d => d.Code == "SQL0003");
+        new SqlQueryParser().Parse("CREATE TABLE t (c TEXT DEFAULT -'x');").Diagnostics.ShouldBeEmpty();
     }
 }

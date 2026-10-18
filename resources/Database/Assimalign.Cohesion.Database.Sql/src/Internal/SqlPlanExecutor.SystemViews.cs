@@ -162,7 +162,15 @@ internal sealed partial class SqlPlanExecutor
                             referencedConstraint is null ? null : database,
                             referencedConstraint is null ? null : referencedTable!.Schema,
                             referencedConstraint, "NONE", "RESTRICT",
-                            constraint.OnDelete == SqlCatalogReferentialAction.Cascade ? "CASCADE" : "RESTRICT",
+                            constraint.OnDelete switch
+                            {
+                                SqlCatalogReferentialAction.Cascade => "CASCADE",
+                                SqlCatalogReferentialAction.Restrict => "RESTRICT",
+                                SqlCatalogReferentialAction.NoAction => "NO ACTION",
+                                SqlCatalogReferentialAction.SetNull => "SET NULL",
+                                SqlCatalogReferentialAction.SetDefault => "SET DEFAULT",
+                                _ => throw new DatabaseException(ErrorMessages.DeleteActionUnknown),
+                            },
                         ];
                     }
                     break;

@@ -52,7 +52,8 @@ internal static class SqlRowCodec
     /// <summary>
     /// The format version of the database's data storage (rows and the index
     /// trees that share its file set) this engine reads and writes, persisted in
-    /// the catalog: 19 quotes PERCENT and TIES identifiers in persisted canonical SQL (#1107);
+    /// the catalog: 20 admits the three additional persisted referential delete actions (#1121);
+    /// 19 quotes PERCENT and TIES identifiers in persisted canonical SQL (#1107);
     /// 18 quotes newly executable T1 function names and BOTH/LEADING/TRAILING in persisted canonical SQL (#1120);
     /// 17 freezes ADD COLUMN missing values separately from insert defaults (table extension 6, #1122);
     /// 16 quotes SEARCH and MATERIALIZED identifiers in persisted canonical SQL (#1116);
@@ -78,7 +79,7 @@ internal static class SqlRowCodec
     /// There is no upgrade path (owner decisions of 2026-10-01 and 2026-10-02;
     /// upgrades are #1152).
     /// </summary>
-    internal const int RecordSpaceFormatVersion = 19;
+    internal const int RecordSpaceFormatVersion = 20;
 
     /// <summary>
     /// The size of the fixed version-stamp header preceding the tuple payload.

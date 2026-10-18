@@ -132,6 +132,15 @@ internal sealed class SqlBoundTableCache
         return GetState(cancellationToken).Get(table, cancellationToken);
     }
 
+    // DDL has already evaluated immutable defaults before its first mutation. Retain
+    // those exact bindings instead of folding them again while publishing this version.
+    internal SqlBoundTable GetDeclared(SqlCatalogTable table, IReadOnlyList<SqlBoundExpression?> defaults, CancellationToken cancellationToken)
+    {
+        var state = GetState(cancellationToken);
+        var entry = new SqlBindingEntry<SqlBoundTable>(Bind(table, state.Functions, cancellationToken, defaults));
+        return state.Bound.GetValue(table, _ => entry).Get(cancellationToken);
+    }
+
     /// <summary>
     /// Registers the version a catalog mutation published, reusing the bindings of the version
     /// it was derived from when the published one carries the very same column instances, the same
@@ -276,7 +285,8 @@ internal sealed class SqlBoundTableCache
         return entry.Get(cancellationToken);
     }
 
-    private SqlBoundTable Bind(SqlCatalogTable table, SqlFunctionEnvironment functions, CancellationToken cancellationToken)
+    private SqlBoundTable Bind(SqlCatalogTable table, SqlFunctionEnvironment functions, CancellationToken cancellationToken,
+        IReadOnlyList<SqlBoundExpression?>? declaredDefaults = null)
     {
         Interlocked.Increment(ref _bindCount);
         string tableName = $"{table.Schema}.{table.Name}";
@@ -313,7 +323,7 @@ internal sealed class SqlBoundTableCache
             if (column.DefaultLiteral is not null)
             {
                 // Converted to the column's type once, here: no decoded row and no INSERT converts it again.
-                defaults[ordinal] = SqlPlanExecutor.BindDefaultExpression(column,
+                defaults[ordinal] = declaredDefaults?[ordinal] ?? SqlPlanExecutor.BindDefaultExpression(column,
                     $"DEFAULT of column '{column.Name}' on table '{tableName}'", functions, _catalog.DefaultCollation, cancellationToken);
             }
 
