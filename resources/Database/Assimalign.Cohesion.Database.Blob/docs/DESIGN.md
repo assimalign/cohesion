@@ -263,7 +263,13 @@ committing during download cannot advance the purge horizon past its selected co
 Mutations take the shared lock manager's database exclusive lock before physical application.
 This conservative first version serializes writers for the upload lifetime; snapshot readers
 continue concurrently. Under that lock, the engine compares snapshot-visible metadata with
-the latest state and rejects stale writes. A session admits only one active operation/stream.
+the latest state and rejects stale writes. Latest snapshots exclude committed contexts
+still tracked between writer-lock release and coordinator untracking (#1664), mirroring
+Documents' filter (db1a2e3bf) while preserving caller-owned writes and excluding every
+other tracked context; this applies to container creation/deletion, container metadata,
+blob replacement metadata and blob deletion. PostgreSQL likewise ends transaction
+visibility before lock release (`src/backend/access/transam/xact.c:2425-2430`).
+A session admits only one active operation/stream.
 This avoids overlapping uploads in the same transaction replacing the same original version.
 When a transaction ends, the lock manager releases its grants and fails the requests it still has
 queued, so an operation whose session closes or whose transaction rolls back while it waits for
