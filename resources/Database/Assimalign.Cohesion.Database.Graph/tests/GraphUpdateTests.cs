@@ -93,7 +93,8 @@ public sealed class GraphUpdateTests
         var result = await session.ExecuteAsync("MATCH (a:P) SET a.n=1, a IS Graph NEXT MATCH (b:Graph) RETURN b.n");
         (await Read(result)).Select(row => row[0]).ShouldBe([1L, 1L]);
         result.AffectedCount.ShouldBe(2);
-        (await session.ExecuteAsync("FOR v IN $vs MATCH (a:P {k:v}) SET a.seen=TRUE", new Dictionary<string, object?> { ["vs"] = new long[] { 1, 2 } })).AffectedCount.ShouldBe(2);
+        (await session.ExecuteAsync("FOR v IN $vs MATCH (a:P {k:v}) SET a.seen=TRUE", new Dictionary<string, object?>
+            { ["vs"] = new long[] { 1, 2 }, ["$$unused"] = 1, ["$unused"] = 2 })).AffectedCount.ShouldBe(2);
         var inserted = await session.ExecuteAsync("INSERT (n:T {k:1}) SET n.v=2 RETURN n.v");
         (await Read(inserted)).Single()[0].ShouldBe(2L);
         inserted.AffectedCount.ShouldBe(1);

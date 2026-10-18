@@ -94,12 +94,12 @@ internal sealed partial class GraphPlanner
     /// <param name="token">Cancellation observed while validating and indexing expression structure.</param>
     /// <returns>The plan.</returns>
     /// <exception cref="DatabaseException">The statement is invalid (<c>COHDBG001</c>, <c>COHDBG003</c>, <c>COHDBG015</c>).</exception>
-    internal GraphPlan Plan(GqlQueryExpression query, IReadOnlyDictionary<string, object?>? parameters = null, bool paths = false, CancellationToken token = default)
+    internal GraphPlan Plan(GqlQueryExpression query, IReadOnlyDictionary<string, object?>? parameters = null, bool paths = false, CancellationToken token = default, bool normalizedParameters = false)
     {
         try
         {
             token.ThrowIfCancellationRequested();
-            _parameters = ParameterBindings.Normalize(parameters, name => new GraphPlanningException(
+            _parameters = normalizedParameters ? parameters : ParameterBindings.Normalize(parameters, name => new GraphPlanningException(
                 "COHDBG014", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ParameterCollision, name), query.Location));
             return PlanCore(query, paths, token);
         }
