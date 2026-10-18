@@ -290,18 +290,36 @@ public sealed partial class DocumentQueryTests
         // Arrange
         using var document = JsonDocument.Parse("{\"flag\":true}");
         var query = (OqlSelectExpression)((OqlQueryStatement)new OqlQueryParser().Parse("SELECT d.flag FROM items d")).OqlExpression;
+        var controlQuery = (OqlSelectExpression)((OqlQueryStatement)new OqlQueryParser().Parse("SELECT NULL FROM items d")).OqlExpression;
         var evaluator = new DocumentExpressionEvaluator("d", null);
         var context = new DocumentEvaluationContext(document.RootElement);
         var path = query.Projections[0].Expression;
+        var control = controlQuery.Projections[0].Expression;
         evaluator.Evaluate(path, context).ShouldBe(true);
+        evaluator.Evaluate(control, context).ShouldBeNull();
 
         // Act
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 0; i < 10000; i++) { _ = evaluator.Evaluate(path, context); }
-        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        long controlAllocated = Measure(control);
+        long allocated = Measure(path);
 
-        // Assert: the Boolean leaf costs one 24-byte box; the root stays a struct.
-        allocated.ShouldBeLessThanOrEqualTo(240_000L);
+        // Assert: the control evaluates NULL over the same 10,000 row contexts without boxing.
+        // Allow one 24-byte Boolean leaf box per evaluation plus 10% on all 64-bit CI legs.
+        // d1183905e also boxed the 16-byte JsonElement root (32 bytes per evaluation), so
+        // its 560,000-byte excess cannot fit this 264,000-byte allowance in Debug or Release.
+        Console.WriteLine($"10,000 path evaluations allocated {allocated:N0} bytes; NULL control {controlAllocated:N0} bytes.");
+        (allocated - controlAllocated).ShouldBeLessThanOrEqualTo(264_000L);
+
+        long Measure(OqlExpression expression)
+        {
+            long minimum = long.MaxValue;
+            for (int sample = 0; sample < 3; sample++)
+            {
+                long before = GC.GetAllocatedBytesForCurrentThread();
+                for (int i = 0; i < 10000; i++) { _ = evaluator.Evaluate(expression, context); }
+                minimum = Math.Min(minimum, GC.GetAllocatedBytesForCurrentThread() - before);
+            }
+            return minimum;
+        }
     }
 
     [Theory(DisplayName = "Cohesion Test [Documents] - Arrays: metadata aggregates and missing inputs fail before empty execution")]
