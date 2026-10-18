@@ -115,11 +115,10 @@ internal sealed partial class DocumentExpressionEvaluator
 
     private object? StringFunction(string name, string text, object?[] values)
     {
-        CheckStringLength(text.Length);
         switch (name)
         {
             case "LOWER": case "UPPER":
-                var changed = new StringBuilder(text.Length);
+                var changed = new StringBuilder(Math.Min(text.Length, maximumStringLength));
                 int changedIndex = 0;
                 foreach (var rune in text.EnumerateRunes())
                 {
@@ -127,23 +126,30 @@ internal sealed partial class DocumentExpressionEvaluator
                     Append(changed, (name == "LOWER" ? Rune.ToLowerInvariant(rune) : Rune.ToUpperInvariant(rune)).ToString());
                 }
                 return changed.ToString();
-            case "LENGTH": return (long)FunctionRunes(text).Length;
+            case "LENGTH": return (long)CountFunctionRunes(text);
             case "SUBSTR":
                 decimal startValue = Number(values[1]!);
                 decimal? lengthValue = values.Length == 3 ? Number(values[2]!) : null;
                 if (decimal.Truncate(startValue) != startValue || lengthValue is { } len && (len < 0 || decimal.Truncate(len) != len)) { return null; }
-                var runes = FunctionRunes(text);
-                decimal offset = startValue < 0 ? Math.Max(0, runes.Length + startValue) : Math.Min(startValue, runes.Length);
-                int count = (int)Math.Min(lengthValue ?? runes.Length, runes.Length - offset);
-                return JoinRunes(runes.AsSpan((int)offset, count));
+                decimal offset = startValue < 0 ? Math.Max(0, CountFunctionRunes(text) + startValue) : startValue;
+                var substring = new StringBuilder();
+                int substringIndex = 0;
+                foreach (var rune in text.EnumerateRunes())
+                {
+                    ObserveFunctionCancellation(substringIndex++);
+                    if (offset > 0) { offset--; continue; }
+                    if (lengthValue <= 0) { break; }
+                    Append(substring, rune.ToString());
+                    lengthValue--;
+                }
+                return substring.ToString();
             case "POSITION":
                 string pattern = (string)values[1]!;
-                CheckStringLength(pattern.Length);
-                int position = text.IndexOf(pattern, StringComparison.Ordinal);
-                return position < 0 ? -1L : (long)FunctionRunes(text[..position]).Length;
-            case "CONTAINS": return text.Contains((string)values[1]!, StringComparison.Ordinal);
-            case "STARTS_WITH": return text.StartsWith((string)values[1]!, StringComparison.Ordinal);
-            case "ENDS_WITH": return text.EndsWith((string)values[1]!, StringComparison.Ordinal);
+                int position = FindFunctionText(text, pattern);
+                return position < 0 ? -1L : (long)CountFunctionRunes(text.AsSpan(0, position));
+            case "CONTAINS": return FindFunctionText(text, (string)values[1]!) >= 0;
+            case "STARTS_WITH": return FunctionTextMatches(text, (string)values[1]!, false);
+            case "ENDS_WITH": return FunctionTextMatches(text, (string)values[1]!, true);
             case "CONCAT":
                 var concatenated = new StringBuilder();
                 foreach (string piece in values.Cast<string>()) { _cancellationToken.ThrowIfCancellationRequested(); Append(concatenated, piece); }
@@ -157,22 +163,75 @@ internal sealed partial class DocumentExpressionEvaluator
                 return JoinRunes(source.AsSpan(start, end - start));
             case "REPLACE":
                 string old = (string)values[1]!, replacement = (string)values[2]!;
-                CheckStringLength(old.Length);
-                if (old.Length == 0) { return text; }
+                if (old.Length == 0) { CheckStringLength(text.Length); return text; }
                 var replaced = new StringBuilder();
                 int consumed = 0;
                 while (consumed < text.Length)
                 {
                     _cancellationToken.ThrowIfCancellationRequested();
-                    int next = text.IndexOf(old, consumed, StringComparison.Ordinal);
-                    if (next < 0) { Append(replaced, text[consumed..]); break; }
-                    Append(replaced, text[consumed..next]);
+                    int next = FindFunctionText(text, old, consumed);
+                    if (next < 0) { Append(replaced, text.AsSpan(consumed)); break; }
+                    Append(replaced, text.AsSpan(consumed, next - consumed));
                     Append(replaced, replacement);
                     consumed = next + old.Length;
                 }
                 return replaced.ToString();
             default: throw new DocumentPlanningException("COHDOC001", ErrorMessages.FunctionArgumentsInvalid);
         }
+    }
+
+    private int CountFunctionRunes(ReadOnlySpan<char> text)
+    {
+        int count = 0;
+        foreach (var rune in text.EnumerateRunes()) { ObserveFunctionCancellation(count++); }
+        return count;
+    }
+
+    private bool FunctionTextMatches(string text, string pattern, bool suffix)
+    {
+        if (pattern.Length > text.Length) { return false; }
+        int start = suffix ? text.Length - pattern.Length : 0;
+        for (int index = 0; index < pattern.Length; index += 1024)
+        {
+            _cancellationToken.ThrowIfCancellationRequested();
+            int length = Math.Min(1024, pattern.Length - index);
+            if (!text.AsSpan(start + index, length).SequenceEqual(pattern.AsSpan(index, length))) { return false; }
+        }
+        return true;
+    }
+
+    private int FindFunctionText(string text, string pattern, int start = 0)
+    {
+        if (pattern.Length == 0) { return start; }
+        int end = text.Length - pattern.Length;
+        if (start > end) { return -1; }
+
+        // PostgreSQL src/backend/utils/adt/varlena.c:1004-1070,1233-1271 uses
+        // Boyer-Moore-Horspool with a fixed 256-entry skip table. Colliding UTF-16
+        // units keep the shortest skip, preserving ordinal matches without an input-sized buffer.
+        Span<int> skips = stackalloc int[256];
+        skips.Fill(pattern.Length);
+        for (int index = 0; index < pattern.Length - 1; index++)
+        {
+            ObserveFunctionCancellation(index);
+            skips[pattern[index] & 255] = pattern.Length - 1 - index;
+        }
+        int iterations = 0;
+        while (start <= end)
+        {
+            int index = pattern.Length - 1;
+            while (index >= 0)
+            {
+                ObserveFunctionCancellation(unchecked(iterations++));
+                if (text[start + index] != pattern[index]) { break; }
+                index--;
+            }
+            if (index < 0) { return start; }
+            int skip = skips[text[start + pattern.Length - 1] & 255];
+            if (skip > end - start) { break; }
+            start += skip;
+        }
+        return -1;
     }
 
     private Rune[] FunctionRunes(string text)
@@ -190,13 +249,13 @@ internal sealed partial class DocumentExpressionEvaluator
         return builder.ToString();
     }
 
-    private void Append(StringBuilder builder, string text)
+    private void Append(StringBuilder builder, ReadOnlySpan<char> text)
     {
         CheckStringLength((long)builder.Length + text.Length);
         for (int index = 0; index < text.Length; index += 1024)
         {
             _cancellationToken.ThrowIfCancellationRequested();
-            builder.Append(text.AsSpan(index, Math.Min(1024, text.Length - index)));
+            builder.Append(text.Slice(index, Math.Min(1024, text.Length - index)));
         }
     }
 

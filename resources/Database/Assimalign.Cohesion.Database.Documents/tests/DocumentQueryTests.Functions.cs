@@ -74,6 +74,48 @@ public sealed partial class DocumentQueryTests
         row.GetValue(0).ShouldBe(expected);
     }
 
+    public static IEnumerable<object?[]> LargeStringCases
+    {
+        get
+        {
+            object?[][] cases =
+            [
+                ["LENGTH({0})", 1_048_577L], ["POSITION({0},'a')", 0L], ["POSITION({0},'z')", -1L],
+                ["CONTAINS({0},'a')", true], ["CONTAINS({0},'z')", false],
+                ["POSITION({0},{0})", 0L], ["CONTAINS({0},{0})", true],
+                ["STARTS_WITH({0},{0})", true], ["ENDS_WITH({0},{0})", true],
+                ["SUBSTR({0},0,1)", "a"], ["SUBSTR({0},1048576,1)", "a"], ["SUBSTR({0},-1)", "a"],
+                ["LENGTH(SUBSTR({0},1))", 1_048_576L],
+            ];
+            foreach (var item in cases)
+            {
+                yield return [item[0], item[1], true];
+                yield return [item[0], item[1], false];
+            }
+        }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Documents] - Scalars: large parameter and stored inputs stream without a result-size refusal")]
+    [MemberData(nameof(LargeStringCases))]
+    public async Task Execute_LargeStringInput_ShouldLimitOnlyConstructedResultsAsync(string expression, object? expected, bool parameter)
+    {
+        // Arrange
+        await using var engine = DocumentDatabaseEngine.Create("large-scalars", new());
+        var database = await engine.CreateDatabaseAsync("scalars", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        var collection = await session.CreateCollectionAsync("items", CancellationToken.None);
+        string text = new('a', 1_048_577);
+        await PutAsync(collection, session, "a", parameter ? "{}" : "{\"name\":\"" + text + "\"}");
+        var parameters = new Dictionary<string, object?> { ["p"] = text };
+
+        // Act
+        var row = (await RowsAsync(session, "SELECT " + string.Format(CultureInfo.InvariantCulture, expression, parameter ? "$p" : "name") + " FROM items", parameters))
+            .ShouldHaveSingleItem();
+
+        // Assert
+        row.GetValue(0).ShouldBe(expected);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Documents] - Scalars: literal kinds fail during planning")]
     [InlineData("SELECT SQRT('x') FROM items")]
     [InlineData("SELECT SUBSTR(name,'a') FROM items")]
@@ -160,7 +202,7 @@ public sealed partial class DocumentQueryTests
                 .Parse("SELECT ABS(1) FROM items")).OqlExpression).Projections[0].Expression).ShouldBeFalse();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Documents] - Scalars: string bounds, cancellation and invariant culture")]
+    [Fact(DisplayName = "Cohesion Test [Documents] - Scalars: string bounds and invariant culture")]
     public async Task Execute_BoundedInvariantFunctions_ShouldKeepLimitsAsync()
     {
         // Arrange
@@ -174,10 +216,6 @@ public sealed partial class DocumentQueryTests
         (await RowsAsync(session, "SELECT LENGTH(CONCAT($text,'')) FROM items", parameters)).Single().GetValue(0).ShouldBe(1_048_576L);
         var error = await Should.ThrowAsync<DatabaseException>(async () => await RowsAsync(session, "SELECT CONCAT($text,'a') FROM items", parameters));
         error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDOC007");
-        using var cancelled = new CancellationTokenSource();
-        cancelled.Cancel();
-        var evaluator = new DocumentExpressionEvaluator(null, null, cancelled.Token);
-        Should.Throw<OperationCanceledException>(() => evaluator.Evaluate(new OqlCallExpression("LENGTH", [new OqlLiteralExpression("x")]), default));
         var previous = CultureInfo.CurrentCulture;
         try
         {
@@ -186,6 +224,22 @@ public sealed partial class DocumentQueryTests
             row.GetValue(0).ShouldBe("i"); row.GetValue(1).ShouldBe("I"); row.GetValue(2).ShouldBe("1970-01-01T00:00:00.000Z");
         }
         finally { CultureInfo.CurrentCulture = previous; }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Documents] - Scalars: LENGTH observes cancellation after its parameter has evaluated")]
+    public void Evaluate_LengthParameterCancels_ShouldObserveCancellationInsideLoop()
+    {
+        // Arrange
+        using var cancellation = new CancellationTokenSource();
+        var parameters = new CancellingStringParameters(cancellation, new string('a', 1_048_576));
+        var evaluator = new DocumentExpressionEvaluator(null, parameters, cancellation.Token);
+        var call = new OqlCallExpression("LENGTH", [new OqlParameterExpression("p")]);
+        cancellation.IsCancellationRequested.ShouldBeFalse();
+
+        // Act / Assert
+        Should.Throw<OperationCanceledException>(() => evaluator.Evaluate(call, default));
+        parameters.ReadCount.ShouldBe(1);
+        cancellation.IsCancellationRequested.ShouldBeTrue();
     }
 
     [Theory(DisplayName = "Cohesion Test [Documents] - Clock: transaction start survives every row and ReadCommitted repinning")]

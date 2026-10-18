@@ -24,7 +24,9 @@ POSITION returns -1 for no match. SUBSTR permits a negative start from the end, 
 to the string, and returns NULL for a negative length or fractional index. String predicates
 compare ordinally; LOWER/UPPER use invariant case conversion. TRIM defaults to a space and its
 optional second argument is a set of code points. Empty REPLACE patterns leave text unchanged.
-Strings and Unicode work buffers are capped at 1,048,576 UTF-16 units; loops observe cancellation.
+Constructed string results and work buffers are capped at 1,048,576 UTF-16 units; inputs are
+not capped. LENGTH, searching, string predicates and SUBSTR scan without input-sized buffers,
+and loops observe cancellation at least every 1,024 iterations.
 ROUND uses half-away-from-zero for exact numbers, with negative scales; TRUNC rounds toward zero.
 SQRT of a negative number and invalid POWER domains give COHDOC019; overflow gives COHDOC007.
 Fractional ROUND/TRUNC scales give COHDOC019. SQRT and nonintegral POWER use BCL double

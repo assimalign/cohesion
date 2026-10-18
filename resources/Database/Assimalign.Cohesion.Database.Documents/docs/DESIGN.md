@@ -350,7 +350,11 @@ String positions and lengths count code points; predicates compare ordinally and
 is invariant. SQL shares code-point LENGTH/POSITION, invariant case conversion, empty REPLACE and
 half-away-from-zero ROUND. OQL's divergence is zero-based SUBSTR/POSITION and -1 for no match,
 versus SQL's one-based positions and zero for no match. Results/work buffers are bounded to
-1,048,576 UTF-16 units, with cancellation at least every 1024 loop iterations. ROUND/TRUNC support
+1,048,576 UTF-16 units, with cancellation at least every 1024 loop iterations. Inputs have no
+function-size cap: LENGTH, POSITION, CONTAINS, STARTS_WITH, ENDS_WITH and SUBSTR scan directly.
+Ordinal searching uses PostgreSQL's fixed-size skip-table approach
+(src/backend/utils/adt/varlena.c:1004-1070,1233-1271), with UTF-16 comparisons and cancellation
+inside both pattern preparation and matching. ROUND/TRUNC support
 negative scales and bound extreme scales before calling decimal.Round (SQL's RoundExact precedent;
 PostgreSQL src/backend/utils/adt/numeric.c:1548-1577 bounds scale before rounding). SQRT rejects
 negative arguments with COHDOC019, following PostgreSQL src/backend/utils/adt/float.c:1492-1495;
