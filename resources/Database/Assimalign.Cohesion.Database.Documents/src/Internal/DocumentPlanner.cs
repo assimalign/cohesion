@@ -99,9 +99,13 @@ internal sealed partial class DocumentPlanner
             throw new DocumentPlanningException("COHDOC001", "CREATE INDEX requires an index name.", create.Location);
         }
 
-        string path = IndexPath(create.Path, alias: null)
-            ?? throw new DocumentPlanningException("COHDOC001", $"CREATE INDEX '{create.IndexName}' requires a representable document path.", create.Location);
-        return new DocumentCreateIndexPlan(ResolveCollection(create.Collection, create.Location), create.IndexName, path);
+        if (create.Paths.Count is < 1 or > 32)
+        { throw new DocumentPlanningException("COHDOC022", ErrorMessages.IndexPathCount, create.Location); }
+        var paths = create.Paths.Select(path => IndexPath(path, alias: null)
+            ?? throw new DocumentPlanningException("COHDOC001", $"CREATE INDEX '{create.IndexName}' requires a representable document path.", path.Location)).ToArray();
+        if (paths.Distinct(StringComparer.Ordinal).Count() != paths.Length)
+        { throw new DocumentPlanningException("COHDOC001", ErrorMessages.IndexPathsDuplicate, create.Location); }
+        return new DocumentCreateIndexPlan(ResolveCollection(create.Collection, create.Location), create.IndexName, paths, create.IsUnique, create.IfNotExists);
     }
 
     private DocumentDropIndexPlan PlanDropIndex(OqlDropIndexExpression drop)
@@ -112,7 +116,7 @@ internal sealed partial class DocumentPlanner
             throw new DocumentPlanningException("COHDOC001", "DROP INDEX requires an index name.", drop.Location);
         }
 
-        return new DocumentDropIndexPlan(ResolveCollection(drop.Collection, drop.Location), drop.IndexName);
+        return new DocumentDropIndexPlan(ResolveCollection(drop.Collection, drop.Location), drop.IndexName, drop.IfExists);
     }
 
     private DocumentCollectionMetadata ResolveCollection(string name, Assimalign.Cohesion.Database.Language.Location? location)
@@ -203,39 +207,39 @@ internal sealed partial class DocumentPlanner
         var predicates = new List<(string Path, string? LegacyPath, string Operator, object Value)>();
         if (predicate is not null) { Collect(predicate); }
         DocumentIndexPath? best = null;
-        bool bestEquality = false;
+        int bestPrefix = -1;
+        bool bestRange = false;
         foreach (var index in indexes.OrderBy(index => index.Name, StringComparer.Ordinal))
         {
-            var usable = predicates.Where(term =>
-                string.Equals(term.Path, index.Path, StringComparison.Ordinal) ||
-                term.LegacyPath is not null && string.Equals(term.LegacyPath, index.Path, StringComparison.Ordinal)).ToArray();
-            var equality = usable.FirstOrDefault(term => term.Operator == "=");
-            bool hasEquality = equality.Value is not null;
+            _cancellationToken.ThrowIfCancellationRequested();
+            var prefix = new List<object>();
             DocumentSeekBound? lower = null;
             DocumentSeekBound? upper = null;
-            if (hasEquality)
+            foreach (string path in index.Paths)
             {
-                lower = upper = new DocumentSeekBound(equality.Value!, true);
-            }
-            else
-            {
+                var usable = predicates.Where(term => term.Path == path || term.LegacyPath == path).ToArray();
+                var equality = usable.FirstOrDefault(term => term.Operator == "=");
+                if (equality.Value is not null) { prefix.Add(equality.Value); continue; }
                 foreach (var term in usable)
                 {
                     if (term.Operator is ">" or ">=")
-                    {
-                        lower = Tighter(lower, new DocumentSeekBound(term.Value, term.Operator == ">="), isLower: true);
-                    }
+                    { lower = Tighter(lower, new DocumentSeekBound(term.Value, term.Operator == ">="), isLower: true); }
                     if (term.Operator is "<" or "<=")
-                    {
-                        upper = Tighter(upper, new DocumentSeekBound(term.Value, term.Operator == "<="), isLower: false);
-                    }
+                    { upper = Tighter(upper, new DocumentSeekBound(term.Value, term.Operator == "<="), isLower: false); }
                 }
+                break;
             }
-            if ((lower is not null || upper is not null) && (best is null || hasEquality && !bestEquality))
-            {
-                best = new DocumentIndexPath(index, lower, upper);
-                bestEquality = hasEquality;
-            }
+            bool range = lower is not null || upper is not null;
+            if (prefix.Count == 0 && !range) { continue; }
+            bool better = best is null || prefix.Count > bestPrefix || prefix.Count == bestPrefix &&
+                (range && !bestRange || range == bestRange && index.IsUnique && !best.Index.IsUnique);
+            if (!better) { continue; }
+            bestPrefix = prefix.Count;
+            bestRange = range;
+            // Keep the single-path plan's scalar bound shape for callers inspecting it.
+            if (index.Paths.Count == 1 && prefix.Count == 1)
+            { best = new DocumentIndexPath(index, new DocumentSeekBound(prefix[0], true), new DocumentSeekBound(prefix[0], true)); }
+            else { best = new DocumentIndexPath(index, lower, upper, prefix.AsReadOnly()); }
         }
         return (DocumentAccessPath?)best ?? new DocumentScanPath();
 

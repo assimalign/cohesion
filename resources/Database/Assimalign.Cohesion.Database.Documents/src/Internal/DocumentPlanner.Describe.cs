@@ -114,8 +114,11 @@ internal sealed partial class DocumentPlanner
                     break;
                 case DocumentIndexPath seek:
                     var bounds = new List<string>();
-                    if (seek.Lower is { } lower) { bounds.Add($"{seek.Index.Path} {(lower.Inclusive ? ">=" : ">")} {Value(lower.Value)}"); }
-                    if (seek.Upper is { } upper) { bounds.Add($"{seek.Index.Path} {(upper.Inclusive ? "<=" : "<")} {Value(upper.Value)}"); }
+                    var prefix = seek.EqualityPrefix ?? [];
+                    for (int i = 0; i < prefix.Count; i++) { bounds.Add($"{seek.Index.Paths[i]} = {Value(prefix[i])}"); }
+                    string rangePath = seek.Index.Paths[Math.Min(prefix.Count, seek.Index.Paths.Count - 1)];
+                    if (seek.Lower is { } lower) { bounds.Add($"{rangePath} {(lower.Inclusive ? ">=" : ">")} {Value(lower.Value)}"); }
+                    if (seek.Upper is { } upper) { bounds.Add($"{rangePath} {(upper.Inclusive ? "<=" : "<")} {Value(upper.Value)}"); }
                     Add("IndexSeek", parent, seek.Index.Name, string.Join(" AND ", bounds));
                     break;
                 default:

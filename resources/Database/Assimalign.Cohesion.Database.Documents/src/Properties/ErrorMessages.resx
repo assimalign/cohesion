@@ -77,4 +77,6 @@
   <data name="FunctionStringTooLarge" xml:space="preserve"><value>The OQL function string exceeds 1,048,576 UTF-16 units.</value></data>
   <data name="ReplaceCountInvalid" xml:space="preserve"><value>The OQL REPLACE count must be an integer.</value></data>
   <data name="PagingCountInvalid" xml:space="preserve"><value>{0} requires a non-negative integer in the signed 64-bit range.</value></data>
+  <data name="IndexPathCount" xml:space="preserve"><value>An index requires between 1 and 32 key paths.</value></data>
+  <data name="IndexPathsDuplicate" xml:space="preserve"><value>Index key paths must be distinct.</value></data>
 </root>

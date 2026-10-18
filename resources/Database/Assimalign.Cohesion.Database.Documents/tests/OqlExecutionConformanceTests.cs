@@ -172,11 +172,20 @@ public sealed class OqlExecutionConformanceTests
             [
                 new("CREATE INDEX by_score ON items (details.score)", [["by_score", "details.score", false]],
                     VerificationStatement: "SELECT INDEX_NAME, PATH, IS_UNIQUE FROM COHESION_SCHEMA.INDEXES"),
+                new("CREATE UNIQUE INDEX by_name ON items (name)", [["by_name", "name", "name", null, true]],
+                    VerificationStatement: "SELECT INDEX_NAME, PATH, PATHS[0], PATHS[1], IS_UNIQUE FROM COHESION_SCHEMA.INDEXES ORDER BY INDEX_NAME",
+                    Missing: [(0, 3)]),
+                new("CREATE INDEX by_cat_amount ON items (category, amount)", [["by_cat_amount", "category", "category", "amount", false]],
+                    VerificationStatement: "SELECT INDEX_NAME, PATH, PATHS[0], PATHS[1], IS_UNIQUE FROM COHESION_SCHEMA.INDEXES ORDER BY INDEX_NAME"),
+                new("CREATE INDEX IF NOT EXISTS by_score ON items (details.score)", [["by_score", "details.score", "details.score", null, false]],
+                    ["CREATE INDEX by_score ON items (details.score)"],
+                    "SELECT INDEX_NAME, PATH, PATHS[0], PATHS[1], IS_UNIQUE FROM COHESION_SCHEMA.INDEXES ORDER BY INDEX_NAME", Missing: [(0, 3)]),
                 new("CREATE INDEX by_tag ON items (tags[0])", [["by_tag", "tags[0]", false]],
                     VerificationStatement: "SELECT INDEX_NAME, PATH, IS_UNIQUE FROM COHESION_SCHEMA.INDEXES"),
             ],
             [OqlClauses.DropIndex] =
             [
+                new("DROP INDEX IF EXISTS absent ON items", [], VerificationStatement: "SELECT INDEX_NAME FROM COHESION_SCHEMA.INDEXES"),
                 new("DROP INDEX by_score ON items", [], ["CREATE INDEX by_score ON items (details.score)"],
                     "SELECT INDEX_NAME FROM COHESION_SCHEMA.INDEXES"),
             ],

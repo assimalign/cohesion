@@ -32,7 +32,7 @@ public sealed class DocumentIntrospectionTests
         var whole = (JsonElement)(await RowsAsync(session, "SELECT * FROM cohesion_schema.indexes WHERE INDEX_NAME = 'by_city'"))
             .Single().GetValue(0)!;
         whole.EnumerateObject().Select(property => property.Name).ShouldBe(
-            ["COLLECTION_CATALOG", "COLLECTION_NAME", "INDEX_NAME", "PATH", "IS_UNIQUE"]);
+            ["COLLECTION_CATALOG", "COLLECTION_NAME", "INDEX_NAME", "PATH", "PATHS", "IS_UNIQUE"]);
         whole.GetProperty("COLLECTION_CATALOG").GetString().ShouldBe("inventory");
         whole.GetProperty("COLLECTION_NAME").GetString().ShouldBe("items");
         var groups = await RowsAsync(session, "SELECT COLLECTION_NAME, COUNT(*) AS total FROM COHESION_SCHEMA.INDEXES GROUP BY COLLECTION_NAME HAVING COUNT(*) > 1 ORDER BY total");

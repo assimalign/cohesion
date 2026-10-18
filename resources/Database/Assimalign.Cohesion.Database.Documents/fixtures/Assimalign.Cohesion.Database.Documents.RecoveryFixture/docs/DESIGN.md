@@ -9,7 +9,11 @@ the original nested JSON, checks the partial document is absent, and executes
 an indexed parameterized OQL aggregate and an IS MISSING projection that checks IsMissing,
 IsNull and GetValue remain distinct. Assertions fail the executable with a
 nonzero exit. COUNT verification requires an Int64 long (#1137), including indexed DELETE checks.
-The fixture uses no reflection and can be published with NativeAOT.
+A composite UNIQUE (rank, marker) index also survives restart. Verify seeks the committed key
+and attempts a duplicate Put, which must fail without leaving state so verify can run twice.
+The owning test reads both raw trees and counts all live entries as well as each committed,
+deleted and abandoned key, proving no missing or orphan entries. Both registrations are v2 and
+the composite registration retains its UNIQUE flag. The fixture uses no reflection and can be published with NativeAOT.
 
 The process boundary forces recovery from persisted files, independently of
 in-process cleanup. A separate identity receives a committed whole-document UPSERT and an

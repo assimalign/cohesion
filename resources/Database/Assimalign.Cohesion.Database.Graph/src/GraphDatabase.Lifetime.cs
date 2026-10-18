@@ -148,8 +148,10 @@ public sealed partial class GraphDatabase
 
     // Called only under the database writer lock, after all earlier writers
     // finished. Preserve the caller's own uncommitted writes in the latest view.
+    // Committed writers may still be tracked after releasing the lock; they
+    // must already be visible to the next writer during that handoff.
     internal TransactionSnapshot LatestSnapshot(TransactionContext context) => new(context.Sequence,
-        TransactionSequence.None, new TransactionSequence(ulong.MaxValue), Coordinator.GetOpenContexts().Select(item => item.Sequence));
+        TransactionSequence.None, new TransactionSequence(ulong.MaxValue), Coordinator.GetOpenContexts().Where(item => item.State != TransactionState.Committed).Select(item => item.Sequence));
 
     internal static void ThrowConflict() => throw new DatabaseTransactionAbortedException("The graph catalog changed since this transaction's snapshot. Retry the transaction.");
 

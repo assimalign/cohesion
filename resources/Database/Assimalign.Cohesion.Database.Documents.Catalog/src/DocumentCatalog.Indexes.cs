@@ -19,6 +19,7 @@ public sealed partial class DocumentCatalog
 {
     private readonly Dictionary<(Guid CollectionId, string Name), List<Reference>> _indexDefinitions = new();
     private readonly Dictionary<ulong, (PageId Page, int Slot, long Root)> _registrations = new();
+    private readonly Dictionary<ulong, bool> _uniqueIndexes = new();
     private BTreeIndexManager _indexes = null!;
 
     /// <summary>Lists visible index definitions in ordinal name order.</summary>
@@ -48,12 +49,12 @@ public sealed partial class DocumentCatalog
     /// <summary>Builds a nonunique B+Tree and publishes its definition in the supplied transaction.</summary>
     /// <param name="collectionId">The collection identity.</param>
     /// <param name="name">The new index name.</param>
-    /// <param name="path">The scalar field path.</param>
-    /// <param name="context">The active transaction; the caller holds the collection's exclusive lock.</param>
+    /// <param name="path">The document field path.</param>
+    /// <param name="context">The active transaction; the caller holds the database writer lock.</param>
     /// <param name="cancellationToken">Cancels the build.</param>
     /// <returns>The new index definition.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="context"/> is null.</exception>
-    /// <exception cref="ArgumentException"><paramref name="name"/> is null or white space, or <paramref name="path"/> is not a scalar field path.</exception>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is null or white space, or <paramref name="path"/> is not a document field path.</exception>
     /// <exception cref="InvalidOperationException"><paramref name="context"/> is not active.</exception>
     /// <exception cref="DocumentCatalogException">
     /// The collection is absent, the index already exists, or an existing document's indexed scalar
@@ -63,11 +64,38 @@ public sealed partial class DocumentCatalog
     /// <exception cref="TransactionAbortedException">The transaction ended, or its end began, before the build was applied.</exception>
     public async ValueTask<DocumentIndexMetadata> CreateIndexAsync(Guid collectionId, string name, string path,
         TransactionContext context, CancellationToken cancellationToken = default)
+        => await CreateIndexAsync(collectionId, name, [path], false, context, cancellationToken).ConfigureAwait(false);
+
+    /// <summary>Builds a composite index and checks valued scalar uniqueness before publication.</summary>
+    /// <param name="collectionId">The collection identity.</param>
+    /// <param name="name">The new ordinal index name.</param>
+    /// <param name="paths">One to 32 ordered document paths.</param>
+    /// <param name="isUnique">Whether keys containing only valued scalars must be unique.</param>
+    /// <param name="context">The active transaction; the caller holds the database writer lock.</param>
+    /// <param name="cancellationToken">Cancels the build.</param>
+    /// <returns>The published index definition.</returns>
+    /// <exception cref="ArgumentNullException">The paths or context are null.</exception>
+    /// <exception cref="ArgumentException">A name or path is invalid.</exception>
+    /// <exception cref="DatabaseException">The path count is zero or exceeds 32 (COHDOC022).</exception>
+    /// <exception cref="DocumentCatalogException">The collection is absent, the name exists, or a key exceeds 1024 bytes.</exception>
+    /// <exception cref="DocumentConstraintViolationException">A UNIQUE key is duplicate or non-scalar.</exception>
+    /// <exception cref="InvalidOperationException">The context is not active.</exception>
+    /// <exception cref="TransactionAbortedException">The transaction ended before publication.</exception>
+    /// <exception cref="OperationCanceledException">The build was canceled.</exception>
+    public async ValueTask<DocumentIndexMetadata> CreateIndexAsync(Guid collectionId, string name, IReadOnlyList<string> paths,
+        bool isUnique, TransactionContext context, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(paths);
         EnsureActive(context);
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
-        DocumentIndexKeys.ValidatePath(path);
+        if (paths.Count is < 1 or > 32)
+        {
+            string message = ErrorMessages.IndexPathCount;
+            throw new DatabaseException(message, [new Types.Diagnostic { Code = "COHDOC022", Message = message, Severity = Types.DiagnosticSeverity.Error }]);
+        }
+        paths = Array.AsReadOnly(paths.ToArray());
+        foreach (string path in paths) { DocumentIndexKeys.ValidatePath(path); }
         if (!GetCollections(context.Snapshot).Any(collection => collection.Id == collectionId))
         {
             throw new DocumentCatalogException("The collection does not exist.");
@@ -79,23 +107,30 @@ public sealed partial class DocumentCatalog
                 throw new DocumentCatalogException($"Index '{name}' already exists.");
             }
         }
-        var metadata = new DocumentIndexMetadata(collectionId, name, path, (ulong)_storage.ReserveTransactionSequence());
+        var metadata = new DocumentIndexMetadata(collectionId, name, paths, isUnique, (ulong)_storage.ReserveTransactionSequence());
         var encoded = DocumentCatalogCodec.Encode(new CatalogRecord(null, null, metadata), context.Sequence);
         var entries = new List<(IndexKey Key, Reference Reference)>();
+        var uniqueKeys = new HashSet<IndexKey>();
         lock (_sync)
         {
             foreach (var document in GetDocuments(collectionId, null, context.Snapshot))
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var found = FindDocumentVersion(collectionId, document.Id, context.Snapshot)!.Value;
-                if (KeyFor(document, path) is { } key)
+                if (KeyFor(document, metadata, out bool distinct) is { } key)
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (isUnique && !distinct && !uniqueKeys.Add(key)) { throw Duplicate(metadata, context.Snapshot); }
                     entries.Add((key, found.Reference));
                 }
             }
         }
         var location = await ApplyAsync(context, async bracket =>
         {
+            // The catalog pre-check implements NULLS DISTINCT under the writer lock;
+            // physical trees remain nonunique even when registrations persist UNIQUE.
             var index = await _indexes.CreateIndexAsync(context, metadata.ObjectId, new IndexDefinition(name), cancellationToken).ConfigureAwait(false);
+            _uniqueIndexes[metadata.ObjectId] = metadata.IsUnique;
             foreach (var entry in entries)
             {
                 // The definition is invisible to older snapshots; preserve source stamps
@@ -166,9 +201,33 @@ public sealed partial class DocumentCatalog
     public async ValueTask<IReadOnlyList<DocumentCatalogEntry>> SearchIndexAsync(Guid collectionId, string indexName,
         object? lower, bool includeLower, object? upper, bool includeUpper, TransactionSnapshot snapshot,
         CancellationToken cancellationToken = default)
+        => await SearchIndexAsync(collectionId, indexName, [], lower, includeLower, upper, includeUpper,
+            snapshot, cancellationToken).ConfigureAwait(false);
+
+    /// <summary>Seeks a leading equality prefix and a range on the next key component.</summary>
+    /// <param name="collectionId">The collection identity.</param>
+    /// <param name="indexName">The visible index name.</param>
+    /// <param name="equalityPrefix">Ordered scalar values for leading paths.</param>
+    /// <param name="lower">The next component's lower bound, or null.</param>
+    /// <param name="includeLower">Whether the lower bound is inclusive.</param>
+    /// <param name="upper">The next component's upper bound, or null.</param>
+    /// <param name="includeUpper">Whether the upper bound is inclusive.</param>
+    /// <param name="snapshot">The visibility snapshot.</param>
+    /// <param name="cancellationToken">Cancels iteration.</param>
+    /// <returns>Visible candidate documents in ordinal identity order; apply the residual predicate.</returns>
+    /// <exception cref="ArgumentNullException">The name, prefix or snapshot is null.</exception>
+    /// <exception cref="ArgumentException">The bounds are not scalar or exceed the index's path count.</exception>
+    /// <exception cref="DocumentCatalogException">The definition or tree is absent or malformed.</exception>
+    /// <exception cref="StorageCorruptionException">A matching entry's catalog page failed its checksum or is malformed.</exception>
+    /// <exception cref="StorageIOException">A matching entry's catalog page could not be read.</exception>
+    /// <exception cref="OperationCanceledException">Iteration was canceled.</exception>
+    public async ValueTask<IReadOnlyList<DocumentCatalogEntry>> SearchIndexAsync(Guid collectionId, string indexName,
+        IReadOnlyList<object> equalityPrefix, object? lower, bool includeLower, object? upper, bool includeUpper,
+        TransactionSnapshot snapshot, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(indexName);
         ArgumentNullException.ThrowIfNull(snapshot);
+        ArgumentNullException.ThrowIfNull(equalityPrefix);
         DocumentIndexMetadata definition;
         lock (_sync)
         {
@@ -176,8 +235,23 @@ public sealed partial class DocumentCatalog
                 ?? throw new DocumentCatalogException($"Index '{indexName}' is not visible.");
         }
         var index = ResolveIndex(definition);
-        var range = new IndexKeyRange(lower is null ? null : DocumentIndexKeys.Encode(lower),
-            upper is null ? null : DocumentIndexKeys.Encode(upper), includeLower, includeUpper);
+        if (equalityPrefix.Count > definition.Paths.Count ||
+            equalityPrefix.Count == definition.Paths.Count && (lower is not null || upper is not null))
+        { throw new ArgumentException(ErrorMessages.SeekBoundsTooWide, nameof(equalityPrefix)); }
+        var prefix = DocumentIndexKeys.EncodePrefix(equalityPrefix);
+        IndexKey? start = equalityPrefix.Count == 0 ? null : prefix;
+        IndexKey? end = equalityPrefix.Count == 0 ? null : DocumentIndexKeys.Successor(prefix);
+        if (lower is not null)
+        {
+            var key = DocumentIndexKeys.EncodePrefix(equalityPrefix, lower);
+            start = includeLower ? key : DocumentIndexKeys.Successor(key);
+        }
+        if (upper is not null)
+        {
+            var key = DocumentIndexKeys.EncodePrefix(equalityPrefix, upper);
+            end = includeUpper ? DocumentIndexKeys.Successor(key) : key;
+        }
+        var range = new IndexKeyRange(start, end, true, false);
         var result = new Dictionary<string, DocumentCatalogEntry>(StringComparer.Ordinal);
         await using var cursor = index.OpenCursor(snapshot, range);
         while (await cursor.MoveNextAsync(cancellationToken).ConfigureAwait(false))
@@ -237,22 +311,47 @@ public sealed partial class DocumentCatalog
         var result = new List<IndexChange>();
         foreach (var metadata in GetIndexes(collectionId, snapshot))
         {
+            bool distinct = true;
+            var newKey = document is { } current ? KeyFor(current, metadata, out distinct) : null;
             result.Add(new IndexChange(metadata,
-                priorDocument is { } old ? KeyFor(old, metadata.Path) : null,
-                document is { } current ? KeyFor(current, metadata.Path) : null,
-                previous is { } prior ? DocumentStorage.PackLocation(prior.Reference.PageId, prior.Reference.SlotIndex) : 0));
+                priorDocument is { } old ? KeyFor(old, metadata, out _) : null, newKey,
+                previous is { } prior ? DocumentStorage.PackLocation(prior.Reference.PageId, prior.Reference.SlotIndex) : 0,
+                metadata.IsUnique && !distinct));
         }
         return result;
     }
 
-    private IndexKey? KeyFor(DocumentCatalogEntry document, string path)
+    private IndexKey? KeyFor(DocumentCatalogEntry document, DocumentIndexMetadata metadata, out bool distinct)
     {
-        var key = DocumentIndexKeys.Read(_storage.ReadContent(new DocumentContentReference(document.HeadLocation, document.Length, document.Checksum)), path);
+        var key = DocumentIndexKeys.Read(_storage.ReadContent(new DocumentContentReference(document.HeadLocation, document.Length, document.Checksum)), metadata, out distinct);
         if (key is { Length: > 1024 })
         {
             throw new DocumentCatalogException("Indexed scalar encodes beyond the shared B+Tree 1024-byte key limit.");
         }
         return key;
+    }
+
+    private DocumentConstraintViolationException Duplicate(DocumentIndexMetadata metadata, TransactionSnapshot snapshot)
+        => DocumentConstraintViolationException.Duplicate(metadata.Name,
+            GetCollections(snapshot).First(collection => collection.Id == metadata.CollectionId).Name);
+
+    private async ValueTask CheckUniqueAsync(List<IndexChange> changes,
+        TransactionContext context, CancellationToken cancellationToken)
+    {
+        TransactionSnapshot? latest = null;
+        foreach (var change in changes)
+        {
+            if (!change.CheckUnique || change.NewKey is not { } key) { continue; }
+            // Commit marks the context Committed before releasing the writer lock,
+            // but coordinator untracking follows release. Such a writer is already visible.
+            latest ??= new TransactionSnapshot(context.Sequence, TransactionSequence.None,
+                new TransactionSequence(ulong.MaxValue), _coordinator.GetOpenContexts().Where(item => item.State != TransactionState.Committed).Select(item => item.Sequence));
+            await using var cursor = ResolveIndex(change.Metadata).OpenCursor(latest, new IndexKeyRange(key, key, true, true));
+            while (await cursor.MoveNextAsync(cancellationToken).ConfigureAwait(false))
+            {
+                if (cursor.CurrentEntryReference != change.OldLocation) { throw Duplicate(change.Metadata, latest); }
+            }
+        }
     }
 
     private async ValueTask ApplyIndexChangesAsync(List<IndexChange> changes, (PageId PageId, int SlotIndex) inserted,
@@ -299,10 +398,12 @@ public sealed partial class DocumentCatalog
     private void OpenIndexes()
     {
         _registrations.Clear();
+        _uniqueIndexes.Clear();
         var registrations = new List<BTreeIndexRegistration>();
-        foreach (var (registration, page, slot) in ReadRegistrations(_storage))
+        foreach (var (registration, page, slot, isUnique) in ReadRegistrations(_storage))
         {
             registrations.Add(registration);
+            _uniqueIndexes.Add(registration.ObjectId, isUnique);
             _registrations.Add(registration.ObjectId, (page, slot, registration.RootPageId));
         }
         _indexes = BTreeIndexManager.Create(new BTreeIndexManagerOptions
@@ -313,30 +414,37 @@ public sealed partial class DocumentCatalog
         });
     }
 
-    private static List<(BTreeIndexRegistration Registration, PageId Page, int Slot)> ReadRegistrations(DocumentStorage storage)
+    private static List<(BTreeIndexRegistration Registration, PageId Page, int Slot, bool IsUnique)> ReadRegistrations(DocumentStorage storage)
     {
-        var registrations = new List<(BTreeIndexRegistration, PageId, int)>();
-        var objectIds = new HashSet<ulong>();
-        using var iterator = storage.GetUnitIterator(1);
-        while (iterator.MoveNext())
+        try
         {
-            var unit = iterator.Current;
-            using var stream = new MemoryStream(unit.Data.ToArray(), writable: false);
-            using var reader = new BinaryReader(stream, new UTF8Encoding(false, true));
-            if (reader.ReadUInt64() != 0 || reader.ReadUInt64() != 0 || reader.ReadByte() != 5 || reader.ReadByte() != 1)
+            var registrations = new List<(BTreeIndexRegistration, PageId, int, bool)>();
+            var objectIds = new HashSet<ulong>();
+            using var iterator = storage.GetUnitIterator(1);
+            while (iterator.MoveNext())
             {
-                throw new DocumentCatalogException("Invalid physical index registration header.");
+                var unit = iterator.Current;
+                using var stream = new MemoryStream(unit.Data.ToArray(), writable: false);
+                using var reader = new BinaryReader(stream, new UTF8Encoding(false, true));
+                if (reader.ReadUInt64() != 0 || reader.ReadUInt64() != 0 || reader.ReadByte() != 5)
+                {
+                    throw new DocumentCatalogException("Invalid physical index registration header.");
+                }
+                DocumentCatalogCodec.EnsureVersion(5, reader.ReadByte());
+                ulong objectId = reader.ReadUInt64();
+                long root = reader.ReadInt64();
+                string name = DocumentCatalogCodec.ReadString(reader) ?? throw new DocumentCatalogException("Missing physical index name.");
+                byte flags = reader.ReadByte();
+                if (flags > 1 || objectId == 0 || root <= 0 || stream.Position != stream.Length || !objectIds.Add(objectId))
+                {
+                    throw new DocumentCatalogException("Invalid physical index registration.");
+                }
+                registrations.Add((new BTreeIndexRegistration(objectId, new IndexDefinition(name), root), unit.PageId, unit.SlotIndex, flags == 1));
             }
-            ulong objectId = reader.ReadUInt64();
-            long root = reader.ReadInt64();
-            string name = DocumentCatalogCodec.ReadString(reader) ?? throw new DocumentCatalogException("Missing physical index name.");
-            if (objectId == 0 || root <= 0 || stream.Position != stream.Length || !objectIds.Add(objectId))
-            {
-                throw new DocumentCatalogException("Invalid physical index registration.");
-            }
-            registrations.Add((new BTreeIndexRegistration(objectId, new IndexDefinition(name), root), unit.PageId, unit.SlotIndex));
+            return registrations;
         }
-        return registrations;
+        catch (Exception error) when (error is IOException or ArgumentException or OverflowException)
+        { throw new DocumentCatalogException(ErrorMessages.PhysicalRegistrationMalformed, error); }
     }
 
     private void SaveRegistrations(StorageTransaction bracket)
@@ -352,10 +460,11 @@ public sealed partial class DocumentCatalog
             writer.Write(0UL);
             writer.Write(0UL);
             writer.Write((byte)5);
-            writer.Write((byte)1);
+            writer.Write((byte)2);
             writer.Write(registration.ObjectId);
             writer.Write(registration.RootPageId);
             DocumentCatalogCodec.WriteString(writer, registration.Definition.Name);
+            writer.Write(_uniqueIndexes.GetValueOrDefault(registration.ObjectId));
             var bytes = stream.ToArray();
             if (_registrations.ContainsKey(registration.ObjectId))
             {
@@ -370,7 +479,7 @@ public sealed partial class DocumentCatalog
         }
     }
 
-    private readonly record struct IndexChange(DocumentIndexMetadata Metadata, IndexKey? OldKey, IndexKey? NewKey, ulong OldLocation);
+    private readonly record struct IndexChange(DocumentIndexMetadata Metadata, IndexKey? OldKey, IndexKey? NewKey, ulong OldLocation, bool CheckUnique);
 
     // The index manager's storage transaction for a context: the shared statement bracket the
     // coordinator owns, or this catalog's own error when there is none.

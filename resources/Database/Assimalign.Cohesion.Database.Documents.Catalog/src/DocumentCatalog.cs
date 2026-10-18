@@ -67,8 +67,8 @@ public sealed partial class DocumentCatalog
 
     /// <summary>
     /// Checks that every index tree the storage registers is in the B-tree page format
-    /// this engine reads (<see cref="BTreeIndexManager.FormatVersion"/>), reading only
-    /// the registrations and each tree's root page. An engine calls it before the
+    /// this engine reads (<see cref="BTreeIndexManager.FormatVersion"/>), reading
+    /// metadata kind/version headers, registrations and each tree's root page. An engine calls it before the
     /// coordinator's recovery scrub, so a database whose indexes it cannot read is
     /// refused before anything is written to it; <see cref="Open"/> checks again as it
     /// attaches the trees. Registration records carry no MVCC stamps, so they read the
@@ -77,10 +77,23 @@ public sealed partial class DocumentCatalog
     /// <param name="storage">The storage that holds the index registrations and trees.</param>
     /// <exception cref="ArgumentNullException"><paramref name="storage"/> is null.</exception>
     /// <exception cref="IndexFormatException">An index tree is in another B-tree page format.</exception>
-    /// <exception cref="DocumentCatalogException">A persisted index registration is malformed.</exception>
+    /// <exception cref="DocumentCatalogException">A metadata header or index registration is malformed or unsupported.</exception>
     public static void EnsureIndexFormat(DocumentStorage storage)
     {
         ArgumentNullException.ThrowIfNull(storage);
+        using (var iterator = storage.GetUnitIterator(0))
+        {
+            while (iterator.MoveNext())
+            {
+                // Open decodes payloads after recovery; the fence needs only kind and version.
+                var header = iterator.Current.Data.Span;
+                if (header.Length < 18 || header[16] is not (1 or 2 or 4))
+                {
+                    throw new DocumentCatalogException(ErrorMessages.CatalogHeaderMalformed);
+                }
+                DocumentCatalogCodec.EnsureVersion(header[16], header[17]);
+            }
+        }
         BTreeIndexManager.EnsureFormat(storage, ReadRegistrations(storage).Select(entry => entry.Registration));
     }
 
@@ -284,6 +297,7 @@ public sealed partial class DocumentCatalog
         EnsureActive(context);
         byte[] bytes = DocumentCatalogCodec.Encode(record, context.Sequence);
         var changes = PrepareIndexChanges(record.Document, previous, context.Snapshot);
+        if (record.Document is not null) { await CheckUniqueAsync(changes, context, cancellationToken).ConfigureAwait(false); }
         var location = await ApplyAsync(context, async bracket =>
         {
             if (previous is { } old)

@@ -1,9 +1,13 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+
 using Assimalign.Cohesion.Database.Language;
 
 namespace Assimalign.Cohesion.Database.Documents.Language;
 
 /// <summary>
-/// A <c>CREATE INDEX</c> statement that creates an index over one document path.
+/// A <c>CREATE INDEX</c> statement that creates an index over ordered document paths.
 /// </summary>
 public sealed class OqlCreateIndexExpression : OqlExpression
 {
@@ -16,11 +20,25 @@ public sealed class OqlCreateIndexExpression : OqlExpression
         string indexName,
         string collection,
         OqlPathExpression path,
-        Location? location = null) : base(location)
+        Location? location = null) : this(indexName, collection, [path], false, false, location) { }
+
+    /// <summary>Initializes a composite index creation statement.</summary>
+    /// <param name="indexName">The index name.</param>
+    /// <param name="collection">The collection name.</param>
+    /// <param name="paths">The ordered document key paths.</param>
+    /// <param name="isUnique">Whether valued scalar keys must be unique.</param>
+    /// <param name="ifNotExists">Whether an existing name is a no-op.</param>
+    /// <param name="location">The statement span.</param>
+    /// <exception cref="ArgumentNullException">The paths are null.</exception>
+    public OqlCreateIndexExpression(string indexName, string collection, IReadOnlyList<OqlPathExpression> paths,
+        bool isUnique, bool ifNotExists, Location? location = null) : base(location)
     {
+        ArgumentNullException.ThrowIfNull(paths);
         IndexName = indexName;
         Collection = collection;
-        Path = path;
+        Paths = Array.AsReadOnly(paths.ToArray());
+        IsUnique = isUnique;
+        IfNotExists = ifNotExists;
     }
 
     /// <summary>Gets the name of the index to create.</summary>
@@ -30,5 +48,14 @@ public sealed class OqlCreateIndexExpression : OqlExpression
     public string Collection { get; }
 
     /// <summary>Gets the document path indexed within the collection.</summary>
-    public OqlPathExpression Path { get; }
+    public OqlPathExpression Path => Paths[0];
+
+    /// <summary>Gets the ordered key paths.</summary>
+    public IReadOnlyList<OqlPathExpression> Paths { get; }
+
+    /// <summary>Gets whether valued scalar keys must be unique.</summary>
+    public bool IsUnique { get; }
+
+    /// <summary>Gets whether an existing name is a no-op.</summary>
+    public bool IfNotExists { get; }
 }

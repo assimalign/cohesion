@@ -61,7 +61,10 @@ internal static class DocumentSystemCollections
             writer.WriteString("COLLECTION_NAME", collection);
             writer.WriteString("INDEX_NAME", index.Name);
             writer.WriteString("PATH", index.Path);
-            writer.WriteBoolean("IS_UNIQUE", false);
+            writer.WriteStartArray("PATHS");
+                foreach (string path in index.Paths) { writer.WriteStringValue(path); }
+                writer.WriteEndArray();
+                writer.WriteBoolean("IS_UNIQUE", index.IsUnique);
             writer.WriteEndObject();
         }
         using var document = JsonDocument.Parse(buffer.WrittenMemory);

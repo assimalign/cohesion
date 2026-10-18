@@ -79,7 +79,7 @@ public sealed class OqlKeywordDispositionTests
         ["ARRAY"] = Rejects("SELECT ARRAY(1, 2) FROM c", "ARRAY"),
         ["FIRST"] = Rejects("SELECT FIRST(a) FROM c", "FIRST"),
         ["LAST"] = Rejects("SELECT LAST(a) FROM c", "LAST"),
-        ["UNIQUE"] = Rejects("SELECT UNIQUE(a) FROM c", "UNIQUE"),
+        ["UNIQUE"] = Parses("CREATE UNIQUE INDEX ix ON c (a)"),
         ["LISTTOSET"] = Rejects("SELECT LISTTOSET(a) FROM c", "LISTTOSET"),
         ["TYPEOF"] = Rejects("SELECT TYPEOF(a) FROM c", "TYPEOF"),
         ["ARRAY_AGG"] = Rejects("SELECT ARRAY_AGG(a) FROM c", "ARRAY_AGG"),
