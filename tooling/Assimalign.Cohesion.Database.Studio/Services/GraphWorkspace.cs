@@ -269,7 +269,7 @@ internal static class GraphSamples
             SHOW OBJECT OWNERSHIP;
             """),
         new("5. Diagnostics demo (expected errors)", """
-            MATCH (a) RETURN count(a);
+            MATCH (a) RETURN a.name UNION MATCH (b) RETURN b.name;
             """),
         new("6. Cleanup", """
             MATCH (a:Person) DETACH DELETE a;
