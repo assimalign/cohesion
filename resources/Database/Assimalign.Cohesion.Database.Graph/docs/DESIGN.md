@@ -357,10 +357,11 @@ ordered path identities. Reduced fractions preserve transitivity and hash consis
 large integers, decimals and subnormal floats. Comparisons (=, <>, !=, <, <=, >, >=), inline
 property matching and IN use this same exact numeric equality and ordering: 0.1m differs from
 0.1d, 1 equals 1.0, and an Int64 above 2^53 is never rounded to compare with a Double.
-NULL comparisons remain UNKNOWN while DISTINCT groups NULLs. Non-finite inputs, including NaN,
-remain COHDBG003 at planning; internal value equality groups NaNs consistently across float/double
+NULL comparisons remain UNKNOWN while DISTINCT groups NULLs. Overflowing numeric text such as
+`1e999` fails parsing with GQL0004. Non-finite AST literals and parameters, including NaN,
+fail planning with COHDBG003; internal value equality groups NaNs consistently across float/double
 and hashes, and treats signed zeros as equal. This #1141 owner choice changes #1140 comparison
-promotion; #1145 and #1147 must reuse it. Arithmetic promotion remains unchanged.
+promotion; grouping (#1147) reuses it, and #1145 must also. Arithmetic promotion remains unchanged.
 Reference behavior consulted, no code copied, relative to C:/Source/repos/neo4j/neo4j:
 `community/values/src/main/java/org/neo4j/values/storable/Value.java:162` delegates ordinary
 non-NaN predicate equality to value equality, `IntegralValue.java:77-95` shares numeric equality
@@ -373,8 +374,8 @@ GraphProjectionPlan and GraphDistinctPlan both have EXPLAIN mappings and descrip
 The owner's Execute default is a conservative static gate over planned column kinds. The wire
 request marks its scalar requirement internally; the executor checks it after binding and planning,
 before writer locking, reads or writes. Node, relationship or path columns fail with COHDBG001
-and the existing ExecutePaths guidance, even for empty matches. Future collection/CASE result
-kinds must explicitly propagate possible entities in the closed planner dispatch. EXPLAIN
+and the existing ExecutePaths guidance, even for empty matches. Collection and CASE result
+kinds propagate possible entities through the closed planner dispatch (#1146). EXPLAIN
 bypasses execution and continues to return scalar description rows for entity projections.
 
 WHERE executes the scalar grammar in

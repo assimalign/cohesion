@@ -289,8 +289,8 @@ same instruction through the same column-default resolver for each matching row.
 These markers never reach scalar evaluation. Cached literal and function-call defaults
 keep their existing binding, coercion and per-assignment evaluation, without parsing
 catalog text during statement planning or execution. All row constraints and statement
-atomicity remain on the shared INSERT/UPDATE paths; identity allocation (#1123) should
-extend the omitted-column resolver so these forms inherit it. No format, protocol,
+atomicity remain on the shared INSERT/UPDATE paths; identity allocation (#1123) extends
+the omitted-column resolver so these forms inherit it. No format, protocol,
 project-reference or visibility boundary changes.
 
 Both the missing-default resolver and explicit-NULL coercion raise COHSQLE024
@@ -587,10 +587,10 @@ flowchart TD
   loaded predicate against the table version and returns its tree, which
   `SqlBoundTableCache` keeps in `SqlBoundCheck.Bound` and every session writing the
   version evaluates. A DEFAULT binds once per table version too
-  (`SqlPlanExecutor.BindDefault`, kept in `SqlBoundTable.DefaultValues`): its literal
-  converted to the column's type, a `SqlBoundConstant` that every decoded row lacking
-  the column and every INSERT omitting it reads, where each use converted the text
-  before. A DEFAULT that does not convert, which DDL never stores, binds as a
+  (`SqlPlanExecutor.BindDefaultExpression`, kept in `SqlBoundTable.DefaultValues`): literals
+  become converted constants; expression defaults retain a column-free tree evaluated
+  per assignment (#1121). Decoded rows lacking the column instead read the independent
+  frozen literal in `SqlBoundTable.MissingValues` (#1122). A literal DEFAULT that does not convert, which DDL never stores, binds as a
   `SqlBoundFailure` that fails each use as before, so the table still opens. Bound
   trees and converted values are shared; binary defaults are copied when delivered into a row.
   Failure nodes construct a new exception per throw, so sharing the cache across threads is safe.
@@ -825,8 +825,9 @@ flowchart LR
 - **Resolution** (`SqlFunctionResolver`, PostgreSQL's `func_get_detail` and
   `func_select_candidate`). The planner's pre-pass checks every call's name and count
   before it binds the catalog: a name outside the catalog is `Unknown function '<name>'.`
-  unless the SQL profile declares it (`NULLIF`, `TRIM`, ...), which still fails only when
-  evaluated; a count no overload takes is `COHSQLE006`, worded from the overload set
+  unless it is an evaluator form (`COALESCE`, `NULLIF`, `EXTRACT`) or recognized unsupported
+  vocabulary (`RANK`, `LEAD`, ...), which rejects at parse time with `COHDBL001`;
+  a count no overload takes is `COHSQLE006`, worded from the overload set
   (`takes exactly 1 argument or '*'`, `Accepted: COUNT(*) or COUNT(value)`). Then, in
   each expression's validation, the candidates by count are costed by their arguments'
   static types (`SqlExpressionEvaluator.StaticTypeOf`): nothing for an exact type or an
@@ -1097,8 +1098,8 @@ win-arm64 by hand and for linux-x64 in CI (`resource-database.yml`), which runs 
 as it does a small-table smoke of the statement benchmark, and fails either publish on any
 `warning IL2xxx`/`IL3xxx` in its output.
 
-**Not yet.** The context's transaction timestamp (no transaction carries its start time; the
-statement-context track owns that change); the `FunctionCatalogFrozen`,
+**Not yet.** Public access to the context's transaction timestamp (#1120 supplies it internally
+for built-ins); the `FunctionCatalogFrozen`,
 `PersistedDefinitionUnresolved` and `FunctionFailed` events (§8 of the design, the
 EventSource track's); an uncast string literal for a DATE, TIME, TIMESTAMP, INTERVAL or UUID
 parameter (E3's cast registry converts text to those types under `CAST`, so
@@ -2312,8 +2313,8 @@ PostgreSQL references: tablecmds.c:3903-4062 (column identity), :4329-4385 (rela
   arguments before the call itself, as PostgreSQL's parse analysis does
   (`transformFuncCall` transforms the arguments and then `ParseFuncOrColumn`
   resolves the function, `src/backend/parser/parse_expr.c`), so the innermost bad
-  call is the one reported. A recognized name that does not execute yet (`NULLIF`,
-  `TRIM`, ...) is absent from the executable profile and rejects at parse time with
+  call is the one reported. A recognized name that does not execute yet (`RANK`,
+  `LEAD`, ...) is absent from the executable profile and rejects at parse time with
   `COHDBL001`; it is not also reported as an unknown function (#1103).
 - **One catalog of functions (#1189, E2).** The engine's `SqlFunctionCatalog` holds
   every executable function, the standard library's and the application's alike
@@ -2387,7 +2388,7 @@ PostgreSQL references: tablecmds.c:3903-4062 (column identity), :4329-4385 (rela
   proof surface — the planner suite asserts an indexed equality seek examines
   O(matches) records while the equivalent scan examines O(table).
 - **Row format: MVCC stamps + object-id-prefixed tuple, in per-object page
-  chains (since record-space format version 3; the current format is 14).**
+  chains (since record-space format version 3; the current format is 20).**
   Every data record is `[writer u64][deleter u64]` — a fixed 16-byte version-stamp header, the
   B+Tree leaf-entry design adopted for the record space — followed by the
   shared tuple codec payload (#854): the owning table's object id, then one
@@ -2497,7 +2498,7 @@ PostgreSQL references: tablecmds.c:3903-4062 (column identity), :4329-4385 (rela
   'x' cannot be opened: its catalog file set 'x/catalog' was refused. COHDBS001: …"
   (or its data file set 'x'). The server forwards it to the client like the gate's
   own refusals, and the files stay byte-identical.
-- **Schema evolution (#1023):** `ADD COLUMN` validates the literal default and
+- **Schema evolution (#1023):** `ADD COLUMN` validates the default expression and
   current rows under the exclusive object lock before publishing the complete
   replacement definition in one catalog transaction. Backfill is resolved at
   read time from frozen missing-value column metadata, independent of the current insert default; no existing row bytes, locations or
@@ -2509,7 +2510,7 @@ PostgreSQL references: tablecmds.c:3903-4062 (column identity), :4329-4385 (rela
   nonfinite floats. Validation scans are O(table); there is no physical backfill or
   cross-storage row/catalog commit.
   A crash before catalog publication leaves the old definition; after publication
-  the same persisted default resolves old rows on reopen. Constrained additions
+  the same frozen missing value resolves old rows on reopen. Constrained additions
   still build enforcing indexes durably before publication; a crash can leave
   unpublished index pages, never a partly backfilled table.
   Bound plans retain their immutable definition; later statements bind the full
@@ -2519,9 +2520,9 @@ PostgreSQL references: tablecmds.c:3903-4062 (column identity), :4329-4385 (rela
   `DROP COLUMN` marks the column dropped in the catalog and rewrites no row
   (#1241), described in the next item. DDL is self-committing and refused in explicit
   transactions. Schema-owned tables retain their existing live-session DDL guard.
-  The persisted default is the canonical SQL text of its literal (`'it''s'`, `5`,
-  `TRUE`), and the value every read and INSERT coerces comes from the table
-  version's bound form, parsed once (see [Persisted definitions](#persisted-definitions-canonical-text-parsed-once)).
+  The insert default persists as canonical SQL and resolved calls, bound once per table
+  version and evaluated per assignment. Reads use the independent frozen missing-value
+  literal (see [Persisted definitions](#persisted-definitions-canonical-text-parsed-once)).
 - **DROP COLUMN marks the column dropped; no version is rewritten (#1241).**
   The catalog keeps each table's physical column layout (`SqlCatalogTable`): the
   live columns, in order (`Columns`), and the physical ordinals of the dropped
@@ -2826,11 +2827,10 @@ PostgreSQL references: tablecmds.c:3903-4062 (column identity), :4329-4385 (rela
   evaluator's `Expression 'SqlStarExpression' is not supported by the executor yet.`
   A whole `DEFAULT` item instead maps to the target column's omitted-value path (#1193);
   it is not a column reference or scalar operand. The niladic datetime functions
-  `CURRENT_DATE`, `CURRENT_TIME` and `CURRENT_TIMESTAMP` also parse as names, because
-  they take no parentheses; `RejectColumnReferences` reports an unqualified name
-  spelled as one of them as the unsupported function (`Function '<name>' is not
-  supported by the executor yet.`, the message `NOW()` gets at evaluation), not as
-  a column, until the parser gives them a function node.
+  `CURRENT_DATE`, `CURRENT_TIME`, `CURRENT_TIMESTAMP`, `LOCALTIME` and `LOCALTIMESTAMP`
+  parse as function nodes and execute with the transaction-start clock, as `NOW()` does
+  (#1120). Quoted datetime names and qualified references remain column references,
+  so `RejectColumnReferences` reports `COHSQLE005` for them in these clauses.
 - **SELECT materializes.** Sorting and `DISTINCT` need the full result anyway at
   this stage; `SqlMaterializedResultSet` carries typed columns and evaluated
   rows. Streaming operators arrive with the planner build-out.
@@ -4303,7 +4303,7 @@ and add it again" as the only remedy.
   TEXT default, even for old rows that lack the field), `+5` as `5`, and `abc` as
   a column reference reported as catalog damage. The format gate
   (`ThrowIfFormatIsNotCurrent`, see "Format rule") refuses every database not on
-  the current format (14; canonical since 4) before `BindCatalog` runs, so no
+  the current format (20; canonical since 4) before `BindCatalog` runs, so no
   pre-canonical definition is ever bound.
   `BindCatalog` runs after that gate on open and after the format marker is written
   on create; keep that order.

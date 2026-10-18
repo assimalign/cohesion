@@ -801,7 +801,7 @@ internal sealed partial class SqlPlanner
     /// already knows is not a number (<c>COHSQLE003</c>).
     /// </exception>
     /// <exception cref="DatabaseException">
-    /// The expression contains an aggregate, <c>*</c>, a subquery or a niladic datetime function.
+    /// The expression contains an aggregate, <c>*</c> or a subquery.
     /// </exception>
     private void ValidateScopelessExpression(SqlExpression expression, string clause, string? alternative = null)
     {

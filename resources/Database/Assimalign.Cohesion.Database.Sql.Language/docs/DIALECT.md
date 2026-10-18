@@ -119,7 +119,7 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `WITH RECURSIVE` | Recognized, not supported | `COHDBL001` at RECURSIVE |
 | Window functions / `OVER` / `WINDOW` | Recognized, not supported | function names lexed; clauses rejected with `COHDBL001` |
 | `CREATE VIEW` / `DROP VIEW` | Recognized, not supported | rejected with `COHDBL001` |
-| `CONSTRAINT` / `FOREIGN KEY` / `REFERENCES` / `CHECK` / `UNIQUE` constraints | Supported subset, measured | Column and table declarations normalize into constraint definitions; UNIQUE lowers to a unique catalog index. NULL is an equal index key: a second NULL violates a single-column UNIQUE constraint. Foreign-key NULL values are allowed; CHECK accepts UNKNOWN and rejects FALSE. CHECK expressions must be deterministic Boolean row expressions with the engine's scalar functions (built-in or registered, `IMMUTABLE` only), each called with arguments its signature accepts (`COHSQLE006` otherwise); parameters and aggregates are excluded. CHECK predicates and DEFAULT literals are stored as canonical text and parsed once per table version; see [Persisted definitions are canonical](#persisted-definitions-are-canonical). |
+| `CONSTRAINT` / `FOREIGN KEY` / `REFERENCES` / `CHECK` / `UNIQUE` constraints | Supported subset, measured | Column and table declarations normalize into constraint definitions; UNIQUE lowers to a unique catalog index. NULL is an equal index key: a second NULL violates a single-column UNIQUE constraint. Foreign-key NULL values are allowed; CHECK accepts UNKNOWN and rejects FALSE. CHECK expressions must be deterministic Boolean row expressions with the engine's scalar functions (built-in or registered, `IMMUTABLE` only), each called with arguments its signature accepts (`COHSQLE006` otherwise); parameters and aggregates are excluded. CHECK predicates and DEFAULT expressions are stored as canonical text and parsed once per table version; see [Persisted definitions are canonical](#persisted-definitions-are-canonical). |
 | `ON DELETE CASCADE` / `RESTRICT` / `NO ACTION` / `SET NULL` / `SET DEFAULT` | Supported | omitted deletion action defaults to `NO ACTION`; a cascade deletes its whole transitive closure with no depth limit, so a self-referencing chain deletes however long it is (#1164), and a cycle deletes each row once; `DROP TABLE ... CASCADE` is not supported |
 | `ON UPDATE` | Recognized, not supported | absent from the profile; rejected with `COHDBL001` |
 | `START TRANSACTION` / `BEGIN [WORK\|TRANSACTION]` / `COMMIT [WORK\|TRANSACTION]` / `END` / `ROLLBACK [WORK\|TRANSACTION]` | Supported | Spellings map to the existing BEGIN/COMMIT/ROLLBACK session commands (+0 clauses). Like every SQL statement, a valid spelling without `;` receives informational SQL0100, with no error or warning; with `;` it has no parser diagnostics. START and WORK are contextual, so columns named start/work remain valid. END takes no suffix; without a transaction its COHSQLT002 message names COMMIT. END WORK/TRANSACTION, AND [NO] CHAIN, modes, ROLLBACK [WORK] TO [SAVEPOINT], BEGIN TRAN/named transactions and COMMIT PREPARED stay SQL0003. ABORT [WORK\|TRANSACTION], SAVEPOINT, RELEASE, SET TRANSACTION and PREPARE TRANSACTION stay SQL0002 (#1012); TRANSACTION alone is not a statement. |
@@ -895,7 +895,7 @@ database is refused too. Format 6 (#1241) keeps format 5's rows and index trees
 but records each table's dropped-column positions in the catalog and decodes
 rows through them, so a format-5 database is refused too. The engine has no
 upgrade path (#1152). It refuses to
-open a database on any format but 6 — older or newer — with an error that names
+open a database on any format but 20 — older or newer — with an error that names
 the database, the format it found and the format it supports. The check reads
 only the database's catalog and runs before the engine opens the data files, so
 a refused open never touches them. A cleanly
@@ -906,7 +906,7 @@ its data with the engine that wrote it (which can still open it), drop the
 database (`DropDatabaseAsync`), create it again and reload the data. A database
 whose creation was interrupted before its format was recorded reads as format 1
 and needs only the drop and create. Upgrading databases across format versions
-is tracked by #1152. New databases are created on format 6.
+is tracked by #1152. New databases are created on format 20.
 
 From format 4 on, the catalog stores the format marker in a record that engines
 before format 4 do not recognize, so those engines refuse to open a format-4
@@ -1116,14 +1116,10 @@ has no SELECT source (`gram.y:12559-12565`). Its optional-column-list grammar do
 not include DEFAULT VALUES; accepting that combination here follows #1193's explicit
 column-list requirement. These DEFAULT forms add no named clause (+0); see the [statement matrix](#statement-matrix).
 
-`CURRENT_DATE`, `CURRENT_TIME` and `CURRENT_TIMESTAMP` take no parentheses, so the
-parser reads each as a name. In these clauses an unqualified name spelled as one of
-them is the recognized function, not a column, and reports
-`Function 'CURRENT_TIMESTAMP' is not supported by the executor yet.` while
-planning, the message `NOW()` reports during evaluation; nothing executes. The
-parser does not keep quoting, so a delimited `"CURRENT_TIMESTAMP"` reports the same
-message. Elsewhere the name still binds as a column and reports `Unknown column`
-when the source has none.
+`CURRENT_DATE`, `CURRENT_TIME`, `CURRENT_TIMESTAMP`, `LOCALTIME` and `LOCALTIMESTAMP`
+parse as niladic function nodes and execute using the transaction-start clock (#1120).
+`NOW()` executes with the same clock. Quoted datetime names and qualified references
+remain column references and receive `COHSQLE005` in these clauses.
 
 ## Grouping and aggregate functions (#1020)
 
@@ -1152,8 +1148,8 @@ the same way over an empty table as over a populated one and changes no row. Unt
 the #1189 review it succeeded over an empty table and failed per row over a
 populated one, with an uncoded `... is not supported by the executor yet.` message.
 A wrong argument count is checked first, so `UPDATE t SET a = SUM()` reports
-`COHSQLE006`. (A subquery in either statement is outside the dialect and reports
-`COHDBL001` at parse time.)
+`COHSQLE006`. Aggregates inside UPDATE/DELETE WHERE subqueries execute in the child's
+scope (#1113); subqueries in UPDATE SET retain `COHDBL001`.
 
 | Aggregate | NULL and empty-input behavior | Result type |
 |---|---|---|
@@ -1198,7 +1194,7 @@ and report `COHDBL001`. Which names are aggregates is the engine's function cata
 say, so the parser reports `DISTINCT`, `ALL` and `ORDER BY` inside any call, an
 application's aggregate included; PostgreSQL refuses them on a function that is not an
 aggregate. Top-level `SELECT DISTINCT` remains available. These
-boundaries do not add named clauses to the 51-clause denominator.
+boundaries do not add named clauses to the 54-clause denominator.
 
 ## Subqueries and query-source inserts (#1021)
 
@@ -1277,7 +1273,7 @@ and subqueries in UPDATE SET, INSERT VALUES, CHECK/DEFAULT,
 or LIMIT/OFFSET/FETCH/TOP expressions remain excluded with `COHDBL001`. Ordinary numeric
 LIMIT/OFFSET/FETCH/TOP clauses on queries containing subqueries do execute. CHECK remains
 a deterministic row-local expression and still rejects every subquery form.
-These subset boundaries do not add named clauses to the 51-clause denominator.
+These subset boundaries do not add named clauses to the 54-clause denominator.
 
 ## Common table expressions (#1116)
 
@@ -1348,7 +1344,8 @@ Output storage types, length/precision/scale, nullability, shared domains and co
 materialization, including empty results. WHERE, GROUP BY/HAVING, ORDER BY and
 LIMIT/OFFSET inside the body apply before the enclosing query reads its rows.
 Stored, system and derived sources can join each other, including LEFT null
-extension. A body is executed once under the enclosing statement context.
+extension. An uncorrelated body executes once under the enclosing statement context;
+a correlated body re-evaluates for each enclosing frame.
 
 Correlated and uncorrelated scalar, membership and existence subqueries also execute in
 UPDATE/DELETE WHERE. Their children materialize before any target mutation, so a
@@ -1730,7 +1727,7 @@ PT1M is one minute. Field precision, temporal precision,
 numeric/UUID/JSON/BYTEA typed strings and B/E/U& string prefixes also report COHDBL001.
 TIME WITH TIME ZONE is recognized but refused: SQL0005 in declarations and CAST
 (see [Type names](#type-names-the-sqltypenames-table)), COHDBL001 as a typed literal.
-INTERVAL arithmetic and unary minus on INTERVAL remain owned by sql-functions (#1120).
+INTERVAL arithmetic and unary minus on INTERVAL execute under the #1120 contract below.
 
 Unqualified PostgreSQL clock forms accept `1 day 02:03:04`, `1 02:03:04` and
 `02:03:04`, including fractional seconds. Days and clocks have independent signs:
@@ -2528,7 +2525,8 @@ InvalidDocument at schema.format; COHDBSDK206 for SDK migration input). Rebuild 
 recreate databases recording an earlier schema format; there is no upgrade or old-hash reconciliation.
 
 `DEFAULT -7` and `DEFAULT -1.2500` accept a single numeric minus. Arithmetic, nested unary expressions,
-functions and other computed expressions remain unsupported in typed defaults and ADD COLUMN; see E4 below for CREATE TABLE function-call defaults. `DEFAULT NULL` has the same
+functions and other computed expressions remain unsupported in typed defaults. SQL column defaults
+admit scalar expressions, including in ADD COLUMN under its nonvolatile fast-default rules (#1121); see E4 below. `DEFAULT NULL` has the same
 stored meaning as no default. A binary default is a quoted `\x` prefix followed by even-count
 hexadecimal digits, for example `DEFAULT '\x007FFF'`; no whitespace or octal escapes are accepted,
 and the column's length bounds still apply. The typed `byte[]` renderer emits uppercase digits.
@@ -2579,7 +2577,7 @@ wrappers and domain CHECKs, including domains in casts and function parameter/re
 Reopening with the original compatible registration restores use.
 New declarations still reject incompatible volatility. CHECK rechecks Immutable-only admission
 on every bind. Domain defaults remain literal-only
-and carry an empty call list. Format 10 is unchanged and has no compatibility reader.
+and carry an empty call list. Call vectors were introduced in format 10; the current record-space format is 20, with no compatibility reader.
 
 Domains share E3's type namespace and coercion/check path. Columns inherit their domain's
 literal default unless they supply one; explicit DEFAULT NULL overrides inheritance. Domain

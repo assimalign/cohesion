@@ -44,7 +44,9 @@ strings ordinally, entities by ID and paths by ordered entity identities. The re
 its values' runtime types. Comparisons and IN use the same exact numeric values: 0.1m = 0.1d
 is FALSE, 1 = 1.0 is TRUE, and mixed integer/Double comparisons above 2^53 retain every
 integer bit. Signed zeros compare equal; NULL comparisons remain UNKNOWN while DISTINCT
-groups NULLs. NaN and infinities remain COHDBG003 at planning. Arithmetic retains its promotion rules.
+groups NULLs. Overflowing numeric text such as `1e999` is a parse error, GQL0004.
+NaN and infinities supplied as AST literals or parameters fail planning with COHDBG003.
+Arithmetic retains its promotion rules.
 Bare binding references also permit entity equality and IS NULL tests in value expressions;
 entity/path equality compares identity across independent materializations.
 
@@ -119,8 +121,8 @@ graph values, including NULL and floating types, fail COHDBG013 before reads or 
 
 Paging never reduces mutation inputs. Full materialization still applies: LIMIT 1 over
 more than 100,000 matches raises COHDBG004. Row and path requests share this stage.
-Standalone ORDER BY/page statements before RETURN remain COHDBL001. WITH and aggregate
-ordering are the #1145 and #1147 hand-offs. See [ordering design](DESIGN.md#ordering-and-paging-1142).
+Standalone ORDER BY/page statements before RETURN remain COHDBL001. Aggregate ordering
+uses #1147's computed group values; WITH ordering remains the #1145 hand-off. See [ordering design](DESIGN.md#ordering-and-paging-1142).
 
 ## CASE and composite values
 

@@ -10,8 +10,8 @@ namespace Assimalign.Cohesion.Database.Sql.Language.Internal;
 /// <para>
 /// Profile keywords that start an unsupported construct by another rule, such as <c>LEFT</c> or
 /// <c>CROSS</c>, have no entry; the keyword-disposition corpus covers them through the profile.
-/// Non-executing function names, including window and niladic datetime names, have entries
-/// whose positions distinguish calls and ISO niladic forms (#1103).
+/// Non-executing window function names have call-position entries (#1103).
+/// Niladic datetime names execute and are recognized separately (#1120).
 /// </para>
 /// <para>
 /// The preflight clause scan matches the <see cref="SqlWordPosition.Clause"/> entries wherever

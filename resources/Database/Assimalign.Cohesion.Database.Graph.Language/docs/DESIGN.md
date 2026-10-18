@@ -332,7 +332,8 @@ keep hashing consistent without merging adjacent Int64 values above 2^53 or roun
 to zero. Numeric comparisons (=, <>, !=, <, <=, >, >=), property matching and IN use the same
 exact fractions: 0.1m = 0.1d is FALSE, 1 = 1.0 is TRUE, and mixed comparisons above 2^53
 retain every integer bit. NULL comparisons remain UNKNOWN, while DISTINCT groups NULLs;
-signed zeros compare equal. Non-finite literals and parameters, including NaN, remain COHDBG003.
+signed zeros compare equal. Overflowing numeric text such as `1e999` fails parsing with GQL0004.
+Non-finite AST literals and parameters, including NaN, fail planning with COHDBG003.
 Internal value equality groups NaNs across floating tags and payloads with consistent hashes.
 This owner choice changes #1140's comparison promotion for reuse by #1145/#1147;
 arithmetic still follows the separate promotion table below. Behavior consulted, no code copied,

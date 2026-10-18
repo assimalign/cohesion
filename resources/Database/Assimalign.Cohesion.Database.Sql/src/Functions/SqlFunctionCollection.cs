@@ -21,11 +21,11 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// <para>
 /// <b>What <see cref="Add"/> refuses</b> (owner decision 62): a name that is not an identifier, a
 /// special form (<c>COALESCE</c>, <c>NULLIF</c>, <c>CASE</c>, <c>CAST</c>, <c>EXTRACT</c>, which
-/// stay grammar), a SQL keyword, a type name, or a name the dialect reserves for a built-in that does
-/// not execute yet (<c>TRIM</c>, <c>NOW</c>, ...); a name and parameter-type list already registered;
+/// stay grammar), a SQL keyword, a type name, a reserved T1 built-in name (<c>TRIM</c>, <c>NOW</c>, ...),
+/// or a recognized non-executing name (<c>RANK</c>, <c>LEAD</c>, ...); a name and parameter-type list already registered;
 /// an overload of a standard-library name that takes a number of arguments the built-in takes, so a
-/// standard-library function can never be replaced or made ambiguous (an overload of another arity,
-/// <c>upper(TEXT, BIGINT)</c>, is allowed); a scalar and an aggregate under one name; and any call
+/// standard-library function can never be replaced or made ambiguous (the original UPPER/LOWER/LENGTH/ABS
+/// names permit other arities, such as <c>upper(TEXT, BIGINT)</c>); a scalar and an aggregate under one name; and any call
 /// once the engine's build began. There is no removal.
 /// </para>
 /// <para>
