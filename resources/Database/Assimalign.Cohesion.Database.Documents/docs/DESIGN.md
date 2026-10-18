@@ -564,20 +564,31 @@ Root replacement (`SET d = ...`) and UNSET ending in an array index fail plannin
 An aliased array root can be updated through an index, for example `SET d[0].name = 'new'`.
 At execution, name segments require objects; missing intermediate objects are created as `{}`
 when a SET needs them. Index segments require an existing array and an in-range index, with
-shape failures identifying the target path (COHDOC016). UNSET of an absent path is a no-op;
-an existing incompatible intermediate value fails. No array is created or expanded implicitly.
+shape failures identifying the target path (COHDOC016). These index requirements apply equally
+to UNSET and SET-to-MISSING, even beneath missing members; every invalid target fails the
+statement before anything is written. UNSET of an absent object member is a no-op; an existing
+incompatible intermediate value fails. No array is created or expanded implicitly.
 
 SET-to-MISSING is removal for a named member, including leaving an absent member absent.
 Missing intermediate objects are not created solely for removals, including SET-to-MISSING.
 A MISSING assigned directly to an existing array element becomes JSON null. SET-to-NULL writes
 JSON null in either shape. Sibling targets share one patch tree; object properties that survive
 keep their original order, replacement keeps the property's position, and new properties append
-in target order. Array order and length remain unchanged. Untouched JSON values are written
-through JsonElement; the whole content is rebuilt only with Utf8JsonWriter, without JsonSerializer,
-reflection or mutable object-model serialization. Whitespace is normalized during a rewrite.
+in target order. Array order and length remain unchanged. Untouched values and property names
+retain their original UTF-8 bytes, including escape and number spelling and whitespace within
+untouched values. Whitespace between members or elements of rewritten containers, and around
+their names and delimiters, may be normalized. Raw JsonElement/JsonProperty text supplies those
+fragments; only target values and new names are serialized through Utf8JsonWriter and
+JsonEncodedText. No JsonSerializer, reflection or mutable object-model serialization is used.
+New names and values retain non-ASCII characters (including supplementary Unicode scalars) in
+UTF-8. The internal JSON encoder escapes quotes, backslashes and controls as required by
+[RFC 8259 section 7](https://www.rfc-editor.org/rfc/rfc8259#section-7); the BCL relaxed encoder
+still escapes supplementary characters. Its pointer-based BCL override signatures require
+AllowUnsafeBlocks locally, without changing public surface or NativeAOT compatibility.
 The result passes DocumentStorage.ValidateContent, including its 128-level limit, before writing.
-SET constructor and final-document depth failures use COHDOC018 with an UPDATE-specific message;
-WHERE constructors retain the ordinary query allowance because their values are not stored.
+Only the patched document is constrained by storage depth: temporary SET and WHERE constructors
+retain the ordinary 256-level query allowance, even inside CASE conditions. COHDOC018 uses the
+failing target's span for a leaf-value write, and the statement span for whole-document validation.
 
 Every matched document is passed through INSERT/CRUD's existing WriteAsync primitive, even if
 the content is byte-identical or UNSET removes nothing. Each receives a strictly greater version;
@@ -655,7 +666,7 @@ snapshots retain their defined visibility.
 Successful index DDL returns a command `DatabaseResult` with `Success` status and an affected count
 of zero; index definition changes are not document-row mutations.
 
-`ChooseAccess` takes a predicate and source alias independently of SELECT, so SELECT and DELETE
+`ChooseAccess` takes a predicate and source alias independently of SELECT, so SELECT, UPDATE and DELETE
 share the same physical access selection. The planner uses applicable equality/range predicates on indexed paths,
 including parameter values, reversed operands, and conjunctive bounds. Equality
 is preferred over a range; ties choose ordinal index name. The executor reapplies
@@ -710,7 +721,7 @@ The input walk validates numeric literals and referenced JsonElement parameters 
 so grouped-expression matching and empty sources retain the same located numeric refusal.
 Unused parameter-map entries remain ignored.
 
-INSERT and PutAsync share one internal write primitive inside the existing statement operation:
+INSERT, UPDATE and PutAsync share one internal write primitive inside the existing statement operation:
 writer lock, collection/index snapshot checks, current-key check, content write/tombstone,
 durable version allocation and catalog/index maintenance. A statement is atomic, including its
 index changes. A failure in an explicit transaction rolls back all of that transaction's work

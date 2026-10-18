@@ -27,6 +27,7 @@ public sealed class DocumentUpdateTests
     [InlineData("SET extra = nosuch", "{\"name\":\"alpha\",\"category\":\"a\",\"amount\":2,\"details\":{\"score\":1},\"tags\":[\"blue\"]}")]
     [InlineData("SET extra.deep.value = MISSING", "{\"name\":\"alpha\",\"category\":\"a\",\"amount\":2,\"details\":{\"score\":1},\"tags\":[\"blue\"]}")]
     [InlineData("UNSET absent.deep", "{\"name\":\"alpha\",\"category\":\"a\",\"amount\":2,\"details\":{\"score\":1},\"tags\":[\"blue\"]}")]
+    [InlineData("UNSET absent", "{\"name\":\"alpha\",\"category\":\"a\",\"amount\":2,\"details\":{\"score\":1},\"tags\":[\"blue\"]}")]
     [InlineData("SET amount = NULL UNSET tags", "{\"name\":\"alpha\",\"category\":\"a\",\"amount\":null,\"details\":{\"score\":1}}")]
     [InlineData("SET details = {'a':MISSING,'b':[1,MISSING,NULL]}", "{\"name\":\"alpha\",\"category\":\"a\",\"amount\":2,\"details\":{\"b\":[1,null,null]},\"tags\":[\"blue\"]}")]
     [InlineData("SET d['odd.name'] = 1, d.set = 2", "{\"name\":\"alpha\",\"category\":\"a\",\"amount\":2,\"details\":{\"score\":1},\"tags\":[\"blue\"],\"odd.name\":1,\"set\":2}")]
@@ -56,6 +57,15 @@ public sealed class DocumentUpdateTests
     [InlineData("UNSET name.first", "COHDOC016")]
     [InlineData("SET tags[5] = 'x'", "COHDOC016")]
     [InlineData("SET absent[0] = 1", "COHDOC016")]
+    [InlineData("UNSET absent[0].x", "COHDOC016")]
+    [InlineData("SET absent[0].x = MISSING", "COHDOC016")]
+    [InlineData("UNSET tags[5].x", "COHDOC016")]
+    [InlineData("SET tags[5].x = MISSING", "COHDOC016")]
+    [InlineData("SET amount = 99 UNSET absent[0].x", "COHDOC016")]
+    [InlineData("SET amount = 99, absent[0].x = MISSING", "COHDOC016")]
+    [InlineData("SET amount = 99 UNSET tags[5].x", "COHDOC016")]
+    [InlineData("SET amount = 99, tags[5].x = MISSING", "COHDOC016")]
+    [InlineData("UNSET absent.deep[0].x", "COHDOC016")]
     [InlineData("SET details[0] = 1", "COHDOC016")]
     [InlineData("SET tags.name = 1", "COHDOC016")]
     [InlineData("SET d = {}", "COHDOC016")]
@@ -399,6 +409,84 @@ public sealed class DocumentUpdateTests
         // Assert
         result.AffectedCount.ShouldBe(4);
         (await ValuesAsync(session, "SELECT amount FROM items")).ShouldBe([0m, 0m, 0m, 0m]);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Documents] - UPDATE: temporary RHS constructors retain the query depth allowance")]
+    public async Task Execute_DeepTemporaryValue_ShouldStoreShallowResultAsync()
+    {
+        // Arrange
+        await using var engine = DocumentDatabaseEngine.Create("update", new());
+        var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await SeedAsync(session);
+        using var parameter = JsonDocument.Parse(new string('[', 128) + "1" + new string(']', 128), new JsonDocumentOptions { MaxDepth = 256 });
+        // Act
+        var result = await session.ExecuteAsync("UPDATE items SET amount = CASE WHEN {'deep': $value} THEN 1 ELSE 0 END",
+            new Dictionary<string, object?> { ["value"] = parameter.RootElement }, CancellationToken.None);
+        // Assert
+        result.AffectedCount.ShouldBe(4);
+        (await ValuesAsync(session, "SELECT amount FROM items")).ShouldBe([1m, 1m, 1m, 1m]);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Documents] - UPDATE: untouched UTF-8 values and property spellings survive byte for byte")]
+    public async Task Execute_UnrelatedChange_ShouldPreserveRawPropertiesAndValuesAsync()
+    {
+        // Arrange
+        await using var engine = DocumentDatabaseEngine.Create("update", new());
+        var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        var items = await session.CreateCollectionAsync("items", CancellationToken.None);
+        const string original = """{"é東京<😀":"é東京<😀","escaped\u00e9":"\u00e9\/\"\n","nested\u003c":{"é東京<😀":[ "é東京<😀", 1.00e0 ],"n":1},"array":[ "é東京<😀", { "é東京<😀" : "\u6771京<😀" }, 1 ]} """;
+        await items.PutAsync(session, "one", Encoding.UTF8.GetBytes(original), cancellationToken: CancellationToken.None);
+        // Act
+        await session.ExecuteAsync("UPDATE items d SET d['nested<'].n = 2, d.array[2] = 2, n = 2", cancellationToken: CancellationToken.None);
+        // Assert
+        string expected = original.TrimEnd().Replace("\"n\":1", "\"n\":2", StringComparison.Ordinal)
+            .Replace("[ \"é東京<😀\", { \"é東京<😀\" : \"\\u6771京<😀\" }, 1 ]", "[\"é東京<😀\",{ \"é東京<😀\" : \"\\u6771京<😀\" },2]", StringComparison.Ordinal);
+        expected = expected[..^1] + ",\"n\":2}";
+        (await items.GetAsync(session, "one", CancellationToken.None)).ShouldNotBeNull().Content.ToArray().ShouldBe(Encoding.UTF8.GetBytes(expected));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Documents] - UPDATE: new UTF-8 values retain text with RFC 8259 escaping")]
+    public async Task Execute_NewUnicodeValue_ShouldEscapeOnlyRequiredCharactersAsync()
+    {
+        // Arrange
+        await using var engine = DocumentDatabaseEngine.Create("update", new());
+        var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        var items = await session.CreateCollectionAsync("items", CancellationToken.None);
+        await items.PutAsync(session, "one", "{}"u8.ToArray(), cancellationToken: CancellationToken.None);
+        // Act
+        await session.ExecuteAsync("UPDATE items d SET d['é東京<😀'] = $text", new Dictionary<string, object?>
+        {
+            ["text"] = "é東京<😀\n\"\\\u0001",
+        }, CancellationToken.None);
+        // Assert
+        var content = (await items.GetAsync(session, "one", CancellationToken.None)).ShouldNotBeNull().Content;
+        content.ToArray().ShouldBe(Encoding.UTF8.GetBytes("{\"é東京<😀\":\"é東京<😀\\n\\\"\\\\\\u0001\"}"));
+        DocumentStorage.ValidateContent(content);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Documents] - UPDATE: a later overflowing value identifies its own target")]
+    public async Task Execute_LaterTargetDepthFailure_ShouldReportFailingTargetAsync()
+    {
+        // Arrange
+        await using var engine = DocumentDatabaseEngine.Create("update", new());
+        var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        var items = await SeedAsync(session);
+        var before = await SnapshotAsync(items, session);
+        using var parameter = JsonDocument.Parse(new string('[', 127) + "1" + new string(']', 127), new JsonDocumentOptions { MaxDepth = 256 });
+        const string statement = "UPDATE items SET a = 1, b.c = $deep";
+        // Act
+        var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(statement,
+            new Dictionary<string, object?> { ["deep"] = parameter.RootElement }, CancellationToken.None));
+        // Assert
+        var diagnostic = error.Diagnostics.ShouldHaveSingleItem();
+        diagnostic.Code.ShouldBe("COHDOC018");
+        diagnostic.Start.ShouldBe(statement.IndexOf("b.c", StringComparison.Ordinal));
+        diagnostic.End.ShouldBe(statement.IndexOf("b.c", StringComparison.Ordinal) + 3);
+        (await SnapshotAsync(items, session)).ShouldBe(before);
     }
 
     private static async Task<DocumentCollection> SeedAsync(DocumentDatabaseSession session)

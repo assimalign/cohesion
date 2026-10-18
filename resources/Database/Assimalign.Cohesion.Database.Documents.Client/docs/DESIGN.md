@@ -202,7 +202,7 @@ analysis and execution of the published binary are gates; IL2xxx/IL3xxx warnings
 
 Documents.Client is inventoried and built in the Database workflow, but remains NuGet-only like
 Graph.Client. Documents.Security remains deferred. Transactions, remote database administration,
-replication and model-specific security policies are outside this wire slice. OQL INSERT and DELETE
+replication and model-specific security policies are outside this wire slice. OQL INSERT, UPDATE and DELETE
 return their affected counts through the existing completion field. Wire negotiation remains
 the shared protocol's responsibility, with no model-specific version exchange. The startup version
 is 2.1, retaining the major-2 projection contract; old-major peers receive the existing coded

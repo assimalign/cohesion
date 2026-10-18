@@ -3,18 +3,20 @@ using System.Buffers;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Text;
 using System.Text.Json;
 using System.Threading;
 
 using Assimalign.Cohesion.Database.Documents.Language;
 using Assimalign.Cohesion.Database.Documents.Storage;
+using Assimalign.Cohesion.Database.Language;
 
 namespace Assimalign.Cohesion.Database.Documents.Internal;
 
 internal static class DocumentJsonPatcher
 {
     internal static byte[] Patch(JsonElement document, IReadOnlyList<DocumentUpdateTarget> targets,
-        object?[] values, CancellationToken cancellationToken)
+        object?[] values, Location? location, CancellationToken cancellationToken)
     {
         var root = new PatchNode(default, targets[0]);
         for (int i = 0; i < targets.Count; i++)
@@ -26,6 +28,7 @@ internal static class DocumentJsonPatcher
             node.HasWrites |= writes;
             foreach (var segment in target.Segments)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 if (!node.Children.TryGetValue(segment, out var child))
                 {
                     child = new PatchNode(segment, target);
@@ -40,31 +43,45 @@ internal static class DocumentJsonPatcher
         try
         {
             var buffer = new ArrayBufferWriter<byte>();
-            using (var writer = new Utf8JsonWriter(buffer, new JsonWriterOptions { MaxDepth = 128 }))
-            {
-                Rewrite(writer, document, root, values, cancellationToken);
-            }
+            Rewrite(buffer, document, root, values, 0, cancellationToken);
             byte[] content = buffer.WrittenSpan.ToArray();
             DocumentStorage.ValidateContent(content);
             return content;
         }
         catch (Exception exception) when (exception is JsonException or InvalidOperationException)
         {
-            throw new DocumentPlanningException("COHDOC018", ErrorMessages.UpdateJsonInvalid, targets[0].Path.Location, exception);
+            throw new DocumentPlanningException("COHDOC018", ErrorMessages.UpdateJsonInvalid, location, exception);
         }
     }
 
-    private static void Rewrite(Utf8JsonWriter writer, JsonElement current, PatchNode node,
-        object?[] values, CancellationToken cancellationToken)
+    private static void Rewrite(IBufferWriter<byte> buffer, JsonElement current, PatchNode node,
+        object?[] values, int depth, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (node.Leaf is int leaf)
         {
-            // A MISSING array element is JSON null; missing object members are omitted by the caller.
-            DocumentJsonValue.Write(writer, values[leaf] is DocumentMissing ? null : values[leaf]);
+            try
+            {
+                // Count the enclosing containers even though this writer serializes only the target.
+                if (depth >= 128 && values[leaf] is JsonElement { ValueKind: JsonValueKind.Object or JsonValueKind.Array })
+                {
+                    throw new DocumentPlanningException("COHDOC018", ErrorMessages.UpdateJsonInvalid, node.Target.Path.Location);
+                }
+                using var writer = new Utf8JsonWriter(buffer, new JsonWriterOptions
+                {
+                    MaxDepth = Math.Max(1, 128 - depth),
+                    Encoder = DocumentJsonEncoder.Instance,
+                });
+                // A MISSING array element is JSON null; missing object members are omitted by the caller.
+                DocumentJsonValue.Write(writer, values[leaf] is DocumentMissing ? null : values[leaf]);
+            }
+            catch (Exception exception) when (exception is JsonException or InvalidOperationException)
+            {
+                throw new DocumentPlanningException("COHDOC018", ErrorMessages.UpdateJsonInvalid, node.Target.Path.Location, exception);
+            }
             return;
         }
-        if (writer.CurrentDepth >= 128)
+        if (depth >= 128)
         {
             throw new DocumentPlanningException("COHDOC018", ErrorMessages.UpdateJsonInvalid, node.Target.Path.Location);
         }
@@ -75,16 +92,17 @@ internal static class DocumentJsonPatcher
             {
                 if (child.Segment.Index is not int index || index >= length) { throw PathFailure(child); }
             }
-            writer.WriteStartArray();
+            buffer.Write("["u8);
             int ordinal = 0;
             foreach (var element in current.EnumerateArray())
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                if (ordinal > 0) { buffer.Write(","u8); }
                 if (node.Children.TryGetValue(new OqlPathSegment(null, ordinal++), out var child))
-                { Rewrite(writer, element, child, values, cancellationToken); }
-                else { element.WriteTo(writer); }
+                { Rewrite(buffer, element, child, values, depth + 1, cancellationToken); }
+                else { Raw(buffer, element.GetRawText()); }
             }
-            writer.WriteEndArray();
+            buffer.Write("]"u8);
             return;
         }
         if (current.ValueKind is not (JsonValueKind.Object or JsonValueKind.Undefined)) { throw PathFailure(node); }
@@ -92,7 +110,8 @@ internal static class DocumentJsonPatcher
         {
             if (child.Segment.Name is null) { throw PathFailure(child); }
         }
-        writer.WriteStartObject();
+        buffer.Write("{"u8);
+        bool hasMember = false;
         var seen = new HashSet<string>(StringComparer.Ordinal);
         if (current.ValueKind == JsonValueKind.Object)
         {
@@ -102,24 +121,76 @@ internal static class DocumentJsonPatcher
                 if (node.Children.TryGetValue(new OqlPathSegment(property.Name, null), out var child))
                 {
                     seen.Add(property.Name);
-                    Member(property.Name, property.Value, child);
+                    Member(property.Name, property.Value, child, property);
                 }
-                else { property.WriteTo(writer); }
+                else
+                {
+                    Separator();
+                    // JsonProperty.ToString retains both the encoded name and the complete raw value.
+                    Raw(buffer, property.ToString());
+                }
             }
         }
         // New members follow the statement's target order. Existing members keep their positions.
         foreach (var child in node.Ordered)
         {
             string name = child.Segment.Name!;
-            if (!seen.Contains(name) && child.HasWrites) { Member(name, default, child); }
+            if (seen.Contains(name)) { continue; }
+            if (child.HasWrites) { Member(name, default, child); }
+            else { ValidateAbsent(child, cancellationToken); }
         }
-        writer.WriteEndObject();
+        buffer.Write("}"u8);
 
-        void Member(string name, JsonElement value, PatchNode child)
+        void Separator()
+        {
+            if (hasMember) { buffer.Write(","u8); }
+            hasMember = true;
+        }
+
+        void Member(string name, JsonElement value, PatchNode child, JsonProperty? property = null)
         {
             if (child.Leaf is int index && values[index] is DocumentMissing) { return; }
-            writer.WritePropertyName(name);
-            Rewrite(writer, value, child, values, cancellationToken);
+            Separator();
+            if (property is { } existing)
+            {
+                string raw = existing.ToString();
+                int end = 1;
+                for (; end < raw.Length; end++)
+                {
+                    if (raw[end] == '\\') { end++; }
+                    else if (raw[end] == '"') { break; }
+                }
+                Raw(buffer, raw.AsSpan(0, end + 1));
+            }
+            else
+            {
+                buffer.Write("\""u8);
+                buffer.Write(JsonEncodedText.Encode(name, DocumentJsonEncoder.Instance).EncodedUtf8Bytes);
+                buffer.Write("\""u8);
+            }
+            buffer.Write(":"u8);
+            Rewrite(buffer, value, child, values, depth + 1, cancellationToken);
+        }
+    }
+
+    private static void Raw(IBufferWriter<byte> buffer, ReadOnlySpan<char> text)
+    {
+        int length = Encoding.UTF8.GetByteCount(text);
+        Encoding.UTF8.GetBytes(text, buffer.GetSpan(length));
+        buffer.Advance(length);
+    }
+
+    private static void ValidateAbsent(PatchNode node, CancellationToken cancellationToken)
+    {
+        // Missing object members are harmless for removal, but an index always needs an array.
+        // Walk iteratively: a removal-only path need not fit the storage depth limit.
+        var pending = new Stack<PatchNode>();
+        pending.Push(node);
+        while (pending.TryPop(out var current))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (current.Segment.Index is not null) { throw PathFailure(current); }
+            foreach (var child in current.Ordered) { pending.Push(child); }
         }
     }
 

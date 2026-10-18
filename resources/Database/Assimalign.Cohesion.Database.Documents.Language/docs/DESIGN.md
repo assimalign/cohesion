@@ -455,6 +455,10 @@ Planning rejects root replacement, duplicate/prefix-overlapping paths (after str
 and UNSET ending in an index. Every right-hand side reads the original document. SET-to-MISSING
 removes a property; an array element assigned MISSING becomes NULL. The engine design records
 creation, shape failure, ordering, depth, version and transaction rules.
+Every index segment needs an existing array and an in-range index, including removals beneath
+missing object members; an absent object member alone is a no-op for UNSET. Invalid shapes,
+overlapping targets and invalid stored results carry COHDOC016, COHDOC017 and COHDOC018
+respectively. The [dialect page](DIALECT.md) records the executable UPDATE contract.
 
 WHERE and SET values share ordinary parameter, numeric and META validation, and reject aggregates.
 Subqueries in either clause report COHDBL001 naming SUBQUERY at the inner SELECT, including under

@@ -17,7 +17,7 @@ internal static class DocumentJsonValue
         return buffer.WrittenSpan.ToArray();
     }
 
-    internal static JsonElement Object(IEnumerable<KeyValuePair<string, object?>> members, bool forInsert = false, int maxDepth = 256, bool forUpdate = false)
+    internal static JsonElement Object(IEnumerable<KeyValuePair<string, object?>> members, bool forInsert = false, int maxDepth = 256)
     {
         // Couchbase expression/cons_object.go:53-77 constructs a keyed map and assigns
         // non-MISSING members into it (72-73). Later assignments replace the same key.
@@ -29,7 +29,7 @@ internal static class DocumentJsonValue
         try
         {
             var buffer = new ArrayBufferWriter<byte>();
-            using (var writer = new Utf8JsonWriter(buffer, new JsonWriterOptions { MaxDepth = forInsert || forUpdate ? 128 : maxDepth }))
+            using (var writer = new Utf8JsonWriter(buffer, new JsonWriterOptions { MaxDepth = forInsert ? 128 : maxDepth }))
             {
                 writer.WriteStartObject();
                 foreach (var member in keyed)
@@ -39,37 +39,37 @@ internal static class DocumentJsonValue
                 }
                 writer.WriteEndObject();
             }
-            using var json = JsonDocument.Parse(buffer.WrittenMemory, new JsonDocumentOptions { MaxDepth = forInsert || forUpdate ? 128 : maxDepth });
+            using var json = JsonDocument.Parse(buffer.WrittenMemory, new JsonDocumentOptions { MaxDepth = forInsert ? 128 : maxDepth });
             return json.RootElement.Clone();
         }
         catch (InvalidOperationException exception)
         {
-            throw Depth("object", forInsert, forUpdate, exception);
+            throw Depth("object", forInsert, exception);
         }
     }
 
-    internal static JsonElement Array(IEnumerable<object?> elements, bool forInsert = false, int maxDepth = 256, bool forUpdate = false)
+    internal static JsonElement Array(IEnumerable<object?> elements, bool forInsert = false, int maxDepth = 256)
     {
         try
         {
             var buffer = new ArrayBufferWriter<byte>();
-            using (var writer = new Utf8JsonWriter(buffer, new JsonWriterOptions { MaxDepth = forInsert || forUpdate ? 128 : maxDepth }))
+            using (var writer = new Utf8JsonWriter(buffer, new JsonWriterOptions { MaxDepth = forInsert ? 128 : maxDepth }))
             {
                 writer.WriteStartArray();
                 foreach (var element in elements) { Write(writer, element is DocumentMissing ? null : element); }
                 writer.WriteEndArray();
             }
-            using var json = JsonDocument.Parse(buffer.WrittenMemory, new JsonDocumentOptions { MaxDepth = forInsert || forUpdate ? 128 : maxDepth });
+            using var json = JsonDocument.Parse(buffer.WrittenMemory, new JsonDocumentOptions { MaxDepth = forInsert ? 128 : maxDepth });
             return json.RootElement.Clone();
         }
         catch (InvalidOperationException exception)
         {
-            throw Depth("array", forInsert, forUpdate, exception);
+            throw Depth("array", forInsert, exception);
         }
     }
 
-    private static DocumentPlanningException Depth(string constructor, bool forInsert, bool forUpdate, Exception exception)
-        => forUpdate ? new DocumentPlanningException("COHDOC018", ErrorMessages.UpdateJsonInvalid, innerException: exception) : forInsert
+    private static DocumentPlanningException Depth(string constructor, bool forInsert, Exception exception)
+        => forInsert
             ? new DocumentPlanningException("COHDOC008", ErrorMessages.InsertJsonInvalid, innerException: exception)
             : new DocumentPlanningException("COHDOC015", string.Format(System.Globalization.CultureInfo.CurrentCulture,
                 ErrorMessages.SelectConstructorDepthExceeded, constructor), innerException: exception);

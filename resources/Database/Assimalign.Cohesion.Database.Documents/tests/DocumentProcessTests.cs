@@ -5,11 +5,12 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Shouldly;
+using Xunit;
+
 using Assimalign.Cohesion.Database.Indexing;
 using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Database.Types;
-using Shouldly;
-using Xunit;
 
 namespace Assimalign.Cohesion.Database.Documents.Tests;
 
