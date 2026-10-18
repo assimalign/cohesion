@@ -102,7 +102,7 @@ public sealed class OqlKeywordDispositionTests
         // SQL++ words
         ["LIMIT"] = Rejects("SELECT * FROM c WHERE a = 1 LIMIT 5", "LIMIT"),
         ["OFFSET"] = Rejects("SELECT * FROM c ORDER BY a DESC OFFSET 2", "OFFSET"),
-        ["UPSERT"] = Rejects("UPSERT INTO c (KEY, VALUE) VALUES ('k', {'a': 1})", "UPSERT"),
+        ["UPSERT"] = Parses("UPSERT INTO c (KEY, VALUE) VALUES ('k', {'a': 1})"),
         ["MERGE"] = Rejects("MERGE INTO c USING d ON c.id = d.id WHEN MATCHED THEN UPDATE SET c.a = d.a", "MERGE"),
         ["UNNEST"] = Rejects("SELECT * FROM c UNNEST c.items AS i", "UNNEST"),
         ["EVERY"] = Rejects("SELECT * FROM c WHERE EVERY x IN c.items SATISFIES x > 1 END", "EVERY ... SATISFIES"),

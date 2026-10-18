@@ -93,34 +93,41 @@ internal sealed partial class DocumentPlanner
             ChooseAccess(delete.Predicate, delete.Alias, _catalog.GetIndexes(collection.Id, _snapshot)));
     }
 
-    private DocumentStatementPlan PlanInsert(OqlInsertExpression insert)
+    private DocumentStatementPlan PlanWrite(OqlExpression statement, string destination,
+        IReadOnlyList<(OqlExpression Key, OqlExpression Value)> values, OqlSelectExpression? select,
+        string? keyName, string? valueName)
     {
-        DocumentSystemCollections.EnsureReadOnly(insert.Collection, insert.Location);
-        var collection = ResolveCollection(insert.Collection, insert.Location);
-        if (insert.Select is not { } select)
+        string verb = statement is OqlUpsertExpression ? "UPSERT" : "INSERT";
+        DocumentSystemCollections.EnsureReadOnly(destination, statement.Location);
+        var collection = ResolveCollection(destination, statement.Location);
+        if (select is null)
         {
-            if (insert.Values.Count == 0)
+            if (values.Count == 0)
             {
-                throw new DocumentPlanningException("COHDOC001", ErrorMessages.InsertValuesContext, insert.Location);
+                throw new DocumentPlanningException("COHDOC001", string.Format(CultureInfo.CurrentCulture, ErrorMessages.WriteValuesContext, verb), statement.Location);
             }
-            foreach (var pair in insert.Values)
+            foreach (var pair in values)
             {
                 foreach (var expression in new[] { pair.Key, pair.Value })
                 {
                     if (!IsConstant(expression))
                     {
-                        throw new DocumentPlanningException("COHDOC001", ErrorMessages.InsertValuesContext, expression.Location);
+                        throw new DocumentPlanningException("COHDOC001", string.Format(CultureInfo.CurrentCulture, ErrorMessages.WriteValuesContext, verb), expression.Location);
                     }
                     Validate(expression, allowAggregate: false);
                 }
             }
-            return new DocumentInsertPlan(collection, insert);
+            return statement is OqlUpsertExpression upsert
+                ? new DocumentUpsertPlan(collection, upsert)
+                : new DocumentInsertPlan(collection, (OqlInsertExpression)statement);
         }
         var source = Plan((OqlExpression)select);
         var logical = source is DocumentPlan plan ? plan.Logical : ((DocumentSystemCollectionPlan)source).Logical;
-        int keyOrdinal = Bind(insert.KeyName);
-        int? valueOrdinal = insert.ValueName is null ? null : Bind(insert.ValueName);
-        return new DocumentInsertSelectPlan(collection, insert, source, keyOrdinal, valueOrdinal);
+        int keyOrdinal = Bind(keyName);
+        int? valueOrdinal = valueName is null ? null : Bind(valueName);
+        return statement is OqlUpsertExpression upsertSelect
+            ? new DocumentUpsertPlan(collection, upsertSelect, source, keyOrdinal, valueOrdinal)
+            : new DocumentInsertSelectPlan(collection, (OqlInsertExpression)statement, source, keyOrdinal, valueOrdinal);
 
         int Bind(string? name)
         {
@@ -129,7 +136,7 @@ internal sealed partial class DocumentPlanner
                 if (logical.Projections[i].Name == name) { return i; }
             }
             throw new DocumentPlanningException("COHDOC001", string.Format(CultureInfo.CurrentCulture,
-                ErrorMessages.InsertOutputMissing, name), insert.Location);
+                ErrorMessages.WriteOutputMissing, verb, name), statement.Location);
         }
     }
 

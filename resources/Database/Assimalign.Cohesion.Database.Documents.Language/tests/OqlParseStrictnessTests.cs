@@ -75,7 +75,6 @@ public sealed class OqlParseStrictnessTests
     [InlineData("SELECT * FROM c ORDER BY a DESC «OFFSET» 2", "OFFSET")]
     [InlineData("SELECT * FROM c ORDER BY a ASC «LIMIT» 2", "LIMIT")]
     [InlineData("SELECT * FROM c «LIMIT» 10", "LIMIT")]
-    [InlineData("«UPSERT» INTO c (KEY, VALUE) VALUES ('k', {'a': 1})", "UPSERT")]
     [InlineData("«MERGE» INTO c USING d ON c.id = d.id WHEN MATCHED THEN UPDATE SET c.a = d.a", "MERGE")]
     [InlineData("SELECT * FROM c «UNNEST» c.items AS i", "UNNEST")]
     [InlineData("SELECT * FROM c AS x «UNNEST» x.items AS i", "UNNEST")]
@@ -137,6 +136,16 @@ public sealed class OqlParseStrictnessTests
         // Assert
         statement.Diagnostics.ShouldBeEmpty();
         statement.OqlExpression.ShouldBeOfType<OqlSelectExpression>().Projections.ShouldNotBeEmpty();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Documents.Language] - Strictness: UPSERT is an executable document write")]
+    public void Parse_Upsert_ShouldProduceSupportedStatement()
+    {
+        // Arrange / Act
+        var statement = Parse("UPSERT INTO c (KEY, VALUE) VALUES ('k', {'a': 1})");
+        // Assert
+        statement.Diagnostics.ShouldBeEmpty();
+        statement.OqlExpression.ShouldBeOfType<OqlUpsertExpression>().Collection.ShouldBe("c");
     }
 
     [Fact(DisplayName = "Cohesion Test [Documents.Language] - Strictness: OQL declares no ~, so it stays a syntax error (pin)")]

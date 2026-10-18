@@ -126,6 +126,8 @@ public sealed class OqlDmlParserTests
     [InlineData("DELETE FROM items WHERE amount IN (SELECT VALUE amount FROM other)")]
     [InlineData("DELETE FROM items WHERE amount = (SELECT RAW amount FROM other)")]
     [InlineData("EXPLAIN DELETE FROM items WHERE amount IN (SELECT amount FROM other)")]
+    [InlineData("UPSERT INTO items (KEY, VALUE) VALUES ('a', (SELECT VALUE amount FROM other))")]
+    [InlineData("EXPLAIN UPSERT INTO items (KEY, VALUE) VALUES ('a', (SELECT amount FROM other))")]
     [InlineData("INSERT INTO items (KEY, VALUE) VALUES ('a', (SELECT VALUE amount FROM other))")]
     [InlineData("INSERT INTO items (KEY, VALUE) VALUES ((SELECT RAW id FROM other), 1)")]
     [InlineData("EXPLAIN INSERT INTO items (KEY, VALUE) VALUES ('a', (SELECT amount FROM other))")]
@@ -187,6 +189,9 @@ public sealed class OqlDmlParserTests
     [InlineData("INSERT INTO items (KEY, VALUE) VALUES ('e', $doc) RETURNING k", "COHDBL001", "RETURNING", "RETURNING")]
     [InlineData("INSERT INTO archive (KEY k) SELECT META(d).id AS k FROM items d WHERE d.category = 'a' RETURNING k", "COHDBL001", "RETURNING", "RETURNING")]
     [InlineData("INSERT INTO archive (KEY k) SELECT META(d).id AS k FROM items d WHERE d.details = {'score':1} RETURNING k", "COHDBL001", "RETURNING", "RETURNING")]
+    [InlineData("INSERT INTO archive (KEY k, OPTIONS o) SELECT META(d).id AS k FROM items d", "COHDBL001", "OPTIONS", "OPTIONS")]
+    [InlineData("INSERT INTO archive (KEY k, OPTIONS {'expiration': 10}) SELECT META(d).id AS k FROM items d", "COHDBL001", "OPTIONS", "OPTIONS")]
+    [InlineData("INSERT INTO archive (KEY k, VALUE v, OPTIONS o) SELECT META(d).id AS k, d AS v FROM items d", "COHDBL001", "OPTIONS", "OPTIONS")]
     public void Parse_InvalidInsert_ShouldLocateFailure(string query, string code, string token, string message)
     {
         // Arrange / Act
@@ -198,6 +203,68 @@ public sealed class OqlDmlParserTests
         int start = token == ")" ? query.LastIndexOf(')') : query.IndexOf(token, StringComparison.Ordinal);
         diagnostic.Start.ShouldBe(start);
         diagnostic.End.ShouldBe(start + token.Length);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Documents.Language] - UPSERT: KEY/VALUE forms retain complete spans")]
+    [InlineData("UPSERT INTO items (KEY, VALUE) VALUES ('e', $doc)", 1, null, null, null)]
+    [InlineData("UPSERT INTO items (KEY, VALUE) VALUES ('e', $d1), ('f', $d2)", 2, null, null, null)]
+    [InlineData("UPSERT INTO items AS u (KEY, VALUE) VALUES ('e', $doc)", 1, "u", null, null)]
+    [InlineData("UPSERT INTO archive (KEY k, VALUE v) SELECT META(d).id AS k, d AS v FROM items AS d WHERE d.category = 'a'", 0, null, "k", "v")]
+    [InlineData("UPSERT INTO archive (KEY k) SELECT META(d).id AS k FROM items AS d", 0, null, "k", null)]
+    public void Parse_UpsertForms_ShouldRetainStructureAndSpans(string query, int count, string? alias, string? key, string? value)
+    {
+        // Arrange / Act
+        var statement = (OqlQueryStatement)new OqlQueryParser().Parse(query);
+        // Assert
+        statement.Diagnostics.ShouldBeEmpty();
+        var insert = statement.OqlExpression.ShouldBeOfType<OqlUpsertExpression>();
+        insert.Collection.ShouldBe(key is null ? "items" : "archive");
+        insert.Alias.ShouldBe(alias);
+        insert.Values.Count.ShouldBe(count);
+        insert.KeyName.ShouldBe(key);
+        insert.ValueName.ShouldBe(value);
+        insert.Location!.Start.ShouldBe(0);
+        insert.Location.End.ShouldBe(query.Length);
+        insert.Text.ShouldBe(query);
+        if (count > 0)
+        {
+            insert.Values[0].Key.Location!.Start.ShouldBe(query.IndexOf("'e'", StringComparison.Ordinal));
+            insert.Values[0].Key.Location!.End.ShouldBe(query.IndexOf("'e'", StringComparison.Ordinal) + 3);
+            insert.Values[0].Value.ShouldBeOfType<OqlParameterExpression>();
+        }
+        else
+        {
+            insert.Select!.Location!.Start.ShouldBe(query.IndexOf("SELECT", StringComparison.Ordinal));
+            insert.Select.Projections[0].Expression.ShouldBeOfType<OqlMetaExpression>().Member.ShouldBe("id");
+        }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Documents.Language] - UPSERT: malformed and deferred forms have exact diagnostics")]
+    [InlineData("UPSERT INTO items (KEY, VALUE) VALUES ('e', $doc, 1)", "OQL0002", ", 1", ")")]
+    [InlineData("UPSERT INTO items VALUE $doc", "OQL0002", "VALUE", "KEY")]
+    [InlineData("UPSERT INTO items VALUES ($doc)", "OQL0002", "VALUES", "KEY")]
+    [InlineData("UPSERT INTO items (KEY, VALUE) VALUES ('e')", "OQL0002", ")", "VALUE")]
+    [InlineData("UPSERT INTO other.items (KEY, VALUE) VALUES ('e', $doc)", "OQL0002", ".", "KEY")]
+    [InlineData("UPSERT INTO items (KEY, VALUE) VALUES ('e', $doc) garbage", "OQL0002", "garbage", "Unexpected")]
+    [InlineData("UPSERT INTO items (KEY, VALUE, OPTIONS) VALUES ('e', $doc, $o)", "COHDBL001", "OPTIONS", "OPTIONS")]
+    [InlineData("UPSERT INTO items (KEY, VALUE) VALUES ('e', $doc) RETURNING k", "COHDBL001", "RETURNING", "RETURNING")]
+    [InlineData("UPSERT INTO archive (KEY k) SELECT META(d).id AS k FROM items d WHERE d.category = 'a' RETURNING k", "COHDBL001", "RETURNING", "RETURNING")]
+    [InlineData("UPSERT INTO archive (KEY k) SELECT META(d).id AS k FROM items d WHERE d.details = {'score':1} RETURNING k", "COHDBL001", "RETURNING", "RETURNING")]
+    [InlineData("UPSERT INTO archive (KEY k, OPTIONS o) SELECT META(d).id AS k FROM items d", "COHDBL001", "OPTIONS", "OPTIONS")]
+    [InlineData("UPSERT INTO archive (KEY k, OPTIONS {'expiration': 10}) SELECT META(d).id AS k FROM items d", "COHDBL001", "OPTIONS", "OPTIONS")]
+    [InlineData("UPSERT INTO archive (KEY k, VALUE v, OPTIONS o) SELECT META(d).id AS k, d AS v FROM items d", "COHDBL001", "OPTIONS", "OPTIONS")]
+    public void Parse_InvalidUpsert_ShouldLocateFailure(string query, string code, string token, string message)
+    {
+        // Arrange / Act
+        var statement = new OqlQueryParser().Parse(query);
+        // Assert
+        var diagnostic = statement.Diagnostics.ShouldHaveSingleItem();
+        diagnostic.Code.ShouldBe(code);
+        diagnostic.Message.ShouldNotBeNull().ShouldContain(message, Case.Sensitive);
+        int start = token == ")" ? query.LastIndexOf(')') : query.IndexOf(token, StringComparison.Ordinal);
+        diagnostic.Start.ShouldBe(start);
+        diagnostic.End.ShouldBe(start + (token == ", 1" ? 1 : token.Length));
+        diagnostic.Line.ShouldBe(1);
     }
 
     [Theory(DisplayName = "Cohesion Test [Documents.Language] - META: function vocabulary preserves paths and aliases")]

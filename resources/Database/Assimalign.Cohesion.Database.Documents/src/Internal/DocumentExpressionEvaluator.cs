@@ -15,7 +15,7 @@ namespace Assimalign.Cohesion.Database.Documents.Internal;
 internal sealed partial class DocumentExpressionEvaluator
 {
     private readonly string? _alias;
-    private readonly bool _forInsert;
+    private readonly string? _writeVerb;
     private int _constructorMaxDepth = 256;
     private readonly CancellationToken _cancellationToken;
     private readonly Dictionary<OqlLikeExpression, int[]> _likePatterns = new();
@@ -27,11 +27,11 @@ internal sealed partial class DocumentExpressionEvaluator
     /// <param name="alias">The collection alias that may prefix document paths, or <see langword="null"/> when the query declares none.</param>
     /// <param name="parameters">The OQL parameter values, or <see langword="null"/> when the statement supplies none.</param>
     /// <param name="cancellationToken">The statement cancellation token.</param>
-    /// <param name="forInsert">Whether constructors target the storage depth limit.</param>
-    public DocumentExpressionEvaluator(string? alias, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken = default, bool forInsert = false)
+    /// <param name="writeVerb">INSERT or UPSERT when constructors target the storage depth limit; otherwise null.</param>
+    public DocumentExpressionEvaluator(string? alias, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken = default, string? writeVerb = null)
     {
         _alias = alias;
-        _forInsert = forInsert;
+        _writeVerb = writeVerb;
         _cancellationToken = cancellationToken;
         _parameters = parameters;
     }
@@ -48,9 +48,9 @@ internal sealed partial class DocumentExpressionEvaluator
                 OqlParameterExpression parameter => Parameter(parameter.Name),
                 OqlStarExpression => Normalize(document.Content),
                 OqlMetaExpression meta => meta.Member == "id" ? document.Id : (decimal)document.Version,
-                OqlArrayExpression array => DocumentJsonValue.Array(array.Elements.Select(element => Evaluate(element, document, group)), _forInsert, _constructorMaxDepth),
+                OqlArrayExpression array => DocumentJsonValue.Array(array.Elements.Select(element => Evaluate(element, document, group)), _writeVerb, _constructorMaxDepth),
                 OqlObjectExpression obj => DocumentJsonValue.Object(obj.Members.Select(member =>
-                    new KeyValuePair<string, object?>(member.Key, Evaluate(member.Value, document, group))), _forInsert, _constructorMaxDepth),
+                    new KeyValuePair<string, object?>(member.Key, Evaluate(member.Value, document, group))), _writeVerb, _constructorMaxDepth),
                 OqlPathExpression path => ReadPath(path, document.Content),
                 OqlUnaryExpression unary => Unary(unary.Operator, Evaluate(unary.Operand, document, group)),
                 OqlBinaryExpression binary => Binary(binary, document, group),
@@ -115,6 +115,10 @@ internal sealed partial class DocumentExpressionEvaluator
             case OqlInsertExpression insert:
                 foreach (var pair in insert.Values) { ValidateInputs(pair.Key); ValidateInputs(pair.Value); }
                 ValidateInputs(insert.Select);
+                break;
+            case OqlUpsertExpression upsert:
+                foreach (var pair in upsert.Values) { ValidateInputs(pair.Key); ValidateInputs(pair.Value); }
+                ValidateInputs(upsert.Select);
                 break;
             case OqlMetaExpression meta:
                 foreach (var argument in meta.Arguments) { ValidateInputs(argument); }

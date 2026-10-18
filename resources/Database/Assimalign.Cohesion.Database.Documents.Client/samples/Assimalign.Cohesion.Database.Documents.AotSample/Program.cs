@@ -153,6 +153,22 @@ internal static class Program
             Check(await connection.ExecuteAsync("DELETE FROM archive", cancellationToken: token) == 1, "DELETE all affected count");
             Check((await connection.QueryAsync("SELECT * FROM COHESION_SCHEMA.INDEXES WHERE COLLECTION_NAME = 'archive'", cancellationToken: token)).Count == 1, "DELETE retains index");
             Check(await connection.ExecuteAsync("DROP COLLECTION archive", cancellationToken: token) == 0, "reuse after duplicate");
+            var upsert = await connection.QueryAsync("UPSERT INTO items (KEY, VALUE) VALUES ('e', {'name':'é東京<😀'}), ('new', NULL)", cancellationToken: token);
+            Check(upsert.AffectedCount == 2 && upsert.Count == 0 && upsert.Documents.Count == 0 && upsert.Columns.Count == 0, "UPSERT completion");
+            var replaced = await connection.GetAsync("items", "e", token);
+            Check(System.Text.Encoding.UTF8.GetString(replaced.GetValueOrDefault().Content.Span) == "{\"name\":\"é東京<😀\"}", "UPSERT whole UTF-8 replacement");
+            var upsertPlan = await connection.QueryAsync("EXPLAIN UPSERT INTO items (KEY k) SELECT META().id AS k FROM items", cancellationToken: token);
+            Check(upsertPlan.Documents.Any(document => document.GetProperty("operator").GetString() == "UpsertSelect"), "UPSERT SELECT EXPLAIN");
+            try
+            {
+                await connection.ExecuteAsync("UPSERT INTO items (KEY, VALUE) VALUES (MISSING, 1)", cancellationToken: token);
+                throw new InvalidOperationException("Invalid UPSERT succeeded.");
+            }
+            catch (DocumentClientException exception)
+            {
+                Check(exception.Code == ProtocolErrorCode.ExecutionFailure && exception.Diagnostics.Any(d => d.Code == "COHDOC008"), "UPSERT invalid key");
+            }
+            Check(await connection.ExecuteAsync("UPSERT INTO items (KEY k, VALUE v) SELECT META().id AS k, 1 AS v FROM items", cancellationToken: token) == 3, "UPSERT SELECT session reuse");
             Check(await connection.ExecuteAsync("DROP COLLECTION items", cancellationToken: token) == 0, "OQL drop collection");
             Check(await connection.ExecuteAsync("DROP COLLECTION IF EXISTS items", cancellationToken: token) == 0, "absent collection");
             Check((await connection.GetCollectionsAsync(token)).Count == 0, "drop collection");

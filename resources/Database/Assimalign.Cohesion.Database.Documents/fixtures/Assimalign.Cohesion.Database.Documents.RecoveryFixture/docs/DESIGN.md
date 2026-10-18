@@ -11,7 +11,9 @@ IsNull and GetValue remain distinct. Assertions fail the executable with a
 nonzero exit. The fixture uses no reflection and can be published with NativeAOT.
 
 The process boundary forces recovery from persisted files, independently of
-in-process cleanup.
+in-process cleanup. A separate identity receives a committed whole-document UPSERT and an
+abandoned UPSERT. Recovery retains only the committed value and drops its absent property;
+the owning test reads the raw B-tree to assert zero old/abandoned keys and exactly one committed key.
 
 ```mermaid
 flowchart TD

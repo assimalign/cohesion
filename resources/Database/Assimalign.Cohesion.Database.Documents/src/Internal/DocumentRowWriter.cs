@@ -12,7 +12,7 @@ internal sealed class DocumentRowWriter : IDisposable
     private readonly DocumentJsonBuffer _buffer = new();
     private readonly Utf8JsonWriter _writer;
 
-    internal DocumentRowWriter() => _writer = new(_buffer, new JsonWriterOptions { MaxDepth = 256 });
+    internal DocumentRowWriter() => _writer = new(_buffer, new JsonWriterOptions { Encoder = DocumentJsonEncoder.Instance, MaxDepth = 256 });
 
     private ReadOnlyMemory<byte> Value(object? value)
     {

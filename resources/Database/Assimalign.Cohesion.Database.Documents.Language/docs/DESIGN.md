@@ -46,12 +46,14 @@ Lexical recognition preserves the established vocabulary so rejected constructs 
 | `SELECT VALUE` | Yes | One bare expression; RAW is a synonym |
 | `OBJECT CONSTRUCTOR` | Yes | Named members in braces; last non-MISSING member wins |
 | `ARRAY CONSTRUCTOR` | Yes | Expressions in brackets; MISSING elements become NULL |
-| `EXPLAIN` | Yes | SELECT, INSERT, UPDATE or DELETE plan description without reading document data or writing |
+| `EXPLAIN` | Yes | SELECT, INSERT, UPSERT, UPDATE or DELETE plan description without reading document data or writing |
 | `INSERT` | Yes | Explicit KEY/VALUE pairs, or KEY and optional VALUE bindings to SELECT output names |
+| `UPSERT` | Yes | The same KEY/VALUE grammar; inserts absent keys and wholly replaces existing documents |
 | `UPDATE` | Yes | One collection, optional alias, SET assignments and/or UNSET paths, optional WHERE |
 | `UNSET` | Yes | Removes properties in UPDATE; a final array index is invalid |
 | `DELETE` | Yes | `DELETE FROM collection [AS? alias] [WHERE expression]`; keeps the collection and indexes |
-| `VALUES` | Yes | One or more parenthesized key/value pairs for INSERT |
+| `OPTIONS` | No | INSERT/UPSERT header element; one COHDBL001 at OPTIONS, including directly after KEY; no TTL or version precondition in T1 |
+| `VALUES` | Yes | One or more parenthesized key/value pairs for INSERT or UPSERT |
 | `FROM` | Yes | Exactly one unqualified collection or reserved `COHESION_SCHEMA` source and optional iteration variable, with or without `AS` |
 | `WHERE` | Yes | Scalar comparison and Boolean document filtering |
 | `IN` | Yes | Structural membership in a nonempty parenthesized value list, optionally NOT |
@@ -65,9 +67,8 @@ Lexical recognition preserves the established vocabulary so rejected constructs 
 | `DROP COLLECTION` | Yes | One database-local collection, optionally `IF EXISTS` |
 | `CREATE INDEX` | Yes | One named, nonunique index over one document path in one collection |
 | `DROP INDEX` | Yes | One named index in one collection; the `ON` qualifier is required |
-| `SUBQUERY` | No | A nested `SELECT` reports this capability name at the inner keyword, including UPDATE SET/WHERE, DELETE and INSERT VALUES, with or without EXPLAIN |
+| `SUBQUERY` | No | A nested `SELECT` reports this capability name at the inner keyword, including UPDATE SET/WHERE, DELETE and INSERT/UPSERT VALUES, with or without EXPLAIN |
 | `LIMIT`, `OFFSET` | No (pin) | SQL++ row limits; oql-limit-offset flips the pin |
-| `UPSERT` | No (pin) | SQL++ document write; oql-upsert flips the pin |
 | `MERGE` | No (pin) | SQL++ merge; stays a pin with no T1 item lifting it, and #1101 owns it |
 | `UNNEST` | No (pin) | SQL++ array expansion in `FROM`; oql-arrays flips the pin |
 | `EVERY ... SATISFIES` | No (pin) | SQL++ quantified predicate, also opened by `ANY` and `SOME`; oql-arrays flips the pin |
@@ -119,8 +120,9 @@ a name:
   words are not lexer keywords, so `SELECT limit, merge FROM c` and `SELECT a AS limit FROM c`
   still parse. Because the collection name ends an operand, a Clause word cannot be an AS-less
   `FROM` alias: `FROM c unnest` reports `UNNEST`, while `FROM c AS unnest` keeps it a name.
-- **Statement** (`DEFINE` and the SQL++ statement verbs `UPSERT` and `MERGE`): only the first word of the
-  statement. Elsewhere they are names, so an AS-less alias such as `FROM c merge` still parses,
+- **Statement** (`DEFINE`, `MERGE` and the enabled `UPSERT` coverage entry): only the first word of the
+  statement. UPSERT bypasses refusal through OqlClauses.Upsert; its table entry retains contextual
+  keyword coverage. Elsewhere they are names, so an AS-less alias such as `FROM c merge` still parses,
   as it did before #1101.
 - **Trailing** (`RETURNING`): rejected after the parser consumes a complete statement, or at
   the statement prefix. Destinations, KEY/VALUE output binding names, properties, object keys,
@@ -137,8 +139,8 @@ a name:
   again. `EVERY` and `SATISFIES` name the construct only there, so an alias such as
   `FROM c every` still parses.
 
-A statement whose first word is unsupported, such as `UPSERT INTO c ...` or
-`MERGE INTO c ...`, is one construct: the scan reports that word and nothing after it. Each
+A statement whose first word is unsupported, such as `MERGE INTO c ...`, is one construct:
+the scan reports that word and nothing after it. Each
 operand of a set operation starts its own `SELECT`, which is not reported as a subquery, and a
 set operation with `ALL` or `DISTINCT` (`UNION ALL`) is one construct spanning both words.
 `OqlKeywordDispositionTests` enumerates the profile's keywords plus the table. Every word needs
@@ -229,14 +231,16 @@ Composite/UNIQUE index keys belong to oql-index-ddl.
 ## Grammar, statement, and expression trees
 
 ```text
-statement    := (query | insert | update | delete | EXPLAIN (query | insert | update | delete) | create-collection | drop-collection | create-index | drop-index) [';']
+statement    := (query | insert | upsert | update | delete | EXPLAIN (query | insert | upsert | update | delete) | create-collection | drop-collection | create-index | drop-index) [';']
 query        := SELECT [ALL | DISTINCT] select-kind FROM collection [AS? identifier]
                 [WHERE expression] [GROUP BY expression (',' expression)*]
                 [HAVING expression] [ORDER BY ordering (',' ordering)*]
 select-kind  := projection (',' projection)* | (VALUE | RAW) expression
-insert       := INSERT INTO collection [AS identifier] '(' KEY ',' VALUE ')'
-                VALUES '(' expression ',' expression ')' (',' '(' expression ',' expression ')')*
-              | INSERT INTO collection [AS identifier] '(' KEY identifier [',' VALUE identifier] ')' query
+insert       := INSERT INTO collection [AS identifier] write-input
+upsert       := UPSERT INTO collection [AS identifier] write-input
+write-input  := '(' KEY ',' VALUE [refused-options] ')' VALUES '(' expression ',' expression ')' (',' '(' expression ',' expression ')')*
+              | '(' KEY identifier [',' VALUE identifier] [refused-options] ')' query
+refused-options := ',' OPTIONS [expression]  -- recognized header element; rejected with one COHDBL001 at OPTIONS
 delete       := DELETE FROM collection [AS? identifier] [WHERE expression]
 update       := UPDATE collection [AS? identifier] (set [unset] | unset) [WHERE expression]
 set          := SET assignment (',' assignment)*
@@ -269,7 +273,7 @@ there is no iteration alias in an index statement. Index and collection names fo
 identifier quoting and case-preservation rules as query collection names.
 
 `OqlQueryStatement` wraps one top-level `OqlExpression`: `OqlSelectExpression`,
-`OqlExplainExpression` (one SELECT, INSERT, UPDATE or DELETE), `OqlInsertExpression`, `OqlUpdateExpression`, `OqlDeleteExpression`,
+`OqlExplainExpression` (one SELECT, INSERT, UPSERT, UPDATE or DELETE), `OqlInsertExpression`, `OqlUpsertExpression`, `OqlUpdateExpression`, `OqlDeleteExpression`,
 `OqlCreateCollectionExpression`, `OqlDropCollectionExpression`, `OqlCreateIndexExpression`, or
 `OqlDropIndexExpression`. Collection nodes retain `Name` and `IfNotExists`/`IfExists`.
 Index creation retains its target as an `OqlPathExpression`, rather than flattening the path during
@@ -355,7 +359,7 @@ disposable resources beyond those used by the shared analyzer pipeline.
 
 ## EXPLAIN (#1104)
 
-SQL++'s EXPLAIN for SELECT, INSERT, UPDATE and DELETE produces the shared plan-description columns documented by
+SQL++'s EXPLAIN for SELECT, INSERT, UPSERT, UPDATE and DELETE produces the shared plan-description columns documented by
 [Execution](../../Assimalign.Cohesion.Database.Execution/docs/DESIGN.md#plan-descriptions-1104).
 `OqlExplainExpression.Statement` retains the query for ordinary parameter validation and
 planning. The parser rejects DDL, transaction control, nested EXPLAIN and EXPLAIN ANALYZE with
@@ -483,13 +487,30 @@ System collections are read-only; Schema-owned stored collections permit content
 Commands report the deleted-document count, including zero, through the existing completion
 affected count and emit no Document frames. EXPLAIN DELETE describes the access without writing.
 
+### UPSERT (#1134)
+
+[SQL++ UPSERT](https://docs.couchbase.com/server/current/n1ql/n1ql-language-reference/upsert.html)
+uses INSERT's KEY/VALUE forms, with an optional explicit AS alias. The public sealed
+OqlUpsertExpression retains Collection, Alias, Values, Select, KeyName, ValueName and spans.
+It inserts an absent identity or wholly replaces the existing JSON value with Put semantics;
+properties absent from the replacement disappear. Every pair counts once and receives a fresh
+version, including an unchanged value. SELECT sources materialize before writes, including self-sources.
+Repeated keys in one statement raise DocumentDuplicateKeyException and roll back the statement;
+last-writer-wins does not apply. Key/value validation, MISSING omission and complete-row binding
+are shared with INSERT. OPTIONS and RETURNING remain COHDBL001 at their tokens, and a nested
+SELECT in VALUES reports SUBQUERY. There is no statement-level version precondition in T1;
+use PutAsync(expectedVersion) or UPDATE WHERE META().version = $v for optimistic replacement.
+EXPLAIN UPSERT describes Upsert or UpsertSelect without writing. The existing completion carries
+the affected count with no result rows; no wire or persisted catalog shape changes.
+
 ### INSERT and metadata (#1131)
 
 Document keys are external: collections declare no key field and never generate ids. The
 SQL++ KEY/VALUE forms above are the T1 mutation grammar. Id-less VALUE/VALUES forms report
 OQL0002 asking for KEY. KEY, VALUES and INTO remain non-reserved; the header reads KEY and
 VALUE by position, independently of SELECT VALUE's eventual reservation. OPTIONS in the
-header reports COHDBL001 because Documents has no TTL. A trailing RETURNING clause is recognized
+header reports one COHDBL001 at OPTIONS, including when it follows KEY directly in the SELECT
+form, because Documents has no TTL or statement-level version precondition. A trailing RETURNING clause is recognized
 but deferred; identifier positions keep `returning` as a name. General database-qualified destinations remain invalid.
 
 VALUES expressions accept constants, parameters, operators and object constructors; document

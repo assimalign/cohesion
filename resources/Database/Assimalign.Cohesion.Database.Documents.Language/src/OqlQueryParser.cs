@@ -105,7 +105,11 @@ public sealed partial class OqlQueryParser : QueryParser
             }
             else if (Is("INSERT"))
             {
-                expression = new OqlExplainExpression(ParseInsert(), Span(start, Previous));
+                expression = new OqlExplainExpression(ParseWrite(), Span(start, Previous));
+            }
+            else if (Is("UPSERT"))
+            {
+                expression = new OqlExplainExpression(ParseWrite(upsert: true), Span(start, Previous));
             }
             else if (Is("DELETE"))
             {
@@ -127,7 +131,11 @@ public sealed partial class OqlQueryParser : QueryParser
         }
         else if (Is("INSERT"))
         {
-            expression = ParseInsert();
+            expression = ParseWrite();
+        }
+        else if (Is("UPSERT"))
+        {
+            expression = ParseWrite(upsert: true);
         }
         else if (Is("DELETE"))
         {
@@ -155,7 +163,7 @@ public sealed partial class OqlQueryParser : QueryParser
         }
         else
         {
-            Error("OQL0002", "Expected SELECT, INSERT, UPDATE, DELETE, CREATE INDEX, DROP INDEX, CREATE COLLECTION, or DROP COLLECTION.", Current);
+            Error("OQL0002", "Expected SELECT, INSERT, UPSERT, UPDATE, DELETE, CREATE INDEX, DROP INDEX, CREATE COLLECTION, or DROP COLLECTION.", Current);
             expression = EmptyExpression();
         }
 
@@ -252,7 +260,7 @@ public sealed partial class OqlQueryParser : QueryParser
             // SET(...) elsewhere still refuses.
             if (index > statementStart && (index < updateHeaderEnd || index == updateClause)) { continue; }
 
-            // DISTINCT/ALL are legal only directly after SELECT, including INSERT SELECT.
+            // DISTINCT/ALL are legal only directly after SELECT, including INSERT/UPSERT SELECT.
             if (openQuantifiers == 0 && value is "DISTINCT" or "ALL")
             {
                 if (index == selectHead + 1) { continue; }
@@ -324,7 +332,7 @@ public sealed partial class OqlQueryParser : QueryParser
             }
             if (value == "SELECT")
             {
-                // Only SELECT statements and INSERT SELECT have a query of their own.
+                // Only SELECT statements and INSERT/UPSERT SELECT have a query of their own.
                 // A SELECT inside an expression is nested even when it is the first one.
                 if (statementWithoutQuery || selected || parentheses > 0)
                 {

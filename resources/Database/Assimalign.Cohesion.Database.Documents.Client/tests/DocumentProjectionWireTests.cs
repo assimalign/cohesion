@@ -105,15 +105,21 @@ public sealed class DocumentProjectionWireTests
     public async Task GetBytes_ResultShapes_ShouldAgreeAcrossTransportsAsync()
     {
         // Arrange
-        const string content = " \r\n{ \"name\" : \"alpha\", \"n\" : null } \t";
+        const string text = "é東京<&😀\u2028\u2029";
+        const string content = " \r\n{ \"name\" : \"" + text + "\", \"n\" : null } \t";
         (string Query, string Bytes)[] cases =
         [
-            ("SELECT name FROM items", "alpha"),
+            ("SELECT name FROM items", text),
             ("SELECT n FROM items", ""),
             ("SELECT MISSING AS n FROM items", ""),
             ("SELECT VALUE MISSING FROM items", "null"),
             ("SELECT * FROM items", content),
-            ("SELECT VALUE name FROM items", "\"alpha\""),
+            ("SELECT VALUE name FROM items", "\"" + text + "\""),
+            ("SELECT RAW name FROM items", "\"" + text + "\""),
+            ("SELECT VALUE {'n':name} FROM items", "{\"n\":\"" + text + "\"}"),
+            ("SELECT RAW [name] FROM items", "[\"" + text + "\"]"),
+            ("SELECT {'n':name} AS o FROM items", "{\"n\":\"" + text + "\"}"),
+            ("SELECT [name] AS a FROM items", "[\"" + text + "\"]"),
             ("SELECT VALUE NULL FROM items", "null"),
             ("SELECT RAW 42 FROM items", "42"),
             ("SELECT VALUE TRUE FROM items", "true"),

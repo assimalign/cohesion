@@ -30,6 +30,18 @@ including simple CASE on MISSING, gives ELSE or NULL when ELSE is absent. The en
 record these rules. CASE, WHEN, THEN, ELSE, END and ESCAPE are reserved; `"end"` and `d.end`
 remain valid field references.
 
+UPSERT INTO collection [AS alias] (KEY, VALUE) VALUES (key, value) [, ...] and
+UPSERT INTO collection (KEY outputName [, VALUE outputName]) SELECT ... execute with
+INSERT's validation and MISSING rules. Existing identities receive complete replacements;
+absent properties disappear and each written identity receives a fresh version. Without VALUE,
+the complete projected row becomes the document. Every source row is staged before writes.
+A repeated key fails the whole statement with DocumentDuplicateKeyException (COHDOC012).
+OPTIONS and RETURNING remain COHDBL001 at their tokens. INSERT and UPSERT both reject
+(KEY k, OPTIONS o) SELECT ... with one diagnostic naming OPTIONS, including its expression form. No statement-level version precondition is available;
+PutAsync(expectedVersion) and UPDATE WHERE META().version = $v provide optimistic replacement.
+EXPLAIN UPSERT returns Upsert or UpsertSelect; completion reports affected count without rows.
+DocumentUpsertTests, the advertised-clause corpus, wire tests and the recovery fixture cover it.
+
 DELETE FROM collection [AS alias | alias] [WHERE expression] executes through the existing
 scan and equality/range index seeks. The complete predicate selects matching ids from the
 statement snapshot before any deletion; META().id remains a residual filter in T1. Omitting

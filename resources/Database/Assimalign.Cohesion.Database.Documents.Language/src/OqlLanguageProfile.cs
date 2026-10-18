@@ -52,6 +52,7 @@ public static class OqlLanguageProfile
         OqlClauses.CreateIndex,
         OqlClauses.DropIndex,
         OqlClauses.Insert,
+        OqlClauses.Upsert,
         OqlClauses.Update,
         OqlClauses.Unset,
         OqlClauses.Delete,

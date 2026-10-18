@@ -56,7 +56,7 @@ public sealed class DocumentProcessTests
             ExistingIndexes = [new BTreeIndexRegistration(metadata.ObjectId, new IndexDefinition(metadata.Name), rootPage)]
         });
         manager.TryGetIndex(metadata.ObjectId, metadata.Name, out var tree).ShouldBeTrue();
-        foreach (var (rank, count) in new[] { (1m, 0), (11m, 1), (99m, 0), (2m, 0), (3m, 1) })
+        foreach (var (rank, count) in new[] { (1m, 0), (11m, 1), (99m, 0), (2m, 0), (3m, 1), (4m, 0), (14m, 1), (98m, 0) })
         {
             var key = IndexKey.From(new DatabaseKeyWriter().AppendDecimal(rank));
             await using var cursor = tree.OpenCursor(latest, new IndexKeyRange(key, key, true, true));

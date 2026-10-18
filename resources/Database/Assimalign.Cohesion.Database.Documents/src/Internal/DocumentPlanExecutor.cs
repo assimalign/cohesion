@@ -27,8 +27,11 @@ internal static partial class DocumentPlanExecutor
         {
             DocumentDeletePlan delete => await ExecuteDeleteAsync(database, operation, delete, parameters, cancellationToken).ConfigureAwait(false),
             DocumentUpdatePlan update => await ExecuteUpdateAsync(database, operation, update, parameters, cancellationToken).ConfigureAwait(false),
-            DocumentInsertPlan insert => await ExecuteInsertAsync(database, operation, insert.Collection, insert.Statement, null, parameters, cancellationToken).ConfigureAwait(false),
-            DocumentInsertSelectPlan insert => await ExecuteInsertAsync(database, operation, insert.Collection, insert.Statement, insert, parameters, cancellationToken).ConfigureAwait(false),
+            DocumentInsertPlan insert => await ExecuteWriteAsync(database, operation, insert.Collection, insert.Statement, insert.Statement.Values, null, true, parameters, cancellationToken).ConfigureAwait(false),
+            DocumentInsertSelectPlan insert => await ExecuteWriteAsync(database, operation, insert.Collection, insert.Statement, insert.Statement.Values, (insert.Source, insert.KeyOrdinal, insert.ValueOrdinal), true, parameters, cancellationToken).ConfigureAwait(false),
+            DocumentUpsertPlan upsert => await ExecuteWriteAsync(database, operation, upsert.Collection, upsert.Statement,
+                upsert.Statement.Values, upsert.Source is { } source ? (source, upsert.KeyOrdinal, upsert.ValueOrdinal) : null,
+                false, parameters, cancellationToken).ConfigureAwait(false),
             DocumentSystemCollectionPlan system => ExecuteSystemCollection(database, operation, system, parameters, cancellationToken),
             DocumentPlan select => await ExecuteSelectAsync(database, operation, select, parameters, cancellationToken).ConfigureAwait(false),
             DocumentCreateCollectionPlan createCollection => await ExecuteCreateCollectionAsync(database, operation, createCollection, cancellationToken).ConfigureAwait(false),
@@ -40,10 +43,10 @@ internal static partial class DocumentPlanExecutor
     }
 
     private static async ValueTask<DatabaseResult> ExecuteSelectAsync(DocumentDatabase database, DocumentOperation operation,
-        DocumentPlan plan, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken, bool forInsert = false)
+        DocumentPlan plan, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken, string? writeVerb = null)
     {
         var query = plan.Logical.Query;
-        var evaluator = new DocumentExpressionEvaluator(query.Alias, parameters, cancellationToken, forInsert);
+        var evaluator = new DocumentExpressionEvaluator(query.Alias, parameters, cancellationToken, writeVerb);
         var candidates = await ReadCandidatesAsync(database, operation, plan.Collection, plan.Access, cancellationToken).ConfigureAwait(false);
 
         var matches = new List<DocumentEvaluationContext>();
@@ -72,9 +75,9 @@ internal static partial class DocumentPlanExecutor
             : ValueTask.FromResult(database.Catalog.GetDocuments(collection.Id, null, operation.Context.Snapshot));
 
     private static DatabaseResult ExecuteSystemCollection(DocumentDatabase database, DocumentOperation operation,
-        DocumentSystemCollectionPlan plan, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken, bool forInsert = false)
+        DocumentSystemCollectionPlan plan, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken, string? writeVerb = null)
     {
-        var evaluator = new DocumentExpressionEvaluator(plan.Logical.Query.Alias, parameters, cancellationToken, forInsert);
+        var evaluator = new DocumentExpressionEvaluator(plan.Logical.Query.Alias, parameters, cancellationToken, writeVerb);
         var matches = new List<DocumentEvaluationContext>();
         foreach (var document in DocumentSystemCollections.Enumerate(database, operation.Context.Snapshot, plan.Name, cancellationToken))
         {

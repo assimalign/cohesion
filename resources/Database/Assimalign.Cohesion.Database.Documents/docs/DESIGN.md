@@ -34,7 +34,7 @@ belong to the shared kernel. No kernel contract was widened. The engine, its dat
 first four leaves of the area root's bases ([Concrete types](#concrete-types-concrete-types-plan-phase-4-1260)),
 while the planner, executor, workers and storage strategy are internal.
 
-SELECT and index-DDL statements flow through these stages; INSERT, UPDATE and DELETE use the same pipeline. Catalog metadata informs query access-path
+SELECT and index-DDL statements flow through these stages; INSERT, UPSERT, UPDATE and DELETE use the same pipeline. Catalog metadata informs query access-path
 selection and index-DDL planning; `SELECT`, `CREATE INDEX`, and `DROP INDEX` all reach the same
 plan executor rather than an index-management side channel.
 
@@ -252,7 +252,7 @@ Message contains no code prefix. The Documents family is `COHDOCnnn`:
 | `COHDOC003` | Duplicate projection name; use unique aliases |
 | `COHDOC010` | Collection already exists (PostgreSQL SQLSTATE 42P07) |
 | `COHDOC011` | Collection is owned by the declared schema and cannot be dropped through a session |
-| `COHDOC012` | INSERT found a duplicate document key visible in its transaction |
+| `COHDOC012` | INSERT found an existing key, or INSERT/UPSERT repeated a key in one statement |
 | `COHDOC013` | Invalid evaluated LIKE escape or a pattern ending in its escape character |
 | `COHDOC014` | DISTINCT ORDER BY expression is absent from the projection |
 | `COHDOC015` | A SELECT array or object constructor exceeds the 256-level result limit |
@@ -315,7 +315,7 @@ uncommitted catalog writes are visible. Subsequent statements observe committed
 catalog changes according to their isolation level. No metadata copy, content record,
 or synthetic collection is stored, and existing collection listing stays unchanged.
 
-The sources are read-only. `INSERT`, `UPDATE`, `DELETE`, `CREATE COLLECTION`, `DROP COLLECTION`, `CREATE INDEX`, and `DROP INDEX` targeting either source,
+The sources are read-only. `INSERT`, `UPSERT`, `UPDATE`, `DELETE`, `CREATE COLLECTION`, `DROP COLLECTION`, `CREATE INDEX`, and `DROP INDEX` targeting either source,
 and `CreateCollectionAsync` or `DropCollectionAsync` using either reserved name,
 throw `DatabaseException` with `System collection '<canonical source>' is read-only.`
 before ordinary catalog lookup or mutation. Virtual sources do not provide mutable `DocumentCollection` handles.
@@ -325,7 +325,7 @@ before ordinary catalog lookup or mutation. Virtual sources do not provide mutab
 The supported clause matrix lives in the language package's
 [DESIGN.md](../../Assimalign.Cohesion.Database.Documents.Language/docs/DESIGN.md).
 SELECT (ALL/DISTINCT and VALUE/RAW), object/array constructors, FROM, WHERE, GROUP BY, HAVING, ORDER BY, CREATE COLLECTION, DROP COLLECTION,
-CREATE INDEX, DROP INDEX, INSERT, UPDATE, UNSET, DELETE, VALUES, IN, BETWEEN, LIKE and CASE are executed. OQL retains its name with a SQL++ basis.
+CREATE INDEX, DROP INDEX, INSERT, UPSERT, UPDATE, UNSET, DELETE, VALUES, IN, BETWEEN, LIKE and CASE are executed. OQL retains its name with a SQL++ basis.
 Retired ODMG constructs are rejected positionally; nested queries, deferred document mutations
 and server statements are rejected with `COHDBL001`. The parser advertises only clauses this executor
 supports.
@@ -369,7 +369,9 @@ raises COHDOC015, naming the constructor at its expression span. INSERT retains 
 GetBytes returns unquoted UTF-8 for named string columns and empty bytes for named NULL/MISSING
 columns; named JSON objects/arrays return JSON bytes. A bare VALUE/RAW row returns JSON bytes
 (including quotes for strings and null for NULL), and a lone SELECT * returns exact stored bytes.
-The in-process row and Documents.Client share this contract.
+The in-process row and Documents.Client share this contract and the same RFC 8259 encoder:
+non-ASCII text, HTML-sensitive characters and U+2028/U+2029 retain their UTF-8 spelling;
+quotes, backslashes and U+0000 through U+001F are escaped.
 
 Projection supports whole documents, nested field paths, zero-based array element
 paths, literals, parameters, arithmetic, and aggregates. `SELECT *` returns one
@@ -617,7 +619,7 @@ no format version or upgrade reader is added.
 
 ## EXPLAIN operator vocabulary and wire shape (#1104)
 
-EXPLAIN for SELECT, INSERT, UPDATE and DELETE performs ordinary parameter validation and snapshot-visible planning, then
+EXPLAIN for SELECT, INSERT, UPSERT, UPDATE and DELETE performs ordinary parameter validation and snapshot-visible planning, then
 materialize a `DatabasePlanDescription` before reading document content or invoking the plan
 executor. Its columns and nullable count fields follow
 [Execution](../../Assimalign.Cohesion.Database.Execution/docs/DESIGN.md#plan-descriptions-1104).
@@ -632,6 +634,7 @@ It changes no documents or catalog entries, including when its explicit transact
 | `Delete` | Snapshot-filtered deletion; detail states filter presence and IndexSeek or CollectionScan, with that access as its child |
 | `Update` | Snapshot-filtered partial update; detail states filter presence and its IndexSeek or CollectionScan child |
 | `Insert`, `InsertSelect` | Document creation from VALUES or a fully materialized query; SELECT children describe the source access |
+| `Upsert`, `UpsertSelect` | Whole-document insert-or-replace from the same staged inputs; SELECT children describe the source access |
 | `SystemCollection` | A virtual `COHESION_SCHEMA` collection without stored-document access |
 | `CreateCollection`, `DropCollection`, `CreateIndex`, `DropIndex` | Internal DDL mappings; EXPLAIN DDL is refused by the parser |
 
@@ -685,6 +688,35 @@ index chosen by another conjunct. T1 has no key-lookup access path.
 
 ## Data mutation and serialization semantics
 
+OQL UPSERT uses the [SQL++ KEY/VALUE grammar](https://docs.couchbase.com/server/current/n1ql/n1ql-language-reference/upsert.html)
+and INSERT's staging and validation. It has Put semantics: an absent key is inserted and an
+existing key receives the complete replacement value, with omitted properties gone. A fresh
+durable version is allocated even for identical content; other documents retain their versions.
+Both VALUES and SELECT forms validate all rows before writing, and a self-source reads the
+statement snapshot. A repeated ordinal key fails the whole statement with DocumentDuplicateKeyException
+(COHDOC012), without applying last-writer-wins. The failure rolls back autocommit or aborts the
+whole explicit transaction under #1225; the caller rolls back that transaction before reuse.
+No statement-level version precondition is supported in T1: OPTIONS remains COHDBL001 and
+expiration is not implemented. Optimistic replacement uses PutAsync(expectedVersion) or
+UPDATE WHERE META(d).version = $v. RETURNING remains deferred.
+
+UPSERT calls the same WriteAsync primitive as INSERT, UPDATE and PutAsync, with insert-only
+checking disabled. It writes the new content first, tombstones the old content, then saves
+the catalog entry with old/new index-key maintenance, all in one logical transaction. Current-state checks reject
+an intervening committed writer with DatabaseTransactionAbortedException. Schema ownership
+permits content writes; virtual system collections are read-only and missing destinations
+are never created. EXPLAIN describes Upsert/UpsertSelect without mutation. Completion reports
+the written-document count and emits no Document frames. The process-exit fixture and its raw
+B-tree assertions prove committed old-key removal and abandoned new-key removal after recovery.
+The catalog layout is unchanged, so no format bump or upgrade path is introduced.
+
+The shared INSERT/UPSERT JSON writer now uses the existing RFC 8259 encoder used by UPDATE.
+Non-ASCII text (including é, CJK, < and supplementary Unicode scalars) remains UTF-8;
+quotes, backslashes and controls are escaped. VALUES parameters and constructors share the
+same serialization and storage validation. Other whitespace and original escape spelling may
+be normalized, as in INSERT. No public boundary or wire layout is widened.
+
+
 OQL DELETE FROM collection [AS? alias] [WHERE predicate] collects matching document ids from
 the statement snapshot before its first write, in ordinal identity order. Candidate retrieval
 uses the chosen scan or seek; the complete predicate is always reapplied, including metadata
@@ -736,7 +768,16 @@ and leaves it Faulted until rollback, as described above. Schema ownership restr
 INSERT accepts Schema-owned collections. Missing collections are never created implicitly.
 
 An existing or repeated key raises DocumentDuplicateKeyException with CollectionName,
-DocumentId and diagnostic COHDOC012. Its message deliberately names the key because document
+DocumentId and diagnostic COHDOC012. An existing INSERT key reports "Collection 'items' already
+contains document key 'n'."; an INSERT/UPSERT key repeated within one statement reports
+"Document key 'n' appears more than once in one statement." This follows PostgreSQL's separate
+same-command cardinality refusal (src/backend/executor/nodeModifyTable.c:2828-2830 in the reference clone).
+Shared KEY, VALUE, VALUES-context, output-binding and JSON-depth failures name the statement's
+INSERT or UPSERT verb while retaining their existing codes. Input validation also runs for
+EXPLAIN UPSERT and SELECT sources with zero rows, so unused execution paths cannot hide an
+unbound parameter or a lossy JSON number.
+
+Duplicate-key messages deliberately name the key because document
 identity is an explicit caller-supplied address, matching the CRUD expected-version diagnostic;
 this differs from SQL constraint diagnostics that omit key values. A same-key insert committed
 after the snapshot instead raises DatabaseTransactionAbortedException: current-state conflict

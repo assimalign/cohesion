@@ -17,6 +17,8 @@ internal sealed record DocumentUpdateTarget(OqlPathExpression Path, IReadOnlyLis
 internal sealed record DocumentInsertPlan(DocumentCollectionMetadata Collection, OqlInsertExpression Statement) : DocumentStatementPlan;
 internal sealed record DocumentInsertSelectPlan(DocumentCollectionMetadata Collection, OqlInsertExpression Statement,
     DocumentStatementPlan Source, int KeyOrdinal, int? ValueOrdinal) : DocumentStatementPlan;
+internal sealed record DocumentUpsertPlan(DocumentCollectionMetadata Collection, OqlUpsertExpression Statement,
+    DocumentStatementPlan? Source = null, int KeyOrdinal = 0, int? ValueOrdinal = null) : DocumentStatementPlan;
 internal sealed record DocumentCreateCollectionPlan(OqlCreateCollectionExpression Statement) : DocumentStatementPlan;
 internal sealed record DocumentDropCollectionPlan(OqlDropCollectionExpression Statement) : DocumentStatementPlan;
 internal sealed record DocumentCreateIndexPlan(DocumentCollectionMetadata Collection, string IndexName, string Path) : DocumentStatementPlan;

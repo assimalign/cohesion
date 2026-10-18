@@ -35,6 +35,10 @@ public sealed class OqlExecutionConformanceTests
                     VerificationStatement: "SELECT absent IS MISSING AS absent_value, null_value IS NULL AS null_value FROM items WHERE META().id = 'object'",
                     ExpectedAffectedCount: 1),
             ],
+            [OqlClauses.Upsert] =
+            [
+                UpsertCase(),
+            ],
             [OqlClauses.Update] =
             [
                 new("UPDATE items SET amount = amount + 1, details.score = 9 WHERE category = 'a'",
@@ -317,6 +321,7 @@ public sealed class OqlExecutionConformanceTests
     {
         OqlClauses.Explain => expression is OqlExplainExpression,
         OqlClauses.Insert => expression is OqlInsertExpression,
+        OqlClauses.Upsert => expression is OqlUpsertExpression,
         OqlClauses.Delete => expression is OqlDeleteExpression,
         OqlClauses.Update => expression is OqlUpdateExpression,
         OqlClauses.Unset => expression is OqlUpdateExpression { Unset.Count: > 0 },
@@ -394,6 +399,17 @@ public sealed class OqlExecutionConformanceTests
     private sealed record ExecutionCase(string Statement, object?[][] ExpectedRows,
         string[]? Setup = null, string? VerificationStatement = null, (int Row, int Column)[]? Missing = null,
         long ExpectedAffectedCount = 0, IReadOnlyDictionary<string, object?>? Parameters = null);
+
+    private static ExecutionCase UpsertCase()
+    {
+        using var replacement = JsonDocument.Parse("""{"name":"alpha2","category":"a"}""");
+        using var added = JsonDocument.Parse("""{"name":"zeta","category":"z"}""");
+        return new("UPSERT INTO items (KEY, VALUE) VALUES ('a', $replacement), ('z', $new)",
+            [["a", "alpha2", null], ["b", "beta", 6m], ["c", "gamma", 4m], ["d", "delta", null], ["z", "zeta", null]],
+            VerificationStatement: "SELECT META(d).id AS id, d.name AS name, d.amount AS amount FROM items d ORDER BY id",
+            Missing: [(0, 2), (4, 2)], ExpectedAffectedCount: 2,
+            Parameters: new Dictionary<string, object?> { ["replacement"] = replacement.RootElement.Clone(), ["new"] = added.RootElement.Clone() });
+    }
 
     private static ExecutionCase InsertCase()
     {
