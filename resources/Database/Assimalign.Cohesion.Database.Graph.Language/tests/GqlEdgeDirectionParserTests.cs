@@ -105,22 +105,6 @@ public sealed class GqlEdgeDirectionParserTests
         error.End.ShouldNotBeNull().ShouldBeInRange(start, gql.Length);
     }
 
-    /// <param name="gql">A quantifier after an abbreviated edge.</param>
-    [Theory(DisplayName = "Cohesion Test [Graph.Language] - Edges: a quantifier after an abbreviated edge is still COHDBL001")]
-    [InlineData("MATCH (a)->{1,3}(b) RETURN a")]
-    [InlineData("MATCH (a)-{2}(b) RETURN a")]
-    [InlineData("MATCH (a)<->{,3}(b) RETURN a")]
-    [InlineData("MATCH (a){1,3} RETURN a")]
-    public void Parse_QuantifierAfterEdge_ShouldStayUnsupported(string gql)
-    {
-        // Act
-        var diagnostic = Parse(gql).Diagnostics.ShouldHaveSingleItem();
-
-        // Assert
-        diagnostic.Code.ShouldBe("COHDBL001");
-        diagnostic.Message.ShouldBe("The QUANTIFIED PATTERN clause is not supported by the GQL surface of this database model.");
-    }
-
     [Fact(DisplayName = "Cohesion Test [Graph.Language] - Edges: a tilde outside pattern position stays a stray character")]
     public void Parse_TildeOutsidePattern_ShouldReportSyntaxError()
     {

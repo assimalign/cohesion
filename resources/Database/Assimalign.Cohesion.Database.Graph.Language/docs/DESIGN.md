@@ -91,7 +91,7 @@ flowchart LR
 The flat single-segment facade carries ordered `GqlMatchClause(Paths, Predicate, Optional)` records, insertion paths, deletion variables,
 a detach flag, expression projections, a `GqlSetQuantifier` (ALL by default), `ReturnStar`, and an optional `GqlCatalogSurface` for dedicated metadata statements.
 Catalog statements cannot carry graph clauses. `GqlPathPattern.Variable` optionally names a MATCH
-path; it is null for anonymous paths and insertion paths. Every path holds one more node than relationship. Anonymous nodes
+path; it is null for anonymous paths and insertion paths. A path without parenthesized elements holds one more node than relationship. Anonymous nodes
 and relationships have a null variable. Relationship directions are relative to consecutive pattern
 nodes; incoming arrows reverse that relationship's endpoints. A scalar property reference always
 contains a variable and exactly one property key; qualified database names have no AST representation.
@@ -131,8 +131,9 @@ collect_list and its Cypher alias collect. Ordinary scalar functions remain outs
 
 | Clause | Accepted subset | Execution |
 | --- | --- | --- |
-| `MATCH` | Comma-separated finite node/relationship chains; optional `variable =` path assignment, label expressions, scalar expression property maps; every ISO full and abbreviated edge except the tilde forms | Planner chooses an indexed anchor when available; executor matches bounded relationship-unique trails and binds named paths in traversal order |
+| `MATCH` | Comma-separated paths with fixed/quantified edges and parenthesized segments; optional `variable =` path assignment, label expressions, scalar expression property maps; every ISO full and abbreviated edge except the tilde forms | Planner chooses an indexed anchor when available; executor matches bounded relationship-unique trails and binds named paths in traversal order |
 | `OPTIONAL MATCH` | The same graph patterns and clause-local WHERE, including a leading optional or several consecutive matching clauses | Left join against each running binding; an unmatched clause preserves that row and binds its new variables to NULL |
+| `QUANTIFIED PATH` | ISO edge/subpath `{m,n}`, `{m}`, `{m,}`, `{,n}`, `{,}`, `+`, `*`; Cypher bracketed `*m..n` | Enumerates distinct trails, including zero-length matches; group variables bind source-ordered lists |
 | `WHERE` | Boolean and scalar expressions: comparisons, labels, AND/OR/XOR/NOT, IS null/truth tests, arithmetic, concatenation, IN lists and string predicates | Keeps TRUE only; see [DIALECT.md](DIALECT.md) and scalar expressions below |
 | `EXPLAIN` | One linear statement of the supported stages | Shared description rows without executing any read expansion or write; Cohesion extension |
 | `LET` | One or more `variable = expression` assignments | Adds new value bindings in assignment order; rebinding is COHDBG003 |
@@ -169,7 +170,7 @@ Double-quoted names preserve spaces. A single optional trailing semicolon is acc
 statements, the tilde (undirected) edges, Cypher arrows, nested property access, and
 return-after-delete are not accepted.
 
-The grammar is intentionally finite:
+The executable grammar is:
 
 ```text
 statement    := (query | EXPLAIN query | catalog) [';']
@@ -186,11 +187,15 @@ stage        := [OPTIONAL] MATCH match-paths [WHERE predicate]
 match-paths  := match-path (',' match-path)*
 match-path   := [ variable '=' ] path
 paths        := path (',' path)*
-path         := node (edge node)*
+path         := path-primary ((edge [quantifier] path-primary) | parenthesized | node)*
+path-primary := node | parenthesized
+parenthesized:= '(' path ')' [quantifier]
+quantifier   := '{' integer [',' [integer]] '}' | '{,' [integer] '}' | '+' | '*'
 node         := '(' [ variable ] [ label-spec ] [ properties ] ')'
 edge         := '-[' filler ']->' | '<-[' filler ']-' | '-[' filler ']-' | '<-[' filler ']->'
               | '->' | '<-' | '-' | '<->'
-filler       := [ variable ] [ label-spec ] [ properties ]
+filler       := [ variable ] [ label-spec ] [cypher-length] [ properties ]
+cypher-length:= '*' [integer] ['..' [integer]]
 label-spec   := (':' | IS) label-expr | ':' label ( ':' label )+
 label-expr   := label-term ('|' label-term)*
 label-term   := label-factor ('&' label-factor)*
@@ -247,12 +252,89 @@ the order of nodes and relationships when an indexed anchor starts in the middle
 is traversed in reverse. A path variable cannot be deleted or used as a scalar property owner;
 the planner rejects `DELETE p` and `RETURN p.name` rather than treating a path as an entity.
 A named path cannot rebind an existing variable, including a node or relationship binding.
-Pattern chains are limited to 64 relationships (`GQL0005`). Label expressions and predicates have no
+The sum of path repetition bounds is limited to 64 relationships (`GQL0005`). Label expressions and predicates have no
 length or nesting limit: a chain of one operator is one n-ary node of any length, and only the stack
 bounds parentheses and negations, as in Neo4j (see "Chain length and nesting" below). Match execution
 also imposes a materialized-binding limit, documented in the Graph engine design. Quantified paths
-are unsupported, so cycles cannot cause unbounded repetition of a path pattern. The executor's
+enumerate bounded or unbounded repetitions with a runtime 64-hop backstop. The executor's
 trail rule permits repeated nodes but forbids repeated relationship identities within one path.
+
+### Quantified paths (#1144)
+
+`GqlRelationshipPattern.Quantifier` and `GqlQuantifier(Min, Max)` retain inclusive bounds;
+null Max means unbounded. `GqlPathPattern.Elements` holds source-ordered `GqlPathNode`,
+`GqlPathRelationship` and `GqlParenthesizedPathPattern` elements. The latter carries an enclosed
+path and an optional quantifier. Nodes/Relationships remain populated for a path without any
+parenthesized element, and are empty for a path with one. A hand-built path may omit Elements
+and use the chain lists alone; contradictory representations are COHDBG001. There is no
+catalog, storage or wire format change.
+
+| Spelling | Inclusive bounds |
+| --- | --- |
+| `->{m}`, `->{m,n}`, `->{m,}`, `->{,n}`, `->{,}` | m..m, m..n, m..unbounded, 0..n, 0..unbounded |
+| `->+`, `->*` | 1..unbounded, 0..unbounded |
+| `-[r:T*]->`, `-[*..n]->` | 1..unbounded, 1..n |
+| `-[*m]->`, `-[*m..n]->`, `-[*m..]->` | m..m, m..n, m..unbounded |
+| `-[*0]->`, `-[*0..n]->` | 0..0, 0..n |
+
+The Cypher bound sits after the label expression and before the property map. ISO `{0}` and
+`{0,0}` are GQL0002; the Cypher zero-length spelling `[*0]` is accepted. Reversed bounds are GQL0002, and a bound that cannot fit Int32 is GQL0004. A fixed edge contributes 1
+to the path sum; a bounded segment contributes its upper bound times its body's edge count;
+an unbounded segment contributes its lower bound times that count. A text sum above 64 is
+GQL0005, including an unbounded lower bound above 64. Hand-built invalid bounds use COHDBG001.
+At runtime an unbounded segment continues until no unused relationship qualifies; needing a
+65th relationship after direction, type, bound identity and the hop's own property checks is
+COHDBG004. Endpoint predicates, LIMIT and the projection cannot suppress that failure. The shared 100,000-binding and 1,000,000-candidate
+budgets also apply, with no partial result output.
+
+`(a) ((x)-[r:T]->(y)){2} (b)` joins the iterations at the same node: each y is the next x,
+and both endpoint constraints hold at the junction. Every repeated property map is evaluated
+for every occurrence, including deferred references to later outer bindings or comma-separated
+paths. A zero repetition tests both outer endpoints on one node, emits a one-node path, and
+binds empty group lists. Unknown names inside a Min=0 segment still warn but cannot eliminate
+its zero branch. A standalone nullable parenthesized path also anchors on one graph node;
+accepting that form departs from Neo4j's rejection of patterns that may have no node pattern.
+
+Variables declared inside a repeated segment are lists of their singleton kind. RETURN * and
+WITH * include these group variables in declaration order. Lists preserve source order when
+expanded from either end; FOR/UNWIND retain the node/relationship kind, including across WITH
+and NEXT. Ordinary list expressions and aggregates can consume them in process. Group provenance
+survives CASE, COALESCE, NULLIF, aggregates and container construction/access at the corresponding
+depth. Direct member access (`r.w`), DELETE of a group, and reuse of a name as both group and singleton are COHDBG003.
+Property maps inside a repeated segment cannot reference group variables (COHDBG003); no
+implicit choice between an iteration's singleton and the final list is made. A non-negotiated
+possible composite final projection is statically COHDBG016. The existing Execute prohibition
+on entity-valued results still applies to a negotiated possibly nonempty group-list projection,
+as for collect(entity), with COHDBG001 naming lists of nodes or relationships. A Max=0 group is
+provably empty and projects as `[]`; scalar projections after FOR/UNWIND use the existing wire codec. Named full paths use ExecutePaths.
+
+INSERT/CREATE quantifiers and node quantifiers are GQL0002 before writes. Questioned paths
+after an edge or parenthesized path, subpath assignments, WHERE inside a parenthesized path,
+and nested quantifiers each produce one named COHDBL001. Elsewhere `?` retains the stray-character
+or unsupported-parameter diagnostic. Explicit TRAIL and other path modes/search prefixes remain
+COHDBL001. A `--` touching a subpath's `)` or quantifier's `}`, `+` or `*` is GQL0008, just as
+after a node or edge filler, including the bracketed Cypher star and its bounds. A nested `?`
+retains COHDBL001; path modes inside subpaths receive the same named capability diagnostic. Recursive
+subpath parsing uses the GQL0009 stack guard. Hand-built subpath nesting beyond 128 levels, cycles and repeated path instances in one walk are refused
+iteratively with COHDBG001 before shape traversal. Parsed text has no nesting cap beyond GQL0009.
+
+Bare unbounded quantifiers use implicit trail semantics without ISO's required restrictive mode
+or selector; this is a deliberate ISO deviation for the Cypher alias. Relationship uniqueness is
+per path; separate comma-separated paths may reuse relationships, differing from Neo4j's clause-wide
+default. Mixing bracketed Cypher lengths and ISO quantified subpaths in a clause is accepted.
+
+Behavior consulted, no code copied, relative to `C:/Source/repos/neo4j/neo4j`:
+`community/cypher/front-end/expressions/src/main/scala/org/neo4j/cypher/internal/expressions/GraphPatternQuantifier.scala:26-44`
+defines plus/star emptiness and interval lower-default zero;
+`community/cypher/front-end/parser/v25/parser/src/main/antlr4/org/neo4j/cypher/internal/parser/v25/Cypher25Parser.g4:381-386`
+permits both interval bounds to be omitted (`{,}`);
+`community/cypher/ir/src/main/scala/org/neo4j/cypher/internal/ir/converters/SimplePatternConverters.scala:108-126`
+lowers legacy lengths with lower-default one; and
+`community/cypher/front-end/ast/src/main/scala/org/neo4j/cypher/internal/ast/semantics/SemanticPatternCheck.scala:609-619`
+declares group variables as lists of their singleton types.
+
+GqlQuantifiedPathParserTests, GqlQuantifiedPathTests, the clause conformance corpus,
+GraphQuantifiedPathWireTests and GraphServerProtocolTests pin this surface.
 
 Matching clauses execute in source order; WHERE sees variables bound by its own or earlier clauses,
 never later clauses (COHDBG001). An optional WHERE filters candidate matches before null extension;
@@ -618,15 +700,15 @@ GqlOrderPagingTests and GraphOrderPagingWireTests pin the executable surface.
 
 | Code | Meaning |
 | --- | --- |
-| `COHDBL001` | Recognized construct outside the executable profile, reported once at its own span: OPTIONAL block operands, MANDATORY MATCH, procedures, scalar functions, HAVING and statistical aggregates (STDDEV_SAMP/POP, PERCENTILE_CONT/DISC), substituted/whole-map parameters, composite properties, comprehensions, slicing, map projections, path quantifiers, standalone ORDER BY/page statements, set operations, FOR ordinality/offset suffixes, NEXT YIELD, server/session scope, undirected (tilde) edges, path mode and path search prefixes, `NODETACH DELETE`, and `MERGE` |
+| `COHDBL001` | Recognized construct outside the executable profile, reported once at its own span: OPTIONAL block operands, MANDATORY MATCH, procedures, scalar functions, HAVING and statistical aggregates (STDDEV_SAMP/POP, PERCENTILE_CONT/DISC), substituted/whole-map parameters, composite properties, comprehensions, slicing, map projections, questioned paths, subpath variables, parenthesized-path WHERE, nested quantifiers, standalone ORDER BY/page statements, set operations, FOR ordinality/offset suffixes, NEXT YIELD, server/session scope, undirected (tilde) edges, path mode and path search prefixes, `NODETACH DELETE`, and `MERGE` |
 | `GQL0001` | Empty statement |
 | `GQL0002` | Malformed supported syntax, invalid statement composition, leftover tokens, or a character GQL does not use (`?`, `#`, `^`, ```, ...) |
 | `GQL0003` | Unterminated string, quoted name, or block comment |
 | `GQL0004` | Invalid or out-of-range numeric literal |
-| `GQL0005` | Pattern length limit exceeded: a path pattern holds at most 64 relationships. Label expressions and predicates have no length or nesting limit (#1139 follow-up) |
+| `GQL0005` | Repetition-bound sum exceeded: a path contributes at most 64 relationships through fixed edges and quantified bounds. Label expressions and predicates have no length or nesting limit (#1139 follow-up) |
 | `GQL0006` | Duplicate literal property or map-literal key |
 | `GQL0007` | `Graph catalog introspection is read-only.`: mutation composed with `SHOW` |
-| `GQL0008` | A `--` comment begins exactly where a node pattern's `)` or an edge pattern's `]` ends, in `MATCH`, `INSERT` or `CREATE`: a Cypher arrow (`-->`, `--`) that would hide the rest of the line. Reported at the `--`; the message names `->`, `<-` and `-` |
+| `GQL0008` | A `--` comment begins exactly where a node/subpath pattern's `)`, an edge pattern's `]`, or a postfix quantifier's `}`, `+` or `*` ends, in `MATCH`, `INSERT` or `CREATE`: a Cypher arrow (`-->`, `--`) that would hide the rest of the line. Reported at the `--`; the message names `->`, `<-` and `-` |
 | `GQL0009` | The statement nests groups, unary expressions, CASE, subscripts or collection constructors deeper than the parsing thread's stack can follow. Reported at the group, unary, constructor or subscript token that could not be entered; the parse stops there and reports nothing else. The same text parses on a thread with more stack, so the engine's `GraphQueryRequest.FromGql` reports it as `COHDBG008`, statement too complex, not as a parse error |
 
 Locations use zero-based absolute UTF-16 offsets with exclusive ends and one-based line numbers.

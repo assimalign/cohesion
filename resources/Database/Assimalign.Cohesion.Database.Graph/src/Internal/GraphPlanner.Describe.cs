@@ -69,12 +69,22 @@ internal sealed partial class GraphPlanner
                     int parent = Add(DescribeOperator(anchor),
                         pathId, anchor.Label, index, $"node={anchor.NodeIndex}; property={anchor.Property}; value={Value(anchor.Value)}");
                     // The executor expands right of the anchor, then left, in this exact order.
-                    foreach (int edge in Enumerable.Range(anchor.NodeIndex, path.Pattern.Relationships.Count - anchor.NodeIndex)
+                    var shape = path.Shape ?? GraphPathShape.Create(path.Pattern);
+                    foreach (int edge in Enumerable.Range(anchor.NodeIndex, shape.Segments.Count - anchor.NodeIndex)
                         .Concat(Enumerable.Range(0, anchor.NodeIndex).Reverse()))
                     {
-                        var relationship = path.Pattern.Relationships[edge];
-                        parent = Add("Expand", parent, relationship.Type,
-                            detail: $"edge={edge}; direction={relationship.Direction}; labels={relationship.LabelExpression}");
+                        var segment = shape.Segments[edge];
+                        if (segment.Quantifier is { } quantifier)
+                        {
+                            parent = Add("Expand", parent, segment.Body.Edge?.Type,
+                                detail: $"edge={edge}; quantifier={{{quantifier.Min},{quantifier.Max?.ToString(CultureInfo.InvariantCulture) ?? ""}}}; body_hops={segment.Body.Bound}; trail=True");
+                        }
+                        else
+                        {
+                            var relationship = segment.Body.Edge!;
+                            parent = Add("Expand", parent, relationship.Type,
+                                detail: $"edge={edge}; direction={relationship.Direction}; labels={relationship.LabelExpression}");
+                        }
                     }
                 }
             }

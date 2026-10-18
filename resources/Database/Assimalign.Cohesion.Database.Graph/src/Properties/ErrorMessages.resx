@@ -26,6 +26,7 @@
   <data name="MatchClausePathsRequired" xml:space="preserve"><value>A matching clause requires a non-null, non-empty path list.</value></data>
   <data name="MatchLimitExceeded" xml:space="preserve"><value>The query exceeded 100000 path matches.</value></data>
   <data name="InsertEndpointInvalid" xml:space="preserve"><value>An inserted endpoint must be a non-null node compatible with its existing binding.</value></data>
+  <data name="EntityListWireUnsupported" xml:space="preserve"><value>Lists of nodes or relationships cannot be returned over the wire yet. Use ExecutePaths with a read-only MATCH to return a node, relationship, or path.</value></data>
   <data name="ExecuteScalarRequired" xml:space="preserve"><value>Execute accepts scalar projections. Use ExecutePaths with a read-only MATCH to return a node, relationship, or path.</value></data>
   <data name="CompositeLimit" xml:space="preserve"><value>Graph values are limited to depth 64, 65536 values and 16777216 encoded bytes.</value></data>
   <data name="CompositeMalformed" xml:space="preserve"><value>Malformed or oversized Graph composite value.</value></data>
@@ -54,4 +55,9 @@
   <data name="MemberBindingRequired" xml:space="preserve">
     <value>Member access requires a binding that may contain a map, node or relationship.</value>
   </data>
+  <data name="PathShapeInvalid" xml:space="preserve"><value>A path requires consistent elements, valid non-nested quantifiers and a sum of repetition bounds at most 64 relationships; INSERT patterns cannot be quantified or parenthesized.</value></data>
+  <data name="GroupBindingConflict" xml:space="preserve"><value>A group variable cannot also bind a singleton or another quantified segment.</value></data>
+  <data name="GroupPropertyReference" xml:space="preserve"><value>A property map inside a quantified segment cannot reference a group variable.</value></data>
+  <data name="PathHopLimitExceeded" xml:space="preserve"><value>The query requires a trail exceeding 64 relationships.</value></data>
+  <data name="ExpansionLimitExceeded" xml:space="preserve"><value>The query exceeded 1000000 candidate expansions.</value></data>
 </root>

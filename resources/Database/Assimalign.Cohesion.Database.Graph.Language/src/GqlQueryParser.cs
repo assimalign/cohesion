@@ -16,6 +16,7 @@ public sealed partial class GqlQueryParser : QueryParser
     private readonly List<Lexeme> _tokens = [];
     private readonly List<Diagnostic> _diagnostics = [];
     private readonly HashSet<int> _parameterFormPositions = [];
+    private readonly HashSet<int> _questionedPathPositions = [];
     // Each '--' comment by its start offset, so a pattern element can tell whether one begins
     // exactly where its ')' or ']' ends (GQL0008).
     private readonly Dictionary<int, Lexeme> _lineComments = new();
@@ -51,6 +52,7 @@ public sealed partial class GqlQueryParser : QueryParser
         _tokens.Clear();
         _diagnostics.Clear();
         _parameterFormPositions.Clear();
+        _questionedPathPositions.Clear();
         _lineComments.Clear();
         _position = 0;
         int line = 1;
@@ -142,6 +144,7 @@ public sealed partial class GqlQueryParser : QueryParser
         foreach (var token in _tokens)
         {
             if (token.Type != TokenType.Unrecognized || token.Text != "?") { continue; }
+            if (_questionedPathPositions.Contains(token.Start)) { continue; }
             if (!_parameterFormPositions.Contains(token.Start))
             {
                 _diagnostics.RemoveAll(diagnostic => diagnostic.Start == token.Start);
@@ -170,6 +173,7 @@ public sealed partial class GqlQueryParser : QueryParser
         var containers = new Stack<TokenType>();
         int mapSeparatorPosition = -1;
         bool inValueExpression = false;
+        bool inPattern = false;
         bool sawCall = false;
         var label = LabelScan.None;
         int labelParens = 0;
@@ -177,10 +181,6 @@ public sealed partial class GqlQueryParser : QueryParser
         {
             var token = _tokens[i];
             if (token.Type == TokenType.Semicolon) { break; }
-            if (token.Type == TokenType.LeftBrace && StartsQuantifier(i, patternDepth))
-            {
-                Unsupported("QUANTIFIED PATTERN", token);
-            }
             bool mapSeparator = token.Type == TokenType.Colon && containers.TryPeek(out var container) && container == TokenType.LeftBrace &&
                 i > 1 && _tokens[i - 2].Type is TokenType.LeftBrace or TokenType.Comma;
             if (mapSeparator) { mapSeparatorPosition = i; }
@@ -226,7 +226,7 @@ public sealed partial class GqlQueryParser : QueryParser
                 continue;
             }
 
-            if (token.Type is TokenType.Asterisk or TokenType.DotDot && !valuePosition)
+            if (token.Type is TokenType.Asterisk or TokenType.DotDot && !valuePosition && !inPattern)
             {
                 Unsupported("QUANTIFIED PATTERN OR STAR PROJECTION", token);
                 continue;
@@ -270,8 +270,10 @@ public sealed partial class GqlQueryParser : QueryParser
                 }
                 continue;
             }
-            if (patternDepth == 0 && value is "WHERE" or "RETURN" or "WITH" or "LET" or "FILTER" or "FOR" or "UNWIND") { inValueExpression = true; }
+            if (patternDepth == 0 && value is "WHERE" or "RETURN" or "WITH" or "LET" or "FILTER" or "FOR" or "UNWIND") { inValueExpression = true; inPattern = false; }
             if (patternDepth == 0 && (value is "MATCH" or "CREATE" or "INSERT" or "DELETE" || value == "NEXT" && IsQueryStartAt(i + 1))) { inValueExpression = false; }
+            if (patternDepth == 0 && value is "MATCH" or "CREATE" or "INSERT") { inPattern = true; }
+            if (patternDepth == 0 && value == "DELETE") { inPattern = false; }
 
             // n IS [NOT] LABELED A in WHERE is ISO's <labeled predicate>; IS NULL and truth
             // tests are scalar predicates (#1140), also available in RETURN (#1141).
@@ -395,33 +397,6 @@ public sealed partial class GqlQueryParser : QueryParser
 
         construct = head + " PATH SEARCH";
         return next < _tokens.Count && _tokens[next].Type == TokenType.LeftParen;
-    }
-
-    /// <summary>
-    /// Whether the <c>{</c> at <paramref name="index"/> opens an ISO quantifier (<c>{m,n}</c>,
-    /// <c>{m}</c>, <c>{,n}</c>) after an edge or a node pattern. A quantifier starts with a bound
-    /// or a comma. A property map starts with a key, as in <c>(n:(A|B) {k: 1})</c> or the
-    /// malformed abbreviated edge <c>-{k: 1}-&gt;</c>, and is left to the parser.
-    /// </summary>
-    /// <param name="index">The index of the <c>{</c>.</param>
-    /// <param name="patternDepth">The nesting depth before the <c>{</c>.</param>
-    private bool StartsQuantifier(int index, int patternDepth)
-    {
-        if (index == 0 || index + 1 >= _tokens.Count ||
-            _tokens[index + 1].Type is not (TokenType.Integer or TokenType.Comma))
-        {
-            return false;
-        }
-
-        return _tokens[index - 1].Type switch
-        {
-            TokenType.RightArrow or TokenType.LeftArrow or TokenType.Minus => true,
-            // A ')' inside an element closes a label group, not the node pattern.
-            TokenType.RightParen => patternDepth == 0,
-            // The '>' of '<->'.
-            TokenType.GreaterThan => index >= 2 && _tokens[index - 2].Type == TokenType.LeftArrow && Adjacent(index - 2, index - 1),
-            _ => false,
-        };
     }
 
     /// <summary>

@@ -178,11 +178,17 @@ public sealed partial class GqlQueryParser
 
     private static bool HasNamedBinding(IReadOnlyList<GqlPathPattern> paths)
     {
-        foreach (var path in paths)
+        var pending = new Stack<GqlPathPattern>(paths);
+        while (pending.TryPop(out var path))
         {
             if (path.Variable is not null) { return true; }
             foreach (var node in path.Nodes) { if (node.Variable is not null) { return true; } }
             foreach (var edge in path.Relationships) { if (edge.Variable is not null) { return true; } }
+            foreach (var element in path.Elements ?? [])
+            {
+                if (element is GqlPathNode { Pattern.Variable: not null } or GqlPathRelationship { Pattern.Variable: not null }) { return true; }
+                if (element is GqlParenthesizedPathPattern group) { pending.Push(group.Pattern); }
+            }
         }
         return false;
     }

@@ -12,7 +12,37 @@ matching rows; OPTIONAL MATCH also keeps each unmatched input row, preserving ea
 and binding every newly declared node, relationship and named path to NULL. Its WHERE filters
 inside that optional match. A leading optional starts from one empty binding, so an empty match
 returns one all-null row. Comma-separated paths belong to one clause and succeed or null-extend
-together. Trail uniqueness is per path; a later clause may reuse a relationship.
+together. Trail uniqueness is per path, including every quantified repetition; another comma-separated
+path or a later clause may reuse a relationship. This differs from Neo4j's clause-wide uniqueness.
+
+Quantified relationships accept ISO `->{m,n}`, `{m}`, `{m,}`, `{,n}`, `{,}`, `->+` and `->*` in every
+supported direction, and Cypher `-[r:T*m..n]->` before the property map. Bracketed `*` and `*..n`
+start at 1; ISO postfix `*` and `{,n}` start at 0. Cypher `[*0]` is a zero-length path; ISO `{0}`
+is GQL0002. Parenthesized bodies repeat as a unit: `(a) ((x)-[:T]->(y)){2} (b)`, with adjoining
+iteration endpoints constrained together. Zero repetitions test both outer nodes on the same node;
+unknown inner names warn without removing that row. A bare nullable subpath also anchors on one
+graph node, unlike Neo4j. Mixing Cypher lengths and ISO subpaths in one clause is accepted.
+
+The sum of upper bounds, or lower bounds for unbounded segments, times body hop counts is at most
+64 (GQL0005 for text, COHDBG001 for direct ASTs). Unbounded segments use implicit trails, a deliberate
+ISO deviation from the requirement for a mode/selector. An eligible 65th relationship after type
+and direction, bound-identity and own-property filtering raises COHDBG004; LIMIT and endpoint predicates do not hide it. The
+100,000-binding and 1,000,000-expansion budgets also apply. Results materialize before wire output.
+
+Variables inside quantifiers are lists in source order, including under RETURN * and WITH *.
+FOR/UNWIND preserve the singleton entity kind; list expressions and aggregates can consume them.
+Using a group as a singleton, accessing `r.w`, deleting the list, or referencing a group in a map
+inside a repeated segment is COHDBG003. Unnegotiated composite projections are COHDBG016;
+negotiated Execute returns a provably empty Max=0 group as `[]` and retains COHDBG001
+for possible nonempty lists of nodes or relationships. Group provenance survives result-preserving
+expressions and container access. Project scalar values
+after FOR/UNWIND, or project a full named path through ExecutePaths. No wire format is added.
+
+Node and INSERT/CREATE quantifiers are GQL0002. Questioned paths after an edge or subpath,
+subpath assignments, inner WHERE and nested quantifiers remain named COHDBL001. Explicit TRAIL
+remains COHDBL001. A touching `--` after `}`, `+`, `*` or a subpath's `)` is GQL0008.
+Subpath parsing uses GQL0009 on stack exhaustion, with no separate text nesting cap; direct AST
+nesting beyond 128, cycles and repeated path instances in one walk are COHDBG001.
 
 A NULL binding in a later pattern matches nothing. Property access, labeled predicates and
 ordinary comparisons over NULL yield NULL/UNKNOWN; IS NULL is TRUE. RETURN expressions and
@@ -38,7 +68,7 @@ This naming policy is the owner's default; the available ISO 14.11 preview does 
 implicit computed names (see [the standards check](DESIGN.md#return-expressions-and-duplicate-elimination-1141)).
 
 RETURN * lists named bindings in first-declaration order, omitting anonymous and repeated
-elements; `(a)-[r]->(b)` yields a, r, b. With no named binding, it is GQL0002. DISTINCT removes
+elements; `(a)-[r]->(b)` yields a, r, b. Quantified variables are included as lists. With no named binding, it is GQL0002. DISTINCT removes
 duplicate projected tuples, treating NULLs as equal, numbers by exact value across runtime types,
 strings ordinally, entities by ID and paths by ordered entity identities. The retained row keeps
 its values' runtime types. Comparisons and IN use the same exact numeric values: 0.1m = 0.1d

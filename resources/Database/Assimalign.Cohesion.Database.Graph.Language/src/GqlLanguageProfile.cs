@@ -50,6 +50,7 @@ public static class GqlLanguageProfile
     private static readonly string[] _clauses =
     [
         GqlClauses.Match,
+        GqlClauses.QuantifiedPath,
         GqlClauses.OptionalMatch,
         GqlClauses.Explain,
         GqlClauses.Return,

@@ -32,6 +32,13 @@ public sealed class GqlProfileExecutionTests
                      [2, 1, "LabelScan", "Person", null, "node=0; property=; value=NULL", null, null],
                      [3, 0, "Project", "a", null, "kind=Node; expression=a", null, null]]),
             ],
+            [GqlClauses.QuantifiedPath] =
+            [
+                new("MATCH (a)->{1,3}(b) RETURN a.name, b.name", [["Alice", "Bob"], ["Robo", "Ghost"]]),
+                new("MATCH (a)-[*1..3]->(b) RETURN a.name, b.name", [["Alice", "Bob"], ["Robo", "Ghost"]]),
+                new("MATCH (a) ((x)->(y)){1,3} (b) RETURN a.name, b.name", [["Alice", "Bob"], ["Robo", "Ghost"]]),
+                new("MATCH (a) ((x:Person|Robot)->(y)){1,3} (b) RETURN a.name, b.name", [["Alice", "Bob"], ["Robo", "Ghost"]]),
+            ],
             [GqlClauses.Match] =
             [
                 new("MATCH (a:Person) MATCH (a)-[:KNOWS]->(b) RETURN a.name, b.name", [["Alice", "Bob"]]),
@@ -292,7 +299,6 @@ public sealed class GqlProfileExecutionTests
 
     /// <summary>The supported subset rejects broader GQL forms at parse time, before they reach planning.</summary>
     [Theory(DisplayName = "Cohesion Test [Graph] - Unsupported forms fail at parse time against a live engine")]
-    [InlineData("MATCH (a)-[r*1..3]->(b) RETURN a")]
     [InlineData("MATCH (a) RETURN a {.name}")]
     [InlineData("INSERT (:Person {tags: [1, 2]})")]
     [InlineData("MATCH (a) DELETE a RETURN a")]
@@ -370,6 +376,7 @@ public sealed class GqlProfileExecutionTests
 
     private static bool UsesClause(string clause, GqlQueryExpression query) => clause switch
     {
+        GqlClauses.QuantifiedPath => query.MatchClauses.SelectMany(clause => clause.Paths).SelectMany(PatternPaths).Any(path => path.Relationships.Any(edge => edge.Quantifier is not null) || path.Elements?.Any(element => element is GqlParenthesizedPathPattern { Quantifier: not null }) == true),
         GqlClauses.Explain => query.IsExplain,
         GqlClauses.Match => query.MatchClauses.Any(clause => !clause.Optional),
         GqlClauses.OptionalMatch => query.MatchClauses.Any(clause => clause.Optional),
@@ -399,8 +406,20 @@ public sealed class GqlProfileExecutionTests
     // A label expression beyond the conjunction :A:B the profile always ran: an operator, the
     // wildcard or a type alternative on a pattern element.
     private static bool UsesLabelOperators(GqlPathPattern path)
-        => path.Nodes.Any(node => node.LabelExpression is { } labels && !IsNameConjunction(labels)) ||
-           path.Relationships.Any(edge => edge.LabelExpression is { } labels && labels is not GqlLabelName);
+        => PatternPaths(path).Any(current => current.Nodes.Any(node => node.LabelExpression is { } labels && !IsNameConjunction(labels)) ||
+           current.Relationships.Any(edge => edge.LabelExpression is { } labels && labels is not GqlLabelName));
+
+    private static IEnumerable<GqlPathPattern> PatternPaths(GqlPathPattern root)
+    {
+        var pending = new Stack<GqlPathPattern>();
+        pending.Push(root);
+        while (pending.TryPop(out var path))
+        {
+            yield return path;
+            foreach (var element in path.Elements ?? [])
+            { if (element is GqlParenthesizedPathPattern group) { pending.Push(group.Pattern); } }
+        }
+    }
 
     private static bool IsNameConjunction(GqlLabelExpression expression) => expression switch
     {
