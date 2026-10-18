@@ -90,7 +90,7 @@ internal sealed partial class SqlPlanExecutor
                 case "VIEWS": yield return [database, stored.Schema, stored.Name, stored.Definition, "NONE", "NO"]; break;
                 case "OBJECT_OWNERSHIP": yield return [database, stored.Schema, stored.Name, "VIEW", stored.Name, SystemOwner(stored.Owner), stored.OwningSchema]; break;
                 case "COLUMNS":
-                    var liveColumns = new SqlPlanner(_catalog, null, _definitions.Functions, cancellationToken).ViewColumns(stored, catalog, _definitions.NativeFunctions);
+                    var liveColumns = stored.Columns;
                     for (int i = 0; i < liveColumns.Count; i++)
                     {
                         var column = liveColumns[i];

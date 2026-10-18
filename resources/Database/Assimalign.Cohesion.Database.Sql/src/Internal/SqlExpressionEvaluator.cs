@@ -53,6 +53,9 @@ internal sealed partial class SqlExpressionEvaluator
     // Either the original single-relation reference or the join bindings. Reuse one
     // reference slot so ordinary queries allocate neither a wrapper nor a larger evaluator.
     private readonly object? _relations;
+    internal SqlRelationReference? Relation => _relations as SqlRelationReference;
+    internal IReadOnlyList<SqlRelationBinding>? RelationBindings => _relations as IReadOnlyList<SqlRelationBinding>;
+    internal IReadOnlyList<SqlCatalogColumn> Columns => _columns;
     private readonly IReadOnlyDictionary<SqlExpression, int>? _valueOrdinals;
     private readonly Collation _defaultCollation;
     private readonly IReadOnlyDictionary<SqlExpression, SqlProjection>? _projectionSources;

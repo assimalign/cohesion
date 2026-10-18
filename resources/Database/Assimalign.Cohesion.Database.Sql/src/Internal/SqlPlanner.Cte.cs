@@ -43,10 +43,11 @@ internal sealed partial class SqlPlanner
             where = evaluator.Bind(select.Where);
         }
         var outputSlots = BindOrderByProjections(select, projections, 0);
+        CaptureViewOrdering(select, [], null, evaluator, outputSlots);
         foreach (var order in select.OrderBy) { ValidateExpression(order.Expression, evaluator, _subqueryTypes, outputSlots); }
         return new SqlConstantPlan(projections, where,
             BindOrdering(select.OrderBy, evaluator.ForOrdering(projections, outputSlots, 0)),
-            EvaluateCount(select.Limit, LimitClause(select)), EvaluateCount(select.Offset, "OFFSET"), select.IsDistinct, outputSlots);
+            BindCount(select.Limit, LimitClause(select)), BindCount(select.Offset, "OFFSET"), select.IsDistinct, outputSlots);
     }
 
     private SqlPlan PlanCommonTables(IReadOnlyList<SqlCommonTableExpression> definitions, SqlQueryExpression statement)

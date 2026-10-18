@@ -73,8 +73,8 @@ public sealed class SqlDataStorageFormatTests : IDisposable
         // Assert: the reopened database is on format 23 and its identity keys seek.
         await using var engine = CreateEngine();
         var database = await engine.OpenDatabaseAsync(TestDatabase);
-        database.Catalog.RecordSpaceFormatVersion.ShouldBe(22);
-        SqlRowCodec.RecordSpaceFormatVersion.ShouldBe(22);
+        database.Catalog.RecordSpaceFormatVersion.ShouldBe(23);
+        SqlRowCodec.RecordSpaceFormatVersion.ShouldBe(23);
 
         await using var session = await database.CreateSessionAsync();
         (await IdsAsync(session, "SELECT id FROM events WHERE at = @p ORDER BY id", Instant.ToOffset(TimeSpan.FromHours(9)))).ShouldBe([1, 2]);
@@ -289,7 +289,7 @@ public sealed class SqlDataStorageFormatTests : IDisposable
                 failure.Message.ShouldContain("less than its 8192-byte header page", Case.Sensitive);
                 continue;
             }
-            database.Catalog.RecordSpaceFormatVersion.ShouldBe(22);
+            database.Catalog.RecordSpaceFormatVersion.ShouldBe(23);
             database.Catalog.Namespaces.ShouldHaveSingleItem().Name.ShouldBe("dbo", $"Crash point {point}");
             await using var session = await database.CreateSessionAsync(CancellationToken.None);
             (await session.ExecuteAsync("CREATE TABLE t(id INT)", cancellationToken: CancellationToken.None)).Status.ShouldBe(DatabaseResultStatus.Success);

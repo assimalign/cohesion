@@ -83,6 +83,7 @@ internal sealed partial class SqlPlanExecutor
     internal async Task<DatabaseResult> ExecuteAsync(SqlPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
+        plan = InitializeWindow(plan, ExecutionEvaluator(_subqueryValues, cancellationToken));
         switch (plan)
         {
             case SqlSetOperationPlan set:
@@ -185,7 +186,7 @@ internal sealed partial class SqlPlanExecutor
 
     /// <summary>Applies the common SELECT projection, ordering, distinctness and window.</summary>
     private static DatabaseResult MaterializeSelect(List<object?[]> matches, IReadOnlyList<SqlProjection> projections,
-        IReadOnlyList<SqlBoundOrdering> orderBy, long? limit, long? offset,
+        IReadOnlyList<SqlBoundOrdering> orderBy, SqlRowCount? limit, SqlRowCount? offset,
         bool isDistinct, SqlExpressionEvaluator evaluator,
         IReadOnlyDictionary<SqlExpression, int>? orderByProjections, CancellationToken cancellationToken)
     {
@@ -211,12 +212,12 @@ internal sealed partial class SqlPlanExecutor
     }
 
     /// <summary>Bounds nonnegative Int64 counts by the materialized rows before narrowing.</summary>
-    private static List<object?[]> ApplyRowWindow(List<object?[]> rows, long? limit, long? offset)
+    private static List<object?[]> ApplyRowWindow(List<object?[]> rows, SqlRowCount? limit, SqlRowCount? offset)
     {
         // Planning rejects negative counts. The collection bounds make both checked casts safe,
         // even at Int64.MaxValue, without adding the requested offset and limit.
-        int start = checked((int)Math.Min(offset ?? 0, rows.Count));
-        int count = checked((int)Math.Min(limit ?? rows.Count, rows.Count - start));
+        int start = checked((int)Math.Min(offset?.Count ?? 0, rows.Count));
+        int count = checked((int)Math.Min(limit?.Count ?? rows.Count, rows.Count - start));
         return rows.GetRange(start, count);
     }
 

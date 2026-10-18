@@ -218,6 +218,7 @@ internal sealed partial class SqlPlanner
         }
 
         var orderByProjections = BindOrderByProjections(select, projections, outputOrdinals?.Count ?? columns.Count);
+        CaptureViewOrdering(select, columns, bindings, evaluator, orderByProjections);
         if (bindings is not null && select.OrderBy.Count > 0) { RejectDerivedOrdering(select, projections, orderByProjections, evaluator, bindings); }
         foreach (var orderBy in select.OrderBy)
         {
@@ -231,15 +232,15 @@ internal sealed partial class SqlPlanner
         if (bindings is not null)
         {
             return new SqlJoinPlan(bindings, columns, steps, projections,
-                where, ordering, EvaluateCount(select.Limit, LimitClause(select)),
-                EvaluateCount(select.Offset, "OFFSET"), select.IsDistinct,
+                where, ordering, BindCount(select.Limit, LimitClause(select)),
+                BindCount(select.Offset, "OFFSET"), select.IsDistinct,
                 orderByProjections);
         }
 
         if (systemView is not null)
         {
             return new SqlSystemViewPlan(systemView, projections, where, ordering,
-                EvaluateCount(select.Limit, LimitClause(select)), EvaluateCount(select.Offset, "OFFSET"),
+                BindCount(select.Limit, LimitClause(select)), BindCount(select.Offset, "OFFSET"),
                 select.IsDistinct, orderByProjections);
         }
 
@@ -248,8 +249,8 @@ internal sealed partial class SqlPlanner
             projections,
             where,
             ordering,
-            EvaluateCount(select.Limit, LimitClause(select)),
-            EvaluateCount(select.Offset, "OFFSET"),
+            BindCount(select.Limit, LimitClause(select)),
+            BindCount(select.Offset, "OFFSET"),
             select.IsDistinct,
             SelectAccessPath(table!, select.Where, OuterScope is null ? null : evaluator), orderByProjections);
     }
@@ -1365,37 +1366,16 @@ internal sealed partial class SqlPlanner
         _ => "LIMIT",
     };
 
-    private long? EvaluateCount(SqlExpression? expression, string clause)
+    private SqlRowCount? BindCount(SqlExpression? expression, string clause)
     {
-        if (expression is null)
-        {
-            return null;
-        }
-
-        // A count has no columns in scope; a reference fails here as COHSQLE005 (#1165).
+        if (expression is null) { return null; }
         ValidateScopelessExpression(expression, clause);
-        if (_commonTableState?.BindingUnused == true)
-        {
-            _ = ScopelessEvaluator.Bind(expression);
-            var type = GroupExpressionType(expression, Array.Empty<SqlCatalogColumn>(), ScopelessEvaluator);
-            if (type is not (DatabaseType.Int8 or DatabaseType.Int16 or DatabaseType.Int32 or DatabaseType.Int64))
-            {
-                throw new SqlPlanningException("COHSQLE018", string.Format(CultureInfo.CurrentCulture,
-                    ErrorMessages.CountNonNegative, clause), expression.Location);
-            }
-            return null;
-        }
-        object? value = ScopelessEvaluator.Evaluate(expression, Array.Empty<object?>());
-
-        return value switch
-        {
-            sbyte number when number >= 0 => number,
-            short number when number >= 0 => number,
-            long number when number >= 0 => number,
-            int number when number >= 0 => number,
-            _ => throw new SqlPlanningException("COHSQLE018", string.Format(CultureInfo.CurrentCulture,
-                ErrorMessages.CountNonNegative, clause), expression.Location),
-        };
+        var bound = ScopelessEvaluator.Bind(expression);
+        if (_commonTableState?.BindingUnused == true &&
+            GroupExpressionType(expression, [], ScopelessEvaluator) is not (DatabaseType.Int8 or DatabaseType.Int16 or DatabaseType.Int32 or DatabaseType.Int64))
+        { throw new SqlPlanningException("COHSQLE018", string.Format(CultureInfo.CurrentCulture, ErrorMessages.CountNonNegative, clause), expression.Location); }
+        // nodeLimit.c:348 evaluates counts at executor startup/rescan, never in a cached plan.
+        return new SqlRowCount(bound, clause, expression.Location);
     }
 
     /// <summary>

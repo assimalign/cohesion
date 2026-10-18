@@ -86,11 +86,19 @@ internal sealed partial class SqlPlanner
                     scope ??= new SqlExpressionEvaluator(output.Columns, _parameters, output.Bindings,
                         defaultCollation: _catalog.DefaultCollation, subquerySlots: _subquerySlots, functions: _functions,
                         cancellationToken: _cancellationToken, outerScope: OuterScope, outerDependencies: OuterDependencies);
-                    if (scope.ResolveFunction(call)?.ReturnType is { IsDomain: true } domain) { declaredType = domain; }
+                    if (scope.ResolveFunction(call)?.ReturnType is { IsPseudo: false } result) { declaredType = result; }
                 }
             }
+            DatabaseTypeInfo? inferredType = null;
+            if (declaredType is null && projection.Expression is { } resultExpression && projection.Metadata?.TypeInfo is null && inherited is null)
+            {
+                scope ??= new SqlExpressionEvaluator(output.Columns, _parameters, output.Bindings,
+                    defaultCollation: _catalog.DefaultCollation, subquerySlots: _subquerySlots, functions: _functions,
+                    cancellationToken: _cancellationToken, outerScope: OuterScope, outerDependencies: OuterDependencies);
+                inferredType = scope.OutputTypeInfo(resultExpression);
+            }
             var type = projection.Metadata?.TypeInfo ?? inherited?.Type ?? declaredType?.Storage
-                ?? (projection.Expression as SqlCastExpression)?.TargetTypeInfo ?? new DatabaseTypeInfo(projection.Type, projection.MaxLength);
+                ?? inferredType ?? (projection.Expression as SqlCastExpression)?.TargetTypeInfo ?? new DatabaseTypeInfo(projection.Type, projection.MaxLength);
             // PostgreSQL parse_relation.c:1715-1721 takes metadata from the projected
             // expression. Default strength must not become a declared column override.
             var candidate = type.Type is DatabaseType.String or DatabaseType.Character

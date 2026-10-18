@@ -162,7 +162,7 @@ public sealed partial class SqlCatalog
                 throw new SqlCatalogException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.ViewMissing, schema, name));
             }
             var dropped = _views.Where(pair => pair.Key.Equals(key, StringComparison.OrdinalIgnoreCase) || Reaches(pair.Key, key, new(StringComparer.OrdinalIgnoreCase))).ToArray();
-            if (!cascade && dropped.Length > 1) { RefuseViewDependency(dropped.First(pair => !pair.Key.Equals(key, StringComparison.OrdinalIgnoreCase)).Value.Value); }
+            if (!cascade && dropped.Length > 1) { RefuseViewDependency(dropped.First(pair => !pair.Key.Equals(key, StringComparison.OrdinalIgnoreCase)).Value.Value, slot.Value.Schema + "." + slot.Value.Name); }
             using var transaction = _storage.BeginTransaction();
             foreach (var pair in dropped) { _storage.DeleteRow(transaction, pair.Value.Location.PageId, pair.Value.Location.SlotIndex); }
             CommitCatalogChange(transaction, publication: publication, actualObject: SqlObjectIdentity.View(slot.Value.Schema, slot.Value.Name));

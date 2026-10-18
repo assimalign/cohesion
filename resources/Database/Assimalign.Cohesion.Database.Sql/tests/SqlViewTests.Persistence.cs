@@ -229,7 +229,7 @@ public sealed partial class SqlViewTests
         await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "DROP TABLE replacement"));
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sql] - Views: one bound plan per catalog generation and live nullability")]
+    [Fact(DisplayName = "Cohesion Test [Sql] - Views: one bound plan per catalog generation and frozen COLUMNS nullability")]
     public async Task Plan_RepeatedViewRead_ShouldReuseBodyUntilCatalogChanges()
     {
         // Arrange
@@ -249,7 +249,7 @@ public sealed partial class SqlViewTests
         // Assert
         ReferenceEquals(first, repeated).ShouldBeTrue();
         ReferenceEquals(first, changed).ShouldBeFalse();
-        nullable.ShouldHaveSingleItem().ShouldBe(["NO"]);
+        nullable.ShouldHaveSingleItem().ShouldBe(["YES"]);
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Views: added overloads never replace persisted calls")]

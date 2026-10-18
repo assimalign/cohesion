@@ -13,7 +13,7 @@ public sealed class SqlCatalogView
     /// <param name="schema">The SQL namespace.</param>
     /// <param name="name">The relation name.</param>
     /// <param name="definition">The canonical query with expanded projection stars.</param>
-    /// <param name="columns">The frozen output names, types, domains and collations. Nullability is derived on binding.</param>
+    /// <param name="columns">The frozen output names, types, domains and collations. Nullability is frozen for catalog metadata.</param>
     /// <param name="tableDependencies">The identities of stored tables read directly by the query.</param>
     /// <param name="dependencies">Resolved view, column, function and domain identities.</param>
     /// <param name="functionCalls">Function identities in query traversal order.</param>
@@ -38,7 +38,7 @@ public sealed class SqlCatalogView
         { throw new ArgumentException(ErrorMessages.ViewMetadataInvalid); }
         SqlCatalogOwnership.Validate(owner, owningSchema);
         Schema = schema; Name = name; Definition = definition; Owner = owner; OwningSchema = owningSchema;
-        Columns = Array.AsReadOnly(columns.Select(column => new SqlCatalogColumn(column.Name, column.Type,
+        Columns = Array.AsReadOnly(columns.Select(column => new SqlCatalogColumn(column.Name, column.Type, column.IsNullable,
             collation: column.Collation, domainName: column.DomainName)).ToArray());
         TableDependencies = Array.AsReadOnly(tableDependencies.Distinct().ToArray());
         Dependencies = Array.AsReadOnly(dependencies.Distinct(StringComparer.OrdinalIgnoreCase).ToArray());
@@ -50,7 +50,7 @@ public sealed class SqlCatalogView
     public string Name { get; }
     /// <summary>Gets the canonical body, with projection stars expanded.</summary>
     public string Definition { get; }
-    /// <summary>Gets the frozen output contract; nullability is computed when bound.</summary>
+    /// <summary>Gets the frozen output contract; nullability reflects creation-time sources.</summary>
     public IReadOnlyList<SqlCatalogColumn> Columns { get; }
     /// <summary>Gets the stored table identities the view reads directly.</summary>
     public IReadOnlyList<ulong> TableDependencies { get; }

@@ -36,19 +36,6 @@ internal sealed partial class SqlPlanner
         }
     }
 
-    internal IReadOnlyList<SqlCatalogColumn> ViewColumns(SqlCatalogView view, SqlCatalogSnapshot snapshot, SqlFunctionEnvironment native)
-    {
-        var directory = _viewImages.GetValue(_catalog, _ => new());
-        ViewImage image;
-        lock (directory.Sync)
-        {
-            image = FindViewImage(directory, snapshot, () => new SqlBindingEntry<SqlFunctionEnvironment>(token => SqlDefinitionBinder.Load(snapshot, native, token)));
-            directory.Metadata = image;
-        }
-        var planner = new SqlPlanner(_catalog, null, image.Functions.Get(_cancellationToken), _cancellationToken) { ViewImageState = image };
-        return planner.BindCatalogView(view).Columns;
-    }
-
     private static ViewImage FindViewImage(ViewImageDirectory directory, SqlCatalogSnapshot snapshot,
         Func<SqlBindingEntry<SqlFunctionEnvironment>> functions)
     {
@@ -101,7 +88,6 @@ internal sealed partial class SqlPlanner
         internal object Sync { get; } = new();
         internal ulong Generation { get; set; }
         internal ViewImage? Current { get; set; }
-        internal ViewImage? Metadata { get; set; }
         internal List<WeakReference<ViewImage>> Images { get; } = new();
         internal ConditionalWeakTable<SqlCatalogSnapshot, ViewImage> Captures { get; } = new();
     }

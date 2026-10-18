@@ -202,6 +202,7 @@ internal sealed partial class SqlPlanner
         IReadOnlyList<SqlCatalogColumn> columns, List<(int Left, int Right, Collation Collation)> equalities,
         int added, bool maySwap)
     {
+        if (ViewDefinitionBinding is not null) { return null; }
         SqlJoinIndexPath? best = null;
         foreach (int inner in maySwap ? new[] { added, 0 } : new[] { added })
         {

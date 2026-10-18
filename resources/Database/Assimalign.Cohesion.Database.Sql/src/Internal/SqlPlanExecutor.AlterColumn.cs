@@ -20,6 +20,9 @@ internal sealed partial class SqlPlanExecutor
         int ordinal = FindColumnOrdinal(plan.Table, plan.Column.Name);
         SqlCatalogColumn previous = plan.Table.Columns[ordinal];
         var column = plan.Column;
+        // PostgreSQL tablecmds.c:15612-15624 refuses changing a type read by a view.
+        if (previous.Type.Type != column.Type.Type || previous.Type.MaxLength != column.Type.MaxLength ||
+            previous.Type.Precision != column.Type.Precision || previous.Type.Scale != column.Type.Scale) { EnsureNoViewReads(plan.Table, column.Name, rename: true); }
         if (previous.Identity is not null && previous.Type.Type != column.Type.Type)
         {
             throw SqlPlanningException.IdentityViolation(column.Name, ErrorMessages.IdentityTypeChangeForbidden);

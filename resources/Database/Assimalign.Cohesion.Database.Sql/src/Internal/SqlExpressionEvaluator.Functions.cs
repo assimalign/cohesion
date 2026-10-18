@@ -145,9 +145,26 @@ internal sealed partial class SqlExpressionEvaluator
         {
             SqlColumnReferenceExpression column => ColumnMetadata(column).Type.MaxLength,
             SqlCastExpression cast => TryResolveCastTarget(cast)?.Storage.MaxLength,
+            SqlSubqueryExpression => _subquerySlots is not null && _subquerySlots.TryGetValue(expression, out var slot) ? slot.TypeInfo?.MaxLength : null,
             SqlCollateExpression collate => MaximumLengthOf(collate.Operand),
             SqlFunctionCallExpression call when !SqlStandardLibrary.IsEvaluatorForm(call.FunctionName)
                 => ResolveFunction(call)?.ReturnType.Storage.MaxLength,
+            _ => null,
+        };
+    }
+
+    /// <summary>Retains declared type facets through scalar slots, casts and function outputs.</summary>
+    internal DatabaseTypeInfo? OutputTypeInfo(SqlExpression expression)
+    {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+        return expression switch
+        {
+            SqlColumnReferenceExpression column => ColumnMetadata(column).Type,
+            SqlCastExpression cast => TryResolveCastTarget(cast)?.Storage,
+            SqlCollateExpression collate => OutputTypeInfo(collate.Operand),
+            SqlSubqueryExpression => _subquerySlots is not null && _subquerySlots.TryGetValue(expression, out var slot) ? slot.TypeInfo : null,
+            SqlFunctionCallExpression call when !SqlStandardLibrary.IsEvaluatorForm(call.FunctionName)
+                && ResolveFunction(call) is { ReturnType.IsPseudo: false } function => function.ReturnType.Storage,
             _ => null,
         };
     }

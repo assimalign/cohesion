@@ -16,6 +16,7 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 public sealed partial class SqlViewTests
 {
     [Theory(DisplayName = "Cohesion Test [Sql] - Views: bodies and outer relational contexts compose")]
+    [InlineData("SELECT b.id FROM t a, t b JOIN t c ON b.id = c.id WHERE a.id = 1 AND b.id = 2", "SELECT id FROM v", 2)]
     [InlineData("SELECT id FROM t WHERE id > 1", "SELECT id FROM v WHERE id = 2", 2)]
     [InlineData("SELECT id AS n FROM t", "SELECT dbo.v.n FROM v ORDER BY n DESC LIMIT 1", 3)]
     [InlineData("SELECT id AS n FROM t ORDER BY ABS(n) DESC LIMIT 1", "SELECT n FROM v", 3)]
@@ -151,7 +152,7 @@ public sealed partial class SqlViewTests
         // Act
         var error = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, sql));
         // Assert
-        error.Message.ShouldContain("v", Case.Sensitive);
+        error.Message.ShouldContain("view 'dbo.v'", Case.Sensitive);
         error.Message.ShouldContain("depend", Case.Sensitive);
     }
 

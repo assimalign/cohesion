@@ -2363,58 +2363,65 @@ table-only statements name the view kind, including IF [NOT] EXISTS forms.
 
 ## Persisted read-only views (#1124)
 
-SqlCatalogView is a distinct relation source identity with an existing derived
-query materializer. It preserves namespace qualification and supports outer
-ordering/windowing without impersonating a CTE. The body uses an independent
-planner and execution frame: caller CTEs, correlation scopes, subquery slots and
-materialization caches cannot leak into it. Each view reference materializes once
-per statement under that statement's MVCC context. No view merging or predicate
-pushdown is performed; each reference costs O(body rows).
+SqlCatalogView is a distinct relation source identity with an existing derived query
+materializer. It preserves namespace qualification and supports outer ordering/windowing without
+impersonating a CTE. The body uses an independent planner and execution frame: caller CTEs,
+correlation scopes, subquery slots and materialization caches cannot leak into it. Each view
+reference materializes once per statement under that statement's MVCC context. No view merging
+or predicate pushdown is performed; each reference costs O(body rows).
 
-SqlPersistedExpression.LoadQuery uses the existing parser and ceiling options.
-The base-typed renderer and SameQuery prove canonical round trips. CREATE expands
-projection stars at every level using bound relation columns (merged USING columns
-stay unqualified), then stores canonical text and the ordered resolved call vector.
-A ConditionalWeakTable parses once per immutable view; a per-catalog generation
-cache binds the closed body once, with SqlBindingEntry's cancellable compilation
-and no application callback under the cache lock. Persisted calls bind to their
-recorded signatures. CREATE records resolver choices in the actual input, grouping
-and output-alias ordering scopes. Cached plans use scans so a statement-dependent seek bound
-cannot be frozen. Runtime evaluation supplies the current statement's transaction
-instant and cancellation. Binding never folds application calls. Catalog opens
-parse/bind all views; unresolved native identities fail use with COHSQLE009.
-The existing bind-time system-relation capture seam is re-entered for cached
-bodies so each caller retains its own catalog image.
+SqlPersistedExpression.LoadQuery uses the existing parser and ceiling options. The base-typed
+renderer and SameQuery prove canonical round trips. CREATE serializes bound column references
+with their resolved relation qualifiers and expands projection stars at every level. Merged
+USING values retain their chosen source and coercions. The canonical text and ordered resolved
+call vector preserve those bindings across ADD COLUMN. Rebinding rejects any column identity
+absent from the recorded C: dependencies (COHSQLE033), following PostgreSQL
+`src/backend/rewrite/rewriteDefine.c:61`'s persistence of the transformed tree. A
+ConditionalWeakTable parses once per immutable view; a per-catalog generation cache binds the
+closed body once, with SqlBindingEntry's cancellable compilation and no application callback
+under the cache lock. Persisted calls bind to their recorded signatures. CREATE records resolver
+choices in the actual input, grouping and output-alias ordering scopes. Cached plans use scans
+for both stored-table access and joins, so index replacement cannot reuse a stale key path.
+LIMIT/OFFSET/FETCH retain bound expressions evaluated once at each relation execution's startup,
+following PostgreSQL `src/backend/executor/nodeLimit.c:348`. Runtime evaluation supplies the
+current statement's transaction instant and cancellation. Binding never folds application calls.
+Catalog opens parse all views; every body binding failure is deferred to a read of that view, so
+unrelated queries, metadata and DROP remain usable. The existing bind-time system-relation
+capture seam is re-entered for cached bodies so each caller retains its own catalog image.
 
-View body caches retain immutable catalog images by source-definition identity.
-Equivalent captures share bindings; a snapshot transaction's COLUMNS projection
-binds against its retained tables, views and SQL definitions after later drops.
-Historical image entries are weak and stay alive with their retained captures;
-ordinary view reads use a DDL-generation fast path. No snapshot generation API or
-friend grant was added for this purpose.
+View body caches retain immutable catalog images by source-definition identity. Equivalent
+captures share bindings. COLUMNS reads frozen view columns from its own catalog image without
+binding a body; reference capture always reads the binding's own table image. Historical image
+entries are weak and stay alive with their retained captures; ordinary view reads use a
+DDL-generation fast path. No snapshot generation API or friend grant was added for this purpose.
 
-Views freeze names/types/modifiers/domains/collations, with live nullability on
-binding. OR REPLACE may append columns only, following PostgreSQL
-`src/backend/commands/view.c:266-325`. Table/column renames refuse dependencies
-because this engine stores textual relation names. Dependency collection retains
-stored table identities and referenced columns, including predicates and nested
-queries, along with direct view/function/domain identities. Transitive guards follow
-the current view graph, so OR REPLACE does not retain obsolete dependencies. Both SQL admission and catalog
-publication enforce dependency guards. DROP SCHEMA RESTRICT counts views and
-CASCADE removes external dependent views as well as contained views; DROP VIEW
-CASCADE removes the dependent view closure. Dependency errors name the view and use
-COHSQLD002 (PostgreSQL `src/backend/catalog/dependency.c:1163-1170`). Schema-apply
-failures retain that diagnostic and dependent name in their outer migration message. Deferred typed
-migration admission follows persisted table identities through views.
+Views freeze names/types/modifiers/domains/collations and creation-time nullability for COLUMNS,
+with current nullability on query binding. Scalar-subquery slots and function outputs preserve
+complete precision, scale and length before contract comparison (PostgreSQL
+`src/backend/nodes/nodeFuncs.c:345`, `src/backend/commands/view.c:300`). ALTER COLUMN refuses
+changes to type, length, precision or scale for any column a view reads, both in the executor
+and catalog publication (COHSQLD002; PostgreSQL `src/backend/commands/tablecmds.c:15612-15624`).
+OR REPLACE may append columns only, following PostgreSQL `src/backend/commands/view.c:266-325`.
+Table/column renames refuse dependencies because this engine stores textual relation names.
+Dependency collection retains stored table identities and referenced input columns, including
+predicates and nested queries, along with direct view/function/domain identities. ORDER BY
+output aliases contribute only their projection's dependencies (PostgreSQL
+`src/backend/parser/parse_clause.c:2016`). Transitive guards follow the current view graph, so
+OR REPLACE does not retain obsolete dependencies. Both SQL admission and catalog publication
+enforce dependency guards. DROP SCHEMA RESTRICT counts views and CASCADE removes external
+dependent views as well as contained views; DROP VIEW CASCADE removes the dependent view
+closure. Dependency errors name the view and use COHSQLD002 (PostgreSQL
+`src/backend/catalog/dependency.c:1163-1170`). Schema-apply failures retain that diagnostic and
+dependent name in their outer migration message. Deferred typed migration admission follows
+persisted table identities through views.
 
-Views join TABLES, COLUMNS, OBJECT_OWNERSHIP and INFORMATION_SCHEMA.VIEWS; catalog
-snapshots contain their immutable descriptions. Session DDL creates Adhoc views;
-declared scripts use Schema ownership and atomic V: publication and absence
-receipts. View CREATE/DROP is self-committing and returns COHSQLT003 in explicit
-transactions. Format **23** gates kind **17** with no upgrade path. The encoded
-record is limited to **8,092 bytes** and rejected before publication if larger.
-MATERIALIZED, recursive, temporary and updatable views, options and CHECK OPTION
-remain excluded. The dialect records the complete executable surface.
+Views join TABLES, COLUMNS, OBJECT_OWNERSHIP and INFORMATION_SCHEMA.VIEWS; catalog snapshots
+contain their immutable descriptions. Session DDL creates Adhoc views; declared scripts use
+Schema ownership and atomic V: publication and absence receipts. View CREATE/DROP is
+self-committing and returns COHSQLT003 in explicit transactions. Format **23** gates kind **17**
+with no upgrade path. The encoded record is limited to **8,092 bytes** and rejected before
+publication if larger. MATERIALIZED, recursive, temporary and updatable views, options and CHECK
+OPTION remain excluded. The dialect records the complete executable surface.
 
 ## ALTER TABLE renames and column facets (#1122)
 

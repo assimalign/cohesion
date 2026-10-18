@@ -2320,7 +2320,13 @@ public sealed partial class SqlCatalog
             if (_views.ContainsKey(SqlObjectIdentity.View(table.Schema, table.Name))) { throw new SqlCatalogException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ViewExists, table.Schema, table.Name)); }
             if (existing is not null)
             {
-                foreach (var column in existing.Table.Columns.Where(column => table.FindColumn(column.Name) is null)) { EnsureNoViewReads(existing.Table, column.Name); }
+                foreach (var column in existing.Table.Columns)
+                {
+                    var replacement = table.FindColumn(column.Name);
+                    if (replacement is null) { EnsureNoViewReads(existing.Table, column.Name); }
+                    else if (replacement.Type.Type != column.Type.Type || replacement.Type.MaxLength != column.Type.MaxLength ||
+                        replacement.Type.Precision != column.Type.Precision || replacement.Type.Scale != column.Type.Scale) { EnsureNoViewReads(existing.Table, column.Name, rename: true); }
+                }
             }
             EnsurePhysicalLayoutKept(existing?.Table, table);
             if (existing is not null) { EnsureIdentityKept(existing.Table, table); }

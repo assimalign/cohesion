@@ -683,8 +683,8 @@ Kind **17**, pre-assigned to views, stores strict source-generated JSON through
 an internal DTO: namespace/name, canonical body, frozen output names and types,
 domains/collations, stored-table ObjectIds, column/view/function/domain dependencies,
 ordered resolved calls and ownership. SqlCatalogView and snapshot Views expose
-immutable descriptions; tables retain their own stored-only shape. Nullability is
-computed by the engine on binding. No interface, friend grant or language reference
+immutable descriptions; tables retain their own stored-only shape. Creation-time nullability is
+persisted for COLUMNS, which never needs to bind a view body. No interface, friend grant or language reference
 was added. Format **23** fences kind 17; table extension 6 is unchanged. Older
 formats are refused, with no upgrade reader. The encoded record must fit one page
 (**8,092 bytes**); oversized definitions fail CREATE with COHSQLE033.
@@ -697,7 +697,8 @@ names, types, modifiers, domains and collations, following PostgreSQL
 records its target claim when run by a declared script. DropViewAsync commits
 RESTRICT or dependent-view CASCADE and optional absence receipts atomically.
 Table create/reserve/publish/rename share the view relation namespace. Table/column
-drops and textual renames independently enforce view dependencies at publication.
+drops, textual renames and changes to type/length/precision/scale independently enforce
+view dependencies at publication (COHSQLD002; PostgreSQL `src/backend/commands/tablecmds.c:15612-15624`).
 DROP SCHEMA includes contained and external dependent views in its one atomic
 transaction. Engine ownership and DDL admission precede these invariant guards.
 

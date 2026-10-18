@@ -8,6 +8,23 @@ namespace Assimalign.Cohesion.Database.Sql.Language.Tests;
 
 public sealed class SqlViewParserTests
 {
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - CREATE modifiers: excluded constructs retain their own names")]
+    [InlineData("CREATE TEMP TABLE t (id INT)", "CREATE TEMP TABLE")]
+    [InlineData("CREATE TEMPORARY TABLE t (id INT)", "CREATE TEMPORARY TABLE")]
+    [InlineData("CREATE OR REPLACE FUNCTION f(x INT) RETURNS INT RETURN x", "CREATE OR REPLACE FUNCTION")]
+    public void Parse_ExcludedCreateConstruct_ShouldNameActualObject(string sql, string construct)
+    {
+        // Arrange
+        var parser = new SqlQueryParser();
+        // Act
+        var statement = (SqlQueryStatement)parser.Parse(sql);
+        // Assert
+        var error = statement.Diagnostics.Where(item => item.Severity == DiagnosticSeverity.Error).ShouldHaveSingleItem();
+        error.Code.ShouldBe("COHDBL001");
+        error.Message!.ShouldContain(construct, Case.Sensitive);
+        error.Message.ShouldNotContain("VIEW", Case.Sensitive);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - View grammar: typed complete statements")]
     [InlineData("CREATE VIEW v AS SELECT a FROM t")]
     [InlineData("CREATE VIEW dbo.v (a, b) AS SELECT a, b FROM t")]

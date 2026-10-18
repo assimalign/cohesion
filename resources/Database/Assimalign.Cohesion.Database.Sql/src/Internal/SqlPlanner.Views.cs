@@ -36,7 +36,7 @@ internal sealed partial class SqlPlanner
         var output = declaration.BindDerivedOutput(child, create.View.TableName, create.Columns, query).Columns;
         if (output.Select(column => column.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count() != output.Count) { throw ViewError(ErrorMessages.ViewDuplicateColumns); }
         var expanded = new StringBuilder(text);
-        foreach (var edit in binding.Stars.OrderByDescending(pair => pair.Key)) { expanded.Remove(edit.Key, 1).Insert(edit.Key, edit.Value); }
+        foreach (var edit in binding.Edits.OrderByDescending(pair => pair.Key)) { expanded.Remove(edit.Key, edit.Value.Length).Insert(edit.Key, edit.Value.Text); }
         var frozen = SqlPersistedExpression.LoadQuery(expanded.ToString(), "view " + create.View.TableName);
         string canonical = SqlExpressionRenderer.Render(frozen);
         if (!SqlPersistedExpression.SameQuery(frozen, SqlPersistedExpression.LoadQuery(canonical, "view " + create.View.TableName))) { throw ViewError(ErrorMessages.ViewRoundTrip); }
@@ -58,11 +58,10 @@ internal sealed partial class SqlPlanner
     {
         foreach (var view in _catalog.Views)
         {
-            // Parsing malformed canonical text fails open. A missing native registration
-            // leaves the database readable and fails use with the ordinary definition code.
+            // Malformed canonical text fails open; body binding failures are isolated to use.
             _parsedViews.GetValue(view, value => new ParsedView(SqlPersistedExpression.LoadQuery(value.Definition, "view " + value.Schema + "." + value.Name)));
             try { BindCatalogView(view); }
-            catch (SqlPlanningException exception) when (exception.Diagnostics[0].Code == "COHSQLE009") { }
+            catch (DatabaseException) { }
         }
     }
 
@@ -122,117 +121,106 @@ internal sealed partial class SqlPlanner
         IReadOnlyList<SqlRelationBinding>? bindings, IReadOnlyList<int>? outputOrdinals, SqlExpressionEvaluator scope)
     {
         if (ViewDefinitionBinding is not { } binding) { return; }
-        foreach (var node in SqlViewQuery.Expressions(select).Where(root => !select.From.SelectMany(item => item.Joins).Any(join => ReferenceEquals(join.Condition, root))).SelectMany(expression => SqlViewQuery.Nodes(expression, queries: false)))
-        {
-            if (node is SqlCastExpression cast && SqlDefinitionBinder.ResolveType(cast.TargetType, _functions, cast.Location) is { IsDomain: true } domain)
-            { binding.Dependencies.Add(SqlDefinitionBinder.DomainKey(domain.Name)); }
-            if (node is SqlColumnReferenceExpression reference)
-            {
-                int ordinal;
-                try { ordinal = scope.ResolveColumn(reference); }
-                catch (SqlPlanningException) { continue; } // ORDER BY output aliases bind later.
-                if (ordinal < 0) { CaptureOuterViewColumn(reference); continue; }
-                AddColumn(ordinal);
-                if (reference.TableAlias is null && reference.SchemaName is null && bindings is not null)
-                {
-                    foreach (var candidate in bindings)
-                    {
-                        for (int i = 0; i < candidate.Source.Columns.Count; i++)
-                        { if (candidate.Source.Columns[i].Name.Equals(reference.ColumnName, StringComparison.OrdinalIgnoreCase)) { AddColumn(candidate.Offset + i); } }
-                    }
-                }
-            }
-        }
+        var ordering = select.OrderBy.Select(order => order.Expression).ToHashSet();
+        foreach (var root in SqlViewQuery.Expressions(select).Where(root => !ordering.Contains(root) &&
+            !select.From.SelectMany(item => item.Joins).Any(join => ReferenceEquals(join.Condition, root))))
+        { CaptureViewExpression(root, columns, bindings, select.From.FirstOrDefault()?.Table, scope); }
         foreach (var column in select.Columns)
         {
+            if (column.Expression is SqlColumnReferenceExpression projected && column.Alias is null &&
+                binding.Edits.TryGetValue(projected.Location!.Start, out var rendered) && rendered.Text.StartsWith("CAST(", StringComparison.Ordinal))
+            { binding.Edits[projected.Location.Start] = (rendered.Length, rendered.Text + " AS " + SqlObjectIdentity.Quote(projected.ColumnName)); }
             if (column.Expression is not SqlStarExpression star) { continue; }
             var names = new List<string>();
             foreach (int ordinal in outputOrdinals ?? Enumerable.Range(0, columns.Count).ToArray())
             {
-                AddColumn(ordinal);
-                var source = bindings?.First(item => ordinal >= item.Offset && ordinal < item.Offset + item.Source.Columns.Count);
-                string name = SqlObjectIdentity.Quote(columns[ordinal].Name);
-                if (scope.MergedColumn(ordinal) is null)
-                {
-                    var relation = source?.Reference ?? select.From[0].Table;
-                    string qualifier = relation.Alias ?? (relation as SqlTableReference)?.TableName ?? relation.Alias!;
-                    name = SqlObjectIdentity.Quote(qualifier) + "." + name;
-                    if (relation is SqlTableReference { Alias: null, SchemaName: { } schema }) { name = SqlObjectIdentity.Quote(schema) + "." + name; }
-                }
-                else if (bindings is not null)
-                {
-                    foreach (var candidate in bindings)
-                    { for (int i = 0; i < candidate.Source.Columns.Count; i++) { if (candidate.Source.Columns[i].Name.Equals(columns[ordinal].Name, StringComparison.OrdinalIgnoreCase)) { AddColumn(candidate.Offset + i); } } }
-                }
-                names.Add(name);
+                string name = RenderViewColumn(ordinal, columns, bindings, select.From[0].Table, scope, merged: true);
+                names.Add(name + " AS " + SqlObjectIdentity.Quote(columns[ordinal].Name));
             }
-            binding.Stars[star.Location!.Start] = string.Join(", ", names);
+            binding.Edits[star.Location!.Start] = (star.Location.End - star.Location.Start, string.Join(", ", names));
         }
+    }
 
-        void AddColumn(int ordinal)
+    private void CaptureViewOrdering(SqlSelectExpression select, IReadOnlyList<SqlCatalogColumn> columns,
+        IReadOnlyList<SqlRelationBinding>? bindings, SqlExpressionEvaluator scope, IReadOnlyDictionary<SqlExpression, int> outputs)
+    {
+        if (ViewDefinitionBinding is null) { return; }
+        foreach (var order in select.OrderBy)
+        { CaptureViewExpression(order.Expression, columns, bindings, select.From.FirstOrDefault()?.Table, scope, outputs); }
+    }
+
+    private void CaptureViewExpression(SqlExpression expression, IReadOnlyList<SqlCatalogColumn> columns,
+        IReadOnlyList<SqlRelationBinding>? bindings, SqlRelationReference? relation, SqlExpressionEvaluator scope,
+        IReadOnlyDictionary<SqlExpression, int>? outputs = null)
+    {
+        if (outputs?.ContainsKey(expression) == true) { return; } // Output dependencies were captured at projection binding.
+        if (expression is SqlCastExpression cast && SqlDefinitionBinder.ResolveType(cast.TargetType, _functions, cast.Location) is { IsDomain: true } domain)
+        { ViewDefinitionBinding!.Dependencies.Add(SqlDefinitionBinder.DomainKey(domain.Name)); }
+        if (expression is SqlColumnReferenceExpression reference)
         {
-            var source = bindings?.First(item => ordinal >= item.Offset && ordinal < item.Offset + item.Source.Columns.Count);
-            var table = source?.Source.Table;
-            if (table is null && bindings is null && select.From[0].Table is SqlTableReference named) { _catalog.TryGetTable(named.SchemaName ?? DefaultSchema, named.TableName, out table!); }
-            if (table is not null)
-            {
-                var column = table.Columns[ordinal - (source?.Offset ?? 0)];
-                binding.Dependencies.Add(SqlObjectIdentity.Column(table.ObjectId, column.Name));
-                if (column.DomainName is { } domain) { binding.Dependencies.Add(SqlDefinitionBinder.DomainKey(domain)); }
-            }
+            int ordinal = scope.ResolveColumn(reference);
+            string text = ordinal < 0 ? CaptureOuterViewColumn(reference)
+                : RenderViewColumn(ordinal, columns, bindings, relation!, scope, reference.TableAlias is null && reference.SchemaName is null);
+            ViewDefinitionBinding!.Edits[reference.Location!.Start] = (reference.Location.End - reference.Location.Start, text);
         }
+        foreach (var child in Children(expression)) { CaptureViewExpression(child, columns, bindings, relation, scope, outputs); }
+    }
+
+    // Render the resolver's selected source, including USING coercions, rather than the original spelling.
+    // PostgreSQL rewriteDefine.c:61 persists the transformed tree; these edits serialize that binding
+    // through the existing canonical renderer without adding AST constructors across the assembly boundary.
+    private string RenderViewColumn(int ordinal, IReadOnlyList<SqlCatalogColumn> columns,
+        IReadOnlyList<SqlRelationBinding>? bindings, SqlRelationReference relation, SqlExpressionEvaluator scope, bool merged)
+    {
+        if (merged && scope.MergedColumn(ordinal) is { } output) { return RenderValue(output.Value); }
+        var source = bindings?.First(item => ordinal >= item.Offset && ordinal < item.Offset + item.Source.Columns.Count);
+        var table = source?.Source.Table;
+        relation = source?.Reference ?? relation;
+        if (table is null && bindings is null && relation is SqlTableReference named)
+        { TryReadTable(named.SchemaName ?? DefaultSchema, named.TableName, out table!); }
+        if (table is not null) { RecordViewColumn(new SqlRelationSource(table), ordinal - (source?.Offset ?? 0)); }
+        string qualifier = relation.Alias ?? ((SqlTableReference)relation).TableName;
+        string result = SqlObjectIdentity.Quote(qualifier) + "." + SqlObjectIdentity.Quote(columns[ordinal].Name);
+        return relation is SqlTableReference { Alias: null, SchemaName: { } schema }
+            ? SqlObjectIdentity.Quote(schema) + "." + result : result;
+
+        string RenderValue(SqlBoundExpression value) => value switch
+        {
+            SqlBoundColumn column => RenderViewColumn(column.Ordinal, columns, bindings, relation, scope, merged: false),
+            SqlBoundCast cast => "CAST(" + RenderValue(cast.Operand) + " AS " + cast.TargetText + ")",
+            _ => throw ViewError(ErrorMessages.ViewRoundTrip),
+        };
     }
 
     private void RecordViewColumn(SqlRelationSource source, int ordinal)
     {
         if (ViewDefinitionBinding is not { } binding || source.Table is not { } table) { return; }
         var column = table.Columns[ordinal];
-        binding.Dependencies.Add(SqlObjectIdentity.Column(table.ObjectId, column.Name));
+        string identity = SqlObjectIdentity.Column(table.ObjectId, column.Name);
+        if (binding.Owner is { } owner && !owner.Dependencies.Contains(identity, StringComparer.OrdinalIgnoreCase))
+        { throw new SqlPlanningException("COHSQLE033", string.Format(CultureInfo.CurrentCulture, ErrorMessages.ViewColumnChanged, owner.Schema, owner.Name)); }
+        binding.Dependencies.Add(identity);
         if (column.DomainName is { } domain) { binding.Dependencies.Add(SqlDefinitionBinder.DomainKey(domain)); }
     }
 
-    private void CaptureOuterViewColumn(SqlColumnReferenceExpression reference)
+    private string CaptureOuterViewColumn(SqlColumnReferenceExpression reference)
     {
         for (var outer = OuterScope; outer is not null; outer = outer.Parent)
         {
             int ordinal;
             try { ordinal = outer.Local.ResolveLocalColumn(reference); }
             catch (SqlPlanningException) { continue; }
-            if (outer.Bindings is { } bindings)
-            {
-                var source = bindings.First(item => ordinal >= item.Offset && ordinal < item.Offset + item.Source.Columns.Count);
-                RecordViewColumn(source.Source, ordinal - source.Offset);
-                if (reference.TableAlias is null && outer.Local.MergedColumn(ordinal) is not null)
-                {
-                    foreach (var candidate in bindings)
-                    { for (int i = 0; i < candidate.Source.Columns.Count; i++) { if (candidate.Source.Columns[i].Name.Equals(reference.ColumnName, StringComparison.OrdinalIgnoreCase)) { RecordViewColumn(candidate.Source, i); } } }
-                }
-            }
-            else
-            {
-                var metadata = outer.Local.ColumnMetadata(reference);
-                foreach (var table in ViewImageState?.Snapshot.Tables ?? _catalog.Tables)
-                { for (int i = 0; i < table.Columns.Count; i++) { if (ReferenceEquals(metadata, table.Columns[i])) { RecordViewColumn(new SqlRelationSource(table), i); } } }
-            }
-            return;
+            var bindings = outer.Bindings ?? outer.Local.RelationBindings;
+            return RenderViewColumn(ordinal, outer.Local.Columns, bindings, outer.Local.Relation ?? bindings![0].Reference, outer.Local,
+                reference.TableAlias is null && reference.SchemaName is null);
         }
+        throw ViewError(ErrorMessages.ViewRoundTrip);
     }
 
     private void CaptureViewJoin(SqlExpression expression, IReadOnlyList<SqlRelationBinding> bindings, SqlExpressionEvaluator scope)
     {
-        if (ViewDefinitionBinding is not { } binding) { return; }
-        foreach (var node in SqlViewQuery.Nodes(expression, queries: false))
-        {
-            if (node is SqlCastExpression cast && SqlDefinitionBinder.ResolveType(cast.TargetType, _functions, cast.Location) is { IsDomain: true } domain)
-            { binding.Dependencies.Add(SqlDefinitionBinder.DomainKey(domain.Name)); }
-            if (node is SqlColumnReferenceExpression reference)
-            {
-                int ordinal = scope.ResolveColumn(reference);
-                if (ordinal < 0) { CaptureOuterViewColumn(reference); continue; }
-                var source = bindings.First(item => ordinal >= item.Offset && ordinal < item.Offset + item.Source.Columns.Count);
-                RecordViewColumn(source.Source, ordinal - source.Offset);
-            }
-        }
+        if (ViewDefinitionBinding is null) { return; }
+        CaptureViewExpression(expression, scope.Columns, bindings, bindings[0].Reference, scope);
     }
 
     private void EnsureViewTargetReadOnly(SqlQueryExpression expression)
@@ -272,7 +260,7 @@ internal sealed partial class SqlPlanner
         internal HashSet<ulong> Tables { get; } = new();
         internal HashSet<string> Dependencies { get; } = new(StringComparer.OrdinalIgnoreCase);
         internal SqlViewCallCapture Calls { get; } = new();
-        internal Dictionary<int, string> Stars { get; } = new();
+        internal Dictionary<int, (int Length, string Text)> Edits { get; } = new();
         internal List<SqlTableReference> SystemRelations { get; } = new();
     }
 }

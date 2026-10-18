@@ -19,10 +19,19 @@ public sealed partial class SqlQueryParser
         var pos = lexer.Current.Position;
         Advance(ref lexer); // consume CREATE
 
-        if (IsKeyword(ref lexer, "VIEW") || IsKeyword(ref lexer, "OR") || IsWord(ref lexer, "MATERIALIZED") ||
-            IsWord(ref lexer, "RECURSIVE") || IsWord(ref lexer, "TEMP") || IsWord(ref lexer, "TEMPORARY"))
+        var header = lexer;
+        string modifiers = "";
+        while (IsWord(ref header, "OR") || IsKeywordOrFunction(ref header, "REPLACE") || IsWord(ref header, "MATERIALIZED") ||
+            IsWord(ref header, "RECURSIVE") || IsWord(ref header, "TEMP") || IsWord(ref header, "TEMPORARY"))
         {
-            return ParseCreateView(ref lexer, pos);
+            modifiers += CurrentText(ref header).ToUpperInvariant() + " ";
+            if (!header.MoveNext()) { break; }
+        }
+        if (IsKeyword(ref header, "VIEW")) { return ParseCreateView(ref lexer, pos); }
+        if (modifiers.Length > 0)
+        {
+            RejectIdentityConstruct(ref lexer, "CREATE " + modifiers + CurrentText(ref header).ToUpperInvariant());
+            return new SqlQueryExpression(SqlQueryCommandType.Create, null, Location.Create(1, 1, pos, _lastTokenEnd));
         }
         if (IsWord(ref lexer, "SCHEMA"))
         {

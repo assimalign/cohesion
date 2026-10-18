@@ -217,6 +217,6 @@ internal sealed partial class SqlPlanner
         _ => Convert.ToString(value, CultureInfo.InvariantCulture) ?? "NULL",
     };
 
-    private static string QueryDetail(bool filter, int orderKeys, bool distinct, long? limit, long? offset)
+    private static string QueryDetail(bool filter, int orderKeys, bool distinct, SqlRowCount? limit, SqlRowCount? offset)
         => FormattableString.Invariant($"filter={filter}; order_keys={orderKeys}; distinct={distinct}; limit={limit}; offset={offset}");
 }

@@ -121,7 +121,9 @@ internal sealed partial class SqlPlanner
         }
         var type = kind == SqlSubqueryKind.Exists ? DatabaseType.Boolean : projections[0].Type;
         var collation = kind == SqlSubqueryKind.Exists ? _catalog.DefaultCollation : SubqueryCollation(child);
-        var slot = new SqlSubquerySlot(_subquerySlotCount++, kind, collation, type);
+        var typeInfo = kind == SqlSubqueryKind.Scalar
+            ? BindDerivedOutput(child, "scalar", [], query).Columns[0].Type : (DatabaseTypeInfo?)null;
+        var slot = new SqlSubquerySlot(_subquerySlotCount++, kind, collation, type, typeInfo);
         // The slot keeps the membership element type; the predicate itself produces BOOLEAN.
         _subqueryTypes[source] = kind == SqlSubqueryKind.Scalar ? type : DatabaseType.Boolean;
         _subquerySlots[source] = slot;

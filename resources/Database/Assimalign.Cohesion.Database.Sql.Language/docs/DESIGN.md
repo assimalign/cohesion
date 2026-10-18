@@ -1,5 +1,13 @@
 # Assimalign.Cohesion.Database.Sql.Language — Design
 
+## CREATE modifier dispatch (#1124 review)
+
+CREATE examines the object word after modifiers before choosing the view parser.
+Excluded TEMP/TEMPORARY TABLE and OR REPLACE FUNCTION constructs keep their own
+COHDBL001 names. View input references are serialized from their engine bindings;
+ORDER BY output aliases remain output references. DIALECT.md specifies frozen view
+metadata and isolated bind failures.
+
 ## Parameters (#1102)
 
 SQL follows the [shared parameter contract](../../Assimalign.Cohesion.Database.Language/docs/DESIGN.md#parameter-contract-1102).

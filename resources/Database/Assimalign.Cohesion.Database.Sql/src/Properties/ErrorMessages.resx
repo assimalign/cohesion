@@ -140,4 +140,5 @@
   <data name="StringAggregateTypeHint" xml:space="preserve"><value> Use CAST(... AS TEXT) for non-text inputs; the delimiter must be a string constant or parameter.</value></data>
   <data name="StringAggregateDelimiter" xml:space="preserve"><value>STRING_AGG/LISTAGG delimiter must be a string constant or parameter known at plan time.</value></data>
   <data name="ListaggRequiresWithinGroup" xml:space="preserve"><value>LISTAGG requires WITHIN GROUP (ORDER BY keys) and does not accept an inner ORDER BY.</value></data>
+  <data name="ViewColumnChanged" xml:space="preserve"><value>View '{0}.{1}' cannot be bound because a recorded column identity changed.</value></data>
 </root>

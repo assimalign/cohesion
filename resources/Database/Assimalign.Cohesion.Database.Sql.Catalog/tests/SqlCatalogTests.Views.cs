@@ -13,6 +13,35 @@ namespace Assimalign.Cohesion.Database.Sql.Catalog.Tests;
 
 public partial class SqlCatalogTests
 {
+    [Theory(DisplayName = "Cohesion Test [Sql.Catalog] - Views: publication refuses changing referenced type facets")]
+    [InlineData(DatabaseType.Int32, DatabaseType.Int64, null, null, null, null)]
+    [InlineData(DatabaseType.String, DatabaseType.String, 3, 4, null, null)]
+    [InlineData(DatabaseType.Decimal, DatabaseType.Decimal, 5, 6, 2, 2)]
+    [InlineData(DatabaseType.Decimal, DatabaseType.Decimal, 5, 5, 2, 3)]
+    public async Task PublishTableAsync_ChangedViewColumn_ShouldRefuseBeforePublication(DatabaseType beforeType,
+        DatabaseType afterType, int? beforeSize, int? afterSize, int? beforeScale, int? afterScale)
+    {
+        // Arrange
+        var catalog = new CatalogHarness().Open();
+        await catalog.CreateSchemaAsync(new SqlCatalogNamespace("dbo"), CancellationToken.None);
+        DatabaseTypeInfo Type(DatabaseType type, int? size, int? scale) => type == DatabaseType.Decimal
+            ? new(type, precision: size, scale: scale) : new(type, maxLength: size);
+        var table = await catalog.CreateTableAsync("dbo", "t", [new("id", Type(beforeType, beforeSize, beforeScale))], [], CancellationToken.None);
+        await catalog.CreateViewAsync(new SqlCatalogView("dbo", "dependent_view", "SELECT t.id FROM t", table.Columns,
+            [table.ObjectId], [SqlObjectIdentity.Column(table.ObjectId, "id")], []), cancellationToken: CancellationToken.None);
+        var replacement = new SqlCatalogTable(table.ObjectId, table.Schema, table.Name,
+            [new("id", Type(afterType, afterSize, afterScale))]);
+        ulong generation = catalog.DdlGeneration;
+        // Act
+        var error = await Should.ThrowAsync<SqlCatalogException>(() => catalog.PublishTableAsync(replacement, [], [],
+            replaceExisting: true, cancellationToken: CancellationToken.None).AsTask());
+        // Assert
+        error.Message.ShouldBe("COHSQLD002: Cannot change the object because view 'dbo.dependent_view' depends on it.");
+        catalog.DdlGeneration.ShouldBe(generation);
+        catalog.TryGetTable("dbo", "t", out var retained).ShouldBeTrue();
+        retained.ShouldBeSameAs(table);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Sql.Catalog] - Views: all table publication collision sites protect the shared namespace")]
     public async Task PublishTableAsync_ViewCollision_ShouldRefuseCreateReservePublishAndRename()
     {

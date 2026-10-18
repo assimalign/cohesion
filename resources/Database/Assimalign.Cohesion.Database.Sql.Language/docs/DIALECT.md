@@ -132,7 +132,8 @@ complete ISO SQL support; the boundaries below are part of the contract.
 canonical SELECT or set-operation body. A body can have its own non-recursive WITH,
 subqueries, joins and grouping. Projection `*` is expanded at every query level,
 including derived queries, CTEs and set operands, so later ADD COLUMN does not
-change the view. An explicit column list must match the output count exactly
+change the view. Every input column reference is stored with its bound qualifier;
+rebind rejects a changed C: identity with COHSQLE033. An explicit column list must match the output count exactly
 (the ISO rule); output names must be unique. Parameters are refused at CREATE.
 Bodies receive the same SELECT-subset diagnostics as standalone queries.
 
@@ -144,19 +145,25 @@ ORDER BY, LIMIT and FETCH work over view columns. Each reference materializes
 its body once under the caller's statement snapshot, costing O(body rows);
 there is no merging or predicate pushdown. Body ordering/windowing follows the
 existing derived-body rules. Overloaded functions in ORDER BY expressions use the
-completed projection types when their arguments name output aliases.
+completed projection types when their arguments name output aliases. Those aliases
+are not input dependencies. Cached bodies use scans for table and join inputs;
+LIMIT, OFFSET and FETCH count expressions run once per execution in the current
+statement context.
 
 OR REPLACE retains every existing column's name, order, type, type modifiers,
 domain and collation and permits appended columns only. Incompatible replacement
 and dependency cycles fail atomically. Definitions are parsed once per immutable
 view and bound once per catalog generation; recorded function identities keep a
-later overload from changing a stored call. Output nullability is derived from
-current bound sources, rather than frozen at CREATE.
+later overload from changing a stored call. COLUMNS uses frozen creation-time metadata without binding a body, including full
+length, precision and scale. Query output nullability follows current bound sources.
+A body binding failure affects only reads of that view; it never blocks open,
+unrelated reads, metadata enumeration or DROP VIEW.
 
 INSERT, UPDATE, DELETE, ALTER TABLE, CREATE INDEX and DROP TABLE require a table
 and refuse a view, naming its kind. DROP VIEW refuses a table, including IF EXISTS.
 DROP TABLE and DROP FUNCTION/DOMAIN refuse dependent views; DROP COLUMN and
-RENAME COLUMN refuse columns a view reads. RENAME TABLE also refuses dependents
+RENAME COLUMN refuse columns a view reads. ALTER COLUMN also refuses type, length,
+precision and scale changes on those columns (COHSQLD002). RENAME TABLE also refuses dependents
 because canonical bodies retain textual relation names. DROP SCHEMA RESTRICT
 counts views. DROP SCHEMA CASCADE removes contained views and external views
 that depend on its tables or views. DROP VIEW [IF EXISTS] defaults to RESTRICT;
@@ -167,7 +174,7 @@ Views appear in TABLES (`TABLE_TYPE = 'VIEW'`), COLUMNS, VIEWS and OBJECT_OWNERS
 VIEWS returns canonical VIEW_DEFINITION, CHECK_OPTION `NONE` and IS_UPDATABLE `NO`.
 Session-created views are Adhoc; declared scripts use Schema ownership and atomic
 `V:` publication/absence receipts. View DDL requires auto-commit (COHSQLT003 inside
-an explicit transaction). SQL record-space format **22** adds catalog kind **17**;
+an explicit transaction). SQL record-space format **23** adds catalog kind **17**;
 older formats are refused without an upgrade reader. The complete encoded record,
 including text, columns and dependencies, is limited to **8,092 bytes**; CREATE
 refuses a larger record before publishing anything.
@@ -2677,6 +2684,7 @@ pin in the same change.
 | `COHSQLE029` | Error | CREATE SCHEMA names an existing namespace without IF NOT EXISTS (PostgreSQL SQLSTATE 42P06) |
 | `COHSQLE030` | Error | DROP SCHEMA RESTRICT finds dependent objects; the message offers CASCADE (PostgreSQL SQLSTATE 2BP01) |
 | `COHSQLE031` | Error | DROP SCHEMA targets dbo, which code-first provisioning requires |
+| `COHSQLE033` | Error | Invalid persisted view declaration/replacement, changed recorded column identity, or oversized view record |
 | `COHSQLE032` | Error | DISTINCT/ALL/input ORDER BY on a scalar function, or DISTINCT input ordering whose keys are absent from the arguments (PostgreSQL 42809 / 42P10) |
 
 Positions are absolute character offsets into the statement text; line/column
