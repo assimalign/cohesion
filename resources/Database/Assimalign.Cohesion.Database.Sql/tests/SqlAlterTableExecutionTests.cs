@@ -8,9 +8,11 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Database.Execution;
+using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Sql.Schema;
 using Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
+using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
@@ -224,7 +226,6 @@ public sealed class SqlAlterTableExecutionTests
     [InlineData("ALTER TABLE t RENAME TO t", "COHSQLE013", "Table 'dbo.t' already exists.")]
     [InlineData("ALTER TABLE t RENAME a TO a", "COHSQLE013", "Column 'a' already exists on 't'.")]
     [InlineData("ALTER TABLE t RENAME a TO b", "COHSQLE013", "Column 'b' already exists on 't'.")]
-    [InlineData("CREATE TABLE INFORMATION_SCHEMA.t(a INT)", "COHSQLE021", "System namespace 'INFORMATION_SCHEMA' is read-only.")]
     public async Task ExecuteAsync_Collision_ShouldLeaveCatalogUnchanged(string sql, string code, string message)
     {
         // Arrange
@@ -242,6 +243,35 @@ public sealed class SqlAlterTableExecutionTests
         database.Catalog.DdlGeneration.ShouldBe(generation);
         await ExecuteAsync(session, "INSERT INTO t VALUES (1, 2)");
         (await RowsAsync(session, "SELECT * FROM t"))[0].ShouldBe(new object?[] { 1, 2 });
+    }
+
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - RENAME: the executor refuses a target that is a system view")]
+    public async Task ExecuteAsync_RenameIntoSystemView_ShouldLeaveCatalogUnchanged()
+    {
+        // Arrange: the bare catalog accepts namespace strings independently of SQL admission.
+        // Exercise the executor guard directly, beyond the session's namespace protection.
+        await using var engine = SqlDatabaseEngine.Create("rename-system-view", new());
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        var table = await database.Catalog.CreateTableAsync("INFORMATION_SCHEMA", "staging",
+            [new SqlCatalogColumn("id", new DatabaseTypeInfo(DatabaseType.Int32), true)], [], CancellationToken.None);
+        ulong generation = database.Catalog.DdlGeneration;
+        var transaction = await database.Coordinator.BeginAsync(IsolationLevel.Snapshot, CancellationToken.None);
+        try
+        {
+            // Act
+            var executor = new SqlPlanExecutor(database.DataStorage, database.Catalog, database.IndexManager, database.Definitions);
+            var failure = await Should.ThrowAsync<DatabaseException>(() => executor.ExecuteAsync(
+                new SqlRenamePlan(table, null, "TABLES"), new SqlStatementContext(transaction, database.Coordinator), CancellationToken.None));
+
+            // Assert
+            failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE021");
+            failure.Message.ShouldContain("System view 'INFORMATION_SCHEMA.TABLES' is read-only.", Case.Sensitive);
+            database.Catalog.DdlGeneration.ShouldBe(generation);
+            database.Catalog.TryGetTable("INFORMATION_SCHEMA", "staging", out var unchanged).ShouldBeTrue();
+            unchanged.ShouldBeSameAs(table);
+            database.Catalog.TryGetTable("INFORMATION_SCHEMA", "TABLES", out _).ShouldBeFalse();
+        }
+        finally { await database.Coordinator.RollbackAsync(transaction, CancellationToken.None); }
     }
 
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - ALTER: schema-owned tables retain their DDL protection")]

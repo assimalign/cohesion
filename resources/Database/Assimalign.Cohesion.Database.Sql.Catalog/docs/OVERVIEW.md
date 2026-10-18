@@ -1,11 +1,16 @@
 # Assimalign.Cohesion.Database.Sql.Catalog — Overview
 
-The relational catalog of the SQL model: schemas, tables, columns, and constraints
+The relational catalog of the SQL model: SQL namespaces, tables, columns, and constraints
 (`SqlCatalogTable`/`SqlCatalogColumn`), persisted through the storage kernel so
 metadata gets the same page/WAL durability as data, plus persistence for the
 physical index registrations exported by `Database.Indexing`.
 
 ## Scope
+
+- **SQL namespaces** — immutable `SqlCatalogNamespace` descriptions persist empty namespaces
+  and join statement catalog snapshots. CREATE SCHEMA and DROP SCHEMA are durable catalog
+  publications; CASCADE removes contained tables/indexes and external incoming foreign keys
+  atomically. Namespace ownership is separate from compiled-schema identity.
 
 - **Fixed-length characters** — columns retain Character identity and length; domains and
   function signatures retain CHAR(n). The [current record-space format](../../Assimalign.Cohesion.Database.Sql/docs/DESIGN.md#execution-model)
