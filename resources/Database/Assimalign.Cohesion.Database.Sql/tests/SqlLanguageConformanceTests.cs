@@ -122,8 +122,10 @@ public sealed class SqlLanguageConformanceTests
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - SELECT: audited aggregate forms execute and ungrouped columns fail")]
     [InlineData("COUNT(age)")]
     [InlineData("COUNT(DISTINCT age)")]
+    [InlineData("COUNT(ALL age)")]
     [InlineData("SUM(age)")]
     [InlineData("SUM(DISTINCT age)")]
+    [InlineData("SUM(ALL age)")]
     [InlineData("AVG(age)")]
     [InlineData("MIN(age)")]
     [InlineData("MAX(age)")]
@@ -135,6 +137,7 @@ public sealed class SqlLanguageConformanceTests
         var database = await engine.CreateDatabaseAsync("audit");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         foreach (string setup in _seed) { await ExecuteAsync(session, setup); }
+        await ExecuteAsync(session, "INSERT INTO t VALUES (4, 'Ada', 36);");
         (await RowsAsync(session, "SELECT COUNT(*) FROM t WHERE age > 40;")).ShouldHaveSingleItem()[0].ShouldBe(2L);
         string sql = $"SELECT {projection} FROM t;";
         new SqlQueryParser().Parse(sql).Diagnostics.ShouldNotContain(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
@@ -147,15 +150,18 @@ public sealed class SqlLanguageConformanceTests
         }
         object expected = projection switch
         {
-            "COUNT(age)" or "COUNT(DISTINCT age)" => 3L,
-            "SUM(age)" or "SUM(DISTINCT age)" => 122m,
-            "AVG(age)" => 122m / 3m,
+            "COUNT(age)" or "COUNT(ALL age)" => 4L,
+            "COUNT(DISTINCT age)" => 3L,
+            "SUM(age)" or "SUM(ALL age)" => 158m,
+            "SUM(DISTINCT age)" => 122m,
+            "AVG(age)" => 158m / 4m,
             "MIN(age)" => 36,
             "MAX(age)" => 45,
-            "COUNT(*) + 1" => 4L,
+            "COUNT(*) + 1" => 5L,
             _ => throw new InvalidOperationException($"Missing expected value for {projection}."),
         };
         (await RowsAsync(session, sql)).ShouldHaveSingleItem()[0].ShouldBe(expected);
+        (await RowsAsync(session, $"SELECT {projection} FROM t GROUP BY age - age;")).ShouldHaveSingleItem()[0].ShouldBe(expected);
     }
 
     /// <summary>Applies the full Int64 count range consistently to every materialized SELECT shape.</summary>

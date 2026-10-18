@@ -388,21 +388,27 @@ public sealed class SqlAggregateWireTests
             .ShouldHaveSingleItem()["rows"].ShouldBe(2L);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - Aggregates: DISTINCT and ordered strings retain values and metadata")]
-    public async Task QueryAsync_DistinctAndOrderedStrings_ShouldExecuteOverWire()
+    [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - Aggregates: DISTINCT and ordered strings retain values and metadata")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task QueryAsync_DistinctAndOrderedStrings_ShouldExecuteOverWire(bool grouped)
     {
         // Arrange
         await using var harness = await SqlClientTestHarness.StartAsync();
         await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
         await SeedAsync(connection);
+        await connection.ExecuteAsync("INSERT INTO sales VALUES (8, 'A', 'x', 10, NULL)", cancellationToken: SqlClientTestHarness.Timeout());
         // Act
-        var result = await connection.QueryAsync("SELECT COUNT(DISTINCT amount) AS n, SUM(DISTINCT amount) AS total, STRING_AGG(category, ',' ORDER BY id DESC) AS names FROM sales", cancellationToken: SqlClientTestHarness.Timeout());
+        var result = await connection.QueryAsync("SELECT COUNT(DISTINCT amount) AS n, COUNT(ALL amount) AS all_n, SUM(DISTINCT amount) AS total, SUM(ALL amount) AS all_total, STRING_AGG(category, ',' ORDER BY id DESC) AS names, LISTAGG(DISTINCT category, ',') WITHIN GROUP (ORDER BY category) AS distinct_names FROM sales" + (grouped ? " GROUP BY absent" : ""), cancellationToken: SqlClientTestHarness.Timeout());
         // Assert
         var row = result.ShouldHaveSingleItem();
         row["n"].ShouldBe(4L);
+        row["all_n"].ShouldBe(5L);
         row["total"].ShouldBe(40m);
-        row["names"].ShouldBe("x,y,y,x,y,x,x");
-        result.Columns.Select(column => column.Type).ShouldBe([DatabaseType.Int64, DatabaseType.Decimal, DatabaseType.String]);
+        row["all_total"].ShouldBe(50m);
+        row["names"].ShouldBe("x,x,y,y,x,y,x,x");
+        row["distinct_names"].ShouldBe("x,y");
+        result.Columns.Select(column => column.Type).ShouldBe([DatabaseType.Int64, DatabaseType.Int64, DatabaseType.Decimal, DatabaseType.Decimal, DatabaseType.String, DatabaseType.String]);
     }
 
     private static void AssertAggregateValues(SqlRow row, long rows, long populated, decimal? total,
