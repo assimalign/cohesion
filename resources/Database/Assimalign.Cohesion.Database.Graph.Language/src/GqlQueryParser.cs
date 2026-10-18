@@ -166,6 +166,7 @@ public sealed partial class GqlQueryParser : QueryParser
     private void FindUnsupported()
     {
         int patternDepth = 0;
+        int mapDepth = 0;
         var containers = new Stack<TokenType>();
         int mapSeparatorPosition = -1;
         bool inValueExpression = false;
@@ -186,6 +187,10 @@ public sealed partial class GqlQueryParser : QueryParser
             if (token.Type is TokenType.LeftParen or TokenType.LeftBracket or TokenType.LeftBrace) { patternDepth++; containers.Push(token.Type); }
             if (token.Type is TokenType.RightParen or TokenType.RightBracket or TokenType.RightBrace) { patternDepth--; containers.TryPop(out _); }
 
+            if (token.Type == TokenType.LeftBrace) { mapDepth++; }
+            if (token.Type == TokenType.RightBrace) { mapDepth--; }
+            bool valuePosition = inValueExpression || mapDepth > 0;
+
             // A WHERE/RETURN label expression (n:A|B, n IS [NOT] LABELED A|B) holds label names exactly
             // as a pattern does, so n:A|Order names a label, not ORDER BY.
             if (label != LabelScan.None)
@@ -194,7 +199,7 @@ public sealed partial class GqlQueryParser : QueryParser
                 label = LabelScan.None;
                 labelParens = 0;
             }
-            if (token.Type == TokenType.Colon && inValueExpression && i > 0 &&
+            if (token.Type == TokenType.Colon && valuePosition && i > 0 &&
                 !mapSeparator &&
                 IsVariableLexeme(_tokens[i - 1]))
             {
@@ -205,7 +210,7 @@ public sealed partial class GqlQueryParser : QueryParser
             // expression on an edge ISO gives no filler. The parser reports that (GQL0002); the
             // scan reads the names that follow as labels, so IS is not the unsupported IS clause
             // and -IS Order-> is not ORDER BY.
-            if (patternDepth == 0 && !inValueExpression && FollowsEdgeConnector(i) &&
+            if (patternDepth == 0 && !valuePosition && FollowsEdgeConnector(i) &&
                 (token.Type == TokenType.Colon || IsWordAt(i, "IS")))
             {
                 label = LabelScan.ExpectPrimary;
@@ -214,19 +219,19 @@ public sealed partial class GqlQueryParser : QueryParser
 
             // A tilde edge right after a node pattern is undirected, which the engine cannot
             // store: ~[]~, <~[]~, ~[]~>, ~, <~ and ~> each name one construct.
-            if (token.Type == TokenType.RightParen && patternDepth == 0 && !inValueExpression &&
+            if (token.Type == TokenType.RightParen && patternDepth == 0 && !valuePosition &&
                 TryFindUndirectedEdge(i + 1, out int edgeEnd))
             {
                 UnsupportedConstruct(GqlUnsupportedVocabulary.UndirectedEdge, _tokens[i + 1], _tokens[edgeEnd]);
                 continue;
             }
 
-            if (token.Type is TokenType.Asterisk or TokenType.DotDot && !inValueExpression)
+            if (token.Type is TokenType.Asterisk or TokenType.DotDot && !valuePosition)
             {
                 Unsupported("QUANTIFIED PATTERN OR STAR PROJECTION", token);
                 continue;
             }
-            if (token.Type == TokenType.Tilde && inValueExpression && i > 0 && _tokens[i - 1].Type == TokenType.Equals && Adjacent(i - 1, i))
+            if (token.Type == TokenType.Tilde && valuePosition && i > 0 && _tokens[i - 1].Type == TokenType.Equals && Adjacent(i - 1, i))
             {
                 Unsupported("REGULAR EXPRESSION =~", token);
                 continue;
@@ -272,7 +277,7 @@ public sealed partial class GqlQueryParser : QueryParser
             // tests are scalar predicates (#1140), also available in RETURN (#1141).
             // In a pattern, (n IS A) is a label expression and needs no case
             // here: words inside a pattern are names.
-            if (value == "IS" && inValueExpression)
+            if (value == "IS" && valuePosition)
             {
                 int labeled = IsWordAt(i + 1, "NOT") ? i + 2 : i + 1;
                 if (IsWordAt(labeled, GqlLabelVocabulary.Labeled))
@@ -282,16 +287,16 @@ public sealed partial class GqlQueryParser : QueryParser
                     continue;
                 }
             }
-            if (inValueExpression && token.Type is TokenType.Identifier or TokenType.Function &&
+            if (valuePosition && token.Type is TokenType.Identifier or TokenType.Function &&
                 i + 1 < _tokens.Count && _tokens[i + 1].Type == TokenType.LeftParen &&
                 !GqlUnsupportedVocabulary.TryFind(value, out _) && token.Type != TokenType.Function)
             {
                 Unsupported($"FUNCTION {token.Text}", token);
                 continue;
             }
-            if (value == "WITH" && inValueExpression && i > 0 && (IsWordAt(i - 1, "STARTS") || IsWordAt(i - 1, "ENDS"))) { continue; }
+            if (value == "WITH" && valuePosition && i > 0 && (IsWordAt(i - 1, "STARTS") || IsWordAt(i - 1, "ENDS"))) { continue; }
             if (value == "ALL" && i > 0 && (IsWordAt(i - 1, "RETURN") || IsWordAt(i - 1, "WITH") || _tokens[i - 1].Type == TokenType.LeftParen && i > 1 && _tokens[i - 2].Type == TokenType.Function)) { continue; }
-            if (patternDepth != 0 && !inValueExpression) { continue; }
+            if (patternDepth != 0 && !valuePosition) { continue; }
             if (!GqlUnsupportedVocabulary.TryFind(value, out var word)) { continue; }
 
             bool first = i == 0;
@@ -301,7 +306,7 @@ public sealed partial class GqlQueryParser : QueryParser
             {
                 case GqlWordPosition.PathMode:
                     // TRAIL (a)... is a path mode; trail = (a)... names a path.
-                    if (patternDepth != 0 || inValueExpression || !StartsPathPattern(i + 1, ref end)) { continue; }
+                    if (patternDepth != 0 || valuePosition || !StartsPathPattern(i + 1, ref end)) { continue; }
                     break;
                 case GqlWordPosition.BeforeDelete:
                     if (!IsWordAt(i + 1, "DELETE")) { continue; }
@@ -310,7 +315,7 @@ public sealed partial class GqlQueryParser : QueryParser
                 case GqlWordPosition.EdgePattern:
                     continue;
                 default:
-                    if (value is "ALL" or "ANY" or "SHORTEST" && !inValueExpression &&
+                    if (value is "ALL" or "ANY" or "SHORTEST" && !valuePosition &&
                         TryPathSearchPrefix(i, out string prefix, out int last))
                     {
                         // One path search prefix, with its path mode and PATH/PATHS, not ALL

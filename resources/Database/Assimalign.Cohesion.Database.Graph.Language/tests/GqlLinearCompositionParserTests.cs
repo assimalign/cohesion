@@ -27,6 +27,7 @@ public sealed class GqlLinearCompositionParserTests
     [InlineData("LET for = 1, next = 2 RETURN for, next", "Let,Return")]
     [InlineData("MATCH (for {next: 1, for: 2}) RETURN for.next AS next", "Match,Return")]
     [InlineData("MATCH (next) FILTER next:Order RETURN next", "Match,Filter,Return")]
+    [InlineData("FOR x IN [1] INSERT (:P {k:x * 2})", "For,Insert")]
     [InlineData("EXPLAIN LET x = 1 RETURN x", "Let,Return")]
     public void Parse_LinearStatement_ShouldPreserveStageOrder(string source, string expected)
     {
@@ -43,6 +44,7 @@ public sealed class GqlLinearCompositionParserTests
     [Theory(DisplayName = "Cohesion Test [Graph.Language] - Linear composition: excluded and malformed forms retain precise diagnostics")]
     [InlineData("FOR x IN $xs WITH ORDINALITY i RETURN x, i", "COHDBL001", "FOR ORDINALITY/OFFSET SUFFIX")]
     [InlineData("FOR x IN $xs WITH OFFSET i RETURN x, i", "COHDBL001", "FOR ORDINALITY/OFFSET SUFFIX")]
+    [InlineData("FOR x IN [1] INSERT (:P {k:abs(x)})", "COHDBL001", "FUNCTION abs")]
     [InlineData("LET next = abs(1) RETURN next", "COHDBL001", "FUNCTION abs")]
     [InlineData("LET next=1 LET x=next + abs(1) RETURN x", "COHDBL001", "FUNCTION abs")]
     [InlineData("LET x = abs(1) RETURN x", "COHDBL001", "FUNCTION abs")]

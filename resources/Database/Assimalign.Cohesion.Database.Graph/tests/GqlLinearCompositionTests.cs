@@ -18,6 +18,7 @@ public sealed class GqlLinearCompositionTests
     [Theory(DisplayName = "Cohesion Test [Graph] - Composition: values, filters, fan-out and boundaries share one binding table")]
     [InlineData("LET x = NULL RETURN x", "null")]
     [InlineData("LET x = 1, y = x + 1 RETURN y", "2")]
+    [InlineData("FOR x IN [1] INSERT (:P {k:x * 2}) MATCH (p:P) RETURN p.k", "2")]
     [InlineData("LET x = 1 FILTER UNKNOWN RETURN x", "")]
     [InlineData("LET x = 1 FILTER WHERE x = 1 RETURN x", "1")]
     [InlineData("FOR x IN [1,2] RETURN x", "1,2")]
