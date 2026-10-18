@@ -8,7 +8,8 @@ without disposing anything. The verification process reopens storage, reads
 the original nested JSON, checks the partial document is absent, and executes
 an indexed parameterized OQL aggregate and an IS MISSING projection that checks IsMissing,
 IsNull and GetValue remain distinct. Assertions fail the executable with a
-nonzero exit. The fixture uses no reflection and can be published with NativeAOT.
+nonzero exit. COUNT verification requires an Int64 long (#1137), including indexed DELETE checks.
+The fixture uses no reflection and can be published with NativeAOT.
 
 The process boundary forces recovery from persisted files, independently of
 in-process cleanup. A separate identity receives a committed whole-document UPSERT and an

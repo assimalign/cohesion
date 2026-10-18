@@ -264,9 +264,16 @@ public sealed partial class OqlQueryParser : QueryParser
             if (openQuantifiers == 0 && value is "DISTINCT" or "ALL")
             {
                 if (index == selectHead + 1) { continue; }
-                string construct = index > 1 && _tokens[index - 1].Type == TokenType.LeftParen &&
-                    _tokens[index - 2].Type == TokenType.Function
+                bool function = index > 1 && _tokens[index - 1].Type == TokenType.LeftParen &&
+                    (_tokens[index - 2].Type == TokenType.Function ||
+                        OqlUnsupportedVocabulary.TryFind(_tokens[index - 2].Text.ToUpperInvariant(), out var unsupportedFunction) &&
+                        unsupportedFunction.Position == OqlWordPosition.Function);
+                string construct = function
                     ? _tokens[index - 2].Text.ToUpperInvariant() + "(" + value + ")" : value;
+                // A deferred function was already recognized at its name. Its quantifier
+                // refines that one construct rather than adding a second refusal.
+                if (function && result.Count > 0 && result[^1].Item2.Start == _tokens[index - 2].Start)
+                { result.RemoveAt(result.Count - 1); }
                 _diagnostics.Add(QueryDiagnostics.UnsupportedClause(construct, Profile.Language, Span(token, token)));
                 break;
             }
@@ -462,7 +469,7 @@ public sealed partial class OqlQueryParser : QueryParser
     /// <c>name IN</c>, as in <c>EVERY x IN c.items</c> or ODMG's <c>FOR ALL x IN c.items</c>.
     /// </summary>
     private bool IsQuantifierBinding(int index) => index + 1 < _tokens.Count &&
-        _tokens[index].Type is TokenType.Identifier or TokenType.QuotedIdentifier &&
+        _tokens[index].Type is TokenType.Identifier or TokenType.QuotedIdentifier or TokenType.Function &&
         IsWord(_tokens[index + 1], "IN");
 
     /// <summary>

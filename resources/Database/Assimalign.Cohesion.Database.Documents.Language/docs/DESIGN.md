@@ -73,12 +73,57 @@ Lexical recognition preserves the established vocabulary so rejected constructs 
 | `UNNEST` | No (pin) | SQL++ array expansion in `FROM`; oql-arrays flips the pin |
 | `EVERY ... SATISFIES` | No (pin) | SQL++ quantified predicate, also opened by `ANY` and `SOME`; oql-arrays flips the pin |
 
-Callable functions are `META` and the aggregates `COUNT`, `SUM`, `AVG`, `MIN`, and `MAX`. Each aggregate takes one expression;
-`COUNT(*)` also counts documents. Aggregate placement, grouping consistency, and value semantics
-are validated by the Documents planner/executor. `EXISTS`,
-collection constructors/quantifiers, `ABS`, and other reserved but unimplemented
-operations produce `COHDBL001`. Unknown function calls likewise produce `COHDBL001` naming the
-function. Retired ODMG constructs remain recognized only to produce deliberate diagnostics.
+`OqlFunctions.All` is the public, immutable function table consumed by the parser, profile
+and engine. It classifies scalar versus aggregate calls, argument counts and kinds, and static
+result types. The profile derives its function tokens from this table; names remain usable as fields.
+In this table, **propagate** means MISSING wins over NULL; a wrong-kind stored value gives NULL,
+while an incompatible literal kind fails planning before document access. **Selected** means the
+result has the selected argument's type. Conditional functions evaluate only through the selected
+argument. Aggregate placement and grouped scalar arguments are validated by the planner.
+
+| Name | Arity | Result type | NULL / MISSING rule |
+| --- | --- | --- | --- |
+| META | 0..1 | Metadata members | [#1131](#insert-and-metadata-1131): only .id and .version |
+| COUNT | 1, including * | Int64 | Skip both; * counts documents; empty input gives 0 |
+| SUM, AVG | 1 | Decimal | Skip both; empty valued input gives NULL |
+| MIN, MAX | 1 | Argument type | Skip both; empty valued input gives NULL |
+| LOWER, UPPER | 1 | String | Propagate |
+| LENGTH | 1 | Int64 | Propagate |
+| SUBSTR | 2..3 | String | Propagate |
+| POSITION | 2 | Int64 | Propagate |
+| CONTAINS, STARTS_WITH, ENDS_WITH | 2 | Boolean | Propagate |
+| REPLACE | 3..4 | String | Propagate; optional integer count |
+| TRIM | 1..2 | String | Propagate |
+| CONCAT | 2..N | String | Propagate |
+| ABS | 1 | Decimal | Propagate |
+| ROUND, TRUNC | 1..2 | Decimal | Propagate |
+| FLOOR, CEIL | 1 | Decimal | Propagate |
+| POWER | 2 | Decimal | Propagate |
+| SQRT | 1 | Decimal | Propagate |
+| NOW_STR | 0 | String | No inputs |
+| NOW_MILLIS | 0 | Int64 | No inputs |
+| STR_TO_MILLIS | 1 | Int64 | Propagate; invalid date gives NULL |
+| MILLIS_TO_STR | 1 | String | Propagate; out-of-range date gives NULL |
+| TYPE | 1 | String | Return 'null' or 'missing' for those values |
+| IS_ARRAY, IS_OBJECT, IS_STRING, IS_NUMBER, IS_BOOLEAN | 1 | Boolean | Propagate |
+| ARRAY_LENGTH | 1 | Int64 | Propagate; non-array gives NULL |
+| ARRAY_CONTAINS | 2 | Boolean | Propagate; non-array gives NULL |
+| COALESCE, IFMISSINGORNULL | 2..N | Selected | First neither NULL nor MISSING; otherwise NULL |
+| IFMISSING | 2..N | Selected | First non-MISSING, including NULL; otherwise NULL |
+| IFNULL | 2..N | Selected | First non-NULL, including MISSING; otherwise NULL |
+
+The conditional rules follow [Couchbase](https://docs.couchbase.com/server/current/n1ql/n1ql-language-reference/condfununknown.html).
+ARRAY_AGG, REGEXP_LIKE, REGEXP_REPLACE and REGEXP_POSITION are deliberately deferred and report
+one COHDBL001 in call position. Unknown function names instead report OQL0008 after their
+arguments are parsed, avoiding secondary syntax diagnostics. Retired ODMG constructs retain
+their positional refusals. Calls never become planner constants or index seek bounds, and
+INSERT/UPSERT VALUES continues to reject calls.
+
+REPLACE's optional fourth argument limits replacement to the first n nonoverlapping occurrences;
+an omitted or negative count replaces all, following the
+[Couchbase string-function contract](https://docs.couchbase.com/server/current/n1ql/n1ql-language-reference/stringfun.html#replace).
+A fractional count gives the engine type diagnostic COHDOC008. Plain arity errors name only
+the invalid count; the OQL0006 COUNT-star explanation appears only for an actual star operand.
 
 ### Projection semantics (#1128)
 
@@ -91,7 +136,10 @@ After AS, a projection label accepts reserved words, following PostgreSQL ColLab
 their positional capability refusal everywhere except directly after a clause-head SELECT (and after a dot).
 A property or projection label named select does not open a SELECT clause. The AS-label exemption
 applies only within a SELECT list; reserved unsupported FROM and INSERT aliases retain COHDBL001.
-COUNT(DISTINCT x) remains one COHDBL001 naming COUNT(DISTINCT). ARRAY comprehensions, computed
+COUNT(DISTINCT x) remains one COHDBL001 naming COUNT(DISTINCT). Function-position names in the
+recognized-unsupported table receive that same single refusal for DISTINCT/ALL:
+ARRAY_AGG(DISTINCT x) and ARRAY_AGG(ALL x) name ARRAY_AGG(DISTINCT) and ARRAY_AGG(ALL).
+ARRAY comprehensions, computed
 member names, IN's array form and path access on constructor results remain deferred.
 Member colons remain delimiters even without whitespace: `{a:DISTINCT}` receives the positional
 capability refusal, while `:distinct` in an operand keeps the parameter-form syntax diagnostic.
@@ -130,7 +178,7 @@ a name:
   uses that name when followed by the end or a following clause; `FROM c RETURNING *` leaves
   RETURNING for the capability rejection. This positional check keeps a real trailing clause
   at COHDBL001 without treating positional INTO or KEY as preceding operands. VALUE is reserved for projection and INSERT binding syntax.
-- **Function** (`ELEMENT`, `FLATTEN`, `LISTTOSET`, `STRUCT`, `LIST`, `BAG`, `TYPEOF`, and `ABS`):
+- **Function** (`ELEMENT`, `FLATTEN`, `LISTTOSET`, `STRUCT`, `LIST`, `BAG`, `TYPEOF`, `ARRAY_AGG`, and the deferred REGEXP functions):
   only immediately before `(`. Elsewhere these spellings are ordinary identifiers.
 - **Quantifier**: `EVERY`, `ANY` or `SOME` followed by `name IN` opens a quantified predicate.
   It is one construct named `EVERY ... SATISFIES` (or `ANY`/`SOME`), up to its `END`. Its binding
@@ -380,7 +428,9 @@ The keyword-disposition corpus covers these identifiers both with and without th
 | `OQL0003` | Unterminated quoted text or block comment |
 | `OQL0004` | Malformed numeric literal (decimal-domain refusals belong to the engine's `COHDOC007`) |
 | `OQL0005` | Expression nesting exceeds the supported depth |
-| `OQL0006` | Invalid aggregate argument count or star operand |
+| `OQL0006` | Invalid function argument count or star operand; only COUNT accepts * |
+| `OQL0007` | Reserved for LIMIT/OFFSET (#1129) |
+| `OQL0008` | Unknown function name, reported once at its name after argument parsing |
 
 Every error has an absolute start/end span and source line. End-of-input errors use the source
 length for both offsets. A line breaks at LF, CR, NEL (U+0085), LS (U+2028) or PS (U+2029), and
@@ -555,12 +605,9 @@ NativeAOT compatible.
 
 Profile.Functions is the executable built-in set, checked by the engine's one function-
 coverage guard: every declared name has a passing live case and every live case has a
-declared name. OQL declares META, COUNT, SUM, AVG, MIN and MAX; the retired ODMG declarations
-and their temporary guard exemptions are gone. ABS remains recognized by its unsupported
-table, and parser/planner membership checks read the profile.
-
-ABS now lexes as an identifier and its unsupported-table position matches calls only:
-`ABS(value)` reports COHDBL001 while a field named `abs` remains a path expression.
+declared name. OQL declares META, the five aggregates and 34 SQL++ scalars (#1137); the retired
+ODMG declarations and their temporary guard exemptions are gone. ABS is executable and leaves
+the recognized-unsupported table and keyword corpus. The function table is the declaration source.
 
 The root DatabaseException.Diagnostics carrier preserves the complete parser list at text
 factories and session boundaries, including parsed typed requests. DatabaseParseException

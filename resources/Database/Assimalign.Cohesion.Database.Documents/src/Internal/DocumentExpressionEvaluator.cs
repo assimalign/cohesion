@@ -16,6 +16,7 @@ internal sealed partial class DocumentExpressionEvaluator
 {
     private readonly string? _alias;
     private readonly string? _writeVerb;
+    private readonly DateTimeOffset? _transactionStart;
     private int _constructorMaxDepth = 256;
     private readonly CancellationToken _cancellationToken;
     private readonly Dictionary<OqlLikeExpression, int[]> _likePatterns = new();
@@ -28,10 +29,12 @@ internal sealed partial class DocumentExpressionEvaluator
     /// <param name="parameters">The OQL parameter values, or <see langword="null"/> when the statement supplies none.</param>
     /// <param name="cancellationToken">The statement cancellation token.</param>
     /// <param name="writeVerb">INSERT or UPSERT when constructors target the storage depth limit; otherwise null.</param>
-    public DocumentExpressionEvaluator(string? alias, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken = default, string? writeVerb = null)
+    /// <param name="transactionStart">The UTC instant captured before the executing transaction began.</param>
+    public DocumentExpressionEvaluator(string? alias, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken = default, string? writeVerb = null, DateTimeOffset? transactionStart = null)
     {
         _alias = alias;
         _writeVerb = writeVerb;
+        _transactionStart = transactionStart;
         _cancellationToken = cancellationToken;
         _parameters = parameters;
     }
@@ -58,7 +61,7 @@ internal sealed partial class DocumentExpressionEvaluator
                 OqlBetweenExpression between => Between(between, document, group),
                 OqlLikeExpression like => Like(like, document, group),
                 OqlCaseExpression conditional => Case(conditional, document, group),
-                OqlCallExpression call => Aggregate(call, group ?? throw new DocumentPlanningException("COHDOC001", "An aggregate requires a grouping context.")),
+                OqlCallExpression call => Call(call, document, group),
                 _ => throw new DocumentPlanningException("COHDOC001", "The OQL expression is not executable."),
             };
         }
@@ -304,9 +307,9 @@ internal sealed partial class DocumentExpressionEvaluator
     private object? Aggregate(OqlCallExpression call, IReadOnlyList<DocumentEvaluationContext> group)
     {
         if (call.Arguments.Count != 1) { throw new DocumentPlanningException("COHDOC001", $"OQL aggregate '{call.Name}' requires one argument."); }
-        if (call.Name == "COUNT" && call.Arguments[0] is OqlStarExpression) { return (decimal)group.Count; }
+        if (call.Name == "COUNT" && call.Arguments[0] is OqlStarExpression) { return (long)group.Count; }
         var values = group.Select(document => Evaluate(call.Arguments[0], document)).Where(value => value is not null and not DocumentMissing).ToArray();
-        if (call.Name == "COUNT") { return (decimal)values.Length; }
+        if (call.Name == "COUNT") { return (long)values.Length; }
         if (values.Length == 0) { return null; }
         return call.Name switch
         {
@@ -318,7 +321,8 @@ internal sealed partial class DocumentExpressionEvaluator
         };
     }
 
-    private static decimal Number(object value) => value is decimal number ? number : throw new DocumentPlanningException("COHDOC008", "OQL arithmetic requires numeric operands.");
+    private static decimal Number(object value) => value switch { decimal number => number, long number => number,
+        _ => throw new DocumentPlanningException("COHDOC008", "OQL arithmetic requires numeric operands.") };
     private static bool SameScalarKind(object left, object right) => Kind(left) == Kind(right) && Kind(left) is >= 1 and <= 3;
 
     // Total order for grouping and sorting. Predicates only compare ranges within
@@ -345,7 +349,7 @@ internal sealed partial class DocumentExpressionEvaluator
         DocumentMissing => -1,
         null => 0,
         bool => 1,
-        decimal => 2,
+        decimal or long => 2,
         string => 3,
         JsonElement { ValueKind: JsonValueKind.Array } => 4,
         JsonElement { ValueKind: JsonValueKind.Object } => 5,

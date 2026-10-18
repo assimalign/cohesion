@@ -13,6 +13,41 @@ omitted from result objects, while explicit null members remain null. Grouping k
 states separate; ascending order puts MISSING before NULL and descending reverses that order.
 NIL is a NULL synonym; UNDEFINED is reserved and rejected.
 
+The [function table](DESIGN.md#supported-clause-matrix) declares META, five aggregates and 34
+SQL++ scalar functions (#1137). Scalars execute in projections, WHERE, GROUP BY, HAVING, ORDER BY,
+UPDATE expressions and INSERT/UPSERT SELECT; VALUES remains constant-only. Unknown calls report
+OQL0008 and invalid arities report OQL0006. ARRAY_AGG and the deferred REGEXP functions retain
+COHDBL001. Function tokens stay usable as fields and iteration aliases.
+
+LENGTH counts Unicode scalars. SUBSTR and POSITION use zero-based code-point positions;
+POSITION returns -1 for no match. SUBSTR permits a negative start from the end, clamps starts
+to the string, and returns NULL for a negative length or fractional index. String predicates
+compare ordinally; LOWER/UPPER use invariant case conversion. TRIM defaults to SQL++ whitespace:
+space, tab, newline, form feed and carriage return, diverging from SQL's space-only default.
+Its optional second argument is a set of code points. Empty REPLACE patterns leave text unchanged.
+REPLACE accepts an optional fourth integer argument n and replaces the first n occurrences;
+omitting n or using any negative integer replaces all, as
+[Couchbase documents](https://docs.couchbase.com/server/current/n1ql/n1ql-language-reference/stringfun.html#replace).
+Zero replaces none; a fractional count gives COHDOC008.
+Constructed string results and work buffers are capped at 1,048,576 UTF-16 units; inputs are
+not capped. LENGTH, searching, string predicates and SUBSTR scan without input-sized buffers,
+and loops observe cancellation at least every 1,024 iterations.
+ROUND uses half-away-from-zero for exact numbers, with negative scales; TRUNC rounds toward zero.
+SQRT of a negative number and invalid POWER domains give COHDOC019; overflow gives COHDOC007.
+Fractional ROUND/TRUNC scales give COHDOC019. SQRT and nonintegral POWER use BCL double
+calculations converted through the double's shortest round-trip representation to the decimal
+scalar domain, retaining full double precision; integral POWER uses decimal arithmetic.
+
+Dates use UTC ISO strings `yyyy-MM-ddTHH:mm:ss.fffZ` and Int64 epoch milliseconds. STR_TO_MILLIS
+accepts `yyyy-MM-dd` and date plus `T` or space, `HH:mm:ss`, optional 1..7 fractional digits and
+optional `Z` or numeric offset. Zone-less inputs mean UTC; invalid inputs and out-of-range epoch
+values give NULL. T1 has no format-string argument. NOW_STR/NOW_MILLIS share the transaction-start
+instant across every row and statement; autocommit captures one instant for the statement.
+COUNT, LENGTH, POSITION and ARRAY_LENGTH return long values and Int64 column metadata, including
+empty grouped results. Epoch-millisecond functions also return Int64. Other numeric scalars use Decimal.
+Mixed Int64/Decimal projection columns promote to Decimal; numeric cells in heterogeneous columns
+also use Decimal so embedded and wire values agree. Uniform Int64 columns retain long values.
+
 `[NOT] IN (a, b)`, `[NOT] BETWEEN a AND b`, `[NOT] LIKE pattern [ESCAPE c]` and searched/simple
 CASE execute in projections, filters, grouping and aggregate arguments. IN compares list
 items structurally; parentheses always mean a value list, even for one array-valued item.

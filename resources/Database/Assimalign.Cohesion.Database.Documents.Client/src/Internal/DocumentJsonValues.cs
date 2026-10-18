@@ -5,6 +5,7 @@ using System.Globalization;
 using System.Text.Json;
 
 using Assimalign.Cohesion.Database.Protocol;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Documents.Client.Internal;
 
@@ -28,13 +29,14 @@ internal static class DocumentJsonValues
         return buffer.WrittenSpan.ToArray();
     }
 
-    internal static object? Read(JsonElement json) => json.ValueKind switch
+    internal static object? Read(JsonElement json, DatabaseType type) => json.ValueKind switch
     {
         JsonValueKind.Null => null,
         JsonValueKind.True => true,
         JsonValueKind.False => false,
         JsonValueKind.String => json.GetString(),
-        JsonValueKind.Number when json.TryGetDecimal(out var number) => number,
+        JsonValueKind.Number when type == DatabaseType.Int64 && json.TryGetInt64(out long integer) => integer,
+        JsonValueKind.Number when type != DatabaseType.Int64 && json.TryGetDecimal(out var number) => number,
         JsonValueKind.Object or JsonValueKind.Array => json.Clone(),
         _ => throw new ProtocolException(ErrorMessages.JsonScalarInvalid),
     };

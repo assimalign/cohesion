@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using Assimalign.Cohesion.Database.Documents.Catalog;
 using Assimalign.Cohesion.Database.Documents.Language;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Documents.Internal;
 
@@ -23,7 +24,7 @@ internal sealed record DocumentCreateCollectionPlan(OqlCreateCollectionExpressio
 internal sealed record DocumentDropCollectionPlan(OqlDropCollectionExpression Statement) : DocumentStatementPlan;
 internal sealed record DocumentCreateIndexPlan(DocumentCollectionMetadata Collection, string IndexName, string Path) : DocumentStatementPlan;
 internal sealed record DocumentDropIndexPlan(DocumentCollectionMetadata Collection, string IndexName) : DocumentStatementPlan;
-internal sealed record DocumentProjection(string Name, OqlExpression Expression);
+internal sealed record DocumentProjection(string Name, OqlExpression Expression, DatabaseType Type);
 internal abstract record DocumentAccessPath;
 internal sealed record DocumentScanPath : DocumentAccessPath;
 internal sealed record DocumentIndexPath(DocumentIndexMetadata Index, DocumentSeekBound? Lower, DocumentSeekBound? Upper) : DocumentAccessPath;

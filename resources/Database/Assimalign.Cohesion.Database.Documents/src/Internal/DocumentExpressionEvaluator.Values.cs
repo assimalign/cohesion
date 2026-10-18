@@ -12,6 +12,7 @@ internal sealed partial class DocumentExpressionEvaluator
     {
         null or DocumentMissing or bool => value,
         decimal number => number != 0,
+        long number => number != 0,
         string text => text.Length > 0,
         JsonElement { ValueKind: JsonValueKind.Array } array => array.GetArrayLength() > 0,
         JsonElement { ValueKind: JsonValueKind.Object } obj => obj.GetPropertyCount() > 0,

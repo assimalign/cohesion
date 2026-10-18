@@ -369,6 +369,7 @@ public sealed class DocumentDatabaseSession : DatabaseLanguageSession<DocumentQu
 
         _database.EnsureNotDisposed();
         _database.ThrowIfOffline();
+        var transactionStart = (_database.Engine.EngineOptions.TimeProvider ?? TimeProvider.System).GetUtcNow();
         TransactionContext context;
         try
         {
@@ -386,7 +387,7 @@ public sealed class DocumentDatabaseSession : DatabaseLanguageSession<DocumentQu
             throw reported;
         }
 
-        return new DocumentDatabaseTransaction(_database.Coordinator, context, _database);
+        return new DocumentDatabaseTransaction(_database.Coordinator, context, _database, transactionStart);
     }
 
     /// <inheritdoc />

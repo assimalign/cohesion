@@ -257,7 +257,7 @@ public sealed class DocumentInsertTests
         var objectGroups = await RowsAsync(session, "SELECT {'category': category} AS key, COUNT(*) AS n FROM items GROUP BY {'category': category} ORDER BY n DESC");
         objectGroups.Count.ShouldBe(3);
         objectGroups[0][0].ShouldBeOfType<JsonElement>().GetProperty("category").GetString().ShouldBe("a");
-        objectGroups[0][1].ShouldBe(3m);
+        objectGroups[0][1].ShouldBe(3L);
         var grouped = await RowsAsync(session, "SELECT META(d).id AS id, MAX(META(d).version) AS v FROM items d GROUP BY META(d).id ORDER BY id");
         grouped.SelectMany(row => row).ShouldBe(rows.SelectMany(row => row));
         ulong previous = 0;

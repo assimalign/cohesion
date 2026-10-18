@@ -82,6 +82,7 @@ internal static class DocumentJsonValue
             case null: writer.WriteNullValue(); break;
             case bool boolean: writer.WriteBooleanValue(boolean); break;
             case decimal number: writer.WriteNumberValue(number); break;
+            case long number: writer.WriteNumberValue(number); break;
             case string text: writer.WriteStringValue(text); break;
             case JsonElement json: json.WriteTo(writer); break;
             default: throw new DocumentPlanningException("COHDOC008", writeVerb is null ? ErrorMessages.JsonScalarInvalid :

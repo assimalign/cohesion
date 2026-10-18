@@ -111,9 +111,11 @@ connection remains usable. `IsDocumentQuery` means one bare JSON value per frame
 `Documents` holds owned `JsonElement` values in that case; positional queries leave it empty.
 Bare-value rows contain the same owned JsonElement as Documents, including scalar and constructed values;
 the row also owns the original frame bytes for GetBytes.
-Projected rows expose JSON numbers as `decimal`, strings, booleans, null, and nested object/array values as
-owned `JsonElement`. Projected Document-frame objects omit MISSING members and retain explicit
-null members (for example, `"x":null`). The header supplies each column's ordinal even when its member is omitted.
+Projected rows expose JSON numbers as `long` when the header column type is Int64, otherwise `decimal` (#1137), strings, booleans, null, and nested object/array values as
+owned `JsonElement`. Mixed Int64/Decimal columns promote to Decimal in the engine; numeric cells
+in heterogeneous columns use decimal as well, preserving embedded/client value equality.
+Projected Document-frame objects omit MISSING members and retain explicit null members
+(for example, `"x":null`). The header supplies each column's ordinal even when its member is omitted.
 `DocumentRow` is a sealed DatabaseRow leaf with SupportsMissing true: IsMissing distinguishes
 omission from explicit NULL, IsNull is false for MISSING, and GetValue/indexers return null
 for either. An internal undefined JsonElement marks absence without crossing an assembly
@@ -204,6 +206,8 @@ serialization, dynamic activation or runtime code generation. The NativeAOT samp
 and uses project-local `PublishAot=true`. Publish with `-c Release -r win-arm64` locally (Visual
 Studio Installer on PATH), or `linux-x64` in the shared Database NativeAOT CI job. Both publish
 analysis and execution of the published binary are gates; IL2xxx/IL3xxx warnings fail CI.
+The sample executes every scalar category and verifies code-point LENGTH and Int64 COUNT over
+both InMemory and TCP (#1137), alongside the existing advertised-clause checks.
 
 Documents.Client is inventoried and built in the Database workflow, but remains NuGet-only like
 Graph.Client. Documents.Security remains deferred. Transactions, remote database administration,

@@ -259,6 +259,7 @@ Message contains no code prefix. The Documents family is `COHDOCnnn`:
 | `COHDOC016` | Invalid UPDATE target or an incompatible object/array shape or index |
 | `COHDOC017` | UPDATE targets duplicate or prefix-overlap after alias normalization |
 | `COHDOC018` | UPDATE produces invalid stored JSON or exceeds storage's 128-level depth |
+| `COHDOC019` | A scalar function argument is outside its domain (SQRT, POWER or a fractional ROUND/TRUNC scale) |
 
 `DocumentQueryRequest.FromOql` and a directly constructed typed query with parse errors
 throw `DatabaseParseException` carrying the complete, ordered parser diagnostics and the
@@ -321,6 +322,65 @@ throw `DatabaseException` with `System collection '<canonical source>' is read-o
 before ordinary catalog lookup or mutation. Virtual sources do not provide mutable `DocumentCollection` handles.
 
 ### Stored document queries
+
+#### SQL++ functions and transaction clock (#1137)
+
+Documents.Language's public immutable OqlFunctions table owns the 40 executable names (META,
+five aggregates and 34 scalars), arities, kind constraints, aggregate classification and static
+result types. There is no duplicate engine table or new visibility grant. Scalar validation
+passes aggregate permission into its arguments, while aggregates forbid nested aggregates.
+Grouping equivalence is checked before recursing through scalar arguments, so GROUP BY LOWER(x)
+and UPPER(MIN(x)) bind correctly. Literal kinds, including JsonElement numbers and unary minus,
+fail during planning; incompatible stored kinds yield NULL. Ordinary functions propagate MISSING
+before NULL. TYPE and the four short-circuit conditional functions have the explicit rules in
+the language table. Calls stay excluded from IsConstant and VALUES and cannot become seek bounds.
+
+NOW_STR and NOW_MILLIS follow PostgreSQL's transaction-start rule. The engine captures one UTC
+instant through EngineOptions.TimeProvider ?? TimeProvider.System before Coordinator.BeginAsync,
+on explicit begin or an autocommit statement. The transaction and operation carry it independently
+of Context, which ReadCommitted repins per statement. All five executing evaluator sites receive
+it; clock-less validation/constant evaluators cannot evaluate calls. This aligns the internal seam
+with SQL (#1120), adding no public option. Date conversion uses invariant TryParseExact with
+AssumeUniversal; renderings use UTC Z and millisecond precision. Supported ISO inputs and the
+T1 no-format-argument boundary are recorded in DIALECT. Out-of-range epoch dates return NULL.
+The [Couchbase date reference](https://docs.couchbase.com/server/current/n1ql/n1ql-language-reference/datefun.html)
+supplies the string/epoch forms; the transaction clock is the recorded PostgreSQL default.
+
+String positions and lengths count code points; predicates compare ordinally and case conversion
+is invariant. SQL shares code-point LENGTH/POSITION, invariant case conversion, empty REPLACE and
+half-away-from-zero ROUND. OQL's divergence is zero-based SUBSTR/POSITION and -1 for no match,
+versus SQL's one-based positions and zero for no match. Results/work buffers are bounded to
+1,048,576 UTF-16 units, with cancellation at least every 1024 loop iterations. Inputs have no
+function-size cap: LENGTH, POSITION, CONTAINS, STARTS_WITH, ENDS_WITH and SUBSTR scan directly.
+Ordinal searching uses PostgreSQL's fixed-size skip-table approach
+(src/backend/utils/adt/varlena.c:1004-1070,1233-1271), with UTF-16 comparisons and cancellation
+inside both pattern preparation and matching. TRIM's omitted character set is SQL++ whitespace
+(space, tab, newline, form feed and carriage return), unlike SQL's space-only default; its input
+scan is streamed and its distinct trim-character set is bounded. OQL rounds exact digits with
+remainders. ROUND/TRUNC support negative scales and bound extreme scales before rounding
+(PostgreSQL src/backend/utils/adt/numeric.c:1548-1577 also bounds scale). SQRT rejects
+negative arguments with COHDOC019, following PostgreSQL src/backend/utils/adt/float.c:1492-1495;
+POWER invalid domains use that code too. Overflow retains COHDOC007 and division by zero COHDOC006.
+SQRT and fractional POWER preserve the BCL double result through its shortest round-trip
+representation when converting to the decimal scalar domain, avoiding the decimal cast's
+15-significant-digit rounding. Nonfinite or overflowing results retain COHDOC007.
+A function error inside an explicit transaction aborts it through the existing statement bracket.
+REPLACE accepts a fourth integer count: the first n nonoverlapping occurrences, all occurrences
+when omitted or negative, and none for zero (Couchbase stringfun.html#replace). A fractional
+count is a COHDOC008 type error; a wrong-kind literal still fails planning. Unchanged results
+returned directly from REPLACE's empty-pattern or zero-count path need no constructed-string buffer.
+Negative-scale rounding uses the exact decimal remainder before testing the midpoint, avoiding
+the double rounding that a division by the scale factor can introduce just below a midpoint.
+
+COUNT, LENGTH, POSITION and ARRAY_LENGTH return Int64 columns holding long, as do epoch-millisecond
+functions. Number, Kind, Truth, comparison, JSON constructors/writes and bare-value encoding accept
+these numbers. DocumentProjection retains the static type before execution/paging (#1129), so a
+zero-row grouped result keeps Int64 metadata. Documents.Client decodes Int64 header columns to long;
+JSON digits are unchanged. No persisted layout or catalog-format change is involved.
+Mixed Int64/Decimal projection columns promote to Decimal. In any heterogeneous column without
+an Int64 header, long numeric cells normalize to decimal after grouping, DISTINCT and ordering;
+this preserves embedded/client value equality without adding numeric tags to JSON. Uniform Int64
+columns retain long values. JSON numeric equality and wire digits are unchanged by this promotion.
 
 The supported clause matrix lives in the language package's
 [DESIGN.md](../../Assimalign.Cohesion.Database.Documents.Language/docs/DESIGN.md).
@@ -394,7 +454,7 @@ MISSING propagates before NULL through ordinary comparison and arithmetic; `MISS
 and `MISSING IS NOT NULL` produce MISSING. WHERE/HAVING retain values whose SQL++ Truth conversion is true.
 Equality compares scalar values and structurally compares arrays/objects.
 Range predicates compare only values of the same scalar kind. Arithmetic requires
-decimal operands; invalid numeric input and division by zero fail explicitly.
+decimal or Int64 operands; invalid numeric input and division by zero fail explicitly.
 
 COUNT(*) counts documents; COUNT(expression) skips both MISSING and NULL. SUM and AVG
 require numeric valued inputs. SUM, AVG, MIN, and MAX skip MISSING and NULL; no valued inputs return

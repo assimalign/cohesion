@@ -67,9 +67,9 @@ public sealed class OqlExecutionConformanceTests
                 new("SELECT d.name AS label, d.details.score + @increment AS adjusted, d.tags[0] AS tag FROM items AS d WHERE d.name = 'alpha'",
                     [["alpha", 3m, "blue"]], Parameters: new Dictionary<string, object?> { ["increment"] = 2 }),
                 new("SELECT COUNT(*) AS total, COUNT(amount) AS present, SUM(amount) AS sum, AVG(amount) AS average, MIN(amount) AS minimum, MAX(amount) AS maximum FROM items",
-                    [[4m, 3m, 12m, 4m, 2m, 6m]]),
+                    [[4L, 3L, 12m, 4m, 2m, 6m]]),
                 new("SELECT COUNT(*) AS total, SUM(amount) AS sum, AVG(amount) AS average, MIN(amount) AS minimum, MAX(amount) AS maximum FROM items WHERE amount > 100",
-                    [[0m, null, null, null, null]]),
+                    [[0L, null, null, null, null]]),
             ],
             [OqlClauses.Distinct] =
             [
@@ -120,20 +120,20 @@ public sealed class OqlExecutionConformanceTests
                 new("SELECT name, CASE WHEN amount > 3 THEN 'big' WHEN amount IS NULL THEN 'none' ELSE 'small' END AS size FROM items",
                     [["alpha", "small"], ["beta", "big"], ["gamma", "big"], ["delta", "none"]]),
                 new("SELECT CASE WHEN amount > 3 THEN 'big' ELSE 'small' END AS size, COUNT(*) AS n FROM items GROUP BY CASE WHEN amount > 3 THEN 'big' ELSE 'small' END",
-                    [["big", 2m], ["small", 2m]]),
+                    [["big", 2L], ["small", 2L]]),
                 new("SELECT SUM(CASE WHEN amount > 3 THEN 1 ELSE 0 END) AS big FROM items", [[2m]]),
             ],
             [OqlClauses.GroupBy] =
             [
                 new("SELECT category, COUNT(*) AS total, COUNT(amount) AS present, SUM(amount) AS sum, AVG(amount) AS average, MIN(amount) AS minimum, MAX(amount) AS maximum FROM items GROUP BY category ORDER BY category",
-                    [["a", 3m, 2m, 8m, 4m, 2m, 6m], ["b", 1m, 1m, 4m, 4m, 4m, 4m]]),
+                    [["a", 3L, 2L, 8m, 4m, 2m, 6m], ["b", 1L, 1L, 4m, 4m, 4m, 4m]]),
                 new("SELECT category, tags[0] AS tag, COUNT(*) AS total FROM items GROUP BY category, tags[0] ORDER BY category, tag",
-                    [["a", null, 1m], ["a", "blue", 1m], ["a", "green", 1m], ["b", "blue", 1m]], Missing: [(0, 1)]),
+                    [["a", null, 1L], ["a", "blue", 1L], ["a", "green", 1L], ["b", "blue", 1L]], Missing: [(0, 1)]),
             ],
             [OqlClauses.Having] =
             [
                 new("SELECT category, SUM(amount) AS total FROM items GROUP BY category HAVING SUM(amount) > 5", [["a", 8m]]),
-                new("SELECT COUNT(*) AS total FROM items HAVING COUNT(*) > 3", [[4m]]),
+                new("SELECT COUNT(*) AS total FROM items HAVING COUNT(*) > 3", [[4L]]),
                 new("SELECT COUNT(*) AS total FROM items HAVING COUNT(*) > 4", []),
             ],
             [OqlClauses.OrderBy] =
@@ -251,12 +251,49 @@ public sealed class OqlExecutionConformanceTests
         new Dictionary<string, FunctionCase>(StringComparer.OrdinalIgnoreCase)
         {
             ["META"] = new("META().id", [["a"], ["b"], ["c"], ["d"]]),
-            ["COUNT"] = new("COUNT(*)", [[4m]]),
+            ["LOWER"] = ScalarCase("LOWER('AbC')", "abc"),
+            ["UPPER"] = ScalarCase("UPPER('AbC')", "ABC"),
+            ["LENGTH"] = ScalarCase("LENGTH('😀a')", 2L),
+            ["SUBSTR"] = ScalarCase("SUBSTR('😀ab', 1, 1)", "a"),
+            ["POSITION"] = ScalarCase("POSITION('abc', 'z')", -1L),
+            ["CONTAINS"] = ScalarCase("CONTAINS('abc', 'b')", true),
+            ["STARTS_WITH"] = ScalarCase("STARTS_WITH('abc', 'a')", true),
+            ["ENDS_WITH"] = ScalarCase("ENDS_WITH('abc', 'c')", true),
+            ["REPLACE"] = ScalarCase("REPLACE('abc', 'b', 'x')", "axc"),
+            ["TRIM"] = ScalarCase("TRIM(' abc ')", "abc"),
+            ["CONCAT"] = ScalarCase("CONCAT('a', 'b')", "ab"),
+            ["ABS"] = ScalarCase("ABS(-2)", 2m),
+            ["ROUND"] = ScalarCase("ROUND(2.5)", 3m),
+            ["TRUNC"] = ScalarCase("TRUNC(2.567, 2)", 2.56m),
+            ["FLOOR"] = ScalarCase("FLOOR(2.5)", 2m),
+            ["CEIL"] = ScalarCase("CEIL(2.5)", 3m),
+            ["POWER"] = ScalarCase("POWER(2, 3)", 8m),
+            ["SQRT"] = ScalarCase("SQRT(4)", 2m),
+            ["NOW_STR"] = ScalarCase("STR_TO_MILLIS(NOW_STR()) = NOW_MILLIS()", true),
+            ["NOW_MILLIS"] = ScalarCase("NOW_MILLIS() = NOW_MILLIS()", true),
+            ["STR_TO_MILLIS"] = ScalarCase("STR_TO_MILLIS('1970-01-01T00:00:00Z')", 0L),
+            ["MILLIS_TO_STR"] = ScalarCase("MILLIS_TO_STR(0)", "1970-01-01T00:00:00.000Z"),
+            ["TYPE"] = ScalarCase("TYPE(tags)", "array"),
+            ["IS_ARRAY"] = ScalarCase("IS_ARRAY(tags)", true),
+            ["IS_OBJECT"] = ScalarCase("IS_OBJECT(tags)", false),
+            ["IS_STRING"] = ScalarCase("IS_STRING(name)", true),
+            ["IS_NUMBER"] = ScalarCase("IS_NUMBER(1)", true),
+            ["IS_BOOLEAN"] = ScalarCase("IS_BOOLEAN(TRUE)", true),
+            ["ARRAY_LENGTH"] = ScalarCase("ARRAY_LENGTH([1,2])", 2L),
+            ["ARRAY_CONTAINS"] = new("ARRAY_CONTAINS(tags, 'blue')", [[true], [false], [true], [false]]),
+            ["COALESCE"] = ScalarCase("COALESCE(MISSING, NULL, 1)", 1m),
+            ["IFMISSING"] = ScalarCase("IFMISSING(absent, 'x')", "x"),
+            ["IFNULL"] = new("IFNULL(amount, 0)", [[2m], [6m], [4m], [0m]]),
+            ["IFMISSINGORNULL"] = ScalarCase("IFMISSINGORNULL(absent, NULL, 1)", 1m),
+            ["COUNT"] = new("COUNT(*)", [[4L]]),
             ["SUM"] = new("SUM(amount)", [[12m]]),
             ["AVG"] = new("AVG(amount)", [[4m]]),
             ["MIN"] = new("MIN(amount)", [[2m]]),
             ["MAX"] = new("MAX(amount)", [[6m]]),
         };
+
+    private static FunctionCase ScalarCase(string expression, object? value)
+        => new(expression, Enumerable.Range(0, 4).Select(_ => new object?[] { value }).ToArray());
 
     [Fact(DisplayName = "Cohesion Test [Documents] - Functions: every declaration has live execution evidence")]
     public async Task Profile_DeclaredFunctions_ShouldExecuteEveryCaseAsync()

@@ -15,6 +15,51 @@ namespace Assimalign.Cohesion.Database.Documents.Client.Tests;
 
 public sealed class DocumentClientWireTests
 {
+    [Theory(DisplayName = "Cohesion Test [Documents.Client] - SQL++ function categories preserve embedded values and Int64 types")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task QueryAsync_ScalarFunctions_ShouldMatchEmbeddedResultsAsync(bool tcp)
+    {
+        // Arrange
+        await using var harness = await DocumentClientTestHarness.StartAsync(tcp);
+        await using var connection = await harness.Client.ConnectAsync(harness.Token);
+        await connection.CreateCollectionAsync("items", harness.Token);
+        await connection.PutAsync("items", "a", "{\"name\":\"😀Alpha\",\"tags\":[\"blue\"]}"u8.ToArray(), cancellationToken: harness.Token);
+        const string query = "SELECT LOWER(name) AS s, ROUND(-2.5) AS n, MILLIS_TO_STR(0) AS d, TYPE(tags) AS t, ARRAY_CONTAINS(tags,'blue') AS a, IFMISSING(absent,'x') AS c, LENGTH(name) AS l, POSITION(name,'A') AS p, ARRAY_LENGTH(tags) AS z FROM items";
+        await using var session = await harness.Database.CreateSessionAsync(harness.Token);
+        await using var embedded = (Assimalign.Cohesion.Database.Execution.DatabaseResultSet)await session.ExecuteAsync(query, cancellationToken: harness.Token);
+        var expected = new List<object?[]>();
+        await foreach (var row in embedded.GetRowsAsync(harness.Token)) { expected.Add(Enumerable.Range(0, row.FieldCount).Select(row.GetValue).ToArray()); }
+        // Act
+        var remote = await connection.QueryAsync(query, cancellationToken: harness.Token);
+        var count = await connection.QueryAsync("SELECT COUNT(*) FROM items", cancellationToken: harness.Token);
+        // Assert
+        remote.ShouldHaveSingleItem().ToArray().ShouldBe(expected.ShouldHaveSingleItem());
+        remote[0].ToArray().ShouldBe(new object?[] { "😀alpha", -3m, "1970-01-01T00:00:00.000Z", "array", true, "x", 6L, 1L, 1L });
+        remote.Columns.Select(column => column.Type).ShouldBe(embedded.Columns.Select(column => column.Type));
+        count.Columns[0].Type.ShouldBe(Assimalign.Cohesion.Database.Types.DatabaseType.Int64);
+        count.ShouldHaveSingleItem()[0].ShouldBeOfType<long>().ShouldBe(1L);
+        var failure = await Should.ThrowAsync<DocumentClientException>(async () =>
+            await connection.QueryAsync("SELECT SQRT(-1) FROM items", cancellationToken: harness.Token));
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDOC019");
+        (await connection.QueryAsync("SELECT LENGTH(name) FROM items", cancellationToken: harness.Token)).ShouldHaveSingleItem()[0].ShouldBe(6L);
+        await connection.PutAsync("items", "b", "{\"name\":\"Beta\",\"tags\":[]}"u8.ToArray(), cancellationToken: harness.Token);
+        foreach (string mixed in new[]
+        {
+            "SELECT CASE WHEN META().id = 'a' THEN 1 ELSE LENGTH(name) END AS n FROM items",
+            "SELECT CASE WHEN META().id = 'a' THEN 'text' ELSE LENGTH(name) END AS n FROM items",
+        })
+        {
+            await using var inProcess = (Assimalign.Cohesion.Database.Execution.DatabaseResultSet)await session.ExecuteAsync(mixed, cancellationToken: harness.Token);
+            var embeddedValues = new List<object?>();
+            await foreach (var resultRow in inProcess.GetRowsAsync(harness.Token)) { embeddedValues.Add(resultRow.GetValue(0)); }
+            var wire = await connection.QueryAsync(mixed, cancellationToken: harness.Token);
+            wire.Select(resultRow => resultRow[0]).ShouldBe(embeddedValues);
+            wire[1][0].ShouldBeOfType<decimal>().ShouldBe(4m);
+            wire.Columns[0].Type.ShouldBe(inProcess.Columns[0].Type);
+        }
+    }
+
     [Theory(DisplayName = "Cohesion Test [Documents.Client] - Advertised predicates preserve in-process rows over both transports")]
     [InlineData(false)]
     [InlineData(true)]
@@ -38,7 +83,7 @@ public sealed class DocumentClientWireTests
             ("SELECT name, CASE WHEN amount > 3 THEN 'big' WHEN amount IS NULL THEN 'none' ELSE 'small' END AS size FROM items",
                 [["alpha", "small"], ["beta", "big"], ["gamma", "big"], ["delta", "none"]]),
             ("SELECT CASE WHEN amount > 3 THEN 'big' ELSE 'small' END AS size, COUNT(*) AS n FROM items GROUP BY CASE WHEN amount > 3 THEN 'big' ELSE 'small' END",
-                [["big", 2m], ["small", 2m]]),
+                [["big", 2L], ["small", 2L]]),
             ("SELECT SUM(CASE WHEN amount > 3 THEN 1 ELSE 0 END) AS big FROM items", [[2m]]),
         ];
         // Act / Assert
@@ -194,7 +239,7 @@ public sealed class DocumentClientWireTests
         rows.IsDocumentQuery.ShouldBeFalse();
         rows.Documents.ShouldBeEmpty();
         var grouped = await connection.QueryAsync("SELECT d.group AS category, COUNT(*) AS n, SUM(d.score) AS total, AVG(d.score) AS average, MIN(d.score) AS low, MAX(d.score) AS high FROM items d GROUP BY d.group HAVING SUM(d.score) > 2 ORDER BY total DESC", cancellationToken: harness.Token);
-        grouped.ShouldHaveSingleItem().ToArray().ShouldBe(new object?[] { "A", 2m, 6m, 3m, 2m, 4m });
+        grouped.ShouldHaveSingleItem().ToArray().ShouldBe(new object?[] { "A", 2L, 6m, 3m, 2m, 4m });
         (await connection.QueryAsync("SELECT name FROM items WHERE nested.x IS MISSING OR score < 0 ORDER BY name ASC", cancellationToken: harness.Token))
             .Select(row => row[0]).ShouldBe(new object?[] { "Bob", "Cy" });
         (await connection.QueryAsync("SELECT name FROM items WHERE score <> 2 AND score != 4 AND score <= 1 AND score > 0", cancellationToken: harness.Token))
