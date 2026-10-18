@@ -326,7 +326,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         }
         bool definition = request.Statement.SqlExpression
             is SqlCreateFunctionExpression or SqlDropFunctionExpression or SqlCreateDomainExpression or SqlDropDomainExpression
-                or SqlCreateSchemaExpression;
+                or SqlCreateSchemaExpression or SqlCreateViewExpression or SqlDropViewExpression;
         using var metadata = _ddlLockOwner is not null
             ? await _database.DdlInterlock.EnterMetadataAsync(definition, cancellationToken).ConfigureAwait(false)
             : _database.DdlInterlock.EnterMetadata(_database.Name.ToString(), definition);

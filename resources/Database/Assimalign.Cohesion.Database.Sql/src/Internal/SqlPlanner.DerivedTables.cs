@@ -16,7 +16,7 @@ internal sealed partial class SqlPlanner
     private bool InDerivedBody => _queryScopes?.Scopes.Any(scope => scope.Derived is not null) ?? false;
 
     private SqlProjectionMetadata? CaptureProjectionMetadata(SqlCollationCandidate candidate, SqlCatalogColumn? source = null)
-        => InDerivedBody || _commonTableState?.BindingOperands is not null || _queryScopes?.SetOperandDepth > 0 ? new(candidate, source) : null;
+        => ViewDefinitionBinding is not null || InDerivedBody || _commonTableState?.BindingOperands is not null || _queryScopes?.SetOperandDepth > 0 ? new(candidate, source) : null;
 
     private SqlRelationSource BindDerivedTable(SqlDerivedTableReference derived, SqlSelectExpression? owner)
     {
@@ -76,8 +76,29 @@ internal sealed partial class SqlPlanner
                     outerScope: OuterScope, outerDependencies: OuterDependencies);
                 inherited = scope.ColumnMetadata(reference);
             }
-            var type = projection.Metadata?.TypeInfo ?? inherited?.Type ?? (projection.Expression as SqlCastExpression)?.TargetTypeInfo
-                ?? new DatabaseTypeInfo(projection.Type, projection.MaxLength);
+            SqlType? declaredType = null;
+            if (projection.Expression is { } projected)
+            {
+                var value = UnwrapCollation(projected);
+                if (value is SqlCastExpression cast) { declaredType = SqlDefinitionBinder.ResolveType(cast.TargetType, _functions, cast.Location); }
+                else if (value is SqlFunctionCallExpression call && !SqlStandardLibrary.IsEvaluatorForm(call.FunctionName))
+                {
+                    scope ??= new SqlExpressionEvaluator(output.Columns, _parameters, output.Bindings,
+                        defaultCollation: _catalog.DefaultCollation, subquerySlots: _subquerySlots, functions: _functions,
+                        cancellationToken: _cancellationToken, outerScope: OuterScope, outerDependencies: OuterDependencies);
+                    if (scope.ResolveFunction(call)?.ReturnType is { IsPseudo: false } result) { declaredType = result; }
+                }
+            }
+            DatabaseTypeInfo? inferredType = null;
+            if (declaredType is null && projection.Expression is { } resultExpression && projection.Metadata?.TypeInfo is null && inherited is null)
+            {
+                scope ??= new SqlExpressionEvaluator(output.Columns, _parameters, output.Bindings,
+                    defaultCollation: _catalog.DefaultCollation, subquerySlots: _subquerySlots, functions: _functions,
+                    cancellationToken: _cancellationToken, outerScope: OuterScope, outerDependencies: OuterDependencies);
+                inferredType = scope.OutputTypeInfo(resultExpression);
+            }
+            var type = projection.Metadata?.TypeInfo ?? inherited?.Type ?? declaredType?.Storage
+                ?? inferredType ?? (projection.Expression as SqlCastExpression)?.TargetTypeInfo ?? new DatabaseTypeInfo(projection.Type, projection.MaxLength);
             // PostgreSQL parse_relation.c:1715-1721 takes metadata from the projected
             // expression. Default strength must not become a declared column override.
             var candidate = type.Type is DatabaseType.String or DatabaseType.Character
@@ -90,7 +111,7 @@ internal sealed partial class SqlPlanner
             columns[i] = new SqlCatalogColumn(name,
                 type, projection.IsNullable,
                 collation: candidate.Priority >= 2 ? candidate.Collation : null,
-                domainName: projection.Metadata?.DomainName ?? inherited?.DomainName);
+                domainName: projection.Metadata?.DomainName ?? inherited?.DomainName ?? (declaredType is { IsDomain: true } ? declaredType.Name : null));
         }
         return new SqlRelationSource(new SqlDerivedRelation(relationName, child, columns, isCorrelated));
     }

@@ -41,8 +41,8 @@ public sealed class SqlLanguageConformanceTests
     {
         // The profile drives enumeration. A newly advertised clause cannot silently escape this test.
         var cases = CreateCases();
-        // #1114 adds UNION, INTERSECT and EXCEPT: exactly three over #1030's 44.
-        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(47);
+        // #1124 adds CREATE/DROP VIEW: exactly two over #1114's 47.
+        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(49);
         RequireExecutionCases(SqlLanguageProfile.Instance.Clauses, cases);
         cases.Keys.Except(SqlLanguageProfile.Instance.Clauses).ShouldBeEmpty("Cases must describe the current profile.");
 
@@ -575,6 +575,16 @@ public sealed class SqlLanguageConformanceTests
                 (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "SELECT * FROM t;")))
                     .Message.ShouldContain("does not exist", Case.Sensitive);
                 (await ExecuteAsync(session, "DROP TABLE IF EXISTS t;")).Status.ShouldBe(DatabaseResultStatus.Success);
+            }),
+        [SqlClauses.CreateView] = new("CREATE VIEW v AS SELECT id FROM t;", _seed,
+            expression => expression is SqlCreateViewExpression,
+            async (session, _) => await ExpectRowsAsync(session, "SELECT id FROM v ORDER BY id LIMIT 1;", [[1]])),
+        [SqlClauses.DropView] = new("DROP VIEW v;", ["CREATE TABLE t (id INT);", "INSERT INTO t VALUES (1);", "CREATE VIEW v AS SELECT id FROM t;"],
+            expression => expression is SqlDropViewExpression,
+            async (session, _) =>
+            {
+                session.Database.Catalog.TryGetView("dbo", "v", out var absentView).ShouldBeFalse();
+                await ExpectRowsAsync(session, "SELECT id FROM t;", [[1]]);
             }),
         [SqlClauses.CreateSchema] = new("CREATE SCHEMA sales;", [],
             expression => expression is SqlCreateSchemaExpression,

@@ -114,6 +114,7 @@ internal sealed partial class SqlPlanner
     private SqlPlan PlanStatementCore(SqlQueryExpression expression)
     {
         SqlSystemViews.EnsureReadOnly(expression);
+        EnsureViewTargetReadOnly(expression);
         ValidateFunctionCalls(expression);
         return expression switch
         {
@@ -123,6 +124,8 @@ internal sealed partial class SqlPlanner
             SqlInsertExpression insert => PlanInsert(insert),
             SqlUpdateExpression update => PlanUpdate(update),
             SqlDeleteExpression delete => PlanDelete(delete),
+            SqlCreateViewExpression create => PlanCreateView(create),
+            SqlDropViewExpression drop => new SqlDropViewPlan(drop.View.SchemaName ?? DefaultSchema, drop.View.TableName, drop.IfExists, drop.Cascade),
             SqlCreateTableExpression create => PlanCreateTable(create),
             SqlCreateSchemaExpression create => new SqlCreateSchemaPlan(create.Name, create.IfNotExists),
             SqlDropTableExpression drop => PlanDropTable(drop),
@@ -169,6 +172,7 @@ internal sealed partial class SqlPlanner
             subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken,
             outerScope: OuterScope, outerDependencies: OuterDependencies, relation: select.From[0].Table);
 
+        if (ViewDefinitionBinding is not null) { CaptureViewSelect(select, columns, bindings, outputOrdinals, evaluator); }
         if (select.GroupBy.Count > 0 || select.Having is not null || ProjectsOrOrdersByAggregate(select))
         {
             return PlanGroup(select, table, systemView, columns, bindings, evaluator, steps);
@@ -214,6 +218,7 @@ internal sealed partial class SqlPlanner
         }
 
         var orderByProjections = BindOrderByProjections(select, projections, outputOrdinals?.Count ?? columns.Count);
+        CaptureViewOrdering(select, columns, bindings, evaluator, orderByProjections);
         if (bindings is not null && select.OrderBy.Count > 0) { RejectDerivedOrdering(select, projections, orderByProjections, evaluator, bindings); }
         foreach (var orderBy in select.OrderBy)
         {
@@ -227,15 +232,15 @@ internal sealed partial class SqlPlanner
         if (bindings is not null)
         {
             return new SqlJoinPlan(bindings, columns, steps, projections,
-                where, ordering, EvaluateCount(select.Limit, LimitClause(select)),
-                EvaluateCount(select.Offset, "OFFSET"), select.IsDistinct,
+                where, ordering, BindCount(select.Limit, LimitClause(select)),
+                BindCount(select.Offset, "OFFSET"), select.IsDistinct,
                 orderByProjections);
         }
 
         if (systemView is not null)
         {
             return new SqlSystemViewPlan(systemView, projections, where, ordering,
-                EvaluateCount(select.Limit, LimitClause(select)), EvaluateCount(select.Offset, "OFFSET"),
+                BindCount(select.Limit, LimitClause(select)), BindCount(select.Offset, "OFFSET"),
                 select.IsDistinct, orderByProjections);
         }
 
@@ -244,8 +249,8 @@ internal sealed partial class SqlPlanner
             projections,
             where,
             ordering,
-            EvaluateCount(select.Limit, LimitClause(select)),
-            EvaluateCount(select.Offset, "OFFSET"),
+            BindCount(select.Limit, LimitClause(select)),
+            BindCount(select.Offset, "OFFSET"),
             select.IsDistinct,
             SelectAccessPath(table!, select.Where, OuterScope is null ? null : evaluator), orderByProjections);
     }
@@ -279,13 +284,22 @@ internal sealed partial class SqlPlanner
         }
         if (SqlSystemViews.Find(named) is { } view)
         {
+            ViewDefinitionBinding?.SystemRelations.Add(named);
             _statementMetrics?.CaptureCatalogSnapshot(_catalog);
             return new SqlRelationSource(view);
         }
+        // Tables and views share a namespace. Resolve the stored case first so ordinary
+        // queries allocate no encoded view identity, even when the catalog contains views.
+        if (TryReadTable(named.SchemaName ?? DefaultSchema, named.TableName, out var readTable))
+        {
+            ViewDefinitionBinding?.Tables.Add(readTable.ObjectId);
+            return new SqlRelationSource(ResolveTable(named));
+        }
+        if (TryReadView(named.SchemaName ?? DefaultSchema, named.TableName, out var storedView)) { return BindCatalogView(storedView); }
         // Future CTEs are a missing-relation hint, not a catalog shadow (PostgreSQL
         // src/backend/parser/parse_relation.c:1463-1487).
         if (named.SchemaName is null && _commonTableState?.Future?.Contains(named.TableName) == true &&
-            !_catalog.TryGetTable(DefaultSchema, named.TableName, out _))
+            !TryReadTable(DefaultSchema, named.TableName, out _))
         {
             throw new SqlPlanningException("COHSQLE026", string.Format(CultureInfo.CurrentCulture,
                 ErrorMessages.CteForwardReference, named.TableName), owner?.Location);
@@ -321,11 +335,23 @@ internal sealed partial class SqlPlanner
         var ordering = new SqlBoundOrdering[orderBy.Count];
         for (int index = 0; index < ordering.Length; index++)
         {
+            if (scope.HasOutputValues) { ValidateOrderingCalls(orderBy[index].Expression, scope); }
             var key = scope.Bind(orderBy[index].Expression, out SqlBoundCollation collation);
             ordering[index] = new SqlBoundOrdering(key, orderBy[index].IsDescending, collation);
         }
 
         return ordering;
+    }
+
+    private static bool ValidateOrderingCalls(SqlExpression expression, SqlExpressionEvaluator scope)
+    {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+        if (scope.IsBoundValue(expression)) { return scope.IsOutputValue(expression); }
+        if (expression is SqlSubqueryExpression or SqlExistsExpression) { return false; }
+        bool usesOutput = false;
+        foreach (var child in Children(expression)) { usesOutput |= ValidateOrderingCalls(child, scope); }
+        if (usesOutput && expression is SqlFunctionCallExpression call) { ResolveCall(call, scope); }
+        return usesOutput;
     }
 
     // ── Access-path selection (rule-based, by design) ──────────────────
@@ -341,7 +367,7 @@ internal sealed partial class SqlPlanner
     /// </summary>
     private SqlAccessPath SelectAccessPath(SqlCatalogTable table, SqlExpression? where, SqlExpressionEvaluator? scope = null)
     {
-        if (where is null || _commonTableState?.BindingUnused == true)
+        if (ViewDefinitionBinding is not null || where is null || _commonTableState?.BindingUnused == true)
         {
             return SqlScanPath.Instance;
         }
@@ -1255,7 +1281,7 @@ internal sealed partial class SqlPlanner
     {
         string schema = reference.SchemaName ?? DefaultSchema;
 
-        if (SqlNamespaces.Find(_catalog, schema) is null || !_catalog.TryGetTable(schema, reference.TableName, out var table))
+        if (!HasReadNamespace(schema) || !TryReadTable(schema, reference.TableName, out var table))
         {
             throw new SqlPlanningException("COHSQLE014", string.Format(CultureInfo.CurrentCulture, ErrorMessages.TableMissing, schema, reference.TableName));
         }
@@ -1340,37 +1366,16 @@ internal sealed partial class SqlPlanner
         _ => "LIMIT",
     };
 
-    private long? EvaluateCount(SqlExpression? expression, string clause)
+    private SqlRowCount? BindCount(SqlExpression? expression, string clause)
     {
-        if (expression is null)
-        {
-            return null;
-        }
-
-        // A count has no columns in scope; a reference fails here as COHSQLE005 (#1165).
+        if (expression is null) { return null; }
         ValidateScopelessExpression(expression, clause);
-        if (_commonTableState?.BindingUnused == true)
-        {
-            _ = ScopelessEvaluator.Bind(expression);
-            var type = GroupExpressionType(expression, Array.Empty<SqlCatalogColumn>(), ScopelessEvaluator);
-            if (type is not (DatabaseType.Int8 or DatabaseType.Int16 or DatabaseType.Int32 or DatabaseType.Int64))
-            {
-                throw new SqlPlanningException("COHSQLE018", string.Format(CultureInfo.CurrentCulture,
-                    ErrorMessages.CountNonNegative, clause), expression.Location);
-            }
-            return null;
-        }
-        object? value = ScopelessEvaluator.Evaluate(expression, Array.Empty<object?>());
-
-        return value switch
-        {
-            sbyte number when number >= 0 => number,
-            short number when number >= 0 => number,
-            long number when number >= 0 => number,
-            int number when number >= 0 => number,
-            _ => throw new SqlPlanningException("COHSQLE018", string.Format(CultureInfo.CurrentCulture,
-                ErrorMessages.CountNonNegative, clause), expression.Location),
-        };
+        var bound = ScopelessEvaluator.Bind(expression);
+        if (_commonTableState?.BindingUnused == true &&
+            GroupExpressionType(expression, [], ScopelessEvaluator) is not (DatabaseType.Int8 or DatabaseType.Int16 or DatabaseType.Int32 or DatabaseType.Int64))
+        { throw new SqlPlanningException("COHSQLE018", string.Format(CultureInfo.CurrentCulture, ErrorMessages.CountNonNegative, clause), expression.Location); }
+        // nodeLimit.c:348 evaluates counts at executor startup/rescan, never in a cached plan.
+        return new SqlRowCount(bound, clause, expression.Location);
     }
 
     /// <summary>
@@ -1462,10 +1467,22 @@ internal sealed partial class SqlPlanner
         // After its arguments, as PostgreSQL resolves a call, so an argument's error is reported
         // first. The planner's walk (ValidateFunctionCalls) checked every call's count already; this
         // chooses the overload by the arguments' types, with the scope's columns in hand.
-        if (expression is SqlFunctionCallExpression call)
+        if (expression is SqlFunctionCallExpression call &&
+            (boundValues is null || !ContainsBoundOutput(call, boundValues)))
         {
             ResolveCall(call, evaluator);
         }
+        // Calls using output aliases resolve when BindOrdering supplies the completed
+        // projection's types. The input scope cannot choose their overloads yet.
+    }
+
+    private static bool ContainsBoundOutput(SqlExpression expression, IReadOnlyDictionary<SqlExpression, int> outputs)
+    {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+        if (outputs.ContainsKey(expression)) { return true; }
+        foreach (var child in Children(expression))
+        { if (ContainsBoundOutput(child, outputs)) { return true; } }
+        return false;
     }
 
     internal static void ValidateTemporalArithmetic(SqlBinaryExpression arithmetic, SqlExpressionEvaluator evaluator)

@@ -163,9 +163,16 @@ internal static class SqlDefinitionBinder
     }
 
     internal static SqlFunctionEnvironment Load(SqlCatalog catalog, SqlFunctionEnvironment native, CancellationToken cancellationToken)
+        => Load(catalog.Functions, catalog.Domains, catalog.DefaultCollation, native, cancellationToken);
+
+    internal static SqlFunctionEnvironment Load(SqlCatalogSnapshot catalog, SqlFunctionEnvironment native, CancellationToken cancellationToken)
+        => Load(catalog.Functions, catalog.Domains, catalog.DefaultCollation, native, cancellationToken);
+
+    private static SqlFunctionEnvironment Load(IReadOnlyList<SqlCatalogFunction> storedFunctions, IReadOnlyList<SqlCatalogDomain> storedDomains,
+        Collation collation, SqlFunctionEnvironment native, CancellationToken cancellationToken)
     {
-        var functions = catalog.Functions.ToDictionary(function => "F:" + function.Signature, StringComparer.OrdinalIgnoreCase);
-        var domains = catalog.Domains.ToDictionary(domain => DomainKey(domain.Name), StringComparer.OrdinalIgnoreCase);
+        var functions = storedFunctions.ToDictionary(function => "F:" + function.Signature, StringComparer.OrdinalIgnoreCase);
+        var domains = storedDomains.ToDictionary(domain => DomainKey(domain.Name), StringComparer.OrdinalIgnoreCase);
         var done = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var active = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var environment = native;
@@ -195,7 +202,7 @@ internal static class SqlDefinitionBinder
             }
             if (function is not null)
             {
-                var bound = Bind(function, environment, catalog.DefaultCollation, cancellationToken);
+                var bound = Bind(function, environment, collation, cancellationToken);
                 environment = new SqlFunctionEnvironment(MergeFunctions(environment.Catalog, bound), native.Database, environment.Types);
             }
             else
@@ -205,7 +212,7 @@ internal static class SqlDefinitionBinder
                 {
                     throw Refuse($"SQL domain '{domain.Name}' conflicts with an engine-registered type.", FragmentLocation(domain.CheckExpression ?? domain.BaseType));
                 }
-                var type = Bind(domain, environment, catalog.DefaultCollation, cancellationToken);
+                var type = Bind(domain, environment, collation, cancellationToken);
                 environment = new SqlFunctionEnvironment(environment.Catalog, native.Database,
                     new SqlTypeCatalog(environment.Types.Append(type), environment.Types.Casts));
             }

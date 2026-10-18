@@ -62,7 +62,7 @@ public sealed class SqlKeywordDispositionTests
         ["CYCLE"] = Rejects("CREATE TABLE t (id INT GENERATED ALWAYS AS IDENTITY (CYCLE))", "CYCLE"),
         ["CACHE"] = Rejects("CREATE TABLE t (id INT GENERATED ALWAYS AS IDENTITY (CACHE 2))", "CACHE"),
         ["RESTART"] = Rejects("ALTER TABLE t ALTER COLUMN id RESTART WITH 1", "ALTER COLUMN RESTART"),
-        ["VIEW"] = Rejects("DROP VIEW v", SqlClauses.DropView),
+        ["VIEW"] = Parses("CREATE VIEW v AS SELECT a FROM t"),
         ["PRIMARY"] = Parses("CREATE TABLE t (a INT PRIMARY KEY)"),
         ["KEY"] = Parses("CREATE TABLE t (a INT PRIMARY KEY)"),
         ["FOREIGN"] = Parses("CREATE TABLE c (p INT, FOREIGN KEY (p) REFERENCES t (id))"),

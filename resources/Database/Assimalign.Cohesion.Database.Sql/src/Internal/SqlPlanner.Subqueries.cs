@@ -99,9 +99,14 @@ internal sealed partial class SqlPlanner
         OuterScope = SubqueryScope(scope, owner, source);
         OuterDependencies = dependencies;
         SqlPlan child;
+        DatabaseTypeInfo? typeInfo = null;
         (_queryScopes ??= new()).Scopes.Push((owner, dml, null));
         _subqueryDepth++;
-        try { child = PlanQuery(query); }
+        try
+        {
+            child = PlanQuery(query);
+            if (kind == SqlSubqueryKind.Scalar) { typeInfo = BindDerivedOutput(child, "scalar", [], query).Columns[0].Type; }
+        }
         finally
         {
             _subqueryDepth--;
@@ -121,7 +126,7 @@ internal sealed partial class SqlPlanner
         }
         var type = kind == SqlSubqueryKind.Exists ? DatabaseType.Boolean : projections[0].Type;
         var collation = kind == SqlSubqueryKind.Exists ? _catalog.DefaultCollation : SubqueryCollation(child);
-        var slot = new SqlSubquerySlot(_subquerySlotCount++, kind, collation, type);
+        var slot = new SqlSubquerySlot(_subquerySlotCount++, kind, collation, type, typeInfo);
         // The slot keeps the membership element type; the predicate itself produces BOOLEAN.
         _subqueryTypes[source] = kind == SqlSubqueryKind.Scalar ? type : DatabaseType.Boolean;
         _subquerySlots[source] = slot;

@@ -1,5 +1,8 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
+
+using Assimalign.Cohesion.Database.Sql.Language;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
@@ -12,6 +15,10 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 internal sealed class SqlFunctionEnvironment
 {
     private SqlFunctionEnvironment? _clockEnvironment;
+    internal bool IsView { get; init; }
+    internal IReadOnlyDictionary<SqlFunctionCallExpression, string>? ViewCalls { get; private init; }
+    internal SqlFunctionEnvironment WithViewCalls(IReadOnlyDictionary<SqlFunctionCallExpression, string> calls)
+        => new(Catalog, Database, Types) { ViewCalls = calls, IsView = true };
 
     /// <summary>Initializes an environment.</summary>
     /// <param name="catalog">The engine's function catalog.</param>

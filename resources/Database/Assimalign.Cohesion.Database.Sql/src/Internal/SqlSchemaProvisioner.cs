@@ -251,8 +251,13 @@ internal sealed partial class SqlSchemaProvisioner
                 string where = applied.Count < script.Steps.Count
                     ? $"step {applied.Count + 1} of {script.Steps.Count} ({Describe(script.Steps[applied.Count].Operation)}) failed"
                     : $"recording the applied schema failed after all {script.Steps.Count} step(s)";
+                // Keep the named dependent view visible at the schema-apply boundary,
+                // rather than requiring callers to inspect the compensation's inner error.
+                string dependency = failure is DatabaseException databaseFailure &&
+                    databaseFailure.Diagnostics.Any(diagnostic => diagnostic.Code == "COHSQLD002")
+                    ? " " + failure.Message : string.Empty;
                 throw new SqlSchemaMigrationException(
-                    $"{SqlProvisioningCodes.StepFailed}: {Describe()}: applying schema '{schema.Name}': {where}. {state}",
+                    $"{SqlProvisioningCodes.StepFailed}: {Describe()}: applying schema '{schema.Name}': {where}. {state}{dependency}",
                     inner);
             }
 

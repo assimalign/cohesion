@@ -27,6 +27,7 @@ internal sealed partial class SqlPlanExecutor
         }
         await AcquireObjectLockAsync(statement, plan.Table.Schema, plan.Table.Name, "ALTER TABLE RENAME", cancellationToken).ConfigureAwait(false);
         EnsureCurrentDefinition(plan.Table);
+        EnsureNoViewReads(plan.Table, plan.ColumnName, rename: true);
         if (plan.ColumnName is not null)
         {
             FindColumnOrdinal(plan.Table, plan.ColumnName);
@@ -36,7 +37,7 @@ internal sealed partial class SqlPlanExecutor
                     ErrorMessages.RenameColumnCollision, plan.NewName, plan.Table.Name));
             }
         }
-        else if (_catalog.TryGetTable(plan.Table.Schema, plan.NewName, out _))
+        else if (_catalog.TryGetTable(plan.Table.Schema, plan.NewName, out _) || _catalog.TryGetView(plan.Table.Schema, plan.NewName, out _))
         {
             throw new SqlPlanningException("COHSQLE013", string.Format(CultureInfo.CurrentCulture,
                 ErrorMessages.RenameTableCollision, plan.Table.Schema, plan.NewName));

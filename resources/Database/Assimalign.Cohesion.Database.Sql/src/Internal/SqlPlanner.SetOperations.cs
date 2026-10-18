@@ -136,7 +136,7 @@ internal sealed partial class SqlPlanner
         if (CanFlatten(right, rightValues)) { operands.AddRange(((SqlSetOperationPlan)right).Operands); }
         else { operands.Add(new SqlSetOperand(right, rightValues)); }
         return new SqlSetOperationPlan(operands, set.Operator, set.IsAll, projections, columns,
-            ordering, EvaluateCount(set.Limit, LimitClause(set)), EvaluateCount(set.Offset, "OFFSET"));
+            ordering, BindCount(set.Limit, LimitClause(set)), BindCount(set.Offset, "OFFSET"));
     }
 
     private (DatabaseTypeInfo Type, string? Domain, bool Unknown) SetColumn(SqlProjection projection, IReadOnlyList<SqlCatalogColumn> columns)

@@ -204,6 +204,9 @@ internal static class Program
         await session.ExecuteAsync("CREATE DOMAIN sql_positive AS INT CHECK (VALUE > 0)");
         await session.ExecuteAsync("CREATE TABLE sql_defined (n sql_positive DEFAULT sql_increment(2))");
         await session.ExecuteAsync("INSERT INTO sql_defined VALUES (sql_increment(3))");
+        await session.ExecuteAsync("CREATE VIEW native_view AS SELECT sql_increment(n) AS n FROM sql_defined");
+        Check("in process: persisted view with pinned call", await RowsAsync(session, "SELECT n FROM native_view"), [[5]]);
+        Check("in process: VIEWS metadata", await RowsAsync(session, "SELECT CHECK_OPTION, IS_UPDATABLE FROM INFORMATION_SCHEMA.VIEWS WHERE TABLE_NAME = 'native_view'"), [["NONE", "NO"]]);
         await session.ExecuteAsync("CREATE TABLE fixed_codes (c CHAR(3) PRIMARY KEY)");
         await session.ExecuteAsync("INSERT INTO fixed_codes VALUES ('a')");
         await session.ExecuteAsync("CREATE TABLE type_aliases (n NCHAR(3), s NVARCHAR(MAX), f DOUBLE PRECISION, d TIMESTAMP WITH TIME ZONE)");
@@ -343,6 +346,8 @@ internal static class Program
         await connection.ExecuteAsync("INSERT INTO namespace_external VALUES (99)", cancellationToken: timeout.Token);
         Check("over the wire: CASCADE retains external tables", await RowsAsync(connection,
             "SELECT pid FROM namespace_external", timeout.Token), [[99]]);
+        Check("over the wire: view join", await RowsAsync(connection, "SELECT v.n FROM native_view v JOIN sql_defined t ON v.n = t.n + 1", timeout.Token), [[5]]);
+        CheckFailure("over the wire: view read-only", await FailureAsync(async () => await connection.ExecuteAsync("DELETE FROM native_view", cancellationToken: timeout.Token)), "read-only");
         Check("over the wire: OFFSET FETCH", await RowsAsync(connection, "SELECT Id FROM customers ORDER BY Id OFFSET 1 ROW FETCH NEXT ROW ONLY", timeout.Token), [[2L]]);
         Check("over the wire: OFFSET before LIMIT", await RowsAsync(connection, "SELECT Id FROM customers ORDER BY Id OFFSET 1 LIMIT 1", timeout.Token), [[2L]]);
         foreach (string grouping in new[] { "", " GROUP BY g" })

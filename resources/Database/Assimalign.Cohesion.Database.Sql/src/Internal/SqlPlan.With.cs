@@ -10,7 +10,7 @@ internal sealed record SqlWithPlan(SqlPlan Input, IReadOnlyList<SqlDerivedRelati
 
 /// <summary>The singleton input of a scalar SELECT body with no FROM clause.</summary>
 internal sealed record SqlConstantPlan(IReadOnlyList<SqlProjection> Projections, SqlBoundExpression? Where,
-    IReadOnlyList<SqlBoundOrdering> OrderBy, long? Limit, long? Offset, bool IsDistinct,
+    IReadOnlyList<SqlBoundOrdering> OrderBy, SqlRowCount? Limit, SqlRowCount? Offset, bool IsDistinct,
     IReadOnlyDictionary<SqlExpression, int>? OrderByProjections) : SqlRelationPlan
 {
     internal override IReadOnlyList<SqlProjection> OutputProjections => Projections;

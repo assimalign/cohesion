@@ -111,6 +111,11 @@ internal sealed partial class SqlPlanExecutor
 
     private void EnsureNoDependents(string key)
     {
+        foreach (var view in _catalog.Views)
+        {
+            if (view.Dependencies.Contains(key, StringComparer.OrdinalIgnoreCase) || view.FunctionCalls.Contains(key, StringComparer.OrdinalIgnoreCase))
+            { throw new SqlPlanningException("COHSQLD002", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ViewDropDependent, key, view.Schema, view.Name)); }
+        }
         foreach (var function in _catalog.Functions)
         {
             if (SqlDefinitionBinder.DefinitionDependencies(function).Contains(key, StringComparer.OrdinalIgnoreCase))

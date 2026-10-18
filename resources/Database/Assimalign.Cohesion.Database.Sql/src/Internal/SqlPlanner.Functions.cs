@@ -167,7 +167,7 @@ internal sealed partial class SqlPlanner
             ValidateFunctionCalls(child);
         }
 
-        if (expression is SqlFunctionCallExpression call)
+        if (expression is SqlFunctionCallExpression call && _functions.ViewCalls?.ContainsKey(call) != true)
         {
             CheckCall(call, _functions.Catalog);
         }

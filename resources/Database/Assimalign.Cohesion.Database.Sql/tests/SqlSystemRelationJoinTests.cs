@@ -291,7 +291,7 @@ public sealed class SqlSystemRelationJoinTests
                 "JOIN INFORMATION_SCHEMA.COLUMNS c ON t.TABLE_NAME = c.TABLE_NAME");
 
             // Assert: another owner can still acquire exclusive locks while this transaction remains active.
-            rows.Count.ShouldBe(6);
+            rows.Count.ShouldBe(7);
             session.LastStatementMetrics!.JoinAccessPaths.ShouldBe(["join-scan"]);
             foreach (string name in new[] { "parent", "child" })
             {
@@ -309,6 +309,7 @@ public sealed class SqlSystemRelationJoinTests
 
     private static async Task SeedAsync(SqlDatabaseSession session)
     {
+        await session.ExecuteAsync("CREATE VIEW seeded_view AS SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA", cancellationToken: CancellationToken.None);
         await session.ExecuteAsync("CREATE TABLE parent (a INT, b INT, CONSTRAINT pk_parent PRIMARY KEY(b,a))", cancellationToken: CancellationToken.None);
         await session.ExecuteAsync("CREATE TABLE child (id INT, parent_a INT, parent_b INT, quantity INT, CONSTRAINT pk_child PRIMARY KEY(id), " +
             "CONSTRAINT fk_parent FOREIGN KEY(parent_b,parent_a) REFERENCES parent(b,a), CONSTRAINT ck_quantity CHECK(quantity > 0))", cancellationToken: CancellationToken.None);

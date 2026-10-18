@@ -29,6 +29,8 @@ public class SqlLanguageProfileTests
     [InlineData(SqlClauses.CreateIndex, "CREATE INDEX ix_t_id ON t (id);")]
     [InlineData(SqlClauses.AlterTable, "ALTER TABLE t ADD COLUMN name TEXT;")]
     [InlineData(SqlClauses.DropTable, "DROP TABLE t;")]
+    [InlineData(SqlClauses.CreateView, "CREATE VIEW v AS SELECT a FROM t;")]
+    [InlineData(SqlClauses.DropView, "DROP VIEW v;")]
     [InlineData(SqlClauses.DropIndex, "DROP INDEX ix_t_id ON t;")]
     [InlineData(SqlClauses.From, "SELECT * FROM t;")]
     [InlineData(SqlClauses.Join, "SELECT * FROM t JOIN u ON t.id = u.id;")]
@@ -105,8 +107,6 @@ public class SqlLanguageProfileTests
     [InlineData(SqlClauses.Returning)]
     [InlineData(SqlClauses.All)]
     [InlineData(SqlClauses.Natural)]
-    [InlineData(SqlClauses.CreateView)]
-    [InlineData(SqlClauses.DropView)]
     public void Profile_UnsupportedClause_IsNotDeclared(string clause)
     {
         SqlLanguageProfile.Instance.Supports(clause).ShouldBeFalse();
@@ -120,8 +120,6 @@ public class SqlLanguageProfileTests
     [InlineData(SqlClauses.Returning, "INSERT INTO t (id) VALUES (1) RETURNING id;")]
     [InlineData(SqlClauses.All, "SELECT ALL id FROM t;")]
     [InlineData(SqlClauses.Natural, "SELECT * FROM t NATURAL JOIN u;")]
-    [InlineData(SqlClauses.CreateView, "CREATE VIEW active_users AS SELECT * FROM users;")]
-    [InlineData(SqlClauses.DropView, "DROP VIEW active_users;")]
     public void Parse_UnsupportedClause_EmitsModelSpecificDiagnostic(string clause, string sql)
     {
         var statement = (SqlQueryStatement)new SqlQueryParser().Parse(sql);

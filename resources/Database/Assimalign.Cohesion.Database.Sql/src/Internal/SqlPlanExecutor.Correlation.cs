@@ -136,7 +136,7 @@ internal sealed partial class SqlPlanExecutor
 
     private async Task<DatabaseResult> ExecuteCorrelatedSelectAsync(IEnumerable<object?[]> rows,
         IReadOnlyList<SqlProjection> projections, SqlBoundExpression? where, IReadOnlyList<SqlBoundOrdering> orderBy,
-        long? limit, long? offset, bool distinct, SqlStatementContext statement, CancellationToken cancellationToken)
+        SqlRowCount? limit, SqlRowCount? offset, bool distinct, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
         var matches = new List<object?[]>();
@@ -151,7 +151,7 @@ internal sealed partial class SqlPlanExecutor
 
     /// <summary>Computes projection and sort values within each outer row's frame, then sorts fixed keys.</summary>
     private async Task<DatabaseResult> MaterializeCorrelatedSelectAsync(List<object?[]> matches,
-        IReadOnlyList<SqlProjection> projections, IReadOnlyList<SqlBoundOrdering> orderBy, long? limit, long? offset,
+        IReadOnlyList<SqlProjection> projections, IReadOnlyList<SqlBoundOrdering> orderBy, SqlRowCount? limit, SqlRowCount? offset,
         bool distinct, SqlExpressionEvaluator evaluator, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();

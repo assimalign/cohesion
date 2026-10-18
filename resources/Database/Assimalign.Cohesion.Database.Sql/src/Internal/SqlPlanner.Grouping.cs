@@ -57,6 +57,7 @@ internal sealed partial class SqlPlanner
         }
 
         var orderByProjections = BindOrderByProjections(select, projections, columns.Count);
+        CaptureViewOrdering(select, columns, bindings, evaluator, orderByProjections);
         if (bindings is not null && select.OrderBy.Count > 0) { RejectDerivedOrdering(select, projections, orderByProjections, evaluator, bindings); }
         foreach (var order in select.OrderBy)
         {
@@ -125,7 +126,7 @@ internal sealed partial class SqlPlanner
             groupScope.ForOrdering(projections, orderByProjections, keys.Length + boundAggregates.Length));
 
         return new SqlGroupPlan(input, columns, bindings, keys, boundAggregates, projections,
-            having, ordering, EvaluateCount(select.Limit, LimitClause(select)), EvaluateCount(select.Offset, "OFFSET"),
+            having, ordering, BindCount(select.Limit, LimitClause(select)), BindCount(select.Offset, "OFFSET"),
             select.IsDistinct);
 
         void BindSlots(SqlExpression expression, IReadOnlyDictionary<SqlExpression, int>? outputSlots = null)
@@ -182,6 +183,7 @@ internal sealed partial class SqlPlanner
                 // comparing it against source keys would rebind the alias as a column.
                 if (!ContainsOutput(expression) && SameGroupExpression(expression, select.GroupBy[i], evaluator))
                 {
+                    ValidateExpression(expression, evaluator, _subqueryTypes);
                     slots[expression] = i;
                     return;
                 }

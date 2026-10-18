@@ -38,7 +38,13 @@ internal sealed partial class SqlExpressionEvaluator
                 throw SqlEvaluationException.FunctionArgumentTypeMismatch(call.FunctionName, text, "DATE_TRUNC(compatible field, temporal)");
             }
         }
+        RecordViewCall(call, resolved);
         return resolved;
+    }
+
+    private void RecordViewCall(SqlFunctionCallExpression call, SqlFunction function)
+    {
+        if (_functions.ViewCalls is SqlViewCallCapture capture) { capture[call] = SqlDefinitionBinder.Key(function); }
     }
 
     internal void PinFunction(SqlFunctionCallExpression call, string identity)
@@ -64,6 +70,13 @@ internal sealed partial class SqlExpressionEvaluator
         {
             overloads = recorded.Functions;
             return overloads.Length != 0;
+        }
+        if (_functions.ViewCalls is { } pins && pins is not SqlViewCallCapture && pins.TryGetValue(call, out var identity))
+        {
+            overloads = System.Linq.Enumerable.ToArray(System.Linq.Enumerable.Where(_functions.Catalog.GetOverloads(call.FunctionName), function =>
+                SqlDefinitionBinder.Key(function).Equals(identity, StringComparison.OrdinalIgnoreCase)));
+            if (overloads.Length == 0) { throw new SqlPlanningException("COHSQLE009", ErrorMessages.ViewFunctionMissing, call.Location); }
+            return true;
         }
         return _functions.Catalog.TryGetOverloads(call.FunctionName, out overloads!);
     }
@@ -132,9 +145,26 @@ internal sealed partial class SqlExpressionEvaluator
         {
             SqlColumnReferenceExpression column => ColumnMetadata(column).Type.MaxLength,
             SqlCastExpression cast => TryResolveCastTarget(cast)?.Storage.MaxLength,
+            SqlSubqueryExpression => _subquerySlots is not null && _subquerySlots.TryGetValue(expression, out var slot) ? slot.TypeInfo?.MaxLength : null,
             SqlCollateExpression collate => MaximumLengthOf(collate.Operand),
             SqlFunctionCallExpression call when !SqlStandardLibrary.IsEvaluatorForm(call.FunctionName)
                 => ResolveFunction(call)?.ReturnType.Storage.MaxLength,
+            _ => null,
+        };
+    }
+
+    /// <summary>Retains declared type facets through scalar slots, casts and function outputs.</summary>
+    internal DatabaseTypeInfo? OutputTypeInfo(SqlExpression expression)
+    {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+        return expression switch
+        {
+            SqlColumnReferenceExpression column => ColumnMetadata(column).Type,
+            SqlCastExpression cast => TryResolveCastTarget(cast)?.Storage,
+            SqlCollateExpression collate => OutputTypeInfo(collate.Operand),
+            SqlSubqueryExpression => _subquerySlots is not null && _subquerySlots.TryGetValue(expression, out var slot) ? slot.TypeInfo : null,
+            SqlFunctionCallExpression call when !SqlStandardLibrary.IsEvaluatorForm(call.FunctionName)
+                && ResolveFunction(call) is { ReturnType.IsPseudo: false } function => function.ReturnType.Storage,
             _ => null,
         };
     }
@@ -338,6 +368,7 @@ internal sealed partial class SqlExpressionEvaluator
             }
         }
 
+        if (typed.Function is { } resolved) { RecordViewCall(call, resolved); }
         RememberTypedCall(call, typed);
         return typed;
     }
