@@ -159,10 +159,12 @@ public sealed class GqlLinearCompositionTests
         (await Rows(session, "MATCH (a:P) WITH a AS z, a.k AS k MATCH (z)-[:T]->(b) RETURN k, b.k")).Rows.ShouldHaveSingleItem().ShouldBe(new object?[] { 1L, 2L });
         (await Rows(session, "LET x=1, y=2 WITH y,x RETURN *")).Names.ShouldBe(new[] { "y", "x" });
         await using var tx = await session.BeginTransactionAsync(CancellationToken.None);
-        var query = GraphQueryRequest.FromGql("MATCH (a:P) RETURN a AS z NEXT MATCH (z)-[:T]->(b) RETURN b.k").Statement.GqlExpression;
+        const string anchored = "MATCH (a:P) RETURN a AS z NEXT MATCH (b)-[:T]->(z) RETURN b.k";
+        var query = GraphQueryRequest.FromGql(anchored).Statement.GqlExpression;
         var plan = new GraphPlanner(database, tx.Context.Snapshot).Plan(query);
-        plan.Stages[3].Plan.MatchClauses.Single().Paths.Single().Anchor.NodeIndex.ShouldBe(0);
+        plan.Stages[3].Plan.MatchClauses.Single().Paths.Single().Anchor.NodeIndex.ShouldBe(1);
         plan.Stages[3].Plan.MatchClauses.Single().Paths.Single().Anchor.Property.ShouldBeNull();
+        (await Rows(session, anchored)).Rows.ShouldHaveSingleItem().ShouldBe(new object?[] { 1L });
         await tx.RollbackAsync(CancellationToken.None);
     }
 
