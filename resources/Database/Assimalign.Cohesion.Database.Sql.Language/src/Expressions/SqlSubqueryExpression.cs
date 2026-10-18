@@ -10,9 +10,9 @@ public sealed class SqlSubqueryExpression : SqlExpression
     /// <summary>
     /// Initializes a new <see cref="SqlSubqueryExpression"/>.
     /// </summary>
-    /// <param name="select">The SELECT expression forming the subquery.</param>
+    /// <param name="select">The query body forming the subquery.</param>
     /// <param name="location">The source location.</param>
-    internal SqlSubqueryExpression(SqlSelectExpression select, Location? location)
+    internal SqlSubqueryExpression(SqlQueryBodyExpression select, Location? location)
         : base(location)
     {
         Select = select;
@@ -20,7 +20,7 @@ public sealed class SqlSubqueryExpression : SqlExpression
     }
 
     /// <summary>
-    /// Gets the SELECT expression forming the subquery.
+    /// Gets the SELECT or set-operation body forming the subquery.
     /// </summary>
-    public SqlSelectExpression Select { get; }
+    public SqlQueryBodyExpression Select { get; }
 }

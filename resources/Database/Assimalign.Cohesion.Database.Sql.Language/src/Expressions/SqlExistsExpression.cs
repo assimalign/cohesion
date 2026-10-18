@@ -13,7 +13,7 @@ public sealed class SqlExistsExpression : SqlExpression
     /// <param name="subquery">The subquery being tested.</param>
     /// <param name="isNegated">Whether the predicate is negated (<c>NOT EXISTS</c>).</param>
     /// <param name="location">The source location.</param>
-    internal SqlExistsExpression(SqlSelectExpression subquery, bool isNegated, Location? location)
+    internal SqlExistsExpression(SqlQueryBodyExpression subquery, bool isNegated, Location? location)
         : base(location)
     {
         Subquery = subquery;
@@ -24,7 +24,7 @@ public sealed class SqlExistsExpression : SqlExpression
     /// <summary>
     /// Gets the subquery being tested for existence.
     /// </summary>
-    public SqlSelectExpression Subquery { get; }
+    public SqlQueryBodyExpression Subquery { get; }
 
     /// <summary>
     /// Gets whether the predicate is negated (<c>NOT EXISTS</c>).

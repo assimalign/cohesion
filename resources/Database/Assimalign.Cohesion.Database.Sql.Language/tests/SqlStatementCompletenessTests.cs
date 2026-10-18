@@ -52,6 +52,9 @@ public sealed class SqlStatementCompletenessTests
         [SqlClauses.Limit] = ["SELECT a FROM t LIMIT 1", "SELECT a FROM t OFFSET 1 LIMIT 2"],
         [SqlClauses.Offset] = ["SELECT a FROM t OFFSET 1", "SELECT a FROM t ORDER BY a LIMIT 1 OFFSET 2"],
         [SqlClauses.Values] = ["INSERT INTO t VALUES (1), (2)", "INSERT INTO t VALUES (DEFAULT), (2)", "INSERT INTO t DEFAULT VALUES"],
+        [SqlClauses.SetOperation] = ["SELECT a FROM t UNION SELECT a FROM u", "(SELECT a FROM t ORDER BY a LIMIT 1) UNION ALL SELECT a FROM u"],
+        [SqlClauses.Intersect] = ["SELECT a FROM t INTERSECT ALL SELECT a FROM u"],
+        [SqlClauses.Except] = ["SELECT a FROM t EXCEPT DISTINCT SELECT a FROM u"],
         [SqlClauses.Cte] = ["WITH c AS (SELECT a FROM t) SELECT * FROM c", "WITH c AS (SELECT a FROM t) DELETE FROM t WHERE a IN (SELECT a FROM c)", "INSERT INTO t WITH c AS (SELECT a FROM t) SELECT * FROM c"],
         [SqlClauses.Subquery] =
         [

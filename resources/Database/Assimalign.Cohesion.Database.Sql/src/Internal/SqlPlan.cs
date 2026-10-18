@@ -146,7 +146,20 @@ internal sealed record SqlProjection(string Name, int? ColumnOrdinal, SqlExpress
 }
 
 /// <summary>Projected expression metadata retained across derived materialization.</summary>
-internal sealed record SqlProjectionMetadata(SqlCollationCandidate Collation, SqlCatalogColumn? SourceColumn);
+internal sealed record SqlProjectionMetadata(SqlCollationCandidate Collation, SqlCatalogColumn? SourceColumn,
+    DatabaseTypeInfo? TypeInfo = null, string? DomainName = null);
+
+internal sealed record SqlSetOperand(SqlPlan Query, IReadOnlyList<SqlBoundExpression> Values);
+
+/// <summary>A materialized set operation, with compatible UNION chains stored as N inputs.</summary>
+internal sealed record SqlSetOperationPlan(
+    List<SqlSetOperand> Operands, SqlSetOperator Operator, bool IsAll,
+    IReadOnlyList<SqlProjection> Projections, IReadOnlyList<SqlCatalogColumn> Columns,
+    IReadOnlyList<SqlBoundOrdering> OrderBy, long? Limit, long? Offset) : SqlRelationPlan
+{
+    internal override IReadOnlyList<SqlProjection> OutputProjections => Projections;
+    internal override IReadOnlyList<SqlCatalogColumn> OutputColumns => Columns;
+}
 
 internal sealed record SqlSelectPlan(
     SqlCatalogTable Table,

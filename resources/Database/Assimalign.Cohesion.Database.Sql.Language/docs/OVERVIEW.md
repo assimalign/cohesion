@@ -8,7 +8,7 @@ binding SQL DDL/CAST type names to the shared type system (`Database.Types`).
 
 ## Scope
 
-- **Parser** — non-recursive `WITH` before SELECT/INSERT/UPDATE/DELETE, plus `SELECT` (joins, derived tables, grouping, ordering, limits, subqueries), `INSERT`
+- **Parser** — UNION/INTERSECT/EXCEPT with ALL or DISTINCT in every query position, non-recursive `WITH` before SELECT/INSERT/UPDATE/DELETE, plus `SELECT` (joins, derived tables, grouping, ordering, limits, subqueries), `INSERT`
   (multi-row, whole-item `DEFAULT`, `DEFAULT VALUES`, `INSERT ... SELECT`), `UPDATE`
   (including `SET c = DEFAULT` and correlated and uncorrelated WHERE subqueries), `DELETE`
   (including correlated and uncorrelated WHERE subqueries), `CREATE/ALTER/DROP TABLE`,
@@ -18,7 +18,8 @@ binding SQL DDL/CAST type names to the shared type system (`Database.Types`).
 - **AST** — sealed statement/expression node families under
   `SqlQueryStatement`/`SqlQueryExpression`; the raw statement text is stamped on
   the root after parsing. An `AND` or `OR` chain is one n-ary
-  `SqlLogicalExpression` of any length.
+  `SqlLogicalExpression` of any length. SELECT and set-operation query bodies share
+  `SqlQueryBodyExpression`, including WITH definitions and combined result tails.
 - **Nesting limit** — `SqlQueryParserOptions.ExpressionNestingLimit` (256 by
   default, 32..4096) bounds how deep an expression and its parentheses nest
   (`SQL0006`); a flat `AND`/`OR` chain counts one level. The statement records
@@ -35,7 +36,7 @@ binding SQL DDL/CAST type names to the shared type system (`Database.Types`).
   length/precision/scale) to `DatabaseType` identities; builtin function names are
   declared in the lexer tables and the dialect doc.
 - **Canonical rendering** — `SqlExpressionRenderer` turns a parsed expression or
-  `SELECT` back into canonical SQL text that parses to the same tree. It is the
+  SELECT or set-operation query back into canonical SQL text that parses to the same tree. It is the
   form in which the engine persists stored expressions (CHECK, DEFAULT and SQL function bodies); see
   [DIALECT.md](DIALECT.md#persisted-definitions-are-canonical).
 

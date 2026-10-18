@@ -2,10 +2,10 @@ using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.Database.Sql.Language;
 
-/// <summary>An aliased SELECT used as a FROM or JOIN relation, with optional output names.</summary>
+/// <summary>An aliased query used as a FROM or JOIN relation, with optional output names.</summary>
 public sealed class SqlDerivedTableReference : SqlRelationReference
 {
-    internal SqlDerivedTableReference(SqlSelectExpression query, string alias, IReadOnlyList<string> columns)
+    internal SqlDerivedTableReference(SqlQueryBodyExpression query, string alias, IReadOnlyList<string> columns)
         : base(alias)
     {
         Query = query;
@@ -13,7 +13,7 @@ public sealed class SqlDerivedTableReference : SqlRelationReference
     }
 
     /// <summary>Gets the query that produces this relation's rows.</summary>
-    public SqlSelectExpression Query { get; }
+    public SqlQueryBodyExpression Query { get; }
 
     /// <summary>Gets the derived column names, or an empty list when output names are inherited.</summary>
     public IReadOnlyList<string> Columns { get; }

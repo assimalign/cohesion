@@ -17,6 +17,9 @@ public class SqlLanguageProfileTests
 {
     [Theory]
     [InlineData(SqlClauses.Select, "SELECT 1;")]
+    [InlineData(SqlClauses.SetOperation, "SELECT a FROM t UNION SELECT a FROM u;")]
+    [InlineData(SqlClauses.Intersect, "SELECT a FROM t INTERSECT SELECT a FROM u;")]
+    [InlineData(SqlClauses.Except, "SELECT a FROM t EXCEPT SELECT a FROM u;")]
     [InlineData(SqlClauses.Explain, "EXPLAIN SELECT * FROM t;")]
     [InlineData(SqlClauses.Insert, "INSERT INTO t (id) VALUES (1);")]
     [InlineData(SqlClauses.Update, "UPDATE t SET id = 1;")]
@@ -96,9 +99,6 @@ public class SqlLanguageProfileTests
 
     [Theory]
     [InlineData(SqlClauses.Window)]
-    [InlineData(SqlClauses.SetOperation)]
-    [InlineData(SqlClauses.Intersect)]
-    [InlineData(SqlClauses.Except)]
     [InlineData(SqlClauses.Recursive)]
     [InlineData(SqlClauses.Over)]
     [InlineData(SqlClauses.Partition)]
@@ -114,12 +114,9 @@ public class SqlLanguageProfileTests
 
     [Theory]
     [InlineData(SqlClauses.Window, "SELECT * FROM t WINDOW w AS ();")]
-    [InlineData(SqlClauses.Intersect, "SELECT * FROM t INTERSECT SELECT * FROM u;")]
-    [InlineData(SqlClauses.Except, "SELECT * FROM t EXCEPT SELECT * FROM u;")]
     [InlineData(SqlClauses.Recursive, "WITH RECURSIVE cte AS (SELECT * FROM t) SELECT * FROM cte;")]
     [InlineData(SqlClauses.Over, "SELECT ROW_NUMBER() OVER () FROM t;")]
     [InlineData(SqlClauses.Partition, "SELECT ROW_NUMBER() PARTITION BY id FROM t;")]
-    [InlineData(SqlClauses.SetOperation, "SELECT * FROM t UNION SELECT * FROM u;")]
     [InlineData(SqlClauses.Returning, "INSERT INTO t (id) VALUES (1) RETURNING id;")]
     [InlineData(SqlClauses.All, "SELECT ALL id FROM t;")]
     [InlineData(SqlClauses.Natural, "SELECT * FROM t NATURAL JOIN u;")]

@@ -89,7 +89,15 @@ public static class SqlExpressionRenderer
     /// <exception cref="InsufficientExecutionStackException">
     /// The calling thread has too little stack left to walk the query.
     /// </exception>
-    public static string Render(SqlSelectExpression query)
+    public static string Render(SqlSelectExpression query) => Render((SqlQueryBodyExpression)query);
+
+    /// <summary>Renders a SELECT or set operation as canonical SQL without a terminator.</summary>
+    /// <param name="query">A parsed query body.</param>
+    /// <returns>The canonical query text.</returns>
+    /// <exception cref="ArgumentNullException">The query is null.</exception>
+    /// <exception cref="NotSupportedException">The tree cannot be represented by the dialect.</exception>
+    /// <exception cref="InsufficientExecutionStackException">The thread has insufficient stack.</exception>
+    public static string Render(SqlQueryBodyExpression query)
     {
         ArgumentNullException.ThrowIfNull(query);
         ThrowIfTooDeep(query.ExpressionDepth);
@@ -360,20 +368,21 @@ public static class SqlExpressionRenderer
         return builder.ToString();
     }
 
-    private static string Select(SqlSelectExpression select)
+    private static string Select(SqlQueryBodyExpression query)
     {
-        if (select.CommonTables.Count > 0)
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+        if (query.CommonTables.Count > 0)
         {
-            foreach (var definition in select.CommonTables) { ThrowIfTooDeep(definition.Body.ExpressionDepth); }
+            foreach (var definition in query.CommonTables) { ThrowIfTooDeep(definition.Body.ExpressionDepth); }
         }
         var builder = new StringBuilder();
-        if (select.CommonTables.Count > 0)
+        if (query.CommonTables.Count > 0)
         {
             builder.Append("WITH ");
-            for (int i = 0; i < select.CommonTables.Count; i++)
+            for (int i = 0; i < query.CommonTables.Count; i++)
             {
                 if (i > 0) { builder.Append(", "); }
-                var definition = select.CommonTables[i];
+                var definition = query.CommonTables[i];
                 builder.Append(Identifier(definition.Name));
                 if (definition.Columns.Count > 0)
                 {
@@ -383,6 +392,18 @@ public static class SqlExpressionRenderer
             }
             builder.Append(' ');
         }
+        if (query is SqlSetOperationExpression set)
+        {
+            builder.Append(SetOperand(set.Left, set.Operator, false)).Append(set.Operator switch
+            {
+                SqlSetOperator.Union => " UNION",
+                SqlSetOperator.Intersect => " INTERSECT",
+                _ => " EXCEPT",
+            }).Append(set.IsAll ? " ALL " : " ").Append(SetOperand(set.Right, set.Operator, true));
+            AppendQueryTail(builder, query);
+            return builder.ToString();
+        }
+        var select = (SqlSelectExpression)query;
         builder.Append("SELECT ");
         if (select.IsDistinct)
         {
@@ -444,25 +465,41 @@ public static class SqlExpressionRenderer
         {
             builder.Append(" HAVING ").Append(Expression(select.Having));
         }
-        for (int index = 0; index < select.OrderBy.Count; index++)
+        AppendQueryTail(builder, select);
+        return builder.ToString();
+    }
+
+    private static string SetOperand(SqlQueryBodyExpression operand, SqlSetOperator parent, bool right)
+    {
+        int precedence = parent == SqlSetOperator.Intersect ? 2 : 1;
+        int childPrecedence = operand is SqlSetOperationExpression child ? child.Operator == SqlSetOperator.Intersect ? 2 : 1 : 3;
+        bool parentheses = operand.CommonTables.Count > 0 || operand.OrderBy.Count > 0 || operand.Limit is not null || operand.Offset is not null ||
+            childPrecedence < precedence || right && childPrecedence == precedence;
+        string text = Select(operand);
+        return parentheses ? "(" + text + ")" : text;
+    }
+
+    private static void AppendQueryTail(StringBuilder builder, SqlQueryBodyExpression query)
+    {
+        for (int index = 0; index < query.OrderBy.Count; index++)
         {
-            builder.Append(index == 0 ? " ORDER BY " : ", ").Append(Expression(select.OrderBy[index].Expression));
-            if (select.OrderBy[index].IsDescending)
+            builder.Append(index == 0 ? " ORDER BY " : ", ").Append(Expression(query.OrderBy[index].Expression));
+            if (query.OrderBy[index].IsDescending)
             {
                 builder.Append(" DESC");
             }
         }
-        if (select.LimitSyntaxKind == SqlLimitSyntaxKind.Limit)
+        if (query.LimitSyntaxKind == SqlLimitSyntaxKind.Limit)
         {
-            builder.Append(" LIMIT ").Append(Expression(select.Limit!));
+            builder.Append(" LIMIT ").Append(Expression(query.Limit!));
         }
-        if (select.Offset is not null)
+        if (query.Offset is not null)
         {
-            builder.Append(" OFFSET ").Append(Expression(select.Offset));
+            builder.Append(" OFFSET ").Append(Expression(query.Offset));
         }
-        if (select.LimitSyntaxKind == SqlLimitSyntaxKind.Fetch)
+        if (query.LimitSyntaxKind == SqlLimitSyntaxKind.Fetch)
         {
-            var count = select.Limit!;
+            var count = query.Limit!;
             bool signedNumeric = count is SqlUnaryExpression
             {
                 Operator: SqlUnaryOperator.Negate,
@@ -471,7 +508,6 @@ public static class SqlExpressionRenderer
             builder.Append(" FETCH FIRST ").Append(signedNumeric ? Expression(count) : Operand(count, primaryLevel))
                 .Append(" ROWS ONLY");
         }
-        return builder.ToString();
     }
 
     private static string Table(SqlRelationReference relation)

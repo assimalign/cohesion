@@ -79,7 +79,7 @@ public sealed class SqlPagingParserTests
         foreach (string statement in statements)
         {
             var parsed = Parse(statement);
-            SqlSelectExpression child = parsed.SqlExpression switch
+            SqlQueryBodyExpression child = parsed.SqlExpression switch
             {
                 SqlInsertExpression insert => insert.SelectSource!,
                 SqlSelectExpression { CommonTables.Count: > 0 } select => select.CommonTables[0].Body,

@@ -97,6 +97,9 @@ internal static class Program
         "WHERE EXISTS (SELECT other.Id FROM customers other WHERE other.Id = c.Id) AND c.Id IN (SELECT other.Id FROM customers other WHERE other.Id = c.Id) ORDER BY c.Id";
     private const string correlatedCardinality = "SELECT (SELECT other.Id FROM customers other WHERE other.Id = c.Id OR c.Id = 2) FROM customers c ORDER BY c.Id";
 
+    private const string setOperations = "(SELECT Id FROM customers UNION ALL SELECT Id FROM customers) EXCEPT ALL " +
+        "(SELECT Id FROM customers INTERSECT SELECT Id FROM customers) ORDER BY 1 OFFSET 1 ROW FETCH NEXT ROW ONLY";
+
     private const string derivedJoin = "SELECT d.key_id FROM customers c JOIN (SELECT Id FROM customers WHERE Id = 1) d (key_id) ON c.Id = d.key_id";
 
     private const string CannotCast = "SELECT CAST(Active AS DATE) FROM customers WHERE Id < 0";
@@ -215,6 +218,8 @@ internal static class Program
         Check("in process: all CAST families", await RowsAsync(session, allCasts), _allCasts);
         Check("in process: three-way USING and LEFT", await RowsAsync(session, expandedJoin), [[1L, 1L], [2L, null]]);
         Check("in process: comma and CROSS", await RowsAsync(session, crossJoin), [[8L]]);
+        Check("in process: set operations", await RowsAsync(session, setOperations), [[2L]]);
+        Check("in process: set subquery", await RowsAsync(session, "SELECT Id FROM customers WHERE Id IN (SELECT Id FROM customers EXCEPT SELECT Id FROM customers WHERE Id = 1)"), [[2L]]);
         Check("in process: renamed derived join", await RowsAsync(session, derivedJoin), [[1L]]);
         Check("in process: correlated scalar EXISTS and IN", await RowsAsync(session, correlatedRows), [[1L, 100L], [2L, 200L]]);
         CheckFailure("in process: correlated cardinality", await FailureAsync(() => RowsAsync(session, correlatedCardinality)), "one row");
@@ -352,6 +357,8 @@ internal static class Program
         Check("over the wire: all CAST families", await RowsAsync(connection, allCasts, timeout.Token), _allCasts);
         Check("over the wire: three-way USING and LEFT", await RowsAsync(connection, expandedJoin, timeout.Token), [[1L, 1L], [2L, null]]);
         Check("over the wire: comma and CROSS", await RowsAsync(connection, crossJoin, timeout.Token), [[8L]]);
+        Check("over the wire: set operations", await RowsAsync(connection, setOperations, timeout.Token), [[2L]]);
+        Check("over the wire: set subquery", await RowsAsync(connection, "SELECT Id FROM customers WHERE Id IN (SELECT Id FROM customers EXCEPT SELECT Id FROM customers WHERE Id = 1)", timeout.Token), [[2L]]);
         Check("over the wire: renamed derived join", await RowsAsync(connection, derivedJoin, timeout.Token), [[1L]]);
         Check("over the wire: chained CTEs", await RowsAsync(connection,
             "WITH a AS (SELECT Id FROM customers), b AS (SELECT Id FROM a) SELECT Id FROM b ORDER BY Id", timeout.Token), [[1L], [2L]]);

@@ -115,7 +115,8 @@ internal static class SqlCastConverter
         if (target.Type == DatabaseType.Character)
         {
             string text = (string)value;
-            int length = target.MaxLength ?? 1;
+            // PostgreSQL varchar.c:284-286: an unconstrained bpchar typmod passes through.
+            if (target.MaxLength is not int length) { return new SqlCharacter(text); }
             int characters = 0;
             int end = 0;
             // PostgreSQL varchar.c:130-190 and 271-339: count characters, pad on storage;

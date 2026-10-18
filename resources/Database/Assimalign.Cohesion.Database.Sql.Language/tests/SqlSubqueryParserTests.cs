@@ -111,7 +111,6 @@ public sealed class SqlSubqueryParserTests
     [InlineData("SELECT id FROM t WHERE id = any /* trivia */ (SELECT id FROM u);", "ANY quantified comparison")]
     [InlineData("SELECT * FROM LATERAL (SELECT id FROM u) q;", "LATERAL")]
 
-    [InlineData("SELECT * FROM (SELECT id FROM t UNION SELECT id FROM u) d;", "UNION")]
 
     [InlineData("INSERT INTO t VALUES ((SELECT id FROM u));", "SUBQUERY in INSERT VALUES")]
     [InlineData("SELECT id FROM t LIMIT (SELECT id FROM u);", "LIMIT")]

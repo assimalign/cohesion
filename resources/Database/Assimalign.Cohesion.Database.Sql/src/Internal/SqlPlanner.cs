@@ -119,7 +119,7 @@ internal sealed partial class SqlPlanner
         {
             SqlCreateFunctionExpression or SqlDropFunctionExpression or SqlCreateDomainExpression or SqlDropDomainExpression
                 => new SqlDefinitionPlan(expression),
-            SqlSelectExpression select => PlanSelect(select),
+            SqlQueryBodyExpression query => PlanQuery(query),
             SqlInsertExpression insert => PlanInsert(insert),
             SqlUpdateExpression update => PlanUpdate(update),
             SqlDeleteExpression delete => PlanDelete(delete),
@@ -134,10 +134,10 @@ internal sealed partial class SqlPlanner
         };
     }
 
-    private SqlPlan PlanSelect(SqlSelectExpression select)
+    private SqlPlan PlanQuery(SqlQueryBodyExpression select)
     {
         _cancellationToken.ThrowIfCancellationRequested();
-        return select.CommonTables.Count == 0 ? PlanSubqueries(select)
+        return select.CommonTables.Count == 0 ? PlanQueryBody(select)
             : PlanCommonTables(select.CommonTables, select);
     }
 
@@ -150,7 +150,7 @@ internal sealed partial class SqlPlanner
         }
         if (select.From.Count == 0)
         {
-            if (ReferenceEquals(_commonTableState?.BindingBody, select)) { return PlanConstantCommonTable(select); }
+            if (IsCommonTableOperand(select)) { return PlanConstantCommonTable(select); }
             throw new SqlPlanningException("COHSQLE013", "SELECT requires a FROM table.", select.Location);
         }
 
@@ -1333,7 +1333,7 @@ internal sealed partial class SqlPlanner
         throw SqlEvaluationException.UnknownType(cast.TargetType, "CAST target");
     }
 
-    private static string LimitClause(SqlSelectExpression select) => select.LimitSyntaxKind switch
+    private static string LimitClause(SqlQueryBodyExpression select) => select.LimitSyntaxKind switch
     {
         SqlLimitSyntaxKind.Fetch => "FETCH",
         SqlLimitSyntaxKind.Top => "TOP",

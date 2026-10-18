@@ -64,7 +64,7 @@ nullable definitions and DEFAULT; retaining the type and NOT NULL preserves gene
 
 ## Statement matrix
 
-With CREATE SCHEMA and DROP SCHEMA (#1030), the profile measures **44 of 56 declared clauses** against the live SQL engine.
+With CREATE SCHEMA and DROP SCHEMA (#1030) and UNION, INTERSECT and EXCEPT (#1114), the profile measures **47 of 56 declared clauses** against the live SQL engine.
 Phase 22 measured 33 of 49.
 The earlier 32/48 figure included `JOIN`, `GROUP BY`, `HAVING`, and `SUBQUERY`,
 removed in Phase 12e (#1019–#1021), plus a no-op `CAST` removed in Phase 13.
@@ -85,8 +85,7 @@ projection aliases, including aliases inside scalar expressions, and select-list
 ordinals through the SQL server/client (#1024). At Phase 22 the count remained 33/49 because
 `ALTER TABLE` and `ORDER BY` were already advertised for smaller executable subsets.
 
-The **12 excluded clauses** are set operations (`UNION`,
-`INTERSECT`, `EXCEPT`), recursive CTEs (`RECURSIVE`), window clauses (`WINDOW`,
+The **9 excluded clauses** are recursive CTEs (`RECURSIVE`), window clauses (`WINDOW`,
 `OVER`, `PARTITION`), views (`CREATE VIEW`, `DROP VIEW`), `NATURAL`,
 `ALL` and `RETURNING`. Counts describe named clauses, not
 complete ISO SQL support; the boundaries below are part of the contract.
@@ -111,12 +110,12 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `COLLATE` | Supported subset, measured | Column and expression overrides: `binary`, `case_insensitive`, `case_accent_insensitive`, plus compatibility `invariant` with scan execution only. Effective collation governs comparisons, `LIKE`, ordering, grouping, `DISTINCT`, and unique keys. See the collation contract below. |
 | `JOIN` / `USING` | Supported subset, measured | N-way INNER (or bare JOIN), LEFT [OUTER], CROSS and comma joins over stored/system/derived sources. INNER/LEFT require ON or USING; CROSS accepts neither. RIGHT/FULL, NATURAL, LATERAL and qualified wildcards remain excluded. See the precise contract below. |
 | `GROUP BY` / `HAVING` | Supported subset, measured | One or more grouping expressions; `WHERE` filters input rows and `HAVING` filters groups after aggregation. Composes with supported N-way joins, `ORDER BY`, `LIMIT`, and `OFFSET`, including server/client execution. Ungrouped, unaggregated projected columns are errors. `DISTINCT`/`ALL` aggregate modifiers, grouping extensions, windows, and ordered-set aggregates report `COHDBL001`. |
-| Subqueries / `INSERT ... SELECT` | Supported subset, measured | Correlated and uncorrelated scalar, `IN`/`NOT IN`, and `EXISTS`/`NOT EXISTS` queries in supported SELECT expressions and UPDATE/DELETE WHERE predicates, plus aliased derived tables and transactional insert-source queries. All use the outer statement snapshot; nesting is limited to 32 subquery levels, within the statement's expression nesting limit (256 levels by default, `SQL0006`). Quantified comparisons and subqueries in UPDATE SET, VALUES, CHECK/DEFAULT, and LIMIT/OFFSET/FETCH/TOP expressions report `COHDBL001`. See the subquery contract below. |
+| Subqueries / `INSERT ... SELECT` | Supported subset, measured | Correlated and uncorrelated scalar, `IN`/`NOT IN`, and `EXISTS`/`NOT EXISTS` queries in supported SELECT expressions and UPDATE/DELETE WHERE predicates, plus aliased derived tables and transactional insert-source queries. Each body may be a set operation (#1114). All use the outer statement snapshot; nesting is limited to 32 subquery levels, within the statement's expression nesting limit (256 levels by default, `SQL0006`). Quantified comparisons and subqueries in UPDATE SET, VALUES, CHECK/DEFAULT, and LIMIT/OFFSET/FETCH/TOP expressions report `COHDBL001`. See the subquery contract below. |
 | `TOP` / `FETCH` | Supported subset, measured | Row counts normalize to LIMIT/Offset plan fields; see [Pagination](#pagination-1107). PERCENT, WITH TIES and DML TOP retain COHDBL001. |
 | `SELECT ALL` | Recognized, not supported | rejected with `COHDBL001` |
 | DML `RETURNING` | Recognized, not supported | rejected with `COHDBL001` |
 | `NATURAL JOIN` | Recognized, not supported | rejected with `COHDBL001` |
-| `UNION` / `INTERSECT` / `EXCEPT` | Recognized, not supported | keywords lexed; rejected with `COHDBL001` |
+| `UNION` / `INTERSECT` / `EXCEPT` | Supported, measured | Each accepts ALL or DISTINCT (default); available in every query position, with parenthesized operands and combined ordering/paging. See [Set operations](#set-operations-1114). |
 | `WITH` (CTEs) | Supported subset, measured | Ordered non-recursive SELECT bodies before SELECT, INSERT, UPDATE or DELETE; optional output column lists; also INSERT INTO t WITH ... SELECT |
 | `WITH RECURSIVE` | Recognized, not supported | `COHDBL001` at RECURSIVE |
 | Window functions / `OVER` / `WINDOW` | Recognized, not supported | function names lexed; clauses rejected with `COHDBL001` |
@@ -1257,6 +1256,74 @@ application's aggregate included; PostgreSQL refuses them on a function that is 
 aggregate. Top-level `SELECT DISTINCT` remains available. These
 boundaries do not add named clauses to the 54-clause denominator.
 
+## Set operations (#1114)
+
+UNION, INTERSECT and EXCEPT accept optional ALL or DISTINCT. DISTINCT is the default.
+UNION ALL concatenates inputs; UNION DISTINCT removes duplicates within and across inputs.
+INTERSECT DISTINCT returns each common row once; EXCEPT DISTINCT returns each left-only row once.
+For a row occurring m times on the left and n times on the right, INTERSECT ALL returns
+min(m,n) copies and EXCEPT ALL returns max(m-n,0). NULL cells compare equal for set
+membership, including multi-column rows. Equality and hashing use the same comparer as
+GROUP BY and SELECT DISTINCT. Spelling of a collation-equivalent surviving row is unspecified.
+
+INTERSECT binds tighter than UNION and EXCEPT; UNION and EXCEPT associate left to right.
+Parenthesized operands may carry their own ORDER BY, LIMIT, OFFSET or FETCH. Without
+parentheses those clauses belong to the combined result; placing them before another
+operator is SQL0003. TOP stays on its SELECT operand, so
+`SELECT id FROM t UNION SELECT TOP 1 id FROM u OFFSET 1` skips a combined row.
+Combined ORDER BY accepts first-operand output names (implicit names included) and positive
+one-based ordinals only. Expressions, qualified names, absent output names and invalid ordinals
+fail planning with COHSQLE018; ambiguous names use COHSQLE019. Combined OFFSET/FETCH shares
+the ordinary Int64 count validation. Explicit NULL placement retains COHDBL001.
+
+Both inputs must have the same column count (COHSQLE013 names both counts).
+Types are checked before reading any row. The USING common-type rule selects a category-compatible
+type with implicit registry casts, retaining the left candidate when conversions work in both
+directions. Numeric one-way widening makes INTEGER with BIGINT produce Int64 values and metadata,
+and DECIMAL with DOUBLE produce Double. Untyped NULL and string literals are unknown and take the other input's type; an all-unknown
+pair becomes TEXT. Explicit CAST to TEXT remains typed and cannot match INTEGER. Type mismatches use COHSQLE003, naming the one-based position and both types.
+Length, precision and scale survive only when both input types and modifiers agree. A domain
+survives only when every input has the identical domain and modifiers. Values convert before
+duplicate comparison: TEXT combined with CHAR trims the latter through its registered text cast,
+CHAR first with differing types or typmods becomes unconstrained CHAR and preserves full values,
+including TEXT lengths; no declaration default CHAR(1) is applied. DATE combined with TIMESTAMP promotes calendar values. Output names come from the first input;
+nullability is the OR of each operand's reported result metadata.
+
+Per-column collation uses explicit COLLATE over a declared column collation over the database
+default; the left operand wins a tie. This deliberately resolves conflicting declared collations
+instead of rejecting them. The unified collation also governs an IN subquery's membership.
+Derived and CTE outputs expose newly synthesized metadata, preserving the unified type and
+collation without borrowing a physical source ordinal or expression.
+
+Set bodies execute at the top level, in IN/NOT IN, EXISTS/NOT EXISTS, scalar subqueries,
+derived tables, CTE definitions and INSERT query sources, including correlated operands.
+`IN ((SELECT id FROM t))` is now membership, with redundant query parentheses removed
+by canonical rendering. Top-level SELECT operands still require FROM; the top-level operands
+of a CTE definition may use its implicit row. Each subquery counts once toward the existing
+32-level subquery limit; set nodes count individually toward the expression depth limit.
+Parenthesized scalar queries followed by arithmetic, comparison or a list comma remain values
+(PostgreSQL gram.y:15645,15899,15916). Parenthesized WITH retains the existing single subquery
+refusal. Query lookahead is bounded; excess grouping parentheses retain their first-offending-token span.
+All operands share one statement snapshot and catalog capture, see their transaction's own
+writes, and retain existing INSERT atomicity and scalar-cardinality checks.
+
+Compatible same-quantifier UNION chains flatten to one N-way materialization with O(total input)
+time and memory before sorting; no accumulated prefix is copied per link. Other set nodes
+materialize both operands and a hash membership/count table in O(L+R). Every remaining recursive
+execution level checks the stack and reports COHSQLE004. Sorting adds O(N log N); streaming
+and spilling remain excluded.
+CORRESPONDING (including BY forms) remains T2 and reports one contextual COHDBL001.
+Nested/recursive WITH, LATERAL and outer ORDER BY keys bound to derived outputs retain their
+existing exclusions.
+
+Reference anchors in the local PostgreSQL clone: `src/backend/parser/gram.y:845-846,13103-13115`
+(precedence and select_with_parens), `parse_coerce.c:1362-1457,1648-1678` (types, unknowns
+and modifiers), `analyze.c:1983-2006` (combined ordering), and
+`src/backend/executor/nodeSetOp.c:128-160` (multiplicities).
+UNION, INTERSECT and EXCEPT were already keywords; removing their unsupported rows and
+keeping CORRESPONDING contextual changes no persisted identifier quoting, so the storage
+format is unchanged. Persisted-text drift tests pin these four spellings.
+
 ## Subqueries and query-source inserts (#1021)
 
 Subqueries are separate planned queries. An uncorrelated child materializes once
@@ -1357,7 +1424,7 @@ entry). A CTE and a stored relation with the same unaliased name conflict
 `WITH t AS (SELECT 1 AS id) DELETE FROM t` deletes from stored t. A target naming
 only a CTE fails as an unknown table. Scalar and aggregate SELECT bodies may omit
 FROM and operate on one implicit row; a wildcard still requires a relation.
-This implicit row applies only to the definition's SELECT root. Subqueries and
+This implicit row applies to the definition's SELECT root and the top-level SELECT operands of a set-operation body. Subqueries and
 derived tables nested in that body retain the ordinary FROM requirement and
 ordinary diagnostics. Constant bodies run the same planning checks, including
 COHSQLE017 for aggregates in WHERE even when the definition is unused.
@@ -2313,7 +2380,7 @@ use ordinal Unicode scalar matching.
 | RPAD(text, integer [, fill]) | TEXT | Strict | I | PG; nonpositive length gives empty text; default space |
 | REVERSE(text) | TEXT | Strict | I | PG; reverses Unicode scalars |
 | ABS(numeric) | Numeric result | Strict | I | ISO / PG; BIGINT minimum overflows |
-| ROUND(numeric); ROUND(exact_numeric, integer_scale) | Numeric result | Strict | I | ISO / PG; exact halves away from zero, approximate halves to even; negative exact scale supported |
+| ROUND(numeric); ROUND(exact_numeric, integer_scale) | Numeric result | Strict | I | ISO / PG; exact halves away from zero, approximate halves to even; negative exact scale decides once from the exact discarded remainder, without division rounding (#1661) |
 | FLOOR(numeric) | Numeric result | Strict | I | ISO / PG |
 | CEILING(numeric) | Numeric result | Strict | I | ISO / PG |
 | CEIL(numeric) | Numeric result | Strict | I | PG alias of CEILING |
@@ -2333,6 +2400,13 @@ use ordinal Unicode scalar matching.
 | EXTRACT(field FROM temporal) | DECIMAL | Strict | I | ISO / PG; fields below |
 | DATE_TRUNC(field_text, temporal) | Input temporal type | Strict | I | PG; DATE stays DATE, a PG deviation |
 | GEN_RANDOM_UUID() | UUID version 4, per call | Never NULL | V | PG |
+
+For an exact value and negative scale, ROUND compares the exact discarded remainder with
+half the scale's power of ten, then rounds once, with ties away from zero. Thus
+`ROUND(4.9999999999999999999999999999, -1)` is 0, while `ROUND(5.0, -1)` is 10
+and `ROUND(-5.0, -1)` is -10. The rule applies at every supported negative scale,
+including -28; division must not first round a value onto a midpoint (#1661).
+Reference: PostgreSQL `src/backend/utils/adt/numeric.c:11683-11756`, `round_var`.
 
 EXTRACT fields are YEAR, QUARTER, MONTH, WEEK (ISO week number), DAY, DOW
 (Sunday zero), DOY, HOUR, MINUTE, SECOND (with fractional seconds) and EPOCH.
@@ -2480,7 +2554,7 @@ pin in the same change.
 | `COHDBL001` | Error | Recognized clause, keyword, function, operator or type modifier is not supported by the SQL model surface, including prefix and infix `~` (#1101), temporal precision and INTERVAL field qualifiers in declarations and CAST (#1438); the message names the construct and, for a modifier, its declaration |
 | `SQL0001` | Error | Empty query text |
 | `SQL0002` | Error | Unknown command (recognized unsupported clauses use `COHDBL001`) |
-| `SQL0003` | Error | Malformed syntax: text after a complete statement or after its terminating `;`; a missing expression, closing token, keyword, name or `VALUES` row; an unterminated string, quoted identifier or block comment; a character outside the dialect, such as `?`, `#`, `^` or a non-ASCII digit, which binds no alias or column (#1101); a numeric literal whose exponent has no digits; an `IS` form other than `[NOT] NULL`; `NOT` after an operand without `BETWEEN`, `IN` or `LIKE`; `LIKE ... ESCAPE`; mixed or duplicate pagination clauses, incomplete FETCH, or malformed TOP; an incomplete `IF [NOT] EXISTS`; `ALTER` without `TABLE`; an unknown or incomplete `ALTER TABLE` action; and malformed transaction-control, JOIN, GROUP BY, HAVING, CAST, COLLATE, or constraint/DDL syntax |
+| `SQL0003` | Error | Malformed syntax: text after a complete statement or after its terminating `;`; a missing expression, closing token, keyword, name or `VALUES` row; an unterminated string, quoted identifier or block comment; a character outside the dialect, such as `?`, `#`, `^` or a non-ASCII digit, which binds no alias or column (#1101); a numeric literal whose exponent has no digits; an `IS` form other than `[NOT] NULL`; `NOT` after an operand without `BETWEEN`, `IN` or `LIKE`; `LIKE ... ESCAPE`; mixed or duplicate pagination clauses, incomplete FETCH, or malformed TOP; an incomplete `IF [NOT] EXISTS`; `ALTER` without `TABLE`; an unknown or incomplete `ALTER TABLE` action; and missing set operands or an unparenthesized operand window before a set operator; malformed transaction-control, JOIN, GROUP BY, HAVING, CAST, COLLATE, or constraint/DDL syntax |
 | `SQL0004` | — | Retired (E3): an unknown CAST target type was a parse error; a name that is not a built-in type is now resolved by the engine, and one it does not know is `COHSQLE010` |
 | `SQL0005` | Error | Invalid type modifiers at any declaration or CAST: malformed arguments (including CHAR(MAX)), out-of-range length/precision/scale (including FLOAT outside 1..53 bits), arguments a type does not take, or a rejected type spelling (BIT, SMALLDATETIME, TIME WITH TIME ZONE); names the declaration and reason. Temporal precision and INTERVAL qualifiers use COHDBL001 |
 | `SQL0006` | Error | Expression nesting exceeds the limit (256 levels by default, configurable within 32..4096), or parentheses nest deeper than the limit; an `AND`/`OR` chain counts one level. The rest of the statement is not parsed. An engine also reports it for a typed request whose statement nests deeper than the engine's limit (#1151) |
@@ -2489,7 +2563,7 @@ pin in the same change.
 | `SQL0100` | Information | Statement does not end with `;` |
 | `COHSQLE001` | Error | Division by zero during evaluation (ISO SQLSTATE 22012) |
 | `COHSQLE002` | Error | Numeric value out of range during evaluation, store assignment, DEFAULT conversion or built-in NUMERIC CAST, including an inexact Decimal representation after any declared-scale rounding (ISO SQLSTATE 22003) |
-| `COHSQLE003` | Error | Unary `+` or `-` over a non-numeric operand (ISO SQLSTATE 42804) |
+| `COHSQLE003` | Error | Datatype mismatch, including non-numeric signs and incompatible set-operation column types; set errors name both types and the one-based position (ISO SQLSTATE 42804) |
 | `COHSQLE004` | Error | Statement too complex: parsing it or a walk over it needs more stack than the executing thread has left, which a statement within a high configured nesting limit, a deeply backtracking `LIKE` match or a thread created with a small stack can reach (ISO SQLSTATE 54001, #1151) |
 | `COHSQLE005` | Error | Column reference in a clause with no columns in scope: an `INSERT ... VALUES` row or a `LIMIT`/`OFFSET` count, raised while planning (ISO SQLSTATE class 42, #1165) |
 | `COHSQLE006` | Error | Function call whose arguments no overload of its function accepts: a count outside every overload's (`ABS(1, 2)`, `UPPER()`, `COALESCE()`, `COUNT(a, b)`, `SUM()`), `*` for a function other than a parameterless aggregate such as `COUNT`, or argument types no overload takes (`SUM(name)` over text). Raised while planning, in every expression position, `CHECK` and `DEFAULT` included; by the evaluator for a call that reaches it unplanned; and by opening a database whose catalog stores a CHECK holding `COALESCE` with no operand (ISO SQLSTATE class 42; PostgreSQL's 42883, undefined function, #1189) |
@@ -2522,7 +2596,7 @@ carried per node.
 the internal recognized-unsupported table (`SqlUnsupportedVocabulary`), either
 parses inside a supported clause or reports exactly one `COHDBL001` naming its
 construct. The table holds the clause keywords the preflight scan rejects,
-`UNION` through `USING` in the statement matrix. It also holds every other word or
+such as `WINDOW` in the statement matrix. UNION, INTERSECT and EXCEPT remain profile keywords and execute; CORRESPONDING is rejected contextually after an operator and optional quantifier, without reserving that identifier. It also holds every other word or
 operator outside the profile's keywords that a dedicated rule recognizes and
 rejects with `COHDBL001`: `RECURSIVE`, `[NOT] MATERIALIZED`, `SEARCH`/`CYCLE`,
 `SELECT ALL`, `CREATE`/`DROP VIEW`,
@@ -2719,6 +2793,7 @@ quoted names to match uppercase vocabulary entries.
 | `COHSQLE024` | A column that disallows NULL receives NULL, including DEFAULT with no declared default | 23502 (`not_null_violation`) |
 | `COHSQLE025` | An identity definition, explicit assignment, ALTER, backfill or allocation violates its generation contract | 428C9 (`generated_always`) for explicit ALWAYS assignments; identity range and definition failures share the local code |
 | `COHSQLE026` | Duplicate CTE name or missing relation matching a later sibling, before reading rows | 42712 / 42P01 |
+| `COHSQLE003` | Set-operation column types cannot be matched by implicit conversion; names both types and the one-based position | 42804 |
 
 NOT NULL failures carry one error diagnostic naming the column, with no source span at
 execution time. The existing missing-default and explicit-NULL message texts are unchanged.

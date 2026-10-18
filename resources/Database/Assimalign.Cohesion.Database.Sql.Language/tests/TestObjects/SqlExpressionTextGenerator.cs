@@ -8,8 +8,8 @@ namespace Assimalign.Cohesion.Database.Sql.Language.Tests;
 /// seed: every operator rung, sign and NOT nesting, the predicates, CASE, COLLATE, CAST,
 /// builtin and plain calls, subqueries, and the literal and identifier spellings (quoted,
 /// keyword, unicode, doubled quotes). Operands are parenthesized at random, so the text
-/// exercises both the parser's precedence and explicit grouping; text that does not parse is
-/// skipped by the caller. Spelling varies too — keyword case, spacing, comments — because the
+/// exercises explicit grouping; the renderer then exercises minimal precedence. Every generated
+/// expression must parse. Spelling varies too — keyword case, spacing, comments — because the
 /// canonical form must not depend on it.
 /// </summary>
 internal sealed class SqlExpressionTextGenerator
@@ -38,6 +38,23 @@ internal sealed class SqlExpressionTextGenerator
     /// <summary>Generates WITH roots with ordered bodies and optional output-name lists.</summary>
     internal string NextQuery(int depth)
     {
+        if (_random.Next(3) == 0)
+        {
+            string left = "SELECT " + Value(depth) + " AS x FROM t";
+            string middle = "SELECT " + Value(depth) + " AS x FROM u";
+            string right = "SELECT " + Value(depth) + " AS x FROM v";
+            string first = Pick("UNION", "UNION ALL", "EXCEPT", "EXCEPT ALL", "INTERSECT", "INTERSECT ALL");
+            string second = Pick("UNION", "UNION ALL", "EXCEPT", "EXCEPT ALL", "INTERSECT", "INTERSECT ALL");
+            string operand = "(SELECT x FROM q ORDER BY 1 LIMIT 2)";
+            string body = _random.Next(4) switch
+            {
+                0 => operand + " " + first + " " + middle + " " + second + " " + right,
+                1 => "(" + operand + " " + first + " " + middle + ") " + second + " " + right,
+                2 => operand + " " + first + " (" + middle + " " + second + " " + right + ")",
+                _ => "((" + operand + " " + first + " (" + middle + " ORDER BY 1 LIMIT 1))) " + second + " " + right,
+            };
+            return "WITH q AS (" + left + ") " + body + " ORDER BY 1" + Paging(_random.Next(3));
+        }
         string[] names = ["a", "top", "ties"];
         int count = 1 + _random.Next(names.Length);
         var builder = new StringBuilder("WITH ");
@@ -96,7 +113,7 @@ internal sealed class SqlExpressionTextGenerator
             19 => Pick("EXISTS (", "NOT EXISTS (", "exists(") + "SELECT a FROM u WHERE " + Value(next) + ")",
             20 => Operand(next) + Pick(" IN (SELECT ", " NOT IN (SELECT ") + Value(next) + " FROM u)",
             21 => "(" + Value(next) + ")",
-            _ => Operand(next) + Spaced(Pick("+", "*", "=", "AND", "OR")) + Operand(next) + Spaced(Pick("-", "/", "<", "OR")) + Operand(next),
+            _ => "(" + Operand(next) + Spaced(Pick("+", "*", "=", "AND", "OR")) + Operand(next) + ")" + Spaced(Pick("-", "/", "<", "OR")) + Operand(next),
         };
     }
 
@@ -104,7 +121,7 @@ internal sealed class SqlExpressionTextGenerator
     // a second minus sign straight after the first (that would start a line comment).
     private string Signed(int depth) => _random.Next(3) == 0 ? Leaf() : "(" + Value(depth) + ")";
 
-    private string Operand(int depth) => _random.Next(2) == 0 ? "(" + Value(depth) + ")" : Value(depth);
+    private string Operand(int depth) => "(" + Value(depth) + ")";
 
     private string Primary(int depth) => _random.Next(2) == 0 ? Leaf() : "(" + Value(depth) + ")";
 

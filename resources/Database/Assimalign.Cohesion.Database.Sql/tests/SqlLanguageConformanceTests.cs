@@ -41,8 +41,8 @@ public sealed class SqlLanguageConformanceTests
     {
         // The profile drives enumeration. A newly advertised clause cannot silently escape this test.
         var cases = CreateCases();
-        // #1030 adds CREATE SCHEMA and DROP SCHEMA: exactly two over #1121's 42.
-        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(44);
+        // #1114 adds UNION, INTERSECT and EXCEPT: exactly three over #1030's 44.
+        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(47);
         RequireExecutionCases(SqlLanguageProfile.Instance.Clauses, cases);
         cases.Keys.Except(SqlLanguageProfile.Instance.Clauses).ShouldBeEmpty("Cases must describe the current profile.");
 
@@ -432,6 +432,12 @@ public sealed class SqlLanguageConformanceTests
             [[1, 37L], [2, 46L], [3, 42L]]),
         [SqlClauses.From] = Query("SELECT u.name FROM dbo.t AS u WHERE id = 1;", expression => expression is SqlSelectExpression { From.Count: 1 },
             [["Ada"]]),
+        [SqlClauses.SetOperation] = Query("SELECT id FROM t WHERE id = 1 UNION SELECT id FROM t WHERE id = 2 ORDER BY id;",
+            expression => expression is SqlSetOperationExpression { Operator: SqlSetOperator.Union }, [[1], [2]]),
+        [SqlClauses.Intersect] = Query("SELECT id FROM t INTERSECT SELECT id FROM t WHERE id = 2;",
+            expression => expression is SqlSetOperationExpression { Operator: SqlSetOperator.Intersect }, [[2]]),
+        [SqlClauses.Except] = Query("SELECT id FROM t EXCEPT SELECT id FROM t WHERE id <> 2;",
+            expression => expression is SqlSetOperationExpression { Operator: SqlSetOperator.Except }, [[2]]),
         [SqlClauses.Cte] = new("WITH a AS (SELECT id FROM t WHERE age > 40), b AS (SELECT id FROM a) SELECT id FROM b ORDER BY id;", _seed,
             expression => expression is SqlSelectExpression { CommonTables.Count: 2 },
             async (session, result) =>

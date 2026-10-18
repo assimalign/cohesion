@@ -15,9 +15,9 @@ internal sealed partial class SqlPlanner
     /// no rows. Value-dependent conversions are checked by the shared insert path.
     /// </summary>
     private SqlInsertSelectPlan PlanInsertSelect(SqlCatalogTable table, IReadOnlyList<int> targetOrdinals,
-        SqlSelectExpression source)
+        SqlQueryBodyExpression source)
     {
-        var plan = PlanSelect(source);
+        var plan = PlanQuery(source);
         var projections = InsertSourceProjections(plan);
         if (projections.Count != targetOrdinals.Count)
         {

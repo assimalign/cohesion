@@ -21,7 +21,7 @@ internal static class SqlTreeDump
         return builder.ToString();
     }
 
-    internal static string Dump(SqlSelectExpression select)
+    internal static string Dump(SqlQueryBodyExpression select)
     {
         var builder = new StringBuilder();
         Append(builder, select);
@@ -150,8 +150,34 @@ internal static class SqlTreeDump
         }
     }
 
-    private static void Append(StringBuilder builder, SqlSelectExpression select)
+    private static void Append(StringBuilder builder, SqlQueryBodyExpression query)
     {
+        if (query is SqlSetOperationExpression set)
+        {
+            builder.Append("Set(").Append(set.Operator).Append(", all=").Append(set.IsAll).Append(", with=[");
+            foreach (var definition in set.CommonTables)
+            {
+                builder.Append(Text(definition.Name)).Append('[').Append(string.Join(",", definition.Columns.Select(Text))).Append("]=");
+                Append(builder, definition.Body);
+            }
+            builder.Append("], left=");
+            Append(builder, set.Left);
+            builder.Append(", right=");
+            Append(builder, set.Right);
+            builder.Append(", order=[");
+            foreach (var order in set.OrderBy)
+            {
+                Append(builder, order.Expression);
+                builder.Append(order.IsDescending ? " desc;" : " asc;");
+            }
+            builder.Append("], limitSyntax=").Append(set.LimitSyntaxKind).Append(", limit=");
+            Append(builder, set.Limit);
+            builder.Append(", offset=");
+            Append(builder, set.Offset);
+            builder.Append(')');
+            return;
+        }
+        var select = (SqlSelectExpression)query;
         builder.Append("Select(commonTables=[");
         for (int index = 0; index < select.CommonTables.Count; index++)
         {

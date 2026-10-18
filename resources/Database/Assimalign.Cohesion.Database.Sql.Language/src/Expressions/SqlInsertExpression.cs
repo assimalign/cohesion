@@ -26,7 +26,7 @@ public sealed class SqlInsertExpression : SqlQueryExpression
         SqlTableReference table,
         IReadOnlyList<string>? columns,
         IReadOnlyList<IReadOnlyList<SqlExpression>>? values,
-        SqlSelectExpression? selectSource,
+        SqlQueryBodyExpression? selectSource,
         bool isDefaultValues,
         string? text,
         Location? location)
@@ -57,7 +57,7 @@ public sealed class SqlInsertExpression : SqlQueryExpression
     /// <summary>
     /// Gets the SELECT source for INSERT...SELECT, if applicable.
     /// </summary>
-    public SqlSelectExpression? SelectSource { get; }
+    public SqlQueryBodyExpression? SelectSource { get; }
 
     /// <summary>
     /// Gets whether DEFAULT VALUES inserts one row with every column omitted.

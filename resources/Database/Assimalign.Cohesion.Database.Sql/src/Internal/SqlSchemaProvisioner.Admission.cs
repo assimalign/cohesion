@@ -69,7 +69,7 @@ internal sealed partial class SqlSchemaProvisioner
         RuntimeHelpers.EnsureSufficientExecutionStack();
         IReadOnlyList<SqlCommonTableExpression> commonTables = query switch
         {
-            SqlSelectExpression select => select.CommonTables,
+            SqlQueryBodyExpression select => select.CommonTables,
             SqlInsertExpression insert => insert.CommonTables,
             SqlUpdateExpression update => update.CommonTables,
             SqlDeleteExpression delete => delete.CommonTables,
@@ -85,6 +85,30 @@ internal sealed partial class SqlSchemaProvisioner
                 foreach (var table in References(explain.Statement))
                 {
                     yield return table;
+                }
+                break;
+            case SqlSetOperationExpression set:
+                var pending = new Stack<SqlQueryBodyExpression>();
+                pending.Push(set);
+                while (pending.TryPop(out var body))
+                {
+                    if (body is SqlSetOperationExpression operation)
+                    {
+                        pending.Push(operation.Right);
+                        pending.Push(operation.Left);
+                        if (!ReferenceEquals(operation, set))
+                        {
+                            foreach (var definition in operation.CommonTables)
+                            {
+                                foreach (var table in References(definition.Body)) { yield return table; }
+                            }
+                        }
+                        foreach (var expression in operation.OrderBy.Select(order => order.Expression).Append(operation.Limit).Append(operation.Offset))
+                        {
+                            foreach (var table in References(expression)) { yield return table; }
+                        }
+                    }
+                    else { foreach (var table in References(body)) { yield return table; } }
                 }
                 break;
             case SqlSelectExpression select:
@@ -197,7 +221,7 @@ internal sealed partial class SqlSchemaProvisioner
     private static IEnumerable<SqlTableReference> References(SqlExpression? expression)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
-        SqlSelectExpression? query = expression switch
+        SqlQueryBodyExpression? query = expression switch
         {
             SqlSubqueryExpression scalar => scalar.Select,
             SqlExistsExpression exists => exists.Subquery,

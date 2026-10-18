@@ -46,6 +46,9 @@
   <data name="DerivedTableOuterReference" xml:space="preserve">
     <value>A derived table cannot reference sibling relations without LATERAL. {0}</value>
   </data>
+  <data name="SetColumnTypes" xml:space="preserve">
+    <value>Set operation column {0}: types {1} and {2} cannot be matched by implicit conversion.</value>
+  </data>
   <data name="DerivedColumnCount" xml:space="preserve">
     <value>Derived table '{0}' has {1} output columns but {2} column names.</value>
   </data>
@@ -62,8 +65,17 @@
   <data name="DerivedColumnName" xml:space="preserve">
     <value>A derived output column name must not be empty or whitespace.</value>
   </data>
+  <data name="SetOrderOutput" xml:space="preserve">
+    <value>ORDER BY on a combined result requires an unqualified output column name or an ordinal within the output column count; expressions and qualified references are not supported.</value>
+  </data>
+  <data name="SetOrderAmbiguous" xml:space="preserve">
+    <value>Ambiguous combined-result ORDER BY column '{0}'.</value>
+  </data>
   <data name="DerivedOutputOrdering" xml:space="preserve">
     <value>SQL derived-table SUBQUERY output ordering awaits the ordering extension.</value>
+  </data>
+  <data name="SetColumnCount" xml:space="preserve">
+    <value>{0} inputs have {1} and {2} columns; both counts must match.</value>
   </data>
   <data name="SubqueryColumnCount" xml:space="preserve">
     <value>{0} subquery requires exactly one output column; found {1}.</value>

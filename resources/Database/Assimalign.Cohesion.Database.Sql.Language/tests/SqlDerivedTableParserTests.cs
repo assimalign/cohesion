@@ -83,7 +83,7 @@ public sealed class SqlDerivedTableParserTests
         statement.Diagnostics.ShouldNotContain(d => d.Severity == DiagnosticSeverity.Error);
         var query = ((SqlQueryStatement)statement).SqlExpression.ShouldBeOfType<SqlSelectExpression>();
         var derived = query.From.Select(item => item.Table).OfType<SqlDerivedTableReference>().Single();
-        var column = derived.Query.Columns[0].Expression.ShouldBeOfType<SqlColumnReferenceExpression>();
+        var column = derived.Query.ShouldBeOfType<SqlSelectExpression>().Columns[0].Expression.ShouldBeOfType<SqlColumnReferenceExpression>();
         sql[column.Location!.Start..column.Location.End].ShouldBe(reference);
     }
 

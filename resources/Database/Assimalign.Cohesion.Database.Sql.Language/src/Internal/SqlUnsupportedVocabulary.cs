@@ -27,9 +27,6 @@ internal static class SqlUnsupportedVocabulary
     /// <summary>The table, in the order the dialect documents it.</summary>
     internal static readonly SqlUnsupportedWord[] Words =
     [
-        new("UNION", SqlClauses.SetOperation, SqlWordPosition.Clause),
-        new("INTERSECT", SqlClauses.Intersect, SqlWordPosition.Clause),
-        new("EXCEPT", SqlClauses.Except, SqlWordPosition.Clause),
         new("RECURSIVE", SqlClauses.Recursive, SqlWordPosition.Clause),
         new("MATERIALIZED", "[NOT] MATERIALIZED", SqlWordPosition.Rule),
         new("SEARCH", "SEARCH/CYCLE", SqlWordPosition.Rule),

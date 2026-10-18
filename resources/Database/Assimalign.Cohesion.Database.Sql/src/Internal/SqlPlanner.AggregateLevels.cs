@@ -86,9 +86,17 @@ internal sealed partial class SqlPlanner
             if (level >= 0) { minimum = Math.Min(minimum, level); }
         }
 
-        void VisitQuery(SqlSelectExpression query, int depth)
+        void VisitQuery(SqlQueryBodyExpression body, int depth)
         {
+            RuntimeHelpers.EnsureSufficientExecutionStack();
             _cancellationToken.ThrowIfCancellationRequested();
+            if (body is SqlSetOperationExpression set)
+            {
+                VisitQuery(set.Left, depth);
+                VisitQuery(set.Right, depth);
+                return;
+            }
+            var query = (SqlSelectExpression)body;
             scopes.Insert(0, query);
             try
             {
@@ -135,18 +143,21 @@ internal sealed partial class SqlPlanner
             return ResolveRelation(reference, owner).Columns.Select(column => column.Name);
         }
         if (derived.Columns.Count > 0) { return derived.Columns; }
+        var body = derived.Query;
+        while (body is SqlSetOperationExpression set) { body = set.Left; }
+        var query = (SqlSelectExpression)body;
         var names = new List<string>();
-        bool grouped = derived.Query.GroupBy.Count > 0 || derived.Query.Having is not null || ProjectsOrOrdersByAggregate(derived.Query);
-        foreach (var projection in derived.Query.Columns)
+        bool grouped = query.GroupBy.Count > 0 || query.Having is not null || ProjectsOrOrdersByAggregate(query);
+        foreach (var projection in query.Columns)
         {
             if (projection.Expression is SqlStarExpression)
             {
-                foreach (var item in derived.Query.From)
+                foreach (var item in query.From)
                 {
-                    names.AddRange(AggregateColumnNames(item.Table, derived.Query));
+                    names.AddRange(AggregateColumnNames(item.Table, query));
                     foreach (var join in item.Joins)
                     {
-                        names.AddRange(AggregateColumnNames(join.Table, derived.Query)
+                        names.AddRange(AggregateColumnNames(join.Table, query)
                             .Where(name => !join.UsingColumns.Contains(name, StringComparer.OrdinalIgnoreCase)));
                     }
                 }

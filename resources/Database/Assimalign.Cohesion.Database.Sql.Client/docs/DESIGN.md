@@ -84,6 +84,13 @@ flowchart LR
 
 Other model clients do not depend on this package.
 
+## Set operations (#1114)
+
+Set roots and query operands use the existing execute exchange with common-typed column
+names and values. InMemory and TCP cases exercise UNION ALL, INTERSECT and EXCEPT ALL,
+combined OFFSET/FETCH, IN bodies and reusable coded parse/planning failures. Result metadata
+still carries no nullability field. No client API or wire format changes.
+
 ## Pagination (#1107)
 
 OFFSET/FETCH, OFFSET before LIMIT and TOP use the existing SQL execute exchange and
@@ -388,3 +395,7 @@ Statement failures leave the server session ready. Model clients validate diagno
 ordering and preserve every code, severity, message, nullable offset and source line.
 
 DatabaseClientResult.Diagnostics and SqlResultSet.Diagnostics expose negotiated ProtocolDiagnostic values. SqlClientException retains the shared core exception and copies its existing diagnostics carrier.
+
+Set-operation type mismatches reuse COHSQLE003 (42804), retaining the one-based output
+position and both types. INSERT set-source width/type errors use the same exchange and
+leave the connection usable.

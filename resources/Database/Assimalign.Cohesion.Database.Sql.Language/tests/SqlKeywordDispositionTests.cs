@@ -115,9 +115,9 @@ public sealed class SqlKeywordDispositionTests
         ["ALL"] = Rejects("SELECT ALL a FROM t", SqlClauses.All),
         ["TOP"] = Parses("SELECT TOP 1 a FROM t"),
         // Set operations
-        ["UNION"] = Rejects("SELECT a FROM t UNION SELECT a FROM u", SqlClauses.SetOperation),
-        ["INTERSECT"] = Rejects("SELECT a FROM t INTERSECT SELECT a FROM u", SqlClauses.Intersect),
-        ["EXCEPT"] = Rejects("SELECT a FROM t EXCEPT SELECT a FROM u", SqlClauses.Except),
+        ["UNION"] = Parses("SELECT a FROM t UNION SELECT a FROM u"),
+        ["INTERSECT"] = Parses("SELECT a FROM t INTERSECT SELECT a FROM u"),
+        ["EXCEPT"] = Parses("SELECT a FROM t EXCEPT SELECT a FROM u"),
         // Logical operators and predicates
         ["AND"] = Parses("SELECT a FROM t WHERE a = 1 AND b = 2"),
         ["OR"] = Parses("SELECT a FROM t WHERE a = 1 OR b = 2"),
