@@ -204,7 +204,8 @@ internal sealed partial class SqlPlanner
                         ? outerColumn.ColumnName : $"column{projections.Count + 1}"), null, column.Expression,
                     GroupExpressionType(column.Expression, columns, evaluator)) { Value = value, Collation = collation,
                         Metadata = CaptureProjectionMetadata(candidate,
-                            UnwrapCollation(column.Expression) is SqlColumnReferenceExpression projectedColumn ? evaluator.ColumnMetadata(projectedColumn) : null),
+                            UnwrapCollation(column.Expression) is SqlColumnReferenceExpression projectedColumn ? evaluator.ColumnMetadata(projectedColumn) : null,
+                            column.Expression, evaluator),
                         MaxLength = evaluator.MaximumLengthOf(column.Expression),
                         IsNullable = column.Expression is not SqlColumnReferenceExpression nullableColumn || evaluator.ColumnMetadata(nullableColumn).IsNullable });
             }

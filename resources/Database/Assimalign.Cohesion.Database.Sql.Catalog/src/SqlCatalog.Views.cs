@@ -70,30 +70,30 @@ public sealed partial class SqlCatalog
         cancellationToken.ThrowIfCancellationRequested();
         var record = new DatabaseKeyWriter().AppendInt32(_viewRecordKind)
             .AppendString(JsonSerializer.Serialize(SqlViewRecord.From(view), SqlCatalogJsonContext.Default.SqlViewRecord), Collation.Binary).ToArray();
-        if (record.Length > SlottedPage.MaxRecordSize) { throw new SqlCatalogException(ErrorMessages.ViewRecordTooLarge); }
+        if (record.Length > SlottedPage.MaxRecordSize) { throw new SqlCatalogException("COHSQLE033", ErrorMessages.ViewRecordTooLarge); }
         lock (_sync)
         {
             ThrowIfOffline();
             string key = SqlObjectIdentity.View(view.Schema, view.Name);
-            if (_tables.ContainsKey((view.Schema, view.Name))) { throw new SqlCatalogException(ErrorMessages.ViewNameIsTable); }
+            if (_tables.ContainsKey((view.Schema, view.Name))) { throw new SqlCatalogException("COHSQLE033", ErrorMessages.ViewNameIsTable); }
             _views.TryGetValue(key, out var previous);
-            if (previous is not null && !orReplace) { throw new SqlCatalogException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.ViewExists, view.Schema, view.Name)); }
-            if (!_namespaces.ContainsKey(view.Schema)) { throw new SqlCatalogException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.NamespaceMissing, view.Schema)); }
+            if (previous is not null && !orReplace) { throw new SqlCatalogException("COHSQLE033", string.Format(CultureInfo.CurrentCulture, ErrorMessages.ViewExists, view.Schema, view.Name)); }
+            if (!_namespaces.ContainsKey(view.Schema)) { throw new SqlCatalogException("COHSQLE033", string.Format(CultureInfo.CurrentCulture, ErrorMessages.NamespaceMissing, view.Schema)); }
             if (previous is not null)
             {
                 var old = previous.Value.Columns;
                 if (view.Columns.Count < old.Count || old.Where((column, index) => !SameViewColumn(column, view.Columns[index])).Any())
-                { throw new SqlCatalogException(ErrorMessages.ViewReplacementInvalid); }
+                { throw new SqlCatalogException("COHSQLE033", ErrorMessages.ViewReplacementInvalid); }
             }
             foreach (ulong id in view.TableDependencies)
-            { if (FindTableByObjectId(id) is null) { throw new SqlCatalogException(ErrorMessages.ViewDependencyChanged); } }
+            { if (FindTableByObjectId(id) is null) { throw new SqlCatalogException("COHSQLE033", ErrorMessages.ViewDependencyChanged); } }
             foreach (var dependency in view.Dependencies)
             {
                 if (dependency.Equals(key, StringComparison.OrdinalIgnoreCase) || dependency.StartsWith("V:", StringComparison.Ordinal) && Reaches(dependency, key, new(StringComparer.OrdinalIgnoreCase)))
-                { throw new SqlCatalogException(ErrorMessages.ViewCycle); }
-                if (dependency.StartsWith("V:", StringComparison.Ordinal) && !_views.ContainsKey(dependency)) { throw new SqlCatalogException(ErrorMessages.ViewDependencyChanged); }
+                { throw new SqlCatalogException("COHSQLE033", ErrorMessages.ViewCycle); }
+                if (dependency.StartsWith("V:", StringComparison.Ordinal) && !_views.ContainsKey(dependency)) { throw new SqlCatalogException("COHSQLE033", ErrorMessages.ViewDependencyChanged); }
                 if (dependency.StartsWith("C:", StringComparison.Ordinal) && !_tables.Values.Any(slot => slot.Table.Columns.Any(column => SqlObjectIdentity.Column(slot.Table.ObjectId, column.Name).Equals(dependency, StringComparison.OrdinalIgnoreCase))))
-                { throw new SqlCatalogException(ErrorMessages.ViewDependencyChanged); }
+                { throw new SqlCatalogException("COHSQLE033", ErrorMessages.ViewDependencyChanged); }
             }
             using var transaction = _storage.BeginTransaction();
             var location = UpsertRecord(transaction, previous?.Location, record);
@@ -155,11 +155,11 @@ public sealed partial class SqlCatalog
         {
             ThrowIfOffline();
             string key = SqlObjectIdentity.View(schema, name);
-            if (_tables.ContainsKey((schema, name))) { throw new SqlCatalogException(ErrorMessages.ViewNameIsTable); }
+            if (_tables.ContainsKey((schema, name))) { throw new SqlCatalogException("COHSQLE033", ErrorMessages.ViewNameIsTable); }
             if (!_views.TryGetValue(key, out var slot))
             {
                 if (publication is not null) { CommitScriptAbsence(publication, key); return default; }
-                throw new SqlCatalogException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.ViewMissing, schema, name));
+                throw new SqlCatalogException("COHSQLE033", string.Format(CultureInfo.CurrentCulture, ErrorMessages.ViewMissing, schema, name));
             }
             var dropped = _views.Where(pair => pair.Key.Equals(key, StringComparison.OrdinalIgnoreCase) || Reaches(pair.Key, key, new(StringComparer.OrdinalIgnoreCase))).ToArray();
             if (!cascade && dropped.Length > 1) { RefuseViewDependency(dropped.First(pair => !pair.Key.Equals(key, StringComparison.OrdinalIgnoreCase)).Value.Value, slot.Value.Schema + "." + slot.Value.Name); }
@@ -180,7 +180,7 @@ public sealed partial class SqlCatalog
     }
 
     private static void RefuseViewDependency(SqlCatalogView view, string target = "the object", bool rename = false)
-        => throw new SqlCatalogException(rename
+        => throw new SqlCatalogException("COHSQLD002", rename
             ? string.Format(CultureInfo.CurrentCulture, ErrorMessages.ViewDependent, view.Schema, view.Name)
             : string.Format(CultureInfo.CurrentCulture, ErrorMessages.ViewDropDependent, target, view.Schema, view.Name));
 
@@ -192,7 +192,7 @@ public sealed partial class SqlCatalog
             if (_tables.ContainsKey((view.Schema, view.Name)) || !_namespaces.ContainsKey(view.Schema) || view.TableDependencies.Any(id => !tables.ContainsKey(id)) ||
                 view.Dependencies.Where(key => key.StartsWith("V:", StringComparison.Ordinal)).Any(key => !_views.ContainsKey(key) || Reaches(key, pair.Key, new(StringComparer.OrdinalIgnoreCase))) ||
                 view.Dependencies.Where(key => key.StartsWith("C:", StringComparison.Ordinal)).Any(key => !tables.Values.Any(table => table.Columns.Any(column => SqlObjectIdentity.Column(table.ObjectId, column.Name).Equals(key, StringComparison.OrdinalIgnoreCase)))))
-            { throw new SqlCatalogException(ErrorMessages.ViewMetadataInvalid); }
+            { throw new SqlCatalogException("COHSQLE033", ErrorMessages.ViewMetadataInvalid); }
         }
     }
 
@@ -204,6 +204,6 @@ public sealed partial class SqlCatalog
             if (!_views.TryAdd(SqlObjectIdentity.View(view.Schema, view.Name), new(view, location))) { throw new JsonException(); }
         }
         catch (Exception exception) when (exception is JsonException or ArgumentException or NullReferenceException)
-        { throw new SqlCatalogException(ErrorMessages.ViewMetadataInvalid); }
+        { throw new SqlCatalogException("COHSQLE033", ErrorMessages.ViewMetadataInvalid); }
     }
 }

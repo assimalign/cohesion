@@ -561,7 +561,8 @@ internal sealed partial class SqlExpressionEvaluator
             if (textResult) { elseResult = CharacterToText(conditional.ElseResult, elseResult); }
         }
 
-        collation = CollationOf(conditional, results);
+        collation = StaticTypeOf(conditional) is DatabaseType.String or DatabaseType.Character
+            ? CollationOf(conditional, results) : default;
         return new SqlBoundCase(input, whens, elseResult, StaticTypeOf(conditional));
     }
 
@@ -636,6 +637,7 @@ internal sealed partial class SqlExpressionEvaluator
                     arguments[index] = CharacterToText(call.Arguments[index], arguments[index]);
                 }
             }
+            if (StaticCallType(call) is not (DatabaseType.String or DatabaseType.Character)) { collation = default; }
             return new SqlBoundCoalesce(arguments, StaticCallType(call));
         }
 

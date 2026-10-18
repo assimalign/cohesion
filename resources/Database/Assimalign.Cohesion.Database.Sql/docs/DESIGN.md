@@ -2389,8 +2389,14 @@ LIMIT/OFFSET/FETCH retain bound expressions evaluated once at each relation exec
 following PostgreSQL `src/backend/executor/nodeLimit.c:348`. Count descriptors are optional references,
 so absent windows do not enlarge the ordinary stored-query plan or its allocation budget. Runtime evaluation supplies the
 current statement's transaction instant and cancellation. Binding never folds application calls.
-Catalog opens parse all views; every body binding failure is deferred to a read of that view, so
-unrelated queries, metadata and DROP remain usable. The existing bind-time system-relation
+Execution checks for a bound row window before creating its evaluator. Cancellable INSERT,
+index-seek SELECT and aggregate statements with application functions registered therefore add
+zero startup bytes compared with dispatch directly to the same statement cores (Release, tiering off).
+Catalog opens parse all views; every recoverable body binding failure is deferred to a read of
+that view, with a coded view-local exception retaining the original cause. Cancellation,
+out-of-memory, storage corruption and I/O failures still propagate. Unrelated queries, metadata
+and DROP remain usable. Set, CASE and COALESCE outputs carry collation metadata only for
+character/string result types. The existing bind-time system-relation
 capture seam is re-entered for cached bodies so each caller retains its own catalog image.
 
 View body caches retain immutable catalog images by source-definition identity. Equivalent
@@ -2399,15 +2405,22 @@ binding a body; reference capture always reads the binding's own table image. Hi
 entries are weak and stay alive with their retained captures; ordinary view reads use a
 DDL-generation fast path. No snapshot generation API or friend grant was added for this purpose.
 
-Views freeze names/types/modifiers/domains/collations and creation-time nullability for COLUMNS,
-with current nullability on query binding. Scalar-subquery slots and function outputs preserve
-complete precision, scale and length before contract comparison (PostgreSQL
+Views freeze names/types/modifiers/domains/collations for COLUMNS. Every view column reports
+IS_NULLABLE = YES without binding a body: PostgreSQL view attributes have no NOT NULL constraint
+(`src/backend/catalog/information_schema.sql:295`). The format-23 view column record stores no
+nullability flag; query binding still derives current source nullability. Scalar-subquery slots
+and function outputs preserve complete precision, scale and length before contract comparison (PostgreSQL
 `src/backend/nodes/nodeFuncs.c:345`, `src/backend/commands/view.c:300`). Scalar output descriptors are captured inside the child
 lexical scope before restoring the parent, including correlated column projections. ALTER
 COLUMN refuses
 changes to type, length, precision or scale for any column a view reads, both in the executor
 and catalog publication (COHSQLD002; PostgreSQL `src/backend/commands/tablecmds.c:15612-15624`).
-OR REPLACE may append columns only, following PostgreSQL `src/backend/commands/view.c:266-325`.
+CASE and COALESCE preserve a modifier only when all alternatives have the same type and modifier;
+an absent ELSE or an unconstrained/different argument clears it. NULLIF retains its first
+argument's modifier. Set operands capture complete output descriptors in their own lexical
+scopes, including function calls, and apply the same agreement rule per column (PostgreSQL
+`src/backend/nodes/nodeFuncs.c:327-336,389-480`, `src/backend/parser/parse_coerce.c:1648-1678`).
+OR REPLACE compares that full contract and may append columns only, following PostgreSQL `src/backend/commands/view.c:266-325`.
 Table/column renames refuse dependencies because this engine stores textual relation names.
 Dependency collection retains stored table identities and referenced input columns, including
 predicates and nested queries, along with direct view/function/domain identities. ORDER BY

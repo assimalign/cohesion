@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Text;
@@ -8,6 +9,7 @@ using System.Text;
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Catalog.Internal;
 using Assimalign.Cohesion.Database.Sql.Language;
+using Assimalign.Cohesion.Database.Storage;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
@@ -61,11 +63,30 @@ internal sealed partial class SqlPlanner
             // Malformed canonical text fails open; body binding failures are isolated to use.
             _parsedViews.GetValue(view, value => new ParsedView(SqlPersistedExpression.LoadQuery(value.Definition, "view " + value.Schema + "." + value.Name)));
             try { BindCatalogView(view); }
-            catch (DatabaseException) { }
+            catch (Exception exception) when (IsViewBindingFailure(exception)) { }
         }
     }
 
     private SqlRelationSource BindCatalogView(SqlCatalogView view)
+    {
+        try { return BindCatalogViewCore(view); }
+        // Stored bodies may fail after application registrations change, or expose a binder
+        // defect. Isolate every recoverable failure to this view, preserving its original cause.
+        catch (Exception exception) when (IsViewBindingFailure(exception))
+        {
+            string code = exception is DatabaseException { Diagnostics.Count: > 0 } database
+                ? database.Diagnostics[0].Code ?? "COHSQLE033" : "COHSQLE033";
+            throw new SqlPlanningException(code, string.Format(CultureInfo.CurrentCulture,
+                ErrorMessages.ViewBindingFailed, view.Schema, view.Name, exception.Message), innerException: exception);
+        }
+    }
+
+    private static bool IsViewBindingFailure(Exception exception)
+        => exception is not (OperationCanceledException or OutOfMemoryException or StorageCorruptionException or StorageIOException or IOException)
+            && (exception.InnerException is null || IsViewBindingFailure(exception.InnerException))
+            && (exception is not AggregateException aggregate || aggregate.InnerExceptions.All(IsViewBindingFailure));
+
+    private SqlRelationSource BindCatalogViewCore(SqlCatalogView view)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
         if (ViewDefinitionBinding?.Owner is { } owner && !owner.Dependencies.Contains(SqlObjectIdentity.View(view.Schema, view.Name), StringComparer.OrdinalIgnoreCase))

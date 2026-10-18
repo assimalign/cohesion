@@ -83,7 +83,7 @@ internal sealed partial class SqlPlanExecutor
     internal async Task<DatabaseResult> ExecuteAsync(SqlPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
-        plan = InitializeWindow(plan, ExecutionEvaluator(_subqueryValues, cancellationToken));
+        plan = InitializeWindow(plan, cancellationToken);
         switch (plan)
         {
             case SqlSetOperationPlan set:

@@ -154,10 +154,17 @@ OR REPLACE retains every existing column's name, order, type, type modifiers,
 domain and collation and permits appended columns only. Incompatible replacement
 and dependency cycles fail atomically. Definitions are parsed once per immutable
 view and bound once per catalog generation; recorded function identities keep a
-later overload from changing a stored call. COLUMNS uses frozen creation-time metadata without binding a body, including full
-length, precision and scale. Query output nullability follows current bound sources.
-A body binding failure affects only reads of that view; it never blocks open,
-unrelated reads, metadata enumeration or DROP VIEW.
+later overload from changing a stored call. COLUMNS uses frozen type metadata without binding a
+body, including full length, precision and scale. CASE and COALESCE keep modifiers when every
+result alternative has the same type and modifier; otherwise the result is unconstrained.
+NULLIF keeps its first argument's modifier. Set operations apply the same agreement rule per
+column, including function-call operands (PostgreSQL `src/backend/nodes/nodeFuncs.c:327-480`,
+`src/backend/parser/parse_coerce.c:1648-1678`). Every view column reports IS_NULLABLE = 'YES',
+following PostgreSQL view attributes without NOT NULL (`src/backend/catalog/information_schema.sql:295`).
+Query output nullability follows current bound sources.
+A recoverable body binding failure affects only reads of that view, with a coded error retaining
+the original exception; it never blocks open, unrelated reads, metadata enumeration or DROP VIEW.
+Cancellation, out-of-memory, storage corruption and I/O failures still propagate.
 
 INSERT, UPDATE, DELETE, ALTER TABLE, CREATE INDEX and DROP TABLE require a table
 and refuse a view, naming its kind. DROP VIEW refuses a table, including IF EXISTS.
@@ -168,7 +175,9 @@ because canonical bodies retain textual relation names. DROP SCHEMA RESTRICT
 counts views. DROP SCHEMA CASCADE removes contained views and external views
 that depend on its tables or views. DROP VIEW [IF EXISTS] defaults to RESTRICT;
 CASCADE removes dependent views. Dependency failures name the view (COHSQLD002).
-View-specific declaration/replacement failures and oversized records use COHSQLE033; ordinary query binding diagnostics still apply, including COHSQLE013 for a column-list count mismatch.
+View-specific declaration/replacement failures and oversized records carry structured COHSQLE033
+diagnostics in process and over the wire; ordinary query binding diagnostics still apply,
+including COHSQLE013 for a column-list count mismatch.
 
 Views appear in TABLES (`TABLE_TYPE = 'VIEW'`), COLUMNS, VIEWS and OBJECT_OWNERSHIP.
 VIEWS returns canonical VIEW_DEFINITION, CHECK_OPTION `NONE` and IS_UPDATABLE `NO`.
@@ -1343,8 +1352,9 @@ checking at most every 32 operations and preserving cancellation through runtime
 STRING_AGG(value, delimiter [ORDER BY keys]) uses PostgreSQL spelling; ISO LISTAGG(value
 [, delimiter]) WITHIN GROUP (ORDER BY keys) executes through the same accumulator.
 LISTAGG permits DISTINCT, requires WITHIN GROUP, and cannot also have an inner ORDER BY
-(SQL0003), including when its name is quoted. Ordinary quoted calls may parse, but the planner
-refuses them without WITHIN GROUP keys. An omitted LISTAGG delimiter is empty. The delimiter must be a string literal,
+(SQL0003), including when its name is written as the quoted lower-case `"listagg"`, which
+names the same function. Any other quoted spelling, such as `"LISTAGG"`, is an ordinary call:
+it may parse, but the planner refuses it without WITHIN GROUP keys. An omitted LISTAGG delimiter is empty. The delimiter must be a string literal,
 NULL literal, or parameter known at plan time; a column/expression delimiter is COHDBL001.
 Both arguments must be String or Character; CHAR is trimmed on conversion to text.
 JSON and other types fail with COHSQLE006 and require CAST(... AS TEXT). NULL values are
@@ -1792,7 +1802,7 @@ conventions, not the complete ISO view layouts. Columns below are listed in
 | `INFORMATION_SCHEMA.TABLES` | `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `TABLE_TYPE` | Stored tables (`BASE TABLE`) and persisted user views (`VIEW`) in the current database |
 | `INFORMATION_SCHEMA.VIEWS` | `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `VIEW_DEFINITION`, `CHECK_OPTION`, `IS_UPDATABLE` | Persisted canonical body; `NONE`, `NO` for every read-only view |
 | `INFORMATION_SCHEMA.SCHEMATA` | `CATALOG_NAME`, `SCHEMA_NAME`, `SCHEMA_OWNER`, `DEFAULT_CHARACTER_SET_CATALOG`, `DEFAULT_CHARACTER_SET_SCHEMA`, `DEFAULT_CHARACTER_SET_NAME`, `SQL_PATH` | Persisted namespaces, including empty namespaces and dbo, from the statement's captured catalog. Owner principal, default character set and SQL path are NULL because those SQL facilities are not implemented. |
-| `INFORMATION_SCHEMA.COLUMNS` | `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `COLUMN_NAME`, `ORDINAL_POSITION`, `COLUMN_DEFAULT`, `IS_NULLABLE`, `DATA_TYPE`, `CHARACTER_MAXIMUM_LENGTH`, `CHARACTER_OCTET_LENGTH`, `NUMERIC_PRECISION`, `NUMERIC_PRECISION_RADIX`, `NUMERIC_SCALE`, `DATETIME_PRECISION`, `IS_IDENTITY`, `IDENTITY_GENERATION`, `IDENTITY_START`, `IDENTITY_INCREMENT`, `IDENTITY_MAXIMUM`, `IDENTITY_MINIMUM`, `IDENTITY_CYCLE` | One row per live table or view column; view names, types, domains and collations are frozen, while nullability follows the captured source image. Ordinals start at one and have no gap where a table column was dropped. All 19 DATA_TYPE names parse in DDL and CAST; aliases report canonical identity and modifiers. COLUMN_DEFAULT renders resolved temporal and binary literal values with typed prefixes, including defaults declared as plain strings; other defaults retain canonical SQL |
+| `INFORMATION_SCHEMA.COLUMNS` | `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `COLUMN_NAME`, `ORDINAL_POSITION`, `COLUMN_DEFAULT`, `IS_NULLABLE`, `DATA_TYPE`, `CHARACTER_MAXIMUM_LENGTH`, `CHARACTER_OCTET_LENGTH`, `NUMERIC_PRECISION`, `NUMERIC_PRECISION_RADIX`, `NUMERIC_SCALE`, `DATETIME_PRECISION`, `IS_IDENTITY`, `IDENTITY_GENERATION`, `IDENTITY_START`, `IDENTITY_INCREMENT`, `IDENTITY_MAXIMUM`, `IDENTITY_MINIMUM`, `IDENTITY_CYCLE` | One row per live table or view column; view names, types, domains and collations are frozen, and every view column reports IS_NULLABLE = YES without body binding. Ordinals start at one and have no gap where a table column was dropped. All 19 DATA_TYPE names parse in DDL and CAST; aliases report canonical identity and modifiers. COLUMN_DEFAULT renders resolved temporal and binary literal values with typed prefixes, including defaults declared as plain strings; other defaults retain canonical SQL |
 | `INFORMATION_SCHEMA.TABLE_CONSTRAINTS` | `CONSTRAINT_CATALOG`, `CONSTRAINT_SCHEMA`, `CONSTRAINT_NAME`, `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `CONSTRAINT_TYPE`, `IS_DEFERRABLE`, `INITIALLY_DEFERRED` | Primary keys, unique indexes/constraints, foreign keys, and explicit checks; both deferral fields are `NO` |
 | `INFORMATION_SCHEMA.KEY_COLUMN_USAGE` | `CONSTRAINT_CATALOG`, `CONSTRAINT_SCHEMA`, `CONSTRAINT_NAME`, `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `COLUMN_NAME`, `ORDINAL_POSITION` | One row per primary, unique, or foreign-key column, in constraint order |
 | `INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS` | `CONSTRAINT_CATALOG`, `CONSTRAINT_SCHEMA`, `CONSTRAINT_NAME`, `UNIQUE_CONSTRAINT_CATALOG`, `UNIQUE_CONSTRAINT_SCHEMA`, `UNIQUE_CONSTRAINT_NAME`, `MATCH_OPTION`, `UPDATE_RULE`, `DELETE_RULE` | Foreign keys with the referenced key identity; `MATCH_OPTION = 'NONE'`, `UPDATE_RULE = 'RESTRICT'`, delete rule `RESTRICT`, `CASCADE`, `NO ACTION`, `SET NULL` or `SET DEFAULT` |
@@ -2700,7 +2710,7 @@ pin in the same change.
 | `COHSQLE030` | Error | DROP SCHEMA RESTRICT finds dependent objects; the message offers CASCADE (PostgreSQL SQLSTATE 2BP01) |
 | `COHSQLE031` | Error | DROP SCHEMA targets dbo, which code-first provisioning requires |
 | `COHSQLE032` | Error | DISTINCT/ALL/input ORDER BY on a scalar function, or DISTINCT input ordering whose keys are absent from the arguments (PostgreSQL 42809 / 42P10) |
-| `COHSQLE033` | Error | Invalid persisted view declaration/replacement, changed recorded column identity, or oversized view record |
+| `COHSQLE033` | Error | Invalid persisted view declaration/replacement, changed recorded column identity, oversized view record, or otherwise uncoded stored-body binding failure |
 
 Positions are absolute character offsets into the statement text; line/column
 presentation is computed by tooling from the source (offset → line mapping), not
