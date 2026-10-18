@@ -18,7 +18,8 @@ public sealed partial class GraphStore
     /// <param name="properties">The complete resulting property map.</param>
     /// <param name="context">The owning transaction.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The new version, or null if absent.</returns>
+    /// <returns>A replacement version even when the supplied values are identical, or null if absent.</returns>
+    /// <remarks>GQL filters pure no-op assignments before calling storage; every storage update publishes a replacement.</remarks>
     /// <exception cref="ArgumentNullException">A required argument is null.</exception>
     /// <exception cref="ArgumentException">A name or scalar value is invalid.</exception>
     /// <exception cref="InvalidOperationException">The transaction is not active.</exception>
@@ -31,12 +32,13 @@ public sealed partial class GraphStore
         ArgumentNullException.ThrowIfNull(labels);
         ArgumentNullException.ThrowIfNull(properties);
         foreach (string label in labels) { ArgumentException.ThrowIfNullOrWhiteSpace(label); }
-        await LockAsync(context, cancellationToken).ConfigureAwait(false);
+        using var mutation = await EnterMutationAsync(context, cancellationToken).ConfigureAwait(false);
+        context = mutation.RefreshSnapshot(context);
         EnsureUnchanged(1, id, context);
         if (Find(1, id, context.Snapshot) is not { } prior) { return null; }
         var record = new GraphRecord(1, id, new StoredGraphNode(id,
             labels.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray(), properties), Revision: checked(prior.Record.Revision + 1));
-        byte[] bytes = GraphRecordCodec.Encode(record, context.Sequence);
+        byte[] bytes = await EncodeAsync(record, context.Sequence).ConfigureAwait(false);
         record = GraphRecordCodec.Decode(bytes);
         var node = record.Node!.Value;
         var old = prior.Record.Node!.Value;
@@ -68,7 +70,8 @@ public sealed partial class GraphStore
     /// <param name="properties">The complete resulting scalar property map.</param>
     /// <param name="context">The owning transaction.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The new version, or null if absent.</returns>
+    /// <returns>A replacement version even when the supplied values are identical, or null if absent.</returns>
+    /// <remarks>GQL filters pure no-op assignments before calling storage; every storage update publishes a replacement.</remarks>
     /// <exception cref="ArgumentNullException">A required argument is null.</exception>
     /// <exception cref="ArgumentException">A property name or scalar value is invalid.</exception>
     /// <exception cref="InvalidOperationException">The transaction is not active.</exception>
@@ -79,13 +82,14 @@ public sealed partial class GraphStore
         IReadOnlyDictionary<string, object?> properties, TransactionContext context, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(properties);
-        await LockAsync(context, cancellationToken).ConfigureAwait(false);
+        using var mutation = await EnterMutationAsync(context, cancellationToken).ConfigureAwait(false);
+        context = mutation.RefreshSnapshot(context);
         EnsureUnchanged(2, id, context);
         if (Find(2, id, context.Snapshot) is not { } prior) { return null; }
         var old = prior.Record.Relationship!.Value;
         var record = new GraphRecord(2, id, Relationship: new StoredGraphRelationship(id, old.SourceId, old.TargetId, old.Type, properties),
             Revision: checked(prior.Record.Revision + 1));
-        byte[] bytes = GraphRecordCodec.Encode(record, context.Sequence);
+        byte[] bytes = await EncodeAsync(record, context.Sequence).ConfigureAwait(false);
         record = GraphRecordCodec.Decode(bytes);
         var inserted = await ApplyAsync(context, async bracket =>
         {

@@ -169,8 +169,16 @@ collisions and retained versions; ordering its `m` visible matches adds `O(m log
 ## Atomicity, conflicts and recovery
 
 All graph writers acquire the shared database-level exclusive lock and retain it until
-logical commit/rollback; readers use MVCC snapshots. The lock is deliberately coarse
-for the MVP. After a wait, the store checks cancellation and active transaction state
+logical commit/rollback; readers use MVCC snapshots. A weakly associated per-transaction
+async gate serializes complete store mutations, including statement views of the same
+transaction, from lookup and encoding through directory publication. The gate is allocated
+once per transaction; repeated uncontended entries and their value-type leases allocate
+nothing. The physical apply gate alone cannot protect a prior-version lookup or the later
+publication. The lock is deliberately coarse
+for the MVP. Once the writer lock is acquired, every mutation captures a fresh
+ReadCommitted snapshot from the transaction's original context, including calls given
+a previously pinned statement view. Snapshot isolation retains its fixed horizon.
+After a wait, the store checks cancellation and active transaction state
 and releases a grant received after rollback. Update and deletion checks compare the
 caller's snapshot with the latest committed view while holding the lock; a changed
 record produces `TransactionAbortedException`. A stale detach cannot silently cascade

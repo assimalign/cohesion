@@ -34,6 +34,7 @@ public sealed partial class GraphStore
     {
         _storage = storage;
         _coordinator = coordinator;
+        _mutationGateFactory = CreateMutationGate;
         using var iterator = storage.GetUnitIterator(2);
         while (iterator.MoveNext())
         {
@@ -106,11 +107,12 @@ public sealed partial class GraphStore
         ArgumentNullException.ThrowIfNull(node.Properties);
         ArgumentOutOfRangeException.ThrowIfZero(node.Id);
         foreach (string label in node.Labels) { ArgumentException.ThrowIfNullOrWhiteSpace(label); }
-        await LockAsync(context, cancellationToken).ConfigureAwait(false);
+        using var mutation = await EnterMutationAsync(context, cancellationToken).ConfigureAwait(false);
+        context = mutation.RefreshSnapshot(context);
         EnsureNew(1, node.Id);
         var proposed = new GraphRecord(1, node.Id, new StoredGraphNode(node.Id,
             node.Labels.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray(), node.Properties));
-        byte[] bytes = GraphRecordCodec.Encode(proposed, context.Sequence);
+        byte[] bytes = await EncodeAsync(proposed, context.Sequence).ConfigureAwait(false);
         var record = GraphRecordCodec.Decode(bytes); // Own immutable copies, never retain caller dictionaries.
         node = record.Node!.Value;
         var indexes = Definitions(Latest(context));
@@ -167,7 +169,8 @@ public sealed partial class GraphStore
         ArgumentNullException.ThrowIfNull(relationship.Properties);
         ArgumentOutOfRangeException.ThrowIfZero(relationship.Id);
         ulong sourceId = relationship.SourceId, targetId = relationship.TargetId;
-        await LockAsync(context, cancellationToken).ConfigureAwait(false);
+        using var mutation = await EnterMutationAsync(context, cancellationToken).ConfigureAwait(false);
+        context = mutation.RefreshSnapshot(context);
         var latest = Latest(context);
         if (FindNode(sourceId, latest) is null && FindNode(sourceId, context.Snapshot) is not null ||
             FindNode(targetId, latest) is null && FindNode(targetId, context.Snapshot) is not null)
@@ -178,7 +181,7 @@ public sealed partial class GraphStore
         }
         ulong id = relationship.Id;
         EnsureNew(2, id);
-        byte[] bytes = GraphRecordCodec.Encode(new GraphRecord(2, id, Relationship: relationship), context.Sequence);
+        byte[] bytes = await EncodeAsync(new GraphRecord(2, id, Relationship: relationship), context.Sequence).ConfigureAwait(false);
         var record = GraphRecordCodec.Decode(bytes);
         var inserted = await ApplyAsync(context, async bracket =>
         {
@@ -228,7 +231,8 @@ public sealed partial class GraphStore
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
     public async ValueTask DeleteNodeAsync(ulong id, bool detach, TransactionContext context, CancellationToken cancellationToken = default)
     {
-        await LockAsync(context, cancellationToken).ConfigureAwait(false);
+        using var mutation = await EnterMutationAsync(context, cancellationToken).ConfigureAwait(false);
+        context = mutation.RefreshSnapshot(context);
         EnsureUnchanged(1, id, context);
         var node = Find(1, id, context.Snapshot);
         if (node is null) { return; }
@@ -264,7 +268,8 @@ public sealed partial class GraphStore
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
     public async ValueTask DeleteRelationshipAsync(ulong id, TransactionContext context, CancellationToken cancellationToken = default)
     {
-        await LockAsync(context, cancellationToken).ConfigureAwait(false);
+        using var mutation = await EnterMutationAsync(context, cancellationToken).ConfigureAwait(false);
+        context = mutation.RefreshSnapshot(context);
         EnsureUnchanged(2, id, context);
         if (Find(2, id, context.Snapshot) is not { } relationship) { return; }
         await ApplyAsync(context, async bracket =>
