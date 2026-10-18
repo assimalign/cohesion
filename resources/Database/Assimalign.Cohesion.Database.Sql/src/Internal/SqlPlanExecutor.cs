@@ -197,6 +197,12 @@ internal sealed partial class SqlPlanExecutor
             projected = Deduplicate(projected, projections, evaluator);
         }
 
+        return MaterializeProjected(projections, ApplyRowWindow(projected, limit, offset));
+    }
+
+    private static DatabaseResult MaterializeProjected(IReadOnlyList<SqlProjection> projections,
+        List<object?[]> rows, long affectedCount = -1)
+    {
         var columns = new DatabaseColumn[projections.Count];
         for (int i = 0; i < projections.Count; i++)
         {
@@ -208,7 +214,7 @@ internal sealed partial class SqlPlanExecutor
             };
         }
 
-        return new SqlMaterializedResultSet(columns, ApplyRowWindow(projected, limit, offset));
+        return new SqlMaterializedResultSet(columns, rows, affectedCount);
     }
 
     /// <summary>Bounds nonnegative Int64 counts by the materialized rows before narrowing.</summary>
@@ -244,7 +250,7 @@ internal sealed partial class SqlPlanExecutor
                 cancellationToken.ThrowIfCancellationRequested();
                 var row = new object?[projectionStart + projections.Count];
                 source.CopyTo(row, 0);
-                Project(source).CopyTo(row, projectionStart);
+                ProjectRow(source, projections, evaluator, cancellationToken).CopyTo(row, projectionStart);
                 rows.Add(row);
             }
             return SortRows(rows, orderBy, evaluator, cancellationToken)
@@ -258,35 +264,36 @@ internal sealed partial class SqlPlanExecutor
         var projected = new List<object?[]>(matches.Count);
         foreach (var row in matches)
         {
-            projected.Add(Project(row));
+            projected.Add(ProjectRow(row, projections, evaluator, cancellationToken));
         }
         return projected;
+    }
 
-        object?[] Project(object?[] row)
+    private static object?[] ProjectRow(object?[] row, IReadOnlyList<SqlProjection> projections,
+        SqlExpressionEvaluator evaluator, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var output = new object?[projections.Count];
+        for (int i = 0; i < output.Length; i++)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            var output = new object?[projections.Count];
-            for (int i = 0; i < output.Length; i++)
+            var projection = projections[i];
+            output[i] = projection.ColumnOrdinal is int ordinal ? evaluator.DeliverColumn(row, ordinal)
+                : NormalizeGroupValue(evaluator.Evaluate(projection.Value!, row, copySharedBinary: true), projection.Type);
+            if (output[i] is byte[])
             {
-                var projection = projections[i];
-                output[i] = projection.ColumnOrdinal is int ordinal ? evaluator.DeliverColumn(row, ordinal)
-                    : NormalizeGroupValue(evaluator.Evaluate(projection.Value!, row, copySharedBinary: true), projection.Type);
-                if (output[i] is byte[])
+                // One decoded cell can be projected more than once, directly or through CASE,
+                // COALESCE or an identity CAST. Transfer its first use; copy subsequent uses.
+                for (int previous = 0; previous < i; previous++)
                 {
-                    // One decoded cell can be projected more than once, directly or through CASE,
-                    // COALESCE or an identity CAST. Transfer its first use; copy subsequent uses.
-                    for (int previous = 0; previous < i; previous++)
+                    if (ReferenceEquals(output[previous], output[i]))
                     {
-                        if (ReferenceEquals(output[previous], output[i]))
-                        {
-                            output[i] = SqlBinaryValue.CopyShared(output[i]);
-                            break;
-                        }
+                        output[i] = SqlBinaryValue.CopyShared(output[i]);
+                        break;
                     }
                 }
             }
-            return output;
         }
+        return output;
     }
 
     private static int CompareOrderingValues(object? left, object? right, int direction, int nullComparison, Collation collation)
@@ -408,7 +415,7 @@ internal sealed partial class SqlPlanExecutor
             }
             values.Add(row);
         }
-        return await ExecuteInsertRowsAsync(plan.Table, plan.TargetOrdinals, values, statement, cancellationToken, plan.Rows).ConfigureAwait(false);
+        return await ExecuteInsertRowsAsync(plan.Table, plan.TargetOrdinals, values, statement, cancellationToken, plan.Returning, plan.Rows).ConfigureAwait(false);
     }
 
     private async Task<DatabaseResult> ExecuteUpdateAsync(SqlUpdatePlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
@@ -431,6 +438,7 @@ internal sealed partial class SqlPlanExecutor
             }
         }
 
+        var returned = plan.Returning is null ? null : new List<object?[]>(targets.Count);
         var replacements = new List<(PageId PageId, int SlotIndex, object?[] OldValues, object?[] NewValues, byte[] NewVersion)>(targets.Count);
         var bound = _definitions.Get(plan.Table, cancellationToken);
 
@@ -519,9 +527,11 @@ internal sealed partial class SqlPlanExecutor
                     statement.Coordinator.VersionStore.RecordCreated(statement.Transaction.Sequence, location.PageId, location.SlotIndex);
                     await InsertIndexEntriesAsync(
                         statement, indexes, plan.Table, newValues, SqlRecordLocation.Pack(location.PageId, location.SlotIndex), cancellationToken).ConfigureAwait(false);
+                    if (returned is not null) { returned.Add(ProjectRow(newValues, plan.Returning!, evaluator, cancellationToken)); }
                 }
 
-                return (DatabaseResult)new SqlQueryResult(DatabaseResultStatus.Success, replacements.Count);
+                return returned is null ? new SqlQueryResult(DatabaseResultStatus.Success, replacements.Count)
+                    : MaterializeProjected(plan.Returning!, returned, replacements.Count);
             }, durable: false, cancellationToken).ConfigureAwait(false);
         }
         catch (IndexUniqueViolationException exception)
@@ -552,6 +562,9 @@ internal sealed partial class SqlPlanExecutor
         // manager's deadlock detection rather than on a global ordering.
         await AcquireRowWriteLocksAsync(statement, plan.Table.ObjectId, targets.ConvertAll(t => t.Location), cancellationToken).ConfigureAwait(false);
 
+        var returned = plan.Returning is null ? null : new List<object?[]>(targets.Count);
+        var returningTargets = plan.Returning is null ? null : targets.Select(target =>
+            SqlRecordLocation.Pack(target.Location.PageId, target.Location.SlotIndex)).ToHashSet();
         var deletions = new Dictionary<(ulong ObjectId, ulong Location), SqlConstraintDelete>();
         var scannedTables = new HashSet<ulong>();
         var released = new List<SqlParentReference>();
@@ -584,6 +597,11 @@ internal sealed partial class SqlPlanExecutor
                 TombstoneVersion(statement, bracket, deletion.Location.PageId, deletion.Location.SlotIndex);
                 await TombstoneIndexEntriesAsync(statement, GetLiveIndexes(deletion.Table), deletion.Table, deletion.Values,
                     SqlRecordLocation.Pack(deletion.Location.PageId, deletion.Location.SlotIndex), cancellationToken).ConfigureAwait(false);
+                if (returned is not null && deletion.Table.ObjectId == plan.Table.ObjectId &&
+                    returningTargets!.Contains(SqlRecordLocation.Pack(deletion.Location.PageId, deletion.Location.SlotIndex)))
+                {
+                    returned.Add(ProjectRow(deletion.Values, plan.Returning!, evaluator, cancellationToken));
+                }
             }
             foreach (var update in updates.Values)
             {
@@ -608,7 +626,8 @@ internal sealed partial class SqlPlanExecutor
                     throw TranslateUniqueViolation(update.Table, exception);
                 }
             }
-            return (DatabaseResult)new SqlQueryResult(DatabaseResultStatus.Success, targets.Count);
+            return returned is null ? new SqlQueryResult(DatabaseResultStatus.Success, targets.Count)
+                : MaterializeProjected(plan.Returning!, returned, targets.Count);
         }, durable: false, cancellationToken).ConfigureAwait(false);
     }
 

@@ -28,6 +28,12 @@ public sealed partial class SqlQueryParser
             columns = ParseInsertColumnList(ref lexer);
         }
 
+        if (RejectDmlOutput(ref lexer))
+        {
+            return new SqlInsertExpression(table, columns, null, null, false, null,
+                Location.Create(1, 1, pos, _lastTokenEnd));
+        }
+
         if (IsWord(ref lexer, "OVERRIDING"))
         {
             RejectIdentityConstruct(ref lexer, "OVERRIDING ... VALUE");
@@ -63,8 +69,10 @@ public sealed partial class SqlQueryParser
             AddExpectedDiagnostic(ref lexer, "VALUES, DEFAULT VALUES or SELECT");
         }
 
+        var returning = ParseReturning(ref lexer, table);
+
         return new SqlInsertExpression(table, columns, values, selectSource, isDefaultValues, null,
-            Location.Create(1, 1, pos, _lastTokenEnd));
+            Location.Create(1, 1, pos, _lastTokenEnd), returning);
     }
 
     /// <summary>

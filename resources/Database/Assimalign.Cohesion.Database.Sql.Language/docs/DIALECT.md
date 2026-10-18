@@ -58,13 +58,58 @@ Explicit INSERT aliases `AS overriding` and `AS "overriding"` remain valid;
 only a bare OVERRIDING token in clause position is refused. CREATE SEQUENCE, OVERRIDING ... VALUE, identity
 MINVALUE/MAXVALUE/CYCLE/CACHE, ALTER COLUMN RESTART/SET GENERATED, and generated stored
 expressions also report named `COHDBL001`. Sequences, restart, overriding and populated-table
-identity backfill remain T2. RETURNING is still unavailable on this base; #1117 adds generated
-key retrieval when it lands. Full-definition ALTER COLUMN already refuses identity type changes,
+identity backfill remain T2. INSERT ... RETURNING exposes the allocated identity value (#1117). Full-definition ALTER COLUMN already refuses identity type changes,
 nullable definitions and DEFAULT; retaining the type and NOT NULL preserves generation. SET/DROP DEFAULT and DROP NOT NULL refuse identity columns with COHSQLE025 (#1122).
+
+## RETURNING contract (#1117)
+
+INSERT, UPDATE and DELETE accept a final RETURNING SELECT list: `*`, target columns,
+scalar expressions and aliases. A target name or alias qualifies columns; an alias hides
+the original name. INSERT SELECT binds RETURNING only to the target, never to source
+relations. Wildcards expand in table column order, pass-through columns keep their names,
+and unaliased computed outputs use SELECT's `columnN` names and typing.
+
+INSERT returns stored values after coercion, generated identity allocation and per-row
+expression defaults. VALUES and INSERT SELECT preserve source order. UPDATE returns the
+new values, while SET expressions still read the original row. DELETE returns the old
+values of directly targeted rows; ON DELETE CASCADE rows and SET NULL/DEFAULT children
+are excluded. UPDATE and DELETE output order is unspecified. A zero-row write returns
+the same typed columns, no rows, and AffectedCount zero.
+
+RETURNING evaluates per row inside the transactional apply step, after that row's write
+and index checks, before commit; even immutable calls are not folded during planning.
+Any constraint or projection error (including division
+by zero) rolls back the entire statement, including inside BEGIN. Previously successful
+statements in that transaction remain intact. Results are fully materialized and can be
+read after ROLLBACK; an auto-commit result is delivered only after commit succeeds.
+
+QueryAsync returns the rows and SqlResultSet.AffectedCount (n for DML, -1 for SELECT).
+ExecuteAsync still returns n and discards rows; ExecuteScalarAsync returns the first
+returned cell. ResultComplete already carries this count, with no wire-format change.
+
+SQL Server OUTPUT, RETURNING ... INTO, PostgreSQL OLD/NEW pseudo-relations and
+RETURNING WITH (...) are positional COHDBL001 refusals. A target named or aliased old/new
+masks that pseudo-relation name and works normally. Ordinary output/old/new identifiers
+retain their quoting rules, and UPDATE accepts a bare output target alias. DELETE's
+bare output alias is reserved for OUTPUT detection: `DELETE FROM t output WHERE ...`
+reports COHDBL001; use `AS output` to spell that alias. RETURNING subqueries report
+COHDBL001 naming SUBQUERY in
+RETURNING, even after an INSERT SELECT or a supported DML WHERE subquery. Windows also
+remain COHDBL001; aggregates fail planning with COHSQLE017. Modifying CTE bodies retain
+COHDBL001 and perform no writes. Empty lists and SELECT ... RETURNING report SQL0003.
+ON CONFLICT ... RETURNING follows the sql-upsert hand-off (#1118).
+EXPLAIN reports the expanded RETURNING projection count and names for INSERT,
+INSERT SELECT, UPDATE and DELETE without applying the write or evaluating the projection.
+
+The row-source and target-list model follows PostgreSQL
+`src/backend/executor/nodeModifyTable.c:308-330` and
+`src/backend/parser/analyze.c:2796-2811`; target-only INSERT scope follows
+`analyze.c:1035-1044`. OLD/NEW masking follows `analyze.c:2773-2786`.
+Subqueries are a deliberate Cohesion subset exclusion.
 
 ## Statement matrix
 
-With persisted CREATE/DROP VIEW (#1124), CREATE/DROP SCHEMA (#1030) and set operations (#1114), the profile measures **49 of 56 declared clauses** against the live SQL engine.
+With DML RETURNING (#1117), persisted CREATE/DROP VIEW (#1124), CREATE/DROP SCHEMA (#1030) and set operations (#1114), the profile measures **50 of 56 declared clauses** against the live SQL engine.
 Phase 22 measured 33 of 49.
 The earlier 32/48 figure included `JOIN`, `GROUP BY`, `HAVING`, and `SUBQUERY`,
 removed in Phase 12e (#1019–#1021), plus a no-op `CAST` removed in Phase 13.
@@ -85,9 +130,9 @@ projection aliases, including aliases inside scalar expressions, and select-list
 ordinals through the SQL server/client (#1024). At Phase 22 the count remained 33/49 because
 `ALTER TABLE` and `ORDER BY` were already advertised for smaller executable subsets.
 
-The **7 excluded clauses** are recursive CTEs (`RECURSIVE`), window clauses (`WINDOW`,
+The **6 excluded clauses** are recursive CTEs (`RECURSIVE`), window clauses (`WINDOW`,
 `OVER`, `PARTITION`), `NATURAL`,
-`ALL` and `RETURNING`. Counts describe named clauses, not
+and `ALL`. Counts describe named clauses, not
 complete ISO SQL support; the boundaries below are part of the contract.
 
 | Statement | Status | Notes |
@@ -113,7 +158,7 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | Subqueries / `INSERT ... SELECT` | Supported subset, measured | Correlated and uncorrelated scalar, `IN`/`NOT IN`, and `EXISTS`/`NOT EXISTS` queries in supported SELECT expressions and UPDATE/DELETE WHERE predicates, plus aliased derived tables and transactional insert-source queries. Each body may be a set operation (#1114). All use the outer statement snapshot; nesting is limited to 32 subquery levels, within the statement's expression nesting limit (256 levels by default, `SQL0006`). Quantified comparisons and subqueries in UPDATE SET, VALUES, CHECK/DEFAULT, and LIMIT/OFFSET/FETCH/TOP expressions report `COHDBL001`. See the subquery contract below. |
 | `TOP` / `FETCH` | Supported subset, measured | Row counts normalize to LIMIT/Offset plan fields; see [Pagination](#pagination-1107). PERCENT, WITH TIES and DML TOP retain COHDBL001. |
 | `SELECT ALL` | Recognized, not supported | rejected with `COHDBL001` |
-| DML `RETURNING` | Recognized, not supported | rejected with `COHDBL001` |
+| DML `RETURNING` | Supported subset, measured | Written-row SELECT list and affected count; see the RETURNING contract below |
 | `NATURAL JOIN` | Recognized, not supported | rejected with `COHDBL001` |
 | `UNION` / `INTERSECT` / `EXCEPT` | Supported, measured | Each accepts ALL or DISTINCT (default); available in every query position, with parenthesized operands and combined ordering/paging. See [Set operations](#set-operations-1114). |
 | `WITH` (CTEs) | Supported subset, measured | Ordered non-recursive SELECT bodies before SELECT, INSERT, UPDATE or DELETE; optional output column lists; also INSERT INTO t WITH ... SELECT |
@@ -376,10 +421,10 @@ comment, and a string literal or block comment may span lines. `//` is not a
 comment: `/` is the division operator, so `//` is a syntax error.
 
 A recognized clause outside the profile keeps its `COHDBL001`, for example
-`RETURNING` or `WINDOW`. The parser stops at such a clause by design, so the text
+`WINDOW`. The parser stops at such a clause by design, so the text
 from that clause on adds no second diagnostic. Text the parser stopped at before
 it reached the clause still reports `SQL0003`: `DELETE FROM t WHRE id = 1
-RETURNING *` reports both, so fixing `RETURNING` does not reveal a new error. A
+WINDOW w AS ()` reports both, so fixing `WINDOW` does not reveal a new error. A
 derived table, `(SELECT ...) alias`, is parsed as a query relation; its alias is required.
 Named `:name` parameters are not part of the dialect; bind `@name` or `$1`.
 

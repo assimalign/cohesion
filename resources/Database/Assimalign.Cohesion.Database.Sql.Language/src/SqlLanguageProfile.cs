@@ -76,6 +76,7 @@ public static class SqlLanguageProfile
         SqlClauses.Insert,
         SqlClauses.Update,
         SqlClauses.Delete,
+        SqlClauses.Returning,
         SqlClauses.CreateTable,
         SqlClauses.CreateSchema,
         SqlClauses.Identity,

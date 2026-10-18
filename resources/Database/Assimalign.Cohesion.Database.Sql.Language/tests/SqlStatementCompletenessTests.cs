@@ -74,6 +74,7 @@ public sealed class SqlStatementCompletenessTests
         [SqlClauses.Insert] = ["INSERT INTO t VALUES (1)", "INSERT INTO t (a, b) VALUES (1, 'x')", "INSERT INTO t (b, a) DEFAULT VALUES"],
         [SqlClauses.Update] = ["UPDATE t SET a = 1", "UPDATE t SET a = DEFAULT", "UPDATE dbo.t SET a = 1, b = 'x' WHERE id = 1"],
         [SqlClauses.Delete] = ["DELETE FROM t", "DELETE FROM t WHERE id = 1"],
+        [SqlClauses.Returning] = ["INSERT INTO t VALUES (1) RETURNING *", "INSERT INTO t SELECT a FROM u RETURNING a", "UPDATE t SET a = 1 RETURNING a AS updated", "DELETE FROM t RETURNING *"],
         [SqlClauses.CreateTable] = ["CREATE TABLE t (id INT PRIMARY KEY, name TEXT NOT NULL DEFAULT 'x')", "CREATE TABLE IF NOT EXISTS dbo.t (id INT)"],
         [SqlClauses.Identity] = ["CREATE TABLE t (id BIGINT GENERATED ALWAYS AS IDENTITY)", "ALTER TABLE t ADD id INT IDENTITY(100, 5)"],
         [SqlClauses.CreateIndex] = ["CREATE INDEX ix ON t (a)", "CREATE UNIQUE INDEX IF NOT EXISTS ix ON dbo.t (a, b)"],
@@ -397,9 +398,9 @@ public sealed class SqlStatementCompletenessTests
     /// <param name="sql">A statement with a clause outside the profile.</param>
     /// <param name="expected">The error codes, in order.</param>
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Completeness: excluded and restored clauses retain precise boundaries")]
-    [InlineData("DELETE FROM t WHERE id = 1 RETURNING *;", new[] { "COHDBL001" })]
-    [InlineData("DELETE FROM t WHERE id = 1 RETURNING *; DELETE FROM t;", new[] { "COHDBL001" })]
-    [InlineData("DELETE FROM t WHRE id = 1 RETURNING *;", new[] { "SQL0003", "COHDBL001" })]
+    [InlineData("DELETE FROM t WHERE id = 1 WINDOW w AS ();", new[] { "COHDBL001" })]
+    [InlineData("DELETE FROM t WHERE id = 1 WINDOW w AS (); DELETE FROM t;", new[] { "COHDBL001" })]
+    [InlineData("DELETE FROM t WHRE id = 1 WINDOW w AS ();", new[] { "SQL0003", "COHDBL001" })]
     // Derived output ordering is classified by the planner; its execution test verifies resolved output ordering.
     [InlineData("SELECT * FROM (SELECT id FROM u) d ORDER BY id;", new string[0])]
     [InlineData("SELECT * FROM t JOIN (SELECT id FROM u) q ON t.id = q.id;", new string[0])]

@@ -458,8 +458,7 @@ internal sealed class SqlDatabaseServerSession : DatabaseServerSession
 
                 // Evidence-driven fix kept from the (since-reversed) shared-core
                 // extraction: ResultComplete carries the set's real AffectedCount
-                // (SQL's materialized sets report -1, so SQL wire behavior is
-                // unchanged; outcome sets elsewhere carry real counts).
+                // (SELECT sets report -1; RETURNING sets report their write count).
                 await WriteDiagnosticsAsync(diagnosticPayload, cancellationToken).ConfigureAwait(false);
                 await WriteFrameAsync((ProtocolMessageType)SqlProtocolMessageType.ResultComplete, new ProtocolResultCompleteMessage(resultSet.AffectedCount).Encode(), cancellationToken).ConfigureAwait(false);
             }

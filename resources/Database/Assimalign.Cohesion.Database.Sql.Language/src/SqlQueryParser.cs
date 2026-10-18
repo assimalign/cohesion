@@ -191,7 +191,7 @@ public sealed partial class SqlQueryParser : QueryParser
         // on adds no second diagnostic. Otherwise every statement kind must have
         // consumed its whole text: a leftover token means the parse dropped part of
         // what was written (#1068). That includes text the parser stopped at before
-        // it reached the clause, as in DELETE FROM t WHRE id = 1 RETURNING *.
+        // it reached the clause, as in DELETE FROM t WHRE id = 1 WINDOW w AS ().
         if (!hasUnsupportedClause || lexer.Current.Position < unsupportedLocation.Start)
         {
             RejectTrailingTokens(ref lexer, expression);
@@ -727,7 +727,7 @@ public sealed partial class SqlQueryParser : QueryParser
     /// yields the <c>?</c> placeholder, which never executes because of that error:
     /// <c>DELETE;</c> once deleted every row of a table quoted as <c>"?"</c>.
     /// </summary>
-    private SqlTableReference ParseRequiredTableReference(ref TokenLexer lexer, bool insertTarget = false)
+    private SqlTableReference ParseRequiredTableReference(ref TokenLexer lexer, bool insertTarget = false, bool dmlTarget = false)
     {
         // LATERAL (SELECT ...) alias used to bind LATERAL as the table name, so the JOIN it
         // followed also reported a missing ON predicate (#1101).
@@ -743,7 +743,7 @@ public sealed partial class SqlQueryParser : QueryParser
 
         if (IsNameToken(ref lexer))
         {
-            return ParseTableReference(ref lexer, insertTarget);
+            return ParseTableReference(ref lexer, insertTarget, dmlTarget || insertTarget);
         }
 
         if (!SkipDerivedTable(ref lexer))
@@ -843,7 +843,7 @@ public sealed partial class SqlQueryParser : QueryParser
         }
     }
 
-    private SqlTableReference ParseTableReference(ref TokenLexer lexer, bool insertTarget = false)
+    private SqlTableReference ParseTableReference(ref TokenLexer lexer, bool insertTarget = false, bool dmlTarget = false)
     {
         string firstPart = CurrentIdentifierText(ref lexer);
         string? schemaName = null;
@@ -878,6 +878,7 @@ public sealed partial class SqlQueryParser : QueryParser
         }
         else if (!IsAtEnd(ref lexer) && IsIdentifierOrKeyword(ref lexer) &&
                  !(insertTarget && IsWord(ref lexer, "OVERRIDING")) &&
+                 !(dmlTarget && IsWord(ref lexer, "OUTPUT")) &&
                  !IsStatementBoundaryKeyword(ref lexer))
         {
             alias = CurrentIdentifierText(ref lexer);
@@ -947,6 +948,8 @@ public sealed partial class SqlQueryParser : QueryParser
         string? firstToken = null;
         bool insertValues = false;
         bool dmlWhere = false;
+        bool dmlStatement = false;
+        bool returning = false;
         bool inFrom = false;
         bool previousFromComma = false;
         bool previousPreviousFromComma = false;
@@ -1007,8 +1010,19 @@ public sealed partial class SqlQueryParser : QueryParser
                 previousPreviousToken = null;
                 continue;
             }
-            withStatement |= IsKeyword(ref lexer, "WITH");
-            if (IsKeyword(ref lexer, "WITH")) { inWithDefinitions = true; }
+            // A WITH-prefixed INSERT's SELECT source can change firstToken below. Retain
+            // the outer write identity so its RETURNING subqueries still get their own gate.
+            dmlStatement |= fromScopes.Count == 0 &&
+                (IsKeyword(ref lexer, "INSERT") || IsKeyword(ref lexer, "UPDATE") || IsKeyword(ref lexer, "DELETE"));
+            if (fromScopes.Count == 0 && IsKeyword(ref lexer, "RETURNING") && dmlStatement)
+            {
+                returning = true;
+                insertValues = false;
+                dmlWhere = false;
+                inFrom = false;
+            }
+            withStatement |= !returning && IsKeyword(ref lexer, "WITH");
+            if (!returning && IsKeyword(ref lexer, "WITH")) { inWithDefinitions = true; }
             if (withStatement && fromScopes.Count == 0 &&
                 (IsKeyword(ref lexer, "SELECT") || IsKeyword(ref lexer, "INSERT") ||
                  IsKeyword(ref lexer, "UPDATE") || IsKeyword(ref lexer, "DELETE")))
@@ -1045,7 +1059,7 @@ public sealed partial class SqlQueryParser : QueryParser
             }
 
             if (TryFindUnsupportedSubqueryForm(lexer, firstToken.Equals("WITH", StringComparison.OrdinalIgnoreCase) ? "SELECT" : firstToken, previousToken,
-                previousPreviousToken, insertValues, dmlWhere,
+                previousPreviousToken, insertValues, dmlWhere, returning,
                 previousFromComma || previousPreviousFromComma, out clause))
             {
                 location = tokenLocation;

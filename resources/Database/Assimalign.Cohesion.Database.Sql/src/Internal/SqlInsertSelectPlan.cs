@@ -11,4 +11,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 internal sealed record SqlInsertSelectPlan(
     SqlCatalogTable Table,
     IReadOnlyList<int> TargetOrdinals,
-    SqlPlan Source) : SqlPlan;
+    SqlPlan Source) : SqlPlan
+{
+    public IReadOnlyList<SqlProjection>? Returning { get; init; }
+}

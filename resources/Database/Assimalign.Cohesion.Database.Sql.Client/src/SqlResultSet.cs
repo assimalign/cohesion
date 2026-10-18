@@ -18,11 +18,12 @@ public sealed class SqlResultSet : IReadOnlyList<SqlRow>
 {
     private readonly IReadOnlyList<SqlRow> _rows;
 
-    private SqlResultSet(IReadOnlyList<SqlColumn> columns, IReadOnlyList<SqlRow> rows, IReadOnlyList<ProtocolDiagnostic> diagnostics)
+    private SqlResultSet(IReadOnlyList<SqlColumn> columns, IReadOnlyList<SqlRow> rows, IReadOnlyList<ProtocolDiagnostic> diagnostics, long affectedCount)
     {
         Columns = columns;
         _rows = rows;
         Diagnostics = diagnostics;
+        AffectedCount = affectedCount;
     }
 
     /// <summary>Gets the negotiated warning and error diagnostics.</summary>
@@ -37,6 +38,9 @@ public sealed class SqlResultSet : IReadOnlyList<SqlRow>
     /// Gets the number of rows in the result set.
     /// </summary>
     public int Count => _rows.Count;
+
+    /// <summary>Gets the number of rows affected by a write, including a write with RETURNING; -1 for SELECT.</summary>
+    public long AffectedCount { get; }
 
     /// <summary>
     /// Gets the row at the given index.
@@ -77,6 +81,6 @@ public sealed class SqlResultSet : IReadOnlyList<SqlRow>
             rows[index] = new SqlRow(result.Rows[index], ordinals);
         }
 
-        return new SqlResultSet(columns, rows, result.Diagnostics);
+        return new SqlResultSet(columns, rows, result.Diagnostics, result.AffectedCount);
     }
 }

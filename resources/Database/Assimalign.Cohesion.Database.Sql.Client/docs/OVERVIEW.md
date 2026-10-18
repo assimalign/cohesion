@@ -26,7 +26,7 @@ The model reference supplies wire codecs; the client never calls its parser.
 - `SqlCommand` + `SqlParameterCollection`: statement text with named parameters
   (the `@`/`$` sigil is normalized away on bind).
 - `SqlConnection.QueryAsync` / `ExecuteAsync` / `ExecuteScalarAsync<T>`: run commands
-  and get a `SqlResultSet`, an affected count, or a scalar.
+  and get a `SqlResultSet` with rows and affected count, a count alone, or a scalar.
 - `SqlResultSet` / `SqlRow` / `SqlColumn`: typed, ordinal- and name-addressable rows
   with widening numeric getters.
 - `SqlClientException` + `SqlClientErrorKind`: a SQL-scoped failure taxonomy mapped
@@ -66,5 +66,9 @@ foreach (SqlRow row in rows)
 long affected = await connection.ExecuteAsync("DELETE FROM users WHERE id = @id",
     new Dictionary<string, object?> { ["id"] = 42 });
 ```
+
+RETURNING writes use QueryAsync to retrieve typed rows and SqlResultSet.AffectedCount
+in one exchange (-1 for SELECT, n for DML). ExecuteAsync returns only n and discards
+returned rows; ExecuteScalarAsync retrieves the first cell, including a generated identity.
 
 See `docs/DESIGN.md` for the design decisions behind the surface.
