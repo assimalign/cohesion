@@ -68,7 +68,9 @@ also use Decimal so embedded and wire values agree. Uniform Int64 columns retain
 `[NOT] IN (a, b)`, `[NOT] BETWEEN a AND b`, `[NOT] LIKE pattern [ESCAPE c]` and searched/simple
 CASE execute in projections, filters, grouping and aggregate arguments. IN compares list
 items structurally; parentheses always mean a value list, even for one array-valued item.
-The array form `x IN d.tags` remains deferred. LIKE is ordinal and case-sensitive, `%`
+The array form `x IN d.tags` also executes; a NULL or non-array right operand gives NULL,
+and a MISSING operand on either side gives MISSING. `NULL IN []` deliberately retains NULL.
+LIKE is ordinal and case-sensitive, `%`
 matches any number of Unicode scalars and `_` matches one. Backslash is the default escape;
 `ESCAPE ''` disables it. Invalid evaluated escapes and trailing pattern escapes give COHDOC013.
 
@@ -81,6 +83,33 @@ including simple CASE on MISSING, gives ELSE or NULL when ELSE is absent. The en
 [truth tables and Couchbase sources](../../Assimalign.Cohesion.Database.Documents/docs/DESIGN.md#predicate-truth-tables-1127)
 record these rules. CASE, WHEN, THEN, ELSE, END and ESCAPE are reserved; `"end"` and `d.end`
 remain valid field references.
+
+`FROM items d [INNER | LEFT [OUTER]] UNNEST d.tags [AS] t` executes and can chain bindings.
+The alias may be omitted for a path, defaulting to its last named step. INNER drops empty,
+MISSING, NULL and non-array operands; LEFT preserves them with t MISSING. Null array elements
+stay NULL. Rows follow document ID then array order. WHERE runs after expansion; COUNT(*)
+counts expanded rows. With UNNEST, `SELECT *` returns synthetic `{"d":...,"t":...}` objects;
+without a FROM alias the source member is named items, while paths keep existing resolution.
+A plain star without UNNEST preserves stored bytes. ORDER BY projection aliases outrank
+UNNEST variables. Variables shadow fields; quantified bindings may shadow enclosing variables.
+Duplicate names in one binding list give OQL0010. The unaliased collection name is reserved
+for this check: `FROM items LEFT UNNEST tags items` is a duplicate, while paths still do not
+resolve an implicit items variable. Inferred duplicate aliases span the final path-name token.
+Direct AST duplicates give COHDOC023. Group-key equivalence preserves lexical binding scope;
+a quantified t cannot match an outer t in a grouping expression.
+
+`ANY | SOME | EVERY x IN array SATISFIES predicate END` executes with one scoped variable.
+SOME is ANY. Each predicate result undergoes SQL++ Truth conversion; NULL/MISSING results
+are not true. ANY is FALSE on empty arrays, EVERY is TRUE. A MISSING collection gives MISSING;
+NULL or non-array collections give NULL. `NOT ANY x IN [NULL] SATISFIES x = 1 END` is TRUE,
+following [Couchbase ANY](https://github.com/couchbase/query/blob/master/expression/coll_any.go)
+and [EVERY](https://github.com/couchbase/query/blob/master/expression/coll_every.go).
+UNNEST, INNER, LEFT, OUTER, EVERY and SATISFIES stay contextual names. END remains reserved.
+UNNEST in UPDATE/DELETE, FLATTEN calls, multi-binding quantifiers, ARRAY/FIRST comprehensions, NEST,
+JOIN, WITHIN and ANY AND EVERY remain deferred with COHDBL001.
+The DML refusal applies at an UNNEST clause, so `DELETE FROM items WHERE ANY x IN tags
+SATISFIES unnest END` and UPDATE predicates/values may read a field named unnest. A MERGE INTO
+inside a CASE result in SATISFIES receives one COHDBL001 naming MERGE.
 
 UPSERT INTO collection [AS alias] (KEY, VALUE) VALUES (key, value) [, ...] and
 UPSERT INTO collection (KEY outputName [, VALUE outputName]) SELECT ... execute with

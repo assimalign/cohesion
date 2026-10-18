@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Text;
+using System.Text.Json;
 
 using Assimalign.Cohesion.Database.Documents.Language;
 
@@ -14,6 +15,23 @@ internal sealed partial class DocumentExpressionEvaluator
         bool missing = false;
         bool nullItem = false;
         bool matched = false;
+        if (expression.Array is { } collection)
+        {
+            var value = Evaluate(collection, document, group);
+            if (operand is DocumentMissing || value is DocumentMissing) { return DocumentMissing.Instance; }
+            if (value is not JsonElement { ValueKind: JsonValueKind.Array } array) { return null; }
+            // Keep #1127's NULL-left rule, including an empty array.
+            if (operand is null) { return null; }
+            foreach (var item in array.EnumerateArray())
+            {
+                _cancellationToken.ThrowIfCancellationRequested();
+                var itemValue = ReadJson(item);
+                var equal = Equal(operand, itemValue);
+                if (equal is true) { return !expression.Negated; }
+                if (itemValue is null) { nullItem = true; }
+            }
+            return nullItem ? null : expression.Negated;
+        }
         // Couchbase expression/coll_in.go:58-159: a match wins, then NULL, then MISSING.
         foreach (var item in expression.Values)
         {

@@ -103,9 +103,28 @@ public sealed class OqlExecutionConformanceTests
                 new("SELECT name FROM items WHERE amount IS NOT VALUED", [["delta"]]),
                 new("SELECT name FROM items WHERE details.score IS VALUED", [["alpha"], ["beta"], ["gamma"]]),
             ],
+            [OqlClauses.Unnest] =
+            [
+                new("SELECT d.name, t FROM items d UNNEST d.tags AS t ORDER BY d.name", [["alpha", "blue"], ["beta", "green"], ["gamma", "blue"]]),
+                new("SELECT t, COUNT(*) AS n FROM items d UNNEST d.tags t GROUP BY t ORDER BY t", [["blue", 2L], ["green", 1L]]),
+            ],
+            [OqlClauses.LeftUnnest] =
+            [
+                new("SELECT d.name, t FROM items d LEFT UNNEST d.tags t ORDER BY d.name", [["alpha", "blue"], ["beta", "green"], ["delta", null], ["gamma", "blue"]], Missing: [(2, 1)]),
+            ],
+            [OqlClauses.Any] =
+            [
+                new("SELECT name FROM items d WHERE ANY t IN d.tags SATISFIES t = 'blue' END", [["alpha"], ["gamma"]]),
+                new("SELECT name FROM items d WHERE SOME t IN d.tags SATISFIES t = 'blue' END", [["alpha"], ["gamma"]]),
+            ],
+            [OqlClauses.Every] =
+            [
+                new("SELECT name FROM items d WHERE EVERY t IN d.tags SATISFIES t = 'blue' END", [["alpha"], ["gamma"], ["delta"]]),
+            ],
             [OqlClauses.In] =
             [
                 new("SELECT name FROM items WHERE category IN ('b', 'z')", [["gamma"]]),
+                new("SELECT name FROM items d WHERE 'green' IN d.tags", [["beta"]]),
             ],
             [OqlClauses.Between] =
             [
@@ -391,6 +410,10 @@ public sealed class OqlExecutionConformanceTests
         OqlClauses.ObjectConstructor => expression is OqlSelectExpression objectQuery && objectQuery.Projections.Any(p => p.Expression is OqlObjectExpression),
         OqlClauses.ArrayConstructor => expression is OqlSelectExpression arrayQuery && arrayQuery.Projections.Any(p => p.Expression is OqlArrayExpression),
         OqlClauses.From => expression is OqlSelectExpression { Collection.Length: > 0 },
+        OqlClauses.Unnest => expression is OqlSelectExpression unnestQuery && unnestQuery.Unnest.Any(binding => !binding.IsLeft),
+        OqlClauses.LeftUnnest => expression is OqlSelectExpression leftQuery && leftQuery.Unnest.Any(binding => binding.IsLeft),
+        OqlClauses.Any => expression is OqlSelectExpression { Predicate: OqlQuantifiedExpression { IsEvery: false } },
+        OqlClauses.Every => expression is OqlSelectExpression { Predicate: OqlQuantifiedExpression { IsEvery: true } },
         OqlClauses.Where => expression is OqlSelectExpression { Predicate: not null },
         OqlClauses.In => expression is OqlSelectExpression { Predicate: OqlInExpression },
         OqlClauses.Between => expression is OqlSelectExpression { Predicate: OqlBetweenExpression },

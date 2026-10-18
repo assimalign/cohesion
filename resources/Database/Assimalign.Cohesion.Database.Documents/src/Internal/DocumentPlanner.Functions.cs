@@ -27,7 +27,7 @@ internal sealed partial class DocumentPlanner
         OqlUnaryExpression => DatabaseType.Boolean,
         OqlBinaryExpression binary => binary.Operator is "+" or "-" or "*" or "/" or "%" ? DatabaseType.Decimal : DatabaseType.Boolean,
         OqlCallExpression call => OqlFunctions.Find(call.Name)?.ResultType ?? DatabaseType.Null,
-        OqlInExpression or OqlBetweenExpression or OqlLikeExpression => DatabaseType.Boolean,
+        OqlQuantifiedExpression or OqlInExpression or OqlBetweenExpression or OqlLikeExpression => DatabaseType.Boolean,
         _ => DatabaseType.Null,
     };
 

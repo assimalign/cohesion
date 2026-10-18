@@ -10,8 +10,13 @@ internal sealed partial class DocumentPlanner
     {
         switch (expression)
         {
+            case OqlQuantifiedExpression quantified:
+                yield return quantified.Collection;
+                yield return quantified.Predicate;
+                break;
             case OqlInExpression membership:
                 yield return membership.Operand;
+                if (membership.Array is { } array) { yield return array; }
                 foreach (var value in membership.Values) { yield return value; }
                 break;
             case OqlBetweenExpression between:

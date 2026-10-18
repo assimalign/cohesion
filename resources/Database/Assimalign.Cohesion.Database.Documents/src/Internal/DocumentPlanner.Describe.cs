@@ -69,6 +69,7 @@ internal sealed partial class DocumentPlanner
         if (plan is DocumentDeletePlan deletion) { AddAccess(deletion.Access, 0); }
         if (plan is DocumentUpdatePlan mutation) { AddAccess(mutation.Access, 0); }
         var select = plan as DocumentPlan;
+        var systemSelect = plan as DocumentSystemCollectionPlan;
         int sourceParent = 0;
         var writeSource = plan switch
         {
@@ -87,6 +88,7 @@ internal sealed partial class DocumentPlanner
             }
             else if (writeSource is DocumentSystemCollectionPlan system)
             {
+                systemSelect = system;
                 target = system.Name;
                 Add("SystemCollection", 0, detail: SelectDetail(system.Logical));
             }
@@ -101,9 +103,35 @@ internal sealed partial class DocumentPlanner
             }
             int projectionId = nodes.Count;
             Add(DescribeOperator(select.Logical), sourceParent);
+            projectionId = AddBindings(select.Logical, projectionId);
             AddAccess(select.Access, projectionId);
         }
+        if (systemSelect is not null && systemSelect.Logical.Query.Unnest.Count > 0)
+        {
+            int parent = sourceParent;
+            if (systemSelect.Logical.Query.IsDistinct)
+            {
+                parent = nodes.Count;
+                Add("Distinct", sourceParent);
+            }
+            int projectionId = nodes.Count;
+            Add(DescribeOperator(systemSelect.Logical), parent);
+            Add("SystemCollectionScan", AddBindings(systemSelect.Logical, projectionId));
+        }
         return DatabasePlanDescription.Create(nodes, diagnostics);
+
+        int AddBindings(DocumentLogicalPlan sourceLogical, int parent)
+        {
+            // Execution reads this chain from access upwards, preserving binding order.
+            for (int i = sourceLogical.Query.Unnest.Count - 1; i >= 0; i--)
+            {
+                var binding = sourceLogical.Query.Unnest[i];
+                int bindingId = nodes.Count;
+                Add(binding.IsLeft ? "LeftUnnest" : "Unnest", parent, detail: binding.Variable);
+                parent = bindingId;
+            }
+            return parent;
+        }
 
         void AddAccess(DocumentAccessPath access, int parent)
         {

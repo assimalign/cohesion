@@ -11,6 +11,10 @@ arity checks, OQL0008 for unknown calls, and static result types consumed by the
 SELECT LIMIT/OFFSET accept signed integer literals or parameters in either order, with non-negative
 Int64 values and OQL0007 for invalid counts. LIMIT and OFFSET are reserved field names; quoting
 or a preceding dot keeps them usable, and AS labels still accept them.
+Chainable INNER/LEFT UNNEST, ANY/SOME/EVERY ... SATISFIES ... END and array-value IN execute.
+`OqlSelectExpression.Unnest`, `OqlUnnestExpression` and `OqlQuantifiedExpression` retain the
+bindings. The new words remain contextual; END retains its existing reservation. See the
+[array contract](DESIGN.md#array-bindings-and-quantified-predicates-1136) for scope and truth rules.
 
 ```csharp
 var parser = new OqlQueryParser();

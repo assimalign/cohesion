@@ -57,10 +57,22 @@ public static class OqlClauses
     /// <summary>Introduces the source collections and iteration variables for a query.</summary>
     public const string From = "FROM";
 
+    /// <summary>Expands an array into inner rows.</summary>
+    public const string Unnest = "UNNEST";
+
+    /// <summary>Expands an array while preserving empty or non-array inputs.</summary>
+    public const string LeftUnnest = "LEFT UNNEST";
+
     /// <summary>Restricts values by a predicate.</summary>
     public const string Where = "WHERE";
 
-    /// <summary>Tests membership in an explicit value list.</summary>
+    /// <summary>Tests whether any array element satisfies a predicate; SOME is a synonym.</summary>
+    public const string Any = "ANY ... SATISFIES";
+
+    /// <summary>Tests whether every array element satisfies a predicate.</summary>
+    public const string Every = "EVERY ... SATISFIES";
+
+    /// <summary>Tests structural membership in an explicit value list or array value.</summary>
     public const string In = "IN";
 
     /// <summary>Tests an inclusive scalar range.</summary>

@@ -268,6 +268,7 @@ OQL0007 for the same count rule at parse and plan time:
 | `COHDOC020` | A UNIQUE index found a duplicate valued scalar key (23505) |
 | `COHDOC021` | A UNIQUE key contains an array or object |
 | `COHDOC022` | An index has fewer than one or more than 32 paths |
+| `COHDOC023` | A direct SELECT AST repeats a FROM/UNNEST binding name or supplies an empty binding name |
 
 `DocumentQueryRequest.FromOql` and a directly constructed typed query with parse errors
 throw `DatabaseParseException` carrying the complete, ordered parser diagnostics and the
@@ -330,6 +331,69 @@ throw `DatabaseException` with `System collection '<canonical source>' is read-o
 before ordinary catalog lookup or mutation. Virtual sources do not provide mutable `DocumentCollection` handles.
 
 ### Stored document queries
+
+#### Array row bindings (#1136)
+
+Each evaluation tuple carries its owned FROM value, identity/version/raw metadata and a
+persistent chain of named UNNEST bindings. Quantifiers add an inner frame only while evaluating
+SATISFIES; their collection expression sees the enclosing tuple. The nearest named variable
+wins, then the explicit FROM alias, then document fields. Names use ordinal comparison.
+FROM and UNNEST form one binding list with unique names, reserving the unaliased collection
+name for duplicate checks (OQL0010 in text, COHDOC023 for a
+direct AST); quantifiers may shadow outer bindings. META on a quantified or UNNEST variable
+is invalid, including a quantified name that shadows the FROM alias.
+
+Stored and virtual sources share expansion and residual WHERE evaluation. An iterative
+depth-first stage enumerates JsonElement arrays, preserving document-ID order then array
+index at each binding. INNER drops non-arrays and empty arrays; LEFT emits one MISSING
+binding for MISSING, NULL, scalar, object and empty-array inputs. A null element remains
+NULL. Groups, HAVING, aggregate arguments and ordering evaluate these tuples; COUNT(*) is
+an Int64 count of rows. LIMIT's early-stop window counts matching expanded rows and checks
+before advancing to the next element, including multiple rows from the same document.
+Projection aliases retain precedence in ORDER BY. Group-key and VALUE-order equivalence
+distinguish a variable t from the document field d.t and preserve quantifier scope when
+matching compound group keys. Persistent quantifier scope frames and UNNEST variable names
+are computed once per plan; VALUE-order equivalence is also resolved before iterating rows.
+
+With UNNEST, star constructs an object with the explicit FROM alias (or collection name) and
+each array variable, omitting MISSING bindings. For an unaliased system source, the full
+COHESION_SCHEMA name is the object key. The collection name does not become a path variable;
+broader implicit-keyspace alias semantics remain a follow-up. Synthetic stars use the existing
+whole-document result mode and row writer, with empty RawContent, so the wire receives the
+constructed object. A lone star without UNNEST still preserves stored bytes.
+An array variable colliding with the unaliased collection name is a duplicate binding;
+no additional path alias is introduced.
+
+Quantified element results use Couchbase's true/not-true test, as recorded in the
+[language contract](../../Assimalign.Cohesion.Database.Documents.Language/docs/DESIGN.md#array-bindings-and-quantified-predicates-1136).
+MISSING collection operands propagate MISSING; NULL and non-array operands give NULL.
+Array IN reuses #1127 structural equality, preserving the distinction from list IN and the
+existing NULL-left rule even for an empty array. The Couchbase NULL IN [] difference remains
+a follow-up. UPDATE and DELETE may use quantified predicates but cannot introduce UNNEST.
+
+Index collection uses only top-level document conjuncts; variable-headed paths cannot select
+a document index, and quantifier predicates are never traversed for seeks. A document-only
+conjunct can still select an index with UNNEST. Array-index pushdown remains deferred.
+EXPLAIN inserts Unnest/LeftUnnest nodes, naming each variable in Detail, between projection
+and access while retaining the existing Select detail string.
+
+With UNNEST each stored document is cloned once and shared across its expanded rows.
+Without UNNEST, WHERE reads the borrowed root and only matching documents are cloned;
+no expansion iterator or stack is created. Path navigation keeps the root as a JsonElement
+and consults variable frames only when bindings exist, avoiding a boxed root per path.
+The selective-scan allocation regression allows 10% above an in-test control that reads the
+same catalog/storage snapshot and filters borrowed JSON roots directly. A separate path
+regression subtracts a NULL-expression control and allows Boolean leaf boxes plus 10%.
+Synthetic stars have a fixed object result type, so unsorted, ungrouped, non-DISTINCT LIMIT
+queries stop expansion and projection at the completed window. Constant array and object
+constructors cache their owned JSON per evaluator and result-depth limit. Path navigation
+does not revalidate JSON subtrees already validated by storage; parameter JSON normalizes
+once per evaluator. UNNEST, quantifiers and array IN enumerate arrays without indexing them
+repeatedly. Expansion checks cancellation and transaction activity for every row; predicate
+and structural-equality loops also observe cancellation. The expansion method is internal for
+the owning test assembly to cancel from borrowed JSON reads and verify per-element checks.
+No reflection or runtime code generation is involved. No catalog, storage or wire layout
+changes, format bump or upgrade path are needed; #1135's index v2 remains unchanged.
 
 #### Result paging (#1129)
 
@@ -425,7 +489,7 @@ columns retain long values. JSON numeric equality and wire digits are unchanged 
 
 The supported clause matrix lives in the language package's
 [DESIGN.md](../../Assimalign.Cohesion.Database.Documents.Language/docs/DESIGN.md).
-SELECT (ALL/DISTINCT and VALUE/RAW), object/array constructors, FROM, WHERE, GROUP BY, HAVING, ORDER BY, LIMIT, OFFSET, CREATE COLLECTION, DROP COLLECTION,
+SELECT (ALL/DISTINCT and VALUE/RAW), object/array constructors, FROM/UNNEST, quantified predicates, WHERE, GROUP BY, HAVING, ORDER BY, LIMIT, OFFSET, CREATE COLLECTION, DROP COLLECTION,
 CREATE INDEX, DROP INDEX, INSERT, UPSERT, UPDATE, UNSET, DELETE, VALUES, IN, BETWEEN, LIKE and CASE are executed. OQL retains its name with a SQL++ basis.
 Retired ODMG constructs are rejected positionally; nested queries, deferred document mutations
 and server statements are rejected with `COHDBL001`. The parser advertises only clauses this executor
@@ -496,14 +560,14 @@ Equality compares scalar values and structurally compares arrays/objects.
 Range predicates compare only values of the same scalar kind. Arithmetic requires
 decimal or Int64 operands; invalid numeric input and division by zero fail explicitly.
 
-COUNT(*) counts documents; COUNT(expression) skips both MISSING and NULL. SUM and AVG
+COUNT(*) counts input rows; COUNT(expression) skips both MISSING and NULL. SUM and AVG
 require numeric valued inputs. SUM, AVG, MIN, and MAX skip MISSING and NULL; no valued inputs return
 null; COUNT returns zero. Ungrouped aggregate queries yield a single group even
 for an empty source. Outside aggregate calls, grouped projection, HAVING, and
 ORDER BY expressions must be a group key or an expression built from group keys
 and constants. Group-key binding compares expression structure, preserves literal
-scalar types, and treats qualified and unqualified paths to the same iteration
-variable as equivalent. Group values compare structurally.
+scalar types, and treats qualified and unqualified document paths as equivalent only when
+neither resolves to an inner variable. Group values compare structurally.
 
 Results are deterministic. A scan and an index seek both establish ordinal
 document-ID order before filtering and projection. GROUP BY uses the total order
@@ -729,6 +793,7 @@ It changes no documents or catalog entries, including when its explicit transact
 | --- | --- |
 | `Select`, `Project`, `ProjectValue`, `Group` | The physical query and its logical projection or grouping stage; details include filters and ordering |
 | `Distinct` | A separate parent node above Project, ProjectValue or Group, preserving the underlying stage |
+| `Unnest`, `LeftUnnest` | Array expansion between projection/grouping and access, with the variable name in Detail |
 | `CollectionScan` | Candidate retrieval from the named collection |
 | `IndexSeek` | The chosen catalog index name, collection and inclusive/exclusive path bounds |
 | `Delete` | Snapshot-filtered deletion; detail states filter presence and IndexSeek or CollectionScan, with that access as its child |
@@ -736,6 +801,7 @@ It changes no documents or catalog entries, including when its explicit transact
 | `Insert`, `InsertSelect` | Document creation from VALUES or a fully materialized query; SELECT children describe the source access |
 | `Upsert`, `UpsertSelect` | Whole-document insert-or-replace from the same staged inputs; SELECT children describe the source access |
 | `SystemCollection` | A virtual `COHESION_SCHEMA` collection without stored-document access |
+| `SystemCollectionScan` | Virtual-source input below UNNEST; ordinary system queries retain their compact SystemCollection description |
 | `CreateCollection`, `DropCollection`, `CreateIndex`, `DropIndex` | Internal DDL mappings; EXPLAIN DDL is refused by the parser |
 
 Nodes use depth-first pre-order. Test-only enumeration guards both logical and statement plan
@@ -1184,7 +1250,8 @@ the database's own retry, a `FailureBackoff` after the failure, not the next
 ## Limits and verification
 
 The current engine materializes query inputs/results and whole JSON values in
-managed memory. Chunk persistence handles documents larger than a page but does
+managed memory. UNNEST multiplies input rows and has no row cap; it is not a join and
+does not add JOIN or cross-collection execution. Chunk persistence handles documents larger than a page but does
 not promise a bounded heap independent of document/query size. Database-wide
 writer locking is conservative; there is no query-cost statistics model, join,
 subquery, external sort, replication, model-specific security,

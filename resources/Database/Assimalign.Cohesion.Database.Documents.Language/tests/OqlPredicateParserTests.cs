@@ -84,11 +84,8 @@ public sealed class OqlPredicateParserTests
     [InlineData("SELECT CASE «END» FROM c", "OQL0002", null)]
     [InlineData("SELECT CASE WHEN a = 1 THEN 2 «FROM» c", "OQL0002", null)]
     [InlineData("SELECT a NOT«»", "OQL0002", null)]
-    [InlineData("SELECT 'blue' «IN» d.tags FROM c d", "COHDBL001", "IN array form")]
     [InlineData("SELECT a IN («SELECT» b FROM d) FROM c", "COHDBL001", "SUBQUERY")]
     [InlineData("SELECT «EXISTS» (a) FROM c", "COHDBL001", "EXISTS")]
-    [InlineData("SELECT * FROM c WHERE «EVERY» x IN c.items SATISFIES x > 1 END", "COHDBL001", "EVERY ... SATISFIES")]
-    [InlineData("SELECT * FROM c WHERE «EVERY» x IN c.items SATISFIES CASE WHEN x > 1 THEN TRUE END AND x IN c.tags END", "COHDBL001", "EVERY ... SATISFIES")]
     public void Parse_InvalidPredicate_ShouldLocateOneDiagnostic(string marked, string code, string? construct)
     {
         // Arrange

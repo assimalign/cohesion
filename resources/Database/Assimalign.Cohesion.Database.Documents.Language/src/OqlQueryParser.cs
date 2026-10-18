@@ -266,6 +266,9 @@ public sealed partial class OqlQueryParser : QueryParser
             // as use. SET is exempt only at the assignment-clause token after that header;
             // SET(...) elsewhere still refuses.
             if (index > statementStart && (index < updateHeaderEnd || index == updateClause)) { continue; }
+            // An unsupported source expansion owns the remainder of UPDATE. Syntax parsing
+            // locates it after the destination, rather than guessing from expression names.
+            if (index == updateHeaderEnd && updateClause < 0 && IsUnnestClause(index)) { break; }
 
             // FETCH FIRST is one unsupported spelling. LIMIT ALL is an invalid count.
             // Only a recognized clause head owns the next word; a path or alias does not.
@@ -306,7 +309,7 @@ public sealed partial class OqlQueryParser : QueryParser
                     openQuantifiers++;
                     index += 2;
                 }
-                else if (value == "CASE")
+                else if (value == "CASE" || value == "ARRAY" && index + 1 < _tokens.Count && _tokens[index + 1].Type != TokenType.LeftParen)
                 {
                     // CASE shares END with quantified predicates. Its END must not expose
                     // the rest of the unsupported predicate to independent capability scans.
@@ -320,10 +323,40 @@ public sealed partial class OqlQueryParser : QueryParser
             }
             if (quantifier)
             {
-                AddUnsupported(result, $"{value} ... SATISFIES", token);
+                string clause = value == "EVERY" ? OqlClauses.Every : OqlClauses.Any;
+                if (!Supports(clause))
+                {
+                    AddUnsupported(result, clause, token);
+                    openQuantifiers++;
+                }
+                index += 2;
+                continue;
+            }
+
+            if (value == "ARRAY" && index + 1 < _tokens.Count && _tokens[index + 1].Type != TokenType.LeftParen)
+            {
+                AddUnsupported(result, "ARRAY", token);
+                openQuantifiers++;
+                continue;
+            }
+            if (value == "ANY" && index + 2 < _tokens.Count && IsWord(_tokens[index + 1], "AND") && IsWord(_tokens[index + 2], "EVERY"))
+            {
+                AddUnsupported(result, "ANY AND EVERY", token);
                 openQuantifiers++;
                 index += 2;
                 continue;
+            }
+            // The binding itself is not array membership. WITHIN remains deferred.
+            if (value is "ANY" or "SOME" or "EVERY" && index + 2 < _tokens.Count && IsWord(_tokens[index + 2], "WITHIN"))
+            { continue; }
+            if (value == "MERGE" && index > 0 && index + 1 < _tokens.Count && IsWord(_tokens[index + 1], "INTO") &&
+                (IsWord(_tokens[index - 1], "SATISFIES") || IsWord(_tokens[index - 1], "THEN") ||
+                    IsWord(_tokens[index - 1], "ELSE") || _tokens[index - 1].Type == TokenType.LeftParen))
+            {
+                // A nested MERGE statement owns its text, while a field named merge
+                // remains an ordinary expression in SATISFIES.
+                AddUnsupported(result, "MERGE", token);
+                break;
             }
 
             // EXISTS is supported only in the positional DDL modifier. Keep malformed
@@ -403,12 +436,6 @@ public sealed partial class OqlQueryParser : QueryParser
                 }
                 // Keep the UPDATE grammar responsible for its own LIMIT refusal.
                 if (value == "LIMIT") { continue; }
-            }
-
-            if (value == "IN" && index + 1 < _tokens.Count && _tokens[index + 1].Type != TokenType.LeftParen)
-            {
-                AddUnsupported(result, "IN array form", token);
-                continue;
             }
 
             if (!OqlUnsupportedVocabulary.TryFind(value, out var word) || Supports(word.Construct))

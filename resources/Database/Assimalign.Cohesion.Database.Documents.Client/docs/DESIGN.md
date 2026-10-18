@@ -35,6 +35,11 @@ function column types. OQL0007 survives parse or plan failure at the operand and
 reusable. Both transports and the NativeAOT guard exercise paging.
 DISTINCT completion counts follow duplicate removal; object/array constructors need no codec
 extension. A lone SELECT * preserves stored bytes on the wire, including scalar roots.
+With UNNEST, the same whole-document mode instead carries synthetic objects keyed by FROM
+and array variable names; MISSING LEFT bindings are omitted, actual null elements remain null.
+Array expansion, grouped Int64 counts, ANY/SOME/EVERY and array IN use the ordinary query
+exchange, without new messages or format versions. The advertised-clause test exercises
+grouped UNNEST and ANY on both transports; the AOT consumer covers these shapes too.
 VALUE/RAW MISSING becomes NULL during engine projection, before DISTINCT and projected ordering,
 so embedded and wire rows agree on IsMissing=false and completion counts. Embedded MISSING
 object members remain omitted and MISSING array elements become NULL.

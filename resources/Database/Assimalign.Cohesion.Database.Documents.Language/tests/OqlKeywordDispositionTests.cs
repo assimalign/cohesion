@@ -69,8 +69,8 @@ public sealed class OqlKeywordDispositionTests
         ["LIKE"] = Parses("SELECT * FROM c WHERE a LIKE 'x%'"),
         ["BETWEEN"] = Parses("SELECT * FROM c WHERE a BETWEEN 1 AND 2"),
         ["FOR"] = Rejects("SELECT * FROM c WHERE FOR ALL x IN c.items: x > 1", "FOR ALL"),
-        ["SOME"] = Rejects("SELECT * FROM c WHERE SOME x IN c.items SATISFIES x > 1 END", "SOME ... SATISFIES"),
-        ["ANY"] = Rejects("SELECT * FROM c WHERE ANY x IN c.items SATISFIES x > 1 END", "ANY ... SATISFIES"),
+        ["SOME"] = Parses("SELECT * FROM c WHERE SOME x IN c.items SATISFIES x > 1 END"),
+        ["ANY"] = Parses("SELECT * FROM c WHERE ANY x IN c.items SATISFIES x > 1 END"),
         ["UNDEFINED"] = Rejects("SELECT UNDEFINED FROM c", "UNDEFINED"),
         ["STRUCT"] = Rejects("SELECT STRUCT(a: 1) FROM c", "STRUCT"),
         ["LIST"] = Rejects("SELECT LIST(1, 2) FROM c", "LIST"),
@@ -108,9 +108,14 @@ public sealed class OqlKeywordDispositionTests
         ["FETCH"] = Rejects("SELECT * FROM c ORDER BY a FETCH FIRST 5 ROWS ONLY", "FETCH"),
         ["UPSERT"] = Parses("UPSERT INTO c (KEY, VALUE) VALUES ('k', {'a': 1})"),
         ["MERGE"] = Rejects("MERGE INTO c USING d ON c.id = d.id WHEN MATCHED THEN UPDATE SET c.a = d.a", "MERGE"),
-        ["UNNEST"] = Rejects("SELECT * FROM c UNNEST c.items AS i", "UNNEST"),
-        ["EVERY"] = Rejects("SELECT * FROM c WHERE EVERY x IN c.items SATISFIES x > 1 END", "EVERY ... SATISFIES"),
-        ["SATISFIES"] = Rejects("SELECT * FROM c WHERE EVERY x IN c.items SATISFIES x > 1 END", "EVERY ... SATISFIES"),
+        ["NEST"] = Rejects("SELECT * FROM c NEST d ON TRUE", "NEST"),
+        ["WITHIN"] = Rejects("SELECT * FROM c WHERE ANY x WITHIN a SATISFIES TRUE END", "WITHIN"),
+        ["INNER"] = Parses("SELECT * FROM c d INNER UNNEST d.a t"),
+        ["LEFT"] = Parses("SELECT * FROM c d LEFT UNNEST d.a t"),
+        ["OUTER"] = Parses("SELECT * FROM c d LEFT OUTER UNNEST d.a t"),
+        ["UNNEST"] = Parses("SELECT * FROM c UNNEST c.items AS i"),
+        ["EVERY"] = Parses("SELECT * FROM c WHERE EVERY x IN c.items SATISFIES x > 1 END"),
+        ["SATISFIES"] = Parses("SELECT * FROM c WHERE EVERY x IN c.items SATISFIES x > 1 END"),
     };
 
     [Fact(DisplayName = "Cohesion Test [Documents.Language] - Keyword disposition: every keyword and recognized-unsupported entry has a case")]
@@ -251,7 +256,7 @@ public sealed class OqlKeywordDispositionTests
     private static string[] Words()
         => OqlLanguageProfile.Instance.Keywords.ToArray()
             .Concat(OqlUnsupportedVocabulary.Words.Select(word => word.Spelling))
-            .Append("EXPLAIN") // Contextual statement prefix; identifier cases live in this corpus too.
+            .Concat(new[] { "UNNEST", "INNER", "LEFT", "OUTER", "EVERY", "SATISFIES" }).Append("EXPLAIN") // Contextual statement prefix; identifier cases live in this corpus too.
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
 

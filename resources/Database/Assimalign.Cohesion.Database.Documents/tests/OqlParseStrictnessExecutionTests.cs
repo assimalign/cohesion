@@ -27,8 +27,6 @@ public sealed class OqlParseStrictnessExecutionTests
     [InlineData("SELECT ? FROM items", "OQL0002")]
     [InlineData("CREATE INDEX by_name ON items (name) #", "OQL0002")]
     [InlineData("MERGE INTO items", "COHDBL001")]
-    [InlineData("SELECT * FROM items UNNEST items.tags AS tag", "COHDBL001")]
-    [InlineData("SELECT * FROM items WHERE EVERY tag IN items.tags SATISFIES tag = 'blue' END", "COHDBL001")]
     [InlineData("MERGE INTO items USING other ON items.name = other.name WHEN MATCHED THEN DELETE", "COHDBL001")]
     public async Task Execute_StrictnessViolation_FailsAtParseTimeWithoutEffectAsync(string oql, string code)
     {

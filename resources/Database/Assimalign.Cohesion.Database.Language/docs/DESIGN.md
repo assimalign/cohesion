@@ -115,7 +115,7 @@ language's syntax code. The rules, shared by SQL, OQL and GQL:
   modes, GQL shortest-path prefixes, GQL `MERGE`, GQL `NODETACH DELETE`, and OQL `MERGE`. #1101
   owns the OQL `MERGE` pin, so oql-upsert does not re-pin it. Each of these items depends on #1101
   and flips its own pins, corpus cases included, in its own change: oql-limit-offset (OQL `LIMIT`
-  and `OFFSET`), oql-upsert (`UPSERT`), oql-arrays (`UNNEST` and `EVERY ... SATISFIES`), and
+  and `OFFSET`), oql-upsert (`UPSERT`), oql-arrays (`UNNEST` and quantified predicates, flipped by #1136), and
   gql-label-direction (label-expression operators and `IS`). gql-label-direction (#1139) has
   flipped its pins and added one: the GQL tilde edge, `UNDIRECTED EDGE`, stays `COHDBL001` until
   the graph engine stores undirected relationships.
