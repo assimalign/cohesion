@@ -165,6 +165,9 @@ public sealed partial class SqlViewTests
     [Theory(DisplayName = "Cohesion Test [Sql] - Views: complete decimal facets survive scalar projections")]
     [InlineData("(SELECT CAST(id AS DECIMAL(5,2)) FROM t)", "(SELECT CAST(id AS DECIMAL(6,3)) FROM t)")]
     [InlineData("f(id)", "CAST(id AS DECIMAL(6,3))")]
+    [InlineData("CASE WHEN id = 1 THEN CAST(id AS DECIMAL(5,2)) ELSE CAST(id AS DECIMAL(5,2)) END", "CASE WHEN id = 1 THEN CAST(id AS DECIMAL(6,3)) ELSE CAST(id AS DECIMAL(6,3)) END")]
+    [InlineData("COALESCE(CAST(id AS DECIMAL(5,2)), CAST(id AS DECIMAL(5,2)))", "COALESCE(CAST(id AS DECIMAL(6,3)), CAST(id AS DECIMAL(6,3)))")]
+    [InlineData("NULLIF(CAST(id AS DECIMAL(5,2)), CAST(0 AS DECIMAL(9,4)))", "NULLIF(CAST(id AS DECIMAL(6,3)), CAST(0 AS DECIMAL(9,4)))")]
     public async Task Execute_DecimalOutput_ShouldFreezePrecisionAndScale(string projection, string replacement)
     {
         // Arrange
@@ -180,7 +183,7 @@ public sealed partial class SqlViewTests
         var error = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "CREATE OR REPLACE VIEW v AS SELECT " + replacement + " AS y FROM t"));
         // Assert
         rows.ShouldHaveSingleItem().ShouldBe([5L, 2L]);
-        error.Message.ShouldContain("COHSQLE033", Case.Sensitive);
+        error.Diagnostics[0].Code.ShouldBe("COHSQLE033");
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Views: repeated grouped expressions retain every overload")]

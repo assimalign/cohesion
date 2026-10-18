@@ -709,3 +709,6 @@ View modifiers remain contextual so persisted identifier quoting does not change
 Capability scanning treats the body after AS as a query, preserving the same
 unsupported-SELECT diagnostic at declaration time. DROP VIEW RESTRICT and CASCADE
 are parsed independently of the foreign-key action capability flags.
+The engine's view metadata contract is documented in DIALECT: complete common type modifiers
+flow through scalar alternatives and set operands, every catalog view column is nullable, and
+catalog refusals retain structured diagnostics over the wire.

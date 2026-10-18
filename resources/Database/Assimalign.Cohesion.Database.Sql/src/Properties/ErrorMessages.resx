@@ -134,6 +134,7 @@
   <data name="ViewDependent" xml:space="preserve"><value>Cannot change the object because view '{0}.{1}' depends on it.</value></data>
   <data name="ViewLoadInvalid" xml:space="preserve"><value>{0} cannot be loaded as a query. {1}</value></data>
   <data name="ViewDropDependent" xml:space="preserve"><value>Cannot drop '{0}' because other objects depend on it: view '{1}.{2}' depends on it.</value></data>
+  <data name="ViewBindingFailed" xml:space="preserve"><value>View '{0}.{1}' cannot be bound. {2}</value></data>
   <data name="ViewContractChanged" xml:space="preserve"><value>View '{0}.{1}' cannot be bound because a source definition changed its output type, modifiers, domain or collation.</value></data>
   <data name="AggregateModifiersOnScalar" xml:space="preserve"><value>DISTINCT, ALL or ORDER BY specified, but '{0}' is not an aggregate function.</value></data>
   <data name="DistinctOrderingArgument" xml:space="preserve"><value>In an aggregate with DISTINCT, ORDER BY expressions must appear in the argument list.</value></data>

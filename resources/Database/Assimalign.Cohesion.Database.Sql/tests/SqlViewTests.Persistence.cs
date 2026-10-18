@@ -161,7 +161,7 @@ public sealed partial class SqlViewTests
         await ExecuteAsync(reader, "COMMIT");
         // Assert
         rows.Count.ShouldBe(2);
-        rows[0].ShouldBe(["id", "NO"]);
+        rows[0].ShouldBe(["id", "YES"]);
         rows[1].ShouldBe(["n", "YES"]);
     }
 
@@ -229,7 +229,7 @@ public sealed partial class SqlViewTests
         await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "DROP TABLE replacement"));
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sql] - Views: one bound plan per catalog generation and frozen COLUMNS nullability")]
+    [Fact(DisplayName = "Cohesion Test [Sql] - Views: one bound plan per catalog generation and nullable COLUMNS metadata")]
     public async Task Plan_RepeatedViewRead_ShouldReuseBodyUntilCatalogChanges()
     {
         // Arrange
@@ -369,6 +369,7 @@ public sealed partial class SqlViewTests
         var error = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "CREATE VIEW v AS SELECT '" + new string('x', 9000) + "' AS n FROM t"));
         // Assert
         error.Message.ShouldContain("8,092", Case.Sensitive);
+        error.Diagnostics[0].Code.ShouldBe("COHSQLE033");
         database.Catalog.DdlGeneration.ShouldBe(before);
         database.Catalog.Views.ShouldBeEmpty();
     }

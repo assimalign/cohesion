@@ -32,7 +32,7 @@ internal sealed partial class SqlPlanner
             projections.Add(new SqlProjection(column.Alias ?? $"column{projections.Count + 1}", null, column.Expression,
                 GroupExpressionType(column.Expression, Array.Empty<SqlCatalogColumn>(), evaluator))
             {
-                Value = value, Collation = collation, Metadata = CaptureProjectionMetadata(candidate),
+                Value = value, Collation = collation, Metadata = CaptureProjectionMetadata(candidate, expression: column.Expression, evaluator: evaluator),
                 MaxLength = evaluator.MaximumLengthOf(column.Expression),
             });
         }

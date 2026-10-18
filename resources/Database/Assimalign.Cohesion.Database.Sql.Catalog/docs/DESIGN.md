@@ -683,11 +683,15 @@ Kind **17**, pre-assigned to views, stores strict source-generated JSON through
 an internal DTO: namespace/name, canonical body, frozen output names and types,
 domains/collations, stored-table ObjectIds, column/view/function/domain dependencies,
 ordered resolved calls and ownership. SqlCatalogView and snapshot Views expose
-immutable descriptions; tables retain their own stored-only shape. Creation-time nullability is
-persisted for COLUMNS, which never needs to bind a view body. No interface, friend grant or language reference
+immutable descriptions; tables retain their own stored-only shape. View columns are always nullable
+in catalog metadata, following PostgreSQL's unconstrained view attributes
+(`src/backend/catalog/information_schema.sql:295`). The new format-23 record stores no nullability
+flag, and COLUMNS never needs to bind a view body. No interface, friend grant or language reference
 was added. Format **23** fences kind 17; table extension 6 is unchanged. Older
 formats are refused, with no upgrade reader. The encoded record must fit one page
 (**8,092 bytes**); oversized definitions fail CREATE with COHSQLE033.
+View refusals carry structured diagnostics on SqlCatalogException, including COHSQLE033 for
+incompatible replacement and oversized records, so the wire preserves the same code.
 
 CreateViewAsync validates collisions, live dependency identities, cycles and the
 append-only replacement contract under the metadata lock, then commits record,

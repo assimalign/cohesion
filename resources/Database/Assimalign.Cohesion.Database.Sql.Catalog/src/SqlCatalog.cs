@@ -1296,7 +1296,7 @@ public sealed partial class SqlCatalog
             {
                 case _viewRecordKind:
                     LoadView(reader.ReadString(out _), (unit.PageId, unit.SlotIndex));
-                    if (!reader.IsAtEnd) { throw new SqlCatalogException(ErrorMessages.ViewMetadataInvalid); }
+                    if (!reader.IsAtEnd) { throw new SqlCatalogException("COHSQLE033", ErrorMessages.ViewMetadataInvalid); }
                     break;
                 case namespaceRecordKind:
                     LoadNamespace(reader.ReadString(out _), (unit.PageId, unit.SlotIndex));
@@ -2317,7 +2317,7 @@ public sealed partial class SqlCatalog
             {
                 throw new SqlCatalogException($"Table '{table.Schema}.{table.Name}' has an unexpected catalog identity.");
             }
-            if (_views.ContainsKey(SqlObjectIdentity.View(table.Schema, table.Name))) { throw new SqlCatalogException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ViewExists, table.Schema, table.Name)); }
+            if (_views.ContainsKey(SqlObjectIdentity.View(table.Schema, table.Name))) { throw new SqlCatalogException("COHSQLE033", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ViewExists, table.Schema, table.Name)); }
             if (existing is not null)
             {
                 foreach (var column in existing.Table.Columns)

@@ -90,11 +90,11 @@ internal sealed partial class SqlPlanExecutor
                 case "VIEWS": yield return [database, stored.Schema, stored.Name, stored.Definition, "NONE", "NO"]; break;
                 case "OBJECT_OWNERSHIP": yield return [database, stored.Schema, stored.Name, "VIEW", stored.Name, SystemOwner(stored.Owner), stored.OwningSchema]; break;
                 case "COLUMNS":
-                    var liveColumns = stored.Columns;
-                    for (int i = 0; i < liveColumns.Count; i++)
+                    for (int i = 0; i < stored.Columns.Count; i++)
                     {
-                        var column = liveColumns[i];
-                        yield return [database, stored.Schema, stored.Name, column.Name, (long)i + 1, null, column.IsNullable ? "YES" : "NO", SystemDataType(column.Type.Type),
+                        var column = stored.Columns[i];
+                        // PostgreSQL view attributes have no NOT NULL constraint (information_schema.sql:295).
+                        yield return [database, stored.Schema, stored.Name, column.Name, (long)i + 1, null, "YES", SystemDataType(column.Type.Type),
                             column.Type.Type is DatabaseType.String or DatabaseType.Character ? (long?)column.Type.MaxLength : null,
                             null, SystemNumericPrecision(column.Type), SystemNumericRadix(column.Type.Type), SystemNumericScale(column.Type),
                             SystemDateTimePrecision(column.Type.Type), "NO", null, null, null, null, null, null];
