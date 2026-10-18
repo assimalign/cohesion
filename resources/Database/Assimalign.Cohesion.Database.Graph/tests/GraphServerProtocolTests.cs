@@ -81,6 +81,7 @@ public sealed class GraphServerProtocolTests
     [InlineData("BEGIN")]
     [InlineData("COMMIT")]
     [InlineData("ROLLBACK")]
+    [InlineData("MATCH (a)->{3,1}(b) RETURN a.name")]
     [InlineData("")]
     public async Task Execute_UnsupportedText_ShouldReturnParseFailureAndKeepSessionReady(string statement)
     {

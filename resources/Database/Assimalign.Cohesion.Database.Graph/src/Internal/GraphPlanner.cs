@@ -10,7 +10,10 @@ using Assimalign.Cohesion.Database.Types;
 namespace Assimalign.Cohesion.Database.Graph.Internal;
 
 internal sealed record GraphAnchor(int NodeIndex, string? Label, string? Property, object? Value);
-internal sealed record GraphPathPlan(GqlPathPattern Pattern, GraphAnchor Anchor);
+internal sealed record GraphPathPlan(GqlPathPattern Pattern, GraphAnchor Anchor)
+{
+    internal GraphPathShape? Shape { get; init; }
+}
 internal sealed record GraphMatchClausePlan(IReadOnlyList<GraphPathPlan> Paths, GqlExpression? Predicate,
     bool Optional, IReadOnlyList<string> NewVariables, bool MatchesNothing);
 internal enum GraphProjectionKind { Scalar, Node, Relationship, Path, EntityValue }
@@ -26,7 +29,10 @@ internal sealed record GraphStagePlan(GqlStage Stage, GraphPlan Plan)
     internal GraphProjectionKind ElementKind { get; init; }
 }
 internal readonly record struct GraphEntityShape(GraphProjectionKind Kind, bool Optional);
-internal sealed record GraphBindingShape(bool[] Entities, bool[] Composites, bool[] Scalars, GraphEntityShape[] EntityKinds, DatabaseType Type);
+internal sealed record GraphBindingShape(bool[] Entities, bool[] Composites, bool[] Scalars, GraphEntityShape[] EntityKinds, DatabaseType Type)
+{
+    internal bool Group { get; init; }
+}
 internal sealed record GraphDistinctPlan(IReadOnlyList<GraphProjectionPlan> Keys);
 internal sealed record GraphGroupingPlan(IReadOnlyList<GqlExpression> Keys, IReadOnlyList<GqlAggregateExpression> Aggregates, GraphGroupingScope Scope);
 internal sealed record GraphSortKeyPlan(GqlSortItem Item, int ProjectionIndex);
@@ -117,6 +123,8 @@ internal sealed partial class GraphPlanner
         var declarations = new List<string>();
         var mandatoryVariables = new HashSet<string>(StringComparer.Ordinal);
         var boundVariables = new HashSet<string>(StringComparer.Ordinal);
+        var groupVariables = new HashSet<string>(StringComparer.Ordinal);
+        var pathShapes = new Dictionary<GqlPathPattern, GraphPathShape>(ReferenceEqualityComparer.Instance);
         Dictionary<string, int>? orderAliases = null;
         Dictionary<GqlExpression, int>? orderProjections = null;
         GraphGroupingPlan? grouping = null;
@@ -197,11 +205,10 @@ internal sealed partial class GraphPlanner
                 var paths = new List<GraphPathPlan>();
                 foreach (var path in clause.Paths)
                 {
-                    paths.Add(new GraphPathPlan(path, ChooseAnchor(path, anchors, boundVariables)));
-                    foreach (var node in path.Nodes)
-                    { if (node.Variable is { } variable) { boundVariables.Add(variable); } }
-                    foreach (var relationship in path.Relationships)
-                    { if (relationship.Variable is { } variable) { boundVariables.Add(variable); } }
+                    var shape = pathShapes[path];
+                    paths.Add(new GraphPathPlan(path, ChooseAnchor(shape, anchors, boundVariables)) { Shape = shape });
+                    foreach (var binding in shape.Bindings())
+                    { if (!groupVariables.Contains(binding.Name)) { boundVariables.Add(binding.Name); } }
                 }
                 clauses.Add(new GraphMatchClausePlan(paths, clause.Predicate, optional,
                     declarations.Skip(firstDeclaration).ToArray(), clauseMatchesNothing));
@@ -382,7 +389,7 @@ internal sealed partial class GraphPlanner
         };
 
         void ClearScope()
-        { variables.Clear(); declarations.Clear(); shapes.Clear(); mandatoryVariables.Clear(); boundVariables.Clear(); }
+        { variables.Clear(); declarations.Clear(); shapes.Clear(); mandatoryVariables.Clear(); boundVariables.Clear(); groupVariables.Clear(); }
 
         bool MayReturn(GqlExpression expression, bool entity, int accesses = 0) => GraphValueExpressions.MayReturn(expression, _parameters, entity,
             (name, depth, entities) => shapes.TryGetValue(name, out var shape)
@@ -411,7 +418,8 @@ internal sealed partial class GraphPlanner
                     i + accesses);
                 if (!entities[i] && !composites[i]) { break; }
             }
-            return new GraphBindingShape(entities, composites, scalars, kinds, accesses == 0 ? ExpressionType(expression) : DatabaseType.Null);
+            return new GraphBindingShape(entities, composites, scalars, kinds, accesses == 0 ? ExpressionType(expression) : DatabaseType.Null)
+            { Group = accesses == 0 && expression is GqlVariableExpression group && shapes.TryGetValue(group.Variable, out var groupShape) && groupShape.Group };
         }
 
         DatabaseType ExpressionType(GqlExpression expression) => expression switch
@@ -482,10 +490,8 @@ internal sealed partial class GraphPlanner
         void Declare(GqlPathPattern path, bool creating)
         {
             token.ThrowIfCancellationRequested();
-            if (path?.Nodes is null || path.Relationships is null || path.Nodes.Count == 0 ||
-                path.Relationships.Count != path.Nodes.Count - 1 || path.Relationships.Count > 64 ||
-                path.Nodes.Any(node => node is null) || path.Relationships.Any(relationship => relationship is null))
-            { throw new GraphPlanningException("COHDBG001", "A finite path requires one more node than relationships and at most 64 hops.", query.Location); }
+            var shape = GraphPathShape.Create(path, creating);
+            pathShapes[path] = shape;
             if (path.Variable is { } variable)
             {
                 if (creating || !variables.TryAdd(variable, BindingKind.Path))
@@ -493,13 +499,31 @@ internal sealed partial class GraphPlanner
                 declarations.Add(variable);
                 if (!optional) { mandatoryVariables.Add(variable); }
             }
-            for (int i = 0; i < path.Nodes.Count; i++)
+            for (int i = 0; i < shape.Nodes.Count; i++)
             {
-                var node = path.Nodes[i];
-                Bind(node.Variable, BindingKind.Node);
-                if (i == path.Relationships.Count) { continue; }
-                var relationship = path.Relationships[i];
-                Bind(relationship.Variable, BindingKind.Relationship);
+                foreach (var node in shape.Nodes[i]) { Bind(node.Variable, BindingKind.Node); }
+                if (i == shape.Segments.Count) { continue; }
+                var segment = shape.Segments[i];
+                if (segment.Quantifier is null)
+                {
+                    foreach (var binding in segment.Body.Bindings()) { Bind(binding.Name, binding.Node ? BindingKind.Node : BindingKind.Relationship); }
+                    continue;
+                }
+                var names = new Dictionary<string, bool>(StringComparer.Ordinal);
+                foreach (var binding in segment.Body.Bindings())
+                {
+                    if (names.TryGetValue(binding.Name, out bool nodeKind))
+                    {
+                        if (nodeKind != binding.Node) { throw new GraphPlanningException("COHDBG003", ErrorMessages.GroupBindingConflict, query.Location); }
+                        continue;
+                    }
+                    names.Add(binding.Name, binding.Node);
+                    if (variables.ContainsKey(binding.Name)) { throw new GraphPlanningException("COHDBG003", ErrorMessages.GroupBindingConflict, query.Location); }
+                    Bind(binding.Name, BindingKind.Value);
+                    groupVariables.Add(binding.Name);
+                    shapes[binding.Name] = new GraphBindingShape([true, true, false], [true, false, false], [false, false, true],
+                        [default, new GraphEntityShape(binding.Node ? GraphProjectionKind.Node : GraphProjectionKind.Relationship, false), default], DatabaseType.Null) { Group = true };
+                }
             }
         }
         // Returns false when a MATCH pattern requires a name the database does not have.
@@ -507,13 +531,34 @@ internal sealed partial class GraphPlanner
         {
             if (!declared) { Declare(path, creating); }
             bool satisfiable = true;
-            foreach (var node in path.Nodes) { satisfiable &= ValidateNodeLabels(node, creating, tokens); }
-            foreach (var relationship in path.Relationships) { satisfiable &= ValidateRelationship(relationship, creating, tokens); }
-            // MATCH properties are predicates on the complete bound clause, including
-            // forward references (Neo4j PropertyPredicateNormalizer.scala:35-41).
-            foreach (var node in path.Nodes) { ValidateStageProperties(node.Properties, creating, propertyScope); }
-            foreach (var relationship in path.Relationships) { ValidateStageProperties(relationship.Properties, creating, propertyScope); }
+            var propertyGroups = shapes.Where(binding => binding.Value.Group).Select(binding => binding.Key).ToHashSet(StringComparer.Ordinal);
+            var pending = new Stack<(GraphPathShape Shape, bool Required, bool Group)>();
+            pending.Push((pathShapes[path], true, false));
+            while (pending.TryPop(out var item))
+            {
+                foreach (var node in item.Shape.Nodes.SelectMany(nodes => nodes))
+                {
+                    bool valid = ValidateNodeLabels(node, creating, tokens);
+                    if (item.Required) { satisfiable &= valid; }
+                    ValidatePatternProperties(node.Properties, item.Group);
+                }
+                if (item.Shape.Edge is { } edge)
+                {
+                    bool valid = ValidateRelationship(edge, creating, tokens);
+                    if (item.Required) { satisfiable &= valid; }
+                    ValidatePatternProperties(edge.Properties, item.Group);
+                }
+                foreach (var segment in item.Shape.Segments.AsEnumerable().Reverse())
+                { pending.Push((segment.Body, item.Required && segment.Quantifier?.Min != 0, item.Group || segment.Quantifier is not null)); }
+            }
             return satisfiable;
+
+            void ValidatePatternProperties(IReadOnlyDictionary<string, GqlExpression> properties, bool group)
+            {
+                if (group && properties is not null && properties.Values.Any(expression => expression is not null && GraphValueExpressions.ReferencesAny(expression, propertyGroups, token)))
+                { throw new GraphPlanningException("COHDBG003", ErrorMessages.GroupPropertyReference, query.Location); }
+                ValidateStageProperties(properties!, creating, propertyScope);
+            }
         }
         void ValidateStageProperties(IReadOnlyDictionary<string, GqlExpression> properties, bool creating, IReadOnlySet<string>? propertyScope)
         {
@@ -536,6 +581,8 @@ internal sealed partial class GraphPlanner
         void Bind(string? variable, BindingKind kind)
         {
             if (variable is null) { return; }
+            if (groupVariables.Contains(variable))
+            { throw new GraphPlanningException("COHDBG003", ErrorMessages.GroupBindingConflict, query.Location); }
             if (variables.TryGetValue(variable, out var previous) && previous != kind)
             { throw new GraphPlanningException("COHDBG003", $"Variable '{variable}' has incompatible graph bindings.", query.Location); }
             if (!variables.ContainsKey(variable)) { declarations.Add(variable); }
@@ -577,6 +624,8 @@ internal sealed partial class GraphPlanner
                         if (expression is GqlPropertyExpression && alias.Kind == GraphProjectionKind.Path)
                         { throw new GraphPlanningException("COHDBG003", ErrorMessages.SortPathProperty, expression.Location); }
                         if (expression is GqlPropertyExpression && alias.Kind == GraphProjectionKind.Scalar && Shape(alias.Expression).Scalars[0])
+                        { throw new GraphPlanningException("COHDBG003", ErrorMessages.MemberBindingRequired, expression.Location); }
+                        if (expression is GqlPropertyExpression && Shape(alias.Expression).Group)
                         { throw new GraphPlanningException("COHDBG003", ErrorMessages.MemberBindingRequired, expression.Location); }
                         if (expression is GqlLabeledPredicate labeled)
                         {
@@ -672,7 +721,7 @@ internal sealed partial class GraphPlanner
         {
             var kind = RequireVariable(variable);
             if (kind == BindingKind.Path || kind == BindingKind.Value &&
-                shapes.TryGetValue(variable, out var shape) && shape.Scalars[0])
+                shapes.TryGetValue(variable, out var shape) && (shape.Scalars[0] || shape.Group))
             { throw new GraphPlanningException("COHDBG003", ErrorMessages.MemberBindingRequired, expression.Location); }
         }
         // A labeled predicate tests a node's labels or a relationship's type; a path has neither.
@@ -889,47 +938,52 @@ internal sealed partial class GraphPlanner
     // plus the indexes its labels own, never their product: Neo4j's leaf planner likewise groups the
     // predicates once and visits only each label's own index descriptors
     // (cypher-planner .../leafplanner/index/NodeIndexLeafPlanner.scala:184, :201, :248-261, :279-296).
-    private GraphAnchor ChooseAnchor(GqlPathPattern path, AnchorSources sources, IReadOnlySet<string> boundVariables)
+    private GraphAnchor ChooseAnchor(GraphPathShape shape, AnchorSources sources, IReadOnlySet<string> boundVariables)
     {
-        for (int i = 0; i < path.Nodes.Count; i++)
+        for (int i = 0; i < shape.Nodes.Count; i++)
         {
-            if (path.Nodes[i].Variable is { } variable && boundVariables.Contains(variable))
-            { return new GraphAnchor(i, path.Nodes[i].Labels.FirstOrDefault(), null, null); }
-        }
-        for (int i = 0; i < path.Relationships.Count; i++)
-        {
-            if (path.Relationships[i].Variable is { } variable && boundVariables.Contains(variable))
-            { return new GraphAnchor(i, path.Nodes[i].Labels.FirstOrDefault(), null, null); }
-        }
-        for (int i = 0; i < path.Nodes.Count; i++)
-        {
-            var node = path.Nodes[i];
-            if (node.Labels.Count == 0) { continue; }
-            var inline = FirstValues(node.Properties);
-            var equalities = sources.GetEqualities(node.Variable);
-            if (inline.Count == 0 && equalities.Count == 0) { continue; }
-            var indexes = sources.GetIndexedKeys();
-            if (indexes.Count == 0) { break; }
-            var tried = new HashSet<string>(StringComparer.Ordinal);
-            foreach (string label in node.Labels)
+            foreach (var node in shape.Nodes[i])
             {
-                if (!tried.Add(label) || !indexes.TryGetValue(label, out var keys)) { continue; }
-                string? bestKey = null;
-                FirstValue best = new(int.MaxValue, null!);
-                foreach (string key in keys)
-                {
-                    // Inline positions precede every equality position, as the properties precede
-                    // the WHERE clause.
-                    FirstValue candidate;
-                    if (inline.TryGetValue(key, out var property)) { candidate = property; }
-                    else if (equalities.TryGetValue(key, out var equality)) { candidate = new(inline.Count + equality.Position, equality.Value); }
-                    else { continue; }
-                    if (candidate.Position < best.Position) { best = candidate; bestKey = key; }
-                }
-                if (bestKey is not null) { return new GraphAnchor(i, label, bestKey, best.Value); }
+                if (node.Variable is { } variable && boundVariables.Contains(variable))
+                { return new GraphAnchor(i, node.Labels.FirstOrDefault(), null, null); }
             }
         }
-        return new GraphAnchor(0, path.Nodes[0].Labels.FirstOrDefault(), null, null);
+        for (int i = 0; i < shape.Segments.Count; i++)
+        {
+            if (shape.Segments[i] is { Quantifier: null, Body.Edge.Variable: { } variable } && boundVariables.Contains(variable))
+            { return new GraphAnchor(i, shape.Nodes[i].SelectMany(node => node.Labels).FirstOrDefault(), null, null); }
+        }
+        for (int i = 0; i < shape.Nodes.Count; i++)
+        {
+            foreach (var node in shape.Nodes[i])
+            {
+                if (node.Labels.Count == 0) { continue; }
+                var inline = FirstValues(node.Properties);
+                var equalities = sources.GetEqualities(node.Variable);
+                if (inline.Count == 0 && equalities.Count == 0) { continue; }
+                var indexes = sources.GetIndexedKeys();
+                if (indexes.Count == 0) { break; }
+                var tried = new HashSet<string>(StringComparer.Ordinal);
+                foreach (string label in node.Labels)
+                {
+                    if (!tried.Add(label) || !indexes.TryGetValue(label, out var keys)) { continue; }
+                    string? bestKey = null;
+                    FirstValue best = new(int.MaxValue, null!);
+                    foreach (string key in keys)
+                    {
+                        // Inline positions precede every equality position, as the properties precede
+                        // the WHERE clause.
+                        FirstValue candidate;
+                        if (inline.TryGetValue(key, out var property)) { candidate = property; }
+                        else if (equalities.TryGetValue(key, out var equality)) { candidate = new(inline.Count + equality.Position, equality.Value); }
+                        else { continue; }
+                        if (candidate.Position < best.Position) { best = candidate; bestKey = key; }
+                    }
+                    if (bestKey is not null) { return new GraphAnchor(i, label, bestKey, best.Value); }
+                }
+            }
+        }
+        return new GraphAnchor(0, shape.Nodes[0].SelectMany(node => node.Labels).FirstOrDefault(), null, null);
     }
 
     /// <summary>Each key's first non-null inline value and its position among the node's non-null values.</summary>

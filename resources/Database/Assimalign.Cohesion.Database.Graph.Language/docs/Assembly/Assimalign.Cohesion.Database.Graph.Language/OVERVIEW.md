@@ -26,7 +26,7 @@ The original constructor still creates the single mandatory clause; `Matches` an
 expose that view only and return empty/null for optional or multiple clauses. The engine reads
 Stages and null-extends every new binding of an unmatched optional clause. Each clause's
 predicate sees its own and preceding variables. Optional-only path projections are COHDBG001.
-`GqlPathPattern` holds ordered nodes and relationships; their immutable metadata
+`GqlPathPattern` holds ordered node/relationship chains or an Elements list of GqlPathNode, GqlPathRelationship and GqlParenthesizedPathPattern records; GqlQuantifier(Min, Max) supplies inclusive relationship/subpath repetition bounds. A parenthesized path has empty chain lists; contradictory representations are COHDBG001. Quantified bindings are source-ordered lists. The chain facade holds ordered nodes and relationships; their immutable metadata
 captures labels, direction, type and scalar properties. Each pattern's `LabelExpression` is a
 `GqlLabelExpression` tree (`GqlLabelName`, `GqlLabelWildcard`, `GqlLabelNegation`,
 `GqlLabelConjunction`, `GqlLabelDisjunction`), and `GqlPatternDirection.LeftOrRight` is the ISO

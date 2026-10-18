@@ -70,6 +70,19 @@ failure permits reuse of the exact authenticated pooled session. ExecutePaths re
 existing COHDBG001 projection diagnostic. GraphAggregateWireTests verifies both transports,
 recorded types and names, empty input, capability refusal and session reuse.
 
+## Quantified paths (#1144)
+
+QueryAsync accepts ISO quantified edges/subpaths and Cypher bracketed lengths; QueryPathsAsync
+returns the complete source-ordered trail in the existing Path frame, including intermediate
+nodes, stored relationship directions and zero-length paths. Right index anchors preserve that
+order. Group lists flow through FOR/UNWIND with their entity kinds; scalar projections after
+expansion use the existing result codec. Unnegotiated possible composite final projections
+fail statically with COHDBG016. Negotiated lists containing entities keep the existing Execute
+entity-result rejection, as collect(entity) does. No new wire tag or capability is introduced.
+Malformed bounds return ParseFailure and keep the authenticated session; the protocol suite
+also pins the following Ping/Pong. GraphQuantifiedPathWireTests exercises rows, paths, aliases,
+linear group flow and session reuse over InMemory and TCP.
+
 ## Ordering and paging (#1142)
 
 QueryAsync and QueryPathsAsync preserve the engine's ORDER BY, OFFSET/SKIP and LIMIT sequence,

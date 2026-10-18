@@ -1,6 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Globalization;
+using System.Linq;
+using Assimalign.Cohesion.Database.Graph.Language.Internal;
 using Assimalign.Cohesion.Database.Language;
 
 namespace Assimalign.Cohesion.Database.Graph.Language;
@@ -21,22 +24,147 @@ public sealed partial class GqlQueryParser
                 variable = Identifier();
                 Expect(TokenType.Equals, "'='");
             }
-            List<GqlNodePattern> nodes = [ParseNode()];
-            List<GqlRelationshipPattern> relationships = [];
-            // Every ISO edge that is not a tilde form starts with '-', '<-' or '->'.
-            while (!Failed && Current.Type is TokenType.Minus or TokenType.LeftArrow or TokenType.RightArrow)
-            {
-                if (relationships.Count == 64)
-                {
-                    Error("GQL0005", "A path pattern cannot exceed 64 relationships.", Current);
-                    break;
-                }
-                relationships.Add(ParseRelationship());
-                nodes.Add(ParseNode());
-            }
-            paths.Add(new GqlPathPattern(nodes.AsReadOnly(), relationships.AsReadOnly()) { Variable = variable });
+            var path = ParsePath(allowQuantifiers: allowPathVariable, out _);
+            paths.Add(path with { Variable = variable });
         } while (!Failed && Take(TokenType.Comma));
         return paths.AsReadOnly();
+    }
+
+    private GqlPathPattern ParsePath(bool allowQuantifiers, out long bound)
+    {
+        bound = 0;
+        var elements = new List<GqlPathElement>();
+        bool needsNode = true;
+        do
+        {
+            if (Current.Type == TokenType.LeftParen &&
+                (_tokens[_position + 1].Type == TokenType.LeftParen ||
+                 IsVariableLexeme(_tokens[_position + 1]) && _tokens[_position + 2].Type == TokenType.Equals))
+            {
+                var start = Current;
+                if (!allowQuantifiers)
+                { Error("GQL0002", "INSERT and CREATE patterns cannot contain parenthesized paths or quantifiers.", start); break; }
+                if (!HasStackToNest(start)) { break; }
+                Advance();
+                if (IsVariableToken)
+                { Unsupported("SUBPATH VARIABLE", Current); break; }
+                var inner = ParsePath(allowQuantifiers, out long innerBound);
+                if (!Failed && Is("WHERE")) { Unsupported("PARENTHESIZED PATH WHERE", Current); break; }
+                Expect(TokenType.RightParen, "')'");
+                RejectLineCommentAfterElement();
+                var quantifierStart = Current;
+                var quantifier = ParseQuantifier(cypher: false, allowQuantifiers);
+                if (!Failed && quantifier is not null && ContainsQuantifier(inner))
+                { Unsupported("NESTED QUANTIFIER", quantifierStart); }
+                if (!Failed && quantifier is not null && innerBound == 0)
+                { Error("GQL0002", "A quantified parenthesized path requires a relationship.", start); }
+                elements.Add(new GqlParenthesizedPathPattern(inner, quantifier));
+                bound += innerBound * (quantifier?.Max ?? quantifier?.Min ?? 1);
+                needsNode = false;
+            }
+            else if (Current.Type == TokenType.LeftParen)
+            {
+                if (!needsNode && elements[^1] is GqlPathNode)
+                { Error("GQL0002", "Consecutive node patterns require an intervening edge or parenthesized path.", Current); break; }
+                elements.Add(new GqlPathNode(ParseNode()));
+                needsNode = false;
+                if (!Failed && IsQuantifier)
+                { Error("GQL0002", "A node pattern cannot be quantified.", Current); }
+            }
+            else if (!needsNode && Current.Type is TokenType.Minus or TokenType.LeftArrow or TokenType.RightArrow)
+            {
+                var edge = ParseRelationship();
+                var start = Current;
+                var quantifier = ParseQuantifier(cypher: false, allowQuantifiers);
+                if (!Failed && edge.Quantifier is not null && quantifier is not null)
+                { Unsupported("NESTED QUANTIFIER", start); }
+                if (!allowQuantifiers && edge.Quantifier is not null && !Failed)
+                { Error("GQL0002", "INSERT and CREATE patterns cannot contain quantifiers.", start); }
+                elements.Add(new GqlPathRelationship(edge with { Quantifier = quantifier ?? edge.Quantifier }));
+                var bounds = quantifier ?? edge.Quantifier;
+                bound += bounds?.Max ?? bounds?.Min ?? 1;
+                needsNode = true;
+            }
+            else if (!needsNode && TryFindUndirectedEdge(_position, out int last))
+            { UnsupportedConstruct(GqlUnsupportedVocabulary.UndirectedEdge, Current, _tokens[last]); break; }
+            else { break; }
+            if (!Failed && bound > 64)
+            { Error("GQL0005", "The sum of path repetition bounds cannot exceed 64 relationships.", Previous); }
+        } while (!Failed);
+        if (!Failed && (elements.Count == 0 || needsNode)) { Error("GQL0002", "Expected a node pattern.", Current); }
+        bool parenthesized = elements.Any(element => element is GqlParenthesizedPathPattern);
+        return new GqlPathPattern(parenthesized ? [] : elements.OfType<GqlPathNode>().Select(element => element.Pattern).ToArray(),
+            parenthesized ? [] : elements.OfType<GqlPathRelationship>().Select(element => element.Pattern).ToArray())
+        { Elements = elements.AsReadOnly() };
+    }
+
+    private bool IsQuantifier => Current.Type is TokenType.Plus or TokenType.Asterisk ||
+        Current.Type == TokenType.LeftBrace && _tokens[_position + 1].Type is TokenType.Integer or TokenType.Comma || Current.Text == "?";
+
+    private GqlQuantifier? ParseQuantifier(bool cypher, bool allowQuantifiers)
+    {
+        if (Failed || !IsQuantifier) { return null; }
+        var start = Current;
+        if (Current.Text == "?")
+        {
+            _questionedPathPositions.Add(Current.Start);
+            Unsupported("QUESTIONED PATH", Current);
+            return null;
+        }
+        if (!allowQuantifiers)
+        { Error("GQL0002", "INSERT and CREATE patterns cannot contain quantifiers.", start); return null; }
+        int min;
+        int? max;
+        if (cypher)
+        {
+            Expect(TokenType.Asterisk, "'*'");
+            min = Current.Type == TokenType.Integer ? ParseQuantifierBound() : 1;
+            max = min;
+            if (Take(TokenType.DotDot)) { max = Current.Type == TokenType.Integer ? ParseQuantifierBound() : null; }
+            else if (Previous.Type == TokenType.Asterisk) { max = null; }
+        }
+        else if (Take(TokenType.Plus)) { min = 1; max = null; }
+        else if (Take(TokenType.Asterisk)) { min = 0; max = null; }
+        else
+        {
+            Expect(TokenType.LeftBrace, "'{'");
+            bool hasLower = Current.Type == TokenType.Integer;
+            min = Current.Type == TokenType.Integer ? ParseQuantifierBound() : 0;
+            max = min;
+            if (Take(TokenType.Comma)) { max = Current.Type == TokenType.Integer ? ParseQuantifierBound() : null; }
+            if (!Failed && !hasLower && max is null) { Error("GQL0002", "A quantifier requires at least one bound.", start); }
+            Expect(TokenType.RightBrace, "'}'");
+        }
+        if (!cypher) { RejectLineCommentAfterElement(); }
+        if (!Failed && (max < min || !cypher && max == 0))
+        { Error("GQL0002", "A quantifier requires ordered bounds and a positive upper bound.", start); }
+        if (!Failed && IsQuantifier) { Unsupported("NESTED QUANTIFIER", Current); }
+        return new GqlQuantifier(min, max);
+    }
+
+    private int ParseQuantifierBound()
+    {
+        var token = Current;
+        Advance();
+        if (int.TryParse(token.Text, NumberStyles.None, CultureInfo.InvariantCulture, out int bound)) { return bound; }
+        Error("GQL0004", "Invalid or out-of-range numeric literal.", token);
+        return 0;
+    }
+
+    private static bool ContainsQuantifier(GqlPathPattern path)
+    {
+        var pending = new Stack<GqlPathPattern>();
+        pending.Push(path);
+        while (pending.TryPop(out var current))
+        {
+            if (current.Relationships.Any(edge => edge.Quantifier is not null)) { return true; }
+            foreach (var element in current.Elements ?? [])
+            {
+                if (element is GqlPathRelationship { Pattern.Quantifier: not null } || element is GqlParenthesizedPathPattern { Quantifier: not null }) { return true; }
+                if (element is GqlParenthesizedPathPattern group) { pending.Push(group.Pattern); }
+            }
+        }
+        return false;
     }
 
     private GqlNodePattern ParseNode()
@@ -79,6 +207,7 @@ public sealed partial class GqlQueryParser
         Advance(); // '['
         string? variable = IsVariableToken ? Identifier() : null;
         var labels = ParseLabelSpecification(node: false);
+        var quantifier = Current.Type == TokenType.Asterisk ? ParseQuantifier(cypher: true, allowQuantifiers: true) : null;
         if (!Failed && (variable is not null || labels is not null) && Current.Type == TokenType.Parameter) { RejectUnsupportedParameter("WHOLE-MAP PARAMETER"); }
         var properties = ParseProperties();
         Expect(TokenType.RightBracket, "']'");
@@ -90,7 +219,7 @@ public sealed partial class GqlQueryParser
             Expect(TokenType.Minus, "'-' or '->'");
             direction = pointsLeft ? GqlPatternDirection.Incoming : GqlPatternDirection.Undirected;
         }
-        return new GqlRelationshipPattern(variable, (labels as GqlLabelName)?.Name, direction, properties) { LabelExpression = labels };
+        return new GqlRelationshipPattern(variable, (labels as GqlLabelName)?.Name, direction, properties) { LabelExpression = labels, Quantifier = quantifier };
     }
 
     /// <summary>
@@ -101,7 +230,7 @@ public sealed partial class GqlQueryParser
     private GqlRelationshipPattern AbbreviatedEdge(GqlPatternDirection direction)
     {
         if (!Failed && (IsVariableToken || Current.Type is TokenType.Colon or
-            TokenType.LeftBrace or TokenType.LeftBracket || Current.Type == TokenType.Keyword && Is("IS")))
+            TokenType.LeftBracket || Current.Type == TokenType.LeftBrace && !IsQuantifier || Current.Type == TokenType.Keyword && Is("IS")))
         {
             Error("GQL0002", "An abbreviated edge pattern cannot carry a variable, label expression or property map; " +
                 "write the bracketed form, such as -[r:TYPE]->.", Current);

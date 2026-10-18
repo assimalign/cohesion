@@ -505,7 +505,7 @@ so a statement that introduces N new labels costs time quadratic in N (measured 
 new labels in one `INSERT` take 7.5 s, 2,000 take 42 s). Neither limit counts expression length;
 both are follow-up storage items.
 
-GQL patterns are finite chains of at most 64 relationships. Each matched path is a trail: an edge
+GQL patterns include quantified relationships and parenthesized subpaths; the sum of finite upper bounds (or unbounded lower bounds) is at most 64 relationships. Each matched path is a trail: an edge
 identity is used at most once within that path; a node may recur. Separate comma-separated paths
 have separate edge sets and share variable bindings. This makes a three-edge cycle a valid
 three-hop result but forbids reusing its first edge on a fourth hop. At most 100,000 intermediate
@@ -513,6 +513,44 @@ path matches materialize per pattern, and a statement examines at most 1,000,000
 candidates, including dead ends; either overflow fails with `COHDBG004`, never silent truncation.
 Cancellation is observed during expansion and materialization. Repeated node/relationship
 variables enforce identity equality, and conflicting variable kinds fail before execution.
+
+### Quantified expansion (#1144)
+
+GraphPathShape validates both AST representations and lowers juxtaposed node constraints and
+parenthesized bodies into boundary nodes and repeated segments. Shape validation uses an explicit
+stack; cyclic AST lists and subpath depth above 128 fail with COHDBG001 before any recursive walk.
+Bounds over 64, nested repetitions, conflicting chain/element lists and quantified INSERT ASTs
+also use COHDBG001. Text insertion quantifiers are GQL0002. Parenthesized INSERT paths are outside
+the insertion grammar and are refused before writes. No catalog/storage format change is needed.
+
+The executor's DFS frontier and continuations live on the heap. Each state carries the trail's
+relationship identity set, source-ordered entities, group lists and the actual pattern/property
+pair for every occurrence. This mapping replaces positional indexing: repeated properties and
+anonymous elements are checked correctly after full-clause binding, including forward references.
+Zero repetitions conjoin the outer boundary nodes; a Min=0 body's unknown labels/types cannot
+set MatchesNothing on the clause, although their warnings are retained.
+
+Only outer singleton nodes/relationships can anchor. Expansion proceeds right, then left, and
+prepends leftward entities and group elements to restore source order without changing stored
+relationship endpoints. Group lists retain node/relationship kind through FOR/UNWIND and projection
+boundaries; RETURN * and WITH * include them. Inner property maps that reference a group, direct
+group member access, group deletion and mixed singleton/group declarations are COHDBG003.
+
+Finite upper-bound sums and unbounded lower-bound sums cannot exceed 64. An unbounded repetition
+explores at most 64 successful hops; an unused 65th relationship passing direction/type filters
+raises COHDBG004 before testing its endpoint. Failed filters do not trigger the hop cap, and
+LIMIT cannot suppress it. AddBinding and the shared statement ExpansionBudget also apply to
+every repeated branch. The internal per-budget OnConsume test hook cancels deterministically
+after expansion begins; tests assert the consumed count. No partial wire output precedes failure.
+
+EXPLAIN emits Expand details `quantifier={min,max}; body_hops=n; trail=True` (empty max means
+unbounded). The existing Path frame represents every length, including one node with no edges.
+The composite capability check precedes the existing Execute entity-result gate, so an unnegotiated
+group list receives static COHDBG016 even on an empty match. A negotiated list of entities retains
+the collect(entity) Execute rejection; scalar results after FOR/UNWIND travel through the existing
+codec. In-process list/aggregate results preserve real entities. No new capability or encoding
+is introduced. The [language design](../../Assimalign.Cohesion.Database.Graph.Language/docs/DESIGN.md#quantified-paths-1144)
+records the ISO and Cypher deviations and reference-engine evidence.
 
 `TraverseAsync` implements the frozen `GraphTraversal` contract separately: breadth-first traversal,
 an explicit nonnegative maximum depth, a visited-node set seeded with the start, and no repeated
@@ -540,7 +578,7 @@ The [supported-clause matrix](../../Assimalign.Cohesion.Database.Graph.Language/
 is the single executable-language inventory: MATCH, OPTIONAL MATCH, WHERE, LET, FILTER, FOR/UNWIND, RETURN/NEXT, WITH, INSERT, CREATE (compatibility
 extension), DELETE, DETACH DELETE, SHOW (catalog extension), GROUP BY and LABEL EXPRESSION.
 COUNT, SUM, AVG, MIN, MAX, COLLECT_LIST and collect execute with implicit or explicit grouping.
-Scalar functions, variable-length paths, graph selection and language DDL are not advertised. ORDER BY, OFFSET, SKIP and LIMIT execute
+Scalar functions, graph selection and language DDL are not advertised. ORDER BY, OFFSET, SKIP and LIMIT execute
 after RETURN, as described below. Label/type/index management is the
 session-bound C# schema API. The ISO decision and conformance corpus are documented alongside the
 parser; this is a bounded ISO subset, not a full conformance claim.
@@ -841,14 +879,14 @@ to exercise that enforcement path; compiled provisioning is not included.
 | Code | Meaning |
 | --- | --- |
 | `COHDBL001` | Unsupported language capability, reported on the parsed statement |
-| `GQL0001`–`GQL0006` | Parser syntax/literal/bound errors; see language design. `GQL0005` is the 64-relationship path bound only |
+| `GQL0001`–`GQL0006` | Parser syntax/literal/bound errors; see language design. `GQL0005` is the sum-of-repetition-bounds limit of 64 relationships |
 | `GQL0007` | Attempt to mutate catalog introspection results |
 | `GQL0008` | A Cypher arrow (`-->`, `--`) directly after a pattern element, which GQL reads as a comment |
 | `GQL0009` | Groups, unary expressions, CASE or collection constructors nested deeper than the parsing thread's stack; `GraphQueryRequest.FromGql` and the engine report it as `COHDBG008` |
 | `COHDBG001` | Invalid pattern, variable binding, label expression, predicate or traversal specification, including an insertion that names `\|`, `!`, `%` or an either-direction edge, a binary `AND`, and a chain with fewer than two operands |
 | `COHDBG002` | Unknown label or relationship type in a schema write (`CreateIndexAsync`, `DropLabelAsync`, `DropRelationshipTypeAsync`), a failed statement. A read never reports it; see `COHDBG010` and `COHDBG011` |
 | `COHDBG003` | Schema/data mismatch, restricted deletion or invalid graph mutation |
-| `COHDBG004` | Path materialization or candidate-expansion limit exceeded |
+| `COHDBG004` | Path materialization, candidate-expansion or 64-hop trail limit exceeded |
 | `COHDBG005` | Session/database binding mismatch |
 | `COHDBG006` | Storage failure translated at the engine boundary |
 | `COHDBG007` | The session's explicit transaction is aborted by a failed statement: a statement, BEGIN or COMMIT is refused until a rollback completes; the message and `InnerException` name the original failure |
