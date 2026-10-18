@@ -68,6 +68,7 @@ public class SqlLanguageProfileTests
 
     [Theory]
     [InlineData(SqlClauses.Using, "SELECT * FROM t JOIN u USING (id);")]
+    [InlineData(SqlClauses.Cte, "WITH cte AS (SELECT * FROM t) SELECT * FROM cte;")]
     [InlineData(SqlClauses.Subquery, "SELECT * FROM t WHERE id IN (SELECT id FROM u);")]
     public void Parse_ExecutableSubquery_IsDeclaredAndReportsNoError(string clause, string sql)
     {
@@ -94,7 +95,6 @@ public class SqlLanguageProfileTests
     [Theory]
     [InlineData(SqlClauses.Window)]
     [InlineData(SqlClauses.SetOperation)]
-    [InlineData(SqlClauses.Cte)]
     [InlineData(SqlClauses.Intersect)]
     [InlineData(SqlClauses.Except)]
     [InlineData(SqlClauses.Recursive)]
@@ -121,7 +121,6 @@ public class SqlLanguageProfileTests
     [InlineData(SqlClauses.Over, "SELECT ROW_NUMBER() OVER () FROM t;")]
     [InlineData(SqlClauses.Partition, "SELECT ROW_NUMBER() PARTITION BY id FROM t;")]
     [InlineData(SqlClauses.SetOperation, "SELECT * FROM t UNION SELECT * FROM u;")]
-    [InlineData(SqlClauses.Cte, "WITH cte AS (SELECT * FROM t) SELECT * FROM cte;")]
     [InlineData(SqlClauses.Returning, "INSERT INTO t (id) VALUES (1) RETURNING id;")]
     [InlineData(SqlClauses.Top, "SELECT TOP 1 * FROM t;")]
     [InlineData(SqlClauses.All, "SELECT ALL id FROM t;")]

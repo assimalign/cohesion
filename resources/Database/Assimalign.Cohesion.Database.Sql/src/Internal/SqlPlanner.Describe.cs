@@ -23,6 +23,8 @@ internal sealed partial class SqlPlanner
         SqlSystemViewPlan => "SystemView",
         SqlGroupPlan => "Group",
         SqlSubqueryPlan => "Subqueries",
+        SqlWithPlan => "With",
+        SqlConstantPlan => "Constant",
         SqlInsertSelectPlan => "InsertSelect",
         SqlInsertPlan => "Insert",
         SqlUpdatePlan => "Update",
@@ -123,6 +125,15 @@ internal sealed partial class SqlPlanner
                     foreach (var child in subqueries.Queries) { Visit(child.Query, id); }
                     Visit(subqueries.Input, id);
                     break;
+                case SqlWithPlan with:
+                    foreach (var relation in with.Relations)
+                    {
+                        int materialization = nodes.Count;
+                        Add("Materialize", id, relation.Name);
+                        Visit(relation.Query, materialization);
+                    }
+                    Visit(with.Input, id);
+                    break;
                 case SqlInsertSelectPlan insert:
                     Visit(insert.Source, id);
                     break;
@@ -137,6 +148,11 @@ internal sealed partial class SqlPlanner
 
         void RelationScan(SqlRelationSource source, int parent)
         {
+            if (source.Derived is { IsCommonTable: true } commonTable)
+            {
+                Add("CteScan", parent, commonTable.Name);
+                return;
+            }
             if (source.Derived is { } derived)
             {
                 int id = nodes.Count;

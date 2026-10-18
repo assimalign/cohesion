@@ -16,6 +16,30 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed class SqlBinaryOwnershipTests
 {
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Binary CTEs: shared materialization detaches every delivered cell")]
+    public async Task Select_CommonTableFanout_ShouldOwnEveryRetainedBinaryValue()
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("binary-cte", new());
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE t (id INT, b BINARY);", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT INTO t VALUES (1, X'00FF'), (2, X'00FF');", cancellationToken: CancellationToken.None);
+
+        // Act
+        var values = await ValuesAsync(session, "WITH c AS (SELECT b FROM t) SELECT x.b, x.b, y.b FROM c x CROSS JOIN c y;");
+
+        // Assert
+        session.LastStatementMetrics!.RecordsExamined.ShouldBe(2);
+        values.Count.ShouldBe(12);
+        foreach (var value in values)
+        {
+            value.ShouldBe(new byte[] { 0, 255 });
+            value[0] = 0x99;
+        }
+        (await ValuesAsync(session, "SELECT b FROM t;")).ShouldAllBe(value => value.SequenceEqual(new byte[] { 0, 255 }));
+    }
+
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Binary derived tables: fanout owns every emitted cell")]
     public async Task Select_DerivedFanout_ShouldDetachRetainedBinaryValues()
     {

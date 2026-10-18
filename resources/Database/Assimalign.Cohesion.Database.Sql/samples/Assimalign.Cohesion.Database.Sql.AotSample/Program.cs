@@ -288,6 +288,15 @@ internal static class Program
         Check("over the wire: three-way USING and LEFT", await RowsAsync(connection, expandedJoin, timeout.Token), [[1L, 1L], [2L, null]]);
         Check("over the wire: comma and CROSS", await RowsAsync(connection, crossJoin, timeout.Token), [[8L]]);
         Check("over the wire: renamed derived join", await RowsAsync(connection, derivedJoin, timeout.Token), [[1L]]);
+        Check("over the wire: chained CTEs", await RowsAsync(connection,
+            "WITH a AS (SELECT Id FROM customers), b AS (SELECT Id FROM a) SELECT Id FROM b ORDER BY Id", timeout.Token), [[1L], [2L]]);
+        await connection.ExecuteAsync("CREATE TABLE cte_wire (id BIGINT)", cancellationToken: timeout.Token);
+        Check("over the wire: WITH INSERT", await connection.ExecuteAsync(
+            "WITH a AS (SELECT Id FROM customers) INSERT INTO cte_wire SELECT Id FROM a", cancellationToken: timeout.Token), 2L);
+        Check("over the wire: WITH UPDATE", await connection.ExecuteAsync(
+            "WITH a AS (SELECT id FROM cte_wire) UPDATE cte_wire SET id = id + 10 WHERE id IN (SELECT id FROM a)", cancellationToken: timeout.Token), 2L);
+        Check("over the wire: WITH DELETE", await connection.ExecuteAsync(
+            "WITH a AS (SELECT id FROM cte_wire) DELETE FROM cte_wire WHERE id IN (SELECT id FROM a)", cancellationToken: timeout.Token), 2L);
         Check("over the wire: strict typed literals", await RowsAsync(connection, typedLiterals, timeout.Token), _typedLiterals);
         Check("over the wire: ISO type names and SQL Server lexical aliases", await RowsAsync(connection, typeAliases, timeout.Token), _typeAliases);
         var fixedCodes = await connection.QueryAsync(Characters, cancellationToken: timeout.Token);

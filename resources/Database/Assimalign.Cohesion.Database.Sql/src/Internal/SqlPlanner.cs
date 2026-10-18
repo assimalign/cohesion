@@ -58,6 +58,8 @@ internal sealed partial class SqlPlanner
     {
         try
         {
+            var referenced = FindReferencedCommonTables(expression);
+            _commonTableState = referenced is null ? null : new CommonTableState(referenced);
             return PlanCore(expression);
         }
         catch (SqlEvaluationException exception) when (exception.Diagnostics[0].Start is null && expression.Location is not null)
@@ -71,6 +73,15 @@ internal sealed partial class SqlPlanner
     }
 
     private SqlPlan PlanCore(SqlQueryExpression expression)
+        => expression switch
+        {
+            SqlInsertExpression { CommonTables.Count: > 0 } insert => PlanCommonTables(insert.CommonTables, insert),
+            SqlUpdateExpression { CommonTables.Count: > 0 } update => PlanCommonTables(update.CommonTables, update),
+            SqlDeleteExpression { CommonTables.Count: > 0 } delete => PlanCommonTables(delete.CommonTables, delete),
+            _ => PlanStatementCore(expression),
+        };
+
+    private SqlPlan PlanStatementCore(SqlQueryExpression expression)
     {
         SqlSystemViews.EnsureReadOnly(expression);
         ValidateFunctionCalls(expression);
@@ -92,13 +103,15 @@ internal sealed partial class SqlPlanner
     }
 
     private SqlPlan PlanSelect(SqlSelectExpression select)
-        => PlanSubqueries(select);
+        => select.CommonTables.Count == 0 ? PlanSubqueries(select)
+            : PlanCommonTables(select.CommonTables, select);
 
     /// <summary>Binds a SELECT whose subqueries have already been lowered to value slots.</summary>
     private SqlPlan PlanSelectCore(SqlSelectExpression select)
     {
         if (select.From.Count == 0)
         {
+            if (_commonTableState?.BindingBody == true) { return PlanConstantCommonTable(select); }
             throw new SqlPlanningException("COHSQLE013", "SELECT requires a FROM table.", select.Location);
         }
 
@@ -205,6 +218,19 @@ internal sealed partial class SqlPlanner
             return BindDerivedTable(derived, owner);
         }
         var named = (SqlTableReference)reference;
+        if (named.SchemaName is null && _commonTableState is { } state)
+        {
+            if (state.Relations?.TryGetValue(named.TableName, out var commonTable) == true)
+            {
+                state.Dependencies!.Add(commonTable);
+                return new SqlRelationSource(commonTable);
+            }
+            if (state.Future?.Contains(named.TableName) == true)
+            {
+                throw new SqlPlanningException("COHSQLE026", string.Format(CultureInfo.CurrentCulture,
+                    ErrorMessages.CteForwardReference, named.TableName), owner?.Location);
+            }
+        }
         if (SqlSystemViews.Find(named) is { } view)
         {
             _statementMetrics?.CaptureCatalogSnapshot(_catalog);
@@ -261,7 +287,7 @@ internal sealed partial class SqlPlanner
     /// </summary>
     private SqlAccessPath SelectAccessPath(SqlCatalogTable table, SqlExpression? where)
     {
-        if (where is null)
+        if (where is null || _commonTableState?.BindingUnused == true)
         {
             return SqlScanPath.Instance;
         }
@@ -1175,6 +1201,17 @@ internal sealed partial class SqlPlanner
 
         // A count has no columns in scope; a reference fails here as COHSQLE005 (#1165).
         ValidateScopelessExpression(expression, clause);
+        if (_commonTableState?.BindingUnused == true)
+        {
+            _ = ScopelessEvaluator.Bind(expression);
+            var type = GroupExpressionType(expression, Array.Empty<SqlCatalogColumn>(), ScopelessEvaluator);
+            if (type is not (DatabaseType.Int8 or DatabaseType.Int16 or DatabaseType.Int32 or DatabaseType.Int64))
+            {
+                throw new SqlPlanningException("COHSQLE018", string.Format(CultureInfo.CurrentCulture,
+                    ErrorMessages.CountNonNegative, clause), expression.Location);
+            }
+            return null;
+        }
         object? value = ScopelessEvaluator.Evaluate(expression, Array.Empty<object?>());
 
         return value switch
@@ -1183,7 +1220,8 @@ internal sealed partial class SqlPlanner
             short number when number >= 0 => number,
             long number when number >= 0 => number,
             int number when number >= 0 => number,
-            _ => throw new SqlPlanningException("COHSQLE018", $"{clause} requires a non-negative integer.", expression.Location),
+            _ => throw new SqlPlanningException("COHSQLE018", string.Format(CultureInfo.CurrentCulture,
+                ErrorMessages.CountNonNegative, clause), expression.Location),
         };
     }
 

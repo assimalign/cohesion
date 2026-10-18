@@ -50,6 +50,7 @@ public sealed class SqlStatementCompletenessTests
         [SqlClauses.Limit] = ["SELECT a FROM t LIMIT 1"],
         [SqlClauses.Offset] = ["SELECT a FROM t OFFSET 1", "SELECT a FROM t ORDER BY a LIMIT 1 OFFSET 2"],
         [SqlClauses.Values] = ["INSERT INTO t VALUES (1), (2)", "INSERT INTO t VALUES (DEFAULT), (2)", "INSERT INTO t DEFAULT VALUES"],
+        [SqlClauses.Cte] = ["WITH c AS (SELECT a FROM t) SELECT * FROM c", "WITH c AS (SELECT a FROM t) DELETE FROM t WHERE a IN (SELECT a FROM c)", "INSERT INTO t WITH c AS (SELECT a FROM t) SELECT * FROM c"],
         [SqlClauses.Subquery] =
         [
             "SELECT a FROM t WHERE a IN (SELECT b FROM u)",

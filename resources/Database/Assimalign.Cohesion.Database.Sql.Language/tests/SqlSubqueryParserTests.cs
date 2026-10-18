@@ -24,6 +24,7 @@ public sealed class SqlSubqueryParserTests
     [InlineData("SELECT COUNT(*) FROM t HAVING COUNT(*) > (SELECT COUNT(*) FROM u);")]
     [InlineData("SELECT id FROM t WHERE EXISTS (SELECT u.id FROM u JOIN v ON u.id = v.id GROUP BY u.id HAVING COUNT(*) > 0 ORDER BY u.id LIMIT 1);")]
     [InlineData("INSERT INTO t SELECT id FROM u WHERE id IN (SELECT id FROM v);")]
+    [InlineData("WITH q AS (SELECT id FROM u) SELECT id FROM q;")]
     [InlineData("SELECT 'ANY (SELECT), LATERAL, SOME (SELECT)' FROM t;")]
     [InlineData("SELECT \"ANY\", \"LATERAL\" FROM t;")]
     [InlineData("SELECT id, lateral FROM t;")]
@@ -58,7 +59,6 @@ public sealed class SqlSubqueryParserTests
     [InlineData("SELECT id FROM t WHERE id = any /* trivia */ (SELECT id FROM u);", "ANY quantified comparison")]
     [InlineData("SELECT * FROM LATERAL (SELECT id FROM u) q;", "LATERAL")]
 
-    [InlineData("WITH q AS (SELECT id FROM u) SELECT id FROM q;", "WITH")]
     [InlineData("SELECT * FROM (SELECT id FROM t UNION SELECT id FROM u) d;", "UNION")]
 
     [InlineData("INSERT INTO t VALUES ((SELECT id FROM u));", "SUBQUERY in INSERT VALUES")]

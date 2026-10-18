@@ -232,6 +232,25 @@ and execution evidence are in
 
 ## Subquery and insert-source operators (#1021)
 
+Non-recursive WITH (#1116) binds every definition in declaration order and resolves
+unqualified read names before the catalog. Targets and schema-qualified reads keep
+catalog resolution; a self-reference sees the stored table. A dependency closure
+selects reachable definitions while still binding unused ones.
+An iterative read-reference walk establishes reachability before binding count
+values or seek bounds. Unused bodies still bind names, types and functions, while
+skipping those evaluations; their unused plans never execute. Referenced bodies
+retain the existing count evaluation and index selection paths.
+CTE scope fields live in one optional state object, allocated only for WITH;
+stored-only execution retains its existing allocation budget. Each definition uses
+the existing SqlDerivedRelation output contract, preserving types and collation
+provenance. One executor cache materializes each relation by identity for the whole
+statement. SqlWithPlan pre-materializes reachable definitions before the input's
+first write, under the same statement context. Binary values detach on retention
+and delivery. EXPLAIN maps WITH and constant-source plans. Scalar/aggregate bodies
+without FROM use one implicit row. No interface, project reference or internal grant
+is added. The unreleased data-storage format advances 15 -> 16 without an upgrade
+path; no catalog record or wire payload changes.
+
 DEFAULT assignment (#1193) uses this same insertion path. The planner binds a whole
 `SqlDefaultExpression` to an internal `SqlBoundDefaultItem` at its target ordinal;
 the executor skips that source slot so the ordinary omitted-column pass supplies
@@ -286,8 +305,8 @@ only references that actually bind to sibling FROM items name LATERAL; enclosing
 references keep the correlation refusal and unknown names retain COHSQLE015.
 Parsing and planning enforce at most 32
 subquery levels, counting derived bodies too. UPDATE SET, VALUES, CHECK/DEFAULT and LIMIT/OFFSET expression
-subqueries, quantified comparisons, CTEs and lateral joins remain
-outside the profile. SELECT continues to require FROM. Subquery resolution binds
+subqueries, quantified comparisons, recursive/nested CTEs and lateral joins remain
+outside the profile. Ordinary top-level SELECT continues to require FROM. Subquery resolution binds
 each use site to its slot number when the statement is planned; it needs no
 language-assembly friend access or public AST constructors. See [DIALECT.md](../../Assimalign.Cohesion.Database.Sql.Language/docs/DIALECT.md#subqueries-and-query-source-inserts-1021)
 for the exact supported forms and semantics.
@@ -1345,7 +1364,7 @@ SqlSchemaValidationException (InvalidDocument, schema.format), naming both forma
 rebuild/recreate remedy. SQL checks applied markers and pending targets before opening the data
 file set, and checks a replacement document before Apply/Verify compares hashes or plans work.
 The gate reads only the format; it never validates a pre-normalization hash or reconciles an old
-identity. Both catalog records retain a versioned document; the current record-space format 15
+identity. Both catalog records retain a versioned document; the current record-space format 16
 gates Character identity and its index keys, without changing these document envelopes.
 
 FLOAT(p) selects Float32 for 1..24 bits and Float64 for 25..53 bits; bare FLOAT stays Float64.
@@ -1973,7 +1992,7 @@ capture when the binder first resolves a system relation. `SqlStatementContext` 
 readonly struct: it fixes the MVCC row snapshot at construction and stores the lazy catalog
 image in the existing shared `SqlStatementMetrics` state. Every context copy and nested plan
 uses that same state,
-so subqueries, derived tables, DML predicates and INSERT sources (and future CTEs, set operands, view
+so subqueries, derived tables, CTE bodies, DML predicates and INSERT sources (and future set operands, view
 bodies) inherit capture without an AST walk. Ordinary
 stored-only statements never capture metadata or allocate a context/source/binding wrapper;
 the Release ReadCommitted allocation regression retains the pre-join per-query budget.
@@ -2241,7 +2260,7 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   format, no upgrade path.** The catalog stores the format version of the whole
   data file set, rows and the index trees that ride it (a kind-4 record for
   versions 1–3, a kind-8 record from version 4). The engine reads and writes
-  format 15 only: format 6's stamped rows in per-object page chains whose index keys use the
+  format 16 only: format 6's stamped rows in per-object page chains whose index keys use the
   temporal identity encoding (#1099, below), in index trees of B-tree page format
   2, which order entries by key, entry reference and writer (#1194,
   `Database.Indexing` DESIGN), decoded through each table's physical column

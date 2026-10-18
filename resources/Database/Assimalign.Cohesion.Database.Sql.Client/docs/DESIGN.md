@@ -1,5 +1,10 @@
 # Database.Sql.Client — Design
 
+Non-recursive WITH queries and INSERT/UPDATE/DELETE (#1116) travel through the
+existing SQL execute exchange. Wire tests pin results, exact affected counts and
+recursive/modifying-body ParseFailure diagnostics, preserving connection reuse
+and stored rows after rejection. No client API or wire payload changes.
+
 Blank derived output names fail planning with COHSQLE013 and arrive as an
 ExecutionFailure with ConnectionUsable true. The connection and an explicit
 transaction remain usable; the wire regression verifies pending writes and rollback.

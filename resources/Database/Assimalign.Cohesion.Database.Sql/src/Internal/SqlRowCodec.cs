@@ -74,7 +74,7 @@ internal static class SqlRowCodec
     /// There is no upgrade path (owner decisions of 2026-10-01 and 2026-10-02;
     /// upgrades are #1152).
     /// </summary>
-    internal const int RecordSpaceFormatVersion = 15;
+    internal const int RecordSpaceFormatVersion = 16;
 
     /// <summary>
     /// The size of the fixed version-stamp header preceding the tuple payload.

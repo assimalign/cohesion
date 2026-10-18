@@ -117,6 +117,15 @@ the parser implements today. Recognized clauses outside that set produce the sha
 
 ## Why-this-not-that decisions
 
+Non-recursive WITH (#1116) uses an ordered CommonTables list on each SELECT/INSERT/
+UPDATE/DELETE root and a sealed SqlCommonTableExpression leaf. This preserves the
+existing command dispatch and exposes bodies without a wrapper statement variant.
+INSERT INTO ... WITH attaches the list to its SELECT source. Prefix parsing is
+separate from ordinary subquery parsing, so bodies never become SUBQUERY in WITH.
+The capability scan continues through the complete prefix and rejects recursive,
+nested, modifying, materialization-hint and SEARCH/CYCLE forms precisely. PostgreSQL
+src/backend/parser/parse_cte.c:214-229 supplies declaration-order visibility.
+
 FROM exposes one SqlFromItem join tree per comma item (#1109), preserving JOIN precedence
 and ON scopes without recovering grouping from flattened text. SqlJoinClause retains ordered
 UsingColumns separately from ON. The capability pre-scan skips advertised clauses and reports
@@ -213,11 +222,11 @@ COHDBL001. ORDER BY aliases and ordinals count visible wildcard output after USI
   the engine resolves remaining domain names and reports a name it does not know. Which conversions a
   CAST may make is the engine's cast registry's question too, so every built-in type
   is a valid CAST target here.
-- **Recognized-but-unsupported tokens stay in the lexer tables.** `UNION`, `WITH`,
+- **Recognized-but-unsupported tokens stay in the lexer tables.** `UNION`, `RECURSIVE`,
   and window functions are lexed so diagnostics can
   say "unsupported" precisely rather than mis-parsing them as identifiers. Gateable
   names live in `SqlClauses`; supported names are present in `SqlLanguageProfile`,
-  while reserved future clauses such as set operations, CTEs, windows, `FETCH`,
+  while reserved future clauses such as set operations, recursive/nested CTEs, windows, `FETCH`,
   `RETURNING`, `TOP`, unsupported join forms, and views remain absent. `ParseCore` scans a copy of its configured
   lexer before recursive descent and attaches the first rejected clause to the
   statement, so analyzers observe `COHDBL001` with the token location and the `SQL`
@@ -256,7 +265,7 @@ rename happened before external consumers existed.
 
 ## Non-goals (current dialect)
 
-Set operations, CTEs, window functions, views, correlated queries, LATERAL,
+Set operations, recursive/nested or data-modifying CTEs, window functions, views, correlated queries, LATERAL,
 outer ordering keys bound to derived outputs, UPDATE SET subqueries, `ON UPDATE`,
 `MERGE`, `RETURNING`, savepoints, isolation-level syntax, and cost-hint syntax.
 Each is an additive dialect extension when its engine feature

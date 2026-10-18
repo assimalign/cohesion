@@ -25,19 +25,8 @@ internal sealed partial class SqlPlanExecutor
         foreach (var binding in plan.Bindings)
         {
             if (binding.Source.Derived is not { } derived) { continue; }
-            await using var result = (DatabaseResultSet)await ExecuteAsync(derived.Query, statement, cancellationToken).ConfigureAwait(false);
-            var rows = new List<object?[]>();
-            await foreach (var row in result.GetRowsAsync(cancellationToken).ConfigureAwait(false))
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                var values = new object?[row.FieldCount];
-                for (int i = 0; i < values.Length; i++)
-                {
-                    values[i] = SqlCharacter.Input(row.GetValue(i), result.Columns[i].Type);
-                }
-                rows.Add(values);
-            }
-            (derivedRows ??= new(ReferenceEqualityComparer.Instance)).Add(derived, rows);
+            (derivedRows ??= new(ReferenceEqualityComparer.Instance))[derived] =
+                await MaterializeRelationAsync(derived, statement, cancellationToken).ConfigureAwait(false);
         }
         foreach (var table in plan.Bindings.Select(binding => binding.Source.Table).OfType<SqlCatalogTable>().DistinctBy(table => table.ObjectId).OrderBy(table => table.ObjectId))
         {

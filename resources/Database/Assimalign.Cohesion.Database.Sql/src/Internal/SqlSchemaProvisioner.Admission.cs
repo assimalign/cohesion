@@ -54,6 +54,18 @@ internal sealed partial class SqlSchemaProvisioner
     private static IEnumerable<SqlTableReference> References(SqlQueryExpression query)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
+        IReadOnlyList<SqlCommonTableExpression> commonTables = query switch
+        {
+            SqlSelectExpression select => select.CommonTables,
+            SqlInsertExpression insert => insert.CommonTables,
+            SqlUpdateExpression update => update.CommonTables,
+            SqlDeleteExpression delete => delete.CommonTables,
+            _ => [],
+        };
+        foreach (var definition in commonTables)
+        {
+            foreach (var table in References(definition.Body)) { yield return table; }
+        }
         switch (query)
         {
             case SqlExplainExpression explain:

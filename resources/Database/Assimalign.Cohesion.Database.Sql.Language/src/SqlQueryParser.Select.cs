@@ -305,7 +305,7 @@ public sealed partial class SqlQueryParser
         }
 
         Advance(ref lexer);
-        if (!IsKeyword(ref lexer, "SELECT"))
+        if (!IsKeyword(ref lexer, "SELECT") && !IsKeyword(ref lexer, "WITH"))
         {
             AddSyntaxDiagnostic(ref lexer, "Expected SELECT in a derived table.");
             return new SqlTableReference("?", null, null);

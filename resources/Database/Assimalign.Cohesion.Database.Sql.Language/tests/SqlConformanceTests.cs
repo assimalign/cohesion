@@ -63,6 +63,11 @@ public class SqlConformanceTests
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Conformance: executable subqueries parse without errors")]
     [InlineData("SELECT id FROM users WHERE id IN (SELECT user_id FROM admins);", SqlQueryCommandType.Select)]
     [InlineData("INSERT INTO archive SELECT * FROM users WHERE inactive = TRUE;", SqlQueryCommandType.Insert)]
+    [InlineData("WITH a AS (SELECT id FROM users), b AS (SELECT id FROM a) SELECT * FROM b;", SqlQueryCommandType.Select)]
+    [InlineData("WITH a AS (SELECT id FROM users) INSERT INTO archive SELECT id FROM a;", SqlQueryCommandType.Insert)]
+    [InlineData("INSERT INTO archive WITH a AS (SELECT id FROM users) SELECT id FROM a;", SqlQueryCommandType.Insert)]
+    [InlineData("WITH a AS (SELECT id FROM users) UPDATE users SET id = 3 WHERE id IN (SELECT id FROM a);", SqlQueryCommandType.Update)]
+    [InlineData("WITH a AS (SELECT id FROM users) DELETE FROM users WHERE id IN (SELECT id FROM a);", SqlQueryCommandType.Delete)]
     public void Parse_ExecutableSubqueryCorpus_ShouldParseWithoutErrors(string sql, SqlQueryCommandType expected)
     {
         var statement = Parse(sql);

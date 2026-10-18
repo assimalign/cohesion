@@ -119,7 +119,11 @@ public sealed partial class SqlQueryParser : QueryParser
         {
             var keyword = lexer.Current.Value;
 
-            if (keyword.Equals("EXPLAIN", StringComparison.OrdinalIgnoreCase))
+            if (keyword.Equals("WITH", StringComparison.OrdinalIgnoreCase))
+            {
+                expression = ParseWith(ref lexer);
+            }
+            else if (keyword.Equals("EXPLAIN", StringComparison.OrdinalIgnoreCase))
             {
                 expression = ParseExplain(ref lexer);
             }
@@ -803,6 +807,7 @@ public sealed partial class SqlQueryParser : QueryParser
         Advance(ref lexer);
         SqlQueryExpression statement;
         if (IsWord(ref lexer, "SELECT")) { statement = ParseSelect(ref lexer); }
+        else if (IsWord(ref lexer, "WITH")) { statement = ParseWith(ref lexer); }
         else if (IsWord(ref lexer, "INSERT")) { statement = ParseInsert(ref lexer); }
         else if (IsWord(ref lexer, "UPDATE")) { statement = ParseUpdate(ref lexer); }
         else if (IsWord(ref lexer, "DELETE")) { statement = ParseDelete(ref lexer); }
@@ -888,6 +893,7 @@ public sealed partial class SqlQueryParser : QueryParser
                value.Equals("VALUES", StringComparison.OrdinalIgnoreCase) ||
                value.Equals("DEFAULT", StringComparison.OrdinalIgnoreCase) ||
                value.Equals("SELECT", StringComparison.OrdinalIgnoreCase) ||
+               value.Equals("WITH", StringComparison.OrdinalIgnoreCase) ||
                value.Equals("FROM", StringComparison.OrdinalIgnoreCase) ||
                value.Equals("JOIN", StringComparison.OrdinalIgnoreCase) ||
                value.Equals("INNER", StringComparison.OrdinalIgnoreCase) ||
@@ -919,7 +925,9 @@ public sealed partial class SqlQueryParser : QueryParser
         out string clause,
         out Location location)
     {
-        Location? pendingCte = null;
+        bool withStatement = false;
+        bool inWithDefinitions = false;
+        HashSet<string>? cteNames = null;
         string? pendingExecutionClause = null;
         Location? pendingExecutionLocation = null;
         string? previousToken = null;
@@ -963,6 +971,20 @@ public sealed partial class SqlQueryParser : QueryParser
                 continue; // Capability checks classify the statement being described.
             }
             firstToken ??= token;
+            withStatement |= IsKeyword(ref lexer, "WITH");
+            if (IsKeyword(ref lexer, "WITH")) { inWithDefinitions = true; }
+            if (withStatement && fromScopes.Count == 0 &&
+                (IsKeyword(ref lexer, "SELECT") || IsKeyword(ref lexer, "INSERT") ||
+                 IsKeyword(ref lexer, "UPDATE") || IsKeyword(ref lexer, "DELETE")))
+            {
+                firstToken = token;
+                inWithDefinitions = false;
+            }
+            if (inWithDefinitions && fromScopes.Count == 0 && IsNameToken(ref lexer) &&
+                (string.Equals(previousToken, "WITH", StringComparison.OrdinalIgnoreCase) || previousToken == ","))
+            {
+                (cteNames ??= new(StringComparer.OrdinalIgnoreCase)).Add(CurrentIdentifierText(ref lexer));
+            }
             // An adjacent :name in an operand is one rejected parameter form. Its name
             // belongs to syntax parsing even when it spells a clause or function keyword.
             if (previousToken == ":" && lexer.Current.Position == previousPosition + 1 &&
@@ -976,7 +998,7 @@ public sealed partial class SqlQueryParser : QueryParser
                 lexer.Current.Position,
                 lexer.Current.Position + lexer.Current.Value.Length);
 
-            if (TryFindUnsupportedSubqueryForm(lexer, firstToken, previousToken,
+            if (TryFindUnsupportedSubqueryForm(lexer, firstToken.Equals("WITH", StringComparison.OrdinalIgnoreCase) ? "SELECT" : firstToken, previousToken,
                 previousPreviousToken, insertValues, dmlWhere,
                 previousFromComma || previousPreviousFromComma, out clause))
             {
@@ -1028,28 +1050,39 @@ public sealed partial class SqlQueryParser : QueryParser
                 pendingExecutionLocation = tokenLocation;
             }
 
-            // WITH RECURSIVE is one unsupported construct. Prefer the more
-            // specific token so callers can distinguish it from an ordinary CTE.
-            if (pendingCte is not null)
+            if (IsKeyword(ref lexer, "WITH") && TryPeekToken(lexer, out string withNext, out _) &&
+                withNext.Equals("TIES", StringComparison.OrdinalIgnoreCase) && !WithStartsNamedDefinition(lexer))
             {
-                if (token.Equals(SqlClauses.Recursive, StringComparison.OrdinalIgnoreCase))
-                {
-                    clause = SqlClauses.Recursive;
-                    location = tokenLocation;
-                }
-                else
-                {
-                    clause = SqlClauses.Cte;
-                    location = pendingCte;
-                }
-
+                clause = "WITH TIES";
+                location = tokenLocation;
                 return true;
             }
-
-            if (token.Equals(SqlClauses.Cte, StringComparison.OrdinalIgnoreCase))
+            if (withStatement && previousToken == "(" &&
+                (IsKeyword(ref lexer, "INSERT") || IsKeyword(ref lexer, "UPDATE") || IsKeyword(ref lexer, "DELETE")))
             {
-                pendingCte = tokenLocation;
-                continue;
+                clause = $"data-modifying CTE body ({token.ToUpperInvariant()})";
+                location = tokenLocation;
+                return true;
+            }
+            if (inWithDefinitions && fromScopes.Count == 0 && (IsWord(ref lexer, "MATERIALIZED") && previousToken?.Equals("AS", StringComparison.OrdinalIgnoreCase) == true ||
+                IsWord(ref lexer, "NOT") && previousToken?.Equals("AS", StringComparison.OrdinalIgnoreCase) == true &&
+                TryPeekToken(lexer, out string materialized, out _) && materialized.Equals("MATERIALIZED", StringComparison.OrdinalIgnoreCase)))
+            {
+                clause = "[NOT] MATERIALIZED";
+                location = tokenLocation;
+                return true;
+            }
+            if (inWithDefinitions && fromScopes.Count == 0 && previousToken == ")" && (IsWord(ref lexer, "SEARCH") || IsWord(ref lexer, "CYCLE")))
+            {
+                clause = "SEARCH/CYCLE";
+                location = tokenLocation;
+                return true;
+            }
+            if (IsKeyword(ref lexer, "WITH") && previousToken == "(")
+            {
+                clause = "WITH inside a subquery or derived table";
+                location = tokenLocation;
+                return true;
             }
 
             if (lexer.Current.Type == TokenType.Keyword)
@@ -1089,7 +1122,16 @@ public sealed partial class SqlQueryParser : QueryParser
                     return true;
                 }
 
-                if (TryGetUnsupportedClause(token, out clause) && !Supports(clause))
+                bool cteIdentifier = cteNames?.Contains(CurrentIdentifierText(ref lexer)) == true && IsNameToken(ref lexer) &&
+                    !(IsKeyword(ref lexer, "RECURSIVE") && string.Equals(previousToken, "WITH", StringComparison.OrdinalIgnoreCase)) &&
+                    (inWithDefinitions && fromScopes.Count == 0 &&
+                        (string.Equals(previousToken, "WITH", StringComparison.OrdinalIgnoreCase) || previousToken == ",") ||
+                     string.Equals(previousToken, "FROM", StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(previousToken, "JOIN", StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(previousToken, "AS", StringComparison.OrdinalIgnoreCase) ||
+                     inFrom && previousToken == "," || previousToken == "." ||
+                     TryPeekToken(lexer, out string qualifierDot, out _) && qualifierDot == ".");
+                if (TryGetUnsupportedClause(token, out clause) && !Supports(clause) && !cteIdentifier)
                 {
                     location = tokenLocation;
                     return true;
@@ -1124,13 +1166,6 @@ public sealed partial class SqlQueryParser : QueryParser
             previousPreviousToken = previousToken;
             previousToken = token;
             previousPosition = lexer.Current.Position;
-        }
-
-        if (pendingCte is not null)
-        {
-            clause = SqlClauses.Cte;
-            location = pendingCte;
-            return true;
         }
 
         if (pendingExecutionClause is not null)

@@ -357,7 +357,28 @@ public static class SqlExpressionRenderer
 
     private static string Select(SqlSelectExpression select)
     {
-        var builder = new StringBuilder("SELECT ");
+        if (select.CommonTables.Count > 0)
+        {
+            foreach (var definition in select.CommonTables) { ThrowIfTooDeep(definition.Body.ExpressionDepth); }
+        }
+        var builder = new StringBuilder();
+        if (select.CommonTables.Count > 0)
+        {
+            builder.Append("WITH ");
+            for (int i = 0; i < select.CommonTables.Count; i++)
+            {
+                if (i > 0) { builder.Append(", "); }
+                var definition = select.CommonTables[i];
+                builder.Append(Identifier(definition.Name));
+                if (definition.Columns.Count > 0)
+                {
+                    builder.Append(" (").Append(string.Join(", ", definition.Columns.Select(Identifier))).Append(')');
+                }
+                builder.Append(" AS (").Append(Select(definition.Body)).Append(')');
+            }
+            builder.Append(' ');
+        }
+        builder.Append("SELECT ");
         if (select.IsDistinct)
         {
             builder.Append("DISTINCT ");

@@ -68,11 +68,11 @@ internal sealed partial class SqlPlanner
         // then aggregate results, then the projected outputs that ordering may name). Both scopes
         // resolve columns through the same relation references as the input scope.
         var sourceScope = new SqlExpressionEvaluator(columns, _parameters, bindings, defaultCollation: _catalog.DefaultCollation,
-            subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken, relation: select.From[0].Table);
+            subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken, relation: select.From.Count == 0 ? null : select.From[0].Table);
         // A call over a key or an aggregate result resolves by the slot's type over the input row,
         // as the same call does outside a grouping: describe(COUNT(*)) is describe(BIGINT).
         var groupScope = new SqlExpressionEvaluator(columns, _parameters, bindings, slots, _catalog.DefaultCollation,
-            subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken, slotScope: sourceScope, relation: select.From[0].Table);
+            subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken, slotScope: sourceScope, relation: select.From.Count == 0 ? null : select.From[0].Table);
 
         var source = columns.Select((column, index) => PassThrough(column.Name, index, columns, sourceScope)).ToArray();
         var where = select.Where is null ? null : evaluator.Bind(select.Where);
@@ -80,7 +80,9 @@ internal sealed partial class SqlPlanner
             ? new SqlJoinPlan(bindings, columns, steps, source, where, [], null, null, false)
             : view is not null
                 ? new SqlSystemViewPlan(view, source, where, [], null, null, false)
-                : new SqlSelectPlan(table!, source, where, [], null, null, false, SelectAccessPath(table!, select.Where));
+                : table is null
+                    ? new SqlConstantPlan(source, where, [], null, null, false, null)
+                    : new SqlSelectPlan(table, source, where, [], null, null, false, SelectAccessPath(table, select.Where));
 
         var keys = new SqlBoundKey[select.GroupBy.Count];
         for (int i = 0; i < keys.Length; i++)
