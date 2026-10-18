@@ -10,7 +10,7 @@ from its `WriteAheadJournal` and `Records`, then use `GraphStore.Open` to obtain
 `GraphStore`. Every mutation takes the caller's `TransactionContext` and leaves commit
 or rollback to that caller. Reads take an immutable `TransactionSnapshot`.
 
-The store exposes creation, lookup, restricted or cascading deletion, incident-edge
+The store exposes creation, MVCC replacement through `UpdateNodeAsync` and `UpdateRelationshipAsync`, lookup, restricted or cascading deletion, incident-edge
 lookup, and exact node-property index creation/search/drop/listing. An incident-edge lookup is
 a B+Tree range seek and does not scan every relationship. Property index searches return
 scalar-verified candidates in identity order. The graph root maps storage DTO identities

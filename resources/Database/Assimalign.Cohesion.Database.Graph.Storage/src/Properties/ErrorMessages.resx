@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
+  <data name="RecordFormatUnsupported" xml:space="preserve"><value>Unsupported graph record format. This engine requires format 2; recreate the database with this engine. No upgrade path is available.</value></data>
+  <data name="EndpointDeleted" xml:space="preserve"><value>Graph write conflict: an endpoint was deleted after the transaction snapshot.</value></data>
+</root>

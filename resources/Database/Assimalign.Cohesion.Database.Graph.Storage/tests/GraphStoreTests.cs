@@ -15,7 +15,7 @@ using Xunit;
 
 namespace Assimalign.Cohesion.Database.Graph.Storage.Tests;
 
-public sealed class GraphStoreTests
+public sealed partial class GraphStoreTests
 {
     [Fact]
     public async Task RelationshipsPublishBothAdjacenciesAndRollbackRemovesAllEffects()

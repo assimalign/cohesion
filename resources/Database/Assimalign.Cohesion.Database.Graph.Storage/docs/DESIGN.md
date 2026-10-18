@@ -54,13 +54,13 @@ protection against a duplicate-key lower-bound seek starting in a later leaf aft
 shared B+Tree split. A regression creates 240 incident edges, forces splits, reopens the
 file set, and checks all edges. There is no kernel change.
 
-## Version 1 record format
+## Version 2 record format
 
 All multibyte fixed-width values below are little-endian unless a key explicitly says
 otherwise. Every slotted record starts with the shared 16-byte stamp prefix: writer
 sequence at offsets 0-7, deleter sequence at offsets 8-15. Zero deleter means live.
-Graph records have kind at offset 16, format version `1` at offset 17 and a nonzero
-64-bit logical identity at offsets 18-25. The remaining payload is:
+Graph records have kind at offset 16, format version `2` at offset 17 and a nonzero
+64-bit logical identity at offsets 18-25 and a UInt64 revision at offsets 26-33. Revision starts at zero and increases with each replacement. The remaining payload is:
 
 | Kind | Meaning | Payload after identity |
 | --- | --- | --- |
@@ -94,8 +94,7 @@ is written: the size is the element's, not a store fault, so the Graph engine re
 as the statement failure `COHDBG009` and keeps the session. This version does not define
 arrays, nested objects or overflow chains; Neo4j spills large label sets to dynamic label
 records and long values to property chains, and an overflow-record format is a follow-up. Nodes and
-relationships are immutable versions; the frozen engine surface has create/delete
-operations and no property-update member.
+relationships are immutable versions. UpdateNodeAsync replaces labels and properties; UpdateRelationshipAsync replaces properties and preserves endpoints and type. Both skip type-and-value-identical replacements. Format 1 is refused before recovery scrub with the remedy to recreate the database; no legacy reader or upgrade path exists. Catalog, registration and B-tree formats are unchanged.
 
 Owner-one physical registration records are exactly 34 bytes: a zero stamp prefix,
 kind `4`, version `1`, UInt64 object ID, and Int64 root page ID. Every tree is named
@@ -164,7 +163,7 @@ collisions and retained versions; ordering its `m` visible matches adds `O(m log
 All graph writers acquire the shared database-level exclusive lock and retain it until
 logical commit/rollback; readers use MVCC snapshots. The lock is deliberately coarse
 for the MVP. After a wait, the store checks cancellation and active transaction state
-and releases a grant received after rollback. Endpoint and deletion checks compare the
+and releases a grant received after rollback. Update and deletion checks compare the
 caller's snapshot with the latest committed view while holding the lock; a changed
 record produces `TransactionAbortedException`. A stale detach cannot silently cascade
 a relationship that appeared after its snapshot.
@@ -189,6 +188,8 @@ without disposing the live database. MemoryStream has no durable-flush contract;
 these serialized images test recovery replay and scrub, not physical persistence. They
 prove committed nodes, relationships and property indexes survive while a partially
 applied logical transaction disappears. The graph store keeps an in-memory identity
-directory rebuilt in `O(V + E + I)` at open; label scans examine `O(V)` records and sort
+directory of every retained version, rebuilt in O(R log R) for R retained records. Chains are ordered by descending persisted revision; reads choose the first visible version. Reclaimed or reused references are removed lazily. Label scans examine node identities and retained versions and sort
 their `m` visible matches in `O(m log m)`. Traversal path
 enumeration and cycle limits are owned and documented by the Graph root.
+
+Updates encode the replacement and every new index key before mutation. They move every property-index entry, or both adjacency entries (one for a self-loop), to the new physical location and tombstone the old record in one physical bracket. Rollback restores old stamps and removes new versions. Relationship insertion checks endpoint existence in the latest committed view, so property updates do not conflict with insertion. Snapshot pins protect old versions from purge.

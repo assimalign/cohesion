@@ -23,7 +23,7 @@ public sealed partial class GraphStore
     private readonly GraphStorage _storage;
     private readonly TransactionCoordinator _coordinator;
     private readonly object _sync = new();
-    private readonly Dictionary<(byte Kind, ulong Id), Reference> _records = new();
+    private readonly Dictionary<(byte Kind, ulong Id), List<Reference>> _records = new();
 
     // The identities of the index definitions among _records, so reading the definitions costs
     // their count rather than a pass over every node and relationship record.
@@ -39,9 +39,11 @@ public sealed partial class GraphStore
             var unit = iterator.Current;
             var record = GraphRecordCodec.Decode(unit.Data);
             var (writer, _) = RecordVersionStamp.ReadStamps(unit.Data.Span);
-            _records.Add((record.Kind, record.Id), new Reference(unit.PageId, unit.SlotIndex, writer));
+            Add(record, GraphStorage.PackLocation(unit.PageId, unit.SlotIndex), writer);
             if (record.Kind == 3) { _definitionIds.Add(record.Id); }
         }
+        foreach (var versions in _records.Values)
+        { versions.Sort((left, right) => right.Revision.CompareTo(left.Revision)); }
         OpenIndexes();
     }
 
@@ -72,6 +74,8 @@ public sealed partial class GraphStore
     public static void EnsureIndexFormat(GraphStorage storage)
     {
         ArgumentNullException.ThrowIfNull(storage);
+        using var records = storage.GetUnitIterator(2);
+        while (records.MoveNext()) { GraphRecordCodec.EnsureFormat(records.Current.Data.Span); }
         BTreeIndexManager.EnsureFormat(storage, ReadRegistrations(storage).Select(entry => entry.Registration));
     }
 
@@ -147,9 +151,11 @@ public sealed partial class GraphStore
         ArgumentException.ThrowIfNullOrWhiteSpace(type);
         ArgumentNullException.ThrowIfNull(properties);
         await LockAsync(context, cancellationToken).ConfigureAwait(false);
-        EnsureUnchanged(1, sourceId, context);
-        EnsureUnchanged(1, targetId, context);
-        if (FindNode(sourceId, context.Snapshot) is null || FindNode(targetId, context.Snapshot) is null)
+        var latest = Latest(context);
+        if (FindNode(sourceId, latest) is null && FindNode(sourceId, context.Snapshot) is not null ||
+            FindNode(targetId, latest) is null && FindNode(targetId, context.Snapshot) is not null)
+        { throw new TransactionAbortedException(ErrorMessages.EndpointDeleted); }
+        if (FindNode(sourceId, latest) is null || FindNode(targetId, latest) is null)
         {
             throw new InvalidOperationException("A relationship requires two visible existing endpoints.");
         }
@@ -283,7 +289,9 @@ public sealed partial class GraphStore
         var (page, slot) = GraphStorage.UnpackLocation(location);
         lock (_sync)
         {
-            _records[(record.Kind, record.Id)] = new Reference(page, slot, writer);
+            if (!_records.TryGetValue((record.Kind, record.Id), out var versions))
+            { _records.Add((record.Kind, record.Id), versions = []); }
+            versions.Insert(0, new Reference(page, slot, writer, record.Revision));
             if (record.Kind == 3) { _definitionIds.Add(record.Id); }
         }
     }
@@ -301,10 +309,21 @@ public sealed partial class GraphStore
         ArgumentNullException.ThrowIfNull(snapshot);
         lock (_sync)
         {
-            if (!_records.TryGetValue((kind, id), out var reference)) { return null; }
-            var found = ReadAt(reference.Location, snapshot);
-            if (found is not { } record || record.Reference.Writer != reference.Writer || record.Record.Kind != kind || record.Record.Id != id) { return null; }
-            return found;
+            if (!_records.TryGetValue((kind, id), out var versions)) { return null; }
+            for (int i = 0; i < versions.Count;)
+            {
+                var reference = versions[i];
+                if (!_storage.TryReadRecord(reference.PageId, reference.SlotIndex, 2, out var bytes))
+                { versions.RemoveAt(i); continue; }
+                var (writer, deleter) = RecordVersionStamp.ReadStamps(bytes.Span);
+                var record = GraphRecordCodec.Decode(bytes);
+                if (writer != reference.Writer || record.Kind != kind || record.Id != id)
+                { versions.RemoveAt(i); continue; }
+                if (snapshot.IsVisible(writer) && (deleter == TransactionSequence.None || !snapshot.IsVisible(deleter)))
+                { return new Found(reference, record); }
+                i++;
+            }
+            return null;
         }
     }
 
@@ -316,7 +335,8 @@ public sealed partial class GraphStore
         if (bytes.Length < 26) { throw new StorageCorruptionException("Truncated graph record."); }
         var (writer, deleter) = RecordVersionStamp.ReadStamps(bytes.Span);
         if (!snapshot.IsVisible(writer) || (deleter != TransactionSequence.None && snapshot.IsVisible(deleter))) { return null; }
-        return new Found(new Reference(page, slot, writer), GraphRecordCodec.Decode(bytes));
+        var record = GraphRecordCodec.Decode(bytes);
+        return new Found(new Reference(page, slot, writer, record.Revision), record);
     }
 
     private async ValueTask LockAsync(TransactionContext context, CancellationToken cancellationToken)
@@ -358,7 +378,7 @@ public sealed partial class GraphStore
         catch { OpenIndexes(); throw; }
     }
 
-    private readonly record struct Reference(PageId PageId, int SlotIndex, TransactionSequence Writer)
+    private readonly record struct Reference(PageId PageId, int SlotIndex, TransactionSequence Writer, ulong Revision)
     {
         internal ulong Location => GraphStorage.PackLocation(PageId, SlotIndex);
     }
