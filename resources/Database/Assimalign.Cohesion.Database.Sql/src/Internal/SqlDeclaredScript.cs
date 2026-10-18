@@ -45,11 +45,13 @@ internal sealed class SqlDeclaredScript
     }
     internal string ObjectKey(int position, Func<string, int, SqlType> resolveType) => Statements[position].Statement.SqlExpression switch
     {
-        SqlCreateTableExpression table => SqlObjectIdentity.Table(table.Table.SchemaName ?? "dbo", table.Table.TableName),
-        SqlAlterTableExpression table => SqlObjectIdentity.Table(table.Table.SchemaName ?? "dbo", table.Table.TableName),
-        SqlDropTableExpression table => SqlObjectIdentity.Table(table.Table.SchemaName ?? "dbo", table.Table.TableName),
-        SqlCreateIndexExpression index => SqlObjectIdentity.Index(index.Table.SchemaName ?? "dbo", index.Table.TableName, index.IndexName),
-        SqlDropIndexExpression index => SqlObjectIdentity.Index(index.Table.SchemaName ?? "dbo", index.Table.TableName, index.IndexName),
+        SqlCreateTableExpression table => SqlObjectIdentity.Table(table.Table.SchemaName ?? SqlPlanner.DefaultSchema, table.Table.TableName),
+        SqlCreateSchemaExpression schema => SqlObjectIdentity.Schema(schema.Name),
+        SqlAlterTableExpression table => SqlObjectIdentity.Table(table.Table.SchemaName ?? SqlPlanner.DefaultSchema, table.Table.TableName),
+        SqlDropTableExpression table => SqlObjectIdentity.Table(table.Table.SchemaName ?? SqlPlanner.DefaultSchema, table.Table.TableName),
+        SqlDropSchemaExpression schema => SqlObjectIdentity.Schema(schema.Name),
+        SqlCreateIndexExpression index => SqlObjectIdentity.Index(index.Table.SchemaName ?? SqlPlanner.DefaultSchema, index.Table.TableName, index.IndexName),
+        SqlDropIndexExpression index => SqlObjectIdentity.Index(index.Table.SchemaName ?? SqlPlanner.DefaultSchema, index.Table.TableName, index.IndexName),
         SqlCreateFunctionExpression function => "F:" + SqlDefinitionBinder.Signature(function.Name, function.Parameters.Select((parameter, index) => resolveType(parameter.DataType, index))),
         SqlDropFunctionExpression function => "F:" + SqlDefinitionBinder.Signature(function.Name, function.ParameterTypes.Select(resolveType)),
         SqlCreateDomainExpression domain => SqlDefinitionBinder.DomainKey(domain.Name),

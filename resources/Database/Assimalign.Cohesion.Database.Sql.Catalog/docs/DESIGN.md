@@ -84,7 +84,7 @@ would tell every caller the value is changeable and then guard that promise at
 runtime.
 
 Table metadata extension version 2 introduced one collation identifier per column
-after the existing constraints. Current format 20 requires the complete table extension 6 record,
+after the existing constraints. Current format 21 requires the complete table extension 6 record,
 including resolved-call vectors, identity facets and frozen missing-value literals described below. Column additions,
 drops, and restart preserve explicit overrides. An index inherits its key
 columns' effective collations; the SQL engine verifies index eligibility and
@@ -164,12 +164,33 @@ codec, the key encoding and every comparison read, so they do not consult the do
   column (the primary key's implicit NOT NULL).
 - **Persistence: table extension version 4** (data-storage format 7). After the dropped
   ordinals, one optional string per live column, NULL for a column of a built-in type,
-  which this catalog always writes. Current format 20 also requires the call vectors, identity facets and extension 6 missing-value literals;
+  which this catalog always writes. Current format 21 also requires the call vectors, identity facets and extension 6 missing-value literals;
   the format gate refuses earlier databases rather than loading their definitions. A persisted blank
   name fails the load with `SqlCatalogException`, as does a blank `domainName` at the
   column's constructor (`ArgumentException`).
 
 ## Why-this-not-that decisions
+
+SQL namespaces (#1030) are immutable SqlCatalogNamespace descriptions, separate from the
+compiled SqlCatalogSchemaState. Kind 15 stores strict source-generated JSON with Name, Owner
+and OwningSchema. Namespaces join the atomic SqlCatalogSnapshot, so empty namespaces persist
+and appear in SCHEMATA without inferring them from tables. CreateSchemaAsync and DropSchemaAsync
+are instance operations, with declared-script publication overloads and an S: identity. Opening
+the catalog seeds nothing and commits nothing; SqlDatabase.StampNewCatalog alone seeds dbo.
+
+DROP SCHEMA CASCADE serializes its complete mutation under the publication lock in one storage
+transaction: namespace/table/index removal, incoming external-FK replacement, identity-counter
+deletion, one kind-14 reclamation intent per table, registration replacement, one generation
+advance and an optional receipt. Cache changes follow commit. SQL's
+SqlPlanExecutor.Schemas.ObjectsInNamespace snapshot enumeration defines RESTRICT, ordered locks,
+ownership and the CASCADE drop set; views (#1124) must extend that one enumeration and its
+revalidation. The catalog's commit-time contents check remains an independent invariant guard.
+SQL owns metadata admission, ordered object locks and ownership checks; bare catalog table
+operations continue to accept namespace strings without requiring a namespace record.
+
+Format 21 fences the new namespace record. Earlier databases without first-class namespaces
+are refused, rather than synthesized or upgraded on open: export with the old engine, recreate,
+explicitly create non-dbo namespaces and import. Table extension version 6 is unchanged.
 
 - **A dedicated catalog storage file set** — not catalog rows mixed into the data
   file. The current row facade exposes one record space per storage instance;

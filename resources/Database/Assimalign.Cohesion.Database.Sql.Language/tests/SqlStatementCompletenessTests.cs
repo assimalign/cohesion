@@ -90,6 +90,8 @@ public sealed class SqlStatementCompletenessTests
             "ALTER TABLE t ALTER COLUMN a DROP NOT NULL",
         ],
         [SqlClauses.DropTable] = ["DROP TABLE t", "DROP TABLE IF EXISTS dbo.t"],
+        [SqlClauses.CreateSchema] = ["CREATE SCHEMA sales", "CREATE SCHEMA IF NOT EXISTS sales"],
+        [SqlClauses.DropSchema] = ["DROP SCHEMA sales", "DROP SCHEMA IF EXISTS sales RESTRICT", "DROP SCHEMA sales CASCADE"],
         [SqlClauses.DropIndex] = ["DROP INDEX ix ON t", "DROP INDEX IF EXISTS ix ON dbo.t"],
         [SqlClauses.Constraint] = ["CREATE TABLE c (a INT, CONSTRAINT uq UNIQUE (a))"],
         [SqlClauses.ForeignKey] = ["CREATE TABLE c (p INT, FOREIGN KEY (p) REFERENCES t (id))"],

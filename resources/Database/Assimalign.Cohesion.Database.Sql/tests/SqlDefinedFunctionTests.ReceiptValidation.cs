@@ -134,11 +134,13 @@ public sealed partial class SqlDefinedFunctionTests
         result.Catalog.Scripts.ShouldHaveSingleItem().StatementObjects.ShouldBe(["T:\"dbo\".\"script_rows\"", "I:\"dbo\".\"script_rows\".\"uq\""]);
     }
 
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Successful IF EXISTS drops record verified absence")]
-    public async Task BuildAsync_AbsentIfExistsDrops_ShouldCompleteAndValidateReceipts()
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Successful IF EXISTS drops record verified absence, including a missing namespace")]
+    [InlineData("dbo")]
+    [InlineData("missing")]
+    public async Task BuildAsync_AbsentIfExistsDrops_ShouldCompleteAndValidateReceipts(string schema)
     {
         // Arrange
-        const string sql = "DROP TABLE IF EXISTS absent; CREATE TABLE script_rows(id INT); DROP INDEX IF EXISTS absent ON script_rows";
+        string sql = $"DROP TABLE IF EXISTS {schema}.absent; CREATE TABLE script_rows(id INT); DROP INDEX IF EXISTS absent ON script_rows";
         var storage = new CrashCaptureSqlStorageStrategy();
 
         // Act
@@ -154,7 +156,7 @@ public sealed partial class SqlDefinedFunctionTests
         // Assert
         var receipt = result.Catalog.Scripts.ShouldHaveSingleItem();
         receipt.CompletedStatements.ShouldBe(3);
-        receipt.StatementObjects.ShouldBe(["T:\"dbo\".\"absent\"", "T:\"dbo\".\"script_rows\"", "I:\"dbo\".\"script_rows\".\"absent\""]);
+        receipt.StatementObjects.ShouldBe([$"T:\"{schema}\".\"absent\"", "T:\"dbo\".\"script_rows\"", "I:\"dbo\".\"script_rows\".\"absent\""]);
         receipt.Objects.ShouldBe(["T:\"dbo\".\"script_rows\""]);
     }
 

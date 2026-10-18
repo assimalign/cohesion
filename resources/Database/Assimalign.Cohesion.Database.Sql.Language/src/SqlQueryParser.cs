@@ -617,8 +617,10 @@ public sealed partial class SqlQueryParser : QueryParser
     private static string StatementName(SqlQueryExpression expression) => expression switch
     {
         SqlCreateTableExpression => "CREATE TABLE",
+        SqlCreateSchemaExpression => "CREATE SCHEMA",
         SqlCreateIndexExpression => "CREATE INDEX",
         SqlDropTableExpression => "DROP TABLE",
+        SqlDropSchemaExpression => "DROP SCHEMA",
         SqlDropIndexExpression => "DROP INDEX",
         _ => expression.CommandType switch
         {
@@ -975,6 +977,16 @@ public sealed partial class SqlQueryParser : QueryParser
                 continue; // Capability checks classify the statement being described.
             }
             firstToken ??= token;
+            // Namespace words stay contextual. Their dedicated grammar owns the complete
+            // clause gate and named exclusions, including CASCADE/RESTRICT independently
+            // of the referential-action capabilities.
+            if (IsWord(ref lexer, "SCHEMA") && previousToken == firstToken &&
+                (firstToken.Equals("CREATE", StringComparison.OrdinalIgnoreCase) || firstToken.Equals("DROP", StringComparison.OrdinalIgnoreCase)))
+            {
+                clause = string.Empty;
+                location = null!;
+                return false;
+            }
             withStatement |= IsKeyword(ref lexer, "WITH");
             if (IsKeyword(ref lexer, "WITH")) { inWithDefinitions = true; }
             if (withStatement && fromScopes.Count == 0 &&

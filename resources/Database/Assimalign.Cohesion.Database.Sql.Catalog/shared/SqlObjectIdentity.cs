@@ -17,6 +17,8 @@ internal static class SqlObjectIdentity
 
     internal static string Domain(string name) => "D:" + Quote(name);
 
+    internal static string Schema(string name) => "S:" + Quote(name);
+
     internal static string Signature(string name, IEnumerable<string> parameterTypes)
         => Quote(name.ToUpperInvariant()) + "(" + string.Join(",", parameterTypes) + ")";
 }

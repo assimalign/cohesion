@@ -282,6 +282,13 @@ I/O-free.
 
 ## E4 scripts
 
+SQL CREATE SCHEMA (#1030) creates a SQL namespace, a different concept from this package's
+compiled schema. Builders and compiled declarations remain pinned to dbo, with no namespace
+targeting option. The runtime persists dbo when creating a database and refuses DROP SCHEMA dbo;
+creating another namespace does not redirect code-first objects. Shared SqlNamespaceNames.Default
+keeps runtime provisioning and SDK migration rendering on the same default. Namespace records
+and their SQL ownership are catalog metadata and add no members to the compiled document.
+
 SqlDatabaseBuilder.Script belongs to the database declaration after typed apply. SqlCompiledSchema
 uses v7 and typed defaults remain literal-only. Script history has its own ordered-set digest
 and catalog-generation marker, so unchanged reconciliation hashes nothing. Script-created tables

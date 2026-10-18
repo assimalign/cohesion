@@ -15,6 +15,9 @@ internal static class SqlSystemViews
     private static readonly SqlSystemViewDefinition[] _views =
     [
         Iso("TABLES", Text("TABLE_CATALOG"), Text("TABLE_SCHEMA"), Text("TABLE_NAME"), Text("TABLE_TYPE")),
+        Iso("SCHEMATA", Text("CATALOG_NAME"), Text("SCHEMA_NAME"), Text("SCHEMA_OWNER", true),
+            Text("DEFAULT_CHARACTER_SET_CATALOG", true), Text("DEFAULT_CHARACTER_SET_SCHEMA", true),
+            Text("DEFAULT_CHARACTER_SET_NAME", true), Text("SQL_PATH", true)),
         Iso("COLUMNS", Text("TABLE_CATALOG"), Text("TABLE_SCHEMA"), Text("TABLE_NAME"), Text("COLUMN_NAME"),
             Number("ORDINAL_POSITION"), Text("COLUMN_DEFAULT", true), Text("IS_NULLABLE"), Text("DATA_TYPE"),
             Number("CHARACTER_MAXIMUM_LENGTH", true), Number("CHARACTER_OCTET_LENGTH", true),
@@ -67,6 +70,13 @@ internal static class SqlSystemViews
     // session's transaction-mode check so every supported mutation has one diagnostic.
     internal static void EnsureReadOnly(SqlQueryExpression expression)
     {
+        string? namespaceTarget = expression switch
+        {
+            SqlCreateSchemaExpression create => create.Name,
+            SqlDropSchemaExpression drop => drop.Name,
+            SqlCreateTableExpression create => create.Table.SchemaName,
+            _ => null,
+        };
         SqlTableReference? target = expression switch
         {
             SqlInsertExpression insert => insert.Table,
@@ -83,6 +93,11 @@ internal static class SqlSystemViews
         if (target is not null && Find(target) is { } view)
         {
             throw new SqlPlanningException("COHSQLE021", $"System view '{view.Schema}.{view.Name}' is read-only.", expression.Location);
+        }
+        if (namespaceTarget is not null && SqlNamespaces.IsReserved(namespaceTarget))
+        {
+            throw new SqlPlanningException("COHSQLE021", string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                ErrorMessages.SystemNamespaceReadOnly, namespaceTarget), expression.Location);
         }
     }
 

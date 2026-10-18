@@ -26,7 +26,7 @@ using Assimalign.Cohesion.Database.Types;
 
 /// <summary>
 /// The data-storage format gate (#1099, owner decisions of 2026-10-01 and
-/// 2026-10-02): a new database is created on format 20, and an existing database on
+/// 2026-10-02): a new database is created on format 21, and an existing database on
 /// any other format is refused at open — an older one must be dropped and recreated
 /// (there is no upgrade path; upgrades are #1152), and a newer one belongs to the
 /// engine that wrote it. The gate reads only the catalog, before the data file set is
@@ -64,17 +64,17 @@ public sealed class SqlDataStorageFormatTests : IDisposable
         }
     }
 
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Data-storage format: a new database is created on format 20 and reopens (#1099, #1194, #1241, E3)")]
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Data-storage format: a new database is created on format 21 and reopens (#1099, #1194, #1241, E3)")]
     public async Task Create_NewDatabase_ShouldUseCurrentFormatAndReopen()
     {
         // Arrange + Act: create, write temporal keys, close.
         await CreateDatabaseAsync(formatVersion: null);
 
-        // Assert: the reopened database is on format 20 and its identity keys seek.
+        // Assert: the reopened database is on format 21 and its identity keys seek.
         await using var engine = CreateEngine();
         var database = await engine.OpenDatabaseAsync(TestDatabase);
-        database.Catalog.RecordSpaceFormatVersion.ShouldBe(20);
-        SqlRowCodec.RecordSpaceFormatVersion.ShouldBe(20);
+        database.Catalog.RecordSpaceFormatVersion.ShouldBe(21);
+        SqlRowCodec.RecordSpaceFormatVersion.ShouldBe(21);
 
         await using var session = await database.CreateSessionAsync();
         (await IdsAsync(session, "SELECT id FROM events WHERE at = @p ORDER BY id", Instant.ToOffset(TimeSpan.FromHours(9)))).ShouldBe([1, 2]);
@@ -101,6 +101,7 @@ public sealed class SqlDataStorageFormatTests : IDisposable
     [InlineData(17)]
     [InlineData(18)]
     [InlineData(19)]
+    [InlineData(20)]
     public async Task Open_OlderFormat_ShouldBeRefusedWithoutTouchingFiles(int version)
     {
         // Arrange: a closed database whose catalog marker says an older format —
@@ -119,7 +120,7 @@ public sealed class SqlDataStorageFormatTests : IDisposable
         // drop and create again, since create refuses a name whose storage
         // exists; version 1 (no marker) also covers an interrupted creation...
         refusal.Message.ShouldContain($"Database '{TestDatabase}' uses data-storage format {version}");
-        refusal.Message.ShouldContain("this engine supports only format 20");
+        refusal.Message.ShouldContain("this engine supports only format 21");
         refusal.Message.ShouldContain("drop the database (DropDatabaseAsync) and create it again");
         refusal.Message.ShouldContain(version == 1 ? "its creation was interrupted" : "export its data with the engine that wrote it");
         refusal.Message.ShouldContain("#1152");
@@ -145,7 +146,7 @@ public sealed class SqlDataStorageFormatTests : IDisposable
         var refusal = await Should.ThrowAsync<SqlDataStorageFormatException>(async () => await engine.OpenDatabaseAsync(TestDatabase));
 
         // Assert: this is the refusal the server forwards as Unavailable.
-        refusal.Message.ShouldContain($"Database '{TestDatabase}' uses data-storage format 7, but this engine supports only format 20");
+        refusal.Message.ShouldContain($"Database '{TestDatabase}' uses data-storage format 7, but this engine supports only format 21");
         refusal.Message.ShouldContain("export its data with the engine that wrote it");
         refusal.Message.ShouldContain("#1152");
         engine.TryGetDatabase(TestDatabase, out _).ShouldBeFalse();
@@ -168,7 +169,7 @@ public sealed class SqlDataStorageFormatTests : IDisposable
         var refusal = await Should.ThrowAsync<SqlDataStorageFormatException>(async () => await engine.OpenDatabaseAsync(TestDatabase));
 
         // Assert
-        refusal.Message.ShouldContain("uses data-storage format 1, but this engine supports only format 20");
+        refusal.Message.ShouldContain("uses data-storage format 1, but this engine supports only format 21");
         refusal.Message.ShouldContain("drop the database (DropDatabaseAsync) and create it again");
         engine.TryGetDatabase(TestDatabase, out _).ShouldBeFalse();
         AssertUnchanged(before);
@@ -225,11 +226,20 @@ public sealed class SqlDataStorageFormatTests : IDisposable
         AssertUnchanged(before);
     }
 
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Data-storage format: a newer database is refused at open and its files are left untouched (#1099)")]
-    public async Task Open_NewerFormat_ShouldBeRefusedWithoutTouchingFiles()
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Data-storage format: a newer database reaches the format gate even with unknown record kinds")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Open_NewerFormat_ShouldBeRefusedWithoutTouchingFiles(bool unknownRecord)
     {
         // Arrange
         await CreateDatabaseAsync(formatVersion: SqlRowCodec.RecordSpaceFormatVersion + 1);
+        if (unknownRecord)
+        {
+            using var storage = new FileSystemSqlStorageStrategy(_rootPath).OpenStorage(TestDatabase, catalog: true);
+            using var transaction = storage.BeginTransaction();
+            storage.InsertRow(transaction, new DatabaseKeyWriter().AppendInt32(999).AppendInt32(1).ToArray());
+            transaction.Commit();
+        }
         var before = Snapshot();
 
         // Act
@@ -238,9 +248,54 @@ public sealed class SqlDataStorageFormatTests : IDisposable
 
         // Assert
         refusal.Message.ShouldContain($"Database '{TestDatabase}' uses data-storage format {SqlRowCodec.RecordSpaceFormatVersion + 1}");
-        refusal.Message.ShouldContain("this engine supports only format 20");
+        refusal.Message.ShouldContain("this engine supports only format 21");
         refusal.Message.ShouldContain("written by a newer engine");
         AssertUnchanged(before);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - CREATE DATABASE: every accepted crash image contains dbo")]
+    public async Task CreateDatabaseAsync_EveryCrashPoint_ShouldPublishDboBeforeCurrentFormat()
+    {
+        // Arrange
+        var storage = new CrashCaptureSqlStorageStrategy();
+        await using var creator = SqlDatabaseEngine.Create("creation-crashes", new() { StorageStrategy = storage });
+        using var recording = storage.RecordCrashPoints();
+
+        // Act
+        await creator.CreateDatabaseAsync(TestDatabase, CancellationToken.None);
+        recording.Dispose();
+
+        // Assert: an interrupted creation is refused; every successful open is usable.
+        int accepted = 0;
+        int interrupted = 0;
+        for (int point = 0; point < recording.Count; point++)
+        {
+            var image = recording.Open(point);
+            if (!image.StorageExists(TestDatabase, catalog: false) || !image.StorageExists(TestDatabase, catalog: true)) { continue; }
+            await using var reopened = SqlDatabaseEngine.Create("creation-image", new() { StorageStrategy = image });
+            SqlDatabase database;
+            try { database = await reopened.OpenDatabaseAsync(TestDatabase, CancellationToken.None); }
+            catch (SqlDataStorageFormatException failure)
+            {
+                failure.Message.ShouldContain("creation was interrupted", Case.Sensitive);
+                interrupted++;
+                continue;
+            }
+            catch (StorageIOException failure)
+            {
+                // The recorder also includes the file's creation before its header write.
+                failure.Message.ShouldContain("less than its 8192-byte header page", Case.Sensitive);
+                continue;
+            }
+            database.Catalog.RecordSpaceFormatVersion.ShouldBe(21);
+            database.Catalog.Namespaces.ShouldHaveSingleItem().Name.ShouldBe("dbo", $"Crash point {point}");
+            await using var session = await database.CreateSessionAsync(CancellationToken.None);
+            (await session.ExecuteAsync("CREATE TABLE t(id INT)", cancellationToken: CancellationToken.None)).Status.ShouldBe(DatabaseResultStatus.Success);
+            accepted++;
+        }
+        recording.Count.ShouldBeGreaterThan(1);
+        accepted.ShouldBeGreaterThan(0);
+        interrupted.ShouldBeGreaterThan(0);
     }
 
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Data-storage format: a format-4 database with key-ordered index pages is refused by the gate, its files untouched (#1194)")]
@@ -257,7 +312,7 @@ public sealed class SqlDataStorageFormatTests : IDisposable
         var refusal = await Should.ThrowAsync<DatabaseException>(async () => await engine.OpenDatabaseAsync(TestDatabase));
 
         // Assert: refused on the catalog alone, before any index page is read.
-        refusal.Message.ShouldContain($"Database '{TestDatabase}' uses data-storage format 4, but this engine supports only format 20", Case.Sensitive);
+        refusal.Message.ShouldContain($"Database '{TestDatabase}' uses data-storage format 4, but this engine supports only format 21", Case.Sensitive);
         refusal.Message.ShouldContain("export its data with the engine that wrote it");
         AssertUnchanged(before);
     }
@@ -279,7 +334,7 @@ public sealed class SqlDataStorageFormatTests : IDisposable
         // Assert: the coded refusal, carried through the engine's own format error
         // with the index manager's as its cause.
         refusal.ShouldBeOfType<SqlDataStorageFormatException>();
-        refusal.Message.ShouldStartWith($"Database '{TestDatabase}' uses data-storage format 20, but one of its index trees does not: ", Case.Sensitive);
+        refusal.Message.ShouldStartWith($"Database '{TestDatabase}' uses data-storage format 21, but one of its index trees does not: ", Case.Sensitive);
         refusal.Message.ShouldContain(IndexFormatException.ErrorCode + ": Index '", Case.Sensitive);
         refusal.Message.ShouldContain("uses B-tree page format 1, but this engine supports only format 2", Case.Sensitive);
         var cause = refusal.InnerException.ShouldBeOfType<IndexFormatException>();
@@ -477,6 +532,7 @@ public sealed class SqlDataStorageFormatTests : IDisposable
     [InlineData(16, false)]
     [InlineData(18, false)]
     [InlineData(19, false)]
+    [InlineData(20, false)]
     [InlineData(7, true)]
     [InlineData(1, true)]
     public async Task Handshake_OlderFormatDatabase_ShouldSendRefusalToClient(int version, bool removeCounterGeneration)
@@ -501,7 +557,7 @@ public sealed class SqlDataStorageFormatTests : IDisposable
         // and the session closes.
         var error = ProtocolErrorMessage.Decode((await client.ExpectAsync(ProtocolMessageType.Error)).Payload.Span);
         error.Code.ShouldBe(ProtocolErrorCode.Unavailable);
-        error.Message.ShouldContain($"Database '{TestDatabase}' uses data-storage format {version}, but this engine supports only format 20");
+        error.Message.ShouldContain($"Database '{TestDatabase}' uses data-storage format {version}, but this engine supports only format 21");
         error.Message.ShouldContain("#1152");
         (await client.ReadAsync()).ShouldBeNull();
     }

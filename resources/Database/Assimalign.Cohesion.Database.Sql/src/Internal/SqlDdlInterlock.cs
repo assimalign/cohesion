@@ -1,4 +1,6 @@
 using System;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
@@ -14,6 +16,20 @@ internal sealed class SqlDdlInterlock
     private int _statements;
     private int _metadataStatements;
     private bool _definitionStatement;
+    private TaskCompletionSource? _metadataChanged;
+
+    // A definition can refuse conflicting admission before reading the catalog, without
+    // owning a lease during snapshot capture or any subsequent transaction-lock wait.
+    internal void CheckDefinitionAdmission(string database)
+    {
+        lock (_sync)
+        {
+            if (_metadataStatements != 0)
+            {
+                throw new DatabaseObjectLockedException(database, database, "SQL definition DDL");
+            }
+        }
+    }
 
     // A definition drop checks persisted dependencies against a stable metadata directory.
     // Unrelated table DDL remains concurrent; conflicting definition DDL refuses immediately.
@@ -31,6 +47,28 @@ internal sealed class SqlDdlInterlock
         }
     }
 
+    // Deferred steps already own their complete ordered table reservation. Definition
+    // DDL never waits for locks under its lease, so waiting here cannot close a cycle.
+    internal async ValueTask<IDisposable> EnterMetadataAsync(bool definition, CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Task changed;
+            lock (_sync)
+            {
+                if (!_definitionStatement && (!definition || _metadataStatements == 0))
+                {
+                    _metadataStatements++;
+                    _definitionStatement = definition;
+                    return new MetadataLease(this);
+                }
+                changed = (_metadataChanged ??= new(TaskCreationOptions.RunContinuationsAsynchronously)).Task;
+            }
+            await changed.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+    }
+
     private sealed class MetadataLease : IDisposable
     {
         private SqlDdlInterlock? _owner;
@@ -42,6 +80,8 @@ internal sealed class SqlDdlInterlock
             {
                 owner._metadataStatements--;
                 owner._definitionStatement = false;
+                owner._metadataChanged?.TrySetResult();
+                owner._metadataChanged = null;
                 _owner = null;
             }
         }

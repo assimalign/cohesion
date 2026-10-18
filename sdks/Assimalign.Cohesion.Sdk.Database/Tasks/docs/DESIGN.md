@@ -26,6 +26,10 @@ baselines (v5 included) fail the format gate; rebuild them and recreate affected
 
 ## Boundaries
 
+SQL namespaces (#1030) do not change typed-schema targeting. Migration SQL still qualifies
+tables with dbo, now read from shared SqlNamespaceNames.Default, the same stateless rule used
+by runtime provisioning. CREATE SCHEMA is SQL-only; builders expose no namespace target.
+
 A database's C# schema declaration is the only schema source. The SDK compiler reads Roslyn
 syntax and symbols from `@(Compile)` and `@(ReferencePath)`; it never invokes `Program.Main`,
 starts an engine, loads a consumer plug-in, or scans `Schema/**/*.sql`. The compiler lowers each

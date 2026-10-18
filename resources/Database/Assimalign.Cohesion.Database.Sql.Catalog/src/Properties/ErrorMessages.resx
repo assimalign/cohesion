@@ -10,4 +10,7 @@
   <data name="IdentityCounterOrphaned" xml:space="preserve"><value>An identity counter has no owning identity column.</value></data>
   <data name="IdentityCounterInvalid" xml:space="preserve"><value>Identity counter of column '{0}' is invalid.</value></data>
   <data name="IdentityMetadataInvalid" xml:space="preserve"><value>Column '{0}' has invalid or duplicate identity metadata.</value></data>
+  <data name="NamespaceMissing" xml:space="preserve"><value>COHSQLE028: Schema '{0}' does not exist.</value></data>
+  <data name="NamespaceDependentObjects" xml:space="preserve"><value>COHSQLE030: Cannot drop schema '{0}' because other objects depend on it. Use DROP SCHEMA ... CASCADE to drop the dependent objects too.</value></data>
+  <data name="NamespaceRecordMalformed" xml:space="preserve"><value>Malformed or duplicate SQL namespace record.</value></data>
 </root>

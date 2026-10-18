@@ -1,5 +1,10 @@
 # Database.Sql.Client — Design
 
+CREATE/DROP SCHEMA (#1030) travel through the existing execute exchange. Wire coverage pins
+cross-connection namespace visibility, RESTRICT failure, CASCADE's retained external table,
+and stable missing/reserved/protected namespace and unsupported-syntax diagnostics. Errors
+leave connections usable; no client API or payload format changes.
+
 ALTER TABLE rename/default/nullability actions (#1122) use the existing execute exchange.
 Wire tests pin renamed query results, signed defaults on omitted inserts, and failed NOT NULL
 validation as ExecutionFailure with a reusable connection. No client API or payload changes.

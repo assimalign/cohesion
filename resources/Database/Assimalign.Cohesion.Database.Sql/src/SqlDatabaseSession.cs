@@ -256,7 +256,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         {
             try
             {
-                if (request.Statement.SqlExpression is SqlDropTableExpression)
+                if (request.Statement.SqlExpression is SqlDropTableExpression or SqlDropSchemaExpression)
                 {
                     _database.TableReclamation.Request();
                 }
@@ -318,8 +318,18 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
 
     private async ValueTask<DatabaseResult> ExecuteMetadataStatementAsync(SqlQueryRequest request, CancellationToken cancellationToken, SqlCatalogScriptPublication? scriptReceipt)
     {
-        using var metadata = _database.DdlInterlock.EnterMetadata(_database.Name.ToString(), request.Statement.SqlExpression
-            is SqlCreateFunctionExpression or SqlDropFunctionExpression or SqlCreateDomainExpression or SqlDropDomainExpression);
+        // DROP SCHEMA takes its definition lease in the executor, after all table locks.
+        if (request.Statement.SqlExpression is SqlDropSchemaExpression)
+        {
+            if (_ddlLockOwner is null) { _database.DdlInterlock.CheckDefinitionAdmission(_database.Name.ToString()); }
+            return await ExecuteStatementCoreAsync(request, cancellationToken, scriptReceipt).ConfigureAwait(false);
+        }
+        bool definition = request.Statement.SqlExpression
+            is SqlCreateFunctionExpression or SqlDropFunctionExpression or SqlCreateDomainExpression or SqlDropDomainExpression
+                or SqlCreateSchemaExpression;
+        using var metadata = _ddlLockOwner is not null
+            ? await _database.DdlInterlock.EnterMetadataAsync(definition, cancellationToken).ConfigureAwait(false)
+            : _database.DdlInterlock.EnterMetadata(_database.Name.ToString(), definition);
         return await ExecuteStatementCoreAsync(request, cancellationToken, scriptReceipt).ConfigureAwait(false);
     }
 
@@ -447,13 +457,17 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         try
         {
             var scope = new SqlStatementContext(context, _coordinator, _provisioningSchema,
-                _database.Name.ToString(), null, _ddlLockOwner, ProvisioningProgress, scriptReceipt, transactionStart);
+                _database.Name.ToString(), null, _ddlLockOwner, ProvisioningProgress, scriptReceipt, transactionStart, _database.DdlInterlock);
             _lastStatementMetrics = scope.Metrics;
             var result = await ExecuteDataOrExplainAsync(request, scope, cancellationToken).ConfigureAwait(false);
             if (scriptReceipt is { } receipt && !IsSelfCommitting(request) && result.Status == DatabaseResultStatus.Success)
             {
                 await CompleteScriptStatementAsync(result, context, receipt, cancellationToken).ConfigureAwait(false);
             }
+            // The executor must finish mandatory cleanup after a catalog self-commit.
+            // Then report caller cancellation directly, before the logical commit wraps it
+            // as a transaction-aborted error. Rollback below only ends the statement context.
+            if (scope.Metrics.SelfCommits > 0) { cancellationToken.ThrowIfCancellationRequested(); }
             await _coordinator.CommitAsync(context, cancellationToken).ConfigureAwait(false);
             return result;
         }

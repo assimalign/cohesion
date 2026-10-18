@@ -22,7 +22,7 @@ internal sealed partial class SqlPlanner
     /// <summary>
     /// The schema used when a table reference has none.
     /// </summary>
-    internal const string DefaultSchema = "dbo";
+    internal const string DefaultSchema = SqlNamespaces.DefaultName;
 
     /// <summary>The dialect's name for a row of an INSERT's table value constructor, in diagnostics.</summary>
     private const string insertValuesClause = "INSERT ... VALUES";
@@ -124,7 +124,9 @@ internal sealed partial class SqlPlanner
             SqlUpdateExpression update => PlanUpdate(update),
             SqlDeleteExpression delete => PlanDelete(delete),
             SqlCreateTableExpression create => PlanCreateTable(create),
+            SqlCreateSchemaExpression create => new SqlCreateSchemaPlan(create.Name, create.IfNotExists),
             SqlDropTableExpression drop => PlanDropTable(drop),
+            SqlDropSchemaExpression drop => new SqlDropSchemaPlan(drop.Name, drop.IfExists, drop.Cascade),
             SqlAlterTableExpression alter => PlanAlterTable(alter),
             SqlCreateIndexExpression createIndex => PlanCreateIndex(createIndex),
             SqlDropIndexExpression dropIndex => PlanDropIndex(dropIndex),
@@ -947,7 +949,7 @@ internal sealed partial class SqlPlanner
 
     private SqlCreateTablePlan PlanCreateTable(SqlCreateTableExpression create)
     {
-        string schema = create.Table.SchemaName ?? DefaultSchema;
+        string schema = SqlNamespaces.Require(_catalog, create.Table.SchemaName ?? DefaultSchema).Name;
         var columns = new List<SqlCatalogColumn>(create.Columns.Count);
         var primaryKey = new List<string>();
         bool hasIdentity = false;
@@ -1098,7 +1100,11 @@ internal sealed partial class SqlPlanner
     }
 
     private SqlDropTablePlan PlanDropTable(SqlDropTableExpression drop)
-        => new(drop.Table.SchemaName ?? DefaultSchema, drop.Table.TableName, drop.IfExists);
+    {
+        string schema = drop.Table.SchemaName ?? DefaultSchema;
+        if (!drop.IfExists) { SqlNamespaces.Require(_catalog, schema); }
+        return new(schema, drop.Table.TableName, drop.IfExists);
+    }
 
     private SqlCreateIndexPlan PlanCreateIndex(SqlCreateIndexExpression create)
     {
@@ -1112,6 +1118,7 @@ internal sealed partial class SqlPlanner
             throw new SqlPlanningException("COHSQLE013", $"CREATE INDEX '{create.IndexName}' requires at least one key column.", create.Location);
         }
 
+        SqlNamespaces.Require(_catalog, create.Table.SchemaName ?? DefaultSchema);
         var table = ResolveTable(create.Table);
 
         foreach (string column in create.Columns)
@@ -1139,12 +1146,14 @@ internal sealed partial class SqlPlanner
             throw new SqlPlanningException("COHSQLE013", "DROP INDEX requires the table-qualified form: DROP INDEX <name> ON <table>.", drop.Location);
         }
 
+        SqlNamespaces.Require(_catalog, drop.Table.SchemaName ?? DefaultSchema);
         return new SqlDropIndexPlan(ResolveTable(drop.Table), drop.IndexName, drop.IfExists);
     }
 
     private SqlPlan PlanAlterTable(SqlAlterTableExpression alter)
     {
         string schema = alter.Table.SchemaName ?? DefaultSchema;
+        SqlNamespaces.Require(_catalog, schema);
 
         return alter.Action switch
         {
@@ -1246,7 +1255,7 @@ internal sealed partial class SqlPlanner
     {
         string schema = reference.SchemaName ?? DefaultSchema;
 
-        if (!_catalog.TryGetTable(schema, reference.TableName, out var table))
+        if (SqlNamespaces.Find(_catalog, schema) is null || !_catalog.TryGetTable(schema, reference.TableName, out var table))
         {
             throw new SqlPlanningException("COHSQLE014", string.Format(CultureInfo.CurrentCulture, ErrorMessages.TableMissing, schema, reference.TableName));
         }

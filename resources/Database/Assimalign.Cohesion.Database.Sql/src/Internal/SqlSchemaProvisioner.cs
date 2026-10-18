@@ -510,7 +510,7 @@ internal sealed partial class SqlSchemaProvisioner
 
                 // The table as its CREATE TABLE will publish it: its declared columns and types, no
                 // column collation (the database default), and no data.
-                shape ??= new SqlCatalogTable(0, "dbo", table.Name, table.Columns
+                shape ??= new SqlCatalogTable(0, SqlPlanner.DefaultSchema, table.Name, table.Columns
                     .Select(column => new SqlCatalogColumn(column.Name,
                         ResolveColumnType(column, functions.Types, out string? domain), column.IsNullable, domainName: domain))
                     .ToArray());
@@ -587,7 +587,7 @@ internal sealed partial class SqlSchemaProvisioner
 
         foreach (SqlCatalogTable catalogTable in catalogTables.OrderBy(table => table.Name, StringComparer.Ordinal))
         {
-            if (!string.Equals(catalogTable.Schema, "dbo", StringComparison.OrdinalIgnoreCase))
+            if (!string.Equals(catalogTable.Schema, SqlPlanner.DefaultSchema, StringComparison.OrdinalIgnoreCase))
             {
                 throw new SqlSchemaMigrationException(
                     $"{Describe()}: the live SQL catalog contains table '{catalogTable.Schema}.{catalogTable.Name}', " +
@@ -686,7 +686,7 @@ internal sealed partial class SqlSchemaProvisioner
             .ToList();
         foreach (CompiledSchemaTable expected in schema.Tables)
         {
-            if (!_catalog.TryGetTable("dbo", expected.Name, out SqlCatalogTable actual))
+            if (!_catalog.TryGetTable(SqlPlanner.DefaultSchema, expected.Name, out SqlCatalogTable actual))
             {
                 return $"table '{expected.Name}' is missing";
             }
@@ -720,7 +720,7 @@ internal sealed partial class SqlSchemaProvisioner
                     (constraint.Kind == CompiledSchemaConstraintKind.Reference && !NamesEqual(persisted.Columns, constraint.Columns)) ||
                     !NamesEqual(persisted.ReferencedColumns, constraint.ReferencedColumns) ||
                     !string.Equals(persisted.ReferencedTable, constraint.ReferencedObject, StringComparison.OrdinalIgnoreCase) ||
-                    (persisted.Kind == SqlCatalogConstraintKind.Reference && !string.Equals(persisted.ReferencedSchema, "dbo", StringComparison.OrdinalIgnoreCase)) ||
+                    (persisted.Kind == SqlCatalogConstraintKind.Reference && !string.Equals(persisted.ReferencedSchema, SqlPlanner.DefaultSchema, StringComparison.OrdinalIgnoreCase)) ||
                     CompiledDeleteAction(persisted.OnDelete) != constraint.OnDelete ||
                     !string.Equals(persisted.CheckExpression, CanonicalCheck(constraint.Expression?.CanonicalText), StringComparison.Ordinal))
                 {
@@ -770,7 +770,7 @@ internal sealed partial class SqlSchemaProvisioner
         {
             SqlCatalogTable? extra = ownedTables.FirstOrDefault(table => !schema.Tables.Any(declared =>
                 string.Equals(declared.Name, table.Name, StringComparison.OrdinalIgnoreCase) &&
-                string.Equals(table.Schema, "dbo", StringComparison.OrdinalIgnoreCase)));
+                string.Equals(table.Schema, SqlPlanner.DefaultSchema, StringComparison.OrdinalIgnoreCase)));
             return extra is null
                 ? $"the database has {ownedTables.Count} table(s) created by schema '{schema.Name}', declared {schema.Tables.Count}"
                 : $"table '{extra.Schema}.{extra.Name}' was created by schema '{schema.Name}' but is not declared";
@@ -934,7 +934,7 @@ internal sealed partial class SqlSchemaProvisioner
         CatalogWalkCount++;
         foreach (CompiledSchemaTable table in schema.Tables)
         {
-            if (!_catalog.TryGetTable("dbo", table.Name, out SqlCatalogTable actual))
+            if (!_catalog.TryGetTable(SqlPlanner.DefaultSchema, table.Name, out SqlCatalogTable actual))
             {
                 continue;
             }

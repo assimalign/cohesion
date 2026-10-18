@@ -7,7 +7,7 @@ using Assimalign.Cohesion.Database.Types;
 namespace Assimalign.Cohesion.Database.Sql.Catalog;
 
 /// <summary>
-/// A consistent, read-only capture of a SQL catalog's table and index descriptions, taken by
+/// A consistent, read-only capture of a SQL catalog's namespace, table and index descriptions, taken by
 /// <see cref="SqlCatalog.CaptureSnapshot"/>.
 /// </summary>
 /// <remarks>
@@ -25,13 +25,18 @@ public sealed class SqlCatalogSnapshot
     /// <summary>Gets the SQL domains present at capture time.</summary>
     public IReadOnlyList<SqlCatalogDomain> Domains { get; }
 
+    /// <summary>Gets the SQL namespaces, including empty namespaces, present at capture time.</summary>
+    public IReadOnlyList<SqlCatalogNamespace> Namespaces { get; }
+
     private readonly IReadOnlyDictionary<ulong, IReadOnlyList<SqlCatalogIndex>> _indexes;
 
     internal SqlCatalogSnapshot(IEnumerable<SqlCatalogTable> tables, IEnumerable<SqlCatalogIndex> indexes, Collation? defaultCollation = null,
-        IEnumerable<SqlCatalogFunction>? functions = null, IEnumerable<SqlCatalogDomain>? domains = null)
+        IEnumerable<SqlCatalogFunction>? functions = null, IEnumerable<SqlCatalogDomain>? domains = null,
+        IEnumerable<SqlCatalogNamespace>? namespaces = null)
     {
         Functions = Array.AsReadOnly((functions ?? []).ToArray());
         Domains = Array.AsReadOnly((domains ?? []).ToArray());
+        Namespaces = Array.AsReadOnly((namespaces ?? []).ToArray());
         DefaultCollation = defaultCollation ?? Collation.Binary;
         Tables = Array.AsReadOnly(tables.ToArray());
         _indexes = indexes.GroupBy(index => index.TableObjectId).ToDictionary(

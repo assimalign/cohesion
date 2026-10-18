@@ -289,8 +289,8 @@ same instruction through the same column-default resolver for each matching row.
 These markers never reach scalar evaluation. Cached literal and function-call defaults
 keep their existing binding, coercion and per-assignment evaluation, without parsing
 catalog text during statement planning or execution. All row constraints and statement
-atomicity remain on the shared INSERT/UPDATE paths; identity allocation (#1123) extends
-the omitted-column resolver so these forms inherit it. No format, protocol,
+atomicity remain on the shared INSERT/UPDATE paths; identity allocation (#1123) should
+extend the omitted-column resolver so these forms inherit it. No format, protocol,
 project-reference or visibility boundary changes.
 
 Both the missing-default resolver and explicit-NULL coercion raise COHSQLE024
@@ -587,10 +587,10 @@ flowchart TD
   loaded predicate against the table version and returns its tree, which
   `SqlBoundTableCache` keeps in `SqlBoundCheck.Bound` and every session writing the
   version evaluates. A DEFAULT binds once per table version too
-  (`SqlPlanExecutor.BindDefaultExpression`, kept in `SqlBoundTable.DefaultValues`): literals
-  become converted constants; expression defaults retain a column-free tree evaluated
-  per assignment (#1121). Decoded rows lacking the column instead read the independent
-  frozen literal in `SqlBoundTable.MissingValues` (#1122). A literal DEFAULT that does not convert, which DDL never stores, binds as a
+  (`SqlPlanExecutor.BindDefault`, kept in `SqlBoundTable.DefaultValues`): its literal
+  converted to the column's type, a `SqlBoundConstant` that every decoded row lacking
+  the column and every INSERT omitting it reads, where each use converted the text
+  before. A DEFAULT that does not convert, which DDL never stores, binds as a
   `SqlBoundFailure` that fails each use as before, so the table still opens. Bound
   trees and converted values are shared; binary defaults are copied when delivered into a row.
   Failure nodes construct a new exception per throw, so sharing the cache across threads is safe.
@@ -825,9 +825,8 @@ flowchart LR
 - **Resolution** (`SqlFunctionResolver`, PostgreSQL's `func_get_detail` and
   `func_select_candidate`). The planner's pre-pass checks every call's name and count
   before it binds the catalog: a name outside the catalog is `Unknown function '<name>'.`
-  unless it is an evaluator form (`COALESCE`, `NULLIF`, `EXTRACT`) or recognized unsupported
-  vocabulary (`RANK`, `LEAD`, ...), which rejects at parse time with `COHDBL001`;
-  a count no overload takes is `COHSQLE006`, worded from the overload set
+  unless the SQL profile declares it (`NULLIF`, `TRIM`, ...), which still fails only when
+  evaluated; a count no overload takes is `COHSQLE006`, worded from the overload set
   (`takes exactly 1 argument or '*'`, `Accepted: COUNT(*) or COUNT(value)`). Then, in
   each expression's validation, the candidates by count are costed by their arguments'
   static types (`SqlExpressionEvaluator.StaticTypeOf`): nothing for an exact type or an
@@ -1098,8 +1097,8 @@ win-arm64 by hand and for linux-x64 in CI (`resource-database.yml`), which runs 
 as it does a small-table smoke of the statement benchmark, and fails either publish on any
 `warning IL2xxx`/`IL3xxx` in its output.
 
-**Not yet.** Public access to the context's transaction timestamp (#1120 supplies it internally
-for built-ins); the `FunctionCatalogFrozen`,
+**Not yet.** The context's transaction timestamp (no transaction carries its start time; the
+statement-context track owns that change); the `FunctionCatalogFrozen`,
 `PersistedDefinitionUnresolved` and `FunctionFailed` events (§8 of the design, the
 EventSource track's); an uncast string literal for a DATE, TIME, TIMESTAMP, INTERVAL or UUID
 parameter (E3's cast registry converts text to those types under `CAST`, so
@@ -1579,6 +1578,14 @@ binary values. Stored row bytes and canonical DEFAULT text retain their existing
 
 ## Compiled-schema provisioning
 
+Namespace targeting (#1030) remains fixed at dbo for compiled declarations and migration SQL.
+SqlNamespaceNames.Default is the shared spelling used by runtime and SDK rendering. CREATE SCHEMA
+creates a SQL namespace only; a compiled schema's name remains its ownership identity and never
+selects a namespace. dbo is an Adhoc namespace record seeded only by StampNewCatalog, and SQL
+refuses its removal because provisioning requires it. Creation commits dbo before the final format
+marker, so every crash image accepted as format 21 contains dbo; earlier images retain the
+format-1 interrupted-creation refusal. Opening a database seeds or commits nothing.
+
 Provisioning belongs to this model (owner decisions 49 to 58 of 2026-10-09, B1 of
 `docs/programs/DATABASE_ENGINE_EXTENSIBILITY_DESIGN.md`). It has two entry points over one internal
 `SqlSchemaProvisioner` per database: the engine builder completes inline work and reserves deferred
@@ -1618,7 +1625,9 @@ upgrade or legacy counter reader. If catalog decoding fails before reaching an o
 format marker, the engine reads only the unchanged marker tuple and invokes that same gate. This
 failure-only read adds no traversal to a successful open and preserves the actionable `Unavailable`
 wire refusal. A marker-free catalog containing one genuine old counter tuple is refused as format 1;
-duplicate counters, unknown record kinds, and malformed or ambiguous markers remain corruption.
+duplicate counters and malformed or ambiguous markers remain corruption. The failure-only marker
+reader skips unfamiliar record kinds when a valid marker exists, allowing newer formats to reach
+the actionable format refusal; without a marker, unfamiliar kinds remain corruption.
 
 The marker retains the canonical document for migration history, alongside `{hash, generation}`.
 After the open-time document format gate, equal declared hash and current generation return immediately: no ownership scan, snapshot,
@@ -2011,7 +2020,7 @@ Every synchronization wait reached by these paths has the following owner and te
 | Wait or retry | Apply, worker and compensation rule |
 |---|---|
 | Provisioner semaphore | Apply and Verify use `WaitAsync(0, token)` and refuse contention. The worker inherits ownership and never reacquires it. Compensation stays inside its owner's reservation. |
-| DDL admission monitor | Its critical section only checks/updates the schema name and statement count. Ownership contention throws immediately; nobody waits for a DDL lease. Inline apply keeps the lease through compensation and cleanup; the worker never requests it. |
+| DDL admission monitor | Its critical section only checks/updates the schema name and statement count. Ownership contention throws immediately. Inline apply keeps the apply lease through compensation and cleanup; the worker never requests it. A deferred step waits cancellably for a definition metadata lease to clear, without failing the migration. Definition DDL never waits for transaction locks while holding that lease. |
 | Table, referenced-parent, row and index-key locks | Real waits use `LockManager.AcquireAsync` with a live transaction sequence, so the wait-for graph and cycle detector see them. Apply keeps a read-only owner across its self-committing DDL. Handoff reserves pending tables and FK parents in object-id order before publication; the worker reuses that owner. Caller/worker cancellation and database-offline abandonment also end waits. |
 | Coordinator statement gate | Acquired after transaction-lock pre-acquisition, with cancellation. Its holder performs one physical bracket; the lock manager rejects a request that would wait while that gate is held. Worker index population releases it after each batch of at most 64 versions. Table reclamation runs outside this gate in batches of at most 32 retired pages. Other inline data work can scale with table size; the gate is not a wall-clock deadline. |
 | Catalog, index and storage metadata/page monitors; journal durability | Internal critical sections perform finite local work and do not await SQL transaction locks. Physical page ownership conflicts fail immediately. Group commit waits at most its configured batching window before flushing itself; journal durability failures take the database offline. Synchronous filesystem I/O has no hard completion deadline, so cancellation does not promise an OS-I/O timeout. |
@@ -2024,6 +2033,50 @@ detection and transaction locks with detection (`src/backend/storage/lmgr/README
 reference clone). This is a behavioral reference; no implementation was copied.
 
 ### Object ownership and the schema package
+
+SQL namespaces (#1030) carry the same DatabaseObjectOwner and OwningSchema as tables and indexes.
+Namespaces created by declared scripts retain that schema's ownership identity; ordinary session
+CREATE SCHEMA creates Adhoc namespaces. Script receipts retain their quoted S: identities.
+They are independent catalog descriptions, never compiled-schema declarations. DROP SCHEMA takes
+Exclusive object locks with DdlLockOwner in ObjectId order on all contained tables and external
+children whose incoming foreign keys will be removed, before taking the definition metadata lease.
+It then captures the catalog again and compares namespace, contained-table, external-child and
+index instances with the original enumeration. Changed contents receive COHSQLE013 with a retry
+remedy; normal statement cleanup releases every lock. Namespace, table and index ownership is
+checked against that revalidated set before publication, naming DROP SCHEMA in the existing
+ownership diagnostic. Table/index/constraint DDL cannot publish while the lease is held, including
+CREATE TABLE's durable reservation. A deferred worker step encountering a definition lease waits
+cancellably for its release. CREATE SCHEMA and other definition DDL acquire no transaction locks
+under their leases, so they cannot strand a worker holding its table reservations.
+
+CASCADE delegates the whole multi-record mutation to one SqlCatalog.DropSchemaAsync call, then
+removes live index directories after commit. The session requests reclamation for DROP SCHEMA as
+for DROP TABLE; one durable intent per table survives failure and restart. The executor adopts
+each surviving external child's bound CHECK and DEFAULT expressions from its previous instance;
+the next write does not reparse unchanged definitions. After catalog commit, binding adoption
+and live index-directory removal use CancellationToken.None; every child and index is attempted
+before cleanup failures are aggregated. DROP TABLE and DROP INDEX share the directory cleanup;
+ALTER's post-commit binding also ignores caller cancellation, and rename attempts every affected
+table before aggregating failures. DROP COLUMN binds its projected definition before publication
+with the caller's token, then adopts that binding after commit without refolding. The session
+observes cancellation after this mandatory cleanup and before its logical commit, preserving cancellation instead of wrapping it as
+a transaction-aborted error. RESTRICT, locks, ownership and the CASCADE
+drop set use SqlPlanExecutor.Schemas.ObjectsInNamespace over a catalog snapshot. Future views
+(#1124) must extend this one SQL-side enumeration and its revalidation; the catalog's commit-time
+check remains an independent invariant guard.
+Incoming external FKs are removed while external tables survive, following PostgreSQL's constraint
+dependency direction (src/backend/catalog/pg_constraint.c:304-324). Typed external child ownership
+blocks this metadata change too. SQL namespace checks stay in planning/execution, preserving the
+bare catalog API's independent use. Reads and DML in missing namespaces retain COHSQLE014;
+CREATE TABLE, unguarded DROP TABLE, ALTER TABLE and table-qualified CREATE/DROP INDEX use
+COHSQLE028 (3F000). DROP TABLE IF EXISTS retains its no-op and declared-script absence receipt.
+PostgreSQL anchors are namespace.c:673-683,3605-3616, tablecmds.c:1498-1506,4534-4539,
+utility.c:1480-1483 and namespace.c:526-531.
+
+AUTHORIZATION and nested schema elements are rejected with COHDBL001. Atomic nested statements
+would require a separate DDL execution contract because each existing statement self-commits.
+Record-space format 21 has no upgrade reader: export older databases, recreate and explicitly
+CREATE SCHEMA for non-dbo table namespaces before importing. Namespace records are not synthesized.
 
 The area root carries only the model-independent ownership contracts (`DatabaseObjectOwner`,
 `DatabaseObjectLockedException`). `Database.Sql.Schema` owns SQL declarations, the standalone
@@ -2071,13 +2124,19 @@ retain COHDBL001.
 
 ## Virtual system relations (C1)
 
-The catalog is the sole data source for six `INFORMATION_SCHEMA` relations and
+The catalog is the sole data source for seven `INFORMATION_SCHEMA` relations and
 five Cohesion extensions. Their complete MVP column matrix is in
 [DIALECT.md](../../Assimalign.Cohesion.Database.Sql.Language/docs/DIALECT.md#system-view-matrix-c1).
 Every row describes an object in the session's current database. The catalog
 name columns contain that database's name; schema qualification continues to
 select a SQL namespace, never another database. `TABLES` lists stored tables as
 `BASE TABLE`; these virtual relations have no catalog table records to list.
+
+SCHEMATA (#1030) reads SqlCatalogSnapshot.Namespaces outside the per-table loop, preserving empty
+namespaces and one row per namespace. It joins through the existing SqlRelationSource seam and
+statement capture; no join operator knows its name. CATALOG_NAME is the statement database;
+SCHEMA_NAME keeps the catalog spelling. SQL owner principal, character set and path columns are
+NULL because those facilities do not execute. This is separate from compiled object ownership.
 
 ### The relation seam and statement snapshot
 
@@ -2313,8 +2372,8 @@ PostgreSQL references: tablecmds.c:3903-4062 (column identity), :4329-4385 (rela
   arguments before the call itself, as PostgreSQL's parse analysis does
   (`transformFuncCall` transforms the arguments and then `ParseFuncOrColumn`
   resolves the function, `src/backend/parser/parse_expr.c`), so the innermost bad
-  call is the one reported. A recognized name that does not execute yet (`RANK`,
-  `LEAD`, ...) is absent from the executable profile and rejects at parse time with
+  call is the one reported. A recognized name that does not execute yet (`NULLIF`,
+  `TRIM`, ...) is absent from the executable profile and rejects at parse time with
   `COHDBL001`; it is not also reported as an unknown function (#1103).
 - **One catalog of functions (#1189, E2).** The engine's `SqlFunctionCatalog` holds
   every executable function, the standard library's and the application's alike
@@ -2388,7 +2447,7 @@ PostgreSQL references: tablecmds.c:3903-4062 (column identity), :4329-4385 (rela
   proof surface — the planner suite asserts an indexed equality seek examines
   O(matches) records while the equivalent scan examines O(table).
 - **Row format: MVCC stamps + object-id-prefixed tuple, in per-object page
-  chains (since record-space format version 3; the current format is 20).**
+  chains (since record-space format version 3; the current format is 21).**
   Every data record is `[writer u64][deleter u64]` — a fixed 16-byte version-stamp header, the
   B+Tree leaf-entry design adopted for the record space — followed by the
   shared tuple codec payload (#854): the owning table's object id, then one
@@ -2426,13 +2485,13 @@ PostgreSQL references: tablecmds.c:3903-4062 (column identity), :4329-4385 (rela
   format, no upgrade path.** The catalog stores the format version of the whole
   data file set, rows and the index trees that ride it (a kind-4 record for
   versions 1–3, a kind-8 record from version 4). The engine reads and writes
-  format 20 only: format 6's stamped rows in per-object page chains whose index keys use the
+  format 21 only: format 6's stamped rows in per-object page chains whose index keys use the
   temporal identity encoding (#1099, below), in index trees of B-tree page format
   2, which order entries by key, entry reference and writer (#1194,
   `Database.Indexing` DESIGN), decoded through each table's physical column
   layout, which the catalog's table record carries (including extension version 3's
   dropped physical ordinals, later domain/ownership/resolved-call fields, and the
-  current format's durable reclamation intents and index owner tags). Earlier versions are history —
+  current format's durable reclamation intents, index owner tags and kind-15 SQL namespaces). Earlier versions are history —
   1 = the pre-MVCC unstamped layout, 2 = stamped rows in the shared page stream,
   3 = per-object chains with the `DateTimeKind` and offset inside temporal keys
   (written through 10.0.0-preview.1), 4 = format 5's rows over index trees of
@@ -2498,7 +2557,7 @@ PostgreSQL references: tablecmds.c:3903-4062 (column identity), :4329-4385 (rela
   'x' cannot be opened: its catalog file set 'x/catalog' was refused. COHDBS001: …"
   (or its data file set 'x'). The server forwards it to the client like the gate's
   own refusals, and the files stay byte-identical.
-- **Schema evolution (#1023):** `ADD COLUMN` validates the default expression and
+- **Schema evolution (#1023):** `ADD COLUMN` validates the literal default and
   current rows under the exclusive object lock before publishing the complete
   replacement definition in one catalog transaction. Backfill is resolved at
   read time from frozen missing-value column metadata, independent of the current insert default; no existing row bytes, locations or
@@ -2510,7 +2569,7 @@ PostgreSQL references: tablecmds.c:3903-4062 (column identity), :4329-4385 (rela
   nonfinite floats. Validation scans are O(table); there is no physical backfill or
   cross-storage row/catalog commit.
   A crash before catalog publication leaves the old definition; after publication
-  the same frozen missing value resolves old rows on reopen. Constrained additions
+  the same persisted default resolves old rows on reopen. Constrained additions
   still build enforcing indexes durably before publication; a crash can leave
   unpublished index pages, never a partly backfilled table.
   Bound plans retain their immutable definition; later statements bind the full
@@ -2520,9 +2579,9 @@ PostgreSQL references: tablecmds.c:3903-4062 (column identity), :4329-4385 (rela
   `DROP COLUMN` marks the column dropped in the catalog and rewrites no row
   (#1241), described in the next item. DDL is self-committing and refused in explicit
   transactions. Schema-owned tables retain their existing live-session DDL guard.
-  The insert default persists as canonical SQL and resolved calls, bound once per table
-  version and evaluated per assignment. Reads use the independent frozen missing-value
-  literal (see [Persisted definitions](#persisted-definitions-canonical-text-parsed-once)).
+  The persisted default is the canonical SQL text of its literal (`'it''s'`, `5`,
+  `TRUE`), and the value every read and INSERT coerces comes from the table
+  version's bound form, parsed once (see [Persisted definitions](#persisted-definitions-canonical-text-parsed-once)).
 - **DROP COLUMN marks the column dropped; no version is rewritten (#1241).**
   The catalog keeps each table's physical column layout (`SqlCatalogTable`): the
   live columns, in order (`Columns`), and the physical ordinals of the dropped
@@ -2827,10 +2886,11 @@ PostgreSQL references: tablecmds.c:3903-4062 (column identity), :4329-4385 (rela
   evaluator's `Expression 'SqlStarExpression' is not supported by the executor yet.`
   A whole `DEFAULT` item instead maps to the target column's omitted-value path (#1193);
   it is not a column reference or scalar operand. The niladic datetime functions
-  `CURRENT_DATE`, `CURRENT_TIME`, `CURRENT_TIMESTAMP`, `LOCALTIME` and `LOCALTIMESTAMP`
-  parse as function nodes and execute with the transaction-start clock, as `NOW()` does
-  (#1120). Quoted datetime names and qualified references remain column references,
-  so `RejectColumnReferences` reports `COHSQLE005` for them in these clauses.
+  `CURRENT_DATE`, `CURRENT_TIME` and `CURRENT_TIMESTAMP` also parse as names, because
+  they take no parentheses; `RejectColumnReferences` reports an unqualified name
+  spelled as one of them as the unsupported function (`Function '<name>' is not
+  supported by the executor yet.`, the message `NOW()` gets at evaluation), not as
+  a column, until the parser gives them a function node.
 - **SELECT materializes.** Sorting and `DISTINCT` need the full result anyway at
   this stage; `SqlMaterializedResultSet` carries typed columns and evaluated
   rows. Streaming operators arrive with the planner build-out.
@@ -4303,7 +4363,7 @@ and add it again" as the only remedy.
   TEXT default, even for old rows that lack the field), `+5` as `5`, and `abc` as
   a column reference reported as catalog damage. The format gate
   (`ThrowIfFormatIsNotCurrent`, see "Format rule") refuses every database not on
-  the current format (20; canonical since 4) before `BindCatalog` runs, so no
+  the current format (21; canonical since 4) before `BindCatalog` runs, so no
   pre-canonical definition is ever bound.
   `BindCatalog` runs after that gate on open and after the format marker is written
   on create; keep that order.

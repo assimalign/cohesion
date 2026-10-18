@@ -15,7 +15,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// </summary>
 internal static class SqlSchemaStatementRenderer
 {
-    private const string defaultSchema = "dbo";
+    private const string defaultSchema = SqlPlanner.DefaultSchema;
 
     internal static string CreateTable(CompiledSchemaTable table)
     {

@@ -26,6 +26,12 @@ internal sealed partial class SqlDeclaredDatabase
         {
             foreach (var request in script.Statements)
             {
+                if (request.Statement.SqlExpression is SqlDropSchemaExpression { Cascade: true } dropSchema &&
+                    dropSchema.Name.Equals(SqlPlanner.DefaultSchema, StringComparison.OrdinalIgnoreCase) && schema.Tables.Count != 0)
+                {
+                    throw new SqlSchemaMigrationException(string.Format(CultureInfo.CurrentCulture,
+                        ErrorMessages.ScriptNamespaceTypedObjects, script.Name, dropSchema.Name));
+                }
                 SqlTableReference? target = request.Statement.SqlExpression switch
                 {
                     SqlAlterTableExpression alter => alter.Table,
@@ -33,10 +39,10 @@ internal sealed partial class SqlDeclaredDatabase
                     SqlDropIndexExpression drop => drop.Table,
                     _ => null,
                 };
-                if (target is null || !(target.SchemaName ?? "dbo").Equals("dbo", StringComparison.OrdinalIgnoreCase)) { continue; }
+                if (target is null || !(target.SchemaName ?? SqlPlanner.DefaultSchema).Equals(SqlPlanner.DefaultSchema, StringComparison.OrdinalIgnoreCase)) { continue; }
                 var table = schema.Tables.FirstOrDefault(table => table.Name.Equals(target.TableName, StringComparison.OrdinalIgnoreCase));
                 if (table is null) { continue; }
-                string objectName = "dbo." + table.Name;
+                string objectName = SqlPlanner.DefaultSchema + "." + table.Name;
                 if (request.Statement.SqlExpression is SqlDropIndexExpression index)
                 {
                     if (!table.Indexes.Any(declared => declared.Name.Equals(index.IndexName, StringComparison.OrdinalIgnoreCase)) &&
@@ -78,7 +84,7 @@ internal sealed partial class SqlDeclaredDatabase
                     }
                 }
                 var created = Enumerable.Range(0, receipt.CompletedStatements)
-                    .Where(position => script.Statements[position].Statement.SqlExpression is SqlCreateTableExpression or SqlCreateIndexExpression)
+                    .Where(position => script.Statements[position].Statement.SqlExpression is SqlCreateTableExpression or SqlCreateIndexExpression or SqlCreateSchemaExpression)
                     .Select(position => expected[position]).ToHashSet(StringComparer.OrdinalIgnoreCase);
                 if (!created.SetEquals(receipt.Objects))
                 {
@@ -141,12 +147,12 @@ internal sealed partial class SqlDeclaredDatabase
                 if (!dataReceipts.Contains((receipt.Name, receipt.ContentHash, receipt.CompletedStatements)))
                 {
                     if (script.Statements[position].Statement.SqlExpression is SqlCreateTableExpression create &&
-                        database.Catalog.TryGetTable(create.Table.SchemaName ?? "dbo", create.Table.TableName, out _))
+                        database.Catalog.TryGetTable(create.Table.SchemaName ?? SqlPlanner.DefaultSchema, create.Table.TableName, out _))
                     {
                         throw new SqlSchemaMigrationException($"COHSQLS004: Script '{script.Name}' cannot adopt existing table '{create.Table.TableName}'.");
                     }
                     if (script.Statements[position].Statement.SqlExpression is SqlCreateIndexExpression index &&
-                        database.Catalog.TryGetTable(index.Table.SchemaName ?? "dbo", index.Table.TableName, out var indexedTable) &&
+                        database.Catalog.TryGetTable(index.Table.SchemaName ?? SqlPlanner.DefaultSchema, index.Table.TableName, out var indexedTable) &&
                         database.Catalog.GetIndexes(indexedTable.ObjectId).Any(existingIndex => existingIndex.Name.Equals(index.IndexName, StringComparison.OrdinalIgnoreCase)))
                     {
                         throw new SqlSchemaMigrationException($"COHSQLS004: Script '{script.Name}' cannot adopt existing index '{index.IndexName}'.");
@@ -186,11 +192,11 @@ internal sealed partial class SqlDeclaredDatabase
         var expression = script.Statements[position].Statement.SqlExpression;
         if (expression is SqlAlterTableExpression { Action: SqlAlterDropConstraintAction drop } alter)
         {
-            string index = SqlObjectIdentity.Index(alter.Table.SchemaName ?? "dbo", alter.Table.TableName, drop.ConstraintName);
+            string index = SqlObjectIdentity.Index(alter.Table.SchemaName ?? SqlPlanner.DefaultSchema, alter.Table.TableName, drop.ConstraintName);
             // UNIQUE is represented by an index. For completed statements either this exact
             // index or the containing table (CHECK/FK) is a legitimate DROP CONSTRAINT target.
             if (recorded ? string.Equals(receipt.StatementObjects[position], index, StringComparison.OrdinalIgnoreCase)
-                : database.Catalog.TryGetTable(alter.Table.SchemaName ?? "dbo", alter.Table.TableName, out var table) &&
+                : database.Catalog.TryGetTable(alter.Table.SchemaName ?? SqlPlanner.DefaultSchema, alter.Table.TableName, out var table) &&
                   !table.Constraints.Any(constraint => constraint.Name.Equals(drop.ConstraintName, StringComparison.OrdinalIgnoreCase)) &&
                   database.Catalog.TryGetIndex(table.ObjectId, drop.ConstraintName, out var unique) && unique.IsUnique)
             {

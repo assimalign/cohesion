@@ -530,7 +530,7 @@ public sealed partial class CreateDatabaseMigrationTask : DatabaseTask
         private static string ColumnList(System.Collections.Generic.IReadOnlyList<string> columns)
             => string.Join(", ", columns.Select(Identifier));
 
-        private static string QualifiedTable(string tableName) => $"dbo.{Identifier(tableName)}";
+        private static string QualifiedTable(string tableName) => $"{Assimalign.Cohesion.Database.Sql.Language.Internal.SqlNamespaceNames.Default}.{Identifier(tableName)}";
 
         private static string Identifier(string value)
         {
