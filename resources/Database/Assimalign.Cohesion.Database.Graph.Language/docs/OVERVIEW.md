@@ -17,6 +17,7 @@ null extension, and finite paths including named paths such as
 `-[r:T|U]->`, every directed ISO edge in full and abbreviated form (`->`, `<-`, `-`, `<->`), scalar
 Boolean, arithmetic, null/truth, list-membership and string filters and labeled predicates (`n IS NOT LABELED A`, `n:A|B`),
 CASE, COALESCE, NULLIF, list/map literals and parameters, subscripts and map/entity property access,
+LET and FILTER, FOR (Cypher UNWIND), RETURN ... NEXT and Cypher WITH,
 RETURN expressions and aliases, DISTINCT/ALL, RETURN * and standalone RETURN,
 COUNT, SUM, AVG, MIN, MAX and COLLECT_LIST (Cypher collect), with implicit or ISO GROUP BY,
 ORDER BY with ASC/DESC and NULLS FIRST/LAST, OFFSET (Cypher SKIP) and LIMIT,
@@ -35,7 +36,7 @@ rejected by binding. Path results retain the actual traversal entities rather th
 
 Property maps, WHERE operands and RETURN expressions accept `$name` and the Cohesion spelling `@name`.
 Both produce `GqlParameterExpression` with a bare name and source span; property-map values
-are literal or parameter expressions. See [DIALECT.md](DIALECT.md#named-scalar-parameters) for binding rules.
+are scalar value expressions, evaluated against the incoming row. See [DIALECT.md](DIALECT.md#named-scalar-parameters) for binding rules.
 
 Read [DESIGN.md](DESIGN.md) for the standard decision, exact clause matrix, AST model, bounds,
 diagnostic codes, and the conformance corpus's relationship to ISO GQL.

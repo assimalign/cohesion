@@ -95,13 +95,12 @@ public sealed class GqlAggregateParserTests
         new GqlQueryParser().Parse("RETURN " + expression).Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "GQL0002");
     }
 
-    [Fact(DisplayName = "Cohesion Test [GQL] - Aggregates: WITH count remains the composition hand-off")]
-    public void Parse_WithAggregate_ShouldRetainCompositionPin()
+    [Fact(DisplayName = "Cohesion Test [GQL] - Aggregates: WITH count composes with RETURN")]
+    public void Parse_WithAggregate_ShouldAcceptComposition()
     {
         // Arrange / Act
         var errors = new GqlQueryParser().Parse("MATCH (a:Person) WITH count(a) AS c RETURN c").Diagnostics;
         // Assert
-        var error = errors.ShouldHaveSingleItem();
-        error.Code.ShouldBe("COHDBL001"); error.Message.ShouldNotBeNull().ShouldContain("WITH", Case.Sensitive);
+        errors.ShouldBeEmpty();
     }
 }

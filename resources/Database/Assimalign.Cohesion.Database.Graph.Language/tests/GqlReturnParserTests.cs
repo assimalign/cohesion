@@ -105,8 +105,6 @@ public sealed class GqlReturnParserTests
 
     [Theory(DisplayName = "Cohesion Test [Graph.Language] - RETURN: excluded compositions keep precise capability diagnostics")]
     [InlineData("MATCH (a) RETURN a {.name}", "MAP PROJECTION")]
-    [InlineData("RETURN 1 NEXT RETURN 2", "NEXT")]
-    [InlineData("MATCH (a) WITH DISTINCT a RETURN a", "WITH")]
     [InlineData("MATCH (a) DELETE a RETURN *", "RETURN AFTER DELETE")]
     public void Parse_ExcludedForm_ShouldNameConstruct(string source, string construct)
     {

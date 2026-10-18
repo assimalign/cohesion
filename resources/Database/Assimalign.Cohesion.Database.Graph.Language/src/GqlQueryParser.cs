@@ -102,7 +102,7 @@ public sealed partial class GqlQueryParser : QueryParser
         else if (Is("EXPLAIN"))
         {
             _position++;
-            if (Is("MATCH") || Is("OPTIONAL") || Is("CREATE") || Is("INSERT") || Is("RETURN"))
+            if (IsQueryStart())
             {
                 expression = ParseQuery();
                 expression.Explain();
@@ -114,7 +114,7 @@ public sealed partial class GqlQueryParser : QueryParser
             }
         }
         else if (catalogStatement) { expression = ParseCatalog(); }
-        else if (Is("MATCH") || Is("OPTIONAL") || Is("CREATE") || Is("INSERT") || Is("RETURN")) { expression = ParseQuery(); }
+        else if (IsQueryStart()) { expression = ParseQuery(); }
         else
         {
             if (Is("ORDER") || Is("OFFSET") || Is("SKIP") || Is("LIMIT"))
@@ -123,7 +123,7 @@ public sealed partial class GqlQueryParser : QueryParser
             }
             else if (Is("DELETE") || Is("DETACH") || Is("WHERE"))
             {
-                Error("GQL0002", "Expected MATCH, INSERT, or CREATE before this clause.", Current);
+                Error("GQL0002", "Expected MATCH, INSERT, CREATE, RETURN, LET, FILTER, FOR, UNWIND, or WITH before this clause.", Current);
             }
             else { Unsupported(Current.Text, Current); }
             expression = EmptyExpression();
@@ -196,7 +196,7 @@ public sealed partial class GqlQueryParser : QueryParser
             }
             if (token.Type == TokenType.Colon && inValueExpression && i > 0 &&
                 !mapSeparator &&
-                _tokens[i - 1].Type is TokenType.Identifier or TokenType.Function or TokenType.QuotedIdentifier)
+                IsVariableLexeme(_tokens[i - 1]))
             {
                 label = LabelScan.ExpectPrimary;
                 continue;
@@ -239,7 +239,7 @@ public sealed partial class GqlQueryParser : QueryParser
             }
             if (token.Type is not (TokenType.Keyword or TokenType.Identifier or TokenType.Function)) { continue; }
             // Contextual clause words, such as NEXT, remain legal aliases after AS.
-            if (i > 0 && IsWordAt(i - 1, "AS") && token.Type is TokenType.Identifier or TokenType.Function) { continue; }
+            if (i > 0 && IsWordAt(i - 1, "AS") && (token.Type is TokenType.Identifier or TokenType.Function || token.Type == TokenType.Keyword && token.Text.ToUpperInvariant() is "NEXT" or "FOR")) { continue; }
             if (i > 0 && (_tokens[i - 1].Type == TokenType.Dot ||
                 _tokens[i - 1].Type == TokenType.Colon && i - 1 != mapSeparatorPosition)) { continue; }
             if (i + 1 < _tokens.Count && _tokens[i + 1].Type == TokenType.Colon) { continue; }
@@ -265,8 +265,8 @@ public sealed partial class GqlQueryParser : QueryParser
                 }
                 continue;
             }
-            if (patternDepth == 0 && value is "WHERE" or "RETURN") { inValueExpression = true; }
-            if (patternDepth == 0 && value is "MATCH" or "CREATE" or "INSERT" or "DELETE") { inValueExpression = false; }
+            if (patternDepth == 0 && value is "WHERE" or "RETURN" or "WITH" or "LET" or "FILTER" or "FOR" or "UNWIND") { inValueExpression = true; }
+            if (patternDepth == 0 && (value is "MATCH" or "CREATE" or "INSERT" or "DELETE" || value == "NEXT" && IsQueryStartAt(i + 1))) { inValueExpression = false; }
 
             // n IS [NOT] LABELED A in WHERE is ISO's <labeled predicate>; IS NULL and truth
             // tests are scalar predicates (#1140), also available in RETURN (#1141).
@@ -290,7 +290,7 @@ public sealed partial class GqlQueryParser : QueryParser
                 continue;
             }
             if (value == "WITH" && inValueExpression && i > 0 && (IsWordAt(i - 1, "STARTS") || IsWordAt(i - 1, "ENDS"))) { continue; }
-            if (value == "ALL" && i > 0 && (IsWordAt(i - 1, "RETURN") || _tokens[i - 1].Type == TokenType.LeftParen && i > 1 && _tokens[i - 2].Type == TokenType.Function)) { continue; }
+            if (value == "ALL" && i > 0 && (IsWordAt(i - 1, "RETURN") || IsWordAt(i - 1, "WITH") || _tokens[i - 1].Type == TokenType.LeftParen && i > 1 && _tokens[i - 2].Type == TokenType.Function)) { continue; }
             if (patternDepth != 0 && !inValueExpression) { continue; }
             if (!GqlUnsupportedVocabulary.TryFind(value, out var word)) { continue; }
 
@@ -539,6 +539,16 @@ public sealed partial class GqlQueryParser : QueryParser
         AfterPrimary,
     }
 
+    private bool IsQueryStart() => Is("MATCH") || Is("OPTIONAL") || Is("CREATE") || Is("INSERT") || Is("RETURN") ||
+        Is("LET") || Is("FILTER") || Is("FOR") || Is("UNWIND") || Is("WITH");
+
+    private bool IsVariableToken => IsVariableLexeme(Current);
+    private static bool IsVariableLexeme(Lexeme token) => token.Type is TokenType.Identifier or TokenType.Function or TokenType.QuotedIdentifier ||
+        token.Type == TokenType.Keyword && token.Text.ToUpperInvariant() is "NEXT" or "FOR";
+    private bool IsQueryStartAt(int index) => IsWordAt(index, "MATCH") || IsWordAt(index, "OPTIONAL") || IsWordAt(index, "CREATE") ||
+        IsWordAt(index, "INSERT") || IsWordAt(index, "RETURN") || IsWordAt(index, "LET") || IsWordAt(index, "FILTER") ||
+        IsWordAt(index, "FOR") || IsWordAt(index, "UNWIND") || IsWordAt(index, "WITH");
+
     private bool IsWordAt(int index, string word) => index < _tokens.Count &&
         _tokens[index].Type is TokenType.Keyword or TokenType.Identifier or TokenType.Function &&
         string.Equals(_tokens[index].Text, word, StringComparison.OrdinalIgnoreCase);
@@ -588,7 +598,7 @@ public sealed partial class GqlQueryParser : QueryParser
             if (token.Text.Length <= 2) { Error("GQL0002", "An identifier cannot be empty.", token); }
             return token.Text.Length >= 2 ? token.Text[1..^1] : string.Empty;
         }
-        if ((token.Type is TokenType.Identifier or TokenType.Function || allowKeyword && token.Type == TokenType.Keyword) &&
+        if ((token.Type is TokenType.Identifier or TokenType.Function || token.Type == TokenType.Keyword && token.Text.ToUpperInvariant() is "NEXT" or "FOR" || allowKeyword && token.Type == TokenType.Keyword) &&
             token.Text.Length > 0 && (char.IsLetter(token.Text[0]) || token.Text[0] == '_'))
         {
             Advance();

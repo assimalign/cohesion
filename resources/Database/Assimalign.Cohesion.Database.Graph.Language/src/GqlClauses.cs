@@ -23,6 +23,9 @@ public static class GqlClauses
     /// <summary>Projects values from a graph query.</summary>
     public const string Return = "RETURN";
 
+    /// <summary>Starts a following linear query segment.</summary>
+    public const string Next = "NEXT";
+
     /// <summary>Groups by exactly the non-aggregated RETURN expressions.</summary>
     public const string GroupBy = "GROUP BY";
 
@@ -74,6 +77,9 @@ public static class GqlClauses
 
     /// <summary>Binds a value for use by later query stages.</summary>
     public const string Let = "LET";
+
+    /// <summary>Expands a list into one row for each element.</summary>
+    public const string For = "FOR";
 
     /// <summary>Expands a collection into individual query rows.</summary>
     public const string Unwind = "UNWIND";

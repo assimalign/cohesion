@@ -18,17 +18,13 @@ internal static class GqlUnsupportedVocabulary
     [
         // Clauses, statements and predicates outside the executable subset.
         new("MANDATORY", GqlClauses.MandatoryMatch, GqlWordPosition.Clause),
-        new("WITH", "WITH", GqlWordPosition.Clause),
         new("SET", "SET", GqlWordPosition.Clause),
         new("REMOVE", "REMOVE", GqlWordPosition.Clause),
         new("MERGE", "MERGE", GqlWordPosition.Clause),
-        new("LET", "LET", GqlWordPosition.Clause),
-        new("UNWIND", "UNWIND", GqlWordPosition.Clause),
         new("FOREACH", "FOREACH", GqlWordPosition.Clause),
         new("UNION", "UNION", GqlWordPosition.Clause),
         new("CALL", "CALL", GqlWordPosition.Clause),
         new("YIELD", "YIELD", GqlWordPosition.Clause),
-        new("FILTER", "FILTER", GqlWordPosition.Clause),
         new("ALL", "ALL", GqlWordPosition.Clause),
         new("EXISTS", "EXISTS", GqlWordPosition.Clause),
         new("ANY", "ANY", GqlWordPosition.Clause),
@@ -49,8 +45,6 @@ internal static class GqlUnsupportedVocabulary
         new("COMMIT", "COMMIT", GqlWordPosition.Clause),
         new("ROLLBACK", "ROLLBACK", GqlWordPosition.Clause),
         new("FINISH", "FINISH", GqlWordPosition.Clause),
-        new("NEXT", "NEXT", GqlWordPosition.Clause),
-        new("FOR", "FOR", GqlWordPosition.Clause),
         new("HAVING", "HAVING", GqlWordPosition.Clause),
         // ISO statistical aggregates are recognized for a later tier.
         new("STDDEV_SAMP", "STDDEV_SAMP", GqlWordPosition.Clause),

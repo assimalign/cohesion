@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Graph.Catalog;
+using Assimalign.Cohesion.Database.Graph.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Database.Types;
 
@@ -12,6 +14,7 @@ using Xunit;
 
 namespace Assimalign.Cohesion.Database.Graph.Tests;
 
+[Collection(nameof(GraphConcurrencyCollection))]
 public sealed class GraphConcurrencyTests
 {
     [Theory]
@@ -200,5 +203,49 @@ public sealed class GraphConcurrencyTests
         error.Message.ShouldContain("COHDBG003");
         (await schema.GetPropertyKeysAsync(definitionId)).ShouldHaveSingleItem().Type.ShouldBeNull();
         (await database.GetNodeAsync(session, first.Id)).ShouldNotBeNull().Properties["age"].ShouldBe("unknown");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Graph] - Composition: writer locking precedes every stage and empty writes retain the lock")]
+    public async Task Execute_LinearWrite_ShouldLockBeforeFirstStageAsync()
+    {
+        // Arrange
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        var token = timeout.Token;
+        await using var engine = GraphDatabaseEngine.Create("linear-lock", new());
+        var database = await engine.CreateDatabaseAsync("graph", token);
+        await using var first = await database.CreateSessionAsync(token);
+        await using var second = await database.CreateSessionAsync(token);
+        int blockedErrors = 0, blockedWriters = 0;
+        var elapsed = Stopwatch.StartNew();
+        // Act: exercise both lock edges for at least 250 ms and at least two complete rounds.
+        do
+        {
+            await using (var transaction = await first.BeginTransactionAsync(token))
+            {
+                await first.ExecuteAsync("INSERT (:Holding)", cancellationToken: token);
+                var pending = second.ExecuteAsync("LET x = 1 / 0 INSERT (:NeverWritten)", cancellationToken: token).AsTask();
+                await Task.WhenAny(pending, Task.Delay(10, token));
+                bool blockedBeforeExpression = !pending.IsCompleted;
+                await transaction.RollbackAsync(token);
+                var error = await Should.ThrowAsync<DatabaseException>(async () => await pending);
+                error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG013");
+                blockedBeforeExpression.ShouldBeTrue("a write statement must wait before evaluating its first LET");
+                blockedErrors++;
+            }
+            await using (var transaction = await first.BeginTransactionAsync(token))
+            {
+                await first.ExecuteAsync("FILTER FALSE INSERT (:NeverWritten)", cancellationToken: token);
+                var pending = second.ExecuteAsync("INSERT (:Other)", cancellationToken: token).AsTask();
+                await Task.WhenAny(pending, Task.Delay(10, token));
+                bool blockedBehindEmptyWrite = !pending.IsCompleted;
+                await transaction.CommitAsync(token);
+                (await pending).AffectedCount.ShouldBe(1);
+                blockedBehindEmptyWrite.ShouldBeTrue("an empty write pipeline must already hold its writer lock");
+                blockedWriters++;
+            }
+        } while ((elapsed.Elapsed < TimeSpan.FromMilliseconds(250) || blockedErrors < 2 || blockedWriters < 2) && elapsed.Elapsed < TimeSpan.FromSeconds(10));
+        // Assert
+        blockedErrors.ShouldBeGreaterThanOrEqualTo(2);
+        blockedWriters.ShouldBe(blockedErrors);
     }
 }

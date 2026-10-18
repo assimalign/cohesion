@@ -14,14 +14,14 @@ public static class GqlLanguageProfile
         // Pattern matching
         "MATCH", "OPTIONAL", "MANDATORY",
         // Projection
-        "RETURN", "WITH", "AS",
+        "RETURN", "NEXT", "WITH", "AS",
         // Mutation
         "CREATE", "INSERT", "DELETE", "DETACH",
         "SET", "REMOVE", "MERGE",
         // Clauses
         "WHERE", "GROUP", "ORDER", "BY", "ASC", "ASCENDING", "DESC", "DESCENDING",
         "LIMIT", "OFFSET", "SKIP",
-        "LET", "UNWIND", "FOREACH",
+        "LET", "FOR", "UNWIND", "FOREACH",
         // Set operations
         "UNION", "DISTINCT", "ALL",
         // Logical
@@ -53,6 +53,8 @@ public static class GqlLanguageProfile
         GqlClauses.OptionalMatch,
         GqlClauses.Explain,
         GqlClauses.Return,
+        GqlClauses.Next,
+        GqlClauses.With,
         GqlClauses.GroupBy,
         GqlClauses.OrderBy,
         GqlClauses.Offset,
@@ -64,6 +66,10 @@ public static class GqlLanguageProfile
         GqlClauses.Delete,
         GqlClauses.DetachDelete,
         GqlClauses.Where,
+        GqlClauses.Filter,
+        GqlClauses.Let,
+        GqlClauses.For,
+        GqlClauses.Unwind,
         GqlClauses.Show,
         GqlClauses.LabelExpression,
     ];

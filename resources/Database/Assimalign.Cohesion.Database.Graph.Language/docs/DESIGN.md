@@ -15,8 +15,7 @@ in those unsupported positions retain their named COHDBL001 capability diagnosti
 
 `GqlParameterExpression` exposes the bare `Name` and complete reference `Location`.
 **Breaking AST change:** `GqlNodePattern.Properties` and `GqlRelationshipPattern.Properties`
-are now `IReadOnlyDictionary<string, GqlExpression>`. Each map entry must be a
-`GqlLiteralExpression` or `GqlParameterExpression`; hand-built ASTs must wrap literals.
+are now `IReadOnlyDictionary<string, GqlExpression>`. Each map entry is a scalar value expression; hand-built ASTs must wrap literals.
 WHERE accepts parameters wherever it accepts scalar operands, including IN list items.
 
 Planning snapshots and normalizes the supplied map, rejects duplicate normalized keys with
@@ -59,7 +58,7 @@ every mandatory ISO feature.
 
 The implemented syntax is an explicitly bounded subset. **`INSERT` is the standard graph-insertion
 verb. `CREATE (pattern)` is a Cohesion compatibility extension**, retained for the phase-5 examples.
-Both compile to the same `Creates` AST. Database-scoped catalog `SHOW` statements are another
+Both compile to an insertion stage. Database-scoped catalog `SHOW` statements are another
 explicit Cohesion extension. Repeated colon labels and `!=` are accepted conveniences: `:A:B`
 builds the same tree as ISO `:A&B`. The convenience repeats plain names only, so mixing repeated
 colons with label-expression operators or a wildcard (`:A:B|C`, `:A|B:C`, `:%:A`, `:A:%`) is
@@ -135,15 +134,21 @@ collect_list and its Cypher alias collect. Ordinary scalar functions remain outs
 | `MATCH` | Comma-separated finite node/relationship chains; optional `variable =` path assignment, label expressions, scalar literal/parameter property maps; every ISO full and abbreviated edge except the tilde forms | Planner chooses an indexed anchor when available; executor matches bounded relationship-unique trails and binds named paths in traversal order |
 | `OPTIONAL MATCH` | The same graph patterns and clause-local WHERE, including a leading optional or several consecutive matching clauses | Left join against each running binding; an unmatched clause preserves that row and binds its new variables to NULL |
 | `WHERE` | Boolean and scalar expressions: comparisons, labels, AND/OR/XOR/NOT, IS null/truth tests, arithmetic, concatenation, IN lists and string predicates | Keeps TRUE only; see [DIALECT.md](DIALECT.md) and scalar expressions below |
-| `EXPLAIN` | One query with ordered MATCH/OPTIONAL MATCH clauses and RETURN, INSERT/CREATE, or [DETACH] DELETE | Shared description rows without executing any read expansion or write; Cohesion extension |
+| `EXPLAIN` | One linear statement of the supported stages | Shared description rows without executing any read expansion or write; Cohesion extension |
+| `LET` | One or more `variable = expression` assignments | Adds new value bindings in assignment order; rebinding is COHDBG003 |
+| `FILTER` | Predicate, optionally preceded by WHERE | Keeps TRUE only; FALSE and UNKNOWN drop the row |
+| `FOR` | `FOR variable IN expression` | Expands a list; NULL yields zero rows; a non-list is COHDBG013 |
+| `UNWIND` | Cypher spelling `UNWIND expression AS variable` | The same list expansion, with the scalar divergence below |
+| `NEXT` | Separates linear segments after RETURN or a modifying segment | Carries projected columns, or one empty binding after a modifying segment without RETURN |
+| `WITH` | Cypher projection spelling, including DISTINCT/ALL, star, GROUP BY, ordering/paging and WHERE | Projects a new scope; applies WHERE after ordering/paging |
 | `RETURN` | Optional DISTINCT/ALL, either `*` or value expressions with optional `AS` aliases; also standalone | Projects expressions, expands named bindings in declaration order, then eliminates duplicate tuples for DISTINCT; path requests require one entity or path column |
 | `GROUP BY` | ISO names of non-aggregated RETURN items, equivalent input expressions, or the empty grouping set `()`; omission uses the same implicit keys | Bounded hash grouping before projection, DISTINCT, ordering and paging; aggregate placement and scope are validated before execution |
-| `ORDER BY` | One or more expression keys with optional ASC/ASCENDING/DESC/DESCENDING and NULLS FIRST/LAST after RETURN | Orders projected rows and paths by the total order below, after DISTINCT |
+| `ORDER BY` | One or more expression keys with optional ASC/ASCENDING/DESC/DESCENDING and NULLS FIRST/LAST after RETURN or WITH | Orders projected rows and paths by the total order below, after DISTINCT |
 | `OFFSET` | Unsigned Int64 literal or named parameter after RETURN | Drops the first count rows after ordering |
 | `SKIP` | Cypher spelling of OFFSET | The same offset stage; cannot accompany another OFFSET/SKIP |
 | `LIMIT` | Unsigned Int64 literal or named parameter after RETURN | Truncates after full materialization, ordering and offset; never reduces mutations or the match cap |
 | `CASE` | Simple and searched CASE, COALESCE and NULLIF case abbreviations | First matching alternative, lazy selected branch; absent ELSE yields NULL |
-| `INSERT` | Scalar literal/parameter node/path insertion, optionally following a match; a node takes a label conjunction (`:A&B`, `:A:B`), a relationship one type and a directed edge (`-[:T]->`, `<-[:T]-`) | Inserts nodes and relationships transactionally |
+| `INSERT` | Scalar value-expression node/path insertion, optionally following a match; a node takes a label conjunction (`:A&B`, `:A:B`), a relationship one type and a directed edge (`-[:T]->`, `<-[:T]-`) | Inserts nodes and relationships transactionally |
 | `CREATE` | Same insertion grammar as `INSERT`; compatibility extension | Same transactional insertion path |
 | `DELETE` | Bound node/relationship variables following a match | Refuses deleting a node that still has incident relationships |
 | `DETACH DELETE` | Bound node/relationship variables following a match | Deletes incident relationships with the node in one transaction |
@@ -168,10 +173,16 @@ The grammar is intentionally finite:
 
 ```text
 statement    := (query | EXPLAIN query | catalog) [';']
-query        := ( [OPTIONAL] MATCH match-paths [ WHERE predicate ] )*
-                ( (INSERT | CREATE) paths [ RETURN projections return-tail ]
-                | [ DETACH ] DELETE variables
-                | RETURN projections return-tail )
+query        := segment (NEXT segment)*
+segment      := stage* [RETURN projections return-tail]
+stage        := [OPTIONAL] MATCH match-paths [WHERE predicate]
+              | LET variable '=' predicate (',' variable '=' predicate)*
+              | FILTER [WHERE] predicate
+              | FOR variable IN predicate
+              | UNWIND predicate AS variable
+              | (INSERT | CREATE) paths
+              | [DETACH] DELETE variables
+              | WITH projections return-tail [WHERE predicate]
 match-paths  := match-path (',' match-path)*
 match-path   := [ variable '=' ] path
 paths        := path (',' path)*
@@ -206,7 +217,7 @@ primary      := variable ['.' property] | scalar-literal | parameter | labeled |
               | COALESCE '(' predicate ',' predicate (',' predicate)* ')'
               | NULLIF '(' predicate ',' predicate ')'
 parameter    := ('$' | '@') (identifier | ASCII-digits)
-properties   := '{' [property ':' (scalar-literal | parameter) (',' property ':' (scalar-literal | parameter))*] '}'
+properties   := '{' [property ':' predicate (',' property ':' predicate)*] '}'
 projections  := [DISTINCT | ALL] ('*' | projection (',' projection)*)
 projection   := predicate [AS alias]
 return-tail  := [GROUP BY ('(' ')' | predicate (',' predicate)*)] [ORDER BY sort-item (',' sort-item)*] [paging]
@@ -228,8 +239,7 @@ The pattern-comprehension probe requires a relationship before the bar and stops
 item comma; label disjunctions in later list items remain ordinary values. Map key separators
 do not start label scans, so unsupported map values retain their COHDBL001 diagnostics.
 
-A mutation or RETURN can start without `MATCH`; a deletion must bind variables through MATCH or
-OPTIONAL MATCH. A query may start with OPTIONAL MATCH.
+A linear statement may start with MATCH, OPTIONAL MATCH, INSERT/CREATE, LET, FILTER, FOR/UNWIND, WITH or RETURN. Each read segment requires RETURN; a modifying segment may omit it. RETURN is terminal within its segment, and NEXT must have a following segment. WITH requires a following stage. Deletion requires an entity binding.
 Standalone RETURN evaluates against one empty binding, so `RETURN 1 + 1 AS two` returns one row.
 Named assignment is a MATCH-only construct: `INSERT p = (...)` and `CREATE p = (...)` are
 unsupported. `MATCH p = (a)-[r:TYPE]->(b) RETURN p` captures the entire matched trail, including
@@ -257,7 +267,7 @@ is safe. Scalar NULLs use the existing wire encoding.
 
 ISO 14.4's `OPTIONAL { ... }` and `OPTIONAL ( ... )` block operands remain recognized outside T1.
 Their one COHDBL001 names OPTIONAL BLOCK OPERAND, including after WHERE. MANDATORY MATCH remains
-unsupported. MATCH after INSERT or DELETE is GQL0002 until #1145 adds statement stages.
+unsupported. MATCH after INSERT or DELETE is a supported stage (#1145).
 Behavior consulted, no code copied, relative to `C:/Source/repos/neo4j/neo4j`:
 `community/cypher/interpreted-runtime/src/main/scala/org/neo4j/cypher/internal/runtime/interpreted/pipes/OptionalExpandAllPipe.scala:54-68`
 keeps a row with nulls for an empty expansion or null source; `:174` filters matches to TRUE before
@@ -278,6 +288,26 @@ mutation. Attempted mutation composition produces `GQL0007`, including verbs suc
 The [engine's catalog section](../../Assimalign.Cohesion.Database.Graph/docs/DESIGN.md#catalog-introspection-c2)
 defines ordered result columns, SQL-consistent ownership vocabulary and session snapshot behavior.
 The parser describes only the metadata subject; it never accesses or caches catalog state.
+
+## Linear composition (#1145)
+
+The stage list is the planner/executor input. The original constructors retain the owner-selected single-segment facade for hand-built ASTs; SHOW composition is rejected through either shape. NEXT and FOR are profile keywords and also remain legal variable names and aliases, so `RETURN a AS next NEXT ...` and property keys named next or for remain valid.
+
+LET adds new bindings, evaluating comma-separated assignments in order. FILTER (also FILTER WHERE) keeps only TRUE. FOR and Cypher UNWIND expand a list per incoming row; NULL gives zero rows. A non-list, including string or byte[], is COHDBG013. The ISO WITH ORDINALITY and WITH OFFSET suffixes are excluded with one COHDBL001 naming FOR ORDINALITY/OFFSET SUFFIX. FOREACH, CALL, NEXT YIELD and UNION remain capability refusals. Standalone ORDER BY/OFFSET/SKIP/LIMIT stages, including after LET, FILTER, FOR or writes, remain COHDBL001 under the owner default.
+
+RETURN followed by NEXT and WITH retain only aliased columns and bare-variable projections. Star expands all current bindings in scope order, including LET/FOR values and the preceding projection's order. Unaliased computed columns are accepted but cannot be referenced in a later stage; this is an explicit superset divergence from Cypher. WITH DISTINCT uses the same exact numeric tuple comparer as RETURN DISTINCT. Entity kinds, optionality, possible composite values and Int64 COUNT types survive boundaries. An unbound variable is COHDBG001; LET/FOR rebinding, a scalar used as an entity, or a later reference to a deleted variable is COHDBG003. A NEXT after a modifying segment without RETURN starts with one empty binding and no scope.
+
+WITH's ORDER BY and WHERE see both projected aliases and the incoming scope when neither DISTINCT nor grouping is present. Aliases shadow incoming names. With DISTINCT or grouping, only projected/grouped values remain visible. WHERE applies after ORDER BY, OFFSET and LIMIT. Each projection has its own grouping and ordering state, so one stage's aliases never validate a later stage. Pattern maps evaluate scalar expressions against each row; list/map syntax keeps its graph-storage COHDBL001 and composite values remain COHDBG003.
+
+Every stage materializes eagerly in source order. Unknown labels empty their MATCH stage only, and names introduced by an earlier INSERT are treated as available. A statement sees its own writes under Snapshot and ReadCommitted. A write anywhere takes the writer lock before the first stage. FOR and matching share the 100,000-row bound. Only the final columns determine Execute admission; a scalar LET/FOR variable is scalar, possible composites require negotiation, and carried entities still require ExecutePaths. ExecutePaths accepts a read-only composed statement with one mandatory entity/path final column and rejects any write stage.
+
+Behavior consulted, no code copied, relative to `C:/Source/repos/neo4j/neo4j`:
+`community/cypher/front-end/ast/src/main/scala/org/neo4j/cypher/internal/ast/Clause.scala:1965-1970` defines WITH's incoming scope;
+`community/cypher/cypher-planner/src/main/scala/org/neo4j/cypher/internal/compiler/ast/convert/plannerQuery/ClauseConverters.scala:1018-1032` puts selection on the paged projection horizon;
+`community/cypher/runtime-util/src/main/scala/org/neo4j/cypher/internal/runtime/ListSupport.scala:56-67` wraps a scalar as one row. Cohesion deliberately rejects that scalar UNWIND behavior with COHDBG013; NULL still yields zero rows.
+`community/cypher/interpreted-runtime/src/main/scala/org/neo4j/cypher/internal/runtime/interpreted/pipes/LazyLabel.scala:32-37` retries unresolved label tokens, motivating stage-aware insertion name resolution.
+
+GqlLinearCompositionParserTests, GqlKeywordDispositionTests, GqlProfileExecutionTests, GqlLinearCompositionTests, GraphConcurrencyTests and GraphLinearCompositionWireTests cover the grammar, scope, execution, locking and both wire transports. No public interface, catalog format or protocol frame is added. Typed stage dispatch preserves trimming and NativeAOT compatibility.
 
 ## EXPLAIN (#1104)
 
@@ -357,8 +387,7 @@ kind dispatch, including under list/map constructors and field references (#1146
 one named binding. Computed, multiple and multi-binding star projections use the existing
 COHDBG001 request-shape diagnostic. GraphPathResult completion diagnostics remain unchanged.
 
-Cypher map projection (`a {.name}`) remains COHDBL001 naming MAP PROJECTION. NEXT and WITH
-remain COHDBL001 until #1145; WITH DISTINCT is not activated here. Return-after-delete remains
+Cypher map projection (`a {.name}`) remains COHDBL001 naming MAP PROJECTION. NEXT and WITH, including WITH DISTINCT, execute through the linear pipeline. Immediate return-after-delete remains
 COHDBL001. No catalog format or protocol frame changes are involved. `GqlReturnParserTests`,
 the keyword-disposition corpus, `GqlProfileExecutionTests`, `GraphReturnTests` and
 `GraphReturnWireTests` cover this surface and its boundaries.
@@ -406,7 +435,7 @@ Only containers that are neither entities nor maps fail member lookup. Invalid a
 including (a.name).x on a string, use #1140's COHDBG013.
 The parser keeps a.b.c on a stored property as COHDBL001 while {k:{j:1}}.k.j and $m.k
 are field access. Comprehensions, pattern comprehensions and slicing remain named COHDBL001.
-UNWIND/FOR remain #1145's work and their unsupported pins are unchanged.
+UNWIND/FOR expand literal and parameter lists through the linear pipeline (#1145).
 
 List equality requires equal lengths and element-wise equality. Map equality requires
 equal ordinal key sets and value equality, independent of entry order. FALSE dominates
@@ -504,7 +533,7 @@ ORDER BY references are COHDBG001 before reading data, including under EXPLAIN. 
 inside aggregate operands are validated even on empty input. ExecutePaths rejects aggregates
 with its existing COHDBG001 path-request message. HAVING, STDDEV_SAMP, STDDEV_POP,
 PERCENTILE_CONT and PERCENTILE_DISC remain precise COHDBL001 capability diagnostics.
-WITH aggregates remain a #1145 hand-off.
+WITH aggregates execute through the same per-stage grouping plan (#1145).
 
 Neo4j behavior consulted, no code copied, relative to `C:/Source/repos/neo4j/neo4j`, under
 `community/cypher/interpreted-runtime/src/main/scala/org/neo4j/cypher/internal/runtime/interpreted/pipes/aggregation/`:
@@ -558,7 +587,7 @@ OFFSET precedes LIMIT. LIMIT 0 returns no rows; large offsets return no rows wit
 The owner default is full materialization: LIMIT 1 over more than 100,000 matches still fails
 COHDBG004. Sorting does not change wire or catalog formats. Standalone ORDER BY/page statements
 before RETURN remain COHDBL001 naming STANDALONE ORDER BY AND PAGE STATEMENT (T2).
-WITH ordering/paging remains #1145's hand-off, and aggregate aliases follow #1147's grouping stage.
+WITH ordering/paging executes through the same stage, and aggregate aliases follow its grouping stage.
 
 Behavior consulted, no code copied, relative to `C:/Source/repos/neo4j/neo4j`:
 `community/values/src/main/java/org/neo4j/values/AnyValueComparator.java:44-85`,
@@ -583,7 +612,7 @@ GqlOrderPagingTests and GraphOrderPagingWireTests pin the executable surface.
 
 | Code | Meaning |
 | --- | --- |
-| `COHDBL001` | Recognized construct outside the executable profile, reported once at its own span: OPTIONAL block operands, MANDATORY MATCH, procedures, scalar functions, HAVING and statistical aggregates (STDDEV_SAMP/POP, PERCENTILE_CONT/DISC), substituted/whole-map parameters, composite properties, comprehensions, slicing, map projections, path quantifiers, standalone ORDER BY/page statements, set operations, NEXT/WITH, server/session scope, undirected (tilde) edges, path mode and path search prefixes, `NODETACH DELETE`, and `MERGE` |
+| `COHDBL001` | Recognized construct outside the executable profile, reported once at its own span: OPTIONAL block operands, MANDATORY MATCH, procedures, scalar functions, HAVING and statistical aggregates (STDDEV_SAMP/POP, PERCENTILE_CONT/DISC), substituted/whole-map parameters, composite properties, comprehensions, slicing, map projections, path quantifiers, standalone ORDER BY/page statements, set operations, FOR ordinality/offset suffixes, NEXT YIELD, server/session scope, undirected (tilde) edges, path mode and path search prefixes, `NODETACH DELETE`, and `MERGE` |
 | `GQL0001` | Empty statement |
 | `GQL0002` | Malformed supported syntax, invalid statement composition, leftover tokens, or a character GQL does not use (`?`, `#`, `^`, ```, ...) |
 | `GQL0003` | Unterminated string, quoted name, or block comment |

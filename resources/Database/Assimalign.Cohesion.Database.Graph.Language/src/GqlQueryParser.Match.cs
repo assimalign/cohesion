@@ -8,107 +8,165 @@ public sealed partial class GqlQueryParser
     private GqlQueryExpression ParseQuery()
     {
         var start = Current;
-        List<GqlMatchClause> matches = [];
-        IReadOnlyList<GqlPathPattern> creates = [];
-        List<string> deletes = [];
-        List<GqlProjection> projections = [];
-        bool detach = false;
-        bool returnStar = false;
-        List<GqlSortItem> orderBy = [];
-        List<GqlExpression>? groupBy = null;
-        GqlExpression? offset = null;
-        GqlExpression? limit = null;
-        var quantifier = GqlSetQuantifier.All;
-        while (!Failed && (Is("MATCH") || Is("OPTIONAL")))
+        var stages = new List<GqlStage>();
+        bool segmentWrites = false;
+        bool hasNamedBinding = false;
+        while (!Failed && Current.Type is not (TokenType.Eof or TokenType.Semicolon))
         {
-            bool optional = Take("OPTIONAL");
-            Expect("MATCH");
-            var paths = Failed ? [] : ParsePatterns(allowPathVariable: true);
-            GqlExpression? predicate = null;
-            if (!Failed && Take("WHERE")) { predicate = ParsePredicate(); }
-            matches.Add(new GqlMatchClause(paths, predicate, optional));
-        }
-        if (!Failed && (Is("ORDER") || Is("OFFSET") || Is("SKIP") || Is("LIMIT")))
-        {
-            Unsupported("STANDALONE ORDER BY AND PAGE STATEMENT", Current);
-        }
-        if (!Failed && (Take("CREATE") || Take("INSERT"))) { creates = ParsePatterns(); }
-        else if (!Failed && (Is("DETACH") || Is("DELETE")))
-        {
-            detach = Take("DETACH");
-            Expect("DELETE");
-            do { deletes.Add(Identifier()); } while (!Failed && Take(TokenType.Comma));
-        }
-        if (!Failed && (Is("ORDER") || Is("OFFSET") || Is("SKIP") || Is("LIMIT")))
-        {
-            Unsupported("STANDALONE ORDER BY AND PAGE STATEMENT", Current);
-        }
-        if (!Failed && Take("RETURN"))
-        {
-            if (Take("DISTINCT")) { quantifier = GqlSetQuantifier.Distinct; }
-            else { Take("ALL"); }
-            returnStar = Take(TokenType.Asterisk);
-            if (returnStar && !matches.Exists(clause => HasNamedBinding(clause.Paths)) && !HasNamedBinding(creates))
-            { Error("GQL0002", "RETURN * requires at least one named binding.", Previous); }
-            if (!returnStar)
+            var clauseStart = Current;
+            if (Take("NEXT"))
             {
+                if (stages.Count == 0 || stages[^1] is GqlNextStage || stages[^1] is not GqlReturnStage && !segmentWrites || Current.Type is TokenType.Eof or TokenType.Semicolon)
+                { Error("GQL0002", "NEXT requires a RETURN or data-modifying segment and a following segment.", clauseStart); break; }
+                if (stages[^1] is not GqlReturnStage) { hasNamedBinding = false; }
+                stages.Add(new GqlNextStage(Span(clauseStart, Previous)));
+                segmentWrites = false;
+                continue;
+            }
+            if (stages.Count != 0 && stages[^1] is GqlReturnStage { IsWith: false }) { break; }
+            if (Is("MATCH") || Is("OPTIONAL"))
+            {
+                bool optional = Take("OPTIONAL");
+                Expect("MATCH");
+                var paths = Failed ? [] : ParsePatterns(allowPathVariable: true);
+                GqlExpression? predicate = null;
+                if (!Failed && Take("WHERE")) { predicate = ParsePredicate(); }
+                hasNamedBinding |= HasNamedBinding(paths);
+                stages.Add(new GqlMatchStage(new GqlMatchClause(paths, predicate, optional), Span(clauseStart, Previous)));
+            }
+            else if (Is("CREATE") || Is("INSERT"))
+            {
+                bool create = Take("CREATE");
+                if (!create) { Advance(); }
+                var paths = ParsePatterns();
+                hasNamedBinding |= HasNamedBinding(paths);
+                stages.Add(new GqlInsertStage(paths, create, Span(clauseStart, Previous)));
+                segmentWrites = true;
+            }
+            else if (Is("DETACH") || Is("DELETE"))
+            {
+                bool detach = Take("DETACH");
+                Expect("DELETE");
+                var deletes = new List<string>();
+                do { deletes.Add(Identifier()); } while (!Failed && Take(TokenType.Comma));
+                stages.Add(new GqlDeleteStage(deletes.AsReadOnly(), detach, Span(clauseStart, Previous)));
+                segmentWrites = true;
+            }
+            else if (Take("LET"))
+            {
+                var bindings = new List<GqlProjection>();
                 do
                 {
-                    int first = _position;
+                    string variable = Identifier();
+                    Expect(TokenType.Equals, "'='");
                     var expression = ParsePredicate();
-                    expression.SetStatementText(NormalizeProjectionText(first, _position));
-                    if (!Failed && Current.Type == TokenType.LeftBrace) { Unsupported("MAP PROJECTION", Current); }
-                    string? alias = Take("AS") ? Identifier() : null;
-                    projections.Add(new GqlProjection(expression, alias));
+                    bindings.Add(new GqlProjection(expression, variable));
                 } while (!Failed && Take(TokenType.Comma));
+                stages.Add(new GqlLetStage(bindings.AsReadOnly(), Span(clauseStart, Previous)));
+                hasNamedBinding = true;
             }
-            if (!Failed && Take("GROUP"))
+            else if (Take("FILTER"))
             {
-                Expect("BY");
-                groupBy = [];
-                if (Current.Type == TokenType.LeftParen && _tokens[_position + 1].Type == TokenType.RightParen)
-                { Advance(); Advance(); }
-                else { do { groupBy.Add(ParsePredicate()); } while (!Failed && Take(TokenType.Comma)); }
+                Take("WHERE");
+                var predicate = ParsePredicate();
+                stages.Add(new GqlFilterStage(predicate, Span(clauseStart, Previous)));
             }
-            if (!Failed && Take("ORDER"))
+            else if (Is("FOR") || Is("UNWIND"))
             {
-                Expect("BY");
-                do
+                bool unwind = Take("UNWIND");
+                string variable;
+                GqlExpression list;
+                if (unwind)
+                { list = ParsePredicate(); Expect("AS"); variable = Identifier(); }
+                else
+                { Advance(); variable = Identifier(); Expect("IN"); list = ParsePredicate(); }
+                stages.Add(new GqlForStage(variable, list, unwind, Span(clauseStart, Previous)));
+                hasNamedBinding = true;
+                if (!Failed && Is("WITH") && (IsWordAt(_position + 1, "ORDINALITY") || IsWordAt(_position + 1, "OFFSET")))
+                { Unsupported("FOR ORDINALITY/OFFSET SUFFIX", Current); }
+            }
+            else if (Is("RETURN") || Is("WITH"))
+            {
+                if (stages.Count != 0 && stages[^1] is GqlDeleteStage)
+                { Unsupported("RETURN AFTER DELETE", Current); break; }
+                bool with = Take("WITH");
+                if (!with) { Advance(); }
+                var projections = new List<GqlProjection>();
+                bool returnStar = false;
+                var orderBy = new List<GqlSortItem>();
+                List<GqlExpression>? groupBy = null;
+                GqlExpression? offset = null;
+                GqlExpression? limit = null;
+                var quantifier = GqlSetQuantifier.All;
+                if (Take("DISTINCT")) { quantifier = GqlSetQuantifier.Distinct; }
+                else { Take("ALL"); }
+                returnStar = Take(TokenType.Asterisk);
+                if (returnStar && !hasNamedBinding)
+                { Error("GQL0002", "RETURN * requires at least one named binding.", Previous); }
+                if (!returnStar)
                 {
-                    var expression = ParsePredicate();
-                    var direction = Take("DESC") || Take("DESCENDING") ? GqlSortDirection.Descending : GqlSortDirection.Ascending;
-                    if (direction == GqlSortDirection.Ascending) { if (!Take("ASC")) { Take("ASCENDING"); } }
-                    var nullOrdering = GqlNullOrdering.Default;
-                    if (Take("NULLS"))
+                    do
                     {
-                        if (Take("FIRST")) { nullOrdering = GqlNullOrdering.First; }
-                        else if (Take("LAST")) { nullOrdering = GqlNullOrdering.Last; }
-                        else { Error("GQL0002", "Expected FIRST or LAST after NULLS.", Current); }
-                    }
-                    orderBy.Add(new GqlSortItem(expression, direction, nullOrdering));
-                } while (!Failed && Take(TokenType.Comma));
+                        int first = _position;
+                        var expression = ParsePredicate();
+                        expression.SetStatementText(NormalizeProjectionText(first, _position));
+                        if (!Failed && Current.Type == TokenType.LeftBrace) { Unsupported("MAP PROJECTION", Current); }
+                        string? alias = Take("AS") ? Identifier() : null;
+                        projections.Add(new GqlProjection(expression, alias));
+                    } while (!Failed && Take(TokenType.Comma));
+                }
+                if (!Failed && Take("GROUP"))
+                {
+                    Expect("BY");
+                    groupBy = [];
+                    if (Current.Type == TokenType.LeftParen && _tokens[_position + 1].Type == TokenType.RightParen)
+                    { Advance(); Advance(); }
+                    else { do { groupBy.Add(ParsePredicate()); } while (!Failed && Take(TokenType.Comma)); }
+                }
+                if (!Failed && Take("ORDER"))
+                {
+                    Expect("BY");
+                    do
+                    {
+                        var expression = ParsePredicate();
+                        var direction = Take("DESC") || Take("DESCENDING") ? GqlSortDirection.Descending : GqlSortDirection.Ascending;
+                        if (direction == GqlSortDirection.Ascending) { if (!Take("ASC")) { Take("ASCENDING"); } }
+                        var nullOrdering = GqlNullOrdering.Default;
+                        if (Take("NULLS"))
+                        {
+                            if (Take("FIRST")) { nullOrdering = GqlNullOrdering.First; }
+                            else if (Take("LAST")) { nullOrdering = GqlNullOrdering.Last; }
+                            else { Error("GQL0002", "Expected FIRST or LAST after NULLS.", Current); }
+                        }
+                        orderBy.Add(new GqlSortItem(expression, direction, nullOrdering));
+                    } while (!Failed && Take(TokenType.Comma));
+                }
+                while (!Failed && (Is("OFFSET") || Is("SKIP") || Is("LIMIT")))
+                {
+                    bool limiting = Is("LIMIT");
+                    if (limit is not null || !limiting && offset is not null)
+                    { Error("GQL0002", "Expected OFFSET or SKIP before LIMIT, with each paging clause at most once.", Current); break; }
+                    Advance();
+                    var value = ParsePageValue();
+                    if (limiting) { limit = value; } else { offset = value; }
+                }
+
+                GqlExpression? predicate = null;
+                if (!Failed && with && Take("WHERE")) { predicate = ParsePredicate(); }
+                stages.Add(new GqlReturnStage(projections.AsReadOnly(), with, Span(clauseStart, Previous))
+                { SetQuantifier = quantifier, ReturnStar = returnStar, GroupBy = groupBy?.AsReadOnly(),
+                    OrderBy = orderBy.AsReadOnly(), Offset = offset, Limit = limit, Predicate = predicate });
+                if (!returnStar)
+                { hasNamedBinding = projections.Exists(item => item.Alias is not null || item.Expression is GqlVariableExpression); }
             }
-            while (!Failed && (Is("OFFSET") || Is("SKIP") || Is("LIMIT")))
-            {
-                bool limiting = Is("LIMIT");
-                if (limit is not null || !limiting && offset is not null)
-                { Error("GQL0002", "Expected OFFSET or SKIP before LIMIT, with each paging clause at most once.", Current); break; }
-                Advance();
-                var value = ParsePageValue();
-                if (limiting) { limit = value; } else { offset = value; }
-            }
+            else if (Is("ORDER") || Is("OFFSET") || Is("SKIP") || Is("LIMIT"))
+            { Unsupported("STANDALONE ORDER BY AND PAGE STATEMENT", Current); }
+            else { break; }
         }
-        if (!Failed && creates.Count == 0 && deletes.Count == 0 && projections.Count == 0 && !returnStar)
-        {
-            Error("GQL0002", "MATCH requires RETURN, INSERT, CREATE, or DELETE.", Current);
-        }
-        if (!Failed && deletes.Count != 0 && (projections.Count != 0 || returnStar))
-        {
-            Unsupported("RETURN AFTER DELETE", Previous);
-        }
-        return new GqlQueryExpression(matches.AsReadOnly(), creates, deletes.AsReadOnly(), detach,
-            projections.AsReadOnly(), Span(start, Previous))
-        { SetQuantifier = quantifier, ReturnStar = returnStar, GroupBy = groupBy?.AsReadOnly(), OrderBy = orderBy.AsReadOnly(), Offset = offset, Limit = limit };
+        if (!Failed && (stages.Count != 0 && stages[^1] is GqlReturnStage { IsWith: true } ||
+            !segmentWrites && (stages.Count == 0 || stages[^1] is not GqlReturnStage { IsWith: false })))
+        { Error("GQL0002", "A read segment requires RETURN; a linear statement may also end with INSERT, CREATE, or DELETE.", Current); }
+        return new GqlQueryExpression(stages.AsReadOnly(), Span(start, Previous));
     }
 
     private GqlExpression ParsePageValue()
