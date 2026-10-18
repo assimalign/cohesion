@@ -263,8 +263,10 @@ internal sealed partial class SqlPlanExecutor
     private static SqlBoundFailure DefaultFailure(SqlCatalogColumn column, string defaultValue)
         => new(() => ResolveDefault(column, defaultValue));
 
-    /// <summary>The value a bound DEFAULT supplies: its converted constant, or its conversion failure raised again.</summary>
-    /// <param name="bound">The bound DEFAULT (<see cref="BindDefault"/>).</param>
+    /// <summary>Evaluates a bound insert default or reads a frozen missing value, copying binary constants.</summary>
+    /// <param name="bound">The bound default expression or missing-value literal.</param>
+    /// <param name="cancellationToken">The statement's cancellation token.</param>
+    /// <param name="transactionStart">The transaction-start instant for datetime functions.</param>
     /// <returns>The value.</returns>
     private static object? DefaultValue(SqlBoundExpression bound, CancellationToken cancellationToken = default, DateTimeOffset? transactionStart = null)
     {

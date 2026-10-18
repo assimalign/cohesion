@@ -134,7 +134,7 @@ including after partial rows or documents, with no `Complete` after it. The clie
 accumulated results and throws the typed error; the authenticated session remains reusable. Failure
 carries the shared classification
 and the server's structured `Diagnostic` values, including codes and nullable locations. Parser
-diagnostics, planning and evaluation diagnostics (`COHDOC001`–`008`), and offline `COHDBD002`
+diagnostics, planning and evaluation diagnostics (`COHDOC001`–`COHDOC018`), and offline `COHDBD002`
 survive intact. The server reads the database exception carrier and composes `CODE: message`
 once; the client preserves that text without adding a prefix. Located diagnostics retain their
 spans; direct collection APIs retain unlocated diagnostics. An engine failure without structured diagnostics

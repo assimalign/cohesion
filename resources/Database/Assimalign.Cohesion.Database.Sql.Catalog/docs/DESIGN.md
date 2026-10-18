@@ -59,7 +59,7 @@ worker, or hosting lifecycle.
 
 The compiled document is now `cohesion/database-schema/v7` (#1108), matching Sdk.Database.
 Applied-schema records (kind 6) and pending targets (kind 9) both retain the complete versioned
-document, so their field layout does not change. The SQL record-space gate is now 15 (#1123).
+document, so their field layout does not change. The SQL record-space gate is now 20 (#1121).
 SQL checks those document formats before opening
 the data file set and before Apply/Verify compares persisted hashes. A v4 NUMERIC(p) document
 with scale:null is refused through the schema format gate, with the rebuild/recreate remedy;
