@@ -19,21 +19,7 @@ internal sealed partial class SqlPlanner
     }
 
     private bool IsCommonTableOperand(SqlSelectExpression select)
-    {
-        return _commonTableState?.BindingBody is { } body && Contains(body);
-
-        bool Contains(SqlQueryBodyExpression query)
-        {
-            var pending = new Stack<SqlQueryBodyExpression>();
-            pending.Push(query);
-            while (pending.TryPop(out var body))
-            {
-                if (ReferenceEquals(body, select)) { return true; }
-                if (body is SqlSetOperationExpression set) { pending.Push(set.Right); pending.Push(set.Left); }
-            }
-            return false;
-        }
-    }
+        => _commonTableState?.BindingOperands?.Contains(select) == true;
 
     private SqlSetOperationPlan PlanSetOperation(SqlSetOperationExpression set)
     {

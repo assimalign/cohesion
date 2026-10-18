@@ -255,6 +255,8 @@ SqlSetOperationPlan implements SqlRelationPlan, publishing synthesized common-ty
 to subquery, derived, CTE and INSERT-source consumers. Each operand binds through PlanQuery;
 CTE reachability, function validation, deferred-schema admission, aggregate scope discovery
 and EXPLAIN descend through both operands. CTE constant rows extend to top-level set operands.
+Each CTE body collects its direct SELECT operand identities once in a reference-equality set;
+constant-row admission uses membership checks, keeping FROM-less set-chain planning linear.
 Combined ordering binds output names and ordinals directly, without source-expression lookup.
 USING's category/implicit-cast rule is reused, with unknown handling and a set-specific mismatch
 message (COHSQLE003 / 42804). Literal strings retain unknown provenance until the pair

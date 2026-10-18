@@ -51,7 +51,7 @@ internal sealed partial class SqlPlanner
     private SqlPlan PlanCommonTables(IReadOnlyList<SqlCommonTableExpression> definitions, SqlQueryExpression statement)
     {
         var state = _commonTableState!;
-        var previous = (state.Relations, state.Future, state.Dependencies, state.BindingBody, state.BindingUnused);
+        var previous = (state.Relations, state.Future, state.Dependencies, state.BindingOperands, state.BindingUnused);
         state.Relations = previous.Relations is null
             ? new(StringComparer.OrdinalIgnoreCase) : new(previous.Relations, StringComparer.OrdinalIgnoreCase);
         state.Future = new(StringComparer.OrdinalIgnoreCase);
@@ -73,7 +73,7 @@ internal sealed partial class SqlPlanner
             {
                 state.Future.Remove(definition.Name); // Self-reference falls through to the stored relation.
                 state.Dependencies = new(ReferenceEqualityComparer.Instance);
-                state.BindingBody = definition.Body;
+                state.BindingOperands = CollectCommonTableOperands(definition.Body);
                 state.BindingUnused = !state.Referenced.Contains(definition);
                 ValidateFunctionCalls(definition.Body);
                 var query = PlanQuery(definition.Body);
@@ -82,7 +82,7 @@ internal sealed partial class SqlPlanner
                 state.Relations[definition.Name] = relation;
                 ordered.Add(relation);
             }
-            state.BindingBody = null;
+            state.BindingOperands = null;
             state.BindingUnused = previous.BindingUnused;
             state.Dependencies = new(ReferenceEqualityComparer.Instance);
             var input = statement is SqlQueryBodyExpression body ? PlanQueryBody(body) : PlanStatementCore(statement);
@@ -101,8 +101,24 @@ internal sealed partial class SqlPlanner
         }
         finally
         {
-            (state.Relations, state.Future, state.Dependencies, state.BindingBody, state.BindingUnused) = previous;
+            (state.Relations, state.Future, state.Dependencies, state.BindingOperands, state.BindingUnused) = previous;
         }
+    }
+
+    private HashSet<SqlSelectExpression> CollectCommonTableOperands(SqlQueryBodyExpression query)
+    {
+        // Only direct SELECT operands receive the CTE's implicit row. Do not descend
+        // into scalar subqueries or derived tables, which bind their own query scopes.
+        var operands = new HashSet<SqlSelectExpression>(ReferenceEqualityComparer.Instance);
+        var pending = new Stack<SqlQueryBodyExpression>();
+        pending.Push(query);
+        while (pending.TryPop(out var body))
+        {
+            _cancellationToken.ThrowIfCancellationRequested();
+            if (body is SqlSetOperationExpression set) { pending.Push(set.Right); pending.Push(set.Left); }
+            else { operands.Add((SqlSelectExpression)body); }
+        }
+        return operands;
     }
 
     // Stored-only planners retain one nullable reference; WITH alone allocates its scope state.
@@ -114,7 +130,7 @@ internal sealed partial class SqlPlanner
         internal Dictionary<string, SqlDerivedRelation>? Relations { get; set; }
         internal HashSet<string>? Future { get; set; }
         internal HashSet<SqlDerivedRelation>? Dependencies { get; set; }
-        internal SqlQueryBodyExpression? BindingBody { get; set; }
+        internal HashSet<SqlSelectExpression>? BindingOperands { get; set; }
         internal bool BindingUnused { get; set; }
     }
 }

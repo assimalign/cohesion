@@ -13,11 +13,70 @@ using Assimalign.Cohesion.Database.Transactions;
 
 using Shouldly;
 using Xunit;
+using Xunit.Abstractions;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed class SqlSetOperationExecutionTests
 {
+    private readonly ITestOutputHelper _output;
+
+    public SqlSetOperationExecutionTests(ITestOutputHelper output) { _output = output; }
+
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Set chains: stored and FROM-less CTE planning allocations grow near-linearly")]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task Plan_UnionChain_ShouldAllocateNearLinearly(bool commonTable, bool all)
+    {
+        // Arrange
+        await using var engine = CreateEngine();
+        var database = await engine.CreateDatabaseAsync("set-planning");
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecuteAsync(session, "CREATE TABLE t (id INT);");
+        var parser = new SqlQueryParser(new SqlQueryParserOptions
+        {
+            ExpressionNestingLimit = SqlQueryParserOptions.MaximumExpressionNestingLimit,
+        });
+        var small = Parse(1_024);
+        var large = Parse(4_096);
+        Measure(Parse(16), 16);
+
+        // Act
+        long smallBytes = Measure(small, 1_024);
+        long largeBytes = Measure(large, 4_096);
+
+        // Assert: four times the operands allows six times the allocation plus fixed overhead.
+        _output.WriteLine($"Planning 1,024 operands: {smallBytes:N0} bytes; 4,096 operands: {largeBytes:N0} bytes.");
+        largeBytes.ShouldBeLessThan(smallBytes * 6 + 1_000_000);
+
+        SqlQueryStatement Parse(int count)
+        {
+            string sql = string.Join(all ? " UNION ALL " : " UNION ",
+                Enumerable.Repeat(commonTable ? "SELECT 1 AS id" : "SELECT id FROM t", count));
+            if (commonTable) { sql = $"WITH q AS ({sql}) SELECT id FROM q"; }
+            var statement = parser.Parse(sql).ShouldBeOfType<SqlQueryStatement>();
+            statement.Diagnostics.ShouldNotContain(item => item.Severity == DiagnosticSeverity.Error);
+            return statement;
+        }
+
+        long Measure(SqlQueryStatement statement, int count)
+        {
+            long allocated = long.MaxValue;
+            for (int round = 0; round < 3; round++)
+            {
+                long before = GC.GetAllocatedBytesForCurrentThread();
+                var plan = new SqlPlanner(database.Catalog, null, database.Definitions.Functions).Plan(statement.SqlExpression);
+                long sample = GC.GetAllocatedBytesForCurrentThread() - before;
+                allocated = Math.Min(allocated, sample);
+                if (commonTable) { plan = plan.ShouldBeOfType<SqlWithPlan>().Relations.ShouldHaveSingleItem().Query; }
+                plan.ShouldBeOfType<SqlSetOperationPlan>().Operands.Count.ShouldBe(count);
+            }
+            return allocated;
+        }
+    }
+
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Set CHAR common types: an unconstrained typmod preserves membership")]
     [InlineData("UNION", 1)]
     [InlineData("INTERSECT", 1)]
