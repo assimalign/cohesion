@@ -55,10 +55,10 @@ public readonly ref struct SqlArguments
     /// <param name="database">The database whose statement makes the call.</param>
     /// <param name="collation">The collation the call's input compares under.</param>
     /// <param name="cancellationToken">The statement's cancellation token.</param>
-    internal SqlArguments(ReadOnlySpan<SqlValue> values, DatabaseName database, Collation collation, CancellationToken cancellationToken)
+    internal SqlArguments(ReadOnlySpan<SqlValue> values, DatabaseName database, Collation collation, CancellationToken cancellationToken, DateTimeOffset? transactionStart = null)
     {
         _values = values;
-        _context = new SqlFunctionContext(database, collation, cancellationToken);
+        _context = new SqlFunctionContext(database, collation, cancellationToken, transactionStart);
     }
 
     /// <summary>Gets the number of arguments.</summary>

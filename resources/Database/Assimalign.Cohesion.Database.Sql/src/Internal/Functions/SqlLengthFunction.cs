@@ -1,23 +1,22 @@
 using System;
 using System.Globalization;
 using System.Text;
+using System.Threading;
 
 using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 /// <summary>
-/// <c>LENGTH(value)</c>: the number of UTF-16 characters in a value's invariant-culture text, as
-/// BIGINT; CHAR counts Unicode scalars after removing trailing ASCII spaces. It accepts any type,
-/// as it did before typed signatures (owner decision 67).
+/// <c>LENGTH(TEXT)</c>: Unicode scalar count as BIGINT; CHAR loses trailing ASCII spaces.
 /// </summary>
 internal sealed class SqlLengthFunction : SqlScalarFunction
 {
     /// <summary>Initializes the function.</summary>
     internal SqlLengthFunction()
-        : base("LENGTH", [SqlType.Any], SqlType.BigInt, SqlFunctionVolatility.Immutable)
+        : base("LENGTH", [SqlType.Text], SqlType.BigInt, SqlFunctionVolatility.Immutable)
     {
-        Usage = "LENGTH(value)";
+        Usage = "LENGTH(TEXT)";
     }
 
     /// <inheritdoc />
@@ -25,17 +24,21 @@ internal sealed class SqlLengthFunction : SqlScalarFunction
     {
         var value = arguments[0];
         int length = value.Type == DatabaseType.Character
-            ? CountCharacters(value.AsString().TrimEnd(' '))
+            ? CountCharacters(value.AsString().AsSpan().TrimEnd(' '), arguments.Context.CancellationToken)
             : value.Type == DatabaseType.String
-            ? value.AsString().Length
+            ? CountCharacters(value.AsString(), arguments.Context.CancellationToken)
             : Convert.ToString(value.ToObject(), CultureInfo.InvariantCulture)?.Length ?? 0;
         return SqlValue.FromInt64(length);
     }
 
-    private static int CountCharacters(string text)
+    internal static int CountCharacters(ReadOnlySpan<char> text, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         int count = 0;
-        foreach (var rune in text.EnumerateRunes()) { count++; }
+        foreach (var rune in text.EnumerateRunes())
+        {
+            if ((++count & 1023) == 0) { cancellationToken.ThrowIfCancellationRequested(); }
+        }
         return count;
     }
 }

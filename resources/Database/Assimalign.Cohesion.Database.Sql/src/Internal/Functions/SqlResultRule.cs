@@ -10,6 +10,10 @@ internal enum SqlResultRule : byte
     /// <summary>The declared result type, an <see cref="SqlType.AnyElement"/> result taking its arguments' type.</summary>
     Declared,
 
+    /// <summary>A T1 scalar leaf supplies its polymorphic result rule.</summary>
+    Builtin,
+
+
     /// <summary>
     /// <c>ABS</c>: an exact integer argument widens to BIGINT, and any other argument keeps its type,
     /// a non-number included, as before typed signatures (the call itself fails when it runs).

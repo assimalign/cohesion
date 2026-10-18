@@ -292,7 +292,7 @@ internal static class SqlDefinitionBinder
         void Visit(SqlExpression node)
         {
             RuntimeHelpers.EnsureSufficientExecutionStack();
-            if (node is SqlFunctionCallExpression call && !SqlStandardLibrary.IsCoalesce(call.FunctionName))
+            if (node is SqlFunctionCallExpression call && !SqlStandardLibrary.IsEvaluatorForm(call.FunctionName))
             {
                 calls.Add(Key(scope.ResolveFunction(call) ?? throw Refuse($"Unknown function '{call.FunctionName}'.", call.Location)));
             }
@@ -309,7 +309,7 @@ internal static class SqlDefinitionBinder
         void Visit(SqlExpression node)
         {
             RuntimeHelpers.EnsureSufficientExecutionStack();
-            if (node is SqlFunctionCallExpression call && !SqlStandardLibrary.IsCoalesce(call.FunctionName))
+            if (node is SqlFunctionCallExpression call && !SqlStandardLibrary.IsEvaluatorForm(call.FunctionName))
             {
                 if (position == identities.Count || !identities[position].StartsWith("F:" + SqlObjectIdentity.Quote(call.FunctionName.ToUpperInvariant()) + "(", StringComparison.Ordinal))
                 {
@@ -338,7 +338,7 @@ internal static class SqlDefinitionBinder
         void Visit(SqlExpression node)
         {
             RuntimeHelpers.EnsureSufficientExecutionStack();
-            if (node is SqlFunctionCallExpression call && !call.FunctionName.Equals("COALESCE", StringComparison.OrdinalIgnoreCase))
+            if (node is SqlFunctionCallExpression call && !SqlStandardLibrary.IsEvaluatorForm(call.FunctionName))
             {
                 var function = scope.ResolveFunction(call) ?? throw Refuse($"Unknown function '{call.FunctionName}'.", call.Location);
                 if (function.Kind != SqlFunctionKind.Scalar || function.Volatility < volatility)
@@ -370,7 +370,7 @@ internal static class SqlDefinitionBinder
         SqlFunctionVolatility? requiredVolatility = null)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
-        if (expression is SqlFunctionCallExpression call && !call.FunctionName.Equals("COALESCE", StringComparison.OrdinalIgnoreCase))
+        if (expression is SqlFunctionCallExpression call && !SqlStandardLibrary.IsEvaluatorForm(call.FunctionName))
         {
             try
             {

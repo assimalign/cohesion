@@ -101,6 +101,8 @@ internal static class SqlFunctionResolver
             return false;
         }
 
+        if (candidate is SqlBuiltinScalarFunction or SqlAbsFunction) { return true; }
+
         int elements = 0;
         for (int index = 0; index < arguments.Count; index++)
         {
@@ -177,6 +179,7 @@ internal static class SqlFunctionResolver
     /// <returns>The result type; <see cref="DatabaseType.Null"/> when the plan cannot tell.</returns>
     internal static DatabaseType ResultType(SqlFunction function, ReadOnlySpan<DatabaseType> types)
     {
+        if (function is SqlBuiltinScalarFunction builtin) { return builtin.ResultType(types); }
         var returnType = function.ReturnType;
         if (!returnType.IsPseudo)
         {
@@ -382,6 +385,8 @@ internal static class SqlFunctionResolver
     /// </summary>
     private static int Cost(SqlFunction overload, ReadOnlySpan<DatabaseType> types)
     {
+        if (overload is SqlBuiltinScalarFunction builtin && !builtin.AcceptsTypes(types)) { return -1; }
+        if (overload is SqlAbsFunction && types.Length > 0 && types[0] != DatabaseType.Null && !IsNumeric(types[0])) { return -1; }
         int cost = overload.VariadicParameter is null ? 0 : 1;
         var element = DatabaseType.Null;
         for (int index = 0; index < types.Length && HasParameterAt(overload, index); index++)
@@ -459,7 +464,7 @@ internal static class SqlFunctionResolver
     private static bool IsExactInteger(DatabaseType type)
         => type is DatabaseType.Int8 or DatabaseType.Int16 or DatabaseType.Int32 or DatabaseType.Int64;
 
-    private static bool IsNumeric(DatabaseType type)
+    internal static bool IsNumeric(DatabaseType type)
         => IsExactInteger(type) || type is DatabaseType.Float32 or DatabaseType.Float64 or DatabaseType.Decimal;
 
     /// <summary>The call forms of every overload, as a diagnostic lists them: <c>COUNT(*) or COUNT(value)</c>.</summary>

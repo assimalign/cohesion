@@ -202,18 +202,17 @@ public sealed class SqlDefaultAssignmentTests
         (await RowsAsync(session)).ShouldBeEmpty();
     }
 
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - DEFAULT: existing catalog function defaults evaluate for each assigned row")]
-    public async Task ExecuteAsync_StoredFunctionDefault_ShouldEvaluatePerRow()
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - DEFAULT: immutable catalog function defaults resolve for every DEFAULT assignment")]
+    public async Task ExecuteAsync_ImmutableFunctionDefault_ShouldResolveEveryAssignment()
     {
         // Arrange
-        int calls = 0;
         var builder = SqlDatabaseEngine.CreateBuilder("default-tests");
-        builder.Functions.Add(SqlScalarFunction.Create("next_default", (long value) => (long)Interlocked.Increment(ref calls)));
+        builder.Functions.Add(SqlScalarFunction.Create("fixed_default", static (long value) => value + 1, volatility: SqlFunctionVolatility.Immutable));
         await using var engine = await builder.BuildAsync(CancellationToken.None);
         var database = await engine.CreateDatabaseAsync("defaults", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
-        await session.ExecuteAsync("CREATE FUNCTION seed_label() RETURNS TEXT RETURN 'stored'", cancellationToken: CancellationToken.None);
-        await session.ExecuteAsync("CREATE TABLE defaults (id INT DEFAULT 7, label TEXT DEFAULT seed_label(), note BIGINT DEFAULT next_default(0))", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("CREATE FUNCTION seed_label() RETURNS TEXT IMMUTABLE RETURN 'stored'", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE defaults (id INT DEFAULT 7, label TEXT DEFAULT seed_label(), note BIGINT DEFAULT fixed_default(0))", cancellationToken: CancellationToken.None);
 
         // Act
         await session.ExecuteAsync("INSERT INTO defaults VALUES (1, DEFAULT, DEFAULT), (2, DEFAULT, DEFAULT)", cancellationToken: CancellationToken.None);
@@ -221,9 +220,8 @@ public sealed class SqlDefaultAssignmentTests
         await session.ExecuteAsync("UPDATE defaults SET label = DEFAULT, note = DEFAULT", cancellationToken: CancellationToken.None);
 
         // Assert
-        calls.ShouldBe(6);
         (await RowsAsync(session)).Select(row => row[1]).ShouldBe(["stored", "stored", "stored"]);
-        (await RowsAsync(session)).Select(row => (long)row[2]!).Order().ShouldBe([4L, 5L, 6L]);
+        (await RowsAsync(session)).Select(row => (long)row[2]!).ShouldBe([1L, 1L, 1L]);
     }
 
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - DEFAULT: CHECK, UNIQUE and foreign keys validate resolved defaults atomically")]

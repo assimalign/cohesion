@@ -76,6 +76,11 @@ internal static class Program
         "CAST(NULL AS DATETIME2), CAST(NULL AS DATETIMEOFFSET), CAST(NULL AS UNIQUEIDENTIFIER) FROM type_aliases";
     private static readonly object?[][] _typeAliases = [["ab ", "text", 1.5d, null, null, null]];
 
+    private const string t1Scalars = "SELECT REVERSE('A😀b'), SUBSTRING('A😀b' FROM 2 FOR 1), ROUND(2.5), NULLIF(1, 1), " +
+        "EXTRACT(YEAR FROM DATE '2024-03-04'), DATE_TRUNC('month', DATE '2024-03-04'), DATE '2024-03-04' + INTERVAL '1' DAY, " +
+        "CURRENT_TIMESTAMP = NOW(), CURRENT_DATE = CAST(LOCALTIMESTAMP AS DATE), GEN_RANDOM_UUID() <> GEN_RANDOM_UUID() FROM customers WHERE Id = 1";
+    private static readonly object?[][] _t1Scalars = [["b😀A", "😀", 3m, null, 2024m, new DateOnly(2024, 3, 1), new DateTime(2024, 3, 5), true, true, true]];
+
     private const string typedLiterals = "SELECT DATE '2024-01-01', TIME '10:20:30.1234567', " +
         "TIMESTAMP '2024-01-01 10:00:00', TIMESTAMPTZ '2024-01-01 12:00:00+02:00', " +
         "INTERVAL 'P1DT2H', X'00ff', N'héllo' FROM customers WHERE Id = 1";
@@ -218,6 +223,7 @@ internal static class Program
         await session.ExecuteAsync("ALTER TABLE altered_guard ALTER value DROP NOT NULL");
         await session.ExecuteAsync("ALTER TABLE altered_guard ALTER value SET NOT NULL");
         Check("in process: ALTER rename and frozen missing values", await RowsAsync(session, "SELECT value FROM altered_guard ORDER BY id"), [[7], [-9]]);
+        Check("in process: T1 scalars and transaction clock", await RowsAsync(session, t1Scalars), _t1Scalars);
         Check("in process: strict typed literals", await RowsAsync(session, typedLiterals), _typedLiterals);
         Check("in process: ISO type names and SQL Server lexical aliases", await RowsAsync(session, typeAliases), _typeAliases);
         Check("in process: CHAR storage, cast, length, concat, LIKE and seek", await RowsAsync(session, Characters), _characters);
@@ -319,6 +325,7 @@ internal static class Program
         Check("over the wire: correlated UPDATE", await connection.ExecuteAsync("UPDATE subquery_guard SET id = id WHERE EXISTS (SELECT u.id FROM subquery_guard u WHERE u.id = subquery_guard.id)", cancellationToken: timeout.Token), 1L);
         Check("over the wire: correlated DELETE", await connection.ExecuteAsync("DELETE FROM subquery_guard WHERE id IN (SELECT u.id FROM subquery_guard u WHERE u.id = subquery_guard.id)", cancellationToken: timeout.Token), 1L);
         Check("over the wire: ALTER rename and frozen missing values", await RowsAsync(connection, "SELECT value FROM altered_guard ORDER BY id", timeout.Token), [[7], [-9]]);
+        Check("over the wire: T1 scalars and transaction clock", await RowsAsync(connection, t1Scalars, timeout.Token), _t1Scalars);
         Check("over the wire: strict typed literals", await RowsAsync(connection, typedLiterals, timeout.Token), _typedLiterals);
         Check("over the wire: ISO type names and SQL Server lexical aliases", await RowsAsync(connection, typeAliases, timeout.Token), _typeAliases);
         var fixedCodes = await connection.QueryAsync(Characters, cancellationToken: timeout.Token);

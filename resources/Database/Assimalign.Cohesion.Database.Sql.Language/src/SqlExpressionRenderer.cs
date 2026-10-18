@@ -47,7 +47,7 @@ public static class SqlExpressionRenderer
 
     // Words that are not profile keywords or functions but that a parser rule reads by spelling
     // in some position: the LIKE escape clause, IS UNKNOWN, and NULLS FIRST/LAST.
-    private static readonly string[] _positionalWords = ["ESCAPE", "UNKNOWN", "NULLS"];
+    private static readonly string[] _positionalWords = ["ESCAPE", "UNKNOWN", "BOTH", "LEADING", "TRAILING", "NULLS"];
 
     // Builtin window functions. An accepted quoted uppercase or mixed-case spelling is a
     // distinct name: keep it delimited so rendering cannot turn it into an unquoted built-in.
@@ -137,6 +137,11 @@ public static class SqlExpressionRenderer
         SqlLikeExpression like => Operand(like.Operand, additiveLevel) + (like.IsNegated ? " NOT LIKE " : " LIKE ") +
             Operand(like.Pattern, collateLevel),
         SqlCollateExpression collate => Operand(collate.Operand, collateLevel) + " COLLATE " + collate.CollationName,
+        SqlFunctionCallExpression function when SqlUnsupportedVocabulary.IsNiladicFunction(function.FunctionName) && function.Arguments.Count == 0 => function.FunctionName,
+        SqlFunctionCallExpression function when function.FunctionName.Equals("EXTRACT", StringComparison.OrdinalIgnoreCase) && function.Arguments.Count == 2 && function.Arguments[0] is SqlLiteralExpression field
+            => "EXTRACT(" + field.Value + " FROM " + Expression(function.Arguments[1]) + ")",
+        SqlFunctionCallExpression function when function.FunctionName.Equals("POSITION", StringComparison.OrdinalIgnoreCase) && function.Arguments.Count == 2
+            => "POSITION(" + Operand(function.Arguments[0], additiveLevel) + " IN " + Expression(function.Arguments[1]) + ")",
         SqlFunctionCallExpression function => FunctionName(function.FunctionName) + "(" + Arguments(function.Arguments) + ")",
         SqlCaseExpression caseExpression => Case(caseExpression),
         SqlCastExpression cast => "CAST(" + Expression(cast.Operand) + " AS " + CastTarget(cast.TargetType) + ")",

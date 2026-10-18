@@ -54,13 +54,19 @@ public static class SqlLanguageProfile
         // Aggregate
         "COUNT", "SUM", "AVG", "MIN", "MAX",
         // Null handling
-        "COALESCE",
+        "COALESCE", "NULLIF",
         // Type
         "CAST",
         // String
-        "UPPER", "LOWER", "LENGTH",
+        "UPPER", "LOWER", "LENGTH", "CHAR_LENGTH", "CHARACTER_LENGTH",
+        "TRIM", "LTRIM", "RTRIM", "SUBSTRING", "REPLACE", "CONCAT", "CONCAT_WS",
+        "POSITION", "STRPOS", "LEFT", "RIGHT", "LPAD", "RPAD", "REVERSE",
         // Numeric
-        "ABS",
+        "ABS", "ROUND", "FLOOR", "CEILING", "CEIL", "POWER", "SQRT", "MOD", "SIGN", "EXP", "LN", "LOG10",
+        // Temporal
+        "CURRENT_DATE", "CURRENT_TIME", "CURRENT_TIMESTAMP", "LOCALTIME", "LOCALTIMESTAMP", "NOW", "EXTRACT", "DATE_TRUNC",
+        // UUID
+        "GEN_RANDOM_UUID",
     ];
 
     private static readonly string[] _clauses =

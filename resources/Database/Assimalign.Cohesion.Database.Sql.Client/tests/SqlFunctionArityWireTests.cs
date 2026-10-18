@@ -25,19 +25,19 @@ public sealed class SqlFunctionArityWireTests
     [InlineData("SELECT ABS(1, 2), UPPER(), COALESCE() FROM empty_rows",
         "COHSQLE006: Function 'ABS' takes exactly 1 argument but was called with 2. Accepted: ABS(numeric).")]
     [InlineData("SELECT id FROM users WHERE UPPER() IS NULL",
-        "COHSQLE006: Function 'UPPER' takes exactly 1 argument but was called with none. Accepted: UPPER(value).")]
+        "COHSQLE006: Function 'UPPER' takes exactly 1 argument but was called with none. Accepted: UPPER(TEXT).")]
     [InlineData("UPDATE users SET score = COALESCE()",
         "COHSQLE006: Function 'COALESCE' takes 1 or more arguments but was called with none. Accepted: COALESCE(value [, value ...]).")]
     [InlineData("UPDATE empty_rows SET id = SUM()",
         "COHSQLE006: Function 'SUM' takes exactly 1 argument but was called with none. Accepted: SUM(numeric).")]
     [InlineData("INSERT INTO users (id, name, score) VALUES (3, LOWER('A', 'B'), 1)",
-        "COHSQLE006: Function 'LOWER' takes exactly 1 argument but was called with 2. Accepted: LOWER(value).")]
+        "COHSQLE006: Function 'LOWER' takes exactly 1 argument but was called with 2. Accepted: LOWER(TEXT).")]
     [InlineData("SELECT COUNT(id, name) FROM users",
         "COHSQLE006: Function 'COUNT' takes exactly 1 argument or '*' but was called with 2. Accepted: COUNT(*) or COUNT(value).")]
     [InlineData("CREATE TABLE ck1 (c INT CHECK (ABS(c, 1) > 0))",
         "COHSQLE006: Function 'ABS' takes exactly 1 argument but was called with 2. Accepted: ABS(numeric).")]
     [InlineData("ALTER TABLE users ADD CONSTRAINT ck CHECK (LENGTH(name, 1) > 0)",
-        "COHSQLE006: Function 'LENGTH' takes exactly 1 argument but was called with 2. Accepted: LENGTH(value).")]
+        "COHSQLE006: Function 'LENGTH' takes exactly 1 argument but was called with 2. Accepted: LENGTH(TEXT).")]
     public async Task ExecuteAsync_WrongArity_ShouldFailWithCodeAndKeepTheConnection(string statement, string message)
     {
         // Arrange

@@ -561,7 +561,7 @@ internal sealed partial class SqlExpressionEvaluator
         }
 
         collation = CollationOf(conditional, results);
-        return new SqlBoundCase(input, whens, elseResult);
+        return new SqlBoundCase(input, whens, elseResult, StaticTypeOf(conditional));
     }
 
     /// <summary>
@@ -578,13 +578,25 @@ internal sealed partial class SqlExpressionEvaluator
     [MethodImpl(MethodImplOptions.NoInlining)]
     private SqlBoundExpression BindCall(SqlFunctionCallExpression call, out SqlCollationCandidate collation)
     {
+        if (SqlStandardLibrary.IsEvaluatorForm(call.FunctionName) && !SqlStandardLibrary.IsCoalesce(call.FunctionName))
+        {
+            ValidateEvaluatorForm(call);
+            var operands = BindArguments(call.Arguments, out var specialCollation);
+            collation = CollationOf(call, ChildCollations(call));
+            // NULLIF uses equality's CHAR identity for untyped text, while returning the
+            // original first value. PostgreSQL: src/backend/parser/parse_expr.c:1083.
+            bool nullIf = call.FunctionName.Equals("NULLIF", StringComparison.OrdinalIgnoreCase);
+            bool firstCharacter = nullIf && !ReferenceEquals(operands[0], BindCharacterComparand(call.Arguments[0], operands[0], call.Arguments[1]));
+            bool secondCharacter = nullIf && !ReferenceEquals(operands[1], BindCharacterComparand(call.Arguments[1], operands[1], call.Arguments[0]));
+            return new SqlBoundSpecialForm(call.FunctionName.ToUpperInvariant(), operands, specialCollation, firstCharacter, secondCharacter);
+        }
         bool coalesce = SqlStandardLibrary.IsCoalesce(call.FunctionName);
         SqlFunction? function = null;
         try
         {
             if (coalesce)
             {
-                CheckCoalesce(call);
+                CheckEvaluatorForm(call);
             }
             else
             {
@@ -623,7 +635,7 @@ internal sealed partial class SqlExpressionEvaluator
                     arguments[index] = CharacterToText(call.Arguments[index], arguments[index]);
                 }
             }
-            return new SqlBoundCoalesce(arguments);
+            return new SqlBoundCoalesce(arguments, StaticCallType(call));
         }
 
         var scalar = (SqlScalarFunction)function!;
@@ -631,7 +643,7 @@ internal sealed partial class SqlExpressionEvaluator
         var callCollation = SqlBoundCollation.Of(collation, default, _defaultCollation);
         BindParameterCoercions(scalar, arguments, callCollation);
         var bound = new SqlBoundCall(scalar, arguments, SqlFunctionResolver.CoercionTargets(scalar, arguments.Length),
-            callCollation, _functions.Database, _cancellationToken);
+            callCollation, _functions.Database, _cancellationToken, _functions.TransactionStart);
         return scalar.Volatility == SqlFunctionVolatility.Immutable && fixedArguments ? Fold(bound) : bound;
     }
 

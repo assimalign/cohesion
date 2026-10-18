@@ -258,7 +258,7 @@ including unused constant bodies, reject aggregates in WHERE during planning
 (COHSQLE017; PostgreSQL src/backend/parser/parse_agg.c:407).
 No interface, project reference or internal grant is added.
 
-Data-storage format 16 is retained because the new SEARCH and MATERIALIZED
+Data-storage format 16 was introduced because the new SEARCH and MATERIALIZED
 vocabulary entries change canonical persisted identifier text: a CHECK previously
 stored as `search >= 0` now stores `"search" >= 0`. DEFAULT expressions and SQL
 function bodies use the same renderer. SqlSchemaProvisioner compares persisted
@@ -632,6 +632,65 @@ earlier campaign did; bytes per row are deterministic and lower in every case. M
 row's cost is the scan and materialization around the expressions, which E1 does not
 change.
 
+## T1 scalar execution and transaction clocks (#1120)
+
+The existing reflection-free function catalog now executes the complete 42-name T1
+scalar surface. Stateless SqlScalarFunction leaves carry arity, parameter, result,
+NULL and volatility metadata. Numeric/temporal pseudo-type rules live on the leaf
+and are read by the same resolver for planning and output typing. NULLIF and EXTRACT
+join COALESCE/CASE/CAST as evaluator forms (decision 66); the parser normalizes
+SUBSTRING/TRIM/POSITION onto calls. Immutable calls fold and persisted CHECKs retain
+resolved identities. Format 18 quotes newly executable function names and
+BOTH/LEADING/TRAILING in persisted CHECK, DEFAULT and function-body text (for
+example, `sign >= 0` becomes `"sign" >= 0`). SqlT1StorageFormatTests demonstrates
+format-16 canonical CHECK drift and its open refusal. No upgrade reader exists.
+
+Definition dependency/volatility walks and correlated preparation descend through
+every evaluator form. NULLIF applies equality's CHAR comparand normalization while
+preserving its first value (PostgreSQL `src/backend/parser/parse_expr.c:1083`).
+Temporal CHECK arithmetic and calendar comparison share the planner's type rules;
+unsupported temporal operators are refused before execution, including alternatives
+inside CASE/COALESCE, and guarded again at runtime. TIMESTAMPTZ arithmetic checks
+the UTC range and retains the written offset only when its local clock is representable.
+Constant EXTRACT/DATE_TRUNC fields are validated during planning for every operand
+type. INTERVAL field extraction retains normalized TimeSpan components, a documented
+PostgreSQL departure. Integer arithmetic with NULL retains BIGINT metadata.
+Until #1121, CREATE/ALTER TABLE planning refuses Stable/Volatile DEFAULT calls with
+COHDBL001 before any schema mutation, including calls nested under evaluator forms.
+ADD COLUMN retains its literal-only rule, but Stable/Volatile calls receive this same
+named refusal before its general nonliteral-DEFAULT rejection.
+
+String-producing scalars cap output and Unicode work buffers at 1,048,576 UTF-16 units.
+UPPER/LOWER apply the same bound; LENGTH/CHAR_LENGTH count without allocating a rune
+buffer. CONCAT checks binary-to-hex expansion before formatting as well as joined length.
+LPAD/RPAD bound two units per requested scalar; REPLACE counts nonoverlapping matches
+and bounds the expanded length before allocating. CONCAT/CONCAT_WS bound the joined
+length, and slicing/trimming/reversal bound their input work buffers. Long loops
+observe cancellation. Allocation failures are translated to COHSQLE002. PostgreSQL's
+equivalent preallocation check is `src/backend/utils/adt/oracle_compat.c:199-206`.
+
+SqlDatabaseSession captures one UTC instant from EngineOptions.TimeProvider at
+explicit transaction start, or when beginning an automatic statement transaction.
+SqlDatabaseTransaction retains it; SqlStatementContext carries it to planning.
+The statement's SqlFunctionEnvironment and bound calls retain the same instant
+for seek-bound evaluation and row execution. An internal SqlFunctionContext field
+passes it through SQL function bodies, whose shared bound trees take the invoking
+statement's clock, never their bind time. Correlated children inherit the statement
+environment. This capture/carrier/reader shape is the reuse point for #1121, #1137
+and #1148. The existing TimeProvider seam remains internal (decision 42); no public
+clock option, interface, reference or visibility grant is added.
+
+The environment keeps one immutable clock environment for reuse by statements with
+the same transaction instant. A competing transaction can replace the cache entry;
+retained environments keep their own clocks. Execution scopes use that environment
+without adding a clock field to every evaluator, preserving the stored-query allocation budget.
+
+Temporal operators share static validation and runtime dispatch, and DATE midnight
+joins the existing TIMESTAMP/TIMESTAMPTZ UTC equality and hashing classes. Calendar
+CASE/COALESCE results promote to their common temporal type. Numeric and temporal
+range/domain failures preserve the #1069 execution codes. DIALECT.md owns signatures,
+Unicode scalar semantics, temporal normalization and the recorded PG deviations.
+
 ## Functions (E2)
 
 The engine's functions are one public family, and the built-ins are leaves of it: an
@@ -709,8 +768,7 @@ flowchart LR
   constructor, `SqlType.AnyNumeric` is public, and `SqlValue.Compare` is the engine's value
   order `MIN` and `MAX` use. Only the standard library's diagnostic call forms
   (`ABS(numeric)`) and `ABS`'s static result rule stay internal init-only members of the
-  base, because they exist only while decision 67 keeps the built-ins permissive, and go when
-  they are tightened. The typed shorthands are static; their leaves override non-generic
+  base; #1120 tightens the text signatures and retains numeric polymorphic result rules. The typed shorthands are static; their leaves override non-generic
   cores, so no generic virtual method exists. The four abstract bases carry the deviation
   marker. `SqlType`, the collections and the catalog are sealed; no interface is added.
   `SqlFunctionVolatility.Volatile` is the enum's zero value, so `default` is the safe
@@ -739,13 +797,11 @@ flowchart LR
   (`ArgumentException`) a name that is not an identifier, a special form, a keyword, a type
   name (`INT`, `DATE`), a quantifier or date-time value word (`ANY`, `SOME`,
   `LOCALTIMESTAMP`), or a name the dialect reserves for a built-in that does not execute
-  yet (`TRIM`, `NOW`, `ROUND`, ...), which would fail the application's build the day the
+  yet (`RANK`, `LEAD`, `NTILE`, ...), which would fail the application's build the day the
   engine ships it; and (`InvalidOperationException`) a name and parameter-type list already
   registered, a built-in's included; an overload of a standard-library name that takes a
   number of arguments the built-in takes (decision 62: a built-in's parameters are
-  pseudo-types, so `upper(TEXT)` would outrank `UPPER(ANYELEMENT)` for text and replace it,
-  in stored CHECKs too, and `length(ANYELEMENT)` would tie with `LENGTH(ANY)` and make every
-  call ambiguous), while an overload of another arity, `upper(TEXT, BIGINT)`, is allowed;
+  concrete text or numeric pseudo-types, so an application must not shadow a built-in, in stored CHECKs too). The new T1 names are reserved at every arity; the original UPPER/LOWER/LENGTH/ABS names still permit disjoint arities, such as `upper(TEXT, BIGINT)`;
   a scalar and an aggregate under one name, which keeps aggregate recognition a name lookup;
   and any call once the build began. Parameter types
   compare by storage type, as PostgreSQL ignores type modifiers in a signature. Build
@@ -977,18 +1033,16 @@ stateDiagram-v2
     Refused --> [*]: the open fails, as damage or as the #1189 COALESCE arity case
 ```
 
-| Built-in | Leaf | Parameters → result | Kept behavior (decision 67) |
+| Built-in | Leaf | Parameters → result | Behavior (#1120) |
 |---|---|---|---|
-| `UPPER`, `LOWER` | `SqlUpperFunction`, `SqlLowerFunction` | `ANYELEMENT` → `ANYELEMENT` | a non-string passes through |
-| `LENGTH` | `SqlLengthFunction` | `ANY` → `BIGINT` | length of the value's invariant text |
-| `ABS` | `SqlAbsFunction` | `ANYELEMENT` → integers `BIGINT`, else the argument's type | a non-number fails when evaluated; the BIGINT minimum is `COHSQLE002` |
+| `UPPER`, `LOWER` | `SqlUpperFunction`, `SqlLowerFunction` | `TEXT` → `TEXT` | non-text inputs fail planning |
+| `LENGTH` | `SqlLengthFunction` | `TEXT` → `BIGINT` | Unicode scalar length |
+| `ABS` | `SqlAbsFunction` | `ANYELEMENT` → integers `BIGINT`, else the argument's type | a non-number fails planning; the BIGINT minimum is `COHSQLE002` |
 | `COUNT` | `SqlCountFunction` ×2 | `()` called as `COUNT(*)`, and `ANY`, → `BIGINT` | never NULL; 0 for an empty group |
 | `SUM`, `AVG` | `SqlSumFunction` | numeric → `NUMERIC` | decimal accumulation; overflow is `COHSQLE002` |
 | `MIN`, `MAX` | `SqlExtremumFunction` | `ANYELEMENT` → `ANYELEMENT` | compares under the context's collation |
 
-**Behavior that moved.** The static type of `UPPER` and `LOWER` follows their argument, so
-`-UPPER(5)` evaluates (to `-5`) where it used to fail planning with `COHSQLE003`, and DDL
-accepts `CHECK (-UPPER(n) < 0)` over a number for the same reason; `SUM` and `AVG` over a
+**Behavior that moved.** #1120 makes UPPER/LOWER text-only with TEXT results; numeric inputs fail planning with COHSQLE006. The other T1 leaves and special forms are documented in DIALECT.md. `SUM` and `AVG` over a
 non-numeric argument fail planning with `COHSQLE006` (`Accepted: SUM(numeric)`) instead of
 an uncoded message, a `char` parameter included, even over an empty table where they used
 to return NULL; `DISTINCT`, `ALL` and `ORDER BY` inside any call report `COHDBL001` at
@@ -1420,7 +1474,7 @@ rebuild/recreate remedy. SQL checks applied markers and pending targets before o
 file set, and checks a replacement document before Apply/Verify compares hashes or plans work.
 The gate reads only the format; it never validates a pre-normalization hash or reconciles an old
 identity. Both catalog records retain a versioned document. Record-space format 12
-introduced Character identity and its trimmed index keys; format 16 gates canonical
+introduced Character identity and its trimmed index keys; format 18 gates canonical
 identifier quoting, without changing these document envelopes.
 
 FLOAT(p) selects Float32 for 1..24 bits and Float64 for 25..53 bits; bare FLOAT stays Float64.
@@ -2361,7 +2415,7 @@ PostgreSQL references: tablecmds.c:3903-4062 (column identity), :4329-4385 (rela
   format, no upgrade path.** The catalog stores the format version of the whole
   data file set, rows and the index trees that ride it (a kind-4 record for
   versions 1–3, a kind-8 record from version 4). The engine reads and writes
-  format 17 only: format 6's stamped rows in per-object page chains whose index keys use the
+  format 18 only: format 6's stamped rows in per-object page chains whose index keys use the
   temporal identity encoding (#1099, below), in index trees of B-tree page format
   2, which order entries by key, entry reference and writer (#1194,
   `Database.Indexing` DESIGN), decoded through each table's physical column
@@ -3609,6 +3663,10 @@ TLS/transport policy — transport configuration stays in `libraries/Connections
 drivers, while the server owns bind-through-release lifecycle.
 
 ## SQL transaction control and the B7 seam
+
+The transaction also owns the #1120 start instant, captured once at BEGIN/API start.
+Every statement context borrows it until commit or rollback; auto-commit captures
+one per statement. The internal TimeProvider is the existing engine test seam.
 
 `START TRANSACTION`, `BEGIN [WORK|TRANSACTION]`, `COMMIT [WORK|TRANSACTION]`,
 `END`, and `ROLLBACK [WORK|TRANSACTION]` are ordinary SQL requests over the
@@ -4981,8 +5039,9 @@ PostgreSQL src/backend/utils/fmgr/fmgr.c:253 (fmgr_sql), commands/functioncmds.c
 
 One immutable per-database environment merges native and SQL definitions, rebuilt topologically
 on open and definition DDL. Namespace collisions, recursive dependencies and declarations weaker
-than their called functions are refused before publication. SQL defaults are volatile and called
-on NULL, while native shorthand keeps its strict default. SQL domain columns use E3's existing
+than their called functions are refused before publication. SQL functions default to Volatile
+and CALLED ON NULL INPUT, while native shorthand keeps its strict default. Until #1121,
+column DEFAULT calls must be explicitly Immutable; Stable/Volatile calls are refused during DDL. SQL domain columns use E3's existing
 bounds and check path. Function metadata preserves domain names for parameters and results.
 SQL functions accept the parser's delimited names; native registrations retain their identifier
 name rule. Both paths retain the same reserved-name and overload admission checks.

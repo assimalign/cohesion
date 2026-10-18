@@ -1,3 +1,5 @@
+using Assimalign.Cohesion.Database.Types;
+
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 /// <summary>
@@ -9,11 +11,14 @@ internal sealed class SqlBoundCoalesce : SqlBoundExpression
 {
     /// <summary>Initializes a bound <c>COALESCE</c>.</summary>
     /// <param name="arguments">The bound arguments, at least one.</param>
-    internal SqlBoundCoalesce(SqlBoundExpression[] arguments)
+    internal SqlBoundCoalesce(SqlBoundExpression[] arguments, DatabaseType resultType = DatabaseType.Null)
         : base(SqlBoundExpressionKind.Coalesce)
     {
+        ResultType = resultType;
         Arguments = arguments;
     }
+
+    internal DatabaseType ResultType { get; }
 
     /// <summary>Gets the bound arguments, in order.</summary>
     internal SqlBoundExpression[] Arguments { get; }

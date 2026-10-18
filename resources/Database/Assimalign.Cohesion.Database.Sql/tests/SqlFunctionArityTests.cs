@@ -127,11 +127,11 @@ public sealed class SqlFunctionArityTests : IDisposable
     /// <param name="message">The complete message.</param>
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Functions: the wrong-arity error names the function, its accepted counts and its call forms")]
     [InlineData("SELECT ABS(1, 2) FROM t;", "COHSQLE006: Function 'ABS' takes exactly 1 argument but was called with 2. Accepted: ABS(numeric).")]
-    [InlineData("SELECT upper() FROM t;", "COHSQLE006: Function 'upper' takes exactly 1 argument but was called with none. Accepted: UPPER(value).")]
+    [InlineData("SELECT upper() FROM t;", "COHSQLE006: Function 'upper' takes exactly 1 argument but was called with none. Accepted: UPPER(TEXT).")]
     [InlineData("SELECT COALESCE() FROM t;", "COHSQLE006: Function 'COALESCE' takes 1 or more arguments but was called with none. Accepted: COALESCE(value [, value ...]).")]
     [InlineData("SELECT COUNT(id, age) FROM t;", "COHSQLE006: Function 'COUNT' takes exactly 1 argument or '*' but was called with 2. Accepted: COUNT(*) or COUNT(value).")]
     [InlineData("SELECT SUM(*) FROM t;", "COHSQLE006: Function 'SUM' takes exactly 1 argument but was called with '*'. Accepted: SUM(numeric).")]
-    [InlineData("SELECT LENGTH(*) FROM t;", "COHSQLE006: Function 'LENGTH' takes exactly 1 argument but was called with '*'. Accepted: LENGTH(value).")]
+    [InlineData("SELECT LENGTH(*) FROM t;", "COHSQLE006: Function 'LENGTH' takes exactly 1 argument but was called with '*'. Accepted: LENGTH(TEXT).")]
     // '*' among other arguments is counted with them, not reported as if it were the only one.
     [InlineData("SELECT COUNT(id, *) FROM t;", "COHSQLE006: Function 'COUNT' takes exactly 1 argument or '*' but was called with 2 arguments including '*'. Accepted: COUNT(*) or COUNT(value).")]
     [InlineData("SELECT COALESCE(age, *) FROM t;", "COHSQLE006: Function 'COALESCE' takes 1 or more arguments but was called with 2 arguments including '*'. Accepted: COALESCE(value [, value ...]).")]
@@ -251,7 +251,7 @@ public sealed class SqlFunctionArityTests : IDisposable
 
         // Assert
         functions.Select(function => function.Name).Distinct().ShouldBe(
-            ["UPPER", "LOWER", "LENGTH", "ABS", "COUNT", "SUM", "AVG", "MIN", "MAX"], ignoreOrder: true);
+            declared.Except(SqlStandardLibrary.SpecialForms, StringComparer.OrdinalIgnoreCase), ignoreOrder: true);
         functions.Distinct().Count().ShouldBe(functions.Length);
         SqlFunctionCatalog.Standard.GetOverloads("COALESCE").ShouldBeEmpty();
         foreach (var function in functions)
@@ -261,8 +261,11 @@ public sealed class SqlFunctionArityTests : IDisposable
             function.Usage.ShouldStartWith($"{function.Name}(", Case.Sensitive);
             if (function.Kind == SqlFunctionKind.Scalar)
             {
-                string arguments = string.Join(", ", Enumerable.Repeat("-1", function.Parameters.Count));
-                Should.NotThrow(() => evaluator.Evaluate(ParseProjection($"{function.Name}({arguments})"), []), $"{function.Name}/{function.Parameters.Count}");
+                var values = function.Parameters.Select((parameter, index) => SqlValue.FromObject(
+                    function.Name == "DATE_TRUNC" ? index == 0 ? (object)"day" : new DateOnly(2024, 1, 1) :
+                    parameter == SqlType.Text ? (object)"x" : 2L)).ToArray();
+                Should.NotThrow(() => ((SqlScalarFunction)function).Invoke(new SqlArguments(values,
+                    new SqlFunctionContext(default, null, CancellationToken.None, SqlT1ScalarTests.Instant))), $"{function.Name}/{function.Parameters.Count}");
             }
         }
         foreach (int count in new[] { 1, 2 })

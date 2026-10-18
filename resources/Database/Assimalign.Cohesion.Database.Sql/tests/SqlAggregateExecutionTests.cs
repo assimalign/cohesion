@@ -583,9 +583,9 @@ public sealed class SqlAggregateExecutionTests
         (await ReadRowsAsync(result)).ShouldHaveSingleItem().ShouldBe(new object?[] { -2L, 12L });
     }
 
-    /// <summary>Existing scalar UPPER/LOWER behavior passes non-string arguments through without changing their aggregate type.</summary>
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Aggregates: scalar numeric passthrough retains extrema value types")]
-    public async Task Aggregates_NumericStringFunctionOperand_ShouldMatchScalarRuntimeType()
+    /// <summary>T1 string signatures reject numeric inputs even inside aggregate arguments.</summary>
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Aggregates: scalar string functions reject numeric aggregate inputs")]
+    public async Task Aggregates_NumericStringFunctionOperand_ShouldRejectSignature()
     {
         // Arrange
         await using var engine = CreateEngine();
@@ -593,13 +593,9 @@ public sealed class SqlAggregateExecutionTests
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await SeedAsync(session);
 
-        // Act
-        await using var result = (await ExecuteAsync(session, "SELECT MIN(UPPER(amount)), MAX(LOWER(amount)) FROM metrics;"))
-            .ShouldBeAssignableTo<DatabaseResultSet>();
-
-        // Assert
-        result.Columns.Select(column => column.Type).ShouldBe([DatabaseType.Int32, DatabaseType.Int32]);
-        (await ReadRowsAsync(result)).ShouldHaveSingleItem().ShouldBe(new object?[] { -3, 11 });
+        // Act / Assert
+        var failure = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "SELECT MIN(UPPER(amount)), MAX(LOWER(amount)) FROM metrics;"));
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE006");
     }
 
     /// <summary>Alternative scalar branches with incompatible types fail before an empty input can conceal the mismatch.</summary>

@@ -147,27 +147,27 @@ public sealed class SqlKeywordDispositionTests
         ["COMMIT"] = Parses("COMMIT"),
         ["ROLLBACK"] = Parses("ROLLBACK"),
         ["TRANSACTION"] = Parses("BEGIN TRANSACTION"),
-        // Recognized unsupported function calls
-        ["NULLIF"] = Rejects("SELECT NULLIF() FROM t", "NULLIF"),
-        ["TRIM"] = Rejects("SELECT TRIM() FROM t", "TRIM"),
-        ["LTRIM"] = Rejects("SELECT LTRIM() FROM t", "LTRIM"),
-        ["RTRIM"] = Rejects("SELECT RTRIM() FROM t", "RTRIM"),
-        ["SUBSTRING"] = Rejects("SELECT SUBSTRING() FROM t", "SUBSTRING"),
-        ["REPLACE"] = Rejects("SELECT REPLACE() FROM t", "REPLACE"),
-        ["CONCAT"] = Rejects("SELECT CONCAT() FROM t", "CONCAT"),
-        ["CEILING"] = Rejects("SELECT CEILING() FROM t", "CEILING"),
-        ["FLOOR"] = Rejects("SELECT FLOOR() FROM t", "FLOOR"),
-        ["ROUND"] = Rejects("SELECT ROUND() FROM t", "ROUND"),
-        ["POWER"] = Rejects("SELECT POWER() FROM t", "POWER"),
-        ["SQRT"] = Rejects("SELECT SQRT() FROM t", "SQRT"),
-        ["MOD"] = Rejects("SELECT MOD() FROM t", "MOD"),
-        ["NOW"] = Rejects("SELECT NOW() FROM t", "NOW"),
-        ["CURRENT_DATE"] = Rejects("SELECT CURRENT_DATE() FROM t", "CURRENT_DATE"),
-        ["CURRENT_TIME"] = Rejects("SELECT CURRENT_TIME() FROM t", "CURRENT_TIME"),
-        ["CURRENT_TIMESTAMP"] = Rejects("SELECT CURRENT_TIMESTAMP() FROM t", "CURRENT_TIMESTAMP"),
-        ["LOCALTIME"] = Rejects("SELECT LOCALTIME() FROM t", "LOCALTIME"),
-        ["LOCALTIMESTAMP"] = Rejects("SELECT LOCALTIMESTAMP() FROM t", "LOCALTIMESTAMP"),
-        ["EXTRACT"] = Rejects("SELECT EXTRACT() FROM t", "EXTRACT"),
+        // T1 scalar forms, followed by recognized unsupported window calls
+        ["NULLIF"] = Parses("SELECT NULLIF(a, a) FROM t"),
+        ["TRIM"] = Parses("SELECT TRIM(a) FROM t"),
+        ["LTRIM"] = Parses("SELECT LTRIM(a) FROM t"),
+        ["RTRIM"] = Parses("SELECT RTRIM(a) FROM t"),
+        ["SUBSTRING"] = Parses("SELECT SUBSTRING(a FROM 1) FROM t"),
+        ["REPLACE"] = Parses("SELECT REPLACE(a, 'x', 'y') FROM t"),
+        ["CONCAT"] = Parses("SELECT CONCAT(a) FROM t"),
+        ["CEILING"] = Parses("SELECT CEILING(a) FROM t"),
+        ["FLOOR"] = Parses("SELECT FLOOR(a) FROM t"),
+        ["ROUND"] = Parses("SELECT ROUND(a) FROM t"),
+        ["POWER"] = Parses("SELECT POWER(a, 2) FROM t"),
+        ["SQRT"] = Parses("SELECT SQRT(a) FROM t"),
+        ["MOD"] = Parses("SELECT MOD(a, 2) FROM t"),
+        ["NOW"] = Parses("SELECT NOW() FROM t"),
+        ["CURRENT_DATE"] = Parses("SELECT CURRENT_DATE FROM t"),
+        ["CURRENT_TIME"] = Parses("SELECT CURRENT_TIME FROM t"),
+        ["CURRENT_TIMESTAMP"] = Parses("SELECT CURRENT_TIMESTAMP FROM t"),
+        ["LOCALTIME"] = Parses("SELECT LOCALTIME FROM t"),
+        ["LOCALTIMESTAMP"] = Parses("SELECT LOCALTIMESTAMP FROM t"),
+        ["EXTRACT"] = Parses("SELECT EXTRACT(YEAR FROM a) FROM t"),
         ["ROW_NUMBER"] = Rejects("SELECT ROW_NUMBER() FROM t", "ROW_NUMBER"),
         ["RANK"] = Rejects("SELECT RANK() FROM t", "RANK"),
         ["DENSE_RANK"] = Rejects("SELECT DENSE_RANK() FROM t", "DENSE_RANK"),
@@ -263,6 +263,7 @@ public sealed class SqlKeywordDispositionTests
     private static string[] Words()
         => SqlLanguageProfile.Instance.Keywords.ToArray()
             .Concat(SqlUnsupportedVocabulary.Words.Select(word => word.Spelling))
+            .Concat(new[] { "CEILING", "CONCAT", "CURRENT_DATE", "CURRENT_TIME", "CURRENT_TIMESTAMP", "EXTRACT", "FLOOR", "LOCALTIME", "LOCALTIMESTAMP", "LTRIM", "MOD", "NOW", "NULLIF", "POWER", "REPLACE", "ROUND", "RTRIM", "SQRT", "SUBSTRING", "TRIM" })
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
 

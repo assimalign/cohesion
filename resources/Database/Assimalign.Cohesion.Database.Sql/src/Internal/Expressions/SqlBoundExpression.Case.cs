@@ -1,3 +1,5 @@
+using Assimalign.Cohesion.Database.Types;
+
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 /// <summary>
@@ -11,13 +13,16 @@ internal sealed class SqlBoundCase : SqlBoundExpression
     /// <param name="input">The bound input of a simple <c>CASE</c>, or null for a searched one.</param>
     /// <param name="whens">The bound <c>WHEN</c> clauses, in order.</param>
     /// <param name="elseResult">The bound <c>ELSE</c> result, or null when there is none.</param>
-    internal SqlBoundCase(SqlBoundExpression? input, SqlBoundWhen[] whens, SqlBoundExpression? elseResult)
+    internal SqlBoundCase(SqlBoundExpression? input, SqlBoundWhen[] whens, SqlBoundExpression? elseResult, DatabaseType resultType = DatabaseType.Null)
         : base(SqlBoundExpressionKind.Case)
     {
+        ResultType = resultType;
         Input = input;
         Whens = whens;
         ElseResult = elseResult;
     }
+
+    internal DatabaseType ResultType { get; }
 
     /// <summary>Gets the bound input of a simple <c>CASE</c>, or null for a searched one.</summary>
     internal SqlBoundExpression? Input { get; }

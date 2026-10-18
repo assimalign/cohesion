@@ -241,9 +241,9 @@ internal static class SqlPersistedExpression
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static void ResolveCall(SqlFunctionCallExpression call, SqlExpressionEvaluator evaluator)
     {
-        if (SqlStandardLibrary.IsCoalesce(call.FunctionName))
+        if (SqlStandardLibrary.IsEvaluatorForm(call.FunctionName))
         {
-            SqlExpressionEvaluator.CheckCoalesce(call);
+            SqlExpressionEvaluator.CheckEvaluatorForm(call);
         }
         else
         {

@@ -6,10 +6,10 @@ namespace Assimalign.Cohesion.Database.Sql.Language.Tests;
 public sealed class QuotedFunctionDiagnosticTests
 {
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Quoted functions: lowercase unsupported names fail during parsing")]
-    [InlineData("sqrt")]
-    [InlineData("nullif")]
+    [InlineData("lead")]
+    [InlineData("lag")]
     [InlineData("rank")]
-    [InlineData("current_date")]
+    [InlineData("ntile")]
     public void Parse_QuotedUnsupportedCall_ShouldCarryLocatedDiagnostic(string name)
     {
         // Arrange

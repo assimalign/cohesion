@@ -8,9 +8,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// <summary>
 /// <c>ABS(numeric)</c>: a number's magnitude. Exact integers widen to BIGINT before the magnitude is
 /// taken (so INTEGER's minimum is representable); approximate and decimal values keep their type.
-/// A non-number is refused only when the call runs, as before typed signatures (owner decision 67),
-/// so the parameter is <see cref="SqlType.AnyElement"/> and the planner types the result by
-/// <see cref="SqlResultRule.NumericElement"/>.
+/// Non-numeric arguments fail signature validation before row access (#1120).
 /// </summary>
 internal sealed class SqlAbsFunction : SqlScalarFunction
 {

@@ -56,9 +56,10 @@ public sealed class SqlDatabaseTransaction : DatabaseTransaction
     private readonly SqlDatabase _database;
     private readonly SqlCatalogSnapshot? _catalogSnapshot;
 
-    internal SqlDatabaseTransaction(TransactionCoordinator coordinator, TransactionContext context, SqlDatabase database, SqlCatalogSnapshot? catalogSnapshot)
+    internal SqlDatabaseTransaction(TransactionCoordinator coordinator, TransactionContext context, SqlDatabase database, SqlCatalogSnapshot? catalogSnapshot, DateTimeOffset? transactionStart = null)
         : base(context.Id, context.IsolationLevel)
     {
+        TransactionStart = transactionStart ?? DateTimeOffset.UtcNow;
         _coordinator = coordinator;
         _context = context;
         _database = database;
@@ -72,6 +73,8 @@ public sealed class SqlDatabaseTransaction : DatabaseTransaction
     /// <see cref="IsolationLevel.Snapshot"/>).
     /// </summary>
     internal TransactionContext Context => _context;
+
+    internal DateTimeOffset TransactionStart { get; }
 
     /// <summary>
     /// Gets the catalog capture a <see cref="IsolationLevel.Snapshot"/> transaction took at BEGIN,

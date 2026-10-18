@@ -1,3 +1,4 @@
+using System;
 using System.Threading;
 
 using Assimalign.Cohesion.Database.Types;
@@ -18,6 +19,12 @@ namespace Assimalign.Cohesion.Database.Sql;
 public readonly ref struct SqlFunctionContext
 {
     private readonly Collation? _collation;
+    private readonly DateTimeOffset? _transactionStart;
+
+    internal DateTimeOffset? TransactionStart => _transactionStart;
+
+    internal SqlFunctionContext(DatabaseName database, Collation? collation, CancellationToken cancellationToken, DateTimeOffset? transactionStart)
+        : this(database, collation, cancellationToken) => _transactionStart = transactionStart;
 
     /// <summary>
     /// Initializes the context of one call: the engine's, or a test's that calls a function directly
@@ -28,6 +35,7 @@ public readonly ref struct SqlFunctionContext
     /// <param name="cancellationToken">The statement's cancellation token.</param>
     public SqlFunctionContext(DatabaseName database, Collation? collation, CancellationToken cancellationToken)
     {
+        _transactionStart = null;
         Database = database;
         _collation = collation;
         CancellationToken = cancellationToken;

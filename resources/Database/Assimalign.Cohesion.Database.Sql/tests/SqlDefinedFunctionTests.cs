@@ -82,23 +82,21 @@ public sealed partial class SqlDefinedFunctionTests
         (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "DROP DOMAIN native_domain"))).Message.ShouldContain("COHSQLD003");
     }
 
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - A volatile SQL default runs once per omitted INSERT value")]
-    public async Task ExecuteAsync_VolatileDefault_ShouldEvaluateEachOmittedValue()
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - A volatile SQL default is refused before publication until #1121")]
+    public async Task ExecuteAsync_VolatileDefault_ShouldRefuseBeforePublication()
     {
         // Arrange
         int calls = 0;
         await using var engine = await BuildAsync(functions => functions.Add(SqlScalarFunction.Create("sequence_value", (int _) => ++calls)));
         await using var session = await SessionAsync(engine);
         await ExecuteAsync(session, "CREATE FUNCTION next_value() RETURNS INT RETURN sequence_value(0)");
-        await ExecuteAsync(session, "CREATE TABLE t (id INT, n INT DEFAULT next_value())");
-        calls.ShouldBe(0);
         // Act
-        await ExecuteAsync(session, "INSERT INTO t (id) VALUES (1), (2)");
-        await ExecuteAsync(session, "INSERT INTO t VALUES (3, 50)");
-        var rows = await RowsAsync(session, "SELECT n FROM t ORDER BY id");
+        var failure = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "CREATE TABLE t (id INT, n INT DEFAULT next_value())"));
         // Assert
-        rows.ShouldBe([[1], [2], [50]]);
-        calls.ShouldBe(2);
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBL001");
+        failure.Message.ShouldContain("next_value", Case.Sensitive);
+        (await RowsAsync(session, "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 't'")).ShouldBeEmpty();
+        calls.ShouldBe(0);
     }
 
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - SQL definition views retain transaction snapshot metadata")]

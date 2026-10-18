@@ -168,7 +168,7 @@ internal sealed partial class SqlPlanner
 
         if (expression is SqlFunctionCallExpression call)
         {
-            if (!SqlStandardLibrary.IsCoalesce(call.FunctionName) && !catalog.TryGetOverloads(call.FunctionName, out _) &&
+            if (!SqlStandardLibrary.IsEvaluatorForm(call.FunctionName) && !catalog.TryGetOverloads(call.FunctionName, out _) &&
                 !SqlStandardLibrary.IsDeclaredName(call.FunctionName))
             {
                 // The likeliest cause in a declared schema: the function was not registered on this engine.
@@ -200,9 +200,9 @@ internal sealed partial class SqlPlanner
 
     private static void CheckCallCore(SqlFunctionCallExpression call, SqlFunctionCatalog catalog)
     {
-        if (SqlStandardLibrary.IsCoalesce(call.FunctionName))
+        if (SqlStandardLibrary.IsEvaluatorForm(call.FunctionName))
         {
-            SqlExpressionEvaluator.CheckCoalesce(call);
+            SqlExpressionEvaluator.CheckEvaluatorForm(call);
         }
         else if (catalog.TryGetOverloads(call.FunctionName, out var overloads))
         {

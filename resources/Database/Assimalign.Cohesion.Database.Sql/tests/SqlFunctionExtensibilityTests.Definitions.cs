@@ -302,11 +302,11 @@ public sealed partial class SqlFunctionExtensibilityTests
     /// <param name="mismatch">The arity failure the reason quotes.</param>
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Functions: a stored call of a standard-library name no built-in takes opens and refuses writes with COHSQLE009")]
     [InlineData("ddl", "upper(email, 2) <> ''", "upper(TEXT, INTEGER)",
-        "COHSQLE006: Function 'upper' takes exactly 1 argument but was called with 2. Accepted: UPPER(value).")]
+        "COHSQLE006: Function 'upper' takes exactly 1 argument but was called with 2. Accepted: UPPER(TEXT).")]
     [InlineData("catalog", "ABS(id, 1) > 0", "ABS(BIGINT, INTEGER)",
         "COHSQLE006: Function 'ABS' takes exactly 1 argument but was called with 2. Accepted: ABS(numeric).")]
     [InlineData("catalog", "id > 0 AND UPPER(email, email) IS NOT NULL", "UPPER(TEXT, TEXT)",
-        "COHSQLE006: Function 'UPPER' takes exactly 1 argument but was called with 2. Accepted: UPPER(value).")]
+        "COHSQLE006: Function 'UPPER' takes exactly 1 argument but was called with 2. Accepted: UPPER(TEXT).")]
     public async Task Open_StoredStandardNameCallNoBuiltInTakes_ShouldOpenAndRefuseWrites(string stored, string predicate, string signature, string mismatch)
     {
         string root = NewRoot();
@@ -481,19 +481,15 @@ public sealed partial class SqlFunctionExtensibilityTests
             ExecuteAsync(session, "INSERT INTO COHESION_SCHEMA.FUNCTIONS (FUNCTION_NAME) VALUES ('x')"));
 
         // Assert
-        rows.Select(row => (string)row[0]!).ShouldBe([
-            "UPPER", "LOWER", "LENGTH", "ABS", "COUNT", "COUNT", "SUM", "AVG", "MIN", "MAX",
-            "clamp", "is_missing", "median",
-            "COALESCE", "NULLIF", "CASE", "CAST", "EXTRACT",
-        ]);
-        rows[0].ShouldBe(["UPPER", "SCALAR", "ANYELEMENT", 1L, "ANYELEMENT", "IMMUTABLE", "RETURNS NULL ON NULL INPUT", "YES"]);
-        rows[4].ShouldBe(["COUNT", "AGGREGATE", "*", 0L, "BIGINT", null, "RETURNS NULL ON NULL INPUT", "YES"]);
-        rows[5].ShouldBe(["COUNT", "AGGREGATE", "ANY", 1L, "BIGINT", null, "RETURNS NULL ON NULL INPUT", "YES"]);
-        rows[6].ShouldBe(["SUM", "AGGREGATE", "ANYNUMERIC", 1L, "NUMERIC", null, "RETURNS NULL ON NULL INPUT", "YES"]);
-        rows[10].ShouldBe(["clamp", "SCALAR", "BIGINT, BIGINT, BIGINT", 3L, "BIGINT", "IMMUTABLE", "RETURNS NULL ON NULL INPUT", "NO"]);
-        rows[11].ShouldBe(["is_missing", "SCALAR", "ANY", 1L, "BOOLEAN", "IMMUTABLE", "CALLED ON NULL INPUT", "NO"]);
-        rows[12].ShouldBe(["median", "AGGREGATE", "DOUBLE", 1L, "DOUBLE", null, "RETURNS NULL ON NULL INPUT", "NO"]);
-        rows[13].ShouldBe(["COALESCE", "SPECIAL FORM", null, null, null, null, null, "YES"]);
+        rows.Select(row => (string)row[0]!).ShouldBe(engine.Functions.Select(function => function.Name).Concat(new[] { "COALESCE", "NULLIF", "CASE", "CAST", "EXTRACT" }));
+        rows.Single(row => Equals(row[0], "UPPER")).ShouldBe(["UPPER", "SCALAR", "TEXT", 1L, "TEXT", "IMMUTABLE", "RETURNS NULL ON NULL INPUT", "YES"]);
+        rows.Single(row => Equals(row[0], "COUNT") && Equals(row[2], "*")).ShouldBe(["COUNT", "AGGREGATE", "*", 0L, "BIGINT", null, "RETURNS NULL ON NULL INPUT", "YES"]);
+        rows.Single(row => Equals(row[0], "COUNT") && Equals(row[2], "ANY")).ShouldBe(["COUNT", "AGGREGATE", "ANY", 1L, "BIGINT", null, "RETURNS NULL ON NULL INPUT", "YES"]);
+        rows.Single(row => Equals(row[0], "SUM")).ShouldBe(["SUM", "AGGREGATE", "ANYNUMERIC", 1L, "NUMERIC", null, "RETURNS NULL ON NULL INPUT", "YES"]);
+        rows.Single(row => Equals(row[0], "clamp")).ShouldBe(["clamp", "SCALAR", "BIGINT, BIGINT, BIGINT", 3L, "BIGINT", "IMMUTABLE", "RETURNS NULL ON NULL INPUT", "NO"]);
+        rows.Single(row => Equals(row[0], "is_missing")).ShouldBe(["is_missing", "SCALAR", "ANY", 1L, "BOOLEAN", "IMMUTABLE", "CALLED ON NULL INPUT", "NO"]);
+        rows.Single(row => Equals(row[0], "median")).ShouldBe(["median", "AGGREGATE", "DOUBLE", 1L, "DOUBLE", null, "RETURNS NULL ON NULL INPUT", "NO"]);
+        rows.Single(row => Equals(row[0], "COALESCE")).ShouldBe(["COALESCE", "SPECIAL FORM", null, null, null, null, null, "YES"]);
         registered.ShouldBe([["clamp"], ["is_missing"], ["median"]]);
         readOnly.Message.ShouldBe("System view 'COHESION_SCHEMA.FUNCTIONS' is read-only.");
     }

@@ -471,7 +471,7 @@ internal sealed class SqlBoundTableCache
                 }
             }
 
-            if (expression is not SqlFunctionCallExpression call || SqlStandardLibrary.IsCoalesce(call.FunctionName) ||
+            if (expression is not SqlFunctionCallExpression call || SqlStandardLibrary.IsEvaluatorForm(call.FunctionName) ||
                 Unresolved(call) is not { } reason)
             {
                 return null;

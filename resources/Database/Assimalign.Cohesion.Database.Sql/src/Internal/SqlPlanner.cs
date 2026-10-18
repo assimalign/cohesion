@@ -52,7 +52,7 @@ internal sealed partial class SqlPlanner
         _catalog = catalog;
         _parameters = parameters;
         _cancellationToken = cancellationToken;
-        _functions = functions ?? SqlFunctionEnvironment.Standard;
+        _functions = statement is { } context ? (functions ?? SqlFunctionEnvironment.Standard).At(context.TransactionStart) : functions ?? SqlFunctionEnvironment.Standard;
     }
 
     private SqlPlanner(SqlPlanner previous)
@@ -1031,6 +1031,12 @@ internal sealed partial class SqlPlanner
         }
         if (!SqlPersistedExpression.IsDefaultLiteral(expression))
         {
+            // ADD COLUMN stays literal-only, but newly executable clocks and UUIDs retain
+            // the same named refusal as CREATE/ALTER COLUMN rather than a generic literal error.
+            if (!allowFunction && expression is SqlFunctionCallExpression)
+            {
+                ValidateDefaultVolatility(expression, ScopelessEvaluator);
+            }
             if (!allowFunction || expression is not SqlFunctionCallExpression)
             {
                 throw new SqlPlanningException("COHSQLE013", $"Column '{columnName}': only literal DEFAULT values are supported.", expression?.Location);
@@ -1038,6 +1044,7 @@ internal sealed partial class SqlPlanner
             var scope = new SqlExpressionEvaluator([], null, defaultCollation: _catalog.DefaultCollation, functions: _functions, cancellationToken: _cancellationToken);
             SqlPersistedExpression.Bind(expression, scope);
             ValidateExpression(expression, scope);
+            ValidateDefaultVolatility(expression, scope);
             ValidateDefaultType(expression, scope, type.Storage.Type, columnName);
         }
         return SqlPersistedExpression.Canonicalize(expression, $"DEFAULT of column '{columnName}' on table '{table}'");
@@ -1052,6 +1059,17 @@ internal sealed partial class SqlPlanner
             throw new SqlPlanningException("COHSQLE013", string.Format(CultureInfo.CurrentCulture,
                 ErrorMessages.DefaultTypeIncompatible, column, source, target), expression.Location);
         }
+    }
+
+    private static void ValidateDefaultVolatility(SqlExpression expression, SqlExpressionEvaluator scope)
+    {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+        if (expression is SqlFunctionCallExpression call && !SqlStandardLibrary.IsEvaluatorForm(call.FunctionName) &&
+            scope.ResolveFunction(call) is { Volatility: not SqlFunctionVolatility.Immutable } function)
+        {
+            throw new SqlPlanningException("COHDBL001", $"Function '{function.Name}' is not supported in DEFAULT until non-immutable DEFAULT expressions are implemented (#1121).", call.Location);
+        }
+        foreach (var child in Children(expression)) { ValidateDefaultVolatility(child, scope); }
     }
 
     private IReadOnlyList<string> DefaultCalls(string? text)
@@ -1391,7 +1409,7 @@ internal sealed partial class SqlPlanner
             case SqlInExpression { Values: null } when !isBound:
                 throw new SqlPlanningException("COHDBL001", "IN subqueries are supported only in SELECT expressions and INSERT ... SELECT.", expression.Location);
             case SqlUnaryExpression { Operator: SqlUnaryOperator.Negate or SqlUnaryOperator.Plus } sign
-                when StaticOperandType(sign.Operand, evaluator, boundSubqueries, boundValues) is { } type && !IsNumeric(type):
+                when StaticOperandType(sign.Operand, evaluator, boundSubqueries, boundValues) is { } type && !IsNumeric(type) && !(sign.Operator == SqlUnaryOperator.Negate && type == DatabaseType.TimeSpan):
                 // A sign over a value the plan already knows is not a number fails here, the same
                 // over an empty table as over a populated one; the evaluator raises the same code
                 // for an operand only a row's value reveals.
@@ -1417,12 +1435,61 @@ internal sealed partial class SqlPlanner
             ValidateExpression(child, evaluator, boundSubqueries, boundValues);
         }
 
+        if (expression is SqlBinaryExpression { Operator: SqlBinaryOperator.Add or SqlBinaryOperator.Subtract or SqlBinaryOperator.Multiply or SqlBinaryOperator.Divide or SqlBinaryOperator.Modulo } arithmetic)
+        {
+            ValidateTemporalArithmetic(arithmetic, evaluator);
+        }
+
         // After its arguments, as PostgreSQL resolves a call, so an argument's error is reported
         // first. The planner's walk (ValidateFunctionCalls) checked every call's count already; this
         // chooses the overload by the arguments' types, with the scope's columns in hand.
         if (expression is SqlFunctionCallExpression call)
         {
             ResolveCall(call, evaluator);
+        }
+    }
+
+    internal static void ValidateTemporalArithmetic(SqlBinaryExpression arithmetic, SqlExpressionEvaluator evaluator)
+        => ValidateTemporalOperands(arithmetic, arithmetic.Left, arithmetic.Right, evaluator);
+
+    // Check the possible values of alternatives even where projection common-type inference
+    // does not run (WHERE, UPDATE and CHECK). Ordinary numeric operands allocate no walk state.
+    private static void ValidateTemporalOperands(SqlBinaryExpression arithmetic, SqlExpression leftExpression,
+        SqlExpression rightExpression, SqlExpressionEvaluator evaluator)
+    {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+        if (ValidateAlternatives(leftExpression, rightExpression, left: true) ||
+            ValidateAlternatives(rightExpression, leftExpression, left: false)) { return; }
+        var left = evaluator.StaticTypeOf(leftExpression);
+        var right = evaluator.StaticTypeOf(rightExpression);
+        if ((SqlTemporalArithmetic.IsTemporal(left) || SqlTemporalArithmetic.IsTemporal(right)) &&
+            left != DatabaseType.Null && right != DatabaseType.Null &&
+            SqlTemporalArithmetic.ResultType(arithmetic.Operator, left, right) == DatabaseType.Null)
+        { throw SqlTemporalArithmetic.InvalidOperands(arithmetic.Operator, left, right, arithmetic.Location); }
+
+        bool ValidateAlternatives(SqlExpression expression, SqlExpression other, bool left)
+        {
+            switch (expression)
+            {
+                case SqlFunctionCallExpression call when SqlStandardLibrary.IsCoalesce(call.FunctionName):
+                    foreach (var argument in call.Arguments) { ValidatePair(argument); }
+                    return true;
+                case SqlFunctionCallExpression call when call.FunctionName.Equals("NULLIF", StringComparison.OrdinalIgnoreCase):
+                    ValidatePair(call.Arguments[0]);
+                    return true;
+                case SqlCaseExpression conditional:
+                    foreach (var clause in conditional.WhenClauses) { ValidatePair(clause.Result); }
+                    if (conditional.ElseResult is not null) { ValidatePair(conditional.ElseResult); }
+                    return true;
+                case SqlCollateExpression collate:
+                    ValidatePair(collate.Operand);
+                    return true;
+                default:
+                    return false;
+            }
+
+            void ValidatePair(SqlExpression alternative)
+                => ValidateTemporalOperands(arithmetic, left ? alternative : other, left ? other : alternative, evaluator);
         }
     }
 
@@ -1501,10 +1568,8 @@ internal sealed partial class SqlPlanner
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static void ResolveCall(SqlFunctionCallExpression call, SqlExpressionEvaluator evaluator)
     {
-        if (!SqlStandardLibrary.IsCoalesce(call.FunctionName))
-        {
-            evaluator.ResolveFunction(call);
-        }
+        if (SqlStandardLibrary.IsEvaluatorForm(call.FunctionName)) { evaluator.ValidateEvaluatorForm(call); }
+        else { evaluator.ResolveFunction(call); }
     }
 
     /// <summary>
@@ -1627,7 +1692,7 @@ internal sealed partial class SqlPlanner
     private bool ContainsVolatileCall(SqlExpression expression)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
-        if (expression is SqlFunctionCallExpression call && !SqlStandardLibrary.IsCoalesce(call.FunctionName))
+        if (expression is SqlFunctionCallExpression call && !SqlStandardLibrary.IsEvaluatorForm(call.FunctionName))
         {
             try
             {

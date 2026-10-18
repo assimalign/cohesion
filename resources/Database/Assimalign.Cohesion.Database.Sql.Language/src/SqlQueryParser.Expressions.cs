@@ -729,7 +729,7 @@ public sealed partial class SqlQueryParser
         // Function call or column reference
         if (lexer.Current.Type == TokenType.Function)
         {
-            return ParseFunctionCall(ref lexer);
+            return ParseColumnRefOrFunction(ref lexer);
         }
 
         // Identifier: could be column_ref (possibly dotted) or function call
@@ -781,10 +781,7 @@ public sealed partial class SqlQueryParser
         // Niladic datetime names are value functions, never unquoted column references.
         if (!quoted && SqlUnsupportedVocabulary.IsNiladicFunction(first))
         {
-            AddUnsupportedSurfaceDiagnostic(pos, pos + first.Length,
-                $"The SQL function {first.ToUpperInvariant()} is not supported.");
-            if (lexer.Current.Type == TokenType.LeftParen) { SkipParenthesized(ref lexer); }
-            return new SqlLiteralExpression("NULL", SqlLiteralType.Null, Location.Create(1, 1, pos, pos + first.Length));
+            return ParseNiladic(ref lexer, first, pos);
         }
 
         // Check for function call: identifier(
@@ -856,6 +853,8 @@ public sealed partial class SqlQueryParser
             return ParseFunctionCallArgs(ref lexer, name, pos);
         }
 
+        if (SqlUnsupportedVocabulary.IsNiladicFunction(name)) { return ParseNiladic(ref lexer, name, pos); }
+
         // If no parens, treat as column reference
         return new SqlColumnReferenceExpression(name, null, null,
             Location.Create(1, 1, pos, pos + name.Length));
@@ -863,6 +862,14 @@ public sealed partial class SqlQueryParser
 
     private SqlExpression ParseFunctionCallArgs(ref TokenLexer lexer, string name, int pos, bool quoted = false)
     {
+        if (!quoted || name == name.ToLowerInvariant())
+        {
+            if (SqlUnsupportedVocabulary.IsNiladicFunction(name)) { return ParseNiladic(ref lexer, name, pos); }
+            if (name.ToUpperInvariant() is "SUBSTRING" or "TRIM" or "POSITION" or "EXTRACT")
+            {
+                return ParseStandardForm(ref lexer, name.ToUpperInvariant(), pos);
+            }
+        }
         // PostgreSQL scan.l:773-783 preserves quoted case; namespace.c:1237 looks up that spelling.
         // The vocabulary stores uppercase display names; quoted built-ins use lowercase lookup names.
         if ((!quoted || string.Equals(name, name.ToLowerInvariant(), StringComparison.Ordinal)) && SqlUnsupportedVocabulary.IsFunction(name))

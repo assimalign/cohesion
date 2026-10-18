@@ -19,7 +19,7 @@ public sealed class SqlDiagnosticTests
     public async Task Execute_ErrorStatement_ShouldCarryCompleteDiagnosticsAsync()
     {
         // Arrange
-        const string sql = "SELECT NULLIF(1, 2), CURRENT_DATE FROM t;";
+        const string sql = "SELECT CURRENT_DATE(), LOCALTIME() FROM t;";
         var parsed = (SqlQueryStatement)new SqlQueryParser().Parse(sql);
         parsed.Diagnostics.Count().ShouldBe(2);
         await using var engine = SqlDatabaseEngine.Create("diagnostics", new());
@@ -67,7 +67,7 @@ public sealed class SqlDiagnosticTests
     public async Task Execute_UnknownFunction_ShouldRejectOnlyAtPlanningAsync()
     {
         // Arrange
-        var unsupported = new SqlQueryParser().Parse("SELECT NULLIF(a, b) FROM t;");
+        var unsupported = new SqlQueryParser().Parse("SELECT RANK() FROM t;");
         unsupported.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBL001");
         new SqlQueryParser().Parse("SELECT FOO(a) FROM t;").Diagnostics.ShouldBeEmpty();
         await using var engine = SqlDatabaseEngine.Create("diagnostics", new());
@@ -88,7 +88,7 @@ public sealed class SqlDiagnosticTests
     public async Task ApplySchema_FunctionNamedColumns_ShouldRemainNoOpAsync()
     {
         // Arrange
-        var columns = new[] { "rank", "current_date", "localtime", "localtimestamp" }
+        var columns = new[] { "rank", "current_date", "localtime", "localtimestamp", "position", "sign", "reverse", "ln", "exp", "concat_ws", "date_trunc", "gen_random_uuid" }
             .Select(name => new CompiledSchemaColumn(name, DatabaseType.Int32, true)).ToArray();
         var table = new CompiledSchemaTable("function_names", "Tests.FunctionNames", columns, null, [], []);
         var schema = new SqlCompiledSchema(SqlCompiledSchema.CurrentFormat, "diagnostics", false, [], [table], []);
