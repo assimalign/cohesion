@@ -244,11 +244,6 @@ public sealed partial class OqlQueryParser
             if (Take(TokenType.LeftParen))
             {
                 string function = name.ToUpperInvariant();
-                if (!Profile.Functions.Contains(function, StringComparer.OrdinalIgnoreCase))
-                {
-                    _diagnostics.Add(QueryDiagnostics.UnsupportedClause($"FUNCTION {name}", Profile.Language, Span(start, start)));
-                }
-
                 List<OqlExpression> arguments = [];
                 if (Current.Type != TokenType.RightParen)
                 {
@@ -256,16 +251,21 @@ public sealed partial class OqlQueryParser
                 }
 
                 Expect(TokenType.RightParen, "')'");
+                var definition = OqlFunctions.Find(function);
+                if (!Failed && definition is null)
+                {
+                    Error("OQL0008", $"Unknown OQL function '{name}'.", start);
+                }
+                else if (!Failed && (!definition!.AcceptsArity(arguments.Count) ||
+                    function != "COUNT" && arguments.Any(argument => argument is OqlStarExpression)))
+                {
+                    Error("OQL0006", $"Invalid argument count for OQL function '{function}'; only COUNT accepts '*'.", start);
+                }
                 if (function == "META")
                 {
                     string? member = Take(TokenType.Dot) ? Identifier(allowKeyword: true) : null;
                     return new OqlMetaExpression(arguments.AsReadOnly(), member, Span(start, Previous));
                 }
-                if (arguments.Count != 1 || function != "COUNT" && arguments[0] is OqlStarExpression)
-                {
-                    Error("OQL0006", "Aggregates require one expression; only COUNT accepts '*'.", start);
-                }
-
                 return new OqlCallExpression(function, arguments.AsReadOnly(), Span(start, Previous));
             }
             return ParsePath(start, name);

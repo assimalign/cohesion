@@ -174,7 +174,7 @@ public sealed class DocumentMissingTests
         Check(groups[0], 0, "MISSING");
         groups[0].GetInt32(1).ShouldBe(2);
         Check(groups[1], 0, "NULL");
-        Enumerable.Range(0, 6).Select(aggregates.Single().GetValue).ShouldBe([5m, 2m, 6m, 3m, 2m, 4m]);
+        Enumerable.Range(0, 6).Select(aggregates.Single().GetValue).ShouldBe([5L, 2L, 6m, 3m, 2m, 4m]);
         var constants = (await RowsAsync(session, "SELECT MISSING AS m, COUNT(*) AS total FROM items GROUP BY MISSING")).Single();
         constants.IsMissing(0).ShouldBeTrue();
         constants.GetInt32(1).ShouldBe(10);

@@ -88,7 +88,7 @@ internal sealed class DocumentExchange : DatabaseProtocolExchange<DocumentExchan
                                 {
                                     throw new ProtocolException(ErrorMessages.RowWidthInvalid);
                                 }
-                                values[ordinal] = DocumentJsonValues.Read(property.Value);
+                                values[ordinal] = DocumentJsonValues.Read(property.Value, columns[ordinal].Type);
                             }
                             rows.Add(values);
                         }

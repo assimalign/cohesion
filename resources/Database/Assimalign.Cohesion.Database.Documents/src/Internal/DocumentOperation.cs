@@ -28,17 +28,21 @@ internal sealed class DocumentOperation
     /// The session the statement holds, which the operation releases when it finishes.
     /// </param>
     /// <param name="context">The transaction context the statement runs under.</param>
+    /// <param name="transactionStart">The instant captured before the transaction began.</param>
     /// <param name="transaction">The explicit transaction that admitted the statement, or null for autocommit.</param>
-    internal DocumentOperation(DocumentDatabase database, DocumentDatabaseSession session, TransactionContext context, DocumentDatabaseTransaction? transaction)
+    internal DocumentOperation(DocumentDatabase database, DocumentDatabaseSession session, TransactionContext context, DocumentDatabaseTransaction? transaction, DateTimeOffset transactionStart)
     {
         _database = database;
         _session = session;
         Context = context;
         _context = context;
         _transaction = transaction;
+        TransactionStart = transactionStart;
     }
 
     internal DocumentDatabaseSession Session => _session;
+
+    internal DateTimeOffset TransactionStart { get; }
 
     internal TransactionContext Context { get; private set; }
 

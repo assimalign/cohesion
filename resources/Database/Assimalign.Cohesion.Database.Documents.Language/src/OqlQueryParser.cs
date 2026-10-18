@@ -462,7 +462,7 @@ public sealed partial class OqlQueryParser : QueryParser
     /// <c>name IN</c>, as in <c>EVERY x IN c.items</c> or ODMG's <c>FOR ALL x IN c.items</c>.
     /// </summary>
     private bool IsQuantifierBinding(int index) => index + 1 < _tokens.Count &&
-        _tokens[index].Type is TokenType.Identifier or TokenType.QuotedIdentifier &&
+        _tokens[index].Type is TokenType.Identifier or TokenType.QuotedIdentifier or TokenType.Function &&
         IsWord(_tokens[index + 1], "IN");
 
     /// <summary>

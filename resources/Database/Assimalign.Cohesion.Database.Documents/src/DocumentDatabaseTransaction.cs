@@ -42,18 +42,21 @@ public sealed class DocumentDatabaseTransaction : DatabaseTransaction
     // makes its disposal touch nothing.
     private readonly DocumentDatabase _database;
 
-    internal DocumentDatabaseTransaction(TransactionCoordinator coordinator, TransactionContext context, DocumentDatabase database)
+    internal DocumentDatabaseTransaction(TransactionCoordinator coordinator, TransactionContext context, DocumentDatabase database, DateTimeOffset transactionStart)
         : base(context.Id, context.IsolationLevel)
     {
         _coordinator = coordinator;
         _context = context;
         _database = database;
+        TransactionStart = transactionStart;
     }
 
     /// <summary>
     /// Gets the MVCC transaction context the transaction's statements run under.
     /// </summary>
     internal TransactionContext Context => _context;
+
+    internal DateTimeOffset TransactionStart { get; }
 
     /// <summary>
     /// Gets whether statements may run in the transaction: the caller has not ended it, no

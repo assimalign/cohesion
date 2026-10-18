@@ -18,7 +18,7 @@ internal static partial class DocumentPlanExecutor
     private static async ValueTask<DatabaseResult> ExecuteUpdateAsync(DocumentDatabase database, DocumentOperation operation,
         DocumentUpdatePlan plan, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
     {
-        var evaluator = new DocumentExpressionEvaluator(plan.Statement.Alias, parameters, cancellationToken);
+        var evaluator = new DocumentExpressionEvaluator(plan.Statement.Alias, parameters, cancellationToken, transactionStart: operation.TransactionStart);
         var candidates = await ReadCandidatesAsync(database, operation, plan.Collection, plan.Access, cancellationToken).ConfigureAwait(false);
         var pending = new List<(DocumentId Id, byte[] Content)>();
         // Freeze membership and every RHS against the statement snapshot before writing.
@@ -49,7 +49,7 @@ internal static partial class DocumentPlanExecutor
     private static async ValueTask<DatabaseResult> ExecuteDeleteAsync(DocumentDatabase database, DocumentOperation operation,
         DocumentDeletePlan plan, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
     {
-        var evaluator = new DocumentExpressionEvaluator(plan.Statement.Alias, parameters, cancellationToken);
+        var evaluator = new DocumentExpressionEvaluator(plan.Statement.Alias, parameters, cancellationToken, transactionStart: operation.TransactionStart);
         var candidates = await ReadCandidatesAsync(database, operation, plan.Collection, plan.Access, cancellationToken).ConfigureAwait(false);
         var pending = new List<DocumentId>();
         // Finish reading and evaluating the statement snapshot before changing any content
@@ -104,7 +104,7 @@ internal static partial class DocumentPlanExecutor
         }
         else
         {
-            var evaluator = new DocumentExpressionEvaluator(null, parameters, cancellationToken, writeVerb: verb);
+            var evaluator = new DocumentExpressionEvaluator(null, parameters, cancellationToken, writeVerb: verb, transactionStart: operation.TransactionStart);
             foreach (var pair in values)
             {
                 cancellationToken.ThrowIfCancellationRequested();

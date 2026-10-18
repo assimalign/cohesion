@@ -46,7 +46,7 @@ internal static partial class DocumentPlanExecutor
         DocumentPlan plan, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken, string? writeVerb = null)
     {
         var query = plan.Logical.Query;
-        var evaluator = new DocumentExpressionEvaluator(query.Alias, parameters, cancellationToken, writeVerb);
+        var evaluator = new DocumentExpressionEvaluator(query.Alias, parameters, cancellationToken, writeVerb, operation.TransactionStart);
         var candidates = await ReadCandidatesAsync(database, operation, plan.Collection, plan.Access, cancellationToken).ConfigureAwait(false);
 
         var matches = new List<DocumentEvaluationContext>();
@@ -77,7 +77,7 @@ internal static partial class DocumentPlanExecutor
     private static DatabaseResult ExecuteSystemCollection(DocumentDatabase database, DocumentOperation operation,
         DocumentSystemCollectionPlan plan, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken, string? writeVerb = null)
     {
-        var evaluator = new DocumentExpressionEvaluator(plan.Logical.Query.Alias, parameters, cancellationToken, writeVerb);
+        var evaluator = new DocumentExpressionEvaluator(plan.Logical.Query.Alias, parameters, cancellationToken, writeVerb, operation.TransactionStart);
         var matches = new List<DocumentEvaluationContext>();
         foreach (var document in DocumentSystemCollections.Enumerate(database, operation.Context.Snapshot, plan.Name, cancellationToken))
         {
@@ -151,7 +151,19 @@ internal static partial class DocumentPlanExecutor
         for (int i = 0; i < columns.Length; i++)
         {
             var types = output.Select(row => GetType(row.Values[i])).Where(type => type != DatabaseType.Null).Distinct().ToArray();
-            columns[i] = new DatabaseColumn { Name = logical.Projections[i].Name, Ordinal = i, Type = types.Length == 1 ? types[0] : DatabaseType.Null };
+            var columnType = types.Length == 0 ? logical.Projections[i].Type : types.Length == 1 ? types[0] :
+                types.All(kind => kind is DatabaseType.Int64 or DatabaseType.Decimal) ? DatabaseType.Decimal : DatabaseType.Null;
+            // JSON has one number kind. An Int64 header is the evidence the client uses
+            // to recover long values; other numeric cells use the decimal scalar domain.
+            if (columnType != DatabaseType.Int64 && types.Contains(DatabaseType.Int64))
+            {
+                foreach (var row in output)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (row.Values[i] is long integer) { row.Values[i] = (decimal)integer; }
+                }
+            }
+            columns[i] = new DatabaseColumn { Name = logical.Projections[i].Name, Ordinal = i, Type = columnType };
         }
         bool wholeDocument = query.Projections.Count == 1 && query.Projections[0].Expression is OqlStarExpression;
         return new DocumentQueryResult(columns, output.Select(row => row.Values).ToList(),
@@ -224,6 +236,7 @@ internal static partial class DocumentPlanExecutor
     private static DatabaseType GetType(object? value) => value switch
     {
         bool => DatabaseType.Boolean,
+        long => DatabaseType.Int64,
         decimal => DatabaseType.Decimal,
         string => DatabaseType.String,
         JsonElement => DatabaseType.Json,

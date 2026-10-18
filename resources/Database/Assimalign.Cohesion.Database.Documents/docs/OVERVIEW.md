@@ -5,6 +5,12 @@ versioned UTF-8 JSON documents. Each session is bound to one database. The engin
 supports document CRUD, OQL queries, KEY/VALUE INSERT and UPSERT, SET/UNSET UPDATE, DELETE and collection/index DDL, secondary B+Tree indexes,
 snapshot and read-committed transactions, durable file or in-memory storage, and a wire server.
 
+OQL executes 34 SQL++ scalar functions, including Unicode string operations, exact math,
+UTC date conversion, type/array tests and short-circuit conditionals. Clock functions share the
+transaction-start instant. COUNT and string/array lengths and positions return Int64 long values,
+with matching wire column types; the language [dialect](../../Assimalign.Cohesion.Database.Documents.Language/docs/DIALECT.md)
+records the full contract.
+
 `DocumentDatabaseServer.Create(engine, options)` or `engineBuilder.AddServer(options => ...)`
 serves OQL and document/collection commands on a consumer-supplied listener. Each authenticated
 connection binds one database. [Documents.Client](../../Assimalign.Cohesion.Database.Documents.Client/docs/OVERVIEW.md)

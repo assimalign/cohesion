@@ -1,3 +1,5 @@
+using System.Linq;
+
 using Assimalign.Cohesion.Database.Language;
 
 namespace Assimalign.Cohesion.Database.Documents.Language;
@@ -38,12 +40,7 @@ public static class OqlLanguageProfile
         "FIRST", "LAST", "UNIQUE",
     ];
 
-    private static readonly string[] _functions =
-    [
-        "META",
-        // Aggregate
-        "COUNT", "SUM", "AVG", "MIN", "MAX",
-    ];
+    private static readonly string[] _functions = OqlFunctions.All.Select(function => function.Name).ToArray();
 
     private static readonly string[] _clauses =
     [

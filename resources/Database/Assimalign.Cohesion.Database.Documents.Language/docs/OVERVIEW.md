@@ -6,6 +6,8 @@ expression trees. It provides `OqlLanguageProfile`, stable `OqlClauses` names, `
 `OqlSelectExpression`, `OqlInsertExpression`, `OqlUpsertExpression`, `OqlUpdateExpression`, `OqlUpdateAssignment`, `OqlDeleteExpression`, `OqlMetaExpression`, `OqlObjectExpression`, `OqlCreateCollectionExpression`, `OqlDropCollectionExpression`,
 `OqlCreateIndexExpression`, `OqlDropIndexExpression`, and expression nodes
 for projection, filtering, grouping, aggregates, ordering, nested properties, and array access.
+One immutable function table declares META, five aggregates and 34 SQL++ scalars, with parse-time
+arity checks, OQL0008 for unknown calls, and static result types consumed by the Documents engine.
 
 ```csharp
 var parser = new OqlQueryParser();

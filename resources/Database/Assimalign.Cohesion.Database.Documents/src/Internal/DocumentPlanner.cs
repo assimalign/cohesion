@@ -174,7 +174,7 @@ internal sealed partial class DocumentPlanner
             {
                 throw new DocumentPlanningException("COHDOC003", $"OQL projection name '{name}' occurs more than once; specify unique aliases.", projection.Expression.Location);
             }
-            projections.Add(new DocumentProjection(name, projection.Expression));
+            projections.Add(new DocumentProjection(name, projection.Expression, StaticType(projection.Expression)));
         }
         if (query.Having is not null)
         {
@@ -355,7 +355,7 @@ internal sealed partial class DocumentPlanner
         OqlInExpression or OqlBetweenExpression or OqlLikeExpression or OqlCaseExpression => PredicateChildren(expression).Any(ContainsAggregate),
         OqlArrayExpression array => array.Elements.Any(ContainsAggregate),
         OqlObjectExpression obj => obj.Members.Any(member => ContainsAggregate(member.Value)),
-        OqlCallExpression => true,
+        OqlCallExpression call => OqlFunctions.Find(call.Name)?.IsAggregate == true || call.Arguments.Any(ContainsAggregate),
         OqlBinaryExpression binary => ContainsAggregate(binary.Left) || ContainsAggregate(binary.Right),
         OqlUnaryExpression unary => ContainsAggregate(unary.Operand),
         _ => false,
@@ -386,9 +386,17 @@ internal sealed partial class DocumentPlanner
                 "IS MISSING" or "IS NOT MISSING" or "IS VALUED" or "IS NOT VALUED":
                 Validate(unary.Operand, allowAggregate);
                 return;
-            case OqlCallExpression call when allowAggregate && call.Name != "META" && OqlLanguageProfile.Instance.Functions.Contains(call.Name, StringComparer.OrdinalIgnoreCase):
-                if (call.Arguments.Count != 1) { throw new DocumentPlanningException("COHDOC001", $"OQL aggregate '{call.Name}' requires one argument.", call.Location); }
-                Validate(call.Arguments[0], allowAggregate: false, allowStar: call.Name == "COUNT");
+            case OqlCallExpression call when call.Name != "META" && OqlFunctions.Find(call.Name) is { } function &&
+                (!function.IsAggregate || allowAggregate):
+                if (!function.AcceptsArity(call.Arguments.Count))
+                {
+                    throw new DocumentPlanningException("COHDOC001", ErrorMessages.FunctionArgumentsInvalid, call.Location);
+                }
+                for (int i = 0; i < call.Arguments.Count; i++)
+                {
+                    Validate(call.Arguments[i], allowAggregate: !function.IsAggregate && allowAggregate, allowStar: call.Name == "COUNT");
+                    ValidateFunctionKind(function, i, call.Arguments[i]);
+                }
                 return;
             default:
                 throw new DocumentPlanningException("COHDOC001", "The expression is not valid in this OQL planning context.", expression.Location);
@@ -413,7 +421,13 @@ internal sealed partial class DocumentPlanner
             foreach (var member in obj.Members) { ValidateGrouped(member.Value, query); }
             return;
         }
-        if (expression is OqlCallExpression or OqlLiteralExpression or OqlMissingExpression or OqlParameterExpression) { return; }
+        if (expression is OqlCallExpression call)
+        {
+            if (OqlFunctions.Find(call.Name)?.IsAggregate == true) { return; }
+            foreach (var argument in call.Arguments) { ValidateGrouped(argument, query); }
+            return;
+        }
+        if (expression is OqlLiteralExpression or OqlMissingExpression or OqlParameterExpression) { return; }
         if (expression is OqlBinaryExpression binary)
         {
             ValidateGrouped(binary.Left, query);

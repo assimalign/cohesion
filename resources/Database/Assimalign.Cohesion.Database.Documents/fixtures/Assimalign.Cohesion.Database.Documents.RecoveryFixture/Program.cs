@@ -76,13 +76,13 @@ else if (args[0] == "verify")
     }
     await using var result = (DatabaseResultSet)await session.ExecuteAsync("SELECT COUNT(*) AS total FROM items i WHERE i.rank = @rank", new Dictionary<string, object?> { ["rank"] = 11 });
     await using var cursor = result.GetRowsAsync().GetAsyncEnumerator();
-    if (!await cursor.MoveNextAsync() || cursor.Current.GetValue(0) is not decimal count || count != 1)
+    if (!await cursor.MoveNextAsync() || cursor.Current.GetValue(0) is not long count || count != 1)
     {
         throw new InvalidOperationException("Recovered index does not match committed documents.");
     }
     if (await collection.GetAsync(session, "deleted") is not null || await collection.GetAsync(session, "restored") is null)
     { throw new InvalidOperationException("Recovered DELETE content visibility is incorrect."); }
-    foreach (var (rank, expected) in new[] { (2, 0m), (3, 1m) })
+    foreach (var (rank, expected) in new[] { (2, 0L), (3, 1L) })
     {
         await using var deletion = (DatabaseResultSet)await session.ExecuteAsync("SELECT COUNT(*) FROM items WHERE rank = @rank",
             new Dictionary<string, object?> { ["rank"] = rank }, CancellationToken.None);

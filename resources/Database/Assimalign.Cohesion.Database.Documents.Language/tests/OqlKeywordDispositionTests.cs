@@ -82,7 +82,10 @@ public sealed class OqlKeywordDispositionTests
         ["UNIQUE"] = Rejects("SELECT UNIQUE(a) FROM c", "UNIQUE"),
         ["LISTTOSET"] = Rejects("SELECT LISTTOSET(a) FROM c", "LISTTOSET"),
         ["TYPEOF"] = Rejects("SELECT TYPEOF(a) FROM c", "TYPEOF"),
-        ["ABS"] = Rejects("SELECT ABS(a) FROM c", "ABS"),
+        ["ARRAY_AGG"] = Rejects("SELECT ARRAY_AGG(a) FROM c", "ARRAY_AGG"),
+        ["REGEXP_LIKE"] = Rejects("SELECT REGEXP_LIKE(a, 'x') FROM c", "REGEXP_LIKE"),
+        ["REGEXP_REPLACE"] = Rejects("SELECT REGEXP_REPLACE(a, 'x', 'y') FROM c", "REGEXP_REPLACE"),
+        ["REGEXP_POSITION"] = Rejects("SELECT REGEXP_POSITION(a, 'x') FROM c", "REGEXP_POSITION"),
         // Statements and clauses of other languages
         ["ALTER"] = Rejects("ALTER INDEX ix ON c", "ALTER"),
         ["INSERT"] = Parses("INSERT INTO c (KEY, VALUE) VALUES ('k', 1)"),
@@ -170,7 +173,7 @@ public sealed class OqlKeywordDispositionTests
         failures.ShouldBeEmpty();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Documents.Language] - Functions: ABS is rejected as a call and remains a field identifier")]
+    [Fact(DisplayName = "Cohesion Test [Documents.Language] - Functions: ABS remains a field path")]
     public void Parse_AbsIdentifier_ShouldRemainAPath()
     {
         // Arrange / Act

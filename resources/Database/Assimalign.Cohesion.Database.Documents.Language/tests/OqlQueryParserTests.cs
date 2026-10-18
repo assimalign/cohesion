@@ -101,7 +101,7 @@ public sealed class OqlQueryParserTests
     [InlineData("SELECT ELEMENT(address) FROM people", "ELEMENT", 7)]
     [InlineData("SELECT FLATTEN(address) FROM people", "FLATTEN", 7)]
     [InlineData("SELECT (SELECT city FROM addresses) FROM people", "SUBQUERY", 8)]
-    [InlineData("SELECT ABS(age) FROM people", "ABS", 7)]
+    [InlineData("SELECT ARRAY_AGG(age) FROM people", "ARRAY_AGG", 7)]
     [InlineData("SELECT * FROM people LIMIT 10", "LIMIT", 21)]
     [InlineData("SELECT 'blue' IN tags FROM people", "IN array form", 14)]
     [InlineData("CREATE DATABASE other", "CREATE", 0)]
