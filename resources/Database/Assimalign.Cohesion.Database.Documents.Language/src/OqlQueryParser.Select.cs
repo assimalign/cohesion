@@ -73,16 +73,42 @@ public sealed partial class OqlQueryParser
                 break;
             }
             Advance();
+            // Refuse the comma spelling before validating its first count, as PostgreSQL's
+            // grammar does (src/backend/parser/gram.y:13586-13593).
+            if (isLimit && HasCommaCount())
+            {
+                _diagnostics.Add(QueryDiagnostics.UnsupportedClause("LIMIT m, n (use LIMIT n OFFSET m)", Profile.Language, Span(clause, clause)));
+                break;
+            }
             var count = ParseCount(clause.Text.ToUpperInvariant());
             if (isLimit) { limit = count; }
             else { offset = count; }
-            if (!Failed && isLimit && Current.Type == TokenType.Comma)
-            {
-                _diagnostics.Add(QueryDiagnostics.UnsupportedClause("LIMIT m, n (use LIMIT n OFFSET m)", Profile.Language, Span(clause, clause)));
-            }
         }
         return new OqlSelectExpression(collection, alias, projections.AsReadOnly(), predicate,
             groups.AsReadOnly(), having, ordering.AsReadOnly(), distinct, value, limit, offset, Span(start, Previous));
+    }
+
+    private bool HasCommaCount()
+    {
+        int depth = 0;
+        for (int index = _position; index < _tokens.Count; index++)
+        {
+            var token = _tokens[index];
+            if (depth == 0)
+            {
+                if (token.Type == TokenType.Comma) { return index > _position; }
+                if (token.Type is TokenType.Eof or TokenType.Semicolon || IsWord(token, "LIMIT") || IsWord(token, "OFFSET") ||
+                    IsWord(token, "ORDER") || IsWord(token, "GROUP") || IsWord(token, "HAVING") ||
+                    IsWord(token, "WHERE") || IsWord(token, "FROM")) { return false; }
+            }
+            if (token.Type is TokenType.LeftParen or TokenType.LeftBracket or TokenType.LeftBrace) { depth++; }
+            else if (token.Type is TokenType.RightParen or TokenType.RightBracket or TokenType.RightBrace)
+            {
+                if (depth == 0) { return false; }
+                depth--;
+            }
+        }
+        return false;
     }
 
     private OqlExpression ParseCount(string clause)

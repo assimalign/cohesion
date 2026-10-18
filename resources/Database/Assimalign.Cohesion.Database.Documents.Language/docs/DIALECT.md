@@ -19,9 +19,12 @@ signed integer literal or a parameter with an integral, non-negative signed Int6
 NULL/NIL, MISSING, Boolean, string, fractional, nonfinite and out-of-range counts give OQL0007
 at the operand; literal 2.0/1e2, LIMIT ALL and arbitrary expressions are also invalid.
 Integral decimal/JSON numeric parameters normalize before checking. Missing names retain COHDOC005.
-Missing operands and duplicate clauses give OQL0002; LIMIT m, n and FETCH FIRST give one COHDBL001.
+Missing operands and duplicate clauses give OQL0002; LIMIT m, n gives one COHDBL001 before
+validating m, including ALL, negative and string operands. FETCH FIRST gives one COHDBL001
+only when FETCH starts a construct; c.fetch FIRST and c.limit ALL still reject FIRST and ALL.
 LIMIT/OFFSET are reserved: quote field names or use d.limit/d.offset; SELECT a AS limit is valid.
-UPDATE/DELETE paging stays unsupported. Column types are computed before paging, so empty pages
+UPDATE/DELETE and INSERT/UPSERT VALUES paging stays unsupported, naming the statement and clause
+(for example, DELETE LIMIT or INSERT VALUES OFFSET). Column types are computed before paging, so empty pages
 retain metadata, including Int64 COUNT. Scan and seek pages share ordinal document-ID order;
 groups use group-key order, system sources catalog order, and ORDER BY ties retain baseline order.
 Separate pages need unchanged data or a shared snapshot for repeatability. Completion counts

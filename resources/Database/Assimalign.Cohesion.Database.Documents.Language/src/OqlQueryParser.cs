@@ -232,6 +232,8 @@ public sealed partial class OqlQueryParser : QueryParser
         int parentheses = 0;
         bool inSelectList = false;
         int selectHead = -2;
+        int fetchHead = -2;
+        int pagingHead = -2;
         int openQuantifiers = 0;
         for (int index = 0; index < _tokens.Count; index++)
         {
@@ -265,8 +267,8 @@ public sealed partial class OqlQueryParser : QueryParser
             if (index > statementStart && (index < updateHeaderEnd || index == updateClause)) { continue; }
 
             // FETCH FIRST is one unsupported spelling. LIMIT ALL is an invalid count.
-            if (index > 0 && (value == "FIRST" && IsWord(_tokens[index - 1], "FETCH") ||
-                value == "ALL" && (IsWord(_tokens[index - 1], "LIMIT") || IsWord(_tokens[index - 1], "OFFSET")))) { continue; }
+            // Only a recognized clause head owns the next word; a path or alias does not.
+            if (value == "FIRST" && index == fetchHead + 1 || value == "ALL" && index == pagingHead + 1) { continue; }
 
             // DISTINCT/ALL are legal only directly after SELECT, including INSERT/UPSERT SELECT.
             if (openQuantifiers == 0 && value is "DISTINCT" or "ALL")
@@ -360,6 +362,12 @@ public sealed partial class OqlQueryParser : QueryParser
                 continue;
             }
 
+            if (value is "LIMIT" or "OFFSET" && !inSelectList && index > 0 && EndsOperand(index - 1))
+            {
+                pagingHead = index;
+                continue;
+            }
+
             // ODMG's quantifiers, FOR ALL x IN e: p and EXISTS x IN e: p, bind with IN too.
             if (value == "FOR" && index + 1 < _tokens.Count && IsWord(_tokens[index + 1], "ALL") &&
                 IsQuantifierBinding(index + 2))
@@ -432,6 +440,7 @@ public sealed partial class OqlQueryParser : QueryParser
             }
 
             result.Add((word.Construct, reported));
+            if (value == "FETCH") { fetchHead = index; }
 
             // A statement that does not start as OQL is one unsupported construct; the rest of
             // its text belongs to it (MERGE INTO c USING ...).

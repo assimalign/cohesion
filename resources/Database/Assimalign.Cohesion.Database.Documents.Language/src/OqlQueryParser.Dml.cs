@@ -68,7 +68,7 @@ public sealed partial class OqlQueryParser
         // DELETE paging remains unsupported independently of SELECT capabilities.
         if (!Failed && (Is("LIMIT") || Is("OFFSET")))
         {
-            _diagnostics.Add(QueryDiagnostics.UnsupportedClause(Current.Text.ToUpperInvariant(), Profile.Language, Span(Current, Current)));
+            _diagnostics.Add(QueryDiagnostics.UnsupportedClause("DELETE " + Current.Text.ToUpperInvariant(), Profile.Language, Span(Current, Current)));
         }
         return new OqlDeleteExpression(collection, alias, predicate, Span(start, Previous));
     }
@@ -120,6 +120,10 @@ public sealed partial class OqlQueryParser
                 Expect(TokenType.RightParen, "')'");
                 values.Add((key, value));
             } while (!Failed && Take(TokenType.Comma));
+            if (!Failed && (Is("LIMIT") || Is("OFFSET")))
+            {
+                _diagnostics.Add(QueryDiagnostics.UnsupportedClause(verb + " VALUES " + Current.Text.ToUpperInvariant(), Profile.Language, Span(Current, Current)));
+            }
         }
         else if (Is("SELECT"))
         {

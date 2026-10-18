@@ -68,6 +68,12 @@ public sealed class OqlParseStrictnessTests
     [InlineData("«MERGE» INTO c USING d ON c.id = d.id WHEN MATCHED THEN UPDATE SET c.a = d.a", "MERGE")]
     [InlineData("SELECT * FROM c «UNNEST» c.items AS i", "UNNEST")]
     [InlineData("SELECT * FROM c AS x «UNNEST» x.items AS i", "UNNEST")]
+    [InlineData("SELECT c.fetch «first» FROM c", "FIRST")]
+    [InlineData("SELECT c.limit «ALL» FROM c", "ALL")]
+    [InlineData("SELECT c.offset «ALL» FROM c", "ALL")]
+    [InlineData("SELECT fetch «FIRST» FROM c", "FIRST")]
+    [InlineData("SELECT c AS fetch «FIRST» FROM c", "FIRST")]
+    [InlineData("SELECT c AS limit «ALL» FROM c", "ALL")]
     [InlineData("SELECT * FROM c WHERE «EVERY» x IN c.items SATISFIES x > 1 END", "EVERY ... SATISFIES")]
     [InlineData("SELECT * FROM c WHERE «ANY» x IN c.items SATISFIES x > 1 END", "ANY ... SATISFIES")]
     [InlineData("SELECT * FROM c WHERE a = 1 AND «EVERY» x IN c.items SATISFIES x IN [1, 2] END", "EVERY ... SATISFIES")]
@@ -105,8 +111,8 @@ public sealed class OqlParseStrictnessTests
     [InlineData("SELECT merge FROM c")]
     [InlineData("SELECT a AS limit FROM c")]
     [InlineData("SELECT upsert, unnest, every, satisfies FROM c")]
-    [InlineData("SELECT * FROM c WHERE merge = 1 AND upsert = 2")]
-    [InlineData("SELECT * FROM c ORDER BY merge DESC")]
+    [InlineData("SELECT * FROM c WHERE fetch = 1 AND unnest = 2")]
+    [InlineData("SELECT * FROM c ORDER BY fetch DESC")]
     [InlineData("SELECT c.limit FROM c WHERE c.every.satisfies = 1")]
     // A statement verb or quantifier word is a construct only in its own position, so an
     // AS-less FROM alias of that name still parses, as it did before #1101.
@@ -125,6 +131,18 @@ public sealed class OqlParseStrictnessTests
         // Assert
         statement.Diagnostics.ShouldBeEmpty();
         statement.OqlExpression.ShouldBeOfType<OqlSelectExpression>().Projections.ShouldNotBeEmpty();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Documents.Language] - Strictness: FETCH in a field position retains its document path")]
+    public void Parse_FetchField_ShouldRetainPath()
+    {
+        // Act
+        var statement = Parse("SELECT fetch FROM c");
+
+        // Assert
+        statement.Diagnostics.ShouldBeEmpty();
+        var projection = statement.OqlExpression.ShouldBeOfType<OqlSelectExpression>().Projections.ShouldHaveSingleItem();
+        projection.Expression.ShouldBeOfType<OqlPathExpression>().Segments.ShouldHaveSingleItem().Name.ShouldBe("fetch");
     }
 
     [Fact(DisplayName = "Cohesion Test [Documents.Language] - Strictness: UPSERT is an executable document write")]

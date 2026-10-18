@@ -165,16 +165,18 @@ parameter values are accepted after normalization; NULL parameters are invalid.
 Every invalid count has OQL0007 at its full operand span, with the message
 "LIMIT requires a non-negative integer in the signed 64-bit range." (OFFSET names OFFSET).
 A missing operand, duplicate clause (at its second keyword), arithmetic after a count or
-ORDER BY after paging retains OQL0002. LIMIT m, n reports one COHDBL001 at LIMIT, naming
-that unsupported spelling and asking for LIMIT n OFFSET m. Missing parameters retain COHDOC005;
+ORDER BY after paging retains OQL0002. LIMIT m, n reports one COHDBL001 at LIMIT before
+validating m (including ALL, negative and string operands), naming that unsupported spelling
+and asking for LIMIT n OFFSET m. Missing parameters retain COHDOC005;
 parameter lookup is the shared contract. Normalization failures, including nonfinite values and
 numbers outside the decimal domain, become OQL0007 for paging. Direct AST counts are checked too.
 No new shared public member or visibility grant is required; the two assemblies keep the message
 locally, with equality covered by planner/parser tests.
 
 Paging follows WHERE, grouping/HAVING, projection, DISTINCT and ORDER BY. INSERT and UPSERT SELECT
-sources use the same final page. UPDATE/DELETE LIMIT and OFFSET remain COHDBL001. LIMIT/OFFSET after
-INSERT/UPSERT VALUES remains unsupported. RETURNING as an implicit source alias may precede paging.
+sources use the same final page. UPDATE/DELETE LIMIT and OFFSET remain COHDBL001, naming the
+statement and clause (for example, DELETE LIMIT). INSERT/UPSERT VALUES paging names
+INSERT VALUES LIMIT, UPSERT VALUES OFFSET, or the corresponding clause. RETURNING as an implicit source alias may precede paging.
 EXPLAIN validates counts without reading documents and reports the resolved limit and offset.
 The PostgreSQL reference accepts either order (src/backend/parser/gram.y:13537-13566) and rejects
 the comma spelling at LIMIT (13586-13593). OQL rejects NULL and LIMIT ALL, unlike PostgreSQL's
@@ -193,7 +195,9 @@ a name:
 - **Clause** (statements and clauses of other languages, including FETCH, and SQL++ UNNEST):
   the first word of the statement, or directly after the end of an operand. Names, literals,
   parameters, closing delimiters and ASC/DESC end operands. FETCH FIRST is one unsupported
-  spelling at FETCH; a FIRST directly after FETCH is not reported again. These words remain
+  spelling at FETCH; FIRST is exempt only directly after a FETCH in construct position.
+  ALL is an invalid paging count only after an actual LIMIT/OFFSET clause head; path segments
+  such as c.fetch and c.limit grant no exemption to a following FIRST or ALL. These words remain
   identifiers elsewhere. A Clause word cannot be an implicit FROM alias: FROM c unnest
   reports UNNEST, while FROM c AS unnest keeps it a name. LIMIT and OFFSET execute and are
   reserved; use quoted names or path segments such as d.limit. SELECT a AS limit still parses.

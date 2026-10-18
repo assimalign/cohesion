@@ -162,17 +162,32 @@ public sealed class OqlPagingParserTests
 
     [Theory(DisplayName = "Cohesion Test [Documents.Language] - Paging: deferred spellings report one capability diagnostic")]
     [InlineData("SELECT * FROM c LIMIT 5, 10", "LIMIT", "LIMIT m, n (use LIMIT n OFFSET m)")]
+    [InlineData("SELECT * FROM c LIMIT ALL, 10", "LIMIT", "LIMIT m, n (use LIMIT n OFFSET m)")]
+    [InlineData("SELECT * FROM c LIMIT -5, 10", "LIMIT", "LIMIT m, n (use LIMIT n OFFSET m)")]
+    [InlineData("SELECT * FROM c LIMIT 'a', 10", "LIMIT", "LIMIT m, n (use LIMIT n OFFSET m)")]
+    [InlineData("SELECT * FROM c LIMIT 1 + 1, 10", "LIMIT", "LIMIT m, n (use LIMIT n OFFSET m)")]
+    [InlineData("SELECT * FROM c LIMIT (1 + 1), 10", "LIMIT", "LIMIT m, n (use LIMIT n OFFSET m)")]
+    [InlineData("SELECT * FROM c LIMIT @n, 10", "LIMIT", "LIMIT m, n (use LIMIT n OFFSET m)")]
+    [InlineData("SELECT * FROM c LIMIT [1, 2], 10", "LIMIT", "LIMIT m, n (use LIMIT n OFFSET m)")]
     [InlineData("SELECT * FROM c ORDER BY a FETCH FIRST 5 ROWS ONLY", "FETCH", "FETCH")]
-    [InlineData("UPDATE c SET a = 1 OFFSET 2", "OFFSET", "OFFSET")]
-    [InlineData("DELETE FROM c OFFSET 2", "OFFSET", "OFFSET")]
-    [InlineData("INSERT INTO c (KEY, VALUE) VALUES ('a', 1) LIMIT 2", "LIMIT", "LIMIT")]
+    [InlineData("UPDATE c SET a = 1 LIMIT 2", "LIMIT", "UPDATE LIMIT")]
+    [InlineData("UPDATE c SET a = 1 OFFSET 2", "OFFSET", "UPDATE OFFSET")]
+    [InlineData("DELETE FROM c OFFSET 2", "OFFSET", "DELETE OFFSET")]
+    [InlineData("INSERT INTO c (KEY, VALUE) VALUES ('a', 1) LIMIT 2", "LIMIT", "INSERT VALUES LIMIT")]
+    [InlineData("INSERT INTO c (KEY, VALUE) VALUES ('a', 1) OFFSET 2", "OFFSET", "INSERT VALUES OFFSET")]
+    [InlineData("UPSERT INTO c (KEY, VALUE) VALUES ('a', 1) LIMIT 2", "LIMIT", "UPSERT VALUES LIMIT")]
+    [InlineData("UPSERT INTO c (KEY, VALUE) VALUES ('a', 1) OFFSET 2", "OFFSET", "UPSERT VALUES OFFSET")]
+    [InlineData("EXPLAIN INSERT INTO c (KEY, VALUE) VALUES ('a', 1) LIMIT 2", "LIMIT", "INSERT VALUES LIMIT")]
+    [InlineData("EXPLAIN INSERT INTO c (KEY, VALUE) VALUES ('a', 1) OFFSET 2", "OFFSET", "INSERT VALUES OFFSET")]
+    [InlineData("EXPLAIN UPSERT INTO c (KEY, VALUE) VALUES ('a', 1) LIMIT 2", "LIMIT", "UPSERT VALUES LIMIT")]
+    [InlineData("EXPLAIN UPSERT INTO c (KEY, VALUE) VALUES ('a', 1) OFFSET 2", "OFFSET", "UPSERT VALUES OFFSET")]
     public void Parse_DeferredPaging_ShouldReportOneCapabilityDiagnostic(string text, string word, string construct)
     {
         // Act
         var diagnostic = new OqlQueryParser().Parse(text).Diagnostics.ShouldHaveSingleItem();
         // Assert
         diagnostic.Code.ShouldBe("COHDBL001");
-        diagnostic.Message.ShouldNotBeNull().ShouldContain(construct, Case.Sensitive);
+        diagnostic.Message.ShouldBe($"The {construct} clause is not supported by the OQL surface of this database model.");
         diagnostic.Start.ShouldBe(text.IndexOf(word, StringComparison.Ordinal));
         diagnostic.End.ShouldBe(diagnostic.Start + word.Length);
     }
