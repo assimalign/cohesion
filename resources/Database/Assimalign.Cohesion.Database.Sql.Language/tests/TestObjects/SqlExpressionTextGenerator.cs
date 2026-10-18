@@ -90,8 +90,12 @@ internal sealed class SqlExpressionTextGenerator
         }
 
         int next = depth - 1;
-        return _random.Next(24) switch
+        return _random.Next(28) switch
         {
+            24 => "COUNT(" + Pick("DISTINCT ", "ALL ") + Value(next) + ")",
+            25 => "STRING_AGG(" + Pick("DISTINCT ", "ALL ", "") + Value(next) + ", ',' ORDER BY " + Value(next) + Pick(" DESC", " ASC", "") + ")",
+            26 => "LISTAGG(" + Pick("DISTINCT ", "ALL ", "") + Value(next) + ") WITHIN GROUP (ORDER BY " + Value(next) + ")",
+            27 => "SUM(" + Value(next) + " ORDER BY " + Value(next) + ", " + Value(next) + " DESC)",
             0 or 1 => Leaf(),
             2 => Operand(next) + Spaced(Pick("+", "-", "||")) + Operand(next),
             3 => Operand(next) + Spaced(Pick("*", "/", "%")) + Operand(next),

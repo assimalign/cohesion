@@ -618,6 +618,160 @@ public sealed class SqlAggregateExecutionTests
         error.Message.ShouldContain("String", Case.Sensitive);
     }
 
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Aggregates: DISTINCT tuples and ordinary calls have separate slots")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Aggregates_DistinctNumericInputs_ShouldUseSqlEquality(bool grouped)
+    {
+        // Arrange
+        await using var engine = CreateEngine();
+        var database = await engine.CreateDatabaseAsync("aggregate");
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecuteAsync(session, "CREATE TABLE t (x INT, g INT);");
+        await ExecuteAsync(session, "INSERT INTO t VALUES (1, 1), (1, 1), (2, 1), (NULL, 1);");
+        // Act
+        var rows = await RowsAsync(session, "SELECT COUNT(x), COUNT(DISTINCT x), COUNT(ALL x), SUM(DISTINCT x), AVG(DISTINCT x), MIN(DISTINCT x), MAX(DISTINCT x), SUM(x ORDER BY g) FROM t" + (grouped ? " GROUP BY g" : "") + ";");
+        // Assert
+        CheckRows(rows, [[3L, 2L, 3L, 3m, 1.5m, 1, 2, 4m]]);
+        CheckRows(await RowsAsync(session, "SELECT COUNT(DISTINCT a.x) FROM t a JOIN t b ON a.g = b.g HAVING SUM(DISTINCT a.x) = 3 ORDER BY COUNT(DISTINCT a.x);"), [[2L]]);
+        CheckRows(await RowsAsync(session, "SELECT COUNT(DISTINCT CASE WHEN x = 1 THEN 1 ELSE 1.0 END) FROM t;"), [[1L]]);
+        CheckRows(await RowsAsync(session, "SELECT COUNT(DISTINCT x), SUM(DISTINCT x) FROM t WHERE g < 0;"), [[0L, null]]);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - String aggregates: grouped and global ordering share nullable text behavior")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Aggregates_OrderedStrings_ShouldReturnTextAndMetadata(bool grouped)
+    {
+        // Arrange
+        await using var engine = CreateEngine();
+        var database = await engine.CreateDatabaseAsync("aggregate");
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecuteAsync(session, "CREATE TABLE t (id INT, name TEXT, g INT);");
+        await ExecuteAsync(session, "INSERT INTO t VALUES (3, 'c', 1), (1, 'a', 1), (2, 'b', 1), (4, NULL, 1);");
+        string tail = " FROM t" + (grouped ? " GROUP BY g" : "") + ";";
+        // Act
+        await using var result = (await ExecuteAsync(session, "SELECT STRING_AGG(name, ',' ORDER BY id), LISTAGG(name, ',') WITHIN GROUP (ORDER BY id), STRING_AGG(name, '' ORDER BY id DESC), LISTAGG(name) WITHIN GROUP (ORDER BY g, id DESC), STRING_AGG(name, NULL ORDER BY id)" + tail)).ShouldBeAssignableTo<DatabaseResultSet>();
+        // Assert
+        CheckRows(await ReadRowsAsync(result), [["a,b,c", "a,b,c", "cba", "cba", "abc"]]);
+        result.Columns.ShouldAllBe(column => column.Type == DatabaseType.String && column.IsNullable && column.MaxLength == null);
+        result.Columns.Take(2).Select(column => column.Name).ShouldBe(["string_agg", "listagg"]);
+        CheckRows(await RowsAsync(session, "SELECT STRING_AGG(name, ','), LISTAGG(name) WITHIN GROUP (ORDER BY id) FROM t WHERE id < 0;"), [[null, null]]);
+        CheckRows(await RowsAsync(session, "SELECT STRING_AGG(name, ',') FROM t WHERE name IS NULL;"), [[null]]);
+        CheckRows(await RowsAsync(session, "SELECT STRING_AGG(name, ',' ORDER BY 1) FROM t;"), [["c,a,b"]]);
+        CheckRows(await RowsAsync(session, "SELECT STRING_AGG(name, ',' ORDER BY (SELECT MAX(x.id) FROM t x WHERE x.name = t.name)) FROM t;"), [["a,b,c"]]);
+        CheckRows(await RowsAsync(session, "SELECT STRING_AGG(name, @d ORDER BY id) FROM t;", new Dictionary<string, object?> { ["d"] = null }), [["abc"]]);
+        CheckRows(await RowsAsync(session, "SELECT STRING_AGG(CAST(name AS CHAR(5)), ',' ORDER BY id) FROM t;"), [["a,b,c"]]);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - DISTINCT aggregates: declared and explicit collations and NaN use SQL equality")]
+    public async Task Aggregates_CollatedDistinct_ShouldMatchSelectDistinct()
+    {
+        // Arrange
+        await using var engine = CreateEngine();
+        var database = await engine.CreateDatabaseAsync("aggregate");
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecuteAsync(session, "CREATE TABLE t (name TEXT COLLATE case_insensitive, id INT);");
+        await ExecuteAsync(session, "INSERT INTO t VALUES ('Ada', 1), ('ada', 2), ('Bob', 3);");
+        // Act / Assert
+        CheckRows(await RowsAsync(session, "SELECT COUNT(DISTINCT name), COUNT(DISTINCT name COLLATE binary), COUNT(DISTINCT @nan) FROM t;", new Dictionary<string, object?> { ["nan"] = double.NaN }), [[2L, 3L, 1L]]);
+        var text = (string)(await RowsAsync(session, "SELECT STRING_AGG(DISTINCT name, ',' ORDER BY name) FROM t;"))[0][0]!;
+        text.Split(',').Length.ShouldBe(2);
+        text.Split(',')[0].ShouldBeOneOf("Ada", "ada");
+        CheckRows(await RowsAsync(session, "SELECT STRING_AGG(name, ',' ORDER BY name COLLATE binary DESC) FROM t;"), [["ada,Bob,Ada"]]);
+        CheckRows(await RowsAsync(session, "SELECT STRING_AGG(DISTINCT name, ',' ORDER BY name DESC) FROM t;"), [["Bob,Ada"]]);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Aggregate shape: invalid modifiers and delimiters fail while planning")]
+    [InlineData("COUNT(DISTINCT x, id)", "COHSQLE006", "COUNT")]
+    [InlineData("STRING_AGG(name)", "COHSQLE006", "delimiter")]
+    [InlineData("STRING_AGG(name ORDER BY id, ',')", "COHSQLE006", "delimiter")]
+    [InlineData("STRING_AGG(name, name)", "COHDBL001", "delimiter")]
+    [InlineData("STRING_AGG(DISTINCT name, ',' ORDER BY id)", "COHSQLE032", "argument list")]
+    [InlineData("STRING_AGG(x, ',')", "COHSQLE006", "CAST")]
+    [InlineData("STRING_AGG(CAST(name AS JSON), ',')", "COHSQLE006", "CAST")]
+    [InlineData("UPPER(DISTINCT name)", "COHSQLE032", "not an aggregate")]
+    [InlineData("UPPER(ALL name)", "COHSQLE032", "not an aggregate")]
+    [InlineData("UPPER(name ORDER BY id)", "COHSQLE032", "not an aggregate")]
+    [InlineData("STRING_AGG(name, ',' ORDER BY COUNT(*))", "COHSQLE017", "Nested")]
+    public async Task Aggregates_InvalidShape_ShouldFailBeforeInput(string expression, string code, string message)
+    {
+        // Arrange
+        await using var engine = CreateEngine();
+        var database = await engine.CreateDatabaseAsync("aggregate");
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecuteAsync(session, "CREATE TABLE t (x INT, id INT, name TEXT);");
+        // Act
+        if (code == "COHDBL001")
+        {
+            var result = await ExecuteAsync(session, $"SELECT {expression} FROM t;");
+            // Assert: capability refusals use the statement-result carrier.
+            result.Status.ShouldBe(DatabaseResultStatus.Error);
+            result.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(code);
+            result.Diagnostics[0].Message.ShouldNotBeNull().ShouldContain(message, Case.Sensitive);
+        }
+        else
+        {
+            var error = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, $"SELECT {expression} FROM t;"));
+            // Assert
+            error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == code);
+            error.Message.ShouldContain(message, Case.Sensitive);
+        }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - String aggregates: length cap applies before ordered inputs finish")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Aggregates_StringLengthCap_ShouldFailWithCodedRangeError(bool distinct)
+    {
+        // Arrange
+        await using var engine = CreateEngine();
+        var database = await engine.CreateDatabaseAsync("aggregate");
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecuteAsync(session, "CREATE TABLE t (name TEXT);");
+        var parameters = new Dictionary<string, object?> { ["a"] = new string('a', 524288), ["b"] = new string('b', 524288) };
+        await ExecuteAsync(session, "INSERT INTO t VALUES ('a'), ('b');");
+        const string value = "CASE WHEN name = 'a' THEN @a ELSE @b END";
+        // Act
+        var error = await Should.ThrowAsync<DatabaseException>(() => RowsAsync(session, "SELECT STRING_AGG(" + (distinct ? "DISTINCT " : "") + value + ", ',' ORDER BY " + value + ") FROM t;", parameters));
+        // Assert
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE002");
+        error.Message.ShouldContain("1048576", Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Aggregates: application accumulators receive DISTINCT coerced ordered inputs")]
+    public async Task Aggregates_ApplicationFunction_ShouldApplyModifiersOutsideAccumulator()
+    {
+        // Arrange
+        var builder = SqlDatabaseEngine.CreateBuilder("aggregate-tests");
+        builder.Functions.Add(SqlAggregateFunction.Create<string, string, string>("collect",
+            seed: static () => "", step: static (state, value) => state + value, finish: static state => state));
+        await using var engine = await builder.BuildAsync(CancellationToken.None);
+        var database = await engine.CreateDatabaseAsync("aggregate");
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecuteAsync(session, "CREATE TABLE t (s CHAR(3), id INT);");
+        await ExecuteAsync(session, "INSERT INTO t VALUES ('b', 1), ('a', 2), ('b', 3);");
+        // Act / Assert
+        CheckRows(await RowsAsync(session, "SELECT collect(s), collect(DISTINCT s ORDER BY s), collect(s ORDER BY id DESC) FROM t;"), [["bab", "ab", "bab"]]);
+        CheckRows(await RowsAsync(session, "SELECT COUNT(DISTINCT CASE WHEN id = 1 THEN @a ELSE @b END), SUM(DISTINCT CASE WHEN id = 1 THEN @a ELSE @b END) FROM t;",
+            new Dictionary<string, object?> { ["a"] = 1.0000000000000002d, ["b"] = 1.0000000000000004d }), [[2L, 2m]]);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Scalar modifiers: persisted entry points reject aggregate-only syntax")]
+    [InlineData("CREATE TABLE bad (name TEXT, CHECK (UPPER(DISTINCT name) = 'X'));")]
+    [InlineData("CREATE TABLE bad (name TEXT DEFAULT UPPER(ALL 'x'));")]
+    [InlineData("CREATE FUNCTION bad(value TEXT) RETURNS TEXT RETURN UPPER(value ORDER BY value);")]
+    public async Task Aggregates_PersistedScalarModifier_ShouldReject(string statement)
+    {
+        // Arrange
+        await using var engine = CreateEngine();
+        var database = await engine.CreateDatabaseAsync("aggregate");
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        // Act / Assert
+        var error = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, statement));
+        error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE032");
+    }
+
     private static SqlDatabaseEngine CreateEngine()
         => SqlDatabaseEngine.Create("aggregate-tests", new SqlDatabaseEngineOptions());
 

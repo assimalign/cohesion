@@ -19,6 +19,8 @@ public sealed class SqlT1StorageFormatTests
     [InlineData("both", 16)]
     [InlineData("percent", 18)]
     [InlineData("ties", 18)]
+    [InlineData("string_agg", 21)]
+    [InlineData("listagg", 21)]
     public async Task VerifySchema_PreviousVocabulary_ShouldDemonstrateCanonicalDrift(string name, int version)
     {
         // Arrange: the earlier format rendered these ordinary identifiers without quotes. The
@@ -59,6 +61,6 @@ public sealed class SqlT1StorageFormatTests
         var refusal = await Should.ThrowAsync<SqlDataStorageFormatException>(async () =>
             await reopening.OpenDatabaseAsync("app", CancellationToken.None));
         refusal.Message.ShouldContain($"uses data-storage format {version}", Case.Sensitive);
-        refusal.Message.ShouldContain("supports only format 21", Case.Sensitive);
+        refusal.Message.ShouldContain("supports only format 22", Case.Sensitive);
     }
 }

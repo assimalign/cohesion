@@ -331,6 +331,13 @@ The package has no public interface left and no `Abstractions/` folder
   rented the session next, and a second dispose returned that caller's rental
   (`SqlClientTests.QueryAsync_AfterDisposeAndReRent_ShouldThrowObjectDisposedException`).
 
+## Aggregate modifiers (#1115)
+
+COUNT/SUM DISTINCT and ordered STRING_AGG use the existing statement/result framing.
+The live wire corpus verifies values, nullable String metadata and independent aggregate
+slots; excluded grouping/window forms continue to report usable-connection COHDBL001.
+There is no client ABI or protocol change.
+
 ## E4 SQL definitions
 
 Typed-literal wire theories run over both InMemory and loopback TCP. Temporal, interval,

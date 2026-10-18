@@ -121,7 +121,9 @@ public sealed class SqlLanguageConformanceTests
     /// <param name="projection">An aggregate projection from the original unsupported-forms audit.</param>
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - SELECT: audited aggregate forms execute and ungrouped columns fail")]
     [InlineData("COUNT(age)")]
+    [InlineData("COUNT(DISTINCT age)")]
     [InlineData("SUM(age)")]
+    [InlineData("SUM(DISTINCT age)")]
     [InlineData("AVG(age)")]
     [InlineData("MIN(age)")]
     [InlineData("MAX(age)")]
@@ -145,8 +147,8 @@ public sealed class SqlLanguageConformanceTests
         }
         object expected = projection switch
         {
-            "COUNT(age)" => 3L,
-            "SUM(age)" => 122m,
+            "COUNT(age)" or "COUNT(DISTINCT age)" => 3L,
+            "SUM(age)" or "SUM(DISTINCT age)" => 122m,
             "AVG(age)" => 122m / 3m,
             "MIN(age)" => 36,
             "MAX(age)" => 45,
@@ -358,6 +360,8 @@ public sealed class SqlLanguageConformanceTests
             ["AVG"] = new("AVG(age)", 122m / 3m),
             ["MIN"] = new("MIN(age)", 36),
             ["MAX"] = new("MAX(age)", 45),
+            ["STRING_AGG"] = new("STRING_AGG(name, ',' ORDER BY id)", "Ada,Grace,Alan"),
+            ["LISTAGG"] = new("LISTAGG(name, ',') WITHIN GROUP (ORDER BY id)", "Ada,Grace,Alan"),
             ["COALESCE"] = new("COALESCE(NULL, 7)", 7L),
             ["CAST"] = new("CAST('42' AS INT)", 42),
             ["UPPER"] = new("UPPER('Ada')", "ADA"),

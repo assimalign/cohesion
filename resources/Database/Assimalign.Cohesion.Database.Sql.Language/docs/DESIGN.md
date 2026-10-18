@@ -25,6 +25,15 @@ The SQL front-end (area architecture: [resources/Database/DESIGN.md](../../../..
 §3.3). The dialect is deliberately fundamental — basic SQL, declared precisely —
 and structured to be extended without churning what exists (open/closed).
 
+## Aggregate modifiers and string aggregation (#1115)
+
+SqlFunctionCallExpression retains a SqlSetQuantifier and ordered input keys for every call;
+the engine catalog decides which calls are aggregates. Depth measurement, rendering and
+structural equality include the keys. LISTAGG WITHIN GROUP normalizes onto the same ordered
+input shape, with DISTINCT accepted. ON OVERFLOW is one contextual capability refusal,
+without a vocabulary entry. Explicit ALL is rendered, while execution treats it as default.
+No named clause is added; the executable function profile adds STRING_AGG and LISTAGG.
+
 ## Executable functions and vocabulary (#1103)
 
 Column DEFAULT uses the arithmetic expression grammar, leaving following column constraints

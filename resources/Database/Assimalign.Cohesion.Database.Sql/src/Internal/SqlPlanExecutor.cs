@@ -282,6 +282,14 @@ internal sealed partial class SqlPlanExecutor
         }
     }
 
+    private static int CompareOrderingValues(object? left, object? right, Collation collation) => (left, right) switch
+    {
+        (null, null) => 0,
+        (null, _) => -1,
+        (_, null) => 1,
+        _ => SqlValueComparer.Compare(left, right, collation),
+    };
+
     private static List<object?[]> SortRows(List<object?[]> rows, IReadOnlyList<SqlBoundOrdering> orderBy,
         SqlExpressionEvaluator evaluator)
     {
@@ -294,13 +302,7 @@ internal sealed partial class SqlPlanExecutor
         {
             int index = i;
             var collation = orderBy[index].Collation.Resolve(evaluator.SubqueryValues);
-            var comparer = Comparer<object?>.Create((left, right) => (left, right) switch
-            {
-                (null, null) => 0,
-                (null, _) => -1,
-                (_, null) => 1,
-                _ => SqlValueComparer.Compare(left, right, collation),
-            });
+            var comparer = Comparer<object?>.Create((left, right) => CompareOrderingValues(left, right, collation));
 
             if (ordered is null)
             {

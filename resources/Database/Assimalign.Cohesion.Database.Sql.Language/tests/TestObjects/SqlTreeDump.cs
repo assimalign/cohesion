@@ -106,8 +106,13 @@ internal static class SqlTreeDump
                 builder.Append(')');
                 break;
             case SqlFunctionCallExpression function:
-                builder.Append("Call(").Append(Text(function.FunctionName)).Append(", ");
+                builder.Append("Call(").Append(Text(function.FunctionName)).Append(", ").Append(function.Quantifier).Append(", ");
                 AppendList(builder, function.Arguments);
+                foreach (var order in function.OrderBy)
+                {
+                    builder.Append(order.IsDescending ? ", DESC " : ", ASC ");
+                    Append(builder, order.Expression);
+                }
                 builder.Append(')');
                 break;
             case SqlCaseExpression caseExpression:

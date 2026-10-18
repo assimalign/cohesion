@@ -367,8 +367,6 @@ public sealed class SqlAggregateWireTests
     /// <summary>Excluded aggregate forms fail through the capability diagnostic before planning.</summary>
     /// <param name="statement">The excluded aggregate form.</param>
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - Aggregates: excluded forms report COHDBL001 over the wire")]
-    [InlineData("SELECT COUNT(DISTINCT score) FROM users")]
-    [InlineData("SELECT SUM(DISTINCT score) FROM users")]
     [InlineData("SELECT name, COUNT(*) FROM users GROUP BY ROLLUP(name)")]
     [InlineData("SELECT name, COUNT(*) FROM users GROUP BY CUBE(name)")]
     [InlineData("SELECT name, COUNT(*) FROM users GROUP BY GROUPING SETS ((name), ())")]
@@ -388,6 +386,23 @@ public sealed class SqlAggregateWireTests
         error.ConnectionUsable.ShouldBeTrue();
         (await connection.QueryAsync("SELECT COUNT(*) AS rows FROM users", cancellationToken: SqlClientTestHarness.Timeout()))
             .ShouldHaveSingleItem()["rows"].ShouldBe(2L);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - Aggregates: DISTINCT and ordered strings retain values and metadata")]
+    public async Task QueryAsync_DistinctAndOrderedStrings_ShouldExecuteOverWire()
+    {
+        // Arrange
+        await using var harness = await SqlClientTestHarness.StartAsync();
+        await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
+        await SeedAsync(connection);
+        // Act
+        var result = await connection.QueryAsync("SELECT COUNT(DISTINCT amount) AS n, SUM(DISTINCT amount) AS total, STRING_AGG(category, ',' ORDER BY id DESC) AS names FROM sales", cancellationToken: SqlClientTestHarness.Timeout());
+        // Assert
+        var row = result.ShouldHaveSingleItem();
+        row["n"].ShouldBe(4L);
+        row["total"].ShouldBe(40m);
+        row["names"].ShouldBe("x,y,y,x,y,x,x");
+        result.Columns.Select(column => column.Type).ShouldBe([DatabaseType.Int64, DatabaseType.Decimal, DatabaseType.String]);
     }
 
     private static void AssertAggregateValues(SqlRow row, long rows, long populated, decimal? total,

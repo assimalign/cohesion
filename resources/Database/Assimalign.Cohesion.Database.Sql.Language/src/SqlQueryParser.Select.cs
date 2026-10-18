@@ -469,9 +469,9 @@ public sealed partial class SqlQueryParser
         }
     }
 
-    private SqlOrderByColumn ParseOrderByColumn(ref TokenLexer lexer)
+    private SqlOrderByColumn ParseOrderByColumn(ref TokenLexer lexer, bool aggregateInput = false)
     {
-        var expr = ParseExpression(ref lexer);
+        var expr = aggregateInput ? ParseOperand(ref lexer, OperandRule.Expression) : ParseExpression(ref lexer);
         bool isDescending = false;
 
         if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "DESC"))

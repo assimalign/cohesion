@@ -92,7 +92,7 @@ complete ISO SQL support; the boundaries below are part of the contract.
 
 | Statement | Status | Notes |
 |---|---|---|
-| `SELECT` | Supported subset, measured | Stored tables, virtual system relations and aliased derived queries, with written-order N-way INNER/LEFT/CROSS joins and comma items over these source kinds; `DISTINCT`, projections and aliases, scalar expressions, `WHERE`, grouping, multi-expression `ORDER BY ASC/DESC`, nonnegative integer `LIMIT`/`OFFSET`, ISO `FETCH FIRST`/`NEXT`, and the SQL Server `TOP` lexical alias. `COUNT(*)`, `COUNT(expr)`, `SUM`, `AVG`, `MIN`, and `MAX` execute in grouped and ungrouped queries. See the aggregate contract below. Top-level `SELECT` without `FROM` is rejected by the planner; CTE bodies can use one implicit row. |
+| `SELECT` | Supported subset, measured | Stored tables, virtual system relations and aliased derived queries, with written-order N-way INNER/LEFT/CROSS joins and comma items over these source kinds; `DISTINCT`, projections and aliases, scalar expressions, `WHERE`, grouping, multi-expression `ORDER BY ASC/DESC`, nonnegative integer `LIMIT`/`OFFSET`, ISO `FETCH FIRST`/`NEXT`, and the SQL Server `TOP` lexical alias. `COUNT(*)`, `COUNT(expr)`, `SUM`, `AVG`, `MIN`, `MAX`, `STRING_AGG`, and `LISTAGG` execute in grouped and ungrouped queries, with DISTINCT/ALL and ordered inputs. See the aggregate contract below. Top-level `SELECT` without `FROM` is rejected by the planner; CTE bodies can use one implicit row. |
 | `EXPLAIN` | Supported extension, measured | SELECT, INSERT (including query sources), UPDATE or DELETE returns the chosen plan as ordinary rows without executing it. DDL, transaction control, nested EXPLAIN and EXPLAIN ANALYZE report `COHDBL001`. |
 | `INSERT` / `VALUES` | Supported subset, measured | Optional column list, multi-row literal/scalar `VALUES` including whole-item `DEFAULT`, `INSERT ... DEFAULT VALUES` (one row of defaults, with an optional column list), and transactional `INSERT ... SELECT` with the same destination coercion, defaults, and constraints. `VALUES` expressions have no columns in scope: a column reference reports `COHSQLE005` before anything executes (see [VALUES and counts have no column scope](#values-and-counts-have-no-column-scope-1165)). Subqueries inside `VALUES` are excluded; use `INSERT ... SELECT`. |
 | `UPDATE` | Supported | multi-column `SET`, including `c = DEFAULT`, and `WHERE` (including correlated and uncorrelated subqueries); qualified references in both use the target name or its alias, which hides the base name (PostgreSQL `parse_relation.c:3759`); hidden/unknown qualifiers fail with located `COHSQLE015` before any write and leave an explicit transaction active; aggregates in SET and outside child queries in WHERE are rejected; aggregates inside WHERE subqueries execute (see [Grouping and aggregate functions](#grouping-and-aggregate-functions-1020)) |
@@ -109,7 +109,7 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `CAST` | Supported subset, measured | Built-in conversions across all 19 shared types according to the [conversion matrix](#explicit-conversion-cast-1022-e3), plus application-registered casts (E3's cast registry), in projections, predicates, ordering, and DML expressions, including the SQL server/client. See the exact pair and error contract below. CAST executes in DEFAULT; CHECK still rejects CAST. |
 | `COLLATE` | Supported subset, measured | Column and expression overrides: `binary`, `case_insensitive`, `case_accent_insensitive`, plus compatibility `invariant` with scan execution only. Effective collation governs comparisons, `LIKE`, ordering, grouping, `DISTINCT`, and unique keys. See the collation contract below. |
 | `JOIN` / `USING` | Supported subset, measured | N-way INNER (or bare JOIN), LEFT [OUTER], CROSS and comma joins over stored/system/derived sources. INNER/LEFT require ON or USING; CROSS accepts neither. RIGHT/FULL, NATURAL, LATERAL and qualified wildcards remain excluded. See the precise contract below. |
-| `GROUP BY` / `HAVING` | Supported subset, measured | One or more grouping expressions; `WHERE` filters input rows and `HAVING` filters groups after aggregation. Composes with supported N-way joins, `ORDER BY`, `LIMIT`, and `OFFSET`, including server/client execution. Ungrouped, unaggregated projected columns are errors. `DISTINCT`/`ALL` aggregate modifiers, grouping extensions, windows, and ordered-set aggregates report `COHDBL001`. |
+| `GROUP BY` / `HAVING` | Supported subset, measured | One or more grouping expressions; `WHERE` filters input rows and `HAVING` filters groups after aggregation. Composes with supported N-way joins, `ORDER BY`, `LIMIT`, and `OFFSET`, including server/client execution. Ungrouped, unaggregated projected columns are errors. `DISTINCT`/`ALL` and aggregate input `ORDER BY` execute; STRING_AGG and LISTAGG concatenate text. Grouping extensions, windows, and other ordered-set aggregates report `COHDBL001`. |
 | Subqueries / `INSERT ... SELECT` | Supported subset, measured | Correlated and uncorrelated scalar, `IN`/`NOT IN`, and `EXISTS`/`NOT EXISTS` queries in supported SELECT expressions and UPDATE/DELETE WHERE predicates, plus aliased derived tables and transactional insert-source queries. Each body may be a set operation (#1114). All use the outer statement snapshot; nesting is limited to 32 subquery levels, within the statement's expression nesting limit (256 levels by default, `SQL0006`). Quantified comparisons and subqueries in UPDATE SET, VALUES, CHECK/DEFAULT, and LIMIT/OFFSET/FETCH/TOP expressions report `COHDBL001`. See the subquery contract below. |
 | `TOP` / `FETCH` | Supported subset, measured | Row counts normalize to LIMIT/Offset plan fields; see [Pagination](#pagination-1107). PERCENT, WITH TIES and DML TOP retain COHDBL001. |
 | `SELECT ALL` | Recognized, not supported | rejected with `COHDBL001` |
@@ -364,7 +364,7 @@ with one named `COHDBL001` and are absent from the executable profile (#1103).
 **Function arguments (#1189).** A call to an executable function must pass a number
 of arguments its signature accepts (the table under
 [Builtin functions](#builtin-functions)): `UPPER`, `LOWER`, `LENGTH` and `ABS` take
-exactly one, `COALESCE` one or more, each aggregate exactly one, and only `COUNT`
+exactly one, `COALESCE` one or more, COUNT/SUM/AVG/MIN/MAX exactly one, STRING_AGG two, LISTAGG one or two, and only `COUNT`
 accepts `*`. Any other call fails while planning with `COHSQLE006`, a
 `DatabaseException` (`ExecutionFailure` on the wire), in every position the
 unknown-function check covers: projections, `VALUES`, `UPDATE ... SET`, predicates
@@ -1218,6 +1218,9 @@ scope (#1113); subqueries in UPDATE SET retain `COHDBL001`.
 | `SUM(expr)` | Ignores NULL arguments. All-NULL or empty input returns NULL. | Nullable `Decimal` |
 | `AVG(expr)` | Ignores NULL arguments in both the sum and divisor. All-NULL or empty input returns NULL. | Nullable `Decimal`, including integer input |
 | `MIN(expr)` / `MAX(expr)` | Ignore NULL arguments. All-NULL or empty input returns NULL. | Nullable argument type |
+| `aggregate(DISTINCT expr)` / `aggregate(ALL expr)` | DISTINCT consumes each argument tuple once; ALL consumes every row. The aggregate's NULL rule applies. | Same as the aggregate |
+| `STRING_AGG(value, delimiter [ORDER BY keys])` | Skips NULL values; NULL delimiter is empty. Empty/all-NULL input returns NULL. | Nullable String |
+| `LISTAGG(value [, delimiter]) WITHIN GROUP (ORDER BY keys)` | Same as STRING_AGG; omitted delimiter is empty. | Nullable String |
 
 An ungrouped aggregate has one implicit group, so an empty input produces one
 row containing the zero/NULL results above, subject to `HAVING` and pagination.
@@ -1247,14 +1250,47 @@ queries under the ordering contract above. Aliases in `GROUP BY` or `HAVING`
 remain outside this subset; use the source/grouping expression or repeat the
 aggregate. GROUP BY ordinals report `COHDBL001`.
 
-`DISTINCT` and explicit `ALL` inside a call, aggregate `FILTER`, `ORDER BY` inside a
-call, empty grouping sets (`GROUP BY ()`), `GROUPING SETS`, `ROLLUP`, `CUBE`, `GROUPING`/`GROUPING_ID`, window
-functions and clauses, and ordered-set `WITHIN GROUP` aggregates are excluded
-and report `COHDBL001`. Which names are aggregates is the engine's function catalog to
-say, so the parser reports `DISTINCT`, `ALL` and `ORDER BY` inside any call, an
-application's aggregate included; PostgreSQL refuses them on a function that is not an
-aggregate. Top-level `SELECT DISTINCT` remains available. These
-boundaries do not add named clauses to the 54-clause denominator.
+`DISTINCT` removes duplicate argument tuples after parameter coercion, under each
+argument's collation and the exact numeric equality used by SELECT DISTINCT and GROUP BY.
+Thus Int64 1 and Decimal 1.0 share a class, and NaNs share one class. Strict aggregates
+skip NULL arguments before deduplication. Explicit `ALL` means the default. Distinct
+state grows with the number of distinct values per group. Quantifiers cannot accompany
+`*` (SQL0003); COUNT with several arguments still fails with COHSQLE006.
+
+Every aggregate accepts an inner `ORDER BY`, including SUM whose result does not depend
+on ordering. Keys bind over the source row, may contain prepared subqueries, and use
+ordinary expression rules: an integer is a constant, never a select-list ordinal.
+Sorting is stable, with NULL first in ASC and last in DESC. With DISTINCT, each key must
+structurally match an argument after column binding (COHSQLE032 otherwise). Quantifiers
+and inner ordering on a scalar call also fail with COHSQLE032. The parser accepts these
+modifiers without knowing which names the catalog makes aggregates.
+
+STRING_AGG(value, delimiter [ORDER BY keys]) uses PostgreSQL spelling; ISO LISTAGG(value
+[, delimiter]) WITHIN GROUP (ORDER BY keys) executes through the same accumulator.
+LISTAGG permits DISTINCT, requires WITHIN GROUP, and cannot also have an inner ORDER BY
+(SQL0003). An omitted LISTAGG delimiter is empty. The delimiter must be a string literal,
+NULL literal, or parameter known at plan time; a column/expression delimiter is COHDBL001.
+Both arguments must be String or Character; CHAR is trimmed on conversion to text.
+JSON and other types fail with COHSQLE006 and require CAST(... AS TEXT). NULL values are
+skipped; a NULL delimiter contributes nothing. Empty/all-NULL input returns NULL; a
+single value has no leading/trailing delimiter. The nullable String result takes its
+collation from the value alone, independently of the delimiter and ordering keys.
+
+STRING_AGG/LISTAGG use StringBuilder and fail with COHSQLE002 as soon as the output would
+exceed 1,048,576 UTF-16 units. Ordered calls check while buffering, before sorting. Ordered
+DISTINCT calls retain one representative per equivalence class, selected in sorted input
+order, so case-insensitive aggregation preserves one input spelling.
+
+Aggregate FILTER, empty grouping sets (GROUP BY ()), GROUPING SETS, ROLLUP, CUBE,
+GROUPING/GROUPING_ID, windows, non-LISTAGG WITHIN GROUP, and LISTAGG ON OVERFLOW
+(including ERROR and TRUNCATE) retain COHDBL001. ON OVERFLOW is matched contextually
+inside LISTAGG and names the whole construct once; OVERFLOW remains an ordinary identifier.
+These additions change no named clause count.
+
+Reference behavior: PostgreSQL src/backend/parser/gram.y:16017-16129,
+parse_agg.c:189-203,231-233 and parse_func.c:324-341; executor/nodeAgg.c:832-834,888-898;
+utils/adt/varlena.c:4331-4366,4506-4515. Cohesion restricts the delimiter to a literal or
+parameter and also provides ISO LISTAGG.
 
 ## Set operations (#1114)
 
@@ -2339,8 +2375,8 @@ storage coercion; nested arithmetic therefore sees the converted numeric value.
 
 ## Builtin functions
 
-The executable profile contains the 42 T1 scalar names below, the five aggregates
-COUNT/SUM/AVG/MIN/MAX and CAST. COALESCE, NULLIF, CASE, CAST and EXTRACT remain
+The executable profile contains the 42 T1 scalar names below, the seven aggregate names
+COUNT/SUM/AVG/MIN/MAX/STRING_AGG/LISTAGG and CAST. COALESCE, NULLIF, CASE, CAST and EXTRACT remain
 evaluator special forms, outside the catalog calling convention (owner decision 66).
 SUBSTRING, TRIM and POSITION grammar normalizes to calls; directional TRIM becomes
 LTRIM or RTRIM. Applications and built-ins use the same reflection-free catalog.
@@ -2461,7 +2497,7 @@ unquoted niladic names read their values and need quoting to name a column.
 Existing join-keyword restrictions on LEFT/RIGHT aliases remain. Canonical expression rendering quotes BOTH/LEADING/TRAILING when used as identifiers, preserving TRIM round trips. Applying an
 existing compiled schema with newly quoted function-named columns is a no-op.
 
-The five aggregates keep their existing signatures: COUNT(*)/COUNT(value),
+COUNT/SUM/AVG/MIN/MAX keep their existing signatures: COUNT(*)/COUNT(value),
 SUM(numeric), AVG(numeric), MIN(value), MAX(value). Only COUNT accepts `*`.
 Window functions remain recognized-unsupported (COHDBL001). LOG(base, x), trig,
 regex functions, TO_CHAR and other unknown names remain COHSQLE016.
@@ -2587,6 +2623,7 @@ pin in the same change.
 | `COHSQLE029` | Error | CREATE SCHEMA names an existing namespace without IF NOT EXISTS (PostgreSQL SQLSTATE 42P06) |
 | `COHSQLE030` | Error | DROP SCHEMA RESTRICT finds dependent objects; the message offers CASCADE (PostgreSQL SQLSTATE 2BP01) |
 | `COHSQLE031` | Error | DROP SCHEMA targets dbo, which code-first provisioning requires |
+| `COHSQLE032` | Error | DISTINCT/ALL/input ORDER BY on a scalar function, or DISTINCT input ordering whose keys are absent from the arguments (PostgreSQL 42809 / 42P10) |
 
 Positions are absolute character offsets into the statement text; line/column
 presentation is computed by tooling from the source (offset → line mapping), not
@@ -2602,7 +2639,7 @@ rejects with `COHDBL001`: `RECURSIVE`, `[NOT] MATERIALIZED`, `SEARCH`/`CYCLE`,
 `SELECT ALL`, `CREATE`/`DROP VIEW`,
 `CREATE COLLATION`, `CREATE FULLTEXT`, `NULLS FIRST`/`LAST`, `GROUPING SETS` and
 the `GROUPING`, `ROLLUP`, `CUBE` and `GROUPING_ID` calls, `FILTER (...)` and
-`WITHIN GROUP` after a call, the `ANY`/`SOME` (and `ALL`) quantified comparisons,
+`WITHIN GROUP` after a non-LISTAGG call, LISTAGG ON OVERFLOW (contextual), the `ANY`/`SOME` (and `ALL`) quantified comparisons,
 `LATERAL`, `~`, `SEQUENCE`, `SERIAL`, `BIGSERIAL`, `SMALLSERIAL`, `OVERRIDING`,
 `MINVALUE`, `MAXVALUE`, `CYCLE`, `CACHE`, `RESTART`, plus `PERCENT` and `WITH TIES` after
 FETCH or TOP. Identifiers spelled like these recognized-unsupported words,
