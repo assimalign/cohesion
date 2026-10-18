@@ -9,9 +9,6 @@ using Xunit;
 
 namespace Assimalign.Cohesion.Database.Documents.Tests;
 
-[CollectionDefinition("Document index concurrency", DisableParallelization = true)]
-public sealed class DocumentIndexConcurrencyCollection { }
-
 [Collection("Document index concurrency")]
 public sealed class DocumentIndexConcurrencyTests
 {
