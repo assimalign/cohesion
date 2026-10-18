@@ -201,7 +201,7 @@ public sealed partial class SqlSubqueryExecutionTests
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Correlation: self-referencing DML reads the complete pre-statement snapshot")]
     [InlineData("DELETE FROM t WHERE NOT EXISTS (SELECT 1 FROM t p WHERE p.id = t.id - 1)", 1, new[] { 2, 3 })]
-    [InlineData("UPDATE t SET id = id + 10 WHERE EXISTS (SELECT 1 FROM t n WHERE n.id = t.id + 1)", 2, new[] { 3, 11, 12 })]
+    [InlineData("UPDATE t SET id = id + 10 WHERE EXISTS (SELECT 1 FROM t p WHERE p.id = t.id - 1)", 2, new[] { 1, 12, 13 })]
     public async Task Execute_SelfReferencingCorrelatedDml_ShouldAvoidHalloween(string sql, int affected, int[] expected)
     {
         // Arrange

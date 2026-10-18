@@ -72,6 +72,8 @@ public sealed partial class SqlSubqueryExecutionTests
             .ShouldHaveSingleItem()[0].ShouldBe("sales");
         (await RowsAsync(session, "SELECT DISTINCT (SELECT l.threshold FROM labels l WHERE l.k = s.k) FROM sales s ORDER BY 1 LIMIT 1 OFFSET 1"))
             .ShouldHaveSingleItem()[0].ShouldBe(9);
+        (await RowsAsync(session, "SELECT DISTINCT (SELECT l.threshold FROM labels l WHERE l.k = s.k) FROM sales s ORDER BY 1 LIMIT 1 OFFSET 2"))
+            .ShouldHaveSingleItem()[0].ShouldBe(10);
         (await RowsAsync(session, "SELECT s.id, l.k FROM sales s LEFT JOIN labels l ON s.k = l.k AND NOT EXISTS (SELECT x.k FROM labels x WHERE x.k = s.k AND x.threshold < 10) ORDER BY s.id"))
             .Select(row => row[1]).ShouldBe(new object?[] { null, null, 2, null });
     }
