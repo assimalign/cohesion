@@ -96,7 +96,7 @@ and relationships have a null variable. Relationship directions are relative to 
 nodes; incoming arrows reverse that relationship's endpoints. A scalar property reference always
 contains a variable and exactly one property key; qualified database names have no AST representation.
 
-The engine reads only `MatchClauses`. The original constructor constructs one mandatory clause
+The engine reads `Stages`; `MatchClauses` remains a flattened inspection view. The original constructor constructs one mandatory clause
 when paths or a predicate are supplied, and none for an empty match without a predicate. `Matches`
 and `Predicate` expose the single mandatory clause only, returning empty/null for any optional or
 multi-clause shape. This implements the owner's AST default for hand-built statements; malformed
@@ -131,7 +131,7 @@ collect_list and its Cypher alias collect. Ordinary scalar functions remain outs
 
 | Clause | Accepted subset | Execution |
 | --- | --- | --- |
-| `MATCH` | Comma-separated finite node/relationship chains; optional `variable =` path assignment, label expressions, scalar literal/parameter property maps; every ISO full and abbreviated edge except the tilde forms | Planner chooses an indexed anchor when available; executor matches bounded relationship-unique trails and binds named paths in traversal order |
+| `MATCH` | Comma-separated finite node/relationship chains; optional `variable =` path assignment, label expressions, scalar expression property maps; every ISO full and abbreviated edge except the tilde forms | Planner chooses an indexed anchor when available; executor matches bounded relationship-unique trails and binds named paths in traversal order |
 | `OPTIONAL MATCH` | The same graph patterns and clause-local WHERE, including a leading optional or several consecutive matching clauses | Left join against each running binding; an unmatched clause preserves that row and binds its new variables to NULL |
 | `WHERE` | Boolean and scalar expressions: comparisons, labels, AND/OR/XOR/NOT, IS null/truth tests, arithmetic, concatenation, IN lists and string predicates | Keeps TRUE only; see [DIALECT.md](DIALECT.md) and scalar expressions below |
 | `EXPLAIN` | One linear statement of the supported stages | Shared description rows without executing any read expansion or write; Cohesion extension |
