@@ -381,7 +381,13 @@ output (the rule is in [DIALECT.md](DIALECT.md#persisted-definitions-are-canonic
   canonical spelling of every form a CHECK accepts, proves that parsing the output
   yields the same tree (positions aside; a CAST target's whitespace is normalized)
   and that the output is a fixed point, and runs thousands of randomized
-  expressions over the whole grammar through the same checks. A parser change that
+  expressions over the whole grammar through the same checks. WITH round trips
+  compare the complete SqlTreeDump, including ordered definition names, column
+  lists and bodies; generated query roots exercise WITH as well as scalar grammar.
+  SEARCH and MATERIALIZED now render as quoted identifiers, including in persisted
+  CHECK/DEFAULT/function text; the engine's format-16 gate prevents format-15
+  canonical CHECK text from reporting provisioning drift under the new renderer.
+  A parser change that
   would read stored canonical text differently fails that suite. The engine also
   re-parses each canonical text when it is first rendered and refuses to store a
   definition that does not reproduce its tree.

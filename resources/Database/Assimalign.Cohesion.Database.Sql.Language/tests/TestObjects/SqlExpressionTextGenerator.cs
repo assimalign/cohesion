@@ -35,6 +35,26 @@ internal sealed class SqlExpressionTextGenerator
 
     internal string Next(int depth) => Value(depth);
 
+    /// <summary>Generates WITH roots with ordered bodies and optional output-name lists.</summary>
+    internal string NextQuery(int depth)
+    {
+        string[] names = ["a", "top", "ties"];
+        int count = 1 + _random.Next(names.Length);
+        var builder = new StringBuilder("WITH ");
+        for (int index = 0; index < count; index++)
+        {
+            if (index > 0) { builder.Append(", "); }
+            builder.Append(names[index]);
+            if (_random.Next(2) == 0) { builder.Append(" (x, y)"); }
+            builder.Append(" AS (SELECT ").Append(Value(depth)).Append(" AS x, ")
+                .Append(Value(depth)).Append(" AS y FROM ").Append(index == 0 ? "t" : names[index - 1]);
+            if (_random.Next(2) == 0) { builder.Append(" WHERE ").Append(Value(depth)); }
+            builder.Append(')');
+        }
+        return builder.Append(" SELECT x, y FROM ").Append(names[count - 1])
+            .Append(" ORDER BY x DESC LIMIT 2 OFFSET 1").ToString();
+    }
+
     private string Value(int depth)
     {
         if (depth <= 0)

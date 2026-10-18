@@ -56,7 +56,7 @@ public sealed class SqlCteParserTests
         var rendered = SqlExpressionRenderer.Render(select);
         var roundTrip = (SqlQueryStatement)new SqlQueryParser().Parse(rendered);
         roundTrip.Diagnostics.ShouldNotContain(item => item.Severity == DiagnosticSeverity.Error);
-        roundTrip.SqlExpression.ShouldBeOfType<SqlSelectExpression>().CommonTables.Count.ShouldBe(2);
+        SqlTreeDump.Dump(roundTrip.SqlExpression.ShouldBeOfType<SqlSelectExpression>()).ShouldBe(SqlTreeDump.Dump(select));
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - WITH: excluded forms retain precise capability diagnostics")]

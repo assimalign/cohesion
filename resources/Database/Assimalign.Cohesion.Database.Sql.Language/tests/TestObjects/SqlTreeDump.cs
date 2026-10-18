@@ -152,7 +152,17 @@ internal static class SqlTreeDump
 
     private static void Append(StringBuilder builder, SqlSelectExpression select)
     {
-        builder.Append("Select(distinct=").Append(select.IsDistinct).Append(", columns=[");
+        builder.Append("Select(commonTables=[");
+        for (int index = 0; index < select.CommonTables.Count; index++)
+        {
+            var definition = select.CommonTables[index];
+            builder.Append(index > 0 ? ", " : string.Empty);
+            builder.Append("CommonTable(").Append(Text(definition.Name)).Append(", columns=[")
+                .Append(string.Join(", ", definition.Columns.Select(Text))).Append("], body=");
+            Append(builder, definition.Body);
+            builder.Append(')');
+        }
+        builder.Append("], distinct=").Append(select.IsDistinct).Append(", columns=[");
         for (int index = 0; index < select.Columns.Count; index++)
         {
             builder.Append(index > 0 ? ", " : string.Empty);

@@ -24,6 +24,8 @@ public sealed class SqlExpressionRendererTests
     [
         // Comparison and arithmetic operators, precedence and associativity.
         ["qty > 0", "qty > 0"],
+        ["search >= 0", "\"search\" >= 0"],
+        ["materialized >= 0", "\"materialized\" >= 0"],
         ["QTY>0", "QTY > 0"],
         ["qty<>0 and qty!=1", "qty <> 0 AND qty <> 1"],
         ["qty <= 10 OR qty >= 20", "qty <= 10 OR qty >= 20"],
@@ -253,6 +255,8 @@ public sealed class SqlExpressionRendererTests
     /// <param name="written">The query as written.</param>
     /// <param name="canonical">Its canonical text.</param>
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Renderer: queries render canonically and parse back to the same tree")]
+    [InlineData("WITH top (x) AS (SELECT 1), ties (y) AS (SELECT x + 1 FROM top) SELECT y FROM ties",
+        "WITH \"top\" (x) AS (SELECT 1), ties (y) AS (SELECT x + 1 FROM \"top\") SELECT y FROM ties")]
     [InlineData("select * from t", "SELECT * FROM t")]
     [InlineData("SELECT DISTINCT a AS x, b y FROM dbo.t AS q WHERE a > 0 ORDER BY a DESC, 2 LIMIT 5 OFFSET 1",
         "SELECT DISTINCT a AS x, b AS y FROM dbo.t AS q WHERE a > 0 ORDER BY a DESC, 2 LIMIT 5 OFFSET 1")]
@@ -313,6 +317,49 @@ public sealed class SqlExpressionRendererTests
 
         // Most generated text must parse, or the property would hold vacuously.
         checkedCount.ShouldBeGreaterThan(3000);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sql.Language] - Renderer: generated WITH roots preserve complete ordered definitions")]
+    public void Render_RandomWithQueries_ShouldRoundTripCompleteTrees()
+    {
+        // Arrange
+        var generator = new SqlExpressionTextGenerator(seed: 1116);
+        int checkedCount = 0;
+        for (int iteration = 0; iteration < 2000 && checkedCount < 600; iteration++)
+        {
+            string text = generator.NextQuery(depth: 1 + iteration % 3);
+            var statement = (SqlQueryStatement)new SqlQueryParser().Parse(text);
+            if (statement.Diagnostics.Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)) { continue; }
+            var declared = statement.SqlExpression.ShouldBeOfType<SqlSelectExpression>();
+
+            // Act
+            string rendered = SqlExpressionRenderer.Render(declared);
+            var reloaded = ParseSelect(rendered);
+
+            // Assert
+            declared.CommonTables.ShouldNotBeEmpty();
+            SqlTreeDump.Dump(reloaded).ShouldBe(SqlTreeDump.Dump(declared), $"'{text}' rendered as '{rendered}'.");
+            SqlExpressionRenderer.Render(reloaded).ShouldBe(rendered);
+            checkedCount++;
+        }
+        checkedCount.ShouldBe(600);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Tree comparison: WITH semantic differences are visible")]
+    [InlineData("WITH b (x) AS (SELECT 1), c AS (SELECT 2) SELECT * FROM c")]
+    [InlineData("WITH a (y) AS (SELECT 1), c AS (SELECT 2) SELECT * FROM c")]
+    [InlineData("WITH a (x) AS (SELECT 999), c AS (SELECT 2) SELECT * FROM c")]
+    [InlineData("WITH c AS (SELECT 2), a (x) AS (SELECT 1) SELECT * FROM c")]
+    public void Dump_CommonTableDifference_ShouldDistinguishTrees(string changed)
+    {
+        // Arrange
+        var original = ParseSelect("WITH a (x) AS (SELECT 1), c AS (SELECT 2) SELECT * FROM c");
+
+        // Act
+        var other = ParseSelect(changed);
+
+        // Assert
+        SqlTreeDump.Dump(other).ShouldNotBe(SqlTreeDump.Dump(original));
     }
 
     /// <summary>A name the dialect cannot delimit, and a node it cannot spell, are refused rather than mis-rendered.</summary>
