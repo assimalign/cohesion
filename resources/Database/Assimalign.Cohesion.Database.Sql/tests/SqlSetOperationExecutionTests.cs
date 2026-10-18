@@ -126,7 +126,7 @@ public sealed class SqlSetOperationExecutionTests
             .AsTask().GetAwaiter().GetResult());
 
         // Assert
-        failure.ShouldBeAssignableTo<DatabaseException>().Diagnostics!.ShouldContain(item => item.Code == "COHSQLE004");
+        failure.ShouldBeAssignableTo<DatabaseException>()!.Diagnostics!.ShouldContain(item => item.Code == "COHSQLE004");
         (await RowsAsync(session, "SELECT id FROM t;")).ShouldHaveSingleItem()[0].ShouldBe(1);
     }
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Set operations: duplicate and NULL multiplicities follow SQL bags")]
