@@ -22,15 +22,17 @@ COHDBL001. Function tokens stay usable as fields and iteration aliases.
 LENGTH counts Unicode scalars. SUBSTR and POSITION use zero-based code-point positions;
 POSITION returns -1 for no match. SUBSTR permits a negative start from the end, clamps starts
 to the string, and returns NULL for a negative length or fractional index. String predicates
-compare ordinally; LOWER/UPPER use invariant case conversion. TRIM defaults to a space and its
-optional second argument is a set of code points. Empty REPLACE patterns leave text unchanged.
+compare ordinally; LOWER/UPPER use invariant case conversion. TRIM defaults to SQL++ whitespace:
+space, tab, newline, form feed and carriage return, diverging from SQL's space-only default.
+Its optional second argument is a set of code points. Empty REPLACE patterns leave text unchanged.
 Constructed string results and work buffers are capped at 1,048,576 UTF-16 units; inputs are
 not capped. LENGTH, searching, string predicates and SUBSTR scan without input-sized buffers,
 and loops observe cancellation at least every 1,024 iterations.
 ROUND uses half-away-from-zero for exact numbers, with negative scales; TRUNC rounds toward zero.
 SQRT of a negative number and invalid POWER domains give COHDOC019; overflow gives COHDOC007.
 Fractional ROUND/TRUNC scales give COHDOC019. SQRT and nonintegral POWER use BCL double
-calculations converted to the decimal scalar domain; integral POWER uses decimal arithmetic.
+calculations converted through the double's shortest round-trip representation to the decimal
+scalar domain, retaining full double precision; integral POWER uses decimal arithmetic.
 
 Dates use UTC ISO strings `yyyy-MM-ddTHH:mm:ss.fffZ` and Int64 epoch milliseconds. STR_TO_MILLIS
 accepts `yyyy-MM-dd` and date plus `T` or space, `HH:mm:ss`, optional 1..7 fractional digits and

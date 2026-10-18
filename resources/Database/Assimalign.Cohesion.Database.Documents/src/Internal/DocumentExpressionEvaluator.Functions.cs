@@ -107,7 +107,7 @@ internal sealed partial class DocumentExpressionEvaluator
         {
             "ABS" => decimal.Abs(x), "FLOOR" => decimal.Floor(x), "CEIL" => decimal.Ceiling(x),
             "ROUND" => Round(x, y, false), "TRUNC" => Round(x, y, true),
-            "SQRT" => x < 0 ? throw Domain() : (decimal)Math.Sqrt((double)x),
+            "SQRT" => x < 0 ? throw Domain() : DecimalFromDouble(Math.Sqrt((double)x)),
             "POWER" => Power(x, y),
             _ => throw new DocumentPlanningException("COHDOC001", ErrorMessages.FunctionArgumentsInvalid),
         };
@@ -155,12 +155,29 @@ internal sealed partial class DocumentExpressionEvaluator
                 foreach (string piece in values.Cast<string>()) { _cancellationToken.ThrowIfCancellationRequested(); Append(concatenated, piece); }
                 return concatenated.ToString();
             case "TRIM":
-                var source = FunctionRunes(text);
-                var trim = FunctionRunes(values.Length == 2 ? (string)values[1]! : " ").ToHashSet();
-                int start = 0, end = source.Length;
-                while (start < end && trim.Contains(source[start])) { ObserveFunctionCancellation(start++); }
-                while (end > start && trim.Contains(source[end - 1])) { ObserveFunctionCancellation(--end); }
-                return JoinRunes(source.AsSpan(start, end - start));
+                var trim = new HashSet<Rune>();
+                int trimIndex = 0, trimUnits = 0;
+                foreach (var rune in (values.Length == 2 ? (string)values[1]! : " \t\n\f\r").EnumerateRunes())
+                {
+                    ObserveFunctionCancellation(trimIndex++);
+                    if (trim.Add(rune)) { CheckStringLength(trimUnits += rune.Utf16SequenceLength); }
+                }
+                int start = 0, end = text.Length;
+                while (start < end)
+                {
+                    ObserveFunctionCancellation(trimIndex++);
+                    Rune.DecodeFromUtf16(text.AsSpan(start, end - start), out var rune, out int consumed);
+                    if (!trim.Contains(rune)) { break; }
+                    start += consumed;
+                }
+                while (end > start)
+                {
+                    ObserveFunctionCancellation(trimIndex++);
+                    Rune.DecodeLastFromUtf16(text.AsSpan(start, end - start), out var rune, out int consumed);
+                    if (!trim.Contains(rune)) { break; }
+                    end -= consumed;
+                }
+                return JoinRunes(text.AsSpan(start, end - start));
             case "REPLACE":
                 string old = (string)values[1]!, replacement = (string)values[2]!;
                 if (old.Length == 0) { CheckStringLength(text.Length); return text; }
@@ -234,18 +251,11 @@ internal sealed partial class DocumentExpressionEvaluator
         return -1;
     }
 
-    private Rune[] FunctionRunes(string text)
-    {
-        CheckStringLength(text.Length);
-        var runes = new List<Rune>();
-        foreach (var rune in text.EnumerateRunes()) { ObserveFunctionCancellation(runes.Count); runes.Add(rune); }
-        return runes.ToArray();
-    }
-
-    private string JoinRunes(ReadOnlySpan<Rune> runes)
+    private string JoinRunes(ReadOnlySpan<char> text)
     {
         var builder = new StringBuilder();
-        for (int i = 0; i < runes.Length; i++) { ObserveFunctionCancellation(i); Append(builder, runes[i].ToString()); }
+        int index = 0;
+        foreach (var rune in text.EnumerateRunes()) { ObserveFunctionCancellation(index++); Append(builder, rune.ToString()); }
         return builder.ToString();
     }
 
@@ -293,7 +303,7 @@ internal sealed partial class DocumentExpressionEvaluator
     private static decimal Power(decimal value, decimal exponent)
     {
         if (value == 0 && exponent < 0 || value < 0 && exponent != decimal.Truncate(exponent)) { throw Domain(); }
-        if (exponent != decimal.Truncate(exponent)) { return (decimal)Math.Pow((double)value, (double)exponent); }
+        if (exponent != decimal.Truncate(exponent)) { return DecimalFromDouble(Math.Pow((double)value, (double)exponent)); }
         if (exponent < 0) { value = 1 / value; exponent = -exponent; }
         decimal result = 1;
         while (exponent > 0)
@@ -303,6 +313,12 @@ internal sealed partial class DocumentExpressionEvaluator
             if (exponent != 0) { value *= value; }
         }
         return result;
+    }
+
+    private static decimal DecimalFromDouble(double value)
+    {
+        if (!double.IsFinite(value)) { throw new OverflowException(); }
+        return decimal.Parse(value.ToString("R", CultureInfo.InvariantCulture), NumberStyles.Float, CultureInfo.InvariantCulture);
     }
 
     private static string DateString(DateTimeOffset value)

@@ -28,6 +28,8 @@ public sealed partial class DocumentQueryTests
         ["CONTAINS('Alpha','a')", true], ["STARTS_WITH('Alpha','a')", false], ["ENDS_WITH('Alpha','a')", true],
         ["REPLACE('abcabc','b','X')", "aXcaXc"], ["REPLACE('abc','','X')", "abc"],
         ["REPLACE('','x','y')", ""], ["TRIM(' abc ')", "abc"], ["TRIM('😀abc😀','😀')", "abc"],
+        ["TRIM('\tabc\r\n')", "abc"], ["TRIM(' \t\n\f\rabc \t\n\f\r')", "abc"],
+        ["TRIM('\vabc\u00a0')", "\vabc\u00a0"], ["TRIM('\tabc\t',' ')", "\tabc\t"],
         ["CONCAT(name,' ',name)", "Alpha Alpha"], ["ABS(-2)", 2m], ["ROUND(2.5)", 3m],
         ["ROUND(-2.5)", -3m], ["ROUND(125,-1)", 130m], ["ROUND(-125,-1)", -130m],
         ["ROUND(4.9999999999999999999999999999,-1)", 0m],
@@ -36,7 +38,8 @@ public sealed partial class DocumentQueryTests
         ["TRUNC(-2.567,2)", -2.56m], ["TRUNC(125,-1)", 120m], ["TRUNC(2.5,100)", 2.5m],
         ["TRUNC(4.9999999999999999999999999999,-1)", 0m],
         ["FLOOR(-2.5)", -3m], ["CEIL(-2.5)", -2m], ["POWER(2,3)", 8m], ["POWER(2,-2)", 0.25m],
-        ["SQRT(4)", 2m], ["STR_TO_MILLIS('1970-01-01T00:00:00Z')", 0L],
+        ["SQRT(4)", 2m], ["SQRT(2)", 1.4142135623730951m], ["POWER(2,0.5)", 1.4142135623730951m],
+        ["STR_TO_MILLIS('1970-01-01T00:00:00Z')", 0L],
         ["STR_TO_MILLIS('1970-01-01T01:00:00+01:00')", 0L], ["STR_TO_MILLIS('1970-01-01')", 0L],
         ["STR_TO_MILLIS('1970-01-01T00:00:00.123Z')", 123L], ["STR_TO_MILLIS('no')", null],
         ["STR_TO_MILLIS('10/12/2020')", null], ["MILLIS_TO_STR(0)", "1970-01-01T00:00:00.000Z"],
@@ -86,6 +89,7 @@ public sealed partial class DocumentQueryTests
                 ["STARTS_WITH({0},{0})", true], ["ENDS_WITH({0},{0})", true],
                 ["SUBSTR({0},0,1)", "a"], ["SUBSTR({0},1048576,1)", "a"], ["SUBSTR({0},-1)", "a"],
                 ["LENGTH(SUBSTR({0},1))", 1_048_576L],
+                ["TRIM({0},'a')", ""],
             ];
             foreach (var item in cases)
             {
@@ -128,7 +132,6 @@ public sealed partial class DocumentQueryTests
     [InlineData("DELETE FROM items WHERE COUNT(*) > 0")]
     [InlineData("SELECT SUM(ABS(COUNT(*))) FROM items")]
     [InlineData("SELECT name FROM items WHERE 1 IN (COUNT(*))")]
-    [InlineData("SELECT LOWER(name) FROM items GROUP BY category")]
     public async Task Plan_InvalidFunctionContext_ShouldFailBeforeReadingAsync(string query)
     {
         // Arrange
@@ -141,11 +144,35 @@ public sealed partial class DocumentQueryTests
             .Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDOC001");
     }
 
+    [Fact(DisplayName = "Cohesion Test [Documents] - Scalars: grouped calls retain the exact grouping diagnostic")]
+    public async Task Plan_UngroupedScalarArgument_ShouldReportGroupingMessageAsync()
+    {
+        // Arrange
+        await using var engine = DocumentDatabaseEngine.Create("scalars", new());
+        var database = await engine.CreateDatabaseAsync("scalars", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.CreateCollectionAsync("items", CancellationToken.None);
+
+        // Act
+        var error = await Should.ThrowAsync<DatabaseException>(async () =>
+            await PlanAsync(database, "SELECT LOWER(name) FROM items GROUP BY category"));
+
+        // Assert
+        const string message = "An OQL grouped query may only read grouping expressions outside aggregate calls.";
+        error.Message.ShouldBe(message);
+        var diagnostic = error.Diagnostics.ShouldHaveSingleItem();
+        diagnostic.Code.ShouldBe("COHDOC001");
+        diagnostic.Message.ShouldBe(message);
+        diagnostic.Start.ShouldBe(13);
+        diagnostic.End.ShouldBe(17);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Documents] - Scalars: domain and overflow errors are coded and abort explicit transactions")]
     [InlineData("SQRT(-1)", "COHDOC019", "The OQL function argument is outside its domain.")]
     [InlineData("POWER(-2,0.5)", "COHDOC019", "The OQL function argument is outside its domain.")]
     [InlineData("ROUND(1,0.5)", "COHDOC019", "The OQL function argument is outside its domain.")]
     [InlineData("POWER(10,100)", "COHDOC007", "OQL numbers must fit the decimal scalar domain.")]
+    [InlineData("POWER(10,1000.5)", "COHDOC007", "OQL numbers must fit the decimal scalar domain.")]
     [InlineData("ROUND(70000000000000000000000000000,-29)", "COHDOC007", "OQL numbers must fit the decimal scalar domain.")]
     public async Task Execute_FunctionFailure_ShouldAbortWithFixedDiagnosticAsync(string expression, string code, string message)
     {

@@ -354,11 +354,16 @@ versus SQL's one-based positions and zero for no match. Results/work buffers are
 function-size cap: LENGTH, POSITION, CONTAINS, STARTS_WITH, ENDS_WITH and SUBSTR scan directly.
 Ordinal searching uses PostgreSQL's fixed-size skip-table approach
 (src/backend/utils/adt/varlena.c:1004-1070,1233-1271), with UTF-16 comparisons and cancellation
-inside both pattern preparation and matching. ROUND/TRUNC support
-negative scales and bound extreme scales before calling decimal.Round (SQL's RoundExact precedent;
-PostgreSQL src/backend/utils/adt/numeric.c:1548-1577 bounds scale before rounding). SQRT rejects
+inside both pattern preparation and matching. TRIM's omitted character set is SQL++ whitespace
+(space, tab, newline, form feed and carriage return), unlike SQL's space-only default; its input
+scan is streamed and its distinct trim-character set is bounded. OQL rounds exact digits with
+remainders. ROUND/TRUNC support negative scales and bound extreme scales before rounding
+(PostgreSQL src/backend/utils/adt/numeric.c:1548-1577 also bounds scale). SQRT rejects
 negative arguments with COHDOC019, following PostgreSQL src/backend/utils/adt/float.c:1492-1495;
 POWER invalid domains use that code too. Overflow retains COHDOC007 and division by zero COHDOC006.
+SQRT and fractional POWER preserve the BCL double result through its shortest round-trip
+representation when converting to the decimal scalar domain, avoiding the decimal cast's
+15-significant-digit rounding. Nonfinite or overflowing results retain COHDOC007.
 A function error inside an explicit transaction aborts it through the existing statement bracket.
 Negative-scale rounding uses the exact decimal remainder before testing the midpoint, avoiding
 the double rounding that a division by the scale factor can introduce just below a midpoint.
