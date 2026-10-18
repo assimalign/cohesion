@@ -1,4 +1,5 @@
 using System;
+using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -23,7 +24,7 @@ public sealed partial class GraphStore
     private readonly GraphStorage _storage;
     private readonly TransactionCoordinator _coordinator;
     private readonly object _sync = new();
-    private readonly Dictionary<(byte Kind, ulong Id), List<Reference>> _records = new();
+    private readonly Dictionary<(byte Kind, ulong Id), VersionChain> _records = new();
 
     // The identities of the index definitions among _records, so reading the definitions costs
     // their count rather than a pass over every node and relationship record.
@@ -42,8 +43,17 @@ public sealed partial class GraphStore
             Add(record, GraphStorage.PackLocation(unit.PageId, unit.SlotIndex), writer, prune: false);
             if (record.Kind == 3) { _definitionIds.Add(record.Id); }
         }
-        foreach (var versions in _records.Values)
-        { versions.Sort((left, right) => right.Revision.CompareTo(left.Revision)); }
+        foreach (var key in _records.Keys.ToArray())
+        {
+            var versions = _records[key];
+            if (versions.Older is null) { continue; }
+            var ordered = new List<Reference> { versions.Head };
+            for (var older = versions.Older; older is not null; older = older.Next) { ordered.Add(older.Reference); }
+            ordered.Sort((left, right) => right.Revision.CompareTo(left.Revision));
+            versions = new VersionChain { Head = ordered[0] };
+            for (int i = ordered.Count - 1; i > 0; i--) { versions.Older = new History(ordered[i], versions.Older); }
+            _records[key] = versions;
+        }
         OpenIndexes();
     }
 
@@ -81,25 +91,28 @@ public sealed partial class GraphStore
     }
 
     /// <summary>Creates a node and maintains its property indexes.</summary>
-    /// <param name="labels">Node labels.</param><param name="properties">Scalar properties.</param><param name="context">Owning transaction.</param><param name="cancellationToken">Cancellation token.</param><returns>The created node.</returns>
-    /// <exception cref="ArgumentNullException"><paramref name="labels"/>, <paramref name="properties"/> or <paramref name="context"/> is null.</exception>
-    /// <exception cref="ArgumentException">A label or property key is null or whitespace, or a property value is not a supported scalar.</exception>
+    /// <param name="node">The complete node with an identity reserved from the backing storage.</param><param name="context">Owning transaction.</param><param name="cancellationToken">Cancellation token.</param><returns>The created node.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="node"/> has null labels or properties, or <paramref name="context"/> is null.</exception>
+    /// <exception cref="ArgumentException">The identity already exists, a label or property key is null or whitespace, or a property value is not a supported scalar.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">The identity is zero.</exception>
     /// <exception cref="InvalidOperationException"><paramref name="context"/> is not active.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
     /// <exception cref="GraphElementTooLargeException">The labels and properties exceed one graph record, or an indexed property value exceeds the index key.</exception>
     /// <exception cref="TransactionAbortedException">The transaction ended while waiting for its writer lock.</exception>
-    public async ValueTask<StoredGraphNode> CreateNodeAsync(IReadOnlyList<string> labels,
-        IReadOnlyDictionary<string, object?> properties, TransactionContext context, CancellationToken cancellationToken = default)
+    public async ValueTask<StoredGraphNode> CreateNodeAsync(StoredGraphNode node,
+        TransactionContext context, CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(labels);
-        ArgumentNullException.ThrowIfNull(properties);
-        foreach (string label in labels) { ArgumentException.ThrowIfNullOrWhiteSpace(label); }
+        ArgumentNullException.ThrowIfNull(node.Labels);
+        ArgumentNullException.ThrowIfNull(node.Properties);
+        ArgumentOutOfRangeException.ThrowIfZero(node.Id);
+        foreach (string label in node.Labels) { ArgumentException.ThrowIfNullOrWhiteSpace(label); }
         await LockAsync(context, cancellationToken).ConfigureAwait(false);
-        ulong id = (ulong)_storage.ReserveTransactionSequence();
-        var proposed = new GraphRecord(1, id, new StoredGraphNode(id, labels.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray(), properties));
+        EnsureNew(1, node.Id);
+        var proposed = new GraphRecord(1, node.Id, new StoredGraphNode(node.Id,
+            node.Labels.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray(), node.Properties));
         byte[] bytes = GraphRecordCodec.Encode(proposed, context.Sequence);
         var record = GraphRecordCodec.Decode(bytes); // Own immutable copies, never retain caller dictionaries.
-        var node = record.Node!.Value;
+        node = record.Node!.Value;
         var indexes = Definitions(Latest(context));
         var changes = indexes.Where(index => node.Labels.Contains(index.Label!, StringComparer.Ordinal)
             && node.Properties.ContainsKey(index.PropertyKey!))
@@ -139,18 +152,21 @@ public sealed partial class GraphStore
     }
 
     /// <summary>Atomically creates a relationship and both endpoint adjacency entries.</summary>
-    /// <param name="sourceId">Source node.</param><param name="targetId">Target node.</param><param name="type">Relationship type.</param><param name="properties">Scalar properties.</param><param name="context">Owning transaction.</param><param name="cancellationToken">Cancellation token.</param><returns>The created relationship.</returns>
+    /// <param name="relationship">The complete relationship with an identity reserved from the backing storage.</param><param name="context">Owning transaction.</param><param name="cancellationToken">Cancellation token.</param><returns>The created relationship.</returns>
     /// <exception cref="InvalidOperationException">An endpoint does not exist in the latest committed view, or <paramref name="context"/> is not active.</exception>
     /// <exception cref="TransactionAbortedException">An endpoint was deleted after the transaction snapshot, or the transaction ended while waiting for its writer lock.</exception>
-    /// <exception cref="ArgumentNullException"><paramref name="properties"/> or <paramref name="context"/> is null.</exception>
-    /// <exception cref="ArgumentException">The type or a property key is null or whitespace, or a property value is not a supported scalar.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="relationship"/> has null properties, or <paramref name="context"/> is null.</exception>
+    /// <exception cref="ArgumentException">The identity already exists, the type or a property key is null or whitespace, or a property value is not a supported scalar.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">The identity is zero.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
     /// <exception cref="GraphElementTooLargeException">The type and properties exceed one graph record.</exception>
-    public async ValueTask<StoredGraphRelationship> CreateRelationshipAsync(ulong sourceId, ulong targetId, string type,
-        IReadOnlyDictionary<string, object?> properties, TransactionContext context, CancellationToken cancellationToken = default)
+    public async ValueTask<StoredGraphRelationship> CreateRelationshipAsync(StoredGraphRelationship relationship,
+        TransactionContext context, CancellationToken cancellationToken = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(type);
-        ArgumentNullException.ThrowIfNull(properties);
+        ArgumentException.ThrowIfNullOrWhiteSpace(relationship.Type);
+        ArgumentNullException.ThrowIfNull(relationship.Properties);
+        ArgumentOutOfRangeException.ThrowIfZero(relationship.Id);
+        ulong sourceId = relationship.SourceId, targetId = relationship.TargetId;
         await LockAsync(context, cancellationToken).ConfigureAwait(false);
         var latest = Latest(context);
         if (FindNode(sourceId, latest) is null && FindNode(sourceId, context.Snapshot) is not null ||
@@ -160,9 +176,9 @@ public sealed partial class GraphStore
         {
             throw new InvalidOperationException("A relationship requires two visible existing endpoints.");
         }
-        ulong id = (ulong)_storage.ReserveTransactionSequence();
-        byte[] bytes = GraphRecordCodec.Encode(new GraphRecord(2, id,
-            Relationship: new StoredGraphRelationship(id, sourceId, targetId, type, properties)), context.Sequence);
+        ulong id = relationship.Id;
+        EnsureNew(2, id);
+        byte[] bytes = GraphRecordCodec.Encode(new GraphRecord(2, id, Relationship: relationship), context.Sequence);
         var record = GraphRecordCodec.Decode(bytes);
         var inserted = await ApplyAsync(context, async bracket =>
         {
@@ -271,6 +287,14 @@ public sealed partial class GraphStore
         Tombstone(bracket, found.Reference, context);
     }
 
+    private void EnsureNew(byte kind, ulong id)
+    {
+        lock (_sync)
+        {
+            if (_records.ContainsKey((kind, id))) { throw new ArgumentException(ErrorMessages.IdentityAlreadyExists); }
+        }
+    }
+
     private ulong Insert(StorageTransaction bracket, byte[] bytes, TransactionContext context)
     {
         var location = _storage.InsertOwned(bracket, 2, bytes);
@@ -290,18 +314,16 @@ public sealed partial class GraphStore
         var (page, slot) = GraphStorage.UnpackLocation(location);
         lock (_sync)
         {
-            if (!_records.TryGetValue((record.Kind, record.Id), out var versions))
-            { _records.Add((record.Kind, record.Id), versions = []); }
-            // Clean the tail on publication as well: latest-snapshot lookups usually stop at
-            // the head and would otherwise never encounter references purged behind it.
-            if (prune)
-            {
-                versions.RemoveAll(reference => !_storage.TryReadRecord(reference.PageId, reference.SlotIndex, 2, out var bytes) ||
-                    RecordVersionStamp.ReadStamps(bytes.Span).Writer != reference.Writer ||
-                    GraphRecordCodec.Decode(bytes) is var existing && (existing.Kind != record.Kind || existing.Id != record.Id));
-            }
             var next = new Reference(page, slot, writer, record.Revision);
-            if (prune) { versions.Insert(0, next); } else { versions.Add(next); }
+            if (!_records.TryGetValue((record.Kind, record.Id), out var versions))
+            { versions = new VersionChain { Head = next }; }
+            else
+            {
+                if (prune) { Sweep(ref versions, record.Kind, record.Id); }
+                versions.Older = new History(versions.Head, versions.Older);
+                versions.Head = next;
+            }
+            _records[(record.Kind, record.Id)] = versions;
             if (record.Kind == 3) { _definitionIds.Add(record.Id); }
         }
     }
@@ -320,21 +342,76 @@ public sealed partial class GraphStore
         lock (_sync)
         {
             if (!_records.TryGetValue((kind, id), out var versions)) { return null; }
-            for (int i = 0; i < versions.Count;)
+            History? current = null, previous = null;
+            var reference = versions.Head;
+            while (true)
             {
-                var reference = versions[i];
-                if (!_storage.TryReadRecord(reference.PageId, reference.SlotIndex, 2, out var bytes))
-                { versions.RemoveAt(i); continue; }
-                var (writer, deleter) = RecordVersionStamp.ReadStamps(bytes.Span);
-                var record = GraphRecordCodec.Decode(bytes);
-                if (writer != reference.Writer || record.Kind != kind || record.Id != id)
-                { versions.RemoveAt(i); continue; }
-                if (snapshot.IsVisible(writer) && (deleter == TransactionSequence.None || !snapshot.IsVisible(deleter)))
-                { return new Found(reference, record); }
-                i++;
+                if (TryRead(reference, kind, id, out var bytes))
+                {
+                    var (writer, deleter) = RecordVersionStamp.ReadStamps(bytes.Span);
+                    if (snapshot.IsVisible(writer) && (deleter == TransactionSequence.None || !snapshot.IsVisible(deleter)))
+                    { return new Found(reference, GraphRecordCodec.Decode(bytes)); }
+                    if (current is not null) { previous = current; }
+                }
+                else
+                {
+                    versions.SweepPrevious = null;
+                    if (current is null)
+                    {
+                        if (versions.Older is null) { _records.Remove((kind, id)); return null; }
+                        versions.Head = versions.Older.Reference;
+                        versions.Older = versions.Older.Next;
+                        _records[(kind, id)] = versions;
+                        reference = versions.Head;
+                        continue;
+                    }
+                    if (previous is null) { versions.Older = current.Next; }
+                    else { previous.Next = current.Next; }
+                    _records[(kind, id)] = versions;
+                }
+                current = current is null ? versions.Older : current.Next;
+                if (current is null) { return null; }
+                reference = current.Reference;
             }
-            return null;
         }
+    }
+
+    private bool TryRead(Reference reference, byte kind, ulong id, out ReadOnlyMemory<byte> bytes)
+    {
+        if (!_storage.TryReadRecord(reference.PageId, reference.SlotIndex, 2, out bytes)) { return false; }
+        GraphRecordCodec.EnsureFormat(bytes.Span);
+        if (bytes.Length < 34) { throw new StorageCorruptionException(ErrorMessages.RecordTruncated); }
+        return RecordVersionStamp.ReadStamps(bytes.Span).Writer == reference.Writer && bytes.Span[16] == kind &&
+            BinaryPrimitives.ReadUInt64LittleEndian(bytes.Span.Slice(18, 8)) == id;
+    }
+
+    private void Sweep(ref VersionChain versions, byte kind, ulong id)
+    {
+        // Advance a rotating cursor, bounding publication work independently of history length.
+        for (int i = 0; i < 4; i++)
+        {
+            var previous = versions.SweepPrevious;
+            var current = previous is null ? versions.Older : previous.Next;
+            if (current is null) { versions.SweepPrevious = null; break; }
+            if (TryRead(current.Reference, kind, id, out _)) { versions.SweepPrevious = current; }
+            else if (previous is null) { versions.Older = current.Next; }
+            else { previous.Next = current.Next; }
+        }
+    }
+
+    // The common single-version identity stores its reference directly in the dictionary.
+    private struct VersionChain
+    {
+        internal Reference Head;
+        internal History? Older;
+        internal History? SweepPrevious;
+    }
+
+    private sealed class History
+    {
+        internal readonly Reference Reference;
+        internal History? Next;
+        internal History(Reference reference, History? next) { Reference = reference; Next = next; }
     }
 
     private Found? ReadAt(ulong location, TransactionSnapshot snapshot)

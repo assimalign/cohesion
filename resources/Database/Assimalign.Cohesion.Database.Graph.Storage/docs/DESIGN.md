@@ -94,7 +94,15 @@ is written: the size is the element's, not a store fault, so the Graph engine re
 as the statement failure `COHDBG009` and keeps the session. This version does not define
 arrays, nested objects or overflow chains; Neo4j spills large label sets to dynamic label
 records and long values to property chains, and an overflow-record format is a follow-up. Nodes and
-relationships are immutable versions. UpdateNodeAsync replaces labels and properties; UpdateRelationshipAsync replaces properties and preserves endpoints and type. Both skip type-and-value-identical replacements. Format 1 is refused before recovery scrub with the remedy to recreate the database; no legacy reader or upgrade path exists. Catalog, registration and B-tree formats are unchanged.
+relationships are immutable versions. UpdateNodeAsync replaces labels and properties;
+UpdateRelationshipAsync replaces properties and preserves endpoints and type. Both publish a
+replacement even when the supplied values equal the visible version. The engine filters entities
+whose assignments were all no-ops; a changed-then-restored entity retains its write conflict. Creation accepts complete StoredGraphNode/StoredGraphRelationship
+records whose nonzero identities the caller reserves from the backing storage's durable sequence;
+duplicate identities are refused. Reserving identities before insertion lets the engine stage all
+changes before first publication. Format 1 is refused before recovery scrub with the remedy to
+recreate the database; no legacy reader or upgrade path exists. Catalog, registration and B-tree
+formats are unchanged.
 
 Owner-one physical registration records are exactly 34 bytes: a zero stamp prefix,
 kind `4`, version `1`, UInt64 object ID, and Int64 root page ID. Every tree is named
@@ -190,10 +198,12 @@ prove committed nodes, relationships and property indexes survive while a partia
 applied logical transaction disappears. The graph store keeps an in-memory identity
 directory of every retained version, rebuilt in `O(R log R)` for `R` retained records.
 Chains are ordered by descending persisted revision; reads choose the first visible version.
-Reclaimed or reused references are removed lazily during lookup and subsequent publication,
-which also sweeps the tail behind a visible head. Label scans examine node identities and
-retained versions and sort
-their `m` visible matches in `O(m log m)`. Traversal path
+Single-version identities keep their reference inline in the directory. Older versions form a
+linked history, so publication prepends in constant time. A rotating sweep checks at most four
+older references per publication; it validates fixed identity headers without decoding properties.
+Lookup also removes encountered reclaimed or reused references and decodes only visible records.
+Repeated updates in one transaction therefore allocate and decode linearly in their count.
+Label scans examine node identities and retained versions and sort their `m` visible matches in `O(m log m)`. Traversal path
 enumeration and cycle limits are owned and documented by the Graph root.
 
 Updates encode the replacement and every new index key before mutation. They move every

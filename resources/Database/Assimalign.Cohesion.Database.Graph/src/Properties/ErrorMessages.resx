@@ -67,4 +67,7 @@
   <data name="FunctionEndpointMissing" xml:space="preserve"><value>The relationship function cannot resolve its endpoint in this statement snapshot.</value></data>
   <data name="CastValueInvalid" xml:space="preserve"><value>The value is not valid for this CAST target.</value></data>
   <data name="CastValueFailure" xml:space="preserve"><value>CAST cannot convert the supplied value to {0}.</value></data>
+  <data name="ConnectedNodeDeletion" xml:space="preserve">
+    <value>Cannot delete a connected node without DETACH DELETE.</value>
+  </data>
 </root>

@@ -83,8 +83,9 @@ shared lexer. SHOW remains read-only (GQL0007).
 
 Affected counts include created entities plus distinct changed pre-existing entities. An entity
 created then updated counts once. Mutating RETURN statements report this count too. An entity
-still counts if a later item restores its original value; a net-identical
-final working copy needs no stored replacement. ReadCommitted
+still counts and publishes a replacement if a later item restores its original value, preserving
+Snapshot write conflicts. Only assignments that were all no-ops skip storage. INSERT followed
+by SET stores the final working copy once, with the same identity throughout the statement. ReadCommitted
 updates refresh their statement snapshot after acquiring the writer lock; Snapshot updates use
 first-updater-wins. ExecutePaths refuses either mutation stage with COHDBG001.
 

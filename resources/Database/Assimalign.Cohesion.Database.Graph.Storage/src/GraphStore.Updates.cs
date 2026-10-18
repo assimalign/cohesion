@@ -18,7 +18,7 @@ public sealed partial class GraphStore
     /// <param name="properties">The complete resulting property map.</param>
     /// <param name="context">The owning transaction.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The new version, the unchanged node for an identical replacement, or null if absent.</returns>
+    /// <returns>The new version, or null if absent.</returns>
     /// <exception cref="ArgumentNullException">A required argument is null.</exception>
     /// <exception cref="ArgumentException">A name or scalar value is invalid.</exception>
     /// <exception cref="InvalidOperationException">The transaction is not active.</exception>
@@ -40,7 +40,6 @@ public sealed partial class GraphStore
         record = GraphRecordCodec.Decode(bytes);
         var node = record.Node!.Value;
         var old = prior.Record.Node!.Value;
-        if (old.Labels.SequenceEqual(node.Labels) && PropertiesIdentical(old.Properties, node.Properties)) { return old; }
         var definitions = Definitions(Latest(context));
         // Validate every new key before tombstoning either the record or an index entry.
         var changes = definitions.Where(index => node.Labels.Contains(index.Label!, StringComparer.Ordinal)
@@ -69,7 +68,7 @@ public sealed partial class GraphStore
     /// <param name="properties">The complete resulting scalar property map.</param>
     /// <param name="context">The owning transaction.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The new or identical version, or null if absent.</returns>
+    /// <returns>The new version, or null if absent.</returns>
     /// <exception cref="ArgumentNullException">A required argument is null.</exception>
     /// <exception cref="ArgumentException">A property name or scalar value is invalid.</exception>
     /// <exception cref="InvalidOperationException">The transaction is not active.</exception>
@@ -88,7 +87,6 @@ public sealed partial class GraphStore
             Revision: checked(prior.Record.Revision + 1));
         byte[] bytes = GraphRecordCodec.Encode(record, context.Sequence);
         record = GraphRecordCodec.Decode(bytes);
-        if (PropertiesIdentical(old.Properties, record.Relationship!.Value.Properties)) { return old; }
         var inserted = await ApplyAsync(context, async bracket =>
         {
             var location = Insert(bracket, bytes, context);
@@ -103,6 +101,4 @@ public sealed partial class GraphStore
         return record.Relationship;
     }
 
-    private static bool PropertiesIdentical(IReadOnlyDictionary<string, object?> left, IReadOnlyDictionary<string, object?> right)
-        => left.Count == right.Count && left.All(pair => right.TryGetValue(pair.Key, out var value) && Equals(pair.Value, value));
 }

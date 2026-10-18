@@ -51,7 +51,7 @@ else if (args[0] == "verify")
     count = 0;
     await foreach (var row in all.GetRowsAsync()) { count++; }
     if (count != 2) { throw new InvalidOperationException("Partial nodes survived recovery."); }
-    foreach (string query in new[] { "MATCH (b:Person {name:'b'}) RETURN b.name", "MATCH (b:Person) WHERE b.name='b' RETURN b.name" })
+    foreach (string query in new[] { "MATCH (b:Person {name:'b'}) RETURN b.name", "MATCH (b:Person) WHERE b.name STARTS WITH 'b' RETURN b.name" })
     {
         await using var b = (DatabaseResultSet)await session.ExecuteAsync(query);
         count = 0;

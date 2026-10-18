@@ -207,14 +207,20 @@ internal static partial class GraphPlanExecutor
         // Delete relationships first, so explicit DELETE r,a can remove a connected node.
         foreach (var id in relationships)
         {
-            if (database.Store.FindRelationship(id.Value, operation.Context.Snapshot) is not null) { affected++; }
-            await database.Store.DeleteRelationshipAsync(id.Value, operation.Context, token).ConfigureAwait(false);
+            if (operation.Updates.FindRelationship(id.Value) is not null) { affected++; }
+            if (!operation.Updates.IsCreated(false, id.Value))
+            { await database.Store.DeleteRelationshipAsync(id.Value, operation.Context, token).ConfigureAwait(false); }
             operation.Updates.DeletedRelationship(id.Value);
         }
         foreach (var id in nodes)
         {
-            if (database.Store.FindNode(id.Value, operation.Context.Snapshot) is not null) { affected++; }
-            await database.Store.DeleteNodeAsync(id.Value, deletion.Detach, operation.Context, token).ConfigureAwait(false);
+            if (operation.Updates.FindNode(id.Value) is not null) { affected++; }
+            var incident = await operation.Updates.GetIncidentAsync(id.Value, token).ConfigureAwait(false);
+            if (incident.Count != 0 && !deletion.Detach)
+            { throw new GraphPlanningException("COHDBG003", ErrorMessages.ConnectedNodeDeletion, deletion.Location); }
+            foreach (var edge in incident) { operation.Updates.DeletedRelationship(edge.Id); }
+            if (!operation.Updates.IsCreated(true, id.Value))
+            { await database.Store.DeleteNodeAsync(id.Value, deletion.Detach, operation.Context, token).ConfigureAwait(false); }
             operation.Updates.DeletedNode(id.Value);
         }
         foreach (var binding in bindings) { foreach (string variable in deletion.Variables) { binding.Remove(variable); } }
@@ -394,8 +400,7 @@ internal static partial class GraphPlanExecutor
             }
             else
             {
-                nodes[i] = await database.CreateNodeCoreAsync(operation, GraphLabelEvaluator.InsertLabels(pattern), EvaluateProperties(pattern.Properties, bindings, operation.EvaluationContext, parameters), token).ConfigureAwait(false);
-                operation.Updates.Created(nodes[i]);
+                nodes[i] = await operation.Updates.CreateNodeAsync(GraphLabelEvaluator.InsertLabels(pattern), EvaluateProperties(pattern.Properties, bindings, operation.EvaluationContext, parameters), token).ConfigureAwait(false);
                 Accept(pattern.Variable, nodes[i], bindings);
                 affected++;
             }
@@ -407,10 +412,9 @@ internal static partial class GraphPlanExecutor
             { throw new GraphPlanningException("COHDBG001", "An inserted relationship variable must be new."); }
             // The planner admits only Outgoing and Incoming here.
             bool outgoing = pattern.Direction == GqlPatternDirection.Outgoing;
-            var relationship = await database.CreateRelationshipCoreAsync(operation, nodes[outgoing ? i : i + 1].Id,
+            var relationship = await operation.Updates.CreateRelationshipAsync(nodes[outgoing ? i : i + 1].Id,
                 nodes[outgoing ? i + 1 : i].Id, GraphLabelEvaluator.InsertType(pattern), EvaluateProperties(pattern.Properties, bindings, operation.EvaluationContext, parameters), token).ConfigureAwait(false);
             Accept(pattern.Variable, relationship, bindings);
-            operation.Updates.Created(relationship);
             affected++;
         }
         return affected;

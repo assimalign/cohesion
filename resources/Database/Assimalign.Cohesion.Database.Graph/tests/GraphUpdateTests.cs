@@ -1,6 +1,7 @@
 using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -11,6 +12,7 @@ using Xunit;
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Graph.Catalog;
 using Assimalign.Cohesion.Database.Graph.Internal;
+using Assimalign.Cohesion.Database.Graph.Language;
 using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Database.Types;
 
@@ -101,7 +103,9 @@ public sealed class GraphUpdateTests
         (await session.ExecuteAsync("MATCH (a:P) SET a.n=1, a:Graph REMOVE a.missing")).AffectedCount.ShouldBe(0);
         (await session.ExecuteAsync("OPTIONAL MATCH (a:Absent) SET a.x=1 REMOVE a:Graph")).AffectedCount.ShouldBe(0);
         (await Read(await session.ExecuteAsync("SHOW PROPERTY KEYS"))).ShouldContain(row => row.Contains("seen"));
-        (await Read(await session.ExecuteAsync("SHOW LABELS"))).ShouldContain(row => row.Contains("Graph"));
+        var graphLabel = (await Read(await session.ExecuteAsync("SHOW LABELS"))).Single(row => Equals(row[2], "Graph"));
+        (await Read(await session.ExecuteAsync("SHOW OBJECT OWNERSHIP"))).ShouldContain(row =>
+            Equals(row[2], graphLabel[1]) && Equals(row[4], "LABEL") && Equals(row[6], "Adhoc"));
     }
 
     [Fact(DisplayName = "Cohesion Test [Graph] - SET: type-exact no-ops and left-to-right items (#1149)")]
@@ -246,6 +250,109 @@ public sealed class GraphUpdateTests
         var after = await Read(await session.ExecuteAsync("SHOW OBJECT OWNERSHIP"));
         after.Count.ShouldBe(ownership.Count);
         for (int i = 0; i < after.Count; i++) { after[i].ShouldBe(ownership[i]); }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Graph] - INSERT/SET: final working copies persist exactly once with stable identities (#1149)")]
+    public async Task Execute_InsertThenUpdate_ShouldStoreOneVersionPerEntity()
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create("updates", new());
+        var db = await engine.CreateDatabaseAsync("graph");
+        await using var session = await db.CreateSessionAsync();
+        await using var transaction = await session.BeginTransactionAsync(IsolationLevel.Snapshot);
+
+        // Act
+        var result = await session.ExecuteAsync("INSERT (n:T {k:1}) LET before=elementId(n) SET n.v=2 RETURN before, elementId(n), n.v");
+        var row = (await Read(result)).Single();
+        var edge = await session.ExecuteAsync("MATCH (n:T) INSERT (n)-[r:R]->(b:T) SET r.w=2, b.v=3 RETURN elementId(r), r.w");
+
+        // Assert
+        result.AffectedCount.ShouldBe(1);
+        row.ShouldBe([row[0], row[0], 2L]);
+        edge.AffectedCount.ShouldBe(2);
+        (await Read(edge)).Single()[1].ShouldBe(2L);
+        var counts = new Dictionary<ulong, int>();
+        using var records = db.DataStorage.GetUnitIterator(2);
+        while (records.MoveNext())
+        {
+            var bytes = records.Current.Data;
+            if (bytes.Span[16] is not (1 or 2)) { continue; }
+            ulong id = BinaryPrimitives.ReadUInt64LittleEndian(bytes.Span.Slice(18, 8));
+            counts[id] = counts.GetValueOrDefault(id) + 1;
+        }
+        counts.Count.ShouldBe(3);
+        counts.Values.ShouldAllBe(count => count == 1);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Graph] - SET/DELETE: cascades discard pending relationship updates like explicit deletion (#1149)")]
+    [InlineData("DETACH DELETE a", 1)]
+    [InlineData("DELETE r,a", 2)]
+    public async Task Execute_UpdateThenDelete_ShouldCountDeletionOnce(string deletion, long count)
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create("updates", new());
+        var db = await engine.CreateDatabaseAsync("graph");
+        await using var session = await db.CreateSessionAsync();
+        await session.ExecuteAsync("INSERT (:A)-[:R]->(:B)");
+
+        // Act
+        var result = await session.ExecuteAsync("MATCH (a:A)-[r:R]->() SET r.w=1 " + deletion);
+
+        // Assert
+        result.AffectedCount.ShouldBe(count);
+        (await Read(await session.ExecuteAsync("MATCH ()-[r:R]->() RETURN r"))).ShouldBeEmpty();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Graph] - SET: binding refresh preserves unchanged branches and shared references (#1149)")]
+    public async Task Execute_SharedComposites_ShouldCopyOnlyTouchedBranches()
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create("updates", new());
+        var db = await engine.CreateDatabaseAsync("graph");
+        await using var session = await db.CreateSessionAsync();
+        var node = await db.CreateNodeAsync(session, ["P"]);
+        var unchanged = new object?[] { 1L, new ReadOnlyDictionary<string, object?>(new Dictionary<string, object?> { ["k"] = 2L }) };
+        var shared = new ReadOnlyDictionary<string, object?>(new Dictionary<string, object?> { ["node"] = node, ["untouched"] = unchanged });
+        var bindings = new List<Dictionary<string, object?>>
+        {
+            new() { ["a"] = node, ["nested"] = shared, ["unchanged"] = unchanged },
+            new() { ["a"] = node, ["nested"] = shared, ["unchanged"] = unchanged },
+        };
+        var query = (GqlQueryStatement)new GqlQueryParser().Parse("MATCH (a:P) SET a.x=1");
+        var operation = await db.BeginOperationAsync(session, CancellationToken.None);
+        try
+        {
+            // Act
+            await operation.Updates.ApplyAsync(query.GqlExpression.Stages.OfType<GqlSetStage>().Single(), bindings, null, CancellationToken.None);
+
+            // Assert
+            var refreshed = bindings[0]["nested"].ShouldBeOfType<ReadOnlyDictionary<string, object?>>();
+            refreshed.ShouldBeSameAs(bindings[1]["nested"]);
+            refreshed.ShouldNotBeSameAs(shared);
+            refreshed["untouched"].ShouldBeSameAs(unchanged);
+            bindings.ShouldAllBe(binding => ReferenceEquals(binding["unchanged"], unchanged));
+            refreshed["node"].ShouldBeOfType<GraphNode>().Properties["x"].ShouldBe(1L);
+            await operation.Updates.PublishAsync(CancellationToken.None);
+            await operation.CompleteAsync();
+        }
+        catch (Exception error) { await operation.AbortAsync(error); throw; }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Graph] - SET: nested reads see preceding assignments within a stage (#1149)")]
+    public async Task Execute_NestedAliasesInValues_ShouldReadCurrentEntities()
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create("updates", new());
+        var db = await engine.CreateDatabaseAsync("graph");
+        await using var session = await db.CreateSessionAsync();
+        await session.ExecuteAsync("INSERT (:P {x:0})");
+
+        // Act
+        var result = await session.ExecuteAsync("MATCH (a:P) LET nested={v:[a]} FOR i IN [1,2,3] SET a.x=a.x+1, a.y=nested.v[0].x, a IS Graph, a.flag = a IS LABELED Graph RETURN a.x, a.y, a.flag");
+
+        // Assert
+        result.AffectedCount.ShouldBe(1);
+        (await Read(result)).ShouldAllBe(row => Equals(row[0], 3L) && Equals(row[1], 3L) && Equals(row[2], true));
     }
 
     private static async Task<List<object?[]>> Read(DatabaseResult result)

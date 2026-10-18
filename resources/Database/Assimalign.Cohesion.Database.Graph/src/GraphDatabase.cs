@@ -438,7 +438,7 @@ public sealed partial class GraphDatabase : DatabaseInstance
     {
         await LockWriterAsync(operation.Context, token).ConfigureAwait(false);
         await ValidateNodeAsync(operation, labels, properties, token).ConfigureAwait(false);
-        return Materialize(await Store.CreateNodeAsync(labels, properties ?? new Dictionary<string, object?>(), operation.Context, token).ConfigureAwait(false));
+        return Materialize(await Store.CreateNodeAsync(new StoredGraphNode((ulong)DataStorage.ReserveTransactionSequence(), labels, properties ?? new Dictionary<string, object?>()), operation.Context, token).ConfigureAwait(false));
     }
 
     internal async ValueTask ValidateNodeAsync(GraphOperation operation, IReadOnlyList<string> labels,
@@ -462,7 +462,7 @@ public sealed partial class GraphDatabase : DatabaseInstance
     {
         await LockWriterAsync(operation.Context, token).ConfigureAwait(false);
         await ValidateRelationshipAsync(operation, type, properties, token).ConfigureAwait(false);
-        return Materialize(await Store.CreateRelationshipAsync(from.Value, to.Value, type, properties ?? new Dictionary<string, object?>(), operation.Context, token).ConfigureAwait(false));
+        return Materialize(await Store.CreateRelationshipAsync(new StoredGraphRelationship((ulong)DataStorage.ReserveTransactionSequence(), from.Value, to.Value, type, properties ?? new Dictionary<string, object?>()), operation.Context, token).ConfigureAwait(false));
     }
 
     internal async ValueTask ValidateRelationshipAsync(GraphOperation operation, string type,

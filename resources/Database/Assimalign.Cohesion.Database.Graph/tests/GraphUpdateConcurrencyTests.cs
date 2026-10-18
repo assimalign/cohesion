@@ -1,5 +1,7 @@
 using System;
 using System.Diagnostics;
+using System.Linq;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -51,6 +53,58 @@ public sealed class GraphUpdateConcurrencyTests
 
         // Assert
         queued.ShouldBeGreaterThanOrEqualTo(2);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Graph] - SET: changed then restored values still conflict with stale Snapshot writers (#1149)")]
+    public async Task Execute_RestoredValue_ShouldAbortStaleSnapshotWriter()
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create("updates", new());
+        var db = await engine.CreateDatabaseAsync("graph");
+        await using var first = await db.CreateSessionAsync();
+        await using var stale = await db.CreateSessionAsync();
+        await first.ExecuteAsync("INSERT (:P {x:1})");
+        await using var snapshot = await stale.BeginTransactionAsync(IsolationLevel.Snapshot);
+
+        // Act
+        (await first.ExecuteAsync("MATCH (a:P) SET a.x=2 SET a.x=1")).AffectedCount.ShouldBe(1);
+
+        // Assert
+        await Should.ThrowAsync<DatabaseTransactionAbortedException>(async () => await stale.ExecuteAsync("MATCH (a:P) SET a.x=3"));
+        await snapshot.RollbackAsync();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Graph] - SET: 30,000 collected nodes refresh with bounded allocation (#1149)")]
+    public async Task Execute_SharedCollectAcrossThirtyThousandRows_ShouldAllocateLinearly()
+    {
+        // Arrange
+        using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(2));
+        var token = timeout.Token;
+        await using var engine = GraphDatabaseEngine.Create("updates", new());
+        var db = await engine.CreateDatabaseAsync("graph", token);
+        await using var session = await db.CreateSessionAsync(token);
+        await session.ExecuteAsync("FOR i IN $ids INSERT (:P {k:i})", new Dictionary<string, object?> { ["ids"] = Enumerable.Range(0, 30_000).ToArray() }, token);
+        // Budget the physical writes and the extra read/group pipeline separately. Refresh
+        // may add at most 64 MiB (about 2 KiB per row) beyond those measured costs.
+        long before = GC.GetTotalAllocatedBytes(true);
+        await session.ExecuteAsync("MATCH (b:P) SET b.seen = FALSE", cancellationToken: token);
+        long baseline = GC.GetTotalAllocatedBytes(true) - before;
+        before = GC.GetTotalAllocatedBytes(true);
+        await using (var read = (DatabaseResultSet)await session.ExecuteAsync(
+            "MATCH (a:P) WITH collect(a) AS ps MATCH (b:P) RETURN count(b)", cancellationToken: token))
+        {
+            await foreach (var row in read.GetRowsAsync(token)) { row.GetInt64(0).ShouldBe(30_000); }
+        }
+        long reads = GC.GetTotalAllocatedBytes(true) - before;
+        before = GC.GetTotalAllocatedBytes(true);
+
+        // Act
+        var result = await session.ExecuteAsync("MATCH (a:P) WITH collect(a) AS ps MATCH (b:P) SET b.seen = TRUE", cancellationToken: token);
+        long allocated = GC.GetTotalAllocatedBytes(true) - before;
+
+        // Assert
+        result.AffectedCount.ShouldBe(30_000);
+        allocated.ShouldBeLessThan(baseline + reads + 64L * 1024 * 1024);
     }
 
     [Fact(DisplayName = "Cohesion Test [Graph] - SET: Snapshot uses first-updater-wins and old snapshots retain values (#1149)")]

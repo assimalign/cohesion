@@ -115,6 +115,13 @@ rows and items evaluate left to right, while publishing one replacement per upda
 statement completion. Later scans, index seeks, traversals and endpoint functions consult that
 working copy. Every binding is refreshed after an update stage, including nested lists/maps/paths;
 updated entities retain read-only label and property collections when returned to callers.
+Refresh traverses shared composites once per stage, memoized by reference identity, copying only
+branches containing touched identities and retaining unchanged lists and maps. Refreshed maps
+remain `ReadOnlyDictionary`. Scalar evaluation resolves entity leaves through the current working
+copy, preserving left-to-right reads without rebuilding composites per row or assignment.
+INSERT reserves stable identities from storage, stages the complete entities, then inserts their
+final working copies once, nodes before relationships. A cascade discards pending relationship
+updates just as explicit relationship deletion does; the affected count includes explicit targets.
 
 Each persisted replacement tombstones the old record and moves every property-index entry or
 both adjacency entries (one for a self-loop) to the new location in one physical bracket.
@@ -128,8 +135,9 @@ SET NULL removes a property; INSERT still stores explicit NULL. Map replacement 
 keys and map merge preserves them. Labels and keys reuse INSERT catalog discovery and resulting
 property-set validation. Type-exact no-ops write no version and count zero. The mutation count is
 created entities plus distinct entities changed at any point, counting an entity created then
-updated once. Restoring an original value later still counts that entity; a net-identical final
-working copy needs no stored replacement. Row-returning mutations carry the same count over
+updated once. Restoring an original value later still counts and publishes that entity, preserving
+Snapshot first-updater-wins conflicts. An entity whose assignments were all no-ops skips
+replacement. Row-returning mutations carry the same count over
 the existing ResultComplete frame. EXPLAIN
 describes update stages and their targets without executing them.
 
@@ -142,7 +150,9 @@ checks latest endpoint existence, so a concurrent endpoint property replacement 
 Behavior references (consulted, no code copied), relative to C:/Source/repos/neo4j/neo4j:
 `community/cypher/interpreted-runtime/src/main/scala/org/neo4j/cypher/internal/runtime/interpreted/pipes/SetOperation.scala:103-108`
 removes NULL properties; `community/kernel/src/main/java/org/neo4j/kernel/impl/newapi/Operations.java:3116-3119`
-requires both the same value type and equal value for a no-op.
+requires both the same value type and equal value for a no-op;
+`community/kernel/src/main/java/org/neo4j/kernel/impl/api/state/EntityStateImpl.java:68-75`
+retains assigned values in transaction state, including a restored original value.
 
 ### Database names and directories
 
@@ -1307,7 +1317,7 @@ followed by those bytes. There is no padding.
 | 5 (`Execute`) | Client → server | GQL string; `int32` parameter count; repeated parameter-name string, `int32` encoded-value byte length, value bytes |
 | 6 (`ResultHeader`) | Server → client | `int32` column count; repeated column-name string and one type byte: DatabaseType in bits 0–6, negotiated composite-column flag in bit 7 |
 | 7 (`ResultRow`) | Server → client | One value per column: unmarked scalar tuple component; marked tag 0 plus scalar, or tag 1 plus little-endian Int32 length and GraphValueCodec component |
-| 8 (`ResultComplete`) | Server → client | `int64` affected count; -1 for a result set |
+| 8 (`ResultComplete`) | Server → client | `int64` affected count; -1 for read-only statements, mutation count for writes, including writes returning rows |
 | 9 (`Transaction`) | Client → server | Reserved legacy identifier; server rejects it with `ProtocolViolation` |
 | 64 (`ExecutePaths`) | Client → server | The same GQL/parameter payload as byte 5, requesting path-shaped results |
 | 65 (`Path`) | Server → client | Ordered node and relationship sequences in the format below |
