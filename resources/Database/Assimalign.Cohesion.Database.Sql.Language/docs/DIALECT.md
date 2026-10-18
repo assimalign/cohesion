@@ -1270,8 +1270,9 @@ checking at most every 32 operations and preserving cancellation through runtime
 STRING_AGG(value, delimiter [ORDER BY keys]) uses PostgreSQL spelling; ISO LISTAGG(value
 [, delimiter]) WITHIN GROUP (ORDER BY keys) executes through the same accumulator.
 LISTAGG permits DISTINCT, requires WITHIN GROUP, and cannot also have an inner ORDER BY
-(SQL0003), including when its name is quoted. Ordinary quoted calls may parse, but the planner
-refuses them without WITHIN GROUP keys. An omitted LISTAGG delimiter is empty. The delimiter must be a string literal,
+(SQL0003), including when its name is written as the quoted lower-case `"listagg"`, which
+names the same function. Any other quoted spelling, such as `"LISTAGG"`, is an ordinary call:
+it may parse, but the planner refuses it without WITHIN GROUP keys. An omitted LISTAGG delimiter is empty. The delimiter must be a string literal,
 NULL literal, or parameter known at plan time; a column/expression delimiter is COHDBL001.
 Both arguments must be String or Character; CHAR is trimmed on conversion to text.
 JSON and other types fail with COHSQLE006 and require CAST(... AS TEXT). NULL values are
