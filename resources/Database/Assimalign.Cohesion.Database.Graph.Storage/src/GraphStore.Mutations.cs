@@ -54,7 +54,8 @@ public sealed partial class GraphStore
         private readonly MutationGate _gate;
         internal MutationLease(MutationGate gate) { _gate = gate; }
         internal TransactionContext RefreshSnapshot(TransactionContext context)
-            => context.IsolationLevel == IsolationLevel.ReadCommitted ? _gate.Transaction.PinStatementSnapshot() : context;
+            => context.IsolationLevel == IsolationLevel.ReadCommitted && ReferenceEquals(context, _gate.Transaction)
+                ? context.PinStatementSnapshot() : context;
         public void Dispose() => _gate.Semaphore.Release();
     }
 

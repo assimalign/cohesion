@@ -175,9 +175,11 @@ transaction, from lookup and encoding through directory publication. The gate is
 once per transaction; repeated uncontended entries and their value-type leases allocate
 nothing. The physical apply gate alone cannot protect a prior-version lookup or the later
 publication. The lock is deliberately coarse
-for the MVP. Once the writer lock is acquired, every mutation captures a fresh
-ReadCommitted snapshot from the transaction's original context, including calls given
-a previously pinned statement view. Snapshot isolation retains its fixed horizon.
+for the MVP. Once the writer lock is acquired, a mutation given the transaction's original
+ReadCommitted context captures a fresh statement snapshot. A caller-pinned statement view
+retains its horizon and reports conflicts against that view; the caller decides whether to
+refresh and retry, as PostgreSQL's executor does (`src/backend/executor/nodeModifyTable.c:2636-2665`).
+Snapshot isolation retains its fixed horizon.
 After a wait, the store checks cancellation and active transaction state
 and releases a grant received after rollback. Update and deletion checks compare the
 caller's snapshot with the latest committed view while holding the lock; a changed
