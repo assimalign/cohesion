@@ -349,8 +349,11 @@ order. System-source catalog enumeration is ordinal by collection name, then ind
 ORDER BY ties preserve baseline ordinal order, so pages concatenate without gaps on unchanged
 data. Writes between separate statements may shift pages; use a shared snapshot for repeatability.
 EXPLAIN's select detail includes resolved limit (none when absent) and offset (zero when absent).
-Unsorted, ungrouped, non-DISTINCT queries with literal or constructor projections stop reads
-once the page is complete. Paths and lone stars can observe heterogeneous scalar roots and
+Unsorted, ungrouped, non-DISTINCT queries whose projections have fixed static result types stop reads
+once the page is complete, including scalar functions from OqlFunctions, unary and binary operators,
+META, literals and constructors. LIMIT 0 evaluates no row predicates; a completed window never
+evaluates the next predicate, following PostgreSQL src/backend/executor/nodeLimit.c:153-159.
+Paths and lone stars can observe heterogeneous scalar roots and
 still inspect all matches to guarantee page-independent column types; their result is materialized.
 This preserves the metadata contract while making early termination safe where types are fixed.
 

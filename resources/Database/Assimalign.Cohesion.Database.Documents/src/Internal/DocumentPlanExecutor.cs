@@ -89,13 +89,14 @@ internal static partial class DocumentPlanExecutor
         return ExecuteRows(plan.Logical, matches, evaluator, cancellationToken);
     }
 
-    // Literal and constructor projections have fixed types. Paths and lone stars may
-    // observe heterogeneous scalar roots, so their metadata requires every matching row.
+    // Use the planner's fixed result types, including function, operator and META results.
+    // Stars have a nominal Json type but can observe heterogeneous scalar roots, while
+    // Null also denotes an unknown type; only literal NULL/MISSING is fixed in that case.
     private static bool PageComplete(DocumentLogicalPlan logical, int matched)
         => !logical.IsGrouped && !logical.Query.IsDistinct && logical.Query.OrderBy.Count == 0 &&
-            logical.Query.Projections.All(projection => projection.Expression is
-                OqlLiteralExpression { Value: null or string or bool or decimal or int or long or JsonElement } or
-                OqlArrayExpression or OqlObjectExpression) &&
+            logical.Projections.All(projection => projection.Expression is not OqlStarExpression &&
+                (projection.Type != DatabaseType.Null || projection.Expression is
+                    OqlLiteralExpression { Value: null or JsonElement { ValueKind: JsonValueKind.Null } } or OqlMissingExpression)) &&
             logical.Limit is long limit && Math.Max(0L, matched - logical.Offset) >= limit;
 
     private static DatabaseResult ExecuteRows(DocumentLogicalPlan logical, List<DocumentEvaluationContext> matches,

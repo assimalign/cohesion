@@ -110,6 +110,8 @@ public sealed partial class DocumentQueryTests
             await using var result = (DatabaseResultSet)await session.ExecuteAsync("SELECT v FROM items ORDER BY v" + page, cancellationToken: CancellationToken.None);
             result.Columns.Single().Type.ShouldBe(DatabaseType.Null);
             result.AffectedCount.ShouldBe(-1);
+            await using var unordered = (DatabaseResultSet)await session.ExecuteAsync("SELECT v FROM items" + page, cancellationToken: CancellationToken.None);
+            unordered.Columns.Single().Type.ShouldBe(DatabaseType.Null);
             await using var numeric = (DatabaseResultSet)await session.ExecuteAsync(
                 "SELECT CASE WHEN v = 1 THEN LENGTH('a') ELSE 'x' END AS n FROM items" + page, cancellationToken: CancellationToken.None);
             numeric.Columns.Single().Type.ShouldBe(DatabaseType.Null);
@@ -263,5 +265,47 @@ public sealed partial class DocumentQueryTests
         // Act / Assert: reading the second row would divide by zero.
         (await RowsAsync(session, "SELECT {'v': v} AS obj FROM items WHERE 1 / v > 0 LIMIT 1")).Count.ShouldBe(1);
         (await RowsAsync(session, "SELECT 1 FROM items WHERE 1 / v > 0 LIMIT 0")).ShouldBeEmpty();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Documents] - Paging: fixed result types stop before unused predicates for zero and one row")]
+    [InlineData("LENGTH('a')", DatabaseType.Int64, 1L)]
+    [InlineData("LENGTH(v)", DatabaseType.Int64, null)]
+    [InlineData("UPPER('a')", DatabaseType.String, "A")]
+    [InlineData("ABS(-1)", DatabaseType.Decimal, 1)]
+    [InlineData("-1", DatabaseType.Decimal, -1)]
+    [InlineData("+1", DatabaseType.Decimal, 1)]
+    [InlineData("-LENGTH('a')", DatabaseType.Decimal, -1)]
+    [InlineData("NOT FALSE", DatabaseType.Boolean, true)]
+    [InlineData("1 + 1", DatabaseType.Decimal, 2)]
+    [InlineData("LENGTH('a') + LENGTH('a')", DatabaseType.Decimal, 2)]
+    [InlineData("v > 0", DatabaseType.Boolean, true)]
+    [InlineData("v IS VALUED", DatabaseType.Boolean, true)]
+    [InlineData("v IN (1, 2)", DatabaseType.Boolean, true)]
+    [InlineData("v BETWEEN 1 AND 2", DatabaseType.Boolean, true)]
+    [InlineData("'a' LIKE 'a'", DatabaseType.Boolean, true)]
+    [InlineData("META().id", DatabaseType.String, "a")]
+    [InlineData("NULL", DatabaseType.Null, null)]
+    [InlineData("MISSING", DatabaseType.Null, null)]
+    public async Task Execute_UnsortedStaticType_ShouldStopBeforeUnusedPredicateAsync(string projection, DatabaseType type, object? expected)
+    {
+        // Arrange
+        await using var engine = DocumentDatabaseEngine.Create("paging", new());
+        var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        var items = await session.CreateCollectionAsync("items", CancellationToken.None);
+        await PutAsync(items, session, "a", "{\"v\":1}");
+        await PutAsync(items, session, "b", "{\"v\":0}");
+
+        // Act / Assert: LIMIT 0 reads no predicate; LIMIT 1 never evaluates the second row.
+        foreach (int limit in new[] { 0, 1 })
+        {
+            await using var result = (DatabaseResultSet)await session.ExecuteAsync(
+                $"SELECT {projection} FROM items WHERE 1 / v > 0 LIMIT {limit}", cancellationToken: CancellationToken.None);
+            result.Columns.ShouldHaveSingleItem().Type.ShouldBe(type);
+            var rows = new List<DatabaseRow>();
+            await foreach (var row in result.GetRowsAsync(CancellationToken.None)) { rows.Add(row); }
+            rows.Count.ShouldBe(limit);
+            if (limit == 1) { rows[0].GetValue(0).ShouldBe(expected is int integer ? (decimal)integer : expected); }
+        }
     }
 }
