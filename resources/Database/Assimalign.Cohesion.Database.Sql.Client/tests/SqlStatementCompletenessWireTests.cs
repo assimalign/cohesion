@@ -20,7 +20,6 @@ public sealed class SqlStatementCompletenessWireTests
     [InlineData("UPDATE users SET score = 0 WHRE id = 1")]
     [InlineData("UPDATE users SET score = :score WHERE id = 1")]
     [InlineData("DELETE FROM users WHERE score IS TRUE")]
-    [InlineData("INSERT INTO users (id, name, score) VALUES (3, 'linus', 300) ON CONFLICT DO NOTHING")]
     [InlineData("DELETE FROM users WHERE id = 1; DELETE FROM users")]
     [InlineData("UPDATE users SET score = 0, name = 'x WHERE id = 1")]
     [InlineData("DELETE FROM users /* WHERE id = 1")]

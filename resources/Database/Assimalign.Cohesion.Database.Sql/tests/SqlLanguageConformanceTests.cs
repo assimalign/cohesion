@@ -41,8 +41,8 @@ public sealed class SqlLanguageConformanceTests
     {
         // The profile drives enumeration. A newly advertised clause cannot silently escape this test.
         var cases = CreateCases();
-        // #1117 adds RETURNING: exactly one over #1124's 49.
-        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(50);
+        // #1118 adds ON CONFLICT: exactly one over #1117's 50.
+        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(51);
         RequireExecutionCases(SqlLanguageProfile.Instance.Clauses, cases);
         cases.Keys.Except(SqlLanguageProfile.Instance.Clauses).ShouldBeEmpty("Cases must describe the current profile.");
 
@@ -525,6 +525,13 @@ public sealed class SqlLanguageConformanceTests
             {
                 result.AffectedCount.ShouldBe(1);
                 await ExpectRowsAsync(session, "SELECT name, age FROM t WHERE id = 4;", [["Barbara", 33]]);
+            }),
+        [SqlClauses.OnConflict] = new("INSERT INTO t VALUES (1, 'Ada', 37), (4, 'Barbara', 33) ON CONFLICT (id) DO UPDATE SET age = EXCLUDED.age;", _seed,
+            expression => expression is SqlInsertExpression { OnConflict: not null },
+            async (session, result) =>
+            {
+                result.AffectedCount.ShouldBe(2);
+                await ExpectRowsAsync(session, "SELECT name, age FROM t WHERE id IN (1, 4) ORDER BY id;", [["Ada", 37], ["Barbara", 33]]);
             }),
         [SqlClauses.Values] = new("INSERT INTO t VALUES (4, 'Barbara', 33), (5, 'Edsger', 42);", _seed,
             expression => expression is SqlInsertExpression { Values.Count: 2 },

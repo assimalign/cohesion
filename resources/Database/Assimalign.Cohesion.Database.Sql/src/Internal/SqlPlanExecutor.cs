@@ -415,7 +415,7 @@ internal sealed partial class SqlPlanExecutor
             }
             values.Add(row);
         }
-        return await ExecuteInsertRowsAsync(plan.Table, plan.TargetOrdinals, values, statement, cancellationToken, plan.Returning, plan.Rows).ConfigureAwait(false);
+        return await ExecuteInsertRowsAsync(plan.Table, plan.TargetOrdinals, values, statement, cancellationToken, plan.Returning, plan.Rows, plan.OnConflict).ConfigureAwait(false);
     }
 
     private async Task<DatabaseResult> ExecuteUpdateAsync(SqlUpdatePlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
@@ -667,6 +667,10 @@ internal sealed partial class SqlPlanExecutor
     //   1. the table's IntentExclusive object lock,
     //   2. its target rows' Exclusive locks, sorted by packed location,
     //   3. its unique-index key locks, sorted by key hash (deduplicated).
+    //
+    // ON CONFLICT is the second deliberate exception (beside the cascade walk):
+    // all proposed arbiter keys are acquired once, sorted, before any row lock.
+    // Cycles with row-first writers are handled by the lock manager's deadlock detection.
     //
     // The B+Tree re-acquires the key lock inside the apply gate — a same-owner
     // re-grant that completes synchronously — so no lock wait can ever happen

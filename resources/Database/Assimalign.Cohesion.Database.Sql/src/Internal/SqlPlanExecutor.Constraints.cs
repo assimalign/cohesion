@@ -454,7 +454,7 @@ internal sealed partial class SqlPlanExecutor
     private void ValidateRows(SqlCatalogTable table, IReadOnlyList<object?[]> rows, SqlStatementContext statement,
         CancellationToken cancellationToken, bool current = false, List<SqlParentReference>? references = null,
         Dictionary<(ulong ObjectId, ulong Location), SqlConstraintDelete>? deletions = null,
-        SqlConstraintUpdates? updates = null)
+        SqlConstraintUpdates? updates = null, bool checksOnly = false, bool skipChecks = false)
     {
         // The table version's CHECK predicates were parsed and bound once, when the catalog
         // loaded or the DDL that produced this version ran; a write only evaluates the bound
@@ -465,6 +465,7 @@ internal sealed partial class SqlPlanExecutor
         {
             if (constraint.Kind == SqlCatalogConstraintKind.Check)
             {
+                if (skipChecks) { continue; }
                 var check = bound.GetCheck(constraint);
                 foreach (var row in rows)
                 {
@@ -482,6 +483,7 @@ internal sealed partial class SqlPlanExecutor
                 }
                 continue;
             }
+            if (checksOnly) { continue; }
             if (!_catalog.TryGetTable(constraint.ReferencedSchema!, constraint.ReferencedTable!, out var parent))
             {
                 if (string.Equals(constraint.ReferencedSchema, table.Schema, StringComparison.OrdinalIgnoreCase) &&

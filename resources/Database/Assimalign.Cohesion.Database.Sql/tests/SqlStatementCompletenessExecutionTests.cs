@@ -59,8 +59,6 @@ public sealed class SqlStatementCompletenessExecutionTests
     [InlineData("DELETE FROM t WHRE id = 1;")]
     [InlineData("UPDATE t SET name = 'z' WHRE id = 1;")]
     [InlineData("UPDATE t SET name = u.name FROM u WHERE t.id = u.id;")]
-    [InlineData("INSERT INTO t (id, name, age) VALUES (5, 'new', 1) ON CONFLICT DO NOTHING;")]
-    [InlineData("INSERT INTO t (id, name, age) VALUES (5, 'new', 1) ON DUPLICATE KEY UPDATE name = 'dup';")]
     [InlineData("SELECT id FROM t WHERE name LIKE 'a!%' ESCAPE '!';")]
     [InlineData("DELETE FROM t WHERE name LIKE 'a%' ESCAPE '!';")]
     [InlineData("DELETE FROM t WHERE flag IS DISTINCT FROM TRUE;")]

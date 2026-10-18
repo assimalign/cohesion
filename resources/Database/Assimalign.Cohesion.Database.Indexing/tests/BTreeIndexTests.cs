@@ -21,6 +21,45 @@ namespace Assimalign.Cohesion.Database.Indexing.Tests;
 /// </summary>
 public class BTreeIndexTests
 {
+    [Fact(DisplayName = "Cohesion Test [Database.Indexing] - BTree: latest live lookup includes own writes and follows rollback stamps")]
+    public async Task FindLiveEntry_CommitDeleteAndRollback_ShouldReturnCurrentReference()
+    {
+        // Arrange
+        var (harness, index) = await CreateIndexAsync(unique: true);
+        await using var lifetime = harness;
+        var key = IndexKey.FromInt64(42);
+        var writer = await harness.BeginAsync();
+        await index.InsertAsync(writer, key, 100, CancellationToken.None);
+
+        // Act / Assert: INSERT holds the exclusive key lock for this transaction.
+        index.FindLiveEntry(key).ShouldBe(100UL);
+        await harness.CommitAsync(writer);
+        var deleter = await harness.BeginAsync();
+        await harness.LockManager.AcquireAsync(deleter.Sequence, LockResource.Entry(1, key.Hash()), LockMode.Exclusive, CancellationToken.None);
+        index.FindLiveEntry(key).ShouldBe(100UL);
+        await index.DeleteAsync(deleter, key, 100, CancellationToken.None);
+        index.FindLiveEntry(key).ShouldBeNull();
+        await harness.RollbackAsync(deleter);
+        var rolledBackInsert = await harness.BeginAsync();
+        await harness.LockManager.AcquireAsync(rolledBackInsert.Sequence, LockResource.Entry(1, key.Hash()), LockMode.Exclusive, CancellationToken.None);
+        index.FindLiveEntry(key).ShouldBe(100UL);
+        var otherKey = IndexKey.FromInt64(43);
+        await index.InsertAsync(rolledBackInsert, otherKey, 200, CancellationToken.None);
+        index.FindLiveEntry(otherKey).ShouldBe(200UL);
+        await harness.RollbackAsync(rolledBackInsert);
+        var reader = await harness.BeginAsync();
+        await harness.LockManager.AcquireAsync(reader.Sequence, LockResource.Entry(1, otherKey.Hash()), LockMode.Exclusive, CancellationToken.None);
+        index.FindLiveEntry(otherKey).ShouldBeNull();
+        await harness.RollbackAsync(reader);
+        var committedDelete = await harness.BeginAsync();
+        await index.DeleteAsync(committedDelete, key, 100, CancellationToken.None);
+        await harness.CommitAsync(committedDelete);
+        var final = await harness.BeginAsync();
+        await harness.LockManager.AcquireAsync(final.Sequence, LockResource.Entry(1, key.Hash()), LockMode.Exclusive, CancellationToken.None);
+        index.FindLiveEntry(key).ShouldBeNull();
+        await harness.RollbackAsync(final);
+    }
+
     private static async Task<(IndexTestHarness Harness, BTreeIndex Index)> CreateIndexAsync(bool unique = false)
     {
         var harness = new IndexTestHarness();

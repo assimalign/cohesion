@@ -299,7 +299,12 @@ internal sealed record SqlInsertPlan(
     IReadOnlyList<SqlBoundExpression[]> Rows) : SqlPlan
 {
     public IReadOnlyList<SqlProjection>? Returning { get; init; }
+    public SqlOnConflictPlan? OnConflict { get; init; }
 }
+
+/// <summary>Bound unique-index arbiters and the target-plus-EXCLUDED update expressions.</summary>
+internal sealed record SqlOnConflictPlan(IReadOnlyList<SqlCatalogIndex> Arbiters, bool DoUpdate,
+    IReadOnlyList<(int Ordinal, SqlBoundExpression Value)> Assignments, SqlBoundExpression? Where);
 
 internal sealed record SqlUpdatePlan(
     SqlCatalogTable Table,

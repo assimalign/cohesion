@@ -4,6 +4,18 @@
 
 Every model needs ordered lookups: SQL secondary indexes, document indexes, graph adjacency, the KV primary structure. Building four bespoke trees would quadruple the hardest code in the platform, so index structures live in the kernel and models bring only their key extraction. The SQL engine is the first real consumer (#912): CREATE/DROP INDEX, write-path maintenance, and planner seeks all compose this package's manager, trees, and cursors.
 
+## Latest live-entry lookup (#1118)
+
+BTreeIndex.FindLiveEntry returns the first live entry reference for a complete key,
+without snapshot filtering. The caller **must hold the key's Exclusive entry lock**
+(LockResource.Entry(tableObjectId, key.Hash())) throughout lookup and decision. Like UNIQUE
+enforcement, a live entry under that lock is committed or the caller's own; every insert
+and tombstone takes the same key lock, and rollback undoes entries before releasing it.
+The method is synchronous, takes the tree's read latch, and acquires no transaction lock.
+SQL uses it only in phase one, before the coordinator's apply gate. Tombstoned keys and
+rolled-back inserts return null; rolled-back deletes restore the original reference.
+No page layout or storage-format change is needed.
+
 ## Byte-comparable keys
 
 `IndexKey` compares by unsigned lexicographic byte order — the single comparison rule every structure (and every future on-disk page compare) uses. Type order is preserved at *encoding* time: integers are big-endian with the sign bit flipped (`FromInt64`), so numeric order and byte order coincide; composite keys concatenate component encodings. String collation encoding is deliberately **not** defined here — it belongs to the shared type system (`Database.Types`), which owns collation identity; `IndexKey.From(DatabaseKeyWriter)` is the bridge for typed and composite keys.

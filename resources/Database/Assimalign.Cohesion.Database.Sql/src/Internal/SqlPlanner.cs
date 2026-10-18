@@ -725,16 +725,17 @@ internal sealed partial class SqlPlanner
             }
         }
         var returning = BindReturning(insert.Returning, table, insert.Table);
+        var onConflict = BindOnConflict(insert, table);
         if (insert.SelectSource is not null)
         {
             var plan = PlanInsertSelect(table, targetOrdinals, insert.SelectSource);
-            return returning is null ? plan : plan with { Returning = returning };
+            return plan with { Returning = returning, OnConflict = onConflict };
         }
 
         if (insert.IsDefaultValues)
         {
             // Validate any column list above, then omit every column through the shared INSERT path.
-            return new SqlInsertPlan(table, [], [Array.Empty<SqlBoundExpression>()]) { Returning = returning };
+            return new SqlInsertPlan(table, [], [Array.Empty<SqlBoundExpression>()]) { Returning = returning, OnConflict = onConflict };
         }
 
         foreach (var row in insert.Values!)
@@ -776,7 +777,7 @@ internal sealed partial class SqlPlanner
             rows[index] = bound;
         }
 
-        return new SqlInsertPlan(table, targetOrdinals, rows) { Returning = returning };
+        return new SqlInsertPlan(table, targetOrdinals, rows) { Returning = returning, OnConflict = onConflict };
     }
 
     /// <summary>

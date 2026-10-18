@@ -950,6 +950,7 @@ public sealed partial class SqlQueryParser : QueryParser
         bool dmlWhere = false;
         bool dmlStatement = false;
         bool returning = false;
+        bool onConflictUpdate = false;
         bool inFrom = false;
         bool previousFromComma = false;
         bool previousPreviousFromComma = false;
@@ -1014,16 +1015,31 @@ public sealed partial class SqlQueryParser : QueryParser
             // the outer write identity so its RETURNING subqueries still get their own gate.
             dmlStatement |= fromScopes.Count == 0 &&
                 (IsKeyword(ref lexer, "INSERT") || IsKeyword(ref lexer, "UPDATE") || IsKeyword(ref lexer, "DELETE"));
+            if (fromScopes.Count == 0 && IsWord(ref lexer, "CONFLICT") &&
+                string.Equals(previousToken, "ON", StringComparison.OrdinalIgnoreCase))
+            {
+                insertValues = false;
+                inFrom = false;
+            }
+            if (fromScopes.Count == 0 && IsKeyword(ref lexer, "UPDATE") &&
+                string.Equals(previousToken, "DO", StringComparison.OrdinalIgnoreCase))
+            {
+                onConflictUpdate = true;
+                insertValues = false;
+                dmlWhere = false;
+                inFrom = false;
+            }
             if (fromScopes.Count == 0 && IsKeyword(ref lexer, "RETURNING") && dmlStatement)
             {
                 returning = true;
+                onConflictUpdate = false;
                 insertValues = false;
                 dmlWhere = false;
                 inFrom = false;
             }
             withStatement |= !returning && IsKeyword(ref lexer, "WITH");
             if (!returning && IsKeyword(ref lexer, "WITH")) { inWithDefinitions = true; }
-            if (withStatement && fromScopes.Count == 0 &&
+            if (withStatement && !onConflictUpdate && fromScopes.Count == 0 &&
                 (IsKeyword(ref lexer, "SELECT") || IsKeyword(ref lexer, "INSERT") ||
                  IsKeyword(ref lexer, "UPDATE") || IsKeyword(ref lexer, "DELETE")))
             {
@@ -1059,7 +1075,7 @@ public sealed partial class SqlQueryParser : QueryParser
             }
 
             if (TryFindUnsupportedSubqueryForm(lexer, firstToken.Equals("WITH", StringComparison.OrdinalIgnoreCase) ? "SELECT" : firstToken, previousToken,
-                previousPreviousToken, insertValues, dmlWhere, returning,
+                previousPreviousToken, insertValues, dmlWhere, returning, onConflictUpdate,
                 previousFromComma || previousPreviousFromComma, out clause))
             {
                 location = tokenLocation;

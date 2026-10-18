@@ -115,6 +115,7 @@ public sealed partial class SqlQueryParser
         bool insertValues,
         bool dmlWhere,
         bool returning,
+        bool onConflictUpdate,
         bool followsFromComma,
         out string clause)
     {
@@ -142,7 +143,11 @@ public sealed partial class SqlQueryParser
         else if (lexer.Current.Type == TokenType.Keyword &&
                  token.Equals("SELECT", StringComparison.OrdinalIgnoreCase) && previousToken is not null)
         {
-            if (returning)
+            if (onConflictUpdate)
+            {
+                clause = "SUBQUERY in ON CONFLICT DO UPDATE";
+            }
+            else if (returning)
             {
                 clause = "SUBQUERY in RETURNING";
             }

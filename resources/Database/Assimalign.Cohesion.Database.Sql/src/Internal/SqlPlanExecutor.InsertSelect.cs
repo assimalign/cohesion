@@ -38,7 +38,8 @@ internal sealed partial class SqlPlanExecutor
             }
             rows.Add(row);
         }
-        return await ExecuteInsertRowsAsync(plan.Table, plan.TargetOrdinals, rows, statement, cancellationToken, plan.Returning).ConfigureAwait(false);
+        return await ExecuteInsertRowsAsync(plan.Table, plan.TargetOrdinals, rows, statement, cancellationToken, plan.Returning,
+            onConflict: plan.OnConflict).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -48,9 +49,12 @@ internal sealed partial class SqlPlanExecutor
     /// </summary>
     private async Task<DatabaseResult> ExecuteInsertRowsAsync(SqlCatalogTable table, IReadOnlyList<int> targetOrdinals,
         IReadOnlyList<object?[]> sourceRows, SqlStatementContext statement, CancellationToken cancellationToken,
-        IReadOnlyList<SqlProjection>? returning = null, IReadOnlyList<SqlBoundExpression[]>? valueRows = null)
+        IReadOnlyList<SqlProjection>? returning = null, IReadOnlyList<SqlBoundExpression[]>? valueRows = null,
+        SqlOnConflictPlan? onConflict = null)
     {
         await AcquireOutgoingReferenceIntentLocksAsync(table, statement, cancellationToken).ConfigureAwait(false);
+        if (onConflict?.DoUpdate == true)
+        { await AcquireIncomingReferenceIntentLocksAsync(table, statement, cancellationToken).ConfigureAwait(false); }
         await statement.Coordinator.LockManager.AcquireAsync(statement.Transaction.Sequence, LockResource.Object(table.ObjectId),
             LockMode.IntentExclusive, cancellationToken).ConfigureAwait(false);
         EnsureCurrentDefinition(table);
@@ -103,7 +107,8 @@ internal sealed partial class SqlPlanExecutor
                 {
                     throw SqlPlanningException.IdentityViolation(table.Columns[ordinal].Name, ErrorMessages.IdentityInsertForbidden);
                 }
-                values[ordinal] = CoerceForColumn(sourceRow[i], table.Columns[ordinal]);
+                values[ordinal] = onConflict is null ? CoerceForColumn(sourceRow[i], table.Columns[ordinal])
+                    : CoerceUpsertColumn(table, ordinal, sourceRow[i]);
                 assigned[ordinal] = true;
             }
             for (int ordinal = 0; ordinal < values.Length; ordinal++)
@@ -111,7 +116,7 @@ internal sealed partial class SqlPlanExecutor
                 if (!assigned[ordinal])
                 {
                     // The bound DEFAULT's value, or NULL, or the NOT NULL failure, for a column without one.
-                    values[ordinal] = ResolveColumnDefault(table, ordinal, defaults[ordinal], statement, cancellationToken);
+                    values[ordinal] = ResolveColumnDefault(table, ordinal, defaults[ordinal], statement, cancellationToken, onConflict is not null);
                 }
             }
 
@@ -122,6 +127,11 @@ internal sealed partial class SqlPlanExecutor
             }
 
             rows.Add((SqlRowCodec.Encode(table, values, statement.Transaction.Sequence), values));
+        }
+
+        if (onConflict is not null)
+        {
+            return await ExecuteUpsertRowsAsync(table, indexes, rows, onConflict, returning, statement, cancellationToken).ConfigureAwait(false);
         }
 
         // As with literal INSERT, acquire reference locks and unique-key locks
@@ -161,7 +171,8 @@ internal sealed partial class SqlPlanExecutor
     }
 
     /// <summary>One default-resolution path for omitted INSERT columns and explicit DEFAULT assignments.</summary>
-    private object? ResolveColumnDefault(SqlCatalogTable table, int ordinal, SqlBoundExpression? boundDefault, SqlStatementContext statement, CancellationToken cancellationToken)
+    private object? ResolveColumnDefault(SqlCatalogTable table, int ordinal, SqlBoundExpression? boundDefault, SqlStatementContext statement,
+        CancellationToken cancellationToken, bool upsert = false)
     {
         var column = table.Columns[ordinal];
         if (column.Identity is not null)
@@ -175,8 +186,14 @@ internal sealed partial class SqlPlanExecutor
                 throw new SqlPlanningException("COHSQLE025", failure.Message, innerException: failure);
             }
         }
-        if (boundDefault is null) { return ResolveDefault(column, null); }
-        object? value = DefaultValue(boundDefault, cancellationToken, statement.TransactionStart);
+        if (boundDefault is null)
+        {
+            if (upsert) { return CoerceUpsertColumn(table, ordinal, null); }
+            return ResolveDefault(column, null);
+        }
+        object? value = DefaultValue(upsert && boundDefault is SqlBoundDefault expression ? expression.Value : boundDefault,
+            cancellationToken, statement.TransactionStart);
+        if (upsert) { return CoerceUpsertColumn(table, ordinal, value); }
         return value is null ? CoerceForColumn(null, column) : value;
     }
 }

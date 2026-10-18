@@ -1,5 +1,17 @@
 # Assimalign.Cohesion.Database.Sql.Language — Design
 
+## INSERT conflict clauses (#1118)
+
+SqlOnConflictClause retains inference kind, column set or constraint name, action,
+assignments and optional filter. The parser supplies its EXCLUDED relation reference to
+keep construction inside this assembly. ON CONFLICT adds one advertised clause; no keyword
+or unsupported-vocabulary row changes. INSERT OR IGNORE/REPLACE and ON DUPLICATE KEY UPDATE
+are positional capability refusals (REPLACE uses its existing function token). Inference
+expressions/options, partial WHERE and DO SELECT retain named COHDBL001. Preflight resets
+INSERT VALUES/FROM state at arbitration and names SET/WHERE subqueries ON CONFLICT DO UPDATE,
+including after WITH-prefixed INSERT SELECT. RETURNING ends that scope and refuses
+EXCLUDED.column. DIALECT specifies execution and errors.
+
 ## CREATE modifier dispatch (#1124 review)
 
 CREATE examines the object word after modifiers before choosing the view parser.

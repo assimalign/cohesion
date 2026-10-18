@@ -357,6 +357,28 @@ public sealed class BTreeIndex
         return new BTreeCursor(results);
     }
 
+    /// <summary>Finds a key's live entry reference in the latest index state.</summary>
+    /// <remarks>
+    /// The caller must hold the key's Exclusive entry lock, <c>LockResource.Entry(ObjectId, key.Hash())</c>,
+    /// for the entire lookup and decision. This synchronous phase-one operation takes only the
+    /// tree's read latch; it neither acquires transaction locks nor filters by a snapshot.
+    /// A live entry is committed or belongs to the caller while that lock is held.
+    /// </remarks>
+    /// <param name="key">The complete index key.</param>
+    /// <returns>The live entry reference, or null if no live entry exists.</returns>
+    /// <exception cref="IndexCorruptionException">A tree page is damaged.</exception>
+    public ulong? FindLiveEntry(IndexKey key)
+    {
+        _latch.EnterRead();
+        try
+        {
+            if (!TryFindEntry(BTreeSearchKey.AtKey(key.Encoded.Span), EntryMatch.Live, out long leafId, out int index)) { return null; }
+            using var handle = _storage.PageManager.GetPage((PageId)leafId);
+            return OpenNode(handle.Page.AsBodySpan(), leafId).GetEntryReference(index);
+        }
+        finally { _latch.ExitRead(); }
+    }
+
     /// <summary>
     /// Inserts an entry carrying explicit version stamps inside the given physical
     /// write-ahead bracket — the offline (DDL-blocking) build path: an index built

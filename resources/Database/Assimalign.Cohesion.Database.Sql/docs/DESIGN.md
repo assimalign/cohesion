@@ -2520,6 +2520,42 @@ record kind, wire message, reflection or runtime code generation is introduced.
 PostgreSQL references: tablecmds.c:3903-4062 (column identity), :4329-4385 (relation name),
 :8201-8268 (default), and heaptuple.c:151-180 (frozen missing values).
 
+## INSERT ... ON CONFLICT execution (#1118)
+
+The shared VALUES/DEFAULT VALUES/SELECT path builds every proposed stored row before
+arbitration, including coercion, defaults and identity allocation. Proposed CHECK, NOT NULL
+and domains run before key lookup; FK validation uses only rows actually written. Updated
+rows reuse UPDATE coercion/defaults, assigned-domain checks, CHECK/FK validation,
+released-reference locks, incoming-reference RESTRICT and MVCC/index tombstone/reinsert
+helpers. All writes and RETURNING projections share one ApplyStatementAsync bracket.
+DO NOTHING and false/UNKNOWN filters produce no row or affected count.
+
+The conflict plan selects all matching unique column-set indexes or one named unique index;
+untargeted DO NOTHING selects all unique indexes. The parser supplies EXCLUDED, so binding
+target-plus-proposed rows needs no visibility grant or public internal type. A per-index/key
+pending map models successful earlier proposals and rekeys in source order. Repeated effects
+raise COHSQLE041 before publication; arbiter failures use COHSQLE040. Encoded index equality
+supplies collation, NULL and temporal identity unchanged.
+
+After object intent locks, the statement acquires **all proposed arbiter key locks once,
+sorted and deduplicated, before any row lock**. BTreeIndex.FindLiveEntry runs under those
+locks and its read latch, outside the apply gate. Conflicting row locks then form one sorted
+batch; reference locks and remaining old/new unique-key locks follow. This is the second
+deliberate exception to row-before-key, beside the referential cascade walk. It can form
+row/key cycles with ordinary UPDATE/DELETE and SET NULL/DEFAULT. The lock manager detects
+cycles as retryable deadlocks; callers roll back/retry the victim. Gated tests exercise
+SET NULL/DEFAULT cycles and plain INSERT key waits; the gate's no-wait rule is unchanged.
+
+A live conflict newer than Snapshot visibility fails retryably for either action, including
+autocommit Snapshot. ReadCommitted skips it for DO NOTHING or updates the latest committed
+row for DO UPDATE. Own writes remain visible. Rollback clears the winner's index entries
+before its locks release, allowing a waiting insertion. PostgreSQL anchors are
+nodeModifyTable.c:377-405 (snapshot visibility), :1108 (proposed constraints), :2826-2830
+(repeated effects), :2935-2950 (visibility and WHERE); arbiter set equality is
+optimizer/util/plancat.c:1036-1060. DIALECT specifies the NULL-key difference and retries.
+No persisted grammar, identifier quoting, catalog format, wire format, public interface,
+project reference or InternalsVisibleTo change is required.
+
 ## Execution model
 
 - **Rule-based planning, plan/execute split.** `SqlPlanner` binds the AST against
@@ -3281,10 +3317,10 @@ description + exported registrations), the engine binds them.
   instead of stalling every writer of the database). Non-unique indexes take no key locks. Key
   locks and row locks share the `LockResource.Entry` space; a hash/location
   collision only over-locks, and the class ordering keeps acquisition globally
-  consistent. **The one deliberate exception is the cascade walk**, which locks
+  consistent. **The first deliberate exception is the cascade walk**, which locks
   rows in discovery order because the closure it is discovering is what
   determines the lock set; see "Referential enforcement locks parent rows" under
-  constraints for why that trade was taken and what it costs.
+  constraints for why that trade was taken and what it costs. The second is ON CONFLICT: all proposed arbiter keys precede all conflicting row locks, sorted once for the complete statement; see INSERT ... ON CONFLICT execution above.
 - **Uniqueness = the B+Tree's latest-state check under the exclusive hashed-key
   lock** (never snapshot visibility — write skew; the recorded #851 lesson).
   Violations surface as the area root's `DatabaseException` at the model

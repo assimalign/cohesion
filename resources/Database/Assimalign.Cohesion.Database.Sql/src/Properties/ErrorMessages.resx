@@ -1,5 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <root>
+  <data name="UpsertArbiterInvalid" xml:space="preserve"><value>ON CONFLICT target '{0}' on '{1}.{2}': {3}</value></data>
+  <data name="UpsertTargetRequired" xml:space="preserve"><value>DO UPDATE requires a column or ON CONSTRAINT target.</value></data>
+  <data name="UpsertConstraintNotUnique" xml:space="preserve"><value>The constraint has no associated unique index (CHECK and FOREIGN KEY cannot arbitrate).</value></data>
+  <data name="UpsertLegacyPrimaryKey" xml:space="preserve"><value>The legacy primary key has no associated unique index.</value></data>
+  <data name="UpsertConstraintMissing" xml:space="preserve"><value>No unique index or constraint with this name exists on the target table.</value></data>
+  <data name="UpsertIndexMissing" xml:space="preserve"><value>No unique index or constraint matches the ON CONFLICT specification.</value></data>
+  <data name="UpsertAggregate" xml:space="preserve"><value>Aggregate functions are not allowed in ON CONFLICT DO UPDATE.</value></data>
+  <data name="UpsertStar" xml:space="preserve"><value>'*' is not allowed in ON CONFLICT DO UPDATE.</value></data>
+  <data name="UpsertRepeatedRow" xml:space="preserve"><value>ON CONFLICT DO UPDATE cannot affect a row a second time.</value></data>
+  <data name="UpsertSnapshotConflict" xml:space="preserve"><value>Write-write conflict on '{0}.{1}': ON CONFLICT reached a row version this transaction's snapshot does not see. Retry the transaction.</value></data>
   <resheader name="resmimetype">
     <value>text/microsoft-resx</value>
   </resheader>

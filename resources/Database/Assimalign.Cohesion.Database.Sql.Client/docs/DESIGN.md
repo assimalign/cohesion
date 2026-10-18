@@ -18,6 +18,14 @@ Blank derived output names fail planning with COHSQLE013 and arrive as an
 ExecutionFailure with ConnectionUsable true. The connection and an explicit
 transaction remain usable; the wire regression verifies pending writes and rollback.
 
+## INSERT ... ON CONFLICT (#1118)
+
+Existing execute/query exchanges carry inserted-plus-updated affected counts and RETURNING
+rows. DO NOTHING-skipped proposals return no row. Wire tests cover InMemory and TCP,
+untargeted inserts without unique indexes, and reusable connections after arbiter,
+repeated-row and constraint failures (ExecutionFailure) or excluded spellings (COHDBL001
+ParseFailure). There is no client API, payload or protocol change.
+
 ## Derived relations and DML predicate subqueries (#1113, part b)
 
 The existing query and command exchanges carry derived-table results and
