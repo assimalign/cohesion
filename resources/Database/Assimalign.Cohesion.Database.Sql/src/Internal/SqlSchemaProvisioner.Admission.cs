@@ -56,7 +56,7 @@ internal sealed partial class SqlSchemaProvisioner
         RuntimeHelpers.EnsureSufficientExecutionStack();
         IReadOnlyList<SqlCommonTableExpression> commonTables = query switch
         {
-            SqlSelectExpression select => select.CommonTables,
+            SqlQueryBodyExpression select => select.CommonTables,
             SqlInsertExpression insert => insert.CommonTables,
             SqlUpdateExpression update => update.CommonTables,
             SqlDeleteExpression delete => delete.CommonTables,
@@ -72,6 +72,14 @@ internal sealed partial class SqlSchemaProvisioner
                 foreach (var table in References(explain.Statement))
                 {
                     yield return table;
+                }
+                break;
+            case SqlSetOperationExpression set:
+                foreach (var table in References(set.Left)) { yield return table; }
+                foreach (var table in References(set.Right)) { yield return table; }
+                foreach (var expression in set.OrderBy.Select(order => order.Expression).Append(set.Limit).Append(set.Offset))
+                {
+                    foreach (var table in References(expression)) { yield return table; }
                 }
                 break;
             case SqlSelectExpression select:
@@ -184,7 +192,7 @@ internal sealed partial class SqlSchemaProvisioner
     private static IEnumerable<SqlTableReference> References(SqlExpression? expression)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
-        SqlSelectExpression? query = expression switch
+        SqlQueryBodyExpression? query = expression switch
         {
             SqlSubqueryExpression scalar => scalar.Select,
             SqlExistsExpression exists => exists.Subquery,

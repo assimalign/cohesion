@@ -129,7 +129,7 @@ public sealed partial class SqlQueryParser : QueryParser
             }
             else if (keyword.Equals("SELECT", StringComparison.OrdinalIgnoreCase))
             {
-                expression = ParseSelect(ref lexer);
+                expression = ParseQueryExpression(ref lexer);
             }
             else if (keyword.Equals("INSERT", StringComparison.OrdinalIgnoreCase))
             {
@@ -169,6 +169,10 @@ public sealed partial class SqlQueryParser : QueryParser
                 // consume remaining tokens so we track semicolons
                 ConsumeRemaining(ref lexer);
             }
+        }
+        else if (lexer.Current.Type == TokenType.LeftParen)
+        {
+            expression = ParseQueryExpression(ref lexer);
         }
         else if (IsWord(ref lexer, "START"))
         {
@@ -806,8 +810,8 @@ public sealed partial class SqlQueryParser : QueryParser
         int start = lexer.Current.Position;
         Advance(ref lexer);
         SqlQueryExpression statement;
-        if (IsWord(ref lexer, "SELECT")) { statement = ParseSelect(ref lexer); }
-        else if (IsWord(ref lexer, "WITH")) { statement = ParseWith(ref lexer); }
+        if (IsWord(ref lexer, "WITH")) { statement = ParseWith(ref lexer); }
+        else if (StartsQuery(lexer)) { statement = ParseQueryExpression(ref lexer); }
         else if (IsWord(ref lexer, "INSERT")) { statement = ParseInsert(ref lexer); }
         else if (IsWord(ref lexer, "UPDATE")) { statement = ParseUpdate(ref lexer); }
         else if (IsWord(ref lexer, "DELETE")) { statement = ParseDelete(ref lexer); }
@@ -974,7 +978,7 @@ public sealed partial class SqlQueryParser : QueryParser
             {
                 continue; // Capability checks classify the statement being described.
             }
-            firstToken ??= token;
+            firstToken ??= token == "(" ? "SELECT" : token;
             withStatement |= IsKeyword(ref lexer, "WITH");
             if (IsKeyword(ref lexer, "WITH")) { inWithDefinitions = true; }
             if (withStatement && fromScopes.Count == 0 &&
@@ -1173,7 +1177,10 @@ public sealed partial class SqlQueryParser : QueryParser
                     token.Equals("HAVING", StringComparison.OrdinalIgnoreCase) ||
                     token.Equals("ORDER", StringComparison.OrdinalIgnoreCase) ||
                     token.Equals("LIMIT", StringComparison.OrdinalIgnoreCase) ||
-                    token.Equals("OFFSET", StringComparison.OrdinalIgnoreCase)) { inFrom = false; }
+                    token.Equals("OFFSET", StringComparison.OrdinalIgnoreCase) ||
+                    token.Equals("UNION", StringComparison.OrdinalIgnoreCase) ||
+                    token.Equals("INTERSECT", StringComparison.OrdinalIgnoreCase) ||
+                    token.Equals("EXCEPT", StringComparison.OrdinalIgnoreCase)) { inFrom = false; }
             }
             previousPreviousFromComma = previousFromComma;
             previousFromComma = inFrom && lexer.Current.Type == TokenType.Comma;

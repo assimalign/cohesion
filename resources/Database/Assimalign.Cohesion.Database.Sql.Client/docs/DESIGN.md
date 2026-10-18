@@ -79,6 +79,13 @@ flowchart LR
 
 Other model clients do not depend on this package.
 
+## Set operations (#1114)
+
+Set roots and query operands use the existing execute exchange with common-typed column
+names and values. InMemory and TCP cases exercise UNION ALL, INTERSECT and EXCEPT ALL,
+combined OFFSET/FETCH, IN bodies and reusable coded parse/planning failures. Result metadata
+still carries no nullability field. No client API or wire format changes.
+
 ## Pagination (#1107)
 
 OFFSET/FETCH, OFFSET before LIMIT and TOP use the existing SQL execute exchange and

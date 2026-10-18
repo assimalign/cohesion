@@ -18,6 +18,7 @@ internal sealed partial class SqlPlanner
     internal static string DescribeOperator(SqlPlan plan) => plan switch
     {
         SqlSelectPlan => "Select",
+        SqlSetOperationPlan p => p.Operator.ToString(),
         SqlJoinPlan { Steps.Count: 0 } => "Select",
         SqlJoinPlan => "NestedLoopJoin",
         SqlSystemViewPlan => "SystemView",
@@ -81,6 +82,7 @@ internal sealed partial class SqlPlanner
             {
                 SqlJoinPlan { Steps.Count: 0 } p => QueryDetail(p.Where is not null, p.OrderBy.Count, p.IsDistinct, p.Limit, p.Offset),
                 SqlConstantPlan p => QueryDetail(p.Where is not null, p.OrderBy.Count, p.IsDistinct, p.Limit, p.Offset),
+                SqlSetOperationPlan p => QueryDetail(false, p.OrderBy.Count, !p.IsAll, p.Limit, p.Offset),
                 SqlSelectPlan p => QueryDetail(p.Where is not null, p.OrderBy.Count, p.IsDistinct, p.Limit, p.Offset),
                 SqlSystemViewPlan p => QueryDetail(p.Where is not null, p.OrderBy.Count, p.IsDistinct, p.Limit, p.Offset),
                 SqlJoinPlan p => string.Join("; ", p.Steps.Select(step => $"{step.Kind}: {(step.Access is null ? "buffered inputs" : "correlated equality-prefix seek")}")) + "; " +
@@ -102,6 +104,10 @@ internal sealed partial class SqlPlanner
             Add(DescribeOperator(current), parent, target, indexName, detail);
             switch (current)
             {
+                case SqlSetOperationPlan set:
+                    Visit(set.Left, id);
+                    Visit(set.Right, id);
+                    break;
                 case SqlSelectPlan select:
                     Access(select.Table, select.Access, id);
                     break;

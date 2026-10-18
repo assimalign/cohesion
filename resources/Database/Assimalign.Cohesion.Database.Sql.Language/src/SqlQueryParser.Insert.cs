@@ -22,10 +22,9 @@ public sealed partial class SqlQueryParser
 
         // Optional column list: (col1, col2, ...)
         IReadOnlyList<string>? columns = null;
-        if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.LeftParen)
+        if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.LeftParen && !StartsQuery(lexer))
         {
-            // Peek: is this a column list or VALUES?
-            // Column list if next tokens are identifiers separated by commas before )
+            // A query source may start with SELECT through nested query parentheses.
             columns = ParseInsertColumnList(ref lexer);
         }
 
@@ -38,7 +37,7 @@ public sealed partial class SqlQueryParser
 
         // VALUES, DEFAULT VALUES or SELECT
         List<IReadOnlyList<SqlExpression>>? values = null;
-        SqlSelectExpression? selectSource = null;
+        SqlQueryBodyExpression? selectSource = null;
         bool isDefaultValues = false;
 
         if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "VALUES"))
@@ -53,11 +52,11 @@ public sealed partial class SqlQueryParser
         }
         else if (IsKeyword(ref lexer, "WITH"))
         {
-            selectSource = (SqlSelectExpression)ParseWith(ref lexer, insertSource: true);
+            selectSource = (SqlQueryBodyExpression)ParseWith(ref lexer, insertSource: true);
         }
-        else if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "SELECT"))
+        else if (!IsAtEnd(ref lexer) && StartsQuery(lexer))
         {
-            selectSource = ParseSelect(ref lexer);
+            selectSource = ParseQueryExpression(ref lexer);
         }
         else
         {

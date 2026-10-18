@@ -49,7 +49,7 @@ public sealed class SqlCteParserTests
         // Assert
         select.CommonTables.Select(item => item.Name).ShouldBe(["a", "b"]);
         select.CommonTables[0].Columns.ShouldBe(["x", "y"]);
-        select.CommonTables[0].Body.Columns.Count.ShouldBe(2);
+        select.CommonTables[0].Body.ShouldBeOfType<SqlSelectExpression>().Columns.Count.ShouldBe(2);
         select.CommonTables[1].Columns.ShouldBeEmpty();
         select.CommonTables[0].Location.Start.ShouldBe(5);
         select.CommonTables[0].Location.End.ShouldBe(sql.IndexOf("), b", System.StringComparison.Ordinal) + 1);

@@ -53,7 +53,7 @@ public class SqlInsertParserTests
 
         insert.SelectSource.ShouldNotBeNull();
         insert.Values.ShouldBeNull();
-        insert.SelectSource!.Columns.Count.ShouldBe(2);
+        insert.SelectSource.ShouldBeOfType<SqlSelectExpression>().Columns.Count.ShouldBe(2);
     }
 
     [Fact]

@@ -225,7 +225,7 @@ public sealed partial class SqlQueryParser
                 Advance(ref lexer);
 
                 // Check if it's a subquery: IN (SELECT ...)
-                if (!IsAtEnd(ref lexer) && (IsKeyword(ref lexer, "SELECT") || IsKeyword(ref lexer, "WITH")))
+                if (!IsAtEnd(ref lexer) && StartsQuery(lexer))
                 {
                     var subquery = ParseSubquery(ref lexer);
                     Expect(ref lexer, TokenType.RightParen, "')' after the IN subquery");
@@ -710,7 +710,7 @@ public sealed partial class SqlQueryParser
 
             // Subquery: (SELECT ...). Its parentheses are its syntax, not grouping: the
             // subquery is a node, which ParseSubquery counts as a level of the tree.
-            if (!IsAtEnd(ref lexer) && (IsKeyword(ref lexer, "SELECT") || IsKeyword(ref lexer, "WITH")))
+            if (!IsAtEnd(ref lexer) && StartsQuery(lexer))
             {
                 var subSelect = ParseSubquery(ref lexer);
                 Expect(ref lexer, TokenType.RightParen, "')' after the subquery");
@@ -1034,10 +1034,10 @@ public sealed partial class SqlQueryParser
     {
         Advance(ref lexer); // consume EXISTS
 
-        SqlSelectExpression? subquery = null;
+        SqlQueryBodyExpression? subquery = null;
         if (Expect(ref lexer, TokenType.LeftParen, "'(' after EXISTS"))
         {
-            if ((IsKeyword(ref lexer, "SELECT") || IsKeyword(ref lexer, "WITH")))
+            if (StartsQuery(lexer))
             {
                 subquery = ParseSubquery(ref lexer);
             }

@@ -162,7 +162,7 @@ public sealed class SqlExpressionRendererTests
     [InlineData("NOT (EXISTS (SELECT 1 FROM t) = TRUE)", "NOT (EXISTS (SELECT 1 FROM t) = TRUE)")]
     [InlineData("(NOT EXISTS (SELECT 1 FROM t)) = FALSE", "(NOT EXISTS (SELECT 1 FROM t)) = FALSE")]
     [InlineData("qty IN (SELECT qty FROM u WHERE u.id > 0)", "qty IN (SELECT qty FROM u WHERE u.id > 0)")]
-    [InlineData("qty NOT IN ((SELECT 1 FROM u))", "qty NOT IN ((SELECT 1 FROM u))")]
+    [InlineData("qty NOT IN ((SELECT 1 FROM u))", "qty NOT IN (SELECT 1 FROM u)")]
     [InlineData("~qty", "~qty")]
     [InlineData("f((*) = 1)", "f((* = 1))")]
     [InlineData("UPPER((*) || 'x', (*))", "UPPER((* || 'x'), *)")]
@@ -344,11 +344,12 @@ public sealed class SqlExpressionRendererTests
             string text = generator.NextQuery(depth: 1 + iteration % 3);
             var statement = (SqlQueryStatement)new SqlQueryParser().Parse(text);
             if (statement.Diagnostics.Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)) { continue; }
-            var declared = statement.SqlExpression.ShouldBeOfType<SqlSelectExpression>();
+            var declared = statement.SqlExpression.ShouldBeAssignableTo<SqlQueryBodyExpression>();
 
             // Act
             string rendered = SqlExpressionRenderer.Render(declared);
-            var reloaded = ParseSelect(rendered);
+            var reloaded = new SqlQueryParser().Parse(rendered).ShouldBeOfType<SqlQueryStatement>()
+                .SqlExpression.ShouldBeAssignableTo<SqlQueryBodyExpression>();
 
             // Assert
             declared.CommonTables.ShouldNotBeEmpty();

@@ -17,7 +17,7 @@ public sealed class SqlInExpression : SqlExpression
     /// <param name="subquery">The subquery, if using a subquery.</param>
     /// <param name="isNegated">Whether the predicate is negated (<c>NOT IN</c>).</param>
     /// <param name="location">The source location.</param>
-    internal SqlInExpression(SqlExpression operand, IReadOnlyList<SqlExpression>? values, SqlSelectExpression? subquery, bool isNegated, Location? location)
+    internal SqlInExpression(SqlExpression operand, IReadOnlyList<SqlExpression>? values, SqlQueryBodyExpression? subquery, bool isNegated, Location? location)
         : base(location)
     {
         Operand = operand;
@@ -40,7 +40,7 @@ public sealed class SqlInExpression : SqlExpression
     /// <summary>
     /// Gets the subquery, if this is a subquery form.
     /// </summary>
-    public SqlSelectExpression? Subquery { get; }
+    public SqlQueryBodyExpression? Subquery { get; }
 
     /// <summary>
     /// Gets whether the predicate is negated (<c>NOT IN</c>).

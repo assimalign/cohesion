@@ -7,21 +7,8 @@ using Assimalign.Cohesion.Database.Language;
 /// <summary>
 /// Represents a parsed SELECT statement.
 /// </summary>
-public sealed class SqlSelectExpression : SqlQueryExpression
+public sealed class SqlSelectExpression : SqlQueryBodyExpression
 {
-    /// <summary>Gets the statement's non-recursive WITH definitions, in declaration order.</summary>
-    public IReadOnlyList<SqlCommonTableExpression> CommonTables
-    {
-        get => _commonTables;
-        internal set
-        {
-            _commonTables = value;
-            foreach (var definition in value) { ExpressionDepth = System.Math.Max(ExpressionDepth, definition.Body.ExpressionDepth); }
-        }
-    }
-
-    private IReadOnlyList<SqlCommonTableExpression> _commonTables = [];
-
     /// <summary>
     /// Initializes a new <see cref="SqlSelectExpression"/>.
     /// </summary>
@@ -50,7 +37,7 @@ public sealed class SqlSelectExpression : SqlQueryExpression
         string? text,
         Location? location,
         SqlLimitSyntaxKind? limitSyntaxKind = null)
-        : base(SqlQueryCommandType.Select, text, location)
+        : base(text, location)
     {
         Columns = columns;
         From = from;
@@ -94,20 +81,6 @@ public sealed class SqlSelectExpression : SqlQueryExpression
     }
 
     /// <summary>
-    /// Gets the greatest <see cref="SqlExpression.Depth"/> among the query's clauses, or 0 when
-    /// it has none. A subquery node is one level deeper than the query it wraps.
-    /// </summary>
-    internal int ExpressionDepth { get; private set; }
-
-    /// <inheritdoc />
-    /// <remarks>
-    /// A SELECT is the one query kind another statement nests, as a subquery or the source of an
-    /// <c>INSERT</c>, so it is the one a caller can take out of a parsed statement and execute
-    /// without a parser's measure.
-    /// </remarks>
-    private protected override int ExpressionTreeDepth => ExpressionDepth;
-
-    /// <summary>
     /// Gets the columns in the SELECT list.
     /// </summary>
     public IReadOnlyList<SqlSelectColumn> Columns { get; }
@@ -132,24 +105,6 @@ public sealed class SqlSelectExpression : SqlQueryExpression
     /// Gets the HAVING filter expression, if present.
     /// </summary>
     public SqlExpression? Having { get; }
-
-    /// <summary>
-    /// Gets the ORDER BY columns.
-    /// </summary>
-    public IReadOnlyList<SqlOrderByColumn> OrderBy { get; }
-
-    /// <summary>
-    /// Gets the row-count expression supplied by LIMIT, FETCH or TOP, if present.
-    /// </summary>
-    public SqlExpression? Limit { get; }
-
-    /// <summary>Gets the limit spelling, or null when the query has no row limit.</summary>
-    public SqlLimitSyntaxKind? LimitSyntaxKind { get; }
-
-    /// <summary>
-    /// Gets the OFFSET expression, if present.
-    /// </summary>
-    public SqlExpression? Offset { get; }
 
     /// <summary>
     /// Gets whether DISTINCT was specified.

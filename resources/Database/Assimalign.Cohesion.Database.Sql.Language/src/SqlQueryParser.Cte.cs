@@ -34,14 +34,14 @@ public sealed partial class SqlQueryParser
             {
                 return RejectWithForm(ref lexer, $"data-modifying CTE body ({CurrentText(ref lexer)})");
             }
-            if (!IsKeyword(ref lexer, "SELECT"))
+            if (!StartsQuery(lexer))
             {
                 AddExpectedDiagnostic(ref lexer, "SELECT in the common table expression body");
                 return EmptyWithQuery();
             }
             // A body is a query scope, but not a subquery of the main command. Ordinary
             // subqueries inside it retain their own depth and correlation checks.
-            var body = ParseSelect(ref lexer);
+            var body = ParseQueryExpression(ref lexer);
             int end = lexer.Current.Position + lexer.Current.Value.Length;
             if (!Expect(ref lexer, TokenType.RightParen, "')' after the common table expression body")) { return EmptyWithQuery(); }
             definitions.Add(new SqlCommonTableExpression(name, columns, body, Location.Create(1, 1, start, end)));
@@ -54,7 +54,7 @@ public sealed partial class SqlQueryParser
             return RejectWithForm(ref lexer, "SEARCH/CYCLE");
         }
         SqlQueryExpression statement;
-        if (IsKeyword(ref lexer, "SELECT")) { statement = ParseSelect(ref lexer); }
+        if (StartsQuery(lexer)) { statement = ParseQueryExpression(ref lexer); }
         else if (!insertSource && IsKeyword(ref lexer, "INSERT")) { statement = ParseInsert(ref lexer); }
         else if (!insertSource && IsKeyword(ref lexer, "UPDATE")) { statement = ParseUpdate(ref lexer); }
         else if (!insertSource && IsKeyword(ref lexer, "DELETE")) { statement = ParseDelete(ref lexer); }
@@ -66,7 +66,7 @@ public sealed partial class SqlQueryParser
         var commonTables = definitions.AsReadOnly();
         switch (statement)
         {
-            case SqlSelectExpression select: select.CommonTables = commonTables; break;
+            case SqlQueryBodyExpression select: select.CommonTables = commonTables; break;
             case SqlInsertExpression insert: insert.CommonTables = commonTables; break;
             case SqlUpdateExpression update: update.CommonTables = commonTables; break;
             case SqlDeleteExpression delete: delete.CommonTables = commonTables; break;

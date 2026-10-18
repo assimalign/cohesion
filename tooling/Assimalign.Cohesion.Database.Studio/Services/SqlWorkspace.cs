@@ -331,7 +331,7 @@ internal static class SqlSamples
             SELECT FUNCTION_NAME, FUNCTION_KIND, PARAMETER_TYPES, RETURN_TYPE, VOLATILITY FROM COHESION_SCHEMA.FUNCTIONS WHERE IS_BUILT_IN = 'NO' ORDER BY FUNCTION_NAME;
             """),
         new("7. Diagnostics demo (expected errors)", """
-            SELECT name FROM customers UNION SELECT item FROM orders;
+            SELECT name FROM customers UNION CORRESPONDING SELECT item FROM orders;
             """),
         new("8. Cleanup", """
             DROP TABLE IF EXISTS orders;

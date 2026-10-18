@@ -51,7 +51,7 @@ internal sealed partial class SqlPlanner
     /// </summary>
     private SqlPlan PlanSubqueries(SqlSelectExpression select)
     {
-        if (select.From.Count == 0 && !ReferenceEquals(_commonTableState?.BindingBody, select)) { return PlanSelectCore(select); }
+        if (select.From.Count == 0 && !IsCommonTableOperand(select)) { return PlanSelectCore(select); }
         if (OuterScope is not null) { RejectOuterOnlyAggregates(select); }
         var queries = BindSubqueries(SubquerySources(select), select);
         var input = PlanSelectCore(select);
@@ -84,7 +84,7 @@ internal sealed partial class SqlPlanner
     }
 
     // Keep child binding out of a closure: a stored-only query allocates no scope state.
-    private void BindSubquery(SqlExpression source, SqlSelectExpression query, SqlSubqueryKind kind, bool negated,
+    private void BindSubquery(SqlExpression source, SqlQueryBodyExpression query, SqlSubqueryKind kind, bool negated,
         List<SqlSubqueryBinding> queries, SqlSelectExpression? owner, SqlTableReference? dml,
         ref SqlCorrelationScope? scope)
     {
@@ -101,7 +101,7 @@ internal sealed partial class SqlPlanner
         SqlPlan child;
         (_queryScopes ??= new()).Scopes.Push((owner, dml, null));
         _subqueryDepth++;
-        try { child = PlanSelect(query); }
+        try { child = PlanQuery(query); }
         finally
         {
             _subqueryDepth--;

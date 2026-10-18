@@ -241,6 +241,31 @@ value's source; a qualified stored-table key retains its physical binding. The e
 and execution evidence are in
 [DIALECT.md](../../Assimalign.Cohesion.Database.Sql.Language/docs/DIALECT.md).
 
+## Set-operation operator (#1114)
+
+SqlSetOperationPlan implements SqlRelationPlan, publishing synthesized common-typed outputs
+to subquery, derived, CTE and INSERT-source consumers. Each operand binds through PlanQuery;
+CTE reachability, function validation, deferred-schema admission, aggregate scope discovery
+and EXPLAIN descend through both operands. CTE constant rows extend to top-level set operands.
+Combined ordering binds output names and ordinals directly, without source-expression lookup.
+USING's category/implicit-cast rule is reused, with unknown handling and a set-specific mismatch
+message. Identical domains survive; differing types or modifiers clear typmods. Collation
+provenance is captured only while binding set operands, derived or CTE bodies, keeping ordinary
+stored SELECT allocation unchanged. Outputs carry no left input expression or physical ordinal.
+
+Execution materializes operands in child SqlSubqueryValues frames under one SqlStatementContext,
+detaches retained binary values and restores Character identity before common-type conversion.
+Conversion and calendar promotion precede GroupKeyComparer hashing. Hash sets implement UNION
+DISTINCT; right-side counts implement INTERSECT/EXCEPT ALL multiplicities, following PostgreSQL
+src/backend/executor/nodeSetOp.c:128-160. The existing stable sort and Int64 row-window helper
+apply to completed rows. Cost is O(L+R) retained rows and membership state per binary node,
+plus O(N log N) sorting; streaming and spilling remain non-goals. Structural SameQuery equivalence
+includes set operators, quantifiers, operands, WITH and tails for view canonicalization.
+
+CORRESPONDING remains a contextual exclusion. UNION/INTERSECT/EXCEPT were profile keywords,
+so identifier canonicalization and the storage format are unchanged. No public interface,
+visibility grant, project reference, dynamic code or wire-format change is introduced.
+
 ## Subquery and insert-source operators (#1021)
 
 Non-recursive WITH (#1116) binds every definition in declaration order and resolves
@@ -263,7 +288,7 @@ provenance. One executor cache materializes uncorrelated relations by identity f
 whole statement; correlated derived relations rematerialize per outer frame. SqlWithPlan pre-materializes reachable definitions before the input's
 first write, under the same statement context. Binary values detach on retention
 and delivery. EXPLAIN maps WITH and constant-source plans. Scalar/aggregate bodies
-without FROM use one implicit row only at the definition's exact SELECT root;
+without FROM use one implicit row at the definition's SELECT root or its top-level set operands;
 nested queries keep their ordinary FROM requirement and diagnostics. All bodies,
 including unused constant bodies, reject aggregates in WHERE during planning
 (COHSQLE017; PostgreSQL src/backend/parser/parse_agg.c:407).

@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.CompilerServices;
@@ -148,7 +149,7 @@ internal sealed partial class SqlPlanner
     }
 
     /// <summary>Selects the common USING type, retaining modifiers only when both inputs agree.</summary>
-    private DatabaseTypeInfo UsingType(DatabaseTypeInfo left, DatabaseTypeInfo right, string name, SqlSelectExpression select)
+    private DatabaseTypeInfo UsingType(DatabaseTypeInfo left, DatabaseTypeInfo right, string name, SqlQueryBodyExpression select, bool setOperation = false)
     {
         var common = left.Type;
         if (left.Type != right.Type)
@@ -175,8 +176,9 @@ internal sealed partial class SqlPlanner
             && left.Precision == right.Precision && left.Scale == right.Scale
                 ? left : new DatabaseTypeInfo(common);
 
-        void Refuse() => throw new SqlPlanningException("COHSQLE015",
-            $"USING column '{name}' requires a common type; found {left.Type} and {right.Type}.", select.Location);
+        void Refuse() => throw new SqlPlanningException(setOperation ? "COHSQLE029" : "COHSQLE015",
+            setOperation ? string.Format(CultureInfo.CurrentCulture, ErrorMessages.SetColumnTypes, name, left.Type, right.Type)
+                : $"USING column '{name}' requires a common type; found {left.Type} and {right.Type}.", select.Location);
     }
 
     /// <summary>Coerces the merged value without changing the physical input or qualified references.</summary>

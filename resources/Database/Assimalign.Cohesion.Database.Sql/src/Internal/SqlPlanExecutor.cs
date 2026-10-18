@@ -84,6 +84,8 @@ internal sealed partial class SqlPlanExecutor
     {
         switch (plan)
         {
+            case SqlSetOperationPlan set:
+                return await ExecuteSetOperationAsync(set, statement, cancellationToken).ConfigureAwait(false);
             case SqlConstantPlan constant:
                 var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
                 return MaterializeSelect(evaluator.Matches(constant.Where, []) ? [Array.Empty<object?>()] : [],

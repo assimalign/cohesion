@@ -107,67 +107,12 @@ public sealed partial class SqlQueryParser
             }
         }
 
-        // ORDER BY
-        var orderBy = new List<SqlOrderByColumn>();
-        if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "ORDER"))
-        {
-            Advance(ref lexer);
-            ExpectKeyword(ref lexer, "BY", "BY after ORDER");
-
-            orderBy.Add(ParseOrderByColumn(ref lexer));
-            while (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.Comma)
-            {
-                Advance(ref lexer);
-                orderBy.Add(ParseOrderByColumn(ref lexer));
-            }
-        }
-
-        // PostgreSQL permits either limit/offset order; rendering uses ISO OFFSET ... FETCH.
-        SqlExpression? offset = null;
-        while (IsKeyword(ref lexer, "LIMIT") || IsKeyword(ref lexer, "OFFSET") || IsKeyword(ref lexer, "FETCH"))
-        {
-            string clause = CurrentText(ref lexer).ToUpperInvariant();
-            int start = lexer.Current.Position;
-            int end = start + lexer.Current.Value.Length;
-            if (clause == "OFFSET" ? offset is not null || limitSyntaxKind == SqlLimitSyntaxKind.Top : limit is not null)
-            {
-                AddSyntaxDiagnostic(start, end, "A SELECT accepts one row limit and one OFFSET; TOP cannot combine with LIMIT, OFFSET or FETCH, and LIMIT cannot combine with FETCH.");
-            }
-            Advance(ref lexer);
-            if (clause == "OFFSET")
-            {
-                offset = ParsePaginationExpression(ref lexer, "OFFSET");
-                if (IsKeyword(ref lexer, "ROW") || IsKeyword(ref lexer, "ROWS")) { Advance(ref lexer); }
-            }
-            else if (clause == "LIMIT")
-            {
-                limit = ParsePaginationExpression(ref lexer, "LIMIT");
-                limitSyntaxKind = SqlLimitSyntaxKind.Limit;
-            }
-            else
-            {
-                if (IsWord(ref lexer, "FIRST") || IsKeyword(ref lexer, "NEXT")) { Advance(ref lexer); }
-                else { AddSyntaxDiagnostic(ref lexer, "Expected FIRST or NEXT after FETCH."); }
-                limit = IsKeyword(ref lexer, "ROW") || IsKeyword(ref lexer, "ROWS")
-                    ? new SqlLiteralExpression("1", SqlLiteralType.Integer, Location.Create(1, 1, start, end))
-                    : ParseFetchCount(ref lexer);
-                limitSyntaxKind = SqlLimitSyntaxKind.Fetch;
-                RejectPagingSuffix(ref lexer, "FETCH");
-                if (IsKeyword(ref lexer, "ROW") || IsKeyword(ref lexer, "ROWS")) { Advance(ref lexer); }
-                else { AddSyntaxDiagnostic(ref lexer, "Expected ROW or ROWS after the FETCH count."); }
-                if (!RejectPagingSuffix(ref lexer, "FETCH"))
-                {
-                    ExpectKeyword(ref lexer, "ONLY", "ONLY after FETCH ... ROW or ROWS");
-                }
-            }
-        }
-
         // Consume trailing semicolon (don't advance past it so ParseCore picks it up)
         // The semicolon is tracked by TrackToken when we advance
 
         return new SqlSelectExpression(
-            columns, from, where, groupBy, having, orderBy,
-            limit, offset, isDistinct, null,
+            columns, from, where, groupBy, having, [],
+            limit, null, isDistinct, null,
             Location.Create(1, 1, pos, _lastTokenEnd), limitSyntaxKind);
     }
 
@@ -389,7 +334,7 @@ public sealed partial class SqlQueryParser
         }
 
         Advance(ref lexer);
-        if (!IsKeyword(ref lexer, "SELECT") && !IsKeyword(ref lexer, "WITH"))
+        if (!StartsQuery(lexer))
         {
             AddSyntaxDiagnostic(ref lexer, "Expected SELECT in a derived table.");
             return new SqlTableReference("?", null, null);

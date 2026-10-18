@@ -12,7 +12,7 @@ public sealed partial class SqlQueryParser
     private int _paginationDepth;
     private string _paginationClause = "LIMIT or OFFSET";
 
-    private SqlSelectExpression ParseSubquery(ref TokenLexer lexer)
+    private SqlQueryBodyExpression ParseSubquery(ref TokenLexer lexer)
     {
         if (IsKeyword(ref lexer, "WITH"))
         {
@@ -77,7 +77,7 @@ public sealed partial class SqlQueryParser
         _subqueryDepth++;
         try
         {
-            return ParseSelect(ref lexer);
+            return ParseQueryExpression(ref lexer);
         }
         finally
         {

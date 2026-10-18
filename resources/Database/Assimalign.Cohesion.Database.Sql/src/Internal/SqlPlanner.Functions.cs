@@ -32,8 +32,16 @@ internal sealed partial class SqlPlanner
     /// </exception>
     private void ValidateFunctionCalls(SqlQueryExpression statement)
     {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
         switch (statement)
         {
+            case SqlSetOperationExpression set:
+                ValidateFunctionCalls((SqlQueryExpression)set.Left);
+                ValidateFunctionCalls((SqlQueryExpression)set.Right);
+                foreach (var order in set.OrderBy) { ValidateFunctionCalls(order.Expression); }
+                ValidateFunctionCalls(set.Limit);
+                ValidateFunctionCalls(set.Offset);
+                break;
             case SqlSelectExpression select:
                 ValidateFunctionCalls(select);
                 break;

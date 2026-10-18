@@ -23,6 +23,10 @@ public class SqlConformanceTests
 
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Conformance: supported statements parse without errors")]
     [InlineData("SELECT * FROM users;", SqlQueryCommandType.Select)]
+    [InlineData("SELECT a FROM t UNION SELECT a FROM u;", SqlQueryCommandType.Select)]
+    [InlineData("SELECT a FROM t INTERSECT ALL SELECT a FROM u;", SqlQueryCommandType.Select)]
+    [InlineData("SELECT a FROM t EXCEPT DISTINCT SELECT a FROM u;", SqlQueryCommandType.Select)]
+    [InlineData("(SELECT a FROM t ORDER BY a LIMIT 1) UNION ALL (SELECT a FROM u ORDER BY a LIMIT 1) ORDER BY 1;", SqlQueryCommandType.Select)]
     [InlineData("SELECT DISTINCT u.name AS n, COUNT(*) FROM dbo.users u INNER JOIN orders o ON u.id = o.user_id WHERE u.age >= 21 AND o.total > 100.50 GROUP BY u.name HAVING COUNT(*) > 5 ORDER BY n DESC LIMIT 10 OFFSET 20;", SqlQueryCommandType.Select)]
     [InlineData("SELECT CASE WHEN age >= 18 THEN 'adult' ELSE 'minor' END FROM people;", SqlQueryCommandType.Select)]
     [InlineData("SELECT CAST(price AS DECIMAL(10, 2)) FROM products;", SqlQueryCommandType.Select)]

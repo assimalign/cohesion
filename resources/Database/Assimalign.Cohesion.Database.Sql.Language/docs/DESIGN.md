@@ -90,7 +90,7 @@ Correlated and uncorrelated UPDATE/DELETE WHERE children use ordinary subquery g
 UPDATE SET and lateral references remain explicit capability refusals.
 The planner applies the shared #1112 outer-ordering pin only to keys bound to
 derived outputs, including projection aliases and ordinals. Ordering inside derived
-bodies executes, including over nested derived inputs. The #1114 set-operation pin remains excluded.
+bodies executes, including over nested derived inputs. Set-operation bodies execute through the query-body variant (#1114).
 
 ## Identity grammar (#1123)
 
@@ -132,6 +132,19 @@ the parser implements today. Recognized clauses outside that set produce the sha
 `COHDBL001` model-specific diagnostic; `SQL0002` remains the unknown-command diagnostic.
 
 ## Why-this-not-that decisions
+
+SqlQueryBodyExpression is the closed base for SELECT and SqlSetOperationExpression (#1114),
+with CommonTables and result-tail fields shared across both. All six query-bearing slots take
+the base, and Render has a base-typed overload for future views. Set operations remain a distinct
+root so scalar-expression carriers and SDK migration validation keep refusing set-root injections.
+A two-rung query parser follows PostgreSQL gram.y:845-846,13103-13115, keeping TOP at SELECT
+head and parsing the result tail after the operator ladder. Parentheses use the existing depth
+and stack guards; each left-deep set link counts as a tree level. Renderer precedence preserves
+right operands at equal precedence and operands with windows. The same scalar-subquery funnel
+admits set bodies once per subquery level. Redundant IN query parentheses now mean membership.
+UNION/INTERSECT/EXCEPT stay keywords; contextual CORRESPONDING adds no vocabulary row or
+format bump. DIALECT.md and the conformance corpora pin these choices.
+
 
 Pagination (#1107) normalizes LIMIT, FETCH and the D1 TOP lexical alias into the existing
 Limit/Offset fields and count validator, with a nullable SqlLimitSyntaxKind on SELECT
@@ -295,7 +308,7 @@ rename happened before external consumers existed.
 
 ## Non-goals (current dialect)
 
-Set operations, recursive/nested or data-modifying CTEs, window functions, views, LATERAL,
+CORRESPONDING, recursive/nested or data-modifying CTEs, window functions, views, LATERAL,
 outer ordering keys bound to derived outputs, UPDATE SET subqueries, `ON UPDATE`,
 `MERGE`, `RETURNING`, savepoints, isolation-level syntax, and cost-hint syntax.
 Each is an additive dialect extension when its engine feature
@@ -378,7 +391,7 @@ and remains available for target-name validation. No clause or profile entry is 
 The planner maps these forms to target-column assignment instructions; catalog default
 binding and execution remain in Database.Sql, with no cross-assembly visibility grant.
 
-`SqlExpressionRenderer.Render(SqlExpression)` and `Render(SqlSelectExpression)` turn
+`SqlExpressionRenderer.Render(SqlExpression)` and `Render(SqlQueryBodyExpression)` turn
 a parsed tree back into SQL text. It is the one AST-to-SQL renderer: every
 definition the engine persists — CHECK predicates and literal or expression DEFAULTs,
 and future view queries (#1124) — is stored as its

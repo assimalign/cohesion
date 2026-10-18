@@ -16,7 +16,7 @@ internal sealed partial class SqlPlanner
     private bool InDerivedBody => _queryScopes?.Scopes.Any(scope => scope.Derived is not null) ?? false;
 
     private SqlProjectionMetadata? CaptureProjectionMetadata(SqlCollationCandidate candidate, SqlCatalogColumn? source = null)
-        => InDerivedBody || _commonTableState?.BindingBody is not null ? new(candidate, source) : null;
+        => InDerivedBody || _commonTableState?.BindingBody is not null || _queryScopes?.SetOperandDepth > 0 ? new(candidate, source) : null;
 
     private SqlRelationSource BindDerivedTable(SqlDerivedTableReference derived, SqlSelectExpression? owner)
     {
@@ -32,7 +32,7 @@ internal sealed partial class SqlPlanner
         _subqueryDepth++;
         try
         {
-            child = PlanSelect(derived.Query);
+            child = PlanQuery(derived.Query);
         }
         catch (SqlPlanningException exception) when (exception.UnresolvedColumn is not null && !exception.HasLocalQualifier)
         {
@@ -52,7 +52,7 @@ internal sealed partial class SqlPlanner
         return BindDerivedOutput(child, derived.Alias!, derived.Columns, derived.Query, dependencies.Count > 0);
     }
 
-    private SqlRelationSource BindDerivedOutput(SqlPlan child, string relationName, IReadOnlyList<string> names, SqlSelectExpression query, bool isCorrelated = false)
+    private SqlRelationSource BindDerivedOutput(SqlPlan child, string relationName, IReadOnlyList<string> names, SqlQueryBodyExpression query, bool isCorrelated = false)
     {
         var output = QueryOutput(child);
         var projections = output.Projections;
@@ -76,7 +76,7 @@ internal sealed partial class SqlPlanner
                     outerScope: OuterScope, outerDependencies: OuterDependencies);
                 inherited = scope.ColumnMetadata(reference);
             }
-            var type = inherited?.Type ?? (projection.Expression as SqlCastExpression)?.TargetTypeInfo
+            var type = projection.Metadata?.TypeInfo ?? inherited?.Type ?? (projection.Expression as SqlCastExpression)?.TargetTypeInfo
                 ?? new DatabaseTypeInfo(projection.Type, projection.MaxLength);
             // PostgreSQL parse_relation.c:1715-1721 takes metadata from the projected
             // expression. Default strength must not become a declared column override.
@@ -90,7 +90,7 @@ internal sealed partial class SqlPlanner
             columns[i] = new SqlCatalogColumn(name,
                 type, projection.IsNullable,
                 collation: candidate.Priority >= 2 ? candidate.Collation : null,
-                domainName: inherited?.DomainName);
+                domainName: projection.Metadata?.DomainName ?? inherited?.DomainName);
         }
         return new SqlRelationSource(new SqlDerivedRelation(relationName, child, columns, isCorrelated));
     }

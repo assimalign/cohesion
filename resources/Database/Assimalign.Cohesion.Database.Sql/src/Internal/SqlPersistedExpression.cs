@@ -388,25 +388,33 @@ internal static class SqlPersistedExpression
         _ => false,
     };
 
-    private static bool SameQuery(SqlSelectExpression? left, SqlSelectExpression? right)
+    internal static bool SameQuery(SqlQueryBodyExpression? left, SqlQueryBodyExpression? right)
     {
-        if (left is null || right is null)
+        if (left is null || right is null) { return left is null && right is null; }
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+        if (left.GetType() != right.GetType() ||
+            !SameList(left.CommonTables, right.CommonTables, (a, b) => Same(a.Name, b.Name) &&
+                SameList(a.Columns, b.Columns, Same) && SameQuery(a.Body, b.Body)) ||
+            left.LimitSyntaxKind != right.LimitSyntaxKind ||
+            !SameList(left.OrderBy, right.OrderBy, (a, b) => a.IsDescending == b.IsDescending && AreEquivalent(a.Expression, b.Expression)) ||
+            !AreEquivalent(left.Limit, right.Limit) || !AreEquivalent(left.Offset, right.Offset))
         {
-            return left is null && right is null;
+            return false;
         }
-
-        return left.IsDistinct == right.IsDistinct &&
-            left.LimitSyntaxKind == right.LimitSyntaxKind &&
-            SameList(left.Columns, right.Columns, (a, b) => Same(a.Alias, b.Alias) && AreEquivalent(a.Expression, b.Expression)) &&
-            SameList(left.From, right.From, (a, b) => SameTable(a.Table, b.Table) &&
+        if (left is SqlSetOperationExpression x && right is SqlSetOperationExpression y)
+        {
+            return x.Operator == y.Operator && x.IsAll == y.IsAll && SameQuery(x.Left, y.Left) && SameQuery(x.Right, y.Right);
+        }
+        var first = (SqlSelectExpression)left;
+        var second = (SqlSelectExpression)right;
+        return first.IsDistinct == second.IsDistinct &&
+            SameList(first.Columns, second.Columns, (a, b) => Same(a.Alias, b.Alias) && AreEquivalent(a.Expression, b.Expression)) &&
+            SameList(first.From, second.From, (a, b) => SameTable(a.Table, b.Table) &&
                 SameList(a.Joins, b.Joins, (x, y) => x.JoinType == y.JoinType && SameTable(x.Table, y.Table) &&
                     SameList(x.UsingColumns, y.UsingColumns, Same) && AreEquivalent(x.Condition, y.Condition))) &&
-            AreEquivalent(left.Where, right.Where) &&
-            SameList(left.GroupBy, right.GroupBy, AreEquivalent) &&
-            AreEquivalent(left.Having, right.Having) &&
-            SameList(left.OrderBy, right.OrderBy, (a, b) => a.IsDescending == b.IsDescending && AreEquivalent(a.Expression, b.Expression)) &&
-            AreEquivalent(left.Limit, right.Limit) &&
-            AreEquivalent(left.Offset, right.Offset);
+            AreEquivalent(first.Where, second.Where) &&
+            SameList(first.GroupBy, second.GroupBy, AreEquivalent) &&
+            AreEquivalent(first.Having, second.Having);
     }
 
     private static bool SameTable(SqlRelationReference? left, SqlRelationReference? right)

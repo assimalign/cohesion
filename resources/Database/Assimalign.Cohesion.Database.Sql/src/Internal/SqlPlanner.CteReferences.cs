@@ -11,7 +11,7 @@ internal sealed partial class SqlPlanner
 
     private static IReadOnlyList<SqlCommonTableExpression> CommonTablesOf(SqlQueryExpression query) => query switch
     {
-        SqlSelectExpression select => select.CommonTables,
+        SqlQueryBodyExpression select => select.CommonTables,
         SqlInsertExpression insert => insert.CommonTables,
         SqlUpdateExpression update => update.CommonTables,
         SqlDeleteExpression delete => delete.CommonTables,
@@ -46,6 +46,10 @@ internal sealed partial class SqlPlanner
             }
             switch (item.Query)
             {
+                case SqlSetOperationExpression set:
+                    pending.Push((set.Left, scope, visible));
+                    pending.Push((set.Right, scope, visible));
+                    break;
                 case SqlSelectExpression select:
                     foreach (var from in select.From)
                     {
@@ -87,7 +91,7 @@ internal sealed partial class SqlPlanner
 
         void Subquery(SqlExpression expression, CommonTableScope? scope, int visible)
         {
-            SqlSelectExpression? child = expression switch
+            SqlQueryBodyExpression? child = expression switch
             {
                 SqlSubqueryExpression scalar => scalar.Select,
                 SqlExistsExpression exists => exists.Subquery,

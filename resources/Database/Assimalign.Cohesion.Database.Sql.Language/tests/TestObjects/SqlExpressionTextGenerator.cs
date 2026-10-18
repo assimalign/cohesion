@@ -38,6 +38,14 @@ internal sealed class SqlExpressionTextGenerator
     /// <summary>Generates WITH roots with ordered bodies and optional output-name lists.</summary>
     internal string NextQuery(int depth)
     {
+        if (_random.Next(3) == 0)
+        {
+            string left = "SELECT " + Value(depth) + " AS x FROM t";
+            string middle = "SELECT " + Value(depth) + " AS x FROM u";
+            string right = "SELECT " + Value(depth) + " AS x FROM v";
+            return "WITH q AS (" + left + ") (SELECT x FROM q ORDER BY 1 LIMIT 2) " + Pick("UNION", "UNION ALL", "EXCEPT", "EXCEPT ALL", "INTERSECT", "INTERSECT ALL") +
+                " (" + middle + " UNION " + right + ") ORDER BY 1 OFFSET 1 ROWS FETCH NEXT 2 ROWS ONLY";
+        }
         string[] names = ["a", "top", "ties"];
         int count = 1 + _random.Next(names.Length);
         var builder = new StringBuilder("WITH ");

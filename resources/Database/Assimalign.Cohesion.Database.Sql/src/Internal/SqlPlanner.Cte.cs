@@ -76,7 +76,7 @@ internal sealed partial class SqlPlanner
                 state.BindingBody = definition.Body;
                 state.BindingUnused = !state.Referenced.Contains(definition);
                 ValidateFunctionCalls(definition.Body);
-                var query = PlanSelect(definition.Body);
+                var query = PlanQuery(definition.Body);
                 var relation = BindDerivedOutput(query, definition.Name, definition.Columns, definition.Body).Derived! with { IsCommonTable = true };
                 dependencies.Add(relation, state.Dependencies);
                 state.Relations[definition.Name] = relation;
@@ -85,7 +85,7 @@ internal sealed partial class SqlPlanner
             state.BindingBody = null;
             state.BindingUnused = previous.BindingUnused;
             state.Dependencies = new(ReferenceEqualityComparer.Instance);
-            var input = statement is SqlSelectExpression select ? PlanSubqueries(select) : PlanStatementCore(statement);
+            var input = statement is SqlQueryBodyExpression body ? PlanQueryBody(body) : PlanStatementCore(statement);
             var reachable = new HashSet<SqlDerivedRelation>(ReferenceEqualityComparer.Instance);
             var pending = new Stack<SqlDerivedRelation>(state.Dependencies);
             while (pending.TryPop(out var relation))
@@ -114,7 +114,7 @@ internal sealed partial class SqlPlanner
         internal Dictionary<string, SqlDerivedRelation>? Relations { get; set; }
         internal HashSet<string>? Future { get; set; }
         internal HashSet<SqlDerivedRelation>? Dependencies { get; set; }
-        internal SqlSelectExpression? BindingBody { get; set; }
+        internal SqlQueryBodyExpression? BindingBody { get; set; }
         internal bool BindingUnused { get; set; }
     }
 }
