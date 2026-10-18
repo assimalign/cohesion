@@ -192,7 +192,10 @@ public sealed class GraphCompositeWireTests
                 error.Message.ShouldContain("GQL0002", Case.Sensitive);
             }
         }
-        var deep = "RETURN " + string.Concat(Enumerable.Repeat("0[", 10_000)) + "0" + new string(']', 10_000);
+        // The server parses on a thread pool thread whose stack is 8 MB on Linux against 1 to 1.5 MB
+        // on Windows, so the depth must defeat 8 MB (GraphLabelChainWireTests uses the same depth).
+        const int depth = 500_000;
+        var deep = "RETURN " + string.Concat(Enumerable.Repeat("0[", depth)) + "0" + new string(']', depth);
         var nesting = await Should.ThrowAsync<GraphClientException>(async () => await connection.QueryAsync(deep, cancellationToken: harness.Token));
         nesting.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
         nesting.Message.ShouldContain("COHDBG008", Case.Sensitive);
