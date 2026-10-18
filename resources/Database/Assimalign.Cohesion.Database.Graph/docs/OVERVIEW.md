@@ -78,3 +78,5 @@ and text execution; a foreign-model request fails compilation. `GraphRequest` ow
 `Statement` and optional `Parameters` over the memberless `DatabaseRequest` root. Results
 use the model-neutral `DatabaseResult` family. Lifecycle and explicit transactions remain
 on `DatabaseSession`.
+
+GQL linear composition executes LET, FILTER, FOR/UNWIND, RETURN ... NEXT and Cypher WITH over an eagerly materialized binding table. Projection boundaries retain only carried columns, including entity kinds and aggregate types; statements observe their own source-ordered writes. See [planning and bounds](DESIGN.md#planning-execution-and-bounds).

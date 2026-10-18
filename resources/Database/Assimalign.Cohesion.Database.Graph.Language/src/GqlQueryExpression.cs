@@ -1,4 +1,6 @@
+using System;
 using System.Collections.Generic;
+using System.Linq;
 using Assimalign.Cohesion.Database.Language;
 
 namespace Assimalign.Cohesion.Database.Graph.Language;
@@ -38,6 +40,67 @@ public sealed class GqlQueryExpression : GqlExpression
         DeleteVariables = deleteVariables;
         DetachDelete = detachDelete;
         Projections = projections;
+    }
+
+    private readonly IReadOnlyList<GqlStage>? _stages;
+
+    /// <summary>Initializes a source-ordered linear statement.</summary>
+    /// <param name="stages">The operations, including NEXT segment boundaries.</param>
+    /// <param name="location">The statement source span.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="stages"/> is null.</exception>
+    public GqlQueryExpression(IReadOnlyList<GqlStage> stages, Location? location = null) : base(location)
+    {
+        ArgumentNullException.ThrowIfNull(stages);
+        _stages = stages;
+        MatchClauses = stages.OfType<GqlMatchStage>().Select(stage => stage.Clause).ToArray();
+        Creates = stages.OfType<GqlInsertStage>().SelectMany(stage => stage.Paths ?? []).ToArray();
+        DeleteVariables = stages.OfType<GqlDeleteStage>().SelectMany(stage => stage.Variables ?? []).ToArray();
+        DetachDelete = stages.OfType<GqlDeleteStage>().Any(stage => stage.Detach);
+        var final = stages.LastOrDefault() as GqlReturnStage;
+        Projections = final?.Projections ?? [];
+        SetQuantifier = final?.SetQuantifier ?? GqlSetQuantifier.All;
+        ReturnStar = final?.ReturnStar ?? false;
+        GroupBy = final?.GroupBy;
+        OrderBy = final?.OrderBy ?? [];
+        Offset = final?.Offset;
+        Limit = final?.Limit;
+    }
+
+    /// <summary>Gets the operations in source order. Original constructors provide a single-segment facade.</summary>
+    public IReadOnlyList<GqlStage> Stages
+    {
+        get
+        {
+            if (_stages is not null) { return _stages; }
+            var stages = new List<GqlStage>();
+            if (MatchClauses is not null)
+            { foreach (var clause in MatchClauses) { stages.Add(new GqlMatchStage(clause)); } }
+            if (Creates.Count != 0) { stages.Add(new GqlInsertStage(Creates)); }
+            if (DeleteVariables.Count != 0 || DetachDelete) { stages.Add(new GqlDeleteStage(DeleteVariables, DetachDelete)); }
+            if (Projections.Count != 0 || ReturnStar || SetQuantifier != GqlSetQuantifier.All || GroupBy is not null || OrderBy is null || OrderBy.Count != 0 || Offset is not null || Limit is not null)
+            {
+                stages.Add(new GqlReturnStage(Projections) { SetQuantifier = SetQuantifier, ReturnStar = ReturnStar,
+                    GroupBy = GroupBy, OrderBy = OrderBy!, Offset = Offset, Limit = Limit });
+            }
+            return stages.AsReadOnly();
+        }
+    }
+
+    /// <summary>Gets the linear segments separated by explicit NEXT boundaries.</summary>
+    public IReadOnlyList<GqlQuerySegment> Segments
+    {
+        get
+        {
+            var segments = new List<GqlQuerySegment>();
+            var current = new List<GqlStage>();
+            foreach (var stage in Stages)
+            {
+                if (stage is GqlNextStage) { segments.Add(new GqlQuerySegment(current.AsReadOnly())); current = []; }
+                else { current.Add(stage); }
+            }
+            segments.Add(new GqlQuerySegment(current.AsReadOnly()));
+            return segments.AsReadOnly();
+        }
     }
 
     /// <summary>Gets the matching clauses in source order.</summary>

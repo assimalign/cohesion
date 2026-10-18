@@ -118,7 +118,7 @@ public sealed partial class GqlQueryParser
         { return ParseAggregate(); }
         if (Current.Type == TokenType.LeftBracket) { return ParseList(); }
         if (Current.Type == TokenType.LeftBrace) { return ParseMap(); }
-        if (Current.Type is TokenType.Identifier or TokenType.Function or TokenType.QuotedIdentifier)
+        if (IsVariableToken)
         {
             string variable = Identifier();
             if (!Take(TokenType.Dot)) { return new GqlVariableExpression(variable, Span(start, Previous)); }

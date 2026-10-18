@@ -29,7 +29,7 @@ internal static partial class GraphExpressionEvaluator
                 GqlLiteralExpression literal => literal.Value,
                 GqlParameterExpression parameter => Parameter(parameter, parameters),
                 GqlVariableExpression variable => bindings[variable.Variable],
-                GqlPropertyExpression property => Property(bindings[property.Variable], property.Property),
+                GqlPropertyExpression property => Member(bindings[property.Variable], property.Property, property),
                 GqlBinaryExpression binary => Binary(binary, bindings, parameters),
                 GqlLogicalExpression logical => Logical(logical, bindings, parameters),
                 GqlLabeledPredicate labeled => Labeled(labeled, bindings),
@@ -59,6 +59,15 @@ internal static partial class GraphExpressionEvaluator
         {
             throw new GraphPlanningException("COHDBG013", ErrorMessages.ArithmeticFailure, expression.Location, error);
         }
+    }
+
+    internal static object? PropertyScalar(GqlExpression expression, IReadOnlyDictionary<string, object?> bindings,
+        IReadOnlyDictionary<string, object?>? parameters)
+    {
+        var value = Evaluate(expression, bindings, parameters);
+        if (GraphCompositeValues.IsComposite(value) || value is GraphNode or GraphRelationship or GraphPath)
+        { throw new GraphPlanningException("COHDBG003", ErrorMessages.PropertyScalarRequired, expression.Location); }
+        return value;
     }
 
     internal static object? Scalar(GqlExpression expression, IReadOnlyDictionary<string, object?>? parameters)

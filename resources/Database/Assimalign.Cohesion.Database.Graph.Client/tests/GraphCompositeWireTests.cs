@@ -94,7 +94,7 @@ public sealed class GraphCompositeWireTests
         channel.SetAgreement(ProtocolReadyMessage.Decode(ready.Payload.Span));
         Guid session = harness.Server.Sessions.ShouldHaveSingleItem().Id;
         // Act
-        foreach (string statement in new[] { "RETURN [1,NULL]", "RETURN {k:1}", "INSERT (:Unwritten) RETURN [1]", "INSERT (:Unwritten) RETURN {k:1}" })
+        foreach (string statement in new[] { "LET l = [1,2] RETURN l", "LET l = [[1]] FOR x IN l RETURN x", "LET l = [1] WITH l RETURN l", "RETURN [1] AS l NEXT RETURN l", "RETURN [1,NULL]", "RETURN {k:1}", "INSERT (:Unwritten) RETURN [1]", "INSERT (:Unwritten) RETURN {k:1}" })
         {
             await Execute(statement);
             var failure = await Read();

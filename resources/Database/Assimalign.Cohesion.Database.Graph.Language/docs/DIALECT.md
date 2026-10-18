@@ -25,7 +25,7 @@ planning, even when every row would match. A mandatory binding remains projectab
 Execute already represents NULL without a wire change. EXPLAIN describes ordered clause joins
 and optional filters/null extension. ISO `OPTIONAL { ... }` and `OPTIONAL ( ... )` block operands
 remain recognized but outside T1 (COHDBL001 naming OPTIONAL BLOCK OPERAND). MANDATORY MATCH
-remains COHDBL001. MATCH after INSERT or DELETE remains GQL0002 until statement composition.
+remains COHDBL001. MATCH after INSERT or DELETE is a supported linear stage.
 
 ## RETURN
 
@@ -63,8 +63,19 @@ Duplicates raise planning diagnostic COHDBG015 before reads or mutations, even u
 or on empty matches. Path-request shape errors retain precedence. Thus `RETURN 1 AS x, 2 AS x`
 fails, while `RETURN 1 AS x, 2 AS X` succeeds.
 Unbound projection variables/parameters are COHDBG001; `p.name` on a path is COHDBG003.
-`RETURN a {.name}` is COHDBL001 naming MAP PROJECTION. NEXT, WITH (including WITH DISTINCT)
-and return-after-delete remain COHDBL001. CASE and composite values are described below.
+`RETURN a {.name}` is COHDBL001 naming MAP PROJECTION. Immediate return-after-delete remains COHDBL001. NEXT and WITH, including WITH DISTINCT, execute as described below. CASE and composite values are described below.
+
+## LET, FILTER, FOR/UNWIND, NEXT and WITH
+
+A statement is an ordered binding-table pipeline. LET binds one or more new variables (`LET x = 1, y = x + 1`); FILTER and FILTER WHERE keep TRUE only. FOR x IN list and Cypher UNWIND list AS x expand lists and preserve NULL elements. A NULL list produces zero rows. Non-lists, including strings and byte[], give COHDBG013. This deliberately differs from Neo4j's scalar UNWIND, which produces one row. FOR WITH ORDINALITY/OFFSET is outside T1 (COHDBL001).
+
+RETURN ... NEXT and Cypher WITH project a new scope using the same expressions, aliases, star and DISTINCT/ALL as final RETURN. Only aliases and bare variables are referenceable afterward; unaliased computed columns are allowed but unreferenceable, an explicit superset divergence from Cypher. WITH DISTINCT compares tuples with RETURN's exact numeric comparer. RETURN * includes LET/FOR variables and expands carried columns in projection order. NEXT and FOR are also accepted as variable names and AS aliases.
+
+WITH supports GROUP BY, ORDER BY, OFFSET/SKIP, LIMIT and WHERE. Without DISTINCT/grouping, ORDER BY and WHERE can read incoming variables as well as aliases; aliases shadow the incoming scope. With DISTINCT/grouping they read only projected/grouped values. WHERE filters after ordering and paging. Int64 COUNT metadata, entity kinds, optionality and possible composite values survive projection boundaries.
+
+NEXT requires RETURN on a read segment, and cannot trail a statement. A modifying segment without RETURN passes one empty binding and no variables to NEXT. INSERT and DELETE run in source order; deleted variables leave scope (a later reference is COHDBG003). Statements see their own writes, so INSERT (:T {k:1}) MATCH (t:T) RETURN t.k works even for a new label. INSERT maps evaluate scalar expressions against each row, enabling FOR name IN $names INSERT (:Person {name:name}); composite properties remain unsupported.
+
+LET/FOR cannot rebind a name in scope (COHDBG003). Dropped or unaliased variables are unbound (COHDBG001). Standalone ordering/page stages remain COHDBL001, including after the new clauses. Immediate RETURN after DELETE remains COHDBL001. FOREACH, CALL, NEXT YIELD and UNION remain excluded. Every stage materializes eagerly under the shared 100,000-row bound. The final projection alone drives scalar/composite wire admission; read-only composed entity/path results use ExecutePaths, while any write stage rejects a path request.
 
 ## Aggregates and GROUP BY
 
@@ -98,11 +109,11 @@ so ordering by an aggregate alias sees the computed group value. Neither paging 
 reduces the input match bound. Nested aggregates, aggregates in WHERE/GROUP BY, unequal
 GROUP BY keys and ungrouped ORDER BY references fail at planning with COHDBG001.
 ExecutePaths retains its existing COHDBG001 projection message. HAVING, STDDEV_SAMP,
-STDDEV_POP, PERCENTILE_CONT and PERCENTILE_DISC are COHDBL001; WITH remains deferred to #1145.
+STDDEV_POP, PERCENTILE_CONT and PERCENTILE_DISC are COHDBL001; WITH uses the same aggregation stage.
 
 ## ORDER BY, OFFSET, SKIP and LIMIT
 
-After RETURN, `ORDER BY expression [ASC|ASCENDING|DESC|DESCENDING] [NULLS FIRST|LAST]` accepts multiple keys,
+After RETURN or WITH, `ORDER BY expression [ASC|ASCENDING|DESC|DESCENDING] [NULLS FIRST|LAST]` accepts multiple keys,
 RETURN aliases and projected expressions. ASC is the default. NULL sorts last in ASC and
 first in DESC (Cypher); explicit placement overrides it. This differs from Cohesion SQL's
 NULL-first ASC. NULLS, FIRST and LAST are contextual words and remain available as names.
@@ -121,8 +132,7 @@ graph values, including NULL and floating types, fail COHDBG013 before reads or 
 
 Paging never reduces mutation inputs. Full materialization still applies: LIMIT 1 over
 more than 100,000 matches raises COHDBG004. Row and path requests share this stage.
-Standalone ORDER BY/page statements before RETURN remain COHDBL001. Aggregate ordering
-uses #1147's computed group values; WITH ordering remains the #1145 hand-off. See [ordering design](DESIGN.md#ordering-and-paging-1142).
+Standalone ORDER BY/page statements before RETURN remain COHDBL001. WITH and aggregate ordering execute through the same per-stage pipeline. See [ordering design](DESIGN.md#ordering-and-paging-1142).
 
 ## CASE and composite values
 

@@ -306,6 +306,17 @@ rejected before it reaches the session and changes nothing. Each refusal is an `
 
 ## Planning, execution and bounds
 
+### Linear composition (#1145)
+
+The planner validates each source-ordered stage against its incoming scope. LET adds bindings; FOR/UNWIND retains a proven node or relationship element kind from COLLECT, homogeneous entity lists and compatible result branches, while unproven or mixed elements stay Value bindings; a RETURN/NEXT or WITH boundary retains only referenceable projected columns, including entity kinds, optionality, composite possibilities and Int64 COUNT metadata. Carried columns use binding names independently of displayed source text; duplicate carried names are COHDBG015 during planning, including EXPLAIN. MATCH anchors prefer carried entities. An INSERT introduces its label and relationship-type names for later stages without retaining negative token-cache entries. Unknown names empty only their MATCH stage.
+
+WITH WHERE validates independently of ORDER BY expression reuse. DISTINCT or aggregation restricts it to projected bindings; other WITH predicates also see incoming bindings. An out-of-scope reference or aggregate in WHERE is COHDBG001 during planning; aggregate aliases remain usable. MATCH declares every comma-separated pattern part before validating its maps. Inline maps are predicates on the complete bound clause: available inputs can filter early, while references to later pattern parts wait until the clause is fully bound, including anonymous elements and either expansion direction. Only literal/parameter equalities supply property-index seeks, so a deferred predicate cannot narrow the scan candidates. INSERT/CREATE maps may reference only the incoming scope (COHDBG001 otherwise). Member access on value bindings admits maps and entities and propagates the accessed value's composite/entity shape; known scalar owners are COHDBG003 during planning, and invalid runtime containers are COHDBG013.
+
+Behavior consulted, no code copied, relative to C:/Source/repos/neo4j/neo4j: community/cypher/front-end/ast/src/main/scala/org/neo4j/cypher/internal/ast/Clause.scala:1723-1724,1965,1998-2030; front-end/rewriting/src/main/scala/org/neo4j/cypher/internal/rewriting/rewriters/PropertyPredicateNormalizer.scala:35-41; front-end/ast/src/main/scala/org/neo4j/cypher/internal/ast/semantics/SemanticPatternCheck.scala:101-103; front-end/ast/src/main/scala/org/neo4j/cypher/internal/ast/semantics/SemanticError.scala:725; front-end/ast/src/main/scala/org/neo4j/cypher/internal/ast/semantics/SemanticExpressionCheck.scala:495 and interpreted-runtime/src/main/scala/org/neo4j/cypher/internal/runtime/interpreted/commands/expressions/Property.scala:43-79 (the latter paths are also under community/cypher).
+
+The executor materializes every stage eagerly in source order and acquires the writer lock before any stage when the statement contains a write. Each stage shares the 100,000-row bound; FOR fan-out uses the same AddBinding guard as path matching. Candidate expansion has its separate budget. Statements observe their own writes at both supported isolation levels. NEXT after a write without RETURN seeds one empty binding. Entity-kind proofs and nullable element shapes survive WITH/NEXT and nested list access. COLLECT omits null operands; nullable literal elements retain optional path restrictions. Runtime FOR elements and carried MATCH/DELETE bindings are checked before graph operations: incompatible values raise COHDBG013, while scalar binding rejections remain COHDBG003 during planning. The pipeline uses typed dispatch without reflection or runtime code generation.
+
+
 MATCH and OPTIONAL MATCH execute as source-ordered joins over a nullable binding table. Each
 `GraphMatchClausePlan` records its paths, clause-local predicate, optional flag, newly declared
 variables and unsatisfiable flag. The planner validates WHERE immediately after that clause's
@@ -327,7 +338,7 @@ failure aborts an explicit transaction. Null extension itself succeeds and leave
 ExecutePaths rejects a variable bound only by optional clauses with COHDBG001 during planning,
 even when every row would match, because a Path frame requires a first node. A variable bound or
 subsequently constrained by a mandatory clause is projectable. These implement the owner's path
-default. The old GqlQueryExpression constructor/view is retained; the engine reads MatchClauses.
+default. The old GqlQueryExpression constructor/view is retained; the engine reads the ordered Stages facade.
 No catalog format or wire encoding changes are involved.
 
 Behavior consulted, no code copied, relative to `C:/Source/repos/neo4j/neo4j`:
@@ -526,7 +537,7 @@ and catalog queries are rejected as path requests before execution. This new req
 existing public interfaces and does not infer paths from scalar rows.
 
 The [supported-clause matrix](../../Assimalign.Cohesion.Database.Graph.Language/docs/DESIGN.md#supported-clause-matrix)
-is the single executable-language inventory: MATCH, OPTIONAL MATCH, WHERE, RETURN, INSERT, CREATE (compatibility
+is the single executable-language inventory: MATCH, OPTIONAL MATCH, WHERE, LET, FILTER, FOR/UNWIND, RETURN/NEXT, WITH, INSERT, CREATE (compatibility
 extension), DELETE, DETACH DELETE, SHOW (catalog extension), GROUP BY and LABEL EXPRESSION.
 COUNT, SUM, AVG, MIN, MAX, COLLECT_LIST and collect execute with implicit or explicit grouping.
 Scalar functions, variable-length paths, graph selection and language DDL are not advertised. ORDER BY, OFFSET, SKIP and LIMIT execute
@@ -608,8 +619,7 @@ string, Boolean, number, NULL. Lists are lexicographic; maps compare count, sort
 then values; nested NULL sorts last. Strings compare ordinally and entities by identity.
 Neo4j behavior references and full language rules are recorded in
 [Graph.Language ordering design](../../Assimalign.Cohesion.Database.Graph.Language/docs/DESIGN.md#ordering-and-paging-1142).
-Standalone ORDER BY/page statements remain COHDBL001 (owner default, T2). WITH ordering
-remains a #1145 hand-off; aggregate ordering runs after #1147's grouping stage. No public interface, catalog or wire format changes.
+Standalone ORDER BY/page statements remain COHDBL001 (owner default, T2). WITH ordering executes in its projection stage; aggregate ordering follows that stage's grouping. No public interface, catalog or wire format changes.
 
 ### Conformance corpus timing (#1140 fix pass)
 
@@ -683,17 +693,17 @@ yet keeps the caller's transaction and its earlier writes.
   for a statement with nothing to report. The warning travels on a row result (`DatabaseResultSet`), on
   `GraphPathsQueryResult`, and on the result of a statement with no projection.
 - **Writes.** `INSERT` still defines new labels and relationship types. A write whose `MATCH` names
-  an unknown name matches nothing, so its `INSERT` or `DELETE` acts on nothing: the statement
+  an unknown name empties that MATCH stage, so following `INSERT` or `DELETE` stages act on no rows until a resetting NEXT: the statement
   succeeds having written nothing (an affected count of 0, or an empty row result for
   `INSERT ... RETURN`) and reports no warning, because Neo4j checks unresolved tokens only when
   `query.readOnly` (`CheckForUnresolvedTokens.scala:53`). Schema writes still
   require the definition they change: `CreateIndexAsync`, `DropLabelAsync` and
   `DropRelationshipTypeAsync` of an unknown name fail with `COHDBG002`, a failed statement.
 - **Snapshot.** Resolution uses the statement's snapshot, so a transaction sees the labels and types
-  its own earlier statements created, and another session sees them only after the commit.
+  its own earlier statements or stages created, and another session sees them only after the commit. Earlier INSERT stages introduce names for planning, invalidating any earlier negative token-cache result.
 - **No wasted reads.** A pattern that requires an unknown name, a node conjunction (`:A`, `:A&B`,
   `:A:B`) or a relationship's type, can match no element, so the plan records that it matches
-  nothing and the executor starts with no binding, never scanning the store. The `WHERE` form does
+  nothing and the executor empties that MATCH stage without scanning the store. The `WHERE` form does
   the same: a non-negated labeled predicate with a pure conjunction among the clause's top-level
   `AND` operands (`WHERE n:Missing`, `WHERE n.k = 1 AND n IS LABELED A&Missing`, `WHERE r:Missing`)
   is never true, so under three-valued `AND` the clause keeps no row and the plan reads nothing.
@@ -702,7 +712,7 @@ yet keeps the caller's transaction and its earlier writes.
   forms alike, planning a label scan from the selections' `HasLabels` predicates
   (`cypher-planner/.../steps/leafplanner/labelScanLeafPlanner.scala:45`). A name under `!`, `|` or
   `IS NOT LABELED` can be true for an element without it, so it leaves the plan as it is. The flag
-  empties the whole statement only for a mandatory clause. An unsatisfiable optional clause sets
+  empties only the incoming rows of a mandatory MATCH stage; a later NEXT after a write may seed a new empty row. An unsatisfiable optional clause sets
   its local flag, reads no candidates and binds its new variables to NULL. Its read-only warnings
   still travel with scalar and path completion; required names in a later mandatory clause may
   still empty the statement.

@@ -37,7 +37,7 @@ and shared DatabaseType identities. The engine rejects duplicate final result co
 ordinally with COHDBG015 before any result output or mutation, including implicit/explicit
 collisions. The result container retains first-column lookup for manually constructed duplicate
 metadata. Scalar statements fully materialize before returning.
-Direct COUNT aggregate metadata is Int64, including empty input. Other MATCH projection metadata remains the engine's DatabaseType.Null (unknown), because graph
+Direct COUNT aggregate metadata is Int64, including empty input and values carried through WITH/NEXT. Other MATCH projection metadata remains the engine's DatabaseType.Null (unknown), because graph
 properties may have heterogeneous types. The tuple codec preserves each actual value's runtime
 type. SHOW metadata retains its precisely declared catalog types.
 
@@ -270,3 +270,7 @@ Path completion diagnostics follow Neo4j's completion metadata model
 (community/bolt/src/main/java/org/neo4j/bolt/protocol/common/fsm/response/metadata/DefaultMetadataHandler.java:206).
 The concrete result stream preserves bounded streaming and adds no public interface.
 COHDBP001 reports diagnostic overflow without turning successful reads into failures.
+
+## Linear composition (#1145)
+
+QueryAsync executes LET, FILTER, FOR/UNWIND, WITH and RETURN ... NEXT using the existing request encoding. Lists use the negotiated composite-value parameter codec. Final planned column kinds govern Execute admission: scalar LET/FOR values pass, possible composites require negotiation, and carried entities keep the ExecutePaths hint. Read-only composed path requests preserve optionality; a write stage anywhere rejects the request before execution. GraphLinearCompositionWireTests verifies both InMemory and TCP, own-write reads, row-valued insertion maps, bound MATCH maps, map/entity member access, decoded star bindings and Int64 COUNT metadata through WITH. Scope, duplicate carried-name, INSERT-map and runtime container rejections retain coded diagnostics and permit the next statement on the exact same server session. Comma-separated MATCH maps can reference later pattern parts; their clause-wide predicates, including anonymous elements, execute over both transports and validate under EXPLAIN. FOR/UNWIND retains proven node and relationship list element kinds through WITH/NEXT for later MATCH, DELETE and ExecutePaths; scalar/mixed lists retain coded rejection and exact-session reuse. No protocol format changes.

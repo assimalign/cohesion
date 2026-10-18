@@ -12,6 +12,8 @@ public class GqlQueryParserTests
 {
     [Theory]
     [InlineData("MATCH (a:Person) RETURN a")]
+    [InlineData("UNWIND [1, 2] AS a RETURN a")]
+    [InlineData("MATCH (a) WITH a RETURN a")]
     [InlineData("OPTIONAL MATCH (a) RETURN a")]
     [InlineData("MATCH (a) MATCH (b) RETURN a, b")]
     [InlineData("MATCH (a) RETURN DISTINCT a.name")]
@@ -95,7 +97,6 @@ public class GqlQueryParserTests
 
     [Theory]
     [InlineData("MANDATORY MATCH (a) RETURN a")]
-    [InlineData("MATCH (a) WITH a RETURN a")]
     [InlineData("MATCH (a) SET a.age = 5")]
     [InlineData("MATCH (a) REMOVE a.age")]
     [InlineData("MERGE (a:Person)")]
@@ -107,7 +108,6 @@ public class GqlQueryParserTests
     [InlineData("INSERT (:Person {tags: [1, 2]})")]
     [InlineData("MATCH (a) DELETE a RETURN a")]
     [InlineData("CALL foo()")]
-    [InlineData("UNWIND [1, 2] AS a RETURN a")]
     [InlineData("USE other")]
     [InlineData("CREATE DATABASE other")]
     [InlineData("CREATE GRAPH other")]

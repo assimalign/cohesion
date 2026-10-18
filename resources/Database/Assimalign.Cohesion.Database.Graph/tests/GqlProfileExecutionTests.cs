@@ -99,6 +99,33 @@ public sealed class GqlProfileExecutionTests
                 new("MATCH (a) RETURN $p", [[5], [5], [5], [5], [5]],
                     Parameters: new Dictionary<string, object?> { ["p"] = 5 }, Columns: ["$p"]),
             ],
+            [GqlClauses.Next] =
+            [
+                new("LET x = $value RETURN x NEXT RETURN x + 1 AS y", [[6L]], Parameters: new Dictionary<string, object?> { ["value"] = 5L }),
+            ],
+            [GqlClauses.With] =
+            [
+                new("MATCH (a:Person) WITH a WHERE a.age > $age RETURN a.name ORDER BY a.name", [["Alice"], ["Isolated"]], Parameters: new Dictionary<string, object?> { ["age"] = 18L }),
+                new("MATCH (a:Person) WITH count(a) AS c RETURN c", [[3L]]),
+                new("MATCH (a:Person) WITH DISTINCT a.active AS act RETURN act", [[true], [false], [null]]),
+                new("MATCH (a)-[r:KNOWS]->(b) WITH * RETURN b.name", [["Bob"]]),
+            ],
+            [GqlClauses.Let] =
+            [
+                new("LET x = $value RETURN x", [[5L]], Parameters: new Dictionary<string, object?> { ["value"] = 5L }),
+            ],
+            [GqlClauses.Filter] =
+            [
+                new("MATCH (a:Person) FILTER a.age > $age RETURN a.name", [["Alice"], ["Isolated"]], Parameters: new Dictionary<string, object?> { ["age"] = 18L }),
+            ],
+            [GqlClauses.For] =
+            [
+                new("FOR x IN $xs RETURN x", [[1L], [2L]], Parameters: new Dictionary<string, object?> { ["xs"] = new object?[] { 1L, 2L } }),
+            ],
+            [GqlClauses.Unwind] =
+            [
+                new("UNWIND $xs AS x RETURN x", [[1L], [2L]], Parameters: new Dictionary<string, object?> { ["xs"] = new List<long> { 1, 2 } }),
+            ],
             [GqlClauses.GroupBy] =
             [
                 new("MATCH (a:Person) RETURN a.active, count(*) AS n GROUP BY a.active ORDER BY n DESC",
@@ -347,6 +374,12 @@ public sealed class GqlProfileExecutionTests
         GqlClauses.Match => query.MatchClauses.Any(clause => !clause.Optional),
         GqlClauses.OptionalMatch => query.MatchClauses.Any(clause => clause.Optional),
         GqlClauses.Case => query.Projections.Any(item => item.Expression is GqlCaseExpression or GqlCoalesceExpression or GqlNullIfExpression),
+        GqlClauses.Let => query.Stages.Any(stage => stage is GqlLetStage),
+        GqlClauses.Filter => query.Stages.Any(stage => stage is GqlFilterStage),
+        GqlClauses.For => query.Stages.Any(stage => stage is GqlForStage { IsUnwind: false }),
+        GqlClauses.Unwind => query.Stages.Any(stage => stage is GqlForStage { IsUnwind: true }),
+        GqlClauses.Next => query.Stages.Any(stage => stage is GqlNextStage),
+        GqlClauses.With => query.Stages.Any(stage => stage is GqlReturnStage { IsWith: true }),
         GqlClauses.Return => query.Projections.Count != 0 || query.ReturnStar,
         GqlClauses.GroupBy => query.GroupBy is not null,
         GqlClauses.OrderBy => query.OrderBy.Count != 0,

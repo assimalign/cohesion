@@ -4,6 +4,9 @@
 diagnostics describe malformed or unsupported input. `GqlLanguageProfile.Instance` advertises
 only executable clauses. `GqlClauses` names lexical capability keys, including deferred clauses.
 
+`GqlQueryExpression.Stages` is the source-ordered execution input. `Segments` groups those stages at NEXT boundaries, excluding NEXT itself. The `GqlStage` family contains sealed `GqlMatchStage`, `GqlLetStage`, `GqlFilterStage`, `GqlForStage` (also UNWIND), `GqlInsertStage` (also CREATE), `GqlDeleteStage`, `GqlReturnStage` (also WITH) and `GqlNextStage` records. LET adds value variables; FILTER retains TRUE rows; FOR expands lists. RETURN/NEXT and WITH carry referenceable projections in order, using decoded variable names. DISTINCT or aggregation restricts WITH WHERE to projected names; otherwise incoming bindings remain visible to that predicate. Aggregates in WHERE are rejected, while projected aggregate aliases are usable.
+
+The original single-segment facade remains available for hand-built ASTs.
 `GqlQueryExpression.MatchClauses` groups source-ordered `GqlMatchClause(Paths, Predicate, Optional)`
 records, followed by insertions, deletion variables and
 projections, `SetQuantifier` (GqlSetQuantifier.All or Distinct), and `ReturnStar`.
@@ -21,7 +24,7 @@ apply after RETURN projection and DISTINCT to both rows and paths. Invalid hand-
 receive the same planner shape/value diagnostics as parsed statements.
 The original constructor still creates the single mandatory clause; `Matches` and `Predicate`
 expose that view only and return empty/null for optional or multiple clauses. The engine reads
-MatchClauses and null-extends every new binding of an unmatched optional clause. Each clause's
+Stages and null-extends every new binding of an unmatched optional clause. Each clause's
 predicate sees its own and preceding variables. Optional-only path projections are COHDBG001.
 `GqlPathPattern` holds ordered nodes and relationships; their immutable metadata
 captures labels, direction, type and scalar properties. Each pattern's `LabelExpression` is a
@@ -30,7 +33,7 @@ captures labels, direction, type and scalar properties. Each pattern's `LabelExp
 `<-[]->` / `<->` direction. The conjunction and disjunction are n-ary: each holds an `Operands`
 list of any length, and the records compare structurally. `GqlProjection` now carries a
 `GqlExpression` and an optional alias, a breaking change from its variable/property tuple.
-`GqlVariableExpression` references a bound node, relationship or path. Literal, property, comparison/arithmetic/concatenation
+`GqlVariableExpression` references a bound node, relationship, path or value variable. LET/FOR values may hold scalars, maps, lists or entities; property/member access accepts maps and entities and preserves the accessed value shape. Literal, property, comparison/arithmetic/concatenation
 (`GqlBinaryExpression`), n-ary AND/OR/XOR (`GqlLogicalExpression` with `GqlLogicalOperator`)
 and labeled-predicate (`GqlLabeledPredicate`) classes describe scalar expressions.
 `GqlUnaryExpression` holds NOT or a numeric sign. `GqlIsNullExpression` and
@@ -48,6 +51,6 @@ receive planner shape validation too.
 `GqlParameterExpression` stores a bare, case-sensitive `Name` and the complete reference's
 `Location` for `$name` and `@name`. Node and relationship pattern `Properties` now take
 `IReadOnlyDictionary<string, GqlExpression>`; wrap each constant in `GqlLiteralExpression`
-or supply a parameter expression. This is a breaking AST change.
+or supply a row-valued scalar expression. MATCH entries act as predicates once every referenced pattern variable is bound, including the element itself. INSERT/CREATE entries may reference only the incoming scope. This is a breaking AST change.
 
 See [DESIGN.md](../../DESIGN.md) for ISO scope, source locations, diagnostic codes and conformance.

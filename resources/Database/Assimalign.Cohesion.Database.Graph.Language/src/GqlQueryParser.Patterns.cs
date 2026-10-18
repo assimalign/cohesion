@@ -16,7 +16,7 @@ public sealed partial class GqlQueryParser
         do
         {
             string? variable = null;
-            if (allowPathVariable && Current.Type is TokenType.Identifier or TokenType.Function or TokenType.QuotedIdentifier)
+            if (allowPathVariable && IsVariableToken)
             {
                 variable = Identifier();
                 Expect(TokenType.Equals, "'='");
@@ -44,7 +44,7 @@ public sealed partial class GqlQueryParser
         Expect(TokenType.LeftParen, "'('");
         // After a failure nothing more is read, so one malformed token reports one diagnostic.
         if (Failed) { return new GqlNodePattern(null, [], _noProperties); }
-        string? variable = Current.Type is TokenType.Identifier or TokenType.Function or TokenType.QuotedIdentifier ? Identifier() : null;
+        string? variable = IsVariableToken ? Identifier() : null;
         var labels = ParseLabelSpecification(node: true);
         if (!Failed && (variable is not null || labels is not null) && Current.Type == TokenType.Parameter) { RejectUnsupportedParameter("WHOLE-MAP PARAMETER"); }
         var properties = ParseProperties();
@@ -77,7 +77,7 @@ public sealed partial class GqlQueryParser
         }
 
         Advance(); // '['
-        string? variable = Current.Type is TokenType.Identifier or TokenType.Function or TokenType.QuotedIdentifier ? Identifier() : null;
+        string? variable = IsVariableToken ? Identifier() : null;
         var labels = ParseLabelSpecification(node: false);
         if (!Failed && (variable is not null || labels is not null) && Current.Type == TokenType.Parameter) { RejectUnsupportedParameter("WHOLE-MAP PARAMETER"); }
         var properties = ParseProperties();
@@ -100,7 +100,7 @@ public sealed partial class GqlQueryParser
     /// </summary>
     private GqlRelationshipPattern AbbreviatedEdge(GqlPatternDirection direction)
     {
-        if (!Failed && (Current.Type is TokenType.Identifier or TokenType.Function or TokenType.QuotedIdentifier or TokenType.Colon or
+        if (!Failed && (IsVariableToken || Current.Type is TokenType.Colon or
             TokenType.LeftBrace or TokenType.LeftBracket || Current.Type == TokenType.Keyword && Is("IS")))
         {
             Error("GQL0002", "An abbreviated edge pattern cannot carry a variable, label expression or property map; " +
@@ -136,7 +136,9 @@ public sealed partial class GqlQueryParser
                     string name = Identifier(allowKeyword: true);
                     Expect(TokenType.Colon, "':'");
                     if (Failed) { break; }
-                    var value = ParseScalar();
+                    if (Current.Type is TokenType.LeftBracket or TokenType.LeftBrace)
+                    { _ = ParseScalar(); break; }
+                    var value = ParsePredicate();
                     if (!properties.TryAdd(name, value)) { Error("GQL0006", $"Duplicate property '{name}'.", start); }
                 } while (!Failed && Take(TokenType.Comma));
             }
