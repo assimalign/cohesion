@@ -756,6 +756,8 @@ is recorded for owner review; P8 (#1264) later absorbs the description into its 
 Index definition and physical registration records use catalog v2 (#1135); other record kinds
 retain their current versions. Startup validates metadata and tree formats before the recovery
 scrub. V1 index catalogs are refused with a recreate remedy; no legacy reader or upgrade exists.
+The engine-level refusal names the database, disposes its coordinator and leaves a cleanly closed
+file set byte-identical, for both v1 definition and registration records.
 
 
 `CREATE [UNIQUE] INDEX [IF NOT EXISTS] <index-name> ON <collection> (<path>, ...)` and
@@ -791,7 +793,8 @@ UNIQUE violations use the catalog-owned public DocumentConstraintViolationExcept
 Checks are immediate per row, so a swap can fail; a failed explicit transaction requires caller
 RollbackAsync before session reuse (#1225). The wire sends ExecutionFailure (6) and remains usable.
 Randomized fixed-seed tests compare scans, one/two/three-path seeks and post-DROP scans over mixed
-shapes, scales, parameters and contradictory bounds. The process fixture checks raw entries in
+shapes, scales, parameters and contradictory bounds, including negative decimal bounds whose
+prefix successors skip trailing FF bytes. The process fixture checks raw entries in
 both trees after committed/abandoned UPDATE, UPSERT, DELETE and Put, then probes uniqueness twice.
 
 Successful index DDL returns a command `DatabaseResult` with `Success` status and an affected count

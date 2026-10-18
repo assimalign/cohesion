@@ -48,11 +48,16 @@ public sealed partial class DocumentQueryTests
             ("edge1", "{\"a\":1,\"b\":2,\"c\":9999}"),
             ("edge2", "{\"a\":1,\"b\":3,\"c\":10000}"),
             ("edge3", "{\"a\":\"😀\",\"b\":\"\",\"c\":10001}"),
-            ("edge4", "{\"a\":\"😀\",\"b\":\"\ue000\",\"c\":10002}")
+            ("edge4", "{\"a\":\"😀\",\"b\":\"\ue000\",\"c\":10002}"),
+            ("negative-equal", "{\"a\":-1,\"b\":-1,\"c\":10003}"),
+            ("negative-lower", "{\"a\":-1,\"b\":-2,\"c\":10004}"),
+            ("negative-upper", "{\"a\":-1,\"b\":0,\"c\":10005}")
         }) { await PutAsync(collection, session, id, json); }
         var predicates = new List<(string Text, bool Seek)>
         {
             ("a = 1 AND b <= 2", true), ("a = 1 AND b > 2", true),
+            ("a > -1", true), ("a <= -1", true),
+            ("a = -1 AND b <= -1", true), ("a = -1 AND b > -1", true),
             ("a = '😀' AND b >= ''", true), ("a = '😀' AND b <= '\ue000'", true),
             ("a >= '😀' AND a < '\ue000'", true),
             ("a = 1", true), ("a = 1 AND b > 2", true), ("a = @p AND b = 'x'", true),
@@ -66,9 +71,9 @@ public sealed partial class DocumentQueryTests
         string[] operations = ["=", ">", ">=", "<", "<="];
         for (int i = 0; i < 28; i++)
         {
-            string predicate = $"a {operations[random.Next(5)]} {random.Next(4)}";
-            if (i % 2 == 0) { predicate += $" AND b {operations[random.Next(5)]} {random.Next(4)}"; }
-            if (i % 3 == 0) { predicate += $" AND c {operations[random.Next(5)]} {random.Next(4)}"; }
+            string predicate = $"a {operations[random.Next(5)]} {random.Next(-2, 4)}";
+            if (i % 2 == 0) { predicate += $" AND b {operations[random.Next(5)]} {random.Next(-2, 4)}"; }
+            if (i % 3 == 0) { predicate += $" AND c {operations[random.Next(5)]} {random.Next(-2, 4)}"; }
             predicates.Add((predicate, true));
         }
         var parameters = new Dictionary<string, object?> { ["p"] = 1, ["q"] = 2L };
