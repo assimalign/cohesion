@@ -1582,7 +1582,9 @@ Namespace targeting (#1030) remains fixed at dbo for compiled declarations and m
 SqlNamespaceNames.Default is the shared spelling used by runtime and SDK rendering. CREATE SCHEMA
 creates a SQL namespace only; a compiled schema's name remains its ownership identity and never
 selects a namespace. dbo is an Adhoc namespace record seeded only by StampNewCatalog, and SQL
-refuses its removal because provisioning requires it. Opening a database seeds or commits nothing.
+refuses its removal because provisioning requires it. Creation commits dbo before the final format
+marker, so every crash image accepted as format 21 contains dbo; earlier images retain the
+format-1 interrupted-creation refusal. Opening a database seeds or commits nothing.
 
 Provisioning belongs to this model (owner decisions 49 to 58 of 2026-10-09, B1 of
 `docs/programs/DATABASE_ENGINE_EXTENSIBILITY_DESIGN.md`). It has two entry points over one internal
@@ -1623,7 +1625,9 @@ upgrade or legacy counter reader. If catalog decoding fails before reaching an o
 format marker, the engine reads only the unchanged marker tuple and invokes that same gate. This
 failure-only read adds no traversal to a successful open and preserves the actionable `Unavailable`
 wire refusal. A marker-free catalog containing one genuine old counter tuple is refused as format 1;
-duplicate counters, unknown record kinds, and malformed or ambiguous markers remain corruption.
+duplicate counters and malformed or ambiguous markers remain corruption. The failure-only marker
+reader skips unfamiliar record kinds when a valid marker exists, allowing newer formats to reach
+the actionable format refusal; without a marker, unfamiliar kinds remain corruption.
 
 The marker retains the canonical document for migration history, alongside `{hash, generation}`.
 After the open-time document format gate, equal declared hash and current generation return immediately: no ownership scan, snapshot,

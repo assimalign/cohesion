@@ -226,11 +226,20 @@ public sealed class SqlDataStorageFormatTests : IDisposable
         AssertUnchanged(before);
     }
 
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Data-storage format: a newer database is refused at open and its files are left untouched (#1099)")]
-    public async Task Open_NewerFormat_ShouldBeRefusedWithoutTouchingFiles()
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Data-storage format: a newer database reaches the format gate even with unknown record kinds")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Open_NewerFormat_ShouldBeRefusedWithoutTouchingFiles(bool unknownRecord)
     {
         // Arrange
         await CreateDatabaseAsync(formatVersion: SqlRowCodec.RecordSpaceFormatVersion + 1);
+        if (unknownRecord)
+        {
+            using var storage = new FileSystemSqlStorageStrategy(_rootPath).OpenStorage(TestDatabase, catalog: true);
+            using var transaction = storage.BeginTransaction();
+            storage.InsertRow(transaction, new DatabaseKeyWriter().AppendInt32(999).AppendInt32(1).ToArray());
+            transaction.Commit();
+        }
         var before = Snapshot();
 
         // Act
@@ -242,6 +251,51 @@ public sealed class SqlDataStorageFormatTests : IDisposable
         refusal.Message.ShouldContain("this engine supports only format 21");
         refusal.Message.ShouldContain("written by a newer engine");
         AssertUnchanged(before);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - CREATE DATABASE: every accepted crash image contains dbo")]
+    public async Task CreateDatabaseAsync_EveryCrashPoint_ShouldPublishDboBeforeCurrentFormat()
+    {
+        // Arrange
+        var storage = new CrashCaptureSqlStorageStrategy();
+        await using var creator = SqlDatabaseEngine.Create("creation-crashes", new() { StorageStrategy = storage });
+        using var recording = storage.RecordCrashPoints();
+
+        // Act
+        await creator.CreateDatabaseAsync(TestDatabase, CancellationToken.None);
+        recording.Dispose();
+
+        // Assert: an interrupted creation is refused; every successful open is usable.
+        int accepted = 0;
+        int interrupted = 0;
+        for (int point = 0; point < recording.Count; point++)
+        {
+            var image = recording.Open(point);
+            if (!image.StorageExists(TestDatabase, catalog: false) || !image.StorageExists(TestDatabase, catalog: true)) { continue; }
+            await using var reopened = SqlDatabaseEngine.Create("creation-image", new() { StorageStrategy = image });
+            SqlDatabase database;
+            try { database = await reopened.OpenDatabaseAsync(TestDatabase, CancellationToken.None); }
+            catch (SqlDataStorageFormatException failure)
+            {
+                failure.Message.ShouldContain("creation was interrupted", Case.Sensitive);
+                interrupted++;
+                continue;
+            }
+            catch (StorageIOException failure)
+            {
+                // The recorder also includes the file's creation before its header write.
+                failure.Message.ShouldContain("less than its 8192-byte header page", Case.Sensitive);
+                continue;
+            }
+            database.Catalog.RecordSpaceFormatVersion.ShouldBe(21);
+            database.Catalog.Namespaces.ShouldHaveSingleItem().Name.ShouldBe("dbo", $"Crash point {point}");
+            await using var session = await database.CreateSessionAsync(CancellationToken.None);
+            (await session.ExecuteAsync("CREATE TABLE t(id INT)", cancellationToken: CancellationToken.None)).Status.ShouldBe(DatabaseResultStatus.Success);
+            accepted++;
+        }
+        recording.Count.ShouldBeGreaterThan(1);
+        accepted.ShouldBeGreaterThan(0);
+        interrupted.ShouldBeGreaterThan(0);
     }
 
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Data-storage format: a format-4 database with key-ordered index pages is refused by the gate, its files untouched (#1194)")]
@@ -551,8 +605,6 @@ public sealed class SqlDataStorageFormatTests : IDisposable
         (PageId PageId, int SlotIndex)? location = null;
         long nextObjectId = 0;
         (PageId PageId, int SlotIndex)? formatLocation = null;
-        int recordedFormat = 1;
-        var namespaces = new List<(PageId PageId, int SlotIndex)>();
         using (var iterator = storage.GetUnitIterator())
         {
             while (iterator.MoveNext())
@@ -563,9 +615,7 @@ public sealed class SqlDataStorageFormatTests : IDisposable
                 if (kind is 4 or 8)
                 {
                     formatLocation = (unit.PageId, unit.SlotIndex);
-                    recordedFormat = reader.ReadInt32();
                 }
-                if (kind == 15) { namespaces.Add((unit.PageId, unit.SlotIndex)); }
                 if (kind == 2)
                 {
                     location.ShouldBeNull();
@@ -581,12 +631,6 @@ public sealed class SqlDataStorageFormatTests : IDisposable
         using var transaction = storage.BeginTransaction();
         var persisted = location.GetValueOrDefault();
         storage.UpdateRow(transaction, persisted.PageId, persisted.SlotIndex, counter.ToArray());
-        // These fixtures represent engines predating first-class namespaces, not a format-21
-        // catalog with a damaged counter. Their old catalog never contained kind 15.
-        if (removeFormatMarker || recordedFormat < 21)
-        {
-            foreach (var schema in namespaces) { storage.DeleteRow(transaction, schema.PageId, schema.SlotIndex); }
-        }
         if (removeFormatMarker)
         {
             var format = formatLocation.ShouldNotBeNull();

@@ -763,6 +763,7 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
             int? version = null;
             bool counterFound = false;
             bool legacyCounter = false;
+            bool requiresMarker = false;
             using var iterator = storage.GetUnitIterator();
             while (iterator.MoveNext())
             {
@@ -782,7 +783,11 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
                 }
                 if (kind is < 1 or > 8)
                 {
-                    return null;
+                    // Namespace records are known metadata, including an interrupted new
+                    // creation's dbo. Other unfamiliar kinds require a valid marker below;
+                    // a newer format may introduce records this engine cannot decode.
+                    requiresMarker |= kind != 15;
+                    continue;
                 }
                 if (kind is not (4 or 8))
                 {
@@ -796,7 +801,7 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
                 }
                 version = found;
             }
-            return version ?? (legacyCounter ? 1 : null);
+            return version ?? (legacyCounter && !requiresMarker ? 1 : null);
         }
         catch (DatabaseTypeException)
         {

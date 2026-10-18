@@ -305,9 +305,11 @@ public sealed class SqlDatabase : DatabaseInstance
 
         // Synchronous over the ValueTask by design: catalog writes complete
         // synchronously and instance construction is a synchronous path.
-        _catalog.SetRecordSpaceFormatVersionAsync(SqlRowCodec.RecordSpaceFormatVersion)
-            .AsTask().GetAwaiter().GetResult();
+        // The marker is the final creation commit: every current-format database must
+        // already contain dbo. A crash before it remains an interrupted format-1 creation.
         _catalog.CreateSchemaAsync(new SqlCatalogNamespace(SqlNamespaces.DefaultName))
+            .AsTask().GetAwaiter().GetResult();
+        _catalog.SetRecordSpaceFormatVersionAsync(SqlRowCodec.RecordSpaceFormatVersion)
             .AsTask().GetAwaiter().GetResult();
     }
 
