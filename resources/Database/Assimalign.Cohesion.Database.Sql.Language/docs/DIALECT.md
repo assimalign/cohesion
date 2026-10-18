@@ -156,8 +156,9 @@ and dependency cycles fail atomically. Definitions are parsed once per immutable
 view and bound once per catalog generation; recorded function identities keep a
 later overload from changing a stored call. COLUMNS uses frozen creation-time metadata without binding a body, including full
 length, precision and scale. Query output nullability follows current bound sources.
-A body binding failure affects only reads of that view; it never blocks open,
-unrelated reads, metadata enumeration or DROP VIEW.
+A recoverable body binding failure affects only reads of that view, with a coded error retaining
+the original exception; it never blocks open, unrelated reads, metadata enumeration or DROP VIEW.
+Cancellation, out-of-memory, storage corruption and I/O failures still propagate.
 
 INSERT, UPDATE, DELETE, ALTER TABLE, CREATE INDEX and DROP TABLE require a table
 and refuse a view, naming its kind. DROP VIEW refuses a table, including IF EXISTS.
