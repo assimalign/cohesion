@@ -11,6 +11,19 @@ namespace Assimalign.Cohesion.Database.Graph.Tests;
 
 public sealed class GraphValueCodecTests
 {
+    [Fact(DisplayName = "Cohesion Test [Graph] - Composite codec: Decimal values retain all bits including presented scale")]
+    public void Encode_Decimals_ShouldPreserveBits()
+    {
+        // Arrange
+        decimal[] values = [0.3m, 3m, 1.20m, 0.00m, new decimal(0, 0, 0, true, 4), decimal.MinValue, decimal.MaxValue];
+        // Act / Assert
+        foreach (decimal value in values)
+        {
+            decimal decoded = GraphValueCodec.Decode(GraphValueCodec.Encode(value)).ShouldBeOfType<decimal>();
+            decimal.GetBits(decoded).ShouldBe(decimal.GetBits(value));
+        }
+    }
+
     [Fact(DisplayName = "Cohesion Test [Graph] - Composite codec: nested values preserve every scalar runtime type")]
     public void Encode_NestedValues_ShouldPreserveRuntimeTypes()
     {
@@ -29,6 +42,11 @@ public sealed class GraphValueCodecTests
     {
         yield return [Array.Empty<byte>()];
         yield return [new byte[] { 255 }];
+        yield return [new byte[] { 7 }];
+        var invalidDecimalFlags = new byte[17]; invalidDecimalFlags[0] = 7; invalidDecimalFlags[13] = 1;
+        yield return [invalidDecimalFlags];
+        var invalidDecimalScale = new byte[17]; invalidDecimalScale[0] = 7; invalidDecimalScale[15] = 29;
+        yield return [invalidDecimalScale];
         yield return [new byte[] { 0, 1, 0, 0, 0, 255 }];
         yield return [new byte[] { 1, 255, 255, 255, 127 }];
         yield return [new byte[] { 1, 255, 255, 255, 255 }];

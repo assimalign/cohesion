@@ -170,7 +170,7 @@ public sealed partial class GqlQueryParser
     /// </summary>
     private bool StartsLabeledPredicate()
     {
-        if (Current.Type is not (TokenType.Identifier or TokenType.QuotedIdentifier)) { return false; }
+        if (Current.Type is not (TokenType.Identifier or TokenType.Function or TokenType.QuotedIdentifier)) { return false; }
         int next = _position + 1;
         if (next < _tokens.Count && _tokens[next].Type == TokenType.Colon) { return true; }
         if (next >= _tokens.Count || _tokens[next].Type != TokenType.Keyword || !IsWordAt(next, "IS")) { return false; }

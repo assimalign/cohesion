@@ -43,6 +43,7 @@ internal sealed class GraphExpressionShape : IEqualityComparer<GqlExpression>
             hash.Add(step.Expression.GetType());
             switch (step.Expression)
             {
+                case GqlAggregateExpression aggregate: hash.Add(aggregate.Function); hash.Add(aggregate.Distinct); hash.Add(aggregate.Operand is null); break;
                 case GqlLiteralExpression literal:
                     hash.Add(literal.Value?.GetType());
                     if (literal.Value is null or bool or string || GraphValueComparer.IsNumber(literal.Value!)) { hash.Add(literal.Value); }
@@ -81,6 +82,7 @@ internal sealed class GraphExpressionShape : IEqualityComparer<GqlExpression>
         if (ReferenceEquals(left, right)) { return true; }
         bool same = (left, right) switch
         {
+            (GqlAggregateExpression a, GqlAggregateExpression b) => a.Function == b.Function && a.Distinct == b.Distinct && (a.Operand is null) == (b.Operand is null),
             (GqlLiteralExpression a, GqlLiteralExpression b) => a.Value?.GetType() == b.Value?.GetType() && object.Equals(a.Value, b.Value),
             (GqlParameterExpression a, GqlParameterExpression b) => a.Name == b.Name,
             (GqlVariableExpression a, GqlVariableExpression b) => a.Variable == b.Variable,

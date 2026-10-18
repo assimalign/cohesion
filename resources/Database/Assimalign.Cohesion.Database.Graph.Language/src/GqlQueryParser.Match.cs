@@ -15,6 +15,7 @@ public sealed partial class GqlQueryParser
         bool detach = false;
         bool returnStar = false;
         List<GqlSortItem> orderBy = [];
+        List<GqlExpression>? groupBy = null;
         GqlExpression? offset = null;
         GqlExpression? limit = null;
         var quantifier = GqlSetQuantifier.All;
@@ -61,6 +62,14 @@ public sealed partial class GqlQueryParser
                     projections.Add(new GqlProjection(expression, alias));
                 } while (!Failed && Take(TokenType.Comma));
             }
+            if (!Failed && Take("GROUP"))
+            {
+                Expect("BY");
+                groupBy = [];
+                if (Current.Type == TokenType.LeftParen && _tokens[_position + 1].Type == TokenType.RightParen)
+                { Advance(); Advance(); }
+                else { do { groupBy.Add(ParsePredicate()); } while (!Failed && Take(TokenType.Comma)); }
+            }
             if (!Failed && Take("ORDER"))
             {
                 Expect("BY");
@@ -99,7 +108,7 @@ public sealed partial class GqlQueryParser
         }
         return new GqlQueryExpression(matches.AsReadOnly(), creates, deletes.AsReadOnly(), detach,
             projections.AsReadOnly(), Span(start, Previous))
-        { SetQuantifier = quantifier, ReturnStar = returnStar, OrderBy = orderBy.AsReadOnly(), Offset = offset, Limit = limit };
+        { SetQuantifier = quantifier, ReturnStar = returnStar, GroupBy = groupBy?.AsReadOnly(), OrderBy = orderBy.AsReadOnly(), Offset = offset, Limit = limit };
     }
 
     private GqlExpression ParsePageValue()
@@ -129,6 +138,7 @@ public sealed partial class GqlQueryParser
         {
             var token = _tokens[i];
             if (i > first && token.Type is not (TokenType.Dot or TokenType.RightParen or TokenType.RightBracket or TokenType.Comma) &&
+                !(token.Type == TokenType.LeftParen && _tokens[i - 1].Type == TokenType.Function) &&
                 _tokens[i - 1].Type is not (TokenType.Dot or TokenType.LeftParen or TokenType.LeftBracket)) { text.Append(' '); }
             // Scalar parsing splits a lexical <- into < and unary - in place. Restore the
             // comparison in its column name without inserting tokens (quadratic for chains).

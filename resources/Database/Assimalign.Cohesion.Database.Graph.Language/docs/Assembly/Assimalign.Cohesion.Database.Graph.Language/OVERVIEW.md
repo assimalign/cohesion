@@ -7,6 +7,12 @@ only executable clauses. `GqlClauses` names lexical capability keys, including d
 `GqlQueryExpression.MatchClauses` groups source-ordered `GqlMatchClause(Paths, Predicate, Optional)`
 records, followed by insertions, deletion variables and
 projections, `SetQuantifier` (GqlSetQuantifier.All or Distinct), and `ReturnStar`.
+`GqlAggregateExpression(Function, Operand, Distinct)` distinguishes aggregates from scalar
+expressions. `GqlAggregateFunction` names Count, Sum, Avg, Min, Max and CollectList; collect
+parses as CollectList. A null operand means COUNT(*). `GroupBy` is null for implicit grouping,
+or an explicit ISO list equal to the non-aggregate RETURN keys. Aggregates skip NULL values;
+count is Int64, sum/avg have documented numeric promotion, and collect returns a list. Grouping
+runs before projection, DISTINCT and ordering. Invalid placement or scope is COHDBG001.
 `OrderBy` contains `GqlSortItem(Expression, Direction, NullOrdering)` records with
 `GqlSortDirection.Ascending`/`Descending` and `GqlNullOrdering.Default`/`First`/`Last`.
 Default placement is NULL last ascending, first descending. `Offset` (also spelled SKIP)

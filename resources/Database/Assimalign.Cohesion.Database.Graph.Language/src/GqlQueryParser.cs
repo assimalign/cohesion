@@ -196,7 +196,7 @@ public sealed partial class GqlQueryParser : QueryParser
             }
             if (token.Type == TokenType.Colon && inValueExpression && i > 0 &&
                 !mapSeparator &&
-                _tokens[i - 1].Type is TokenType.Identifier or TokenType.QuotedIdentifier)
+                _tokens[i - 1].Type is TokenType.Identifier or TokenType.Function or TokenType.QuotedIdentifier)
             {
                 label = LabelScan.ExpectPrimary;
                 continue;
@@ -284,13 +284,13 @@ public sealed partial class GqlQueryParser : QueryParser
             }
             if (inValueExpression && token.Type is TokenType.Identifier or TokenType.Function &&
                 i + 1 < _tokens.Count && _tokens[i + 1].Type == TokenType.LeftParen &&
-                !GqlUnsupportedVocabulary.TryFind(value, out _))
+                !GqlUnsupportedVocabulary.TryFind(value, out _) && token.Type != TokenType.Function)
             {
                 Unsupported($"FUNCTION {token.Text}", token);
                 continue;
             }
             if (value == "WITH" && inValueExpression && i > 0 && (IsWordAt(i - 1, "STARTS") || IsWordAt(i - 1, "ENDS"))) { continue; }
-            if (value == "ALL" && i > 0 && IsWordAt(i - 1, "RETURN")) { continue; }
+            if (value == "ALL" && i > 0 && (IsWordAt(i - 1, "RETURN") || _tokens[i - 1].Type == TokenType.LeftParen && i > 1 && _tokens[i - 2].Type == TokenType.Function)) { continue; }
             if (patternDepth != 0 && !inValueExpression) { continue; }
             if (!GqlUnsupportedVocabulary.TryFind(value, out var word)) { continue; }
 

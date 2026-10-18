@@ -62,6 +62,8 @@ public sealed class GqlQueryExpression : GqlExpression
     public GqlSetQuantifier SetQuantifier { get; init; }
     /// <summary>Gets whether RETURN * projects every named binding in declaration order.</summary>
     public bool ReturnStar { get; init; }
+    /// <summary>Gets the explicit GROUP BY names or expressions; empty for (), or null for implicit grouping.</summary>
+    public IReadOnlyList<GqlExpression>? GroupBy { get; init; }
     /// <summary>Gets the ORDER BY keys in priority order.</summary>
     public IReadOnlyList<GqlSortItem> OrderBy { get; init; } = [];
     /// <summary>Gets the non-negative integer literal or parameter for OFFSET (also spelled SKIP).</summary>

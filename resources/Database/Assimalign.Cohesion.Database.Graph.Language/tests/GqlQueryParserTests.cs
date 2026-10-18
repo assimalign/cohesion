@@ -100,7 +100,6 @@ public class GqlQueryParserTests
     [InlineData("MATCH (a) REMOVE a.age")]
     [InlineData("MERGE (a:Person)")]
     [InlineData("MATCH (a) RETURN a UNION MATCH (b) RETURN b")]
-    [InlineData("MATCH (a) RETURN count(a)")]
     [InlineData("MATCH (a) WHERE abs(a.age) = 1 RETURN a")]
     [InlineData("MATCH (a) RETURN a {.name}")]
     [InlineData("MATCH (a)-[r*1..3]->(b) RETURN a")]

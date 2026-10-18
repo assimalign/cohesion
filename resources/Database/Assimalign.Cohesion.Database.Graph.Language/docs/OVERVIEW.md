@@ -18,6 +18,7 @@ null extension, and finite paths including named paths such as
 Boolean, arithmetic, null/truth, list-membership and string filters and labeled predicates (`n IS NOT LABELED A`, `n:A|B`),
 CASE, COALESCE, NULLIF, list/map literals and parameters, subscripts and map/entity property access,
 RETURN expressions and aliases, DISTINCT/ALL, RETURN * and standalone RETURN,
+COUNT, SUM, AVG, MIN, MAX and COLLECT_LIST (Cypher collect), with implicit or ISO GROUP BY,
 ORDER BY with ASC/DESC and NULLS FIRST/LAST, OFFSET (Cypher SKIP) and LIMIT,
 `INSERT`, `CREATE` as an insertion compatibility extension, and restricted or
 cascading deletion. Unsupported features, including the undirected tilde edges, produce

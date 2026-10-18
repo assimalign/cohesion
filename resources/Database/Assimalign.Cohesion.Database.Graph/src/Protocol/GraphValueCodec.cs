@@ -11,7 +11,7 @@ using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Graph;
 
-/// <summary>Encodes Graph composite values around scalar DatabaseValueCodec components.</summary>
+/// <summary>Encodes Graph composite values, exact Decimal bits and scalar DatabaseValueCodec components.</summary>
 /// <remarks>This format requires GraphProtocol.CompositeValues. It is never an index key format.
 /// Lists decode to object arrays; maps decode to read-only ordinal string dictionaries.</remarks>
 public static class GraphValueCodec
@@ -84,7 +84,7 @@ public static class GraphValueCodec
             size = 5;
             foreach (var child in list) { size += Measure(child, depth + 1, ref count); }
         }
-        else { size = ScalarLength(value) + (value is byte or ushort or uint or ulong ? 0 : 5L); }
+        else { size = value is decimal ? 17 : ScalarLength(value) + (value is byte or ushort or uint or ulong ? 0 : 5L); }
         if (size > MaxPayloadLength) { throw new DatabaseTypeException(ErrorMessages.CompositeLimit); }
         return (int)size;
     }
@@ -152,6 +152,12 @@ public static class GraphValueCodec
             case ushort number: writer.Write((byte)4); writer.Write(number); break;
             case uint number: writer.Write((byte)5); writer.Write(number); break;
             case ulong number: writer.Write((byte)6); writer.Write(number); break;
+            case decimal number:
+                writer.Write((byte)7);
+                Span<int> bits = stackalloc int[4];
+                decimal.GetBits(number, bits);
+                foreach (int part in bits) { writer.Write(part); }
+                break;
             default:
                 scalarWriter.Reset(); DatabaseValueCodec.Append(scalarWriter, value);
                 writer.Write((byte)0); writer.Write(scalarWriter.Length); writer.Write(scalarWriter.WrittenSpan);
@@ -179,6 +185,17 @@ public static class GraphValueCodec
             object number = tag switch { 3 => (object)payload[0], 4 => BinaryPrimitives.ReadUInt16LittleEndian(payload),
                 5 => BinaryPrimitives.ReadUInt32LittleEndian(payload), _ => BinaryPrimitives.ReadUInt64LittleEndian(payload) };
             payload = payload[size..]; return number;
+        }
+        if (tag == 7)
+        {
+            if (payload.Length < 16) { throw new ProtocolException(ErrorMessages.CompositeMalformed); }
+            int flags = BinaryPrimitives.ReadInt32LittleEndian(payload[12..]);
+            int scale = (flags >> 16) & 0xff;
+            if ((flags & 0x7f00ffff) != 0 || scale > 28) { throw new ProtocolException(ErrorMessages.CompositeMalformed); }
+            decimal number = new(BinaryPrimitives.ReadInt32LittleEndian(payload), BinaryPrimitives.ReadInt32LittleEndian(payload[4..]),
+                BinaryPrimitives.ReadInt32LittleEndian(payload[8..]), flags < 0, (byte)scale);
+            payload = payload[16..];
+            return number;
         }
         if (tag is not (1 or 2) || payload.Length < 4) { throw new ProtocolException(ErrorMessages.CompositeMalformed); }
         int items = BinaryPrimitives.ReadInt32LittleEndian(payload); payload = payload[4..];

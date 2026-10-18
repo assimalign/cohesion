@@ -114,9 +114,11 @@ public sealed partial class GqlQueryParser
         var start = Current;
         if (Is("CASE")) { return ParseCase(); }
         if (Is("COALESCE") || Is("NULLIF")) { return ParseCaseAbbreviation(); }
+        if (Current.Type == TokenType.Function && _tokens[_position + 1].Type == TokenType.LeftParen)
+        { return ParseAggregate(); }
         if (Current.Type == TokenType.LeftBracket) { return ParseList(); }
         if (Current.Type == TokenType.LeftBrace) { return ParseMap(); }
-        if (Current.Type is TokenType.Identifier or TokenType.QuotedIdentifier)
+        if (Current.Type is TokenType.Identifier or TokenType.Function or TokenType.QuotedIdentifier)
         {
             string variable = Identifier();
             if (!Take(TokenType.Dot)) { return new GqlVariableExpression(variable, Span(start, Previous)); }
@@ -125,6 +127,34 @@ public sealed partial class GqlQueryParser
             return new GqlPropertyExpression(variable, property, Span(start, Previous));
         }
         return ParseScalar();
+    }
+
+    private GqlExpression ParseAggregate()
+    {
+        var start = Current;
+        if (!HasStackToNest(start)) { return new GqlLiteralExpression(null, Span(start, start)); }
+        Advance();
+        Expect(TokenType.LeftParen, "'('");
+        var function = start.Text.ToUpperInvariant() switch
+        {
+            "COUNT" => GqlAggregateFunction.Count,
+            "SUM" => GqlAggregateFunction.Sum,
+            "AVG" => GqlAggregateFunction.Avg,
+            "MIN" => GqlAggregateFunction.Min,
+            "MAX" => GqlAggregateFunction.Max,
+            _ => GqlAggregateFunction.CollectList,
+        };
+        bool distinct = Take("DISTINCT");
+        bool all = !distinct && Take("ALL");
+        GqlExpression? operand = null;
+        if (Take(TokenType.Asterisk))
+        {
+            if (function != GqlAggregateFunction.Count || distinct || all)
+            { Error("GQL0002", "Only COUNT(*) accepts a star, without a set quantifier.", Previous); }
+        }
+        else { operand = ParsePredicate(); }
+        Expect(TokenType.RightParen, "')'");
+        return new GqlAggregateExpression(function, operand, distinct, Span(start, Previous));
     }
 
     private void RejectUnsupportedParameter(string form)

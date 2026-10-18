@@ -51,8 +51,12 @@ internal static class GqlUnsupportedVocabulary
         new("FINISH", "FINISH", GqlWordPosition.Clause),
         new("NEXT", "NEXT", GqlWordPosition.Clause),
         new("FOR", "FOR", GqlWordPosition.Clause),
-        new("GROUP", "GROUP", GqlWordPosition.Clause),
         new("HAVING", "HAVING", GqlWordPosition.Clause),
+        // ISO statistical aggregates are recognized for a later tier.
+        new("STDDEV_SAMP", "STDDEV_SAMP", GqlWordPosition.Clause),
+        new("STDDEV_POP", "STDDEV_POP", GqlWordPosition.Clause),
+        new("PERCENTILE_CONT", "PERCENTILE_CONT", GqlWordPosition.Clause),
+        new("PERCENTILE_DISC", "PERCENTILE_DISC", GqlWordPosition.Clause),
         new("DATABASE", "DATABASE", GqlWordPosition.Clause),
         new("GRAPH", "GRAPH", GqlWordPosition.Clause),
         new("SCHEMA", "SCHEMA", GqlWordPosition.Clause),

@@ -5,6 +5,7 @@ enumerates and drops logical databases, opens database-bound sessions, and imple
 node, relationship and traversal operations of `GraphDatabase`. A session executes the bounded GQL
 subset, including source-ordered MATCH/OPTIONAL MATCH with null extension, named scalar/list/map parameters, Boolean/arithmetic WHERE and RETURN expressions,
 CASE, COALESCE, NULLIF, list/map constructors and field/index access,
+COUNT, SUM, AVG, MIN, MAX and COLLECT_LIST (Cypher collect), with implicit or ISO GROUP BY,
 RETURN DISTINCT/ALL, star, aliases and standalone RETURN, ORDER BY with explicit null placement,
 OFFSET/SKIP and LIMIT, described in [Graph.Language](../../Assimalign.Cohesion.Database.Graph.Language/docs/DESIGN.md).
 

@@ -52,7 +52,7 @@ public sealed partial class GqlQueryParser
         {
             if ((Current.Type == TokenType.LeftParen || _position + 1 < _tokens.Count && _tokens[_position + 1].Type == TokenType.Equals) && HasComprehensionBar())
             { Unsupported("PATTERN COMPREHENSION", Current); return new GqlListExpression(items); }
-            if (Current.Type is TokenType.Identifier or TokenType.QuotedIdentifier &&
+            if (Current.Type is TokenType.Identifier or TokenType.QuotedIdentifier or TokenType.Function &&
                 _tokens[_position + 1].Text.Equals("IN", StringComparison.OrdinalIgnoreCase))
             { Unsupported("LIST COMPREHENSION", Current); return new GqlListExpression(items); }
             do { items.Add(ParseExpression(0)); } while (!Failed && Take(TokenType.Comma));

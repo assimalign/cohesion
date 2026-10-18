@@ -17,6 +17,8 @@ flowchart LR
 
 `QueryAsync` returns scalar, list and map RETURN expressions (also standalone, DISTINCT/ALL and aliased) and the existing SHOW catalog rows as
 `GraphResultSet`, with column metadata and rows accessible by ordinal or name.
+Aggregates support implicit or ISO GROUP BY and ordering by aggregate aliases. Count is Int64;
+COLLECT_LIST and its collect alias return lists through graph.composite-values negotiation.
 `ExecuteAsync` sends CREATE, INSERT, DELETE, and DETACH DELETE to the engine and returns its
 affected count. The server retains engine ownership, cycle, and database-scoping enforcement.
 

@@ -125,7 +125,8 @@ only the parser hands a list it built to a node without copying it.
 
 Only these clauses occur in `GqlLanguageProfile.Clauses`. The larger reserved keyword table is
 retained for tokenization and targeted unsupported diagnostics; it does not advertise capabilities.
-The builtin-function table is empty because the executor implements no functions.
+The function table advertises the executable aggregates: count, sum, avg, min, max,
+collect_list and its Cypher alias collect. Ordinary scalar functions remain outside this subset.
 
 | Clause | Accepted subset | Execution |
 | --- | --- | --- |
@@ -134,6 +135,7 @@ The builtin-function table is empty because the executor implements no functions
 | `WHERE` | Boolean and scalar expressions: comparisons, labels, AND/OR/XOR/NOT, IS null/truth tests, arithmetic, concatenation, IN lists and string predicates | Keeps TRUE only; see [DIALECT.md](DIALECT.md) and scalar expressions below |
 | `EXPLAIN` | One query with ordered MATCH/OPTIONAL MATCH clauses and RETURN, INSERT/CREATE, or [DETACH] DELETE | Shared description rows without executing any read expansion or write; Cohesion extension |
 | `RETURN` | Optional DISTINCT/ALL, either `*` or value expressions with optional `AS` aliases; also standalone | Projects expressions, expands named bindings in declaration order, then eliminates duplicate tuples for DISTINCT; path requests require one entity or path column |
+| `GROUP BY` | ISO names of non-aggregated RETURN items, equivalent input expressions, or the empty grouping set `()`; omission uses the same implicit keys | Bounded hash grouping before projection, DISTINCT, ordering and paging; aggregate placement and scope are validated before execution |
 | `ORDER BY` | One or more expression keys with optional ASC/ASCENDING/DESC/DESCENDING and NULLS FIRST/LAST after RETURN | Orders projected rows and paths by the total order below, after DISTINCT |
 | `OFFSET` | Unsigned Int64 literal or named parameter after RETURN | Drops the first count rows after ordering |
 | `SKIP` | Cypher spelling of OFFSET | The same offset stage; cannot accompany another OFFSET/SKIP |
@@ -195,6 +197,7 @@ signed       := ('+' | '-') signed | operand
 labeled      := variable (IS [NOT] LABELED | ':') label-expr
 operand      := primary ( '[' predicate ']' | '.' field )*
 primary      := variable ['.' property] | scalar-literal | parameter | labeled | '(' predicate ')'
+              | aggregate '(' ([DISTINCT | ALL] predicate | '*') ')'
               | '[' [predicate (',' predicate)*] ']'
               | '{' [field ':' predicate (',' field ':' predicate)*] '}'
               | CASE [predicate] (WHEN predicate THEN predicate)+ [ELSE predicate] END
@@ -204,7 +207,8 @@ parameter    := ('$' | '@') (identifier | ASCII-digits)
 properties   := '{' [property ':' (scalar-literal | parameter) (',' property ':' (scalar-literal | parameter))*] '}'
 projections  := [DISTINCT | ALL] ('*' | projection (',' projection)*)
 projection   := predicate [AS alias]
-return-tail  := [ORDER BY sort-item (',' sort-item)*] [paging]
+return-tail  := [GROUP BY ('(' ')' | predicate (',' predicate)*)] [ORDER BY sort-item (',' sort-item)*] [paging]
+aggregate    := COUNT | SUM | AVG | MIN | MAX | COLLECT_LIST | COLLECT
 sort-item    := predicate [ASC | ASCENDING | DESC | DESCENDING] [NULLS (FIRST | LAST)]
 paging       := (OFFSET | SKIP) page-value [LIMIT page-value]
               | LIMIT page-value
@@ -445,6 +449,80 @@ orders maps before lists, while storable/ValueGroup.java:62-65 orders text, Bool
 The selected exact numeric rule is the owner
 decision, including within these composites.
 
+## Aggregates and grouping (#1147)
+
+`GqlAggregateExpression(Function, Operand, Distinct)` represents ISO aggregate functions
+separately from scalar calls. A null operand represents COUNT(*); only COUNT permits star,
+and COUNT(DISTINCT *) or COUNT(ALL *) is GQL0002. ALL is the default set quantifier; DISTINCT applies to
+the non-null operand values. Function names remain valid node, edge and path variables,
+property owners and aliases despite lexing as Function tokens. `collect` maps directly to
+`GqlAggregateFunction.CollectList`, the ISO COLLECT_LIST operation.
+
+Every RETURN item without an aggregate is an implicit grouping key. An explicit ISO
+`GROUP BY` lists exactly those items' names, in any order; equivalent input expressions
+are also accepted (structurally duplicate RETURN keys count once). A plain variable resolves
+first to a RETURN item's name; an aggregate item's name is COHDBG001. Other expressions
+retain input scope and cannot contain aggregates. `GROUP BY ()` is the empty grouping set,
+valid only when there are no non-aggregate keys; otherwise it raises the same mismatch error.
+A keyed empty input returns no rows; with no keys an aggregate always returns one row. GROUP BY without aggregates
+eliminates duplicate keys. This implements the owner's grouping default. Mixed aggregate
+expressions may use a key as a subtree or a grouped entity's properties; they cannot
+introduce an ungrouped variable. RETURN aliases are available in GROUP BY as plain grouping
+names and in ORDER BY, where they shadow input variables. RETURN itself retains input scope.
+Computed-expression reuse in ORDER BY excludes expressions referencing redefined variables;
+aggregate operands retain input scope. Function-named list comprehensions keep the recognized
+COHDBL001 LIST COMPREHENSION diagnostic. Recursive aggregate parsing checks the thread stack.
+
+All functions skip NULL values; COUNT(*) counts input rows, including OPTIONAL MATCH's
+null-extended rows. DISTINCT and grouping reuse RETURN's exact numeric, composite and
+entity equality; NULL keys group together. MIN/MAX use ORDER BY's total order, preserve
+the selected value's runtime type and skip top-level NULLs. COLLECT_LIST preserves retained
+input order and duplicates unless DISTINCT is specified; its result is an object array.
+
+| Function | Result type | Empty or all-NULL input |
+| --- | --- | --- |
+| COUNT(*), COUNT(expr), COUNT(DISTINCT expr) | Int64, including wire column metadata | 0 |
+| SUM | Int64 for integral inputs; Double when any retained input is floating; Decimal when any is Decimal or UInt64 (takes precedence over floating) | Int64 0 |
+| AVG | Double for integral/floating inputs, including UInt64; Decimal if any retained input is Decimal | NULL |
+| MIN, MAX | Selected input runtime type | NULL |
+| COLLECT_LIST, collect | List, requiring graph.composite-values on the wire | Empty list |
+
+These numeric types implement the owner's default. Decimal arithmetic converts any mixed
+floating values to Decimal; an unrepresentable conversion fails. Integral/Decimal totals
+are retained exactly until final promotion. Mixed integer/floating SUM converts the exact
+integer quotient to Double once before adding floating values. Exact Decimal SUM retains the
+largest input scale (integral inputs have scale zero); only Decimal averages round once, ties to even,
+to the available Decimal precision. Double averages use a bounded running mean. Invalid
+SUM/AVG operands, non-finite results and numeric overflow are COHDBG013, #1140's value
+error code; a non-numeric operand message names SUM or AVG. Floating inputs outside Decimal's
+range are detected before conversion, avoiding per-row overflow exceptions. Negotiated Graph
+value encoding preserves Decimal scale through parameters and results. Nested aggregates,
+aggregates in WHERE, unequal GROUP BY lists, and ungrouped
+ORDER BY references are COHDBG001 before reading data, including under EXPLAIN. Parameters
+inside aggregate operands are validated even on empty input. ExecutePaths rejects aggregates
+with its existing COHDBG001 path-request message. HAVING, STDDEV_SAMP, STDDEV_POP,
+PERCENTILE_CONT and PERCENTILE_DISC remain precise COHDBL001 capability diagnostics.
+WITH aggregates remain a #1145 hand-off.
+
+Neo4j behavior consulted, no code copied, relative to `C:/Source/repos/neo4j/neo4j`, under
+`community/cypher/interpreted-runtime/src/main/scala/org/neo4j/cypher/internal/runtime/interpreted/pipes/aggregation/`:
+`CountFunction.scala:31-40` skips NULL and returns Long; `SumFunction.scala:36-45` returns
+zero for empty input; `AvgFunction.scala:53-57,69-70` returns NULL or Double and updates
+a running mean; `MinMaxFunction.scala:35-49` retains NULL until a non-null input;
+`CollectFunction.scala:32-43` builds a list and skips NULL. Decimal promotion is Cohesion's
+extension to those numeric types. GraphAggregateTests, GraphAggregateWireTests, the keyword
+corpus and the single function-coverage guard pin the executable surface.
+
+The star production has no set quantifier, as in Neo4j
+`community/cypher/front-end/parser/v25/parser/src/main/antlr4/org/neo4j/cypher/internal/parser/v25/Cypher25Parser.g4:812-813`.
+
+Additional local references consulted, no code copied: Neo4j
+`community/values/src/main/java/org/neo4j/values/utils/ValueMath.java:60-65` adds mixed numeric
+values directly; `community/cypher/front-end/rewriting/src/main/scala/org/neo4j/cypher/internal/rewriting/rewriters/preparatoryRewriters/NormalizeWithAndReturnClauses.scala:315-342`
+guards reuse against redefined variables; `community/cypher/front-end/frontend/src/main/scala/org/neo4j/cypher/internal/frontend/phases/parserTransformers/scoping/AggregationChecker.scala:117-144`
+distinguishes grouping and aggregate aliases. PostgreSQL, under `C:/Source/repos/postgres/postgres`,
+`src/backend/utils/adt/numeric.c:8153` retains the larger numeric input scale.
+
 ## Ordering and paging (#1142)
 
 RETURN accepts `return-tail` in both row and path requests. `GqlQueryExpression.OrderBy`
@@ -503,7 +581,7 @@ GqlOrderPagingTests and GraphOrderPagingWireTests pin the executable surface.
 
 | Code | Meaning |
 | --- | --- |
-| `COHDBL001` | Recognized construct outside the executable profile, reported once at its own span: OPTIONAL block operands, MANDATORY MATCH, procedures, functions, substituted/whole-map parameters, composite properties, comprehensions, slicing, map projections, path quantifiers, standalone ORDER BY/page statements, set operations, NEXT/WITH, server/session scope, undirected (tilde) edges, path mode and path search prefixes, `NODETACH DELETE`, and `MERGE` |
+| `COHDBL001` | Recognized construct outside the executable profile, reported once at its own span: OPTIONAL block operands, MANDATORY MATCH, procedures, scalar functions, HAVING and statistical aggregates (STDDEV_SAMP/POP, PERCENTILE_CONT/DISC), substituted/whole-map parameters, composite properties, comprehensions, slicing, map projections, path quantifiers, standalone ORDER BY/page statements, set operations, NEXT/WITH, server/session scope, undirected (tilde) edges, path mode and path search prefixes, `NODETACH DELETE`, and `MERGE` |
 | `GQL0001` | Empty statement |
 | `GQL0002` | Malformed supported syntax, invalid statement composition, leftover tokens, or a character GQL does not use (`?`, `#`, `^`, ```, ...) |
 | `GQL0003` | Unterminated string, quoted name, or block comment |
@@ -871,7 +949,7 @@ keyword recognition alone never enables it.
 
 Profile.Functions is the executable built-in set, checked by the engine's one function-
 coverage guard: every declared name has a passing live case and every live case has a
-declared name. GQL currently declares none. OQL removes ABS (already recognized by its
+declared name. GQL declares count, sum, avg, min, max, collect_list and collect. OQL removes ABS (already recognized by its
 unsupported table), and its parser/planner membership checks read the profile. OQL's
 [temporary ODMG exemptions were removed by #1126](../../Assimalign.Cohesion.Database.Documents.Language/docs/DESIGN.md#function-declaration-and-diagnostic-delivery-1103).
 

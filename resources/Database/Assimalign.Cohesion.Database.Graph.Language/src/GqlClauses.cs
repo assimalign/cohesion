@@ -23,6 +23,9 @@ public static class GqlClauses
     /// <summary>Projects values from a graph query.</summary>
     public const string Return = "RETURN";
 
+    /// <summary>Groups by exactly the non-aggregated RETURN expressions.</summary>
+    public const string GroupBy = "GROUP BY";
+
     /// <summary>Passes projected values to a following query stage.</summary>
     public const string With = "WITH";
 

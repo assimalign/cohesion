@@ -16,7 +16,7 @@ public class GqlLanguageProfileTests
         profile.Language.ShouldBe("GQL");
         profile.IsCaseSensitive.ShouldBeFalse();
         profile.Keywords.ToArray().ShouldContain("MATCH");
-        profile.Functions.ToArray().ShouldBeEmpty();
+        profile.Functions.ToArray().ShouldBe(["count", "sum", "avg", "min", "max", "collect_list", "collect"]);
     }
 
     [Theory]
@@ -24,6 +24,7 @@ public class GqlLanguageProfileTests
     [InlineData(GqlClauses.OptionalMatch)]
     [InlineData(GqlClauses.Explain)]
     [InlineData(GqlClauses.Return)]
+    [InlineData(GqlClauses.GroupBy)]
     [InlineData(GqlClauses.OrderBy)]
     [InlineData(GqlClauses.Offset)]
     [InlineData(GqlClauses.Skip)]
@@ -66,7 +67,7 @@ public class GqlLanguageProfileTests
     public void Profile_AdvertisesOnlyExecutableClauses()
     {
         GqlLanguageProfile.Instance.Clauses.ShouldBe([
-            GqlClauses.Match, GqlClauses.OptionalMatch, GqlClauses.Explain, GqlClauses.Return, GqlClauses.OrderBy, GqlClauses.Offset, GqlClauses.Skip, GqlClauses.Limit, GqlClauses.Case, GqlClauses.Create, GqlClauses.Insert,
+            GqlClauses.Match, GqlClauses.OptionalMatch, GqlClauses.Explain, GqlClauses.Return, GqlClauses.GroupBy, GqlClauses.OrderBy, GqlClauses.Offset, GqlClauses.Skip, GqlClauses.Limit, GqlClauses.Case, GqlClauses.Create, GqlClauses.Insert,
             GqlClauses.Delete, GqlClauses.DetachDelete, GqlClauses.Where, GqlClauses.Show,
             GqlClauses.LabelExpression]);
     }
