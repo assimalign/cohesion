@@ -4,6 +4,7 @@ using System.Threading;
 using Assimalign.Cohesion.Database;
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Graph;
+using Assimalign.Cohesion.Database.Graph.RecoveryFixture;
 
 if (args.Length != 2) { throw new ArgumentException("Usage: seed|verify directory"); }
 await using var engine = GraphDatabaseEngine.Create("graph-engine", new()
@@ -55,10 +56,10 @@ else if (args[0] == "verify")
         await using var b = (DatabaseResultSet)await session.ExecuteAsync(query);
         count = 0;
         await foreach (var row in b.GetRowsAsync()) { if (row.GetString(0) == "b") { count++; } }
-        if (count != 1) { throw new InvalidOperationException("The original indexed and scanned update version was not recovered."); }
+        if (count != 1) { throw new InvalidOperationException(ErrorMessages.OriginalUpdateMissing); }
     }
     await using var b2 = (DatabaseResultSet)await session.ExecuteAsync("MATCH (b:Person {name:'b2'}) RETURN b.name");
-    await foreach (var row in b2.GetRowsAsync()) { throw new InvalidOperationException("An uncommitted update survived recovery."); }
+    await foreach (var row in b2.GetRowsAsync()) { throw new InvalidOperationException(ErrorMessages.UncommittedUpdateSurvived); }
     if ((await GraphSchema.Open(db, session).GetRelationshipTypesAsync()).Count != 1)
     { throw new InvalidOperationException("Uncommitted relationship metadata survived recovery."); }
     Console.WriteLine("Committed nodes, relationships, adjacency and index recovered; partial writes absent.");

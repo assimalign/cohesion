@@ -122,9 +122,7 @@ same shape, names equal ordinally and chains with the same operands in the same 
 hold for a hand-built tree of any depth. The public chain constructors copy their operand sequence;
 only the parser hands a list it built to a node without copying it.
 
-## Supported-clause matrix
-
-### SET and REMOVE (#1149)
+## SET and REMOVE (#1149)
 
 `GqlSetStage` and `GqlRemoveStage` carry ordered public item variants for scalar properties,
 literal-map replacement/merge and node labels. `SetItems` and `RemoveItems` provide flattened
@@ -139,6 +137,8 @@ Leading SET/REMOVE and nested assignment targets are GQL0002. See [DIALECT.md](D
 for row ordering, NULL, no-op and count semantics. `GqlUpdateParserTests` pins the AST and
 diagnostics; the live profile corpus covers node properties/labels and relationship properties
 for both clauses, followed by verification reads. EXPLAIN describes each update target.
+
+## Supported-clause matrix
 
 Only these clauses occur in `GqlLanguageProfile.Clauses`. The larger reserved keyword table is
 retained for tokenization and targeted unsupported diagnostics; it does not advertise capabilities.
