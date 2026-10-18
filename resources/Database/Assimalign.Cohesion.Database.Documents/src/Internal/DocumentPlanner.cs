@@ -37,6 +37,7 @@ internal sealed partial class DocumentPlanner
     {
         OqlInsertExpression insert => PlanInsert(insert),
         OqlDeleteExpression delete => PlanDelete(delete),
+        OqlUpdateExpression update => PlanUpdate(update),
         OqlSelectExpression select when DocumentSystemCollections.Find(select.Collection) is string name =>
             new DocumentSystemCollectionPlan(CreateLogicalPlan(select), name),
         OqlSelectExpression select => Plan(select),

@@ -247,8 +247,23 @@ public sealed class DocumentClientWireTests
         (await connection.QueryAsync("SELECT META(d).id AS id, d.name FROM items d WHERE category = 'z' ORDER BY id", cancellationToken: harness.Token))
             .Select(row => row[0]).ShouldBe(new object?[] { "e", "f" });
 
+        // UPDATE and UNSET share the command completion and reusable execution-failure path.
+        var updated = await connection.QueryAsync("UPDATE items d SET d.nested.score = 9, d.tags = ['red'] UNSET d.category WHERE category = 'z'", cancellationToken: harness.Token);
+        updated.AffectedCount.ShouldBe(2);
+        updated.ShouldBeEmpty();
+        updated.Documents.ShouldBeEmpty();
+        updated.Columns.ShouldBeEmpty();
+        using var patched = JsonDocument.Parse((await connection.GetAsync("items", "e", harness.Token)).ShouldNotBeNull().Content);
+        patched.RootElement.GetProperty("nested").GetProperty("score").GetInt32().ShouldBe(9);
+        patched.RootElement.TryGetProperty("category", out _).ShouldBeFalse();
+        var failedUpdate = await Should.ThrowAsync<DocumentClientException>(async () => await connection.ExecuteAsync(
+            "UPDATE items SET name.first = 'x' WHERE META().id = 'e'", cancellationToken: harness.Token));
+        failedUpdate.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
+        failedUpdate.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDOC016");
+        (await connection.ExecuteAsync("UPDATE items UNSET tags WHERE nested.score = 9", cancellationToken: harness.Token)).ShouldBe(2);
+
         // DELETE reports affected count in Complete and emits no Document frames.
-        var deleted = await connection.QueryAsync("DELETE FROM items WHERE category = 'z'", cancellationToken: harness.Token);
+        var deleted = await connection.QueryAsync("DELETE FROM items WHERE nested.score = 9", cancellationToken: harness.Token);
         deleted.AffectedCount.ShouldBe(2);
         deleted.ShouldBeEmpty();
         deleted.Documents.ShouldBeEmpty();

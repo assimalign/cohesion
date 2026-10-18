@@ -111,6 +111,10 @@ public sealed partial class OqlQueryParser : QueryParser
             {
                 expression = new OqlExplainExpression(ParseDelete(), Span(start, Previous));
             }
+            else if (Is("UPDATE"))
+            {
+                expression = new OqlExplainExpression(ParseUpdate(), Span(start, Previous));
+            }
             else
             {
                 _diagnostics.Add(QueryDiagnostics.UnsupportedClause($"EXPLAIN {Current.Text}", Profile.Language, Span(start, Current)));
@@ -128,6 +132,10 @@ public sealed partial class OqlQueryParser : QueryParser
         else if (Is("DELETE"))
         {
             expression = ParseDelete();
+        }
+        else if (Is("UPDATE"))
+        {
+            expression = ParseUpdate();
         }
         else if (IsIndexStatement("CREATE"))
         {
@@ -147,7 +155,7 @@ public sealed partial class OqlQueryParser : QueryParser
         }
         else
         {
-            Error("OQL0002", "Expected SELECT, INSERT, DELETE, CREATE INDEX, DROP INDEX, CREATE COLLECTION, or DROP COLLECTION.", Current);
+            Error("OQL0002", "Expected SELECT, INSERT, UPDATE, DELETE, CREATE INDEX, DROP INDEX, CREATE COLLECTION, or DROP COLLECTION.", Current);
             expression = EmptyExpression();
         }
 
@@ -205,8 +213,9 @@ public sealed partial class OqlQueryParser : QueryParser
         List<(string, Lexeme)> result = [];
         int statementStart = IsWord(_tokens[0], "EXPLAIN") ? 1 : 0;
         bool statementWithoutQuery = statementStart < _tokens.Count &&
-            (IsWord(_tokens[statementStart], "DELETE") || IsWord(_tokens[statementStart], "CREATE") ||
+            (IsWord(_tokens[statementStart], "DELETE") || IsWord(_tokens[statementStart], "UPDATE") || IsWord(_tokens[statementStart], "CREATE") ||
                 IsWord(_tokens[statementStart], "DROP"));
+        var (updateHeaderEnd, updateClause) = FindUpdateClause(statementStart);
         bool selected = false;
         int parentheses = 0;
         bool inSelectList = false;
@@ -238,6 +247,10 @@ public sealed partial class OqlQueryParser : QueryParser
             }
 
             string value = token.Text.ToUpperInvariant();
+            // UPDATE's parsed destination and alias keep ordinary contextual names such
+            // as use. SET is exempt only at the assignment-clause token after that header;
+            // SET(...) elsewhere still refuses.
+            if (index > statementStart && (index < updateHeaderEnd || index == updateClause)) { continue; }
 
             // DISTINCT/ALL are legal only directly after SELECT, including INSERT SELECT.
             if (openQuantifiers == 0 && value is "DISTINCT" or "ALL")
@@ -339,6 +352,22 @@ public sealed partial class OqlQueryParser : QueryParser
                 continue;
             }
 
+            if (value == "FOR" && statementStart < _tokens.Count && IsWord(_tokens[statementStart], "UPDATE"))
+            {
+                AddUnsupported(result, "FOR", token);
+                break;
+            }
+            if (statementStart < _tokens.Count && IsWord(_tokens[statementStart], "UPDATE"))
+            {
+                if (value == "USE" && EndsOperand(index - 1))
+                {
+                    AddUnsupported(result, "USE", token);
+                    break;
+                }
+                // Keep the UPDATE grammar responsible for its own LIMIT refusal.
+                if (value == "LIMIT") { continue; }
+            }
+
             if (value == "IN" && index + 1 < _tokens.Count && _tokens[index + 1].Type != TokenType.LeftParen)
             {
                 AddUnsupported(result, "IN array form", token);
@@ -382,7 +411,7 @@ public sealed partial class OqlQueryParser : QueryParser
             result.Add((word.Construct, reported));
 
             // A statement that does not start as OQL is one unsupported construct; the rest of
-            // its text belongs to it (UPDATE c SET ..., MERGE INTO c USING ...).
+            // its text belongs to it (MERGE INTO c USING ...).
             if (index == 0)
             {
                 break;
@@ -394,6 +423,21 @@ public sealed partial class OqlQueryParser : QueryParser
                 selected = false;
             }
         }
+        return result;
+    }
+
+    private (int HeaderEnd, int Clause) FindUpdateClause(int start)
+    {
+        if (start >= _tokens.Count || !IsWord(_tokens[start], "UPDATE")) { return (-1, -1); }
+        int saved = _position;
+        int diagnostics = _diagnostics.Count;
+        _position = start + 1;
+        CollectionName();
+        if (Take("AS")) { Identifier(); }
+        else if (IsUpdateAlias()) { Identifier(); }
+        var result = (_position, Is("SET") || Is("UNSET") ? _position : -1);
+        _position = saved;
+        _diagnostics.RemoveRange(diagnostics, _diagnostics.Count - diagnostics);
         return result;
     }
 

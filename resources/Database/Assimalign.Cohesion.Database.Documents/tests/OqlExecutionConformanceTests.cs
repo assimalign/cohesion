@@ -35,6 +35,17 @@ public sealed class OqlExecutionConformanceTests
                     VerificationStatement: "SELECT absent IS MISSING AS absent_value, null_value IS NULL AS null_value FROM items WHERE META().id = 'object'",
                     ExpectedAffectedCount: 1),
             ],
+            [OqlClauses.Update] =
+            [
+                new("UPDATE items SET amount = amount + 1, details.score = 9 WHERE category = 'a'",
+                    [["alpha", 3m, 9m], ["beta", 7m, 9m], ["delta", null, 9m], ["gamma", 4m, 2m]],
+                    VerificationStatement: "SELECT name, amount, details.score AS score FROM items ORDER BY name", ExpectedAffectedCount: 3),
+            ],
+            [OqlClauses.Unset] =
+            [
+                new("UPDATE items UNSET tags WHERE name = 'delta'", [[true]],
+                    VerificationStatement: "SELECT tags IS MISSING FROM items WHERE name = 'delta'", ExpectedAffectedCount: 1),
+            ],
             [OqlClauses.Delete] =
             [
                 new("DELETE FROM items WHERE category = 'a'", [["gamma"]],
@@ -307,6 +318,8 @@ public sealed class OqlExecutionConformanceTests
         OqlClauses.Explain => expression is OqlExplainExpression,
         OqlClauses.Insert => expression is OqlInsertExpression,
         OqlClauses.Delete => expression is OqlDeleteExpression,
+        OqlClauses.Update => expression is OqlUpdateExpression,
+        OqlClauses.Unset => expression is OqlUpdateExpression { Unset.Count: > 0 },
         OqlClauses.Values => expression is OqlInsertExpression { Values.Count: > 0 },
         OqlClauses.Select => expression is OqlSelectExpression { Projections.Count: > 0 },
         OqlClauses.Distinct => expression is OqlSelectExpression { IsDistinct: true },

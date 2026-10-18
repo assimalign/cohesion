@@ -87,10 +87,14 @@ sequenceDiagram
 `DocumentResultSet` exposes ordinal/name-indexed rows, columns and `AffectedCount`. Queries use
 `-1`; collection and index DDL use zero. INSERT uses the inserted-document count and emits
 no Document frames. DELETE uses the deleted-document count, including zero, and likewise
-emits only Complete. Its scan/seek selection, full-predicate filtering and rollback behavior
+emits only Complete. UPDATE uses the matched-document count, including byte-identical rewrites
+and no-op UNSET, with fresh versions for every match. SET and UNSET preserve the engine's
+nested-path, array-index, MISSING and atomicity rules. Invalid paths return ExecutionFailure
+with COHDOC016 and leave the connection reusable. EXPLAIN UPDATE describes its access path
+without writing. DELETE's scan/seek selection, full-predicate filtering and rollback behavior
 are the embedded engine's. EXPLAIN DELETE includes its chosen access without mutating.
 Duplicate keys preserve COHDOC012 as ExecutionFailure and the next statement can reuse the
-session. The advertised-clause suite covers VALUES, SELECT, DELETE and META.
+session. The advertised-clause suite covers VALUES, SELECT, UPDATE, UNSET, DELETE and META.
 The advertised-predicate corpus also covers IN, BETWEEN, LIKE, searched/simple
 CASE, grouped CASE and CASE under SUM over InMemory and TCP. It preserves embedded rows,
 MISSING versus NULL, COHDOC013 and reuse after a malformed LIKE pattern.

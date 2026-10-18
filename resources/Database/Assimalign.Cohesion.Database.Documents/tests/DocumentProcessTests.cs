@@ -1,8 +1,13 @@
 using System;
+using System.Buffers.Binary;
 using System.Diagnostics;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
+
+using Assimalign.Cohesion.Database.Indexing;
+using Assimalign.Cohesion.Database.Transactions;
+using Assimalign.Cohesion.Database.Types;
 using Shouldly;
 using Xunit;
 
@@ -10,22 +15,57 @@ namespace Assimalign.Cohesion.Database.Documents.Tests;
 
 public sealed class DocumentProcessTests
 {
-    [Fact]
-    public async Task Committed_document_and_secondary_index_survive_process_exit_without_disposal()
+    [Fact(DisplayName = "Cohesion Test [Documents] - Recovery: committed mutations and raw index entries survive while abandoned writes disappear")]
+    public async Task Run_ProcessTermination_ShouldRecoverContentAndRawIndexAsync()
     {
+        // Arrange
         string root = Path.Combine(Path.GetTempPath(), "cohesion-document-crash-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
         try
         {
-            await Run("seed", root);
-            await Run("verify", root);
+            // Act
+            await RunAsync("seed", root);
+            await RunAsync("verify", root);
+            // Assert
+            await VerifyRawIndexAsync(root);
             // The recovery checkpoint must itself leave a clean reusable file set.
-            await Run("verify", root);
+            await RunAsync("verify", root);
         }
         finally { Directory.Delete(root, recursive: true); }
     }
 
-    private static async Task Run(string mode, string root)
+    private static async Task VerifyRawIndexAsync(string root)
+    {
+        // SearchIndexAsync filters catalog tombstones; only a raw cursor can expose leftover old keys.
+        await using var engine = DocumentDatabaseEngine.Create("document-recovery-index", new() { RootPath = root });
+        var database = await engine.OpenDatabaseAsync("crash", CancellationToken.None);
+        var latest = new TransactionSnapshot(TransactionSequence.None, TransactionSequence.None, new TransactionSequence(ulong.MaxValue), []);
+        var metadata = database.Catalog.GetIndexes(database.Catalog.FindCollection("items", latest).ShouldNotBeNull().Id, latest).ShouldHaveSingleItem();
+        using var registrations = database.DataStorage.GetUnitIterator(1);
+        registrations.MoveNext().ShouldBeTrue();
+        var bytes = registrations.Current.Data;
+        bytes.Span[16].ShouldBe((byte)5);
+        BinaryPrimitives.ReadUInt64LittleEndian(bytes.Span[18..]).ShouldBe(metadata.ObjectId);
+        long rootPage = BinaryPrimitives.ReadInt64LittleEndian(bytes.Span[26..]);
+        registrations.MoveNext().ShouldBeFalse();
+        var manager = BTreeIndexManager.Create(new BTreeIndexManagerOptions
+        {
+            Storage = database.DataStorage,
+            TransactionSource = _ => throw new InvalidOperationException("The recovery assertion only reads the tree."),
+            ExistingIndexes = [new BTreeIndexRegistration(metadata.ObjectId, new IndexDefinition(metadata.Name), rootPage)]
+        });
+        manager.TryGetIndex(metadata.ObjectId, metadata.Name, out var tree).ShouldBeTrue();
+        foreach (var (rank, count) in new[] { (1m, 0), (11m, 1), (99m, 0), (2m, 0), (3m, 1) })
+        {
+            var key = IndexKey.From(new DatabaseKeyWriter().AppendDecimal(rank));
+            await using var cursor = tree.OpenCursor(latest, new IndexKeyRange(key, key, true, true));
+            int actual = 0;
+            while (await cursor.MoveNextAsync(CancellationToken.None)) { actual++; }
+            actual.ShouldBe(count, $"Recovered raw entries for rank {rank}");
+        }
+    }
+
+    private static async Task RunAsync(string mode, string root)
     {
         string fixture = Path.Combine(AppContext.BaseDirectory, "DocumentRecoveryFixture", "Assimalign.Cohesion.Database.Documents.RecoveryFixture.dll");
         var info = new ProcessStartInfo("dotnet") { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };

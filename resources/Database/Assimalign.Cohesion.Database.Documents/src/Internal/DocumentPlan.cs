@@ -11,6 +11,9 @@ internal sealed record DocumentLogicalPlan(OqlSelectExpression Query, IReadOnlyL
 internal sealed record DocumentPlan(DocumentLogicalPlan Logical, DocumentCollectionMetadata Collection, DocumentAccessPath Access) : DocumentStatementPlan;
 internal sealed record DocumentSystemCollectionPlan(DocumentLogicalPlan Logical, string Name) : DocumentStatementPlan;
 internal sealed record DocumentDeletePlan(DocumentCollectionMetadata Collection, OqlDeleteExpression Statement, DocumentAccessPath Access) : DocumentStatementPlan;
+internal sealed record DocumentUpdatePlan(DocumentCollectionMetadata Collection, OqlUpdateExpression Statement,
+    IReadOnlyList<DocumentUpdateTarget> Targets, DocumentAccessPath Access) : DocumentStatementPlan;
+internal sealed record DocumentUpdateTarget(OqlPathExpression Path, IReadOnlyList<OqlPathSegment> Segments, OqlExpression? Value);
 internal sealed record DocumentInsertPlan(DocumentCollectionMetadata Collection, OqlInsertExpression Statement) : DocumentStatementPlan;
 internal sealed record DocumentInsertSelectPlan(DocumentCollectionMetadata Collection, OqlInsertExpression Statement,
     DocumentStatementPlan Source, int KeyOrdinal, int? ValueOrdinal) : DocumentStatementPlan;

@@ -46,8 +46,10 @@ Lexical recognition preserves the established vocabulary so rejected constructs 
 | `SELECT VALUE` | Yes | One bare expression; RAW is a synonym |
 | `OBJECT CONSTRUCTOR` | Yes | Named members in braces; last non-MISSING member wins |
 | `ARRAY CONSTRUCTOR` | Yes | Expressions in brackets; MISSING elements become NULL |
-| `EXPLAIN` | Yes | `EXPLAIN SELECT`, `EXPLAIN INSERT` or `EXPLAIN DELETE` describes the plan without reading document data or writing |
+| `EXPLAIN` | Yes | SELECT, INSERT, UPDATE or DELETE plan description without reading document data or writing |
 | `INSERT` | Yes | Explicit KEY/VALUE pairs, or KEY and optional VALUE bindings to SELECT output names |
+| `UPDATE` | Yes | One collection, optional alias, SET assignments and/or UNSET paths, optional WHERE |
+| `UNSET` | Yes | Removes properties in UPDATE; a final array index is invalid |
 | `DELETE` | Yes | `DELETE FROM collection [AS? alias] [WHERE expression]`; keeps the collection and indexes |
 | `VALUES` | Yes | One or more parenthesized key/value pairs for INSERT |
 | `FROM` | Yes | Exactly one unqualified collection or reserved `COHESION_SCHEMA` source and optional iteration variable, with or without `AS` |
@@ -63,7 +65,7 @@ Lexical recognition preserves the established vocabulary so rejected constructs 
 | `DROP COLLECTION` | Yes | One database-local collection, optionally `IF EXISTS` |
 | `CREATE INDEX` | Yes | One named, nonunique index over one document path in one collection |
 | `DROP INDEX` | Yes | One named index in one collection; the `ON` qualifier is required |
-| `SUBQUERY` | No | A nested `SELECT` reports this capability name at the inner keyword, including every SELECT in DELETE or INSERT VALUES, with or without EXPLAIN |
+| `SUBQUERY` | No | A nested `SELECT` reports this capability name at the inner keyword, including UPDATE SET/WHERE, DELETE and INSERT VALUES, with or without EXPLAIN |
 | `LIMIT`, `OFFSET` | No (pin) | SQL++ row limits; oql-limit-offset flips the pin |
 | `UPSERT` | No (pin) | SQL++ document write; oql-upsert flips the pin |
 | `MERGE` | No (pin) | SQL++ merge; stays a pin with no T1 item lifting it, and #1101 owns it |
@@ -166,8 +168,11 @@ rejected only as calls. All eight freed names can be projected as unquoted field
 `FIRST`, `LAST` and `UNIQUE` retain SQL++ reservations and report COHDBL001 wherever a
 reserved unsupported word does; UNIQUE's index meaning belongs to oql-index-ddl.
 `UNDEFINED` stays reserved and rejected, never a MISSING synonym. `NIL` remains a NULL synonym.
-SET remains reserved (its UPDATE meaning belongs to oql-update), as do ARRAY, COLLECTION,
-FOR, SOME and ANY. COLLECTION retains its collection-DDL meaning. KNOWN and UNKNOWN are
+SET and UNSET are reserved for UPDATE assignments and removals. Only SET immediately after
+UPDATE's destination and optional alias is exempt from the unsupported-word scan; SET calls
+in SELECT, UPDATE right-hand sides or WHERE still report COHDBL001. Property segments such as
+`d.set` remain names. ARRAY, COLLECTION, FOR, SOME and ANY remain reserved.
+COLLECTION retains its collection-DDL meaning. KNOWN and UNKNOWN are
 reserved but deferred; `IS KNOWN` and `IS UNKNOWN` report COHDBL001 at that word.
 
 Removing public `OqlClauses.Define`, `Element` and `Flatten` is an intentional source/binary
@@ -224,7 +229,7 @@ Composite/UNIQUE index keys belong to oql-index-ddl.
 ## Grammar, statement, and expression trees
 
 ```text
-statement    := (query | insert | delete | EXPLAIN (query | insert | delete) | create-collection | drop-collection | create-index | drop-index) [';']
+statement    := (query | insert | update | delete | EXPLAIN (query | insert | update | delete) | create-collection | drop-collection | create-index | drop-index) [';']
 query        := SELECT [ALL | DISTINCT] select-kind FROM collection [AS? identifier]
                 [WHERE expression] [GROUP BY expression (',' expression)*]
                 [HAVING expression] [ORDER BY ordering (',' ordering)*]
@@ -233,6 +238,10 @@ insert       := INSERT INTO collection [AS identifier] '(' KEY ',' VALUE ')'
                 VALUES '(' expression ',' expression ')' (',' '(' expression ',' expression ')')*
               | INSERT INTO collection [AS identifier] '(' KEY identifier [',' VALUE identifier] ')' query
 delete       := DELETE FROM collection [AS? identifier] [WHERE expression]
+update       := UPDATE collection [AS? identifier] (set [unset] | unset) [WHERE expression]
+set          := SET assignment (',' assignment)*
+assignment   := path '=' expression
+unset        := UNSET path (',' path)*
 object       := '{' [(string | identifier) ':' expression (',' (string | identifier) ':' expression)*] '}'
 metadata     := META '(' [identifier] ')' '.' (id | version)
 create-collection := CREATE COLLECTION [IF NOT EXISTS] collection
@@ -260,7 +269,7 @@ there is no iteration alias in an index statement. Index and collection names fo
 identifier quoting and case-preservation rules as query collection names.
 
 `OqlQueryStatement` wraps one top-level `OqlExpression`: `OqlSelectExpression`,
-`OqlExplainExpression` (one SELECT, INSERT or DELETE), `OqlInsertExpression`, `OqlDeleteExpression`,
+`OqlExplainExpression` (one SELECT, INSERT, UPDATE or DELETE), `OqlInsertExpression`, `OqlUpdateExpression`, `OqlDeleteExpression`,
 `OqlCreateCollectionExpression`, `OqlDropCollectionExpression`, `OqlCreateIndexExpression`, or
 `OqlDropIndexExpression`. Collection nodes retain `Name` and `IfNotExists`/`IfExists`.
 Index creation retains its target as an `OqlPathExpression`, rather than flattening the path during
@@ -346,7 +355,7 @@ disposable resources beyond those used by the shared analyzer pipeline.
 
 ## EXPLAIN (#1104)
 
-SQL++'s `EXPLAIN SELECT`, `EXPLAIN INSERT` and `EXPLAIN DELETE` spellings produce the shared plan-description columns documented by
+SQL++'s EXPLAIN for SELECT, INSERT, UPDATE and DELETE produces the shared plan-description columns documented by
 [Execution](../../Assimalign.Cohesion.Database.Execution/docs/DESIGN.md#plan-descriptions-1104).
 `OqlExplainExpression.Statement` retains the query for ordinary parameter validation and
 planning. The parser rejects DDL, transaction control, nested EXPLAIN and EXPLAIN ANALYZE with
@@ -433,6 +442,25 @@ The engine design documents the field shapes, snapshot visibility, and read-only
 `DROP DATABASE`, `USE`, and other SQL data-mutation/transaction commands are unsupported.
 Multiple statements per parse are rejected. Logical database creation and deletion remain
 engine-side C# operations.
+
+### UPDATE (#1133)
+
+The [SQL++ UPDATE statement](https://docs.couchbase.com/server/current/n1ql/n1ql-language-reference/update.html)
+supplies the SET/UNSET clause shape. This T1 profile requires at least one assignment or removal.
+`OqlUpdateExpression` retains Collection, Alias, Assignments, Unset, Predicate and the statement
+span. Each `OqlUpdateAssignment` retains its Path, Value and complete assignment span; path and
+value nodes retain their own spans. Targets use ordinary nested, bracket-string and integer-index
+paths, including `d['odd.name']`, `d.set` and aliased array roots such as `d[0].name`.
+Planning rejects root replacement, duplicate/prefix-overlapping paths (after stripping the alias),
+and UNSET ending in an index. Every right-hand side reads the original document. SET-to-MISSING
+removes a property; an array element assigned MISSING becomes NULL. The engine design records
+creation, shape failure, ordering, depth, version and transaction rules.
+
+WHERE and SET values share ordinary parameter, numeric and META validation, and reject aggregates.
+Subqueries in either clause report COHDBL001 naming SUBQUERY at the inner SELECT, including under
+EXPLAIN. USE KEYS, RETURNING and FOR comprehensions remain COHDBL001 at USE, RETURNING or FOR.
+UPDATE's grammar itself refuses LIMIT, independently of SELECT capabilities. An update returns
+the matched-document count without rows; EXPLAIN UPDATE describes its scan or seek without writing.
 
 ### DELETE (#1132)
 

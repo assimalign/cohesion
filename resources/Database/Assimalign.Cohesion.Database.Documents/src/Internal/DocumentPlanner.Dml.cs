@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 
@@ -7,6 +8,51 @@ namespace Assimalign.Cohesion.Database.Documents.Internal;
 
 internal sealed partial class DocumentPlanner
 {
+    private DocumentUpdatePlan PlanUpdate(OqlUpdateExpression update)
+    {
+        DocumentSystemCollections.EnsureReadOnly(update.Collection, update.Location);
+        var collection = ResolveCollection(update.Collection, update.Location);
+        var targets = new List<DocumentUpdateTarget>();
+        foreach (var assignment in update.Assignments)
+        {
+            Add(assignment.Path, assignment.Value);
+            ValidateMetadata(assignment.Value, update.Alias, storedSource: true);
+            Validate(assignment.Value, allowAggregate: false);
+        }
+        foreach (var path in update.Unset) { Add(path, null); }
+        if (targets.Count == 0)
+        {
+            throw new DocumentPlanningException("COHDOC016", ErrorMessages.UpdateTargetsMissing, update.Location);
+        }
+        if (update.Predicate is { } predicate)
+        {
+            ValidateMetadata(predicate, update.Alias, storedSource: true);
+            Validate(predicate, allowAggregate: false);
+        }
+        return new DocumentUpdatePlan(collection, update, targets.AsReadOnly(),
+            ChooseAccess(update.Predicate, update.Alias, _catalog.GetIndexes(collection.Id, _snapshot)));
+
+        void Add(OqlPathExpression path, OqlExpression? value)
+        {
+            var segments = PathSegments(path, update.Alias).ToArray();
+            if (segments.Length == 0 ||
+                segments.Any(segment => (segment.Name is null) == (segment.Index is null) || segment.Index < 0) ||
+                value is null && segments[^1].Index is not null)
+            {
+                throw new DocumentPlanningException("COHDOC016", ErrorMessages.UpdateTargetInvalid, path.Location);
+            }
+            foreach (var existing in targets)
+            {
+                int common = System.Math.Min(existing.Segments.Count, segments.Length);
+                if (existing.Segments.Take(common).SequenceEqual(segments.Take(common)))
+                {
+                    throw new DocumentPlanningException("COHDOC017", ErrorMessages.UpdateTargetsOverlap, path.Location);
+                }
+            }
+            targets.Add(new DocumentUpdateTarget(path, segments, value));
+        }
+    }
+
     private DocumentDeletePlan PlanDelete(OqlDeleteExpression delete)
     {
         DocumentSystemCollections.EnsureReadOnly(delete.Collection, delete.Location);

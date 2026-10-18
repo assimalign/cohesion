@@ -52,6 +52,11 @@
   <data name="InsertOutputMissing" xml:space="preserve"><value>INSERT binding '{0}' must name a SELECT output column.</value></data>
   <data name="MetaContextInvalid" xml:space="preserve"><value>META requires a stored document source, an optional matching source alias, and the member id or version.</value></data>
   <data name="InsertJsonInvalid" xml:space="preserve"><value>INSERT JSON must be valid and nested no deeper than 128 levels.</value></data>
+  <data name="UpdateTargetsMissing" xml:space="preserve"><value>UPDATE requires at least one SET assignment or UNSET path.</value></data>
+  <data name="UpdateTargetInvalid" xml:space="preserve"><value>UPDATE targets must be non-root document paths; UNSET must end in a property name.</value></data>
+  <data name="UpdateTargetsOverlap" xml:space="preserve"><value>UPDATE targets must not repeat or overlap, including across SET and UNSET.</value></data>
+  <data name="UpdatePathShapeInvalid" xml:space="preserve"><value>UPDATE path '{0}' requires an object for each property segment and an existing array with an in-range index for each index segment.</value></data>
+  <data name="UpdateJsonInvalid" xml:space="preserve"><value>UPDATE JSON must be valid and nested no deeper than 128 levels.</value></data>
   <data name="NumberOutsideDecimalDomain" xml:space="preserve"><value>OQL numbers must fit the decimal scalar domain exactly, without rounding or underflow.</value></data>
   <data name="LikeEscapeInvalid" xml:space="preserve"><value>LIKE ESCAPE must be empty or one Unicode scalar.</value></data>
   <data name="LikeTrailingEscape" xml:space="preserve"><value>LIKE pattern must not end with the escape character.</value></data>

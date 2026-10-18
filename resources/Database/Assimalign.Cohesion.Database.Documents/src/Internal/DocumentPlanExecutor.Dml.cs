@@ -14,6 +14,38 @@ namespace Assimalign.Cohesion.Database.Documents.Internal;
 
 internal static partial class DocumentPlanExecutor
 {
+    private static async ValueTask<DatabaseResult> ExecuteUpdateAsync(DocumentDatabase database, DocumentOperation operation,
+        DocumentUpdatePlan plan, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
+    {
+        var filter = new DocumentExpressionEvaluator(plan.Statement.Alias, parameters, cancellationToken);
+        var evaluator = new DocumentExpressionEvaluator(plan.Statement.Alias, parameters, cancellationToken, forUpdate: true);
+        var candidates = await ReadCandidatesAsync(database, operation, plan.Collection, plan.Access, cancellationToken).ConfigureAwait(false);
+        var pending = new List<(DocumentId Id, byte[] Content)>();
+        // Freeze membership and every RHS against the statement snapshot before writing.
+        // An indexed field may move across the seek range without revisiting its document.
+        foreach (var entry in candidates.OrderBy(entry => entry.Id, StringComparer.Ordinal))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            operation.EnsureActive();
+            var document = database.ReadDocument(entry);
+            using var json = JsonDocument.Parse(document.Content, new JsonDocumentOptions { MaxDepth = 128 });
+            var context = new DocumentEvaluationContext(json.RootElement, entry.Id, entry.Version);
+            if (!filter.Matches(plan.Statement.Predicate, context)) { continue; }
+            var values = plan.Targets.Select(target => target.Value is null ? DocumentMissing.Instance : evaluator.Evaluate(target.Value, context)).ToArray();
+            pending.Add((document.Id, DocumentJsonPatcher.Patch(json.RootElement, plan.Targets, values, cancellationToken)));
+        }
+        var collection = new DocumentCollection(database, plan.Collection, operation.Session);
+        foreach (var document in pending)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            operation.EnsureActive();
+            await collection.WriteAsync(operation.Context, document.Id, document.Content, null,
+                insertOnly: false, cancellationToken).ConfigureAwait(false);
+        }
+        cancellationToken.ThrowIfCancellationRequested();
+        return new DocumentCommandResult(pending.Count);
+    }
+
     private static async ValueTask<DatabaseResult> ExecuteDeleteAsync(DocumentDatabase database, DocumentOperation operation,
         DocumentDeletePlan plan, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
     {

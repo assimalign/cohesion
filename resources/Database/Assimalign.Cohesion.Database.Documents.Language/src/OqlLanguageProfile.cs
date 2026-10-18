@@ -32,8 +32,8 @@ public static class OqlLanguageProfile
         "FOR", "SOME", "ANY",
         // Literals / Constants
         "NULL", "MISSING", "NIL", "UNDEFINED", "TRUE", "FALSE",
-        // Collection constructors
-        "SET", "ARRAY", "COLLECTION",
+        // Collection constructors and partial-update clauses
+        "SET", "UNSET", "ARRAY", "COLLECTION",
         // Object / Collection operations
         "FIRST", "LAST", "UNIQUE",
     ];
@@ -52,6 +52,8 @@ public static class OqlLanguageProfile
         OqlClauses.CreateIndex,
         OqlClauses.DropIndex,
         OqlClauses.Insert,
+        OqlClauses.Update,
+        OqlClauses.Unset,
         OqlClauses.Delete,
         OqlClauses.Values,
         OqlClauses.Select,
