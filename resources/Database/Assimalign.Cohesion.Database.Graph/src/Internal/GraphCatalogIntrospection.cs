@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 
 using Assimalign.Cohesion.Database.Execution;
@@ -14,7 +15,8 @@ internal static class GraphCatalogIntrospection
         GqlQueryExpression query, GqlCatalogSurface surface, CancellationToken token)
     {
         // A hand-built AST must obey the same read-only rule as a parsed SHOW statement.
-        if (query.Creates.Count != 0 || query.DeleteVariables.Count != 0 || query.DetachDelete)
+        if (query.Creates.Count != 0 || query.DeleteVariables.Count != 0 || query.DetachDelete ||
+            query.Stages.Any(stage => stage is GqlInsertStage or GqlDeleteStage))
         {
             throw new GraphPlanningException("GQL0007", "Graph catalog introspection is read-only.", query.Location);
         }

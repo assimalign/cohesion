@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using Assimalign.Cohesion.Database.Language;
@@ -46,12 +47,14 @@ public sealed class GqlQueryExpression : GqlExpression
     /// <summary>Initializes a source-ordered linear statement.</summary>
     /// <param name="stages">The operations, including NEXT segment boundaries.</param>
     /// <param name="location">The statement source span.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="stages"/> is null.</exception>
     public GqlQueryExpression(IReadOnlyList<GqlStage> stages, Location? location = null) : base(location)
     {
+        ArgumentNullException.ThrowIfNull(stages);
         _stages = stages;
         MatchClauses = stages.OfType<GqlMatchStage>().Select(stage => stage.Clause).ToArray();
-        Creates = stages.OfType<GqlInsertStage>().SelectMany(stage => stage.Paths).ToArray();
-        DeleteVariables = stages.OfType<GqlDeleteStage>().SelectMany(stage => stage.Variables).ToArray();
+        Creates = stages.OfType<GqlInsertStage>().SelectMany(stage => stage.Paths ?? []).ToArray();
+        DeleteVariables = stages.OfType<GqlDeleteStage>().SelectMany(stage => stage.Variables ?? []).ToArray();
         DetachDelete = stages.OfType<GqlDeleteStage>().Any(stage => stage.Detach);
         var final = stages.LastOrDefault() as GqlReturnStage;
         Projections = final?.Projections ?? [];
@@ -73,7 +76,7 @@ public sealed class GqlQueryExpression : GqlExpression
             if (MatchClauses is not null)
             { foreach (var clause in MatchClauses) { stages.Add(new GqlMatchStage(clause)); } }
             if (Creates.Count != 0) { stages.Add(new GqlInsertStage(Creates)); }
-            if (DeleteVariables.Count != 0) { stages.Add(new GqlDeleteStage(DeleteVariables, DetachDelete)); }
+            if (DeleteVariables.Count != 0 || DetachDelete) { stages.Add(new GqlDeleteStage(DeleteVariables, DetachDelete)); }
             if (Projections.Count != 0 || ReturnStar || SetQuantifier != GqlSetQuantifier.All || GroupBy is not null || OrderBy is null || OrderBy.Count != 0 || Offset is not null || Limit is not null)
             {
                 stages.Add(new GqlReturnStage(Projections) { SetQuantifier = SetQuantifier, ReturnStar = ReturnStar,

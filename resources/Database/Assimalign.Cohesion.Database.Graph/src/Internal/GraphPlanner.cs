@@ -130,6 +130,10 @@ internal sealed partial class GraphPlanner
         {
             token.ThrowIfCancellationRequested();
             var stage = stages[stageIndex];
+            if (stage is GqlInsertStage { Paths: null or { Count: 0 } } or
+                GqlDeleteStage { Variables: null or { Count: 0 } } or
+                GqlReturnStage { Projections: null })
+            { throw new GraphPlanningException("COHDBG001", ErrorMessages.StageUnsupported, stage.Location ?? statement.Location); }
             query = StageQuery(stage, statement.Location);
             orderAliases = null;
             orderProjections = null;

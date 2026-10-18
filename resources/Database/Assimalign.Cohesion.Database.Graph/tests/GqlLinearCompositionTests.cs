@@ -203,6 +203,11 @@ public sealed class GqlLinearCompositionTests
         var database = await engine.CreateDatabaseAsync("graph", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         GqlStage[][] malformed = [
+            [new GqlInsertStage([])],
+            [new GqlInsertStage(null!)],
+            [new GqlDeleteStage([])],
+            [new GqlDeleteStage(null!)],
+            [new GqlReturnStage(null!)],
             [new GqlLetStage(null!), new GqlReturnStage([new GqlProjection(new GqlLiteralExpression(1L))])],
             [new GqlFilterStage(null!), new GqlReturnStage([new GqlProjection(new GqlLiteralExpression(1L))])],
             [new GqlForStage("x", null!), new GqlReturnStage([new GqlProjection(new GqlLiteralExpression(1L))])],
@@ -220,6 +225,10 @@ public sealed class GqlLinearCompositionTests
         var rejected = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(
             new GraphQueryRequest(new GqlQueryStatement(show)), CancellationToken.None));
         rejected.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG001");
+        var catalogWrite = new GqlQueryExpression([new GqlInsertStage([])]) { CatalogSurface = GqlCatalogSurface.Labels };
+        var writeRejected = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(
+            new GraphQueryRequest(new GqlQueryStatement(catalogWrite)), CancellationToken.None));
+        writeRejected.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("GQL0007");
     }
 
     private static async Task<(string[] Names, DatabaseType[] Types, List<object?[]> Rows)> Rows(GraphDatabaseSession session,
