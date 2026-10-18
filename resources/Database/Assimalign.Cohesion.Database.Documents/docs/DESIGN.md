@@ -957,6 +957,8 @@ Co-located tests cover nested/mixed JSON, expected-version writes, explicit comm
 and rollback, both isolation levels, cross-database/session guards, direct-marked
 schema ownership, indexed-versus-scanned queries, and file reopen. Storage/catalog
 tests exercise crash images with committed and abandoned writes and index recovery.
+The advertised-clause conformance loop gives each execution case its own 30-second cancellation
+token as a hang guard, so time spent in earlier cases cannot exhaust a later case's budget.
 All serialization and activation are static BCL calls compatible with trimming
 and NativeAOT.
 

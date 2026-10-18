@@ -161,13 +161,12 @@ public sealed class OqlExecutionConformanceTests
         // Arrange: the profile drives enumeration; the case table cannot omit a new capability.
         var profile = OqlLanguageProfile.Instance;
         VerifyCoverage(profile);
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        var cancellationToken = timeout.Token;
-
         foreach (string clause in profile.Clauses)
         {
             foreach (var execution in _cases[clause])
             {
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+                var cancellationToken = timeout.Token;
                 string context = $"OQL clause '{clause}': {execution.Statement}";
                 var parsed = new OqlQueryParser().Parse(execution.Statement).ShouldBeOfType<OqlQueryStatement>();
                 parsed.Diagnostics.ShouldBeEmpty(context);
