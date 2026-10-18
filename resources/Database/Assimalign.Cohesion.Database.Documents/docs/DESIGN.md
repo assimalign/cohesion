@@ -390,9 +390,10 @@ constructors cache their owned JSON per evaluator and result-depth limit. Path n
 does not revalidate JSON subtrees already validated by storage; parameter JSON normalizes
 once per evaluator. UNNEST, quantifiers and array IN enumerate arrays without indexing them
 repeatedly. Expansion checks cancellation and transaction activity for every row; predicate
-and structural-equality loops also observe cancellation. No reflection or runtime code
-generation is involved. No catalog, storage or wire layout changes, format bump or upgrade
-path are needed; #1135's index v2 remains unchanged.
+and structural-equality loops also observe cancellation. The expansion method is internal for
+the owning test assembly to cancel from borrowed JSON reads and verify per-element checks.
+No reflection or runtime code generation is involved. No catalog, storage or wire layout
+changes, format bump or upgrade path are needed; #1135's index v2 remains unchanged.
 
 #### Result paging (#1129)
 

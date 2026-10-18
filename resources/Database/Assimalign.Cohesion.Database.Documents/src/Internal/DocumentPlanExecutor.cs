@@ -115,7 +115,8 @@ internal static partial class DocumentPlanExecutor
         }
     }
 
-    private static IEnumerable<DocumentEvaluationContext> Expand(OqlSelectExpression query, DocumentEvaluationContext source,
+    // Internal so tests can cancel from reads of borrowed JSON during expansion without a timer.
+    internal static IEnumerable<DocumentEvaluationContext> Expand(OqlSelectExpression query, DocumentEvaluationContext source,
         DocumentExpressionEvaluator evaluator, DocumentOperation operation, CancellationToken cancellationToken)
     {
         var pending = new Stack<(DocumentEvaluationContext Row, int Next, JsonElement.ArrayEnumerator Items)>();

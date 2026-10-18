@@ -267,6 +267,42 @@ public sealed partial class DocumentQueryTests
         source.Reads.ShouldBeInRange(64, 70);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Documents] - UNNEST: expansion observes cancellation after element reads begin")]
+    public async Task Expand_UnnestCancellation_ShouldStopWithinElementsAsync()
+    {
+        // Arrange
+        await using var engine = DocumentDatabaseEngine.Create("unnest-cancellation", new());
+        var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        using var cancellation = new CancellationTokenSource();
+        using var source = new CountingJsonMemory("{\"tags\":[" + string.Join(',', Enumerable.Repeat("1", 200000)) + "]}", cancellation);
+        using var document = JsonDocument.Parse(source.Memory);
+        var query = (OqlSelectExpression)((OqlQueryStatement)new OqlQueryParser().Parse("SELECT t FROM items d UNNEST d.tags t")).OqlExpression;
+        var evaluator = new DocumentExpressionEvaluator("d", null, cancellation.Token);
+        var context = new DocumentEvaluationContext(document.RootElement);
+        int expanded = 0;
+        int sum = 0;
+        source.Arm(64);
+
+        // Act: read bound values directly so only Expand can observe cancellation after a read.
+        await Should.ThrowAsync<OperationCanceledException>(async () =>
+            await database.RunAsync(session, operation =>
+            {
+                foreach (var row in DocumentPlanExecutor.Expand(query, context, evaluator, operation, cancellation.Token))
+                {
+                    sum += ((JsonElement)row.Bindings!.Value!).GetInt32();
+                    expanded++;
+                }
+                return ValueTask.FromResult(expanded);
+            }, cancellation.Token));
+
+        // Assert: cancellation originated inside an expanded element, well before exhaustion.
+        cancellation.IsCancellationRequested.ShouldBeTrue();
+        source.Reads.ShouldBeInRange(64, 70);
+        expanded.ShouldBeInRange(1, 64);
+        sum.ShouldBe(expanded);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Documents] - Constructors: constant arrays and objects are cached per evaluator")]
     [InlineData("[1, @value, {a:[2,3]}]")]
     [InlineData("{a:[1, @value], b:{c:2}}")]
@@ -454,8 +490,8 @@ public sealed partial class DocumentQueryTests
         exception.Message.ShouldBe("An OQL binding list cannot repeat a variable name.");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Documents] - Arrays: large arrays support early paging and cancellation")]
-    public async Task Execute_LargeArray_ShouldObserveCancellationAsync()
+    [Fact(DisplayName = "Cohesion Test [Documents] - UNNEST: large arrays page without materializing all rows")]
+    public async Task Execute_LargeArray_ShouldPageWithoutMaterializingAllRowsAsync()
     {
         // Arrange
         await using var engine = DocumentDatabaseEngine.Create("arrays", new());
@@ -480,9 +516,5 @@ public sealed partial class DocumentQueryTests
         // bound the complete operation independently of the 200,000 expanded rows.
         Console.WriteLine($"200,000-element UNNEST star LIMIT 1 allocated {allocated:N0} bytes.");
         allocated.ShouldBeLessThan(40_000_000L);
-        using var cancellation = new CancellationTokenSource();
-        cancellation.CancelAfter(TimeSpan.FromMilliseconds(10));
-        await Should.ThrowAsync<OperationCanceledException>(async () =>
-            await session.ExecuteAsync("SELECT COUNT(*) FROM items d UNNEST d.tags t UNNEST d.tags u", cancellationToken: cancellation.Token));
     }
 }
