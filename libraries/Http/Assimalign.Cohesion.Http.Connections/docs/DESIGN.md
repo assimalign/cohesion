@@ -1106,6 +1106,24 @@ API, its state machine, and the SSE wire format all live in feature packages
 (`Assimalign.Cohesion.Http.Streaming`, `Assimalign.Cohesion.Http.ServerSentEvents`)
 that this library never references.
 
+### Complete buffered HTTP/1.1 responses
+
+For a complete encoded head and body totaling at most 16 KB
+(`MinDataRateWait.MaxWriteSize`), `Http1MessageWriter.WriteResponseAsync` copies both
+to the connection's `PipeWriter` and flushes once. The stream adapter's `WriteAsync`
+flushes implicitly, so the former head write, body write and explicit flush made
+three flush calls for a small response. Combining them removes that work and lets
+the transport see the whole response together. A rate-limited response credits
+only this bounded piece before waiting on its flush, preserving the maximum credit
+per stalled operation and the existing cancellation and slow-reader failure path.
+Larger buffered responses retain the bounded stream-write path.
+
+Every buffered response is flushed before `SendAsync` completes. No response is
+deferred across requests: doing so needs proof of the next complete request, an
+aligned current body, and a flush before every pending read, hook or shutdown
+path. The streaming sink, interim responses and takeover keep their own immediate
+writes and flushes. Requests still execute sequentially in response order.
+
 ### The two moving parts
 
 - **`HttpResponseBodyStream`** — the transport's raw response body sink, a write-only
@@ -1812,11 +1830,12 @@ trivially DoS-able. Two vectors are specific to the HTTP/1.1 read path and must
 be closed *inside the transport*, before a request ever reaches the application:
 
 - **Unbounded buffering (memory exhaustion).** `Http1MessageReader` reads the
-  request line and each header line via a byte-at-a-time `ReadLineAsync` that
-  accumulates into a `MemoryStream`. With no cap, a peer that opens a connection
-  and streams an endless request line — or an endless run of header bytes with
-  no terminating CRLF — grows that buffer without bound and exhausts the heap.
-  This is a *live* memory-exhaustion vector, not a theoretical one. A chunked
+  request line and each header line with `ReadLineAsync`, which waits in the
+  connection pipe until the line's CRLF has arrived. With no cap, a peer that
+  opens a connection and streams an endless request line — or an endless run of
+  header bytes with no terminating CRLF — keeps that line buffered without bound
+  and exhausts the heap. This is a *live* memory-exhaustion vector, not a
+  theoretical one. A chunked
   body has the same shape after dispatch: its chunk-size lines (chunk extensions
   included) and its trailer section are read line by line too, by the application
   or by the keep-alive drain (#1375).
@@ -1982,9 +2001,12 @@ already passed.
 
 ### The two-phase read timeout
 
-`Http1ReadTimeout` reclaims idle and slow peers with a single
-`CancellationTokenSource` (linked to the ambient connection token) whose deadline
-moves through the request lifecycle:
+`Http1ReadTimeout` reclaims idle and slow peers with a monotonic phase deadline.
+Buffered head reads check its elapsed time and the connection token directly.
+Only a read that must wait creates a `CancellationTokenSource` linked to the
+connection token, armed with the **remaining** phase allowance. Fully buffered
+heads therefore create no read-timeout CTS or timer; a partial head never gets a
+fresh budget when it begins waiting. The deadline moves through the request lifecycle:
 
 1. **Keep-alive idle wait.** Armed with `KeepAliveTimeout` while the transport
    waits for the *first byte* of the next request. A connection that goes idle
@@ -2003,11 +2025,15 @@ moves through the request lifecycle:
    coarse deadline for a *bounded* head; the body is unbounded in size, so it
    needs an average-rate gate rather than a fixed deadline.
 
-Every read on the connection stream uses `Http1ReadTimeout.Token`. When the
+Every pending head read uses `Http1ReadTimeout.Token`. When the
 timer fires, `PipeReader.ReadAsync` throws `OperationCanceledException`; the
 context distinguishes a *timeout* cancel from a *shutdown* cancel via
 `TimedOut` (`this CTS fired && the connection token did not`) so cooperative
 shutdown still propagates normally and is never mistaken for a Slowloris.
+An elapsed deadline found on the buffered path has the same outcome. The idle
+phase latch still arbitrates graceful close against the first request octet;
+source creation and idle cancellation share a monitor, so a close racing the
+first pending read cannot lose its cancellation.
 
 The read-timeout controller's token must **not** become the request's abort
 token — the controller is disposed when the read completes, but the dispatched
@@ -2080,21 +2106,57 @@ line and headers are parsed under the head limits, the framing is decided from
 the headers, and the context is yielded with a **lazy** `Http1RequestBodyStream`
 as `Request.Body`. No body octet is read until the application reads the stream.
 
+### Reading the head off the connection pipe
+
+The head is read from the connection's `PipeReader` (`IDuplexConnection.Input`),
+which also supplies the chunk framing reader. Body data still uses the `AsStream()`
+adapter over that same pipe. `ReadLineAsync`
+searches the octets the pipe already holds for the line's CRLF, decodes the line
+as Latin-1, and calls `AdvanceTo` just past the CRLF. A line that has not ended
+yet is moved out of the pipe into a pooled buffer bounded by the cap, as the
+chunk framing reader does (below): keeping it in the pipe would stall a transport
+whose pause threshold is below the line cap, so the CRLF could never arrive. The
+cap counts the octets already moved, and a CR moved at the end of one read still
+pairs with an LF at the start of the next. A line that arrives whole, the common
+case, is decoded straight from the pipe. The search stops at the line's cap plus its CRLF. A line
+is rejected as soon as the buffered octets prove it too long: either cap + 2
+octets with no CRLF among them, or cap + 1 octets whose last is not a CR. That is
+the same octet at which the byte-at-a-time reader used to reject it.
+
+The adapter reads the same pipe, so nothing behind the head is lost. Body octets,
+a pipelined request, and a tunnel's first octets all stay unconsumed for the
+next reader, as they did when the head was read one octet at a time.
+
+The byte-at-a-time reader made one asynchronous pipe read, a one-octet array
+allocation, and a `MemoryStream` write for every octet of the head. On the Web
+benchmarks (Windows ARM64, 2026-10) that cost about 80 ns per octet, so a
+300-octet `Authorization` line took about 24 µs and a 480-octet `Cookie` line
+about 37 µs. That accounted for most of the authentication scenarios' cost per
+request. The bounded scanner now lives in `Http1LineReader`, shared with the chunk
+framing reader below. Head syntax checks remain in the request-line and field-line
+parsers; the framing reader selects the scanner's strict CR/LF mode.
+
 ### `Http1RequestBodyStream`
 
 A forward-only, non-seekable `Stream` (the same shape as `Http2RequestBodyStream`)
-that reads the body incrementally from the shared connection stream, applying the
+that reads the body incrementally from the shared connection pipe and its stream adapter, applying the
 framing decided up front (`Http1RequestBodyFraming`: none / Content-Length /
 chunked). Load-bearing invariants:
 
 - **Byte-exact, no read-ahead.** A Content-Length body reads at most the octets
-  remaining; a chunked body reads its size lines, terminators, and trailer
-  section one byte at a time. It never reads past the request's framing boundary,
+  remaining; a chunked body scans its size lines, terminators, and trailer
+  section in the connection pipe and advances only through each line's CRLF.
+  A complete line is decoded directly. Partial lines alone use a reusable byte
+  buffer bounded by the line cap: every fragment is consumed, including a trailing
+  CR remembered for the next read. This releases backpressure even when the pipe's
+  pause threshold is smaller than the line cap; retaining the whole incomplete
+  line could otherwise prevent its producer from sending the CRLF. The work stays
+  linear when the peer sends one octet per read. It never consumes past the request's framing boundary,
   so octets a client pipelines behind this request (or behind an accepted upgrade
   / CONNECT handshake) stay in the connection stream for the next reader. This is
   the same no-over-read invariant the connection-takeover path already depends on.
-- **Bounded framing lines (#1375).** Every framing line is read into one reused
-  buffer under a cap, and the first octet past it fails the read, so a line that
+- **Bounded framing lines (#1375).** Every framing line is scanned under a cap,
+  and the first ordinary octet past it fails the read, so a line that
   never ends costs at most the cap. A chunk-size line, chunk extensions included,
   is capped by `MaxChunkFramingLineSize` and rejected as malformed (`400`, below);
   a chunk terminator may hold nothing but its CRLF; a trailer field line is capped
@@ -2140,6 +2202,14 @@ chunked). Load-bearing invariants:
   a framing line is refused; control characters other than CR and LF inside a
   trailer field *value* are left to the field-value rule the header section gets
   (#1341), and nothing else rechecks the chunk-size line.
+- **Framing rate credit stays byte-exact.** Each pipe read is bounded by the same
+  body data-rate gate and connection/application cancellation tokens as a data
+  read. Newly inspected framing octets, including a trailing CR in an incomplete
+  line, earn credit once; previously buffered fragments earn none on the following read. Octets
+  behind the line earn no credit until their own read. Thus a partial size or
+  trailer line keeps earning allowance as it arrives, without a pipelined request
+  extending the current body's allowance. Malformed, truncated and interrupted
+  framing retains the same rejection and no-drain latches.
 - **Cap frozen at first read.** `EnsureStarted` (first read) freezes the parse
   context's body-size knob and resolves the cap. Up to that point head hooks
   *and* middleware may raise or lower it via `IHttpMaxRequestBodySizeFeature`. A
@@ -2250,6 +2320,9 @@ the same cap and data-rate enforcement. A drain that cannot complete cleanly
 (slow trickle, over-cap, malformed body, wire failure) returns `false` and the
 connection is closed instead of reused. Draining works after the body stream has
 been disposed (it operates on the connection stream, not the disposed wrapper).
+An already-completed body returns after the existing first-read freeze and rejection
+checks, without allocating the 4 KB discard buffer or an unused request data-rate
+gate. This applies to bodyless requests and to bodies the application fully read.
 
 A body an application read into a framing error is never drained at all (#1333).
 The drain used to resume decoding where the read had failed, so the octets after a
@@ -2265,15 +2338,15 @@ cap was drained in full, past the cap it had just been rejected for. The
 `RejectedStatusCode` latch makes the drain return `false` at once, as `IsMalformed`
 does.
 
-Nor is a body whose read stopped inside its framing. A read that fails while a chunk
-terminator, a chunk-size line or the trailer section is in progress, an application's
-cancelled read among them, has consumed part of a line, and the decoder keeps no
-partial line. A drain that resumed there would read the rest of the line as a line of
-its own: the rest of `40` is `0`, a last chunk, and the chunk's data, from its leading
-CRLF, then reads as the end of a trailer section and a new request. The stream latches
-the interruption, the drain returns `false`, and a later read fails with an
-`IOException` instead of resuming mid-line. The response status is left alone, since
-the client did nothing wrong. A read cancelled inside a chunk's data consumed nothing
+Nor is a body whose read stopped inside its framing. The byte reader consumed part
+of a line and kept no partial line: restarting on the rest of `40` read `0` as a last
+chunk, and the chunk's data could then read as a trailer section and a new request.
+The pipe reader buffers and consumes partial fragments, but it does not publish
+restartable framing or trailer state from a read that failed.
+The same conservative interruption latch remains: a failed read inside a chunk
+terminator, size line or trailer section makes the drain return `false`, and a
+later read throws `IOException`. The response status is left alone, since the
+client did nothing wrong. A read cancelled inside a chunk's data consumed nothing
 of it, so the drain still resumes that one.
 
 The drain reads framing lines under the same caps as the application (#1375). A

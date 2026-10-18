@@ -534,6 +534,13 @@ public sealed class WebApplicationServer : IWebApplicationServer
         bool faultCounted = false;
         try
         {
+            // Request-level links register on this connection's source, rather than contending
+            // with every other connection on the server-wide abort source. It relays only the
+            // server signal: peer loss keeps its separate transport origin. Keep it alive through
+            // context/connection disposal and through the completion of every multiplexed exchange.
+            using CancellationTokenSource connectionCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            cancellationToken = connectionCancellation.Token;
+
             await using (connection.ConfigureAwait(false))
             {
                 IHttpConnectionContext context = await connection.OpenAsync(cancellationToken).ConfigureAwait(false);

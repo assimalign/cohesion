@@ -1,4 +1,3 @@
-using System.Collections.Generic;
 using System.Security.Claims;
 
 using Assimalign.Cohesion.IdentityModel;
@@ -17,7 +16,7 @@ internal static class JwtClaimsPrincipalMapper
     public static ClaimsPrincipal Map(JsonWebToken token, string authenticationType, JwtBearerOptions options)
     {
         string defaultIssuer = options.ClaimsIssuer ?? token.Issuer ?? ClaimsIdentity.DefaultIssuer;
-        var claims = new List<Claim>(token.Claims.Count);
+        ClaimsIdentity identity = new(authenticationType, options.NameClaimType, options.RoleClaimType);
 
         foreach (IIdentityClaim claim in token.Claims)
         {
@@ -30,27 +29,26 @@ internal static class JwtClaimsPrincipalMapper
             {
                 foreach (IdentityClaimValue element in value.AsArray())
                 {
-                    AddClaim(claims, claim.Type, element, issuer);
+                    AddClaim(identity, claim.Type, element, issuer);
                 }
             }
             else
             {
-                AddClaim(claims, claim.Type, value, issuer);
+                AddClaim(identity, claim.Type, value, issuer);
             }
         }
 
-        ClaimsIdentity identity = new(claims, authenticationType, options.NameClaimType, options.RoleClaimType);
         return new ClaimsPrincipal(identity);
     }
 
-    private static void AddClaim(List<Claim> claims, string type, IdentityClaimValue value, string issuer)
+    private static void AddClaim(ClaimsIdentity identity, string type, IdentityClaimValue value, string issuer)
     {
         if (value.IsNull || value.IsUndefined)
         {
             return;
         }
 
-        claims.Add(new Claim(type, value.ToString(), MapValueType(value.Kind), issuer));
+        identity.AddClaim(new Claim(type, value.ToString(), MapValueType(value.Kind), issuer, issuer, identity));
     }
 
     private static string MapValueType(IdentityValueKind kind) => kind switch

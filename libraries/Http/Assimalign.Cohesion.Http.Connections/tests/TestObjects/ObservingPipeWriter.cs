@@ -17,13 +17,17 @@ internal sealed class ObservingPipeWriter : PipeWriter
 
     public Func<ValueTask>? CompletingAsync { get; set; }
     public Func<ReadOnlyMemory<byte>, ValueTask>? WritingAsync { get; set; }
+    public int FlushCount { get; private set; }
 
     public override void Advance(int bytes) => _inner.Advance(bytes);
     public override Memory<byte> GetMemory(int sizeHint = 0) => _inner.GetMemory(sizeHint);
     public override Span<byte> GetSpan(int sizeHint = 0) => _inner.GetSpan(sizeHint);
     public override void CancelPendingFlush() => _inner.CancelPendingFlush();
     public override ValueTask<FlushResult> FlushAsync(CancellationToken cancellationToken = default)
-        => _inner.FlushAsync(cancellationToken);
+    {
+        FlushCount++;
+        return _inner.FlushAsync(cancellationToken);
+    }
     public override void Complete(Exception? exception = null) => _inner.Complete(exception);
 
     public override async ValueTask CompleteAsync(Exception? exception = null)
@@ -37,6 +41,7 @@ internal sealed class ObservingPipeWriter : PipeWriter
 
     public override async ValueTask<FlushResult> WriteAsync(ReadOnlyMemory<byte> source, CancellationToken cancellationToken = default)
     {
+        FlushCount++;
         if (WritingAsync is { } writing)
         {
             await writing(source).ConfigureAwait(false);

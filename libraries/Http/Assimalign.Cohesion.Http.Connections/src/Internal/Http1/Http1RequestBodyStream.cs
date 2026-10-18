@@ -1,7 +1,9 @@
 using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.IO.Pipelines;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading;
@@ -22,8 +24,8 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// <remarks>
 /// <para>
 /// The stream never reads past its framing boundary: a Content-Length body reads at most the bytes
-/// remaining, and a chunked body reads its size lines, terminators, and trailer section one byte at
-/// a time. That byte-exact discipline is load-bearing — it keeps octets that a client pipelines
+/// remaining, and a chunked body scans its size lines, terminators, and trailers on the connection
+/// pipe, consuming only through each CRLF. That byte-exact discipline keeps octets that a client pipelines
 /// behind this request (or behind an accepted upgrade / CONNECT handshake) in the connection stream
 /// for the next reader, and lets the connection realign for keep-alive via <see cref="DrainAsync"/>.
 /// </para>
@@ -58,7 +60,9 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// </remarks>
 internal sealed class Http1RequestBodyStream : Stream
 {
+    private readonly PipeReader _input;
     private readonly Stream _connection;
+    private byte[]? _framingLine;
     private readonly Http1RequestBodyMode _mode;
     private readonly long _contentLength;
     private readonly bool _solicitContinue;
@@ -79,12 +83,6 @@ internal sealed class Http1RequestBodyStream : Stream
     private TransportHttpContext? _owner;
     private int _rejectionReported;
 
-    private readonly byte[] _oneByte = new byte[1];
-
-    // The buffer each chunk framing line is read into, reused across lines. Never grows past the
-    // largest line the limits allow.
-    private StringBuilder? _line;
-
     private bool _started;
     private bool _completed;
     private bool _disposed;
@@ -103,13 +101,14 @@ internal sealed class Http1RequestBodyStream : Stream
     // ChargeChunkFraming.
     private long _framingExcess;
 
-    // Set when a read failed while a framing line or the trailer section was in progress. The octets
-    // that read consumed are gone, so where the framing resumes on the wire is not known.
+    // An interrupted framing read is never restarted: earlier lines and partial fragments have
+    // been consumed, and the framing/trailer reader's local state is not recoverable.
     private bool _framingInterrupted;
 
     /// <summary>
     /// Initializes the streaming request body.
     /// </summary>
+    /// <param name="input">The connection pipe shared with the head reader and stream adapter.</param>
     /// <param name="connection">The shared connection stream, positioned at the first body octet.</param>
     /// <param name="framing">The body framing decided from the request headers.</param>
     /// <param name="solicitContinue">
@@ -135,6 +134,7 @@ internal sealed class Http1RequestBodyStream : Stream
     /// unsupported collection and is never written.
     /// </param>
     public Http1RequestBodyStream(
+        PipeReader input,
         Stream connection,
         Http1RequestBodyFraming framing,
         bool solicitContinue,
@@ -144,6 +144,7 @@ internal sealed class Http1RequestBodyStream : Stream
         CancellationToken connectionToken,
         HttpTrailerCollection trailers)
     {
+        _input = input;
         _connection = connection;
         _mode = framing.Mode;
         _contentLength = framing.ContentLength;
@@ -285,9 +286,9 @@ internal sealed class Http1RequestBodyStream : Stream
         // can one rejected over a limit: where a chunked body broke its cap, the octets that follow the
         // offending chunk-size line are that chunk's data, which can read like a last chunk and then a
         // new request (#1339). Nor can one whose read stopped inside its framing, cancelled by the
-        // application for instance: the octets of the line read so far are gone, so a drain would
-        // resume mid-line, and the rest of a chunk-size line "40" read as a line of its own is "0", a
-        // last chunk. Nor, finally, can one the peer cut short: the connection's read side has ended.
+        // application for instance: buffered fragments do not restore earlier consumed framing
+        // or the trailer reader's local state. Nor, finally, can one the peer cut short:
+        // the connection's read side has ended.
         if (IsMalformed || RejectedStatusCode is not null || _framingInterrupted || IsIncomplete)
         {
             return false;
@@ -296,6 +297,11 @@ internal sealed class Http1RequestBodyStream : Stream
         try
         {
             await EnsureStartedAsync(cancellationToken).ConfigureAwait(false);
+
+            if (_completed)
+            {
+                return true;
+            }
 
             byte[] scratch = new byte[4096];
             while (!_completed)
@@ -334,7 +340,7 @@ internal sealed class Http1RequestBodyStream : Stream
         _cap = _interception is not null ? _interception.MaxRequestBodySize : _fallbackCap;
 
         HttpMinDataRate? rate = _interception is not null ? _interception.MinRequestBodyDataRate : _fallbackRate;
-        if (rate is not null)
+        if (rate is not null && !_completed)
         {
             _gate = new MinDataRateGate(rate, _timeProvider);
         }
@@ -454,9 +460,9 @@ internal sealed class Http1RequestBodyStream : Stream
             throw new InvalidDataException(ErrorMessages.ChunkedRequestBodyInvalid);
         }
 
-        // A read that stopped inside a framing line cannot be resumed: the line's octets read so far are
-        // gone, and resuming would read the rest of the line as a line of its own. The status is left
-        // alone, since the client did nothing wrong; the connection just cannot be reused.
+        // Preserve the conservative no-restart contract for interrupted framing. Earlier complete
+        // lines and local trailer state cannot be reconstructed from a buffered fragment.
+        // The status is left alone, since the client did nothing wrong.
         if (_framingInterrupted)
         {
             throw new IOException(
@@ -480,7 +486,7 @@ internal sealed class Http1RequestBodyStream : Stream
         {
             // _chunkRemaining is negative only while a chunk terminator, a chunk-size line or the
             // trailer section is being read (or is about to be): a read that failed there, cancelled
-            // or not, leaves the framing at an unknown offset. A read that failed inside a chunk's
+            // or not, can lose the decoder's local framing state. A read that failed inside a chunk's
             // data consumed none of it, so that one can be resumed.
             if (!succeeded && _chunkRemaining < 0)
             {
@@ -761,52 +767,147 @@ internal sealed class Http1RequestBodyStream : Stream
     /// <returns>The line, without its CRLF.</returns>
     private async ValueTask<string> ReadFramingLineAsync(int maxLength, FramingLine line, CancellationToken cancellationToken)
     {
-        StringBuilder builder = _line ??= new StringBuilder();
-        builder.Clear();
+        int length = 0;
         bool sawCarriageReturn = false;
-
         while (true)
         {
-            int read = await ReadFromConnectionAsync(_oneByte, cancellationToken).ConfigureAwait(false);
-            if (read == 0)
+            ReadResult result = await ReadFramingBufferAsync(cancellationToken).ConfigureAwait(false);
+            ReadOnlySequence<byte> buffer = result.Buffer;
+            if (sawCarriageReturn && !buffer.IsEmpty)
+            {
+                // The preceding read consumed the CR so even a pipe with a one-octet pause
+                // threshold can accept its LF. Nothing beyond this octet belongs to this line.
+                SequenceReader<byte> reader = new(buffer);
+                reader.TryRead(out byte next);
+                _gate?.Record(ticksWaited: 0, bytesTransferred: 1);
+                _input.AdvanceTo(reader.Position);
+                if (next != (byte)'\n')
+                {
+                    throw new InvalidDataException(ErrorMessages.ChunkFramingBareCarriageReturn);
+                }
+                return length == 0 ? string.Empty : Encoding.Latin1.GetString(_framingLine!, 0, length);
+            }
+
+            Http1LineReader.LineScan scan = Http1LineReader.ScanLine(
+                buffer, maxLength - length,
+                out ReadOnlySequence<byte> payload, out SequencePosition end,
+                rejectBareLineBreaks: true);
+            long inspected = buffer.Slice(0, end).Length;
+            _gate?.Record(ticksWaited: 0, bytesTransferred: inspected);
+
+            if (scan == Http1LineReader.LineScan.Complete)
+            {
+                string value;
+                if (length == 0)
+                {
+                    value = payload.IsSingleSegment
+                        ? Encoding.Latin1.GetString(payload.FirstSpan)
+                        : Encoding.Latin1.GetString(payload);
+                }
+                else
+                {
+                    BufferFramingPayload(payload, ref length, maxLength);
+                    value = Encoding.Latin1.GetString(_framingLine!, 0, length);
+                }
+                _input.AdvanceTo(end);
+                return value;
+            }
+
+            if (scan != Http1LineReader.LineScan.Incomplete)
+            {
+                _input.AdvanceTo(end);
+                throw scan switch
+                {
+                    Http1LineReader.LineScan.BareCarriageReturn => new InvalidDataException(ErrorMessages.ChunkFramingBareCarriageReturn),
+                    Http1LineReader.LineScan.BareLineFeed => new InvalidDataException(ErrorMessages.ChunkFramingBareLineFeed),
+                    _ => FramingLineTooLong(line, maxLength),
+                };
+            }
+
+            // Consume partial framing to release transport backpressure. Only split lines need
+            // this reusable, cap-bounded buffer; a complete line is decoded directly above.
+            BufferFramingPayload(payload, ref length, maxLength);
+            sawCarriageReturn |= inspected > payload.Length;
+            _input.AdvanceTo(buffer.End);
+            if (result.IsCompleted)
             {
                 throw Truncated(ErrorMessages.ChunkFramingTruncated);
             }
-
-            byte b = _oneByte[0];
-            if (sawCarriageReturn)
+            if (result.IsCanceled)
             {
-                if (b == (byte)'\n')
-                {
-                    return builder.ToString();
-                }
-
-                throw new InvalidDataException(ErrorMessages.ChunkFramingBareCarriageReturn);
+                throw new OperationCanceledException(cancellationToken);
             }
-
-            if (b == (byte)'\r')
-            {
-                sawCarriageReturn = true;
-                continue;
-            }
-
-            if (b == (byte)'\n')
-            {
-                throw new InvalidDataException(ErrorMessages.ChunkFramingBareLineFeed);
-            }
-
-            AppendFramingOctet(builder, (char)b, maxLength, line);
         }
     }
 
-    private void AppendFramingOctet(StringBuilder builder, char octet, int maxLength, FramingLine line)
+    private void BufferFramingPayload(in ReadOnlySequence<byte> payload, ref int length, int maxLength)
     {
-        if (builder.Length >= maxLength)
+        if (payload.IsEmpty)
         {
-            throw FramingLineTooLong(line, maxLength);
+            return;
         }
+        int required = length + (int)payload.Length;
+        if (_framingLine is null || _framingLine.Length < required)
+        {
+            // The scanner already checked the logical length. Bound geometric growth by the
+            // configured cap as well, including when a trailer's remaining section budget is smaller.
+            int capacity = (int)Math.Min(maxLength, Math.Max(required, _framingLine is null ? 256L : 2L * _framingLine.Length));
+            byte[] grown = new byte[capacity];
+            if (_framingLine is { } previous)
+            {
+                previous.AsSpan(0, length).CopyTo(grown);
+            }
+            _framingLine = grown;
+        }
+        payload.CopyTo(_framingLine.AsSpan(length));
+        length = required;
+    }
 
-        builder.Append(octet);
+    private async ValueTask<ReadResult> ReadFramingBufferAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            _connectionToken.ThrowIfCancellationRequested();
+            (CancellationToken readToken, CancellationTokenSource? linkedAbort) = LinkAbort(cancellationToken);
+            try
+            {
+                if (_gate is null)
+                {
+                    return await _input.ReadAsync(readToken).ConfigureAwait(false);
+                }
+                if (!_gate.TryGetOperationTimeout(out TimeSpan timeout))
+                {
+                    throw RateTooSlow();
+                }
+                using CancellationTokenSource deadline = new(timeout, _gate.TimeProvider);
+                using CancellationTokenSource linked = CancellationTokenSource.CreateLinkedTokenSource(readToken, deadline.Token);
+                long start = _gate.TimeProvider.GetTimestamp();
+                try
+                {
+                    ReadResult result = await _input.ReadAsync(linked.Token).ConfigureAwait(false);
+                    _gate.Record(_gate.TimeProvider.GetTimestamp() - start, bytesTransferred: 0);
+                    return result;
+                }
+                catch (OperationCanceledException) when (deadline.IsCancellationRequested && !readToken.IsCancellationRequested)
+                {
+                    throw RateTooSlow();
+                }
+            }
+            finally
+            {
+                linkedAbort?.Dispose();
+            }
+        }
+        catch (OperationCanceledException exception) when (_owner is not null && _connectionToken.IsCancellationRequested)
+        {
+            throw _owner.AbortRequestForPeer(exception);
+        }
+        catch (Exception exception) when (_owner is not null
+            && exception is ConnectionException or SocketException
+                or IOException and not EndOfStreamException and not Http1LimitExceededException)
+        {
+            throw _owner.AbortRequestForPeer(exception);
+        }
     }
 
     /// <summary>
