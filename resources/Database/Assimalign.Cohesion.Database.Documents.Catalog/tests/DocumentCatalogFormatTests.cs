@@ -16,7 +16,7 @@ public sealed partial class DocumentCatalogTests
     [Theory(DisplayName = "Cohesion Test [Documents.Catalog] - Legacy index records are refused before recovery writes (#1135)")]
     [InlineData((byte)4)]
     [InlineData((byte)5)]
-    public async Task EnsureIndexFormat_V1IndexRecord_ShouldRefuseWithoutWrites(byte kind)
+    public async Task EnsureIndexFormat_V1IndexRecord_ShouldRefuseWithoutWritesAsync(byte kind)
     {
         // Arrange: hand-build a v1 header on an otherwise current physical record.
         await using var fixture = await Fixture.Create();
