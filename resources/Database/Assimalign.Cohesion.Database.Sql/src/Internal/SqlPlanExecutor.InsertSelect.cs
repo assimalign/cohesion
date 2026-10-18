@@ -89,7 +89,7 @@ internal sealed partial class SqlPlanExecutor
             if (identityOrdinal >= 0 && (identityTargetIndex < 0 || valueRows is not null &&
                 valueRows[rowIndex][identityTargetIndex].Kind == SqlBoundExpressionKind.DefaultItem))
             {
-                values[identityOrdinal] = ResolveColumnDefault(table, identityOrdinal, defaults[identityOrdinal], cancellationToken);
+                values[identityOrdinal] = ResolveColumnDefault(table, identityOrdinal, defaults[identityOrdinal], statement, cancellationToken);
                 assigned[identityOrdinal] = true;
             }
             for (int i = 0; i < targetOrdinals.Count; i++)
@@ -111,7 +111,7 @@ internal sealed partial class SqlPlanExecutor
                 if (!assigned[ordinal])
                 {
                     // The bound DEFAULT's value, or NULL, or the NOT NULL failure, for a column without one.
-                    values[ordinal] = ResolveColumnDefault(table, ordinal, defaults[ordinal], cancellationToken);
+                    values[ordinal] = ResolveColumnDefault(table, ordinal, defaults[ordinal], statement, cancellationToken);
                 }
             }
 
@@ -157,7 +157,7 @@ internal sealed partial class SqlPlanExecutor
     }
 
     /// <summary>One default-resolution path for omitted INSERT columns and explicit DEFAULT assignments.</summary>
-    private object? ResolveColumnDefault(SqlCatalogTable table, int ordinal, SqlBoundExpression? boundDefault, CancellationToken cancellationToken)
+    private object? ResolveColumnDefault(SqlCatalogTable table, int ordinal, SqlBoundExpression? boundDefault, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         var column = table.Columns[ordinal];
         if (column.Identity is not null)
@@ -171,6 +171,6 @@ internal sealed partial class SqlPlanExecutor
                 throw new SqlPlanningException("COHSQLE025", failure.Message, innerException: failure);
             }
         }
-        return boundDefault is not null ? DefaultValue(boundDefault, cancellationToken) : ResolveDefault(column, null);
+        return boundDefault is not null ? DefaultValue(boundDefault, cancellationToken, statement.TransactionStart) : ResolveDefault(column, null);
     }
 }

@@ -2415,7 +2415,7 @@ PostgreSQL references: tablecmds.c:3903-4062 (column identity), :4329-4385 (rela
   format, no upgrade path.** The catalog stores the format version of the whole
   data file set, rows and the index trees that ride it (a kind-4 record for
   versions 1–3, a kind-8 record from version 4). The engine reads and writes
-  format 18 only: format 6's stamped rows in per-object page chains whose index keys use the
+  format 19 only: format 6's stamped rows in per-object page chains whose index keys use the
   temporal identity encoding (#1099, below), in index trees of B-tree page format
   2, which order entries by key, entry reference and writer (#1194,
   `Database.Indexing` DESIGN), decoded through each table's physical column
@@ -3775,6 +3775,19 @@ transaction in state '…'".
 
 ## Integrity constraints
 
+ON DELETE supports CASCADE, RESTRICT, NO ACTION, SET NULL and SET DEFAULT (#1121).
+Omitted SQL actions are NO ACTION; nondeferrable RESTRICT and NO ACTION both validate
+the complete statement result. The cascade walk collects only CASCADE edges, with no
+depth limit. Once its deletion set is complete, SET actions collect and lock surviving
+child replacements through the same latest-state reads and snapshot crosscheck. A row
+in the deletion set is never updated. Constraint checks see final replacements and
+exclude deleted versions, including when SET DEFAULT resolves a new parent. Re-keying
+a referenced child retains UPDATE's incoming-reference restriction. All old index entries
+and row versions are tombstoned before replacement versions and indexes are inserted in
+the one statement bracket; a CHECK, NOT NULL, FK or UNIQUE failure undoes the entire delete.
+Compiled schema mappings explicitly refuse the three new actions instead of collapsing
+them to RESTRICT; typed schemas retain RESTRICT/CASCADE only.
+
 `UNIQUE` is a unique index, consistently across SQL syntax, catalog metadata and
 `CompiledSchemaIndex(IsUnique: true)`. A separate compiled constraint kind would
 duplicate both persistence and enforcement and permit the two paths to diverge.
@@ -4077,10 +4090,22 @@ children the transaction inserted itself included, at all three levels.
 
 ## Persisted definitions: canonical text, parsed once
 
+Column expression defaults (#1121) retain canonical SQL and resolved call vectors and
+reload through SqlQueryRequest.CeilingParserOptions. Binding is column-free, disallowing
+parameters, subqueries and aggregates while admitting CAST and arithmetic. Immutable
+defaults are evaluated and coerced during DDL so constant failures precede mutation;
+the table cache retains those validated bindings instead of evaluating them again at publication.
+stable and volatile trees run per assigned row with SqlStatementContext.TransactionStart,
+including INSERT SELECT, explicit DEFAULT and ON DELETE SET DEFAULT. ADD COLUMN evaluates
+a nonvolatile expression once into its frozen missing literal. A volatile addition to a
+table with live rows reports COHSQLE027 because physical rewrites belong to #1447; empty
+tables admit it. SET/DROP DEFAULT never changes the frozen missing value. SQL format 19
+gates the new persisted referential-action values; table extension 6 remains unchanged.
+
 **The rule (owner decision, 2026-10-01: production-ready regardless of the
 pre-release).** Every SQL expression the catalog persists is stored as canonical
 SQL rendered from its parsed tree, never as the user's text: table/domain CHECKs,
-column/domain DEFAULTs and SQL function bodies. General expression DEFAULTs (#1121) and
+column/domain DEFAULTs and SQL function bodies. Column expression DEFAULTs (#1121) and
 view queries (#1124) must take the same path when they land; a new persisted expression may
 not store source text, parse it on a per-row or per-statement path, or grow a
 second renderer or parser entry. The motivation is #1068: tightening the parser
@@ -5041,7 +5066,7 @@ One immutable per-database environment merges native and SQL definitions, rebuil
 on open and definition DDL. Namespace collisions, recursive dependencies and declarations weaker
 than their called functions are refused before publication. SQL functions default to Volatile
 and CALLED ON NULL INPUT, while native shorthand keeps its strict default. Until #1121,
-column DEFAULT calls must be explicitly Immutable; Stable/Volatile calls are refused during DDL. SQL domain columns use E3's existing
+column DEFAULT calls may be Immutable, Stable or Volatile; CHECK calls must be Immutable. SQL domain columns use E3's existing
 bounds and check path. Function metadata preserves domain names for parameters and results.
 SQL functions accept the parser's delimited names; native registrations retain their identifier
 name rule. Both paths retain the same reserved-name and overload admission checks.

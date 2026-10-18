@@ -42,7 +42,7 @@ public sealed class SqlLanguageConformanceTests
         // The profile drives enumeration. A newly advertised clause cannot silently escape this test.
         var cases = CreateCases();
         // #1116 adds WITH beside SUBQUERY: exactly one clause over the base's 36.
-        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(37);
+        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(40);
         RequireExecutionCases(SqlLanguageProfile.Instance.Clauses, cases);
         cases.Keys.Except(SqlLanguageProfile.Instance.Clauses).ShouldBeEmpty("Cases must describe the current profile.");
 
@@ -242,15 +242,13 @@ public sealed class SqlLanguageConformanceTests
         var database = await engine.CreateDatabaseAsync("audit");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         foreach (string setup in _seed) { await ExecuteAsync(session, setup); }
-        // #1023: the parsed expression must fail before publishing a column or changing old rows.
+        // #1121: the expression supplies a frozen value to old rows and omitted inserts.
         string alter = "ALTER TABLE t ADD COLUMN extra INT DEFAULT (1 + 2);";
         new SqlQueryParser().Parse(alter).Diagnostics.ShouldNotContain(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
-        (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, alter)))
-            .Message.ShouldBe("Column 'extra': only literal DEFAULT values are supported.");
-        await ExpectRowsAsync(session, "SELECT * FROM t ORDER BY id;", [[1, "Ada", 36], [2, "Grace", 45], [3, "Alan", 41]]);
+        await ExecuteAsync(session, alter);
+        await ExpectRowsAsync(session, "SELECT extra FROM t ORDER BY id;", [[3], [3], [3]]);
         await ExecuteAsync(session, "INSERT INTO t (id, name, age) VALUES (4, 'new', 1);");
-        (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "SELECT extra FROM t;")))
-            .Message.ShouldBe("Unknown column 'extra'.");
+        await ExpectRowsAsync(session, "SELECT extra FROM t WHERE id = 4;", [[3]]);
         await ExecuteAsync(session, "ALTER TABLE t ADD COLUMN literal_default INT DEFAULT 7;");
         await ExpectRowsAsync(session, "SELECT id, name, age, literal_default FROM t ORDER BY id;",
             [[1, "Ada", 36, 7], [2, "Grace", 45, 7], [3, "Alan", 41, 7], [4, "new", 1, 7]]);
@@ -591,8 +589,8 @@ public sealed class SqlLanguageConformanceTests
                 error.ConstraintKind.ShouldBe("CHECK");
                 await ExpectRowsAsync(session, "SELECT COUNT(*) FROM c;", [[2L]]);
             }),
-        [SqlClauses.ForeignKey] = ForeignKeyCase("CREATE TABLE c (pid INT, CONSTRAINT fk_parent FOREIGN KEY(pid) REFERENCES t(id));", SqlReferentialAction.Restrict, VerifyReferenceAsync),
-        [SqlClauses.References] = ForeignKeyCase("CREATE TABLE c (pid INT REFERENCES t(id));", SqlReferentialAction.Restrict, VerifyReferenceAsync),
+        [SqlClauses.ForeignKey] = ForeignKeyCase("CREATE TABLE c (pid INT, CONSTRAINT fk_parent FOREIGN KEY(pid) REFERENCES t(id));", SqlReferentialAction.NoAction, VerifyReferenceAsync),
+        [SqlClauses.References] = ForeignKeyCase("CREATE TABLE c (pid INT REFERENCES t(id));", SqlReferentialAction.NoAction, VerifyReferenceAsync),
         [SqlClauses.Cascade] = ForeignKeyCase("CREATE TABLE c (pid INT REFERENCES t(id) ON DELETE CASCADE);", SqlReferentialAction.Cascade,
             async (session, result) =>
             {
@@ -610,6 +608,27 @@ public sealed class SqlLanguageConformanceTests
                 error.ConstraintKind.ShouldBe("FOREIGN KEY");
                 await ExpectRowsAsync(session, "SELECT pid FROM c WHERE pid = 1;", [[1]]);
                 await ExpectRowsAsync(session, "SELECT id FROM t WHERE id = 1;", [[1]]);
+            }),
+        [SqlClauses.SetNull] = ForeignKeyCase("CREATE TABLE c (pid INT REFERENCES t(id) ON DELETE SET NULL);", SqlReferentialAction.SetNull,
+            async (session, result) =>
+            {
+                await VerifyReferenceAsync(session, result);
+                await ExecuteAsync(session, "DELETE FROM t WHERE id = 1;");
+                await ExpectRowsAsync(session, "SELECT COUNT(*) FROM c WHERE pid IS NULL;", [[2L]]);
+            }),
+        [SqlClauses.SetDefault] = ForeignKeyCase("CREATE TABLE c (pid INT DEFAULT 2 REFERENCES t(id) ON DELETE SET DEFAULT);", SqlReferentialAction.SetDefault,
+            async (session, result) =>
+            {
+                await VerifyReferenceAsync(session, result);
+                await ExecuteAsync(session, "DELETE FROM t WHERE id = 1;");
+                await ExpectRowsAsync(session, "SELECT pid FROM c WHERE pid IS NOT NULL;", [[2]]);
+            }),
+        [SqlClauses.NoAction] = ForeignKeyCase("CREATE TABLE c (pid INT REFERENCES t(id) ON DELETE NO ACTION);", SqlReferentialAction.NoAction,
+            async (session, result) =>
+            {
+                await VerifyReferenceAsync(session, result);
+                await Should.ThrowAsync<SqlConstraintViolationException>(() => ExecuteAsync(session, "DELETE FROM t WHERE id = 1;"));
+                await ExpectRowsAsync(session, "SELECT pid FROM c WHERE pid = 1;", [[1]]);
             }),
         [SqlClauses.Begin] = new("BEGIN;", _seed,
             expression => expression is SqlTransactionExpression { CommandType: SqlQueryCommandType.Begin }, VerifyBeginAsync),

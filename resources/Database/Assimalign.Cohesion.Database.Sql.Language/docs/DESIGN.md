@@ -27,6 +27,12 @@ and structured to be extended without churning what exists (open/closed).
 
 ## Executable functions and vocabulary (#1103)
 
+Column DEFAULT uses the arithmetic expression grammar, leaving following column constraints
+unconsumed (PostgreSQL gram.y:4032-4037). Parentheses, CAST and scalar calls execute; the
+engine enforces variable-free definitions and volatility. NO and ACTION are contextual words.
+The five delete actions are retained in the AST; omitted references use NoAction (#1121).
+SET column lists retain COHDBL001. The profile and live clause corpus add exactly three clauses.
+
 The #1120 profile executes all 42 T1 scalar names, including bare datetime values.
 SUBSTRING/TRIM/POSITION normalize onto calls; NULLIF/EXTRACT remain evaluator forms.
 Canonical rendering preserves the standard separators and niladic syntax. Precision

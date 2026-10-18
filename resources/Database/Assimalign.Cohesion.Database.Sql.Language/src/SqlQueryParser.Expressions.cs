@@ -42,7 +42,12 @@ public sealed partial class SqlQueryParser
 
     private SqlExpression ParseExpression(ref TokenLexer lexer)
     {
-        return ParseOr(ref lexer);
+        if (!_columnDefault) { return ParseOr(ref lexer); }
+        // A full expression inside a DEFAULT's grouping parentheses or call
+        // arguments retains expression COLLATE; the outer COLLATE belongs to the column.
+        _columnDefault = false;
+        try { return ParseOr(ref lexer); }
+        finally { _columnDefault = true; }
     }
 
     private SqlExpression ParseOr(ref TokenLexer lexer)
@@ -477,7 +482,7 @@ public sealed partial class SqlQueryParser
                 Location.Create(1, 1, pos, pos));
         }
 
-        return ParseCollate(ref lexer);
+        return _columnDefault ? ParsePrimary(ref lexer) : ParseCollate(ref lexer);
     }
 
     /// <summary>

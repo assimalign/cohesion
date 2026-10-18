@@ -147,6 +147,15 @@ public static class SqlClauses
     /// <summary>A referential <c>RESTRICT</c> action.</summary>
     public const string Restrict = "RESTRICT";
 
+    /// <summary>Assigns NULL through a foreign-key deletion action.</summary>
+    public const string SetNull = "SET NULL";
+
+    /// <summary>Assigns defaults through a foreign-key deletion action.</summary>
+    public const string SetDefault = "SET DEFAULT";
+
+    /// <summary>Checks foreign-key references at statement end.</summary>
+    public const string NoAction = "NO ACTION";
+
     /// <summary>A <c>BEGIN</c> transaction-control statement.</summary>
     public const string Begin = "BEGIN";
 

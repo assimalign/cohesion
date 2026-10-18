@@ -513,19 +513,15 @@ public sealed partial class SqlQueryParser
             Location.Create(1, 1, pos, _lastTokenEnd));
     }
 
+    private bool _columnDefault;
+
     private SqlExpression ParseColumnDefault(ref TokenLexer lexer)
     {
-        // A signed numeric default uses the same unary node as an expression. The
-        // engine admits only one literal (including one numeric minus), not expressions.
-        int defaultStart = lexer.Current.Position;
-        int diagnosticsBeforeDefault = _parseDiagnostics.Count;
-        var value = ParseUnary(ref lexer);
-        if (_parseDiagnostics.Count == diagnosticsBeforeDefault && value is SqlUnaryExpression { Operator: SqlUnaryOperator.Negate or SqlUnaryOperator.Plus } unary &&
-            (unary.Operator != SqlUnaryOperator.Negate || unary.Operand is not SqlLiteralExpression { LiteralType: SqlLiteralType.Integer or SqlLiteralType.Float }))
-        {
-            AddTypeModifierDiagnostic("DEFAULT", "A signed DEFAULT must be one numeric literal.", defaultStart, _lastTokenEnd, "SQL0003");
-        }
-        return value;
+        // PostgreSQL gram.y:4032-4037 uses b_expr so a following NOT NULL is
+        // a column constraint. Parentheses and call arguments retain full expressions.
+        _columnDefault = true;
+        try { return ParseAddition(ref lexer); }
+        finally { _columnDefault = false; }
     }
 
     private SqlAlterAction? ParseRenameAction(ref TokenLexer lexer)

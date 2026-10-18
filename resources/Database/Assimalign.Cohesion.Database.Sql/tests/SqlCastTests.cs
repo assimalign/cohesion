@@ -442,20 +442,33 @@ public sealed class SqlCastTests
         }
     }
 
-    /// <summary>Rejects CAST in schema expressions that cannot yet execute it honestly.</summary>
-    /// <param name="statement">The unsupported schema statement.</param>
-    [Theory(DisplayName = "Cohesion Test [SqlEngine] - CAST: unsupported defaults and CHECK expressions fail explicitly")]
+    /// <summary>Executes CAST in defaults while CHECK retains its explicit boundary.</summary>
+    /// <param name="statement">The schema statement.</param>
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - CAST: defaults execute and CHECK rejects casts")]
     [InlineData("CREATE TABLE defaults (value INT DEFAULT CAST('42' AS INT));")]
     [InlineData("ALTER TABLE t ADD COLUMN value INT DEFAULT CAST('42' AS INT);")]
     [InlineData("CREATE TABLE checks (value TEXT CHECK(CAST(value AS INT) > 0));")]
-    public async Task Cast_UnsupportedSchemaExpression_ShouldReject(string statement)
+    public async Task Cast_SchemaExpression_ShouldFollowDefaultAndCheckRules(string statement)
     {
         await using var engine = SqlDatabaseEngine.Create("cast-schema", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("cast");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await SeedAsync(session);
 
-        await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, statement));
+        if (statement.Contains("DEFAULT", StringComparison.Ordinal))
+        {
+            await ExecuteAsync(session, statement);
+            string table = statement.StartsWith("CREATE", StringComparison.Ordinal) ? "defaults" : "t";
+            if (table == "defaults") { await ExecuteAsync(session, "INSERT INTO defaults DEFAULT VALUES;"); }
+            await using var result = (await ExecuteAsync(session, $"SELECT value FROM {table};")).ShouldBeAssignableTo<DatabaseResultSet>();
+            var rows = await ReadRowsAsync(result);
+            rows.ShouldNotBeEmpty();
+            rows.ShouldAllBe(row => Equals(row[0], 42));
+        }
+        else
+        {
+            await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, statement));
+        }
     }
 
     /// <summary>Preserves typed nulls and target metadata without sampling result values.</summary>

@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
+using System.Runtime.CompilerServices;
 using System.Threading;
 
 using Assimalign.Cohesion.Database.Sql.Language;
@@ -137,10 +139,9 @@ internal sealed partial class SqlPlanExecutor
     }
 
     /// <summary>
-    /// Binds a column's persisted DEFAULT once per table version: the literal's value text
-    /// converted to the column's type (<see cref="ResolveDefault"/>), so a decoded row that lacks
-    /// the column and an INSERT that omits it read the converted value instead of converting the
-    /// text again.
+    /// Binds a column's persisted DEFAULT once per table version: literals and immutable
+    /// expressions become converted constants; stable and volatile expressions retain a
+    /// column-free tree evaluated when a write assigns the default.
     /// </summary>
     /// <remarks>
     /// DDL proves every DEFAULT converts before it publishes one, so the conversion succeeds for any
@@ -151,7 +152,11 @@ internal sealed partial class SqlPlanExecutor
     /// missing stored tail cannot expose the cached value to a caller.
     /// </remarks>
     /// <param name="column">The column.</param>
-    /// <param name="defaultValue">The value text of the column's DEFAULT literal (<see cref="SqlPersistedExpression.LoadDefaultValue"/>).</param>
+    /// <param name="subject">The definition's name for diagnostics.</param>
+    /// <param name="functions">The functions its recorded calls resolve against.</param>
+    /// <param name="collation">The database's default collation.</param>
+    /// <param name="cancellationToken">The binding operation's token.</param>
+    /// <param name="declaring">Whether DDL is accepting and validating the definition.</param>
     /// <returns>The bound DEFAULT.</returns>
     internal static SqlBoundExpression BindDefaultExpression(SqlCatalogColumn column, string subject,
         SqlFunctionEnvironment functions, Collation collation, CancellationToken cancellationToken, bool declaring = false)
@@ -189,7 +194,15 @@ internal sealed partial class SqlPlanExecutor
                 SqlPlanner.ValidateExpression(expression, scope);
                 SqlPlanner.ValidateDefaultType(expression, scope, column.Type.Type, column.Name);
             }
-            return new SqlBoundDefault(scope.Bind(expression), column);
+            var bound = new SqlBoundDefault(scope.Bind(expression), column);
+            // Immutable defaults are proved at definition time, even on an empty table.
+            // Stable and volatile calls run only when a value is assigned.
+            return DefaultVolatility(expression, scope) == SqlFunctionVolatility.Immutable
+                ? new SqlBoundConstant(DefaultValue(bound, cancellationToken)) : bound;
+        }
+        catch (SqlEvaluationException failure) when (declaring)
+        {
+            throw failure.WithContext(string.Format(CultureInfo.CurrentCulture, ErrorMessages.DefaultStorageFailure, column.Name, column.Type.Type));
         }
         catch (DatabaseException failure) when (!declaring && SqlDefinitionBinder.HasUnavailableCall(expression, scope))
         {
@@ -220,13 +233,44 @@ internal sealed partial class SqlPlanExecutor
     /// <summary>The value a bound DEFAULT supplies: its converted constant, or its conversion failure raised again.</summary>
     /// <param name="bound">The bound DEFAULT (<see cref="BindDefault"/>).</param>
     /// <returns>The value.</returns>
-    private static object? DefaultValue(SqlBoundExpression bound, CancellationToken cancellationToken = default)
+    private static object? DefaultValue(SqlBoundExpression bound, CancellationToken cancellationToken = default, DateTimeOffset? transactionStart = null)
     {
         object? value = bound.Kind == SqlBoundExpressionKind.Constant
             ? SqlBinaryValue.CopyShared(((SqlBoundConstant)bound).Value)
-            : SqlExpressionEvaluator.ForExecution(null, cancellationToken).Evaluate(bound, [], copySharedBinary: true);
+            : SqlExpressionEvaluator.ForExecution(null, cancellationToken, transactionStart: transactionStart).Evaluate(bound, [], copySharedBinary: true);
         return value;
     }
+
+    private static SqlFunctionVolatility DefaultVolatility(SqlExpression expression, SqlExpressionEvaluator scope)
+    {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+        var volatility = expression is SqlFunctionCallExpression call && !SqlStandardLibrary.IsEvaluatorForm(call.FunctionName)
+            ? scope.ResolveFunction(call)!.Volatility : SqlFunctionVolatility.Immutable;
+        foreach (var child in SqlPlanner.Children(expression))
+        {
+            var nested = DefaultVolatility(child, scope);
+            if (nested < volatility) { volatility = nested; }
+        }
+        return volatility;
+    }
+
+    // Serialize the already coerced fast-default value, never the original expression.
+    // The persisted literal is read by the same ceiling parser as every definition.
+    private static string FrozenDefaultLiteral(object? value, DatabaseType target) => SqlCharacter.Output(value) switch
+    {
+        null => "NULL",
+        bool boolean => boolean ? "TRUE" : "FALSE",
+        DateOnly date => "DATE '" + date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + "'",
+        TimeOnly time => "TIME '" + time.ToString("HH:mm:ss.fffffff", CultureInfo.InvariantCulture) + "'",
+        DateTime timestamp => "TIMESTAMP '" + timestamp.ToString("yyyy-MM-dd HH:mm:ss.fffffff", CultureInfo.InvariantCulture) + "'",
+        DateTimeOffset instant => "TIMESTAMPTZ '" + instant.ToString("yyyy-MM-dd HH:mm:ss.fffffffzzz", CultureInfo.InvariantCulture) + "'",
+        TimeSpan interval => "INTERVAL '" + (interval.Ticks < 0 ? "-PT" : "PT") +
+            (Math.Abs((decimal)interval.Ticks) / TimeSpan.TicksPerSecond).ToString("0.#######", CultureInfo.InvariantCulture) + "S'",
+        byte[] bytes when target == DatabaseType.JsonBinary => "'\\x" + Convert.ToHexString(bytes) + "'",
+        byte[] bytes => "X'" + Convert.ToHexString(bytes) + "'",
+        sbyte or byte or short or int or long or decimal or float or double => Convert.ToString(value, CultureInfo.InvariantCulture)!,
+        _ => "'" + Convert.ToString(value, CultureInfo.InvariantCulture)!.Replace("'", "''", StringComparison.Ordinal) + "'",
+    };
 
     /// <summary>
     /// Converts a column's DEFAULT value using the same rules for backfill and omitted

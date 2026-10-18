@@ -64,7 +64,7 @@ nullable definitions and DEFAULT; retaining the type and NOT NULL preserves gene
 
 ## Statement matrix
 
-With non-recursive WITH (#1116), the profile measures **37 of 51 declared clauses** against the live SQL engine.
+With non-recursive WITH (#1116), the profile measures **40 of 54 declared clauses** against the live SQL engine.
 Phase 22 measured 33 of 49.
 The earlier 32/48 figure included `JOIN`, `GROUP BY`, `HAVING`, and `SUBQUERY`,
 removed in Phase 12e (#1019–#1021), plus a no-op `CAST` removed in Phase 13.
@@ -80,7 +80,7 @@ for uncorrelated scalar, `IN`/`NOT IN`, and `EXISTS`/`NOT EXISTS` queries and
 adds transactional `INSERT ... SELECT`, with server/client execution (#1021).
 Phase 21 restores literal `ALTER TABLE ADD COLUMN` defaults for populated tables,
 including old-row and omitted-column insert values over the wire, and rejects
-nonliteral defaults before mutation (#1023). Phase 22 resolves `ORDER BY`
+invalid defaults before mutation (#1023); expression defaults execute under #1121. Phase 22 resolves `ORDER BY`
 projection aliases, including aliases inside scalar expressions, and select-list
 ordinals through the SQL server/client (#1024). At Phase 22 the count remained 33/49 because
 `ALTER TABLE` and `ORDER BY` were already advertised for smaller executable subsets.
@@ -98,14 +98,14 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `INSERT` / `VALUES` | Supported subset, measured | Optional column list, multi-row literal/scalar `VALUES` including whole-item `DEFAULT`, `INSERT ... DEFAULT VALUES` (one row of defaults, with an optional column list), and transactional `INSERT ... SELECT` with the same destination coercion, defaults, and constraints. `VALUES` expressions have no columns in scope: a column reference reports `COHSQLE005` before anything executes (see [VALUES and counts have no column scope](#values-and-counts-have-no-column-scope-1165)). Subqueries inside `VALUES` are excluded; use `INSERT ... SELECT`. |
 | `UPDATE` | Supported | multi-column `SET`, including `c = DEFAULT`, and `WHERE` (including correlated and uncorrelated subqueries); qualified references in both use the target name or its alias, which hides the base name (PostgreSQL `parse_relation.c:3759`); hidden/unknown qualifiers fail with located `COHSQLE015` before any write and leave an explicit transaction active; aggregates in SET and outside child queries in WHERE are rejected; aggregates inside WHERE subqueries execute (see [Grouping and aggregate functions](#grouping-and-aggregate-functions-1020)) |
 | `DELETE` | Supported | optional `WHERE`, including correlated and uncorrelated subqueries; aggregates outside a child query are rejected; qualified references use the target name or its alias, which hides the base name (PostgreSQL `parse_relation.c:3759`); hidden/unknown qualifiers fail with located `COHSQLE015` before any write and leave an explicit transaction active |
-| `CREATE TABLE` | Supported | Identity columns use GENERATED ALWAYS/BY DEFAULT AS IDENTITY or the SQL Server IDENTITY alias (see identity contract above). `IF NOT EXISTS`, column definitions with parameterized types, `COLLATE <name>`, `NOT NULL`/`NULL`, `DEFAULT <literal>`, column and table `PRIMARY KEY`, `REFERENCES`/`FOREIGN KEY`, `CHECK`, and `UNIQUE`; optional `CONSTRAINT <name>` |
-| `ALTER TABLE` | Supported subset, measured | ADD/DROP COLUMN and ADD/DROP CONSTRAINT execute. Full-definition `ALTER COLUMN c <type> [NULL | NOT NULL] [DEFAULT literal]` accepts nullability, length and precision changes that preserve storage type, scale, collation, domain and DEFAULT; tightening and every CHAR length change check existing live values and refuse changes requiring a rewrite. RENAME TO, RENAME [COLUMN], ALTER [COLUMN] SET/DROP DEFAULT and SET/DROP NOT NULL also execute (#1122). PostgreSQL TYPE/SET DATA TYPE and TYPE ... USING remain unsupported. ADD COLUMN literal defaults backfill old-row reads and apply to subsequent inserts that omit the column; explicit NULL follows nullability. Nullable additions without a default read NULL. NOT NULL additions to populated tables require a non-null default. Invalid defaults and nonliteral expressions reject before mutation. Column COLLATE persists and governs default comparisons. See the default, atomicity and MVCC contract below (#1023). DROP COLUMN changes only the catalog: it rewrites no row, survives a crash at any point on one definition, and SELECTs running beside it read every value in its own column; see the DROP COLUMN contract below (#1241). |
+| `CREATE TABLE` | Supported | Identity columns use GENERATED ALWAYS/BY DEFAULT AS IDENTITY or the SQL Server IDENTITY alias (see identity contract above). `IF NOT EXISTS`, column definitions with parameterized types, `COLLATE <name>`, `NOT NULL`/`NULL`, `DEFAULT <expression>`, column and table `PRIMARY KEY`, `REFERENCES`/`FOREIGN KEY`, `CHECK`, and `UNIQUE`; optional `CONSTRAINT <name>` |
+| `ALTER TABLE` | Supported subset, measured | ADD/DROP COLUMN and ADD/DROP CONSTRAINT execute. Full-definition `ALTER COLUMN c <type> [NULL | NOT NULL] [DEFAULT expression]` accepts nullability, length and precision changes that preserve storage type, scale, collation, domain and DEFAULT; tightening and every CHAR length change check existing live values and refuse changes requiring a rewrite. RENAME TO, RENAME [COLUMN], ALTER [COLUMN] SET/DROP DEFAULT and SET/DROP NOT NULL also execute (#1122). PostgreSQL TYPE/SET DATA TYPE and TYPE ... USING remain unsupported. ADD COLUMN nonvolatile defaults backfill old-row reads and apply to subsequent inserts that omit the column; explicit NULL follows nullability. Nullable additions without a default read NULL. NOT NULL additions to populated tables require a non-null default. Invalid defaults reject before mutation; expression defaults follow the fast-default contract below. Column COLLATE persists and governs default comparisons. See the default, atomicity and MVCC contract below (#1023). DROP COLUMN changes only the catalog: it rewrites no row, survives a crash at any point on one definition, and SELECTs running beside it read every value in its own column; see the DROP COLUMN contract below (#1241). |
 | `DROP TABLE` | Supported | `IF EXISTS`; returns after catalog unpublication, with page reclamation asynchronous after older readers finish; the name may be recreated immediately |
 | `CREATE INDEX` | Supported | `CREATE [UNIQUE] INDEX [IF NOT EXISTS] <name> ON <table> (<column> [, ...])` — plain column lists only (no `ASC`/`DESC`, expressions, or `INCLUDE`; each is an additive extension) |
 | `DROP INDEX` | Supported | `DROP INDEX [IF EXISTS] <name> ON <table>` — the `ON <table>` qualifier is required: index names are scoped per table |
 | `CASE` | Supported, measured | Simple and searched forms, multiple branches, `ELSE`, implicit null result, and row expressions; branch expressions remain limited to the executable scalar subset. |
 | `ORDER BY` | Supported subset, measured | Multiple source-column/scalar-expression keys, projection aliases (bare or nested in expressions), and one-based select-list ordinals execute with ASC/DESC. Unqualified aliases take precedence over same-named source columns; qualified references bind to the source. Composes with DISTINCT, LIMIT/OFFSET, supported joins, grouped/aggregate queries, and system relations. Zero, negative, out-of-range, and non-integer numeric ordinals error; `1 + 1` remains a constant expression. Explicit NULLS FIRST/LAST, derived-table output ordering, and GROUP BY ordinals report `COHDBL001`. See the ordering contract below (#1024). |
-| `CAST` | Supported subset, measured | Built-in conversions across all 19 shared types according to the [conversion matrix](#explicit-conversion-cast-1022-e3), plus application-registered casts (E3's cast registry), in projections, predicates, ordering, and DML expressions, including the SQL server/client. See the exact pair and error contract below. CAST in DEFAULT or CHECK remains rejected. |
+| `CAST` | Supported subset, measured | Built-in conversions across all 19 shared types according to the [conversion matrix](#explicit-conversion-cast-1022-e3), plus application-registered casts (E3's cast registry), in projections, predicates, ordering, and DML expressions, including the SQL server/client. See the exact pair and error contract below. CAST executes in DEFAULT; CHECK still rejects CAST. |
 | `COLLATE` | Supported subset, measured | Column and expression overrides: `binary`, `case_insensitive`, `case_accent_insensitive`, plus compatibility `invariant` with scan execution only. Effective collation governs comparisons, `LIKE`, ordering, grouping, `DISTINCT`, and unique keys. See the collation contract below. |
 | `JOIN` / `USING` | Supported subset, measured | N-way INNER (or bare JOIN), LEFT [OUTER], CROSS and comma joins over stored/system/derived sources. INNER/LEFT require ON or USING; CROSS accepts neither. RIGHT/FULL, NATURAL, LATERAL and qualified wildcards remain excluded. See the precise contract below. |
 | `GROUP BY` / `HAVING` | Supported subset, measured | One or more grouping expressions; `WHERE` filters input rows and `HAVING` filters groups after aggregation. Composes with supported N-way joins, `ORDER BY`, `LIMIT`, and `OFFSET`, including server/client execution. Ungrouped, unaggregated projected columns are errors. `DISTINCT`/`ALL` aggregate modifiers, grouping extensions, windows, and ordered-set aggregates report `COHDBL001`. |
@@ -119,7 +119,7 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | Window functions / `OVER` / `WINDOW` | Recognized, not supported | function names lexed; clauses rejected with `COHDBL001` |
 | `CREATE VIEW` / `DROP VIEW` | Recognized, not supported | rejected with `COHDBL001` |
 | `CONSTRAINT` / `FOREIGN KEY` / `REFERENCES` / `CHECK` / `UNIQUE` constraints | Supported subset, measured | Column and table declarations normalize into constraint definitions; UNIQUE lowers to a unique catalog index. NULL is an equal index key: a second NULL violates a single-column UNIQUE constraint. Foreign-key NULL values are allowed; CHECK accepts UNKNOWN and rejects FALSE. CHECK expressions must be deterministic Boolean row expressions with the engine's scalar functions (built-in or registered, `IMMUTABLE` only), each called with arguments its signature accepts (`COHSQLE006` otherwise); parameters and aggregates are excluded. CHECK predicates and DEFAULT literals are stored as canonical text and parsed once per table version; see [Persisted definitions are canonical](#persisted-definitions-are-canonical). |
-| `ON DELETE CASCADE` / `ON DELETE RESTRICT` | Supported | omitted deletion action defaults to `RESTRICT`; a cascade deletes its whole transitive closure with no depth limit, so a self-referencing chain deletes however long it is (#1164), and a cycle deletes each row once; `DROP TABLE ... CASCADE` is not supported |
+| `ON DELETE CASCADE` / `RESTRICT` / `NO ACTION` / `SET NULL` / `SET DEFAULT` | Supported | omitted deletion action defaults to `NO ACTION`; a cascade deletes its whole transitive closure with no depth limit, so a self-referencing chain deletes however long it is (#1164), and a cycle deletes each row once; `DROP TABLE ... CASCADE` is not supported |
 | `ON UPDATE` | Recognized, not supported | absent from the profile; rejected with `COHDBL001` |
 | `START TRANSACTION` / `BEGIN [WORK\|TRANSACTION]` / `COMMIT [WORK\|TRANSACTION]` / `END` / `ROLLBACK [WORK\|TRANSACTION]` | Supported | Spellings map to the existing BEGIN/COMMIT/ROLLBACK session commands (+0 clauses). Like every SQL statement, a valid spelling without `;` receives informational SQL0100, with no error or warning; with `;` it has no parser diagnostics. START and WORK are contextual, so columns named start/work remain valid. END takes no suffix; without a transaction its COHSQLT002 message names COMMIT. END WORK/TRANSACTION, AND [NO] CHAIN, modes, ROLLBACK [WORK] TO [SAVEPOINT], BEGIN TRAN/named transactions and COMMIT PREPARED stay SQL0003. ABORT [WORK\|TRANSACTION], SAVEPOINT, RELEASE, SET TRANSACTION and PREPARE TRANSACTION stay SQL0002 (#1012); TRANSACTION alone is not a statement. |
 | `MERGE`, `TRUNCATE`, `GRANT` | Not in the dialect | `SQL0002` |
@@ -150,6 +150,18 @@ After admission, writes enforce the completed column nullability and bounds. Unr
 tables remain available. Code-first changes to built-in `VARCHAR` length and `DECIMAL`
 precision use the validation-only ALTER path described above; a storage, domain, scale or
 DEFAULT rewrite remains unsupported.
+
+Referential SET NULL and SET DEFAULT update only matching foreign-key columns, using the
+ordinary domain, nullability, CHECK, outgoing/incoming FK, MVCC and index machinery.
+NO ACTION and RESTRICT check the complete statement deletion set. A row also reached
+by CASCADE is deleted once and receives no SET action. Any child failure rolls back the
+whole delete. SET DEFAULT with no default supplies NULL; each expression default uses the
+delete transaction's clock. Unique NULLs remain equal. SET DEFAULT uses the ordinary assignment
+path for identity columns: BY DEFAULT allocates, and GENERATED ALWAYS retains its COHSQLE025
+UPDATE refusal. PostgreSQL-style column lists after SET NULL/SET DEFAULT and ON UPDATE actions
+report COHDBL001. Schema-owned typed foreign
+keys retain RESTRICT/CASCADE only. SQL record-space format 19 gates the new persisted
+referential-action values; format 18 is refused with the recreate remedy.
 
 ## Statement completeness (#1068)
 
@@ -347,7 +359,7 @@ without a form fails the test, as does a new statement kind.
 
 Every SQL expression the catalog persists is stored as **canonical SQL rendered
 from its parsed tree**, never as the text the user wrote: a `CHECK` predicate, a
-literal column `DEFAULT`, and — when they arrive — expression defaults (#1121) and
+column literal and expression `DEFAULT` (#1121), and
 view queries (#1124), which must use the same path. `SqlExpressionRenderer` (this
 package) produces the canonical text; the engine's one persistence helper renders
 it, proves before anything is stored that the text parses back to the declared
@@ -524,10 +536,10 @@ subqueries. They therefore require no table-name rewrite. There are no stored vi
 this base; #1124 owns their dependency guard. INFORMATION_SCHEMA and COHESION_SCHEMA expose
 the published names and facets immediately. A query using an old name reports an unknown object.
 
-SET DEFAULT accepts the same literal, signed/typed literal and scalar-function-call forms as
+SET DEFAULT accepts the same literal and variable-free expression forms as
 CREATE TABLE on this base. Function result types must satisfy INSERT assignment compatibility
 (COHSQLE013 naming the column, before any metadata change; PostgreSQL heap.c:3409). Literal
-conversion and bounds are checked before publication; broader expression defaults remain #1121.
+conversion and bounds are checked before publication; expression defaults also execute (#1121).
 DROP DEFAULT re-inherits a domain default, and SET DEFAULT NULL persists an explicit NULL override
 when the domain has a default (rewriteHandler.c:1305-1313; heap.c:2466-2475).
 DROP DEFAULT affects later omitted-column writes. A NOT NULL
@@ -571,7 +583,7 @@ missing field. A later UPDATE writes the resulting full row normally.
 Signed numeric defaults (`-1`, `- 1`, `-1.5e3`, `+7` and the BIGINT minimum)
 and typed DATE/TIME/TIMESTAMP/TIMESTAMPTZ/INTERVAL/X/N literals use this same path.
 A typed DEFAULT must match the column storage type; a mismatch fails planning before
-mutation. `DEFAULT -'x'` reports SQL0003 while the default grammar remains literal-only.
+mutation. `DEFAULT -'x'` parses and fails type validation at definition time.
 
 A subsequent INSERT that omits the column uses its current insert default, which SET/DROP DEFAULT can change. Explicit NULL
 is stored for nullable columns and rejected for NOT NULL columns. A nullable
@@ -582,11 +594,7 @@ is allowed, and future inserts must supply a value. The emptiness check consider
 current committed rows; historical row versions visible only to an older row
 snapshot retain a missing NULL field when such an addition has no default.
 
-Only literal defaults execute. `DEFAULT (1 + 2)`, function calls, parameters,
-CAST, and other expressions are rejected during planning, before schema or data
-mutation, using CREATE TABLE's diagnostic:
-`Column 'extra': only literal DEFAULT values are supported.` A call to a name
-outside the engine's catalog, executable profile and recognized-unsupported vocabulary fails
+Column defaults admit variable-free scalar expressions: arithmetic, unary signs, parentheses, function calls, niladic datetime forms and CAST. The top-level grammar leaves NOT/AND/OR/IS/LIKE/IN and following column constraints unconsumed. Columns, parameters, aggregates and subqueries are excluded. Immutable expressions are evaluated at DDL time, including division-by-zero and conversion errors. Stable and volatile defaults evaluate per assigned row, using the transaction-start clock. A call to a name outside the engine's catalog, executable profile and recognized-unsupported vocabulary fails
 first, with `COHSQLE016` and `Unknown function '<name>'.`,
 and so does a call whose arguments its function does not accept, with `COHSQLE006`
 (`DEFAULT ABS(1, 2)`; see [Statement completeness](#statement-completeness-1068)),
@@ -1036,7 +1044,7 @@ listed columns must still exist and must not repeat. `UPDATE t SET c = DEFAULT`
 uses the same column-default path for each matching row. All constraints apply before
 the statement publishes any writes, and both session requests and the SQL wire use
 these rules. Existing stored function-call defaults retain their per-assignment
-evaluation; this feature adds no new default-declaration expressions (#1121).
+evaluation; DEFAULT declaration expressions follow the #1121 contract.
 
 DEFAULT is contextually typed syntax, not a scalar operand: `VALUES (DEFAULT + 1)`,
 `VALUES (COALESCE(DEFAULT, 1))`, `VALUES ((DEFAULT))` and `SET c = 1 + DEFAULT`
@@ -1496,7 +1504,7 @@ conventions, not the complete ISO view layouts. Columns below are listed in
 | `INFORMATION_SCHEMA.COLUMNS` | `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `COLUMN_NAME`, `ORDINAL_POSITION`, `COLUMN_DEFAULT`, `IS_NULLABLE`, `DATA_TYPE`, `CHARACTER_MAXIMUM_LENGTH`, `CHARACTER_OCTET_LENGTH`, `NUMERIC_PRECISION`, `NUMERIC_PRECISION_RADIX`, `NUMERIC_SCALE`, `DATETIME_PRECISION`, `IS_IDENTITY`, `IDENTITY_GENERATION`, `IDENTITY_START`, `IDENTITY_INCREMENT`, `IDENTITY_MAXIMUM`, `IDENTITY_MINIMUM`, `IDENTITY_CYCLE` | One row per live table column; ordinals start at one and have no gap where a column was dropped. All 19 DATA_TYPE names parse in DDL and CAST; aliases report canonical identity and modifiers. COLUMN_DEFAULT renders resolved temporal and binary literal values with typed prefixes, including defaults declared as plain strings; other defaults retain canonical SQL |
 | `INFORMATION_SCHEMA.TABLE_CONSTRAINTS` | `CONSTRAINT_CATALOG`, `CONSTRAINT_SCHEMA`, `CONSTRAINT_NAME`, `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `CONSTRAINT_TYPE`, `IS_DEFERRABLE`, `INITIALLY_DEFERRED` | Primary keys, unique indexes/constraints, foreign keys, and explicit checks; both deferral fields are `NO` |
 | `INFORMATION_SCHEMA.KEY_COLUMN_USAGE` | `CONSTRAINT_CATALOG`, `CONSTRAINT_SCHEMA`, `CONSTRAINT_NAME`, `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `COLUMN_NAME`, `ORDINAL_POSITION` | One row per primary, unique, or foreign-key column, in constraint order |
-| `INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS` | `CONSTRAINT_CATALOG`, `CONSTRAINT_SCHEMA`, `CONSTRAINT_NAME`, `UNIQUE_CONSTRAINT_CATALOG`, `UNIQUE_CONSTRAINT_SCHEMA`, `UNIQUE_CONSTRAINT_NAME`, `MATCH_OPTION`, `UPDATE_RULE`, `DELETE_RULE` | Foreign keys with the referenced key identity; `MATCH_OPTION = 'NONE'`, `UPDATE_RULE = 'RESTRICT'`, delete rule `RESTRICT` or `CASCADE` |
+| `INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS` | `CONSTRAINT_CATALOG`, `CONSTRAINT_SCHEMA`, `CONSTRAINT_NAME`, `UNIQUE_CONSTRAINT_CATALOG`, `UNIQUE_CONSTRAINT_SCHEMA`, `UNIQUE_CONSTRAINT_NAME`, `MATCH_OPTION`, `UPDATE_RULE`, `DELETE_RULE` | Foreign keys with the referenced key identity; `MATCH_OPTION = 'NONE'`, `UPDATE_RULE = 'RESTRICT'`, delete rule `RESTRICT`, `CASCADE`, `NO ACTION`, `SET NULL` or `SET DEFAULT` |
 | `INFORMATION_SCHEMA.CHECK_CONSTRAINTS` | `CONSTRAINT_CATALOG`, `CONSTRAINT_SCHEMA`, `CONSTRAINT_NAME`, `CHECK_CLAUSE` | Explicit checks; `CHECK_CLAUSE` is the persisted canonical predicate (see [Persisted definitions are canonical](#persisted-definitions-are-canonical)) |
 | `COHESION_SCHEMA.INDEXES` | `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `INDEX_NAME`, `COLUMN_NAME`, `ORDINAL_POSITION`, `IS_UNIQUE`, `IS_PRIMARY_KEY` | Cohesion extension: one row per index key column |
 | `COHESION_SCHEMA.OBJECT_OWNERSHIP` | `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `OBJECT_TYPE`, `OBJECT_NAME`, `OWNER`, `OWNING_SCHEMA` | Cohesion extension: one row per table or index; `OWNER` is `Adhoc` or `Schema` |
@@ -2146,8 +2154,7 @@ supply a floating operand, cast text to REAL or DOUBLE first.
 
 This is a deliberate ISO/IEC 9075 subset: integer conversion requires an exact
 value, declared numeric scale rounds, explicit character conversion truncates,
-and CHAR pads shorter results. CAST in DEFAULT and CHECK is
-rejected by planning.
+and CHAR pads shorter results. CAST executes in DEFAULT; CHECK rejects it during planning.
 CAST values in INSERT/UPDATE are converted before the existing destination-column
 storage coercion; nested arithmetic therefore sees the converted numeric value.
 
@@ -2238,8 +2245,7 @@ BeginTransactionAsync for explicit transactions, statement start for auto-commit
 Planning a seek and evaluating every row, child query and later statement in the
 transaction use the same instant. COMMIT/ROLLBACK ends that lifetime. The engine's
 existing internal TimeProvider seam remains internal (owner decision 42); DEFAULT
-expression admission is #1121 and will reuse this carrier. CREATE TABLE and ALTER TABLE refuse every Stable or Volatile call in DEFAULT with COHDBL001 naming the function, before publishing any schema change, including ALTER TABLE ADD COLUMN. Other ADD
-COLUMN function defaults remain literal-only. #1121 will lift the volatility refusal.
+expression defaults use this carrier for omitted columns, explicit DEFAULT and referential SET DEFAULT (#1121). Stable ADD COLUMN defaults freeze the ALTER instant for missing fields; volatile defaults require an empty table.
 
 Numeric domain errors, nonfinite finite-input results, negative SUBSTRING lengths,
 numeric overflow and temporal range overflow use COHSQLE002; MOD by zero uses
@@ -2390,6 +2396,7 @@ pin in the same change.
 | `COHSQLE019` | Error | Duplicate target column, table binding or ambiguous output alias |
 | `COHSQLE020` | Error | No value supplied for a parameter; rejected before rows are read or written |
 | `COHSQLE023` | Error | Caller parameter keys collide after one leading sigil is stripped |
+| `COHSQLE027` | Error | ADD COLUMN with a volatile DEFAULT on a table with live rows requires a rewrite; names the column (#1121, #1447) |
 
 Positions are absolute character offsets into the statement text; line/column
 presentation is computed by tooling from the source (offset → line mapping), not
@@ -2529,11 +2536,7 @@ DROP FUNCTION checks the requested normalized signature: an engine-registered ov
 COHSQLD003; an absent overload is COHSQLD001 even when the engine registers another overload
 with the same name. Type aliases and function-name casing do not change that identity.
 
-CREATE TABLE defaults additionally admit column-free Immutable scalar function calls, bound once and
-executed for each omitted value. Domain defaults, ADD COLUMN, typed DefaultSql and SDK defaults
-remain literal-only. ADD COLUMN retains the existing missing-tail representation; a volatile
-expression there would change historical rows on each read. ALTER SET/DROP DEFAULT changes only
-the insert default, as specified under ALTER TABLE renames and column facets.
+Column defaults admit variable-free scalar expressions with Immutable, Stable or Volatile calls. Domain, typed DefaultSql and SDK defaults remain literal-only. ADD COLUMN freezes a nonvolatile expression once into the independent missing-value literal; volatile defaults on live rows report COHSQLE027 naming the column because table rewrites are tracked by #1447. SET/DROP DEFAULT changes only the insert default. Canonical expression text and resolved call identities survive reopen through the persisted-definition ceiling parser.
 
 | Code | Meaning |
 | --- | --- |

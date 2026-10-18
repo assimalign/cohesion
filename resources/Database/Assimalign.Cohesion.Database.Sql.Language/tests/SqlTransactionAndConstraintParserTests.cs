@@ -166,7 +166,7 @@ public sealed class SqlTransactionAndConstraintParserTests
         constraints[0].Columns.ShouldBe(["tenant", "id"]);
         constraints[1].Columns.ShouldBe(["id", "tenant"]);
         constraints[2].ReferencedTable!.SchemaName.ShouldBe("dbo");
-        constraints[2].OnDelete.ShouldBe(SqlReferentialAction.Restrict);
+        constraints[2].OnDelete.ShouldBe(SqlReferentialAction.NoAction);
         constraints[3].CheckExpressionText.ShouldBe("(qty + 1) > 0 AND qty < 100");
     }
 
@@ -218,7 +218,6 @@ public sealed class SqlTransactionAndConstraintParserTests
     [InlineData("CREATE TABLE t (id INT, FOREIGN KEY (id) REFERENCES parent(a, b));")]
     [InlineData("CREATE TABLE t (id INT, CONSTRAINT ck CHECK (id > 0);")]
     [InlineData("ALTER TABLE t ADD UNIQUE ();")]
-    [InlineData("CREATE TABLE t (id INT REFERENCES parent(id) ON DELETE SET NULL);")]
     [InlineData("CREATE TABLE t (id INT CHECK ());")]
     [InlineData("DROP TABLE t CASCADE;")]
     public void MalformedConstraint_ReturnsAnErrorInsteadOfThrowing(string sql)

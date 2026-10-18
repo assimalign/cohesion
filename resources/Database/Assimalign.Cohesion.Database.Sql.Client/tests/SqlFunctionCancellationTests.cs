@@ -228,12 +228,18 @@ public sealed class SqlFunctionCancellationTests
         functions.Reset();
         using var binding = new CancellationTokenSource();
         using var statement = new CancellationTokenSource();
+        bool defaultDeclaration = declaration.Contains(" DEFAULT ", StringComparison.Ordinal);
         if (canceled) { functions.BeforeThrow = _ => binding.Cancel(); }
 
         // Act
         if (canceled)
         {
             await Should.ThrowAsync<OperationCanceledException>(() => ExecuteAsync(session, declaration, binding.Token));
+        }
+        else if (defaultDeclaration)
+        {
+            var rejected = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, declaration, binding.Token));
+            rejected.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE007");
         }
         else
         {
@@ -244,15 +250,22 @@ public sealed class SqlFunctionCancellationTests
         functions.Calls.ShouldBeGreaterThan(0);
         functions.Tokens.ShouldAllBe(token => token == binding.Token);
         binding.IsCancellationRequested.ShouldBe(canceled);
+        if (defaultDeclaration) { await AssertDefaultAbsentAsync(database); }
         if (canceled) { functions.Calls.ShouldBe(1); return; }
 
         // Act: a failed fold must not retain the binding token in the cached expression.
         functions.Reset();
-        var failure = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, sql, statement.Token));
+        var failure = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, defaultDeclaration ? declaration : sql, statement.Token));
 
         // Assert
         failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE007");
-        failure.Message.ShouldStartWith($"Function '{function}' failed:", Case.Sensitive);
+        if (defaultDeclaration)
+        {
+            failure.Message.ShouldContain("Column 'v'", Case.Sensitive);
+            failure.Message.ShouldContain($"Function '{function}' failed:", Case.Sensitive);
+            await AssertDefaultAbsentAsync(database);
+        }
+        else { failure.Message.ShouldStartWith($"Function '{function}' failed:", Case.Sensitive); }
         functions.Calls.ShouldBeGreaterThan(0);
         functions.Tokens.ShouldAllBe(token => token == statement.Token);
     }
@@ -282,6 +295,7 @@ public sealed class SqlFunctionCancellationTests
         await using var connection = await client.ConnectAsync(timeout.Token);
         var serverSession = server.Sessions.ShouldHaveSingleItem();
         var closing = new TaskCompletionSource<Task>(TaskCreationOptions.RunContinuationsAsynchronously);
+        bool defaultDeclaration = declaration.Contains(" DEFAULT ", StringComparison.Ordinal);
         if (canceled)
         {
             functions.BeforeThrow = _ =>
@@ -300,6 +314,13 @@ public sealed class SqlFunctionCancellationTests
             await closedSession.WaitAsync(timeout.Token);
             failure.ConnectionUsable.ShouldBeFalse();
         }
+        else if (defaultDeclaration)
+        {
+            var rejected = await Should.ThrowAsync<SqlClientException>(async () =>
+                await connection.ExecuteAsync(declaration, cancellationToken: timeout.Token));
+            rejected.Message.ShouldStartWith("COHSQLE007:", Case.Sensitive);
+            rejected.ConnectionUsable.ShouldBeTrue();
+        }
         else
         {
             await connection.ExecuteAsync(declaration, cancellationToken: timeout.Token);
@@ -309,15 +330,22 @@ public sealed class SqlFunctionCancellationTests
         functions.Calls.ShouldBeGreaterThan(0);
         functions.Tokens.ShouldAllBe(token => token.CanBeCanceled && token == functions.LastToken);
         functions.LastToken.IsCancellationRequested.ShouldBe(canceled);
+        if (defaultDeclaration) { await AssertDefaultAbsentAsync(database); }
         if (canceled) { functions.Calls.ShouldBe(1); return; }
 
         // Act
         functions.Reset();
         var coded = await Should.ThrowAsync<SqlClientException>(async () =>
-            await connection.ExecuteAsync(sql, cancellationToken: timeout.Token));
+            await connection.ExecuteAsync(defaultDeclaration ? declaration : sql, cancellationToken: timeout.Token));
 
         // Assert
-        coded.Message.ShouldStartWith($"COHSQLE007: Function '{function}' failed:", Case.Sensitive);
+        if (defaultDeclaration)
+        {
+            coded.Message.ShouldStartWith("COHSQLE007: Column 'v'", Case.Sensitive);
+            coded.Message.ShouldContain($"Function '{function}' failed:", Case.Sensitive);
+            await AssertDefaultAbsentAsync(database);
+        }
+        else { coded.Message.ShouldStartWith($"COHSQLE007: Function '{function}' failed:", Case.Sensitive); }
         coded.ConnectionUsable.ShouldBeTrue();
         functions.Calls.ShouldBeGreaterThan(0);
         functions.Tokens.ShouldAllBe(token => token.CanBeCanceled && !token.IsCancellationRequested);
@@ -391,6 +419,17 @@ public sealed class SqlFunctionCancellationTests
         failure.Message.ShouldStartWith($"Function '{function}' failed:", Case.Sensitive);
         functions.Calls.ShouldBeGreaterThan(0);
         functions.Tokens.ShouldAllBe(token => token == statement.Token);
+    }
+
+    private static async Task AssertDefaultAbsentAsync(SqlDatabase database)
+    {
+        await using var observer = await database.CreateSessionAsync(CancellationToken.None);
+        await using var result = (await observer.ExecuteAsync(
+            "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'shared_default'",
+            cancellationToken: CancellationToken.None)).ShouldBeAssignableTo<DatabaseResultSet>();
+        int count = 0;
+        await foreach (var row in result.GetRowsAsync(CancellationToken.None)) { count++; }
+        count.ShouldBe(0);
     }
 
     private static SqlClient CreateClient(InMemoryConnectionListener listener)

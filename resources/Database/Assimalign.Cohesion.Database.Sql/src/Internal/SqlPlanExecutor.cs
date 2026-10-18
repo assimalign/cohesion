@@ -419,7 +419,7 @@ internal sealed partial class SqlPlanExecutor
             {
                 // Assignments evaluate against the ORIGINAL row (SQL semantics).
                 updated[ordinal] = expression.Kind == SqlBoundExpressionKind.DefaultItem
-                    ? ResolveColumnDefault(plan.Table, ordinal, bound.DefaultValues[ordinal], cancellationToken)
+                    ? ResolveColumnDefault(plan.Table, ordinal, bound.DefaultValues[ordinal], statement, cancellationToken)
                     : CoerceForColumn(evaluator.Evaluate(expression, values, copySharedBinary: true), plan.Table.Columns[ordinal]);
             }
 
@@ -541,16 +541,44 @@ internal sealed partial class SqlPlanExecutor
         // instead of reading the tombstones as absence.
         await AcquireParentRowLocksAsync(released, statement, cancellationToken, validate: false).ConfigureAwait(false);
 
-        ValidateRestrictedDeletes(deletions, statement, cancellationToken);
+        var updates = await CollectReferentialUpdatesAsync(deletions, statement, cancellationToken).ConfigureAwait(false);
+        ValidateRestrictedDeletes(deletions, updates, statement, cancellationToken);
         await LockConstraintDeletesAsync(deletions.Values, statement, cancellationToken).ConfigureAwait(false);
         return await statement.Coordinator.ApplyStatementAsync(statement.Transaction, async bracket =>
         {
+            // Revalidate every target before applying anything. The bracket makes all
+            // tombstones, versions and index changes one rollback unit.
+            foreach (var update in updates.Values)
+            {
+                EnsureLatestVersion(update.Table, update.Location.PageId, update.Location.SlotIndex, statement.Transaction.Sequence);
+            }
             foreach (var deletion in deletions.Values)
             {
                 EnsureLatestVersion(deletion.Table, deletion.Location.PageId, deletion.Location.SlotIndex, statement.Transaction.Sequence);
                 TombstoneVersion(statement, bracket, deletion.Location.PageId, deletion.Location.SlotIndex);
                 await TombstoneIndexEntriesAsync(statement, GetLiveIndexes(deletion.Table), deletion.Table, deletion.Values,
                     SqlRecordLocation.Pack(deletion.Location.PageId, deletion.Location.SlotIndex), cancellationToken).ConfigureAwait(false);
+            }
+            foreach (var update in updates.Values)
+            {
+                TombstoneVersion(statement, bracket, update.Location.PageId, update.Location.SlotIndex);
+                await TombstoneIndexEntriesAsync(statement, GetLiveIndexes(update.Table), update.Table, update.OldValues,
+                    SqlRecordLocation.Pack(update.Location.PageId, update.Location.SlotIndex), cancellationToken).ConfigureAwait(false);
+            }
+            foreach (var update in updates.Values)
+            {
+                var location = _storage.InsertRow(bracket, update.Table.ObjectId,
+                    SqlRowCodec.Encode(update.Table, update.NewValues, statement.Transaction.Sequence));
+                statement.Coordinator.VersionStore.RecordCreated(statement.Transaction.Sequence, location.PageId, location.SlotIndex);
+                try
+                {
+                    await InsertIndexEntriesAsync(statement, GetLiveIndexes(update.Table), update.Table, update.NewValues,
+                        SqlRecordLocation.Pack(location.PageId, location.SlotIndex), cancellationToken).ConfigureAwait(false);
+                }
+                catch (IndexUniqueViolationException exception)
+                {
+                    throw TranslateUniqueViolation(update.Table, exception);
+                }
             }
             return (DatabaseResult)new SqlQueryResult(DatabaseResultStatus.Success, targets.Count);
         }, durable: false, cancellationToken).ConfigureAwait(false);

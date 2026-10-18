@@ -65,7 +65,7 @@ public sealed partial class SqlQueryParser
         ExpectDdlKeyword(ref lexer, "REFERENCES");
         var parent = ParseUnaliasedTableReference(ref lexer);
         var parentColumns = ParseConstraintColumns(ref lexer);
-        var action = SqlReferentialAction.Restrict;
+        var action = SqlReferentialAction.NoAction;
         if (IsKeyword(ref lexer, "ON"))
         {
             Advance(ref lexer);
@@ -77,9 +77,40 @@ public sealed partial class SqlQueryParser
                     action = SqlReferentialAction.Cascade;
                     Advance(ref lexer);
                 }
+                else if (IsKeyword(ref lexer, "RESTRICT"))
+                {
+                    action = SqlReferentialAction.Restrict;
+                    ExpectDdlKeyword(ref lexer, "RESTRICT");
+                }
+                else if (IsWord(ref lexer, "NO"))
+                {
+                    Advance(ref lexer);
+                    if (IsWord(ref lexer, "ACTION")) { Advance(ref lexer); }
+                    else { AddSyntaxDiagnostic(ref lexer, "Expected ACTION."); }
+                }
+                else if (IsKeyword(ref lexer, "SET"))
+                {
+                    Advance(ref lexer);
+                    if (IsKeyword(ref lexer, "NULL"))
+                    {
+                        action = SqlReferentialAction.SetNull;
+                        Advance(ref lexer);
+                    }
+                    else
+                    {
+                        action = SqlReferentialAction.SetDefault;
+                        ExpectDdlKeyword(ref lexer, "DEFAULT");
+                    }
+                    if (lexer.Current.Type == TokenType.LeftParen)
+                    {
+                        AddUnsupportedSurfaceDiagnostic(lexer.Current.Position, lexer.Current.Position + 1,
+                            "Column lists after ON DELETE SET NULL or SET DEFAULT are not supported by the SQL surface.");
+                        ParseConstraintColumns(ref lexer);
+                    }
+                }
                 else
                 {
-                    ExpectDdlKeyword(ref lexer, "RESTRICT");
+                    AddSyntaxDiagnostic(ref lexer, "Expected CASCADE, RESTRICT, NO ACTION, SET NULL, or SET DEFAULT.");
                 }
             }
             else if (IsKeyword(ref lexer, "UPDATE"))

@@ -84,7 +84,7 @@ would tell every caller the value is changeable and then guard that promise at
 runtime.
 
 Table metadata extension version 2 introduced one collation identifier per column
-after the existing constraints. Current format 18 requires the complete table extension 6 record,
+after the existing constraints. Current format 19 requires the complete table extension 6 record,
 including resolved-call vectors, identity facets and frozen missing-value literals described below. Column additions,
 drops, and restart preserve explicit overrides. An index inherits its key
 columns' effective collations; the SQL engine verifies index eligibility and
@@ -164,7 +164,7 @@ codec, the key encoding and every comparison read, so they do not consult the do
   column (the primary key's implicit NOT NULL).
 - **Persistence: table extension version 4** (data-storage format 7). After the dropped
   ordinals, one optional string per live column, NULL for a column of a built-in type,
-  which this catalog always writes. Current format 18 also requires the call vectors, identity facets and extension 6 missing-value literals;
+  which this catalog always writes. Current format 19 also requires the call vectors, identity facets and extension 6 missing-value literals;
   the format gate refuses earlier databases rather than loading their definitions. A persisted blank
   name fails the load with `SqlCatalogException`, as does a blank `domainName` at the
   column's constructor (`ArgumentException`).
@@ -437,6 +437,13 @@ reconciliation to distinguish it from a separately declared unique index on the
 same columns. Older index records have no marker and load as ordinary indexes.
 
 ## Persisted SQL expressions are canonical text
+
+SQL record-space format 19 adds persisted NoAction, SetNull and SetDefault values beside
+Restrict and Cascade in the existing action byte (#1121). Format 18's action guard refuses
+these values, so the engine refuses format-18 catalogs before opening their data files;
+there is no compatibility reader. Table extension 6 is unchanged: expression defaults and
+their resolved call vectors use the existing canonical text fields; stable ADD COLUMN
+results are independent frozen literals in MissingValueLiteral.
 
 Record-space format 16 gates canonical identifier quoting for SEARCH and MATERIALIZED
 (#1116). The engine renderer now quotes those identifiers in CHECK, DEFAULT and SQL
