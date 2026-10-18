@@ -34,7 +34,7 @@ public sealed class GqlOrderPagingTests
     [InlineData("RETURN a.name ORDER BY a.age DESC SKIP 1 LIMIT 1", "Isolated")]
     [InlineData("RETURN a.name OFFSET 5", "")]
     [InlineData("RETURN a.name LIMIT 0", "")]
-    [InlineData("RETURN a.name ORDER BY a.name LIMIT 2 OFFSET 1", "Bob,Isolated")]
+    [InlineData("RETURN a.name ORDER BY a.name OFFSET 1 LIMIT 2", "Bob,Isolated")]
     [InlineData("RETURN a.name OFFSET 9223372036854775807 LIMIT 9223372036854775807", "")]
     [InlineData("RETURN DISTINCT a.name ORDER BY a.name", "Alice,Bob,Isolated")]
     [InlineData("RETURN DISTINCT a.name AS person ORDER BY person", "Alice,Bob,Isolated")]
@@ -55,7 +55,7 @@ public sealed class GqlOrderPagingTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Graph] - Ordering and paging: both sigils and paging spellings bind before execution")]
-    [InlineData("LIMIT $rows OFFSET @start")]
+    [InlineData("OFFSET @start LIMIT $rows")]
     [InlineData("SKIP $start LIMIT @rows")]
     public async Task Execute_Parameters_ShouldPageSortedRowsAsync(string tail)
     {

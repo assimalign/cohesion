@@ -60,7 +60,8 @@ OR/IN/string/arithmetic case compares wire rows with in-process rows. No wire fi
 
 QueryAsync and QueryPathsAsync preserve the engine's ORDER BY, OFFSET/SKIP and LIMIT sequence,
 including RETURN aliases and paging parameters with either named sigil. The server validates
-counts before emitting rows or paths; invalid counts retain COHDBG013 and terminal completion
+counts before emitting rows or paths; invalid graph counts retain COHDBG013, while non-finite
+or unsupported CLR inputs retain COHDBG003. OFFSET/SKIP precedes LIMIT. Terminal completion
 allows reuse of the authenticated session. GraphOrderPagingWireTests compares ordered rows and
 paths with in-process execution over InMemory and TCP. No wire bytes or capabilities change.
 

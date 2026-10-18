@@ -134,7 +134,7 @@ The builtin-function table is empty because the executor implements no functions
 | `WHERE` | Boolean and scalar expressions: comparisons, labels, AND/OR/XOR/NOT, IS null/truth tests, arithmetic, concatenation, IN lists and string predicates | Keeps TRUE only; see [DIALECT.md](DIALECT.md) and scalar expressions below |
 | `EXPLAIN` | One query with ordered MATCH/OPTIONAL MATCH clauses and RETURN, INSERT/CREATE, or [DETACH] DELETE | Shared description rows without executing any read expansion or write; Cohesion extension |
 | `RETURN` | Optional DISTINCT/ALL, either `*` or value expressions with optional `AS` aliases; also standalone | Projects expressions, expands named bindings in declaration order, then eliminates duplicate tuples for DISTINCT; path requests require one entity or path column |
-| `ORDER BY` | One or more expression keys with optional ASC/DESC and NULLS FIRST/LAST after RETURN | Orders projected rows and paths by the total order below, after DISTINCT |
+| `ORDER BY` | One or more expression keys with optional ASC/ASCENDING/DESC/DESCENDING and NULLS FIRST/LAST after RETURN | Orders projected rows and paths by the total order below, after DISTINCT |
 | `OFFSET` | Unsigned Int64 literal or named parameter after RETURN | Drops the first count rows after ordering |
 | `SKIP` | Cypher spelling of OFFSET | The same offset stage; cannot accompany another OFFSET/SKIP |
 | `LIMIT` | Unsigned Int64 literal or named parameter after RETURN | Truncates after full materialization, ordering and offset; never reduces mutations or the match cap |
@@ -205,9 +205,9 @@ properties   := '{' [property ':' (scalar-literal | parameter) (',' property ':'
 projections  := [DISTINCT | ALL] ('*' | projection (',' projection)*)
 projection   := predicate [AS alias]
 return-tail  := [ORDER BY sort-item (',' sort-item)*] [paging]
-sort-item    := predicate [ASC | DESC] [NULLS (FIRST | LAST)]
+sort-item    := predicate [ASC | ASCENDING | DESC | DESCENDING] [NULLS (FIRST | LAST)]
 paging       := (OFFSET | SKIP) page-value [LIMIT page-value]
-              | LIMIT page-value [(OFFSET | SKIP) page-value]
+              | LIMIT page-value
 page-value   := unsigned-int64 | parameter
 catalog      := SHOW (LABELS | RELATIONSHIP TYPES | PROPERTY KEYS | INDEXES | OBJECT OWNERSHIP)
 ```
@@ -451,11 +451,11 @@ RETURN accepts `return-tail` in both row and path requests. `GqlQueryExpression.
 contains `GqlSortItem(Expression, Direction, NullOrdering)`; Offset and Limit contain literal
 or parameter expressions. ASC and ALL are the defaults. NULLS, FIRST and LAST are contextual
 words, absent from Profile.Keywords, so `first` and `last` remain valid variable names.
-OFFSET and Cypher SKIP share one slot. Either paging order is accepted, but duplicate clauses
+OFFSET and Cypher SKIP share one slot. OFFSET/SKIP must precede LIMIT, as in ISO and Cypher; LIMIT followed by OFFSET/SKIP, duplicate clauses
 and ORDER BY following paging are GQL0002 at the offending token. A negative, floating or
 string literal is GQL0002 expecting an unsigned integer or parameter; overflow is GQL0004.
 Dynamic values must have an integral CLR type in [0, Int64.MaxValue]; NULL, negatives,
-floating values and other types fail with COHDBG013 before reads or writes. Missing parameters
+floating values and other graph values fail with COHDBG013 before reads or writes. Non-finite and unsupported CLR values fail with COHDBG003 during binding. Missing parameters
 remain COHDBG001. Both `$name` and `@name` follow the shared named-binding contract.
 
 The owner default follows Cypher: NULL last ascending, first descending. NULLS FIRST/LAST

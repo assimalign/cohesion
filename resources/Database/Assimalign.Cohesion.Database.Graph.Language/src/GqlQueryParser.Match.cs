@@ -38,6 +38,10 @@ public sealed partial class GqlQueryParser
             Expect("DELETE");
             do { deletes.Add(Identifier()); } while (!Failed && Take(TokenType.Comma));
         }
+        if (!Failed && (Is("ORDER") || Is("OFFSET") || Is("SKIP") || Is("LIMIT")))
+        {
+            Unsupported("STANDALONE ORDER BY AND PAGE STATEMENT", Current);
+        }
         if (!Failed && Take("RETURN"))
         {
             if (Take("DISTINCT")) { quantifier = GqlSetQuantifier.Distinct; }
@@ -63,8 +67,8 @@ public sealed partial class GqlQueryParser
                 do
                 {
                     var expression = ParsePredicate();
-                    var direction = Take("DESC") ? GqlSortDirection.Descending : GqlSortDirection.Ascending;
-                    if (direction == GqlSortDirection.Ascending) { Take("ASC"); }
+                    var direction = Take("DESC") || Take("DESCENDING") ? GqlSortDirection.Descending : GqlSortDirection.Ascending;
+                    if (direction == GqlSortDirection.Ascending) { if (!Take("ASC")) { Take("ASCENDING"); } }
                     var nullOrdering = GqlNullOrdering.Default;
                     if (Take("NULLS"))
                     {
@@ -75,12 +79,11 @@ public sealed partial class GqlQueryParser
                     orderBy.Add(new GqlSortItem(expression, direction, nullOrdering));
                 } while (!Failed && Take(TokenType.Comma));
             }
-            // ISO and Cypher accept either paging order; an OFFSET/SKIP pair is one clause.
             while (!Failed && (Is("OFFSET") || Is("SKIP") || Is("LIMIT")))
             {
                 bool limiting = Is("LIMIT");
-                if (limiting ? limit is not null : offset is not null)
-                { Error("GQL0002", "A paging clause cannot be repeated.", Current); break; }
+                if (limit is not null || !limiting && offset is not null)
+                { Error("GQL0002", "Expected OFFSET or SKIP before LIMIT, with each paging clause at most once.", Current); break; }
                 Advance();
                 var value = ParsePageValue();
                 if (limiting) { limit = value; } else { offset = value; }

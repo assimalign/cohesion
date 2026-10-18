@@ -19,7 +19,7 @@ public static class GqlLanguageProfile
         "CREATE", "INSERT", "DELETE", "DETACH",
         "SET", "REMOVE", "MERGE",
         // Clauses
-        "WHERE", "ORDER", "BY", "ASC", "DESC",
+        "WHERE", "ORDER", "BY", "ASC", "ASCENDING", "DESC", "DESCENDING",
         "LIMIT", "OFFSET", "SKIP",
         "LET", "UNWIND", "FOREACH",
         // Set operations

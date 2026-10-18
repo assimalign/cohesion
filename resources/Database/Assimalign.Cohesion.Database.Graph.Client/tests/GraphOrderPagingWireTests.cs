@@ -40,7 +40,7 @@ public sealed class GraphOrderPagingWireTests
         await using var harness = await GraphClientTestHarness.StartAsync(tcp);
         await using var connection = await harness.Client.ConnectAsync(harness.Token);
         await connection.ExecuteAsync("INSERT (:Person {name:'Root'})-[:KNOWS]->(:Person {name:'Zoe'}), (:Person {name:'Root2'})-[:KNOWS]->(:Person {name:'Amy'})", cancellationToken: harness.Token);
-        const string source = "MATCH p = (a)-[r]->(b) RETURN p ORDER BY b.name LIMIT $rows OFFSET @start";
+        const string source = "MATCH p = (a)-[r]->(b) RETURN p ORDER BY b.name OFFSET @start LIMIT $rows";
         var parameters = new Dictionary<string, object?> { ["rows"] = 1, ["start"] = 0 };
         await using var session = await harness.Database.CreateSessionAsync(harness.Token);
         var local = (await session.ExecuteAsync(GraphPathsQueryRequest.FromGql(source, parameters), harness.Token)).ShouldBeOfType<GraphPathsQueryResult>();
