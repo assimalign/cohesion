@@ -46,6 +46,8 @@ internal static partial class GraphPlanExecutor
         { throw new GraphPlanningException("COHDBG013", ErrorMessages.CompositeLimit, plan.Query.Location); }
         if (!compositeValues && compositeColumns.Any(value => value))
         { throw new GraphPlanningException("COHDBG016", ErrorMessages.CompositeCapabilityRequired, plan.Query.Location); }
+        if (scalarsOnly && plan.Projections.Any(projection => projection.Kind == GraphProjectionKind.EntityValue && projection.MayBeComposite))
+        { throw new GraphPlanningException("COHDBG001", ErrorMessages.EntityListWireUnsupported, plan.Query.Location); }
         if (scalarsOnly && plan.Projections.Any(projection => projection.Kind != GraphProjectionKind.Scalar))
         { throw new GraphPlanningException("COHDBG001", ErrorMessages.ExecuteScalarRequired, plan.Query.Location); }
         if (plan.Writes) { await database.LockWriterAsync(operation.Context, token).ConfigureAwait(false); }

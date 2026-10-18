@@ -518,13 +518,16 @@ variables enforce identity equality, and conflicting variable kinds fail before 
 
 GraphPathShape validates both AST representations and lowers juxtaposed node constraints and
 parenthesized bodies into boundary nodes and repeated segments. Shape validation uses an explicit
-stack; cyclic AST lists and subpath depth above 128 fail with COHDBG001 before any recursive walk.
+stack; cycles and repeated path instances in one walk fail with COHDBG001 before any recursive walk.
+Direct AST subpath depth above 128 also fails; parsed text is bounded only by the GQL0009 stack guard.
 Bounds over 64, nested repetitions, conflicting chain/element lists and quantified INSERT ASTs
 also use COHDBG001. Text insertion quantifiers are GQL0002. Parenthesized INSERT paths are outside
 the insertion grammar and are refused before writes. No catalog/storage format change is needed.
 
-The executor's DFS frontier and continuations live on the heap. Each state carries the trail's
-relationship identity set, source-ordered entities, group lists and the actual pattern/property
+The executor's DFS frontier and continuations live on the heap. Each incident cursor resumes after
+one child, so live search states scale with depth rather than sibling fan-out; storage incident
+buffers and materialized results retain their existing budgets. For a fixed hop, target node checks
+precede copying the trail for descent. Each state carries the trail's relationship identity set, source-ordered entities, group lists and the actual pattern/property
 pair for every occurrence. This mapping replaces positional indexing: repeated properties and
 anonymous elements are checked correctly after full-clause binding, including forward references.
 Zero repetitions conjoin the outer boundary nodes; a Min=0 body's unknown labels/types cannot
@@ -533,22 +536,26 @@ set MatchesNothing on the clause, although their warnings are retained.
 Only outer singleton nodes/relationships can anchor. Expansion proceeds right, then left, and
 prepends leftward entities and group elements to restore source order without changing stored
 relationship endpoints. Group lists retain node/relationship kind through FOR/UNWIND and projection
-boundaries; RETURN * and WITH * include them. Inner property maps that reference a group, direct
-group member access, group deletion and mixed singleton/group declarations are COHDBG003.
+boundaries, including result-preserving expressions and container access at each depth; RETURN *
+and WITH * include them. Inner property maps that reference a group, direct group member access, group deletion and mixed singleton/group declarations are COHDBG003.
 
 Finite upper-bound sums and unbounded lower-bound sums cannot exceed 64. An unbounded repetition
-explores at most 64 successful hops; an unused 65th relationship passing direction/type filters
+explores at most 64 successful hops; an unused 65th relationship passing direction, type,
+bound-variable identity and its own property checks (including deferred maps)
 raises COHDBG004 before testing its endpoint. Failed filters do not trigger the hop cap, and
 LIMIT cannot suppress it. AddBinding and the shared statement ExpansionBudget also apply to
 every repeated branch. The internal per-budget OnConsume test hook cancels deterministically
-after expansion begins; tests assert the consumed count. No partial wire output precedes failure.
+after expansion begins; tests assert the consumed count. The isolated high-fan-out allocation test
+samples live bytes after incident loading to pin bounded retained search state for fixed and
+quantified edges. No partial wire output precedes failure.
 
 EXPLAIN emits Expand details `quantifier={min,max}; body_hops=n; trail=True` (empty max means
 unbounded). The existing Path frame represents every length, including one node with no edges.
 The composite capability check precedes the existing Execute entity-result gate, so an unnegotiated
-group list receives static COHDBG016 even on an empty match. A negotiated list of entities retains
-the collect(entity) Execute rejection; scalar results after FOR/UNWIND travel through the existing
-codec. In-process list/aggregate results preserve real entities. No new capability or encoding
+group list receives static COHDBG016 even on an empty match. A Max=0 group is provably empty
+and projects as `[]` when negotiated. A possibly nonempty list of entities retains COHDBG001
+with a message naming lists of nodes or relationships; scalar results after FOR/UNWIND travel
+through the existing codec. In-process list/aggregate results preserve real entities. No new capability or encoding
 is introduced. The [language design](../../Assimalign.Cohesion.Database.Graph.Language/docs/DESIGN.md#quantified-paths-1144)
 records the ISO and Cypher deviations and reference-engine evidence.
 

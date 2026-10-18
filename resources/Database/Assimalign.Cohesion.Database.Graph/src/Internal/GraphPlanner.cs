@@ -31,7 +31,8 @@ internal sealed record GraphStagePlan(GqlStage Stage, GraphPlan Plan)
 internal readonly record struct GraphEntityShape(GraphProjectionKind Kind, bool Optional);
 internal sealed record GraphBindingShape(bool[] Entities, bool[] Composites, bool[] Scalars, GraphEntityShape[] EntityKinds, DatabaseType Type)
 {
-    internal bool Group { get; init; }
+    internal bool[] Groups { get; init; } = [];
+    internal bool Group => Groups.Length > 0 && Groups[0];
 }
 internal sealed record GraphDistinctPlan(IReadOnlyList<GraphProjectionPlan> Keys);
 internal sealed record GraphGroupingPlan(IReadOnlyList<GqlExpression> Keys, IReadOnlyList<GqlAggregateExpression> Aggregates, GraphGroupingScope Scope);
@@ -396,15 +397,20 @@ internal sealed partial class GraphPlanner
                 ? depth < shape.Entities.Length && (entities ? shape.Entities[depth] : shape.Composites[depth])
                 : entities && depth == 0, accesses);
 
+        bool IsGroup(GqlExpression expression, int accesses = 0) => GraphValueExpressions.IsGroup(expression,
+            (name, depth) => shapes.TryGetValue(name, out var shape) && depth < shape.Groups.Length && shape.Groups[depth], accesses);
+
         GraphBindingShape Shape(GqlExpression expression, int accesses = 0)
         {
             var entities = new bool[GraphValueCodec.MaxDepth + 2];
             var composites = new bool[entities.Length];
             var scalars = new bool[entities.Length];
             var kinds = new GraphEntityShape[entities.Length];
+            var groups = new bool[entities.Length];
             for (int i = 0; i < entities.Length; i++)
             {
                 token.ThrowIfCancellationRequested();
+                groups[i] = IsGroup(expression, i + accesses);
                 entities[i] = MayReturn(expression, true, i + accesses);
                 composites[i] = MayReturn(expression, false, i + accesses);
                 kinds[i] = GraphValueExpressions.EntityShape(expression, (name, depth) =>
@@ -419,7 +425,7 @@ internal sealed partial class GraphPlanner
                 if (!entities[i] && !composites[i]) { break; }
             }
             return new GraphBindingShape(entities, composites, scalars, kinds, accesses == 0 ? ExpressionType(expression) : DatabaseType.Null)
-            { Group = accesses == 0 && expression is GqlVariableExpression group && shapes.TryGetValue(group.Variable, out var groupShape) && groupShape.Group };
+            { Groups = groups };
         }
 
         DatabaseType ExpressionType(GqlExpression expression) => expression switch
@@ -490,7 +496,7 @@ internal sealed partial class GraphPlanner
         void Declare(GqlPathPattern path, bool creating)
         {
             token.ThrowIfCancellationRequested();
-            var shape = GraphPathShape.Create(path, creating);
+            var shape = GraphPathShape.Create(path, creating, parsed: statement.Text is not null);
             pathShapes[path] = shape;
             if (path.Variable is { } variable)
             {
@@ -521,8 +527,8 @@ internal sealed partial class GraphPlanner
                     if (variables.ContainsKey(binding.Name)) { throw new GraphPlanningException("COHDBG003", ErrorMessages.GroupBindingConflict, query.Location); }
                     Bind(binding.Name, BindingKind.Value);
                     groupVariables.Add(binding.Name);
-                    shapes[binding.Name] = new GraphBindingShape([true, true, false], [true, false, false], [false, false, true],
-                        [default, new GraphEntityShape(binding.Node ? GraphProjectionKind.Node : GraphProjectionKind.Relationship, false), default], DatabaseType.Null) { Group = true };
+                    shapes[binding.Name] = new GraphBindingShape([segment.Quantifier.Max != 0, segment.Quantifier.Max != 0, false], [true, false, false], [false, false, true],
+                        [default, new GraphEntityShape(binding.Node ? GraphProjectionKind.Node : GraphProjectionKind.Relationship, false), default], DatabaseType.Null) { Groups = [true, false, false] };
                 }
             }
         }
@@ -531,7 +537,7 @@ internal sealed partial class GraphPlanner
         {
             if (!declared) { Declare(path, creating); }
             bool satisfiable = true;
-            var propertyGroups = shapes.Where(binding => binding.Value.Group).Select(binding => binding.Key).ToHashSet(StringComparer.Ordinal);
+            var propertyGroups = shapes.Where(binding => binding.Value.Groups.Any(group => group)).Select(binding => binding.Key).ToHashSet(StringComparer.Ordinal);
             var pending = new Stack<(GraphPathShape Shape, bool Required, bool Group)>();
             pending.Push((pathShapes[path], true, false));
             while (pending.TryPop(out var item))
@@ -699,8 +705,13 @@ internal sealed partial class GraphPlanner
                         pending.Push(membership.List);
                         pending.Push(membership.Operand);
                         break;
+                    case GqlMemberExpression member:
+                        if (IsGroup(member.Operand))
+                        { throw new GraphPlanningException("COHDBG003", ErrorMessages.MemberBindingRequired, member.Location); }
+                        foreach (var child in GraphValueExpressions.Children(member).Reverse()) { pending.Push(child); }
+                        break;
                     case GqlListExpression or GqlMapExpression or GqlCaseExpression or GqlCoalesceExpression or
-                        GqlNullIfExpression or GqlMemberExpression or GqlSubscriptExpression:
+                        GqlNullIfExpression or GqlSubscriptExpression:
                         foreach (var child in GraphValueExpressions.Children(expression).Reverse()) { pending.Push(child); }
                         break;
                     case GqlStringPredicateExpression predicate when Enum.IsDefined(predicate.Operator):

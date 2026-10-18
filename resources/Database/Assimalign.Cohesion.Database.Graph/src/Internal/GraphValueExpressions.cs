@@ -101,6 +101,42 @@ internal static class GraphValueExpressions
         }
     }
 
+    // Track group lists at their exact container depth. Accessing a group's entity is not
+    // itself a group, while extracting a group from a list/map retains its provenance.
+    internal static bool IsGroup(GqlExpression expression, Func<string, int, bool> variableGroup, int accesses)
+    {
+        var pending = new Stack<(GqlExpression Expression, int Accesses)>();
+        pending.Push((expression, accesses));
+        while (pending.TryPop(out var item))
+        {
+            var (value, depth) = item;
+            switch (value)
+            {
+                case GqlVariableExpression variable:
+                    if (variableGroup(variable.Variable, depth)) { return true; }
+                    break;
+                case GqlPropertyExpression property:
+                    if (variableGroup(property.Variable, depth + 1)) { return true; }
+                    break;
+                case GqlMemberExpression member: pending.Push((member.Operand, depth + 1)); break;
+                case GqlSubscriptExpression subscript: pending.Push((subscript.Operand, depth + 1)); break;
+                case GqlListExpression or GqlMapExpression when depth > 0:
+                    foreach (var child in Children(value)) { pending.Push((child, depth - 1)); }
+                    break;
+                case GqlAggregateExpression { Function: GqlAggregateFunction.CollectList, Operand: { } operand } when depth > 0:
+                    pending.Push((operand, depth - 1));
+                    break;
+                case GqlAggregateExpression { Function: GqlAggregateFunction.Min or GqlAggregateFunction.Max, Operand: { } operand }:
+                    pending.Push((operand, depth));
+                    break;
+                case GqlCaseExpression or GqlCoalesceExpression or GqlNullIfExpression:
+                    foreach (var child in ResultChildren(value)) { pending.Push((child, depth)); }
+                    break;
+            }
+        }
+        return false;
+    }
+
     // Access consumes a container level; accessing an entity produces a scalar property.
     internal static bool MayReturn(GqlExpression expression, IReadOnlyDictionary<string, object?>? parameters, bool entity, Func<string, int, bool, bool>? variableShape = null, int initialAccesses = 0)
     {

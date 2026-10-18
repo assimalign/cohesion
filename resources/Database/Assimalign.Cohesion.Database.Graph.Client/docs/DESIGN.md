@@ -78,10 +78,12 @@ nodes, stored relationship directions and zero-length paths. Right index anchors
 order. Group lists flow through FOR/UNWIND with their entity kinds; scalar projections after
 expansion use the existing result codec. Unnegotiated possible composite final projections
 fail statically with COHDBG016. Negotiated lists containing entities keep the existing Execute
-entity-result rejection, as collect(entity) does. No new wire tag or capability is introduced.
+entity-result rejection with COHDBG001 naming lists of nodes or relationships, as collect(entity)
+does. A provably empty Max=0 group projects as `[]` on a negotiated session. No new wire tag or capability is introduced.
 Malformed bounds and adjacent comments hiding Cypher ranges return ParseFailure and keep the authenticated session; the protocol suite
 also pins the following Ping/Pong. GraphQuantifiedPathWireTests exercises rows, paths, aliases,
-linear group flow and session reuse over InMemory and TCP.
+linear group flow, empty group results, the negotiated entity-list gate and exact-session reuse
+over InMemory and TCP.
 
 ## Ordering and paging (#1142)
 

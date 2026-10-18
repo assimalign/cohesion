@@ -133,7 +133,7 @@ collect_list and its Cypher alias collect. Ordinary scalar functions remain outs
 | --- | --- | --- |
 | `MATCH` | Comma-separated paths with fixed/quantified edges and parenthesized segments; optional `variable =` path assignment, label expressions, scalar expression property maps; every ISO full and abbreviated edge except the tilde forms | Planner chooses an indexed anchor when available; executor matches bounded relationship-unique trails and binds named paths in traversal order |
 | `OPTIONAL MATCH` | The same graph patterns and clause-local WHERE, including a leading optional or several consecutive matching clauses | Left join against each running binding; an unmatched clause preserves that row and binds its new variables to NULL |
-| `QUANTIFIED PATH` | ISO edge/subpath `{m,n}`, `{m}`, `{m,}`, `{,n}`, `+`, `*`; Cypher bracketed `*m..n` | Enumerates distinct trails, including zero-length matches; group variables bind source-ordered lists |
+| `QUANTIFIED PATH` | ISO edge/subpath `{m,n}`, `{m}`, `{m,}`, `{,n}`, `{,}`, `+`, `*`; Cypher bracketed `*m..n` | Enumerates distinct trails, including zero-length matches; group variables bind source-ordered lists |
 | `WHERE` | Boolean and scalar expressions: comparisons, labels, AND/OR/XOR/NOT, IS null/truth tests, arithmetic, concatenation, IN lists and string predicates | Keeps TRUE only; see [DIALECT.md](DIALECT.md) and scalar expressions below |
 | `EXPLAIN` | One linear statement of the supported stages | Shared description rows without executing any read expansion or write; Cohesion extension |
 | `LET` | One or more `variable = expression` assignments | Adds new value bindings in assignment order; rebinding is COHDBG003 |
@@ -283,8 +283,8 @@ to the path sum; a bounded segment contributes its upper bound times its body's 
 an unbounded segment contributes its lower bound times that count. A text sum above 64 is
 GQL0005, including an unbounded lower bound above 64. Hand-built invalid bounds use COHDBG001.
 At runtime an unbounded segment continues until no unused relationship qualifies; needing a
-65th relationship after direction/type filtering is COHDBG004. Endpoint predicates, LIMIT and
-the projection cannot suppress that failure. The shared 100,000-binding and 1,000,000-candidate
+65th relationship after direction, type, bound identity and the hop's own property checks is
+COHDBG004. Endpoint predicates, LIMIT and the projection cannot suppress that failure. The shared 100,000-binding and 1,000,000-candidate
 budgets also apply, with no partial result output.
 
 `(a) ((x)-[r:T]->(y)){2} (b)` joins the iterations at the same node: each y is the next x,
@@ -298,13 +298,15 @@ accepting that form departs from Neo4j's rejection of patterns that may have no 
 Variables declared inside a repeated segment are lists of their singleton kind. RETURN * and
 WITH * include these group variables in declaration order. Lists preserve source order when
 expanded from either end; FOR/UNWIND retain the node/relationship kind, including across WITH
-and NEXT. Ordinary list expressions and aggregates can consume them in process. Direct member
-access (`r.w`), DELETE of a group, and reuse of a name as both group and singleton are COHDBG003.
+and NEXT. Ordinary list expressions and aggregates can consume them in process. Group provenance
+survives CASE, COALESCE, NULLIF, aggregates and container construction/access at the corresponding
+depth. Direct member access (`r.w`), DELETE of a group, and reuse of a name as both group and singleton are COHDBG003.
 Property maps inside a repeated segment cannot reference group variables (COHDBG003); no
 implicit choice between an iteration's singleton and the final list is made. A non-negotiated
 possible composite final projection is statically COHDBG016. The existing Execute prohibition
-on entity-valued results still applies to a negotiated group-list projection, as for collect(entity);
-scalar projections after FOR/UNWIND use the existing wire codec. Named full paths use ExecutePaths.
+on entity-valued results still applies to a negotiated possibly nonempty group-list projection,
+as for collect(entity), with COHDBG001 naming lists of nodes or relationships. A Max=0 group is
+provably empty and projects as `[]`; scalar projections after FOR/UNWIND use the existing wire codec. Named full paths use ExecutePaths.
 
 INSERT/CREATE quantifiers and node quantifiers are GQL0002 before writes. Questioned paths
 after an edge or parenthesized path, subpath assignments, WHERE inside a parenthesized path,
@@ -312,9 +314,9 @@ and nested quantifiers each produce one named COHDBL001. Elsewhere `?` retains t
 or unsupported-parameter diagnostic. Explicit TRAIL and other path modes/search prefixes remain
 COHDBL001. A `--` touching a subpath's `)` or quantifier's `}`, `+` or `*` is GQL0008, just as
 after a node or edge filler, including the bracketed Cypher star and its bounds. A nested `?`
-retains COHDBL001; path modes inside subpaths receive the same named capability diagnostic. Recursive subpath parsing uses the GQL0009 stack guard. Hand-built
-subpath nesting beyond 128 levels or cyclic element collections are refused iteratively with
-COHDBG001 before shape traversal.
+retains COHDBL001; path modes inside subpaths receive the same named capability diagnostic. Recursive
+subpath parsing uses the GQL0009 stack guard. Hand-built subpath nesting beyond 128 levels, cycles and repeated path instances in one walk are refused
+iteratively with COHDBG001 before shape traversal. Parsed text has no nesting cap beyond GQL0009.
 
 Bare unbounded quantifiers use implicit trail semantics without ISO's required restrictive mode
 or selector; this is a deliberate ISO deviation for the Cypher alias. Relationship uniqueness is

@@ -18,21 +18,22 @@ internal sealed class GraphPathShape
     internal long Bound { get; private set; }
     internal bool HasQuantifier { get; private set; }
 
-    internal static GraphPathShape Create(GqlPathPattern path, bool creating = false)
+    internal static GraphPathShape Create(GqlPathPattern path, bool creating = false, bool parsed = false)
     {
-        // Inspect nesting before any recursive work or record equality. This also refuses cycles
-        // in caller-owned AST collections and arbitrarily deep hand-built subpaths safely.
+        // Inspect identity before any recursive work or record equality. Refuse reused instances
+        // as well as cycles, so caller-owned DAGs cannot multiply work exponentially.
+        // Parsed text has already passed the parser stack guard; only direct ASTs have a depth cap.
         var pending = new Stack<(GqlPathPattern? Path, bool Exit, int Depth)>();
-        var active = new HashSet<GqlPathPattern>(ReferenceEqualityComparer.Instance);
+        var visited = new HashSet<GqlPathPattern>(ReferenceEqualityComparer.Instance);
         var shapes = new Dictionary<GqlPathPattern, GraphPathShape>(ReferenceEqualityComparer.Instance);
         pending.Push((path, false, 0));
         while (pending.TryPop(out var item))
         {
             var current = item.Path;
-            if (current is null || item.Depth > 128) { throw Invalid(); }
+            if (current is null || !parsed && item.Depth > 128) { throw Invalid(); }
             if (!item.Exit)
             {
-                if (!active.Add(current)) { throw Invalid(); }
+                if (!visited.Add(current)) { throw Invalid(); }
                 pending.Push((current, true, item.Depth));
                 if (current.Elements is { } elements)
                 {
@@ -44,7 +45,6 @@ internal sealed class GraphPathShape
                 }
                 continue;
             }
-            active.Remove(current);
             if (current.Nodes is null || current.Relationships is null) { throw Invalid(); }
             bool grouped = current.Elements?.Any(element => element is GqlParenthesizedPathPattern) == true;
             if (creating && grouped) { throw Invalid(); }

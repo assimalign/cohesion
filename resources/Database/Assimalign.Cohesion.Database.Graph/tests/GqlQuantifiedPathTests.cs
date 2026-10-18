@@ -93,6 +93,8 @@ public sealed class GqlQuantifiedPathTests
         await using var session = await database.CreateSessionAsync();
         await session.ExecuteAsync(chain);
         // Act / Assert
+        (await Rows(session, "MATCH (a:V {name:'A'})-[:T]->{,}(b) RETURN b.name"))
+            .Select(row => row[0]).ShouldBe(new object?[] { "A", "B", "C", "D" });
         var star = (await Rows(session, "MATCH (a:V {name:'A'}) ((x)-[r:T]->(y)){2} (b) RETURN *")).ShouldHaveSingleItem();
         star.Length.ShouldBe(5);
         star[1].ShouldBeOfType<object?[]>().Select(value => value.ShouldBeOfType<GraphNode>().Properties["name"]).ShouldBe(new object?[] { "A", "B" });
@@ -116,8 +118,18 @@ public sealed class GqlQuantifiedPathTests
 
     [Theory(DisplayName = "Cohesion Test [Graph] - Quantified paths: invalid group use and mixed bindings fail statically")]
     [InlineData("MATCH (a)-[r:T]->{2}(b) RETURN r.w")]
+    [InlineData("MATCH (a)-[r:T]->{2}(b) RETURN COALESCE(r,r).w")]
+    [InlineData("MATCH (a)-[r:T]->{2}(b) RETURN [r][0].w")]
+    [InlineData("MATCH (a)-[r:T]->{2}(b) RETURN {rs:r}.rs.w")]
     [InlineData("MATCH (a)-[r:T]->{2}(b) WITH r RETURN r.w")]
     [InlineData("MATCH (a)-[r:T]->{2}(b) WITH r AS rs RETURN rs.w")]
+    [InlineData("MATCH (a)-[r:T]->{2}(b) WITH COALESCE(r,r) AS rs RETURN rs.w")]
+    [InlineData("MATCH (a)-[r:T]->{2}(b) WITH CASE WHEN TRUE THEN r ELSE r END AS rs RETURN rs.w")]
+    [InlineData("MATCH (a)-[r:T]->{2}(b) WITH NULLIF(r,NULL) AS rs RETURN rs.w")]
+    [InlineData("MATCH (a)-[r:T]->{2}(b) WITH [r][0] AS rs RETURN rs.w")]
+    [InlineData("MATCH (a)-[r:T]->{2}(b) WITH {rs:r}.rs AS rs RETURN rs.w")]
+    [InlineData("MATCH (a)-[r:T]->{2}(b) WITH COALESCE(r,r) AS rs MATCH ((x)-[:T {w:rs[0].w}]->(y)){2} RETURN count(*)")]
+    [InlineData("MATCH (a)-[r:T]->{2}(b) WITH {rs:r} AS box MATCH ((x)-[:T {w:box.rs[0].w}]->(y)){2} RETURN count(*)")]
     [InlineData("MATCH (a)-[r:T]->{2}(b) RETURN r AS rs ORDER BY rs.w")]
     [InlineData("MATCH (a)-[r:T]->{2}(b) WHERE r.w>1 RETURN a")]
     [InlineData("MATCH (a)-[r:T]->{2}(b) DELETE r")]
@@ -262,7 +274,10 @@ public sealed class GqlQuantifiedPathTests
         var nested = new GqlPathPattern([], []) { Elements = [new GqlParenthesizedPathPattern(inner, new GqlQuantifier(2, 2))] };
         var deep = new GqlPathPattern([a, b], [edge]);
         for (int i = 0; i < 100_000; i++) { deep = new GqlPathPattern([], []) { Elements = [new GqlParenthesizedPathPattern(deep)] }; }
-        var bad = new[] { Path(new(-1, 1)), Path(new(3, 1)), Path(new(1, 65)), Path(new(65, null)), nested, deep,
+        var reused = new GqlPathPattern([a], []);
+        for (int i = 0; i < 40; i++)
+        { reused = new GqlPathPattern([], []) { Elements = [new GqlParenthesizedPathPattern(reused), new GqlParenthesizedPathPattern(reused)] }; }
+        var bad = new[] { Path(new(-1, 1)), Path(new(3, 1)), Path(new(1, 65)), Path(new(65, null)), nested, deep, reused,
             new GqlPathPattern([a,b,a], [edge with { Quantifier = new(1,40) }, edge with { Quantifier = new(1,40) }]),
             new GqlPathPattern([a, b], [edge]) { Elements = [new GqlPathNode(a)] },
             new GqlPathPattern([], []) { Elements = [new GqlParenthesizedPathPattern(new GqlPathPattern([a,b], [edge]), new GqlQuantifier(0,0))] } };
@@ -277,6 +292,62 @@ public sealed class GqlQuantifiedPathTests
         (await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(new GraphQueryRequest(insertion))))
             .Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG001");
         (await Rows(session, "MATCH (a) RETURN count(*)")).ShouldHaveSingleItem()[0].ShouldBe(0L);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Graph] - Quantified paths: incoming and either-direction segments execute stored edges correctly")]
+    [InlineData("<-[:T]-{1,3}", "D", "C,B,A")]
+    [InlineData("-[:T]-{1,3}", "D", "C,B,A")]
+    [InlineData("<-[:T]->{1,3}", "D", "C,B,A")]
+    public async Task Execute_DirectedQuantifiers_ShouldRespectTraversalAsync(string segment, string start, string expected)
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create("quantified", new());
+        var database = await engine.CreateDatabaseAsync("graph");
+        await using var session = await database.CreateSessionAsync();
+        await session.ExecuteAsync(chain);
+        // Act
+        var rows = await Rows(session, "MATCH (a:V {name:'" + start + "'})" + segment + "(b) RETURN b.name");
+        // Assert
+        rows.Select(row => row[0]).ShouldBe(expected.Split(',').Cast<object?>());
+        var paths = await PathKeys(session, "MATCH p = (a:V {name:'" + start + "'})" + segment + "(b) RETURN p");
+        paths.Length.ShouldBe(3);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Graph] - Quantified paths: hop properties and bound relationship identity precede the hop cap")]
+    public async Task Execute_FilteredHopCap_ShouldRejectOnlyPassingEdgesAsync()
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create("quantified", new());
+        var database = await engine.CreateDatabaseAsync("graph");
+        await using var session = await database.CreateSessionAsync();
+        await session.ExecuteAsync("INSERT (a:V {k:0})" + string.Concat(Enumerable.Range(1, 64).Select(i => "-[:T {w:1}]->(:V {k:" + i + "})")));
+        await session.ExecuteAsync("MATCH (a:V {k:64}) INSERT (a)-[:T {w:2}]->(:V {k:65}), (:Other)-[:Other]->(:Other)");
+        // Act / Assert
+        (await Rows(session, "MATCH (a:V {k:0})-[:T {w:1}]->+(b) RETURN count(*)")).ShouldHaveSingleItem()[0].ShouldBe(64L);
+        (await Rows(session, "MATCH ()-[r:Other]->() WITH r MATCH (a:V {k:0})-[:T {w:1}]->+(b)-[r]->(c) RETURN count(*)"))
+            .ShouldHaveSingleItem()[0].ShouldBe(0L);
+        await session.ExecuteAsync("MATCH ()-[r:T {w:2}]->() DELETE r");
+        await session.ExecuteAsync("MATCH (a:V {k:64}) INSERT (a)-[:T {w:1}]->(:V {k:66})");
+        foreach (string map in new[] { "{w:1}", "{w:c.k}" })
+        {
+            var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(
+                "MATCH (a:V {k:0})-[:T " + map + "]->+(b), (c:V {k:1}) RETURN count(*)"));
+            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG004");
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Graph] - Quantified paths: parsed text can nest subpaths beyond the direct AST cap")]
+    public async Task Execute_DeepParsedSubpaths_ShouldPlanAndRunAsync()
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create("quantified", new());
+        var database = await engine.CreateDatabaseAsync("graph");
+        await using var session = await database.CreateSessionAsync();
+        await session.ExecuteAsync(chain);
+        string source = "MATCH " + new string('(', 129) + "(a:V {name:'A'})->(b)" + new string(')', 129) + " RETURN b.name";
+        // Act / Assert
+        (await Rows(session, "EXPLAIN " + source)).ShouldNotBeEmpty();
+        (await Rows(session, source)).ShouldHaveSingleItem()[0].ShouldBe("B");
     }
 
     private static async Task<string[]> PathKeys(GraphDatabaseSession session, string source)

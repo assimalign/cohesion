@@ -26,20 +26,23 @@ graph node, unlike Neo4j. Mixing Cypher lengths and ISO subpaths in one clause i
 The sum of upper bounds, or lower bounds for unbounded segments, times body hop counts is at most
 64 (GQL0005 for text, COHDBG001 for direct ASTs). Unbounded segments use implicit trails, a deliberate
 ISO deviation from the requirement for a mode/selector. An eligible 65th relationship after type
-and direction filtering raises COHDBG004; LIMIT and endpoint predicates do not hide it. The
+and direction, bound-identity and own-property filtering raises COHDBG004; LIMIT and endpoint predicates do not hide it. The
 100,000-binding and 1,000,000-expansion budgets also apply. Results materialize before wire output.
 
 Variables inside quantifiers are lists in source order, including under RETURN * and WITH *.
 FOR/UNWIND preserve the singleton entity kind; list expressions and aggregates can consume them.
 Using a group as a singleton, accessing `r.w`, deleting the list, or referencing a group in a map
 inside a repeated segment is COHDBG003. Unnegotiated composite projections are COHDBG016;
-negotiated Execute retains its existing entity-valued-result rejection. Project scalar values
+negotiated Execute returns a provably empty Max=0 group as `[]` and retains COHDBG001
+for possible nonempty lists of nodes or relationships. Group provenance survives result-preserving
+expressions and container access. Project scalar values
 after FOR/UNWIND, or project a full named path through ExecutePaths. No wire format is added.
 
 Node and INSERT/CREATE quantifiers are GQL0002. Questioned paths after an edge or subpath,
 subpath assignments, inner WHERE and nested quantifiers remain named COHDBL001. Explicit TRAIL
 remains COHDBL001. A touching `--` after `}`, `+`, `*` or a subpath's `)` is GQL0008.
-Subpath parsing uses GQL0009 on stack exhaustion; direct AST nesting beyond 128 is COHDBG001.
+Subpath parsing uses GQL0009 on stack exhaustion, with no separate text nesting cap; direct AST
+nesting beyond 128, cycles and repeated path instances in one walk are COHDBG001.
 
 A NULL binding in a later pattern matches nothing. Property access, labeled predicates and
 ordinary comparisons over NULL yield NULL/UNKNOWN; IS NULL is TRUE. RETURN expressions and
