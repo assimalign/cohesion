@@ -1,3 +1,5 @@
+using System;
+using System.Diagnostics;
 using System.Linq;
 using Shouldly;
 using Xunit;
@@ -50,4 +52,21 @@ public sealed class OqlCompositeIndexParserTests
         text.Substring(start, token.Length).ShouldBe(token);
         if (code == "COHDBL001") { diagnostic.Message!.ShouldContain(token + (token == "DISTINCT" ? " ARRAY" : "")); }
     }
+    [Fact(DisplayName = "Cohesion Test [OQL] - Large deferred array keys retain one bounded refusal (#1135)")]
+    public void Parse_LargeDeferredIndexKey_ShouldRejectOnceInBoundedTime()
+    {
+        // Arrange: capability validation must not rescan the entire key prefix per word.
+        string text = "CREATE INDEX ix ON c (DISTINCT ARRAY t " + string.Join(' ', Enumerable.Repeat("FOR t IN tags", 20000)) + " END)";
+        var elapsed = Stopwatch.StartNew();
+
+        // Act.
+        var diagnostic = new OqlQueryParser().Parse(text).Diagnostics.ShouldHaveSingleItem();
+
+        // Assert.
+        diagnostic.Code.ShouldBe("COHDBL001");
+        diagnostic.Start.ShouldBe(22);
+        diagnostic.Message!.ShouldContain("DISTINCT ARRAY");
+        elapsed.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(5));
+    }
+
 }

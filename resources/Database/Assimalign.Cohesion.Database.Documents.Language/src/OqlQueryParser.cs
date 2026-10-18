@@ -235,6 +235,7 @@ public sealed partial class OqlQueryParser : QueryParser
         int fetchHead = -2;
         int pagingHead = -2;
         int openQuantifiers = 0;
+        var (indexKeyStart, indexKeyEnd) = FindIndexKeyRange();
         for (int index = 0; index < _tokens.Count; index++)
         {
             var token = _tokens[index];
@@ -271,7 +272,7 @@ public sealed partial class OqlQueryParser : QueryParser
             if (value == "FIRST" && index == fetchHead + 1 || value == "ALL" && index == pagingHead + 1) { continue; }
 
             // Array-index keys belong to the DDL parser, which emits one diagnostic at ALL/DISTINCT.
-            if (value is ("ALL" or "DISTINCT" or "ARRAY" or "FOR" or "IN" or "END") && IsIndexKeyToken(index)) { continue; }
+            if (value is ("ALL" or "DISTINCT" or "ARRAY" or "FOR" or "IN" or "END") && indexKeyStart >= 0 && index > indexKeyStart && index < indexKeyEnd) { continue; }
             if (value == "UNIQUE" && index == 1 && IsIndexStatement("CREATE")) { continue; }
 
             // DISTINCT/ALL are legal only directly after SELECT, including INSERT/UPSERT SELECT.

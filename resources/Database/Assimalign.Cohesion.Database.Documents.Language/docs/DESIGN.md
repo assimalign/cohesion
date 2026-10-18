@@ -633,7 +633,9 @@ convenience forms. Quoted "if" stays an index name. Duplicate paths compare segm
 partial WHERE and INCLUDE MISSING receive OQL0002 at the invalid token. The engine enforces the
 32-path cap on directly constructed ASTs with COHDOC022; text reports OQL0009 at the 33rd key. ALL and DISTINCT ARRAY keys receive one COHDBL001 from the key parser,
 at ALL or DISTINCT and naming that array-key form. They remain deferred independently of SELECT
-quantifiers. UNIQUE elsewhere, including SELECT UNIQUE(a), retains COHDBL001 and is never a function.
+quantifiers. Capability validation computes the balanced key-list token range once, so repeated
+array-key words do not cause quadratic prefix rescans. UNIQUE elsewhere, including SELECT UNIQUE(a),
+retains COHDBL001 and is never a function.
 
 Composite keys follow SQL++'s leading-key MISSING rule. UNIQUE is a Cohesion SQL-spelled extension;
 any NULL/MISSING component exempts the key from conflicts (PostgreSQL NULLS DISTINCT). Arrays and

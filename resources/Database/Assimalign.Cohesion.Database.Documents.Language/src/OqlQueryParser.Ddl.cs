@@ -50,16 +50,22 @@ public sealed partial class OqlQueryParser
             (position == start + 1 || position == start + 2 && IsWord(_tokens[start + 1], "NOT"));
     }
 
-    private bool IsIndexKeyToken(int position)
+    private (int Start, int End) FindIndexKeyRange()
     {
-        if (!IsIndexStatement("CREATE")) { return false; }
+        if (!IsIndexStatement("CREATE")) { return (-1, -1); }
+        int start = -1;
         int depth = 0;
-        for (int i = 0; i <= position; i++)
+        for (int i = 0; i < _tokens.Count; i++)
         {
-            if (_tokens[i].Type == TokenType.LeftParen) { depth++; }
-            if (_tokens[i].Type == TokenType.RightParen && --depth == 0) { return false; }
+            if (_tokens[i].Type == TokenType.LeftParen)
+            {
+                if (start < 0) { start = i; }
+                depth++;
+            }
+            else if (_tokens[i].Type == TokenType.RightParen && --depth == 0)
+            { return (start, i); }
         }
-        return depth > 0;
+        return (start, _tokens.Count);
     }
 
     private OqlCreateIndexExpression ParseCreateIndex()
