@@ -104,7 +104,7 @@ internal static partial class GraphPlanExecutor
                         var finalProperties = shape.HasQuantifier ? state.Properties : FixedProperties(shape, state);
                         bool matches = true;
                         for (var check = finalProperties; check is not null; check = check.Previous)
-                        { if (!PropertiesMatch(check.Expected, check.Actual, state.Bindings, parameters, deferUnbound)) { matches = false; break; } }
+                        { if (!PropertiesMatch(check.Expected, check.Actual, state.Bindings, operation.EvaluationContext, parameters, deferUnbound)) { matches = false; break; } }
                         if (matches) { acceptMatch(state.Bindings, finalProperties); }
                         break;
                     case StartLeftTask start:
@@ -115,7 +115,7 @@ internal static partial class GraphPlanExecutor
                         var properties = state.Properties;
                         foreach (var pattern in nodes.Patterns)
                         {
-                            if (!AcceptNode(pattern, state.Current, state.Bindings, parameters, deferUnbound: true)) { accepted = false; break; }
+                            if (!AcceptNode(pattern, state.Current, state.Bindings, operation.EvaluationContext, parameters, deferUnbound: true)) { accepted = false; break; }
                             if (shape.HasQuantifier) { properties = new MatchedProperties(pattern.Properties, state.Current.Properties, properties); }
                         }
                         if (accepted) { frontier.Push(state with { Properties = properties, Task = nodes.Next }); }
@@ -168,7 +168,7 @@ internal static partial class GraphPlanExecutor
                         var bindings = new Dictionary<string, object?>(state.Bindings, StringComparer.Ordinal);
                         var relationship = GraphDatabase.Materialize(edge);
                         if (!Accept(hop.Pattern.Variable, relationship, bindings) ||
-                            !PropertiesMatch(hop.Pattern.Properties, relationship.Properties, bindings, parameters, deferUnbound: true)) { break; }
+                            !PropertiesMatch(hop.Pattern.Properties, relationship.Properties, bindings, operation.EvaluationContext, parameters, deferUnbound: true)) { break; }
                         // The hop's own checks precede the cap; deferred references still qualify.
                         // A qualifying 65th edge fails before any target constraints can hide it.
                         if (state.Relationships.Count == 64) { throw new GraphPlanningException("COHDBG004", ErrorMessages.PathHopLimitExceeded); }
@@ -176,7 +176,7 @@ internal static partial class GraphPlanExecutor
                         if (database.Store.FindNode(next, operation.Context.Snapshot) is not { } target) { break; }
                         var nextNode = GraphDatabase.Materialize(target);
                         if (hop.Next is NodeTask targetNodes && targetNodes.Patterns.Any(pattern =>
-                            !AcceptNode(pattern, nextNode, bindings, parameters, deferUnbound: true))) { break; }
+                            !AcceptNode(pattern, nextNode, bindings, operation.EvaluationContext, parameters, deferUnbound: true))) { break; }
                         var copy = state.Fork(bindings);
                         copy.Used.Add(edge.Id);
                         if (hop.Forward) { copy.Nodes.Add(nextNode); copy.Relationships.Add(relationship); }

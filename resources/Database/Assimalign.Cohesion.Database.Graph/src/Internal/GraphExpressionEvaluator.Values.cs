@@ -8,23 +8,23 @@ namespace Assimalign.Cohesion.Database.Graph.Internal;
 
 internal static partial class GraphExpressionEvaluator
 {
-    private static object Map(GqlMapExpression map, IReadOnlyDictionary<string, object?> bindings, IReadOnlyDictionary<string, object?>? parameters)
+    private static object Map(GqlMapExpression map, IReadOnlyDictionary<string, object?> bindings, GraphEvaluationContext context, IReadOnlyDictionary<string, object?>? parameters)
     {
         var values = new Dictionary<string, object?>(map.Entries.Count, StringComparer.Ordinal);
-        foreach (var entry in map.Entries) { values.Add(entry.Key, Evaluate(entry.Value, bindings, parameters)); }
+        foreach (var entry in map.Entries) { values.Add(entry.Key, Evaluate(entry.Value, bindings, context, parameters)); }
         return new ReadOnlyDictionary<string, object?>(values);
     }
 
-    private static object? Case(GqlCaseExpression conditional, IReadOnlyDictionary<string, object?> bindings, IReadOnlyDictionary<string, object?>? parameters)
+    private static object? Case(GqlCaseExpression conditional, IReadOnlyDictionary<string, object?> bindings, GraphEvaluationContext context, IReadOnlyDictionary<string, object?>? parameters)
     {
-        var operand = conditional.Operand is null ? null : Evaluate(conditional.Operand, bindings, parameters);
+        var operand = conditional.Operand is null ? null : Evaluate(conditional.Operand, bindings, context, parameters);
         foreach (var branch in conditional.Alternatives)
         {
-            var when = Evaluate(branch.When, bindings, parameters);
+            var when = Evaluate(branch.When, bindings, context, parameters);
             if ((conditional.Operand is null ? Boolean(when, branch.When) : CaseComparison(operand, when, branch.Comparison)) == true)
-            { return Evaluate(branch.Then, bindings, parameters); }
+            { return Evaluate(branch.Then, bindings, context, parameters); }
         }
-        return conditional.Otherwise is null ? null : Evaluate(conditional.Otherwise, bindings, parameters);
+        return conditional.Otherwise is null ? null : Evaluate(conditional.Otherwise, bindings, context, parameters);
     }
 
     private static bool? CaseComparison(object? left, object? right, string comparison)
@@ -43,17 +43,17 @@ internal static partial class GraphExpressionEvaluator
         };
     }
 
-    private static object? Coalesce(GqlCoalesceExpression coalesce, IReadOnlyDictionary<string, object?> bindings, IReadOnlyDictionary<string, object?>? parameters)
+    private static object? Coalesce(GqlCoalesceExpression coalesce, IReadOnlyDictionary<string, object?> bindings, GraphEvaluationContext context, IReadOnlyDictionary<string, object?>? parameters)
     {
         foreach (var operand in coalesce.Operands)
-        { if (Evaluate(operand, bindings, parameters) is { } value) { return value; } }
+        { if (Evaluate(operand, bindings, context, parameters) is { } value) { return value; } }
         return null;
     }
 
-    private static object? NullIf(GqlNullIfExpression nullIf, IReadOnlyDictionary<string, object?> bindings, IReadOnlyDictionary<string, object?>? parameters)
+    private static object? NullIf(GqlNullIfExpression nullIf, IReadOnlyDictionary<string, object?> bindings, GraphEvaluationContext context, IReadOnlyDictionary<string, object?>? parameters)
     {
-        var left = Evaluate(nullIf.Left, bindings, parameters);
-        var right = Evaluate(nullIf.Right, bindings, parameters);
+        var left = Evaluate(nullIf.Left, bindings, context, parameters);
+        var right = Evaluate(nullIf.Right, bindings, context, parameters);
         return GraphCompositeValues.Equal(left, right) == true ? null : left;
     }
 
@@ -66,10 +66,10 @@ internal static partial class GraphExpressionEvaluator
             _ => throw new GraphPlanningException("COHDBG013", ErrorMessages.CompositeRequired, expression.Location),
         };
 
-    private static object? Subscript(GqlSubscriptExpression subscript, IReadOnlyDictionary<string, object?> bindings, IReadOnlyDictionary<string, object?>? parameters)
+    private static object? Subscript(GqlSubscriptExpression subscript, IReadOnlyDictionary<string, object?> bindings, GraphEvaluationContext context, IReadOnlyDictionary<string, object?>? parameters)
     {
-        var operand = Evaluate(subscript.Operand, bindings, parameters);
-        var index = Evaluate(subscript.Index, bindings, parameters);
+        var operand = Evaluate(subscript.Operand, bindings, context, parameters);
+        var index = Evaluate(subscript.Index, bindings, context, parameters);
         if (operand is null || index is null) { return null; }
         if (operand is IReadOnlyDictionary<string, object?> or GraphNode or GraphRelationship && index is string key) { return Member(operand, key, subscript); }
         if (operand is object?[] list && index is byte or sbyte or short or ushort or int or uint or long or ulong)

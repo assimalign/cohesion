@@ -267,6 +267,7 @@ public sealed class GraphDatabaseSession : DatabaseLanguageSession<GraphRequest>
 
         _database.EnsureNotDisposed();
         _database.ThrowIfOffline();
+        var transactionStart = (_database.Engine.EngineOptions.TimeProvider ?? TimeProvider.System).GetUtcNow();
         TransactionContext context;
         try
         {
@@ -284,7 +285,7 @@ public sealed class GraphDatabaseSession : DatabaseLanguageSession<GraphRequest>
             throw reported;
         }
 
-        return new GraphDatabaseTransaction(_database.Coordinator, context, _database);
+        return new GraphDatabaseTransaction(_database.Coordinator, context, _database, transactionStart);
     }
 
     /// <inheritdoc />

@@ -54,6 +54,8 @@ internal static class GraphOrderComparer
             (GraphPath a, GraphPath b) => Paths(a, b, token),
             (string a, string b) => StringComparer.Ordinal.Compare(a, b),
             (bool a, bool b) => a.CompareTo(b),
+            (DateOnly a, DateOnly b) => a.CompareTo(b),
+            (DateTimeOffset a, DateTimeOffset b) => a.CompareTo(b),
             (int a, int b) => a.CompareTo(b),
             (short a, short b) => a.CompareTo(b),
             (sbyte a, sbyte b) => a.CompareTo(b),
@@ -68,7 +70,8 @@ internal static class GraphOrderComparer
         };
     }
 
-    // AnyValueComparator.java:44-85 and VirtualValueGroup.java:26-32, local Neo4j values tree.
+    // AnyValueComparator.java:44-85, VirtualValueGroup.java:26-32 and
+    // storable/ValueGroup.java:56-65, local Neo4j values tree.
     private static int Group(object? value) => value switch
     {
         PreparedMap => 0,
@@ -76,10 +79,12 @@ internal static class GraphOrderComparer
         GraphRelationship => 2,
         object?[] => 3,
         GraphPath => 4,
-        string => 5,
-        bool => 6,
-        null => 8,
-        _ => 7,
+        DateTimeOffset => 5,
+        DateOnly => 6,
+        string => 7,
+        bool => 8,
+        null => 10,
+        _ => 9,
     };
 
     private static int Lists(object?[] left, object?[] right, CancellationToken token)

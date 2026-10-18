@@ -16,6 +16,7 @@ null extension, quantified relationships/subpaths under trail semantics (ISO {m,
 `MATCH p = (a)-[r:KNOWS]->(b) RETURN p`, ISO label expressions such as `(n:(A|B)&!C)`, `(n:%)` and
 `-[r:T|U]->`, every directed ISO edge in full and abbreviated form (`->`, `<-`, `-`, `<->`), scalar
 Boolean, arithmetic, null/truth, list-membership and string filters and labeled predicates (`n IS NOT LABELED A`, `n:A|B`),
+core element/string/math functions, CAST, Cypher conversions, transaction-start CURRENT_DATE/CURRENT_TIMESTAMP,
 CASE, COALESCE, NULLIF, list/map literals and parameters, subscripts and map/entity property access,
 LET and FILTER, FOR (Cypher UNWIND), RETURN ... NEXT and Cypher WITH,
 RETURN expressions and aliases, DISTINCT/ALL, RETURN * and standalone RETURN,

@@ -27,13 +27,13 @@ public sealed class GqlWhereExpressionTests
         for (int i = 0; i < values.Length; i++)
         {
             var left = new GqlLiteralExpression(values[i]);
-            GraphExpressionEvaluator.Evaluate(new GqlUnaryExpression("NOT", left), bindings).ShouldBe(!values[i]);
+            GraphExpressionEvaluator.Evaluate(new GqlUnaryExpression("NOT", left), bindings, default).ShouldBe(!values[i]);
             for (int j = 0; j < values.Length; j++)
             {
                 var right = new GqlLiteralExpression(values[j]);
                 foreach (var (op, table) in new[] { (GqlLogicalOperator.And, and), (GqlLogicalOperator.Or, or), (GqlLogicalOperator.Xor, xor) })
                 {
-                    GraphExpressionEvaluator.Evaluate(new GqlLogicalExpression(op, [left, right]), bindings).ShouldBe(table[i, j]);
+                    GraphExpressionEvaluator.Evaluate(new GqlLogicalExpression(op, [left, right]), bindings, default).ShouldBe(table[i, j]);
                 }
             }
         }
@@ -156,7 +156,7 @@ public sealed class GqlWhereExpressionTests
         }
 
         // Act / Assert
-        Should.Throw<InsufficientExecutionStackException>(() => GraphExpressionEvaluator.Evaluate(expression, new Dictionary<string, object?>()));
+        Should.Throw<InsufficientExecutionStackException>(() => GraphExpressionEvaluator.Evaluate(expression, new Dictionary<string, object?>(), default));
     }
 
     [Fact(DisplayName = "Cohesion Test [Graph] - WHERE: malformed public expression nodes fail shape validation")]
@@ -214,14 +214,14 @@ public sealed class GqlWhereExpressionTests
         var expression = new GqlBinaryExpression(new GqlLiteralExpression(dividend), "%", new GqlLiteralExpression(-1L));
 
         // Act
-        var result = GraphExpressionEvaluator.Evaluate(expression, new Dictionary<string, object?>());
+        var result = GraphExpressionEvaluator.Evaluate(expression, new Dictionary<string, object?>(), default);
 
         // Assert
         result.ShouldBeOfType<long>().ShouldBe(0L);
     }
 
     private static object? Arithmetic(object left, object right) => GraphExpressionEvaluator.Evaluate(
-        new GqlBinaryExpression(new GqlLiteralExpression(left), "+", new GqlLiteralExpression(right)), new Dictionary<string, object?>());
+        new GqlBinaryExpression(new GqlLiteralExpression(left), "+", new GqlLiteralExpression(right)), new Dictionary<string, object?>(), default);
 
     private static async Task<List<object?>> ValuesAsync(GraphDatabaseSession session, string query)
     {

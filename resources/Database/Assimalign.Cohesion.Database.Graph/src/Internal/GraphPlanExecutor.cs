@@ -71,14 +71,14 @@ internal static partial class GraphPlanExecutor
                     {
                         token.ThrowIfCancellationRequested();
                         foreach (var assignment in let.Bindings)
-                        { binding.Add(assignment.Alias!, GraphExpressionEvaluator.Evaluate(assignment.Expression, binding, parameters)); }
+                        { binding.Add(assignment.Alias!, GraphExpressionEvaluator.Evaluate(assignment.Expression, binding, operation.EvaluationContext, parameters)); }
                     }
                     break;
                 case GqlFilterStage filter:
                     bindings = bindings.Where(binding =>
                     {
                         token.ThrowIfCancellationRequested();
-                        return GraphExpressionEvaluator.Boolean(GraphExpressionEvaluator.Evaluate(filter.Predicate, binding, parameters), filter.Predicate) is true;
+                        return GraphExpressionEvaluator.Boolean(GraphExpressionEvaluator.Evaluate(filter.Predicate, binding, operation.EvaluationContext, parameters), filter.Predicate) is true;
                     }).ToList();
                     break;
                 case GqlForStage loop:
@@ -86,7 +86,7 @@ internal static partial class GraphPlanExecutor
                     foreach (var binding in bindings)
                     {
                         token.ThrowIfCancellationRequested();
-                        object? value = GraphExpressionEvaluator.Evaluate(loop.List, binding, parameters);
+                        object? value = GraphExpressionEvaluator.Evaluate(loop.List, binding, operation.EvaluationContext, parameters);
                         if (value is null) { continue; }
                         if (value is not System.Collections.IList list || value is byte[])
                         { throw new GraphPlanningException("COHDBG013", ErrorMessages.ForListRequired, loop.List.Location); }
@@ -115,7 +115,7 @@ internal static partial class GraphPlanExecutor
                     affected += await DeleteAsync(database, operation, deletion, bindings, token).ConfigureAwait(false);
                     break;
                 case GqlReturnStage projection when stageIndex != plan.Stages.Count - 1:
-                    bindings = ProjectBindings(stagePlan, projection, bindings, parameters, token);
+                    bindings = ProjectBindings(stagePlan, projection, bindings, operation.EvaluationContext, parameters, token);
                     break;
                 case GqlNextStage when plan.Stages[stageIndex - 1].Stage is not GqlReturnStage:
                     bindings = [new(StringComparer.Ordinal)];
@@ -123,7 +123,7 @@ internal static partial class GraphPlanExecutor
             }
         }
         if (plan.Projections.Count == 0) { return new GraphMutationResult(affected, plan.Warnings); }
-        if (plan.Grouping is { } grouping) { bindings = GraphGrouping.Apply(grouping, bindings, parameters, token); }
+        if (plan.Grouping is { } grouping) { bindings = GraphGrouping.Apply(grouping, bindings, operation.EvaluationContext, parameters, token); }
         var columns = plan.Projections.Select((projection, i) => new DatabaseColumn
         { Name = projection.Name, Ordinal = i, Type = projection.Type }).ToArray();
         var rows = new List<GraphOrderedRow>(bindings.Count);
@@ -132,7 +132,7 @@ internal static partial class GraphPlanExecutor
         foreach (var binding in bindings)
         {
             token.ThrowIfCancellationRequested();
-            var row = plan.Projections.Select(projection => GraphExpressionEvaluator.Evaluate(projection.Expression, binding, parameters)).ToArray();
+            var row = plan.Projections.Select(projection => GraphExpressionEvaluator.Evaluate(projection.Expression, binding, operation.EvaluationContext, parameters)).ToArray();
             if (scalarsOnly)
             {
                 for (int i = 0; i < row.Length; i++)
@@ -149,7 +149,7 @@ internal static partial class GraphPlanExecutor
             }
             if (!paths) { GraphResultRowEncoder.Validate(row, compositeColumns); }
             if (distinct is null || distinct.Add(row))
-            { rows.Add(new GraphOrderedRow(row, GraphSortPage.Keys(plan, binding, row, token), rows.Count)); }
+            { rows.Add(new GraphOrderedRow(row, GraphSortPage.Keys(plan, binding, row, operation.EvaluationContext, token), rows.Count)); }
         }
         // Unsigned and Decimal values are learned from rows. Recheck earlier rows when
         // a header flag changes their framing; untagged results never need this pass.
@@ -243,9 +243,9 @@ internal static partial class GraphPlanExecutor
                 token.ThrowIfCancellationRequested();
                 // Cross-part maps include anonymous elements, whose stored values travel
                 // with the row until the complete clause can evaluate their predicates.
-                if (!DeferredPropertiesMatch(candidate, parameters)) { continue; }
+                if (!DeferredPropertiesMatch(candidate, operation.EvaluationContext, parameters)) { continue; }
                 if (clause.Predicate is not null && GraphExpressionEvaluator.Boolean(
-                    GraphExpressionEvaluator.Evaluate(clause.Predicate, candidate.Bindings, parameters), clause.Predicate) is not true) { continue; }
+                    GraphExpressionEvaluator.Evaluate(clause.Predicate, candidate.Bindings, operation.EvaluationContext, parameters), clause.Predicate) is not true) { continue; }
                 AddBinding(matched, candidate.Bindings);
                 found = true;
             }
@@ -274,34 +274,34 @@ internal static partial class GraphPlanExecutor
         return deferred;
     }
 
-    private static bool DeferredPropertiesMatch(MatchCandidate candidate, IReadOnlyDictionary<string, object?>? parameters)
+    private static bool DeferredPropertiesMatch(MatchCandidate candidate, GraphEvaluationContext context, IReadOnlyDictionary<string, object?>? parameters)
     {
         for (var property = candidate.Deferred; property is not null; property = property.Previous)
         {
             if (!property.Exists || !GraphExpressionEvaluator.Equal(
-                GraphExpressionEvaluator.PropertyScalar(property.Expression, candidate.Bindings, parameters), property.Value)) { return false; }
+                GraphExpressionEvaluator.PropertyScalar(property.Expression, candidate.Bindings, context, parameters), property.Value)) { return false; }
         }
         return true;
     }
 
     private static List<Dictionary<string, object?>> ProjectBindings(GraphPlan plan, GqlReturnStage stage,
-        List<Dictionary<string, object?>> bindings, IReadOnlyDictionary<string, object?>? parameters, CancellationToken token)
+        List<Dictionary<string, object?>> bindings, GraphEvaluationContext context, IReadOnlyDictionary<string, object?>? parameters, CancellationToken token)
     {
-        if (plan.Grouping is { } grouping) { bindings = GraphGrouping.Apply(grouping, bindings, parameters, token); }
+        if (plan.Grouping is { } grouping) { bindings = GraphGrouping.Apply(grouping, bindings, context, parameters, token); }
         var rows = new List<GraphOrderedRow>(bindings.Count);
         var scopes = new Dictionary<object?[], Dictionary<string, object?>>();
         var distinct = plan.Distinct is null ? null : new HashSet<object?[]>(GraphRowComparer.Instance);
         foreach (var binding in bindings)
         {
             token.ThrowIfCancellationRequested();
-            var values = plan.Projections.Select(projection => GraphExpressionEvaluator.Evaluate(projection.Expression, binding, parameters)).ToArray();
+            var values = plan.Projections.Select(projection => GraphExpressionEvaluator.Evaluate(projection.Expression, binding, context, parameters)).ToArray();
             if (distinct is not null && !distinct.Add(values)) { continue; }
             var scope = plan.Grouping is null && plan.Distinct is null
                 ? new Dictionary<string, object?>(binding, StringComparer.Ordinal) : new Dictionary<string, object?>(StringComparer.Ordinal);
             for (int i = 0; i < values.Length; i++)
             { if (plan.Projections[i].BindingName is { } name) { scope[name] = values[i]; } }
             scopes.Add(values, scope);
-            rows.Add(new GraphOrderedRow(values, GraphSortPage.Keys(plan, binding, values, token), rows.Count));
+            rows.Add(new GraphOrderedRow(values, GraphSortPage.Keys(plan, binding, values, context, token), rows.Count));
         }
         var paged = GraphSortPage.Apply(rows, plan.SortPage, token);
         var result = new List<Dictionary<string, object?>>(paged.Length);
@@ -309,7 +309,7 @@ internal static partial class GraphPlanExecutor
         {
             token.ThrowIfCancellationRequested();
             if (stage.Predicate is { } predicate && GraphExpressionEvaluator.Boolean(
-                GraphExpressionEvaluator.Evaluate(predicate, scopes[values], parameters), predicate) is not true) { continue; }
+                GraphExpressionEvaluator.Evaluate(predicate, scopes[values], context, parameters), predicate) is not true) { continue; }
             // Grouped bindings store expression keys. Every boundary re-keys the carried
             // output by variable name so later stages see an ordinary binding table.
             var carried = new Dictionary<string, object?>(StringComparer.Ordinal);
@@ -346,9 +346,9 @@ internal static partial class GraphPlanExecutor
         return new GraphPath([GraphDatabase.Materialize(from), GraphDatabase.Materialize(to)], [relationship]);
     }
 
-    private static bool AcceptNode(GqlNodePattern pattern, GraphNode node, Dictionary<string, object?> bindings, IReadOnlyDictionary<string, object?>? parameters, bool deferUnbound = false)
+    private static bool AcceptNode(GqlNodePattern pattern, GraphNode node, Dictionary<string, object?> bindings, GraphEvaluationContext context, IReadOnlyDictionary<string, object?>? parameters, bool deferUnbound = false)
         => GraphLabelEvaluator.Accepts(pattern, node.Labels) && Accept(pattern.Variable, node, bindings) &&
-            PropertiesMatch(pattern.Properties, node.Properties, bindings, parameters, deferUnbound);
+            PropertiesMatch(pattern.Properties, node.Properties, bindings, context, parameters, deferUnbound);
     private static bool Accept(string? variable, object entity, Dictionary<string, object?> bindings)
     {
         if (variable is null) { return true; }
@@ -360,9 +360,9 @@ internal static partial class GraphPlanExecutor
         bindings.Add(variable, entity);
         return true;
     }
-    private static bool PropertiesMatch(IReadOnlyDictionary<string, GqlExpression> expected, IReadOnlyDictionary<string, object?> actual, IReadOnlyDictionary<string, object?> bindings, IReadOnlyDictionary<string, object?>? parameters, bool deferUnbound = false)
+    private static bool PropertiesMatch(IReadOnlyDictionary<string, GqlExpression> expected, IReadOnlyDictionary<string, object?> actual, IReadOnlyDictionary<string, object?> bindings, GraphEvaluationContext context, IReadOnlyDictionary<string, object?>? parameters, bool deferUnbound = false)
         => expected.All(item => deferUnbound && GraphValueExpressions.ReferencesUnbound(item.Value, bindings) ||
-            actual.TryGetValue(item.Key, out var value) && GraphExpressionEvaluator.Equal(GraphExpressionEvaluator.PropertyScalar(item.Value, bindings, parameters), value));
+            actual.TryGetValue(item.Key, out var value) && GraphExpressionEvaluator.Equal(GraphExpressionEvaluator.PropertyScalar(item.Value, bindings, context, parameters), value));
 
     private static async ValueTask<long> CreateAsync(GraphDatabase database, GraphOperation operation, GqlPathPattern path,
         Dictionary<string, object?> bindings, IReadOnlyDictionary<string, object?>? parameters, CancellationToken token)
@@ -375,13 +375,13 @@ internal static partial class GraphPlanExecutor
             var pattern = path.Nodes[i];
             if (pattern.Variable is { } variable && bindings.TryGetValue(variable, out var bound))
             {
-                if (bound is not GraphNode node || !AcceptNode(pattern, node, bindings, parameters))
+                if (bound is not GraphNode node || !AcceptNode(pattern, node, bindings, operation.EvaluationContext, parameters))
                 { throw new GraphPlanningException("COHDBG003", ErrorMessages.InsertEndpointInvalid); }
                 nodes[i] = node;
             }
             else
             {
-                nodes[i] = await database.CreateNodeCoreAsync(operation, GraphLabelEvaluator.InsertLabels(pattern), EvaluateProperties(pattern.Properties, bindings, parameters), token).ConfigureAwait(false);
+                nodes[i] = await database.CreateNodeCoreAsync(operation, GraphLabelEvaluator.InsertLabels(pattern), EvaluateProperties(pattern.Properties, bindings, operation.EvaluationContext, parameters), token).ConfigureAwait(false);
                 Accept(pattern.Variable, nodes[i], bindings);
                 affected++;
             }
@@ -394,7 +394,7 @@ internal static partial class GraphPlanExecutor
             // The planner admits only Outgoing and Incoming here.
             bool outgoing = pattern.Direction == GqlPatternDirection.Outgoing;
             var relationship = await database.CreateRelationshipCoreAsync(operation, nodes[outgoing ? i : i + 1].Id,
-                nodes[outgoing ? i + 1 : i].Id, GraphLabelEvaluator.InsertType(pattern), EvaluateProperties(pattern.Properties, bindings, parameters), token).ConfigureAwait(false);
+                nodes[outgoing ? i + 1 : i].Id, GraphLabelEvaluator.InsertType(pattern), EvaluateProperties(pattern.Properties, bindings, operation.EvaluationContext, parameters), token).ConfigureAwait(false);
             Accept(pattern.Variable, relationship, bindings);
             affected++;
         }
@@ -402,8 +402,8 @@ internal static partial class GraphPlanExecutor
     }
 
     private static IReadOnlyDictionary<string, object?> EvaluateProperties(
-        IReadOnlyDictionary<string, GqlExpression> properties, IReadOnlyDictionary<string, object?> bindings, IReadOnlyDictionary<string, object?>? parameters)
-        => properties.ToDictionary(item => item.Key, item => GraphExpressionEvaluator.PropertyScalar(item.Value, bindings, parameters), StringComparer.Ordinal);
+        IReadOnlyDictionary<string, GqlExpression> properties, IReadOnlyDictionary<string, object?> bindings, GraphEvaluationContext context, IReadOnlyDictionary<string, object?>? parameters)
+        => properties.ToDictionary(item => item.Key, item => GraphExpressionEvaluator.PropertyScalar(item.Value, bindings, context, parameters), StringComparer.Ordinal);
 
     internal sealed class ExpansionBudget
     {

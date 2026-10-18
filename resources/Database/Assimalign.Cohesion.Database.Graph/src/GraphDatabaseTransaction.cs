@@ -41,18 +41,21 @@ public sealed class GraphDatabaseTransaction : DatabaseTransaction
     // makes its disposal touch nothing.
     private readonly GraphDatabase _database;
 
-    internal GraphDatabaseTransaction(TransactionCoordinator coordinator, TransactionContext context, GraphDatabase database)
+    internal GraphDatabaseTransaction(TransactionCoordinator coordinator, TransactionContext context, GraphDatabase database, DateTimeOffset transactionStart)
         : base(context.Id, context.IsolationLevel)
     {
         _coordinator = coordinator;
         _context = context;
         _database = database;
+        TransactionStart = transactionStart;
     }
 
     /// <summary>
     /// Gets the MVCC transaction context the transaction's statements run under.
     /// </summary>
     internal TransactionContext Context => _context;
+
+    internal DateTimeOffset TransactionStart { get; }
 
     /// <summary>
     /// Gets whether statements may run in the transaction: the caller has not ended it, no

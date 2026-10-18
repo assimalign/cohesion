@@ -16,7 +16,7 @@ public class GqlLanguageProfileTests
         profile.Language.ShouldBe("GQL");
         profile.IsCaseSensitive.ShouldBeFalse();
         profile.Keywords.ToArray().ShouldContain("MATCH");
-        profile.Functions.ToArray().ShouldBe(["count", "sum", "avg", "min", "max", "collect_list", "collect"]);
+        profile.Functions.ToArray().ShouldBe(["element_id", "elementId", "labels", "type", "properties", "keys", "startNode", "endNode", "path_length", "length", "nodes", "edges", "relationships", "lower", "toLower", "upper", "toUpper", "trim", "substring", "replace", "char_length", "character_length", "size", "abs", "ceil", "ceiling", "floor", "round", "sqrt", "ln", "log", "mod", "toString", "toInteger", "toFloat", "toBoolean", "current_date", "current_timestamp", "cast", "count", "sum", "avg", "min", "max", "collect_list", "collect"]);
     }
 
     [Theory]

@@ -11,7 +11,7 @@ namespace Assimalign.Cohesion.Database.Graph.Internal;
 /// <summary>Evaluates scalar expressions with three-valued logic and stack-checked descent.</summary>
 internal static partial class GraphExpressionEvaluator
 {
-    internal static object? Evaluate(GqlExpression expression, IReadOnlyDictionary<string, object?> bindings, IReadOnlyDictionary<string, object?>? parameters = null)
+    internal static object? Evaluate(GqlExpression expression, IReadOnlyDictionary<string, object?> bindings, GraphEvaluationContext context, IReadOnlyDictionary<string, object?>? parameters = null)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
         if (bindings is GraphGroupedBinding grouped)
@@ -26,25 +26,27 @@ internal static partial class GraphExpressionEvaluator
         {
             var result = expression switch
             {
+                GqlFunctionCallExpression call => Function(call, bindings, context, parameters),
+                GqlCastExpression cast => Cast(Evaluate(cast.Operand, bindings, context, parameters), cast),
                 GqlLiteralExpression literal => literal.Value,
                 GqlParameterExpression parameter => Parameter(parameter, parameters),
                 GqlVariableExpression variable => bindings[variable.Variable],
                 GqlPropertyExpression property => Member(bindings[property.Variable], property.Property, property),
-                GqlBinaryExpression binary => Binary(binary, bindings, parameters),
-                GqlLogicalExpression logical => Logical(logical, bindings, parameters),
+                GqlBinaryExpression binary => Binary(binary, bindings, context, parameters),
+                GqlLogicalExpression logical => Logical(logical, bindings, context, parameters),
                 GqlLabeledPredicate labeled => Labeled(labeled, bindings),
-                GqlUnaryExpression unary => Unary(unary, bindings, parameters),
-                GqlIsNullExpression test => (Evaluate(test.Operand, bindings, parameters) is null) != test.IsNegated,
-                GqlTruthTestExpression test => (Boolean(Evaluate(test.Operand, bindings, parameters), test.Operand) == test.TruthValue) != test.IsNegated,
-                GqlListExpression list => list.Items.Select(item => Evaluate(item, bindings, parameters)).ToArray(),
-                GqlMapExpression map => Map(map, bindings, parameters),
-                GqlCaseExpression conditional => Case(conditional, bindings, parameters),
-                GqlCoalesceExpression coalesce => Coalesce(coalesce, bindings, parameters),
-                GqlNullIfExpression nullIf => NullIf(nullIf, bindings, parameters),
-                GqlMemberExpression member => Member(Evaluate(member.Operand, bindings, parameters), member.Member, member),
-                GqlSubscriptExpression subscript => Subscript(subscript, bindings, parameters),
-                GqlInExpression membership => In(membership, bindings, parameters),
-                GqlStringPredicateExpression predicate => StringPredicate(predicate, bindings, parameters),
+                GqlUnaryExpression unary => Unary(unary, bindings, context, parameters),
+                GqlIsNullExpression test => (Evaluate(test.Operand, bindings, context, parameters) is null) != test.IsNegated,
+                GqlTruthTestExpression test => (Boolean(Evaluate(test.Operand, bindings, context, parameters), test.Operand) == test.TruthValue) != test.IsNegated,
+                GqlListExpression list => list.Items.Select(item => Evaluate(item, bindings, context, parameters)).ToArray(),
+                GqlMapExpression map => Map(map, bindings, context, parameters),
+                GqlCaseExpression conditional => Case(conditional, bindings, context, parameters),
+                GqlCoalesceExpression coalesce => Coalesce(coalesce, bindings, context, parameters),
+                GqlNullIfExpression nullIf => NullIf(nullIf, bindings, context, parameters),
+                GqlMemberExpression member => Member(Evaluate(member.Operand, bindings, context, parameters), member.Member, member),
+                GqlSubscriptExpression subscript => Subscript(subscript, bindings, context, parameters),
+                GqlInExpression membership => In(membership, bindings, context, parameters),
+                GqlStringPredicateExpression predicate => StringPredicate(predicate, bindings, context, parameters),
                 _ => throw new GraphPlanningException("COHDBG001", "Unsupported graph expression."),
             };
             if (result is string || GraphCompositeValues.IsComposite(result))
@@ -61,12 +63,15 @@ internal static partial class GraphExpressionEvaluator
         }
     }
 
-    internal static object? PropertyScalar(GqlExpression expression, IReadOnlyDictionary<string, object?> bindings,
+    internal static object? PropertyScalar(GqlExpression expression, IReadOnlyDictionary<string, object?> bindings, GraphEvaluationContext context,
         IReadOnlyDictionary<string, object?>? parameters)
     {
-        var value = Evaluate(expression, bindings, parameters);
+        var value = Evaluate(expression, bindings, context, parameters);
         if (GraphCompositeValues.IsComposite(value) || value is GraphNode or GraphRelationship or GraphPath)
         { throw new GraphPlanningException("COHDBG003", ErrorMessages.PropertyScalarRequired, expression.Location); }
+        try { GraphDatabase.TypeOf(value); }
+        catch (DatabaseException error)
+        { throw new GraphPlanningException("COHDBG013", ErrorMessages.PropertyScalarRequired, expression.Location, error); }
         return value;
     }
 
@@ -104,13 +109,13 @@ internal static partial class GraphExpressionEvaluator
         _ => throw new GraphPlanningException("COHDBG013", ErrorMessages.BooleanRequired, expression?.Location),
     };
 
-    private static object? Logical(GqlLogicalExpression logical, IReadOnlyDictionary<string, object?> bindings, IReadOnlyDictionary<string, object?>? parameters)
+    private static object? Logical(GqlLogicalExpression logical, IReadOnlyDictionary<string, object?> bindings, GraphEvaluationContext context, IReadOnlyDictionary<string, object?>? parameters)
     {
         bool unknown = false;
         bool parity = false;
         foreach (var operand in logical.Operands)
         {
-            bool? value = Boolean(Evaluate(operand, bindings, parameters), operand);
+            bool? value = Boolean(Evaluate(operand, bindings, context, parameters), operand);
             if (logical.Operator == GqlLogicalOperator.And && value == false) { return false; }
             if (logical.Operator == GqlLogicalOperator.Or && value == true) { return true; }
             unknown |= value is null;
@@ -148,9 +153,9 @@ internal static partial class GraphExpressionEvaluator
         IReadOnlyDictionary<string, object?> map => map.TryGetValue(name, out var value) ? value : null,
         _ => throw new GraphPlanningException("COHDBG003", "Property access requires a node or relationship."),
     };
-    private static object? Unary(GqlUnaryExpression unary, IReadOnlyDictionary<string, object?> bindings, IReadOnlyDictionary<string, object?>? parameters)
+    private static object? Unary(GqlUnaryExpression unary, IReadOnlyDictionary<string, object?> bindings, GraphEvaluationContext context, IReadOnlyDictionary<string, object?>? parameters)
     {
-        var value = Evaluate(unary.Operand, bindings, parameters);
+        var value = Evaluate(unary.Operand, bindings, context, parameters);
         if (unary.Operator == "NOT") { return !Boolean(value, unary.Operand); }
         if (value is null) { return null; }
         if (!IsNumber(value)) { throw new GraphPlanningException("COHDBG013", ErrorMessages.NumericRequired, unary.Location); }
@@ -168,10 +173,10 @@ internal static partial class GraphExpressionEvaluator
         return unary.Operator == "-" ? checked(-integer) : integer;
     }
 
-    private static object? In(GqlInExpression membership, IReadOnlyDictionary<string, object?> bindings, IReadOnlyDictionary<string, object?>? parameters)
+    private static object? In(GqlInExpression membership, IReadOnlyDictionary<string, object?> bindings, GraphEvaluationContext context, IReadOnlyDictionary<string, object?>? parameters)
     {
-        var value = Evaluate(membership.Operand, bindings, parameters);
-        var evaluated = Evaluate(membership.List, bindings, parameters);
+        var value = Evaluate(membership.Operand, bindings, context, parameters);
+        var evaluated = Evaluate(membership.List, bindings, context, parameters);
         if (evaluated is null) { return null; }
         if (evaluated is not object?[] candidates)
         { throw new GraphPlanningException("COHDBG013", ErrorMessages.CompositeRequired, membership.List.Location); }
@@ -185,10 +190,10 @@ internal static partial class GraphExpressionEvaluator
         return unknown ? null : false;
     }
 
-    private static object? StringPredicate(GqlStringPredicateExpression predicate, IReadOnlyDictionary<string, object?> bindings, IReadOnlyDictionary<string, object?>? parameters)
+    private static object? StringPredicate(GqlStringPredicateExpression predicate, IReadOnlyDictionary<string, object?> bindings, GraphEvaluationContext context, IReadOnlyDictionary<string, object?>? parameters)
     {
-        var left = Evaluate(predicate.Left, bindings, parameters);
-        var right = Evaluate(predicate.Right, bindings, parameters);
+        var left = Evaluate(predicate.Left, bindings, context, parameters);
+        var right = Evaluate(predicate.Right, bindings, context, parameters);
         if (left is not string text || right is not string search) { return null; }
         return predicate.Operator switch
         {
@@ -199,10 +204,10 @@ internal static partial class GraphExpressionEvaluator
         };
     }
 
-    private static object? Binary(GqlBinaryExpression binary, IReadOnlyDictionary<string, object?> bindings, IReadOnlyDictionary<string, object?>? parameters)
+    private static object? Binary(GqlBinaryExpression binary, IReadOnlyDictionary<string, object?> bindings, GraphEvaluationContext context, IReadOnlyDictionary<string, object?>? parameters)
     {
-        var left = Evaluate(binary.Left, bindings, parameters);
-        var right = Evaluate(binary.Right, bindings, parameters);
+        var left = Evaluate(binary.Left, bindings, context, parameters);
+        var right = Evaluate(binary.Right, bindings, context, parameters);
         if (left is null || right is null) { return null; }
         if (binary.Operator is "+" or "-" or "*" or "/" or "%" or "||")
         {
@@ -291,6 +296,8 @@ internal static partial class GraphExpressionEvaluator
         {
             (string a, string b) => StringComparer.Ordinal.Compare(a, b),
             (bool a, bool b) => a.CompareTo(b),
+            (DateOnly a, DateOnly b) => a.CompareTo(b),
+            (DateTimeOffset a, DateTimeOffset b) => a.CompareTo(b),
             _ => GraphValueComparer.Instance.Equals(left, right) ? 0 : null,
         };
     }

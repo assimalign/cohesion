@@ -11,7 +11,7 @@ internal sealed record GraphOrderedRow(object?[] Values, object?[] Keys, int Ord
 
 internal static class GraphSortPage
 {
-    internal static object?[] Keys(GraphPlan plan, Dictionary<string, object?> binding, object?[] row, CancellationToken token)
+    internal static object?[] Keys(GraphPlan plan, Dictionary<string, object?> binding, object?[] row, GraphEvaluationContext context, CancellationToken token)
     {
         if (plan.SortPage is not { Keys.Count: > 0 } stage) { return []; }
         Dictionary<string, object?> scope = binding is GraphGroupedBinding grouped
@@ -23,7 +23,7 @@ internal static class GraphSortPage
             var key = stage.Keys[i];
             token.ThrowIfCancellationRequested();
             keys[i] = GraphOrderComparer.Prepare(key.ProjectionIndex >= 0 ? row[key.ProjectionIndex]
-                : GraphExpressionEvaluator.Evaluate(key.Item.Expression, scope, plan.Parameters), token);
+                : GraphExpressionEvaluator.Evaluate(key.Item.Expression, scope, context, plan.Parameters), token);
         }
         return keys;
     }

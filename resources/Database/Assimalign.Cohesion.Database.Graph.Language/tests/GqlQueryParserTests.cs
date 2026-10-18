@@ -104,7 +104,6 @@ public class GqlQueryParserTests
     [InlineData("MATCH (a) REMOVE a.age")]
     [InlineData("MERGE (a:Person)")]
     [InlineData("MATCH (a) RETURN a UNION MATCH (b) RETURN b")]
-    [InlineData("MATCH (a) WHERE abs(a.age) = 1 RETURN a")]
     [InlineData("MATCH (a) RETURN a {.name}")]
     [InlineData("INSERT (:Person {tags: [1, 2]})")]
     [InlineData("MATCH (a) DELETE a RETURN a")]

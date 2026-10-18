@@ -60,4 +60,11 @@
   <data name="GroupPropertyReference" xml:space="preserve"><value>A property map inside a quantified segment cannot reference a group variable.</value></data>
   <data name="PathHopLimitExceeded" xml:space="preserve"><value>The query requires a trail exceeding 64 relationships.</value></data>
   <data name="ExpansionLimitExceeded" xml:space="preserve"><value>The query exceeded 1000000 candidate expansions.</value></data>
+  <data name="FunctionArity" xml:space="preserve"><value>Function {0} has an invalid identity or argument count.</value></data>
+  <data name="FunctionKind" xml:space="preserve"><value>Function {0} argument {1} has an incompatible kind.</value></data>
+  <data name="FunctionValue" xml:space="preserve"><value>Function {0} cannot evaluate the supplied value.</value></data>
+  <data name="FunctionUnbound" xml:space="preserve"><value>Function {0} references unbound variable '{1}'.</value></data>
+  <data name="FunctionEndpointMissing" xml:space="preserve"><value>The relationship function cannot resolve its endpoint in this statement snapshot.</value></data>
+  <data name="CastValueInvalid" xml:space="preserve"><value>The value is not valid for this CAST target.</value></data>
+  <data name="CastValueFailure" xml:space="preserve"><value>CAST cannot convert the supplied value to {0}.</value></data>
 </root>

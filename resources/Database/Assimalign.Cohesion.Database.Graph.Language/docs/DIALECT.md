@@ -164,6 +164,69 @@ Paging never reduces mutation inputs. Full materialization still applies: LIMIT 
 more than 100,000 matches raises COHDBG004. Row and path requests share this stage.
 Standalone ORDER BY/page statements before RETURN remain COHDBL001. WITH and aggregate ordering execute through the same per-stage pipeline. See [ordering design](DESIGN.md#ordering-and-paging-1142).
 
+## Core functions and CAST
+
+The [complete function table](DESIGN.md#core-scalar-functions-and-cast-1148) records ISO forms,
+Cypher aliases and Cohesion extensions, signatures, result types and strict NULL behavior.
+Element/path functions include element_id (elementId), labels, type, properties, keys,
+startNode/endNode, path_length (length), nodes and relationships (edges). IDs are stable
+strings; id() is rejected with guidance to element_id. Labels and keys are ordinal-sorted;
+path lists retain traversal order and non-null element proofs through aliases. Entity-valued results fail the static wire Execute gate
+before writes; scalar property access through them is legal. labels/keys/properties lists/maps
+require the existing graph.composite-values capability.
+
+Strings support lower/upper (toLower/toUpper), trim, substring, replace, char_length/
+character_length and size over strings or lists. Character counts and substring indexes count
+Unicode code points. Cypher substring is **0-based**, with an optional length. Floating coordinates truncate toward zero before validating
+the resulting nonnegative Int32 range; invalid ranges use COHDBG013, past-end gives empty string. SQL's
+1-based SUBSTRING FROM/FOR spelling is not part of this GQL subset. Casing is invariant;
+TRIM removes U+0020 spaces, REPLACE is ordinal and bounds expansion before allocation, including
+empty-search insertion: replace('abc','','X') yields 'XaXbXcX'.
+
+Math supports abs, ceil/ceiling, floor, round, sqrt, mod, ln and log. abs/ceil/floor/round
+preserve the input numeric type; unsigned inputs become Decimal. Neo4j returns Float for
+ceil/floor/round, so this differs while preserving exact integer equality above 2^53.
+Round ties go **away from zero**; optional precision is nonnegative. sqrt and logarithm
+invalid domains fail with COHDBG013, never NaN. ISO ln(x) and log(base,x) are supported;
+Cypher log(x) is an extension returning the natural logarithm. MOD shares % promotion and
+zero-divisor behavior. NULL input returns NULL before signature kind/domain checks.
+
+CAST supports INT/INTEGER, INT64/BIGINT, REAL, FLOAT/FLOAT64/DOUBLE [PRECISION], DECIMAL/NUMERIC,
+STRING/CHAR/VARCHAR, BOOL/BOOLEAN, DATE, ZONED DATETIME and TIMESTAMP WITH TIME ZONE.
+It follows Cohesion SQL's shared conversions: a fractional-to-integer or invalid-value cast
+raises COHDBG013. Nonzero DOUBLE/REAL underflow to zero also raises COHDBG013; DECIMAL
+converts directly through invariant text to REAL, avoiding double rounding. Timestamp-to-string
+uses optional fractional digits (SQL FFFFFFF), omitting whole-second fractions. INT32, SMALLINT,
+FLOAT32, TIMESTAMP WITHOUT TIME ZONE and LOCAL DATETIME are recognized unsupported CAST
+targets (one COHDBL001 naming the complete type). Cypher toString/toInteger/toFloat/toBoolean are extensions: toInteger truncates
+fractions, Boolean converts to 1/0, and unparsable conversion strings give NULL. Numeric
+string/Decimal overflow still fails; toInteger saturates finite floating overflow as Neo4j does. CAST renders Boolean strings uppercase; toString renders them lowercase.
+
+CURRENT_DATE and CURRENT_TIMESTAMP are niladic without parentheses, returning UTC DateOnly
+and DateTimeOffset. One instant is captured before beginning the transaction: all rows and
+stages, and all statements in an explicit API transaction (also ReadCommitted), reuse it.
+Every autocommit statement captures its own; Graph wire statements are always autocommit.
+The clock seam remains internal. Dates and timestamps compare/sort by date or UTC instant;
+total ordering places zoned timestamps then dates between paths and strings. Temporal values
+cannot become stored graph properties: proven kinds fail planning with COHDBG003 for MATCH
+and INSERT maps; dynamic values fail with COHDBG013 and the statement rolls back.
+
+Unknown calls use GQL0010 naming the function. Scalar/aggregate parsed arity uses GQL0002;
+hand-built invalid arity and unbound arguments use plan-time COHDBG001. Provable wrong kinds
+use plan-time COHDBG003; dynamic wrong kinds and value failures use COHDBG013. EXPLAIN checks
+signatures without evaluating calls. toBoolean requires integral numeric kinds; Boolean
+numeric CAST is COHDBG003. Ordinary function names remain valid variables and keys.
+CURRENT_DATE, CURRENT_TIMESTAMP, CURRENT_TIME, LOCAL_TIME and LOCAL_TIMESTAMP are ISO reserved
+words: every unquoted binding site is GQL0002; quoted names bind and are referenced quoted.
+CAST is contextual: followed by `(` it starts CAST; elsewhere it is an identifier, as in
+`MATCH (cast:Movie) RETURN cast.title`.
+Recognized unsupported calls (reduce, temporal constructors, head/last/tail/reverse/range,
+ELEMENTS, CARDINALITY, LTRIM/RTRIM/BTRIM, LEFT/RIGHT, LOG10 and Cypher
+toStringList/toIntegerList/toFloatList/toBooleanList) keep COHDBL001 in call position, preserving variables such as date.
+CURRENT_TIME/LOCAL_TIME/LOCAL_TIMESTAMP and procedures/CALL also remain COHDBL001.
+Runtime errors precede ResultHeader and retain the pooled session. Every declared function
+and alias has live evidence in the profile coverage guard.
+
 ## CASE and composite values
 
 Simple and searched CASE select the first TRUE comparison/predicate; WHEN NULL never

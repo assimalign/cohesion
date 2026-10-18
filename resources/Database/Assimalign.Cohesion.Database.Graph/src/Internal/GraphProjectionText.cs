@@ -16,6 +16,8 @@ internal static class GraphProjectionText
         if (expression.Text is { } text) { return text; }
         return expression switch
         {
+            GqlFunctionCallExpression call => GraphScalarFunctions.Name(call.Function) + (call.IsNiladic ? "" : "(" + string.Join(", ", call.Arguments.Select(Describe)) + ")"),
+            GqlCastExpression cast => "CAST(" + Describe(cast.Operand) + " AS " + GraphScalarFunctions.Name(cast.Target) + ")",
             GqlAggregateExpression aggregate => (aggregate.Function == GqlAggregateFunction.CollectList ? "collect_list" : aggregate.Function.ToString().ToLowerInvariant()) +
                 "(" + (aggregate.Distinct ? "DISTINCT " : "") + (aggregate.Operand is null ? "*" : Describe(aggregate.Operand)) + ")",
             GqlVariableExpression variable => Name(variable.Variable),
