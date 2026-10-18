@@ -2535,7 +2535,10 @@ untargeted DO NOTHING selects all unique indexes. The parser supplies EXCLUDED, 
 target-plus-proposed rows needs no visibility grant or public internal type. A per-index/key
 pending map models successful earlier proposals and rekeys in source order. Repeated effects
 raise COHSQLE041 before publication; arbiter failures use COHSQLE040. Encoded index equality
-supplies collation, NULL and temporal identity unchanged.
+supplies collation, NULL and temporal identity unchanged. For self-referencing FKs, the existing
+referential-action pending-update view excludes replaced heap versions and supplies final
+values to FK and incoming-reference checks. A removed key cannot authorize a new child; a
+self-reference moved with its key validates against the final row.
 
 After object intent locks, the statement acquires **all proposed arbiter key locks once,
 sorted and deduplicated, before any row lock**. BTreeIndex.FindLiveEntry runs under those

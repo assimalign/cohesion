@@ -101,12 +101,29 @@ internal sealed partial class SqlPlanExecutor
 
         await AcquireRowWriteLocksAsync(statement, table.ObjectId, lockedRows, cancellationToken).ConfigureAwait(false);
         var replacements = writes.Where(write => write.OldLocation.HasValue).ToList();
+        SqlConstraintUpdates? pendingUpdates = null;
+        if (replacements.Count > 0 && table.Constraints.Any(constraint => constraint.Kind == SqlCatalogConstraintKind.Reference &&
+            string.Equals(constraint.ReferencedSchema, table.Schema, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(constraint.ReferencedTable, table.Name, StringComparison.OrdinalIgnoreCase)))
+        {
+            // The existing referential-action view excludes replaced heap versions and contributes
+            // their final values. An old self-referenced key must not authorize a new dangling child.
+            var pendingRows = new Dictionary<(ulong ObjectId, ulong Location), SqlConstraintUpdate>();
+            var assignedColumns = plan.Assignments.Select(assignment => assignment.Ordinal).ToHashSet();
+            foreach (var write in replacements)
+            {
+                pendingRows.Add((table.ObjectId, write.OldLocation!.Value), new SqlConstraintUpdate(table,
+                    SqlRecordLocation.Unpack(write.OldLocation.Value), write.OldValues!, write.Values, assignedColumns));
+            }
+            pendingUpdates = new SqlConstraintUpdates(pendingRows);
+        }
         ValidateRows(table, replacements.Select(write => write.Values).ToList(), statement, cancellationToken, checksOnly: true);
         var references = new List<SqlParentReference>();
         // An RC arbiter wait can reach a new row and its parent committed together after the
         // original statement snapshot. Refresh committed visibility, never the all-writers
         // ConstraintCurrentSnapshot used by lock-protected referential walks and DDL.
-        ValidateRows(table, writes.Select(write => write.Values).ToList(), statement, cancellationToken, references: references, skipChecks: true,
+        ValidateRows(table, writes.Select(write => write.Values).ToList(), statement, cancellationToken, references: references,
+            updates: pendingUpdates, skipChecks: true,
             foreignKeySnapshot: statement.Transaction.IsolationLevel == IsolationLevel.ReadCommitted ? statement.Transaction.Snapshot : null);
         await AcquireParentRowLocksAsync(references, statement, cancellationToken).ConfigureAwait(false);
         var released = new List<SqlParentReference>();
@@ -122,7 +139,7 @@ internal sealed partial class SqlPlanExecutor
         {
             if (write.OldValues is not null)
             {
-                ValidateParentUpdate(table, write.OldValues, write.Values, statement, cancellationToken);
+                ValidateParentUpdate(table, write.OldValues, write.Values, statement, cancellationToken, updates: pendingUpdates);
                 CollectUniqueKeyHashes(indexes, table, write.OldValues, hashes);
             }
             CollectUniqueKeyHashes(indexes, table, write.Values, hashes);

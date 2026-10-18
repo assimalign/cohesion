@@ -145,7 +145,9 @@ for conflicting proposals are consumed, including skipped proposals.
 NOT NULL, domains and CHECK validate every proposed row before arbitration. Foreign keys
 validate only inserted and updated rows, so a conflicting DO NOTHING proposal with a dangling
 foreign key is discarded without error. Discarded proposals never authorize a self-referencing
-foreign key on another inserted row. Updated rows recheck assigned-column domains, NOT NULL,
+foreign key on another inserted row. Self-reference checks use final pending replacements,
+so a rekeyed-away parent cannot authorize a dangling child, and a self-reference can move
+with its key in one update. Updated rows recheck assigned-column domains, NOT NULL,
 CHECK, foreign keys and incoming-reference UPDATE RESTRICT. All writes, index changes and
 RETURNING evaluations share one statement bracket; a failure rolls them all back.
 

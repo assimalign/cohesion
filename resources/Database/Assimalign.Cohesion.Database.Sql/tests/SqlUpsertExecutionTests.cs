@@ -16,6 +16,41 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed class SqlUpsertExecutionTests
 {
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Upsert: a rekeyed-away parent cannot authorize a new self-referencing child")]
+    public async Task ExecuteAsync_RekeyedParentAndInsertedChild_ShouldRejectDanglingReference()
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("upsert-self-rekey", new());
+        var database = await engine.CreateDatabaseAsync("app");
+        await using var session = await database.CreateSessionAsync();
+        await session.ExecuteAsync("CREATE TABLE t (id INT PRIMARY KEY, parent INT REFERENCES t(id), v INT)");
+        await session.ExecuteAsync("INSERT INTO t VALUES (1, NULL, 10)");
+
+        // Act / Assert
+        await Should.ThrowAsync<SqlConstraintViolationException>(async () => await session.ExecuteAsync(
+            "INSERT INTO t VALUES (1, NULL, 20), (2, 1, 30) ON CONFLICT (id) DO UPDATE SET id = 10, v = EXCLUDED.v"));
+        CheckRows(await RowsAsync(session, "SELECT * FROM t"), [[1, null, 10]]);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Upsert: a self-reference can move with its parent key in the same update")]
+    public async Task ExecuteAsync_RekeyedSelfReference_ShouldValidateFinalRow()
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("upsert-self-rekey", new());
+        var database = await engine.CreateDatabaseAsync("app");
+        await using var session = await database.CreateSessionAsync();
+        await session.ExecuteAsync("CREATE TABLE t (id INT PRIMARY KEY, parent INT REFERENCES t(id), v INT)");
+        await session.ExecuteAsync("INSERT INTO t VALUES (1, 1, 10)");
+
+        // Act
+        var result = await session.ExecuteAsync(
+            "INSERT INTO t VALUES (1, 1, 20) ON CONFLICT (id) DO UPDATE SET id = 10, parent = 10, v = EXCLUDED.v");
+
+        // Assert
+        result.AffectedCount.ShouldBe(1);
+        CheckRows(await RowsAsync(session, "SELECT * FROM t"), [[10, 10, 20]]);
+    }
+
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Upsert: excluded forms fail before any write")]
     [InlineData("INSERT INTO t VALUES (2, 20) ON DUPLICATE KEY UPDATE age = 3")]
     [InlineData("INSERT OR IGNORE INTO t VALUES (2, 20)")]

@@ -225,6 +225,10 @@ internal static class Program
         await session.ExecuteAsync("INSERT INTO upsert_native VALUES (1, 10)");
         Check("in process: ON CONFLICT EXCLUDED RETURNING", await RowsAsync(session,
             "INSERT INTO upsert_native (id) VALUES (1), (2) ON CONFLICT (id) DO UPDATE SET value = upsert_native.value + EXCLUDED.value RETURNING id, value"), [[1, 13], [2, 3]]);
+        await session.ExecuteAsync("CREATE TABLE upsert_self_native (id INT PRIMARY KEY, parent INT REFERENCES upsert_self_native(id))");
+        await session.ExecuteAsync("INSERT INTO upsert_self_native VALUES (1, 1)");
+        Check("in process: ON CONFLICT pending self-reference", await RowsAsync(session,
+            "INSERT INTO upsert_self_native VALUES (1, 1) ON CONFLICT (id) DO UPDATE SET id = 10, parent = 10 RETURNING id, parent"), [[10, 10]]);
         Check("in process: IDENTITY and UPDATE DEFAULT", await RowsAsync(session, "SELECT id FROM identity_guard ORDER BY id"), [[105L], [110L]]);
         await session.ExecuteAsync("CREATE TABLE null_ordering (id INT, x INT, name TEXT)");
         await session.ExecuteAsync("INSERT INTO null_ordering VALUES (2, NULL, 'b'), (1, 1, 'a'), (3, 2, 'c')");
