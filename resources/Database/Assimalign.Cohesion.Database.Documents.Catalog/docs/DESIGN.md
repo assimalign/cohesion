@@ -103,26 +103,48 @@ plans, and the plan executor invokes this package under the statement's `Transac
 after lock acquisition and ownership enforcement. `DocumentDatabase` therefore needs no index
 members, and the catalog and B+Tree updates retain the same transaction as the DDL statement.
 
-Each index is a nonunique B+Tree over one case-sensitive field path. The catalog stores that path
-in a lossless canonical form matching OQL's document-path segments. Identifier-safe object names
-use dotted syntax and nonnegative Int32 array subscripts use numeric brackets, for example
-`customer.address.zip` or `items[0].price`. Property names that need escaping, including a root
-name containing punctuation, use bracket-string segments with doubled single quotes, for example
-`customer['address.line']` or `['root.name']`. The planner also recognizes the preceding
-extension API's unquoted, delimiter-free segment encoding when it reads persisted definitions,
-so an upgrade does not turn an existing usable index into a scan. Paths do not support wildcards,
-array expansion, compound keys, unique constraints, or expression indexes. The field path must exist and resolve
-to a boolean, decimal-domain number, or string to produce an entry. Missing fields, null, arrays,
-and objects produce no key; the planner uses a collection scan for null/non-scalar predicates.
+Each index has 1..32 ordered case-sensitive paths and an immutable UNIQUE flag. The cap
+matches PostgreSQL `src/include/pg_config_manual.h:79` (INDEX_MAX_KEYS). Paths retain the
+lossless dotted/bracket-string encoding: `customer.address.zip`, `items[0].price`, and
+`['root.name']`. Wildcards, expansion, expression keys and sort directions are outside T1.
+The single-path catalog overload remains a convenience for a nonunique definition; it writes v2.
 
-Booleans use `DatabaseKeyWriter.AppendBoolean`. Every numeric spelling normalizes to decimal and
-uses `AppendDecimal`, so `1` and `1.00` are identical index keys. Strings encode UTF-16 code units
-as big-endian bytes, then use the shared writer's escaped binary component. This exactly matches
-OQL's ordinal UTF-16 string comparison, including supplementary characters versus BMP values.
-The type tags give mixed types a deterministic physical ordering; OQL retains its residual
-predicate and does not treat that physical tag ordering as a cross-type relational comparison.
-An encoded key larger than the shared B+Tree's 1,024-byte limit rejects the write/build before
-metadata replacement. There is no lossy truncation or omitted oversized key.
+A document gets one entry when the leading path is not MISSING. Absent members, incompatible
+shapes, navigation through NULL and out-of-range subscripts yield MISSING; reading a NULL
+member itself yields NULL, matching the evaluator. Trailing MISSING and explicit NULL are
+distinct encoded components. No document-identity suffix is needed.
+
+Every component starts with one Documents-owned byte: 0 MISSING, 1 NULL, 2 FALSE, 3 TRUE,
+4 number, 5 string, 6 array, 7 object. The first four and the last two have no payload.
+Arrays and objects each use a lossy tag; the executor always reapplies the full predicate.
+Number payloads use `DatabaseKeyWriter.AppendDecimal`, so 1 and 1.00 are equal. String
+payloads use `AppendBinary` over UTF-16BE code units, including surrogates, preserving ordinal
+OQL order. Each scalar payload includes the shared writer's type byte and terminator/escaping.
+Concatenation preserves MISSING &lt; NULL &lt; FALSE &lt; TRUE &lt; number &lt; string &lt; array &lt; object.
+The complete key must fit the shared 1024-byte limit; oversize fails before publication.
+
+UNIQUE checks are immediate, under the caller's database writer lock, before the physical
+statement bracket. A latest-state snapshot includes the caller's own earlier writes; a cursor
+probes equal keys while excluding the document's own previous entry. Build detects duplicate
+encoded keys before creating any tree or registration. Keys containing NULL or MISSING never
+conflict (PostgreSQL's NULLS DISTINCT default, `doc/src/sgml/ref/create_index.sgml:340-347`),
+including trailing NULL/MISSING. This differs from Cohesion SQL's equal-NULL index policy.
+Arrays and objects in an indexed UNIQUE key fail with COHDOC021 naming the index and path.
+Duplicate writes/builds raise COHDOC020 (SQLSTATE 23505, PostgreSQL
+`src/backend/utils/errcodes.txt:239`), naming the collection and index without echoing key data.
+Both use the public `DocumentConstraintViolationException : DatabaseException` owned by this
+catalog package. The physical B+Trees deliberately stay nonunique: the catalog implements
+NULLS DISTINCT and arbitration. Kind 4 and kind 5 retain the UNIQUE flag across restart.
+An immediate multi-row key swap fails, and the engine's transaction boundary undoes the statement.
+
+`SearchIndexAsync` accepts leading scalar equality values plus lower/upper bounds on the
+next component. It uses SQL's prefix-successor ranges (`SqlPlanExecutor.cs:1407-1490`):
+equality is [P, successor(P)); an exclusive lower uses successor(P+v), and an inclusive
+upper uses successor(P+v) exclusively. A successor increments the last non-FF byte and
+truncates after it. Every component tag is below FF, so every nonempty prefix has a successor.
+These bounds include trailing components, unlike an inclusive [P,P] range. The planner uses
+one range component and retains all other conjuncts as residual filters, matching PostgreSQL
+`doc/src/sgml/indices.sgml:461-466`. Candidate documents remain ordered by ordinal identity.
 
 Index leaf entry references are packed metadata page/slot locations. Leaf entries carry writer
 and deleter stamps through the existing index API. Create builds the tree immediately while the
@@ -132,7 +154,7 @@ creation; those snapshots use scans.
 
 ## Mutation, rollback, and recovery
 
-Saving a document prepares old and new scalar keys, then one shared physical statement bracket
+Saving a document prepares old and new composite keys and checks unique constraints, then one shared physical statement bracket
 tombstones prior metadata, inserts new metadata, tombstones old index entries, inserts new index
 entries, and persists any changed root registration (a backstop: a tree's root page stays fixed
 through splits since #1159, so registrations change only when a tree is created). Deletion
@@ -170,7 +192,7 @@ it verifies recovery and index scrub without claiming physical durable-flush sup
 ## Compatibility and error model
 
 Adding/removing fields, changing scalar type, or replacing an object with an array is supported
-without schema migration. Each change creates a new version and updates affected scalar indexes.
+without schema migration. Each change creates a new version and updates every affected index.
 On-disk record-layout changes require a new format version with no migration or legacy reader;
 unknown versions are rejected.
 

@@ -67,8 +67,8 @@ public sealed partial class DocumentCatalog
 
     /// <summary>
     /// Checks that every index tree the storage registers is in the B-tree page format
-    /// this engine reads (<see cref="BTreeIndexManager.FormatVersion"/>), reading only
-    /// the registrations and each tree's root page. An engine calls it before the
+    /// this engine reads (<see cref="BTreeIndexManager.FormatVersion"/>), reading
+    /// metadata records, registrations and each tree's root page. An engine calls it before the
     /// coordinator's recovery scrub, so a database whose indexes it cannot read is
     /// refused before anything is written to it; <see cref="Open"/> checks again as it
     /// attaches the trees. Registration records carry no MVCC stamps, so they read the
@@ -288,6 +288,7 @@ public sealed partial class DocumentCatalog
         EnsureActive(context);
         byte[] bytes = DocumentCatalogCodec.Encode(record, context.Sequence);
         var changes = PrepareIndexChanges(record.Document, previous, context.Snapshot);
+        if (record.Document is not null) { await CheckUniqueAsync(changes, context, cancellationToken).ConfigureAwait(false); }
         var location = await ApplyAsync(context, async bracket =>
         {
             if (previous is { } old)

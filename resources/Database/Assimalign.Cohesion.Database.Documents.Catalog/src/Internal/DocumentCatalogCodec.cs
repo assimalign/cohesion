@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Globalization;
 using System.Text;
 using Assimalign.Cohesion.Database.Transactions;
 
@@ -85,7 +86,7 @@ internal static class DocumentCatalogCodec
                     break;
                 case 4:
                     int count = reader.ReadInt32();
-                    if (count is < 1 or > 32) { throw new DocumentCatalogException("Invalid index path count."); }
+                    if (count is < 1 or > 32) { throw new DocumentCatalogException(ErrorMessages.IndexPathCountInvalid); }
                     var paths = new string[count];
                     for (int i = 0; i < count; i++)
                     {
@@ -93,7 +94,7 @@ internal static class DocumentCatalogCodec
                         DocumentIndexKeys.ValidatePath(paths[i]);
                     }
                     byte flags = reader.ReadByte();
-                    if (flags > 1) { throw new DocumentCatalogException("Invalid index flags."); }
+                    if (flags > 1) { throw new DocumentCatalogException(ErrorMessages.IndexFlagsInvalid); }
                     ulong objectId = reader.ReadUInt64();
                     if (objectId == 0)
                     {
@@ -121,7 +122,7 @@ internal static class DocumentCatalogCodec
         byte supported = (byte)(kind is 4 or 5 ? 2 : 1);
         if (version != supported)
         {
-            throw new DocumentCatalogException($"Document catalog kind {kind} format: found {version}, supported {supported}. Recreate the database with this engine; no upgrade or legacy reader is supported.");
+            throw new DocumentCatalogException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.CatalogFormatMismatch, kind, version, supported));
         }
     }
 
