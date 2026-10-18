@@ -2321,7 +2321,7 @@ use ordinal Unicode scalar matching.
 | RPAD(text, integer [, fill]) | TEXT | Strict | I | PG; nonpositive length gives empty text; default space |
 | REVERSE(text) | TEXT | Strict | I | PG; reverses Unicode scalars |
 | ABS(numeric) | Numeric result | Strict | I | ISO / PG; BIGINT minimum overflows |
-| ROUND(numeric); ROUND(exact_numeric, integer_scale) | Numeric result | Strict | I | ISO / PG; exact halves away from zero, approximate halves to even; negative exact scale supported |
+| ROUND(numeric); ROUND(exact_numeric, integer_scale) | Numeric result | Strict | I | ISO / PG; exact halves away from zero, approximate halves to even; negative exact scale decides once from the exact discarded remainder, without division rounding (#1661) |
 | FLOOR(numeric) | Numeric result | Strict | I | ISO / PG |
 | CEILING(numeric) | Numeric result | Strict | I | ISO / PG |
 | CEIL(numeric) | Numeric result | Strict | I | PG alias of CEILING |
@@ -2341,6 +2341,13 @@ use ordinal Unicode scalar matching.
 | EXTRACT(field FROM temporal) | DECIMAL | Strict | I | ISO / PG; fields below |
 | DATE_TRUNC(field_text, temporal) | Input temporal type | Strict | I | PG; DATE stays DATE, a PG deviation |
 | GEN_RANDOM_UUID() | UUID version 4, per call | Never NULL | V | PG |
+
+For an exact value and negative scale, ROUND compares the exact discarded remainder with
+half the scale's power of ten, then rounds once, with ties away from zero. Thus
+`ROUND(4.9999999999999999999999999999, -1)` is 0, while `ROUND(5.0, -1)` is 10
+and `ROUND(-5.0, -1)` is -10. The rule applies at every supported negative scale,
+including -28; division must not first round a value onto a midpoint (#1661).
+Reference: PostgreSQL `src/backend/utils/adt/numeric.c:11683-11756`, `round_var`.
 
 EXTRACT fields are YEAR, QUARTER, MONTH, WEEK (ISO week number), DAY, DOW
 (Sunday zero), DOY, HOUR, MINUTE, SECOND (with fractional seconds) and EPOCH.

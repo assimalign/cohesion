@@ -246,7 +246,11 @@ internal sealed class SqlBuiltinScalarFunction : SqlScalarFunction
         }
         decimal factor = 1;
         for (int index = 0; index < -scale; index++) { factor *= 10; }
-        return decimal.Round(value / factor, 0, MidpointRounding.AwayFromZero) * factor;
+        // PostgreSQL numeric.c:11683-11756 (round_var) decides from discarded
+        // digits once. As in OQL ROUND (#1137), division must not round them first.
+        decimal remainder = value % factor;
+        decimal whole = decimal.Truncate(value - remainder);
+        return decimal.Abs(remainder) >= factor / 2 ? whole + decimal.Sign(value) * factor : whole;
     }
 
     private static double RoundApproximate(double value, int scale)

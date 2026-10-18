@@ -241,6 +241,14 @@ value's source; a qualified stored-table key retains its physical binding. The e
 and execution evidence are in
 [DIALECT.md](../../Assimalign.Cohesion.Database.Sql.Language/docs/DIALECT.md).
 
+## Exact ROUND (#1661)
+
+Exact ROUND with a negative scale uses remainder arithmetic to decide from the discarded
+digits once, following PostgreSQL numeric.c:11683-11756 (round_var) and OQL ROUND (#1137).
+Dividing first can round a value just below a midpoint onto that midpoint; for example,
+ROUND(4.9999999999999999999999999999, -1) is zero. Midpoints at every scale -1 through -28
+round away from zero for both signs (#1661).
+
 ## Set-operation operator (#1114)
 
 SqlSetOperationPlan implements SqlRelationPlan, publishing synthesized common-typed outputs
