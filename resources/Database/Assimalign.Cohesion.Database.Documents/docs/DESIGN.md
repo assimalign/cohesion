@@ -34,7 +34,7 @@ belong to the shared kernel. No kernel contract was widened. The engine, its dat
 first four leaves of the area root's bases ([Concrete types](#concrete-types-concrete-types-plan-phase-4-1260)),
 while the planner, executor, workers and storage strategy are internal.
 
-SELECT and index-DDL statements flow through these stages; INSERT and DELETE use the same pipeline. Catalog metadata informs query access-path
+SELECT and index-DDL statements flow through these stages; INSERT, UPDATE and DELETE use the same pipeline. Catalog metadata informs query access-path
 selection and index-DDL planning; `SELECT`, `CREATE INDEX`, and `DROP INDEX` all reach the same
 plan executor rather than an index-management side channel.
 
@@ -256,6 +256,9 @@ Message contains no code prefix. The Documents family is `COHDOCnnn`:
 | `COHDOC013` | Invalid evaluated LIKE escape or a pattern ending in its escape character |
 | `COHDOC014` | DISTINCT ORDER BY expression is absent from the projection |
 | `COHDOC015` | A SELECT array or object constructor exceeds the 256-level result limit |
+| `COHDOC016` | Invalid UPDATE target or an incompatible object/array shape or index |
+| `COHDOC017` | UPDATE targets duplicate or prefix-overlap after alias normalization |
+| `COHDOC018` | UPDATE produces invalid stored JSON or exceeds storage's 128-level depth |
 
 `DocumentQueryRequest.FromOql` and a directly constructed typed query with parse errors
 throw `DatabaseParseException` carrying the complete, ordered parser diagnostics and the
@@ -312,18 +315,17 @@ uncommitted catalog writes are visible. Subsequent statements observe committed
 catalog changes according to their isolation level. No metadata copy, content record,
 or synthetic collection is stored, and existing collection listing stays unchanged.
 
-The sources are read-only. `INSERT`, `DELETE`, `CREATE COLLECTION`, `DROP COLLECTION`, `CREATE INDEX`, and `DROP INDEX` targeting either source,
+The sources are read-only. `INSERT`, `UPDATE`, `DELETE`, `CREATE COLLECTION`, `DROP COLLECTION`, `CREATE INDEX`, and `DROP INDEX` targeting either source,
 and `CreateCollectionAsync` or `DropCollectionAsync` using either reserved name,
 throw `DatabaseException` with `System collection '<canonical source>' is read-only.`
-before ordinary catalog lookup or mutation. OQL document `UPDATE`
-remains unsupported and returns the existing `COHDBL001` parse diagnostic. Virtual sources do not provide mutable `DocumentCollection` handles.
+before ordinary catalog lookup or mutation. Virtual sources do not provide mutable `DocumentCollection` handles.
 
 ### Stored document queries
 
 The supported clause matrix lives in the language package's
 [DESIGN.md](../../Assimalign.Cohesion.Database.Documents.Language/docs/DESIGN.md).
 SELECT (ALL/DISTINCT and VALUE/RAW), object/array constructors, FROM, WHERE, GROUP BY, HAVING, ORDER BY, CREATE COLLECTION, DROP COLLECTION,
-CREATE INDEX, DROP INDEX, INSERT, DELETE, VALUES, IN, BETWEEN, LIKE and CASE are executed. OQL retains its name with a SQL++ basis.
+CREATE INDEX, DROP INDEX, INSERT, UPDATE, UNSET, DELETE, VALUES, IN, BETWEEN, LIKE and CASE are executed. OQL retains its name with a SQL++ basis.
 Retired ODMG constructs are rejected positionally; nested queries, deferred document mutations
 and server statements are rejected with `COHDBL001`. The parser advertises only clauses this executor
 supports.
@@ -375,6 +377,8 @@ paths, literals, parameters, arithmetic, and aggregates. `SELECT *` returns one
 `JsonElement` values; scalars become null, Boolean, decimal, or string. Mixed-type
 columns advertise `DatabaseType.Null` as unknown rather than guessing a schema.
 An explicit alias resolves duplicate projected column names; otherwise they fail.
+An ordinal HashSet checks projection-name uniqueness in linear time and the planner observes
+statement cancellation while validating projections.
 No POCO reflection, schema inference, or runtime code generation is involved.
 Query JSON parsing uses the same 128-level nesting limit as storage validation
 and index extraction, so every accepted document can be queried at its stored depth.
@@ -547,9 +551,73 @@ The existing wire Execute operation carries both clauses. CREATE followed by Doc
 Put/Get works on the new collection. A schema-owned DROP returns ExecutionFailure (6), naming
 `DROP COLLECTION`; the next Execute on the same connection succeeds. No protocol layout changes.
 
+### Partial updates and serialization (#1133)
+
+UPDATE materializes candidate identities through DELETE's generalized scan/seek path and
+reapplies the complete WHERE predicate against the statement snapshot. It evaluates every SET
+value and builds every patched document before the first write. Thus all right-hand sides read
+the pre-update content, even a swap such as `SET amount = details.score, details.score = amount`.
+Moving an indexed value never revisits a candidate (Halloween safety). A missing collection
+reports `Collection 'x' does not exist.`; Schema ownership permits content updates.
+
+Targets are compared by ordinal property names and integer indexes after stripping the optional
+source alias. Repeated paths, prefix overlaps and SET/UNSET overlaps fail planning (COHDOC017).
+A segment trie detects all three in time linear in the total number of target segments, checking
+statement cancellation at each target and segment. This follows PostgreSQL's one-pass assignment
+lookup principle (`src/backend/rewrite/rewriteHandler.c:840-870` in the reference clone); the
+document-specific trie also detects prefix overlaps. Bounded regressions plan 200,000 distinct
+UPDATE targets and SELECT projection names, and a deterministic enumeration cancels planning.
+Root replacement (`SET d = ...`) and UNSET ending in an array index fail planning (COHDOC016).
+An aliased array root can be updated through an index, for example `SET d[0].name = 'new'`.
+At execution, name segments require objects; missing intermediate objects are created as `{}`
+when a SET needs them. Index segments require an existing array and an in-range index, with
+shape failures identifying the target path (COHDOC016). These index requirements apply equally
+to UNSET and SET-to-MISSING, even beneath missing members; every invalid target fails the
+statement before anything is written. UNSET of an absent object member is a no-op; an existing
+incompatible intermediate value fails. No array is created or expanded implicitly.
+
+SET-to-MISSING is removal for a named member, including leaving an absent member absent.
+Missing intermediate objects are not created solely for removals, including SET-to-MISSING.
+A MISSING assigned directly to an existing array element becomes JSON null. SET-to-NULL writes
+JSON null in either shape. Sibling targets share one patch tree; object properties that survive
+keep their original order, replacement keeps the property's position, and new properties append
+in target order. Array order and length remain unchanged. Untouched values and property names
+retain their original UTF-8 bytes, including escape and number spelling and whitespace within
+untouched values. Whitespace between members or elements of rewritten containers, and around
+their names and delimiters, may be normalized. Raw JsonElement/JsonProperty text supplies those
+fragments; only target values and new names are serialized through Utf8JsonWriter and
+JsonEncodedText. No JsonSerializer, reflection or mutable object-model serialization is used.
+New names and values retain non-ASCII characters (including supplementary Unicode scalars) in
+UTF-8. The internal JSON encoder escapes quotes, backslashes and controls as required by
+[RFC 8259 section 7](https://www.rfc-editor.org/rfc/rfc8259#section-7); the BCL relaxed encoder
+still escapes supplementary characters. Its pointer-based BCL override signatures require
+AllowUnsafeBlocks locally, without changing public surface or NativeAOT compatibility.
+The result passes DocumentStorage.ValidateContent, including its 128-level limit, before writing.
+Only the patched document is constrained by storage depth: temporary SET and WHERE constructors
+retain the ordinary 256-level query allowance, even inside CASE conditions. COHDOC018 uses the
+failing target's span for a leaf-value write, and the statement span for whole-document validation.
+
+Every matched document is passed through INSERT/CRUD's existing WriteAsync primitive, even if
+the content is byte-identical or UNSET removes nothing. Each receives a strictly greater version;
+unmatched documents retain theirs. AffectedCount is the number matched, including zero.
+`WHERE META(d).version = $v` supplies the version precondition and a stale value matches zero.
+WriteAsync takes the writer lock, runs EnsureCurrent and replaces old/new index keys in the
+same logical transaction as content and metadata. An intervening committed writer takes the
+existing DatabaseTransactionAbortedException conflict path. Any failure rolls back the automatic
+statement, or aborts the whole explicit transaction under #1225. Own writes remain visible to
+later statements of that transaction and invisible to other sessions until commit.
+
+The existing wire completion carries the matched count with no Document frames. Path failures
+arrive as ExecutionFailure with their diagnostic and leave the session reusable. Tests exercise
+scan/seek parity, swaps, versions, failures before and after the first write, cancellation,
+concurrent committed writers, explicit commit/rollback and process termination. Recovery checks
+read the raw B-tree to prove both committed old-key removal and abandoned new-key removal,
+rather than relying on catalog filtering in a seek. No catalog layout or wire encoding changes;
+no format version or upgrade reader is added.
+
 ## EXPLAIN operator vocabulary and wire shape (#1104)
 
-`EXPLAIN SELECT`, `EXPLAIN INSERT` and `EXPLAIN DELETE` perform ordinary parameter validation and snapshot-visible planning, then
+EXPLAIN for SELECT, INSERT, UPDATE and DELETE performs ordinary parameter validation and snapshot-visible planning, then
 materialize a `DatabasePlanDescription` before reading document content or invoking the plan
 executor. Its columns and nullable count fields follow
 [Execution](../../Assimalign.Cohesion.Database.Execution/docs/DESIGN.md#plan-descriptions-1104).
@@ -562,6 +630,7 @@ It changes no documents or catalog entries, including when its explicit transact
 | `CollectionScan` | Candidate retrieval from the named collection |
 | `IndexSeek` | The chosen catalog index name, collection and inclusive/exclusive path bounds |
 | `Delete` | Snapshot-filtered deletion; detail states filter presence and IndexSeek or CollectionScan, with that access as its child |
+| `Update` | Snapshot-filtered partial update; detail states filter presence and its IndexSeek or CollectionScan child |
 | `Insert`, `InsertSelect` | Document creation from VALUES or a fully materialized query; SELECT children describe the source access |
 | `SystemCollection` | A virtual `COHESION_SCHEMA` collection without stored-document access |
 | `CreateCollection`, `DropCollection`, `CreateIndex`, `DropIndex` | Internal DDL mappings; EXPLAIN DDL is refused by the parser |
@@ -604,7 +673,7 @@ snapshots retain their defined visibility.
 Successful index DDL returns a command `DatabaseResult` with `Success` status and an affected count
 of zero; index definition changes are not document-row mutations.
 
-`ChooseAccess` takes a predicate and source alias independently of SELECT, so SELECT and DELETE
+`ChooseAccess` takes a predicate and source alias independently of SELECT, so SELECT, UPDATE and DELETE
 share the same physical access selection. The planner uses applicable equality/range predicates on indexed paths,
 including parameter values, reversed operands, and conjunctive bounds. Equality
 is preferred over a range; ties choose ordinal index name. The executor reapplies
@@ -659,7 +728,7 @@ The input walk validates numeric literals and referenced JsonElement parameters 
 so grouped-expression matching and empty sources retain the same located numeric refusal.
 Unused parameter-map entries remain ignored.
 
-INSERT and PutAsync share one internal write primitive inside the existing statement operation:
+INSERT, UPDATE and PutAsync share one internal write primitive inside the existing statement operation:
 writer lock, collection/index snapshot checks, current-key check, content write/tombstone,
 durable version allocation and catalog/index maintenance. A statement is atomic, including its
 index changes. A failure in an explicit transaction rolls back all of that transaction's work

@@ -18,6 +18,7 @@ await using var engine = DocumentDatabaseEngine.Create("document-engine", new()
     MaintenanceInterval = TimeSpan.FromHours(1)
 });
 string original = "{\"rank\":1,\"nested\":{\"array\":[true,null,\"" + new string('x', 40000) + "\"]}}";
+string updated = original.Replace("\"rank\":1,", "\"rank\":11,", StringComparison.Ordinal);
 if (args[0] == "seed")
 {
     var database = await engine.CreateDatabaseAsync("crash");
@@ -30,8 +31,11 @@ if (args[0] == "seed")
     await session.ExecuteAsync("CREATE INDEX by_rank ON items (rank)");
     if ((await session.ExecuteAsync("DELETE FROM items WHERE rank = 2")).AffectedCount != 1)
     { throw new InvalidOperationException("Committed DELETE did not affect one document."); }
+    if ((await session.ExecuteAsync("UPDATE items SET rank = rank + 10 WHERE rank = 1", cancellationToken: CancellationToken.None)).AffectedCount != 1)
+    { throw new InvalidOperationException("Committed UPDATE did not affect one document."); }
     await session.BeginTransactionAsync();
-    await collection.PutAsync(session, "committed", "{\"rank\":99}"u8.ToArray());
+    if ((await session.ExecuteAsync("UPDATE items SET rank = 99 WHERE rank = 11", cancellationToken: CancellationToken.None)).AffectedCount != 1)
+    { throw new InvalidOperationException("Uncommitted UPDATE did not affect one document."); }
     await collection.PutAsync(session, "partial", Encoding.UTF8.GetBytes(original));
     if ((await session.ExecuteAsync("DELETE FROM items WHERE rank = 3")).AffectedCount != 1)
     { throw new InvalidOperationException("Uncommitted DELETE did not affect one document."); }
@@ -54,7 +58,7 @@ else if (args[0] == "verify")
     await using var session = await database.CreateSessionAsync();
     var collection = await session.GetCollectionAsync("items");
     var document = await collection.GetAsync(session, "committed");
-    if (document is null || Encoding.UTF8.GetString(document.Value.Content.Span) != original)
+    if (document is null || Encoding.UTF8.GetString(document.Value.Content.Span) != updated)
     {
         throw new InvalidOperationException("Committed document did not survive process termination.");
     }
@@ -62,7 +66,7 @@ else if (args[0] == "verify")
     {
         throw new InvalidOperationException("An uncommitted document survived process termination.");
     }
-    await using var result = (DatabaseResultSet)await session.ExecuteAsync("SELECT COUNT(*) AS total FROM items i WHERE i.rank = @rank", new Dictionary<string, object?> { ["rank"] = 1 });
+    await using var result = (DatabaseResultSet)await session.ExecuteAsync("SELECT COUNT(*) AS total FROM items i WHERE i.rank = @rank", new Dictionary<string, object?> { ["rank"] = 11 });
     await using var cursor = result.GetRowsAsync().GetAsyncEnumerator();
     if (!await cursor.MoveNextAsync() || cursor.Current.GetValue(0) is not decimal count || count != 1)
     {
@@ -79,7 +83,7 @@ else if (args[0] == "verify")
             await deletionCursor.MoveNextAsync())
         { throw new InvalidOperationException("Recovered DELETE index visibility is incorrect."); }
     }
-    await using var missing = (DatabaseResultSet)await session.ExecuteAsync("SELECT nested.absent AS absent FROM items WHERE rank = 1 AND nested.absent IS MISSING", cancellationToken: CancellationToken.None);
+    await using var missing = (DatabaseResultSet)await session.ExecuteAsync("SELECT nested.absent AS absent FROM items WHERE rank = 11 AND nested.absent IS MISSING", cancellationToken: CancellationToken.None);
     await using var missingCursor = missing.GetRowsAsync(CancellationToken.None).GetAsyncEnumerator();
     if (!await missingCursor.MoveNextAsync() || !missingCursor.Current.SupportsMissing ||
         !missingCursor.Current.IsMissing(0) || missingCursor.Current.IsNull(0) || missingCursor.Current.GetValue(0) is not null ||

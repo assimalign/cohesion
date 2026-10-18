@@ -3,7 +3,7 @@
 This package parses the Documents engine's executable SQL++ profile, retaining the OQL name, into typed statement and
 expression trees. It provides `OqlLanguageProfile`, stable `OqlClauses` names, `OqlQueryParser`,
 `OqlQueryStatement`,
-`OqlSelectExpression`, `OqlInsertExpression`, `OqlDeleteExpression`, `OqlMetaExpression`, `OqlObjectExpression`, `OqlCreateCollectionExpression`, `OqlDropCollectionExpression`,
+`OqlSelectExpression`, `OqlInsertExpression`, `OqlUpdateExpression`, `OqlUpdateAssignment`, `OqlDeleteExpression`, `OqlMetaExpression`, `OqlObjectExpression`, `OqlCreateCollectionExpression`, `OqlDropCollectionExpression`,
 `OqlCreateIndexExpression`, `OqlDropIndexExpression`, and expression nodes
 for projection, filtering, grouping, aggregates, ordering, nested properties, and array access.
 
@@ -24,7 +24,9 @@ parse-plan-execute path as `SELECT`. `INSERT INTO ... (KEY, VALUE) VALUES` and I
 create externally keyed documents. `META([alias]).id` and `.version` expose stored identities
 and versions independently of JSON content. `DELETE FROM collection [AS? alias] [WHERE expression]`
 deletes snapshot-selected documents and retains the collection and indexes. EXPLAIN accepts
-SELECT, INSERT and DELETE; USE KEYS, RETURNING and DELETE LIMIT remain deferred.
+SELECT, INSERT, UPDATE and DELETE. UPDATE accepts SET and/or UNSET over nested properties and
+array indexes; SET-to-MISSING removes a property. USE KEYS, RETURNING, FOR comprehensions and
+UPDATE/DELETE LIMIT remain deferred.
 `DEFINE` is recognized statement-initially, and `ELEMENT` / `FLATTEN` in call position, to
 produce `COHDBL001`; all three remain usable field names. Subqueries remain unsupported.
 MISSING has its own AST node, distinct from NULL, and `IS [NOT] MISSING` / `IS [NOT] VALUED`

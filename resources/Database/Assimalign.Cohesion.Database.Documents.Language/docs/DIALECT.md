@@ -42,6 +42,23 @@ EXPLAIN DELETE reports Delete plus CollectionScan or IndexSeek without writing. 
 RETURNING and DELETE LIMIT remain COHDBL001 at their tokens. DocumentDeleteTests and the
 advertised-clause corpus cover embedded execution; wire and NativeAOT checks cover completion.
 
+UPDATE collection [AS alias | alias] SET path = expression [, ...] [UNSET path [, ...]]
+[WHERE expression], or UPDATE with UNSET alone, executes through the same snapshot scan/seek
+pipeline. All SET expressions read the original document; all patched documents are validated
+before any write. Name segments require objects and SET can create missing intermediate objects.
+Every index segment requires an existing array and an in-range index, including UNSET and
+SET-to-MISSING beneath missing members; arrays are never created or expanded implicitly.
+UNSET of an absent object member is a no-op. SET-to-MISSING removes object members, while
+MISSING assigned to an existing array element becomes JSON null. UNSET cannot end in an index,
+and root replacement is invalid. Incompatible paths give COHDOC016; duplicate and prefix-overlapping
+SET/UNSET targets after alias normalization give COHDOC017. Invalid stored JSON or a patched
+document deeper than 128 levels gives COHDOC018. Temporary constructors retain query depth.
+Untouched values and property-name spellings retain their bytes; rewritten-container whitespace
+may be normalized. A successful UPDATE returns the matched count, including unchanged matches,
+and allocates fresh versions. Failure or cancellation writes nothing under the transaction rules
+above. EXPLAIN UPDATE describes the access without writing. USE KEYS, RETURNING, LIMIT and FOR
+remain COHDBL001. DocumentUpdateTests covers paths, atomicity, serialization and matched counts.
+
 Conformance lives in OqlSqlppBasisTests, OqlKeywordDispositionTests, DocumentMissingTests,
 OqlExecutionConformanceTests, DocumentQueryTests and DocumentMissingWireTests. The wire tests
 exercise both InMemory and TCP; the recovery fixture also executes IS MISSING under NativeAOT.

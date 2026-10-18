@@ -19,6 +19,7 @@ internal sealed partial class DocumentPlanner
         DocumentSystemCollectionPlan => "SystemCollection",
         DocumentInsertPlan => "Insert",
         DocumentDeletePlan => "Delete",
+        DocumentUpdatePlan => "Update",
         DocumentInsertSelectPlan => "InsertSelect",
         DocumentCreateCollectionPlan => "CreateCollection",
         DocumentDropCollectionPlan => "DropCollection",
@@ -36,6 +37,7 @@ internal sealed partial class DocumentPlanner
             DocumentSystemCollectionPlan p => p.Name,
             DocumentInsertPlan p => p.Collection.Name,
             DocumentDeletePlan p => p.Collection.Name,
+            DocumentUpdatePlan p => p.Collection.Name,
             DocumentInsertSelectPlan p => p.Collection.Name,
             DocumentCreateCollectionPlan p => p.Statement.Name,
             DocumentDropCollectionPlan p => p.Statement.Name,
@@ -57,9 +59,12 @@ internal sealed partial class DocumentPlanner
         };
         string? detail = plan is DocumentDeletePlan delete
             ? $"filter={delete.Statement.Predicate is not null}; access={(delete.Access is DocumentIndexPath ? "IndexSeek" : "CollectionScan")}"
+            : plan is DocumentUpdatePlan update
+            ? $"filter={update.Statement.Predicate is not null}; access={(update.Access is DocumentIndexPath ? "IndexSeek" : "CollectionScan")}"
             : logical is null ? null : $"filter={logical.Query.Predicate is not null}; grouped={logical.IsGrouped}; order_keys={logical.Query.OrderBy.Count}";
         Add(DescribeOperator(plan), null, indexName, detail);
         if (plan is DocumentDeletePlan deletion) { AddAccess(deletion.Access, 0); }
+        if (plan is DocumentUpdatePlan mutation) { AddAccess(mutation.Access, 0); }
         var select = plan as DocumentPlan;
         int sourceParent = 0;
         if (plan is DocumentInsertSelectPlan insert)

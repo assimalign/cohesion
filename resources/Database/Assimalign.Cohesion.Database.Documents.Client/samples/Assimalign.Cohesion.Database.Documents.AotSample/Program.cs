@@ -133,6 +133,20 @@ internal static class Program
             Check(await connection.ExecuteAsync("DELETE FROM archive WHERE META().id = 'e'", cancellationToken: token) == 1, "DELETE META affected count");
             Check(await connection.GetAsync("archive", "e", token) is null, "DELETE readback");
             Check(await connection.ExecuteAsync("CREATE INDEX archive_amount ON archive (amount)", cancellationToken: token) == 0, "DELETE index setup");
+            Check(await connection.ExecuteAsync("UPDATE items SET amount = {'nested':[1,MISSING]}, extra.deep = 2 WHERE META().id = 'e'", cancellationToken: token) == 1, "UPDATE affected count");
+            var patch = await connection.GetAsync("items", "e", token);
+            using var patchJson = System.Text.Json.JsonDocument.Parse(patch.GetValueOrDefault().Content);
+            Check(patchJson.RootElement.GetProperty("amount").GetProperty("nested")[1].ValueKind == System.Text.Json.JsonValueKind.Null, "UPDATE array MISSING");
+            Check(await connection.ExecuteAsync("UPDATE items UNSET extra, amount WHERE META().id = 'e'", cancellationToken: token) == 1, "UNSET affected count");
+            try
+            {
+                await connection.ExecuteAsync("UPDATE items SET extra[5] = 1 WHERE META().id = 'e'", cancellationToken: token);
+                throw new InvalidOperationException("Invalid UPDATE succeeded.");
+            }
+            catch (DocumentClientException exception)
+            {
+                Check(exception.Code == ProtocolErrorCode.ExecutionFailure && exception.Diagnostics.Any(d => d.Code == "COHDOC016"), "UPDATE path diagnostic");
+            }
             var deletePlan = await connection.QueryAsync("EXPLAIN DELETE FROM archive WHERE amount >= 1", cancellationToken: token);
             Check(deletePlan.Documents.Any(document => document.GetProperty("operator").GetString() == "Delete" &&
                 document.GetProperty("detail").GetString() == "filter=True; access=IndexSeek"), "DELETE EXPLAIN seek");

@@ -74,7 +74,7 @@ internal static class DocumentJsonValue
             : new DocumentPlanningException("COHDOC015", string.Format(System.Globalization.CultureInfo.CurrentCulture,
                 ErrorMessages.SelectConstructorDepthExceeded, constructor), innerException: exception);
 
-    private static void Write(Utf8JsonWriter writer, object? value)
+    internal static void Write(Utf8JsonWriter writer, object? value)
     {
         switch (value)
         {

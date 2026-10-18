@@ -108,6 +108,10 @@ internal sealed partial class DocumentExpressionEvaluator
             case OqlDeleteExpression delete:
                 ValidateInputs(delete.Predicate);
                 break;
+            case OqlUpdateExpression update:
+                foreach (var assignment in update.Assignments) { ValidateInputs(assignment.Value); }
+                ValidateInputs(update.Predicate);
+                break;
             case OqlInsertExpression insert:
                 foreach (var pair in insert.Values) { ValidateInputs(pair.Key); ValidateInputs(pair.Value); }
                 ValidateInputs(insert.Select);

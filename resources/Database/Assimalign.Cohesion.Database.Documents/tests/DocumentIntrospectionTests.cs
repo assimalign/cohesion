@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Execution;
@@ -125,14 +126,18 @@ public sealed class DocumentIntrospectionTests
         (await Should.ThrowAsync<DatabaseException>(async () => await session.DropCollectionAsync(name.ToLowerInvariant()))).Message.ShouldBe(expected);
     }
 
-    [Theory]
+    [Theory(DisplayName = "Cohesion Test [Documents] - UPDATE: system collections remain read-only")]
     [InlineData("UPDATE COHESION_SCHEMA.OBJECT_OWNERSHIP SET OWNER = 'Adhoc'")]
-    public async Task Unsupported_document_data_mutations_keep_the_language_capability_diagnostic(string query)
+    public async Task Execute_UpdateSystemCollection_ShouldRefuseMutationAsync(string query)
     {
+        // Arrange
         await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
         var database = await engine.CreateDatabaseAsync("inventory");
         await using var session = await database.CreateSessionAsync();
-        (await Should.ThrowAsync<DatabaseParseException>(async () => await session.ExecuteAsync(query))).Message.ShouldContain("COHDBL001");
+        // Act
+        var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(query, cancellationToken: CancellationToken.None));
+        // Assert
+        error.Message.ShouldBe("System collection 'COHESION_SCHEMA.OBJECT_OWNERSHIP' is read-only.");
     }
 
     [Fact]

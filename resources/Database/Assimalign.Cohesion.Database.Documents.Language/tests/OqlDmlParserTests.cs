@@ -8,6 +8,72 @@ namespace Assimalign.Cohesion.Database.Documents.Language.Tests;
 
 public sealed class OqlDmlParserTests
 {
+    [Theory(DisplayName = "Cohesion Test [Documents.Language] - UPDATE: assignment, removal and predicate spans are retained")]
+    [InlineData("UPDATE items SET amount = amount + 1 WHERE name = 'alpha'", null, 1, 0, true)]
+    [InlineData("UPDATE items AS d SET d.details.score = 5, d.tags[0] = 'red' UNSET d.category WHERE d.amount > 3", "d", 2, 1, true)]
+    [InlineData("UPDATE items UNSET details", null, 0, 1, false)]
+    [InlineData("UPDATE items AS d SET d['odd.name'] = 1", "d", 1, 0, false)]
+    [InlineData("UPDATE items AS d SET d.set = 1", "d", 1, 0, false)]
+    [InlineData("UPDATE items returning SET returning.a = 1", "returning", 1, 0, false)]
+    [InlineData("UPDATE items returning UNSET returning.a", "returning", 0, 1, false)]
+    [InlineData("UPDATE items d SET d.a = {'b':[1, MISSING]} UNSET d.c, d.e", "d", 1, 2, false)]
+    public void Parse_UpdateForms_ShouldRetainStructureAndSpans(string query, string? alias, int assignments, int unset, bool predicate)
+    {
+        // Arrange / Act
+        var statement = new OqlQueryParser().Parse(query).ShouldBeOfType<OqlQueryStatement>();
+        // Assert
+        statement.Diagnostics.ShouldBeEmpty();
+        var update = statement.OqlExpression.ShouldBeOfType<OqlUpdateExpression>();
+        update.Collection.ShouldBe("items");
+        update.Alias.ShouldBe(alias);
+        update.Assignments.Count.ShouldBe(assignments);
+        update.Unset.Count.ShouldBe(unset);
+        (update.Predicate is not null).ShouldBe(predicate);
+        update.Location.ShouldNotBeNull().Start.ShouldBe(0);
+        update.Location.End.ShouldBe(query.Length);
+        foreach (var assignment in update.Assignments)
+        {
+            var span = assignment.Location.ShouldNotBeNull();
+            span.Start.ShouldBe(assignment.Path.Location.ShouldNotBeNull().Start);
+            span.End.ShouldBe(assignment.Value.Location.ShouldNotBeNull().End);
+            query[span.Start..span.End].ShouldContain(" = ", Case.Sensitive);
+        }
+        foreach (var path in update.Unset)
+        {
+            path.Location.ShouldNotBeNull();
+            query[path.Location.Start..path.Location.End].ShouldStartWith(path.Segments[0].Name!);
+        }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Documents.Language] - UPDATE: malformed and deferred syntax has exact spans")]
+    [InlineData("UPDATE items", "OQL0002", "", "SET")]
+    [InlineData("UPDATE use", "OQL0002", "", "SET")]
+    [InlineData("UPDATE items SET = 1", "OQL0002", "=", "identifier")]
+    [InlineData("UPDATE items SET a 1", "OQL0002", "1", "=")]
+    [InlineData("UPDATE items SET a = 1 garbage", "OQL0002", "garbage", "Unexpected")]
+    [InlineData("UPDATE items SET a = 1 RETURNING a", "COHDBL001", "RETURNING", "RETURNING")]
+    [InlineData("UPDATE items SET a = 1 FOR t IN tags END", "COHDBL001", "FOR", "FOR")]
+    [InlineData("UPDATE items USE KEYS 'a' SET a = 1", "COHDBL001", "USE", "USE")]
+    [InlineData("UPDATE items SET a = 1 LIMIT 1", "COHDBL001", "LIMIT", "LIMIT")]
+    [InlineData("UPDATE items UNSET a LIMIT 1", "COHDBL001", "LIMIT", "LIMIT")]
+    [InlineData("SELECT SET(1) FROM items", "COHDBL001", "SET", "SET")]
+    [InlineData("UPDATE items SET a = SET(1)", "COHDBL001", "SET(1)", "SET")]
+    [InlineData("UPDATE items SET a = (SELECT x FROM c)", "COHDBL001", "SELECT", "SUBQUERY")]
+    [InlineData("UPDATE items SET a = 1 WHERE (SELECT x FROM c)", "COHDBL001", "SELECT", "SUBQUERY")]
+    [InlineData("EXPLAIN UPDATE items SET a = (SELECT x FROM c)", "COHDBL001", "SELECT", "SUBQUERY")]
+    public void Parse_InvalidUpdate_ShouldLocateFailure(string query, string code, string token, string message)
+    {
+        // Arrange / Act
+        var statement = new OqlQueryParser().Parse(query);
+        // Assert
+        var diagnostic = statement.Diagnostics.ShouldHaveSingleItem();
+        diagnostic.Code.ShouldBe(code);
+        diagnostic.Message.ShouldNotBeNull().ShouldContain(message, Case.Sensitive);
+        int start = token.Length == 0 ? query.Length : query.IndexOf(token, StringComparison.Ordinal);
+        diagnostic.Start.ShouldBe(start);
+        diagnostic.End.ShouldBe(start + (token == "SET(1)" ? 3 : token.Length));
+    }
+
     [Theory(DisplayName = "Cohesion Test [Documents.Language] - DELETE: source, alias, predicate and spans are retained")]
     [InlineData("DELETE FROM items", null, false)]
     [InlineData("DELETE FROM items WHERE amount > 3", null, true)]
@@ -136,6 +202,10 @@ public sealed class OqlDmlParserTests
 
     [Theory(DisplayName = "Cohesion Test [Documents.Language] - META: function vocabulary preserves paths and aliases")]
     [InlineData("DELETE FROM returning")]
+    [InlineData("UPDATE use SET a = 1")]
+    [InlineData("UPDATE use UNSET a")]
+    [InlineData("UPDATE items use SET use.a = 1")]
+    [InlineData("UPDATE items use UNSET use.a")]
     [InlineData("DELETE FROM items returning WHERE returning.n = 1")]
     [InlineData("DELETE FROM items AS returning WHERE returning.n = 1")]
     [InlineData("EXPLAIN DELETE FROM items d WHERE META(d).id = 'a'")]

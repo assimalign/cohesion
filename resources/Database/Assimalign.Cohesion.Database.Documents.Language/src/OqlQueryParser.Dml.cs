@@ -5,6 +5,49 @@ namespace Assimalign.Cohesion.Database.Documents.Language;
 
 public sealed partial class OqlQueryParser
 {
+    private OqlUpdateExpression ParseUpdate()
+    {
+        var start = Current;
+        Advance();
+        string collection = CollectionName();
+        string? alias = null;
+        if (Take("AS")) { alias = Identifier(); }
+        else if (IsUpdateAlias()) { alias = Identifier(); }
+        List<OqlUpdateAssignment> assignments = [];
+        List<OqlPathExpression> unset = [];
+        if (Take("SET"))
+        {
+            do
+            {
+                var assignmentStart = Current;
+                var path = ParseDocumentPath();
+                Expect("=");
+                var value = ParseExpression();
+                assignments.Add(new OqlUpdateAssignment(path, value, Span(assignmentStart, Previous)));
+            } while (!Failed && Take(TokenType.Comma));
+        }
+        if (Take("UNSET"))
+        {
+            do { unset.Add(ParseDocumentPath()); } while (!Failed && Take(TokenType.Comma));
+        }
+        if (!Failed && assignments.Count == 0 && unset.Count == 0)
+        {
+            Error("OQL0002", "UPDATE requires at least one SET assignment or UNSET path.", Current);
+        }
+        OqlExpression? predicate = !Failed && Take("WHERE") ? ParseExpression() : null;
+        // UPDATE owns this refusal even after SELECT gains LIMIT.
+        if (!Failed && Is("LIMIT"))
+        {
+            _diagnostics.Add(QueryDiagnostics.UnsupportedClause("LIMIT", Profile.Language, Span(Current, Current)));
+        }
+        return new OqlUpdateExpression(collection, alias, assignments.AsReadOnly(), unset.AsReadOnly(), predicate, Span(start, Previous));
+    }
+
+    private bool IsUpdateAlias() => Current.Type is TokenType.Identifier or TokenType.QuotedIdentifier or TokenType.Function &&
+        !Is("LIMIT") && !(Is("USE") && _position + 1 < _tokens.Count && IsWord(_tokens[_position + 1], "KEYS")) &&
+        (!IsReturningClause() || Is("RETURNING") && _position + 1 < _tokens.Count &&
+            (IsWord(_tokens[_position + 1], "SET") || IsWord(_tokens[_position + 1], "UNSET")));
+
     private OqlDeleteExpression ParseDelete()
     {
         var start = Current;

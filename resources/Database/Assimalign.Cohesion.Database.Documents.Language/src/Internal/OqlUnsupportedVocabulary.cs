@@ -47,6 +47,7 @@ internal static class OqlUnsupportedVocabulary
         new("ALTER", "ALTER", OqlWordPosition.Clause),
         new("INSERT", "INSERT", OqlWordPosition.Clause),
         new("RETURNING", "RETURNING", OqlWordPosition.Trailing),
+        // Enabled by OqlClauses.Update; SET's positional exemption belongs to UPDATE.
         new("UPDATE", "UPDATE", OqlWordPosition.Clause),
         // Enabled by OqlClauses.Delete; retained here for contextual keyword coverage.
         new("DELETE", "DELETE", OqlWordPosition.Clause),

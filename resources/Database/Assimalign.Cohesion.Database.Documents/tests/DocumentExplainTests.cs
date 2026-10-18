@@ -22,6 +22,8 @@ public sealed class DocumentExplainTests
     [InlineData("INSERT INTO items (KEY k) SELECT META().id AS k FROM items", "InsertSelect")]
     [InlineData("DELETE FROM items", "Delete")]
     [InlineData("DELETE FROM items WHERE score >= @minimum", "Delete")]
+    [InlineData("UPDATE items SET score = score + 1", "Update")]
+    [InlineData("UPDATE items SET score = score + 1 WHERE score >= @minimum", "Update")]
     [InlineData("SELECT name FROM items", "CollectionScan")]
     [InlineData("SELECT name FROM items WHERE score >= @minimum AND score < 10", "IndexSeek")]
     [InlineData("SELECT INDEX_NAME FROM COHESION_SCHEMA.INDEXES", "SystemCollection")]
@@ -44,7 +46,7 @@ public sealed class DocumentExplainTests
         await transaction.CommitAsync(CancellationToken.None);
         // Assert
         rows.ShouldContain(row => Equals(row[2], expected));
-        if (expected == "Delete")
+        if (expected is "Delete" or "Update")
         {
             string access = query.Contains("WHERE", StringComparison.Ordinal) ? "IndexSeek" : "CollectionScan";
             rows.Count.ShouldBe(2);
@@ -59,7 +61,8 @@ public sealed class DocumentExplainTests
             rows[2][4].ShouldBe("by_score");
             rows[2][5].ShouldBe("score >= 2 AND score < 10");
         }
-        (await collection.GetAsync(session, "a", CancellationToken.None)).ShouldNotBeNull();
+        var unchanged = (await collection.GetAsync(session, "a", CancellationToken.None)).ShouldNotBeNull();
+        System.Text.Encoding.UTF8.GetString(unchanged.Content.Span).ShouldBe("{\"name\":\"Ada\",\"score\":5}");
     }
 
     [Theory(DisplayName = "Cohesion Test [Documents] - EXPLAIN places DISTINCT above projection and grouping")]
