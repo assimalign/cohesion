@@ -127,7 +127,9 @@ public sealed class GraphUpdateConcurrencyTests
             (await stale.ExecuteAsync("MATCH (a:A) DELETE a")).AffectedCount.ShouldBe(1);
             await snapshot.CommitAsync();
             await using var rows = (DatabaseResultSet)await first.ExecuteAsync("MATCH (a:A) RETURN a");
-            await foreach (var row in rows.GetRowsAsync(CancellationToken.None)) { throw new InvalidOperationException("Deleted node survived."); }
+            int remaining = 0;
+            await foreach (var row in rows.GetRowsAsync(CancellationToken.None)) { remaining++; }
+            remaining.ShouldBe(0);
         }
         else
         {
