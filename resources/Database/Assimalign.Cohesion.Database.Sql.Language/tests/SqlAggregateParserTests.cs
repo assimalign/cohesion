@@ -88,6 +88,14 @@ public class SqlAggregateParserTests
     [InlineData("\"listagg\"(name) WITHIN GROUP (ORDER BY id)", SqlSetQuantifier.Default, 1)]
     [InlineData("UPPER(ALL name ORDER BY id)", SqlSetQuantifier.All, 1)]
     [InlineData("\"LISTAGG\"(name)", SqlSetQuantifier.Default, 0)]
+    [InlineData("\"LISTAGG\"(name ORDER BY id)", SqlSetQuantifier.Default, 1)]
+    [InlineData("\"EXTRACT\"(DISTINCT 'YEAR', d)", SqlSetQuantifier.Distinct, 0)]
+    [InlineData("\"POSITION\"(DISTINCT a, b)", SqlSetQuantifier.Distinct, 0)]
+    [InlineData("\"SUBSTRING\"(ALL a, 1, 2)", SqlSetQuantifier.All, 0)]
+    [InlineData("\"TRIM\"(a ORDER BY b)", SqlSetQuantifier.Default, 1)]
+    [InlineData("\"CURRENT_DATE\"(ALL a)", SqlSetQuantifier.All, 0)]
+    [InlineData("\"EXTRACT\"('YEAR', d ORDER BY d)", SqlSetQuantifier.Default, 1)]
+    [InlineData("\"POSITION\"(a, b ORDER BY b)", SqlSetQuantifier.Default, 1)]
     public void Parse_AggregateModifiers_ShouldRetainCompleteTree(string expression, SqlSetQuantifier quantifier, int keys)
     {
         // Arrange / Act
@@ -177,6 +185,7 @@ public class SqlAggregateParserTests
     [InlineData("SELECT grouping sets FROM t;")]
     [InlineData("SELECT \"ROLLUP\", \"CUBE\", \"GROUPING\", \"FILTER\" FROM t;")]
     [InlineData("SELECT amount FROM t /* GROUPING SETS ROLLUP() FILTER() WITHIN GROUP */;")]
+    [InlineData("SELECT 'COUNT(DISTINCT amount) GROUPING SETS ROLLUP() WITHIN GROUP FILTER() OVER' FROM t;")]
     [InlineData("SELECT DISTINCT COUNT(amount), SUM(amount) FROM t;")]
     public void Parse_ExtensionNamesOutsideUnsupportedSyntax_ReportsNoError(string sql)
     {

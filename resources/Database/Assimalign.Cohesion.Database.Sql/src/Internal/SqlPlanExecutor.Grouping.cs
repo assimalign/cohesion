@@ -95,7 +95,7 @@ internal sealed partial class SqlPlanExecutor
                 var state = states[i];
                 if (state.Inputs is not null)
                 {
-                    var ordered = SortRows(state.Inputs, state.Ordering, evaluator);
+                    var ordered = SortRows(state.Inputs, state.Ordering, evaluator, cancellationToken);
                     foreach (var values in ordered)
                     {
                         cancellationToken.ThrowIfCancellationRequested();
@@ -129,7 +129,7 @@ internal sealed partial class SqlPlanExecutor
         if (plan.OrderBy.Count > 0)
         {
             // The ordering keys were bound over the grouped row, outputs included.
-            matches = SortRows(matches, plan.OrderBy, evaluator);
+            matches = SortRows(matches, plan.OrderBy, evaluator, cancellationToken);
         }
         var projected = matches.Select(row => row[projectionStart..]).ToList();
         if (plan.IsDistinct)
@@ -195,6 +195,7 @@ internal sealed partial class SqlPlanExecutor
         tuple.CopyTo(row, 0);
         for (int i = 0; i < aggregate.OrderBy.Count; i++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             row[tuple.Length + i] = evaluator.Evaluate(aggregate.OrderBy[i].Key, source, copySharedBinary: true);
         }
         // Keys are input expressions even for rows the transition function skips.
@@ -206,7 +207,7 @@ internal sealed partial class SqlPlanExecutor
             {
                 // Same tuple, but possibly a different spelling under its collation. Keep
                 // the representative occurring first under the independently collated keys.
-                if (state.Inputs is not null && CompareAggregateInputs(row, previous, aggregate, evaluator) < 0)
+                if (state.Inputs is not null && CompareAggregateInputs(row, previous, aggregate, evaluator, cancellationToken) < 0)
                 {
                     row.CopyTo(previous, 0);
                 }
@@ -228,10 +229,12 @@ internal sealed partial class SqlPlanExecutor
         state.Inputs.Add(row);
     }
 
-    private static int CompareAggregateInputs(object?[] left, object?[] right, SqlGroupAggregate aggregate, SqlExpressionEvaluator evaluator)
+    private static int CompareAggregateInputs(object?[] left, object?[] right, SqlGroupAggregate aggregate, SqlExpressionEvaluator evaluator,
+        CancellationToken cancellationToken)
     {
         for (int i = 0; i < aggregate.OrderBy.Count; i++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var key = aggregate.OrderBy[i];
             int comparison = CompareOrderingValues(left[aggregate.Arguments.Length + i], right[aggregate.Arguments.Length + i], key.Collation.Resolve(evaluator.SubqueryValues));
             if (comparison != 0) { return key.IsDescending ? -Math.Sign(comparison) : comparison; }

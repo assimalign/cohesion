@@ -140,6 +140,11 @@ internal sealed partial class SqlPlanner
                 // The overload is chosen by its arguments' types over the input row: SUM and AVG
                 // take a numeric argument, so SUM over text fails here with COHSQLE006, whatever
                 // the rows (#1189). The grouping executor creates the chosen function's accumulators.
+                if (call.FunctionName.Equals("LISTAGG", StringComparison.OrdinalIgnoreCase) &&
+                    (!call.HasWithinGroupOrdering || call.OrderBy.Count == 0))
+                {
+                    throw new SqlPlanningException("SQL0003", ErrorMessages.ListaggRequiresWithinGroup, call.Location);
+                }
                 var function = (SqlAggregateFunction)evaluator.ResolveFunction(call)!;
                 foreach (var argument in Children(call))
                 {
@@ -230,6 +235,7 @@ internal sealed partial class SqlPlanner
             (SqlUnaryExpression a, SqlUnaryExpression b) => a.Operator == b.Operator,
             (SqlFunctionCallExpression a, SqlFunctionCallExpression b) => a.FunctionName.Equals(b.FunctionName, StringComparison.OrdinalIgnoreCase)
                 && (a.Quantifier == SqlSetQuantifier.Distinct) == (b.Quantifier == SqlSetQuantifier.Distinct)
+                && a.HasWithinGroupOrdering == b.HasWithinGroupOrdering
                 && a.Arguments.Count == b.Arguments.Count && a.OrderBy.Count == b.OrderBy.Count
                 && a.OrderBy.Select(key => key.IsDescending).SequenceEqual(b.OrderBy.Select(key => key.IsDescending)),
             (SqlCollateExpression a, SqlCollateExpression b) => Collation.FromName(a.CollationName) == Collation.FromName(b.CollationName),

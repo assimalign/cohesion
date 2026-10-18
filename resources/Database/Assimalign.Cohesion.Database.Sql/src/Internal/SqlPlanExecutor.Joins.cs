@@ -60,7 +60,7 @@ internal sealed partial class SqlPlanExecutor
                 plan.IsDistinct, evaluator, statement, cancellationToken).ConfigureAwait(false);
         }
         return MaterializeSelect(matches, plan.Projections, plan.OrderBy, plan.Limit, plan.Offset,
-            plan.IsDistinct, evaluator, plan.OrderByProjections);
+            plan.IsDistinct, evaluator, plan.OrderByProjections, cancellationToken);
     }
 
     /// <summary>

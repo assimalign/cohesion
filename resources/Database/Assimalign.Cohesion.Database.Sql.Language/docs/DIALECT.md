@@ -966,7 +966,7 @@ its data with the engine that wrote it (which can still open it), drop the
 database (`DropDatabaseAsync`), create it again and reload the data. A database
 whose creation was interrupted before its format was recorded reads as format 1
 and needs only the drop and create. Upgrading databases across format versions
-is tracked by #1152. New databases are created on format 21.
+is tracked by #1152. New databases are created on format 22.
 
 From format 4 on, the catalog stores the format marker in a record that engines
 before format 4 do not recognize, so those engines refuse to open a format-4
@@ -1264,11 +1264,14 @@ Sorting is stable, with NULL first in ASC and last in DESC. With DISTINCT, each 
 structurally match an argument after column binding (COHSQLE032 otherwise). Quantifiers
 and inner ordering on a scalar call also fail with COHSQLE032. The parser accepts these
 modifiers without knowing which names the catalog makes aggregates.
+Input and outer sorting observe statement cancellation during key evaluation and comparisons,
+checking at most every 32 operations and preserving cancellation through runtime sort wrappers.
 
 STRING_AGG(value, delimiter [ORDER BY keys]) uses PostgreSQL spelling; ISO LISTAGG(value
 [, delimiter]) WITHIN GROUP (ORDER BY keys) executes through the same accumulator.
 LISTAGG permits DISTINCT, requires WITHIN GROUP, and cannot also have an inner ORDER BY
-(SQL0003). An omitted LISTAGG delimiter is empty. The delimiter must be a string literal,
+(SQL0003), including when its name is quoted. Ordinary quoted calls may parse, but the planner
+refuses them without WITHIN GROUP keys. An omitted LISTAGG delimiter is empty. The delimiter must be a string literal,
 NULL literal, or parameter known at plan time; a column/expression delimiter is COHDBL001.
 Both arguments must be String or Character; CHAR is trimmed on conversion to text.
 JSON and other types fail with COHSQLE006 and require CAST(... AS TEXT). NULL values are

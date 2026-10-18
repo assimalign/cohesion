@@ -33,6 +33,10 @@ structural equality include the keys. LISTAGG WITHIN GROUP normalizes onto the s
 input shape, with DISTINCT accepted. ON OVERFLOW is one contextual capability refusal,
 without a vocabulary entry. Explicit ALL is rendered, while execution treats it as default.
 No named clause is added; the executable function profile adds STRING_AGG and LISTAGG.
+The AST retains HasWithinGroupOrdering so ordinary quoted LISTAGG calls preserve their
+ordering syntax through rendering and remain distinguishable for catalog-aware admission.
+Special-form names render as quoted ordinary calls when a quantifier or ordering is present;
+the standard EXTRACT/POSITION and niladic arms apply only without those modifiers.
 
 ## Executable functions and vocabulary (#1103)
 

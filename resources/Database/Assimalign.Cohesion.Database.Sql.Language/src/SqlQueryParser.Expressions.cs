@@ -949,7 +949,7 @@ public sealed partial class SqlQueryParser
             Expect(ref lexer, TokenType.RightParen, "')' after WITHIN GROUP ordering");
         }
         SkipCallExtensions(ref lexer);
-        return new SqlFunctionCallExpression(name, args, Location.Create(1, 1, pos, callEnd), quantifier, ordering);
+        return new SqlFunctionCallExpression(name, args, Location.Create(1, 1, pos, callEnd), quantifier, ordering, listagg);
     }
 
     private void ParseAggregateOrdering(ref TokenLexer lexer, List<SqlOrderByColumn> ordering)

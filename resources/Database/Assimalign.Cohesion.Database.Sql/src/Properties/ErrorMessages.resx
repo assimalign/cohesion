@@ -127,4 +127,5 @@
   <data name="DistinctOrderingArgument" xml:space="preserve"><value>In an aggregate with DISTINCT, ORDER BY expressions must appear in the argument list.</value></data>
   <data name="StringAggregateTypeHint" xml:space="preserve"><value> Use CAST(... AS TEXT) for non-text inputs; the delimiter must be a string constant or parameter.</value></data>
   <data name="StringAggregateDelimiter" xml:space="preserve"><value>STRING_AGG/LISTAGG delimiter must be a string constant or parameter known at plan time.</value></data>
+  <data name="ListaggRequiresWithinGroup" xml:space="preserve"><value>LISTAGG requires WITHIN GROUP (ORDER BY keys) and does not accept an inner ORDER BY.</value></data>
 </root>

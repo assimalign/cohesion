@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -633,9 +634,9 @@ public sealed class SqlAggregateExecutionTests
         var rows = await RowsAsync(session, "SELECT COUNT(x), COUNT(DISTINCT x), COUNT(ALL x), SUM(DISTINCT x), AVG(DISTINCT x), MIN(DISTINCT x), MAX(DISTINCT x), SUM(x ORDER BY g) FROM t" + (grouped ? " GROUP BY g" : "") + ";");
         // Assert
         CheckRows(rows, [[3L, 2L, 3L, 3m, 1.5m, 1, 2, 4m]]);
-        CheckRows(await RowsAsync(session, "SELECT COUNT(DISTINCT a.x) FROM t a JOIN t b ON a.g = b.g HAVING SUM(DISTINCT a.x) = 3 ORDER BY COUNT(DISTINCT a.x);"), [[2L]]);
-        CheckRows(await RowsAsync(session, "SELECT COUNT(DISTINCT CASE WHEN x = 1 THEN 1 ELSE 1.0 END) FROM t;"), [[1L]]);
-        CheckRows(await RowsAsync(session, "SELECT COUNT(DISTINCT x), SUM(DISTINCT x) FROM t WHERE g < 0;"), [[0L, null]]);
+        CheckRows(await RowsAsync(session, "SELECT COUNT(DISTINCT a.x) FROM t a JOIN t b ON a.g = b.g" + (grouped ? " GROUP BY a.g" : "") + " HAVING SUM(DISTINCT a.x) = 3 ORDER BY COUNT(DISTINCT a.x);"), [[2L]]);
+        CheckRows(await RowsAsync(session, "SELECT COUNT(DISTINCT CASE WHEN x = 1 THEN 1 ELSE 1.0 END) FROM t" + (grouped ? " GROUP BY g" : "") + ";"), [[1L]]);
+        CheckRows(await RowsAsync(session, "SELECT COUNT(DISTINCT x), SUM(DISTINCT x) FROM t WHERE g < 0" + (grouped ? " GROUP BY g" : "") + ";"), grouped ? [] : [[0L, null]]);
     }
 
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - String aggregates: grouped and global ordering share nullable text behavior")]
@@ -656,30 +657,38 @@ public sealed class SqlAggregateExecutionTests
         CheckRows(await ReadRowsAsync(result), [["a,b,c", "a,b,c", "cba", "cba", "abc"]]);
         result.Columns.ShouldAllBe(column => column.Type == DatabaseType.String && column.IsNullable && column.MaxLength == null);
         result.Columns.Take(2).Select(column => column.Name).ShouldBe(["string_agg", "listagg"]);
-        CheckRows(await RowsAsync(session, "SELECT STRING_AGG(name, ','), LISTAGG(name) WITHIN GROUP (ORDER BY id) FROM t WHERE id < 0;"), [[null, null]]);
-        CheckRows(await RowsAsync(session, "SELECT STRING_AGG(name, ',') FROM t WHERE name IS NULL;"), [[null]]);
-        CheckRows(await RowsAsync(session, "SELECT STRING_AGG(name, ',' ORDER BY 1) FROM t;"), [["c,a,b"]]);
-        CheckRows(await RowsAsync(session, "SELECT STRING_AGG(name, ',' ORDER BY (SELECT MAX(x.id) FROM t x WHERE x.name = t.name)) FROM t;"), [["a,b,c"]]);
-        CheckRows(await RowsAsync(session, "SELECT STRING_AGG(name, @d ORDER BY id) FROM t;", new Dictionary<string, object?> { ["d"] = null }), [["abc"]]);
-        CheckRows(await RowsAsync(session, "SELECT STRING_AGG(CAST(name AS CHAR(5)), ',' ORDER BY id) FROM t;"), [["a,b,c"]]);
+        string grouping = grouped ? " GROUP BY g" : "";
+        CheckRows(await RowsAsync(session, "SELECT STRING_AGG(name, ','), LISTAGG(name) WITHIN GROUP (ORDER BY id) FROM t WHERE id < 0" + grouping + ";"), grouped ? [] : [[null, null]]);
+        CheckRows(await RowsAsync(session, "SELECT STRING_AGG(name, ',') FROM t WHERE name IS NULL" + grouping + ";"), [[null]]);
+        CheckRows(await RowsAsync(session, "SELECT STRING_AGG(name, ',' ORDER BY 1)" + tail), [["c,a,b"]]);
+        CheckRows(await RowsAsync(session, "SELECT STRING_AGG(name, ',' ORDER BY (SELECT MAX(x.id) FROM t x WHERE x.name = t.name))" + tail), [["a,b,c"]]);
+        CheckRows(await RowsAsync(session, "SELECT STRING_AGG(name, @d ORDER BY id)" + tail, new Dictionary<string, object?> { ["d"] = null }), [["abc"]]);
+        CheckRows(await RowsAsync(session, "SELECT STRING_AGG(CAST(name AS CHAR(5)), ',' ORDER BY id)" + tail), [["a,b,c"]]);
+        CheckRows(await RowsAsync(session, "SELECT STRING_AGG(name, ','), STRING_AGG(name, ',' ORDER BY id), LISTAGG(name, ',') WITHIN GROUP (ORDER BY id) FROM t WHERE id = 1" + grouping + ";"), [["a", "a", "a"]]);
+        CheckRows(await RowsAsync(session, "SELECT STRING_AGG(name, ',' ORDER BY id) AS names, STRING_AGG(name, ',' ORDER BY id DESC) AS reversed FROM t" + grouping + " ORDER BY reversed DESC;"), [["a,b,c", "c,b,a"]]);
+        await ExecuteAsync(session, "INSERT INTO t VALUES (3, 'z', 2), (1, 'x', 2), (2, 'y', 2);");
+        CheckRows(await RowsAsync(session, "SELECT g, STRING_AGG(name, ',' ORDER BY id) FROM t GROUP BY g ORDER BY g DESC;"), [[2, "x,y,z"], [1, "a,b,c"]]);
     }
 
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - DISTINCT aggregates: declared and explicit collations and NaN use SQL equality")]
-    public async Task Aggregates_CollatedDistinct_ShouldMatchSelectDistinct()
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - DISTINCT aggregates: declared and explicit collations and NaN use SQL equality")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Aggregates_CollatedDistinct_ShouldMatchSelectDistinct(bool grouped)
     {
         // Arrange
         await using var engine = CreateEngine();
         var database = await engine.CreateDatabaseAsync("aggregate");
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
-        await ExecuteAsync(session, "CREATE TABLE t (name TEXT COLLATE case_insensitive, id INT);");
-        await ExecuteAsync(session, "INSERT INTO t VALUES ('Ada', 1), ('ada', 2), ('Bob', 3);");
+        await ExecuteAsync(session, "CREATE TABLE t (name TEXT COLLATE case_insensitive, id INT, g INT);");
+        await ExecuteAsync(session, "INSERT INTO t VALUES ('Ada', 1, 1), ('ada', 2, 1), ('Bob', 3, 1);");
+        string tail = " FROM t" + (grouped ? " GROUP BY g" : "") + ";";
         // Act / Assert
-        CheckRows(await RowsAsync(session, "SELECT COUNT(DISTINCT name), COUNT(DISTINCT name COLLATE binary), COUNT(DISTINCT @nan) FROM t;", new Dictionary<string, object?> { ["nan"] = double.NaN }), [[2L, 3L, 1L]]);
-        var text = (string)(await RowsAsync(session, "SELECT STRING_AGG(DISTINCT name, ',' ORDER BY name) FROM t;"))[0][0]!;
+        CheckRows(await RowsAsync(session, "SELECT COUNT(DISTINCT name), COUNT(DISTINCT name COLLATE binary), COUNT(DISTINCT @nan)" + tail, new Dictionary<string, object?> { ["nan"] = double.NaN }), [[2L, 3L, 1L]]);
+        var text = (string)(await RowsAsync(session, "SELECT STRING_AGG(DISTINCT name, ',' ORDER BY name)" + tail))[0][0]!;
         text.Split(',').Length.ShouldBe(2);
         text.Split(',')[0].ShouldBeOneOf("Ada", "ada");
-        CheckRows(await RowsAsync(session, "SELECT STRING_AGG(name, ',' ORDER BY name COLLATE binary DESC) FROM t;"), [["ada,Bob,Ada"]]);
-        CheckRows(await RowsAsync(session, "SELECT STRING_AGG(DISTINCT name, ',' ORDER BY name DESC) FROM t;"), [["Bob,Ada"]]);
+        CheckRows(await RowsAsync(session, "SELECT STRING_AGG(name, ',' ORDER BY name COLLATE binary DESC)" + tail), [["ada,Bob,Ada"]]);
+        CheckRows(await RowsAsync(session, "SELECT STRING_AGG(DISTINCT name, ',' ORDER BY name DESC)" + tail), [["Bob,Ada"]]);
     }
 
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Aggregate shape: invalid modifiers and delimiters fail while planning")]
@@ -693,6 +702,8 @@ public sealed class SqlAggregateExecutionTests
     [InlineData("UPPER(DISTINCT name)", "COHSQLE032", "not an aggregate")]
     [InlineData("UPPER(ALL name)", "COHSQLE032", "not an aggregate")]
     [InlineData("UPPER(name ORDER BY id)", "COHSQLE032", "not an aggregate")]
+    [InlineData("\"LISTAGG\"(name)", "SQL0003", "WITHIN GROUP")]
+    [InlineData("\"LISTAGG\"(name ORDER BY id)", "SQL0003", "WITHIN GROUP")]
     [InlineData("STRING_AGG(name, ',' ORDER BY COUNT(*))", "COHSQLE017", "Nested")]
     public async Task Aggregates_InvalidShape_ShouldFailBeforeInput(string expression, string code, string message)
     {
@@ -720,27 +731,34 @@ public sealed class SqlAggregateExecutionTests
     }
 
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - String aggregates: length cap applies before ordered inputs finish")]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task Aggregates_StringLengthCap_ShouldFailWithCodedRangeError(bool distinct)
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task Aggregates_StringLengthCap_ShouldFailWithCodedRangeError(bool distinct, bool grouped)
     {
         // Arrange
         await using var engine = CreateEngine();
         var database = await engine.CreateDatabaseAsync("aggregate");
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
-        await ExecuteAsync(session, "CREATE TABLE t (name TEXT);");
+        await ExecuteAsync(session, "CREATE TABLE t (name TEXT, zero INT, g INT);");
         var parameters = new Dictionary<string, object?> { ["a"] = new string('a', 524288), ["b"] = new string('b', 524288) };
-        await ExecuteAsync(session, "INSERT INTO t VALUES ('a'), ('b');");
-        const string value = "CASE WHEN name = 'a' THEN @a ELSE @b END";
+        await ExecuteAsync(session, "INSERT INTO t VALUES ('a', 0, 1), ('b', 0, 1), ('c', 0, 1);");
+        string value = distinct
+            ? "CASE WHEN name = 'c' THEN CAST(1 / zero AS TEXT) WHEN name = 'a' THEN @a ELSE @b END"
+            : "CASE WHEN name = 'a' THEN @a ELSE @b END";
+        string key = distinct ? value : "CASE WHEN name = 'c' THEN 1 / zero ELSE 1 END";
         // Act
-        var error = await Should.ThrowAsync<DatabaseException>(() => RowsAsync(session, "SELECT STRING_AGG(" + (distinct ? "DISTINCT " : "") + value + ", ',' ORDER BY " + value + ") FROM t;", parameters));
+        var error = await Should.ThrowAsync<DatabaseException>(() => RowsAsync(session, "SELECT STRING_AGG(" + (distinct ? "DISTINCT " : "") + value + ", ',' ORDER BY " + key + ") FROM t" + (grouped ? " GROUP BY g" : "") + ";", parameters));
         // Assert
         error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE002");
         error.Message.ShouldContain("1048576", Case.Sensitive);
     }
 
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Aggregates: application accumulators receive DISTINCT coerced ordered inputs")]
-    public async Task Aggregates_ApplicationFunction_ShouldApplyModifiersOutsideAccumulator()
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Aggregates: application accumulators receive DISTINCT coerced ordered inputs")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Aggregates_ApplicationFunction_ShouldApplyModifiersOutsideAccumulator(bool grouped)
     {
         // Arrange
         var builder = SqlDatabaseEngine.CreateBuilder("aggregate-tests");
@@ -749,11 +767,12 @@ public sealed class SqlAggregateExecutionTests
         await using var engine = await builder.BuildAsync(CancellationToken.None);
         var database = await engine.CreateDatabaseAsync("aggregate");
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
-        await ExecuteAsync(session, "CREATE TABLE t (s CHAR(3), id INT);");
-        await ExecuteAsync(session, "INSERT INTO t VALUES ('b', 1), ('a', 2), ('b', 3);");
+        await ExecuteAsync(session, "CREATE TABLE t (s CHAR(3), id INT, g INT);");
+        await ExecuteAsync(session, "INSERT INTO t VALUES ('c', 1, 1), ('a', 2, 1), ('b', 3, 1), ('b', 4, 1);");
+        string tail = " FROM t" + (grouped ? " GROUP BY g" : "") + ";";
         // Act / Assert
-        CheckRows(await RowsAsync(session, "SELECT collect(s), collect(DISTINCT s ORDER BY s), collect(s ORDER BY id DESC) FROM t;"), [["bab", "ab", "bab"]]);
-        CheckRows(await RowsAsync(session, "SELECT COUNT(DISTINCT CASE WHEN id = 1 THEN @a ELSE @b END), SUM(DISTINCT CASE WHEN id = 1 THEN @a ELSE @b END) FROM t;",
+        CheckRows(await RowsAsync(session, "SELECT collect(s), collect(DISTINCT s ORDER BY s), collect(s ORDER BY id DESC)" + tail), [["cabb", "abc", "bbac"]]);
+        CheckRows(await RowsAsync(session, "SELECT COUNT(DISTINCT CASE WHEN id = 1 THEN @a ELSE @b END), SUM(DISTINCT CASE WHEN id = 1 THEN @a ELSE @b END)" + tail,
             new Dictionary<string, object?> { ["a"] = 1.0000000000000002d, ["b"] = 1.0000000000000004d }), [[2L, 2m]]);
     }
 
@@ -770,6 +789,73 @@ public sealed class SqlAggregateExecutionTests
         // Act / Assert
         var error = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, statement));
         error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE032");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Aggregate sorting: finish cancellation precedes expensive collated keys")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Aggregates_CanceledFinishBeforeOrderedAggregate_ShouldStopPromptly(bool grouped)
+    {
+        // Arrange
+        using var cancellation = new CancellationTokenSource();
+        var afterCancel = new Stopwatch();
+        int finishes = 0;
+        var builder = SqlDatabaseEngine.CreateBuilder("aggregate-cancellation");
+        builder.Functions.Add(SqlAggregateFunction.Create<int, int, int>("cancel_finish", () => 0,
+            (state, value) => state + value, state =>
+            {
+                finishes++;
+                afterCancel.Start();
+                cancellation.Cancel();
+                return state;
+            }));
+        await using var engine = await builder.BuildAsync(CancellationToken.None);
+        var database = await engine.CreateDatabaseAsync("aggregate");
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecuteAsync(session, "CREATE TABLE t (id INT, g INT);");
+        await ExecuteAsync(session, "INSERT INTO t VALUES " + string.Join(",", Enumerable.Range(0, 1000).Select(id => $"({id}, 1)")) + ";");
+        string sql = "SELECT cancel_finish(id), SUM(id ORDER BY (RPAD('a', 4000, 'a') || CAST(1000-id AS TEXT)) COLLATE case_insensitive) FROM t" +
+            (grouped ? " GROUP BY g" : "") + ";";
+        // Act
+        var error = await Should.ThrowAsync<OperationCanceledException>(async () =>
+            await session.ExecuteAsync(sql, cancellationToken: cancellation.Token));
+        // Assert
+        finishes.ShouldBe(1);
+        error.CancellationToken.ShouldBe(cancellation.Token);
+        afterCancel.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(2));
+    }
+
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Outer sorting: key evaluation and wrapped comparisons preserve cancellation")]
+    [InlineData(1)]
+    [InlineData(1000)]
+    public async Task OrderBy_CancellationDuringKeys_ShouldStopWithinBoundedWork(int cancelAt)
+    {
+        // Arrange
+        using var cancellation = new CancellationTokenSource();
+        var afterCancel = new Stopwatch();
+        int keys = 0;
+        var builder = SqlDatabaseEngine.CreateBuilder("ordering-cancellation");
+        builder.Functions.Add(SqlScalarFunction.Create<int, string>("cancel_key", value =>
+        {
+            if (++keys == cancelAt)
+            {
+                afterCancel.Start();
+                cancellation.Cancel();
+            }
+            return new string('a', 4000) + (1000 - value);
+        }));
+        await using var engine = await builder.BuildAsync(CancellationToken.None);
+        var database = await engine.CreateDatabaseAsync("aggregate");
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecuteAsync(session, "CREATE TABLE t (id INT);");
+        await ExecuteAsync(session, "INSERT INTO t VALUES " + string.Join(",", Enumerable.Range(0, 1000).Select(id => $"({id})")) + ";");
+        // Act
+        var error = await Should.ThrowAsync<OperationCanceledException>(async () => await session.ExecuteAsync(
+            "SELECT id FROM t ORDER BY cancel_key(id) COLLATE case_insensitive;", cancellationToken: cancellation.Token));
+        // Assert
+        keys.ShouldBeInRange(cancelAt, Math.Min(1000, cancelAt + 32));
+        error.CancellationToken.ShouldBe(cancellation.Token);
+        afterCancel.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(2));
     }
 
     private static SqlDatabaseEngine CreateEngine()
