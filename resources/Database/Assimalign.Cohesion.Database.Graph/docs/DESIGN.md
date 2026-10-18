@@ -542,6 +542,9 @@ prepends leftward entities and group elements to restore source order without ch
 relationship endpoints. Group lists retain node/relationship kind through FOR/UNWIND and projection
 boundaries, including result-preserving expressions and container access at each depth; RETURN *
 and WITH * include them. Inner property maps that reference a group, direct group member access, group deletion and mixed singleton/group declarations are COHDBG003.
+ORDER BY resolves group provenance through projection aliases inside compound expressions and
+container access, so `COALESCE(rs,rs).w` and `[rs][0].w` reject a projected group alias with
+COHDBG003 during ordinary planning and EXPLAIN.
 
 Finite upper-bound sums and unbounded lower-bound sums cannot exceed 64. An unbounded repetition
 explores at most 64 successful hops; an unused 65th relationship passing direction, type,

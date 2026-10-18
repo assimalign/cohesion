@@ -10,7 +10,7 @@ using Assimalign.Cohesion.Database.Graph.Storage;
 
 namespace Assimalign.Cohesion.Database.Graph.Tests.TestObjects;
 
-// Frozen pre-quantifier matcher from e6a3da768, GraphPlanExecutor.cs:332-432,455-471.
+// Frozen pre-quantifier matcher from e6a3da768, GraphPlanExecutor.cs:332-436,455-471.
 // Keep its traversal and property evaluation order independent of the current matcher.
 internal static class FixedChainBaseMatcher
 {

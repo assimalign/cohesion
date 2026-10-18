@@ -397,8 +397,12 @@ internal sealed partial class GraphPlanner
                 ? depth < shape.Entities.Length && (entities ? shape.Entities[depth] : shape.Composites[depth])
                 : entities && depth == 0, accesses);
 
-        bool IsGroup(GqlExpression expression, int accesses = 0) => GraphValueExpressions.IsGroup(expression,
-            (name, depth) => shapes.TryGetValue(name, out var shape) && depth < shape.Groups.Length && shape.Groups[depth], accesses);
+        bool IsGroup(GqlExpression expression, int accesses = 0, bool ordering = false) => GraphValueExpressions.IsGroup(expression,
+            // ORDER BY aliases shadow incoming names even inside result-preserving wrappers.
+            // Resolve each alias expression in the incoming scope, not against other aliases.
+            (name, depth) => ordering && orderAliases is not null && orderAliases.TryGetValue(name, out int index)
+                ? IsGroup(projections[index].Expression, depth)
+                : shapes.TryGetValue(name, out var shape) && depth < shape.Groups.Length && shape.Groups[depth], accesses);
 
         GraphBindingShape Shape(GqlExpression expression, int accesses = 0)
         {
@@ -706,7 +710,7 @@ internal sealed partial class GraphPlanner
                         pending.Push(membership.Operand);
                         break;
                     case GqlMemberExpression member:
-                        if (IsGroup(member.Operand))
+                        if (IsGroup(member.Operand, ordering: ordering))
                         { throw new GraphPlanningException("COHDBG003", ErrorMessages.MemberBindingRequired, member.Location); }
                         foreach (var child in GraphValueExpressions.Children(member).Reverse()) { pending.Push(child); }
                         break;

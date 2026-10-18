@@ -131,6 +131,8 @@ public sealed class GqlQuantifiedPathTests
     [InlineData("MATCH (a)-[r:T]->{2}(b) WITH COALESCE(r,r) AS rs MATCH ((x)-[:T {w:rs[0].w}]->(y)){2} RETURN count(*)")]
     [InlineData("MATCH (a)-[r:T]->{2}(b) WITH {rs:r} AS box MATCH ((x)-[:T {w:box.rs[0].w}]->(y)){2} RETURN count(*)")]
     [InlineData("MATCH (a)-[r:T]->{2}(b) RETURN r AS rs ORDER BY rs.w")]
+    [InlineData("MATCH (a)-[r:T]->{2}(b) RETURN r AS rs ORDER BY COALESCE(rs,rs).w")]
+    [InlineData("MATCH (a)-[r:T]->{2}(b) RETURN r AS rs ORDER BY [rs][0].w")]
     [InlineData("MATCH (a)-[r:T]->{2}(b) WHERE r.w>1 RETURN a")]
     [InlineData("MATCH (a)-[r:T]->{2}(b) DELETE r")]
     [InlineData("MATCH (r)-[r:T]->{2}(b) RETURN b")]
@@ -143,6 +145,7 @@ public sealed class GqlQuantifiedPathTests
         await using var engine = GraphDatabaseEngine.Create("quantified", new());
         var database = await engine.CreateDatabaseAsync("graph");
         await using var session = await database.CreateSessionAsync();
+        await session.ExecuteAsync(chain);
         // Act / Assert
         foreach (string prefix in new[] { "", "EXPLAIN " })
         {
