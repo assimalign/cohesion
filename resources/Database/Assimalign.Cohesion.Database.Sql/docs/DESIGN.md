@@ -236,7 +236,8 @@ last descending by default, followed by DISTINCT and LIMIT/OFFSET. Explicit NULL
 overrides placement per key independently of direction (#1112). Binding resolves the default
 to SqlBoundOrdering.NullsFirst; the shared comparer applies direction only to non-NULL
 values. Ordinary, correlated, grouped and aggregate-input ordering use this comparer,
-including DISTINCT aggregate representative selection. Outer derived-table outputs use
+including DISTINCT aggregate representative selection. Both sort paths capture direction and
+NULL-placement signs once per key before constructing their comparison delegates. Outer derived-table outputs use
 ordinary alias, ordinal and source bindings. Structural aggregate/query equality includes
 placement. Format 24 fences the newly storable NULLS text in view bodies; formats through
 23 are refused at open, without an upgrade reader. Canonical rendering preserves explicit
@@ -489,7 +490,8 @@ SQL's combined operators, not a shared or independently executable algebra:
 | `Insert`, `InsertSelect`, `Update`, `Delete` | Intended mutation and target; a source query or target scan is a child, never executed by EXPLAIN |
 | `CreateTable`, `DropTable`, `AddColumn`, `AlterColumn`, `DropColumn`, `AddConstraint`, `DropConstraint`, `CreateIndex`, `DropIndex`, `Definition` | Complete internal DDL mappings, including SQL function/domain definitions; EXPLAIN DDL remains refused at parse time |
 
-Details include bound seek values with invariant formatting, quoted character values and
+Details include each bound ordering key's direction and effective NULLS FIRST/LAST placement,
+plus bound seek values with invariant formatting, quoted character values and
 hexadecimal binary values. Estimates and actual row counts
 are always null in T1. All mappings use closed type switches; the test guard enumerates every
 concrete `SqlPlan` record, and every item adding one supplies a mapping plus an EXPLAIN case.

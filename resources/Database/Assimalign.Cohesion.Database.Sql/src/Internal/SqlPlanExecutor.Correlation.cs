@@ -194,11 +194,14 @@ internal sealed partial class SqlPlanExecutor
         for (int i = 0; i < orderBy.Count; i++)
         {
             int key = i;
-            var collation = orderBy[i].Collation.Resolve(_subqueryValues);
+            var ordering = orderBy[i];
+            var collation = ordering.Collation.Resolve(_subqueryValues);
+            int direction = ordering.IsDescending ? -1 : 1;
+            int nullComparison = ordering.NullsFirst ? -1 : 1;
             var comparer = Comparer<object?>.Create((left, right) =>
             {
                 if ((operations++ & 31) == 0) { cancellationToken.ThrowIfCancellationRequested(); }
-                return CompareOrderingValues(left, right, orderBy[key], collation);
+                return CompareOrderingValues(left, right, direction, nullComparison, collation);
             });
             sorted = sorted is null
                 ? keyed.OrderBy(item => item.Keys[key], comparer)

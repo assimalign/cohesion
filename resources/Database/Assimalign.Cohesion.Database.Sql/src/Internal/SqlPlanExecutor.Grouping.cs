@@ -236,7 +236,8 @@ internal sealed partial class SqlPlanExecutor
         {
             cancellationToken.ThrowIfCancellationRequested();
             var key = aggregate.OrderBy[i];
-            int comparison = CompareOrderingValues(left[aggregate.Arguments.Length + i], right[aggregate.Arguments.Length + i], key, key.Collation.Resolve(evaluator.SubqueryValues));
+            int comparison = CompareOrderingValues(left[aggregate.Arguments.Length + i], right[aggregate.Arguments.Length + i],
+                key.IsDescending ? -1 : 1, key.NullsFirst ? -1 : 1, key.Collation.Resolve(evaluator.SubqueryValues));
             if (comparison != 0) { return comparison; }
         }
         return 0;

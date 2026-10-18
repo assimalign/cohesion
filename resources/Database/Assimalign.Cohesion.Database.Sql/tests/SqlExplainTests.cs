@@ -17,6 +17,34 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed class SqlExplainTests
 {
+    [Theory(DisplayName = "Cohesion Test [Sql] - EXPLAIN: each ordering key describes bound direction and NULL placement")]
+    [InlineData("SELECT id FROM t ORDER BY age {0}, id DESC")]
+    [InlineData("SELECT q.id FROM (SELECT id, age FROM t) q ORDER BY q.age {0}, q.id DESC")]
+    [InlineData("SELECT t.id FROM t JOIN t q ON t.id = q.id ORDER BY q.age {0}, t.id DESC")]
+    [InlineData("SELECT age, COUNT(*) FROM t GROUP BY age ORDER BY age {0}, 2 DESC")]
+    [InlineData("SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES ORDER BY TABLE_SCHEMA {0}, TABLE_NAME DESC")]
+    [InlineData("SELECT id FROM t UNION ALL SELECT id FROM t ORDER BY id {0}, 1 DESC")]
+    [InlineData("WITH q AS (SELECT 1 AS id ORDER BY id {0}, id DESC) SELECT id FROM q")]
+    public async Task Execute_NullPlacement_ShouldDescribeEachOrderingKeyAsync(string query)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("explain-null-order", new());
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE t (id INT, age INT)", cancellationToken: CancellationToken.None);
+
+        // Act
+        var first = await RowsAsync(session, "EXPLAIN " + string.Format(System.Globalization.CultureInfo.InvariantCulture, query, "ASC NULLS FIRST"));
+        var last = await RowsAsync(session, "EXPLAIN " + string.Format(System.Globalization.CultureInfo.InvariantCulture, query, "ASC NULLS LAST"));
+        string firstDetail = first.Single(row => row[5] is string detail && detail.Contains("order_keys=2", StringComparison.Ordinal))[5].ShouldBeOfType<string>();
+        string lastDetail = last.Single(row => row[5] is string detail && detail.Contains("order_keys=2", StringComparison.Ordinal))[5].ShouldBeOfType<string>();
+
+        // Assert
+        firstDetail.ShouldContain("order_by=[ASC NULLS FIRST, DESC NULLS LAST]", Case.Sensitive);
+        lastDetail.ShouldContain("order_by=[ASC NULLS LAST, DESC NULLS LAST]", Case.Sensitive);
+        firstDetail.ShouldNotBe(lastDetail);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sql] - EXPLAIN: one derived source has a Select root and multiple sources retain join steps")]
     [InlineData("SELECT * FROM (SELECT id FROM t) d", "Select", 0)]
     [InlineData("SELECT * FROM t JOIN (SELECT id FROM t) d ON t.id = d.id", "NestedLoopJoin", 1)]

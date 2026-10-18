@@ -289,13 +289,12 @@ internal sealed partial class SqlPlanExecutor
         }
     }
 
-    private static int CompareOrderingValues(object? left, object? right, SqlBoundOrdering ordering, Collation collation)
+    private static int CompareOrderingValues(object? left, object? right, int direction, int nullComparison, Collation collation)
     {
         // NULL placement is independent of direction; the default was resolved during binding.
-        if (left is null) { return right is null ? 0 : ordering.NullsFirst ? -1 : 1; }
-        if (right is null) { return ordering.NullsFirst ? 1 : -1; }
-        int comparison = SqlValueComparer.Compare(left, right, collation);
-        return ordering.IsDescending ? -Math.Sign(comparison) : comparison;
+        if (left is null) { return right is null ? 0 : nullComparison; }
+        if (right is null) { return -nullComparison; }
+        return direction * Math.Sign(SqlValueComparer.Compare(left, right, collation));
     }
 
     private static List<object?[]> SortRows(List<object?[]> rows, IReadOnlyList<SqlBoundOrdering> orderBy,
@@ -311,11 +310,14 @@ internal sealed partial class SqlPlanExecutor
         for (int i = 0; i < orderBy.Count; i++)
         {
             int index = i;
-            var collation = orderBy[index].Collation.Resolve(evaluator.SubqueryValues);
+            var ordering = orderBy[index];
+            var collation = ordering.Collation.Resolve(evaluator.SubqueryValues);
+            int direction = ordering.IsDescending ? -1 : 1;
+            int nullComparison = ordering.NullsFirst ? -1 : 1;
             var comparer = Comparer<object?>.Create((left, right) =>
             {
                 PollCancellation();
-                return CompareOrderingValues(left, right, orderBy[index], collation);
+                return CompareOrderingValues(left, right, direction, nullComparison, collation);
             });
 
             ordered = ordered is null
