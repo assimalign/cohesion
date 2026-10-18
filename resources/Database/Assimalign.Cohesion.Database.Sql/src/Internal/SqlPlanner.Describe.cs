@@ -96,9 +96,10 @@ internal sealed partial class SqlPlanner
                     QueryDetail(p.Where is not null, p.OrderBy.Count, p.IsDistinct, p.Limit, p.Offset),
                 SqlGroupPlan p => $"keys={p.Keys.Count}; aggregates={p.Aggregates.Count}; having={p.Having is not null}; " +
                     QueryDetail(false, p.OrderBy.Count, p.IsDistinct, p.Limit, p.Offset),
-                SqlInsertPlan p => $"values rows={p.Rows.Count}",
-                SqlUpdatePlan p => $"assignments={p.Assignments.Count}; filter={p.Where is not null}",
-                SqlDeletePlan p => $"filter={p.Where is not null}",
+                SqlInsertPlan p => DmlDetail($"values rows={p.Rows.Count}", p.Returning),
+                SqlInsertSelectPlan p => DmlDetail(null, p.Returning),
+                SqlUpdatePlan p => DmlDetail($"assignments={p.Assignments.Count}; filter={p.Where is not null}", p.Returning),
+                SqlDeletePlan p => DmlDetail($"filter={p.Where is not null}", p.Returning),
                 SqlDefinitionPlan p => p.Expression.CommandType.ToString(),
                 _ => null,
             };
@@ -165,6 +166,10 @@ internal sealed partial class SqlPlanner
                     break;
             }
         }
+
+        static string? DmlDetail(string? detail, IReadOnlyList<SqlProjection>? returning)
+            => returning is null ? detail :
+                $"{(detail is null ? string.Empty : detail + "; ")}returning={returning.Count}; columns={string.Join(", ", returning.Select(column => column.Name))}";
 
         void RelationScan(SqlRelationSource source, int parent)
         {

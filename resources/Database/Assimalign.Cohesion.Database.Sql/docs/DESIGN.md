@@ -8,10 +8,15 @@ checks; INSERT sources never enter that scope. Function validation includes ever
 projection, and aggregates fail before reading rows with COHSQLE017.
 RETURNING disables immutable constant folding so even foldable calls run per written
 row inside apply, after index checks, rather than during planning.
+EXPLAIN includes the expanded RETURNING projection count and names in every DML
+node's detail. INSERT SELECT retains its original plan instance without RETURNING.
 
 The executor shares SELECT row projection and binary ownership handling. It evaluates
 each returning row after its mutation and index checks inside ApplyStatementAsync,
 so an evaluation failure rolls back the entire statement even in an explicit transaction.
+Projection runs while the database's apply gate is held: a slow application function
+in RETURNING stalls other writers on that database. Every returned row is buffered
+until apply ends.
 DELETE filters cascade work by direct target locations. Results are materialized before
 commit/delivery and carry the direct affected count; ordinary query sets retain -1.
 ResultComplete already carries that value. No new plan wrapper, public interface,

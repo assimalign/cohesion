@@ -13,7 +13,7 @@ public sealed partial class SqlQueryParser
         Advance(ref lexer); // consume UPDATE
         RejectDmlTop(ref lexer);
 
-        var table = ParseRequiredTableReference(ref lexer, dmlTarget: true);
+        var table = ParseRequiredTableReference(ref lexer);
 
         // SET is required: UPDATE t; used to execute with no assignments.
         var assignments = new List<SqlAssignment>();

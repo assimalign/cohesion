@@ -107,7 +107,8 @@ public sealed class SqlConnection : IAsyncDisposable
     }
 
     /// <summary>
-    /// Executes a command and returns its affected count, discarding any RETURNING rows.
+    /// Executes a command and returns its affected count. Any RETURNING rows are received
+    /// and buffered before being discarded.
     /// </summary>
     /// <param name="command">The command to execute.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
@@ -127,7 +128,7 @@ public sealed class SqlConnection : IAsyncDisposable
 
     /// <summary>
     /// Executes a command from statement text and returns its affected count,
-    /// discarding any RETURNING rows.
+    /// receiving and buffering any RETURNING rows before discarding them.
     /// </summary>
     /// <param name="commandText">The SQL statement text.</param>
     /// <param name="parameters">Parameter values keyed by bare parameter name, or null when the statement takes none.</param>

@@ -165,6 +165,9 @@ validated UTF-8 bytes with byte equality; there is no new wire encoding.
 
 ## RETURNING and affected counts (#1117)
 
+ExecuteAsync receives and buffers RETURNING rows before discarding them and returning
+the affected count, so it has the same row-transfer and buffering cost as QueryAsync.
+
 SqlResultSet preserves ResultComplete's long AffectedCount: -1 for SELECT, n for a
 write including RETURNING. QueryAsync is the rows-plus-count verb, ExecuteAsync returns
 the count and discards rows, and ExecuteScalarAsync reads the first returned cell.

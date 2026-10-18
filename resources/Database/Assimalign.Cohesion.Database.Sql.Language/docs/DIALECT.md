@@ -89,12 +89,17 @@ returned cell. ResultComplete already carries this count, with no wire-format ch
 
 SQL Server OUTPUT, RETURNING ... INTO, PostgreSQL OLD/NEW pseudo-relations and
 RETURNING WITH (...) are positional COHDBL001 refusals. A target named or aliased old/new
-masks that pseudo-relation name and works normally; ordinary output/old/new identifiers
-retain their quoting rules. RETURNING subqueries report COHDBL001 naming SUBQUERY in
+masks that pseudo-relation name and works normally. Ordinary output/old/new identifiers
+retain their quoting rules, and UPDATE accepts a bare output target alias. DELETE's
+bare output alias is reserved for OUTPUT detection: `DELETE FROM t output WHERE ...`
+reports COHDBL001; use `AS output` to spell that alias. RETURNING subqueries report
+COHDBL001 naming SUBQUERY in
 RETURNING, even after an INSERT SELECT or a supported DML WHERE subquery. Windows also
 remain COHDBL001; aggregates fail planning with COHSQLE017. Modifying CTE bodies retain
 COHDBL001 and perform no writes. Empty lists and SELECT ... RETURNING report SQL0003.
 ON CONFLICT ... RETURNING follows the sql-upsert hand-off (#1118).
+EXPLAIN reports the expanded RETURNING projection count and names for INSERT,
+INSERT SELECT, UPDATE and DELETE without applying the write or evaluating the projection.
 
 The row-source and target-list model follows PostgreSQL
 `src/backend/executor/nodeModifyTable.c:308-330` and

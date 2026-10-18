@@ -39,6 +39,7 @@ public sealed class SqlReturningParserTests
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - RETURNING: excluded forms keep precise capability names")]
     [InlineData("INSERT INTO t OUTPUT inserted.* VALUES (1)", "OUTPUT")]
     [InlineData("DELETE FROM t OUTPUT deleted.* WHERE id = 1", "OUTPUT")]
+    [InlineData("DELETE FROM t output WHERE id = 1", "OUTPUT")]
     [InlineData("UPDATE t SET age = 1 OUTPUT inserted.age", "OUTPUT")]
     [InlineData("DELETE FROM t RETURNING id INTO v", "RETURNING ... INTO")]
     [InlineData("DELETE FROM t RETURNING OLD.age", "RETURNING OLD.")]
@@ -80,6 +81,8 @@ public sealed class SqlReturningParserTests
 
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - RETURNING: contextual names preserve ordinary identifiers")]
     [InlineData("UPDATE t AS old SET age = 1 RETURNING old.age;")]
+    [InlineData("UPDATE t output SET age = 1")]
+    [InlineData("UPDATE t output SET age = 1 RETURNING output.age;")]
     [InlineData("UPDATE t AS new SET age = 1 RETURNING new.age;")]
     [InlineData("DELETE FROM old RETURNING old.age;")]
     [InlineData("DELETE FROM t AS output RETURNING output.id;")]

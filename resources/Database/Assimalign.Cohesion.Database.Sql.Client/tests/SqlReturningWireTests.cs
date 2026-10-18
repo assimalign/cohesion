@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 
@@ -10,6 +11,36 @@ namespace Assimalign.Cohesion.Database.Sql.Client.Tests;
 
 public sealed class SqlReturningWireTests
 {
+    [Theory(DisplayName = "Cohesion Test [Sql.Client] - RETURNING: parameters survive the in-memory and TCP exchanges")]
+    [InlineData(false, "INSERT INTO t VALUES (1) RETURNING @p, id + @p")]
+    [InlineData(true, "INSERT INTO t VALUES (1) RETURNING @p, id + @p")]
+    [InlineData(false, "INSERT INTO t SELECT id FROM t RETURNING @p, id + @p")]
+    [InlineData(true, "INSERT INTO t SELECT id FROM t RETURNING @p, id + @p")]
+    [InlineData(false, "UPDATE t SET id = 1 RETURNING @p, id + @p")]
+    [InlineData(true, "UPDATE t SET id = 1 RETURNING @p, id + @p")]
+    [InlineData(false, "DELETE FROM t RETURNING @p, id + @p")]
+    [InlineData(true, "DELETE FROM t RETURNING @p, id + @p")]
+    public async Task QueryAsync_ParameterizedReturning_ShouldBindParameters(bool tcp, string sql)
+    {
+        // Arrange
+        await using var harness = await SqlClientTestHarness.StartAsync(tcp: tcp);
+        await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
+        await connection.ExecuteAsync("CREATE TABLE t (id INT)", cancellationToken: SqlClientTestHarness.Timeout());
+        if (!sql.StartsWith("INSERT INTO t VALUES", System.StringComparison.Ordinal))
+        {
+            await connection.ExecuteAsync("INSERT INTO t VALUES (1)", cancellationToken: SqlClientTestHarness.Timeout());
+        }
+
+        // Act
+        var result = await connection.QueryAsync(sql, new Dictionary<string, object?> { ["p"] = 7 }, SqlClientTestHarness.Timeout());
+
+        // Assert
+        result.AffectedCount.ShouldBe(1);
+        var row = result.ShouldHaveSingleItem();
+        row[0].ShouldBe(7);
+        row[1].ShouldBe(8L);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sql.Client] - RETURNING: rows, affected count and all client verbs share one exchange")]
     [InlineData(false)]
     [InlineData(true)]

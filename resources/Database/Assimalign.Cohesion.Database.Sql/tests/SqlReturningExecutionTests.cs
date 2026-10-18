@@ -8,6 +8,8 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Database.Execution;
+using Assimalign.Cohesion.Database.Sql.Internal;
+using Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
@@ -124,15 +126,18 @@ public sealed class SqlReturningExecutionTests
     }
 
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - RETURNING: constraint failures publish neither rows nor writes")]
-    [InlineData("INSERT INTO t VALUES (2, 2, 1), (1, 3, 1) RETURNING *")]
-    [InlineData("INSERT INTO t VALUES (2, 2, 1), (3, -1, 1) RETURNING *")]
-    [InlineData("INSERT INTO t VALUES (2, 2, 1), (3, NULL, 1) RETURNING *")]
-    [InlineData("INSERT INTO t VALUES (2, 2, 1), (3, 3, 99) RETURNING *")]
-    [InlineData("UPDATE t SET age = -1 RETURNING *")]
-    public async Task ExecuteAsync_ConstraintFailure_ShouldLeaveTableUnchanged(string sql)
+    [InlineData("INSERT INTO t VALUES (2, 2, 1), (1, 3, 1) RETURNING returning_probe(id)", "UNIQUE", 1)]
+    [InlineData("INSERT INTO t VALUES (2, 2, 1), (3, -1, 1) RETURNING *", "CHECK", 0)]
+    [InlineData("INSERT INTO t VALUES (2, 2, 1), (3, NULL, 1) RETURNING *", "COHSQLE024", 0)]
+    [InlineData("INSERT INTO t VALUES (2, 2, 1), (3, 3, 99) RETURNING *", "FOREIGN KEY", 0)]
+    [InlineData("UPDATE t SET age = -1 RETURNING *", "CHECK", 0)]
+    public async Task ExecuteAsync_ConstraintFailure_ShouldLeaveTableUnchanged(string sql, string failureKind, int expectedCalls)
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create("returning", new());
+        int calls = 0;
+        var builder = SqlDatabaseEngine.CreateBuilder("returning");
+        builder.Functions.Add(SqlScalarFunction.Create("returning_probe", (int value) => { calls++; return value; }, SqlFunctionVolatility.Immutable));
+        await using var engine = await builder.BuildAsync(CancellationToken.None);
         var database = await engine.CreateDatabaseAsync("app", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await ExecuteAsync(session, "CREATE TABLE p (id INT PRIMARY KEY)");
@@ -141,9 +146,20 @@ public sealed class SqlReturningExecutionTests
         await ExecuteAsync(session, "INSERT INTO t VALUES (1, 1, 1)");
 
         // Act
-        await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, sql));
+        var failure = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, sql));
 
         // Assert
+        if (failureKind == "COHSQLE024")
+        {
+            failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(failureKind);
+        }
+        else
+        {
+            // UNIQUE, CHECK and FOREIGN KEY use the existing typed constraint contract,
+            // which has no diagnostic code. A parser rejection cannot pass this assertion.
+            failure.ShouldBeOfType<SqlConstraintViolationException>().ConstraintKind.ShouldBe(failureKind);
+        }
+        calls.ShouldBe(expectedCalls);
         await using var result = await QueryAsync(session, "SELECT * FROM t");
         CheckRows(await ReadAsync(result), [[1, 1, 1]]);
     }
@@ -197,6 +213,7 @@ public sealed class SqlReturningExecutionTests
 
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - RETURNING: contextual names remain valid target qualifiers")]
     [InlineData("UPDATE old.t AS old SET age = 2 RETURNING old.id")]
+    [InlineData("UPDATE old.t output SET age = 1 RETURNING output.id")]
     [InlineData("UPDATE old.t AS new SET age = 2 RETURNING new.id")]
     [InlineData("DELETE FROM old.t RETURNING old.t.id")]
     [InlineData("DELETE FROM old.t AS output RETURNING output.id")]
@@ -220,6 +237,7 @@ public sealed class SqlReturningExecutionTests
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - RETURNING: excluded constructs cannot execute a consumed prefix")]
     [InlineData("INSERT INTO t OUTPUT inserted.* VALUES (2, 2)")]
     [InlineData("DELETE FROM t OUTPUT deleted.* WHERE id = 1")]
+    [InlineData("DELETE FROM t output WHERE id = 1")]
     [InlineData("DELETE FROM t RETURNING id INTO v")]
     [InlineData("DELETE FROM t RETURNING OLD.age")]
     [InlineData("UPDATE t SET age = 0 RETURNING NEW.age")]
@@ -290,6 +308,116 @@ public sealed class SqlReturningExecutionTests
         await using var result = await QueryAsync(session, "INSERT INTO t VALUES (2), (3) RETURNING returning_probe(7)");
         calls.ShouldBe(2);
         CheckRows(await ReadAsync(result), [[7L], [7L]]);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - RETURNING: EXPLAIN includes expanded projection names without executing")]
+    [InlineData("INSERT INTO t VALUES (3, 30) RETURNING *", "Insert", "values rows=1; returning=2; columns=id, age")]
+    [InlineData("INSERT INTO t SELECT * FROM t RETURNING id AS written, age + 1", "InsertSelect", "returning=2; columns=written, column2")]
+    [InlineData("UPDATE t SET age = 30 RETURNING id AS written, age + 1", "Update", "assignments=1; filter=False; returning=2; columns=written, column2")]
+    [InlineData("DELETE FROM t WHERE id = 1 RETURNING *", "Delete", "filter=True; returning=2; columns=id, age")]
+    public async Task ExecuteAsync_ExplainReturning_ShouldDescribeProjectionWithoutWrites(string sql, string operation, string detail)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("returning", new());
+        var database = await engine.CreateDatabaseAsync("app", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecuteAsync(session, "CREATE TABLE t (id INT, age INT)");
+        await ExecuteAsync(session, "INSERT INTO t VALUES (1, 10), (2, 20)");
+
+        // Act
+        await using var result = await QueryAsync(session, "EXPLAIN " + sql);
+        var rows = await ReadAsync(result);
+
+        // Assert
+        var root = rows.Single(row => Equals(row[2], operation));
+        root[5].ShouldBe(detail);
+        await using var stored = await QueryAsync(session, "SELECT * FROM t ORDER BY id");
+        CheckRows(await ReadAsync(stored), [[1, 10], [2, 20]]);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - RETURNING: self-cascades return each direct target once")]
+    [InlineData("id = 1", 1)]
+    [InlineData("id IN (1, 2)", 2)]
+    public async Task ExecuteAsync_SelfCascadeReturning_ShouldReturnOnlyDirectTargets(string predicate, int count)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("returning", new());
+        var database = await engine.CreateDatabaseAsync("app", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecuteAsync(session, "CREATE TABLE t (id INT PRIMARY KEY, parent INT REFERENCES t(id) ON DELETE CASCADE)");
+        await ExecuteAsync(session, "INSERT INTO t VALUES (1, NULL), (2, 1)");
+
+        // Act
+        await using var result = await QueryAsync(session, "DELETE FROM t WHERE " + predicate + " RETURNING id");
+
+        // Assert
+        result.AffectedCount.ShouldBe(count);
+        (await ReadAsync(result)).Select(row => row[0]).OrderBy(id => id).ShouldBe(
+            Enumerable.Range(1, count).Cast<object?>());
+        await using var stored = await QueryAsync(session, "SELECT * FROM t");
+        (await ReadAsync(stored)).ShouldBeEmpty();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - RETURNING: parameters bind in every written-row projection")]
+    [InlineData("INSERT INTO t VALUES (1) RETURNING @p, id + @p")]
+    [InlineData("INSERT INTO t SELECT id FROM t RETURNING @p, id + @p")]
+    [InlineData("UPDATE t SET id = 1 RETURNING @p, id + @p")]
+    [InlineData("DELETE FROM t RETURNING @p, id + @p")]
+    public async Task ExecuteAsync_ParameterizedReturning_ShouldBindParameters(string sql)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("returning", new());
+        var database = await engine.CreateDatabaseAsync("app", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecuteAsync(session, "CREATE TABLE t (id INT)");
+        if (!sql.StartsWith("INSERT INTO t VALUES", StringComparison.Ordinal)) { await ExecuteAsync(session, "INSERT INTO t VALUES (1)"); }
+
+        // Act
+        await using var result = (await session.ExecuteAsync(sql, new Dictionary<string, object?> { ["p"] = 7 }, CancellationToken.None))
+            .ShouldBeAssignableTo<DatabaseResultSet>();
+
+        // Assert
+        result.AffectedCount.ShouldBe(1);
+        CheckRows(await ReadAsync(result), [[7, 8L]]);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - RETURNING: wildcard metadata preserves target facets")]
+    [InlineData("INSERT INTO t VALUES (1.25, 'abc', 'AbC') RETURNING *")]
+    [InlineData("INSERT INTO t SELECT amount, label, folded FROM t RETURNING *")]
+    [InlineData("UPDATE t SET amount = 1.25 RETURNING *")]
+    [InlineData("DELETE FROM t RETURNING *")]
+    public async Task ExecuteAsync_WildcardReturning_ShouldPreserveMetadata(string sql)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("returning", new());
+        var database = await engine.CreateDatabaseAsync("app", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecuteAsync(session, "CREATE TABLE t (amount DECIMAL(10,2) NOT NULL, label VARCHAR(12), folded VARCHAR(8) COLLATE case_insensitive NOT NULL)");
+        if (!sql.StartsWith("INSERT INTO t VALUES", StringComparison.Ordinal)) { await ExecuteAsync(session, "INSERT INTO t VALUES (1.25, 'abc', 'AbC')"); }
+        var plan = new SqlPlanner(database.Catalog, null).Plan(SqlQueryRequest.FromSql(sql).Statement.SqlExpression);
+        var (table, returning) = plan switch
+        {
+            SqlInsertPlan insert => (insert.Table, insert.Returning),
+            SqlInsertSelectPlan insert => (insert.Table, insert.Returning),
+            SqlUpdatePlan update => (update.Table, update.Returning),
+            SqlDeletePlan delete => (delete.Table, delete.Returning),
+            _ => throw new InvalidOperationException(),
+        };
+
+        // Act
+        await using var result = await QueryAsync(session, sql);
+
+        // Assert: precision/scale and collation belong to bound source metadata; the
+        // public result contract carries type, length and nullability only.
+        returning.ShouldNotBeNull().Select(column => column.ColumnOrdinal).ShouldBe(new int?[] { 0, 1, 2 });
+        var amount = table.Columns[returning[0].ColumnOrdinal!.Value];
+        amount.Type.Precision.ShouldBe(10);
+        amount.Type.Scale.ShouldBe(2);
+        returning[2].Collation.Resolve(null).ShouldBe(table.Columns[2].Collation);
+        returning[2].Collation.Resolve(null).Name.ShouldBe("case_insensitive");
+        result.Columns.Select(column => (column.Name, column.Type, column.MaxLength, column.IsNullable)).ShouldBe(
+            [("amount", DatabaseType.Decimal, null, false), ("label", DatabaseType.String, 12, true), ("folded", DatabaseType.String, 8, false)]);
+        CheckRows(await ReadAsync(result), [[1.25m, "abc", "AbC"]]);
     }
 
     private static Task<DatabaseResult> ExecuteAsync(SqlDatabaseSession session, string sql, CancellationToken cancellationToken = default)

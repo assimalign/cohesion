@@ -347,6 +347,8 @@ grammar; the preflight resets VALUES/WHERE position flags on RETURNING so exclud
 subqueries retain their precise name. OUTPUT, OLD/NEW and INTO are contextual IsWord
 checks, preserving canonical identifier quoting and requiring no storage-format bump.
 The profile advertises one new clause; DIALECT.md specifies its complete contract.
+The OUTPUT alias stop applies only to INSERT and DELETE targets; UPDATE retains
+its ordinary bare output alias before SET.
 
 ## Non-goals (current dialect)
 

@@ -728,7 +728,8 @@ internal sealed partial class SqlPlanner
         var returning = BindReturning(insert.Returning, table, insert.Table);
         if (insert.SelectSource is not null)
         {
-            return PlanInsertSelect(table, targetOrdinals, insert.SelectSource) with { Returning = returning };
+            var plan = PlanInsertSelect(table, targetOrdinals, insert.SelectSource);
+            return returning is null ? plan : plan with { Returning = returning };
         }
 
         if (insert.IsDefaultValues)
