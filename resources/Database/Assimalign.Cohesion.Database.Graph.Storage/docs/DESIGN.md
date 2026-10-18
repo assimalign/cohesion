@@ -151,7 +151,7 @@ candidate range by node identities zero and `UInt64.MaxValue`; the identity suff
 also makes a heavily repeated property value safe across B+Tree leaf splits.
 
 Index creation backfills visible nodes under the database writer lock and preserves
-source record stamps. Every subsequent node create/delete maintains all current
+source record stamps. Every subsequent node create/update/delete maintains all current
 definitions in its transaction. Dropping an index tombstones its logical definition;
 older snapshots retain the tree and their view. This MVP retains dropped physical trees
 for later reclamation rather than recycling them while snapshots may still reference

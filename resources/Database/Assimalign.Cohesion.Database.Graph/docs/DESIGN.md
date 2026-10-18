@@ -82,8 +82,9 @@ The adjacency B+Tree contains one entry per incident endpoint, keyed by `(node I
 ID)` and pointing to the relationship's packed physical record location `(page ID << 16) | slot`.
 A self-loop has one entry. The relationship record carries both directed endpoints and its type;
 direction/type filtering occurs after the node-prefix seek. Composite keys avoid duplicate-key
-boundary ambiguity after B+Tree splits. A node identity map reconstructed from records at open
-provides constant-time identity lookup followed by a stamped page read.
+boundary ambiguity after B+Tree splits. The identity directory reconstructed at open provides
+constant-time lookup followed by reads along the retained version chain until the snapshot's
+visible record is found.
 
 The diagram shows the references stored by the adjacency and property trees; relationship records
 carry endpoint identities referring to node records.
