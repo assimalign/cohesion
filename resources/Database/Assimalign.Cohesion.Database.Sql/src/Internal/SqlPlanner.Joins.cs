@@ -81,11 +81,13 @@ internal sealed partial class SqlPlanner
                         var rightValue = new SqlBoundColumn(rightOrdinal);
                         // PostgreSQL parse_clause.c:1676-1709,1718-1733: choose a common type,
                         // coerce the inputs, prefer an unchanged INNER input, and preserve LEFT.
-                        var value = CoerceUsing(leftValue, leftColumn.Type.Type, common);
-                        if (join.JoinType == SqlJoinType.Inner && leftColumn.Type.Type != common.Type
-                            && rightColumn.Type.Type == common.Type)
+                        var value = CoerceUsing(leftValue, leftColumn.Type, common);
+                        if (join.JoinType == SqlJoinType.Inner && !ReferenceEquals(value, leftValue))
                         {
-                            value = rightValue;
+                            // PostgreSQL parse_clause.c:1680-1700 also relabels a typmod
+                            // mismatch; prefer the right input only if it needs no coercion.
+                            var coercedRight = CoerceUsing(rightValue, rightColumn.Type, common);
+                            if (ReferenceEquals(coercedRight, rightValue)) { value = rightValue; }
                         }
                         var collation = SqlBoundCollation.Of(
                             new SqlCollationCandidate(leftColumn.Collation ?? _catalog.DefaultCollation, leftColumn.Collation is null ? 1 : 2),
@@ -189,12 +191,13 @@ internal sealed partial class SqlPlanner
     }
 
     /// <summary>Coerces the merged value without changing the physical input or qualified references.</summary>
-    private SqlBoundExpression CoerceUsing(SqlBoundExpression value, DatabaseType source, DatabaseTypeInfo common)
+    private SqlBoundExpression CoerceUsing(SqlBoundExpression value, DatabaseTypeInfo source, DatabaseTypeInfo common)
     {
-        if (source == common.Type) { return value; }
+        if (source.Type == common.Type && source.MaxLength == common.MaxLength &&
+            source.Precision == common.Precision && source.Scale == common.Scale) { return value; }
         var target = SqlType.ForStorage(common);
         return new SqlBoundCast(value, target.Name, target, _functions.Types.ResolveCasts(null, target),
-            _functions.Database, _catalog.DefaultCollation);
+            _functions.Database, _catalog.DefaultCollation, sourceType: source.Type);
     }
 
     /// <summary>Seeks into the added input; only the first INNER pair may reverse direction.</summary>

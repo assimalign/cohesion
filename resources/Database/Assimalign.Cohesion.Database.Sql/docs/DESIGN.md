@@ -2378,8 +2378,12 @@ or predicate pushdown is performed; each reference costs O(body rows).
 SqlPersistedExpression.LoadQuery uses the existing parser and ceiling options. The base-typed
 renderer and SameQuery prove canonical round trips. CREATE serializes bound column references
 with their resolved relation qualifiers and expands projection stars at every level. Merged
-USING values retain their chosen source and coercions. The canonical text and ordered resolved
-call vector preserve those bindings across ADD COLUMN. Rebinding rejects any column identity
+USING values retain their chosen source and coercions. USING facet mismatches add a coercion
+to the unconstrained common type, following PostgreSQL
+`src/backend/parser/parse_clause.c:1680-1700`. For a CHAR modifier relabel the canonical text uses
+`CASE WHEN TRUE THEN source ELSE NULL END`: bare CAST AS CHAR would mean CHAR(1), whereas the
+CASE preserves the complete value and clears only the output modifier. The canonical text and
+ordered resolved call vector preserve those bindings across ADD COLUMN. Rebinding rejects any column identity
 absent from the recorded C: dependencies (COHSQLE033), following PostgreSQL
 `src/backend/rewrite/rewriteDefine.c:61`'s persistence of the transformed tree. A
 ConditionalWeakTable parses once per immutable view; a per-catalog generation cache binds the
@@ -2395,8 +2399,11 @@ Execution checks for a bound row window before creating its evaluator. Cancellab
 index-seek SELECT and aggregate statements with application functions registered therefore add
 zero startup bytes compared with dispatch directly to the same statement cores (Release, tiering off).
 Catalog opens parse all views; every recoverable body binding failure is deferred to a read of
-that view, with a coded view-local exception retaining the original cause. Cancellation,
-out-of-memory, storage corruption and I/O failures still propagate. Unrelated queries, metadata
+that view, with a coded view-local exception retaining the original cause. OperationCanceledException, InsufficientExecutionStackException, OutOfMemoryException,
+StorageException (every subtype, including offline, format, journal and slotted-page failures),
+and IOException propagate, including through inner exceptions and aggregates. At open, stack
+exhaustion reaches the existing larger-stack advisory; on reads it reports COHSQLE004 and
+StatementTooComplex. Unrelated queries, metadata
 and DROP remain usable. Set, CASE and COALESCE outputs carry collation metadata only for
 character/string result types. The existing bind-time system-relation
 capture seam is re-entered for cached bodies so each caller retains its own catalog image.
@@ -2409,7 +2416,7 @@ DDL-generation fast path. No snapshot generation API or friend grant was added f
 
 Views freeze names/types/modifiers/domains/collations for COLUMNS. Every view column reports
 IS_NULLABLE = YES without binding a body: PostgreSQL view attributes have no NOT NULL constraint
-(`src/backend/catalog/information_schema.sql:295`). The format-23 view column record stores no
+(`src/backend/catalog/information_schema.sql:674-676`). The format-23 view column record stores no
 nullability flag; query binding still derives current source nullability. Scalar-subquery slots
 and function outputs preserve complete precision, scale and length before contract comparison (PostgreSQL
 `src/backend/nodes/nodeFuncs.c:345`, `src/backend/commands/view.c:300`). Scalar output descriptors are captured inside the child
@@ -2417,10 +2424,12 @@ lexical scope before restoring the parent, including correlated column projectio
 COLUMN refuses
 changes to type, length, precision or scale for any column a view reads, both in the executor
 and catalog publication (COHSQLD002; PostgreSQL `src/backend/commands/tablecmds.c:15612-15624`).
-CASE and COALESCE preserve a modifier only when all alternatives have the same type and modifier;
+CASE and COALESCE preserve a modifier only when all alternatives have the same type, domain and modifier;
 an absent ELSE or an unconstrained/different argument clears it. NULLIF retains its first
 argument's modifier. Set operands capture complete output descriptors in their own lexical
-scopes, including function calls, and apply the same agreement rule per column (PostgreSQL
+scopes, including function calls, and apply the same agreement rule per column. Identical domains
+survive CASE, COALESCE and sets, including scalar-subquery and function outputs (PostgreSQL
+`src/backend/parser/parse_coerce.c:1360-1363,1658-1660` and
 `src/backend/nodes/nodeFuncs.c:327-336,389-480`, `src/backend/parser/parse_coerce.c:1648-1678`).
 OR REPLACE compares that full contract and may append columns only, following PostgreSQL `src/backend/commands/view.c:266-325`.
 Table/column renames refuse dependencies because this engine stores textual relation names.

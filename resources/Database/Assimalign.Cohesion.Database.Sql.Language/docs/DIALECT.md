@@ -156,15 +156,22 @@ and dependency cycles fail atomically. Definitions are parsed once per immutable
 view and bound once per catalog generation; recorded function identities keep a
 later overload from changing a stored call. COLUMNS uses frozen type metadata without binding a
 body, including full length, precision and scale. CASE and COALESCE keep modifiers when every
-result alternative has the same type and modifier; otherwise the result is unconstrained.
+result alternative has the same type, domain and modifier; otherwise the result is unconstrained.
+Identical domains survive CASE, COALESCE and set outputs (PostgreSQL
+`src/backend/parser/parse_coerce.c:1360-1363,1658-1660`). USING joins coerce facet mismatches to the
+unconstrained common type (`src/backend/parser/parse_clause.c:1680-1700`); persisted CHAR modifier
+relabels use an equivalent CASE expression so bare CHAR's length-one default cannot truncate values.
 NULLIF keeps its first argument's modifier. Set operations apply the same agreement rule per
 column, including function-call operands (PostgreSQL `src/backend/nodes/nodeFuncs.c:327-480`,
 `src/backend/parser/parse_coerce.c:1648-1678`). Every view column reports IS_NULLABLE = 'YES',
-following PostgreSQL view attributes without NOT NULL (`src/backend/catalog/information_schema.sql:295`).
+following PostgreSQL view attributes without NOT NULL (`src/backend/catalog/information_schema.sql:674-676`).
 Query output nullability follows current bound sources.
 A recoverable body binding failure affects only reads of that view, with a coded error retaining
 the original exception; it never blocks open, unrelated reads, metadata enumeration or DROP VIEW.
-Cancellation, out-of-memory, storage corruption and I/O failures still propagate.
+OperationCanceledException, InsufficientExecutionStackException, OutOfMemoryException,
+StorageException (every subtype, including offline, format, journal and slotted-page failures),
+and IOException propagate, including through inner exceptions and aggregates. At open, stack
+exhaustion retains the larger-stack advisory; reads report COHSQLE004 and StatementTooComplex.
 
 INSERT, UPDATE, DELETE, ALTER TABLE, CREATE INDEX and DROP TABLE require a table
 and refuse a view, naming its kind. DROP VIEW refuses a table, including IF EXISTS.
