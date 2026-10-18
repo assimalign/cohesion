@@ -131,6 +131,8 @@ literal-map replacement/merge and node labels. `SetItems` and `RemoveItems` prov
 inspection facades. ISO sections 13.3 and 13.4 supply property, all-property and label items;
 `+=` and multi-label colon lists are D3 spellings. The parser combines touching `+=` into one
 GQL token; SQL/OQL lexer behavior is unchanged. GRAPH and SCHEMA are contextual label names.
+The private token uses a parser-only spelling and is consumed only by whole-map SET, so it
+cannot become unary addition, property assignment or a quantified path elsewhere.
 Whole-map parameters and expressions remain COHDBL001, as do literal composite properties.
 MERGE with either ON CREATE SET or ON MATCH SET produces exactly one COHDBL001 naming MERGE.
 Leading SET/REMOVE and nested assignment targets are GQL0002. See [DIALECT.md](DIALECT.md#set-and-remove)

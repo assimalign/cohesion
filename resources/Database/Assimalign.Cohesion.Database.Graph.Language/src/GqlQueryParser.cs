@@ -75,7 +75,7 @@ public sealed partial class GqlQueryParser : QueryParser
             {
                 // GQL's D3 merge operator is one token, without changing SQL/OQL lexing.
                 if (token.Type == TokenType.Equals && _tokens.Count > 0 && _tokens[^1] is { Type: TokenType.Plus } plus && plus.End == lexeme.Start)
-                { _tokens[^1] = plus with { Text = "+=", End = lexeme.End }; }
+                { _tokens[^1] = plus with { Type = TokenType.Unrecognized, Text = "+=", End = lexeme.End }; }
                 else { _tokens.Add(lexeme); }
                 if (token.Type is TokenType.String or TokenType.QuotedIdentifier && !IsCompleteQuoted(lexeme.Text))
                 {

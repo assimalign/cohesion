@@ -76,7 +76,7 @@ public sealed partial class GqlQueryParser
                     }
                     else
                     {
-                        bool merge = Current.Type == TokenType.Plus && Current.Text == "+=";
+                        bool merge = Current.Type == TokenType.Unrecognized && Current.Text == "+=";
                         if (merge) { Advance(); } else { Expect(TokenType.Equals, "'=', '+=', '.', ':' or IS"); }
                         if (Failed) { break; }
                         if (Current.Type != TokenType.LeftBrace)
