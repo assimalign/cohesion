@@ -365,13 +365,22 @@ public sealed class SqlBindingConcurrencyTests
             gate.Calls.ShouldBe(2);
         });
 
-    private static ValueTask<SqlCatalogTable> CreateUnboundTableAsync(SqlDatabase database, string name, SqlScalarFunction function)
-        => database.Catalog.CreateTableAsync("dbo", name,
+    private static async ValueTask<SqlCatalogTable> CreateUnboundTableAsync(SqlDatabase database, string name, SqlScalarFunction function)
+    {
+        // CHECK binding still folds immutable calls. DEFAULT loading must never invoke one.
+        // Publish directly so the first table-cache miss, rather than DDL, reaches the gate.
+        var table = await database.Catalog.ReserveTableAsync("dbo", name,
         [
             new SqlCatalogColumn("id", new DatabaseTypeInfo(DatabaseType.Int32)),
-            new SqlCatalogColumn("value", new DatabaseTypeInfo(DatabaseType.Int32), defaultLiteral: "review_gate(1)",
-                defaultFunctionCalls: [SqlDefinitionBinder.Key(function)]),
-        ], cancellationToken: CancellationToken.None);
+            new SqlCatalogColumn("value", new DatabaseTypeInfo(DatabaseType.Int32), defaultLiteral: "1"),
+        ], [],
+        [
+            new SqlCatalogConstraint("ck_binding", SqlCatalogConstraintKind.Check, [], checkExpression: "review_gate(1) > 0",
+                checkFunctionCalls: [SqlDefinitionBinder.Key(function)]),
+        ], DatabaseObjectOwner.Adhoc, null, cancellationToken: CancellationToken.None);
+        await database.Catalog.PublishTableAsync(table, [], [], cancellationToken: CancellationToken.None);
+        return table;
+    }
 
     private static async Task QueryAsync(SqlDatabaseSession session, string sql, CancellationToken cancellationToken = default)
     {
