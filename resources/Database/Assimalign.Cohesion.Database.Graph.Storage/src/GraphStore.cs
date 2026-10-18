@@ -39,7 +39,7 @@ public sealed partial class GraphStore
             var unit = iterator.Current;
             var record = GraphRecordCodec.Decode(unit.Data);
             var (writer, _) = RecordVersionStamp.ReadStamps(unit.Data.Span);
-            Add(record, GraphStorage.PackLocation(unit.PageId, unit.SlotIndex), writer);
+            Add(record, GraphStorage.PackLocation(unit.PageId, unit.SlotIndex), writer, prune: false);
             if (record.Kind == 3) { _definitionIds.Add(record.Id); }
         }
         foreach (var versions in _records.Values)
@@ -59,7 +59,7 @@ public sealed partial class GraphStore
     }
 
     /// <summary>
-    /// Checks that every index tree the storage registers is in the B-tree page format
+    /// Checks graph record format 2 and that every index tree the storage registers is in the B-tree page format
     /// this engine reads (<see cref="BTreeIndexManager.FormatVersion"/>), reading only
     /// the registrations and each tree's root page. An engine calls it before the
     /// coordinator's recovery scrub, so a database whose indexes it cannot read is
@@ -70,7 +70,7 @@ public sealed partial class GraphStore
     /// <param name="storage">Graph file set.</param>
     /// <exception cref="ArgumentNullException"><paramref name="storage"/> is null.</exception>
     /// <exception cref="IndexFormatException">An index tree is in another B-tree page format.</exception>
-    /// <exception cref="StorageCorruptionException">A persisted index registration is malformed.</exception>
+    /// <exception cref="StorageCorruptionException">A graph record has an unsupported format, or a persisted index registration is malformed.</exception>
     public static void EnsureIndexFormat(GraphStorage storage)
     {
         ArgumentNullException.ThrowIfNull(storage);
@@ -139,8 +139,8 @@ public sealed partial class GraphStore
 
     /// <summary>Atomically creates a relationship and both endpoint adjacency entries.</summary>
     /// <param name="sourceId">Source node.</param><param name="targetId">Target node.</param><param name="type">Relationship type.</param><param name="properties">Scalar properties.</param><param name="context">Owning transaction.</param><param name="cancellationToken">Cancellation token.</param><returns>The created relationship.</returns>
-    /// <exception cref="InvalidOperationException">An endpoint does not exist in the caller's snapshot, or <paramref name="context"/> is not active.</exception>
-    /// <exception cref="TransactionAbortedException">An endpoint changed after the transaction snapshot, or the transaction ended while waiting for its writer lock.</exception>
+    /// <exception cref="InvalidOperationException">An endpoint does not exist in the latest committed view, or <paramref name="context"/> is not active.</exception>
+    /// <exception cref="TransactionAbortedException">An endpoint was deleted after the transaction snapshot, or the transaction ended while waiting for its writer lock.</exception>
     /// <exception cref="ArgumentNullException"><paramref name="properties"/> or <paramref name="context"/> is null.</exception>
     /// <exception cref="ArgumentException">The type or a property key is null or whitespace, or a property value is not a supported scalar.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
@@ -284,14 +284,23 @@ public sealed partial class GraphStore
         _coordinator.VersionStore.RecordTombstoned(context.Sequence, reference.PageId, reference.SlotIndex);
     }
 
-    private void Add(GraphRecord record, ulong location, TransactionSequence writer)
+    private void Add(GraphRecord record, ulong location, TransactionSequence writer, bool prune = true)
     {
         var (page, slot) = GraphStorage.UnpackLocation(location);
         lock (_sync)
         {
             if (!_records.TryGetValue((record.Kind, record.Id), out var versions))
             { _records.Add((record.Kind, record.Id), versions = []); }
-            versions.Insert(0, new Reference(page, slot, writer, record.Revision));
+            // Clean the tail on publication as well: latest-snapshot lookups usually stop at
+            // the head and would otherwise never encounter references purged behind it.
+            if (prune)
+            {
+                versions.RemoveAll(reference => !_storage.TryReadRecord(reference.PageId, reference.SlotIndex, 2, out var bytes) ||
+                    RecordVersionStamp.ReadStamps(bytes.Span).Writer != reference.Writer ||
+                    GraphRecordCodec.Decode(bytes) is var existing && (existing.Kind != record.Kind || existing.Id != record.Id));
+            }
+            var next = new Reference(page, slot, writer, record.Revision);
+            if (prune) { versions.Insert(0, next); } else { versions.Add(next); }
             if (record.Kind == 3) { _definitionIds.Add(record.Id); }
         }
     }

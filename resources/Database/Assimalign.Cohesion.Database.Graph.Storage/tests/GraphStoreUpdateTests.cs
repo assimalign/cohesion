@@ -12,6 +12,84 @@ namespace Assimalign.Cohesion.Database.Graph.Storage.Tests;
 
 public sealed partial class GraphStoreTests
 {
+    [Fact(DisplayName = "Cohesion Test [Graph.Storage] - Update: exact no-ops skip versions and numeric type changes retain rollback (#1149)")]
+    public async Task Update_IdenticalAndNumericTypeChanges_ShouldPreserveExactTypes()
+    {
+        // Arrange
+        await using var fixture = new Fixture();
+        var seed = await fixture.Begin();
+        await fixture.Store.CreateIndexAsync("N", "key", seed);
+        var node = await fixture.Store.CreateNodeAsync(["N"], Properties("key", 1), seed);
+        await fixture.Coordinator.CommitAsync(seed);
+        var update = await fixture.Begin();
+
+        // Act / Assert
+        await fixture.Store.UpdateNodeAsync(node.Id, ["N", "N"], Properties("key", 1), update);
+        CountVersions().ShouldBe(1);
+        await fixture.Store.UpdateNodeAsync(node.Id, ["N"], Properties("key", 1d), update);
+        CountVersions().ShouldBe(2);
+        fixture.Store.FindNode(node.Id, update.Snapshot)!.Value.Properties["key"].ShouldBeOfType<double>();
+        await fixture.Store.UpdateNodeAsync(node.Id, ["N"], Properties("key", 1), update);
+        CountVersions().ShouldBe(3);
+        (await fixture.Store.SearchIndexAsync("N", "key", 1, update.Snapshot)).Single().Properties["key"].ShouldBeOfType<int>();
+        await fixture.Coordinator.RollbackAsync(update);
+        CountVersions().ShouldBe(1);
+
+        int CountVersions()
+        {
+            int count = 0;
+            using var records = fixture.Storage.GetUnitIterator(2);
+            while (records.MoveNext()) { if (records.Current.Data.Span[16] == 1) { count++; } }
+            return count;
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Graph.Storage] - Format: format 1 is refused with the recreation remedy (#1149)")]
+    public async Task Open_FormatOne_ShouldRefuseBeforeRecovery()
+    {
+        // Arrange
+        await using var fixture = new Fixture();
+        var write = await fixture.Begin();
+        await fixture.Store.CreateNodeAsync(["N"], _empty, write);
+        await fixture.Coordinator.CommitAsync(write);
+        using var units = fixture.Storage.GetUnitIterator(2);
+        units.MoveNext().ShouldBeTrue();
+        var unit = units.Current;
+        byte[] bytes = unit.Data.ToArray();
+        bytes[17] = 1;
+        using (var bracket = fixture.Storage.BeginTransaction())
+        {
+            fixture.Storage.UpdateEntry(bracket, unit.PageId, unit.SlotIndex, bytes);
+            bracket.Commit();
+        }
+
+        // Act / Assert
+        Should.Throw<StorageCorruptionException>(() => GraphStore.EnsureIndexFormat(fixture.Storage)).Message.ShouldContain("recreate the database", Case.Sensitive);
+        Should.Throw<StorageCorruptionException>(() => GraphStore.Open(fixture.Storage, fixture.Coordinator)).Message.ShouldContain("format 2", Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Graph.Storage] - Update: endpoint property changes do not conflict with relationship insertion (#1149)")]
+    public async Task CreateRelationship_UpdatedEndpoint_ShouldCheckExistenceOnly()
+    {
+        // Arrange
+        await using var fixture = new Fixture();
+        var seed = await fixture.Begin();
+        var node = await fixture.Store.CreateNodeAsync(["N"], Properties("key", 1), seed);
+        await fixture.Coordinator.CommitAsync(seed);
+        var stale = await fixture.Begin();
+        var update = await fixture.Begin();
+        await fixture.Store.UpdateNodeAsync(node.Id, ["N"], Properties("key", 2), update);
+        await fixture.Coordinator.CommitAsync(update);
+
+        // Act
+        var relationship = await fixture.Store.CreateRelationshipAsync(node.Id, node.Id, "R", _empty, stale);
+        await fixture.Coordinator.CommitAsync(stale);
+
+        // Assert
+        var read = await fixture.Begin();
+        (await fixture.Store.GetIncidentAsync(node.Id, read.Snapshot)).Single().Id.ShouldBe(relationship.Id);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Graph.Storage] - Update: snapshots retain records, indexes and adjacency until purge (#1149)")]
     public async Task Update_CommittedVersions_ShouldPreserveSnapshotsAndSurvivePurge()
     {

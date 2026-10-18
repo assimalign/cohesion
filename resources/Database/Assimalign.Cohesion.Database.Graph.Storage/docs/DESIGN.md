@@ -188,8 +188,17 @@ without disposing the live database. MemoryStream has no durable-flush contract;
 these serialized images test recovery replay and scrub, not physical persistence. They
 prove committed nodes, relationships and property indexes survive while a partially
 applied logical transaction disappears. The graph store keeps an in-memory identity
-directory of every retained version, rebuilt in O(R log R) for R retained records. Chains are ordered by descending persisted revision; reads choose the first visible version. Reclaimed or reused references are removed lazily. Label scans examine node identities and retained versions and sort
+directory of every retained version, rebuilt in `O(R log R)` for `R` retained records.
+Chains are ordered by descending persisted revision; reads choose the first visible version.
+Reclaimed or reused references are removed lazily during lookup and subsequent publication,
+which also sweeps the tail behind a visible head. Label scans examine node identities and
+retained versions and sort
 their `m` visible matches in `O(m log m)`. Traversal path
 enumeration and cycle limits are owned and documented by the Graph root.
 
-Updates encode the replacement and every new index key before mutation. They move every property-index entry, or both adjacency entries (one for a self-loop), to the new physical location and tombstone the old record in one physical bracket. Rollback restores old stamps and removes new versions. Relationship insertion checks endpoint existence in the latest committed view, so property updates do not conflict with insertion. Snapshot pins protect old versions from purge.
+Updates encode the replacement and every new index key before mutation. They move every
+property-index entry, or both adjacency entries (one for a self-loop), to the new physical
+location and tombstone the old record in one physical bracket. Rollback restores old stamps
+and removes new versions. Relationship insertion checks endpoint existence in the latest
+committed view, so property updates do not conflict with insertion. Snapshot pins protect
+old versions from purge.
