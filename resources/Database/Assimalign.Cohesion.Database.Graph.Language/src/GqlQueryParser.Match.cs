@@ -16,7 +16,7 @@ public sealed partial class GqlQueryParser
             var clauseStart = Current;
             if (Take("NEXT"))
             {
-                if (stages.Count == 0 || stages[^1] is GqlNextStage || stages[^1] is not GqlReturnStage && !segmentWrites || Current.Type is TokenType.Eof or TokenType.Semicolon)
+                if (stages.Count == 0 || stages[^1] is GqlNextStage or GqlReturnStage { IsWith: true } || stages[^1] is not GqlReturnStage && !segmentWrites || Current.Type is TokenType.Eof or TokenType.Semicolon)
                 { Error("GQL0002", "NEXT requires a RETURN or data-modifying segment and a following segment.", clauseStart); break; }
                 if (stages[^1] is not GqlReturnStage) { hasNamedBinding = false; }
                 stages.Add(new GqlNextStage(Span(clauseStart, Previous)));

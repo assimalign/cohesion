@@ -39,6 +39,11 @@ public sealed class GqlLinearCompositionParserTests
         string.Join(",", query.Stages.Select(stage => stage.GetType().Name.Replace("Gql", "", StringComparison.Ordinal).Replace("Stage", "", StringComparison.Ordinal))).ShouldBe(expected);
         query.Segments.Count.ShouldBe(query.Stages.Count(stage => stage is GqlNextStage) + 1);
         query.Segments.SelectMany(segment => segment.Stages).ShouldBe(query.Stages.Where(stage => stage is not GqlNextStage));
+        var expectedSegments = expected.Split(",Next,", StringSplitOptions.None);
+        for (int i = 0; i < expectedSegments.Length; i++)
+        {
+            string.Join(",", query.Segments[i].Stages.Select(stage => stage.GetType().Name.Replace("Gql", "", StringComparison.Ordinal).Replace("Stage", "", StringComparison.Ordinal))).ShouldBe(expectedSegments[i]);
+        }
     }
 
     [Theory(DisplayName = "Cohesion Test [Graph.Language] - Linear composition: excluded and malformed forms retain precise diagnostics")]
@@ -60,6 +65,9 @@ public sealed class GqlLinearCompositionParserTests
     [InlineData("FILTER TRUE OFFSET 1 RETURN 1", "COHDBL001", "STANDALONE ORDER BY AND PAGE STATEMENT")]
     [InlineData("MATCH (a) NEXT MATCH (b) RETURN b", "GQL0002", "NEXT")]
     [InlineData("RETURN 1 NEXT", "GQL0002", "NEXT")]
+    [InlineData("MATCH (a) WITH a NEXT RETURN a", "GQL0002", "NEXT")]
+    [InlineData("NEXT RETURN 1", "GQL0002", "NEXT")]
+    [InlineData("EXPLAIN NEXT RETURN 1", "GQL0002", "NEXT")]
     [InlineData("MATCH (a) DELETE a RETURN a", "COHDBL001", "RETURN AFTER DELETE")]
     [InlineData("RETURN 1 NEXT RETURN 2 UNION RETURN 3", "COHDBL001", "UNION")]
     public void Parse_ExcludedForm_ShouldReportOneDiagnostic(string source, string code, string message)

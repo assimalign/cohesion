@@ -102,7 +102,7 @@ public sealed partial class GqlQueryParser : QueryParser
         else if (Is("EXPLAIN"))
         {
             _position++;
-            if (IsQueryStart())
+            if (IsQueryStart() || Is("NEXT"))
             {
                 expression = ParseQuery();
                 expression.Explain();
@@ -114,7 +114,7 @@ public sealed partial class GqlQueryParser : QueryParser
             }
         }
         else if (catalogStatement) { expression = ParseCatalog(); }
-        else if (IsQueryStart()) { expression = ParseQuery(); }
+        else if (IsQueryStart() || Is("NEXT")) { expression = ParseQuery(); }
         else
         {
             if (Is("ORDER") || Is("OFFSET") || Is("SKIP") || Is("LIMIT"))
