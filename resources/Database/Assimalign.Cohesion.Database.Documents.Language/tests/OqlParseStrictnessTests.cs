@@ -65,16 +65,6 @@ public sealed class OqlParseStrictnessTests
     /// <param name="marked">The statement; the reported span sits between '«' and '»'.</param>
     /// <param name="construct">The construct the message names.</param>
     [Theory(DisplayName = "Cohesion Test [Documents.Language] - Strictness: SQL++ words report one COHDBL001 and no OQL0002")]
-    [InlineData("SELECT * FROM c WHERE a = 1 «LIMIT» 5", "LIMIT")]
-    [InlineData("SELECT * FROM c WHERE a = 'x' «LIMIT» 1", "LIMIT")]
-    [InlineData("SELECT * FROM c WHERE a IS NULL «LIMIT» 1", "LIMIT")]
-    [InlineData("SELECT * FROM c WHERE a = TRUE «LIMIT» 1", "LIMIT")]
-    [InlineData("SELECT * FROM c WHERE a = @p «LIMIT» 1", "LIMIT")]
-    [InlineData("SELECT * FROM c WHERE c.items[0] = 1 «LIMIT» 1", "LIMIT")]
-    [InlineData("SELECT * FROM c ORDER BY c.select «LIMIT» 1", "LIMIT")]
-    [InlineData("SELECT * FROM c ORDER BY a DESC «OFFSET» 2", "OFFSET")]
-    [InlineData("SELECT * FROM c ORDER BY a ASC «LIMIT» 2", "LIMIT")]
-    [InlineData("SELECT * FROM c «LIMIT» 10", "LIMIT")]
     [InlineData("«MERGE» INTO c USING d ON c.id = d.id WHEN MATCHED THEN UPDATE SET c.a = d.a", "MERGE")]
     [InlineData("SELECT * FROM c «UNNEST» c.items AS i", "UNNEST")]
     [InlineData("SELECT * FROM c AS x «UNNEST» x.items AS i", "UNNEST")]
@@ -84,7 +74,6 @@ public sealed class OqlParseStrictnessTests
     [InlineData("SELECT * FROM c WHERE «EVERY» x IN c.items SATISFIES ANY y IN x.tags SATISFIES y = 1 END END", "EVERY ... SATISFIES")]
     // A Clause word directly after the collection is a construct, never an AS-less alias.
     [InlineData("SELECT * FROM c «unnest»", "UNNEST")]
-    [InlineData("SELECT * FROM c «limit»", "LIMIT")]
     // A set operation and its ALL or DISTINCT are one construct.
     [InlineData("SELECT * FROM c «UNION ALL» SELECT * FROM d", "UNION")]
     [InlineData("SELECT * FROM c «EXCEPT DISTINCT» SELECT * FROM d", "EXCEPT")]
@@ -113,11 +102,11 @@ public sealed class OqlParseStrictnessTests
     /// <param name="oql">A statement that uses those words as names.</param>
     [Theory(DisplayName = "Cohesion Test [Documents.Language] - Strictness: words outside a clause position stay field names")]
     [InlineData("SELECT p.flatten, p.select, p.array FROM people p")]
-    [InlineData("SELECT limit, merge FROM c")]
+    [InlineData("SELECT merge FROM c")]
     [InlineData("SELECT a AS limit FROM c")]
-    [InlineData("SELECT offset, upsert, unnest, every, satisfies FROM c")]
-    [InlineData("SELECT * FROM c WHERE limit = 1 AND merge = 2")]
-    [InlineData("SELECT * FROM c ORDER BY limit DESC")]
+    [InlineData("SELECT upsert, unnest, every, satisfies FROM c")]
+    [InlineData("SELECT * FROM c WHERE merge = 1 AND upsert = 2")]
+    [InlineData("SELECT * FROM c ORDER BY merge DESC")]
     [InlineData("SELECT c.limit FROM c WHERE c.every.satisfies = 1")]
     // A statement verb or quantifier word is a construct only in its own position, so an
     // AS-less FROM alias of that name still parses, as it did before #1101.

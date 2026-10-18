@@ -248,7 +248,7 @@ internal sealed class SmokeRunner
             Require(catalog.Any(row => row[0] is "wire_items"), "collection catalog missing wire collection");
             try
             {
-                await connection.QueryAsync("SELECT * FROM wire_items LIMIT 1", cancellationToken: token).ConfigureAwait(false);
+                await connection.QueryAsync("MERGE INTO wire_items", cancellationToken: token).ConfigureAwait(false);
                 throw new InvalidOperationException("unsupported OQL unexpectedly succeeded");
             }
             catch (Documents.Client.DocumentClientException exception)

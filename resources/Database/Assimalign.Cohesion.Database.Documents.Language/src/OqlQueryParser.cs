@@ -173,6 +173,10 @@ public sealed partial class OqlQueryParser : QueryParser
             {
                 _diagnostics.Add(QueryDiagnostics.UnsupportedClause("RETURNING", Profile.Language, Span(Current, Current)));
             }
+            else if (Is("LIMIT") || Is("OFFSET"))
+            {
+                _diagnostics.Add(QueryDiagnostics.UnsupportedClause(Current.Text.ToUpperInvariant(), Profile.Language, Span(Current, Current)));
+            }
             else if (Take(TokenType.Semicolon) && Current.Type != TokenType.Eof)
             {
                 Error("OQL0002", "Only one statement is accepted per query.", Current);
@@ -259,6 +263,10 @@ public sealed partial class OqlQueryParser : QueryParser
             // as use. SET is exempt only at the assignment-clause token after that header;
             // SET(...) elsewhere still refuses.
             if (index > statementStart && (index < updateHeaderEnd || index == updateClause)) { continue; }
+
+            // FETCH FIRST is one unsupported spelling. LIMIT ALL is an invalid count.
+            if (index > 0 && (value == "FIRST" && IsWord(_tokens[index - 1], "FETCH") ||
+                value == "ALL" && (IsWord(_tokens[index - 1], "LIMIT") || IsWord(_tokens[index - 1], "OFFSET")))) { continue; }
 
             // DISTINCT/ALL are legal only directly after SELECT, including INSERT/UPSERT SELECT.
             if (openQuantifiers == 0 && value is "DISTINCT" or "ALL")
@@ -395,7 +403,7 @@ public sealed partial class OqlQueryParser : QueryParser
             }
 
             // Words of other languages are not reserved field names: they name a construct
-            // only where it can start, so mixed-shape fields such as limit still parse. A
+            // only where it can start, so mixed-shape fields such as fetch still parse. A
             // statement verb names one only as the first word, so an AS-less FROM alias named
             // merge or upsert still parses, and a quantifier word only through the binding
             // path above, so an alias named every or satisfies does too.
@@ -503,7 +511,7 @@ public sealed partial class OqlQueryParser : QueryParser
         _tokens[index - 2].Type is TokenType.Identifier or TokenType.QuotedIdentifier or
             TokenType.String or TokenType.Keyword or TokenType.Function;
 
-    private OqlSelectExpression EmptyExpression() => new(string.Empty, null, [], null, [], null, [], false, false, Span(Current, Current));
+    private OqlSelectExpression EmptyExpression() => new(string.Empty, null, [], null, [], null, [], false, false, null, null, Span(Current, Current));
     private bool IsIndexStatement(string verb) => IsDdlStatement(verb, "INDEX");
     private bool IsDdlStatement(string verb, string kind) => Is(verb) && _position + 1 < _tokens.Count &&
         IsWord(_tokens[_position + 1], kind);

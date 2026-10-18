@@ -9,7 +9,9 @@ OQL executes 34 SQL++ scalar functions, including Unicode string operations, exa
 UTC date conversion, type/array tests and short-circuit conditionals. Clock functions share the
 transaction-start instant. COUNT and string/array lengths and positions return Int64 long values,
 with matching wire column types; the language [dialect](../../Assimalign.Cohesion.Database.Documents.Language/docs/DIALECT.md)
-records the full contract.
+records the full contract. LIMIT/OFFSET page stored and system queries after grouping, DISTINCT
+and ordering. Counts accept literals or parameters through Int64.MaxValue; invalid values carry
+OQL0007. Column types remain independent of the page, including empty results.
 
 `DocumentDatabaseServer.Create(engine, options)` or `engineBuilder.AddServer(options => ...)`
 serves OQL and document/collection commands on a consumer-supplied listener. Each authenticated

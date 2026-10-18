@@ -362,7 +362,7 @@ public sealed partial class DocumentQueryTests
         var database = await engine.CreateDatabaseAsync("test");
         await using var session = await database.CreateSessionAsync();
         await session.CreateCollectionAsync("items");
-        var statement = (OqlQueryStatement)new OqlQueryParser().Parse("SELECT * FROM items LIMIT 1");
+        var statement = (OqlQueryStatement)new OqlQueryParser().Parse("MERGE INTO items");
         var exception = await Should.ThrowAsync<DatabaseParseException>(async () => await session.ExecuteAsync(new DocumentQueryRequest(statement)));
         exception.Message.ShouldContain("COHDBL001");
     }

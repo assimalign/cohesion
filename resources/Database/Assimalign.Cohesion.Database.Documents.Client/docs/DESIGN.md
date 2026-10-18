@@ -29,6 +29,10 @@ flowchart LR
 
 SELECT lists arrive as objects in projection order. SELECT VALUE/RAW uses the existing
 whole-value header mode and exposes a single `value` column and its JSON values in Documents.
+LIMIT/OFFSET use the ordinary JSON parameter path; Complete counts only the returned Document
+frames, while query AffectedCount stays -1. Empty pages retain headers, IsDocumentQuery and static
+function column types. OQL0007 survives parse or plan failure at the operand and keeps the session
+reusable. Both transports and the NativeAOT guard exercise paging.
 DISTINCT completion counts follow duplicate removal; object/array constructors need no codec
 extension. A lone SELECT * preserves stored bytes on the wire, including scalar roots.
 VALUE/RAW MISSING becomes NULL during engine projection, before DISTINCT and projected ordering,

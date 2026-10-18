@@ -16,10 +16,13 @@ public sealed class OqlSelectExpression : OqlExpression
     /// <param name="orderBy">The ordering expressions.</param>
     /// <param name="isDistinct">Whether to eliminate duplicate projected values.</param>
     /// <param name="isValue">Whether to return one bare expression rather than named members.</param>
+    /// <param name="limit">The optional maximum row count, as a signed integer literal or parameter.</param>
+    /// <param name="offset">The optional number of rows to skip, as a signed integer literal or parameter.</param>
     /// <param name="location">The source span.</param>
     public OqlSelectExpression(string collection, string? alias, IReadOnlyList<OqlProjection> projections,
         OqlExpression? predicate, IReadOnlyList<OqlExpression> groupBy, OqlExpression? having,
-        IReadOnlyList<OqlOrdering> orderBy, bool isDistinct, bool isValue, Location? location = null) : base(location)
+        IReadOnlyList<OqlOrdering> orderBy, bool isDistinct, bool isValue, OqlExpression? limit = null,
+        OqlExpression? offset = null, Location? location = null) : base(location)
     {
         Collection = collection;
         Alias = alias;
@@ -30,6 +33,8 @@ public sealed class OqlSelectExpression : OqlExpression
         OrderBy = orderBy;
         IsDistinct = isDistinct;
         IsValue = isValue;
+        Limit = limit;
+        Offset = offset;
     }
 
     /// <summary>Gets whether duplicate projected values are eliminated.</summary>
@@ -51,4 +56,8 @@ public sealed class OqlSelectExpression : OqlExpression
     public OqlExpression? Having { get; }
     /// <summary>Gets the ordering expressions, from primary to final key.</summary>
     public IReadOnlyList<OqlOrdering> OrderBy { get; }
+    /// <summary>Gets the optional maximum row count.</summary>
+    public OqlExpression? Limit { get; }
+    /// <summary>Gets the optional number of rows to skip.</summary>
+    public OqlExpression? Offset { get; }
 }

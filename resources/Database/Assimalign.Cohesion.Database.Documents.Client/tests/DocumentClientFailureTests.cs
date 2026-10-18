@@ -72,7 +72,7 @@ public sealed class DocumentClientFailureTests
             await connection.PutAsync("items", "one", "{\"n\":2}"u8.ToArray(), cancellationToken: harness.Token);
 
             // Act / Assert
-            foreach (string statement in new[] { "SELECT * FROM items LIMIT 1", "BEGIN", "COMMIT", "ROLLBACK" })
+            foreach (string statement in new[] { "MERGE INTO items", "BEGIN", "COMMIT", "ROLLBACK" })
             {
                 var error = await Should.ThrowAsync<DocumentClientException>(async () => await connection.QueryAsync(statement, cancellationToken: harness.Token));
                 error.Code.ShouldBe(ProtocolErrorCode.ParseFailure);

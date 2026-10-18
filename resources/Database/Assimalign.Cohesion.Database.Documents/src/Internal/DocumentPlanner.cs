@@ -40,7 +40,7 @@ internal sealed partial class DocumentPlanner
         OqlDeleteExpression delete => PlanDelete(delete),
         OqlUpdateExpression update => PlanUpdate(update),
         OqlSelectExpression select when DocumentSystemCollections.Find(select.Collection) is string name =>
-            new DocumentSystemCollectionPlan(CreateLogicalPlan(select, _cancellationToken), name),
+            new DocumentSystemCollectionPlan(CreateLogicalPlan(select, _cancellationToken, _parameters), name),
         OqlSelectExpression select => Plan(select),
         OqlCreateCollectionExpression createCollection => PlanCreateCollection(createCollection),
         OqlDropCollectionExpression dropCollection => PlanDropCollection(dropCollection),
@@ -51,7 +51,7 @@ internal sealed partial class DocumentPlanner
 
     internal DocumentPlan Plan(OqlSelectExpression query)
     {
-        var logical = CreateLogicalPlan(query, _cancellationToken);
+        var logical = CreateLogicalPlan(query, _cancellationToken, _parameters);
         var collection = ResolveCollection(query.Collection, query.Location);
         return new DocumentPlan(logical, collection, ChooseAccess(query.Predicate, query.Alias, _catalog.GetIndexes(collection.Id, _snapshot)));
     }
@@ -126,8 +126,12 @@ internal sealed partial class DocumentPlanner
             ?? throw new DocumentPlanningException("COHDOC002", $"Collection '{name}' does not exist.", location);
     }
 
-    internal static DocumentLogicalPlan CreateLogicalPlan(OqlSelectExpression query, CancellationToken cancellationToken = default)
+    internal static DocumentLogicalPlan CreateLogicalPlan(OqlSelectExpression query, CancellationToken cancellationToken = default,
+        IReadOnlyDictionary<string, object?>? parameters = null)
     {
+        var evaluator = new DocumentExpressionEvaluator(query.Alias, parameters, cancellationToken);
+        long? limit = evaluator.PagingCount(query.Limit, "LIMIT");
+        long offset = evaluator.PagingCount(query.Offset, "OFFSET") ?? 0;
         foreach (var expression in query.Projections.Select(p => p.Expression).Concat(query.GroupBy)
             .Concat(query.OrderBy.Select(o => o.Expression)).Concat(new[] { query.Predicate, query.Having }).OfType<OqlExpression>())
         {
@@ -146,7 +150,7 @@ internal sealed partial class DocumentPlanner
             query.Projections.FirstOrDefault(projection => projection.Alias is not null && projection.Alias == path.Segments[0].Name) is { } projection
                 ? new OqlOrdering(projection.Expression, order.Descending) : order).ToArray();
         query = new OqlSelectExpression(query.Collection, query.Alias, query.Projections, query.Predicate,
-            query.GroupBy, query.Having, ordering, query.IsDistinct, query.IsValue, query.Location);
+            query.GroupBy, query.Having, ordering, query.IsDistinct, query.IsValue, query.Limit, query.Offset, query.Location);
         bool grouped = query.GroupBy.Count > 0 || query.Projections.Any(projection => ContainsAggregate(projection.Expression)) ||
             (query.Having is not null && ContainsAggregate(query.Having)) || query.OrderBy.Any(order => ContainsAggregate(order.Expression));
         if (query.Predicate is not null)
@@ -191,7 +195,7 @@ internal sealed partial class DocumentPlanner
             Validate(order.Expression, allowAggregate: true);
             if (grouped) { ValidateGrouped(order.Expression, query); }
         }
-        return new DocumentLogicalPlan(query, projections, grouped);
+        return new DocumentLogicalPlan(query, projections, grouped, limit, offset);
     }
 
     private DocumentAccessPath ChooseAccess(OqlExpression? predicate, string? alias, IReadOnlyList<DocumentIndexMetadata> indexes)
