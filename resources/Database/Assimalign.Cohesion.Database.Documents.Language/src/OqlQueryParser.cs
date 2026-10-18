@@ -306,7 +306,7 @@ public sealed partial class OqlQueryParser : QueryParser
                     openQuantifiers++;
                     index += 2;
                 }
-                else if (value == "CASE")
+                else if (value == "CASE" || value == "ARRAY" && index + 1 < _tokens.Count && _tokens[index + 1].Type != TokenType.LeftParen)
                 {
                     // CASE shares END with quantified predicates. Its END must not expose
                     // the rest of the unsupported predicate to independent capability scans.
@@ -320,9 +320,44 @@ public sealed partial class OqlQueryParser : QueryParser
             }
             if (quantifier)
             {
-                AddUnsupported(result, $"{value} ... SATISFIES", token);
+                string clause = value == "EVERY" ? OqlClauses.Every : OqlClauses.Any;
+                if (!Supports(clause))
+                {
+                    AddUnsupported(result, clause, token);
+                    openQuantifiers++;
+                }
+                index += 2;
+                continue;
+            }
+
+            if (value == "ARRAY" && index + 1 < _tokens.Count && _tokens[index + 1].Type != TokenType.LeftParen)
+            {
+                AddUnsupported(result, "ARRAY", token);
+                openQuantifiers++;
+                continue;
+            }
+            if (value == "ANY" && index + 2 < _tokens.Count && IsWord(_tokens[index + 1], "AND") && IsWord(_tokens[index + 2], "EVERY"))
+            {
+                AddUnsupported(result, "ANY AND EVERY", token);
                 openQuantifiers++;
                 index += 2;
+                continue;
+            }
+            // The binding itself is not array membership. WITHIN remains deferred.
+            if (value is "ANY" or "SOME" or "EVERY" && index + 2 < _tokens.Count && IsWord(_tokens[index + 2], "WITHIN"))
+            { continue; }
+            if (value == "UNNEST" && statementWithoutQuery && index > 0 && EndsOperand(index - 1))
+            {
+                result.Add(("UNNEST in UPDATE or DELETE", token));
+                break;
+            }
+            if (value == "MERGE" && index > 0 && index + 1 < _tokens.Count && IsWord(_tokens[index + 1], "INTO") &&
+                (IsWord(_tokens[index - 1], "SATISFIES") || _tokens[index - 1].Type == TokenType.LeftParen))
+            {
+                // A nested MERGE statement owns its text, while a field named merge
+                // remains an ordinary expression in SATISFIES.
+                AddUnsupported(result, "MERGE", token);
+                openQuantifiers++;
                 continue;
             }
 
@@ -405,12 +440,6 @@ public sealed partial class OqlQueryParser : QueryParser
                 if (value == "LIMIT") { continue; }
             }
 
-            if (value == "IN" && index + 1 < _tokens.Count && _tokens[index + 1].Type != TokenType.LeftParen)
-            {
-                AddUnsupported(result, "IN array form", token);
-                continue;
-            }
-
             if (!OqlUnsupportedVocabulary.TryFind(value, out var word) || Supports(word.Construct))
             {
                 continue;
@@ -472,7 +501,8 @@ public sealed partial class OqlQueryParser : QueryParser
         _position = start + 1;
         CollectionName();
         if (Take("AS")) { Identifier(); }
-        else if (IsUpdateAlias()) { Identifier(); }
+        else if (IsUpdateAlias() && (!Is("UNNEST") || _position + 1 < _tokens.Count &&
+            (IsWord(_tokens[_position + 1], "SET") || IsWord(_tokens[_position + 1], "UNSET")))) { Identifier(); }
         var result = (_position, Is("SET") || Is("UNSET") ? _position : -1);
         _position = saved;
         _diagnostics.RemoveRange(diagnostics, _diagnostics.Count - diagnostics);

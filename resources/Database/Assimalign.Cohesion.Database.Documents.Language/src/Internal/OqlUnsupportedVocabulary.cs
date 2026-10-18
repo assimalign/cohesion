@@ -25,6 +25,7 @@ internal static class OqlUnsupportedVocabulary
         new("FOR", "FOR", OqlWordPosition.Anywhere),
         new("SOME", "SOME", OqlWordPosition.Anywhere),
         new("ANY", "ANY", OqlWordPosition.Anywhere),
+        new("WITHIN", "WITHIN", OqlWordPosition.Clause),
         new("STRUCT", "STRUCT", OqlWordPosition.Function),
         new("LIST", "LIST", OqlWordPosition.Function),
         new("SET", "SET", OqlWordPosition.Anywhere),
@@ -61,18 +62,16 @@ internal static class OqlUnsupportedVocabulary
         new("ROLLBACK", "ROLLBACK", OqlWordPosition.Clause),
         new("WITH", "WITH", OqlWordPosition.Clause),
         new("JOIN", "JOIN", OqlWordPosition.Clause),
+        new("NEST", "NEST", OqlWordPosition.Clause),
         new("UNION", "UNION", OqlWordPosition.Clause),
         new("INTERSECT", "INTERSECT", OqlWordPosition.Clause),
         new("EXCEPT", "EXCEPT", OqlWordPosition.Clause),
         // OQL uses LIMIT/OFFSET; the SQL FETCH spelling remains deferred.
         new("FETCH", "FETCH", OqlWordPosition.Clause),
-        // SQL++ words. oql-arrays flips UNNEST; MERGE stays.
+        // SQL++ statement words.
         // Enabled by OqlClauses.Upsert; retained for contextual keyword coverage.
         new("UPSERT", "UPSERT", OqlWordPosition.Statement),
         new("MERGE", "MERGE", OqlWordPosition.Statement),
-        new("UNNEST", "UNNEST", OqlWordPosition.Clause),
-        new("EVERY", "EVERY ... SATISFIES", OqlWordPosition.Quantifier),
-        new("SATISFIES", "SATISFIES", OqlWordPosition.Quantifier),
     ];
 
     /// <summary>Finds the entry for an unquoted word, compared case-insensitively.</summary>

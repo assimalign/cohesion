@@ -240,6 +240,21 @@ public sealed class DocumentClientWireTests
         rows.Documents.ShouldBeEmpty();
         var grouped = await connection.QueryAsync("SELECT d.group AS category, COUNT(*) AS n, SUM(d.score) AS total, AVG(d.score) AS average, MIN(d.score) AS low, MAX(d.score) AS high FROM items d GROUP BY d.group HAVING SUM(d.score) > 2 ORDER BY total DESC", cancellationToken: harness.Token);
         grouped.ShouldHaveSingleItem().ToArray().ShouldBe(new object?[] { "A", 2L, 6m, 3m, 2m, 4m });
+        var expanded = await connection.QueryAsync("SELECT t, COUNT(*) AS n FROM items d UNNEST d.array t GROUP BY t ORDER BY t", cancellationToken: harness.Token);
+        expanded.Select(row => row.ToArray()).ShouldBe(new[] { new object?[] { null, 1L }, new object?[] { 9m, 1L } });
+        (await connection.QueryAsync("SELECT name FROM items d WHERE ANY t IN d.array SATISFIES t = 9 END", cancellationToken: harness.Token))
+            .ShouldHaveSingleItem()[0].ShouldBe("Ada");
+        var leftRows = await connection.QueryAsync("SELECT name, t FROM items d LEFT UNNEST d.array t ORDER BY name, t", cancellationToken: harness.Token);
+        leftRows.Count.ShouldBe(4);
+        leftRows[0].IsNull(1).ShouldBeTrue();
+        leftRows[2].IsMissing(1).ShouldBeTrue();
+        leftRows[2][1].ShouldBeNull();
+        var expandedStar = await connection.QueryAsync("SELECT * FROM items d LEFT UNNEST d.array t ORDER BY name, t", cancellationToken: harness.Token);
+        expandedStar.IsDocumentQuery.ShouldBeTrue();
+        expandedStar.Documents.Count.ShouldBe(4);
+        expandedStar.Documents[1].GetProperty("d").GetProperty("name").GetString().ShouldBe("Ada");
+        expandedStar.Documents[1].GetProperty("t").GetDecimal().ShouldBe(9m);
+        expandedStar.Documents[2].TryGetProperty("t", out _).ShouldBeFalse();
         (await connection.QueryAsync("SELECT name FROM items WHERE nested.x IS MISSING OR score < 0 ORDER BY name ASC", cancellationToken: harness.Token))
             .Select(row => row[0]).ShouldBe(new object?[] { "Bob", "Cy" });
         (await connection.QueryAsync("SELECT name FROM items WHERE score <> 2 AND score != 4 AND score <= 1 AND score > 0", cancellationToken: harness.Token))

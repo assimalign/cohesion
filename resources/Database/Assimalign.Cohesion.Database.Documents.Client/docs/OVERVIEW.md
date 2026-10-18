@@ -37,6 +37,9 @@ values. A stored `Document` carries its exact UTF-8 content, identity and versio
 OQL LIMIT/OFFSET accepts literals or JSON parameters in either order. Empty pages retain column
 metadata, and Complete counts returned frames while query AffectedCount remains -1. Invalid
 counts retain OQL0007 and the operand location over both transports.
+UNNEST and quantified predicates use the same query exchange. A star with UNNEST returns
+synthetic whole-document objects; a MISSING LEFT binding is omitted while actual null elements
+remain null. Grouped counts over expanded rows retain Int64 values and metadata.
 
 OQL INSERT, UPSERT, UPDATE and DELETE return their affected counts through ExecuteAsync. UPDATE accepts
 SET and UNSET paths and reports the matched count, with a new version for every match. DELETE

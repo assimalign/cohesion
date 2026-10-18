@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 
@@ -32,9 +33,31 @@ public sealed partial class OqlQueryParser
         {
             alias = Identifier();
         }
-        else if (Current.Type is TokenType.Identifier or TokenType.QuotedIdentifier or TokenType.Function && !IsReturningClause())
+        else if (Current.Type is TokenType.Identifier or TokenType.QuotedIdentifier or TokenType.Function && !IsReturningClause() && !IsUnnestClause())
         {
             alias = Identifier();
+        }
+
+        List<OqlUnnestExpression> unnest = [];
+        var variables = new HashSet<string>(StringComparer.Ordinal);
+        if (alias is not null) { variables.Add(alias); }
+        while (!Failed && IsUnnestClause())
+        {
+            var bindingStart = Current;
+            bool left = Take("LEFT");
+            if (left) { Take("OUTER"); }
+            else { Take("INNER"); }
+            Expect("UNNEST");
+            var expression = ParseExpression();
+            var variableToken = Current;
+            string? variable = null;
+            if (Take("AS")) { variableToken = Current; variable = Identifier(); }
+            else if (Current.Type is TokenType.Identifier or TokenType.QuotedIdentifier or TokenType.Function && !IsUnnestClause() && !IsReturningClause())
+            { variable = Identifier(); }
+            else if (expression is OqlPathExpression { Segments.Count: > 0 } path) { variable = path.Segments[^1].Name; }
+            if (!Failed && variable is null) { Error("OQL0002", "UNNEST requires an alias for an expression without a final path name.", variableToken); }
+            if (!Failed && !variables.Add(variable!)) { Error("OQL0010", ErrorMessages.BindingNameDuplicate, variableToken); }
+            unnest.Add(new OqlUnnestExpression(expression, variable ?? string.Empty, left, Span(bindingStart, Previous)));
         }
 
         OqlExpression? predicate = Take("WHERE") ? ParseExpression() : null;
@@ -85,8 +108,13 @@ public sealed partial class OqlQueryParser
             else { offset = count; }
         }
         return new OqlSelectExpression(collection, alias, projections.AsReadOnly(), predicate,
-            groups.AsReadOnly(), having, ordering.AsReadOnly(), distinct, value, limit, offset, Span(start, Previous));
+            groups.AsReadOnly(), having, ordering.AsReadOnly(), distinct, value, limit, offset, Span(start, Previous), unnest.AsReadOnly());
     }
+
+    private bool IsUnnestClause() => Is("UNNEST") ||
+        (Is("INNER") || Is("LEFT")) && _position + 1 < _tokens.Count &&
+        (IsWord(_tokens[_position + 1], "UNNEST") || Is("LEFT") && IsWord(_tokens[_position + 1], "OUTER") &&
+            _position + 2 < _tokens.Count && IsWord(_tokens[_position + 2], "UNNEST"));
 
     private bool HasCommaCount()
     {

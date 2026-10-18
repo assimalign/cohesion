@@ -22,10 +22,11 @@ internal sealed partial class DocumentExpressionEvaluator
     // Couchbase value/object.go:770-799 and value/array.go:751-779:
     // a definite mismatch wins over nested NULL; otherwise NULL is not equality.
     // IN consumes only TRUE (expression/coll_in.go:103-115), as does simple CASE.
-    private static object? Equal(object? left, object? right)
+    private object? Equal(object? left, object? right)
     {
-        left = Normalize(left);
-        right = Normalize(right);
+        _cancellationToken.ThrowIfCancellationRequested();
+        left = left is JsonElement leftJson ? ReadJson(leftJson) : Normalize(left);
+        right = right is JsonElement rightJson ? ReadJson(rightJson) : Normalize(right);
         if (left is DocumentMissing || right is DocumentMissing) { return DocumentMissing.Instance; }
         if (left is null || right is null) { return null; }
         if (Kind(left) != Kind(right)) { return false; }
@@ -44,9 +45,11 @@ internal sealed partial class DocumentExpressionEvaluator
         if (a.ValueKind == JsonValueKind.Array)
         {
             if (a.GetArrayLength() != b.GetArrayLength()) { return false; }
-            for (int i = 0; i < a.GetArrayLength(); i++)
+            var rightItems = b.EnumerateArray();
+            foreach (var item in a.EnumerateArray())
             {
-                var equal = Equal(a[i], b[i]);
+                rightItems.MoveNext();
+                var equal = Equal(item, rightItems.Current);
                 if (equal is false) { return false; }
                 if (equal is null) { unknown = true; }
             }

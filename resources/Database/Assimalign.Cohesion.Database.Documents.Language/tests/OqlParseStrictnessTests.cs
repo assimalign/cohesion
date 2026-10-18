@@ -66,20 +66,13 @@ public sealed class OqlParseStrictnessTests
     /// <param name="construct">The construct the message names.</param>
     [Theory(DisplayName = "Cohesion Test [Documents.Language] - Strictness: SQL++ words report one COHDBL001 and no OQL0002")]
     [InlineData("«MERGE» INTO c USING d ON c.id = d.id WHEN MATCHED THEN UPDATE SET c.a = d.a", "MERGE")]
-    [InlineData("SELECT * FROM c «UNNEST» c.items AS i", "UNNEST")]
-    [InlineData("SELECT * FROM c AS x «UNNEST» x.items AS i", "UNNEST")]
     [InlineData("SELECT c.fetch «first» FROM c", "FIRST")]
     [InlineData("SELECT c.limit «ALL» FROM c", "ALL")]
     [InlineData("SELECT c.offset «ALL» FROM c", "ALL")]
     [InlineData("SELECT fetch «FIRST» FROM c", "FIRST")]
     [InlineData("SELECT c AS fetch «FIRST» FROM c", "FIRST")]
     [InlineData("SELECT c AS limit «ALL» FROM c", "ALL")]
-    [InlineData("SELECT * FROM c WHERE «EVERY» x IN c.items SATISFIES x > 1 END", "EVERY ... SATISFIES")]
-    [InlineData("SELECT * FROM c WHERE «ANY» x IN c.items SATISFIES x > 1 END", "ANY ... SATISFIES")]
-    [InlineData("SELECT * FROM c WHERE a = 1 AND «EVERY» x IN c.items SATISFIES x IN [1, 2] END", "EVERY ... SATISFIES")]
-    [InlineData("SELECT * FROM c WHERE «EVERY» x IN c.items SATISFIES ANY y IN x.tags SATISFIES y = 1 END END", "EVERY ... SATISFIES")]
     // A Clause word directly after the collection is a construct, never an AS-less alias.
-    [InlineData("SELECT * FROM c «unnest»", "UNNEST")]
     // A set operation and its ALL or DISTINCT are one construct.
     [InlineData("SELECT * FROM c «UNION ALL» SELECT * FROM d", "UNION")]
     [InlineData("SELECT * FROM c «EXCEPT DISTINCT» SELECT * FROM d", "EXCEPT")]

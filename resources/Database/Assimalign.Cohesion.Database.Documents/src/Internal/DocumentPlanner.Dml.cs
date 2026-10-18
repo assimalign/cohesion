@@ -144,6 +144,10 @@ internal sealed partial class DocumentPlanner
     {
         switch (expression)
         {
+            case OqlQuantifiedExpression quantified:
+                ValidateMetadata(quantified.Collection, alias, storedSource);
+                ValidateMetadata(quantified.Predicate, quantified.Variable == alias ? null : alias, storedSource);
+                break;
             case OqlInExpression or OqlBetweenExpression or OqlLikeExpression or OqlCaseExpression:
                 foreach (var child in PredicateChildren(expression)) { ValidateMetadata(child, alias, storedSource); }
                 break;

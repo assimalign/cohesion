@@ -53,7 +53,8 @@ internal sealed partial class DocumentPlanner
     {
         var logical = CreateLogicalPlan(query, _cancellationToken, _parameters);
         var collection = ResolveCollection(query.Collection, query.Location);
-        return new DocumentPlan(logical, collection, ChooseAccess(query.Predicate, query.Alias, _catalog.GetIndexes(collection.Id, _snapshot)));
+        return new DocumentPlan(logical, collection, ChooseAccess(query.Predicate, query.Alias, _catalog.GetIndexes(collection.Id, _snapshot),
+            query.Unnest.Select(binding => binding.Variable).ToHashSet(StringComparer.Ordinal)));
     }
 
     private static DocumentCreateCollectionPlan PlanCreateCollection(OqlCreateCollectionExpression create)
@@ -136,6 +137,18 @@ internal sealed partial class DocumentPlanner
         var evaluator = new DocumentExpressionEvaluator(query.Alias, parameters, cancellationToken);
         long? limit = evaluator.PagingCount(query.Limit, "LIMIT");
         long offset = evaluator.PagingCount(query.Offset, "OFFSET") ?? 0;
+        var variables = new HashSet<string>(StringComparer.Ordinal);
+        if (query.Alias is not null) { variables.Add(query.Alias); }
+        foreach (var binding in query.Unnest)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (string.IsNullOrEmpty(binding.Variable))
+            { throw new DocumentPlanningException("COHDOC023", ErrorMessages.BindingNameMissing, binding.Location); }
+            if (!variables.Add(binding.Variable))
+            { throw new DocumentPlanningException("COHDOC023", ErrorMessages.BindingNameDuplicate, binding.Location); }
+            Validate(binding.Collection, allowAggregate: false);
+            ValidateMetadata(binding.Collection, query.Alias, DocumentSystemCollections.Find(query.Collection) is null);
+        }
         foreach (var expression in query.Projections.Select(p => p.Expression).Concat(query.GroupBy)
             .Concat(query.OrderBy.Select(o => o.Expression)).Concat(new[] { query.Predicate, query.Having }).OfType<OqlExpression>())
         {
@@ -154,7 +167,7 @@ internal sealed partial class DocumentPlanner
             query.Projections.FirstOrDefault(projection => projection.Alias is not null && projection.Alias == path.Segments[0].Name) is { } projection
                 ? new OqlOrdering(projection.Expression, order.Descending) : order).ToArray();
         query = new OqlSelectExpression(query.Collection, query.Alias, query.Projections, query.Predicate,
-            query.GroupBy, query.Having, ordering, query.IsDistinct, query.IsValue, query.Limit, query.Offset, query.Location);
+            query.GroupBy, query.Having, ordering, query.IsDistinct, query.IsValue, query.Limit, query.Offset, query.Location, query.Unnest);
         bool grouped = query.GroupBy.Count > 0 || query.Projections.Any(projection => ContainsAggregate(projection.Expression)) ||
             (query.Having is not null && ContainsAggregate(query.Having)) || query.OrderBy.Any(order => ContainsAggregate(order.Expression));
         if (query.Predicate is not null)
@@ -192,7 +205,7 @@ internal sealed partial class DocumentPlanner
         foreach (var order in query.OrderBy)
         {
             if (query.IsDistinct && !query.Projections.Any(projection =>
-                EquivalentExpression(projection.Expression, order.Expression, query.Alias)))
+                EquivalentExpression(projection.Expression, order.Expression, query.Alias, UnnestVariables(query))))
             {
                 throw new DocumentPlanningException("COHDOC014", ErrorMessages.DistinctOrderNotProjected, order.Expression.Location);
             }
@@ -202,7 +215,8 @@ internal sealed partial class DocumentPlanner
         return new DocumentLogicalPlan(query, projections, grouped, limit, offset);
     }
 
-    private DocumentAccessPath ChooseAccess(OqlExpression? predicate, string? alias, IReadOnlyList<DocumentIndexMetadata> indexes)
+    private DocumentAccessPath ChooseAccess(OqlExpression? predicate, string? alias, IReadOnlyList<DocumentIndexMetadata> indexes,
+        IReadOnlySet<string>? variables = null)
     {
         var predicates = new List<(string Path, string? LegacyPath, string Operator, object Value)>();
         if (predicate is not null) { Collect(predicate); }
@@ -248,6 +262,7 @@ internal sealed partial class DocumentPlanner
             if (expression is OqlBetweenExpression { Negated: false, Operand: OqlPathExpression rangePath } between &&
                 IsConstant(between.Lower) && IsConstant(between.Upper))
             {
+                if (IsVariablePath(rangePath, variables)) { return; }
                 var rangeEvaluator = new DocumentExpressionEvaluator(alias, _parameters, _cancellationToken);
                 var lower = rangeEvaluator.Evaluate(between.Lower, default);
                 var upper = rangeEvaluator.Evaluate(between.Upper, default);
@@ -272,7 +287,7 @@ internal sealed partial class DocumentPlanner
                 constant = binary.Left;
                 operation = operation switch { ">" => "<", ">=" => "<=", "<" => ">", "<=" => ">=", _ => operation };
             }
-            if (path is null || !IsConstant(constant)) { return; }
+            if (path is null || IsVariablePath(path, variables) || !IsConstant(constant)) { return; }
             var evaluator = new DocumentExpressionEvaluator(alias, _parameters, _cancellationToken);
             var value = evaluator.Evaluate(constant, default);
             string? pathName = IndexPath(path, alias);
@@ -360,7 +375,7 @@ internal sealed partial class DocumentPlanner
 
     internal static bool ContainsAggregate(OqlExpression expression) => expression switch
     {
-        OqlInExpression or OqlBetweenExpression or OqlLikeExpression or OqlCaseExpression => PredicateChildren(expression).Any(ContainsAggregate),
+        OqlQuantifiedExpression or OqlInExpression or OqlBetweenExpression or OqlLikeExpression or OqlCaseExpression => PredicateChildren(expression).Any(ContainsAggregate),
         OqlArrayExpression array => array.Elements.Any(ContainsAggregate),
         OqlObjectExpression obj => obj.Members.Any(member => ContainsAggregate(member.Value)),
         OqlCallExpression call => OqlFunctions.Find(call.Name)?.IsAggregate == true || call.Arguments.Any(ContainsAggregate),
@@ -373,6 +388,10 @@ internal sealed partial class DocumentPlanner
     {
         switch (expression)
         {
+            case OqlQuantifiedExpression quantified:
+                Validate(quantified.Collection, allowAggregate: false);
+                Validate(quantified.Predicate, allowAggregate: false);
+                return;
             case OqlInExpression or OqlBetweenExpression or OqlLikeExpression or OqlCaseExpression:
                 foreach (var child in PredicateChildren(expression)) { Validate(child, allowAggregate); }
                 return;
@@ -411,74 +430,93 @@ internal sealed partial class DocumentPlanner
         }
     }
 
-    private static void ValidateGrouped(OqlExpression expression, OqlSelectExpression query)
+    private static void ValidateGrouped(OqlExpression expression, OqlSelectExpression query, IReadOnlySet<string>? bound = null)
     {
-        if (query.GroupBy.Any(key => EquivalentExpression(key, expression, query.Alias))) { return; }
+        if (expression is OqlPathExpression path && IsVariablePath(path, bound)) { return; }
+        if (query.GroupBy.Any(key => EquivalentExpression(key, expression, query.Alias, UnnestVariables(query)))) { return; }
+        if (expression is OqlQuantifiedExpression quantified)
+        {
+            ValidateGrouped(quantified.Collection, query, bound);
+            var inner = bound is null ? new HashSet<string>(StringComparer.Ordinal) : new HashSet<string>(bound, StringComparer.Ordinal);
+            inner.Add(quantified.Variable);
+            ValidateGrouped(quantified.Predicate, query, inner);
+            return;
+        }
         if (expression is OqlInExpression or OqlBetweenExpression or OqlLikeExpression or OqlCaseExpression)
         {
-            foreach (var child in PredicateChildren(expression)) { ValidateGrouped(child, query); }
+            foreach (var child in PredicateChildren(expression)) { ValidateGrouped(child, query, bound); }
             return;
         }
         if (expression is OqlArrayExpression array)
         {
-            foreach (var element in array.Elements) { ValidateGrouped(element, query); }
+            foreach (var element in array.Elements) { ValidateGrouped(element, query, bound); }
             return;
         }
         if (expression is OqlObjectExpression obj)
         {
-            foreach (var member in obj.Members) { ValidateGrouped(member.Value, query); }
+            foreach (var member in obj.Members) { ValidateGrouped(member.Value, query, bound); }
             return;
         }
         if (expression is OqlCallExpression call)
         {
             if (OqlFunctions.Find(call.Name)?.IsAggregate == true) { return; }
-            foreach (var argument in call.Arguments) { ValidateGrouped(argument, query); }
+            foreach (var argument in call.Arguments) { ValidateGrouped(argument, query, bound); }
             return;
         }
         if (expression is OqlLiteralExpression or OqlMissingExpression or OqlParameterExpression) { return; }
         if (expression is OqlBinaryExpression binary)
         {
-            ValidateGrouped(binary.Left, query);
-            ValidateGrouped(binary.Right, query);
+            ValidateGrouped(binary.Left, query, bound);
+            ValidateGrouped(binary.Right, query, bound);
             return;
         }
-        if (expression is OqlUnaryExpression unary) { ValidateGrouped(unary.Operand, query); return; }
+        if (expression is OqlUnaryExpression unary) { ValidateGrouped(unary.Operand, query, bound); return; }
         throw new DocumentPlanningException("COHDOC001", "An OQL grouped query may only read grouping expressions outside aggregate calls.", expression.Location);
     }
 
-    internal static bool EquivalentExpression(OqlExpression left, OqlExpression right, string? alias) => (left, right) switch
+    internal static HashSet<string> UnnestVariables(OqlSelectExpression query)
+        => query.Unnest.Select(binding => binding.Variable).ToHashSet(StringComparer.Ordinal);
+
+    private static bool IsVariablePath(OqlPathExpression path, IReadOnlySet<string>? variables)
+        => path.Segments.Count > 0 && path.Segments[0].Name is string name && variables?.Contains(name) == true;
+
+    internal static bool EquivalentExpression(OqlExpression left, OqlExpression right, string? alias, IReadOnlySet<string>? variables = null) => (left, right) switch
     {
-        (OqlInExpression a, OqlInExpression b) => a.Negated == b.Negated && EquivalentChildren(a, b, alias),
-        (OqlBetweenExpression a, OqlBetweenExpression b) => a.Negated == b.Negated && EquivalentChildren(a, b, alias),
-        (OqlLikeExpression a, OqlLikeExpression b) => a.Negated == b.Negated && EquivalentChildren(a, b, alias),
+        (OqlQuantifiedExpression a, OqlQuantifiedExpression b) => a.IsEvery == b.IsEvery && a.Variable == b.Variable &&
+            EquivalentExpression(a.Collection, b.Collection, alias, variables) &&
+            EquivalentExpression(a.Predicate, b.Predicate, alias,
+                new HashSet<string>(variables ?? new HashSet<string>(), StringComparer.Ordinal) { a.Variable }),
+        (OqlInExpression a, OqlInExpression b) => (a.Array is null) == (b.Array is null) && a.Negated == b.Negated && EquivalentChildren(a, b, alias, variables),
+        (OqlBetweenExpression a, OqlBetweenExpression b) => a.Negated == b.Negated && EquivalentChildren(a, b, alias, variables),
+        (OqlLikeExpression a, OqlLikeExpression b) => a.Negated == b.Negated && EquivalentChildren(a, b, alias, variables),
         (OqlCaseExpression a, OqlCaseExpression b) => (a.Operand is null) == (b.Operand is null) &&
-            (a.Otherwise is null) == (b.Otherwise is null) && a.Branches.Count == b.Branches.Count && EquivalentChildren(a, b, alias),
-        (OqlPathExpression a, OqlPathExpression b) => PathSegments(a, alias).SequenceEqual(PathSegments(b, alias)),
+            (a.Otherwise is null) == (b.Otherwise is null) && a.Branches.Count == b.Branches.Count && EquivalentChildren(a, b, alias, variables),
+        (OqlPathExpression a, OqlPathExpression b) => IsVariablePath(a, variables) == IsVariablePath(b, variables) && PathSegments(a, alias, variables).SequenceEqual(PathSegments(b, alias, variables)),
         (OqlLiteralExpression a, OqlLiteralExpression b) => DocumentExpressionEvaluator.Compare(a.Value, b.Value) == 0,
         (OqlCallExpression a, OqlCallExpression b) => a.Name == b.Name && a.Arguments.Count == b.Arguments.Count &&
-            a.Arguments.Zip(b.Arguments).All(pair => EquivalentExpression(pair.First, pair.Second, alias)),
+            a.Arguments.Zip(b.Arguments).All(pair => EquivalentExpression(pair.First, pair.Second, alias, variables)),
         (OqlStarExpression, OqlStarExpression) => true,
         (OqlArrayExpression a, OqlArrayExpression b) => a.Elements.Count == b.Elements.Count &&
-            a.Elements.Zip(b.Elements).All(pair => EquivalentExpression(pair.First, pair.Second, alias)),
+            a.Elements.Zip(b.Elements).All(pair => EquivalentExpression(pair.First, pair.Second, alias, variables)),
         (OqlMetaExpression a, OqlMetaExpression b) => a.Member == b.Member,
         (OqlObjectExpression a, OqlObjectExpression b) => a.Members.Count == b.Members.Count &&
             a.Members.Zip(b.Members).All(pair => pair.First.Key == pair.Second.Key &&
-                EquivalentExpression(pair.First.Value, pair.Second.Value, alias)),
+                EquivalentExpression(pair.First.Value, pair.Second.Value, alias, variables)),
         (OqlMissingExpression, OqlMissingExpression) => true,
         (OqlParameterExpression a, OqlParameterExpression b) => a.Name == b.Name,
         (OqlBinaryExpression a, OqlBinaryExpression b) => a.Operator == b.Operator &&
-            EquivalentExpression(a.Left, b.Left, alias) && EquivalentExpression(a.Right, b.Right, alias),
-        (OqlUnaryExpression a, OqlUnaryExpression b) => a.Operator == b.Operator && EquivalentExpression(a.Operand, b.Operand, alias),
+            EquivalentExpression(a.Left, b.Left, alias, variables) && EquivalentExpression(a.Right, b.Right, alias, variables),
+        (OqlUnaryExpression a, OqlUnaryExpression b) => a.Operator == b.Operator && EquivalentExpression(a.Operand, b.Operand, alias, variables),
         _ => false,
     };
 
-    private static IEnumerable<OqlPathSegment> PathSegments(OqlPathExpression path, string? alias)
-        => path.Segments.Skip(alias is not null && path.Segments.Count > 0 && path.Segments[0].Name == alias ? 1 : 0);
+    private static IEnumerable<OqlPathSegment> PathSegments(OqlPathExpression path, string? alias, IReadOnlySet<string>? variables = null)
+        => path.Segments.Skip(!IsVariablePath(path, variables) && alias is not null && path.Segments.Count > 0 && path.Segments[0].Name == alias ? 1 : 0);
 
-    private static bool EquivalentChildren(OqlExpression left, OqlExpression right, string? alias)
+    private static bool EquivalentChildren(OqlExpression left, OqlExpression right, string? alias, IReadOnlySet<string>? variables = null)
     {
         var a = PredicateChildren(left).ToArray();
         var b = PredicateChildren(right).ToArray();
-        return a.Length == b.Length && a.Zip(b).All(pair => EquivalentExpression(pair.First, pair.Second, alias));
+        return a.Length == b.Length && a.Zip(b).All(pair => EquivalentExpression(pair.First, pair.Second, alias, variables));
     }
 }

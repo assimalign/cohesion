@@ -46,7 +46,8 @@ internal static partial class DocumentPlanExecutor
         DocumentPlan plan, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken, string? writeVerb = null)
     {
         var query = plan.Logical.Query;
-        var evaluator = new DocumentExpressionEvaluator(query.Alias, parameters, cancellationToken, writeVerb, operation.TransactionStart);
+        var evaluator = new DocumentExpressionEvaluator(query.Alias, parameters, cancellationToken, writeVerb, operation.TransactionStart,
+            query.Unnest.Count > 0 ? query.Alias ?? query.Collection : null);
         var candidates = await ReadCandidatesAsync(database, operation, plan.Collection, plan.Access, cancellationToken).ConfigureAwait(false);
 
         var matches = new List<DocumentEvaluationContext>();
@@ -59,9 +60,9 @@ internal static partial class DocumentPlanExecutor
             operation.EnsureActive();
             var document = database.ReadDocument(entry);
             using var json = JsonDocument.Parse(document.Content, new JsonDocumentOptions { MaxDepth = 128 });
-            var context = new DocumentEvaluationContext(json.RootElement, entry.Id, entry.Version,
-                query.Projections.Count == 1 && query.Projections[0].Expression is OqlStarExpression ? document.Content : default);
-            if (evaluator.Matches(query.Predicate, context)) { matches.Add(context with { Content = json.RootElement.Clone() }); }
+            var context = new DocumentEvaluationContext(json.RootElement.Clone(), entry.Id, entry.Version,
+                query.Unnest.Count == 0 && query.Projections.Count == 1 && query.Projections[0].Expression is OqlStarExpression ? document.Content : default);
+            CollectMatches(plan.Logical, context, matches, evaluator, operation, cancellationToken);
         }
 
         return ExecuteRows(plan.Logical, matches, evaluator, cancellationToken);
@@ -78,15 +79,74 @@ internal static partial class DocumentPlanExecutor
     private static DatabaseResult ExecuteSystemCollection(DocumentDatabase database, DocumentOperation operation,
         DocumentSystemCollectionPlan plan, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken, string? writeVerb = null)
     {
-        var evaluator = new DocumentExpressionEvaluator(plan.Logical.Query.Alias, parameters, cancellationToken, writeVerb, operation.TransactionStart);
+        var query = plan.Logical.Query;
+        var evaluator = new DocumentExpressionEvaluator(query.Alias, parameters, cancellationToken, writeVerb, operation.TransactionStart,
+            query.Unnest.Count > 0 ? query.Alias ?? query.Collection : null);
         var matches = new List<DocumentEvaluationContext>();
         foreach (var document in DocumentSystemCollections.Enumerate(database, operation.Context.Snapshot, plan.Name, cancellationToken))
         {
             if (PageComplete(plan.Logical, matches.Count)) { break; }
             operation.EnsureActive();
-            if (evaluator.Matches(plan.Logical.Query.Predicate, new DocumentEvaluationContext(document))) { matches.Add(new DocumentEvaluationContext(document)); }
+            CollectMatches(plan.Logical, new DocumentEvaluationContext(document), matches, evaluator, operation, cancellationToken);
         }
         return ExecuteRows(plan.Logical, matches, evaluator, cancellationToken);
+    }
+
+    private static void CollectMatches(DocumentLogicalPlan logical, DocumentEvaluationContext source,
+        List<DocumentEvaluationContext> matches, DocumentExpressionEvaluator evaluator, DocumentOperation operation, CancellationToken cancellationToken)
+    {
+        using var rows = Expand(logical.Query, source, evaluator, operation, cancellationToken).GetEnumerator();
+        // Test the completed window before advancing, including within one source document.
+        while (!PageComplete(logical, matches.Count) && rows.MoveNext())
+        {
+            if (evaluator.Matches(logical.Query.Predicate, rows.Current)) { matches.Add(rows.Current); }
+        }
+    }
+
+    private static IEnumerable<DocumentEvaluationContext> Expand(OqlSelectExpression query, DocumentEvaluationContext source,
+        DocumentExpressionEvaluator evaluator, DocumentOperation operation, CancellationToken cancellationToken)
+    {
+        var pending = new Stack<(DocumentEvaluationContext Row, int Next, JsonElement.ArrayEnumerator Items)>();
+        var row = source;
+        int next = 0;
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            operation.EnsureActive();
+            if (next == query.Unnest.Count) { yield return row; }
+            else
+            {
+                var binding = query.Unnest[next];
+                var value = evaluator.Evaluate(binding.Collection, row);
+                if (value is JsonElement { ValueKind: JsonValueKind.Array } array && array.GetArrayLength() > 0)
+                {
+                    var items = array.EnumerateArray();
+                    items.MoveNext();
+                    pending.Push((row, next + 1, items));
+                    row = row.Bind(binding.Variable, items.Current);
+                    next++;
+                    continue;
+                }
+                if (binding.IsLeft)
+                {
+                    row = row.Bind(binding.Variable, DocumentMissing.Instance);
+                    next++;
+                    continue;
+                }
+            }
+            bool resumed = false;
+            while (pending.TryPop(out var frame))
+            {
+                var items = frame.Items;
+                if (!items.MoveNext()) { continue; }
+                pending.Push((frame.Row, frame.Next, items));
+                row = frame.Row.Bind(query.Unnest[frame.Next - 1].Variable, items.Current);
+                next = frame.Next;
+                resumed = true;
+                break;
+            }
+            if (!resumed) { yield break; }
+        }
     }
 
     // Use the planner's fixed result types, including function, operator and META results.
@@ -103,6 +163,7 @@ internal static partial class DocumentPlanExecutor
         DocumentExpressionEvaluator evaluator, CancellationToken cancellationToken)
     {
         var query = logical.Query;
+        var variables = DocumentPlanner.UnnestVariables(query);
         var output = new List<EvaluatedRow>();
         if (logical.IsGrouped)
         {
@@ -146,7 +207,7 @@ internal static partial class DocumentPlanExecutor
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 row.OrderKeys = query.OrderBy.Select(order => query.IsValue &&
-                    DocumentPlanner.EquivalentExpression(query.Projections[0].Expression, order.Expression, query.Alias)
+                    DocumentPlanner.EquivalentExpression(query.Projections[0].Expression, order.Expression, query.Alias, variables)
                         ? row.Values[0] : evaluator.Evaluate(order.Expression, row.Document, row.Group)).ToArray();
             }
             output.Sort((left, right) =>

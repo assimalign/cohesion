@@ -102,12 +102,11 @@ public sealed class OqlFunctionTests
     }
 
     [Fact(DisplayName = "Cohesion Test [OQL] - Functions: quantified bindings admit function tokens")]
-    public void Parse_QuantifierFunctionBinding_ShouldKeepCapabilityDiagnostic()
+    public void Parse_QuantifierFunctionBinding_ShouldParse()
     {
         // Arrange / Act
-        var diagnostic = new OqlQueryParser().Parse("SELECT ANY type IN c.items SATISFIES type.x END FROM c").Diagnostics.ShouldHaveSingleItem();
+        var statement = new OqlQueryParser().Parse("SELECT ANY type IN c.items SATISFIES type.x END FROM c");
         // Assert
-        diagnostic.Code.ShouldBe("COHDBL001");
-        diagnostic.Message.ShouldNotBeNull().ShouldContain("ANY ... SATISFIES", Case.Sensitive);
+        statement.Diagnostics.ShouldBeEmpty();
     }
 }

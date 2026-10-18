@@ -79,4 +79,6 @@
   <data name="PagingCountInvalid" xml:space="preserve"><value>{0} requires a non-negative integer in the signed 64-bit range.</value></data>
   <data name="IndexPathCount" xml:space="preserve"><value>An index requires between 1 and 32 key paths.</value></data>
   <data name="IndexPathsDuplicate" xml:space="preserve"><value>Index key paths must be distinct.</value></data>
+  <data name="BindingNameMissing" xml:space="preserve"><value>An OQL binding variable requires a nonempty name.</value></data>
+  <data name="BindingNameDuplicate" xml:space="preserve"><value>An OQL binding list cannot repeat a variable name.</value></data>
 </root>

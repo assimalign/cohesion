@@ -32,8 +32,8 @@ public sealed partial class OqlQueryParser
                     var values = new List<OqlExpression>();
                     if (!Take(TokenType.LeftParen))
                     {
-                        _diagnostics.Add(QueryDiagnostics.UnsupportedClause("IN array form", Profile.Language, Span(Previous, Previous)));
-                        break;
+                        left = new OqlInExpression(left, ParseExpression(4), negated, Span(start, Previous));
+                        continue;
                     }
                     do { values.Add(ParseExpression()); } while (!Failed && Take(TokenType.Comma));
                     Expect(TokenType.RightParen, "')'");
@@ -100,6 +100,37 @@ public sealed partial class OqlQueryParser
     private OqlExpression ParsePrimary()
     {
         var start = Current;
+        if ((Is("ANY") || Is("SOME") || Is("EVERY")) &&
+            (IsQuantifierBinding(_position + 1) || Is("ANY") || Is("SOME")))
+        {
+            bool every = Is("EVERY");
+            Advance();
+            string variable = Identifier();
+            Expect("IN");
+            var collection = ParseExpression();
+            var variables = new HashSet<string>(StringComparer.Ordinal) { variable };
+            Lexeme? extraBinding = null;
+            while (!Failed && Current.Type == TokenType.Comma && IsQuantifierBinding(_position + 1))
+            {
+                extraBinding ??= Current;
+                Advance();
+                var nameToken = Current;
+                string name = Identifier();
+                if (!variables.Add(name)) { Error("OQL0010", ErrorMessages.BindingNameDuplicate, nameToken); break; }
+                Expect("IN");
+                ParseExpression();
+            }
+            if (Failed) { return new OqlQuantifiedExpression(variable, collection, new OqlLiteralExpression(null), every, Span(start, Previous)); }
+            if (extraBinding is { } extra)
+            {
+                _diagnostics.Add(QueryDiagnostics.UnsupportedClause("multi-binding quantifier", Profile.Language, Span(extra, extra)));
+                return new OqlQuantifiedExpression(variable, collection, new OqlLiteralExpression(null), every, Span(start, Previous));
+            }
+            Expect("SATISFIES");
+            var predicate = ParseExpression();
+            Expect("END");
+            return new OqlQuantifiedExpression(variable, collection, predicate, every, Span(start, Previous));
+        }
         if (Current.Type == TokenType.Colon || Current.Text == "?")
         {
             Advance();

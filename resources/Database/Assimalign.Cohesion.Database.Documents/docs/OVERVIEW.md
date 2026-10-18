@@ -12,6 +12,9 @@ with matching wire column types; the language [dialect](../../Assimalign.Cohesio
 records the full contract. LIMIT/OFFSET page stored and system queries after grouping, DISTINCT
 and ordering. Counts accept literals or parameters through Int64.MaxValue; invalid values carry
 OQL0007. Column types remain independent of the page, including empty results.
+INNER/LEFT UNNEST expands array elements into scoped rows before WHERE, grouping and paging.
+ANY/SOME/EVERY and array-value IN query arrays without expansion. A star with UNNEST returns
+synthetic objects keyed by variable names; an ordinary star preserves the stored document.
 
 `DocumentDatabaseServer.Create(engine, options)` or `engineBuilder.AddServer(options => ...)`
 serves OQL and document/collection commands on a consumer-supplied listener. Each authenticated

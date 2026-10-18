@@ -54,9 +54,13 @@ Lexical recognition preserves the established vocabulary so rejected constructs 
 | `DELETE` | Yes | `DELETE FROM collection [AS? alias] [WHERE expression]`; keeps the collection and indexes |
 | `OPTIONS` | No | INSERT/UPSERT header element; one COHDBL001 at OPTIONS, including directly after KEY; no TTL or version precondition in T1 |
 | `VALUES` | Yes | One or more parenthesized key/value pairs for INSERT or UPSERT |
-| `FROM` | Yes | Exactly one unqualified collection or reserved `COHESION_SCHEMA` source and optional iteration variable, with or without `AS` |
+| `FROM` | Yes | One collection or reserved `COHESION_SCHEMA` source, optional iteration variable, then ordered UNNEST bindings |
+| `UNNEST` | Yes | Optional INNER; one row per array element, chainable |
+| `LEFT UNNEST` | Yes | Optional OUTER; preserves empty and non-array inputs with a MISSING variable |
 | `WHERE` | Yes | Scalar comparison and Boolean document filtering |
-| `IN` | Yes | Structural membership in a nonempty parenthesized value list, optionally NOT |
+| `ANY ... SATISFIES` | Yes | One array binding; SOME is a synonym |
+| `EVERY ... SATISFIES` | Yes | One array binding; empty arrays satisfy EVERY |
+| `IN` | Yes | Structural membership in a parenthesized list or array value, optionally NOT |
 | `BETWEEN` | Yes | Inclusive same-scalar-kind range, optionally NOT |
 | `LIKE` | Yes | Ordinal string patterns, optionally NOT, with Unicode scalar wildcards and ESCAPE |
 | `CASE` | Yes | Searched and simple conditional expressions, including aggregate arguments |
@@ -72,8 +76,6 @@ Lexical recognition preserves the established vocabulary so rejected constructs 
 | `DROP INDEX` | Yes | One named index in one collection, optional IF EXISTS; ON is required |
 | `SUBQUERY` | No | A nested `SELECT` reports this capability name at the inner keyword, including UPDATE SET/WHERE, DELETE and INSERT/UPSERT VALUES, with or without EXPLAIN |
 | `MERGE` | No (pin) | SQL++ merge; stays a pin with no T1 item lifting it, and #1101 owns it |
-| `UNNEST` | No (pin) | SQL++ array expansion in `FROM`; oql-arrays flips the pin |
-| `EVERY ... SATISFIES` | No (pin) | SQL++ quantified predicate, also opened by `ANY` and `SOME`; oql-arrays flips the pin |
 
 `OqlFunctions.All` is the public, immutable function table consumed by the parser, profile
 and engine. It classifies scalar versus aggregate calls, argument counts and kinds, and static
@@ -86,7 +88,7 @@ argument. Aggregate placement and grouped scalar arguments are validated by the 
 | Name | Arity | Result type | NULL / MISSING rule |
 | --- | --- | --- | --- |
 | META | 0..1 | Metadata members | [#1131](#insert-and-metadata-1131): only .id and .version |
-| COUNT | 1, including * | Int64 | Skip both; * counts documents; empty input gives 0 |
+| COUNT | 1, including * | Int64 | Skip both; * counts input rows; empty input gives 0 |
 | SUM, AVG | 1 | Decimal | Skip both; empty valued input gives NULL |
 | MIN, MAX | 1 | Argument type | Skip both; empty valued input gives NULL |
 | LOWER, UPPER | 1 | String | Propagate |
@@ -142,7 +144,7 @@ COUNT(DISTINCT x) remains one COHDBL001 naming COUNT(DISTINCT). Function-positio
 recognized-unsupported table receive that same single refusal for DISTINCT/ALL:
 ARRAY_AGG(DISTINCT x) and ARRAY_AGG(ALL x) name ARRAY_AGG(DISTINCT) and ARRAY_AGG(ALL).
 ARRAY comprehensions, computed
-member names, IN's array form and path access on constructor results remain deferred.
+member names and path access on constructor results remain deferred.
 Member colons remain delimiters even without whitespace: `{a:DISTINCT}` receives the positional
 capability refusal, while `:distinct` in an operand keeps the parameter-form syntax diagnostic.
 
@@ -192,14 +194,14 @@ a name:
 
 - **Anywhere** (reserved unsupported SQL++ vocabulary): every occurrence except a path segment after a dot or an explicit SELECT-list AS label. All
   are lexer keywords or functions.
-- **Clause** (statements and clauses of other languages, including FETCH, and SQL++ UNNEST):
+- **Clause** (statements and clauses of other languages, including FETCH, NEST and WITHIN):
   the first word of the statement, or directly after the end of an operand. Names, literals,
   parameters, closing delimiters and ASC/DESC end operands. FETCH FIRST is one unsupported
   spelling at FETCH; FIRST is exempt only directly after a FETCH in construct position.
   ALL is an invalid paging count only after an actual LIMIT/OFFSET clause head; path segments
   such as c.fetch and c.limit grant no exemption to a following FIRST or ALL. These words remain
-  identifiers elsewhere. A Clause word cannot be an implicit FROM alias: FROM c unnest
-  reports UNNEST, while FROM c AS unnest keeps it a name. LIMIT and OFFSET execute and are
+  identifiers elsewhere. A Clause word cannot be an implicit FROM alias: FROM c NEST
+  reports NEST, while FROM c AS nest keeps it a name. LIMIT and OFFSET execute and are
   reserved; use quoted names or path segments such as d.limit. SELECT a AS limit still parses.
 - **Statement** (`DEFINE`, `MERGE` and the enabled `UPSERT` coverage entry): only the first word of the
   statement. UPSERT bypasses refusal through OqlClauses.Upsert; its table entry retains contextual
@@ -213,12 +215,12 @@ a name:
   at COHDBL001 without treating positional INTO or KEY as preceding operands. VALUE is reserved for projection and INSERT binding syntax.
 - **Function** (`ELEMENT`, `FLATTEN`, `LISTTOSET`, `STRUCT`, `LIST`, `BAG`, `TYPEOF`, `ARRAY_AGG`, and the deferred REGEXP functions):
   only immediately before `(`. Elsewhere these spellings are ordinary identifiers.
-- **Quantifier**: `EVERY`, `ANY` or `SOME` followed by `name IN` opens a quantified predicate.
-  It is one construct named `EVERY ... SATISFIES` (or `ANY`/`SOME`), up to its `END`. Its binding
-  `IN` is not reported as the `IN` predicate. ODMG's `FOR ALL name IN` and `EXISTS name IN` bind
-  the same way and report `FOR ALL` and `EXISTS`; the `SATISFIES` after them is not reported
-  again. `EVERY` and `SATISFIES` name the construct only there, so an alias such as
-  `FROM c every` still parses.
+- **Quantifiers**: `EVERY`, `ANY` or `SOME` followed by `name IN` opens a supported predicate.
+  The scan skips the binding IN and still scans the collection and SATISFIES expression for
+  unsupported constructs. SOME maps to the ANY capability. ARRAY comprehensions and ANY AND
+  EVERY are each one deferred construct through their matching END, including nested CASE.
+  ODMG's `FOR ALL name IN` and `EXISTS name IN` retain their single refusal. Non-binding ANY
+  and SOME uses remain unsupported. EVERY and SATISFIES remain contextual names elsewhere.
 
 A statement whose first word is unsupported, such as `MERGE INTO c ...`, is one construct:
 the scan reports that word and nothing after it. Each
@@ -306,19 +308,65 @@ does not implicitly map across an array.
 Total ascending order is MISSING < NULL < FALSE < TRUE < number < ordinal string < array <
 object. Descending reverses it; ties retain document identity order. GROUP BY retains
 separate MISSING and NULL keys. COUNT(expr), SUM, AVG, MIN and MAX skip both; COUNT(*)
-counts documents. A MISSING value does not obscure a column's one observed scalar type.
+counts input rows, including expanded UNNEST rows. A MISSING value does not obscure a column's one observed scalar type.
 Result projections and object constructors omit MISSING members and retain explicit null.
 Composite/UNIQUE index keys use the rules documented under Index DDL (#1135).
+
+### Array bindings and quantified predicates (#1136)
+
+`OqlSelectExpression.Unnest` retains ordered public `OqlUnnestExpression` nodes; each has
+Collection, Variable and IsLeft. The SELECT constructor accepts this list. The public
+`OqlQuantifiedExpression` retains Variable, Collection, Predicate and IsEvery; SOME normalizes
+to ANY. A path-headed variable resolves before document fields, with the innermost binding
+winning. Quantifier collections evaluate in the enclosing scope, then SATISFIES adds the
+inner variable. Otherwise an unqualified path addresses the FROM document. The unaliased
+collection name only keys a synthetic star; it does not become an implicit variable.
+The full source name keys an unaliased COHESION_SCHEMA synthetic star too.
+
+The FROM alias and its UNNEST bindings form one list with unique ordinal names. Quantifier
+variables may shadow outer variables and document fields. Duplicate names in one binding
+list give OQL0010; a direct SELECT AST receives COHDOC023. Multi-binding quantifiers remain
+deferred. An omitted UNNEST alias defaults to the final named path step; expressions without
+one require an explicit alias. UNNEST, INNER, LEFT, OUTER, EVERY and SATISFIES are contextual,
+preserving existing fields and AS-less aliases named every or satisfies. END was already
+reserved. ANY and SOME retain their existing reservations. UNNEST in UPDATE/DELETE, FLATTEN calls,
+JOIN, NEST, WITHIN, ANY AND EVERY and ARRAY/FIRST comprehensions remain COHDBL001.
+
+INNER UNNEST emits array elements in order and emits nothing for MISSING, NULL, scalar,
+object or empty-array operands. LEFT UNNEST preserves those inputs with a MISSING binding;
+an actual null array element remains NULL. Chaining expands each preceding tuple. With
+UNNEST, star is a synthetic object keyed by FROM and UNNEST variable names, omitting MISSING.
+Without UNNEST, a lone star retains the original stored value and exact bytes.
+If an array variable matches the implicit source object's member name, the synthetic object
+uses the existing constructor rule: the last non-MISSING member wins. This does not make
+the implicit source name a path variable.
+
+ANY/SOME return TRUE on the first true SQL++ Truth conversion, otherwise FALSE. EVERY returns
+FALSE on the first not-true conversion, otherwise TRUE. NULL and MISSING SATISFIES results
+are not true, so `NOT ANY x IN [NULL] SATISFIES x = 1 END` is TRUE. An empty ANY is FALSE;
+an empty EVERY is TRUE. A MISSING collection gives MISSING; NULL or a non-array gives NULL.
+These rules follow [coll_any.go:41-85](https://github.com/couchbase/query/blob/master/expression/coll_any.go#L41-L85)
+and [coll_every.go:41-87](https://github.com/couchbase/query/blob/master/expression/coll_every.go#L41-L87),
+with non-array handling in [coll_util.go:16-60](https://github.com/couchbase/query/blob/master/expression/coll_util.go#L16-L60),
+superseding the original issue's three-valued element table. IN uses structural equality,
+with a match winning over a NULL element. A MISSING operand on either side gives MISSING;
+a NULL or non-array right operand gives NULL. Cohesion retains NULL for `NULL IN []`,
+diverging from [Couchbase coll_in.go:57-71](https://github.com/couchbase/query/blob/master/expression/coll_in.go#L57-L71).
+Aggregates are forbidden inside UNNEST operands and quantified expressions. META accepts
+only the stored FROM binding; META on an inner variable is an error even if it shadows FROM.
 
 ## Grammar, statement, and expression trees
 
 ```text
 statement    := (query | insert | upsert | update | delete | EXPLAIN (query | insert | upsert | update | delete) | create-collection | drop-collection | create-index | drop-index) [';']
-query        := SELECT [ALL | DISTINCT] select-kind FROM collection [AS? identifier]
+query        := SELECT [ALL | DISTINCT] select-kind from-clause
                 [WHERE expression] [GROUP BY expression (',' expression)*]
                 [HAVING expression] [ORDER BY ordering (',' ordering)*]
                 [LIMIT count [OFFSET count] | OFFSET count [LIMIT count]]
 count        := ['+' | '-'] integer-literal | parameter
+from-clause  := FROM collection [AS? identifier] unnest*
+unnest       := [INNER | LEFT [OUTER]] UNNEST expression [AS? identifier]
+quantified-expression := (ANY | SOME | EVERY) identifier IN expression SATISFIES expression END
 select-kind  := projection (',' projection)* | (VALUE | RAW) expression
 insert       := INSERT INTO collection [AS identifier] write-input
 upsert       := UPSERT INTO collection [AS identifier] write-input
@@ -344,7 +392,7 @@ array        := '[' [expression (',' expression)*] ']'
 ordering     := expression [ASC | DESC]
 path         := identifier ('.' identifier | '[' integer ']' | '[' string ']')*
 presence-test := expression IS [NOT] (NULL | MISSING | VALUED)
-membership   := expression [NOT] IN '(' expression (',' expression)* ')'
+membership   := expression [NOT] IN ('(' expression (',' expression)* ')' | expression)
 range-test   := expression [NOT] BETWEEN expression AND expression
 pattern-test := expression [NOT] LIKE expression [ESCAPE expression]
 case         := CASE [expression] (WHEN expression THEN expression)+ [ELSE expression] END
@@ -399,10 +447,10 @@ inside either bound can still group a Boolean expression. CASE is a primary expr
 
 ### Predicates and CASE (#1127)
 
-OqlInExpression retains a nonempty value list; even `x IN (d.tags)` compares x with the
-whole array as one structural item. The unparenthesized array form `x IN d.tags` stays
-COHDBL001 naming `IN array form` until oql-arrays. A nested SELECT still names SUBQUERY;
-quantified predicates retain one diagnostic at EVERY/ANY/SOME, without reporting their IN.
+OqlInExpression retains either a nonempty Values list or an Array expression; even
+`x IN (d.tags)` compares x with the whole array as one structural item. The array operand
+parses above comparison precedence, so `x IN d.tags AND p` is a conjunction. A nested SELECT
+still names SUBQUERY, including inside SATISFIES.
 The other public nodes are OqlBetweenExpression, OqlLikeExpression and OqlCaseExpression.
 Negated predicates preserve unknown results. Structural equality returns NULL for otherwise equal
 arrays/objects containing NULL, so IN and simple CASE do not match them. A definite structural
@@ -469,6 +517,7 @@ The keyword-disposition corpus covers these identifiers both with and without th
 | `OQL0007` | Invalid LIMIT/OFFSET operand or value; same clause-specific message at parse and plan time, located at the operand |
 | `OQL0008` | Unknown function name, reported once at its name after argument parsing |
 | `OQL0009` | More than 32 index key paths, at the 33rd path |
+| `OQL0010` | A duplicate variable within one FROM/UNNEST or quantifier binding list, at the repeated name |
 
 Every error has an absolute start/end span and source line. End-of-input errors use the source
 length for both offsets. A line breaks at LF, CR, NEL (U+0085), LS (U+2028) or PS (U+2029), and

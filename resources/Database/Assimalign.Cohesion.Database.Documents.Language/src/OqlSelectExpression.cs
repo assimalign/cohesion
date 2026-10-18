@@ -19,10 +19,11 @@ public sealed class OqlSelectExpression : OqlExpression
     /// <param name="limit">The optional maximum row count, as a signed integer literal or parameter.</param>
     /// <param name="offset">The optional number of rows to skip, as a signed integer literal or parameter.</param>
     /// <param name="location">The source span.</param>
+    /// <param name="unnest">The ordered array bindings applied before WHERE.</param>
     public OqlSelectExpression(string collection, string? alias, IReadOnlyList<OqlProjection> projections,
         OqlExpression? predicate, IReadOnlyList<OqlExpression> groupBy, OqlExpression? having,
         IReadOnlyList<OqlOrdering> orderBy, bool isDistinct, bool isValue, OqlExpression? limit = null,
-        OqlExpression? offset = null, Location? location = null) : base(location)
+        OqlExpression? offset = null, Location? location = null, IReadOnlyList<OqlUnnestExpression>? unnest = null) : base(location)
     {
         Collection = collection;
         Alias = alias;
@@ -35,6 +36,7 @@ public sealed class OqlSelectExpression : OqlExpression
         IsValue = isValue;
         Limit = limit;
         Offset = offset;
+        Unnest = unnest ?? [];
     }
 
     /// <summary>Gets whether duplicate projected values are eliminated.</summary>
@@ -46,6 +48,8 @@ public sealed class OqlSelectExpression : OqlExpression
     public string Collection { get; }
     /// <summary>Gets the optional iteration variable.</summary>
     public string? Alias { get; }
+    /// <summary>Gets the array bindings in expansion order.</summary>
+    public IReadOnlyList<OqlUnnestExpression> Unnest { get; }
     /// <summary>Gets the projection expressions in source order.</summary>
     public IReadOnlyList<OqlProjection> Projections { get; }
     /// <summary>Gets the optional document predicate.</summary>

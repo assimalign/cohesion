@@ -100,6 +100,13 @@ internal static class Program
             Check(scalar.Count == 1 && scalar.Columns[0].Name == "value" && scalar.Documents[0].GetInt32() == 3, "RAW scalar");
             var whole = await connection.QueryAsync("SELECT * FROM items", cancellationToken: token);
             Check(whole.IsDocumentQuery && whole.Documents[0].GetProperty("nested")[0].GetInt32() == 1, "whole documents");
+            var unnested = await connection.QueryAsync("SELECT t, COUNT(*) AS n FROM items d UNNEST d.nested t GROUP BY t ORDER BY t", cancellationToken: token);
+            Check(unnested.Count == 2 && unnested[0].IsNull(0) && unnested[1][0] is 1m && unnested[1][1] is 1L, "UNNEST grouped rows");
+            var quantified = await connection.QueryAsync("SELECT ANY x IN nested SATISFIES x = 1 END AS a, EVERY x IN nested SATISFIES x = 1 END AS e, 1 IN nested AS i FROM items", cancellationToken: token);
+            Check(quantified[0][0] is true && quantified[0][1] is false && quantified[0][2] is true, "ANY EVERY array IN");
+            var synthetic = await connection.QueryAsync("SELECT * FROM items d UNNEST d.nested t", cancellationToken: token);
+            Check(synthetic.IsDocumentQuery && synthetic.Documents.Count == 2 && synthetic.Documents[0].GetProperty("d").GetProperty("name").GetString() == "東京" &&
+                synthetic.Documents[0].GetProperty("t").GetInt32() == 1, "UNNEST synthetic documents");
             Check((await connection.QueryAsync("SELECT SUM(score) AS total FROM items HAVING SUM(score) > 0", cancellationToken: token))[0][0] is 3m, "aggregate");
             Check(await connection.ExecuteAsync("CREATE INDEX by_score ON items (score)", cancellationToken: token) == 0, "index create");
             var explained = await connection.QueryAsync("EXPLAIN SELECT score FROM items WHERE score >= 2", cancellationToken: token);
