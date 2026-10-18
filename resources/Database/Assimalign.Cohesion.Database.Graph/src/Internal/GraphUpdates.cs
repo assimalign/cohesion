@@ -270,8 +270,9 @@ internal sealed class GraphUpdates
             object?[]? copy = null;
             for (int i = 0; i < list.Count; i++)
             {
-                var next = Refresh(list[i], nodes, relationships, memo);
-                if (!ReferenceEquals(next, list[i]))
+                var original = list[i];
+                var next = Refresh(original, nodes, relationships, memo);
+                if (!ReferenceEquals(next, original))
                 { copy ??= list.Cast<object?>().ToArray(); copy[i] = next; }
             }
             if (copy is not null) { result = copy; }

@@ -311,7 +311,7 @@ public sealed class GraphUpdateTests
         var db = await engine.CreateDatabaseAsync("graph");
         await using var session = await db.CreateSessionAsync();
         var node = await db.CreateNodeAsync(session, ["P"]);
-        var unchanged = new object?[] { 1L, new ReadOnlyDictionary<string, object?>(new Dictionary<string, object?> { ["k"] = 2L }) };
+        var unchanged = new object?[] { new long[] { 1, 2 }, new ReadOnlyDictionary<string, object?>(new Dictionary<string, object?> { ["k"] = 2L }) };
         var shared = new ReadOnlyDictionary<string, object?>(new Dictionary<string, object?> { ["node"] = node, ["untouched"] = unchanged });
         var bindings = new List<Dictionary<string, object?>>
         {
