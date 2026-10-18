@@ -79,8 +79,9 @@ internal sealed partial class SqlPlanner
                 ? new DatabaseTypeInfo(b.Unknown ? DatabaseType.String : b.Type.Type)
                 : b.Unknown ? new DatabaseTypeInfo(a.Type.Type)
                 : UsingType(a.Type, b.Type, (i + 1).ToString(CultureInfo.InvariantCulture), set, setOperation: true);
-            string? domain = !a.Unknown && !b.Unknown && a.Type.Type == b.Type.Type && a.Type.MaxLength == b.Type.MaxLength &&
-                a.Type.Precision == b.Type.Precision && a.Type.Scale == b.Type.Scale && string.Equals(a.Domain, b.Domain, StringComparison.OrdinalIgnoreCase) ? a.Domain : null;
+            bool sameDomain = string.Equals(a.Domain, b.Domain, StringComparison.OrdinalIgnoreCase);
+            if (!sameDomain) { type = new DatabaseTypeInfo(type.Type); }
+            string? domain = !a.Unknown && !b.Unknown && a.Type.Type == b.Type.Type && sameDomain ? a.Domain : null;
             var candidate = type.Type is DatabaseType.String or DatabaseType.Character
                 ? SqlCollationCandidate.Fold(first.Projections[i].Metadata?.Collation ?? default,
                     second.Projections[i].Metadata?.Collation ?? default) : default;

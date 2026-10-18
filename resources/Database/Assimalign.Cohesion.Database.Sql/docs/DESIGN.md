@@ -2373,8 +2373,12 @@ or predicate pushdown is performed; each reference costs O(body rows).
 SqlPersistedExpression.LoadQuery uses the existing parser and ceiling options. The base-typed
 renderer and SameQuery prove canonical round trips. CREATE serializes bound column references
 with their resolved relation qualifiers and expands projection stars at every level. Merged
-USING values retain their chosen source and coercions. The canonical text and ordered resolved
-call vector preserve those bindings across ADD COLUMN. Rebinding rejects any column identity
+USING values retain their chosen source and coercions. USING facet mismatches add a coercion
+to the unconstrained common type, following PostgreSQL
+`src/backend/parser/parse_clause.c:1680-1700`. For a CHAR modifier relabel the canonical text uses
+`CASE WHEN TRUE THEN source ELSE NULL END`: bare CAST AS CHAR would mean CHAR(1), whereas the
+CASE preserves the complete value and clears only the output modifier. The canonical text and
+ordered resolved call vector preserve those bindings across ADD COLUMN. Rebinding rejects any column identity
 absent from the recorded C: dependencies (COHSQLE033), following PostgreSQL
 `src/backend/rewrite/rewriteDefine.c:61`'s persistence of the transformed tree. A
 ConditionalWeakTable parses once per immutable view; a per-catalog generation cache binds the
@@ -2415,10 +2419,12 @@ lexical scope before restoring the parent, including correlated column projectio
 COLUMN refuses
 changes to type, length, precision or scale for any column a view reads, both in the executor
 and catalog publication (COHSQLD002; PostgreSQL `src/backend/commands/tablecmds.c:15612-15624`).
-CASE and COALESCE preserve a modifier only when all alternatives have the same type and modifier;
+CASE and COALESCE preserve a modifier only when all alternatives have the same type, domain and modifier;
 an absent ELSE or an unconstrained/different argument clears it. NULLIF retains its first
 argument's modifier. Set operands capture complete output descriptors in their own lexical
-scopes, including function calls, and apply the same agreement rule per column (PostgreSQL
+scopes, including function calls, and apply the same agreement rule per column. Identical domains
+survive CASE, COALESCE and sets, including scalar-subquery and function outputs (PostgreSQL
+`src/backend/parser/parse_coerce.c:1360-1363,1658-1660` and
 `src/backend/nodes/nodeFuncs.c:327-336,389-480`, `src/backend/parser/parse_coerce.c:1648-1678`).
 OR REPLACE compares that full contract and may append columns only, following PostgreSQL `src/backend/commands/view.c:266-325`.
 Table/column renames refuse dependencies because this engine stores textual relation names.

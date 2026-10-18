@@ -2,6 +2,7 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Sql.Client;
+using Assimalign.Cohesion.Database.Types;
 using Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
 using Shouldly;
 using Xunit;
@@ -10,6 +11,96 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed partial class SqlViewTests
 {
+    [Theory(DisplayName = "Cohesion Test [Sql] - Views: USING facet coercions remain readable before and after reopen")]
+    [InlineData("VARCHAR(10)", "VARCHAR(20)", "'value'", "value", DatabaseType.String)]
+    [InlineData("NUMERIC(5,2)", "NUMERIC(7,2)", "12.34", "12.34", DatabaseType.Decimal)]
+    [InlineData("NUMERIC(5,2)", "NUMERIC(6,3)", "12.34", "12.34", DatabaseType.Decimal)]
+    [InlineData("CHAR(10)", "VARCHAR(20)", "'value'", "value     ", DatabaseType.Character)]
+    [InlineData("VARCHAR(10)", "CHAR(20)", "'value'", "value", DatabaseType.String)]
+    public async Task Open_UsingDifferentFacets_ShouldRetainUnconstrainedContract(string left, string right, string literal, string expected, DatabaseType type)
+    {
+        // Arrange
+        var storage = new CrashCaptureSqlStorageStrategy();
+        await using (var engine = SqlDatabaseEngine.Create("view-using-facets", new() { StorageStrategy = storage }))
+        {
+            var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+            await using var session = await database.CreateSessionAsync(CancellationToken.None);
+            await ExecuteAsync(session, "CREATE TABLE a (k " + left + ")");
+            await ExecuteAsync(session, "CREATE TABLE b (k " + right + ")");
+            await ExecuteAsync(session, "INSERT INTO a VALUES (" + literal + ")");
+            await ExecuteAsync(session, "INSERT INTO b VALUES (" + literal + ")");
+            await ExecuteAsync(session, "CREATE VIEW v AS SELECT k FROM a JOIN b USING (k)");
+
+            // Act / Assert: creation and the first rebind must agree before persistence too.
+            var column = database.Catalog.Views.ShouldHaveSingleItem().Columns.ShouldHaveSingleItem();
+            column.Type.Type.ShouldBe(type);
+            column.Type.MaxLength.ShouldBeNull();
+            column.Type.Precision.ShouldBeNull();
+            column.Type.Scale.ShouldBeNull();
+            var row = (await RowsAsync(session, "SELECT k FROM v")).ShouldHaveSingleItem();
+            System.Convert.ToString(row[0], System.Globalization.CultureInfo.InvariantCulture).ShouldBe(expected);
+        }
+
+        // Act
+        await using var reopened = SqlDatabaseEngine.Create("view-using-facets", new() { StorageStrategy = storage.CaptureDurableImages() });
+        var restored = await reopened.OpenDatabaseAsync("db", CancellationToken.None);
+        await using var reader = await restored.CreateSessionAsync(CancellationToken.None);
+        var rows = await RowsAsync(reader, "SELECT k FROM v");
+        var metadata = await RowsAsync(reader, "SELECT CHARACTER_MAXIMUM_LENGTH, NUMERIC_PRECISION, NUMERIC_SCALE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'v'");
+
+        // Assert
+        System.Convert.ToString(rows.ShouldHaveSingleItem()[0], System.Globalization.CultureInfo.InvariantCulture).ShouldBe(expected);
+        metadata.ShouldHaveSingleItem().ShouldBe([null, null, null]);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - Views: branch facets require matching domains and identical domains survive")]
+    [InlineData("CASE WHEN id = 1 THEN CAST(id AS amount) ELSE CAST(id AS {0}) END")]
+    [InlineData("COALESCE(CAST(id AS amount), CAST(id AS {0}))")]
+    [InlineData("CAST(id AS amount) AS y FROM t UNION SELECT CAST(id AS {0})")]
+    [InlineData("CASE WHEN id = 1 THEN (SELECT CAST(u.id AS amount) FROM t u WHERE u.id = t.id) ELSE (SELECT CAST(u.id AS {0}) FROM t u WHERE u.id = t.id) END")]
+    [InlineData("COALESCE(domain_value(id), CAST(id AS {0}))")]
+    public async Task Open_BranchDomains_ShouldRetainOnlyAgreedIdentityAndFacets(string projection)
+    {
+        // Arrange
+        var storage = new CrashCaptureSqlStorageStrategy();
+        await using (var engine = SqlDatabaseEngine.Create("view-branch-domains", new() { StorageStrategy = storage }))
+        {
+            var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+            await using var session = await database.CreateSessionAsync(CancellationToken.None);
+            await SeedAsync(session);
+            await ExecuteAsync(session, "CREATE DOMAIN amount AS NUMERIC(5,2)");
+            await ExecuteAsync(session, "CREATE DOMAIN other_amount AS NUMERIC(5,2)");
+            await ExecuteAsync(session, "CREATE FUNCTION domain_value(x INT) RETURNS amount IMMUTABLE RETURN CAST(x AS amount)");
+            foreach (string target in new[] { "amount", "other_amount", "NUMERIC(5,2)" })
+            {
+                string view = target == "amount" ? "same_domain" : target == "other_amount" ? "other_domain" : "base_type";
+                string body = string.Format(System.Globalization.CultureInfo.InvariantCulture, projection, target);
+                await ExecuteAsync(session, "CREATE VIEW " + view + " AS SELECT " + body + " AS y FROM t");
+                var column = System.Linq.Enumerable.Single(database.Catalog.Views, item => item.Name == view).Columns.ShouldHaveSingleItem();
+                column.DomainName.ShouldBe(target == "amount" ? "amount" : null);
+                (await RowsAsync(session, "SELECT NUMERIC_PRECISION, NUMERIC_SCALE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = '" + view + "'"))
+                    .ShouldHaveSingleItem().ShouldBe(target == "amount" ? [5L, 2L] : [null, null]);
+                (await RowsAsync(session, "SELECT * FROM " + view)).Count.ShouldBe(3);
+            }
+        }
+
+        // Act
+        await using var reopened = SqlDatabaseEngine.Create("view-branch-domains", new() { StorageStrategy = storage.CaptureDurableImages() });
+        var restored = await reopened.OpenDatabaseAsync("db", CancellationToken.None);
+        await using var reader = await restored.CreateSessionAsync(CancellationToken.None);
+        var metadata = await RowsAsync(reader, "SELECT TABLE_NAME, NUMERIC_PRECISION, NUMERIC_SCALE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME IN ('same_domain', 'other_domain', 'base_type') ORDER BY TABLE_NAME");
+
+        // Assert
+        metadata.Count.ShouldBe(3);
+        metadata[0].ShouldBe(["base_type", null, null]);
+        metadata[1].ShouldBe(["other_domain", null, null]);
+        metadata[2].ShouldBe(["same_domain", 5L, 2L]);
+        foreach (string view in new[] { "same_domain", "other_domain", "base_type" })
+        {
+            (await RowsAsync(reader, "SELECT * FROM " + view)).Count.ShouldBe(3);
+        }
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sql] - Views: capturing full set operand metadata retains identical domain identities")]
     [InlineData("CAST(id AS positive)")]
     [InlineData("domain_value(id)")]

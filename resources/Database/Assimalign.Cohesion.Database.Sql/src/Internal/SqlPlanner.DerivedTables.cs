@@ -26,7 +26,7 @@ internal sealed partial class SqlPlanner
             _ => null,
         };
         return new(candidate, source, expression is null ? null : evaluator!.OutputTypeInfo(expression),
-            source?.DomainName ?? (declared is { IsDomain: true } ? declared.Name : null));
+            source?.DomainName ?? (declared is { IsDomain: true } ? declared.Name : expression is null ? null : evaluator!.OutputDomainName(expression)));
     }
 
     private SqlRelationSource BindDerivedTable(SqlDerivedTableReference derived, SqlSelectExpression? owner)

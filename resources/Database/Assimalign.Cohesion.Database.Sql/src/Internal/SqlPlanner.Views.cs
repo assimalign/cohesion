@@ -10,6 +10,7 @@ using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Catalog.Internal;
 using Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
@@ -149,7 +150,8 @@ internal sealed partial class SqlPlanner
         foreach (var column in select.Columns)
         {
             if (column.Expression is SqlColumnReferenceExpression projected && column.Alias is null &&
-                binding.Edits.TryGetValue(projected.Location!.Start, out var rendered) && rendered.Text.StartsWith("CAST(", StringComparison.Ordinal))
+                binding.Edits.TryGetValue(projected.Location!.Start, out var rendered) &&
+                (rendered.Text.StartsWith("CAST(", StringComparison.Ordinal) || rendered.Text.StartsWith("CASE ", StringComparison.Ordinal)))
             { binding.Edits[projected.Location.Start] = (rendered.Length, rendered.Text + " AS " + SqlObjectIdentity.Quote(projected.ColumnName)); }
             if (column.Expression is not SqlStarExpression star) { continue; }
             var names = new List<string>();
@@ -209,6 +211,10 @@ internal sealed partial class SqlPlanner
         string RenderValue(SqlBoundExpression value) => value switch
         {
             SqlBoundColumn column => RenderViewColumn(column.Ordinal, columns, bindings, relation, scope, merged: false),
+            // A CHAR typmod relabel must keep every character. Bare CAST AS CHAR
+            // means CHAR(1); this equivalent CASE clears only the output modifier.
+            SqlBoundCast { SourceType: DatabaseType.Character, Target.Storage: { Type: DatabaseType.Character, MaxLength: null } } cast
+                => "CASE WHEN TRUE THEN " + RenderValue(cast.Operand) + " ELSE NULL END",
             SqlBoundCast cast => "CAST(" + RenderValue(cast.Operand) + " AS " + cast.TargetText + ")",
             _ => throw ViewError(ErrorMessages.ViewRoundTrip),
         };
