@@ -381,6 +381,8 @@ With UNNEST each stored document is cloned once and shared across its expanded r
 Without UNNEST, WHERE reads the borrowed root and only matching documents are cloned;
 no expansion iterator or stack is created. Path navigation keeps the root as a JsonElement
 and consults variable frames only when bindings exist, avoiding a boxed root per path.
+The selective-scan allocation regression uses 10,000 documents and a bound measured on
+the pre-UNNEST base; a separate path regression permits only leaf-value allocations.
 Synthetic stars have a fixed object result type, so unsorted, ungrouped, non-DISTINCT LIMIT
 queries stop expansion and projection at the completed window. Constant array and object
 constructors cache their owned JSON per evaluator and result-depth limit. Path navigation
