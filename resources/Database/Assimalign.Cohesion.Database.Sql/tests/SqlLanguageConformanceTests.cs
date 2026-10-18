@@ -41,8 +41,8 @@ public sealed class SqlLanguageConformanceTests
     {
         // The profile drives enumeration. A newly advertised clause cannot silently escape this test.
         var cases = CreateCases();
-        // #1121 adds SET NULL, SET DEFAULT and NO ACTION beside RESTRICT: exactly three over #1107's 39.
-        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(42);
+        // #1030 adds CREATE SCHEMA and DROP SCHEMA: exactly two over #1121's 42.
+        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(44);
         RequireExecutionCases(SqlLanguageProfile.Instance.Clauses, cases);
         cases.Keys.Except(SqlLanguageProfile.Instance.Clauses).ShouldBeEmpty("Cases must describe the current profile.");
 
@@ -559,6 +559,22 @@ public sealed class SqlLanguageConformanceTests
                 (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "SELECT * FROM t;")))
                     .Message.ShouldContain("does not exist", Case.Sensitive);
                 (await ExecuteAsync(session, "DROP TABLE IF EXISTS t;")).Status.ShouldBe(DatabaseResultStatus.Success);
+            }),
+        [SqlClauses.CreateSchema] = new("CREATE SCHEMA sales;", [],
+            expression => expression is SqlCreateSchemaExpression,
+            async (session, _) =>
+            {
+                session.Database.Catalog.Namespaces.ShouldContain(schema => schema.Name == "sales");
+                await ExecuteAsync(session, "CREATE TABLE sales.orders(id INT);");
+                await ExpectRowsAsync(session, "SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = 'sales';", [["sales"]]);
+            }),
+        [SqlClauses.DropSchema] = new("DROP SCHEMA sales CASCADE;", ["CREATE SCHEMA sales;", "CREATE TABLE sales.orders(id INT);"],
+            expression => expression is SqlDropSchemaExpression { Cascade: true },
+            async (session, _) =>
+            {
+                session.Database.Catalog.Namespaces.ShouldNotContain(schema => schema.Name == "sales");
+                session.Database.Catalog.TryGetTable("sales", "orders", out var droppedTable).ShouldBeFalse();
+                await ExecuteAsync(session, "DROP SCHEMA IF EXISTS sales;");
             }),
         [SqlClauses.CreateIndex] = new("CREATE UNIQUE INDEX ix_name ON t(name);", _seed,
             expression => expression is SqlCreateIndexExpression { IsUnique: true },

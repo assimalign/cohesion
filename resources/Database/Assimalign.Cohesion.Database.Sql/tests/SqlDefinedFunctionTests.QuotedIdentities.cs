@@ -61,6 +61,8 @@ public sealed partial class SqlDefinedFunctionTests
         await using (var engine = await seed.BuildAsync(CancellationToken.None))
         {
             await using var session = await SessionAsync(engine);
+            await ExecuteAsync(session, "CREATE SCHEMA a");
+            await ExecuteAsync(session, "CREATE SCHEMA \"a.b\"");
             if (setup is not null) { await ExecuteAsync(session, setup); }
             await ExecuteAsync(session, actualSql);
             var database = await engine.OpenDatabaseAsync("functions", CancellationToken.None);

@@ -157,7 +157,7 @@ public sealed partial class SqlCatalog
     }
 
     /// <summary>
-    /// Captures the table directory, index descriptions, and default collation atomically.
+    /// Captures namespaces, the table directory, index descriptions, and default collation atomically.
     /// </summary>
     /// <returns>A read-only capture unaffected by later catalog publications.</returns>
     /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
@@ -166,7 +166,7 @@ public sealed partial class SqlCatalog
         lock (_sync)
         {
             ThrowIfOffline();
-            return new SqlCatalogSnapshot(_tables.Values.Select(slot => slot.Table), _indexes.Values.Select(slot => slot.Index), _defaultCollation, _functions.Values.Select(slot => slot.Value), _domains.Values.Select(slot => slot.Value));
+            return new SqlCatalogSnapshot(_tables.Values.Select(slot => slot.Table), _indexes.Values.Select(slot => slot.Index), _defaultCollation, _functions.Values.Select(slot => slot.Value), _domains.Values.Select(slot => slot.Value), _namespaces.Values.Select(slot => slot.Value));
         }
     }
 
@@ -1292,6 +1292,10 @@ public sealed partial class SqlCatalog
 
             switch (kind)
             {
+                case namespaceRecordKind:
+                    LoadNamespace(reader.ReadString(out _), (unit.PageId, unit.SlotIndex));
+                    if (!reader.IsAtEnd) { throw new SqlCatalogException(ErrorMessages.NamespaceRecordMalformed); }
+                    break;
                 case SqlReclamationRecord.Kind:
                     var intent = SqlReclamationRecord.Decode(ref reader);
                     if (!_pendingReclamations.TryAdd(intent.ObjectId, (unit.PageId, unit.SlotIndex))) { throw new System.IO.InvalidDataException(); }

@@ -1,5 +1,9 @@
 # Assimalign.Cohesion.Database.Sql.Schema — Overview
 
+Code-first objects are provisioned into the SQL namespace `dbo`. SQL `CREATE SCHEMA` creates
+other namespaces for SQL-authored objects; builders have no namespace-targeting option. A
+compiled schema's name identifies ownership independently of a table's SQL namespace (#1030).
+
 SQL's thin schema package provides one-step `SqlSchema.Compile`, the lower-level
 `SqlSchema.Create` with the opaque declaration it returns and its own `Compile()`, the
 sealed declaration builders, the standalone `SqlCompiledSchema` (format

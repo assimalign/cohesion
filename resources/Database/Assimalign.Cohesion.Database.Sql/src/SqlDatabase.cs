@@ -307,6 +307,8 @@ public sealed class SqlDatabase : DatabaseInstance
         // synchronously and instance construction is a synchronous path.
         _catalog.SetRecordSpaceFormatVersionAsync(SqlRowCodec.RecordSpaceFormatVersion)
             .AsTask().GetAwaiter().GetResult();
+        _catalog.CreateSchemaAsync(new SqlCatalogNamespace(SqlNamespaces.DefaultName))
+            .AsTask().GetAwaiter().GetResult();
     }
 
     /// <summary>

@@ -127,8 +127,12 @@ internal sealed partial class SqlPlanExecutor
                 return await ExecuteDeleteAsync(delete, statement, cancellationToken).ConfigureAwait(false);
             case SqlCreateTablePlan create:
                 return await ExecuteCreateTableAsync(create, statement, cancellationToken).ConfigureAwait(false);
+            case SqlCreateSchemaPlan createSchema:
+                return await ExecuteCreateSchemaAsync(createSchema, statement, cancellationToken).ConfigureAwait(false);
             case SqlDropTablePlan drop:
                 return await ExecuteDropTableAsync(drop, statement, cancellationToken).ConfigureAwait(false);
+            case SqlDropSchemaPlan dropSchema:
+                return await ExecuteDropSchemaAsync(dropSchema, statement, cancellationToken).ConfigureAwait(false);
             case SqlCreateIndexPlan createIndex:
                 return await ExecuteCreateIndexAsync(createIndex, statement, cancellationToken).ConfigureAwait(false);
             case SqlDropIndexPlan dropIndex:
@@ -913,6 +917,7 @@ internal sealed partial class SqlPlanExecutor
 
     private async Task<DatabaseResult> ExecuteCreateTableAsync(SqlCreateTablePlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
+        SqlNamespaces.Require(_catalog, plan.Schema);
         if (plan.IfNotExists && _catalog.TryGetTable(plan.Schema, plan.Name, out _))
         {
             // A provisioner compensates every successful step. An object created
@@ -984,7 +989,7 @@ internal sealed partial class SqlPlanExecutor
 
     private async Task<DatabaseResult> ExecuteDropTableAsync(SqlDropTablePlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
-        if (!_catalog.TryGetTable(plan.Schema, plan.Name, out var table))
+        if (SqlNamespaces.Find(_catalog, plan.Schema) is null || !_catalog.TryGetTable(plan.Schema, plan.Name, out var table))
         {
             if (plan.IfExists)
             {

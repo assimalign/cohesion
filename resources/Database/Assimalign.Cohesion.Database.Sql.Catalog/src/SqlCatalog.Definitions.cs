@@ -226,8 +226,10 @@ public sealed partial class SqlCatalog
             using var transaction = _storage.BeginTransaction();
             var location = _storage.InsertRow(transaction, record);
             CommitCatalogChange(transaction, publication: publication, actualObject: actualObject,
+                createsObject: value is SqlCatalogNamespace,
                 parameterTypes: value is SqlCatalogFunction function ? function.ParameterTypes : null);
             directory.Add(key, new DefinitionSlot<T>(value, location));
+            if (value is SqlCatalogNamespace) { _namespaceCapture = null; }
         }
         return default;
     }

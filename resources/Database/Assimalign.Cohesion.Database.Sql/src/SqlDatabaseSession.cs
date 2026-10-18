@@ -256,7 +256,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         {
             try
             {
-                if (request.Statement.SqlExpression is SqlDropTableExpression)
+                if (request.Statement.SqlExpression is SqlDropTableExpression or SqlDropSchemaExpression)
                 {
                     _database.TableReclamation.Request();
                 }
@@ -319,7 +319,8 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
     private async ValueTask<DatabaseResult> ExecuteMetadataStatementAsync(SqlQueryRequest request, CancellationToken cancellationToken, SqlCatalogScriptPublication? scriptReceipt)
     {
         using var metadata = _database.DdlInterlock.EnterMetadata(_database.Name.ToString(), request.Statement.SqlExpression
-            is SqlCreateFunctionExpression or SqlDropFunctionExpression or SqlCreateDomainExpression or SqlDropDomainExpression);
+            is SqlCreateFunctionExpression or SqlDropFunctionExpression or SqlCreateDomainExpression or SqlDropDomainExpression
+                or SqlCreateSchemaExpression or SqlDropSchemaExpression);
         return await ExecuteStatementCoreAsync(request, cancellationToken, scriptReceipt).ConfigureAwait(false);
     }
 

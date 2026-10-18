@@ -18,12 +18,25 @@ internal sealed partial class SqlSchemaProvisioner
             return;
         }
         var tables = new SortedSet<ulong>();
+        string referenceSchema = request.Statement.SqlExpression switch
+        {
+            SqlCreateTableExpression create => create.Table.SchemaName ?? SqlPlanner.DefaultSchema,
+            SqlAlterTableExpression alter => alter.Table.SchemaName ?? SqlPlanner.DefaultSchema,
+            _ => SqlPlanner.DefaultSchema,
+        };
         foreach (var reference in References(request.Statement.SqlExpression))
         {
-            if (_catalog.TryGetTable(reference.SchemaName ?? SqlPlanner.DefaultSchema, reference.TableName, out var table)
+            if (_catalog.TryGetTable(reference.SchemaName ?? referenceSchema, reference.TableName, out var table)
                 && migration.Tables.Contains(table.ObjectId))
             {
                 tables.Add(table.ObjectId);
+            }
+        }
+        if (request.Statement.SqlExpression is SqlDropSchemaExpression drop)
+        {
+            foreach (var table in _catalog.Tables.Where(table => table.Schema.Equals(drop.Name, System.StringComparison.OrdinalIgnoreCase)))
+            {
+                if (migration.Tables.Contains(table.ObjectId)) { tables.Add(table.ObjectId); }
             }
         }
         if (tables.Count == 0)

@@ -265,6 +265,7 @@ public sealed class SqlJoinWireTests
 
     private static async Task SeedAsync(SqlConnection connection)
     {
+        await connection.ExecuteAsync("CREATE SCHEMA usr", cancellationToken: SqlClientTestHarness.Timeout());
         await connection.ExecuteAsync("CREATE TABLE usr.Users (Id INT PRIMARY KEY, FirstName TEXT, LastName TEXT)",
             cancellationToken: SqlClientTestHarness.Timeout());
         await connection.ExecuteAsync("CREATE TABLE usr.UsersProfile (Id INT PRIMARY KEY, UserId INT REFERENCES usr.Users(Id), Email TEXT)",

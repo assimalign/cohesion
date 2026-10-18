@@ -64,7 +64,7 @@ nullable definitions and DEFAULT; retaining the type and NOT NULL preserves gene
 
 ## Statement matrix
 
-With FETCH and TOP (#1107) and the SET NULL, SET DEFAULT and NO ACTION delete actions (#1121), the profile measures **42 of 54 declared clauses** against the live SQL engine.
+With CREATE SCHEMA and DROP SCHEMA (#1030), the profile measures **44 of 56 declared clauses** against the live SQL engine.
 Phase 22 measured 33 of 49.
 The earlier 32/48 figure included `JOIN`, `GROUP BY`, `HAVING`, and `SUBQUERY`,
 removed in Phase 12e (#1019–#1021), plus a no-op `CAST` removed in Phase 13.
@@ -101,6 +101,8 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `CREATE TABLE` | Supported | Identity columns use GENERATED ALWAYS/BY DEFAULT AS IDENTITY or the SQL Server IDENTITY alias (see identity contract above). `IF NOT EXISTS`, column definitions with parameterized types, `COLLATE <name>`, `NOT NULL`/`NULL`, `DEFAULT <expression>`, column and table `PRIMARY KEY`, `REFERENCES`/`FOREIGN KEY`, `CHECK`, and `UNIQUE`; optional `CONSTRAINT <name>` |
 | `ALTER TABLE` | Supported subset, measured | ADD/DROP COLUMN and ADD/DROP CONSTRAINT execute. Full-definition `ALTER COLUMN c <type> [NULL | NOT NULL] [DEFAULT expression]` accepts nullability, length and precision changes that preserve storage type, scale, collation, domain and DEFAULT; tightening and every CHAR length change check existing live values and refuse changes requiring a rewrite. RENAME TO, RENAME [COLUMN], ALTER [COLUMN] SET/DROP DEFAULT and SET/DROP NOT NULL also execute (#1122). PostgreSQL TYPE/SET DATA TYPE and TYPE ... USING remain unsupported. ADD COLUMN nonvolatile defaults backfill old-row reads and apply to subsequent inserts that omit the column; explicit NULL follows nullability. Nullable additions without a default read NULL. NOT NULL additions to populated tables require a non-null default. Invalid defaults reject before mutation; expression defaults follow the fast-default contract below. Column COLLATE persists and governs default comparisons. See the default, atomicity and MVCC contract below (#1023). DROP COLUMN changes only the catalog: it rewrites no row, survives a crash at any point on one definition, and SELECTs running beside it read every value in its own column; see the DROP COLUMN contract below (#1241). |
 | `DROP TABLE` | Supported | `IF EXISTS`; returns after catalog unpublication, with page reclamation asynchronous after older readers finish; the name may be recreated immediately |
+| `CREATE SCHEMA` | Supported subset, measured | `CREATE SCHEMA [IF NOT EXISTS] name` persists an empty SQL namespace; AUTHORIZATION and nested schema elements report named `COHDBL001` errors. Namespace names compare without case and keep their stored spelling. |
+| `DROP SCHEMA` | Supported subset, measured | `DROP SCHEMA [IF EXISTS] name [RESTRICT \| CASCADE]`; omission means RESTRICT. CASCADE removes contained tables/indexes and incoming foreign keys atomically, retaining external child tables. Compiled ownership blocks the operation. `dbo` cannot be dropped. |
 | `CREATE INDEX` | Supported | `CREATE [UNIQUE] INDEX [IF NOT EXISTS] <name> ON <table> (<column> [, ...])` — plain column lists only (no `ASC`/`DESC`, expressions, or `INCLUDE`; each is an additive extension) |
 | `DROP INDEX` | Supported | `DROP INDEX [IF EXISTS] <name> ON <table>` — the `ON <table>` qualifier is required: index names are scoped per table |
 | `CASE` | Supported, measured | Simple and searched forms, multiple branches, `ELSE`, implicit null result, and row expressions; branch expressions remain limited to the executable scalar subset. |
@@ -124,6 +126,51 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `ON UPDATE` | Recognized, not supported | absent from the profile; rejected with `COHDBL001` |
 | `START TRANSACTION` / `BEGIN [WORK\|TRANSACTION]` / `COMMIT [WORK\|TRANSACTION]` / `END` / `ROLLBACK [WORK\|TRANSACTION]` | Supported | Spellings map to the existing BEGIN/COMMIT/ROLLBACK session commands (+0 clauses). Like every SQL statement, a valid spelling without `;` receives informational SQL0100, with no error or warning; with `;` it has no parser diagnostics. START and WORK are contextual, so columns named start/work remain valid. END takes no suffix; without a transaction its COHSQLT002 message names COMMIT. END WORK/TRANSACTION, AND [NO] CHAIN, modes, ROLLBACK [WORK] TO [SAVEPOINT], BEGIN TRAN/named transactions and COMMIT PREPARED stay SQL0003. ABORT [WORK\|TRANSACTION], SAVEPOINT, RELEASE, SET TRANSACTION and PREPARE TRANSACTION stay SQL0002 (#1012); TRANSACTION alone is not a statement. |
 | `MERGE`, `TRUNCATE`, `GRANT` | Not in the dialect | `SQL0002` |
+
+## SQL namespaces (#1030)
+
+A SQL schema is a namespace, independent of the compiled code-first schema that owns
+provisioned objects. Every new database persists `dbo` as an ordinary Adhoc namespace;
+SQL refuses its removal with `COHSQLE031` because code-first provisioning remains pinned
+to `dbo`. Sql.Schema builders have no target-namespace setting. Creating another namespace
+does not redirect compiled tables, constraints, indexes, domains or declared migration SQL.
+
+`CREATE TABLE s.t` requires an existing namespace (`COHSQLE028`, PostgreSQL SQLSTATE 3F000).
+Reads and ordinary DML of `missing.t` retain the missing-relation `COHSQLE014`; DROP TABLE
+keeps its missing-table behavior, including the `IF EXISTS` no-op. Unqualified table names
+use `dbo`; an unqualified REFERENCES target uses its child table's namespace. A table created
+as `Sales.t` after `CREATE SCHEMA sales` reports `sales` in TABLES and SCHEMATA.
+INFORMATION_SCHEMA and COHESION_SCHEMA are reserved virtual namespaces: CREATE/DROP SCHEMA
+and CREATE TABLE in either receive `COHSQLE021`, including existence guards.
+
+Duplicate namespaces receive `COHSQLE029` unless IF NOT EXISTS is supplied. RESTRICT on a
+nonempty namespace receives `COHSQLE030`: it cannot be dropped because other objects depend
+on it. CASCADE removes every contained table/index and each external incoming FK in one
+catalog transaction; external tables and their rows survive. Tables referencing an external
+parent disappear without changing that parent. Namespace, table and index compiled ownership
+and external child ownership are checked before commit using the existing ownership diagnostic
+with operation `DROP SCHEMA`. Both schema statements are self-committing DDL and receive
+`COHSQLT003` inside an explicit transaction.
+
+AUTHORIZATION, including the form with no explicit namespace name, is rejected with COHDBL001
+naming AUTHORIZATION. Nested CREATE/GRANT schema elements are rejected with COHDBL001 naming
+schema elements, including with IF NOT EXISTS. SCHEMA and AUTHORIZATION stay contextual;
+ordinary identifiers named schema or authorization retain their quoting and binding behavior.
+
+SQL record-space format **21** adds namespace record kind **15**. Earlier databases whose
+tables only named namespaces are refused without synthesizing records or writing during open.
+Export with the matching old engine, drop and recreate the database, explicitly CREATE SCHEMA
+for each non-dbo namespace, then import. There is no upgrade path. The new format also fences
+older engines, which cannot decode kind 15.
+
+Reference semantics: PostgreSQL `src/backend/parser/gram.y:1164-1168` defaults DROP to RESTRICT;
+`:1578-1629` defines CREATE SCHEMA and rejects elements with IF NOT EXISTS;
+`src/backend/catalog/namespace.c:673-683,3605-3616` distinguishes namespace creation lookup;
+`src/backend/parser/parse_relation.c:1463-1487` supplies missing-relation lookup;
+`src/backend/catalog/dependency.c:1163-1170` supplies dependent-objects wording; and
+`src/backend/catalog/pg_constraint.c:304-324` makes the FK depend on its parent rather than
+making its child table depend on that parent. These semantics are verified in process and
+through SqlDatabaseServer and Sql.Client.
 
 ## Plan descriptions (#1104)
 
@@ -1554,6 +1601,7 @@ conventions, not the complete ISO view layouts. Columns below are listed in
 | Relation | Columns, in order | Rows |
 |---|---|---|
 | `INFORMATION_SCHEMA.TABLES` | `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `TABLE_TYPE` | Stored tables in the current database; `TABLE_TYPE = 'BASE TABLE'` |
+| `INFORMATION_SCHEMA.SCHEMATA` | `CATALOG_NAME`, `SCHEMA_NAME`, `SCHEMA_OWNER`, `DEFAULT_CHARACTER_SET_CATALOG`, `DEFAULT_CHARACTER_SET_SCHEMA`, `DEFAULT_CHARACTER_SET_NAME`, `SQL_PATH` | Persisted namespaces, including empty namespaces and dbo, from the statement's captured catalog. Owner principal, default character set and SQL path are NULL because those SQL facilities are not implemented. |
 | `INFORMATION_SCHEMA.COLUMNS` | `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `COLUMN_NAME`, `ORDINAL_POSITION`, `COLUMN_DEFAULT`, `IS_NULLABLE`, `DATA_TYPE`, `CHARACTER_MAXIMUM_LENGTH`, `CHARACTER_OCTET_LENGTH`, `NUMERIC_PRECISION`, `NUMERIC_PRECISION_RADIX`, `NUMERIC_SCALE`, `DATETIME_PRECISION`, `IS_IDENTITY`, `IDENTITY_GENERATION`, `IDENTITY_START`, `IDENTITY_INCREMENT`, `IDENTITY_MAXIMUM`, `IDENTITY_MINIMUM`, `IDENTITY_CYCLE` | One row per live table column; ordinals start at one and have no gap where a column was dropped. All 19 DATA_TYPE names parse in DDL and CAST; aliases report canonical identity and modifiers. COLUMN_DEFAULT renders resolved temporal and binary literal values with typed prefixes, including defaults declared as plain strings; other defaults retain canonical SQL |
 | `INFORMATION_SCHEMA.TABLE_CONSTRAINTS` | `CONSTRAINT_CATALOG`, `CONSTRAINT_SCHEMA`, `CONSTRAINT_NAME`, `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `CONSTRAINT_TYPE`, `IS_DEFERRABLE`, `INITIALLY_DEFERRED` | Primary keys, unique indexes/constraints, foreign keys, and explicit checks; both deferral fields are `NO` |
 | `INFORMATION_SCHEMA.KEY_COLUMN_USAGE` | `CONSTRAINT_CATALOG`, `CONSTRAINT_SCHEMA`, `CONSTRAINT_NAME`, `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `COLUMN_NAME`, `ORDINAL_POSITION` | One row per primary, unique, or foreign-key column, in constraint order |

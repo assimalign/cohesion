@@ -389,6 +389,7 @@ public sealed class SqlJoinExecutionTests
 
     private static async Task SeedUsersAsync(SqlDatabaseSession session)
     {
+        await ExecuteAsync(session, "CREATE SCHEMA usr;");
         await ExecuteAsync(session, "CREATE TABLE usr.Users (Id INT PRIMARY KEY, FirstName TEXT, LastName TEXT);");
         await ExecuteAsync(session, "CREATE TABLE usr.UsersProfile (Id INT PRIMARY KEY, UserId INT, Email TEXT);");
         await ExecuteAsync(session, "INSERT INTO usr.Users VALUES (1, 'Ada', 'Lovelace'), (2, 'Grace', 'Hopper'), (3, 'Alan', 'Turing');");

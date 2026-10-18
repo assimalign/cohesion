@@ -224,7 +224,7 @@ public sealed class SqlAlterTableExecutionTests
     [InlineData("ALTER TABLE t RENAME TO t", "COHSQLE013", "Table 'dbo.t' already exists.")]
     [InlineData("ALTER TABLE t RENAME a TO a", "COHSQLE013", "Column 'a' already exists on 't'.")]
     [InlineData("ALTER TABLE t RENAME a TO b", "COHSQLE013", "Column 'b' already exists on 't'.")]
-    [InlineData("ALTER TABLE INFORMATION_SCHEMA.t RENAME TO TABLES", "COHSQLE021", "System view 'INFORMATION_SCHEMA.TABLES' is read-only.")]
+    [InlineData("CREATE TABLE INFORMATION_SCHEMA.t(a INT)", "COHSQLE021", "System namespace 'INFORMATION_SCHEMA' is read-only.")]
     public async Task ExecuteAsync_Collision_ShouldLeaveCatalogUnchanged(string sql, string code, string message)
     {
         // Arrange
@@ -233,7 +233,6 @@ public sealed class SqlAlterTableExecutionTests
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await ExecuteAsync(session, "CREATE TABLE t(a INT, b INT)");
         await ExecuteAsync(session, "CREATE TABLE u(a INT)");
-        await ExecuteAsync(session, "CREATE TABLE INFORMATION_SCHEMA.t(a INT)");
         ulong generation = database.Catalog.DdlGeneration;
 
         // Act / Assert
@@ -317,6 +316,7 @@ public sealed class SqlAlterTableExecutionTests
         await using var engine = SqlDatabaseEngine.Create("rename-quoted", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("db", cancellationToken: CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecuteAsync(session, "CREATE SCHEMA \"my schema\"");
         await ExecuteAsync(session, "CREATE TABLE \"my schema\".\"my table\" (\"old name\" INT, label TEXT DEFAULT 'old name', CONSTRAINT ck CHECK (\"my table\".\"old name\" > 0 AND label <> 'old name'))");
         await ExecuteAsync(session, "INSERT INTO \"my schema\".\"my table\" VALUES (1, 'okay')");
 

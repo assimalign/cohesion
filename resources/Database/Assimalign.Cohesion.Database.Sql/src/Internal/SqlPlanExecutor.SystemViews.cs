@@ -45,7 +45,7 @@ internal sealed partial class SqlPlanExecutor
             {
                 Name = plan.Projections[i].Name, Ordinal = i, Type = plan.Projections[i].Type,
                 MaxLength = plan.Projections[i].MaxLength,
-                IsNullable = plan.Projections[i].Expression is SqlCastExpression,
+                IsNullable = plan.Projections[i].IsNullable,
             };
         }
         return new SqlMaterializedResultSet(columns, ApplyRowWindow(projected, plan.Limit, plan.Offset));
@@ -71,6 +71,16 @@ internal sealed partial class SqlPlanExecutor
         // immutable catalog snapshot as the statement, including FK targets.
         var catalog = statement.RequireCatalogSnapshot();
         string database = statement.DatabaseName;
+        if (view.Name == "SCHEMATA")
+        {
+            foreach (var schema in catalog.Namespaces)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                // DatabaseObjectOwner describes compiled ownership, not an SQL principal.
+                yield return [database, schema.Name, null, null, null, null, null];
+            }
+            yield break;
+        }
         foreach (var table in catalog.Tables)
         {
             cancellationToken.ThrowIfCancellationRequested();

@@ -24,6 +24,9 @@ public static class SqlClauses
     /// <summary>A <c>CREATE TABLE</c> statement.</summary>
     public const string CreateTable = "CREATE TABLE";
 
+    /// <summary>A <c>CREATE SCHEMA</c> SQL namespace definition.</summary>
+    public const string CreateSchema = "CREATE SCHEMA";
+
     /// <summary>A generated identity column, including the SQL Server lexical alias.</summary>
     public const string Identity = "IDENTITY";
 
@@ -35,6 +38,9 @@ public static class SqlClauses
 
     /// <summary>A <c>DROP TABLE</c> statement.</summary>
     public const string DropTable = "DROP TABLE";
+
+    /// <summary>A <c>DROP SCHEMA</c> SQL namespace removal.</summary>
+    public const string DropSchema = "DROP SCHEMA";
 
     /// <summary>A <c>DROP INDEX</c> statement.</summary>
     public const string DropIndex = "DROP INDEX";

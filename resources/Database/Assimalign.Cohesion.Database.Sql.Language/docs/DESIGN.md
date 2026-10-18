@@ -133,6 +133,15 @@ the parser implements today. Recognized clauses outside that set produce the sha
 
 ## Why-this-not-that decisions
 
+CREATE/DROP SCHEMA (#1030) have dedicated immutable expression leaves and clause gates;
+SCHEMA dispatch precedes the historical optional-TABLE fallback. SCHEMA and AUTHORIZATION
+match with IsWord and never enter keyword/unsupported-vocabulary tables, preserving persisted
+identifier quoting. AUTHORIZATION and nested schema elements are precisely rejected because
+SQL principals and atomic multi-statement DDL are unavailable. DROP defaults to RESTRICT;
+its CASCADE gate is DropSchema, independent of the referential Cascade clause. DIALECT.md
+and both the completeness and live execution corpora define the supported subset. The shared
+stateless SqlNamespaceNames.Default supplies dbo to runtime provisioning and SDK migration SQL.
+
 Pagination (#1107) normalizes LIMIT, FETCH and the D1 TOP lexical alias into the existing
 Limit/Offset fields and count validator, with a nullable SqlLimitSyntaxKind on SELECT
 so tools and conformance distinguish the syntax family. No extra plan or executor is needed.

@@ -181,6 +181,16 @@ internal static class Program
     {
         engine.TryGetDatabase(DatabaseName, out SqlDatabase? database);
         await using SqlDatabaseSession session = await database!.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync("CREATE SCHEMA native_namespace", cancellationToken: CancellationToken.None);
+        Check("in process: CREATE SCHEMA and SCHEMATA", await RowsAsync(session,
+            "SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = 'native_namespace'"), [["native_namespace"]]);
+        await session.ExecuteAsync("CREATE TABLE native_namespace.t(id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY)", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT INTO native_namespace.t DEFAULT VALUES", cancellationToken: CancellationToken.None);
+        CheckFailure("in process: DROP SCHEMA RESTRICT", await FailureAsync(() => session.ExecuteAsync(
+            "DROP SCHEMA native_namespace", cancellationToken: CancellationToken.None).AsTask()), "COHSQLE030");
+        await session.ExecuteAsync("DROP SCHEMA native_namespace CASCADE", cancellationToken: CancellationToken.None);
+        Check("in process: DROP SCHEMA CASCADE", await RowsAsync(session,
+            "SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = 'native_namespace'"), []);
         await session.ExecuteAsync(
             "INSERT INTO customers (Id, Name, Score, Active, Token, Note, Email) VALUES " +
             "(1, 'Ada Lovelace', 100, TRUE, @first, NULL, 'ada@example.com'), (2, 'Grace Hopper', 200, FALSE, @second, 'admiral', 'grace@example.com')",
@@ -308,6 +318,17 @@ internal static class Program
         });
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         await using SqlConnection connection = await client.ConnectAsync(timeout.Token);
+        await connection.ExecuteAsync("CREATE SCHEMA wire_namespace", cancellationToken: timeout.Token);
+        await connection.ExecuteAsync("CREATE TABLE wire_namespace.t(id INT PRIMARY KEY)", cancellationToken: timeout.Token);
+        await connection.ExecuteAsync("CREATE TABLE namespace_external(pid INT REFERENCES wire_namespace.t(id))", cancellationToken: timeout.Token);
+        Check("over the wire: CREATE SCHEMA and SCHEMATA", await RowsAsync(connection,
+            "SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = 'wire_namespace'", timeout.Token), [["wire_namespace"]]);
+        CheckFailure("over the wire: DROP SCHEMA RESTRICT", await FailureAsync(async () =>
+            await connection.ExecuteAsync("DROP SCHEMA wire_namespace RESTRICT", cancellationToken: timeout.Token)), "COHSQLE030");
+        await connection.ExecuteAsync("DROP SCHEMA wire_namespace CASCADE", cancellationToken: timeout.Token);
+        await connection.ExecuteAsync("INSERT INTO namespace_external VALUES (99)", cancellationToken: timeout.Token);
+        Check("over the wire: CASCADE retains external tables", await RowsAsync(connection,
+            "SELECT pid FROM namespace_external", timeout.Token), [[99]]);
         Check("over the wire: OFFSET FETCH", await RowsAsync(connection, "SELECT Id FROM customers ORDER BY Id OFFSET 1 ROW FETCH NEXT ROW ONLY", timeout.Token), [[2L]]);
         Check("over the wire: OFFSET before LIMIT", await RowsAsync(connection, "SELECT Id FROM customers ORDER BY Id OFFSET 1 LIMIT 1", timeout.Token), [[2L]]);
         Check("over the wire: TOP after sorting", await RowsAsync(connection, "SELECT TOP 1 Id FROM customers ORDER BY Id DESC", timeout.Token), [[2L]]);

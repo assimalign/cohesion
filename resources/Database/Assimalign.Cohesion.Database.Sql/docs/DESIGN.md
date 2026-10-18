@@ -1578,6 +1578,12 @@ binary values. Stored row bytes and canonical DEFAULT text retain their existing
 
 ## Compiled-schema provisioning
 
+Namespace targeting (#1030) remains fixed at dbo for compiled declarations and migration SQL.
+SqlNamespaceNames.Default is the shared spelling used by runtime and SDK rendering. CREATE SCHEMA
+creates a SQL namespace only; a compiled schema's name remains its ownership identity and never
+selects a namespace. dbo is an Adhoc namespace record seeded only by StampNewCatalog, and SQL
+refuses its removal because provisioning requires it. Opening a database seeds or commits nothing.
+
 Provisioning belongs to this model (owner decisions 49 to 58 of 2026-10-09, B1 of
 `docs/programs/DATABASE_ENGINE_EXTENSIBILITY_DESIGN.md`). It has two entry points over one internal
 `SqlSchemaProvisioner` per database: the engine builder completes inline work and reserves deferred
@@ -2024,6 +2030,33 @@ reference clone). This is a behavioral reference; no implementation was copied.
 
 ### Object ownership and the schema package
 
+SQL namespaces (#1030) carry the same DatabaseObjectOwner and OwningSchema as tables and indexes.
+Namespaces created by declared scripts retain that schema's ownership identity; ordinary session
+CREATE SCHEMA creates Adhoc namespaces. Script receipts retain their quoted S: identities.
+They are independent catalog descriptions, never compiled-schema declarations. DROP SCHEMA checks
+namespace ownership, then takes Exclusive object locks with DdlLockOwner in ObjectId order on all
+contained tables and external children whose incoming foreign keys will be removed. It rechecks
+EnsureCanChange and EnsureSameIdentity before publication, naming the operation DROP SCHEMA in
+the existing shared ownership diagnostic. Contained indexes receive the same ownership check.
+Schema DDL enters the definition metadata interlock; concurrent table/index/constraint DDL cannot
+publish into or out of a namespace while the drop set is assembled or locks wait. The interlock
+also covers CREATE TABLE's durable reservation, which by itself reserves no namespace name.
+
+CASCADE delegates the whole multi-record mutation to one SqlCatalog.DropSchemaAsync call, then
+removes live index directories after commit. The session requests reclamation for DROP SCHEMA as
+for DROP TABLE; one durable intent per table survives failure and restart. RESTRICT uses the same
+catalog ObjectsInNamespace enumeration as CASCADE, the extension point for future views (#1124).
+Incoming external FKs are removed while external tables survive, following PostgreSQL's constraint
+dependency direction (src/backend/catalog/pg_constraint.c:304-324). Typed external child ownership
+blocks this metadata change too. SQL namespace checks stay in planning/execution, preserving the
+bare catalog API's independent use. Reads in missing namespaces retain COHSQLE014; creation uses
+COHSQLE028, matching PostgreSQL namespace.c:673-683,3605-3616.
+
+AUTHORIZATION and nested schema elements are rejected with COHDBL001. Atomic nested statements
+would require a separate DDL execution contract because each existing statement self-commits.
+Record-space format 21 has no upgrade reader: export older databases, recreate and explicitly
+CREATE SCHEMA for non-dbo table namespaces before importing. Namespace records are not synthesized.
+
 The area root carries only the model-independent ownership contracts (`DatabaseObjectOwner`,
 `DatabaseObjectLockedException`). `Database.Sql.Schema` owns SQL declarations, the standalone
 `SqlCompiledSchema` with its canonical document and hash, compiled tables/indexes/constraints,
@@ -2070,13 +2103,19 @@ retain COHDBL001.
 
 ## Virtual system relations (C1)
 
-The catalog is the sole data source for six `INFORMATION_SCHEMA` relations and
+The catalog is the sole data source for seven `INFORMATION_SCHEMA` relations and
 five Cohesion extensions. Their complete MVP column matrix is in
 [DIALECT.md](../../Assimalign.Cohesion.Database.Sql.Language/docs/DIALECT.md#system-view-matrix-c1).
 Every row describes an object in the session's current database. The catalog
 name columns contain that database's name; schema qualification continues to
 select a SQL namespace, never another database. `TABLES` lists stored tables as
 `BASE TABLE`; these virtual relations have no catalog table records to list.
+
+SCHEMATA (#1030) reads SqlCatalogSnapshot.Namespaces outside the per-table loop, preserving empty
+namespaces and one row per namespace. It joins through the existing SqlRelationSource seam and
+statement capture; no join operator knows its name. CATALOG_NAME is the statement database;
+SCHEMA_NAME keeps the catalog spelling. SQL owner principal, character set and path columns are
+NULL because those facilities do not execute. This is separate from compiled object ownership.
 
 ### The relation seam and statement snapshot
 
@@ -2387,7 +2426,7 @@ PostgreSQL references: tablecmds.c:3903-4062 (column identity), :4329-4385 (rela
   proof surface — the planner suite asserts an indexed equality seek examines
   O(matches) records while the equivalent scan examines O(table).
 - **Row format: MVCC stamps + object-id-prefixed tuple, in per-object page
-  chains (since record-space format version 3; the current format is 14).**
+  chains (since record-space format version 3; the current format is 21).**
   Every data record is `[writer u64][deleter u64]` — a fixed 16-byte version-stamp header, the
   B+Tree leaf-entry design adopted for the record space — followed by the
   shared tuple codec payload (#854): the owning table's object id, then one
@@ -2425,13 +2464,13 @@ PostgreSQL references: tablecmds.c:3903-4062 (column identity), :4329-4385 (rela
   format, no upgrade path.** The catalog stores the format version of the whole
   data file set, rows and the index trees that ride it (a kind-4 record for
   versions 1–3, a kind-8 record from version 4). The engine reads and writes
-  format 20 only: format 6's stamped rows in per-object page chains whose index keys use the
+  format 21 only: format 6's stamped rows in per-object page chains whose index keys use the
   temporal identity encoding (#1099, below), in index trees of B-tree page format
   2, which order entries by key, entry reference and writer (#1194,
   `Database.Indexing` DESIGN), decoded through each table's physical column
   layout, which the catalog's table record carries (including extension version 3's
   dropped physical ordinals, later domain/ownership/resolved-call fields, and the
-  current format's durable reclamation intents and index owner tags). Earlier versions are history —
+  current format's durable reclamation intents, index owner tags and kind-15 SQL namespaces). Earlier versions are history —
   1 = the pre-MVCC unstamped layout, 2 = stamped rows in the shared page stream,
   3 = per-object chains with the `DateTimeKind` and offset inside temporal keys
   (written through 10.0.0-preview.1), 4 = format 5's rows over index trees of
@@ -4303,7 +4342,7 @@ and add it again" as the only remedy.
   TEXT default, even for old rows that lack the field), `+5` as `5`, and `abc` as
   a column reference reported as catalog damage. The format gate
   (`ThrowIfFormatIsNotCurrent`, see "Format rule") refuses every database not on
-  the current format (14; canonical since 4) before `BindCatalog` runs, so no
+  the current format (21; canonical since 4) before `BindCatalog` runs, so no
   pre-canonical definition is ever bound.
   `BindCatalog` runs after that gate on open and after the format marker is written
   on create; keep that order.

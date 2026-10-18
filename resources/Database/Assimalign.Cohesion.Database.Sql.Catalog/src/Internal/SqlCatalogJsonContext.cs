@@ -7,6 +7,7 @@ namespace Assimalign.Cohesion.Database.Sql.Catalog.Internal;
 [JsonSerializable(typeof(SqlCatalogScript))]
 [JsonSerializable(typeof(SqlCatalogFunction))]
 [JsonSerializable(typeof(SqlCatalogDomain))]
+[JsonSerializable(typeof(SqlCatalogNamespace))]
 internal sealed partial class SqlCatalogJsonContext : JsonSerializerContext
 {
 }

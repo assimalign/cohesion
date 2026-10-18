@@ -11,14 +11,18 @@ using Assimalign.Cohesion.Database.Sql.Language.Internal;
 public sealed partial class SqlQueryParser
 {
     /// <summary>
-    /// Dispatches a CREATE statement on the object keyword after CREATE: INDEX
-    /// (optionally preceded by UNIQUE) parses as CREATE INDEX, everything else as
-    /// CREATE TABLE (the TABLE keyword itself stays optional-tolerant).
+    /// Dispatches CREATE on its object word, including contextual SCHEMA, before the
+    /// historical optional-TABLE fallback.
     /// </summary>
     private SqlQueryExpression ParseCreate(ref TokenLexer lexer)
     {
         var pos = lexer.Current.Position;
         Advance(ref lexer); // consume CREATE
+
+        if (IsWord(ref lexer, "SCHEMA"))
+        {
+            return ParseCreateSchema(ref lexer, pos);
+        }
 
         if (!IsAtEnd(ref lexer) && (IsKeyword(ref lexer, "UNIQUE") || IsKeyword(ref lexer, "INDEX")))
         {
@@ -669,13 +673,18 @@ public sealed partial class SqlQueryParser
     }
 
     /// <summary>
-    /// Dispatches a DROP statement on the object keyword after DROP: INDEX parses
-    /// as DROP INDEX, everything else as DROP TABLE.
+    /// Dispatches DROP on its object word, including contextual SCHEMA, before the
+    /// historical optional-TABLE fallback.
     /// </summary>
     private SqlQueryExpression ParseDrop(ref TokenLexer lexer)
     {
         var pos = lexer.Current.Position;
         Advance(ref lexer); // consume DROP
+
+        if (IsWord(ref lexer, "SCHEMA"))
+        {
+            return ParseDropSchema(ref lexer, pos);
+        }
 
         if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "INDEX"))
         {

@@ -150,7 +150,7 @@ internal static class SqlDefinitionBinder
         if (create.Check is { } predicate)
         {
             var column = new SqlCatalogColumn("VALUE", type.Storage);
-            var table = new SqlCatalogTable(0, "dbo", create.Name, [column]);
+            var table = new SqlCatalogTable(0, SqlPlanner.DefaultSchema, create.Name, [column]);
             SqlPlanExecutor.ValidateCheck(predicate, table, collation, environment, SqlBindingContext.Domain);
             var scope = new SqlExpressionEvaluator([column], null, defaultCollation: collation, functions: environment,
                 bindingContext: SqlBindingContext.Domain);
