@@ -56,7 +56,9 @@ Each logical database owns `graph.dat`, `graph.log` and `graph.bak`, in the dire
 `<RootPath>/<storage name>` when it is file-backed (see "Database names and directories" below).
 All records start with the
 shared 16-byte little-endian writer/deleter transaction stamp. The graph payload's byte 16 is the
-kind, byte 17 is format version 1, and bytes 18–25 are a nonzero unsigned 64-bit identity. Graph
+kind, byte 17 is format version 2, bytes 18–25 are a nonzero unsigned 64-bit identity and bytes
+26–33 hold the entity's increasing revision. Format 1 is refused before record recovery writes,
+with the remedy to recreate the database; no upgrade path exists. Graph
 identities are reserved from the shared storage sequence allocator, so rollback does not recycle
 an identity. Database-local IDs must always be paired with the correct session.
 
@@ -80,8 +82,9 @@ The adjacency B+Tree contains one entry per incident endpoint, keyed by `(node I
 ID)` and pointing to the relationship's packed physical record location `(page ID << 16) | slot`.
 A self-loop has one entry. The relationship record carries both directed endpoints and its type;
 direction/type filtering occurs after the node-prefix seek. Composite keys avoid duplicate-key
-boundary ambiguity after B+Tree splits. A node identity map reconstructed from records at open
-provides constant-time identity lookup followed by a stamped page read.
+boundary ambiguity after B+Tree splits. The identity directory reconstructed at open provides
+constant-time lookup followed by reads along the retained version chain until the snapshot's
+visible record is found.
 
 The diagram shows the references stored by the adjacency and property trees; relationship records
 carry endpoint identities referring to node records.
@@ -105,7 +108,54 @@ Index numeric keys normalize
 integral, decimal and finite floating point values through double conversion. Full scalar comparisons
 filter index candidates using exact reduced numeric fractions across all numeric types, including
 floating operands, so key collisions cannot change equality or lose adjacent large integers.
-All node creation/deletion paths maintain property indexes. Graph has no property-update verb.
+All node creation, replacement and deletion paths maintain property indexes. The sealed
+GraphStore exposes UpdateNodeAsync and UpdateRelationshipAsync; GraphDatabase adds no public
+update verb. Its GQL SET/REMOVE stages use a statement-local working copy, so rows observe earlier
+rows and items evaluate left to right, while publishing one replacement per updated entity at
+statement completion. Later scans, index seeks, traversals and endpoint functions consult that
+working copy. Every binding is refreshed after an update stage, including nested lists/maps/paths;
+updated entities retain read-only label and property collections when returned to callers.
+Refresh traverses shared composites once per stage, memoized by reference identity, copying only
+branches containing touched identities and retaining unchanged lists and maps. Refreshed maps
+remain `ReadOnlyDictionary`. Scalar evaluation resolves entity leaves through the current working
+copy, preserving left-to-right reads without rebuilding composites per row or assignment.
+INSERT reserves stable identities from storage, stages the complete entities, then inserts their
+final working copies once, nodes before relationships. A cascade discards pending relationship
+updates just as explicit relationship deletion does; the affected count includes explicit targets.
+
+Each persisted replacement tombstones the old record and moves every property-index entry or
+both adjacency entries (one for a self-loop) to the new location in one physical bracket.
+The identity directory retains all versions newest first, ordered by the format-2 revision on
+reopen. Older snapshots retain the old records and index entries; rollback removes replacements
+and restores old stamps. Purge reclaims only versions no snapshot can see; reclaimed or reused
+references are discarded during lookup and subsequent publication. The process fixture checks
+committed updates and an in-flight indexed-name update through index seeks and label scans.
+
+SET NULL removes a property; INSERT still stores explicit NULL. Map replacement removes absent
+keys and map merge preserves them. Labels and keys reuse INSERT catalog discovery and resulting
+property-set validation. Type-exact no-ops write no version and count zero. The mutation count is
+created entities plus distinct entities changed at any point, counting an entity created then
+updated once. Restoring an original value later still counts and publishes that entity, preserving
+Snapshot first-updater-wins conflicts. An entity whose assignments were all no-ops skips
+replacement. Row-returning mutations carry the same count over
+the existing ResultComplete frame. EXPLAIN
+describes update stages and their targets without executing them.
+
+Autocommit runs at ReadCommitted and pins its statement snapshot. Every mutation entry point,
+including typed creates/deletes and catalog/schema writes, retakes a ReadCommitted snapshot
+after taking the writer lock. A GQL write then replans against it using the
+already normalized, captured parameter bindings, so queued
+increments serialize. Refresh replaces only the statement view and retains the existing
+snapshot pin: its earlier horizon still protects the newer view from pruning, without writing
+another transaction begin or rollback to the journal. Explicit Snapshot writers retain first-updater-wins. Relationship insertion
+checks latest endpoint existence, so a concurrent endpoint property replacement does not abort it.
+
+Behavior references (consulted, no code copied), relative to C:/Source/repos/neo4j/neo4j:
+`community/cypher/interpreted-runtime/src/main/scala/org/neo4j/cypher/internal/runtime/interpreted/pipes/SetOperation.scala:103-108`
+removes NULL properties; `community/kernel/src/main/java/org/neo4j/kernel/impl/newapi/Operations.java:3116-3119`
+requires both the same value type and equal value for a no-op;
+`community/kernel/src/main/java/org/neo4j/kernel/impl/api/state/EntityStateImpl.java:68-75`
+retains assigned values in transaction state, including a restored original value.
 
 ### Database names and directories
 
@@ -1270,7 +1320,7 @@ followed by those bytes. There is no padding.
 | 5 (`Execute`) | Client → server | GQL string; `int32` parameter count; repeated parameter-name string, `int32` encoded-value byte length, value bytes |
 | 6 (`ResultHeader`) | Server → client | `int32` column count; repeated column-name string and one type byte: DatabaseType in bits 0–6, negotiated composite-column flag in bit 7 |
 | 7 (`ResultRow`) | Server → client | One value per column: unmarked scalar tuple component; marked tag 0 plus scalar, or tag 1 plus little-endian Int32 length and GraphValueCodec component |
-| 8 (`ResultComplete`) | Server → client | `int64` affected count; -1 for a result set |
+| 8 (`ResultComplete`) | Server → client | `int64` affected count; -1 for read-only statements, mutation count for writes, including writes returning rows |
 | 9 (`Transaction`) | Client → server | Reserved legacy identifier; server rejects it with `ProtocolViolation` |
 | 64 (`ExecutePaths`) | Client → server | The same GQL/parameter payload as byte 5, requesting path-shaped results |
 | 65 (`Path`) | Server → client | Ordered node and relationship sequences in the format below |

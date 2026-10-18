@@ -25,3 +25,5 @@ restrictions and invalid index operations use `InvalidOperationException`. The G
 translates these to its session diagnostics (`COHDBG009` for an element too large). Storage integrity failures retain the kernel's
 storage exception vocabulary. See [design](../../DESIGN.md) for the full lifecycle
 and on-disk format.
+
+`UpdateNodeAsync(id, labels, properties, context, cancellationToken)` and `UpdateRelationshipAsync(id, properties, context, cancellationToken)` return a replacement MVCC version even for identical supplied values, or null for an absent identity. GQL filters pure no-op SET assignments before calling storage. Node updates replace the complete labels and properties; relationship updates preserve type and endpoints. Every index and adjacency entry moves to the new physical location. `EnsureIndexFormat` also refuses graph record formats other than 2 before recovery writes.

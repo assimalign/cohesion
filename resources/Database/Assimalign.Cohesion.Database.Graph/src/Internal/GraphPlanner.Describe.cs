@@ -15,6 +15,8 @@ internal sealed partial class GraphPlanner
     {
         GraphPlan => "Match",
         GraphStagePlan => "Stage",
+        GqlSetStage => "Set",
+        GqlRemoveStage => "Remove",
         GraphMatchClausePlan { Optional: true } => "OptionalMatch",
         GraphMatchClausePlan => "Match",
         GraphPathPlan => "ExpandPath",
@@ -32,13 +34,32 @@ internal sealed partial class GraphPlanner
     internal DatabasePlanDescription Describe(GraphPlan plan)
     {
         var nodes = new List<DatabasePlanNode>();
-        bool pipeline = plan.Stages.Any(item => item.Stage is GqlLetStage or GqlForStage or GqlFilterStage or GqlNextStage or GqlReturnStage { IsWith: true }) ||
+        bool pipeline = plan.Stages.Any(item => item.Stage is GqlLetStage or GqlForStage or GqlFilterStage or GqlNextStage or GqlSetStage or GqlRemoveStage or GqlReturnStage { IsWith: true }) ||
             plan.Stages.Select((item, i) => item.Stage is GqlMatchStage && plan.Stages.Take(i).Any(earlier => earlier.Stage is GqlInsertStage or GqlDeleteStage)).Any(value => value) ||
             plan.Stages.Count(item => item.Stage is GqlInsertStage or GqlDeleteStage) > 1;
         if (pipeline)
         {
             Add("Pipeline", null, detail: $"stages={plan.Stages.Count}; writes={plan.Writes}");
-            foreach (var item in plan.Stages) { Append(item.Plan, 0, StageName(item.Stage)); }
+            foreach (var item in plan.Stages)
+            {
+                int stageRoot = nodes.Count;
+                Append(item.Plan, 0, StageName(item.Stage));
+                if (item.Stage is GqlSetStage set)
+                {
+                    foreach (var change in set.Items)
+                    { Add("UpdateEntity", stageRoot, change.Variable, detail: change switch
+                        { GqlSetPropertyItem property => $"set {property.Property} = {GraphProjectionText.Describe(property.Value)}",
+                            GqlSetPropertiesItem map => map.Merge ? "merge properties" : "replace properties",
+                            GqlSetLabelsItem labels => $"add labels {string.Join(",", labels.Labels)}", _ => "set" }); }
+                }
+                if (item.Stage is GqlRemoveStage remove)
+                {
+                    foreach (var change in remove.Items)
+                    { Add("UpdateEntity", stageRoot, change.Variable, detail: change switch
+                        { GqlRemovePropertyItem property => $"remove property {property.Property}",
+                            GqlRemoveLabelsItem labels => $"remove labels {string.Join(",", labels.Labels)}", _ => "remove" }); }
+                }
+            }
         }
         else { Append(plan, null, null); }
         return DatabasePlanDescription.Create(nodes, plan.Warnings);
@@ -131,6 +152,8 @@ internal sealed partial class GraphPlanner
         GqlForStage { IsUnwind: true } => "Unwind",
         GqlForStage => "For",
         GqlInsertStage => "Insert",
+        GqlSetStage => "Set",
+        GqlRemoveStage => "Remove",
         GqlDeleteStage { Detach: true } => "DetachDelete",
         GqlDeleteStage => "Delete",
         GqlReturnStage { IsWith: true } => "With",

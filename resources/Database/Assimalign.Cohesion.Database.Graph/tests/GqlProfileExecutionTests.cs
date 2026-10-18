@@ -85,6 +85,24 @@ public sealed class GqlProfileExecutionTests
                 new("RETURN CASE 1 WHEN 1.0 THEN 'match' ELSE 'other' END", [["match"]]),
                 new("RETURN COALESCE(NULL, 5), NULLIF(42, 42)", [[5L, null]]),
             ],
+            [GqlClauses.Set] =
+            [
+                Mutation("MATCH (a:Person {name:'Alice'}) SET a.age=43", 1,
+                    new ExecutionCase("MATCH (a:Person {name:'Alice'}) RETURN a.age", [[43L]])),
+                Mutation("MATCH (a:Person {name:'Alice'}) SET a:Admin", 1,
+                    new ExecutionCase("MATCH (a:Admin) RETURN a.name", [["Alice"]])),
+                Mutation("MATCH ()-[r:KNOWS]->() SET r.weight=9", 1,
+                    new ExecutionCase("MATCH ()-[r:KNOWS]->() RETURN r.weight", [[9L]])),
+            ],
+            [GqlClauses.Remove] =
+            [
+                Mutation("MATCH (a:Person {name:'Alice'}) REMOVE a.age", 1,
+                    new ExecutionCase("MATCH (a:Person {name:'Alice'}) RETURN a.age", [[null]])),
+                Mutation("MATCH (a:Robot) REMOVE a:Robot", 1,
+                    new ExecutionCase("MATCH (a:Robot) RETURN a.name", [])),
+                Mutation("MATCH ()-[r:KNOWS]->() REMOVE r.weight", 1,
+                    new ExecutionCase("MATCH ()-[r:KNOWS]->() RETURN r.weight", [[null]])),
+            ],
             [GqlClauses.Return] =
             [
                 new("RETURN [10,20,30][-1], {k:{j:1}}.k.j, [1] IN [[1]], [NULL] = [NULL]", [[30L, 1L, true, null]]),
@@ -415,6 +433,8 @@ public sealed class GqlProfileExecutionTests
 
     private static bool UsesClause(string clause, GqlQueryExpression query) => clause switch
     {
+        GqlClauses.Set => query.Stages.Any(stage => stage is GqlSetStage),
+        GqlClauses.Remove => query.Stages.Any(stage => stage is GqlRemoveStage),
         GqlClauses.QuantifiedPath => query.MatchClauses.SelectMany(clause => clause.Paths).SelectMany(PatternPaths).Any(path => path.Relationships.Any(edge => edge.Quantifier is not null) || path.Elements?.Any(element => element is GqlParenthesizedPathPattern { Quantifier: not null }) == true),
         GqlClauses.Explain => query.IsExplain,
         GqlClauses.Match => query.MatchClauses.Any(clause => !clause.Optional),

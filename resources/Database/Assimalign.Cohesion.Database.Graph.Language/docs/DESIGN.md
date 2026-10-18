@@ -86,7 +86,7 @@ flowchart LR
     Executor["Graph executor"] --> Planner
 ```
 
-`GqlQueryExpression.Stages` carries source-ordered MATCH, LET, FILTER, FOR/UNWIND, INSERT/CREATE, DELETE, RETURN/WITH and NEXT nodes. `Segments` splits that list at explicit NEXT boundaries. The original constructors retain a single-segment facade for hand-built ASTs. Stage records retain Cypher spellings for conformance checks; the base constructor is private protected, following the Database concrete-first variant rule.
+`GqlQueryExpression.Stages` carries source-ordered MATCH, LET, FILTER, FOR/UNWIND, INSERT/CREATE, SET, REMOVE, DELETE, RETURN/WITH and NEXT nodes. `Segments` splits that list at explicit NEXT boundaries. The original constructors retain a single-segment facade for hand-built ASTs. Stage records retain Cypher spellings for conformance checks; the base constructor is private protected, following the Database concrete-first variant rule.
 
 The flat single-segment facade carries ordered `GqlMatchClause(Paths, Predicate, Optional)` records, insertion paths, deletion variables,
 a detach flag, expression projections, a `GqlSetQuantifier` (ALL by default), `ReturnStar`, and an optional `GqlCatalogSurface` for dedicated metadata statements.
@@ -122,6 +122,25 @@ same shape, names equal ordinally and chains with the same operands in the same 
 hold for a hand-built tree of any depth. The public chain constructors copy their operand sequence;
 only the parser hands a list it built to a node without copying it.
 
+## SET and REMOVE (#1149)
+
+SET/REMOVE recognize `IS` as a label assignment only immediately after an item target.
+Scalar SET values retain `IS [NOT] LABELED`, including contextual label names such as Graph and Schema.
+
+`GqlSetStage` and `GqlRemoveStage` carry ordered public item variants for scalar properties,
+literal-map replacement/merge and node labels. `SetItems` and `RemoveItems` provide flattened
+inspection facades. ISO sections 13.3 and 13.4 supply property, all-property and label items;
+`+=` and multi-label colon lists are D3 spellings. The parser combines touching `+=` into one
+GQL token; SQL/OQL lexer behavior is unchanged. GRAPH and SCHEMA are contextual label names.
+The private token uses a parser-only spelling and is consumed only by whole-map SET, so it
+cannot become unary addition, property assignment or a quantified path elsewhere.
+Whole-map parameters and expressions remain COHDBL001, as do literal composite properties.
+MERGE with either ON CREATE SET or ON MATCH SET produces exactly one COHDBL001 naming MERGE.
+Leading SET/REMOVE and nested assignment targets are GQL0002. See [DIALECT.md](DIALECT.md#set-and-remove)
+for row ordering, NULL, no-op and count semantics. `GqlUpdateParserTests` pins the AST and
+diagnostics; the live profile corpus covers node properties/labels and relationship properties
+for both clauses, followed by verification reads. EXPLAIN describes each update target.
+
 ## Supported-clause matrix
 
 Only these clauses occur in `GqlLanguageProfile.Clauses`. The larger reserved keyword table is
@@ -150,6 +169,8 @@ The function table advertises the aggregates and core scalar functions listed be
 | `CASE` | Simple and searched CASE, COALESCE and NULLIF case abbreviations | First matching alternative, lazy selected branch; absent ELSE yields NULL |
 | `INSERT` | Scalar value-expression node/path insertion, optionally following a match; a node takes a label conjunction (`:A&B`, `:A:B`), a relationship one type and a directed edge (`-[:T]->`, `<-[:T]-`) | Inserts nodes and relationships transactionally |
 | `CREATE` | Same insertion grammar as `INSERT`; compatibility extension | Same transactional insertion path |
+| `SET` | ISO property assignment, literal-map replacement and node labels with IS or colon; D3 `+=` and repeated-colon labels | Applies items left to right per row, with one published replacement per updated entity per statement |
+| `REMOVE` | Property keys or node labels with IS or colon | Removes keys/labels, ignoring OPTIONAL NULL targets |
 | `DELETE` | Bound node/relationship variables following a match | Refuses deleting a node that still has incident relationships |
 | `DETACH DELETE` | Bound node/relationship variables following a match | Deletes incident relationships with the node in one transaction |
 | `SHOW` | `LABELS`, `RELATIONSHIP TYPES`, `PROPERTY KEYS`, `INDEXES`, or `OBJECT OWNERSHIP`; Cohesion extension | Returns typed, read-only metadata from the session database's catalog snapshot |
@@ -181,6 +202,8 @@ stage        := [OPTIONAL] MATCH match-paths [WHERE predicate]
               | FOR variable IN predicate
               | UNWIND predicate AS variable
               | (INSERT | CREATE) paths
+              | SET set-item (',' set-item)*
+              | REMOVE remove-item (',' remove-item)*
               | [DETACH] DELETE variables
               | WITH projections return-tail [WHERE predicate]
 match-paths  := match-path (',' match-path)*
@@ -224,6 +247,9 @@ primary      := variable ['.' property] | scalar-literal | parameter | labeled |
               | NULLIF '(' predicate ',' predicate ')'
 parameter    := ('$' | '@') (identifier | ASCII-digits)
 properties   := '{' [property ':' predicate (',' property ':' predicate)*] '}'
+set-item     := variable '.' property '=' predicate | variable ('=' | '+=') properties
+              | variable (IS label | ':' label (':' label)*)
+remove-item  := variable '.' property | variable (IS label | ':' label (':' label)*)
 projections  := [DISTINCT | ALL] ('*' | projection (',' projection)*)
 projection   := predicate [AS alias]
 return-tail  := [GROUP BY ('(' ')' | predicate (',' predicate)*)] [ORDER BY sort-item (',' sort-item)*] [paging]
@@ -366,7 +392,7 @@ graph elements. The extension adds no server scope or database selector and chan
 interface. Keywords are case-insensitive and comments and one optional trailing semicolon follow
 the ordinary lexer rules. A statement cannot combine `SHOW` with graph matching, projection or
 mutation. Attempted mutation composition produces `GQL0007`, including verbs such as `SET` and
-`DROP` that are otherwise unsupported. The engine validates direct AST requests too.
+`DROP`. SET executes only as a graph stage. The engine validates direct AST requests too.
 
 The [engine's catalog section](../../Assimalign.Cohesion.Database.Graph/docs/DESIGN.md#catalog-introspection-c2)
 defines ordered result columns, SQL-consistent ownership vocabulary and session snapshot behavior.

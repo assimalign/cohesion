@@ -58,22 +58,22 @@ internal static partial class GraphPlanExecutor
         IReadOnlyList<StoredGraphNode> candidates;
         var anchorNode = shape.Nodes[anchor.NodeIndex].FirstOrDefault(node => node.Variable is { } name && input.ContainsKey(name));
         if (anchorNode?.Variable is { } variable && input[variable] is GraphNode bound)
-        { candidates = database.Store.FindNode(bound.Id.Value, operation.Context.Snapshot) is { } node ? [node] : []; }
+        { candidates = operation.Updates.FindNode(bound.Id.Value) is { } node ? [node] : []; }
         else if (anchor.NodeIndex < shape.Segments.Count && shape.Segments[anchor.NodeIndex] is
             { Quantifier: null, Body.Edge: { Variable: { } edgeVariable } edgePattern } &&
             input.TryGetValue(edgeVariable, out var edgeBinding) && edgeBinding is GraphRelationship boundEdge)
         {
             ulong left = edgePattern.Direction == GqlPatternDirection.Incoming ? boundEdge.To.Value : boundEdge.From.Value;
             var endpoints = new List<StoredGraphNode>(2);
-            if (database.Store.FindNode(left, operation.Context.Snapshot) is { } node) { endpoints.Add(node); }
+            if (operation.Updates.FindNode(left) is { } node) { endpoints.Add(node); }
             if (edgePattern.Direction is GqlPatternDirection.Undirected or GqlPatternDirection.LeftOrRight &&
-                boundEdge.From != boundEdge.To && database.Store.FindNode(boundEdge.To.Value, operation.Context.Snapshot) is { } other)
+                boundEdge.From != boundEdge.To && operation.Updates.FindNode(boundEdge.To.Value) is { } other)
             { endpoints.Add(other); }
             candidates = endpoints;
         }
         else if (anchor.Property is { } property)
-        { candidates = await database.Store.SearchIndexAsync(anchor.Label!, property, anchor.Value!, operation.Context.Snapshot, token).ConfigureAwait(false); }
-        else { candidates = database.Store.GetNodes(anchor.Label, operation.Context.Snapshot); }
+        { candidates = await operation.Updates.SearchIndexAsync(anchor.Label!, property, anchor.Value!, token).ConfigureAwait(false); }
+        else { candidates = operation.Updates.GetNodes(anchor.Label); }
 
         foreach (var candidate in candidates)
         {
@@ -149,7 +149,7 @@ internal static partial class GraphPlanExecutor
                         frontier.Push(state with { Task = end.Repeat with { Count = end.Repeat.Count + 1 } });
                         break;
                     case EdgeTask edgeTask:
-                        var incident = await database.Store.GetIncidentAsync(state.Current.Id.Value, operation.Context.Snapshot, token).ConfigureAwait(false);
+                        var incident = await operation.Updates.GetIncidentAsync(state.Current.Id.Value, token).ConfigureAwait(false);
                         frontier.Push(state with { Task = new IncidentTask(edgeTask, incident, 0) });
                         break;
                     case IncidentTask cursor:
@@ -173,7 +173,7 @@ internal static partial class GraphPlanExecutor
                         // A qualifying 65th edge fails before any target constraints can hide it.
                         if (state.Relationships.Count == 64) { throw new GraphPlanningException("COHDBG004", ErrorMessages.PathHopLimitExceeded); }
                         ulong next = edge.SourceId == from ? edge.TargetId : edge.SourceId;
-                        if (database.Store.FindNode(next, operation.Context.Snapshot) is not { } target) { break; }
+                        if (operation.Updates.FindNode(next) is not { } target) { break; }
                         var nextNode = GraphDatabase.Materialize(target);
                         if (hop.Next is NodeTask targetNodes && targetNodes.Patterns.Any(pattern =>
                             !AcceptNode(pattern, nextNode, bindings, operation.EvaluationContext, parameters, deferUnbound: true))) { break; }

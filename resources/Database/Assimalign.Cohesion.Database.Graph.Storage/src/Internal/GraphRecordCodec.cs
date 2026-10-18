@@ -13,10 +13,16 @@ using Assimalign.Cohesion.Database.Types;
 namespace Assimalign.Cohesion.Database.Graph.Storage.Internal;
 
 internal readonly record struct GraphRecord(byte Kind, ulong Id, StoredGraphNode? Node = null,
-    StoredGraphRelationship? Relationship = null, string? Label = null, string? PropertyKey = null);
+    StoredGraphRelationship? Relationship = null, string? Label = null, string? PropertyKey = null, ulong Revision = 0);
 
 internal static class GraphRecordCodec
 {
+    internal static void EnsureFormat(ReadOnlySpan<byte> bytes)
+    {
+        if (bytes.Length < 18 || bytes[17] != 2)
+        { throw new StorageCorruptionException(ErrorMessages.RecordFormatUnsupported); }
+    }
+
     internal static byte[] Encode(GraphRecord record, TransactionSequence writer)
     {
         using var stream = new MemoryStream();
@@ -24,8 +30,9 @@ internal static class GraphRecordCodec
         output.Write(writer.Value);
         output.Write(0UL);
         output.Write(record.Kind);
-        output.Write((byte)1);
+        output.Write((byte)2);
         output.Write(record.Id);
+        output.Write(record.Revision);
         if (record.Node is { } node)
         {
             output.Write(node.Labels.Count);
@@ -62,14 +69,16 @@ internal static class GraphRecordCodec
 
     internal static GraphRecord Decode(ReadOnlyMemory<byte> bytes)
     {
+        EnsureFormat(bytes.Span);
         try
         {
             using var stream = new MemoryStream(bytes.ToArray(), false);
             using var input = new BinaryReader(stream, new UTF8Encoding(false, true));
             input.ReadUInt64(); input.ReadUInt64();
             byte kind = input.ReadByte();
-            if (input.ReadByte() != 1) { throw new StorageCorruptionException("Unknown graph record version."); }
+            if (input.ReadByte() != 2) { throw new StorageCorruptionException(ErrorMessages.RecordFormatUnsupported); }
             ulong id = input.ReadUInt64();
+            ulong revision = input.ReadUInt64();
             GraphRecord record;
             switch (kind)
             {
@@ -87,7 +96,7 @@ internal static class GraphRecordCodec
                 default: throw new StorageCorruptionException("Unknown graph record kind.");
             }
             if (id == 0 || stream.Position != stream.Length) { throw new StorageCorruptionException("Invalid graph record identity or trailing payload."); }
-            return record;
+            return record with { Revision = revision };
         }
         catch (Exception error) when (error is EndOfStreamException or DecoderFallbackException or FormatException or ArgumentException or OverflowException)
         {

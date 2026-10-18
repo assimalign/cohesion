@@ -92,14 +92,15 @@ internal sealed partial class GraphPlanner
     /// <param name="parameters">The named bindings; normalization and validation precede execution.</param>
     /// <param name="paths">Whether path-request projection shape takes precedence over duplicate column names.</param>
     /// <param name="token">Cancellation observed while validating and indexing expression structure.</param>
+    /// <param name="normalizedParameters">Whether these are the statement's already captured bindings for replanning.</param>
     /// <returns>The plan.</returns>
     /// <exception cref="DatabaseException">The statement is invalid (<c>COHDBG001</c>, <c>COHDBG003</c>, <c>COHDBG015</c>).</exception>
-    internal GraphPlan Plan(GqlQueryExpression query, IReadOnlyDictionary<string, object?>? parameters = null, bool paths = false, CancellationToken token = default)
+    internal GraphPlan Plan(GqlQueryExpression query, IReadOnlyDictionary<string, object?>? parameters = null, bool paths = false, CancellationToken token = default, bool normalizedParameters = false)
     {
         try
         {
             token.ThrowIfCancellationRequested();
-            _parameters = ParameterBindings.Normalize(parameters, name => new GraphPlanningException(
+            _parameters = normalizedParameters ? parameters : ParameterBindings.Normalize(parameters, name => new GraphPlanningException(
                 "COHDBG014", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ParameterCollision, name), query.Location));
             return PlanCore(query, paths, token);
         }
@@ -117,7 +118,7 @@ internal sealed partial class GraphPlanner
         var planned = new List<GraphStagePlan>();
         var deletedVariables = new HashSet<string>(StringComparer.Ordinal);
         var shapes = new Dictionary<string, GraphBindingShape>(StringComparer.Ordinal);
-        bool writes = stages.Any(stage => stage is GqlInsertStage or GqlDeleteStage);
+        bool writes = stages.Any(stage => stage is GqlInsertStage or GqlDeleteStage or GqlSetStage or GqlRemoveStage);
         if (pathsRequest && writes)
         { throw new GraphPlanningException("COHDBG001", ErrorMessages.PathProjectionRequired, statement.Location); }
         var snapshotted = new HashSet<string>(StringComparer.Ordinal);
@@ -147,6 +148,7 @@ internal sealed partial class GraphPlanner
             var stage = stages[stageIndex];
             if (stage is GqlInsertStage { Paths: null or { Count: 0 } } or
                 GqlDeleteStage { Variables: null or { Count: 0 } } or
+                GqlSetStage { Items: null or { Count: 0 } } or GqlRemoveStage { Items: null or { Count: 0 } } or
                 GqlReturnStage { Projections: null } or GqlReturnStage { IsWith: false, Predicate: not null })
             { throw new GraphPlanningException("COHDBG001", ErrorMessages.StageUnsupported, stage.Location ?? statement.Location); }
             query = StageQuery(stage, statement.Location);
@@ -160,6 +162,49 @@ internal sealed partial class GraphPlanner
             optional = false;
             switch (stage)
             {
+                case GqlSetStage set:
+                    foreach (var item in set.Items)
+                    {
+                        if (item is null || string.IsNullOrWhiteSpace(item.Variable))
+                        { throw new GraphPlanningException("COHDBG001", ErrorMessages.StageUnsupported, stage.Location); }
+                        RequireVariable(item.Variable, entity: true);
+                        switch (item)
+                        {
+                            case GqlSetPropertyItem property when !string.IsNullOrWhiteSpace(property.Property) && property.Value is not null:
+                                ValidateExpression(property.Value);
+                                break;
+                            case GqlSetPropertiesItem map when map.Properties is not null:
+                                foreach (var pair in map.Properties)
+                                {
+                                    if (string.IsNullOrWhiteSpace(pair.Key) || pair.Value is null)
+                                    { throw new GraphPlanningException("COHDBG001", ErrorMessages.StageUnsupported, item.Location); }
+                                    ValidateExpression(pair.Value);
+                                }
+                                break;
+                            case GqlSetLabelsItem labels when labels.Labels is { Count: > 0 } && labels.Labels.All(name => !string.IsNullOrWhiteSpace(name)):
+                                if (variables[item.Variable] != BindingKind.Node)
+                                { throw new GraphPlanningException("COHDBG003", ErrorMessages.EntityBindingRequired, item.Location); }
+                                foreach (string name in labels.Labels) { tokens.IntroduceLabel(name); }
+                                break;
+                            default: throw new GraphPlanningException("COHDBG001", ErrorMessages.StageUnsupported, item.Location);
+                        }
+                    }
+                    break;
+                case GqlRemoveStage remove:
+                    foreach (var item in remove.Items)
+                    {
+                        if (item is null || string.IsNullOrWhiteSpace(item.Variable))
+                        { throw new GraphPlanningException("COHDBG001", ErrorMessages.StageUnsupported, stage.Location); }
+                        RequireVariable(item.Variable, entity: true);
+                        if (item is GqlRemoveLabelsItem labels && labels.Labels is { Count: > 0 } && labels.Labels.All(name => !string.IsNullOrWhiteSpace(name)))
+                        {
+                            if (variables[item.Variable] != BindingKind.Node)
+                            { throw new GraphPlanningException("COHDBG003", ErrorMessages.EntityBindingRequired, item.Location); }
+                        }
+                        else if (item is not GqlRemovePropertyItem property || string.IsNullOrWhiteSpace(property.Property))
+                        { throw new GraphPlanningException("COHDBG001", ErrorMessages.StageUnsupported, item.Location); }
+                    }
+                    break;
                 case GqlLetStage let:
                     if (let.Bindings is null || let.Bindings.Count == 0 || let.Bindings.Any(item => item?.Expression is null || string.IsNullOrEmpty(item.Alias)))
                     { throw new GraphPlanningException("COHDBG001", ErrorMessages.StageUnsupported, stage.Location ?? statement.Location); }
@@ -183,7 +228,7 @@ internal sealed partial class GraphPlanner
                 case GqlNextStage:
                     if (stageIndex == 0 || stageIndex == stages.Count - 1 ||
                         stages[stageIndex - 1] is GqlReturnStage { IsWith: true } ||
-                        stages[stageIndex - 1] is not GqlReturnStage && !stages.Take(stageIndex).Reverse().TakeWhile(item => item is not GqlNextStage).Any(item => item is GqlInsertStage or GqlDeleteStage))
+                        stages[stageIndex - 1] is not GqlReturnStage && !stages.Take(stageIndex).Reverse().TakeWhile(item => item is not GqlNextStage).Any(item => item is GqlInsertStage or GqlDeleteStage or GqlSetStage or GqlRemoveStage))
                     { throw new GraphPlanningException("COHDBG001", ErrorMessages.NextSegmentInvalid, stage.Location); }
                     if (stages[stageIndex - 1] is not GqlReturnStage) { ClearScope(); }
                     break;
@@ -1037,7 +1082,7 @@ internal sealed partial class GraphPlanner
         GqlReturnStage project => new([], null, [], [], false, project.Projections, location ?? stage.Location)
         { SetQuantifier = project.SetQuantifier, ReturnStar = project.ReturnStar, GroupBy = project.GroupBy,
             OrderBy = project.OrderBy, Offset = project.Offset, Limit = project.Limit },
-        GqlLetStage or GqlForStage or GqlFilterStage or GqlNextStage => new([], null, [], [], false, [], location ?? stage.Location),
+        GqlLetStage or GqlForStage or GqlFilterStage or GqlNextStage or GqlSetStage or GqlRemoveStage => new([], null, [], [], false, [], location ?? stage.Location),
         _ => throw new GraphPlanningException("COHDBG001", ErrorMessages.StageUnsupported, stage?.Location ?? location),
     };
 

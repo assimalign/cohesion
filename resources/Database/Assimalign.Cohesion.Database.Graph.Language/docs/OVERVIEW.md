@@ -22,7 +22,8 @@ LET and FILTER, FOR (Cypher UNWIND), RETURN ... NEXT and Cypher WITH,
 RETURN expressions and aliases, DISTINCT/ALL, RETURN * and standalone RETURN,
 COUNT, SUM, AVG, MIN, MAX and COLLECT_LIST (Cypher collect), with implicit or ISO GROUP BY,
 ORDER BY with ASC/DESC and NULLS FIRST/LAST, OFFSET (Cypher SKIP) and LIMIT,
-`INSERT`, `CREATE` as an insertion compatibility extension, and restricted or
+`INSERT`, `CREATE` as an insertion compatibility extension, SET/REMOVE properties and node labels,
+literal-map replacement and D3 merge (`+=`), and restricted or
 cascading deletion. Unsupported features, including the undirected tilde edges, produce
 `COHDBL001`; malformed supported syntax produces stable `GQL` diagnostics, and a Cypher arrow such
 as `(a)-->(b)`, which GQL reads as a comment, produces `GQL0008`. The parser does not throw for

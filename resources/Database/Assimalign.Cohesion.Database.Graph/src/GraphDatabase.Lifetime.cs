@@ -30,7 +30,7 @@ public sealed partial class GraphDatabase
         try
         {
             var transactionStart = explicitTransaction?.TransactionStart ?? (Engine.EngineOptions.TimeProvider ?? TimeProvider.System).GetUtcNow();
-            var context = explicitTransaction?.Context ?? await Coordinator.BeginAsync(IsolationLevel.Snapshot, token).ConfigureAwait(false);
+            var context = explicitTransaction?.Context ?? await Coordinator.BeginAsync(IsolationLevel.ReadCommitted, token).ConfigureAwait(false);
             operation = new GraphOperation(this, session, context, explicitTransaction, transactionStart);
             await operation.InitializeAsync(token).ConfigureAwait(false);
             session.Track(operation);
@@ -113,6 +113,12 @@ public sealed partial class GraphDatabase
 
     // One database writer at a time is deliberately conservative. The shared
     // lock manager owns waits and releases; readers remain snapshot based.
+    internal async ValueTask LockWriterAsync(GraphOperation operation, CancellationToken token)
+    {
+        await LockWriterAsync(operation.Context, token).ConfigureAwait(false);
+        await operation.RefreshWriterSnapshotAsync(token).ConfigureAwait(false);
+    }
+
     internal async ValueTask LockWriterAsync(TransactionContext context, CancellationToken token)
     {
         // An offline database grants no new writer (#1243). A wait for the lock ends with the
