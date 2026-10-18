@@ -33,6 +33,8 @@ public class SqlLanguageProfileTests
     [InlineData(SqlClauses.GroupBy, "SELECT id FROM t GROUP BY id;")]
     [InlineData(SqlClauses.Having, "SELECT id FROM t GROUP BY id HAVING COUNT(*) > 0;")]
     [InlineData(SqlClauses.OrderBy, "SELECT * FROM t ORDER BY id;")]
+    [InlineData(SqlClauses.Fetch, "SELECT * FROM t FETCH NEXT 1 ROWS ONLY;")]
+    [InlineData(SqlClauses.Top, "SELECT TOP 1 * FROM t;")]
     [InlineData(SqlClauses.Limit, "SELECT * FROM t LIMIT 1;")]
     [InlineData(SqlClauses.Offset, "SELECT * FROM t LIMIT 1 OFFSET 1;")]
     [InlineData(SqlClauses.Values, "INSERT INTO t (id) VALUES (1);")]
@@ -98,11 +100,9 @@ public class SqlLanguageProfileTests
     [InlineData(SqlClauses.Intersect)]
     [InlineData(SqlClauses.Except)]
     [InlineData(SqlClauses.Recursive)]
-    [InlineData(SqlClauses.Fetch)]
     [InlineData(SqlClauses.Over)]
     [InlineData(SqlClauses.Partition)]
     [InlineData(SqlClauses.Returning)]
-    [InlineData(SqlClauses.Top)]
     [InlineData(SqlClauses.All)]
     [InlineData(SqlClauses.Natural)]
     [InlineData(SqlClauses.CreateView)]
@@ -117,12 +117,10 @@ public class SqlLanguageProfileTests
     [InlineData(SqlClauses.Intersect, "SELECT * FROM t INTERSECT SELECT * FROM u;")]
     [InlineData(SqlClauses.Except, "SELECT * FROM t EXCEPT SELECT * FROM u;")]
     [InlineData(SqlClauses.Recursive, "WITH RECURSIVE cte AS (SELECT * FROM t) SELECT * FROM cte;")]
-    [InlineData(SqlClauses.Fetch, "SELECT * FROM t FETCH NEXT 1 ROWS ONLY;")]
     [InlineData(SqlClauses.Over, "SELECT ROW_NUMBER() OVER () FROM t;")]
     [InlineData(SqlClauses.Partition, "SELECT ROW_NUMBER() PARTITION BY id FROM t;")]
     [InlineData(SqlClauses.SetOperation, "SELECT * FROM t UNION SELECT * FROM u;")]
     [InlineData(SqlClauses.Returning, "INSERT INTO t (id) VALUES (1) RETURNING id;")]
-    [InlineData(SqlClauses.Top, "SELECT TOP 1 * FROM t;")]
     [InlineData(SqlClauses.All, "SELECT ALL id FROM t;")]
     [InlineData(SqlClauses.Natural, "SELECT * FROM t NATURAL JOIN u;")]
     [InlineData(SqlClauses.CreateView, "CREATE VIEW active_users AS SELECT * FROM users;")]
@@ -155,7 +153,7 @@ public class SqlLanguageProfileTests
         var options = new QueryParserOptions();
         options.Analyzers.Add(observer);
 
-        _ = new SqlQueryParser(options).Parse("SELECT TOP 1 * FROM t;");
+        _ = new SqlQueryParser(options).Parse("SELECT * FROM t WINDOW w AS ();");
 
         observer.SawUnsupportedClause.ShouldBeTrue();
     }

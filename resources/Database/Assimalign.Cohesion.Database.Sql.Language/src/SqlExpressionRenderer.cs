@@ -388,6 +388,10 @@ public static class SqlExpressionRenderer
         {
             builder.Append("DISTINCT ");
         }
+        if (select.LimitSyntaxKind == SqlLimitSyntaxKind.Top)
+        {
+            builder.Append("TOP (").Append(Expression(select.Limit!)).Append(") ");
+        }
 
         for (int index = 0; index < select.Columns.Count; index++)
         {
@@ -448,13 +452,17 @@ public static class SqlExpressionRenderer
                 builder.Append(" DESC");
             }
         }
-        if (select.Limit is not null)
+        if (select.LimitSyntaxKind == SqlLimitSyntaxKind.Limit)
         {
-            builder.Append(" LIMIT ").Append(Expression(select.Limit));
+            builder.Append(" LIMIT ").Append(Expression(select.Limit!));
         }
         if (select.Offset is not null)
         {
             builder.Append(" OFFSET ").Append(Expression(select.Offset));
+        }
+        if (select.LimitSyntaxKind == SqlLimitSyntaxKind.Fetch)
+        {
+            builder.Append(" FETCH FIRST ").Append(Expression(select.Limit!)).Append(" ROWS ONLY");
         }
         return builder.ToString();
     }

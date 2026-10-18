@@ -36,6 +36,7 @@ public sealed class SqlSelectExpression : SqlQueryExpression
     /// <param name="isDistinct">Whether DISTINCT was specified.</param>
     /// <param name="text">The raw statement text.</param>
     /// <param name="location">The source location.</param>
+    /// <param name="limitSyntaxKind">The spelling that supplied the row limit.</param>
     internal SqlSelectExpression(
         IReadOnlyList<SqlSelectColumn> columns,
         IReadOnlyList<SqlFromItem> from,
@@ -47,7 +48,8 @@ public sealed class SqlSelectExpression : SqlQueryExpression
         SqlExpression? offset,
         bool isDistinct,
         string? text,
-        Location? location)
+        Location? location,
+        SqlLimitSyntaxKind? limitSyntaxKind = null)
         : base(SqlQueryCommandType.Select, text, location)
     {
         Columns = columns;
@@ -57,6 +59,7 @@ public sealed class SqlSelectExpression : SqlQueryExpression
         Having = having;
         OrderBy = orderBy;
         Limit = limit;
+        LimitSyntaxKind = limit is null ? null : limitSyntaxKind ?? SqlLimitSyntaxKind.Limit;
         Offset = offset;
         IsDistinct = isDistinct;
 
@@ -136,9 +139,12 @@ public sealed class SqlSelectExpression : SqlQueryExpression
     public IReadOnlyList<SqlOrderByColumn> OrderBy { get; }
 
     /// <summary>
-    /// Gets the LIMIT expression, if present.
+    /// Gets the row-count expression supplied by LIMIT, FETCH or TOP, if present.
     /// </summary>
     public SqlExpression? Limit { get; }
+
+    /// <summary>Gets the limit spelling, or null when the query has no row limit.</summary>
+    public SqlLimitSyntaxKind? LimitSyntaxKind { get; }
 
     /// <summary>
     /// Gets the OFFSET expression, if present.

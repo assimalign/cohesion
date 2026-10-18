@@ -14,12 +14,14 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed class SqlT1StorageFormatTests
 {
-    [Theory(DisplayName = "Cohesion Test [Sql] - T1 format: format-16 CHECK text would drift under the new identifier vocabulary")]
-    [InlineData("sign")]
-    [InlineData("both")]
-    public async Task VerifySchema_FormatSixteenCheckText_ShouldDemonstrateCanonicalDrift(string name)
+    [Theory(DisplayName = "Cohesion Test [Sql] - T1 format: earlier CHECK text would drift under the new identifier vocabulary")]
+    [InlineData("sign", 16)]
+    [InlineData("both", 16)]
+    [InlineData("percent", 18)]
+    [InlineData("ties", 18)]
+    public async Task VerifySchema_PreviousVocabulary_ShouldDemonstrateCanonicalDrift(string name, int version)
     {
-        // Arrange: format 16 rendered these ordinary identifiers without quotes. The
+        // Arrange: the earlier format rendered these ordinary identifiers without quotes. The
         // SQL-independent catalog API reproduces those persisted bytes without a legacy reader.
         string oldText = name + " >= 0";
         string constraintName = "ck_" + name;
@@ -38,7 +40,7 @@ public sealed class SqlT1StorageFormatTests
                 [new(constraintName, SqlCatalogConstraintKind.Check, [name], checkExpression: oldText)],
                 table.DroppedColumnOrdinals);
             await database.Catalog.PublishTableAsync(legacy, [], [], replaceExisting: true, cancellationToken: CancellationToken.None);
-            await database.Catalog.SetRecordSpaceFormatVersionAsync(16, CancellationToken.None);
+            await database.Catalog.SetRecordSpaceFormatVersionAsync(version, CancellationToken.None);
 
             // Act: an already-open catalog can demonstrate the Verify failure that
             // would follow reopening format 16 if the format gate were removed.
@@ -56,7 +58,7 @@ public sealed class SqlT1StorageFormatTests
         await using var reopening = SqlDatabaseEngine.Create("t1-format", new() { StorageStrategy = storage });
         var refusal = await Should.ThrowAsync<SqlDataStorageFormatException>(async () =>
             await reopening.OpenDatabaseAsync("app", CancellationToken.None));
-        refusal.Message.ShouldContain("uses data-storage format 16", Case.Sensitive);
-        refusal.Message.ShouldContain("supports only format 18", Case.Sensitive);
+        refusal.Message.ShouldContain($"uses data-storage format {version}", Case.Sensitive);
+        refusal.Message.ShouldContain("supports only format 19", Case.Sensitive);
     }
 }

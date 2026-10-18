@@ -1002,6 +1002,15 @@ public sealed partial class SqlQueryParser : QueryParser
                 lexer.Current.Position,
                 lexer.Current.Position + lexer.Current.Value.Length);
 
+            if (IsKeyword(ref lexer, "TOP") &&
+                (string.Equals(previousToken, "DELETE", StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(previousToken, "UPDATE", StringComparison.OrdinalIgnoreCase)))
+            {
+                clause = "DML TOP";
+                location = tokenLocation;
+                return true;
+            }
+
             if (TryFindUnsupportedSubqueryForm(lexer, firstToken.Equals("WITH", StringComparison.OrdinalIgnoreCase) ? "SELECT" : firstToken, previousToken,
                 previousPreviousToken, insertValues, dmlWhere,
                 previousFromComma || previousPreviousFromComma, out clause))

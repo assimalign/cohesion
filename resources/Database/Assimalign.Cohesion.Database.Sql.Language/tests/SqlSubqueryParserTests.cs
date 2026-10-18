@@ -114,8 +114,8 @@ public sealed class SqlSubqueryParserTests
     [InlineData("SELECT * FROM (SELECT id FROM t UNION SELECT id FROM u) d;", "UNION")]
 
     [InlineData("INSERT INTO t VALUES ((SELECT id FROM u));", "SUBQUERY in INSERT VALUES")]
-    [InlineData("SELECT id FROM t LIMIT (SELECT id FROM u);", "LIMIT or OFFSET")]
-    [InlineData("SELECT id FROM t OFFSET (SELECT id FROM u);", "LIMIT or OFFSET")]
+    [InlineData("SELECT id FROM t LIMIT (SELECT id FROM u);", "LIMIT")]
+    [InlineData("SELECT id FROM t OFFSET (SELECT id FROM u);", "OFFSET")]
     [InlineData("CREATE TABLE t (id INT CHECK (EXISTS (SELECT id FROM u)));", "SUBQUERY in CREATE")]
     public void Parse_UnsupportedForm_ReportsModelDiagnostic(string sql, string form)
     {

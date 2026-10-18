@@ -396,6 +396,7 @@ internal static class SqlPersistedExpression
         }
 
         return left.IsDistinct == right.IsDistinct &&
+            left.LimitSyntaxKind == right.LimitSyntaxKind &&
             SameList(left.Columns, right.Columns, (a, b) => Same(a.Alias, b.Alias) && AreEquivalent(a.Expression, b.Expression)) &&
             SameList(left.From, right.From, (a, b) => SameTable(a.Table, b.Table) &&
                 SameList(a.Joins, b.Joins, (x, y) => x.JoinType == y.JoinType && SameTable(x.Table, y.Table) &&

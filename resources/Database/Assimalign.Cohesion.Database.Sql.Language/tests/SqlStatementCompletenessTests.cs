@@ -47,7 +47,9 @@ public sealed class SqlStatementCompletenessTests
         [SqlClauses.GroupBy] = ["SELECT a, COUNT(*) FROM t GROUP BY a", "SELECT a, b FROM t GROUP BY a, b"],
         [SqlClauses.Having] = ["SELECT a FROM t GROUP BY a HAVING COUNT(*) > 1"],
         [SqlClauses.OrderBy] = ["SELECT a FROM t ORDER BY a", "SELECT a FROM t ORDER BY a DESC, 2 ASC"],
-        [SqlClauses.Limit] = ["SELECT a FROM t LIMIT 1"],
+        [SqlClauses.Fetch] = ["SELECT a FROM t OFFSET 1 ROW FETCH FIRST 2 ROWS ONLY", "SELECT a FROM t FETCH NEXT ROW ONLY"],
+        [SqlClauses.Top] = ["SELECT TOP 2 * FROM t", "SELECT DISTINCT TOP (@n) a FROM t"],
+        [SqlClauses.Limit] = ["SELECT a FROM t LIMIT 1", "SELECT a FROM t OFFSET 1 LIMIT 2"],
         [SqlClauses.Offset] = ["SELECT a FROM t OFFSET 1", "SELECT a FROM t ORDER BY a LIMIT 1 OFFSET 2"],
         [SqlClauses.Values] = ["INSERT INTO t VALUES (1), (2)", "INSERT INTO t VALUES (DEFAULT), (2)", "INSERT INTO t DEFAULT VALUES"],
         [SqlClauses.Cte] = ["WITH c AS (SELECT a FROM t) SELECT * FROM c", "WITH c AS (SELECT a FROM t) DELETE FROM t WHERE a IN (SELECT a FROM c)", "INSERT INTO t WITH c AS (SELECT a FROM t) SELECT * FROM c"],
@@ -207,7 +209,6 @@ public sealed class SqlStatementCompletenessTests
     [InlineData("UPDATE t SET a = 1 ^FROM u WHERE t.id = u.id;", "FROM")]
     [InlineData("INSERT INTO t (id) VALUES (1) ^ON CONFLICT DO NOTHING;", "ON")]
     [InlineData("INSERT INTO t (id, a) VALUES (1, 2) ^ON DUPLICATE KEY UPDATE a = 3;", "ON")]
-    [InlineData("SELECT id FROM t ORDER BY id OFFSET 1 ^LIMIT 2;", "LIMIT")]
     [InlineData("SELECT id FROM t WHERE name LIKE 'a!%' ^ESCAPE '!';", "ESCAPE")]
     [InlineData("SELECT id FROM t WHERE a ^IS DISTINCT FROM b;", "IS DISTINCT FROM")]
     [InlineData("SELECT id FROM t WHERE a ^IS NOT DISTINCT FROM b;", "IS NOT DISTINCT FROM")]

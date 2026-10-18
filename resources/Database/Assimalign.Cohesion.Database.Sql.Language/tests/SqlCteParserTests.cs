@@ -76,7 +76,7 @@ public sealed class SqlCteParserTests
     [InlineData("WITH a AS (SELECT ROW_NUMBER() OVER () AS n FROM t) SELECT * FROM a;", "OVER")]
     [InlineData("WITH a AS (SELECT * FROM t) SELECT * FROM a NATURAL JOIN u;", "NATURAL")]
     [InlineData("WITH a AS (SELECT * FROM t) SELECT * FROM a WINDOW w AS ();", "WINDOW")]
-    [InlineData("WITH top AS (SELECT id FROM t) SELECT TOP (1) * FROM top;", "TOP")]
+    [InlineData("WITH top AS (SELECT id FROM t) SELECT TOP (1) WITH TIES * FROM top;", "WITH TIES")]
     [InlineData("WITH natural AS (SELECT id FROM t) SELECT * FROM natural NATURAL JOIN u;", "NATURAL")]
     [InlineData("WITH window AS (SELECT id FROM t) SELECT * FROM window WINDOW w AS ();", "WINDOW")]
     public void Parse_ExcludedWithForm_ShouldNameUnsupportedConstruct(string sql, string construct)

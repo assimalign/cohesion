@@ -204,6 +204,17 @@ The SQL engine (area architecture: [resources/Database/DESIGN.md](../../../../do
 §3.3): parse (`Sql.Language`) → plan (`SqlPlanner`) → execute (`SqlPlanExecutor`)
 against shared storage, with the catalog (`Sql.Catalog`) as schema authority.
 
+## Pagination (#1107)
+
+FETCH and TOP normalize to existing Limit/Offset fields, sharing EvaluateCount and every
+table, join, grouping, DISTINCT, system-view and CTE planning/execution path. The AST's
+LimitSyntaxKind supplies FETCH/TOP count-diagnostic names and persisted-query equivalence.
+No extra plan, executor, interface, reference or visibility grant is introduced.
+The unreleased data-storage format advances 18 -> 19: new PERCENT/TIES unsupported
+vocabulary now quotes those identifier names in canonical persisted expressions.
+SqlT1StorageFormatTests demonstrates the format-18 CHECK drift and pins refusal on reopen.
+There is no upgrade reader. SQL-visible grammar and limits live in DIALECT.md.
+
 ## Ordering output values (#1024)
 
 `SqlPlanner.Ordering.cs` binds aliases and standalone numeric ordinals to

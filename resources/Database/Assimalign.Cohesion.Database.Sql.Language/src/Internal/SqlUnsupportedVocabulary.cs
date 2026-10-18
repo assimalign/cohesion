@@ -34,11 +34,11 @@ internal static class SqlUnsupportedVocabulary
         new("MATERIALIZED", "[NOT] MATERIALIZED", SqlWordPosition.Rule),
         new("SEARCH", "SEARCH/CYCLE", SqlWordPosition.Rule),
         new("WINDOW", SqlClauses.Window, SqlWordPosition.Clause),
-        new("FETCH", SqlClauses.Fetch, SqlWordPosition.Clause),
+        new("PERCENT", "PERCENT", SqlWordPosition.Rule),
+        new("TIES", "WITH TIES", SqlWordPosition.Rule),
         new("OVER", SqlClauses.Over, SqlWordPosition.Clause),
         new("PARTITION", SqlClauses.Partition, SqlWordPosition.Clause),
         new("RETURNING", SqlClauses.Returning, SqlWordPosition.Clause),
-        new("TOP", SqlClauses.Top, SqlWordPosition.Clause),
         new("NATURAL", SqlClauses.Natural, SqlWordPosition.Clause),
         new("USING", SqlClauses.Using, SqlWordPosition.Clause),
         new("ALL", SqlClauses.All, SqlWordPosition.Rule),
@@ -134,7 +134,8 @@ internal enum SqlWordPosition
     /// <c>SELECT</c> or a comparison operator; <c>VIEW</c> after <c>CREATE</c> or <c>DROP</c>;
     /// <c>COLLATION</c> and <c>FULLTEXT</c> after <c>CREATE</c>; <c>NULLS FIRST</c>/<c>LAST</c> in
     /// <c>ORDER BY</c>; <c>GROUPING SETS</c> and the <c>GROUPING</c>, <c>ROLLUP</c>, <c>CUBE</c> and
-    /// <c>GROUPING_ID</c> calls; <c>FILTER (...)</c> and <c>WITHIN GROUP</c> after a call;
+    /// <c>GROUPING_ID</c> calls; <c>PERCENT</c> and <c>WITH TIES</c> after FETCH or TOP;
+    /// <c>FILTER (...)</c> and <c>WITHIN GROUP</c> after a call;
     /// <c>ANY</c> and <c>SOME</c> between a comparison operator and <c>(</c>; <c>LATERAL</c> after
     /// <c>FROM</c> or <c>JOIN</c>; and <c>~</c> in prefix or infix position.
     /// </summary>

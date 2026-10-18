@@ -72,6 +72,13 @@ flowchart LR
 
 Other model clients do not depend on this package.
 
+## Pagination (#1107)
+
+OFFSET/FETCH, OFFSET before LIMIT and TOP use the existing SQL execute exchange and
+result metadata. SqlPagingWireTests verifies exact windows and column names/types over
+InMemory and TCP, plus coded parse/count refusals and subsequent connection reuse.
+No wire or client API changes.
+
 ## Expanded joins (#1109)
 
 LEFT null values, N-way, CROSS, comma and USING results use the existing SQL frames and

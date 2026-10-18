@@ -225,7 +225,7 @@ internal sealed partial class SqlPlanner
         if (bindings is not null)
         {
             return new SqlJoinPlan(bindings, columns, steps, projections,
-                where, ordering, EvaluateCount(select.Limit, "LIMIT"),
+                where, ordering, EvaluateCount(select.Limit, LimitClause(select)),
                 EvaluateCount(select.Offset, "OFFSET"), select.IsDistinct,
                 orderByProjections);
         }
@@ -233,7 +233,7 @@ internal sealed partial class SqlPlanner
         if (systemView is not null)
         {
             return new SqlSystemViewPlan(systemView, projections, where, ordering,
-                EvaluateCount(select.Limit, "LIMIT"), EvaluateCount(select.Offset, "OFFSET"),
+                EvaluateCount(select.Limit, LimitClause(select)), EvaluateCount(select.Offset, "OFFSET"),
                 select.IsDistinct, orderByProjections);
         }
 
@@ -242,7 +242,7 @@ internal sealed partial class SqlPlanner
             projections,
             where,
             ordering,
-            EvaluateCount(select.Limit, "LIMIT"),
+            EvaluateCount(select.Limit, LimitClause(select)),
             EvaluateCount(select.Offset, "OFFSET"),
             select.IsDistinct,
             SelectAccessPath(table!, select.Where, OuterScope is null ? null : evaluator), orderByProjections);
@@ -1320,6 +1320,13 @@ internal sealed partial class SqlPlanner
 
         throw SqlEvaluationException.UnknownType(cast.TargetType, "CAST target");
     }
+
+    private static string LimitClause(SqlSelectExpression select) => select.LimitSyntaxKind switch
+    {
+        SqlLimitSyntaxKind.Fetch => "FETCH",
+        SqlLimitSyntaxKind.Top => "TOP",
+        _ => "LIMIT",
+    };
 
     private long? EvaluateCount(SqlExpression? expression, string clause)
     {
