@@ -468,7 +468,7 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
         }
     }
 
-    // The Execute exchange carries scalar rows only; entity and path projections use ExecutePaths.
+    // The Execute exchange carries scalar and negotiated composite rows; entity and path projections use ExecutePaths.
     // A parse or validation failure is written and propagates unchanged. The filter takes the
     // failures ExecuteAsync answers as statement failures; anything else is an unexpected fault,
     // which the pump reports once, as SessionFaulted.
@@ -477,7 +477,7 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
         try
         {
             var request = GraphQueryRequest.FromGql(statement, parameters);
-            return new GraphQueryRequest(request.Statement, parameters) { ScalarsOnly = true };
+            return new GraphQueryRequest(request.Statement, parameters) { ScalarsOnly = true, CompositeValues = _channel!.Capabilities.Contains(GraphProtocol.CompositeValues.Name) };
         }
         catch (Exception exception) when (exception is DatabaseException or DatabaseTypeException)
         {
@@ -529,49 +529,17 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
 
                 foreach (DatabaseColumn column in resultSet.Columns)
                 {
-                    columns.Add((column.Name, (byte)column.Type));
+                    bool tagged = resultSet is GraphQueryResult graph && graph.CompositeColumns?[column.Ordinal] == true;
+                    columns.Add((column.Name, (byte)((byte)column.Type | (tagged ? 0x80 : 0))));
                 }
 
-                bool composite = _channel!.Capabilities.Contains(GraphProtocol.CompositeValues.Name);
-                // Graph results own repeatable, already-materialized rows. Preflight every value
-                // before the header, then encode each row again for delivery. This bounds temporary
-                // encoding memory to one row rather than duplicating the full materialized result.
-                await foreach (DatabaseRow row in resultSet.GetRowsAsync(cancellationToken).ConfigureAwait(false))
-                {
-                    _ = EncodeRow(row);
-                }
-                byte[] EncodeRow(DatabaseRow row)
-                {
-                    rowWriter.Reset();
-                    using var stream = new System.IO.MemoryStream();
-                    using var compositeWriter = new System.IO.BinaryWriter(stream);
-                    for (int ordinal = 0; ordinal < row.FieldCount; ordinal++)
-                    {
-                        object? value = row.GetValue(ordinal);
-                        if (composite)
-                        {
-                            byte[] encoded = GraphValueCodec.Encode(value);
-                            if (stream.Length + 4 + encoded.Length > GraphValueCodec.MaxPayloadLength)
-                            { throw new DatabaseTypeException(ErrorMessages.CompositeLimit); }
-                            compositeWriter.Write(encoded.Length); compositeWriter.Write(encoded);
-                        }
-                        else
-                        {
-                            if (GraphCompositeValues.IsComposite(value))
-                            { throw new GraphPlanningException("COHDBG016", ErrorMessages.CompositeCapabilityRequired, _statementLocation); }
-                            DatabaseValueCodec.Append(rowWriter, value);
-                        }
-                    }
-                    byte[] payload = composite ? stream.ToArray() : rowWriter.ToArray();
-                    if (payload.Length > GraphValueCodec.MaxPayloadLength) { throw new DatabaseTypeException(ErrorMessages.CompositeLimit); }
-                    return payload;
-                }
+                using var encoder = new GraphResultRowEncoder(rowWriter, (resultSet as GraphQueryResult)?.CompositeColumns);
                 byte[] header = new GraphProtocolResultHeaderMessage(columns).Encode();
                 if (header.Length > GraphValueCodec.MaxPayloadLength) { throw new DatabaseTypeException(ErrorMessages.CompositeLimit); }
                 await WriteFrameAsync((ProtocolMessageType)GraphProtocolMessageType.ResultHeader, header, cancellationToken).ConfigureAwait(false);
                 await foreach (DatabaseRow row in resultSet.GetRowsAsync(cancellationToken).ConfigureAwait(false))
                 {
-                    await WriteFrameAsync((ProtocolMessageType)GraphProtocolMessageType.ResultRow, EncodeRow(row), cancellationToken).ConfigureAwait(false);
+                    await WriteFrameAsync((ProtocolMessageType)GraphProtocolMessageType.ResultRow, encoder.Encode(row), cancellationToken).ConfigureAwait(false);
                 }
 
                 await WriteDiagnosticsAsync(diagnosticPayload, cancellationToken).ConfigureAwait(false);

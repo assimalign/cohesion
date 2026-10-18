@@ -62,6 +62,8 @@ internal sealed class GraphCatalogTestExchange : DatabaseProtocolExchange<GraphC
                     hasResultFrames = true;
                     foreach (var column in GraphProtocolResultHeaderMessage.Decode(frame.Payload.Span).Columns)
                     {
+                        // Catalog columns stay scalar even when composite values were negotiated.
+                        if ((column.Type & 0x80) != 0) { throw new ProtocolException("Catalog columns must use scalar tuple framing."); }
                         columns.Add((column.Name, (DatabaseType)column.Type));
                     }
                     break;
@@ -94,15 +96,14 @@ internal sealed class GraphCatalogTestExchange : DatabaseProtocolExchange<GraphC
 
     private static object?[] DecodeRow(ReadOnlySpan<byte> payload, int count)
     {
+        var reader = new DatabaseKeyReader(payload);
         var values = new object?[count];
         for (int i = 0; i < count; i++)
         {
-            if (payload.Length < 4) { throw new ProtocolException("Malformed composite catalog row."); }
-            int size = System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(payload); payload = payload[4..];
-            if (size < 0 || size > payload.Length) { throw new ProtocolException("Malformed composite catalog row."); }
-            values[i] = GraphValueCodec.Decode(payload[..size]); payload = payload[size..];
+            if (reader.IsAtEnd) { throw new ProtocolException("Catalog tuple has too few values."); }
+            values[i] = DatabaseValueCodec.Read(ref reader);
         }
-        if (!payload.IsEmpty) { throw new ProtocolException("Catalog tuple has extra values."); }
+        if (!reader.IsAtEnd) { throw new ProtocolException("Catalog tuple has extra values."); }
         return values;
     }
 }

@@ -31,10 +31,11 @@ public static class GraphValueCodec
     /// <exception cref="DatabaseTypeException">A type or format bound is unsupported.</exception>
     public static byte[] Encode(object? value)
     {
+        Measure(value);
         using var stream = new MemoryStream();
         using var writer = new BinaryWriter(stream, _utf8, leaveOpen: true);
         int count = 0;
-        try { Write(writer, value, 0, ref count); }
+        try { Write(writer, value, 0, ref count, new DatabaseKeyWriter(32)); }
         catch (EncoderFallbackException error)
         { throw new DatabaseTypeException(ErrorMessages.CompositeMalformed, error); }
         return stream.ToArray();
@@ -47,7 +48,7 @@ public static class GraphValueCodec
     public static object? Decode(ReadOnlySpan<byte> payload)
     {
         if (payload.Length > MaxPayloadLength) { throw new ProtocolException(ErrorMessages.CompositeMalformed); }
-        int count = 0;
+        int count = 1;
         var remaining = payload;
         try
         {
@@ -59,7 +60,71 @@ public static class GraphValueCodec
         { throw new ProtocolException(ErrorMessages.CompositeMalformed, error); }
     }
 
-    private static void Write(BinaryWriter writer, object? value, int depth, ref int count)
+    internal static int Measure(object? value)
+    {
+        int count = 0;
+        try { return Measure(value, 0, ref count); }
+        catch (EncoderFallbackException error) { throw new DatabaseTypeException(ErrorMessages.CompositeMalformed, error); }
+    }
+
+    private static int Measure(object? value, int depth, ref int count)
+    {
+        if (depth > MaxDepth || ++count > MaxValueCount) { throw new DatabaseTypeException(ErrorMessages.CompositeLimit); }
+        long size;
+        if (value is IReadOnlyDictionary<string, object?> map)
+        {
+            if (map.Count > MaxValueCount - count) { throw new DatabaseTypeException(ErrorMessages.CompositeLimit); }
+            size = 5;
+            foreach (var entry in map)
+            { size += 4L + _utf8.GetByteCount(entry.Key) + Measure(entry.Value, depth + 1, ref count); }
+        }
+        else if (value is IList list && value is not byte[])
+        {
+            if (list.Count > MaxValueCount - count) { throw new DatabaseTypeException(ErrorMessages.CompositeLimit); }
+            size = 5;
+            foreach (var child in list) { size += Measure(child, depth + 1, ref count); }
+        }
+        else { size = ScalarLength(value) + (value is byte or ushort or uint or ulong ? 0 : 5L); }
+        if (size > MaxPayloadLength) { throw new DatabaseTypeException(ErrorMessages.CompositeLimit); }
+        return (int)size;
+    }
+
+    internal static int ScalarLength(object? value)
+    {
+        long size = value switch
+        {
+            null => 1, bool or sbyte or byte => 2, short or ushort => 3, int or float or uint => 5,
+            long or double or ulong => 9,
+            string text => 4L + _utf8.GetByteCount(text) + ZeroCount(text),
+            byte[] bytes => 3L + bytes.Length + ZeroCount(bytes),
+            GraphNode or GraphRelationship or GraphPath => 1, // In-process results may contain entities.
+            decimal number => DecimalLength(number),
+            DateOnly => 5, TimeOnly or TimeSpan => 9, DateTime => 10, DateTimeOffset => 11, Guid => 17,
+            _ => throw new DatabaseTypeException(ErrorMessages.CompositeRequired),
+        };
+        if (size > MaxPayloadLength) { throw new DatabaseTypeException(ErrorMessages.CompositeLimit); }
+        return (int)size;
+    }
+
+    // Database.Types/Internal/KeyComponentEncoding.cs:238-278,347-376: sign, exponent,
+    // significant decimal digits and terminator; measure without allocating an encoded value.
+    private static int DecimalLength(decimal value)
+    {
+        if (value == 0m) { return 2; }
+        Span<char> text = stackalloc char[64];
+        Math.Abs(value).TryFormat(text, out int written, provider: System.Globalization.CultureInfo.InvariantCulture);
+        int first = 0, last = written - 1;
+        while (text[first] is '0' or '.') { first++; }
+        while (text[last] is '0' or '.') { last--; }
+        int digits = last - first + 1;
+        for (int i = first; i <= last; i++) { if (text[i] == '.') { digits--; } }
+        return 4 + digits;
+    }
+
+    private static int ZeroCount(string text) { int count = 0; foreach (char c in text) { if (c == 0) { count++; } } return count; }
+    private static int ZeroCount(byte[] bytes) { int count = 0; foreach (byte b in bytes) { if (b == 0) { count++; } } return count; }
+
+    internal static void Write(BinaryWriter writer, object? value, int depth, ref int count, DatabaseKeyWriter scalarWriter)
     {
         if (depth > MaxDepth || ++count > MaxValueCount)
         { throw new DatabaseTypeException(ErrorMessages.CompositeLimit); }
@@ -75,24 +140,21 @@ public static class GraphValueCodec
                     int size = _utf8.GetByteCount(entry.Key);
                     if (size > MaxPayloadLength - writer.BaseStream.Length - 4) { throw new DatabaseTypeException(ErrorMessages.CompositeLimit); }
                     writer.Write(size); writer.Write(_utf8.GetBytes(entry.Key));
-                    Write(writer, entry.Value, depth + 1, ref count);
+                    Write(writer, entry.Value, depth + 1, ref count, scalarWriter);
                 }
                 break;
             case IList list when value is not byte[]:
                 if (list.Count > MaxValueCount - count) { throw new DatabaseTypeException(ErrorMessages.CompositeLimit); }
                 writer.Write((byte)1); writer.Write(list.Count);
-                foreach (var item in list) { Write(writer, item, depth + 1, ref count); }
+                foreach (var item in list) { Write(writer, item, depth + 1, ref count, scalarWriter); }
                 break;
             case byte number: writer.Write((byte)3); writer.Write(number); break;
             case ushort number: writer.Write((byte)4); writer.Write(number); break;
             case uint number: writer.Write((byte)5); writer.Write(number); break;
             case ulong number: writer.Write((byte)6); writer.Write(number); break;
             default:
-                if (value is string text && (long)text.Length * 2 > MaxPayloadLength - writer.BaseStream.Length ||
-                    value is byte[] bytes && bytes.Length > MaxPayloadLength - writer.BaseStream.Length)
-                { throw new DatabaseTypeException(ErrorMessages.CompositeLimit); }
-                byte[] scalar = DatabaseValueCodec.EncodeComponent(value);
-                writer.Write((byte)0); writer.Write(scalar.Length); writer.Write(scalar);
+                scalarWriter.Reset(); DatabaseValueCodec.Append(scalarWriter, value);
+                writer.Write((byte)0); writer.Write(scalarWriter.Length); writer.Write(scalarWriter.WrittenSpan);
                 break;
         }
         if (writer.BaseStream.Length > MaxPayloadLength) { throw new DatabaseTypeException(ErrorMessages.CompositeLimit); }
@@ -100,7 +162,7 @@ public static class GraphValueCodec
 
     private static object? Read(ref ReadOnlySpan<byte> payload, int depth, ref int count)
     {
-        if (depth > MaxDepth || ++count > MaxValueCount || payload.IsEmpty)
+        if (depth > MaxDepth || count > MaxValueCount || payload.IsEmpty)
         { throw new ProtocolException(ErrorMessages.CompositeMalformed); }
         byte tag = payload[0]; payload = payload[1..];
         if (tag == 0)
@@ -124,6 +186,7 @@ public static class GraphValueCodec
         if (items < 0 || items > MaxValueCount - count || items > payload.Length / (tag == 2 ? 5 : 1) ||
             items > 0 && depth == MaxDepth)
         { throw new ProtocolException(ErrorMessages.CompositeMalformed); }
+        count += items;
         if (tag == 1)
         {
             var list = new object?[items];

@@ -20,6 +20,10 @@ public sealed class GraphClientFailureTests
     [InlineData(0)]
     [InlineData(1)]
     [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    [InlineData(5)]
+    [InlineData(6)]
     public async Task QueryAsync_MalformedCompositeRow_ShouldDiscardSession(int form)
     {
         // Arrange
@@ -30,7 +34,7 @@ public sealed class GraphClientFailureTests
         {
             (await ReadAsync(channel, timeout.Token)).Type.ShouldBe((ProtocolMessageType)GraphProtocolMessageType.Execute);
             await WriteAsync(channel, (ProtocolMessageType)GraphProtocolMessageType.ResultHeader,
-                new GraphProtocolResultHeaderMessage([("x", (byte)DatabaseType.Null)]).Encode(), timeout.Token);
+                new GraphProtocolResultHeaderMessage([("x", (byte)0x80)]).Encode(), timeout.Token);
             byte[] component = form switch
             {
                 0 => [255],
@@ -38,9 +42,14 @@ public sealed class GraphClientFailureTests
                 _ => System.Linq.Enumerable.Repeat(new byte[] { 1, 1, 0, 0, 0 }, GraphValueCodec.MaxDepth + 1)
                     .SelectMany(bytes => bytes).Concat(GraphValueCodec.Encode(null)).ToArray(),
             };
-            byte[] payload = new byte[component.Length + 4];
-            System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(payload, component.Length);
-            component.CopyTo(payload, 4);
+            byte[] payload = new byte[component.Length + 5];
+            payload[0] = 1;
+            System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(1), component.Length);
+            component.CopyTo(payload, 5);
+            if (form == 3) { payload = new byte[] { 1, 255, 255, 255, 255 }; }
+            if (form == 4) { payload = new byte[] { 1, 42, 0, 0, 0 }; }
+            if (form == 5) { payload = new byte[] { 0, 0, 99 }; }
+            if (form == 6) { payload = new byte[] { 1, 0, 0 }; }
             await WriteAsync(channel, (ProtocolMessageType)GraphProtocolMessageType.ResultRow, payload, timeout.Token);
         }, timeout.Token, compositeValues: true);
         await using var connection = await client.ConnectAsync(timeout.Token);

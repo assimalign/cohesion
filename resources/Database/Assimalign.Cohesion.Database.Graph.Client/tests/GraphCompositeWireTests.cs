@@ -63,6 +63,12 @@ public sealed class GraphCompositeWireTests
         list.Select(value => value?.GetType()).ShouldBe(values.Select(value => value?.GetType()));
         var map = row[1].ShouldBeAssignableTo<IReadOnlyDictionary<string, object?>>();
         map!["items"].ShouldBeOfType<object?[]>().ShouldBe(values);
+        foreach (object? value in values.Skip(10))
+        {
+            var unsigned = (await connection.QueryAsync("INSERT (a:Unsigned {k:$p}) RETURN a.k",
+                new Dictionary<string, object?> { ["p"] = value }, harness.Token)).ShouldHaveSingleItem()[0];
+            unsigned.ShouldBe(value); unsigned?.GetType().ShouldBe(value?.GetType());
+        }
         await connection.ExecuteAsync("INSERT (:P {k:1})", cancellationToken: harness.Token);
         int paths = 0;
         await foreach (var path in connection.QueryPathsAsync("MATCH (n:P) WHERE n.k IN $xs RETURN n",
@@ -71,12 +77,14 @@ public sealed class GraphCompositeWireTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Graph.Client] - Composite values: unnegotiated results fail before a header and reuse the session")]
-    [InlineData(0)]
-    [InlineData(1)]
-    public async Task Execute_WithoutCapability_ShouldRejectBeforeHeader(ushort minor)
+    [InlineData(0, false)]
+    [InlineData(1, false)]
+    [InlineData(0, true)]
+    [InlineData(1, true)]
+    public async Task Execute_WithoutCapability_ShouldRejectBeforeHeader(ushort minor, bool tcp)
     {
         // Arrange
-        await using var harness = await GraphClientTestHarness.StartAsync();
+        await using var harness = await GraphClientTestHarness.StartAsync(tcp);
         await using var transport = await harness.ConnectionFactory.ConnectAsync(harness.Listener.EndPoint, harness.Token);
         await using var channel = new ProtocolChannel(transport.AsStream(), GraphProtocol.Family, true);
         await Send(ProtocolMessageType.Startup, new ProtocolStartupMessage(new(2, minor), "graph", "tester").Encode());
@@ -86,7 +94,7 @@ public sealed class GraphCompositeWireTests
         channel.SetAgreement(ProtocolReadyMessage.Decode(ready.Payload.Span));
         Guid session = harness.Server.Sessions.ShouldHaveSingleItem().Id;
         // Act
-        foreach (string statement in new[] { "RETURN [1,NULL]", "RETURN {k:1}" })
+        foreach (string statement in new[] { "RETURN [1,NULL]", "RETURN {k:1}", "INSERT (:Unwritten) RETURN [1]", "INSERT (:Unwritten) RETURN {k:1}" })
         {
             await Execute(statement);
             var failure = await Read();
@@ -96,6 +104,9 @@ public sealed class GraphCompositeWireTests
             error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
             error.Message.ShouldContain("COHDBG016", Case.Sensitive);
         }
+        await Execute("MATCH (n:Unwritten) RETURN 1");
+        (await Read()).Type.ShouldBe((ProtocolMessageType)GraphProtocolMessageType.ResultHeader);
+        (await Read()).Type.ShouldBe((ProtocolMessageType)GraphProtocolMessageType.ResultComplete);
         await Execute("SHOW LABELS");
         (await Read()).Type.ShouldBe((ProtocolMessageType)GraphProtocolMessageType.ResultHeader);
         (await Read()).Type.ShouldBe((ProtocolMessageType)GraphProtocolMessageType.ResultComplete);
@@ -112,6 +123,81 @@ public sealed class GraphCompositeWireTests
         async Task<ProtocolFrame> Read() => (await channel.Reader.ReadFrameAsync(harness.Token)).ShouldNotBeNull();
         Task Execute(string statement) => Send((ProtocolMessageType)GraphProtocolMessageType.Execute,
             new GraphProtocolExecuteMessage(statement, new Dictionary<string, byte[]>()).Encode());
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Graph.Client] - Values: entity member and subscript reads pass the Execute gate")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Query_EntityPropertyExpressions_ShouldReturnScalarProperties(bool tcp)
+    {
+        // Arrange
+        await using var harness = await GraphClientTestHarness.StartAsync(tcp);
+        await using var connection = await harness.Client.ConnectAsync(harness.Token);
+        await connection.ExecuteAsync("INSERT (:Person {name:'Alice'}), (:Person {name:'Bob'})", cancellationToken: harness.Token);
+        // Act / Assert
+        var rows = await connection.QueryAsync("MATCH (a:Person) OPTIONAL MATCH (a)->(b) RETURN (a).name, COALESCE(b,a).name, a['name']", cancellationToken: harness.Token);
+        rows.Select(row => row[0]).ShouldBe(new object?[] { "Alice", "Bob" });
+        foreach (var row in rows) { row[1].ShouldBe(row[0]); row[2].ShouldBe(row[0]); }
+        await connection.ExecuteAsync("INSERT (:P)-[:T {name:'edge'}]->(:P)", cancellationToken: harness.Token);
+        var edge = (await connection.QueryAsync("MATCH (a)-[r:T]->(b) RETURN (r).name, r['name']", cancellationToken: harness.Token)).ShouldHaveSingleItem();
+        edge[0].ShouldBe("edge"); edge[1].ShouldBe("edge");
+        var conditional = await connection.QueryAsync("RETURN 42, CASE 1 WHEN 1 THEN 2 ELSE [3] END, {k:1}, 4", cancellationToken: harness.Token);
+        var mixed = conditional.ShouldHaveSingleItem();
+        mixed[0].ShouldBe(42L); mixed[1].ShouldBe(2L); mixed[2].ShouldBeAssignableTo<IReadOnlyDictionary<string, object?>>(); mixed[3].ShouldBe(4L);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Graph.Client] - Composite values: constructed bounds roll back writes and retain the session")]
+    [InlineData(false, 0)]
+    [InlineData(false, 1)]
+    [InlineData(false, 2)]
+    [InlineData(true, 0)]
+    [InlineData(true, 1)]
+    [InlineData(true, 2)]
+    public async Task Execute_ConstructedBound_ShouldRollBackAndReuse(bool tcp, int form)
+    {
+        // Arrange
+        await using var harness = await GraphClientTestHarness.StartAsync(tcp);
+        await using var connection = await harness.Client.ConnectAsync(harness.Token);
+        Guid session = harness.Server.Sessions.ShouldHaveSingleItem().Id;
+        string value = form == 0 ? new string('[', 65) + "1" + new string(']', 65) : "[$p,$p]";
+        var parameters = new Dictionary<string, object?>();
+        if (form != 0) { parameters["p"] = form == 1 ? new object?[40_000] : new string('a', 9 * 1024 * 1024); }
+        // Act
+        var error = await Should.ThrowAsync<GraphClientException>(async () => await connection.QueryAsync(
+            "INSERT (:Unwritten) RETURN " + value, parameters, harness.Token));
+        // Assert
+        error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
+        error.Message.ShouldContain("COHDBG013", Case.Sensitive);
+        (await connection.QueryAsync("MATCH (n:Unwritten) RETURN 1", cancellationToken: harness.Token)).ShouldBeEmpty();
+        (await connection.QueryAsync("RETURN 42", cancellationToken: harness.Token)).ShouldHaveSingleItem()[0].ShouldBe(42L);
+        harness.Server.Sessions.ShouldHaveSingleItem().Id.ShouldBe(session);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Graph.Client] - Parser failures: incomplete lists and nested subscripts retain the session")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Query_InvalidNesting_ShouldFailAndReuse(bool tcp)
+    {
+        // Arrange
+        await using var harness = await GraphClientTestHarness.StartAsync(tcp);
+        await using var connection = await harness.Client.ConnectAsync(harness.Token);
+        Guid session = harness.Server.Sessions.ShouldHaveSingleItem().Id;
+        // Act / Assert
+        foreach (string query in new[] { "RETURN [", "RETURN [[", "MATCH (a) WHERE a.x IN [", "RETURN {k:[" })
+        {
+            foreach (string suffix in new[] { "", " -- comment" })
+            {
+                var error = await Should.ThrowAsync<GraphClientException>(async () => await connection.QueryAsync(query + suffix, cancellationToken: harness.Token));
+                error.Code.ShouldBe(ProtocolErrorCode.ParseFailure);
+                error.Message.ShouldContain("GQL0002", Case.Sensitive);
+            }
+        }
+        var deep = "RETURN " + string.Concat(Enumerable.Repeat("0[", 10_000)) + "0" + new string(']', 10_000);
+        var nesting = await Should.ThrowAsync<GraphClientException>(async () => await connection.QueryAsync(deep, cancellationToken: harness.Token));
+        nesting.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
+        nesting.Message.ShouldContain("COHDBG008", Case.Sensitive);
+        (await connection.QueryAsync("RETURN 42", cancellationToken: harness.Token)).ShouldHaveSingleItem()[0].ShouldBe(42L);
+        harness.Server.Sessions.ShouldHaveSingleItem().Id.ShouldBe(session);
     }
 
     [Fact(DisplayName = "Cohesion Test [Graph.Client] - Composite values: unnegotiated parameter rejection happens before exchange creation")]

@@ -42,6 +42,23 @@ public sealed class GraphValueTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Graph] - Values: CASE and composite semantics retain exact values")]
+    [InlineData("CASE WHEN NULL THEN 1 ELSE 2 END", 2L)]
+    [InlineData("CASE WHEN TRUE THEN 1 WHEN 1/0 = 0 THEN 2 END", 1L)]
+    [InlineData("CASE 42 WHEN 17,42 THEN 1 ELSE 2 END", 1L)]
+    [InlineData("CASE 42 WHEN > 30 THEN 1 END", 1L)]
+    [InlineData("CASE -2 WHEN <-1 THEN 1 END", 1L)]
+    [InlineData("CASE 42 WHEN < 30, >= 42 THEN 1 END", 1L)]
+    [InlineData("CASE 42 WHEN <= 42 THEN 1 END", 1L)]
+    [InlineData("CASE 42 WHEN <> 42 THEN 1 ELSE 2 END", 2L)]
+    [InlineData("CASE 42 WHEN != 17 THEN 1 END", 1L)]
+    [InlineData("CASE 1 WHEN 1, 1/0 THEN 1 END", 1L)]
+    [InlineData("CASE 9007199254740993 WHEN > 9007199254740992.0 THEN 1 END", 1L)]
+    [InlineData("CASE NULL WHEN IS NULL THEN 1 END", 1L)]
+    [InlineData("CASE NULL WHEN IS NOT NULL THEN 1 ELSE 2 END", 2L)]
+    [InlineData("CASE 42 WHEN IS NOT NULL THEN 1 END", 1L)]
+    [InlineData("[1][NULL]", null)]
+    [InlineData("NULL[0]", null)]
+    [InlineData("{k:1}.missing", null)]
     [InlineData("CASE WHEN FALSE THEN 1 END", null)]
     [InlineData("CASE WHEN TRUE THEN 2 WHEN TRUE THEN 3 END", 2L)]
     [InlineData("CASE NULL WHEN NULL THEN 1 ELSE 2 END", 2L)]
@@ -105,10 +122,10 @@ public sealed class GraphValueTests
         var values = new Dictionary<string, object?> { ["l"] = new List<long> { 9 }, ["m"] = new Dictionary<string, object?> { ["k"] = 8 }, ["d"] = 0.1m, ["f"] = 0.1d };
         (await Rows(session, "RETURN $l[0], $m.k, [$d] = [$f], CASE $d WHEN $f THEN 1 ELSE 2 END, NULLIF($d,$f)", values))
             .ShouldHaveSingleItem().ShouldBe(new object?[] { 9L, 8, false, 2L, 0.1m });
-        (await Rows(session, "MATCH (a:Person) OPTIONAL MATCH (a)->(b) RETURN COALESCE(b.name,a.name)"))
+        (await Rows(session, "MATCH (a:Person) OPTIONAL MATCH (a)->(b) RETURN COALESCE(b,a).name"))
             .Select(row => row[0]).ShouldBe(["Alice", "Bob"]);
-        (await Rows(session, "MATCH (a:Person {name:'Alice'}) RETURN COALESCE(a.absent,a.name), NULLIF(a.age,42)"))
-            .ShouldHaveSingleItem().ShouldBe(new object?[] { "Alice", null });
+        (await Rows(session, "MATCH (a:Person {name:'Alice'}) RETURN COALESCE(a.absent,a.name), NULLIF(a.age,42), (a).name, a['name']"))
+            .ShouldHaveSingleItem().ShouldBe(new object?[] { "Alice", null, "Alice", "Alice" });
         var memberError = await Should.ThrowAsync<DatabaseException>(async () =>
             await session.ExecuteAsync("MATCH (a:Person) RETURN (a.name).x", cancellationToken: CancellationToken.None));
         memberError.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG013");
@@ -124,6 +141,8 @@ public sealed class GraphValueTests
 
     [Theory(DisplayName = "Cohesion Test [Graph] - Values: invalid container operations use the value-error diagnostic")]
     [InlineData("(1).x")]
+    [InlineData("CASE WHEN 1 THEN 1 END")]
+    [InlineData("[1][1.0]")]
     [InlineData("[1]['x']")]
     [InlineData("{k:1}[0]")]
     [InlineData("1 IN 2")]
@@ -137,6 +156,28 @@ public sealed class GraphValueTests
         var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("RETURN " + expression, cancellationToken: CancellationToken.None));
         // Assert
         error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG013");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Graph] - Values: constructed bounds roll back the statement in process")]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task Execute_ConstructedBound_ShouldRollBack(int form)
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create("bounds", new());
+        var database = await engine.CreateDatabaseAsync("graph", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        string value = form == 0 ? new string('[', 65) + "1" + new string(']', 65) : "[$p,$p]";
+        var parameters = new Dictionary<string, object?>();
+        if (form != 0) { parameters["p"] = form == 1 ? new object?[40_000] : new string('a', 9 * 1024 * 1024); }
+        // Act
+        var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(
+            "INSERT (:Unwritten) RETURN " + value, parameters, CancellationToken.None));
+        // Assert
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG013");
+        (await Rows(session, "MATCH (n:Unwritten) RETURN 1")).ShouldBeEmpty();
+        (await Rows(session, "RETURN 42")).ShouldHaveSingleItem().ShouldBe(new object?[] { 42L });
     }
 
     private static async Task<List<object?[]>> Rows(GraphDatabaseSession session, string statement, IReadOnlyDictionary<string, object?>? parameters = null)

@@ -61,7 +61,9 @@ OR/IN/string/arithmetic case compares wire rows with in-process rows. No wire fi
 GraphConnection checks the negotiated graph.composite-values capability before constructing
 an exchange. When absent, GraphRequestEncoder refuses list/map parameters locally with
 ExecutionFailure and sends no frame. When present, scalar and path request parameters use
-GraphValueCodec; ResultRow values have Int32 byte lengths followed by its components.
+GraphValueCodec. ResultHeader marks possible composite columns with bit 7 of their type byte.
+Unmarked ResultRow columns keep scalar tuple bytes. Marked columns carry tag 0 plus a scalar
+tuple component, or tag 1 plus a little-endian Int32 byte length and GraphValueCodec component.
 Lists materialize as object?[] and maps as read-only ordinal IReadOnlyDictionary<string, object?>,
 with nested NULLs and scalar runtime types preserved. GraphRow now carries those values.
 Column metadata stays unchanged. No GraphPathResult or Path frame format changes.
@@ -69,8 +71,10 @@ Column metadata stays unchanged. No GraphPathResult or Path frame format changes
 The [Graph codec contract](../../Assimalign.Cohesion.Database.Graph/docs/DESIGN.md#composite-values-and-wire-framing-1146)
 defines depth 64, 65536 values and 16777216 bytes, checked before allocations while decoding.
 Malformed result components or row lengths are ProtocolViolation and discard the connection.
-The server preflights every row before its header; unnegotiated composite results are
-COHDBG016 ExecutionFailure and permit pooled-session reuse. Protocol 2.0 and 2.1 without
+The server rejects unnegotiated possible composite projections statically before writer locking
+with COHDBG016. Constructors and materialized row sizes enforce bounds inside the transaction,
+so refusals roll back writes and permit pooled-session reuse. Scalar results have no encoding
+preflight or additional value framing. Pattern property maps remain scalar-only. Protocol 2.0 and 2.1 without
 the capability retain legacy scalar bytes. Both halves ship now that #1105 has landed.
 
 ## Named scalar parameters (#1138)

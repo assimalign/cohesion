@@ -207,7 +207,11 @@ The repeated-colon form of `label-spec` applies to node patterns only; a relatio
 `LABELED` is positional, like the path mode words: only after `IS` or `IS NOT` in a predicate does
 it introduce a label expression, so it remains usable as a name. `!` negates one primary, as ISO
 writes it, so `!!A` is `GQL0002` and `!(!A)` parses. Each `(...)*` repetition in `label-spec`,
-`label-expr`, `label-term` builds one n-ary label node; Boolean runs build n-ary logical nodes. Groups, signs, NOT, CASE and collection constructors recurse with stack checks.
+`label-expr`, `label-term` builds one n-ary label node; Boolean runs build n-ary logical nodes. Groups, signs, NOT, CASE, subscripts and collection constructors recurse with stack checks.
+A truncated list, including a final [ before a trailing comment, reports GQL0002 at EOF.
+The pattern-comprehension probe requires a relationship before the bar and stops at the first
+item comma; label disjunctions in later list items remain ordinary values. Map key separators
+do not start label scans, so unsupported map values retain their COHDBL001 diagnostics.
 
 A mutation or RETURN can start without `MATCH`; a deletion must bind variables through MATCH or
 OPTIONAL MATCH. A query may start with OPTIONAL MATCH.
@@ -355,7 +359,11 @@ alternatives, GqlMapExpression, GqlSubscriptExpression and GqlMemberExpression. 
 now works in every value position; GqlInExpression.List is a GqlExpression (breaking change).
 
 Searched CASE selects the first TRUE predicate. Simple CASE evaluates its operand once
-and uses three-valued equality: WHEN NULL never matches, including a NULL operand.
+and compares each WHEN operand in source order: WHEN 17, 42 matches either;
+WHEN > 30 (and =, <>, !=, <, <=, >=) uses the exact predicate comparison; WHEN IS NULL
+and WHEN IS NOT NULL test the operand directly. WHEN NULL never matches, including a NULL operand.
+The parser expands a comma list into ordered alternatives sharing the THEN expression;
+GqlCaseAlternative.Comparison records the comparison without reevaluating the CASE operand.
 Only the selected result branch evaluates; no matching branch and no ELSE yields NULL.
 COALESCE evaluates left to right until non-NULL; NULLIF evaluates both operands once and
 returns NULL only for TRUE equality, otherwise its first operand. CASE result types are
@@ -368,13 +376,19 @@ Parameters accept BCL IList implementations with zero-based one-dimensional arra
 byte[] binary scalars) and IReadOnlyDictionary<string, object?> implementations, including
 Dictionary<string, object?>. Each referenced value is recursively snapshotted once per
 execution; invalid/non-finite leaves and cycles or parameter bounds fail with COHDBG003
-before reads or writes. Parameters allow depth 64 and 65536 total values including the root.
+before reads or writes. All values allow depth 64, 65536 total values including the root and
+16 MiB encoded bytes. Constructors validate these bounds inside the statement transaction with
+COHDBG013, including in-process execution, so a refused result rolls back its writes. Strings
+count real UTF-8 bytes, zero escaping and framing.
 INSERT/CREATE and MATCH pattern property maps remain scalar-only (COHDBG003 for composite
 parameters, COHDBL001 naming storage for list/map syntax); whole-map (n $props) stays COHDBL001.
 
 Negative list indexes count from the end. Out-of-range indexes, missing map fields and
 NULL containers/indexes yield NULL. Lists require integral indexes; maps require string
-keys. Invalid accesses, including (a.name).x on a string, use #1140's COHDBG013.
+keys. Node and relationship values also accept string subscripts and member access:
+(a).name, COALESCE(b,a).name and a['name'] read scalar stored properties and pass Execute.
+Only containers that are neither entities nor maps fail member lookup. Invalid accesses,
+including (a.name).x on a string, use #1140's COHDBG013.
 The parser keeps a.b.c on a stored property as COHDBL001 while {k:{j:1}}.k.j and $m.k
 are field access. Comprehensions, pattern comprehensions and slicing remain named COHDBL001.
 UNWIND/FOR remain #1145's work and their unsupported pins are unchanged.
@@ -403,7 +417,16 @@ community/cypher/runtime-util/src/main/java/org/neo4j/cypher/operations/CypherFu
 implements integral, negative and out-of-range indexing, and :3414-3421 delegates map lookup.
 MapValue.java:125-126 returns NO_VALUE for absent keys.
 community/cypher/front-end/parser/v25/ast-factory/src/main/scala/org/neo4j/cypher/internal/parser/v25/ast/factory/ExpressionBuilder.scala:532-569
-lowers simple CASE alternatives to Equals, so NULL comparison never selects a branch.
+lowers plain operands to Equals, comparison parts to binaryPredicate and null tests to advancedPredicate.
+Cypher25Parser.g4:688-707 in community/cypher/front-end/parser/v25/parser/src/main/antlr4/org/neo4j/cypher/internal/parser/v25/
+accepts comma operands, comparison parts and IS [NOT] NULL.
+ISO GQL 20.7, transcribed by the [openGQL grammar](https://github.com/opengql/grammar/blob/main/GQL.g4#L2192-L2245),
+defines whenOperandList, comparisonPredicatePart2 and nullPredicatePart2 respectively.
+[Neo4j simple CASE](https://neo4j.com/docs/cypher-manual/current/expressions/conditional-expressions/#simple-case)
+also accepts comma operands; its extended simple CASE accepts explicit comparisons and IS [NOT] NULL.
+These forms share Cohesion's exact comparison rule (owner, 2026-10-17).
+CypherFunctions.java:988-1017 and :1061-1079 in community/cypher/runtime-util/src/main/java/org/neo4j/cypher/operations/
+read node/relationship properties through member and string-subscript access.
 community/cypher/interpreted-runtime/src/main/scala/org/neo4j/cypher/internal/runtime/interpreted/commands/expressions/ListSlice.scala:34-61
 dispatches omitted bounds to slicing operations, consulted but excluded here.
 community/values/src/main/java/org/neo4j/values/AnyValueComparator.java:87-118 and :146-155
@@ -423,10 +446,10 @@ decision, including within these composites.
 | `GQL0003` | Unterminated string, quoted name, or block comment |
 | `GQL0004` | Invalid or out-of-range numeric literal |
 | `GQL0005` | Pattern length limit exceeded: a path pattern holds at most 64 relationships. Label expressions and predicates have no length or nesting limit (#1139 follow-up) |
-| `GQL0006` | Duplicate literal property key |
+| `GQL0006` | Duplicate literal property or map-literal key |
 | `GQL0007` | `Graph catalog introspection is read-only.`: mutation composed with `SHOW` |
 | `GQL0008` | A `--` comment begins exactly where a node pattern's `)` or an edge pattern's `]` ends, in `MATCH`, `INSERT` or `CREATE`: a Cypher arrow (`-->`, `--`) that would hide the rest of the line. Reported at the `--`; the message names `->`, `<-` and `-` |
-| `GQL0009` | The statement nests groups, unary expressions, CASE or collection constructors deeper than the parsing thread's stack can follow. Reported at the group, unary or list token that could not be entered; the parse stops there and reports nothing else. The same text parses on a thread with more stack, so the engine's `GraphQueryRequest.FromGql` reports it as `COHDBG008`, statement too complex, not as a parse error |
+| `GQL0009` | The statement nests groups, unary expressions, CASE, subscripts or collection constructors deeper than the parsing thread's stack can follow. Reported at the group, unary, constructor or subscript token that could not be entered; the parse stops there and reports nothing else. The same text parses on a thread with more stack, so the engine's `GraphQueryRequest.FromGql` reports it as `COHDBG008`, statement too complex, not as a parse error |
 
 Locations use zero-based absolute UTF-16 offsets with exclusive ends and one-based line numbers.
 A line breaks at LF, CR, NEL (U+0085), LS (U+2028) or PS (U+2029), and CR LF is one break

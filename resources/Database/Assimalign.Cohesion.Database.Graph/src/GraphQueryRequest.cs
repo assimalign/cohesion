@@ -9,7 +9,7 @@ namespace Assimalign.Cohesion.Database.Graph;
 
 /// <summary>A parsed, database-scoped GQL statement whose result is rows.</summary>
 /// <remarks>
-/// Node and relationship property maps, WHERE operands and RETURN expressions bind named scalar parameters. The
+/// Node and relationship property maps bind scalar parameters; WHERE and RETURN also accept lists and maps. The
 /// statement and the parameters live on <see cref="GraphRequest"/>, which a graph session's typed
 /// execute member takes.
 /// </remarks>
@@ -17,7 +17,7 @@ public sealed class GraphQueryRequest : GraphRequest
 {
     /// <summary>Creates a request from a parsed GQL statement.</summary>
     /// <param name="statement">The parsed statement.</param>
-    /// <param name="parameters">Named scalar bindings for $name and @name; see <see cref="GraphRequest.Parameters"/>.</param>
+    /// <param name="parameters">Named scalar, list or map bindings for $name and @name; see <see cref="GraphRequest.Parameters"/>.</param>
     /// <exception cref="ArgumentNullException">The statement is null.</exception>
     public GraphQueryRequest(GqlQueryStatement statement, IReadOnlyDictionary<string, object?>? parameters = null)
         : base(statement, parameters)
@@ -26,7 +26,7 @@ public sealed class GraphQueryRequest : GraphRequest
 
     /// <summary>Parses GQL text into an executable graph statement request.</summary>
     /// <param name="gql">The GQL statement text.</param>
-    /// <param name="parameters">Named scalar bindings for $name and @name; see <see cref="GraphRequest.Parameters"/>.</param>
+    /// <param name="parameters">Named scalar, list or map bindings for $name and @name; see <see cref="GraphRequest.Parameters"/>.</param>
     /// <returns>The parsed request.</returns>
     /// <exception cref="ArgumentException">The statement text is empty.</exception>
     /// <exception cref="DatabaseParseException">The statement has an error diagnostic.</exception>

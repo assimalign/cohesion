@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using Assimalign.Cohesion.Database.Graph.Language;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Graph.Internal;
 
@@ -15,7 +16,7 @@ internal static partial class GraphExpressionEvaluator
         RuntimeHelpers.EnsureSufficientExecutionStack();
         try
         {
-            return expression switch
+            var result = expression switch
             {
                 GqlLiteralExpression literal => literal.Value,
                 GqlParameterExpression parameter => Parameter(parameter, parameters),
@@ -38,6 +39,13 @@ internal static partial class GraphExpressionEvaluator
                 GqlStringPredicateExpression predicate => StringPredicate(predicate, bindings, parameters),
                 _ => throw new GraphPlanningException("COHDBG001", "Unsupported graph expression."),
             };
+            if (result is string || GraphCompositeValues.IsComposite(result))
+            {
+                try { GraphValueCodec.Measure(result); }
+                catch (DatabaseTypeException error)
+                { throw new GraphPlanningException("COHDBG013", error.Message, expression.Location, error); }
+            }
+            return result;
         }
         catch (ArithmeticException error)
         {

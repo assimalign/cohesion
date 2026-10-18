@@ -270,6 +270,10 @@ public sealed class GraphClientWireTests
 
     /// <summary>A mutation with a non-scalar result is rejected before its writes can be applied.</summary>
     [Theory(DisplayName = "Cohesion Test [Graph.Client] - Entity projection on Execute fails before mutation")]
+    [InlineData("INSERT (a:X) RETURN COALESCE(a,1)")]
+    [InlineData("INSERT (a:X) RETURN NULLIF(a,1)")]
+    [InlineData("INSERT (a:X) RETURN [a][0]")]
+    [InlineData("INSERT (a:X) RETURN {n:a}.n")]
     [InlineData("INSERT (a:X) RETURN [a]")]
     [InlineData("INSERT (a:X) RETURN {n: a}")]
     [InlineData("INSERT (a:X) RETURN CASE WHEN a.age > 1 THEN a ELSE 1 END")]

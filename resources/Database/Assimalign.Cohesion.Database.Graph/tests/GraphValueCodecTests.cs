@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Shouldly;
 using Xunit;
+using Assimalign.Cohesion.Database.Graph.Internal;
 using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Types;
 
@@ -46,6 +47,67 @@ public sealed class GraphValueCodecTests
     {
         // Act / Assert
         Should.Throw<ProtocolException>(() => GraphValueCodec.Decode(bytes));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Graph] - Composite codec: precommit sizes agree with actual scalar encodings")]
+    public void Measure_ScalarFraming_ShouldMatchEncodedBytes()
+    {
+        // Arrange
+        object?[] values = [null, false, (sbyte)-1, (byte)1, (ushort)2, 3U, ulong.MaxValue, (short)-2, 3, 4L,
+            0.1f, 0.1d, 0m, 1000.000m, -0.000001m, decimal.MinValue, "é\0", new byte[] { 0, 1 },
+            DateOnly.MinValue, TimeOnly.MinValue, DateTime.UnixEpoch, DateTimeOffset.UnixEpoch, TimeSpan.Zero, Guid.Empty];
+        // Act / Assert
+        foreach (var value in values) { GraphValueCodec.Measure(value).ShouldBe(GraphValueCodec.Encode(value).Length); }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Graph] - Composite codec: encoded string bytes include framing and zero escaping")]
+    [InlineData("a")]
+    [InlineData("é")]
+    [InlineData("\0")]
+    public void Encode_StringBoundary_ShouldUseExactEncodedBytes(string unit)
+    {
+        // Arrange: list header 5, scalar envelope 5, string type/collation/terminator 4.
+        int width = unit == "a" ? 1 : 2;
+        int bytes = GraphValueCodec.MaxPayloadLength - 14;
+        string text = string.Concat(Enumerable.Repeat(unit, bytes / width)) + new string('a', bytes % width);
+        // Act / Assert
+        GraphValueCodec.Encode(new object?[] { text }).Length.ShouldBe(GraphValueCodec.MaxPayloadLength);
+        Should.Throw<DatabaseTypeException>(() => GraphValueCodec.Encode(new object?[] { text + "a" }));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Graph] - Composite codec: claimed counts are refused before large allocations")]
+    public void Decode_ImpossibleCount_ShouldBoundAllocations()
+    {
+        // Arrange
+        byte[] payload = [1, 255, 255, 0, 0];
+        try { GraphValueCodec.Decode(payload); } catch (ProtocolException) { }
+        // Act
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        bool refused = false;
+        try { GraphValueCodec.Decode(payload); } catch (ProtocolException) { refused = true; }
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        // Assert
+        refused.ShouldBeTrue();
+        allocated.ShouldBeLessThan(16_384);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Graph] - Composite codec: sibling descendants share the count budget before allocation")]
+    public void Decode_SiblingCounts_ShouldReserveAggregateBudget()
+    {
+        // Arrange: each child fits alone; their aggregate does not.
+        byte[] sibling = new byte[5 + 40_000 * 2]; sibling[0] = 1;
+        System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(sibling.AsSpan(1), 40_000);
+        for (int i = 5; i < sibling.Length; i += 2) { sibling[i] = 3; }
+        byte[] payload = new byte[] { 1, 2, 0, 0, 0 }.Concat(sibling).Concat(sibling).ToArray();
+        try { GraphValueCodec.Decode(payload); } catch (ProtocolException) { }
+        // Act
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        bool refused = false;
+        try { GraphValueCodec.Decode(payload); } catch (ProtocolException) { refused = true; }
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        // Assert: the first child and its boxed bytes fit; the second array must never allocate.
+        refused.ShouldBeTrue();
+        allocated.ShouldBeLessThan(1_500_000);
     }
 
     [Fact(DisplayName = "Cohesion Test [Graph] - Composite codec: limits include descendants and cyclic input")]

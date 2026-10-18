@@ -1007,14 +1007,22 @@ GraphPathResult and Path frames are unchanged. No catalog/storage format changes
 composites are transient query values, and stored properties and index keys stay scalar-only.
 
 With the capability, each Execute/ExecutePaths parameter is one GraphValueCodec component.
-Each ResultRow column is i32 little-endian byte length followed by one component. The header
-still uses DatabaseType.Null for heterogeneous query columns. Without it, parameters and
-rows keep their existing DatabaseValueCodec bytes; a composite result raises COHDBG016
-ExecutionFailure before any header. Every result value and row/header frame size is validated
-and encoded before ResultHeader; a refusal leaves the same authenticated session reusable.
-The already-materialized result is encoded once for validation and again for delivery, keeping
-temporary encoding memory bounded to one row rather than the entire result. This deliberately
-trades repeated encoding CPU for bounded memory. No partial result is published on encoding failure.
+ResultHeader's column type keeps its DatabaseType identity in bits 0–6; bit 7 marks a column
+that may contain composites. An unmarked column remains one self-delimiting DatabaseValueCodec
+component, with no extra bytes even on a negotiated session. A marked column starts with tag 0
+and one scalar tuple component, or tag 1 and a little-endian i32 byte length followed by one
+GraphValueCodec component. Unsigned scalars use the latter form to preserve their CLR types.
+The underlying query metadata remains DatabaseType.Null. Without negotiation, parameters and
+rows retain their tuple bytes. Possible composite projections raise COHDBG016 statically before
+writer locking, reads or mutations, including skipped CASE arms and empty matches.
+
+Constructed values enforce depth, aggregate count and real encoded-byte bounds during evaluation,
+inside the statement transaction, with COHDBG013. Parameters enforce the same bounds while
+planning with COHDBG003. Header byte sizes are checked before writer locking; row byte sizes are checked during materialization before commit. Thus
+bounds cannot first refuse a write in wire encoding; the same authenticated session stays reusable.
+Scalar results have no encoding preflight pass, per-row stream or per-value writer. One reusable
+tuple writer allocates only the outgoing row array. Composite results reuse one stream and binary
+writer across rows, and the same tuple scratch writer across scalar components.
 
 Component tags: 0 = scalar (i32 byte length, then exactly one DatabaseValueCodec component),
 1 = list (i32 item count, then recursive components), 2 = map (i32 entry count, then each
@@ -1056,8 +1064,8 @@ followed by those bytes. There is no padding.
 | Byte | Direction | Payload |
 | --- | --- | --- |
 | 5 (`Execute`) | Client → server | GQL string; `int32` parameter count; repeated parameter-name string, `int32` encoded-value byte length, value bytes |
-| 6 (`ResultHeader`) | Server → client | `int32` column count; repeated column-name string and one `DatabaseType` byte |
-| 7 (`ResultRow`) | Server → client | Exactly one value per column: legacy scalar components, or negotiated little-endian Int32 byte length plus GraphValueCodec component |
+| 6 (`ResultHeader`) | Server → client | `int32` column count; repeated column-name string and one type byte: DatabaseType in bits 0–6, negotiated composite-column flag in bit 7 |
+| 7 (`ResultRow`) | Server → client | One value per column: unmarked scalar tuple component; marked tag 0 plus scalar, or tag 1 plus little-endian Int32 length and GraphValueCodec component |
 | 8 (`ResultComplete`) | Server → client | `int64` affected count; -1 for a result set |
 | 9 (`Transaction`) | Client → server | Reserved legacy identifier; server rejects it with `ProtocolViolation` |
 | 64 (`ExecutePaths`) | Client → server | The same GQL/parameter payload as byte 5, requesting path-shaped results |
@@ -1087,11 +1095,19 @@ The other family layouts remain prose-only. `Execute` (5) and `ExecutePaths` (64
 payload: bytes 0–3 hold the signed 32-bit big-endian statement length `S`, the statement starts at
 byte 4, and bytes `4 + S`–`7 + S` hold the signed 32-bit big-endian parameter count. Each parameter
 then starts at some byte `Q` with a signed 32-bit big-endian name length `N` at `Q`, `N` name bytes
-at `Q + 4`, a signed 32-bit big-endian encoded-value length `V` at `Q + 4 + N`, and `V` tuple-codec
-bytes at `Q + 8 + N`. `ResultHeader` (6) starts with its signed 32-bit big-endian column count at
+at `Q + 4`, a signed 32-bit big-endian encoded-value length `V` at `Q + 4 + N`, and `V` value
+bytes at `Q + 8 + N`: one GraphValueCodec component when graph.composite-values is negotiated,
+otherwise one scalar tuple component. Pattern property maps remain scalar-only.
+`ResultHeader` (6) starts with its signed 32-bit big-endian column count at
 bytes 0–3; each repeated column has the same four-byte name length and name bytes followed by one
-`DatabaseType` byte. `ResultRow` (7) is self-delimiting tuple components from byte 0 through the
-payload end. The `ResultComplete` (8) encoder emits one signed 64-bit big-endian affected count at
+type byte: DatabaseType in bits 0–6, negotiated composite-column flag in bit 7.
+`ResultRow` (7) contains one value per header column from byte 0 through the payload end.
+Unmarked columns retain self-delimiting scalar tuple bytes. A marked column starts with tag 0
+plus one scalar tuple component, or tag 1 plus a little-endian i32 length and GraphValueCodec bytes.
+Negative/truncated lengths and trailing row bytes are ProtocolViolation. Lists materialize as
+object?[] and maps as read-only IReadOnlyDictionary<string, object?>. Values permit depth 64,
+65,536 values and 16 MiB; rows fit 16 MiB too. Clients refuse composite parameters locally
+without negotiation. The `ResultComplete` (8) encoder emits one signed 64-bit big-endian affected count at
 bytes 0–7. `Transaction` (9) is reserved and has no accepted graph payload. `PathsComplete` (66) is
 exactly a nonnegative signed 64-bit big-endian path count at bytes 0–7 with no trailing bytes.
 

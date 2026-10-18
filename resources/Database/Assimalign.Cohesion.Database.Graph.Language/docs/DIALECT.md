@@ -88,8 +88,14 @@ ordinal keys, then values. Encountered NULL/incomparable values yield UNKNOWN in
 ORDER BY remains outside the current profile. CASE/composite values containing possible
 entities fail the static wire Execute gate before mutations, including on empty matches.
 
+Simple CASE accepts comma-separated WHEN operands, comparison parts (=, <>, !=, <, <=, >, >=),
+and IS NULL / IS NOT NULL. Its operand evaluates once; comparisons use the same exact rule as WHERE.
+Entity expressions support scalar property reads through (a).name, COALESCE(b,a).name and a['name'].
+Constructed values exceeding depth 64, 65,536 values or 16 MiB fail with COHDBG013 inside the
+statement transaction, including in process; the statement's writes roll back.
+
 Wire composite values require graph.composite-values under existing protocol 2.1 negotiation.
-Without it, composite results fail with COHDBG016 before ResultHeader and parameters are
+Without it, projections that may return composites fail statically with COHDBG016 before writer locking and parameters are
 refused locally. The codec bounds are depth 64, 65536 total values and 16777216 bytes.
 Malformed components are ProtocolViolation. Path result encoding is unchanged.
 

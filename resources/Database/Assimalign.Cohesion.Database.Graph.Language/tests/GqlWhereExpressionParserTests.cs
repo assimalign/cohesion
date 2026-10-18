@@ -112,6 +112,12 @@ public sealed class GqlWhereExpressionParserTests
     [InlineData("- ", "", "a.x")]
     [InlineData("(", ")", "TRUE")]
     [InlineData("1 IN [", "]", "1")]
+    [InlineData("$p[", "]", "0")]
+    [InlineData("0[", "]", "0")]
+    [InlineData("CASE WHEN TRUE THEN ", " END", "1")]
+    [InlineData("{k:", "}", "1")]
+    [InlineData("COALESCE(NULL,", ")", "1")]
+    [InlineData("NULLIF(1,", ")", "1")]
     public void Parse_RecursiveNodes_ShouldReportStackExhaustion(string open, string close, string leaf)
     {
         // Arrange
@@ -131,7 +137,9 @@ public sealed class GqlWhereExpressionParserTests
 
         // Assert
         failure.ShouldBeNull();
-        result.ShouldNotBeNull().Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("GQL0009");
+        var error = result.ShouldNotBeNull().Diagnostics.ShouldHaveSingleItem();
+        error.Code.ShouldBe("GQL0009");
+        if (open.EndsWith("[", StringComparison.Ordinal) && open != "1 IN [") { gql[error.Start!.Value].ShouldBe('['); }
     }
 
     private static GqlExpression Predicate(string text)

@@ -32,7 +32,7 @@ internal static class GraphProjectionText
             GqlListExpression list => "[" + string.Join(", ", list.Items.Select(Describe)) + "]",
             GqlMapExpression map => "{" + string.Join(", ", map.Entries.Select(entry => Name(entry.Key) + ": " + Describe(entry.Value))) + "}",
             GqlCaseExpression conditional => "CASE " + (conditional.Operand is null ? "" : Describe(conditional.Operand) + " ") +
-                string.Join(" ", conditional.Alternatives.Select(branch => "WHEN " + Describe(branch.When) + " THEN " + Describe(branch.Then))) +
+                string.Join(" ", conditional.Alternatives.Select(branch => "WHEN " + (branch.Comparison.StartsWith("IS", StringComparison.Ordinal) ? branch.Comparison : (branch.Comparison == "=" ? "" : branch.Comparison + " ") + Describe(branch.When)) + " THEN " + Describe(branch.Then))) +
                 (conditional.Otherwise is null ? "" : " ELSE " + Describe(conditional.Otherwise)) + " END",
             GqlCoalesceExpression coalesce => "COALESCE(" + string.Join(", ", coalesce.Operands.Select(Describe)) + ")",
             GqlNullIfExpression nullIf => "NULLIF(" + Describe(nullIf.Left) + ", " + Describe(nullIf.Right) + ")",

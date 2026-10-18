@@ -21,10 +21,26 @@ internal static partial class GraphExpressionEvaluator
         foreach (var branch in conditional.Alternatives)
         {
             var when = Evaluate(branch.When, bindings, parameters);
-            if ((conditional.Operand is null ? Boolean(when, branch.When) : GraphCompositeValues.Equal(operand, when)) == true)
+            if ((conditional.Operand is null ? Boolean(when, branch.When) : CaseComparison(operand, when, branch.Comparison)) == true)
             { return Evaluate(branch.Then, bindings, parameters); }
         }
         return conditional.Otherwise is null ? null : Evaluate(conditional.Otherwise, bindings, parameters);
+    }
+
+    private static bool? CaseComparison(object? left, object? right, string comparison)
+    {
+        if (comparison == "IS NULL") { return left is null; }
+        if (comparison == "IS NOT NULL") { return left is not null; }
+        if (comparison is "=" or "<>" or "!=")
+        { var equal = GraphCompositeValues.Equal(left, right); return comparison == "=" ? equal : !equal; }
+        if (left is null || right is null) { return null; }
+        int? order = Compare(left, right);
+        return comparison switch
+        {
+            "<" => order is null ? null : order < 0, "<=" => order is null ? null : order <= 0,
+            ">" => order is null ? null : order > 0, ">=" => order is null ? null : order >= 0,
+            _ => throw new GraphPlanningException("COHDBG001", ErrorMessages.CaseInvalid),
+        };
     }
 
     private static object? Coalesce(GqlCoalesceExpression coalesce, IReadOnlyDictionary<string, object?> bindings, IReadOnlyDictionary<string, object?>? parameters)
@@ -45,6 +61,7 @@ internal static partial class GraphExpressionEvaluator
         => operand switch
         {
             null => null,
+            GraphNode or GraphRelationship => Property(operand, key),
             IReadOnlyDictionary<string, object?> map => map.TryGetValue(key, out var value) ? value : null,
             _ => throw new GraphPlanningException("COHDBG013", ErrorMessages.CompositeRequired, expression.Location),
         };
@@ -54,7 +71,7 @@ internal static partial class GraphExpressionEvaluator
         var operand = Evaluate(subscript.Operand, bindings, parameters);
         var index = Evaluate(subscript.Index, bindings, parameters);
         if (operand is null || index is null) { return null; }
-        if (operand is IReadOnlyDictionary<string, object?> && index is string key) { return Member(operand, key, subscript); }
+        if (operand is IReadOnlyDictionary<string, object?> or GraphNode or GraphRelationship && index is string key) { return Member(operand, key, subscript); }
         if (operand is object?[] list && index is byte or sbyte or short or ushort or int or uint or long or ulong)
         {
             if (index is ulong large && large > long.MaxValue) { return null; }

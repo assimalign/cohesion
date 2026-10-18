@@ -188,24 +188,13 @@ internal sealed partial class GraphPlanner
                 _ => GraphProjectionKind.Path,
             },
             GqlListExpression or GqlMapExpression or GqlCaseExpression or GqlCoalesceExpression or GqlNullIfExpression or
-                GqlMemberExpression or GqlSubscriptExpression => ContainsEntity(expression) ? GraphProjectionKind.EntityValue : GraphProjectionKind.Scalar,
+                GqlMemberExpression or GqlSubscriptExpression => GraphValueExpressions.MayReturn(expression, _parameters, entity: true) ? GraphProjectionKind.EntityValue : GraphProjectionKind.Scalar,
             GqlLiteralExpression or GqlParameterExpression or GqlPropertyExpression or
                 GqlBinaryExpression or GqlLogicalExpression or GqlUnaryExpression or
                 GqlIsNullExpression or GqlTruthTestExpression or GqlInExpression or
                 GqlStringPredicateExpression or GqlLabeledPredicate => GraphProjectionKind.Scalar,
             _ => throw new GraphPlanningException("COHDBG001", ErrorMessages.ProjectionUnsupported, expression.Location),
         };
-
-        bool ContainsEntity(GqlExpression root)
-        {
-            var pending = new Stack<GqlExpression>(); pending.Push(root);
-            while (pending.TryPop(out var item))
-            {
-                if (item is GqlVariableExpression) { return true; }
-                foreach (var child in GraphValueExpressions.ResultChildren(item)) { pending.Push(child); }
-            }
-            return false;
-        }
 
         // Returns false when a MATCH pattern requires a name the database does not have.
         bool Validate(GqlPathPattern path, bool creating)

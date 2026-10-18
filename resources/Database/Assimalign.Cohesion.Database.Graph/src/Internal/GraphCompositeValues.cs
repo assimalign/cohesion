@@ -14,7 +14,9 @@ internal static class GraphCompositeValues
     internal static object? Snapshot(object? value, Location? location = null)
     {
         int count = 0;
-        try { return Copy(value, 0, ref count); }
+        try { var copy = Copy(value, 0, ref count); GraphValueCodec.Measure(copy); return copy; }
+        catch (Assimalign.Cohesion.Database.Types.DatabaseTypeException error)
+        { throw new GraphPlanningException("COHDBG003", error.Message, location, error); }
         catch (GraphPlanningException error) when (location is not null)
         { throw error.At(location); }
     }

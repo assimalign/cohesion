@@ -8,9 +8,13 @@ namespace Assimalign.Cohesion.Database.Graph;
 /// <summary>
 /// Opens a streamed result: the column names and type identifiers of the rows that
 /// follow. Row frames (<see cref="GraphProtocolMessageType.ResultRow"/>) carry each row
-/// as shared tuple-codec bytes, one typed component per column.
+/// as shared tuple-codec bytes for scalar columns. With graph.composite-values, bit 7 of
+/// a column type marks possible composites: tag 0 precedes a scalar tuple component; tag 1
+/// precedes a little-endian Int32 length and GraphValueCodec component. Lists decode to
+/// object?[] and maps to read-only IReadOnlyDictionary&lt;string, object?&gt;. Values are limited
+/// to depth 64, 65,536 values and 16 MiB; each row also fits 16 MiB.
 /// </summary>
-/// <param name="Columns">The columns: name plus the shared type identity byte.</param>
+/// <param name="Columns">The columns: name plus the shared type identity byte, with bit 7 marking negotiated composite columns.</param>
 public sealed record GraphProtocolResultHeaderMessage(IReadOnlyList<(string Name, byte Type)> Columns)
 {
     /// <summary>

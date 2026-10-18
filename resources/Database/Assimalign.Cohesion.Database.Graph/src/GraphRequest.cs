@@ -58,11 +58,17 @@ public abstract class GraphRequest : DatabaseRequest
     /// <summary>The wire Execute exchange requires statically scalar result columns.</summary>
     internal bool ScalarsOnly { get; init; }
 
+    internal bool CompositeValues { get; init; } = true;
+
     /// <summary>
-    /// Gets the named scalar bindings for $name and @name references, or null for none.
+    /// Gets the named scalar, list or map bindings for $name and @name references, or null for none.
     /// Lookup strips one leading sigil from map keys and uses ordinal, case-sensitive bare names.
     /// Unbound references fail planning with COHDBG001; duplicate normalized keys use COHDBG014.
     /// Referenced values retain their runtime scalar types; unsupported values use COHDBG003.
+    /// Lists snapshot to <c>object?[]</c>; maps to read-only <c>IReadOnlyDictionary&lt;string, object?&gt;</c>.
+    /// Values permit depth 64, 65,536 total values including the root, and 16 MiB of encoded bytes.
+    /// Pattern property maps remain scalar-only. Wire composites require the negotiated capability;
+    /// the client refuses composite parameters locally without sending a frame when it is absent.
     /// Unused entries are ignored.
     /// </summary>
     public IReadOnlyDictionary<string, object?>? Parameters => _parameters;

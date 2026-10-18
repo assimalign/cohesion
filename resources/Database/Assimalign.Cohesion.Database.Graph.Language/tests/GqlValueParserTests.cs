@@ -7,6 +7,10 @@ namespace Assimalign.Cohesion.Database.Graph.Language.Tests;
 public sealed class GqlValueParserTests
 {
     [Theory(DisplayName = "Cohesion Test [GQL] - Values: conditional and composite expressions parse")]
+    [InlineData("CASE a.age WHEN 17, 42 THEN 1 END")]
+    [InlineData("CASE a.age WHEN > 30, IS NULL THEN 1 WHEN IS NOT NULL THEN 2 END")]
+    [InlineData("[(a.age), a:Person|Robot]")]
+    [InlineData("[a = 1, a:A|B]")]
     [InlineData("CASE WHEN a.age = 42 THEN 1 END")]
     [InlineData("CASE a.age WHEN 42 THEN CASE WHEN TRUE THEN 2 END ELSE 3 END")]
     [InlineData("COALESCE(a.absent, a.name)")]
@@ -28,6 +32,35 @@ public sealed class GqlValueParserTests
         var statement = new GqlQueryParser().Parse("MATCH (a) RETURN " + value);
         // Assert
         statement.Diagnostics.ShouldBeEmpty();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [GQL] - Values: truncated lists report syntax errors at EOF")]
+    [InlineData("RETURN [")]
+    [InlineData("RETURN [[")]
+    [InlineData("MATCH (a) WHERE a.x IN [")]
+    [InlineData("RETURN {k: [")]
+    public void Parse_TruncatedList_ShouldReportSyntaxDiagnostic(string source)
+    {
+        // Arrange / Act / Assert
+        foreach (string suffix in new[] { "", " -- trailing comment", " /* trailing comment */" })
+        {
+            var error = new GqlQueryParser().Parse(source + suffix).Diagnostics.ShouldHaveSingleItem();
+            error.Code.ShouldBe("GQL0002");
+            error.Start.ShouldBe((source + suffix).Length);
+        }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [GQL] - Values: unsupported map values retain capability diagnostics")]
+    [InlineData("{total: count(a)}")]
+    [InlineData("{n: abs(1)}")]
+    [InlineData("{e: EXISTS {(a)->(b)}}")]
+    public void Parse_UnsupportedMapValue_ShouldRetainCapabilityDiagnostic(string value)
+    {
+        // Arrange / Act
+        var errors = new GqlQueryParser().Parse("MATCH (a) RETURN " + value).Diagnostics;
+        // Assert
+        errors.ShouldContain(error => error.Code == "COHDBL001");
+        errors.ShouldNotContain(error => error.Code == "GQL0002");
     }
 
     [Theory(DisplayName = "Cohesion Test [GQL] - Values: malformed CASE identifies the offending token")]

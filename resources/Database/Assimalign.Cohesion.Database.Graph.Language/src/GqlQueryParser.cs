@@ -162,6 +162,8 @@ public sealed partial class GqlQueryParser : QueryParser
     private void FindUnsupported()
     {
         int patternDepth = 0;
+        var containers = new Stack<TokenType>();
+        int mapSeparatorPosition = -1;
         bool inValueExpression = false;
         bool sawCall = false;
         var label = LabelScan.None;
@@ -174,8 +176,11 @@ public sealed partial class GqlQueryParser : QueryParser
             {
                 Unsupported("QUANTIFIED PATTERN", token);
             }
-            if (token.Type is TokenType.LeftParen or TokenType.LeftBracket or TokenType.LeftBrace) { patternDepth++; }
-            if (token.Type is TokenType.RightParen or TokenType.RightBracket or TokenType.RightBrace) { patternDepth--; }
+            bool mapSeparator = token.Type == TokenType.Colon && containers.TryPeek(out var container) && container == TokenType.LeftBrace &&
+                i > 1 && _tokens[i - 2].Type is TokenType.LeftBrace or TokenType.Comma;
+            if (mapSeparator) { mapSeparatorPosition = i; }
+            if (token.Type is TokenType.LeftParen or TokenType.LeftBracket or TokenType.LeftBrace) { patternDepth++; containers.Push(token.Type); }
+            if (token.Type is TokenType.RightParen or TokenType.RightBracket or TokenType.RightBrace) { patternDepth--; containers.TryPop(out _); }
 
             // A WHERE/RETURN label expression (n:A|B, n IS [NOT] LABELED A|B) holds label names exactly
             // as a pattern does, so n:A|Order names a label, not ORDER BY.
@@ -186,6 +191,7 @@ public sealed partial class GqlQueryParser : QueryParser
                 labelParens = 0;
             }
             if (token.Type == TokenType.Colon && inValueExpression && i > 0 &&
+                !mapSeparator &&
                 _tokens[i - 1].Type is TokenType.Identifier or TokenType.QuotedIdentifier)
             {
                 label = LabelScan.ExpectPrimary;
@@ -230,7 +236,8 @@ public sealed partial class GqlQueryParser : QueryParser
             if (token.Type is not (TokenType.Keyword or TokenType.Identifier or TokenType.Function)) { continue; }
             // Contextual clause words, such as NEXT, remain legal aliases after AS.
             if (i > 0 && IsWordAt(i - 1, "AS") && token.Type is TokenType.Identifier or TokenType.Function) { continue; }
-            if (i > 0 && _tokens[i - 1].Type is TokenType.Dot or TokenType.Colon) { continue; }
+            if (i > 0 && (_tokens[i - 1].Type == TokenType.Dot ||
+                _tokens[i - 1].Type == TokenType.Colon && i - 1 != mapSeparatorPosition)) { continue; }
             if (i + 1 < _tokens.Count && _tokens[i + 1].Type == TokenType.Colon) { continue; }
             string value = token.Text.ToUpperInvariant();
             // ISO OPTIONAL block operands are recognized outside T1. Consume their complete

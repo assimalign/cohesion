@@ -184,7 +184,7 @@ public sealed partial class GqlQueryParser
                 }
                 else { Error("GQL0004", "Floating-point literal is invalid or outside the finite double range.", start); }
             }
-            else if (Current.Type is TokenType.LeftBracket or TokenType.LeftBrace) { Unsupported(Current.Type == TokenType.LeftBracket ? "LIST-VALUED PROPERTIES unsupported by graph storage" : "MAP-VALUED PROPERTIES unsupported by graph storage", Current); }
+            else if (Current.Type is TokenType.LeftBracket or TokenType.LeftBrace) { Error("COHDBL001", Current.Type == TokenType.LeftBracket ? "List-valued properties are unsupported by graph storage." : "Map-valued properties are unsupported by graph storage.", Current); }
             else { Error("GQL0002", "Expected a scalar literal.", start); }
         }
         return new GqlLiteralExpression(value, Span(start, Previous));
