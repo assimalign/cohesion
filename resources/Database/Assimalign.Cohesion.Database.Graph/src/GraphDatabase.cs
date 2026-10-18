@@ -284,6 +284,7 @@ public sealed partial class GraphDatabase : DatabaseInstance
     public ValueTask<bool> DeleteNodeAsync(GraphDatabaseSession session, GraphNodeId id, CancellationToken cancellationToken = default)
         => RunAsync(RequireOwnSession(session), async operation =>
         {
+            await LockWriterAsync(operation, cancellationToken).ConfigureAwait(false);
             bool found = Store.FindNode(id.Value, operation.Context.Snapshot) is not null;
             await Store.DeleteNodeAsync(id.Value, true, operation.Context, cancellationToken).ConfigureAwait(false);
             return found;
@@ -340,6 +341,7 @@ public sealed partial class GraphDatabase : DatabaseInstance
     public ValueTask<bool> DeleteRelationshipAsync(GraphDatabaseSession session, GraphRelationshipId id, CancellationToken cancellationToken = default)
         => RunAsync(RequireOwnSession(session), async operation =>
         {
+            await LockWriterAsync(operation, cancellationToken).ConfigureAwait(false);
             bool found = Store.FindRelationship(id.Value, operation.Context.Snapshot) is not null;
             await Store.DeleteRelationshipAsync(id.Value, operation.Context, cancellationToken).ConfigureAwait(false);
             return found;
@@ -436,7 +438,7 @@ public sealed partial class GraphDatabase : DatabaseInstance
     internal async ValueTask<GraphNode> CreateNodeCoreAsync(GraphOperation operation, IReadOnlyList<string> labels,
         IReadOnlyDictionary<string, object?>? properties, CancellationToken token)
     {
-        await LockWriterAsync(operation.Context, token).ConfigureAwait(false);
+        await LockWriterAsync(operation, token).ConfigureAwait(false);
         await ValidateNodeAsync(operation, labels, properties, token).ConfigureAwait(false);
         return Materialize(await Store.CreateNodeAsync(new StoredGraphNode((ulong)DataStorage.ReserveTransactionSequence(), labels, properties ?? new Dictionary<string, object?>()), operation.Context, token).ConfigureAwait(false));
     }
@@ -460,7 +462,7 @@ public sealed partial class GraphDatabase : DatabaseInstance
     internal async ValueTask<GraphRelationship> CreateRelationshipCoreAsync(GraphOperation operation, GraphNodeId from, GraphNodeId to,
         string type, IReadOnlyDictionary<string, object?>? properties, CancellationToken token)
     {
-        await LockWriterAsync(operation.Context, token).ConfigureAwait(false);
+        await LockWriterAsync(operation, token).ConfigureAwait(false);
         await ValidateRelationshipAsync(operation, type, properties, token).ConfigureAwait(false);
         return Materialize(await Store.CreateRelationshipAsync(new StoredGraphRelationship((ulong)DataStorage.ReserveTransactionSequence(), from.Value, to.Value, type, properties ?? new Dictionary<string, object?>()), operation.Context, token).ConfigureAwait(false));
     }

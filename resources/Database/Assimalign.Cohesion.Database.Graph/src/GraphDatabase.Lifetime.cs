@@ -113,6 +113,12 @@ public sealed partial class GraphDatabase
 
     // One database writer at a time is deliberately conservative. The shared
     // lock manager owns waits and releases; readers remain snapshot based.
+    internal async ValueTask LockWriterAsync(GraphOperation operation, CancellationToken token)
+    {
+        await LockWriterAsync(operation.Context, token).ConfigureAwait(false);
+        await operation.RefreshWriterSnapshotAsync(token).ConfigureAwait(false);
+    }
+
     internal async ValueTask LockWriterAsync(TransactionContext context, CancellationToken token)
     {
         // An offline database grants no new writer (#1243). A wait for the lock ends with the

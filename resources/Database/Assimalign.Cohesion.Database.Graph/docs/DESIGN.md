@@ -141,8 +141,9 @@ replacement. Row-returning mutations carry the same count over
 the existing ResultComplete frame. EXPLAIN
 describes update stages and their targets without executing them.
 
-Autocommit runs at ReadCommitted and pins its statement snapshot. A writing ReadCommitted
-statement retakes that snapshot after taking the writer lock, then replans against it using the
+Autocommit runs at ReadCommitted and pins its statement snapshot. Every mutation entry point,
+including typed creates/deletes and catalog/schema writes, retakes a ReadCommitted snapshot
+after taking the writer lock. A GQL write then replans against it using the
 already normalized, captured parameter bindings, so queued
 increments serialize. Explicit Snapshot writers retain first-updater-wins. Relationship insertion
 checks latest endpoint existence, so a concurrent endpoint property replacement does not abort it.

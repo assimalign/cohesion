@@ -52,8 +52,7 @@ internal static partial class GraphPlanExecutor
         { throw new GraphPlanningException("COHDBG001", ErrorMessages.ExecuteScalarRequired, plan.Query.Location); }
         if (plan.Writes)
         {
-            await database.LockWriterAsync(operation.Context, token).ConfigureAwait(false);
-            await operation.RefreshWriterSnapshotAsync(token).ConfigureAwait(false);
+            await database.LockWriterAsync(operation, token).ConfigureAwait(false);
             // Bindings have already been normalized and snapshotted. Re-normalizing would strip
             // another sigil from an unused key such as "$$unused" and can invent a collision.
             plan = new GraphPlanner(database, operation.Context.Snapshot).Plan(statement.GqlExpression, parameters, paths, token, normalizedParameters: true);
