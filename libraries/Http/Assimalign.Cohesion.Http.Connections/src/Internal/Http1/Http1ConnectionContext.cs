@@ -355,6 +355,7 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
         try
         {
             Http1Context? context = await Http1MessageReader.ReadRequestAsync(
+                Connection.Input,
                 Stream,
                 ConnectionInfo,
                 GetScheme(),

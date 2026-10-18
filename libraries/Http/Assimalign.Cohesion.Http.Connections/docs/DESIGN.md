@@ -1812,11 +1812,12 @@ trivially DoS-able. Two vectors are specific to the HTTP/1.1 read path and must
 be closed *inside the transport*, before a request ever reaches the application:
 
 - **Unbounded buffering (memory exhaustion).** `Http1MessageReader` reads the
-  request line and each header line via a byte-at-a-time `ReadLineAsync` that
-  accumulates into a `MemoryStream`. With no cap, a peer that opens a connection
-  and streams an endless request line — or an endless run of header bytes with
-  no terminating CRLF — grows that buffer without bound and exhausts the heap.
-  This is a *live* memory-exhaustion vector, not a theoretical one. A chunked
+  request line and each header line with `ReadLineAsync`, which waits in the
+  connection pipe until the line's CRLF has arrived. With no cap, a peer that
+  opens a connection and streams an endless request line — or an endless run of
+  header bytes with no terminating CRLF — keeps that line buffered without bound
+  and exhausts the heap. This is a *live* memory-exhaustion vector, not a
+  theoretical one. A chunked
   body has the same shape after dispatch: its chunk-size lines (chunk extensions
   included) and its trailer section are read line by line too, by the application
   or by the keep-alive drain (#1375).
@@ -2079,6 +2080,30 @@ The read path now **dispatches the request at head** (like HTTP/2): the request
 line and headers are parsed under the head limits, the framing is decided from
 the headers, and the context is yielded with a **lazy** `Http1RequestBodyStream`
 as `Request.Body`. No body octet is read until the application reads the stream.
+
+### Reading the head off the connection pipe
+
+The head is read from the connection's `PipeReader` (`IDuplexConnection.Input`),
+not through the `AsStream()` adapter the body and response use. `ReadLineAsync`
+searches the octets the pipe already holds for the line's CRLF, decodes the line
+as Latin-1, and calls `AdvanceTo` just past the CRLF. Until the CRLF arrives it
+consumes nothing and marks everything buffered as examined, so the next read
+waits for more octets. The search stops at the line's cap plus its CRLF. A line
+is rejected as soon as the buffered octets prove it too long: either cap + 2
+octets with no CRLF among them, or cap + 1 octets whose last is not a CR. That is
+the same octet at which the byte-at-a-time reader used to reject it.
+
+The adapter reads the same pipe, so nothing behind the head is lost. Body octets,
+a pipelined request, and a tunnel's first octets all stay unconsumed for the
+next reader, as they did when the head was read one octet at a time.
+
+The byte-at-a-time reader made one asynchronous pipe read, a one-octet array
+allocation, and a `MemoryStream` write for every octet of the head. On the Web
+benchmarks (Windows ARM64, 2026-10) that cost about 80 ns per octet, so a
+300-octet `Authorization` line took about 24 µs and a 480-octet `Cookie` line
+about 37 µs. That accounted for most of the authentication scenarios' cost per
+request. Chunk framing lines in `Http1RequestBodyStream` are still read one octet
+at a time (below), which is bounded by the no-read-ahead invariant on a `Stream`.
 
 ### `Http1RequestBodyStream`
 
