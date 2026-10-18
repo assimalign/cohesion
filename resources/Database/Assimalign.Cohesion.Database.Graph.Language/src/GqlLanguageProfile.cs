@@ -69,6 +69,8 @@ public static class GqlLanguageProfile
         GqlClauses.Case,
         GqlClauses.Create,
         GqlClauses.Insert,
+        GqlClauses.Set,
+        GqlClauses.Remove,
         GqlClauses.Delete,
         GqlClauses.DetachDelete,
         GqlClauses.Where,

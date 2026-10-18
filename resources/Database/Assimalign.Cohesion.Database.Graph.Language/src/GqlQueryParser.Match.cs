@@ -52,6 +52,66 @@ public sealed partial class GqlQueryParser
                 stages.Add(new GqlDeleteStage(deletes.AsReadOnly(), detach, Span(clauseStart, Previous)));
                 segmentWrites = true;
             }
+            else if (Take("SET"))
+            {
+                var items = new List<GqlSetItem>();
+                do
+                {
+                    var startItem = Current;
+                    string variable = Identifier();
+                    if (Take(TokenType.Dot))
+                    {
+                        string property = Identifier(allowKeyword: true);
+                        Expect(TokenType.Equals, "'='");
+                        if (Current.Type is TokenType.LeftBrace or TokenType.LeftBracket) { _ = ParseScalar(); break; }
+                        items.Add(new GqlSetPropertyItem(variable, property, ParsePredicate(), Span(startItem, Previous)));
+                    }
+                    else if (Is("IS") || Current.Type == TokenType.Colon)
+                    {
+                        bool colon = Take(TokenType.Colon);
+                        if (!colon) { Advance(); }
+                        var labels = new List<string> { Identifier(allowKeyword: true) };
+                        while (!Failed && colon && Take(TokenType.Colon)) { labels.Add(Identifier(allowKeyword: true)); }
+                        items.Add(new GqlSetLabelsItem(variable, labels.AsReadOnly(), colon, Span(startItem, Previous)));
+                    }
+                    else
+                    {
+                        bool merge = Current.Type == TokenType.Plus && Current.Text == "+=";
+                        if (merge) { Advance(); } else { Expect(TokenType.Equals, "'=', '+=', '.', ':' or IS"); }
+                        if (Failed) { break; }
+                        if (Current.Type != TokenType.LeftBrace)
+                        {
+                            if (Current.Type == TokenType.Parameter) { RejectUnsupportedParameter("WHOLE-MAP PARAMETER"); }
+                            else { Unsupported("WHOLE-MAP EXPRESSION", Current); }
+                            break;
+                        }
+                        items.Add(new GqlSetPropertiesItem(variable, ParseProperties(), merge, Span(startItem, Previous)));
+                    }
+                } while (!Failed && Take(TokenType.Comma));
+                stages.Add(new GqlSetStage(items.AsReadOnly(), Span(clauseStart, Previous)));
+                segmentWrites = true;
+            }
+            else if (Take("REMOVE"))
+            {
+                var items = new List<GqlRemoveItem>();
+                do
+                {
+                    var startItem = Current;
+                    string variable = Identifier();
+                    if (Take(TokenType.Dot))
+                    { items.Add(new GqlRemovePropertyItem(variable, Identifier(allowKeyword: true), Span(startItem, Previous))); }
+                    else
+                    {
+                        bool colon = Take(TokenType.Colon);
+                        if (!colon) { Expect("IS"); }
+                        var labels = new List<string> { Identifier(allowKeyword: true) };
+                        while (!Failed && colon && Take(TokenType.Colon)) { labels.Add(Identifier(allowKeyword: true)); }
+                        items.Add(new GqlRemoveLabelsItem(variable, labels.AsReadOnly(), colon, Span(startItem, Previous)));
+                    }
+                } while (!Failed && Take(TokenType.Comma));
+                stages.Add(new GqlRemoveStage(items.AsReadOnly(), Span(clauseStart, Previous)));
+                segmentWrites = true;
+            }
             else if (Take("LET"))
             {
                 var bindings = new List<GqlProjection>();
@@ -165,7 +225,7 @@ public sealed partial class GqlQueryParser
         }
         if (!Failed && (stages.Count != 0 && stages[^1] is GqlReturnStage { IsWith: true } ||
             !segmentWrites && (stages.Count == 0 || stages[^1] is not GqlReturnStage { IsWith: false })))
-        { Error("GQL0002", "A read segment requires RETURN; a linear statement may also end with INSERT, CREATE, or DELETE.", Current); }
+        { Error("GQL0002", "A read segment requires RETURN; a linear statement may also end with INSERT, CREATE, DELETE, SET or REMOVE.", Current); }
         return new GqlQueryExpression(stages.AsReadOnly(), Span(start, Previous));
     }
 

@@ -47,8 +47,8 @@ public sealed class GqlKeywordDispositionTests
         // Clauses, predicates and expressions outside the executable subset
         ["MANDATORY"] = Rejects("MANDATORY MATCH (a) RETURN a", GqlClauses.MandatoryMatch),
         ["WITH"] = Parses("MATCH (a) WITH a RETURN a"),
-        ["SET"] = Rejects("MATCH (a) SET a.x = 1", "SET"),
-        ["REMOVE"] = Rejects("MATCH (a) REMOVE a.x", "REMOVE"),
+        ["SET"] = Parses("MATCH (a) SET a.x = 1"),
+        ["REMOVE"] = Parses("MATCH (a) REMOVE a.x"),
         ["MERGE"] = Rejects("MERGE (n)", "MERGE"),
         ["ORDER"] = Parses("MATCH (a) RETURN a ORDER BY a.x"),
         ["BY"] = Parses("MATCH (a) RETURN a ORDER BY a.x"),

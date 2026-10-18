@@ -11,6 +11,8 @@ namespace Assimalign.Cohesion.Database.Graph.Language.Tests;
 public class GqlQueryParserTests
 {
     [Theory]
+    [InlineData("MATCH (a) SET a.age = 5")]
+    [InlineData("MATCH (a) REMOVE a.age")]
     [InlineData("MATCH (a:Person) RETURN a")]
     [InlineData("UNWIND [1, 2] AS a RETURN a")]
     [InlineData("MATCH (a) WITH a RETURN a")]
@@ -100,8 +102,8 @@ public class GqlQueryParserTests
 
     [Theory]
     [InlineData("MANDATORY MATCH (a) RETURN a")]
-    [InlineData("MATCH (a) SET a.age = 5")]
-    [InlineData("MATCH (a) REMOVE a.age")]
+
+
     [InlineData("MERGE (a:Person)")]
     [InlineData("MATCH (a) RETURN a UNION MATCH (b) RETURN b")]
     [InlineData("MATCH (a) RETURN a {.name}")]

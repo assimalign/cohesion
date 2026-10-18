@@ -6,6 +6,15 @@ only executable clauses. `GqlClauses` names lexical capability keys, including d
 
 `GqlQueryExpression.Stages` is the source-ordered execution input. `Segments` groups those stages at NEXT boundaries, excluding NEXT itself. The `GqlStage` family contains sealed `GqlMatchStage`, `GqlLetStage`, `GqlFilterStage`, `GqlForStage` (also UNWIND), `GqlInsertStage` (also CREATE), `GqlDeleteStage`, `GqlReturnStage` (also WITH) and `GqlNextStage` records. LET adds value variables; FILTER retains TRUE rows; FOR expands lists. RETURN/NEXT and WITH carry referenceable projections in order, using decoded variable names. DISTINCT or aggregation restricts WITH WHERE to projected names; otherwise incoming bindings remain visible to that predicate. Aggregates in WHERE are rejected, while projected aggregate aliases are usable.
 
+`GqlSetStage.Items` contains `GqlSetPropertyItem(Variable, Property, Value)`,
+`GqlSetPropertiesItem(Variable, Properties, Merge)` or `GqlSetLabelsItem(Variable, Labels, IsColon)`.
+`GqlRemoveStage.Items` contains `GqlRemovePropertyItem(Variable, Property)` or
+`GqlRemoveLabelsItem(Variable, Labels, IsColon)`. Both families retain source locations,
+have closed abstract bases, and target entity bindings; labels require a node.
+`GqlQueryExpression.SetItems` and `RemoveItems` flatten their stages for inspection.
+Map operands remain literal-only; NULL property values remove keys. SET/REMOVE are advertised
+profile clauses and may finish a modifying NEXT segment.
+
 The original single-segment facade remains available for hand-built ASTs.
 `GqlQueryExpression.MatchClauses` groups source-ordered `GqlMatchClause(Paths, Predicate, Optional)`
 records, followed by insertions, deletion variables and
