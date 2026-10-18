@@ -45,13 +45,14 @@
   <data name="IdleTimeoutExceeded" xml:space="preserve"><value>The session was closed after exceeding the idle timeout.</value></data>
   <data name="ReadyFrameUnexpected" xml:space="preserve"><value>Unexpected {0} frame in the ready state.</value></data>
   <data name="SessionLimitReached" xml:space="preserve"><value>The server is at its session limit.</value></data>
+  <data name="RepeatedDocumentKey" xml:space="preserve"><value>Document key '{0}' appears more than once in one statement.</value></data>
   <data name="DuplicateDocumentKey" xml:space="preserve"><value>Collection '{0}' already contains document key '{1}'.</value></data>
-  <data name="InsertKeyInvalid" xml:space="preserve"><value>INSERT KEY must evaluate to a nonblank string.</value></data>
-  <data name="InsertValueMissing" xml:space="preserve"><value>INSERT VALUE must be a JSON value and cannot be MISSING.</value></data>
-  <data name="InsertValuesContext" xml:space="preserve"><value>INSERT VALUES expressions cannot read document paths, metadata, or aggregates.</value></data>
-  <data name="InsertOutputMissing" xml:space="preserve"><value>INSERT binding '{0}' must name a SELECT output column.</value></data>
+  <data name="WriteKeyInvalid" xml:space="preserve"><value>{0} KEY must evaluate to a nonblank string.</value></data>
+  <data name="WriteValueMissing" xml:space="preserve"><value>{0} VALUE must be a JSON value and cannot be MISSING.</value></data>
+  <data name="WriteValuesContext" xml:space="preserve"><value>{0} VALUES expressions cannot read document paths, metadata, or aggregates.</value></data>
+  <data name="WriteOutputMissing" xml:space="preserve"><value>{0} binding '{1}' must name a SELECT output column.</value></data>
   <data name="MetaContextInvalid" xml:space="preserve"><value>META requires a stored document source, an optional matching source alias, and the member id or version.</value></data>
-  <data name="InsertJsonInvalid" xml:space="preserve"><value>INSERT JSON must be valid and nested no deeper than 128 levels.</value></data>
+  <data name="WriteJsonInvalid" xml:space="preserve"><value>{0} JSON must be valid and nested no deeper than 128 levels.</value></data>
   <data name="UpdateTargetsMissing" xml:space="preserve"><value>UPDATE requires at least one SET assignment or UNSET path.</value></data>
   <data name="UpdateTargetInvalid" xml:space="preserve"><value>UPDATE targets must be non-root document paths; UNSET must end in a property name.</value></data>
   <data name="UpdateTargetsOverlap" xml:space="preserve"><value>UPDATE targets must not repeat or overlap, including across SET and UNSET.</value></data>

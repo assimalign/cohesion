@@ -43,10 +43,10 @@ internal static partial class DocumentPlanExecutor
     }
 
     private static async ValueTask<DatabaseResult> ExecuteSelectAsync(DocumentDatabase database, DocumentOperation operation,
-        DocumentPlan plan, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken, bool forInsert = false)
+        DocumentPlan plan, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken, string? writeVerb = null)
     {
         var query = plan.Logical.Query;
-        var evaluator = new DocumentExpressionEvaluator(query.Alias, parameters, cancellationToken, forInsert);
+        var evaluator = new DocumentExpressionEvaluator(query.Alias, parameters, cancellationToken, writeVerb);
         var candidates = await ReadCandidatesAsync(database, operation, plan.Collection, plan.Access, cancellationToken).ConfigureAwait(false);
 
         var matches = new List<DocumentEvaluationContext>();
@@ -75,9 +75,9 @@ internal static partial class DocumentPlanExecutor
             : ValueTask.FromResult(database.Catalog.GetDocuments(collection.Id, null, operation.Context.Snapshot));
 
     private static DatabaseResult ExecuteSystemCollection(DocumentDatabase database, DocumentOperation operation,
-        DocumentSystemCollectionPlan plan, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken, bool forInsert = false)
+        DocumentSystemCollectionPlan plan, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken, string? writeVerb = null)
     {
-        var evaluator = new DocumentExpressionEvaluator(plan.Logical.Query.Alias, parameters, cancellationToken, forInsert);
+        var evaluator = new DocumentExpressionEvaluator(plan.Logical.Query.Alias, parameters, cancellationToken, writeVerb);
         var matches = new List<DocumentEvaluationContext>();
         foreach (var document in DocumentSystemCollections.Enumerate(database, operation.Context.Snapshot, plan.Name, cancellationToken))
         {

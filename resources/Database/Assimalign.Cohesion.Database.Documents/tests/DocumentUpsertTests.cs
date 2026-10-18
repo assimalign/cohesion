@@ -75,10 +75,16 @@ public sealed class DocumentUpsertTests
         }
     }
 
-    [Theory(DisplayName = "Cohesion Test [Documents] - UPSERT: repeated keys fail atomically in VALUES and SELECT")]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task Execute_RepeatedKey_ShouldRejectWholeStatementAsync(bool select)
+    [Theory(DisplayName = "Cohesion Test [Documents] - INSERT/UPSERT: repeated keys fail atomically in VALUES and SELECT")]
+    [InlineData(false, "INSERT", "a")]
+    [InlineData(true, "INSERT", "a")]
+    [InlineData(false, "INSERT", "n")]
+    [InlineData(true, "INSERT", "n")]
+    [InlineData(false, "UPSERT", "a")]
+    [InlineData(true, "UPSERT", "a")]
+    [InlineData(false, "UPSERT", "n")]
+    [InlineData(true, "UPSERT", "n")]
+    public async Task Execute_RepeatedKey_ShouldRejectWholeStatementAsync(bool select, string verb, string key)
     {
         // Arrange
         await using var engine = DocumentDatabaseEngine.Create("upsert", new());
@@ -86,15 +92,19 @@ public sealed class DocumentUpsertTests
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         var items = await SeedAsync(session);
         var before = await SnapshotAsync(items, session);
-        string query = select ? "UPSERT INTO items (KEY k, VALUE v) SELECT 'a' AS k, d AS v FROM items d" :
-            "UPSERT INTO items (KEY, VALUE) VALUES ('a', {'x':1}), ('a', {'x':2})";
+        string query = select ? $"{verb} INTO items (KEY k, VALUE v) SELECT '{key}' AS k, d AS v FROM items d" :
+            $"{verb} INTO items (KEY, VALUE) VALUES ('{key}', {{'x':1}}), ('{key}', {{'x':2}})";
         // Act
         var failure = await Should.ThrowAsync<DocumentDuplicateKeyException>(async () => await session.ExecuteAsync(query, cancellationToken: CancellationToken.None));
         // Assert
         failure.CollectionName.ShouldBe("items");
-        failure.DocumentId.Value.ShouldBe("a");
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDOC012");
+        failure.DocumentId.Value.ShouldBe(key);
+        failure.Message.ShouldBe($"Document key '{key}' appears more than once in one statement.");
+        var diagnostic = failure.Diagnostics.ShouldHaveSingleItem();
+        diagnostic.Code.ShouldBe("COHDOC012");
+        diagnostic.Message.ShouldBe(failure.Message);
         await AssertUnchangedAsync(items, session, before);
+        (await items.GetAsync(session, "n", CancellationToken.None)).ShouldBeNull();
     }
 
     [Theory(DisplayName = "Cohesion Test [Documents] - UPSERT: invalid third rows preserve content, versions and indexes")]
@@ -326,6 +336,83 @@ public sealed class DocumentUpsertTests
         var replaced = (await items.GetAsync(session, "a", CancellationToken.None)).ShouldNotBeNull();
         replaced.Content.ToArray().ShouldBe(inserted.Content.ToArray());
         replaced.Content.ToArray().ShouldBe(Encoding.UTF8.GetBytes(content));
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Documents] - INSERT/UPSERT: shared validation failures name the statement verb")]
+    [InlineData("INSERT")]
+    [InlineData("UPSERT")]
+    public async Task Execute_InvalidWrite_ShouldNameItsVerbAsync(string verb)
+    {
+        // Arrange
+        await using var engine = DocumentDatabaseEngine.Create("messages", new());
+        var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        var items = await SeedAsync(session);
+        var before = await SnapshotAsync(items, session);
+        using var limit = JsonDocument.Parse(new string('[', 128) + "0" + new string(']', 128), new JsonDocumentOptions { MaxDepth = 256 });
+        using var deep = JsonDocument.Parse(new string('[', 129) + "0" + new string(']', 129), new JsonDocumentOptions { MaxDepth = 256 });
+        var parameters = new Dictionary<string, object?> { ["limit"] = limit.RootElement, ["deep"] = deep.RootElement };
+        const string context = "VALUES expressions cannot read document paths, metadata, or aggregates.";
+        const string json = "JSON must be valid and nested no deeper than 128 levels.";
+        (string Input, string Code, string Message)[] cases =
+        [
+            ("(KEY, VALUE) VALUES (MISSING, 1)", "COHDOC008", "KEY must evaluate to a nonblank string."),
+            ("(KEY, VALUE) VALUES ('n', MISSING)", "COHDOC008", "VALUE must be a JSON value and cannot be MISSING."),
+            ("(KEY, VALUE) VALUES ('n', d.name)", "COHDOC001", context),
+            ("(KEY, VALUE) VALUES ('n', META().id)", "COHDOC001", context),
+            ("(KEY, VALUE) VALUES ('n', COUNT(*))", "COHDOC001", context),
+            ("(KEY absent) SELECT 'n' AS k FROM items", "COHDOC001", "binding 'absent' must name a SELECT output column."),
+            ("(KEY k, VALUE absent) SELECT 'n' AS k FROM items", "COHDOC001", "binding 'absent' must name a SELECT output column."),
+            ("(KEY, VALUE) VALUES ('n', $deep)", "COHDOC008", json),
+            ("(KEY, VALUE) VALUES ('n', {'v':$limit})", "COHDOC008", json),
+            ("(KEY, VALUE) VALUES ('n', [$limit])", "COHDOC008", json),
+            ("(KEY k, VALUE v) SELECT 'n' AS k, {'v':$limit} AS v FROM items", "COHDOC008", json),
+            ("(KEY k) SELECT 'n' AS k, $limit AS v FROM items", "COHDOC008", json),
+        ];
+        foreach (var test in cases)
+        {
+            // Act
+            var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(
+                $"{verb} INTO items {test.Input}", parameters, CancellationToken.None));
+            // Assert
+            failure.Message.ShouldBe(verb + " " + test.Message);
+            var diagnostic = failure.Diagnostics.ShouldHaveSingleItem();
+            diagnostic.Code.ShouldBe(test.Code);
+            diagnostic.Message.ShouldBe(failure.Message);
+            await AssertUnchangedAsync(items, session, before);
+            (await items.GetAsync(session, "n", CancellationToken.None)).ShouldBeNull();
+        }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Documents] - UPSERT: input validation rejects unused invalid inputs before EXPLAIN or an empty SELECT")]
+    [InlineData(false, "$absent", "COHDOC005")]
+    [InlineData(true, "$absent", "COHDOC005")]
+    [InlineData(false, "$n", "COHDOC007")]
+    [InlineData(true, "$n", "COHDOC007")]
+    [InlineData(false, "1e-29", "COHDOC007")]
+    [InlineData(true, "1e-29", "COHDOC007")]
+    public async Task Execute_UnusedInvalidInput_ShouldRejectBeforeExecutionAsync(bool explain, string operand, string code)
+    {
+        // Arrange
+        await using var engine = DocumentDatabaseEngine.Create("inputs", new());
+        var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        var items = await SeedAsync(session);
+        var before = await SnapshotAsync(items, session);
+        using var lossy = JsonDocument.Parse("1e-29");
+        var parameters = new Dictionary<string, object?> { ["n"] = lossy.RootElement };
+        string query = explain ? $"EXPLAIN UPSERT INTO items (KEY, VALUE) VALUES ('n', {operand})" :
+            $"UPSERT INTO items (KEY k, VALUE v) SELECT 'n' AS k, {operand} AS v FROM items WHERE FALSE";
+        // Act
+        var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(query, parameters, CancellationToken.None));
+        // Assert
+        var diagnostic = failure.Diagnostics.ShouldHaveSingleItem();
+        diagnostic.Code.ShouldBe(code);
+        diagnostic.Start.ShouldBe(query.IndexOf(operand, StringComparison.Ordinal));
+        diagnostic.End.ShouldBe(diagnostic.Start + operand.Length);
+        diagnostic.Line.ShouldBe(1);
+        await AssertUnchangedAsync(items, session, before);
+        (await items.GetAsync(session, "n", CancellationToken.None)).ShouldBeNull();
     }
 
     private static async Task<DocumentCollection> SeedAsync(DocumentDatabaseSession session)

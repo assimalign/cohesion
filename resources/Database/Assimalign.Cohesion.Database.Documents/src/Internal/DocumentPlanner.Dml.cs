@@ -97,13 +97,14 @@ internal sealed partial class DocumentPlanner
         IReadOnlyList<(OqlExpression Key, OqlExpression Value)> values, OqlSelectExpression? select,
         string? keyName, string? valueName)
     {
+        string verb = statement is OqlUpsertExpression ? "UPSERT" : "INSERT";
         DocumentSystemCollections.EnsureReadOnly(destination, statement.Location);
         var collection = ResolveCollection(destination, statement.Location);
         if (select is null)
         {
             if (values.Count == 0)
             {
-                throw new DocumentPlanningException("COHDOC001", ErrorMessages.InsertValuesContext, statement.Location);
+                throw new DocumentPlanningException("COHDOC001", string.Format(CultureInfo.CurrentCulture, ErrorMessages.WriteValuesContext, verb), statement.Location);
             }
             foreach (var pair in values)
             {
@@ -111,7 +112,7 @@ internal sealed partial class DocumentPlanner
                 {
                     if (!IsConstant(expression))
                     {
-                        throw new DocumentPlanningException("COHDOC001", ErrorMessages.InsertValuesContext, expression.Location);
+                        throw new DocumentPlanningException("COHDOC001", string.Format(CultureInfo.CurrentCulture, ErrorMessages.WriteValuesContext, verb), expression.Location);
                     }
                     Validate(expression, allowAggregate: false);
                 }
@@ -135,7 +136,7 @@ internal sealed partial class DocumentPlanner
                 if (logical.Projections[i].Name == name) { return i; }
             }
             throw new DocumentPlanningException("COHDOC001", string.Format(CultureInfo.CurrentCulture,
-                ErrorMessages.InsertOutputMissing, name), statement.Location);
+                ErrorMessages.WriteOutputMissing, verb, name), statement.Location);
         }
     }
 

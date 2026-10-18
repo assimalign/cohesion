@@ -139,6 +139,7 @@ public sealed class DocumentInsertTests
             "INSERT INTO items (KEY k) SELECT META(d).id AS k FROM items d", cancellationToken: CancellationToken.None));
         duplicate.CollectionName.ShouldBe("items");
         duplicate.DocumentId.ShouldBe(new DocumentId("a"));
+        duplicate.Message.ShouldBe("Collection 'items' already contains document key 'a'.");
         duplicate.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDOC012");
         (await RowsAsync(session, "SELECT META().id, META().version FROM items")).SelectMany(row => row).ShouldBe(before.SelectMany(row => row));
         (await items.GetAsync(session, "a", CancellationToken.None)).ShouldNotBeNull();

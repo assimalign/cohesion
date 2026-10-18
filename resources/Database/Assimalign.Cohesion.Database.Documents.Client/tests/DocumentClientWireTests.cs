@@ -316,6 +316,15 @@ public sealed class DocumentClientWireTests
             "UPSERT INTO items (KEY, VALUE) VALUES ('a', 0), (MISSING, 1)", cancellationToken: harness.Token));
         failure.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
         failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDOC008");
+        failure.Diagnostics[0].Message.ShouldBe("UPSERT KEY must evaluate to a nonblank string.");
+        failure.Message.ShouldBe("COHDOC008: UPSERT KEY must evaluate to a nonblank string.");
+        var repeated = await Should.ThrowAsync<DocumentClientException>(async () => await connection.ExecuteAsync(
+            "UPSERT INTO items (KEY, VALUE) VALUES ('n', 1), ('n', 2)", cancellationToken: harness.Token));
+        repeated.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
+        repeated.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDOC012");
+        repeated.Diagnostics[0].Message.ShouldBe("Document key 'n' appears more than once in one statement.");
+        repeated.Message.ShouldBe("COHDOC012: Document key 'n' appears more than once in one statement.");
+        (await connection.GetAsync("items", "n", harness.Token)).ShouldBeNull();
         (await connection.QueryAsync("SELECT name FROM items ORDER BY name", cancellationToken: harness.Token))
             .Select(row => row[0]).ShouldBe(new object?[] { "alpha2", "zeta" });
         (await connection.ExecuteAsync("UPSERT INTO items (KEY k, VALUE v) SELECT META().id AS k, name AS v FROM items", cancellationToken: harness.Token)).ShouldBe(2);

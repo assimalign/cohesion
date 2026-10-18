@@ -700,9 +700,9 @@ No statement-level version precondition is supported in T1: OPTIONS remains COHD
 expiration is not implemented. Optimistic replacement uses PutAsync(expectedVersion) or
 UPDATE WHERE META(d).version = $v. RETURNING remains deferred.
 
-UPSERT calls the same WriteAsync primitive as INSERT, UPSERT, UPDATE and PutAsync, with insert-only
-checking disabled. Old content is tombstoned and old index keys are removed before new content,
-metadata and index keys publish in the same logical transaction. Current-state checks reject
+UPSERT calls the same WriteAsync primitive as INSERT, UPDATE and PutAsync, with insert-only
+checking disabled. It writes the new content first, tombstones the old content, then saves
+the catalog entry with old/new index-key maintenance, all in one logical transaction. Current-state checks reject
 an intervening committed writer with DatabaseTransactionAbortedException. Schema ownership
 permits content writes; virtual system collections are read-only and missing destinations
 are never created. EXPLAIN describes Upsert/UpsertSelect without mutation. Completion reports
@@ -768,7 +768,16 @@ and leaves it Faulted until rollback, as described above. Schema ownership restr
 INSERT accepts Schema-owned collections. Missing collections are never created implicitly.
 
 An existing or repeated key raises DocumentDuplicateKeyException with CollectionName,
-DocumentId and diagnostic COHDOC012. Its message deliberately names the key because document
+DocumentId and diagnostic COHDOC012. An existing INSERT key reports "Collection 'items' already
+contains document key 'n'."; an INSERT/UPSERT key repeated within one statement reports
+"Document key 'n' appears more than once in one statement." This follows PostgreSQL's separate
+same-command cardinality refusal (src/backend/executor/nodeModifyTable.c:2828-2830 in the reference clone).
+Shared KEY, VALUE, VALUES-context, output-binding and JSON-depth failures name the statement's
+INSERT or UPSERT verb while retaining their existing codes. Input validation also runs for
+EXPLAIN UPSERT and SELECT sources with zero rows, so unused execution paths cannot hide an
+unbound parameter or a lossy JSON number.
+
+Duplicate-key messages deliberately name the key because document
 identity is an explicit caller-supplied address, matching the CRUD expected-version diagnostic;
 this differs from SQL constraint diagnostics that omit key values. A same-key insert committed
 after the snapshot instead raises DatabaseTransactionAbortedException: current-state conflict
