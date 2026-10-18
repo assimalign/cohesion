@@ -537,8 +537,8 @@ public sealed class SqlAggregateExecutionTests
         group.Keys.Count.ShouldBe(1);
         group.Having.ShouldNotBeNull();
         group.OrderBy.ShouldHaveSingleItem();
-        group.Limit.ShouldBe(2);
-        group.Offset.ShouldBe(1);
+        group.Limit.ShouldNotBeNull().Initialize(new SqlExpressionEvaluator([], null)).Count.ShouldBe(2);
+        group.Offset.ShouldNotBeNull().Initialize(new SqlExpressionEvaluator([], null)).Count.ShouldBe(1);
     }
 
     /// <summary>Virtual catalog inputs share grouping, empty-input, and aggregate semantics with stored tables.</summary>

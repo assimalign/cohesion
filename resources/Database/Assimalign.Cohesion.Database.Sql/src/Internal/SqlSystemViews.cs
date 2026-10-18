@@ -14,6 +14,7 @@ internal static class SqlSystemViews
 {
     private static readonly SqlSystemViewDefinition[] _views =
     [
+        Iso("VIEWS", Text("TABLE_CATALOG"), Text("TABLE_SCHEMA"), Text("TABLE_NAME"), Text("VIEW_DEFINITION"), Text("CHECK_OPTION"), Text("IS_UPDATABLE")),
         Iso("TABLES", Text("TABLE_CATALOG"), Text("TABLE_SCHEMA"), Text("TABLE_NAME"), Text("TABLE_TYPE")),
         Iso("SCHEMATA", Text("CATALOG_NAME"), Text("SCHEMA_NAME"), Text("SCHEMA_OWNER", true),
             Text("DEFAULT_CHARACTER_SET_CATALOG", true), Text("DEFAULT_CHARACTER_SET_SCHEMA", true),
@@ -75,10 +76,13 @@ internal static class SqlSystemViews
             SqlCreateSchemaExpression create => create.Name,
             SqlDropSchemaExpression drop => drop.Name,
             SqlCreateTableExpression create => create.Table.SchemaName,
+            SqlCreateViewExpression create => create.View.SchemaName,
             _ => null,
         };
         SqlTableReference? target = expression switch
         {
+            SqlCreateViewExpression create => create.View,
+            SqlDropViewExpression drop => drop.View,
             SqlInsertExpression insert => insert.Table,
             SqlUpdateExpression update => update.Table,
             SqlDeleteExpression delete => delete.Table,

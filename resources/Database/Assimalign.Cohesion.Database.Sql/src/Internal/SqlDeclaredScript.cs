@@ -46,6 +46,8 @@ internal sealed class SqlDeclaredScript
     internal string ObjectKey(int position, Func<string, int, SqlType> resolveType) => Statements[position].Statement.SqlExpression switch
     {
         SqlCreateTableExpression table => SqlObjectIdentity.Table(table.Table.SchemaName ?? SqlPlanner.DefaultSchema, table.Table.TableName),
+        SqlCreateViewExpression view => SqlObjectIdentity.View(view.View.SchemaName ?? SqlPlanner.DefaultSchema, view.View.TableName),
+        SqlDropViewExpression view => SqlObjectIdentity.View(view.View.SchemaName ?? SqlPlanner.DefaultSchema, view.View.TableName),
         SqlCreateSchemaExpression schema => SqlObjectIdentity.Schema(schema.Name),
         SqlAlterTableExpression table => SqlObjectIdentity.Table(table.Table.SchemaName ?? SqlPlanner.DefaultSchema, table.Table.TableName),
         SqlDropTableExpression table => SqlObjectIdentity.Table(table.Table.SchemaName ?? SqlPlanner.DefaultSchema, table.Table.TableName),

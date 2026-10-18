@@ -45,7 +45,7 @@ internal sealed record SqlSubqueryBinding(
 /// The type of the subquery's values: its output column's, or BOOLEAN for <c>EXISTS</c>; what a
 /// function call over a scalar subquery resolves its overload by.
 /// </param>
-internal sealed record SqlSubquerySlot(int Id, SqlSubqueryKind Kind, Collation Collation, DatabaseType Type);
+internal sealed record SqlSubquerySlot(int Id, SqlSubqueryKind Kind, Collation Collation, DatabaseType Type, DatabaseTypeInfo? TypeInfo = null);
 
 /// <summary>The cardinality and reduction required by a subquery's use site.</summary>
 internal enum SqlSubqueryKind { Scalar, Exists, Set }

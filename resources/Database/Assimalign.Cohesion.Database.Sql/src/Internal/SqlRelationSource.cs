@@ -19,7 +19,7 @@ internal readonly struct SqlRelationSource
     internal SqlCatalogTable? Table => _metadata as SqlCatalogTable;
     internal SqlSystemViewDefinition? View => _metadata as SqlSystemViewDefinition;
     internal SqlDerivedRelation? Derived => _metadata as SqlDerivedRelation;
-    internal string Schema => Table?.Schema ?? View?.Schema ?? string.Empty;
+    internal string Schema => Table?.Schema ?? View?.Schema ?? Derived?.CatalogView?.Schema ?? string.Empty;
     internal string Name => Table?.Name ?? View?.Name ?? Derived!.Name;
     internal IReadOnlyList<SqlCatalogColumn> Columns => Table?.Columns ?? View?.Columns ?? Derived!.Columns;
 }
@@ -28,4 +28,5 @@ internal readonly struct SqlRelationSource
 internal sealed record SqlDerivedRelation(string Name, SqlPlan Query, IReadOnlyList<SqlCatalogColumn> Columns, bool IsCorrelated = false)
 {
     internal bool IsCommonTable { get; init; }
+    internal SqlCatalogView? CatalogView { get; init; }
 }

@@ -84,7 +84,7 @@ would tell every caller the value is changeable and then guard that promise at
 runtime.
 
 Table metadata extension version 2 introduced one collation identifier per column
-after the existing constraints. Current format 22 requires the complete table extension 6 record,
+after the existing constraints. Current format 23 requires the complete table extension 6 record,
 including resolved-call vectors, identity facets and frozen missing-value literals described below. Column additions,
 drops, and restart preserve explicit overrides. An index inherits its key
 columns' effective collations; the SQL engine verifies index eligibility and
@@ -164,7 +164,7 @@ codec, the key encoding and every comparison read, so they do not consult the do
   column (the primary key's implicit NOT NULL).
 - **Persistence: table extension version 4** (data-storage format 7). After the dropped
   ordinals, one optional string per live column, NULL for a column of a built-in type,
-  which this catalog always writes. Current format 22 also requires the call vectors, identity facets and extension 6 missing-value literals;
+  which this catalog always writes. Current format 23 also requires the call vectors, identity facets and extension 6 missing-value literals;
   the format gate refuses earlier databases rather than loading their definitions. A persisted blank
   name fails the load with `SqlCatalogException`, as does a blank `domainName` at the
   column's constructor (`ArgumentException`).
@@ -183,7 +183,7 @@ transaction: namespace/table/index removal, incoming external-FK replacement, id
 deletion, one kind-14 reclamation intent per table, registration replacement, one generation
 advance and an optional receipt. Cache changes follow commit. SQL's
 SqlPlanExecutor.Schemas.ObjectsInNamespace snapshot enumeration defines RESTRICT, ordered locks,
-ownership and the CASCADE drop set; views (#1124) must extend that one enumeration and its
+ownership and the CASCADE drop set; views (#1124) participate in that enumeration and its
 revalidation. The catalog's commit-time contents check remains an independent invariant guard.
 SQL owns metadata admission, ordered object locks and ownership checks; bare catalog table
 operations continue to accept namespace strings without requiring a namespace record.
@@ -482,7 +482,7 @@ declared as `QTY>0   and qty<100` is stored as `QTY > 0 AND qty < 100`; a defaul
 declared as `'it''s'` or `+5` is stored as `'it''s'` or `5`, the SQL literal rather
 than its bare value. New persisted expressions must follow the same rule; storing
 source text is not an option, because a stored definition must mean the same thing
-under every later parser. Expression defaults use this same path; future view queries will too.
+under every later parser. Expression defaults use this same path; persisted view queries do too.
 
 Each expression also stores an ordered preorder vector of resolved function identities:
 normalized name and parameter-type signature, including pseudo-types and variadic shape.
@@ -521,8 +521,9 @@ catalog's table, column, key, index, constraint, and ownership descriptions.
 Those descriptions remain the single source of truth: system views are computed
 when queried and never inserted as stored catalog tables or copied into a second
 metadata store. `SqlCatalogTable` describes stored objects only and gains no
-virtual/system flag. SQL view names, columns, binding, and row projection belong
-to the SQL engine, not to this persistence library.
+virtual/system flag. System-relation names, columns, binding and row projection belong to the SQL
+engine. Persisted user views are immutable SqlCatalogView records in this catalog;
+the engine still owns parsing, binding and execution.
 
 `SqlCatalog.CaptureSnapshot()` returns a `SqlCatalogSnapshot` containing
 an atomic capture of tables, index descriptions, and default collation under the
@@ -591,7 +592,7 @@ it atomically. A recreated table gets a fresh ObjectId and starts from START.
 
 ## Non-goals
 
-- Stored user-defined views, sequences, permissions (permissions are
+- General sequences and permissions (permissions are
   `Sql.Security`'s feature, #177). Virtual system views are engine projections
   of this catalog and require no view records here.
 - Multi-statement DDL atomicity (see self-committing DDL above). The migration
@@ -675,3 +676,39 @@ cannot ALTER/DROP typed tables or DROP typed indexes (`COHSQLS005`). Script-crea
 evolve through later scripts, and script-created indexes on typed tables remain separately
 tracked. The typed schema document therefore stays an accurate record of its own objects when
 the engine advances its generation after a script commit.
+
+## Persisted user views (#1124)
+
+Kind **17**, pre-assigned to views, stores strict source-generated JSON through
+an internal DTO: namespace/name, canonical body, frozen output names and types,
+domains/collations, stored-table ObjectIds, column/view/function/domain dependencies,
+ordered resolved calls and ownership. SqlCatalogView and snapshot Views expose
+immutable descriptions; tables retain their own stored-only shape. View columns are always nullable
+in catalog metadata, following PostgreSQL's unconstrained view attributes
+(`src/backend/catalog/information_schema.sql:295`). The new format-23 record stores no nullability
+flag, and COLUMNS never needs to bind a view body. No interface, friend grant or language reference
+was added. Format **23** fences kind 17; table extension 6 is unchanged. Older
+formats are refused, with no upgrade reader. The encoded record must fit one page
+(**8,092 bytes**); oversized definitions fail CREATE with COHSQLE033.
+View refusals carry structured diagnostics on SqlCatalogException, including COHSQLE033 for
+incompatible replacement and oversized records, so the wire preserves the same code.
+
+CreateViewAsync validates collisions, live dependency identities, cycles and the
+append-only replacement contract under the metadata lock, then commits record,
+generation and optional V: script receipt together. Replacement preserves column
+names, types, modifiers, domains and collations, following PostgreSQL
+`src/backend/commands/view.c:266-325`. Every CREATE VIEW, including OR REPLACE,
+records its target claim when run by a declared script. DropViewAsync commits
+RESTRICT or dependent-view CASCADE and optional absence receipts atomically.
+Table create/reserve/publish/rename share the view relation namespace. Table/column
+drops, textual renames and changes to type/length/precision/scale independently enforce
+view dependencies at publication (COHSQLD002; PostgreSQL `src/backend/commands/tablecmds.c:15612-15624`).
+DROP SCHEMA includes contained and external dependent views in its one atomic
+transaction. Engine ownership and DDL admission precede these invariant guards.
+
+View body caches retain immutable catalog images by source-definition identity.
+Equivalent captures share bindings; a snapshot transaction's COLUMNS projection
+binds against its retained tables, views and SQL definitions after later drops.
+Historical image entries are weak and stay alive with their retained captures;
+ordinary view reads use a DDL-generation fast path. No snapshot generation API or
+friend grant was added for this purpose.

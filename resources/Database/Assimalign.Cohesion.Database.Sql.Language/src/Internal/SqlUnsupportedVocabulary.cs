@@ -39,7 +39,6 @@ internal static class SqlUnsupportedVocabulary
         new("NATURAL", SqlClauses.Natural, SqlWordPosition.Clause),
         new("USING", SqlClauses.Using, SqlWordPosition.Clause),
         new("ALL", SqlClauses.All, SqlWordPosition.Rule),
-        new("VIEW", "VIEW", SqlWordPosition.Rule),
         new("SEQUENCE", "CREATE SEQUENCE", SqlWordPosition.Rule),
         new("SERIAL", "SERIAL", SqlWordPosition.Rule),
         new("BIGSERIAL", "BIGSERIAL", SqlWordPosition.Rule),
@@ -114,7 +113,7 @@ internal static class SqlUnsupportedVocabulary
 /// <param name="Spelling">The upper-case word or the operator.</param>
 /// <param name="Construct">
 /// The construct the diagnostic names. A word that starts more than one construct names the
-/// text they share: <c>VIEW</c> for <c>CREATE VIEW</c> and <c>DROP VIEW</c>, and <c>GROUPING</c>
+/// text they share: <c>GROUPING</c>
 /// for <c>GROUPING SETS</c> and the <c>GROUPING(...)</c> call.
 /// </param>
 /// <param name="Position">Where the parser treats the spelling as that construct.</param>
@@ -128,7 +127,7 @@ internal enum SqlWordPosition
 
     /// <summary>
     /// Where a dedicated rule recognizes it: <c>WITH</c> as a statement prefix; <c>ALL</c> after
-    /// <c>SELECT</c> or a comparison operator; <c>VIEW</c> after <c>CREATE</c> or <c>DROP</c>;
+    /// <c>SELECT</c> or a comparison operator;
     /// <c>COLLATION</c> and <c>FULLTEXT</c> after <c>CREATE</c>; <c>NULLS FIRST</c>/<c>LAST</c> in
     /// <c>ORDER BY</c>; <c>GROUPING SETS</c> and the <c>GROUPING</c>, <c>ROLLUP</c>, <c>CUBE</c> and
     /// <c>GROUPING_ID</c> calls; <c>PERCENT</c> and <c>WITH TIES</c> after FETCH or TOP;

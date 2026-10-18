@@ -10,6 +10,8 @@ internal sealed class SqlQueryScopeState
     internal Stack<(SqlSelectExpression? Select, SqlTableReference? Dml, SqlDerivedTableReference? Derived)> Scopes { get; } = new();
     internal SqlCorrelationScope? OuterScope { get; set; }
     internal HashSet<int>? OuterDependencies { get; set; }
+    internal SqlPlanner.ViewImage? ViewImage { get; set; }
+    internal SqlPlanner.ViewBinding? ViewBinding { get; set; }
     internal int SetOperandDepth { get; set; }
     internal int NextScopeId { get; set; }
     internal Dictionary<(SqlSelectExpression? Owner, SqlRelationReference Reference), SqlRelationSource> Relations { get; } = new();

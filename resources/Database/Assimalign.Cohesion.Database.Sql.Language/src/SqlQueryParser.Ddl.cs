@@ -19,6 +19,20 @@ public sealed partial class SqlQueryParser
         var pos = lexer.Current.Position;
         Advance(ref lexer); // consume CREATE
 
+        var header = lexer;
+        string modifiers = "";
+        while (IsWord(ref header, "OR") || IsKeywordOrFunction(ref header, "REPLACE") || IsWord(ref header, "MATERIALIZED") ||
+            IsWord(ref header, "RECURSIVE") || IsWord(ref header, "TEMP") || IsWord(ref header, "TEMPORARY"))
+        {
+            modifiers += CurrentText(ref header).ToUpperInvariant() + " ";
+            if (!header.MoveNext()) { break; }
+        }
+        if (IsKeyword(ref header, "VIEW")) { return ParseCreateView(ref lexer, pos); }
+        if (modifiers.Length > 0)
+        {
+            RejectIdentityConstruct(ref lexer, "CREATE " + modifiers + CurrentText(ref header).ToUpperInvariant());
+            return new SqlQueryExpression(SqlQueryCommandType.Create, null, Location.Create(1, 1, pos, _lastTokenEnd));
+        }
         if (IsWord(ref lexer, "SCHEMA"))
         {
             return ParseCreateSchema(ref lexer, pos);
@@ -681,6 +695,7 @@ public sealed partial class SqlQueryParser
         var pos = lexer.Current.Position;
         Advance(ref lexer); // consume DROP
 
+        if (IsKeyword(ref lexer, "VIEW")) { return ParseDropView(ref lexer, pos); }
         if (IsWord(ref lexer, "SCHEMA"))
         {
             return ParseDropSchema(ref lexer, pos);

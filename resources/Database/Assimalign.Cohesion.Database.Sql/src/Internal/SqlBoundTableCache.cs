@@ -62,6 +62,8 @@ internal sealed class SqlBoundTableCache
     /// Gets the engine's function catalog and the database: what a statement of the database
     /// resolves its calls against, and what the bound CHECK predicates were bound against.
     /// </summary>
+    internal SqlFunctionEnvironment NativeFunctions => _native;
+
     internal SqlFunctionEnvironment Functions => Volatile.Read(ref _state).Functions;
 
     // Metadata loading never executes application code. Body compilation happens per entry,
@@ -216,6 +218,7 @@ internal sealed class SqlBoundTableCache
         try
         {
             GetValidation(cancellationToken, countWalk: false);
+            new SqlPlanner(_catalog, null, Functions, cancellationToken).BindViews();
         }
         catch (InsufficientExecutionStackException exception)
         {

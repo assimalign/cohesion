@@ -57,6 +57,7 @@ internal sealed partial class SqlPlanner
         }
 
         var orderByProjections = BindOrderByProjections(select, projections, columns.Count);
+        CaptureViewOrdering(select, columns, bindings, evaluator, orderByProjections);
         if (bindings is not null && select.OrderBy.Count > 0) { RejectDerivedOrdering(select, projections, orderByProjections, evaluator, bindings); }
         foreach (var order in select.OrderBy)
         {
@@ -117,7 +118,8 @@ internal sealed partial class SqlPlanner
             var value = groupScope.Bind(projections[i].Expression!, out SqlBoundCollation collation, out var candidate);
             projections[i] = projections[i] with { Value = value, Collation = collation,
                 Metadata = CaptureProjectionMetadata(candidate,
-                    UnwrapCollation(projections[i].Expression!) is SqlColumnReferenceExpression column ? evaluator.ColumnMetadata(column) : null) };
+                    UnwrapCollation(projections[i].Expression!) is SqlColumnReferenceExpression column ? evaluator.ColumnMetadata(column) : null,
+                    projections[i].Expression, evaluator) };
         }
 
         var having = select.Having is null ? null : groupScope.Bind(select.Having);
@@ -125,7 +127,7 @@ internal sealed partial class SqlPlanner
             groupScope.ForOrdering(projections, orderByProjections, keys.Length + boundAggregates.Length));
 
         return new SqlGroupPlan(input, columns, bindings, keys, boundAggregates, projections,
-            having, ordering, EvaluateCount(select.Limit, LimitClause(select)), EvaluateCount(select.Offset, "OFFSET"),
+            having, ordering, BindCount(select.Limit, LimitClause(select)), BindCount(select.Offset, "OFFSET"),
             select.IsDistinct);
 
         void BindSlots(SqlExpression expression, IReadOnlyDictionary<SqlExpression, int>? outputSlots = null)
@@ -182,6 +184,7 @@ internal sealed partial class SqlPlanner
                 // comparing it against source keys would rebind the alias as a column.
                 if (!ContainsOutput(expression) && SameGroupExpression(expression, select.GroupBy[i], evaluator))
                 {
+                    ValidateExpression(expression, evaluator, _subqueryTypes);
                     slots[expression] = i;
                     return;
                 }

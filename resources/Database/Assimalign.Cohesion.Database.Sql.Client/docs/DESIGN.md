@@ -406,3 +406,9 @@ DatabaseClientResult.Diagnostics and SqlResultSet.Diagnostics expose negotiated 
 Set-operation type mismatches reuse COHSQLE003 (42804), retaining the one-based output
 position and both types. INSERT set-source width/type errors use the same exchange and
 leave the connection usable.
+
+## Read-only persisted views (#1124)
+
+View DDL, SELECT/JOIN sources and INFORMATION_SCHEMA.VIEWS use ordinary SQL
+requests and typed result sets. A table-only write against a view is ExecutionFailure;
+the connection stays usable. The wire format and client API are unchanged.

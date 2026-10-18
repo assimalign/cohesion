@@ -157,7 +157,7 @@ public sealed partial class SqlCatalog
     }
 
     /// <summary>
-    /// Captures namespaces, the table directory, index descriptions, and default collation atomically.
+    /// Captures namespaces, tables, views, definitions, index descriptions and default collation atomically.
     /// </summary>
     /// <returns>A read-only capture unaffected by later catalog publications.</returns>
     /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
@@ -166,7 +166,7 @@ public sealed partial class SqlCatalog
         lock (_sync)
         {
             ThrowIfOffline();
-            return new SqlCatalogSnapshot(_tables.Values.Select(slot => slot.Table), _indexes.Values.Select(slot => slot.Index), _defaultCollation, _functions.Values.Select(slot => slot.Value), _domains.Values.Select(slot => slot.Value), _namespaces.Values.Select(slot => slot.Value));
+            return new SqlCatalogSnapshot(_tables.Values.Select(slot => slot.Table), _indexes.Values.Select(slot => slot.Index), _defaultCollation, _functions.Values.Select(slot => slot.Value), _domains.Values.Select(slot => slot.Value), _namespaces.Values.Select(slot => slot.Value), _views.Values.Select(slot => slot.Value));
         }
     }
 
@@ -450,7 +450,7 @@ public sealed partial class SqlCatalog
         lock (_sync)
         {
             ThrowIfOffline();
-            if (_tables.ContainsKey((schema, name)))
+            if (_tables.ContainsKey((schema, name)) || _views.ContainsKey(SqlObjectIdentity.View(schema, name)))
             {
                 throw new SqlCatalogException($"Table '{schema}.{name}' already exists.");
             }
@@ -531,6 +531,7 @@ public sealed partial class SqlCatalog
                 throw new SqlCatalogException($"Table '{schema}.{name}' does not exist.");
             }
 
+            EnsureNoViewReads(slot.Table);
             foreach (var dependent in _tables.Values)
             {
                 if (dependent.Table.ObjectId != slot.Table.ObjectId && dependent.Table.Constraints.Any(constraint =>
@@ -762,6 +763,7 @@ public sealed partial class SqlCatalog
         {
             ThrowIfOffline();
             var slot = GetSlot(schema, name);
+            EnsureNoViewReads(slot.Table, columnName);
             int ordinal = -1;
             for (int index = 0; index < slot.Table.Columns.Count; index++)
             {
@@ -1292,6 +1294,10 @@ public sealed partial class SqlCatalog
 
             switch (kind)
             {
+                case _viewRecordKind:
+                    LoadView(reader.ReadString(out _), (unit.PageId, unit.SlotIndex));
+                    if (!reader.IsAtEnd) { throw new SqlCatalogException("COHSQLE033", ErrorMessages.ViewMetadataInvalid); }
+                    break;
                 case namespaceRecordKind:
                     LoadNamespace(reader.ReadString(out _), (unit.PageId, unit.SlotIndex));
                     if (!reader.IsAtEnd) { throw new SqlCatalogException(ErrorMessages.NamespaceRecordMalformed); }
@@ -1419,6 +1425,7 @@ public sealed partial class SqlCatalog
 
         var tablesById = _tables.Values.ToDictionary(slot => slot.Table.ObjectId, slot => slot.Table);
         ValidateIdentityCounters(tablesById);
+        ValidateViewDirectory(tablesById);
 
         if (_tables.Values.Any(slot => _pendingReclamations.ContainsKey(slot.Table.ObjectId)))
         {
@@ -2189,7 +2196,7 @@ public sealed partial class SqlCatalog
         lock (_sync)
         {
             ThrowIfOffline();
-            if (_tables.ContainsKey((schema, name)))
+            if (_tables.ContainsKey((schema, name)) || _views.ContainsKey(SqlObjectIdentity.View(schema, name)))
             {
                 throw new SqlCatalogException($"Table '{schema}.{name}' already exists.");
             }
@@ -2309,6 +2316,17 @@ public sealed partial class SqlCatalog
                 existing is not null || FindTableByObjectId(table.ObjectId) is not null)
             {
                 throw new SqlCatalogException($"Table '{table.Schema}.{table.Name}' has an unexpected catalog identity.");
+            }
+            if (_views.ContainsKey(SqlObjectIdentity.View(table.Schema, table.Name))) { throw new SqlCatalogException("COHSQLE033", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ViewExists, table.Schema, table.Name)); }
+            if (existing is not null)
+            {
+                foreach (var column in existing.Table.Columns)
+                {
+                    var replacement = table.FindColumn(column.Name);
+                    if (replacement is null) { EnsureNoViewReads(existing.Table, column.Name); }
+                    else if (replacement.Type.Type != column.Type.Type || replacement.Type.MaxLength != column.Type.MaxLength ||
+                        replacement.Type.Precision != column.Type.Precision || replacement.Type.Scale != column.Type.Scale) { EnsureNoViewReads(existing.Table, column.Name, rename: true); }
+                }
             }
             EnsurePhysicalLayoutKept(existing?.Table, table);
             if (existing is not null) { EnsureIdentityKept(existing.Table, table); }

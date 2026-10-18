@@ -40,6 +40,8 @@ internal sealed partial class SqlPlanExecutor
         var snapshot = _catalog.CaptureSnapshot();
         var schema = snapshot.Namespaces.FirstOrDefault(value => value.Name.Equals(plan.Name, StringComparison.OrdinalIgnoreCase));
         var contents = ObjectsInNamespace(snapshot, plan.Name);
+        if (!plan.Cascade && contents.Views.Length != 0)
+        { throw new SqlPlanningException("COHSQLD002", string.Format(CultureInfo.CurrentCulture, ErrorMessages.ViewDropDependent, plan.Name, contents.Views[0].Schema, contents.Views[0].Name)); }
         if (!plan.Cascade && contents.Tables.Length != 0)
         {
             throw new SqlPlanningException("COHSQLE030", string.Format(CultureInfo.CurrentCulture, ErrorMessages.NamespaceDependentObjects, plan.Name));
@@ -60,7 +62,7 @@ internal sealed partial class SqlPlanExecutor
         var currentSchema = current.Namespaces.FirstOrDefault(value => value.Name.Equals(plan.Name, StringComparison.OrdinalIgnoreCase));
         var currentContents = ObjectsInNamespace(current, plan.Name);
         if (!ReferenceEquals(schema, currentSchema) || !contents.Tables.SequenceEqual(currentContents.Tables) ||
-            !contents.AffectedTables.SequenceEqual(currentContents.AffectedTables) || !contents.Indexes.SequenceEqual(currentContents.Indexes))
+            !contents.AffectedTables.SequenceEqual(currentContents.AffectedTables) || !contents.Indexes.SequenceEqual(currentContents.Indexes) || !contents.Views.SequenceEqual(currentContents.Views))
         {
             // The statement's ordinary cleanup releases its complete lock set. Never publish
             // by name using locks and ownership checks for a previous namespace image.
@@ -80,6 +82,8 @@ internal sealed partial class SqlPlanExecutor
         {
             EnsureCanChange(table.Owner, table.Name, table.OwningSchema, "DROP SCHEMA", statement);
         }
+        foreach (var view in contents.Views)
+        { EnsureCanChange(view.Owner, view.Name, view.OwningSchema, "DROP SCHEMA", statement); }
         foreach (var index in contents.Indexes)
         {
             EnsureCanChange(index.Owner, index.Name, index.OwningSchema, "DROP SCHEMA", statement);
@@ -106,7 +110,7 @@ internal sealed partial class SqlPlanExecutor
     }
 
     // SQL's one namespace-contents enumeration drives RESTRICT, ordered locks, ownership
-    // and the CASCADE drop set. Views (#1124) must extend this enumeration and its revalidation.
+    // and the CASCADE drop set. Persisted views participate in this enumeration and its revalidation.
     // The catalog independently guards the same invariant inside its publication transaction.
     private static NamespaceContents ObjectsInNamespace(SqlCatalogSnapshot snapshot, string name)
     {
@@ -127,8 +131,9 @@ internal sealed partial class SqlPlanExecutor
                 affected.Add(table);
             }
         }
-        return new(tables.ToArray(), affected.OrderBy(table => table.ObjectId).ToArray(), indexes.ToArray());
+        var views = DependentViews(snapshot, snapshot.Views.Where(view => view.Schema.Equals(name, StringComparison.OrdinalIgnoreCase)), tables.Select(table => table.ObjectId));
+        return new(tables.ToArray(), affected.OrderBy(table => table.ObjectId).ToArray(), indexes.ToArray(), views);
     }
 
-    private sealed record NamespaceContents(SqlCatalogTable[] Tables, SqlCatalogTable[] AffectedTables, SqlCatalogIndex[] Indexes);
+    private sealed record NamespaceContents(SqlCatalogTable[] Tables, SqlCatalogTable[] AffectedTables, SqlCatalogIndex[] Indexes, SqlCatalogView[] Views);
 }

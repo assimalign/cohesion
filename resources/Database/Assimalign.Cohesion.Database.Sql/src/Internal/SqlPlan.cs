@@ -15,6 +15,12 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// </summary>
 internal abstract record SqlPlan;
 
+/// <summary>Publishes a canonical read-only view.</summary>
+internal sealed record SqlCreateViewPlan(SqlCatalogView View, bool OrReplace) : SqlPlan;
+
+/// <summary>Drops a persisted view and optionally its dependent views.</summary>
+internal sealed record SqlDropViewPlan(string Schema, string Name, bool IfExists, bool Cascade) : SqlPlan;
+
 /// <summary>Creates an empty SQL namespace.</summary>
 internal sealed record SqlCreateSchemaPlan(string Name, bool IfNotExists) : SqlPlan;
 
@@ -44,8 +50,8 @@ internal sealed record SqlGroupPlan(
     IReadOnlyList<SqlProjection> Projections,
     SqlBoundExpression? Having,
     IReadOnlyList<SqlBoundOrdering> OrderBy,
-    long? Limit,
-    long? Offset,
+    SqlRowCount? Limit,
+    SqlRowCount? Offset,
     bool IsDistinct) : SqlRelationPlan
 {
     internal override IReadOnlyList<SqlProjection> OutputProjections => Projections;
@@ -165,7 +171,7 @@ internal sealed record SqlSetOperand(SqlPlan Query, IReadOnlyList<SqlBoundExpres
 internal sealed record SqlSetOperationPlan(
     List<SqlSetOperand> Operands, SqlSetOperator Operator, bool IsAll,
     IReadOnlyList<SqlProjection> Projections, IReadOnlyList<SqlCatalogColumn> Columns,
-    IReadOnlyList<SqlBoundOrdering> OrderBy, long? Limit, long? Offset) : SqlRelationPlan
+    IReadOnlyList<SqlBoundOrdering> OrderBy, SqlRowCount? Limit, SqlRowCount? Offset) : SqlRelationPlan
 {
     internal override IReadOnlyList<SqlProjection> OutputProjections => Projections;
     internal override IReadOnlyList<SqlCatalogColumn> OutputColumns => Columns;
@@ -176,8 +182,8 @@ internal sealed record SqlSelectPlan(
     IReadOnlyList<SqlProjection> Projections,
     SqlBoundExpression? Where,
     IReadOnlyList<SqlBoundOrdering> OrderBy,
-    long? Limit,
-    long? Offset,
+    SqlRowCount? Limit,
+    SqlRowCount? Offset,
     bool IsDistinct,
     SqlAccessPath Access,
     IReadOnlyDictionary<SqlExpression, int>? OrderByProjections = null) : SqlRelationPlan
@@ -210,8 +216,8 @@ internal sealed record SqlJoinPlan(
     IReadOnlyList<SqlProjection> Projections,
     SqlBoundExpression? Where,
     IReadOnlyList<SqlBoundOrdering> OrderBy,
-    long? Limit,
-    long? Offset,
+    SqlRowCount? Limit,
+    SqlRowCount? Offset,
     bool IsDistinct,
     IReadOnlyDictionary<SqlExpression, int>? OrderByProjections = null) : SqlRelationPlan
 {
@@ -241,8 +247,8 @@ internal sealed record SqlSystemViewPlan(
     IReadOnlyList<SqlProjection> Projections,
     SqlBoundExpression? Where,
     IReadOnlyList<SqlBoundOrdering> OrderBy,
-    long? Limit,
-    long? Offset,
+    SqlRowCount? Limit,
+    SqlRowCount? Offset,
     bool IsDistinct,
     IReadOnlyDictionary<SqlExpression, int>? OrderByProjections = null) : SqlRelationPlan
 {

@@ -81,8 +81,9 @@ internal sealed partial class SqlPlanner
                 : UsingType(a.Type, b.Type, (i + 1).ToString(CultureInfo.InvariantCulture), set, setOperation: true);
             string? domain = !a.Unknown && !b.Unknown && a.Type.Type == b.Type.Type && a.Type.MaxLength == b.Type.MaxLength &&
                 a.Type.Precision == b.Type.Precision && a.Type.Scale == b.Type.Scale && string.Equals(a.Domain, b.Domain, StringComparison.OrdinalIgnoreCase) ? a.Domain : null;
-            var candidate = SqlCollationCandidate.Fold(first.Projections[i].Metadata?.Collation ?? default,
-                second.Projections[i].Metadata?.Collation ?? default);
+            var candidate = type.Type is DatabaseType.String or DatabaseType.Character
+                ? SqlCollationCandidate.Fold(first.Projections[i].Metadata?.Collation ?? default,
+                    second.Projections[i].Metadata?.Collation ?? default) : default;
             var collation = SqlBoundCollation.Of(candidate, default, _catalog.DefaultCollation);
             bool nullable = SetNullable(left, i) || SetNullable(right, i);
             projections.Add(new SqlProjection(first.Projections[i].Name, null, null, type.Type)
@@ -136,7 +137,7 @@ internal sealed partial class SqlPlanner
         if (CanFlatten(right, rightValues)) { operands.AddRange(((SqlSetOperationPlan)right).Operands); }
         else { operands.Add(new SqlSetOperand(right, rightValues)); }
         return new SqlSetOperationPlan(operands, set.Operator, set.IsAll, projections, columns,
-            ordering, EvaluateCount(set.Limit, LimitClause(set)), EvaluateCount(set.Offset, "OFFSET"));
+            ordering, BindCount(set.Limit, LimitClause(set)), BindCount(set.Offset, "OFFSET"));
     }
 
     private (DatabaseTypeInfo Type, string? Domain, bool Unknown) SetColumn(SqlProjection projection, IReadOnlyList<SqlCatalogColumn> columns)

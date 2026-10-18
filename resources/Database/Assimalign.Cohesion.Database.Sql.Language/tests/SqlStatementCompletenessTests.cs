@@ -92,6 +92,8 @@ public sealed class SqlStatementCompletenessTests
             "ALTER TABLE t ALTER COLUMN a SET NOT NULL",
             "ALTER TABLE t ALTER COLUMN a DROP NOT NULL",
         ],
+        [SqlClauses.CreateView] = ["CREATE VIEW v AS SELECT a FROM t", "CREATE OR REPLACE VIEW dbo.v (a) AS SELECT a FROM t"],
+        [SqlClauses.DropView] = ["DROP VIEW v", "DROP VIEW IF EXISTS dbo.v RESTRICT", "DROP VIEW v CASCADE"],
         [SqlClauses.DropTable] = ["DROP TABLE t", "DROP TABLE IF EXISTS dbo.t"],
         [SqlClauses.CreateSchema] = ["CREATE SCHEMA sales", "CREATE SCHEMA IF NOT EXISTS sales"],
         [SqlClauses.DropSchema] = ["DROP SCHEMA sales", "DROP SCHEMA IF EXISTS sales RESTRICT", "DROP SCHEMA sales CASCADE"],
