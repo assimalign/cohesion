@@ -30,6 +30,33 @@ internal static class GraphValueExpressions
         return false;
     }
 
+    internal static bool ReferencesUnbound(GqlExpression root, IReadOnlyDictionary<string, object?> bindings)
+    {
+        // The common inline literal/parameter/property cases need no traversal allocation.
+        switch (root)
+        {
+            case GqlLiteralExpression or GqlParameterExpression: return false;
+            case GqlVariableExpression variable: return !bindings.ContainsKey(variable.Variable);
+            case GqlPropertyExpression property: return !bindings.ContainsKey(property.Variable);
+            case GqlLabeledPredicate labeled: return !bindings.ContainsKey(labeled.Variable);
+        }
+        var pending = new Stack<GqlExpression>();
+        pending.Push(root);
+        while (pending.TryPop(out var expression))
+        {
+            string? name = expression switch
+            {
+                GqlVariableExpression variable => variable.Variable,
+                GqlPropertyExpression property => property.Variable,
+                GqlLabeledPredicate labeled => labeled.Variable,
+                _ => null,
+            };
+            if (name is not null && !bindings.ContainsKey(name)) { return true; }
+            foreach (var child in Children(expression)) { pending.Push(child); }
+        }
+        return false;
+    }
+
     internal static IEnumerable<GqlExpression> Children(GqlExpression expression)
     {
         switch (expression)
@@ -96,6 +123,9 @@ internal static class GraphValueExpressions
                 case GqlVariableExpression variable:
                     if (variableShape is not null ? variableShape(variable.Variable, accesses, entity) : entity && accesses == 0) { return true; }
                     break;
+                case GqlPropertyExpression property:
+                    if (variableShape?.Invoke(property.Variable, accesses + 1, entity) == true) { return true; }
+                    break;
                 case GqlMemberExpression member: pending.Push((member.Operand, accesses + 1)); break;
                 case GqlSubscriptExpression subscript: pending.Push((subscript.Operand, accesses + 1)); break;
                 case GqlListExpression or GqlMapExpression:
@@ -114,6 +144,74 @@ internal static class GraphValueExpressions
             }
         }
         return false;
+    }
+
+    // A missing/NULL element has no known scalar type. Mixed container/scalar
+    // branches defer container validation to evaluation (COHDBG013).
+    internal static bool IsKnownScalar(GqlExpression expression, IReadOnlyDictionary<string, object?>? parameters,
+        Func<string, int, bool> variableScalar, int accesses)
+    {
+        var pending = new Stack<(GqlExpression Expression, int Accesses)>();
+        pending.Push((expression, accesses));
+        while (pending.TryPop(out var item))
+        {
+            var (value, depth) = item;
+            switch (value)
+            {
+                case GqlVariableExpression variable:
+                    if (!variableScalar(variable.Variable, depth)) { return false; }
+                    break;
+                case GqlPropertyExpression property:
+                    if (!variableScalar(property.Variable, depth + 1)) { return false; }
+                    break;
+                case GqlMemberExpression member: pending.Push((member.Operand, depth + 1)); break;
+                case GqlSubscriptExpression subscript: pending.Push((subscript.Operand, depth + 1)); break;
+                case GqlLiteralExpression literal:
+                    if (!ScalarValue(literal.Value, depth)) { return false; }
+                    break;
+                case GqlParameterExpression parameter:
+                    if (parameters is null || !parameters.TryGetValue(parameter.Name, out var binding) || !ScalarValue(binding, depth)) { return false; }
+                    break;
+                case GqlListExpression or GqlMapExpression:
+                    var children = Children(value).ToArray();
+                    if (depth == 0 || children.Length == 0) { return false; }
+                    foreach (var child in children) { pending.Push((child, depth - 1)); }
+                    break;
+                case GqlAggregateExpression { Function: GqlAggregateFunction.CollectList, Operand: { } operand }:
+                    if (depth == 0) { return false; }
+                    pending.Push((operand, depth - 1));
+                    break;
+                case GqlAggregateExpression { Function: GqlAggregateFunction.Min or GqlAggregateFunction.Max, Operand: { } operand }:
+                    pending.Push((operand, depth));
+                    break;
+                case GqlCaseExpression or GqlCoalesceExpression or GqlNullIfExpression:
+                    foreach (var child in ResultChildren(value)) { pending.Push((child, depth)); }
+                    break;
+                default:
+                    if (depth != 0) { return false; }
+                    break;
+            }
+        }
+        return true;
+    }
+
+    private static bool ScalarValue(object? value, int accesses)
+    {
+        var pending = new Stack<(object? Value, int Accesses)>();
+        pending.Push((value, accesses));
+        while (pending.TryPop(out var item))
+        {
+            if (item.Accesses == 0)
+            {
+                if (item.Value is null || GraphCompositeValues.IsComposite(item.Value)) { return false; }
+            }
+            else if (item.Value is object?[] { Length: > 0 } list)
+            { foreach (var child in list) { pending.Push((child, item.Accesses - 1)); } }
+            else if (item.Value is IReadOnlyDictionary<string, object?> { Count: > 0 } map)
+            { foreach (var child in map.Values) { pending.Push((child, item.Accesses - 1)); } }
+            else { return false; }
+        }
+        return true;
     }
 
     private static bool MayContain(object? value, int accesses)

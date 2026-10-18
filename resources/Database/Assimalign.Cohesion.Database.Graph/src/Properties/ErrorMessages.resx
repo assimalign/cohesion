@@ -48,4 +48,10 @@
   <data name="StageUnsupported" xml:space="preserve"><value>Unsupported graph statement stage.</value></data>
   <data name="ForListRequired" xml:space="preserve"><value>FOR and UNWIND require a list value or NULL.</value></data>
   <data name="EntityBindingRequired" xml:space="preserve"><value>This operation requires a node or relationship binding.</value></data>
+  <data name="InsertPropertyScope" xml:space="preserve">
+    <value>Inserted property maps may reference only variables bound before this INSERT clause.</value>
+  </data>
+  <data name="MemberBindingRequired" xml:space="preserve">
+    <value>Member access requires a binding that may contain a map, node or relationship.</value>
+  </data>
 </root>

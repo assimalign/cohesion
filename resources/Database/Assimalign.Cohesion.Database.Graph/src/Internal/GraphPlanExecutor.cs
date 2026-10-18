@@ -244,7 +244,8 @@ internal static class GraphPlanExecutor
             if (distinct is not null && !distinct.Add(values)) { continue; }
             var scope = plan.Grouping is null && plan.Distinct is null
                 ? new Dictionary<string, object?>(binding, StringComparer.Ordinal) : new Dictionary<string, object?>(StringComparer.Ordinal);
-            for (int i = 0; i < values.Length; i++) { scope[plan.Projections[i].Name] = values[i]; }
+            for (int i = 0; i < values.Length; i++)
+            { if (plan.Projections[i].BindingName is { } name) { scope[name] = values[i]; } }
             scopes.Add(values, scope);
             rows.Add(new GraphOrderedRow(values, GraphSortPage.Keys(plan, binding, values, token), rows.Count));
         }
@@ -260,9 +261,10 @@ internal static class GraphPlanExecutor
             var carried = new Dictionary<string, object?>(StringComparer.Ordinal);
             for (int i = 0; i < values.Length; i++)
             {
-                string? name = stage.ReturnStar ? plan.Projections[i].Name
-                    : stage.Projections[i].Alias ?? (stage.Projections[i].Expression as GqlVariableExpression)?.Variable;
-                if (name is not null) { carried.Add(name, values[i]); }
+                if (plan.Projections[i].BindingName is not { } name) { continue; }
+                if (!carried.TryAdd(name, values[i]))
+                { throw new GraphPlanningException("COHDBG015", string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                    ErrorMessages.DuplicateResultColumn, name), plan.Projections[i].Expression.Location ?? plan.Query.Location); }
             }
             AddBinding(result, carried);
         }
@@ -314,7 +316,7 @@ internal static class GraphPlanExecutor
             budget.Consume();
             var bindings = new Dictionary<string, object?>(input, StringComparer.Ordinal);
             var node = GraphDatabase.Materialize(candidate);
-            if (!AcceptNode(path.Nodes[anchor.NodeIndex], node, bindings, parameters)) { continue; }
+            if (!AcceptNode(path.Nodes[anchor.NodeIndex], node, bindings, parameters, deferUnbound: true)) { continue; }
             var positions = new GraphNode[path.Nodes.Count];
             positions[anchor.NodeIndex] = node;
             await Expand(0, positions, new GraphRelationship[path.Relationships.Count], bindings, []).ConfigureAwait(false);
@@ -328,6 +330,10 @@ internal static class GraphPlanExecutor
             {
                 if (path.Variable is { } pathVariable)
                 { bindings.Add(pathVariable, new GraphPath(Array.AsReadOnly(positions), Array.AsReadOnly(relationships))); }
+                for (int i = 0; i < positions.Length; i++)
+                { if (!PropertiesMatch(path.Nodes[i].Properties, positions[i].Properties, bindings, parameters)) { return; } }
+                for (int i = 0; i < relationships.Length; i++)
+                { if (!PropertiesMatch(path.Relationships[i].Properties, relationships[i].Properties, bindings, parameters)) { return; } }
                 AddBinding(output, bindings);
                 return;
             }
@@ -349,9 +355,9 @@ internal static class GraphPlanExecutor
                 if (database.Store.FindNode(next, operation.Context.Snapshot) is not { } target) { continue; }
                 var copy = new Dictionary<string, object?>(bindings, StringComparer.Ordinal);
                 var relationship = GraphDatabase.Materialize(edge);
-                if (!Accept(pattern.Variable, relationship, copy) || !PropertiesMatch(pattern.Properties, relationship.Properties, copy, parameters)) { continue; }
+                if (!Accept(pattern.Variable, relationship, copy) || !PropertiesMatch(pattern.Properties, relationship.Properties, copy, parameters, deferUnbound: true)) { continue; }
                 var node = GraphDatabase.Materialize(target);
-                if (!AcceptNode(path.Nodes[current.To], node, copy, parameters)) { continue; }
+                if (!AcceptNode(path.Nodes[current.To], node, copy, parameters, deferUnbound: true)) { continue; }
                 var nextPositions = (GraphNode[])positions.Clone();
                 nextPositions[current.To] = node;
                 var nextRelationships = (GraphRelationship[])relationships.Clone();
@@ -379,8 +385,9 @@ internal static class GraphPlanExecutor
         return new GraphPath([GraphDatabase.Materialize(from), GraphDatabase.Materialize(to)], [relationship]);
     }
 
-    private static bool AcceptNode(GqlNodePattern pattern, GraphNode node, Dictionary<string, object?> bindings, IReadOnlyDictionary<string, object?>? parameters)
-        => GraphLabelEvaluator.Accepts(pattern, node.Labels) && PropertiesMatch(pattern.Properties, node.Properties, bindings, parameters) && Accept(pattern.Variable, node, bindings);
+    private static bool AcceptNode(GqlNodePattern pattern, GraphNode node, Dictionary<string, object?> bindings, IReadOnlyDictionary<string, object?>? parameters, bool deferUnbound = false)
+        => GraphLabelEvaluator.Accepts(pattern, node.Labels) && Accept(pattern.Variable, node, bindings) &&
+            PropertiesMatch(pattern.Properties, node.Properties, bindings, parameters, deferUnbound);
     private static bool Accept(string? variable, object entity, Dictionary<string, object?> bindings)
     {
         if (variable is null) { return true; }
@@ -392,8 +399,9 @@ internal static class GraphPlanExecutor
         bindings.Add(variable, entity);
         return true;
     }
-    private static bool PropertiesMatch(IReadOnlyDictionary<string, GqlExpression> expected, IReadOnlyDictionary<string, object?> actual, IReadOnlyDictionary<string, object?> bindings, IReadOnlyDictionary<string, object?>? parameters)
-        => expected.All(item => actual.TryGetValue(item.Key, out var value) && GraphExpressionEvaluator.Equal(GraphExpressionEvaluator.PropertyScalar(item.Value, bindings, parameters), value));
+    private static bool PropertiesMatch(IReadOnlyDictionary<string, GqlExpression> expected, IReadOnlyDictionary<string, object?> actual, IReadOnlyDictionary<string, object?> bindings, IReadOnlyDictionary<string, object?>? parameters, bool deferUnbound = false)
+        => expected.All(item => deferUnbound && GraphValueExpressions.ReferencesUnbound(item.Value, bindings) ||
+            actual.TryGetValue(item.Key, out var value) && GraphExpressionEvaluator.Equal(GraphExpressionEvaluator.PropertyScalar(item.Value, bindings, parameters), value));
 
     private static async ValueTask<long> CreateAsync(GraphDatabase database, GraphOperation operation, GqlPathPattern path,
         Dictionary<string, object?> bindings, IReadOnlyDictionary<string, object?>? parameters, CancellationToken token)

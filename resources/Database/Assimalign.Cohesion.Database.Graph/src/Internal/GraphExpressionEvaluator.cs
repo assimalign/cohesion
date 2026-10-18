@@ -29,7 +29,7 @@ internal static partial class GraphExpressionEvaluator
                 GqlLiteralExpression literal => literal.Value,
                 GqlParameterExpression parameter => Parameter(parameter, parameters),
                 GqlVariableExpression variable => bindings[variable.Variable],
-                GqlPropertyExpression property => Property(bindings[property.Variable], property.Property),
+                GqlPropertyExpression property => Member(bindings[property.Variable], property.Property, property),
                 GqlBinaryExpression binary => Binary(binary, bindings, parameters),
                 GqlLogicalExpression logical => Logical(logical, bindings, parameters),
                 GqlLabeledPredicate labeled => Labeled(labeled, bindings),
