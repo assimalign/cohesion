@@ -17,6 +17,43 @@ namespace Assimalign.Cohesion.Database.Graph.Tests;
 [Collection(nameof(GraphConcurrencyCollection))]
 public sealed class GraphMutationSnapshotTests
 {
+    [Fact(DisplayName = "Cohesion Test [Graph] - Writer snapshot: refresh retains the original pin and writes no journal records (#1149)")]
+    public async Task LockWriter_RefreshReadCommittedSnapshot_ShouldKeepPinWithoutJournaling()
+    {
+        // Arrange
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        var token = timeout.Token;
+        await using var engine = GraphDatabaseEngine.Create("refresh-pin", new());
+        await using var db = await engine.CreateDatabaseAsync("graph", token);
+        await using var writer = await db.CreateSessionAsync(token);
+        await using var reader = await db.CreateSessionAsync(token);
+        var node = await db.CreateNodeAsync(writer, ["N"], new Dictionary<string, object?> { ["x"] = 0L }, token);
+        var operation = await db.BeginOperationAsync(reader, token);
+        try
+        {
+            var original = operation.Context;
+            db.Store.FindNode(node.Id.Value, original.Snapshot)!.Value.Properties["x"].ShouldBe(0L);
+            await writer.ExecuteAsync("MATCH (n:N) SET n.x=1", cancellationToken: token);
+            var contexts = db.Coordinator.GetOpenContexts().OrderBy(context => context.Sequence).ToArray();
+            contexts.Length.ShouldBe(2);
+            long journalLength = db.DataStorage.JournalLength;
+
+            // Act
+            await db.LockWriterAsync(operation, token);
+            await db.LockWriterAsync(operation, token);
+
+            // Assert
+            operation.Context.ShouldNotBeSameAs(original);
+            db.Store.FindNode(node.Id.Value, operation.Context.Snapshot)!.Value.Properties["x"].ShouldBe(1L);
+            db.Store.FindNode(node.Id.Value, original.Snapshot)!.Value.Properties["x"].ShouldBe(0L);
+            db.Coordinator.GetOpenContexts().OrderBy(context => context.Sequence).ShouldBe(contexts);
+            db.DataStorage.JournalLength.ShouldBe(journalLength);
+            await operation.CompleteAsync();
+            db.Coordinator.GetOpenContexts().ShouldBeEmpty();
+        }
+        catch (Exception error) { await operation.AbortAsync(error); throw; }
+    }
+
     [Theory(DisplayName = "Cohesion Test [Graph] - Public mutations: queued ReadCommitted refreshes after locking and Snapshot retains conflicts (#1149)")]
     [InlineData("Label", 0)]
     [InlineData("Label", 1)]

@@ -54,11 +54,16 @@ internal sealed class GraphOperation
         }
     }
 
-    internal async ValueTask RefreshWriterSnapshotAsync(CancellationToken cancellationToken)
+    internal ValueTask RefreshWriterSnapshotAsync(CancellationToken cancellationToken)
     {
-        if (_context.IsolationLevel != IsolationLevel.ReadCommitted) { return; }
-        await ReleaseSnapshotPinAsync().ConfigureAwait(false);
-        await InitializeAsync(cancellationToken).ConfigureAwait(false);
+        if (_context.IsolationLevel == IsolationLevel.ReadCommitted)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            // The existing pin's horizon is at or below the refreshed view's,
+            // so it still protects every version this statement can read.
+            Context = _context.PinStatementSnapshot();
+        }
+        return ValueTask.CompletedTask;
     }
 
     internal void EnsureActive()

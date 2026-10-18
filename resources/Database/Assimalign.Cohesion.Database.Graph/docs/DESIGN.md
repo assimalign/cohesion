@@ -145,7 +145,9 @@ Autocommit runs at ReadCommitted and pins its statement snapshot. Every mutation
 including typed creates/deletes and catalog/schema writes, retakes a ReadCommitted snapshot
 after taking the writer lock. A GQL write then replans against it using the
 already normalized, captured parameter bindings, so queued
-increments serialize. Explicit Snapshot writers retain first-updater-wins. Relationship insertion
+increments serialize. Refresh replaces only the statement view and retains the existing
+snapshot pin: its earlier horizon still protects the newer view from pruning, without writing
+another transaction begin or rollback to the journal. Explicit Snapshot writers retain first-updater-wins. Relationship insertion
 checks latest endpoint existence, so a concurrent endpoint property replacement does not abort it.
 
 Behavior references (consulted, no code copied), relative to C:/Source/repos/neo4j/neo4j:
