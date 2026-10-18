@@ -84,7 +84,7 @@ would tell every caller the value is changeable and then guard that promise at
 runtime.
 
 Table metadata extension version 2 introduced one collation identifier per column
-after the existing constraints. Current format 22 requires the complete table extension 6 record,
+after the existing constraints. Current format 23 requires the complete table extension 6 record,
 including resolved-call vectors, identity facets and frozen missing-value literals described below. Column additions,
 drops, and restart preserve explicit overrides. An index inherits its key
 columns' effective collations; the SQL engine verifies index eligibility and
@@ -164,7 +164,7 @@ codec, the key encoding and every comparison read, so they do not consult the do
   column (the primary key's implicit NOT NULL).
 - **Persistence: table extension version 4** (data-storage format 7). After the dropped
   ordinals, one optional string per live column, NULL for a column of a built-in type,
-  which this catalog always writes. Current format 22 also requires the call vectors, identity facets and extension 6 missing-value literals;
+  which this catalog always writes. Current format 23 also requires the call vectors, identity facets and extension 6 missing-value literals;
   the format gate refuses earlier databases rather than loading their definitions. A persisted blank
   name fails the load with `SqlCatalogException`, as does a blank `domainName` at the
   column's constructor (`ArgumentException`).
@@ -685,9 +685,9 @@ domains/collations, stored-table ObjectIds, column/view/function/domain dependen
 ordered resolved calls and ownership. SqlCatalogView and snapshot Views expose
 immutable descriptions; tables retain their own stored-only shape. Nullability is
 computed by the engine on binding. No interface, friend grant or language reference
-was added. Format **22** fences kind 17; table extension 6 is unchanged. Older
+was added. Format **23** fences kind 17; table extension 6 is unchanged. Older
 formats are refused, with no upgrade reader. The encoded record must fit one page
-(**8,092 bytes**); oversized definitions fail CREATE with COHSQLE032.
+(**8,092 bytes**); oversized definitions fail CREATE with COHSQLE033.
 
 CreateViewAsync validates collisions, live dependency identities, cycles and the
 append-only replacement contract under the metadata lock, then commits record,

@@ -51,9 +51,9 @@ public sealed class GraphNumericComparisonTests
                     "=" => same, "<>" or "!=" => !same, "<" => order < 0,
                     "<=" => order <= 0, ">" => order > 0, _ => order >= 0,
                 };
-                GraphExpressionEvaluator.Evaluate(new GqlBinaryExpression(a, op, b), bindings).ShouldBe(expected);
+                GraphExpressionEvaluator.Evaluate(new GqlBinaryExpression(a, op, b), bindings, default).ShouldBe(expected);
             }
-            GraphExpressionEvaluator.Evaluate(new GqlInExpression(a, new GqlListExpression([b])), bindings)
+            GraphExpressionEvaluator.Evaluate(new GqlInExpression(a, new GqlListExpression([b])), bindings, default)
                 .ShouldBe(nullOperand ? null : (object)same);
             comparer.Equals(left, right).ShouldBe(same);
             comparer.Equals(right, left).ShouldBe(same);

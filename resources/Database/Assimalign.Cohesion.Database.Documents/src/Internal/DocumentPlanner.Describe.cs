@@ -64,7 +64,7 @@ internal sealed partial class DocumentPlanner
             ? $"filter={delete.Statement.Predicate is not null}; access={(delete.Access is DocumentIndexPath ? "IndexSeek" : "CollectionScan")}"
             : plan is DocumentUpdatePlan update
             ? $"filter={update.Statement.Predicate is not null}; access={(update.Access is DocumentIndexPath ? "IndexSeek" : "CollectionScan")}"
-            : logical is null ? null : $"filter={logical.Query.Predicate is not null}; grouped={logical.IsGrouped}; order_keys={logical.Query.OrderBy.Count}";
+            : logical is null ? null : SelectDetail(logical);
         Add(DescribeOperator(plan), null, indexName, detail);
         if (plan is DocumentDeletePlan deletion) { AddAccess(deletion.Access, 0); }
         if (plan is DocumentUpdatePlan mutation) { AddAccess(mutation.Access, 0); }
@@ -83,12 +83,12 @@ internal sealed partial class DocumentPlanner
             {
                 select = source;
                 target = source.Collection.Name;
-                Add("Select", 0);
+                Add("Select", 0, detail: SelectDetail(source.Logical));
             }
             else if (writeSource is DocumentSystemCollectionPlan system)
             {
                 target = system.Name;
-                Add("SystemCollection", 0);
+                Add("SystemCollection", 0, detail: SelectDetail(system.Logical));
             }
         }
         if (select is not null)
@@ -126,6 +126,9 @@ internal sealed partial class DocumentPlanner
         void Add(string name, int? parent, string? index = null, string? detail = null)
             => nodes.Add(new DatabasePlanNode { NodeId = nodes.Count, ParentId = parent, Operator = name, Target = target, Index = index, Detail = detail });
     }
+
+    private static string SelectDetail(DocumentLogicalPlan logical)
+        => $"filter={logical.Query.Predicate is not null}; grouped={logical.IsGrouped}; order_keys={logical.Query.OrderBy.Count}; limit={logical.Limit?.ToString(CultureInfo.InvariantCulture) ?? "none"}; offset={logical.Offset.ToString(CultureInfo.InvariantCulture)}";
 
     private static string Value(object value) => value is string text
         ? "'" + text.Replace("'", "''", StringComparison.Ordinal) + "'"

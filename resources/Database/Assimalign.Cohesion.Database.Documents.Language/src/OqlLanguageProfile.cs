@@ -20,7 +20,7 @@ public static class OqlLanguageProfile
     [
         // Query
         "SELECT", "VALUE", "RAW", "FROM", "WHERE",
-        "ORDER", "BY", "GROUP", "HAVING",
+        "ORDER", "BY", "GROUP", "HAVING", "LIMIT", "OFFSET",
         "DISTINCT", "ALL", "AS", "ASC", "DESC",
         // Index definition
         "CREATE", "DROP", "INDEX", "ON",
@@ -69,6 +69,8 @@ public static class OqlLanguageProfile
         OqlClauses.GroupBy,
         OqlClauses.Having,
         OqlClauses.OrderBy,
+        OqlClauses.Limit,
+        OqlClauses.Offset,
     ];
 
     /// <summary>Gets the OQL language profile used by document-model statement consumers.</summary>

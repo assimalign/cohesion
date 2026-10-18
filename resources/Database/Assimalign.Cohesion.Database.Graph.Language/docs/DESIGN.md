@@ -91,7 +91,7 @@ flowchart LR
 The flat single-segment facade carries ordered `GqlMatchClause(Paths, Predicate, Optional)` records, insertion paths, deletion variables,
 a detach flag, expression projections, a `GqlSetQuantifier` (ALL by default), `ReturnStar`, and an optional `GqlCatalogSurface` for dedicated metadata statements.
 Catalog statements cannot carry graph clauses. `GqlPathPattern.Variable` optionally names a MATCH
-path; it is null for anonymous paths and insertion paths. Every path holds one more node than relationship. Anonymous nodes
+path; it is null for anonymous paths and insertion paths. A path without parenthesized elements holds one more node than relationship. Anonymous nodes
 and relationships have a null variable. Relationship directions are relative to consecutive pattern
 nodes; incoming arrows reverse that relationship's endpoints. A scalar property reference always
 contains a variable and exactly one property key; qualified database names have no AST representation.
@@ -126,13 +126,13 @@ only the parser hands a list it built to a node without copying it.
 
 Only these clauses occur in `GqlLanguageProfile.Clauses`. The larger reserved keyword table is
 retained for tokenization and targeted unsupported diagnostics; it does not advertise capabilities.
-The function table advertises the executable aggregates: count, sum, avg, min, max,
-collect_list and its Cypher alias collect. Ordinary scalar functions remain outside this subset.
+The function table advertises the aggregates and core scalar functions listed below, including their accepted aliases.
 
 | Clause | Accepted subset | Execution |
 | --- | --- | --- |
-| `MATCH` | Comma-separated finite node/relationship chains; optional `variable =` path assignment, label expressions, scalar expression property maps; every ISO full and abbreviated edge except the tilde forms | Planner chooses an indexed anchor when available; executor matches bounded relationship-unique trails and binds named paths in traversal order |
+| `MATCH` | Comma-separated paths with fixed/quantified edges and parenthesized segments; optional `variable =` path assignment, label expressions, scalar expression property maps; every ISO full and abbreviated edge except the tilde forms | Planner chooses an indexed anchor when available; executor matches bounded relationship-unique trails and binds named paths in traversal order |
 | `OPTIONAL MATCH` | The same graph patterns and clause-local WHERE, including a leading optional or several consecutive matching clauses | Left join against each running binding; an unmatched clause preserves that row and binds its new variables to NULL |
+| `QUANTIFIED PATH` | ISO edge/subpath `{m,n}`, `{m}`, `{m,}`, `{,n}`, `{,}`, `+`, `*`; Cypher bracketed `*m..n` | Enumerates distinct trails, including zero-length matches; group variables bind source-ordered lists |
 | `WHERE` | Boolean and scalar expressions: comparisons, labels, AND/OR/XOR/NOT, IS null/truth tests, arithmetic, concatenation, IN lists and string predicates | Keeps TRUE only; see [DIALECT.md](DIALECT.md) and scalar expressions below |
 | `EXPLAIN` | One linear statement of the supported stages | Shared description rows without executing any read expansion or write; Cohesion extension |
 | `LET` | One or more `variable = expression` assignments | Adds new value bindings in assignment order; rebinding is COHDBG003 |
@@ -169,7 +169,7 @@ Double-quoted names preserve spaces. A single optional trailing semicolon is acc
 statements, the tilde (undirected) edges, Cypher arrows, nested property access, and
 return-after-delete are not accepted.
 
-The grammar is intentionally finite:
+The executable grammar is:
 
 ```text
 statement    := (query | EXPLAIN query | catalog) [';']
@@ -186,11 +186,15 @@ stage        := [OPTIONAL] MATCH match-paths [WHERE predicate]
 match-paths  := match-path (',' match-path)*
 match-path   := [ variable '=' ] path
 paths        := path (',' path)*
-path         := node (edge node)*
+path         := path-primary ((edge [quantifier] path-primary) | parenthesized | node)*
+path-primary := node | parenthesized
+parenthesized:= '(' path ')' [quantifier]
+quantifier   := '{' integer [',' [integer]] '}' | '{,' [integer] '}' | '+' | '*'
 node         := '(' [ variable ] [ label-spec ] [ properties ] ')'
 edge         := '-[' filler ']->' | '<-[' filler ']-' | '-[' filler ']-' | '<-[' filler ']->'
               | '->' | '<-' | '-' | '<->'
-filler       := [ variable ] [ label-spec ] [ properties ]
+filler       := [ variable ] [ label-spec ] [cypher-length] [ properties ]
+cypher-length:= '*' [integer] ['..' [integer]]
 label-spec   := (':' | IS) label-expr | ':' label ( ':' label )+
 label-expr   := label-term ('|' label-term)*
 label-term   := label-factor ('&' label-factor)*
@@ -211,6 +215,8 @@ labeled      := variable (IS [NOT] LABELED | ':') label-expr
 operand      := primary ( '[' predicate ']' | '.' field )*
 primary      := variable ['.' property] | scalar-literal | parameter | labeled | '(' predicate ')'
               | aggregate '(' ([DISTINCT | ALL] predicate | '*') ')'
+              | scalar-function '(' [predicate (',' predicate)*] ')'
+              | CAST '(' predicate AS cast-target ')' | CURRENT_DATE | CURRENT_TIMESTAMP
               | '[' [predicate (',' predicate)*] ']'
               | '{' [field ':' predicate (',' field ':' predicate)*] '}'
               | CASE [predicate] (WHEN predicate THEN predicate)+ [ELSE predicate] END
@@ -247,12 +253,89 @@ the order of nodes and relationships when an indexed anchor starts in the middle
 is traversed in reverse. A path variable cannot be deleted or used as a scalar property owner;
 the planner rejects `DELETE p` and `RETURN p.name` rather than treating a path as an entity.
 A named path cannot rebind an existing variable, including a node or relationship binding.
-Pattern chains are limited to 64 relationships (`GQL0005`). Label expressions and predicates have no
+The sum of path repetition bounds is limited to 64 relationships (`GQL0005`). Label expressions and predicates have no
 length or nesting limit: a chain of one operator is one n-ary node of any length, and only the stack
 bounds parentheses and negations, as in Neo4j (see "Chain length and nesting" below). Match execution
 also imposes a materialized-binding limit, documented in the Graph engine design. Quantified paths
-are unsupported, so cycles cannot cause unbounded repetition of a path pattern. The executor's
+enumerate bounded or unbounded repetitions with a runtime 64-hop backstop. The executor's
 trail rule permits repeated nodes but forbids repeated relationship identities within one path.
+
+### Quantified paths (#1144)
+
+`GqlRelationshipPattern.Quantifier` and `GqlQuantifier(Min, Max)` retain inclusive bounds;
+null Max means unbounded. `GqlPathPattern.Elements` holds source-ordered `GqlPathNode`,
+`GqlPathRelationship` and `GqlParenthesizedPathPattern` elements. The latter carries an enclosed
+path and an optional quantifier. Nodes/Relationships remain populated for a path without any
+parenthesized element, and are empty for a path with one. A hand-built path may omit Elements
+and use the chain lists alone; contradictory representations are COHDBG001. There is no
+catalog, storage or wire format change.
+
+| Spelling | Inclusive bounds |
+| --- | --- |
+| `->{m}`, `->{m,n}`, `->{m,}`, `->{,n}`, `->{,}` | m..m, m..n, m..unbounded, 0..n, 0..unbounded |
+| `->+`, `->*` | 1..unbounded, 0..unbounded |
+| `-[r:T*]->`, `-[*..n]->` | 1..unbounded, 1..n |
+| `-[*m]->`, `-[*m..n]->`, `-[*m..]->` | m..m, m..n, m..unbounded |
+| `-[*0]->`, `-[*0..n]->` | 0..0, 0..n |
+
+The Cypher bound sits after the label expression and before the property map. ISO `{0}` and
+`{0,0}` are GQL0002; the Cypher zero-length spelling `[*0]` is accepted. Reversed bounds are GQL0002, and a bound that cannot fit Int32 is GQL0004. A fixed edge contributes 1
+to the path sum; a bounded segment contributes its upper bound times its body's edge count;
+an unbounded segment contributes its lower bound times that count. A text sum above 64 is
+GQL0005, including an unbounded lower bound above 64. Hand-built invalid bounds use COHDBG001.
+At runtime an unbounded segment continues until no unused relationship qualifies; needing a
+65th relationship after direction, type, bound identity and the hop's own property checks is
+COHDBG004. Endpoint predicates, LIMIT and the projection cannot suppress that failure. The shared 100,000-binding and 1,000,000-candidate
+budgets also apply, with no partial result output.
+
+`(a) ((x)-[r:T]->(y)){2} (b)` joins the iterations at the same node: each y is the next x,
+and both endpoint constraints hold at the junction. Every repeated property map is evaluated
+for every occurrence, including deferred references to later outer bindings or comma-separated
+paths. A zero repetition tests both outer endpoints on one node, emits a one-node path, and
+binds empty group lists. Unknown names inside a Min=0 segment still warn but cannot eliminate
+its zero branch. A standalone nullable parenthesized path also anchors on one graph node;
+accepting that form departs from Neo4j's rejection of patterns that may have no node pattern.
+
+Variables declared inside a repeated segment are lists of their singleton kind. RETURN * and
+WITH * include these group variables in declaration order. Lists preserve source order when
+expanded from either end; FOR/UNWIND retain the node/relationship kind, including across WITH
+and NEXT. Ordinary list expressions and aggregates can consume them in process. Group provenance
+survives CASE, COALESCE, NULLIF, aggregates and container construction/access at the corresponding
+depth. Direct member access (`r.w`), DELETE of a group, and reuse of a name as both group and singleton are COHDBG003.
+Property maps inside a repeated segment cannot reference group variables (COHDBG003); no
+implicit choice between an iteration's singleton and the final list is made. A non-negotiated
+possible composite final projection is statically COHDBG016. The existing Execute prohibition
+on entity-valued results still applies to a negotiated possibly nonempty group-list projection,
+as for collect(entity), with COHDBG001 naming lists of nodes or relationships. A Max=0 group is
+provably empty and projects as `[]`; scalar projections after FOR/UNWIND use the existing wire codec. Named full paths use ExecutePaths.
+
+INSERT/CREATE quantifiers and node quantifiers are GQL0002 before writes. Questioned paths
+after an edge or parenthesized path, subpath assignments, WHERE inside a parenthesized path,
+and nested quantifiers each produce one named COHDBL001. Elsewhere `?` retains the stray-character
+or unsupported-parameter diagnostic. Explicit TRAIL and other path modes/search prefixes remain
+COHDBL001. A `--` touching a subpath's `)` or quantifier's `}`, `+` or `*` is GQL0008, just as
+after a node or edge filler, including the bracketed Cypher star and its bounds. A nested `?`
+retains COHDBL001; path modes inside subpaths receive the same named capability diagnostic. Recursive
+subpath parsing uses the GQL0009 stack guard. Hand-built subpath nesting beyond 128 levels, cycles and repeated path instances in one walk are refused
+iteratively with COHDBG001 before shape traversal. Parsed text has no nesting cap beyond GQL0009.
+
+Bare unbounded quantifiers use implicit trail semantics without ISO's required restrictive mode
+or selector; this is a deliberate ISO deviation for the Cypher alias. Relationship uniqueness is
+per path; separate comma-separated paths may reuse relationships, differing from Neo4j's clause-wide
+default. Mixing bracketed Cypher lengths and ISO quantified subpaths in a clause is accepted.
+
+Behavior consulted, no code copied, relative to `C:/Source/repos/neo4j/neo4j`:
+`community/cypher/front-end/expressions/src/main/scala/org/neo4j/cypher/internal/expressions/GraphPatternQuantifier.scala:26-44`
+defines plus/star emptiness and interval lower-default zero;
+`community/cypher/front-end/parser/v25/parser/src/main/antlr4/org/neo4j/cypher/internal/parser/v25/Cypher25Parser.g4:381-386`
+permits both interval bounds to be omitted (`{,}`);
+`community/cypher/ir/src/main/scala/org/neo4j/cypher/internal/ir/converters/SimplePatternConverters.scala:108-126`
+lowers legacy lengths with lower-default one; and
+`community/cypher/front-end/ast/src/main/scala/org/neo4j/cypher/internal/ast/semantics/SemanticPatternCheck.scala:609-619`
+declares group variables as lists of their singleton types.
+
+GqlQuantifiedPathParserTests, GqlQuantifiedPathTests, the clause conformance corpus,
+GraphQuantifiedPathWireTests and GraphServerProtocolTests pin this surface.
 
 Matching clauses execute in source order; WHERE sees variables bound by its own or earlier clauses,
 never later clauses (COHDBG001). An optional WHERE filters candidate matches before null extension;
@@ -400,7 +483,7 @@ the keyword-disposition corpus, `GqlProfileExecutionTests`, `GraphReturnTests` a
 ## Conditional expressions and composite values (#1146)
 
 CASE, WHEN, THEN, ELSE, END, COALESCE and NULLIF sit in Profile.Keywords; the function
-registry stays empty. The keyword-disposition corpus has a live positive parse for each,
+registry independently advertises aggregates and the core scalar set (#1148). The keyword-disposition corpus has a live positive parse for each,
 and GqlProfileExecutionTests measures both CASE forms and both abbreviations. CASE is
 advertised as one clause. COALESCE and NULLIF parse into case-abbreviation AST nodes,
 never registry function calls. The public AST also adds GqlCaseExpression and its ordered
@@ -481,9 +564,150 @@ dispatches omitted bounds to slicing operations, consulted but excluded here.
 community/values/src/main/java/org/neo4j/values/AnyValueComparator.java:87-118 and :146-155
 separates ternary orderability from total sorting (NULL and mixed groups are unordered in predicates).
 Its :44-85 places NULL last and sequences before scalars; virtual/VirtualValueGroup.java:26-32
-orders maps before lists, while storable/ValueGroup.java:62-65 orders text, Boolean and numbers.
+orders maps before lists, while storable/ValueGroup.java:56-65 orders zoned timestamps, dates, text, Boolean and numbers.
 The selected exact numeric rule is the owner
 decision, including within these composites.
+
+## Core scalar functions and CAST (#1148)
+
+`GqlFunctionCallExpression(Function, Arguments)` resolves scalar names to `GqlScalarFunction`;
+`GqlCastExpression(Operand, Target)` resolves explicit conversions to `GqlCastType`. Both copy
+or retain immutable expression children. CURRENT_DATE and CURRENT_TIMESTAMP use function nodes
+whose `IsNiladic` flag is true; their spelling has no parentheses. All niladic temporal
+spellings (also CURRENT_TIME, LOCAL_TIME and LOCAL_TIMESTAMP) are ISO reserved words:
+unquoted binding sites fail with GQL0002; quoted names bind and are referenced quoted.
+CAST is contextual: only CAST followed by `(` starts a conversion; `MATCH (cast:Movie)
+RETURN cast.title` binds normally. Other registered function words remain legal variables,
+path names, labels, keys and aliases. Scalar dispatch is separate from aggregate dispatch; adding a scalar
+cannot silently create COLLECT_LIST. Names are case-insensitive, bindings remain ordinal.
+
+The static language signatures check parsed arity with **GQL0002**, exactly where #1147 checks
+aggregate arity. Hand-built calls are checked again during planning with COHDBG001. Unknown
+calls use **GQL0010** naming the function. Recognized unsupported calls keep COHDBL001 naming
+FUNCTION and the spelling; these table entries apply only before `(` in value positions, so
+`date` and `duration` remain legal variables. `id(n)` specifically directs callers to element_id.
+CURRENT_TIME, LOCAL_TIME and LOCAL_TIMESTAMP are recognized unsupported niladic expressions.
+CARDINALITY, LTRIM/RTRIM/BTRIM, LEFT/RIGHT, LOG10 and Cypher toStringList/toIntegerList/
+toFloatList/toBooleanList are recognized unsupported calls. Procedures/CALL, reduce, temporal
+constructors, ELEMENTS, head/last/tail/reverse/range, list
+comprehensions and slicing remain outside this subset.
+
+The table distinguishes ISO clause 20 forms, direct Cypher aliases, and Cohesion extensions.
+**Every scalar is strict:** a NULL argument returns NULL before kind or domain checks; every
+argument expression still evaluates. Niladic datetime readers are the only exception. All
+referenced bindings and signatures validate even in skipped branches or empty matches.
+The main expression walk checks each reference once and carries its enclosing function for
+diagnostics; nested calls do not rewalk descendants. KnownFunctionKind distinguishes integral
+from non-integral numbers for toBoolean, rejects Boolean numeric CAST and temporal MATCH/INSERT
+property values with COHDBG003 before writes.
+
+| ISO canonical or extension | Accepted alias / status | Arguments | Non-NULL result |
+| --- | --- | --- | --- |
+| `element_id` | ISO 20.10; `elementId` is a 1:1 Cypher alias | node or relationship | database-local stable string identity; entity expressions also accepted as a Cohesion extension to ISO's variable operand |
+| `labels` | Cypher spelling, Cohesion extension | node | ordinal label list |
+| `type` | Cypher spelling, Cohesion extension | relationship | type string |
+| `properties` | Cypher spelling, Cohesion extension | node, relationship or map | read-only property map copy |
+| `keys` | Cypher spelling, Cohesion extension | node, relationship or map | ordinal key list |
+| `startNode`, `endNode` | Cypher spellings, Cohesion extensions | relationship | stored source/target node from the same statement snapshot |
+| `path_length` | ISO 20.22; `length` is a 1:1 Cypher alias | path | Int64 relationship count |
+| `nodes` | Cypher spelling, Cohesion extension | path | non-null nodes in traversal order; aliases retain the element proof |
+| `relationships` | Cypher spelling, Cohesion extension; `edges` is a Cohesion alias | path | non-null relationships in traversal order, retaining stored direction; aliases retain the proof |
+| `lower`, `upper` | ISO 20.25; `toLower`, `toUpper` are 1:1 Cypher aliases | string | invariant-case string |
+| `trim` | ISO 20.25 subset | string | string with leading/trailing U+0020 spaces removed |
+| `substring` | Cypher spelling, Cohesion extension | string, numeric start [, length] | string sliced by Unicode code points, **zero-based**; past-end gives empty string |
+| `replace` | Cypher spelling, Cohesion extension | string, search string, replacement string | ordinal replacement; empty search inserts replacement at every boundary, including both ends |
+| `char_length`, `character_length` | ISO 20.22 synonyms | string | Int64 Unicode code-point count |
+| `size` | ISO 20.22 for lists; Cypher string overload is a Cohesion extension | list or string | Int64 item/code-point count |
+| `abs`, `ceil`, `ceiling`, `floor` | ISO 20.22; CEIL/CEILING are synonyms | number | input numeric type; unsigned inputs become Decimal |
+| `round` | Cypher spelling, Cohesion extension | number [, nonnegative whole precision] | input numeric type; unsigned inputs become Decimal; half **away from zero** |
+| `sqrt` | ISO 20.22 | nonnegative number | finite Double; negative input is COHDBG013 |
+| `ln`, `log` | ISO 20.22 LN(value), LOG(base,value); Cypher log(value) is a Cohesion overload | positive number(s); log base positive and unequal to 1 | finite Double; invalid domain is COHDBG013 |
+| `mod` | ISO 20.22 canonical function for Cypher `%` | two numbers | Double if floating, Decimal if Decimal/UInt64, otherwise checked Int64 |
+| `CAST(value AS type)` | ISO 20.8, shared SQL conversion rules | scalar or NULL | requested scalar target; invalid value is COHDBG013 |
+| `toString` | Cypher spelling, Cohesion extension | number, Boolean, string or temporal | invariant text; Boolean is lowercase |
+| `toInteger` | Cypher spelling, Cohesion extension | number, Boolean or string | Int64, truncating fractions toward zero; unparsable text gives NULL |
+| `toFloat` | Cypher spelling, Cohesion extension | number or string | finite Double; unparsable text gives NULL |
+| `toBoolean` | Cypher spelling, Cohesion extension | Boolean, integer or string | Boolean; zero is false; unparsable text gives NULL |
+| `CURRENT_DATE` | ISO 20.27, no parentheses | none | UTC DateOnly at transaction start |
+| `CURRENT_TIMESTAMP` | ISO 20.27, no parentheses | none | UTC DateTimeOffset at transaction start |
+
+ISO status was checked against the [published clause-20 contents preview](https://cdn.standards.iteh.ai/sist-preview/76120/a5695073ca0a485c9929f50970f4c862/ISO-IEC-39075-2024.pdf)
+and [openGQL's clause-20 grammar](https://github.com/opengql/grammar/blob/main/GQL.g4#L2256-L2645),
+not the paywalled normative text. Labels/type/keys/properties/startNode/endNode, substring,
+replace and the four toX conversions have no corresponding function production there and are
+explicitly Cohesion extensions. ISO supplies LEFT/RIGHT rather than SUBSTRING; the SQL
+`SUBSTRING(s FROM i FOR n)` spelling is not accepted here. Cypher substring always starts at 0. Like Neo4j, floating coordinates truncate toward zero before checking the resulting nonnegative Int32 range; negative resulting coordinates or out-of-range indexes/lengths are COHDBG013.
+
+CAST targets are INT/INTEGER (Int32), INT64/BIGINT (Int64), REAL (Single), FLOAT/FLOAT64/
+DOUBLE [PRECISION] (Double), DECIMAL/NUMERIC, STRING/CHAR/VARCHAR (unbounded string), BOOL/
+BOOLEAN, DATE, ZONED DATETIME and TIMESTAMP WITH TIME ZONE (DateTimeOffset). Type modifiers,
+LIST, DURATION, BYTES, ZONED TIME, INT32, SMALLINT, FLOAT32, TIMESTAMP WITHOUT TIME ZONE
+and LOCAL DATETIME are outside this subset; recognized unsupported target
+families use COHDBL001, unknown target spellings use GQL0002. Numeric-to-integer CAST rejects
+fractions, including fractional text; it never truncates or rounds. It follows SQL #1119's
+shared storage types and value rules. Numeric text is invariant without grouping, and exact
+numeric text cannot silently round into a whole integer. DOUBLE/REAL reject nonzero underflow
+to zero from text or numeric input with COHDBG013. DECIMAL-to-REAL parses invariant decimal
+text directly to avoid double rounding, matching SQL SqlStandardCasts.cs:161,206-249. Temporal text follows SQL's invariant
+ISO date/time grammar, absent offset means UTC, and dates convert to midnight UTC. Boolean
+CAST accepts Boolean or TRUE/FALSE text; CAST to string renders Boolean uppercase. Timestamp
+text uses SQL SqlCastText.cs:27's FFFFFFF fraction, omitting the fraction at whole seconds. Cypher
+conversions deliberately differ from CAST: toInteger truncates, accepts Boolean as 1/0, and
+toInteger/toFloat/toBoolean return NULL for unparsable text. String/Decimal range overflow and non-finite
+results still fail with COHDBG013. Like Neo4j, toInteger saturates finite floating values outside Int64 range; CAST rejects them. toString retains a fractional digit for floating integers and uses Cypher scientific-notation thresholds. This implements the main-session ruling over the older
+issue-body default that requested CAST semantics for toInteger/toFloat.
+
+Math retains exact integer identity above 2^53. abs/ceil/floor/round retain the input CLR
+numeric type (all unsigned inputs become Decimal). Neo4j instead returns Float for ceil,
+floor and round; this is a documented Cohesion divergence. Round uses half away from zero,
+including negative ties, rather than Neo4j's unary ties toward positive infinity. Approximate round
+uses the value's round-trip decimal form with bounded digit work, including precisions above 15.
+SQRT/LOG/LN domain errors, zero divisors, overflow, invalid dynamic kinds, and excessive string
+results use COHDBG013; they never return NaN or infinity. REPLACE bounds expanded UTF-8 bytes
+before allocating, including empty-search insertion (replace('abc','','X') is 'XaXbXcX';
+Neo4j community/values/src/main/java/org/neo4j/values/storable/StringValue.java:197).
+toBoolean's integral-only numeric signature follows CypherFunctions.java:2775. Existing composite limits apply to every function's output.
+
+Planning rejects provably incompatible entity/path/group, literal, parameter and carried value
+kinds with COHDBG003 naming the function. Unbound arguments use COHDBG001 naming the function;
+dynamic property kinds are checked at execution with COHDBG013. EXPLAIN runs the same signature
+and scope checks without evaluation. Properties(map) preserves nested composite/entity/group shapes while stored entity properties remain scalar; wrappers cannot bypass wire admission. Function identity and CAST target participate in expression
+hashing/equality, so equivalent function GROUP BY keys match RETURN items. Child, group,
+composite, entity, scalar, rendering and validation walks all recognize both new nodes.
+
+GraphDatabaseSession captures one UTC instant from `EngineOptions.TimeProvider ?? TimeProvider.System`
+**before Coordinator.BeginAsync**, once per explicit transaction. Autocommit captures at the same
+point in GraphDatabase.BeginOperationAsync. GraphDatabaseTransaction and GraphOperation carry the
+instant; GraphEvaluationContext passes it explicitly to every evaluator reader, including MATCH
+maps, grouping and sorting. It never lives on TransactionContext: ReadCommitted replaces that
+context per statement. Every row, stage and statement of one transaction sees the same instant;
+each autocommit statement captures its own. This mirrors SQL #1120's capture/carrier/reader seam.
+The existing clock remains internal; no public option or visibility grant is added. Graph wire
+has no transaction controls, so each wire statement is autocommit.
+
+Temporal values compare and sort by DateOnly date or DateTimeOffset instant, including nested
+composite sort keys. Total ordering puts zoned timestamps then dates between paths and strings;
+DATE and timestamp are incomparable in predicates. Temporal results cannot become stored graph
+properties: planning rejects proven temporal property kinds with COHDBG003; dynamic temporal values
+raise COHDBG013 before the storage encoder, and the statement rolls back rather than leaking ArgumentException. No stored type, catalog version or wire encoding changes.
+
+The wire Execute gate rejects entity-valued nodes/edges/relationships/startNode/endNode results
+before writer locking or mutation, even on empty input. Scalar access through those results is
+legal, and LET s=startNode(r) followed by RETURN s can use ExecutePaths when the binding is
+mandatory. List/map functions labels/keys/properties use #1146's existing composite capability;
+unnegotiated possible composites are COHDBG016. Scalar, CAST and temporal results use existing
+components. Runtime errors materialize before ResultHeader and preserve the authenticated session.
+
+Conformance lives in GqlFunctionParserTests, GqlKeywordDispositionTests, GraphFunctionTests,
+GraphFunctionWireTests and GqlProfileExecutionTests' bidirectional Profile.Functions guard.
+Local behavior references (consulted, no implementation code copied), relative to
+C:/Source/repos/neo4j/neo4j: community/cypher/runtime-util/src/main/java/org/neo4j/cypher/operations/CypherFunctions.java:328-346,385-456
+(numeric return types and rounding), :1748-1784 (substring), :1920-1935 (labels), :2486-2524
+(path lists), :2675-2692 (size), :2730-2743 (length), :2764-2785,2814-2822,2881-2905 (conversions), :3485-3553 (numeric substring coordinates);
+community/values/src/main/java/org/neo4j/values/storable/StringWrappingStringValue.java:99-116
+(code-point slicing). Cohesion's CAST uses the local SQL precedent in
+Sql/src/Internal/Types/SqlStandardCasts.cs:175-194,224-229 and Sql.Language/src/SqlLiteralText.cs:14-85;
+the clock shape is recorded in Sql/docs/DESIGN.md, Planning, execution and bounds.
 
 ## Aggregates and grouping (#1147)
 
@@ -535,8 +759,9 @@ range are detected before conversion, avoiding per-row overflow exceptions. Nego
 value encoding preserves Decimal scale through parameters and results. Nested aggregates,
 aggregates in WHERE, unequal GROUP BY lists, and ungrouped
 ORDER BY references are COHDBG001 before reading data, including under EXPLAIN. Parameters
-inside aggregate operands are validated even on empty input. ExecutePaths rejects aggregates
-with its existing COHDBG001 path-request message. HAVING, STDDEV_SAMP, STDDEV_POP,
+inside aggregate operands are validated even on empty input. ExecutePaths rejects a final
+aggregate projection with its existing COHDBG001 path-request message; an intermediate
+aggregate such as WITH collect(n) AS ns UNWIND ns AS n feeds later stages (#1145). HAVING, STDDEV_SAMP, STDDEV_POP,
 PERCENTILE_CONT and PERCENTILE_DISC remain precise COHDBL001 capability diagnostics.
 WITH aggregates execute through the same per-stage grouping plan (#1145).
 
@@ -576,7 +801,7 @@ The owner default follows Cypher: NULL last ascending, first descending. NULLS F
 overrides that direction-dependent placement. This diverges from Cohesion SQL's NULL-first ASC
 default. Strings compare ordinally; numbers use the owner's exact comparison everywhere,
 including 0.1m versus 0.1d and adjacent integers above 2^53. The complete ascending family
-order is map, node, relationship, list, path, string, Boolean, number, NULL. Lists compare
+order is map, node, relationship, list, path, zoned timestamp, date, string, Boolean, number, NULL. Lists compare
 lexicographically; maps compare count, sorted ordinal keys, then corresponding values;
 nested values use the same total order with NULL last. Entities compare IDs; paths compare
 their starting node, relationship sequence and length. Equal sort keys retain input order.
@@ -617,16 +842,17 @@ GqlOrderPagingTests and GraphOrderPagingWireTests pin the executable surface.
 
 | Code | Meaning |
 | --- | --- |
-| `COHDBL001` | Recognized construct outside the executable profile, reported once at its own span: OPTIONAL block operands, MANDATORY MATCH, procedures, scalar functions, HAVING and statistical aggregates (STDDEV_SAMP/POP, PERCENTILE_CONT/DISC), substituted/whole-map parameters, composite properties, comprehensions, slicing, map projections, path quantifiers, standalone ORDER BY/page statements, set operations, FOR ordinality/offset suffixes, NEXT YIELD, server/session scope, undirected (tilde) edges, path mode and path search prefixes, `NODETACH DELETE`, and `MERGE` |
+| `COHDBL001` | Recognized construct outside the executable profile, reported once at its own span: OPTIONAL block operands, MANDATORY MATCH, procedures, excluded functions and datetime forms, unsupported CAST targets, HAVING and statistical aggregates (STDDEV_SAMP/POP, PERCENTILE_CONT/DISC), substituted/whole-map parameters, composite properties, comprehensions, slicing, map projections, questioned paths, subpath variables, parenthesized-path WHERE, nested quantifiers, standalone ORDER BY/page statements, set operations, FOR ordinality/offset suffixes, NEXT YIELD, server/session scope, undirected (tilde) edges, path mode and path search prefixes, `NODETACH DELETE`, and `MERGE` |
 | `GQL0001` | Empty statement |
 | `GQL0002` | Malformed supported syntax, invalid statement composition, leftover tokens, or a character GQL does not use (`?`, `#`, `^`, ```, ...) |
 | `GQL0003` | Unterminated string, quoted name, or block comment |
 | `GQL0004` | Invalid or out-of-range numeric literal |
-| `GQL0005` | Pattern length limit exceeded: a path pattern holds at most 64 relationships. Label expressions and predicates have no length or nesting limit (#1139 follow-up) |
+| `GQL0005` | Repetition-bound sum exceeded: a path contributes at most 64 relationships through fixed edges and quantified bounds. Label expressions and predicates have no length or nesting limit (#1139 follow-up) |
 | `GQL0006` | Duplicate literal property or map-literal key |
 | `GQL0007` | `Graph catalog introspection is read-only.`: mutation composed with `SHOW` |
-| `GQL0008` | A `--` comment begins exactly where a node pattern's `)` or an edge pattern's `]` ends, in `MATCH`, `INSERT` or `CREATE`: a Cypher arrow (`-->`, `--`) that would hide the rest of the line. Reported at the `--`; the message names `->`, `<-` and `-` |
+| `GQL0008` | A `--` comment begins exactly where a node/subpath pattern's `)`, an edge pattern's `]`, or a postfix quantifier's `}`, `+` or `*` ends, in `MATCH`, `INSERT` or `CREATE`: a Cypher arrow (`-->`, `--`) that would hide the rest of the line. Reported at the `--`; the message names `->`, `<-` and `-` |
 | `GQL0009` | The statement nests groups, unary expressions, CASE, subscripts or collection constructors deeper than the parsing thread's stack can follow. Reported at the group, unary, constructor or subscript token that could not be entered; the parse stops there and reports nothing else. The same text parses on a thread with more stack, so the engine's `GraphQueryRequest.FromGql` reports it as `COHDBG008`, statement too complex, not as a parse error |
+| `GQL0010` | Unknown function call; the message names the unregistered spelling |
 
 Locations use zero-based absolute UTF-16 offsets with exclusive ends and one-based line numbers.
 A line breaks at LF, CR, NEL (U+0085), LS (U+2028) or PS (U+2029), and CR LF is one break
@@ -941,7 +1167,7 @@ productions for sections 19.2 and 20.1, also contains neither IN nor STARTS WITH
 These four spellings are therefore recorded as Cohesion compatibility extensions. This checks
 the public contents and grammar, not the paywalled normative text. ISO string concatenation
 is `||`; string + is the Cypher alias. % is the Cypher spelling of the ISO MOD operation;
-the canonical function belongs to #1147.
+the canonical MOD function executes in #1148.
 
 Local Neo4j references, relative to C:/Source/repos/neo4j/neo4j (behavior consulted, no code copied):
 
@@ -985,7 +1211,7 @@ keyword recognition alone never enables it.
 
 Profile.Functions is the executable built-in set, checked by the engine's one function-
 coverage guard: every declared name has a passing live case and every live case has a
-declared name. GQL declares count, sum, avg, min, max, collect_list and collect. OQL removes ABS (already recognized by its
+declared name. GQL declares the aggregates and the core scalar names and aliases in the function table above. OQL removes ABS (already recognized by its
 unsupported table), and its parser/planner membership checks read the profile. OQL's
 [temporary ODMG exemptions were removed by #1126](../../Assimalign.Cohesion.Database.Documents.Language/docs/DESIGN.md#function-declaration-and-diagnostic-delivery-1103).
 

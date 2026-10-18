@@ -145,18 +145,37 @@ public static class SqlExpressionRenderer
         SqlLikeExpression like => Operand(like.Operand, additiveLevel) + (like.IsNegated ? " NOT LIKE " : " LIKE ") +
             Operand(like.Pattern, collateLevel),
         SqlCollateExpression collate => Operand(collate.Operand, collateLevel) + " COLLATE " + collate.CollationName,
-        SqlFunctionCallExpression function when SqlUnsupportedVocabulary.IsNiladicFunction(function.FunctionName) && function.Arguments.Count == 0 => function.FunctionName,
-        SqlFunctionCallExpression function when function.FunctionName.Equals("EXTRACT", StringComparison.OrdinalIgnoreCase) && function.Arguments.Count == 2 && function.Arguments[0] is SqlLiteralExpression field
+        SqlFunctionCallExpression function when SqlUnsupportedVocabulary.IsNiladicFunction(function.FunctionName) && function.Arguments.Count == 0 && function.Quantifier == SqlSetQuantifier.Default && function.OrderBy.Count == 0 => function.FunctionName,
+        SqlFunctionCallExpression function when function.FunctionName.Equals("EXTRACT", StringComparison.OrdinalIgnoreCase) && function.Arguments.Count == 2 && function.Arguments[0] is SqlLiteralExpression field && function.Quantifier == SqlSetQuantifier.Default && function.OrderBy.Count == 0
             => "EXTRACT(" + field.Value + " FROM " + Expression(function.Arguments[1]) + ")",
-        SqlFunctionCallExpression function when function.FunctionName.Equals("POSITION", StringComparison.OrdinalIgnoreCase) && function.Arguments.Count == 2
+        SqlFunctionCallExpression function when function.FunctionName.Equals("POSITION", StringComparison.OrdinalIgnoreCase) && function.Arguments.Count == 2 && function.Quantifier == SqlSetQuantifier.Default && function.OrderBy.Count == 0
             => "POSITION(" + Operand(function.Arguments[0], additiveLevel) + " IN " + Expression(function.Arguments[1]) + ")",
-        SqlFunctionCallExpression function => FunctionName(function.FunctionName) + "(" + Arguments(function.Arguments) + ")",
+        SqlFunctionCallExpression function => AggregateCall(function),
         SqlCaseExpression caseExpression => Case(caseExpression),
         SqlCastExpression cast => "CAST(" + Expression(cast.Operand) + " AS " + CastTarget(cast.TargetType) + ")",
         SqlExistsExpression exists => (exists.IsNegated ? "NOT EXISTS (" : "EXISTS (") + Select(exists.Subquery) + ")",
         SqlSubqueryExpression subquery => "(" + Select(subquery.Select) + ")",
         _ => throw new NotSupportedException($"Expression node '{expression.GetType().Name}' has no SQL spelling."),
     };
+
+    private static string AggregateCall(SqlFunctionCallExpression call)
+    {
+        string quantifier = call.Quantifier switch { SqlSetQuantifier.Distinct => "DISTINCT ", SqlSetQuantifier.All => "ALL ", _ => "" };
+        string ordering = call.OrderBy.Count == 0 ? "" : "ORDER BY " + string.Join(", ", call.OrderBy.Select(key =>
+            Expression(key.Expression) + (key.IsDescending ? " DESC" : "")));
+        bool listaggName = call.FunctionName.Equals("LISTAGG", StringComparison.OrdinalIgnoreCase);
+        bool listagg = call.HasWithinGroupOrdering;
+        // A delimited mixed/upper-case LISTAGG is an ordinary call in the parser.
+        // With no WITHIN GROUP keys it must stay delimited on a round trip.
+        bool specialForm = SqlUnsupportedVocabulary.IsNiladicFunction(call.FunctionName) ||
+            call.FunctionName.ToUpperInvariant() is "EXTRACT" or "POSITION" or "SUBSTRING" or "TRIM";
+        string name = (listaggName && !listagg) || (specialForm &&
+            (call.Quantifier != SqlSetQuantifier.Default || call.OrderBy.Count > 0))
+            ? "\"" + call.FunctionName + "\"" : FunctionName(call.FunctionName);
+        return name + "(" + quantifier + Arguments(call.Arguments) +
+            (!listagg && ordering.Length > 0 ? " " + ordering : "") + ")" +
+            (listagg ? " WITHIN GROUP (" + ordering + ")" : "");
+    }
 
     /// <summary>The precedence level the parser assigns the node.</summary>
     private static int Level(SqlExpression expression) => expression switch

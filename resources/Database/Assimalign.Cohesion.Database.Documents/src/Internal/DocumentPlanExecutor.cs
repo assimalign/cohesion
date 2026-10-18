@@ -54,6 +54,7 @@ internal static partial class DocumentPlanExecutor
         // baseline for row output and the tie break of every subsequent sort.
         foreach (var entry in candidates.OrderBy(entry => entry.Id, StringComparer.Ordinal))
         {
+            if (PageComplete(plan.Logical, matches.Count)) { break; }
             cancellationToken.ThrowIfCancellationRequested();
             operation.EnsureActive();
             var document = database.ReadDocument(entry);
@@ -81,11 +82,22 @@ internal static partial class DocumentPlanExecutor
         var matches = new List<DocumentEvaluationContext>();
         foreach (var document in DocumentSystemCollections.Enumerate(database, operation.Context.Snapshot, plan.Name, cancellationToken))
         {
+            if (PageComplete(plan.Logical, matches.Count)) { break; }
             operation.EnsureActive();
             if (evaluator.Matches(plan.Logical.Query.Predicate, new DocumentEvaluationContext(document))) { matches.Add(new DocumentEvaluationContext(document)); }
         }
         return ExecuteRows(plan.Logical, matches, evaluator, cancellationToken);
     }
+
+    // Use the planner's fixed result types, including function, operator and META results.
+    // Stars have a nominal Json type but can observe heterogeneous scalar roots, while
+    // Null also denotes an unknown type; only literal NULL/MISSING is fixed in that case.
+    private static bool PageComplete(DocumentLogicalPlan logical, int matched)
+        => !logical.IsGrouped && !logical.Query.IsDistinct && logical.Query.OrderBy.Count == 0 &&
+            logical.Projections.All(projection => projection.Expression is not OqlStarExpression &&
+                (projection.Type != DatabaseType.Null || projection.Expression is
+                    OqlLiteralExpression { Value: null or JsonElement { ValueKind: JsonValueKind.Null } } or OqlMissingExpression)) &&
+            logical.Limit is long limit && Math.Max(0L, matched - logical.Offset) >= limit;
 
     private static DatabaseResult ExecuteRows(DocumentLogicalPlan logical, List<DocumentEvaluationContext> matches,
         DocumentExpressionEvaluator evaluator, CancellationToken cancellationToken)
@@ -165,6 +177,10 @@ internal static partial class DocumentPlanExecutor
             }
             columns[i] = new DatabaseColumn { Name = logical.Projections[i].Name, Ordinal = i, Type = columnType };
         }
+        // Infer and normalize column types over the complete result before slicing.
+        int start = (int)Math.Min(logical.Offset, output.Count);
+        int take = (int)Math.Min(logical.Limit ?? long.MaxValue, output.Count - start);
+        if (start != 0 || take != output.Count) { output = output.GetRange(start, take); }
         bool wholeDocument = query.Projections.Count == 1 && query.Projections[0].Expression is OqlStarExpression;
         return new DocumentQueryResult(columns, output.Select(row => row.Values).ToList(),
             query.IsValue || wholeDocument, wholeDocument ? output.Select(row => row.Document.RawContent).ToArray() : null);

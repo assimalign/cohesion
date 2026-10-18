@@ -258,7 +258,7 @@ internal sealed partial class SqlPlanner
             left.Type.Precision == right.Type.Precision && left.Type.Scale == right.Type.Scale &&
             left.Collation == right.Collation && string.Equals(left.DomainName, right.DomainName, StringComparison.OrdinalIgnoreCase);
 
-    private static SqlPlanningException ViewError(string message) => new("COHSQLE032", message);
+    private static SqlPlanningException ViewError(string message) => new("COHSQLE033", message);
     private sealed record ParsedView(SqlQueryBodyExpression Query);
     internal sealed record ViewPlan(SqlPlan Query, IReadOnlyList<SqlCatalogColumn> Columns, IReadOnlyList<SqlTableReference> SystemRelations);
     internal sealed class ViewPlans

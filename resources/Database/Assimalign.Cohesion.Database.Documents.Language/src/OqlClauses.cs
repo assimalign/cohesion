@@ -81,6 +81,12 @@ public static class OqlClauses
     /// <summary>Orders values by one or more expressions.</summary>
     public const string OrderBy = "ORDER BY";
 
+    /// <summary>Limits the number of query result rows.</summary>
+    public const string Limit = "LIMIT";
+
+    /// <summary>Skips query result rows before applying LIMIT.</summary>
+    public const string Offset = "OFFSET";
+
     /// <summary>Evaluates a query nested within another OQL expression.</summary>
     public const string Subquery = "SUBQUERY";
 }

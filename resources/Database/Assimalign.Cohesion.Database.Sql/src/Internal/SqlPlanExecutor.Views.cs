@@ -28,10 +28,10 @@ internal sealed partial class SqlPlanExecutor
 
     private async Task<DatabaseResult> ExecuteDropViewAsync(SqlDropViewPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
-        if (_catalog.TryGetTable(plan.Schema, plan.Name, out _)) { throw new SqlPlanningException("COHSQLE032", ErrorMessages.ViewTargetIsTable); }
+        if (_catalog.TryGetTable(plan.Schema, plan.Name, out _)) { throw new SqlPlanningException("COHSQLE033", ErrorMessages.ViewTargetIsTable); }
         if (!_catalog.TryGetView(plan.Schema, plan.Name, out var view))
         {
-            if (!plan.IfExists) { throw new SqlPlanningException("COHSQLE032", string.Format(CultureInfo.CurrentCulture, ErrorMessages.ViewMissing, plan.Schema, plan.Name)); }
+            if (!plan.IfExists) { throw new SqlPlanningException("COHSQLE033", string.Format(CultureInfo.CurrentCulture, ErrorMessages.ViewMissing, plan.Schema, plan.Name)); }
             if (statement.ScriptReceipt is { } absence)
             { await SelfCommitAsync(statement, _catalog.DropViewAsync(plan.Schema, plan.Name, plan.Cascade, absence, cancellationToken)).ConfigureAwait(false); }
             return new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0);

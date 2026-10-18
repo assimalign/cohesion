@@ -236,6 +236,7 @@ internal static class SqlPersistedExpression
         // After the arguments, as the planner resolves a call (SqlPlanner.ValidateFunctionCalls).
         if (expression is SqlFunctionCallExpression function)
         {
+            SqlPlanner.ValidateCallModifiers(function, evaluator.Functions.Catalog);
             ResolveCall(function, evaluator);
         }
     }
@@ -385,7 +386,10 @@ internal static class SqlPersistedExpression
             SameQuery(a.Subquery, b.Subquery),
         (SqlCollateExpression a, SqlCollateExpression b) => Same(a.CollationName, b.CollationName),
         (SqlFunctionCallExpression a, SqlFunctionCallExpression b) =>
-            Same(a.FunctionName, b.FunctionName) && a.Arguments.Count == b.Arguments.Count,
+            Same(a.FunctionName, b.FunctionName) && a.Arguments.Count == b.Arguments.Count &&
+            (a.Quantifier == SqlSetQuantifier.Distinct) == (b.Quantifier == SqlSetQuantifier.Distinct) &&
+            a.HasWithinGroupOrdering == b.HasWithinGroupOrdering &&
+            SameList(a.OrderBy, b.OrderBy, (x, y) => x.IsDescending == y.IsDescending),
         (SqlCaseExpression a, SqlCaseExpression b) => (a.Input is null) == (b.Input is null) &&
             (a.ElseResult is null) == (b.ElseResult is null) && a.WhenClauses.Count == b.WhenClauses.Count,
         (SqlCastExpression a, SqlCastExpression b) => a.TargetTypeInfo is { } x && b.TargetTypeInfo is { } y

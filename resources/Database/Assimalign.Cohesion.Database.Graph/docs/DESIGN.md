@@ -505,7 +505,7 @@ so a statement that introduces N new labels costs time quadratic in N (measured 
 new labels in one `INSERT` take 7.5 s, 2,000 take 42 s). Neither limit counts expression length;
 both are follow-up storage items.
 
-GQL patterns are finite chains of at most 64 relationships. Each matched path is a trail: an edge
+GQL patterns include quantified relationships and parenthesized subpaths; the sum of finite upper bounds (or unbounded lower bounds) is at most 64 relationships. Each matched path is a trail: an edge
 identity is used at most once within that path; a node may recur. Separate comma-separated paths
 have separate edge sets and share variable bindings. This makes a three-edge cycle a valid
 three-hop result but forbids reusing its first edge on a fourth hop. At most 100,000 intermediate
@@ -513,6 +513,58 @@ path matches materialize per pattern, and a statement examines at most 1,000,000
 candidates, including dead ends; either overflow fails with `COHDBG004`, never silent truncation.
 Cancellation is observed during expansion and materialization. Repeated node/relationship
 variables enforce identity equality, and conflicting variable kinds fail before execution.
+
+### Quantified expansion (#1144)
+
+GraphPathShape validates both AST representations and lowers juxtaposed node constraints and
+parenthesized bodies into boundary nodes and repeated segments. Shape validation uses an explicit
+stack; cycles and repeated path instances in one walk fail with COHDBG001 before any recursive walk.
+Direct AST subpath depth above 128 also fails; parsed text is bounded only by the GQL0009 stack guard.
+Bounds over 64, nested repetitions, conflicting chain/element lists and quantified INSERT ASTs
+also use COHDBG001. Text insertion quantifiers are GQL0002. Parenthesized INSERT paths are outside
+the insertion grammar and are refused before writes. No catalog/storage format change is needed.
+
+The executor's DFS frontier and continuations live on the heap. Each incident cursor resumes after
+one child, so live search states scale with depth rather than sibling fan-out; storage incident
+buffers and materialized results retain their existing budgets. For a fixed hop, target node checks
+precede copying the trail for descent. Each state carries the trail's relationship identity set, source-ordered entities, group lists and the actual pattern/property
+pair for every occurrence. This mapping replaces positional indexing: repeated properties and
+anonymous elements are checked correctly after full-clause binding, including forward references.
+Fixed chains recheck node maps in source order, then relationship maps in source order, regardless
+of anchor, preserving the base matcher's short-circuit behavior. Quantified paths recheck maps in
+reverse encounter order (expansion goes right then left; constraints at a boundary are encountered
+in source order); entries within each map retain their declared order.
+Zero repetitions conjoin the outer boundary nodes; a Min=0 body's unknown labels/types cannot
+set MatchesNothing on the clause, although their warnings are retained.
+
+Only outer singleton nodes/relationships can anchor. Expansion proceeds right, then left, and
+prepends leftward entities and group elements to restore source order without changing stored
+relationship endpoints. Group lists retain node/relationship kind through FOR/UNWIND and projection
+boundaries, including result-preserving expressions and container access at each depth; RETURN *
+and WITH * include them. Inner property maps that reference a group, direct group member access, group deletion and mixed singleton/group declarations are COHDBG003.
+ORDER BY resolves group provenance through projection aliases inside compound expressions and
+container access, so `COALESCE(rs,rs).w` and `[rs][0].w` reject a projected group alias with
+COHDBG003 during ordinary planning and EXPLAIN.
+
+Finite upper-bound sums and unbounded lower-bound sums cannot exceed 64. An unbounded repetition
+explores at most 64 successful hops; an unused 65th relationship passing direction, type,
+bound-variable identity and its own property checks (including deferred maps)
+raises COHDBG004 before testing its endpoint. Failed filters do not trigger the hop cap, and
+LIMIT cannot suppress it. AddBinding and the shared statement ExpansionBudget also apply to
+every repeated branch. The internal per-budget OnConsume test hook cancels deterministically
+after expansion begins; tests assert the consumed count. The isolated high-fan-out allocation test
+samples live bytes after incident loading to pin bounded retained search state for fixed and
+quantified edges. No partial wire output precedes failure.
+
+EXPLAIN emits Expand details `quantifier={min,max}; body_hops=n; trail=True` (empty max means
+unbounded). The existing Path frame represents every length, including one node with no edges.
+The composite capability check precedes the existing Execute entity-result gate, so an unnegotiated
+group list receives static COHDBG016 even on an empty match. A Max=0 group is provably empty
+and projects as `[]` when negotiated. A possibly nonempty list of entities retains COHDBG001
+with a message naming lists of nodes or relationships; scalar results after FOR/UNWIND travel
+through the existing codec. In-process list/aggregate results preserve real entities. No new capability or encoding
+is introduced. The [language design](../../Assimalign.Cohesion.Database.Graph.Language/docs/DESIGN.md#quantified-paths-1144)
+records the ISO and Cypher deviations and reference-engine evidence.
 
 `TraverseAsync` implements the frozen `GraphTraversal` contract separately: breadth-first traversal,
 an explicit nonnegative maximum depth, a visited-node set seeded with the start, and no repeated
@@ -540,10 +592,59 @@ The [supported-clause matrix](../../Assimalign.Cohesion.Database.Graph.Language/
 is the single executable-language inventory: MATCH, OPTIONAL MATCH, WHERE, LET, FILTER, FOR/UNWIND, RETURN/NEXT, WITH, INSERT, CREATE (compatibility
 extension), DELETE, DETACH DELETE, SHOW (catalog extension), GROUP BY and LABEL EXPRESSION.
 COUNT, SUM, AVG, MIN, MAX, COLLECT_LIST and collect execute with implicit or explicit grouping.
-Scalar functions, variable-length paths, graph selection and language DDL are not advertised. ORDER BY, OFFSET, SKIP and LIMIT execute
+Core scalar functions and CAST execute as described below; graph selection and language DDL are not advertised. ORDER BY, OFFSET, SKIP and LIMIT execute
 after RETURN, as described below. Label/type/index management is the
 session-bound C# schema API. The ISO decision and conformance corpus are documented alongside the
 parser; this is a bounded ISO subset, not a full conformance claim.
+
+### Core functions, planning and the transaction clock (#1148)
+
+The [language function table](../../Assimalign.Cohesion.Database.Graph.Language/docs/DESIGN.md#core-scalar-functions-and-cast-1148)
+is the spelling/signature record. Immutable function and CAST AST nodes participate in every
+expression walk, projection/entity shape proof, structural grouping key and EXPLAIN rendering.
+Static enum switches define signatures and evaluators, preserving NativeAOT without reflection.
+Parsed scalar arity shares aggregates' GQL0002 rule; hand-built invalid calls are COHDBG001.
+Provably incompatible kinds (including group lists) fail planning with COHDBG003 naming the
+function; dynamic wrong kinds and conversion/domain failures use COHDBG013. Unknown calls
+are GQL0010. Strict NULL arguments return NULL before kind/domain checks. The main walk
+checks each reference once, carrying the enclosing function; evaluation uses fixed argument
+locals and formats function names only on errors. KnownFunctionKind proves non-integral
+toBoolean arguments, Boolean numeric CAST and temporal MATCH/INSERT properties incompatible
+(COHDBG003), including EXPLAIN and empty inputs.
+
+Capture: GraphDatabaseSession.BeginTransactionCoreAsync reads one UTC instant from the existing
+EngineOptions.TimeProvider or TimeProvider.System before Coordinator.BeginAsync. Autocommit
+captures at that same point in GraphDatabase.BeginOperationAsync; an explicit transaction
+reuses its saved instant. Carrier: GraphDatabaseTransaction.TransactionStart and
+GraphOperation.TransactionStart, independently of TransactionContext, which ReadCommitted
+replaces for each statement snapshot. Reader: an explicit GraphEvaluationContext argument
+at every evaluator call, including MATCH maps, projection stages, grouping and sort keys.
+Every stage and statement of a transaction shares the instant. CURRENT_DATE reads its UTC date;
+CURRENT_TIMESTAMP reads the UTC DateTimeOffset. This mirrors SQL #1120's recorded seam; no
+public option, interface, assembly reference or visibility grant is added. The test clock
+advances on every GetUtcNow read so per-row or per-stage capture fails the regression.
+
+abs/ceil/floor/round preserve numeric CLR types (unsigned inputs become Decimal), unlike
+Neo4j's Float ceil/floor/round results. Round ties go away from zero. Exact comparisons remain
+unchanged. sqrt/ln/log domain errors are COHDBG013. Strings use Unicode code points for length
+and zero-based Cypher substring, invariant casing, and bounded ordinal replacement. Empty-search
+replacement inserts at every boundary, including both ends, as Neo4j StringValue.java:197
+does; the expanded size is checked before allocation. CAST shares
+SQL's fractional rejection, nonzero floating underflow checks (SqlStandardCasts.cs:206-249),
+direct decimal-text REAL conversion (:161) and optional timestamp fraction (SqlCastText.cs:27); Cypher conversions truncate and return NULL for unparsable text.
+DateOnly and DateTimeOffset gain predicate and total ordering; total order places zoned timestamps then
+dates between paths and strings (Neo4j storable/ValueGroup.java:56-65). PropertyScalar checks storage admissibility, so computed
+dynamic temporal properties raise COHDBG013 inside the transaction rather than a storage ArgumentException.
+
+Function result shapes drive Execute's static entity gate before writer admission or mutation.
+nodes/edges/relationships and startNode/endNode entity outputs are rejected there; scalar
+reads such as nodes(p)[0].name pass. LET endpoint bindings retain their proven Node kind for
+ExecutePaths. Depth-one nodes/edges/relationships elements are proven non-null, including
+through LET/WITH aliases and FOR expansion. labels/keys/properties use existing negotiated composite values, with ordinal
+labels/keys and snapshot-correct endpoint nodes. Materialized value failures precede ResultHeader,
+allowing exact pooled-session reuse. No catalog, storage or wire format change is needed.
+GraphFunctionTests, GraphFunctionWireTests and the profile's one-live-case-per-name guard pin
+these behaviors and both temporal regressions.
 
 ### Aggregates and grouping (#1147)
 
@@ -841,14 +942,15 @@ to exercise that enforcement path; compiled provisioning is not included.
 | Code | Meaning |
 | --- | --- |
 | `COHDBL001` | Unsupported language capability, reported on the parsed statement |
-| `GQL0001`–`GQL0006` | Parser syntax/literal/bound errors; see language design. `GQL0005` is the 64-relationship path bound only |
+| `GQL0001`–`GQL0006` | Parser syntax/literal/bound errors; see language design. `GQL0005` is the sum-of-repetition-bounds limit of 64 relationships |
 | `GQL0007` | Attempt to mutate catalog introspection results |
 | `GQL0008` | A Cypher arrow (`-->`, `--`) directly after a pattern element, which GQL reads as a comment |
 | `GQL0009` | Groups, unary expressions, CASE or collection constructors nested deeper than the parsing thread's stack; `GraphQueryRequest.FromGql` and the engine report it as `COHDBG008` |
-| `COHDBG001` | Invalid pattern, variable binding, label expression, predicate or traversal specification, including an insertion that names `\|`, `!`, `%` or an either-direction edge, a binary `AND`, and a chain with fewer than two operands |
+| `GQL0010` | Unknown function spelling, reported while parsing |
+| `COHDBG001` | Invalid hand-built function arity or unbound argument; invalid pattern, variable binding, label expression, predicate or traversal specification, including an insertion that names `\|`, `!`, `%` or an either-direction edge, a binary `AND`, and a chain with fewer than two operands |
 | `COHDBG002` | Unknown label or relationship type in a schema write (`CreateIndexAsync`, `DropLabelAsync`, `DropRelationshipTypeAsync`), a failed statement. A read never reports it; see `COHDBG010` and `COHDBG011` |
-| `COHDBG003` | Schema/data mismatch, restricted deletion or invalid graph mutation |
-| `COHDBG004` | Path materialization or candidate-expansion limit exceeded |
+| `COHDBG003` | Proven incompatible function argument kind; schema/data mismatch, restricted deletion or invalid graph mutation |
+| `COHDBG004` | Path materialization, candidate-expansion or 64-hop trail limit exceeded |
 | `COHDBG005` | Session/database binding mismatch |
 | `COHDBG006` | Storage failure translated at the engine boundary |
 | `COHDBG007` | The session's explicit transaction is aborted by a failed statement: a statement, BEGIN or COMMIT is refused until a rollback completes; the message and `InnerException` name the original failure |
@@ -857,7 +959,7 @@ to exercise that enforcement path; compiled provisioning is not included.
 | `COHDBG010` | **Warning**, not a failure: a read-only statement or `GetIndexesAsync` names a label the database does not have at the statement's snapshot. No node carries it, so the read returns the rows the expression still matches (none for a required label), reports this `DiagnosticSeverity.Warning` diagnostic in `DatabaseResult.Diagnostics` or `GraphSchemaResult<T>.Diagnostics`, and leaves an explicit transaction active. Neo4j's `UnknownLabelWarning`, GQLSTATUS 01N50. Not sent over protocol 2.0 |
 | `COHDBG011` | **Warning**, not a failure: the same for a relationship type the database does not have; no relationship has it. Neo4j's `UnknownRelationshipTypeWarning`, GQLSTATUS 01N51. Not sent over protocol 2.0 |
 | `COHDBG012` | The database is offline (#1243): a durable flush of its journal or data file failed. Every operation is refused with `DatabaseOfflineException` until `OpenDatabaseAsync` reopens it; `Unavailable` on the wire. The storage's `StorageOfflineException` (`COHDBS002`) is the inner exception ("Storage operations") |
-| `COHDBG013` | Value error (#1140): non-Boolean conditions, invalid arithmetic, concatenation, container, index or field types, invalid paging counts, zero divisor, overflow or non-finite result. Reused by #1142, #1146, #1147 and #1148; structured Diagnostic, code-free Message, composed as CODE: message on protocol 2.0 |
+| `COHDBG013` | Value error (#1140): non-Boolean conditions, invalid arithmetic, concatenation, container, index or field types, invalid paging counts, function/CAST kind or value failures, unsupported computed property values, zero divisor, overflow or non-finite result. Reused by #1142, #1146, #1147 and #1148; structured Diagnostic, code-free Message, composed as CODE: message on protocol 2.0 |
 | `COHDBG014` | Multiple map keys normalize to the same bare parameter name |
 | `COHDBG015` | Duplicate final result column name, implicit or explicit, under ordinal case-sensitive comparison; rejected during planning before execution |
 | `COHDBG016` | A composite result requires graph.composite-values; ExecutionFailure before ResultHeader, preserving the authenticated session |

@@ -951,6 +951,8 @@ public sealed partial class SqlQueryParser : QueryParser
         bool previousFromComma = false;
         bool previousPreviousFromComma = false;
         var fromScopes = new Stack<bool>();
+        var callNames = new Stack<string?>();
+        bool closedListagg = false;
         int previousPosition = 0;
 
         while (lexer.MoveNext())
@@ -1080,7 +1082,11 @@ public sealed partial class SqlQueryParser : QueryParser
                 return true;
             }
 
-            if (TryGetUnsupportedAggregateClause(lexer, out clause, out int aggregateEnd))
+            bool listaggWithin = closedListagg && IsWord(ref lexer, "WITHIN");
+            if (lexer.Current.Type == TokenType.LeftParen) { callNames.Push(previousToken); }
+            closedListagg = lexer.Current.Type == TokenType.RightParen && callNames.Count > 0 &&
+                callNames.Pop() is string closedName && (closedName.Equals("LISTAGG", StringComparison.OrdinalIgnoreCase) || closedName == "\"listagg\"");
+            if (!listaggWithin && TryGetUnsupportedAggregateClause(lexer, out clause, out int aggregateEnd))
             {
                 location = Location.Create(1, 1, lexer.Current.Position, aggregateEnd);
                 return true;

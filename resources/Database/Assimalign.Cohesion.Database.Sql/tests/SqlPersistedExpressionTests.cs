@@ -80,6 +80,32 @@ public sealed class SqlPersistedExpressionTests
         => Should.Throw<DatabaseException>(() => SqlPersistedExpression.LoadDefaultValue(text, "DEFAULT of column 'c' on table 'dbo.t'"))
             .Message.ShouldContain("is not a literal value", Case.Sensitive);
 
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Persisted expressions: aggregate quantifier and ordering survive round trips")]
+    [InlineData("COUNT(DISTINCT x)", "COUNT(x)")]
+    [InlineData("STRING_AGG(x, ',' ORDER BY id)", "STRING_AGG(x, ',' ORDER BY id DESC)")]
+    [InlineData("STRING_AGG(x, ',' ORDER BY id)", "STRING_AGG(x, ',' ORDER BY x)")]
+    [InlineData("LISTAGG(DISTINCT x) WITHIN GROUP (ORDER BY x)", "LISTAGG(x) WITHIN GROUP (ORDER BY x)")]
+    public void Canonicalize_AggregateShape_ShouldPreserveAndDistinguish(string text, string other)
+    {
+        // Arrange
+        var declared = SqlPersistedExpression.Load(text, "test");
+        // Act
+        string canonical = SqlPersistedExpression.Canonicalize(declared, "test");
+        // Assert
+        SqlPersistedExpression.AreEquivalent(declared, SqlPersistedExpression.Load(canonical, "test")).ShouldBeTrue();
+        SqlPersistedExpression.AreEquivalent(declared, SqlPersistedExpression.Load(other, "test")).ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Persisted expressions: explicit ALL is equivalent to default and still renders")]
+    public void Canonicalize_ExplicitAll_ShouldMatchDefaultAndRetainSpelling()
+    {
+        // Arrange
+        var declared = SqlPersistedExpression.Load("COUNT(ALL x)", "test");
+        // Act / Assert
+        SqlPersistedExpression.Canonicalize(declared, "test").ShouldBe("COUNT(ALL x)");
+        SqlPersistedExpression.AreEquivalent(declared, SqlPersistedExpression.Load("COUNT(x)", "test")).ShouldBeTrue();
+    }
+
     /// <summary>An expression node defined outside the language package, which no SQL text spells.</summary>
     private sealed class UnspellableExpression : SqlExpression
     {

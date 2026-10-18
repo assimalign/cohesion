@@ -25,16 +25,20 @@ internal sealed class GraphOperation
     /// <param name="session">The session the statement holds; the operation releases the hold when it finishes.</param>
     /// <param name="context">The transaction context the statement runs under.</param>
     /// <param name="transaction">The explicit transaction that admitted the statement, or null for autocommit.</param>
-    internal GraphOperation(GraphDatabase database, GraphDatabaseSession session, TransactionContext context, GraphDatabaseTransaction? transaction)
+    /// <param name="transactionStart">The UTC instant captured before the transaction began.</param>
+    internal GraphOperation(GraphDatabase database, GraphDatabaseSession session, TransactionContext context, GraphDatabaseTransaction? transaction, DateTimeOffset transactionStart)
     {
         _database = database;
         _session = session;
         Context = context;
         _context = context;
         _transaction = transaction;
+        TransactionStart = transactionStart;
     }
 
     internal TransactionContext Context { get; private set; }
+    internal DateTimeOffset TransactionStart { get; }
+    internal GraphEvaluationContext EvaluationContext => new(TransactionStart, _database, this);
 
     internal async ValueTask InitializeAsync(CancellationToken cancellationToken)
     {

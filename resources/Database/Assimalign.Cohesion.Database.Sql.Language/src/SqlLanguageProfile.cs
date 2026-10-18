@@ -52,7 +52,7 @@ public static class SqlLanguageProfile
     private static readonly string[] _functions =
     [
         // Aggregate
-        "COUNT", "SUM", "AVG", "MIN", "MAX",
+        "COUNT", "SUM", "AVG", "MIN", "MAX", "STRING_AGG", "LISTAGG",
         // Null handling
         "COALESCE", "NULLIF",
         // Type

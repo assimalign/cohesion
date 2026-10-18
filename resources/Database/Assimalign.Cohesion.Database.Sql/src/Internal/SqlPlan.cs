@@ -78,9 +78,13 @@ internal sealed class SqlGroupAggregate
     /// <param name="targets">The storage type each argument converts to before it is added, or null when none converts.</param>
     /// <param name="collation">The collation the arguments compare under, which the function's context carries (<c>MIN</c>, <c>MAX</c>).</param>
     /// <param name="database">The database whose statement runs the aggregate.</param>
+    /// <param name="orderBy">The bound input ordering.</param>
+    /// <param name="argumentCollations">The per-argument DISTINCT collations.</param>
     internal SqlGroupAggregate(SqlFunctionCallExpression call, SqlAggregateFunction function,
-        SqlBoundExpression[] arguments, DatabaseType[]? targets, SqlBoundCollation collation, DatabaseName database)
+        SqlBoundExpression[] arguments, DatabaseType[]? targets, SqlBoundCollation collation, DatabaseName database, IReadOnlyList<SqlBoundOrdering> orderBy, IReadOnlyList<SqlBoundCollation> argumentCollations)
     {
+        ArgumentCollations = argumentCollations;
+        OrderBy = orderBy;
         Call = call;
         Function = function;
         Arguments = arguments;
@@ -89,6 +93,12 @@ internal sealed class SqlGroupAggregate
         Collation = collation;
         Database = database;
     }
+
+    /// <summary>Gets each DISTINCT argument's own comparison collation.</summary>
+    internal IReadOnlyList<SqlBoundCollation> ArgumentCollations { get; }
+
+    /// <summary>Gets input ordering bound over the source row.</summary>
+    internal IReadOnlyList<SqlBoundOrdering> OrderBy { get; }
 
     /// <summary>Gets the aggregate call as written.</summary>
     internal SqlFunctionCallExpression Call { get; }

@@ -32,6 +32,13 @@ public sealed class GqlProfileExecutionTests
                      [2, 1, "LabelScan", "Person", null, "node=0; property=; value=NULL", null, null],
                      [3, 0, "Project", "a", null, "kind=Node; expression=a", null, null]]),
             ],
+            [GqlClauses.QuantifiedPath] =
+            [
+                new("MATCH (a)->{1,3}(b) RETURN a.name, b.name", [["Alice", "Bob"], ["Robo", "Ghost"]]),
+                new("MATCH (a)-[*1..3]->(b) RETURN a.name, b.name", [["Alice", "Bob"], ["Robo", "Ghost"]]),
+                new("MATCH (a) ((x)->(y)){1,3} (b) RETURN a.name, b.name", [["Alice", "Bob"], ["Robo", "Ghost"]]),
+                new("MATCH (a) ((x:Person|Robot)->(y)){1,3} (b) RETURN a.name, b.name", [["Alice", "Bob"], ["Robo", "Ghost"]]),
+            ],
             [GqlClauses.Match] =
             [
                 new("MATCH (a:Person) MATCH (a)-[:KNOWS]->(b) RETURN a.name, b.name", [["Alice", "Bob"]]),
@@ -292,7 +299,6 @@ public sealed class GqlProfileExecutionTests
 
     /// <summary>The supported subset rejects broader GQL forms at parse time, before they reach planning.</summary>
     [Theory(DisplayName = "Cohesion Test [Graph] - Unsupported forms fail at parse time against a live engine")]
-    [InlineData("MATCH (a)-[r*1..3]->(b) RETURN a")]
     [InlineData("MATCH (a) RETURN a {.name}")]
     [InlineData("INSERT (:Person {tags: [1, 2]})")]
     [InlineData("MATCH (a) DELETE a RETURN a")]
@@ -313,6 +319,45 @@ public sealed class GqlProfileExecutionTests
     private static readonly IReadOnlyDictionary<string, ExecutionCase> _functionCases =
         new Dictionary<string, ExecutionCase>(StringComparer.OrdinalIgnoreCase)
         {
+            ["element_id"] = new("MATCH (a:Person {name:'Alice'}) RETURN element_id(a)=element_id(a)", [[true]]),
+            ["elementId"] = new("MATCH (a:Person {name:'Alice'}) RETURN elementId(a)=element_id(a)", [[true]]),
+            ["labels"] = new("MATCH (a:Person {name:'Alice'}) RETURN labels(a)", [[new object?[] { "Person" }]]),
+            ["type"] = new("MATCH ()-[r:KNOWS]->() RETURN type(r)", [["KNOWS"]]),
+            ["properties"] = new("MATCH (a:Person {name:'Alice'}) RETURN properties(a).age", [[42L]]),
+            ["keys"] = new("MATCH (a:Person {name:'Alice'}) RETURN keys(a)", [[new object?[] { "active", "age", "name" }]]),
+            ["startNode"] = new("MATCH ()-[r:KNOWS]->() RETURN startNode(r).name", [["Alice"]]),
+            ["endNode"] = new("MATCH ()-[r:KNOWS]->() RETURN endNode(r).name", [["Bob"]]),
+            ["path_length"] = new("MATCH p=()-[:KNOWS]->() RETURN path_length(p)", [[1L]]),
+            ["length"] = new("MATCH p=()-[:KNOWS]->() RETURN length(p)", [[1L]]),
+            ["nodes"] = new("MATCH p=()-[:KNOWS]->() RETURN nodes(p)[0].name", [["Alice"]]),
+            ["edges"] = new("MATCH p=()-[:KNOWS]->() RETURN type(edges(p)[0])", [["KNOWS"]]),
+            ["relationships"] = new("MATCH p=()-[:KNOWS]->() RETURN type(relationships(p)[0])", [["KNOWS"]]),
+            ["lower"] = new("RETURN lower('ALICE')", [["alice"]]),
+            ["toLower"] = new("RETURN toLower('ALICE')", [["alice"]]),
+            ["upper"] = new("RETURN upper('alice')", [["ALICE"]]),
+            ["toUpper"] = new("RETURN toUpper('alice')", [["ALICE"]]),
+            ["trim"] = new("RETURN trim(' x ')", [["x"]]),
+            ["substring"] = new("RETURN substring('A😀B',1,1)", [["😀"]]),
+            ["replace"] = new("RETURN replace('a-b','-','+')", [["a+b"]]),
+            ["char_length"] = new("RETURN char_length('A😀B')", [[3L]]),
+            ["character_length"] = new("RETURN character_length('A😀B')", [[3L]]),
+            ["size"] = new("RETURN size([1,2])", [[2L]]),
+            ["abs"] = new("RETURN abs(-42)", [[42L]]),
+            ["ceil"] = new("RETURN ceil(2.1)", [[3d]]),
+            ["ceiling"] = new("RETURN ceiling(2.1)", [[3d]]),
+            ["floor"] = new("RETURN floor(2.9)", [[2d]]),
+            ["round"] = new("RETURN round(-2.5)", [[-3d]]),
+            ["sqrt"] = new("RETURN sqrt(9)", [[3d]]),
+            ["ln"] = new("RETURN ln(1)", [[0d]]),
+            ["log"] = new("RETURN log(10,100)", [[2d]]),
+            ["mod"] = new("MATCH (a:Person {name:'Alice'}) RETURN mod(a.age,5)", [[2L]]),
+            ["toString"] = new("RETURN toString(42)", [["42"]]),
+            ["toInteger"] = new("RETURN toInteger(2.5)", [[2L]]),
+            ["toFloat"] = new("RETURN toFloat('2.5')", [[2.5d]]),
+            ["toBoolean"] = new("RETURN toBoolean('true')", [[true]]),
+            ["current_date"] = new("RETURN CURRENT_DATE=CURRENT_DATE", [[true]]),
+            ["current_timestamp"] = new("RETURN CURRENT_TIMESTAMP=CURRENT_TIMESTAMP", [[true]]),
+            ["cast"] = new("RETURN CAST('42' AS INTEGER)", [[42]]),
             ["count"] = new("MATCH (a:Person) RETURN count(a)", [[3L]]),
             ["sum"] = new("MATCH (a:Person) RETURN sum(a.age)", [[89L]]),
             ["avg"] = new("MATCH (a:Person) RETURN avg(a.age)", [[89d / 3]]),
@@ -370,6 +415,7 @@ public sealed class GqlProfileExecutionTests
 
     private static bool UsesClause(string clause, GqlQueryExpression query) => clause switch
     {
+        GqlClauses.QuantifiedPath => query.MatchClauses.SelectMany(clause => clause.Paths).SelectMany(PatternPaths).Any(path => path.Relationships.Any(edge => edge.Quantifier is not null) || path.Elements?.Any(element => element is GqlParenthesizedPathPattern { Quantifier: not null }) == true),
         GqlClauses.Explain => query.IsExplain,
         GqlClauses.Match => query.MatchClauses.Any(clause => !clause.Optional),
         GqlClauses.OptionalMatch => query.MatchClauses.Any(clause => clause.Optional),
@@ -399,8 +445,20 @@ public sealed class GqlProfileExecutionTests
     // A label expression beyond the conjunction :A:B the profile always ran: an operator, the
     // wildcard or a type alternative on a pattern element.
     private static bool UsesLabelOperators(GqlPathPattern path)
-        => path.Nodes.Any(node => node.LabelExpression is { } labels && !IsNameConjunction(labels)) ||
-           path.Relationships.Any(edge => edge.LabelExpression is { } labels && labels is not GqlLabelName);
+        => PatternPaths(path).Any(current => current.Nodes.Any(node => node.LabelExpression is { } labels && !IsNameConjunction(labels)) ||
+           current.Relationships.Any(edge => edge.LabelExpression is { } labels && labels is not GqlLabelName));
+
+    private static IEnumerable<GqlPathPattern> PatternPaths(GqlPathPattern root)
+    {
+        var pending = new Stack<GqlPathPattern>();
+        pending.Push(root);
+        while (pending.TryPop(out var path))
+        {
+            yield return path;
+            foreach (var element in path.Elements ?? [])
+            { if (element is GqlParenthesizedPathPattern group) { pending.Push(group.Pattern); } }
+        }
+    }
 
     private static bool IsNameConjunction(GqlLabelExpression expression) => expression switch
     {

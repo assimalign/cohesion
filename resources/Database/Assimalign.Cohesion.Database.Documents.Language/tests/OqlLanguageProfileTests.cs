@@ -45,6 +45,8 @@ public class OqlLanguageProfileTests
     [InlineData(OqlClauses.GroupBy)]
     [InlineData(OqlClauses.Having)]
     [InlineData(OqlClauses.OrderBy)]
+    [InlineData(OqlClauses.Limit)]
+    [InlineData(OqlClauses.Offset)]
     [InlineData(OqlClauses.CreateCollection)]
     [InlineData(OqlClauses.DropCollection)]
     [InlineData(OqlClauses.CreateIndex)]

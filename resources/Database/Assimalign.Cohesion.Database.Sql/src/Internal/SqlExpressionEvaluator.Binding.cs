@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Runtime.CompilerServices;
@@ -696,7 +697,10 @@ internal sealed partial class SqlExpressionEvaluator
     private SqlCollationCandidate[] ChildCollations(SqlExpression expression)
     {
         var collations = new System.Collections.Generic.List<SqlCollationCandidate>();
-        foreach (var child in SqlPlanner.Children(expression))
+        foreach (var child in expression is SqlFunctionCallExpression call
+            ? call.FunctionName.Equals("STRING_AGG", StringComparison.OrdinalIgnoreCase) || call.FunctionName.Equals("LISTAGG", StringComparison.OrdinalIgnoreCase)
+                ? call.Arguments.Take(1) : call.Arguments
+            : SqlPlanner.Children(expression))
         {
             collations.Add(FindCollation(child, bound: true));
         }

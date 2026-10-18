@@ -24,7 +24,7 @@ public sealed class OqlExecutionConformanceTests
             [OqlClauses.Explain] =
             [
                 new("EXPLAIN SELECT name FROM items",
-                    [[0, null, "Select", "items", null, "filter=False; grouped=False; order_keys=0", null, null],
+                    [[0, null, "Select", "items", null, "filter=False; grouped=False; order_keys=0; limit=none; offset=0", null, null],
                      [1, 0, "Project", "items", null, null, null, null],
                      [2, 1, "CollectionScan", "items", null, null, null, null]]),
             ],
@@ -140,6 +140,19 @@ public sealed class OqlExecutionConformanceTests
             [
                 new("SELECT name AS label, amount FROM items ORDER BY amount DESC, label ASC",
                     [["beta", 6m], ["gamma", 4m], ["alpha", 2m], ["delta", null]]),
+            ],
+            [OqlClauses.Limit] =
+            [
+                new("SELECT name FROM items ORDER BY name LIMIT 2", [["alpha"], ["beta"]]),
+                new("SELECT name FROM items ORDER BY name LIMIT 2 OFFSET 1", [["beta"], ["delta"]]),
+                new("SELECT name FROM items ORDER BY name LIMIT 0", []),
+                new("SELECT name FROM items ORDER BY name LIMIT @minimum", [["alpha"], ["beta"], ["delta"]],
+                    Parameters: new Dictionary<string, object?> { ["minimum"] = 3 }),
+            ],
+            [OqlClauses.Offset] =
+            [
+                new("SELECT name FROM items ORDER BY name OFFSET 3", [["gamma"]]),
+                new("SELECT name FROM items ORDER BY name OFFSET 1 LIMIT 2", [["beta"], ["delta"]]),
             ],
             [OqlClauses.CreateCollection] =
             [
@@ -377,6 +390,8 @@ public sealed class OqlExecutionConformanceTests
         OqlClauses.GroupBy => expression is OqlSelectExpression { GroupBy.Count: > 0 },
         OqlClauses.Having => expression is OqlSelectExpression { Having: not null },
         OqlClauses.OrderBy => expression is OqlSelectExpression { OrderBy.Count: > 0 },
+        OqlClauses.Limit => expression is OqlSelectExpression { Limit: not null },
+        OqlClauses.Offset => expression is OqlSelectExpression { Offset: not null },
         OqlClauses.CreateCollection => expression is OqlCreateCollectionExpression,
         OqlClauses.DropCollection => expression is OqlDropCollectionExpression,
         OqlClauses.CreateIndex => expression is OqlCreateIndexExpression,

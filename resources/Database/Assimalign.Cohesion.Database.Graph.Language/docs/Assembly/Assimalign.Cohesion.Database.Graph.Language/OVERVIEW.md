@@ -10,6 +10,11 @@ The original single-segment facade remains available for hand-built ASTs.
 `GqlQueryExpression.MatchClauses` groups source-ordered `GqlMatchClause(Paths, Predicate, Optional)`
 records, followed by insertions, deletion variables and
 projections, `SetQuantifier` (GqlSetQuantifier.All or Distinct), and `ReturnStar`.
+`GqlFunctionCallExpression(Function, Arguments)` represents scalar calls resolved to
+`GqlScalarFunction`; niladic CURRENT_DATE/CURRENT_TIMESTAMP have empty arguments and IsNiladic.
+`GqlCastExpression(Operand, Target)` represents explicit conversion to a `GqlCastType` scalar.
+Both nodes retain source locations and immutable children, and receive planner validation
+when constructed through the public AST.
 `GqlAggregateExpression(Function, Operand, Distinct)` distinguishes aggregates from scalar
 expressions. `GqlAggregateFunction` names Count, Sum, Avg, Min, Max and CollectList; collect
 parses as CollectList. A null operand means COUNT(*). `GroupBy` is null for implicit grouping,
@@ -26,7 +31,7 @@ The original constructor still creates the single mandatory clause; `Matches` an
 expose that view only and return empty/null for optional or multiple clauses. The engine reads
 Stages and null-extends every new binding of an unmatched optional clause. Each clause's
 predicate sees its own and preceding variables. Optional-only path projections are COHDBG001.
-`GqlPathPattern` holds ordered nodes and relationships; their immutable metadata
+`GqlPathPattern` holds ordered node/relationship chains or an Elements list of GqlPathNode, GqlPathRelationship and GqlParenthesizedPathPattern records; GqlQuantifier(Min, Max) supplies inclusive relationship/subpath repetition bounds. A parenthesized path has empty chain lists; contradictory representations are COHDBG001. Quantified bindings are source-ordered lists. The chain facade holds ordered nodes and relationships; their immutable metadata
 captures labels, direction, type and scalar properties. Each pattern's `LabelExpression` is a
 `GqlLabelExpression` tree (`GqlLabelName`, `GqlLabelWildcard`, `GqlLabelNegation`,
 `GqlLabelConjunction`, `GqlLabelDisjunction`), and `GqlPatternDirection.LeftOrRight` is the ISO

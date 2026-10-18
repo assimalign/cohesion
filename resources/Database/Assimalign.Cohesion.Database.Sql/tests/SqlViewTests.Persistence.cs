@@ -14,6 +14,33 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed partial class SqlViewTests
 {
+    [Theory(DisplayName = "Cohesion Test [Sql] - Views: aggregate modifiers survive persisted round trips")]
+    [InlineData("COUNT(DISTINCT id)", "3")]
+    [InlineData("COUNT(ALL id)", "4")]
+    [InlineData("COUNT(id)", "4")]
+    [InlineData("STRING_AGG(CAST(id AS TEXT), ',' ORDER BY id DESC)", "3,2,1,1")]
+    [InlineData("LISTAGG(CAST(id AS TEXT), ',') WITHIN GROUP (ORDER BY id DESC)", "3,2,1,1")]
+    public async Task Open_AggregateModifiers_ShouldPreserveResults(string aggregate, string expected)
+    {
+        // Arrange
+        var storage = new CrashCaptureSqlStorageStrategy();
+        await using (var engine = SqlDatabaseEngine.Create("view-aggregates", new() { StorageStrategy = storage }))
+        {
+            var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+            await using var session = await database.CreateSessionAsync(CancellationToken.None);
+            await SeedAsync(session);
+            await ExecuteAsync(session, "INSERT INTO t VALUES (1)");
+            await ExecuteAsync(session, "CREATE VIEW v AS SELECT " + aggregate + " AS n FROM t");
+        }
+        // Act
+        await using var reopened = SqlDatabaseEngine.Create("view-aggregates", new() { StorageStrategy = storage.CaptureDurableImages() });
+        var restored = await reopened.OpenDatabaseAsync("db", CancellationToken.None);
+        await using var reader = await restored.CreateSessionAsync(CancellationToken.None);
+        var rows = await RowsAsync(reader, "SELECT n FROM v");
+        // Assert
+        Convert.ToString(rows.ShouldHaveSingleItem()[0], System.Globalization.CultureInfo.InvariantCulture).ShouldBe(expected);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Sql] - Views: invalid calls over ordering aliases fail before reading empty inputs")]
     public async Task Execute_InvalidOrderingAliasCall_ShouldFailAtCreateOnEmptyInput()
     {

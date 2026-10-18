@@ -112,10 +112,26 @@ public sealed partial class GqlQueryParser
     private GqlExpression ParseOperand()
     {
         var start = Current;
+        if (Failed) { return new GqlLiteralExpression(null, Span(start, start)); }
         if (Is("CASE")) { return ParseCase(); }
         if (Is("COALESCE") || Is("NULLIF")) { return ParseCaseAbbreviation(); }
+        if (Current.Type == TokenType.Function && Is("CAST") && _tokens[_position + 1].Type == TokenType.LeftParen) { return ParseCast(); }
+        if (Current.Type == TokenType.Function && (Is("CURRENT_DATE") || Is("CURRENT_TIMESTAMP")))
+        {
+            Advance();
+            return new GqlFunctionCallExpression(start.Text.Equals("CURRENT_DATE", StringComparison.OrdinalIgnoreCase) ? GqlScalarFunction.CurrentDate : GqlScalarFunction.CurrentTimestamp, [], Span(start, Previous));
+        }
+        if (IsReservedTemporal(Current))
+        {
+            Unsupported(Current.Text.ToUpperInvariant(), Current);
+            return new GqlLiteralExpression(null, Span(start, start));
+        }
         if (Current.Type == TokenType.Function && _tokens[_position + 1].Type == TokenType.LeftParen)
-        { return ParseAggregate(); }
+        {
+            if (start.Text.ToUpperInvariant() is "COUNT" or "SUM" or "AVG" or "MIN" or "MAX" or "COLLECT_LIST" or "COLLECT")
+            { return ParseAggregate(); }
+            return ParseFunction();
+        }
         if (Current.Type == TokenType.LeftBracket) { return ParseList(); }
         if (Current.Type == TokenType.LeftBrace) { return ParseMap(); }
         if (IsVariableToken)

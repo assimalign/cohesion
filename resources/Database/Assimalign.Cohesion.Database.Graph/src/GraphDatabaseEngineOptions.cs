@@ -148,7 +148,7 @@ public sealed class GraphDatabaseEngineOptions
     internal TimeSpan DeferredUndoRetryDelay { get; set; } = TimeSpan.FromMilliseconds(100);
 
     /// <summary>
-    /// Gets or sets the clock the engine measures <see cref="WorkerFailureWindow"/> on; the system
+    /// Gets or sets the clock for transaction-start datetime functions and the engine's <see cref="WorkerFailureWindow"/>; the system
     /// clock when null. Internal: this assembly's tests set a clock they move by hand, so a test
     /// crosses the window without waiting for it (owner decision 42).
     /// </summary>

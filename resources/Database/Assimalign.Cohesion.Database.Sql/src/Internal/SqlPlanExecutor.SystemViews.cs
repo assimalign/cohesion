@@ -31,7 +31,7 @@ internal sealed partial class SqlPlanExecutor
             }
         }
 
-        var projected = ProjectAndSortRows(matches, plan.Projections, plan.OrderBy, evaluator, plan.OrderByProjections);
+        var projected = ProjectAndSortRows(matches, plan.Projections, plan.OrderBy, evaluator, plan.OrderByProjections, cancellationToken);
 
         if (plan.IsDistinct)
         {

@@ -16,6 +16,7 @@ public sealed partial class GqlQueryParser : QueryParser
     private readonly List<Lexeme> _tokens = [];
     private readonly List<Diagnostic> _diagnostics = [];
     private readonly HashSet<int> _parameterFormPositions = [];
+    private readonly HashSet<int> _questionedPathPositions = [];
     // Each '--' comment by its start offset, so a pattern element can tell whether one begins
     // exactly where its ')' or ']' ends (GQL0008).
     private readonly Dictionary<int, Lexeme> _lineComments = new();
@@ -51,6 +52,7 @@ public sealed partial class GqlQueryParser : QueryParser
         _tokens.Clear();
         _diagnostics.Clear();
         _parameterFormPositions.Clear();
+        _questionedPathPositions.Clear();
         _lineComments.Clear();
         _position = 0;
         int line = 1;
@@ -142,6 +144,7 @@ public sealed partial class GqlQueryParser : QueryParser
         foreach (var token in _tokens)
         {
             if (token.Type != TokenType.Unrecognized || token.Text != "?") { continue; }
+            if (_questionedPathPositions.Contains(token.Start)) { continue; }
             if (!_parameterFormPositions.Contains(token.Start))
             {
                 _diagnostics.RemoveAll(diagnostic => diagnostic.Start == token.Start);
@@ -170,6 +173,7 @@ public sealed partial class GqlQueryParser : QueryParser
         var containers = new Stack<TokenType>();
         int mapSeparatorPosition = -1;
         bool inValueExpression = false;
+        bool inPattern = false;
         bool sawCall = false;
         var label = LabelScan.None;
         int labelParens = 0;
@@ -177,10 +181,6 @@ public sealed partial class GqlQueryParser : QueryParser
         {
             var token = _tokens[i];
             if (token.Type == TokenType.Semicolon) { break; }
-            if (token.Type == TokenType.LeftBrace && StartsQuantifier(i, patternDepth))
-            {
-                Unsupported("QUANTIFIED PATTERN", token);
-            }
             bool mapSeparator = token.Type == TokenType.Colon && containers.TryPeek(out var container) && container == TokenType.LeftBrace &&
                 i > 1 && _tokens[i - 2].Type is TokenType.LeftBrace or TokenType.Comma;
             if (mapSeparator) { mapSeparatorPosition = i; }
@@ -226,7 +226,7 @@ public sealed partial class GqlQueryParser : QueryParser
                 continue;
             }
 
-            if (token.Type is TokenType.Asterisk or TokenType.DotDot && !valuePosition)
+            if (token.Type is TokenType.Asterisk or TokenType.DotDot && !valuePosition && !inPattern)
             {
                 Unsupported("QUANTIFIED PATTERN OR STAR PROJECTION", token);
                 continue;
@@ -270,8 +270,10 @@ public sealed partial class GqlQueryParser : QueryParser
                 }
                 continue;
             }
-            if (patternDepth == 0 && value is "WHERE" or "RETURN" or "WITH" or "LET" or "FILTER" or "FOR" or "UNWIND") { inValueExpression = true; }
+            if (patternDepth == 0 && value is "WHERE" or "RETURN" or "WITH" or "LET" or "FILTER" or "FOR" or "UNWIND") { inValueExpression = true; inPattern = false; }
             if (patternDepth == 0 && (value is "MATCH" or "CREATE" or "INSERT" or "DELETE" || value == "NEXT" && IsQueryStartAt(i + 1))) { inValueExpression = false; }
+            if (patternDepth == 0 && value is "MATCH" or "CREATE" or "INSERT") { inPattern = true; }
+            if (patternDepth == 0 && value == "DELETE") { inPattern = false; }
 
             // n IS [NOT] LABELED A in WHERE is ISO's <labeled predicate>; IS NULL and truth
             // tests are scalar predicates (#1140), also available in RETURN (#1141).
@@ -291,7 +293,7 @@ public sealed partial class GqlQueryParser : QueryParser
                 i + 1 < _tokens.Count && _tokens[i + 1].Type == TokenType.LeftParen &&
                 !GqlUnsupportedVocabulary.TryFind(value, out _) && token.Type != TokenType.Function)
             {
-                Unsupported($"FUNCTION {token.Text}", token);
+                Error("GQL0010", $"Unknown function '{token.Text}'.", token);
                 continue;
             }
             if (value == "WITH" && valuePosition && i > 0 && (IsWordAt(i - 1, "STARTS") || IsWordAt(i - 1, "ENDS"))) { continue; }
@@ -304,6 +306,12 @@ public sealed partial class GqlQueryParser : QueryParser
             string construct = word.Construct;
             switch (word.Position)
             {
+                case GqlWordPosition.FunctionCall:
+                    if (!valuePosition || i + 1 >= _tokens.Count || _tokens[i + 1].Type != TokenType.LeftParen) { continue; }
+                    break;
+                case GqlWordPosition.ValueExpression:
+                    // ParseOperand owns niladic expressions so binding sites fail as syntax.
+                    continue;
                 case GqlWordPosition.PathMode:
                     // TRAIL (a)... is a path mode; trail = (a)... names a path.
                     if (patternDepth != 0 || valuePosition || !StartsPathPattern(i + 1, ref end)) { continue; }
@@ -395,33 +403,6 @@ public sealed partial class GqlQueryParser : QueryParser
 
         construct = head + " PATH SEARCH";
         return next < _tokens.Count && _tokens[next].Type == TokenType.LeftParen;
-    }
-
-    /// <summary>
-    /// Whether the <c>{</c> at <paramref name="index"/> opens an ISO quantifier (<c>{m,n}</c>,
-    /// <c>{m}</c>, <c>{,n}</c>) after an edge or a node pattern. A quantifier starts with a bound
-    /// or a comma. A property map starts with a key, as in <c>(n:(A|B) {k: 1})</c> or the
-    /// malformed abbreviated edge <c>-{k: 1}-&gt;</c>, and is left to the parser.
-    /// </summary>
-    /// <param name="index">The index of the <c>{</c>.</param>
-    /// <param name="patternDepth">The nesting depth before the <c>{</c>.</param>
-    private bool StartsQuantifier(int index, int patternDepth)
-    {
-        if (index == 0 || index + 1 >= _tokens.Count ||
-            _tokens[index + 1].Type is not (TokenType.Integer or TokenType.Comma))
-        {
-            return false;
-        }
-
-        return _tokens[index - 1].Type switch
-        {
-            TokenType.RightArrow or TokenType.LeftArrow or TokenType.Minus => true,
-            // A ')' inside an element closes a label group, not the node pattern.
-            TokenType.RightParen => patternDepth == 0,
-            // The '>' of '<->'.
-            TokenType.GreaterThan => index >= 2 && _tokens[index - 2].Type == TokenType.LeftArrow && Adjacent(index - 2, index - 1),
-            _ => false,
-        };
     }
 
     /// <summary>
@@ -548,8 +529,11 @@ public sealed partial class GqlQueryParser : QueryParser
         Is("LET") || Is("FILTER") || Is("FOR") || Is("UNWIND") || Is("WITH");
 
     private bool IsVariableToken => IsVariableLexeme(Current);
-    private static bool IsVariableLexeme(Lexeme token) => token.Type is TokenType.Identifier or TokenType.Function or TokenType.QuotedIdentifier ||
-        token.Type == TokenType.Keyword && token.Text.ToUpperInvariant() is "NEXT" or "FOR";
+    private static bool IsVariableLexeme(Lexeme token) => !IsReservedTemporal(token) &&
+        (token.Type is TokenType.Identifier or TokenType.Function or TokenType.QuotedIdentifier ||
+        token.Type == TokenType.Keyword && token.Text.ToUpperInvariant() is "NEXT" or "FOR");
+    private static bool IsReservedTemporal(Lexeme token) => token.Type is not (TokenType.String or TokenType.QuotedIdentifier) &&
+        token.Text.ToUpperInvariant() is "CURRENT_DATE" or "CURRENT_TIMESTAMP" or "CURRENT_TIME" or "LOCAL_TIME" or "LOCAL_TIMESTAMP";
     private bool IsQueryStartAt(int index) => IsWordAt(index, "MATCH") || IsWordAt(index, "OPTIONAL") || IsWordAt(index, "CREATE") ||
         IsWordAt(index, "INSERT") || IsWordAt(index, "RETURN") || IsWordAt(index, "LET") || IsWordAt(index, "FILTER") ||
         IsWordAt(index, "FOR") || IsWordAt(index, "UNWIND") || IsWordAt(index, "WITH");
@@ -603,7 +587,7 @@ public sealed partial class GqlQueryParser : QueryParser
             if (token.Text.Length <= 2) { Error("GQL0002", "An identifier cannot be empty.", token); }
             return token.Text.Length >= 2 ? token.Text[1..^1] : string.Empty;
         }
-        if ((token.Type is TokenType.Identifier or TokenType.Function || token.Type == TokenType.Keyword && token.Text.ToUpperInvariant() is "NEXT" or "FOR" || allowKeyword && token.Type == TokenType.Keyword) &&
+        if ((allowKeyword || !IsReservedTemporal(token)) && (token.Type is TokenType.Identifier or TokenType.Function || token.Type == TokenType.Keyword && token.Text.ToUpperInvariant() is "NEXT" or "FOR" || allowKeyword && token.Type == TokenType.Keyword) &&
             token.Text.Length > 0 && (char.IsLetter(token.Text[0]) || token.Text[0] == '_'))
         {
             Advance();

@@ -13,14 +13,14 @@
   <data name="NamespaceMissing" xml:space="preserve"><value>COHSQLE028: Schema '{0}' does not exist.</value></data>
   <data name="NamespaceDependentObjects" xml:space="preserve"><value>COHSQLE030: Cannot drop schema '{0}' because other objects depend on it. Use DROP SCHEMA ... CASCADE to drop the dependent objects too.</value></data>
   <data name="NamespaceRecordMalformed" xml:space="preserve"><value>Malformed or duplicate SQL namespace record.</value></data>
-  <data name="ViewMetadataInvalid" xml:space="preserve"><value>COHSQLE032: Invalid persisted view metadata.</value></data>
-  <data name="ViewRecordTooLarge" xml:space="preserve"><value>COHSQLE032: The view definition exceeds the catalog record limit of 8,092 bytes.</value></data>
-  <data name="ViewNameIsTable" xml:space="preserve"><value>COHSQLE032: The target is a table, not a view.</value></data>
-  <data name="ViewExists" xml:space="preserve"><value>COHSQLE032: Relation &#x27;{0}.{1}&#x27; already exists.</value></data>
-  <data name="ViewMissing" xml:space="preserve"><value>COHSQLE032: View &#x27;{0}.{1}&#x27; does not exist.</value></data>
-  <data name="ViewReplacementInvalid" xml:space="preserve"><value>COHSQLE032: CREATE OR REPLACE VIEW must retain existing column names, order, types, type modifiers, domains and collations; only appended columns are allowed.</value></data>
-  <data name="ViewDependencyChanged" xml:space="preserve"><value>COHSQLE032: A view dependency changed before publication. Retry the statement.</value></data>
-  <data name="ViewCycle" xml:space="preserve"><value>COHSQLE032: A view cannot depend on itself, directly or indirectly.</value></data>
+  <data name="ViewMetadataInvalid" xml:space="preserve"><value>COHSQLE033: Invalid persisted view metadata.</value></data>
+  <data name="ViewRecordTooLarge" xml:space="preserve"><value>COHSQLE033: The view definition exceeds the catalog record limit of 8,092 bytes.</value></data>
+  <data name="ViewNameIsTable" xml:space="preserve"><value>COHSQLE033: The target is a table, not a view.</value></data>
+  <data name="ViewExists" xml:space="preserve"><value>COHSQLE033: Relation &#x27;{0}.{1}&#x27; already exists.</value></data>
+  <data name="ViewMissing" xml:space="preserve"><value>COHSQLE033: View &#x27;{0}.{1}&#x27; does not exist.</value></data>
+  <data name="ViewReplacementInvalid" xml:space="preserve"><value>COHSQLE033: CREATE OR REPLACE VIEW must retain existing column names, order, types, type modifiers, domains and collations; only appended columns are allowed.</value></data>
+  <data name="ViewDependencyChanged" xml:space="preserve"><value>COHSQLE033: A view dependency changed before publication. Retry the statement.</value></data>
+  <data name="ViewCycle" xml:space="preserve"><value>COHSQLE033: A view cannot depend on itself, directly or indirectly.</value></data>
   <data name="ViewDependent" xml:space="preserve"><value>COHSQLD002: Cannot change the object because view &#x27;{0}.{1}&#x27; depends on it.</value></data>
   <data name="ViewDropDependent" xml:space="preserve"><value>COHSQLD002: Cannot drop '{0}' because other objects depend on it: view '{1}.{2}' depends on it.</value></data>
 </root>

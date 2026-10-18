@@ -1,3 +1,5 @@
+using System;
+using System.Globalization;
 using System.Runtime.CompilerServices;
 
 using Assimalign.Cohesion.Database.Sql.Language;
@@ -220,6 +222,14 @@ internal sealed partial class SqlPlanner
         }
     }
 
+    internal static void ValidateCallModifiers(SqlFunctionCallExpression call, SqlFunctionCatalog catalog)
+    {
+        if ((call.Quantifier != SqlSetQuantifier.Default || call.OrderBy.Count > 0) && !catalog.IsAggregate(call.FunctionName))
+        {
+            throw new SqlPlanningException("COHSQLE032", string.Format(CultureInfo.CurrentCulture, ErrorMessages.AggregateModifiersOnScalar, call.FunctionName), call.Location);
+        }
+    }
+
     private static void CheckCallCore(SqlFunctionCallExpression call, SqlFunctionCatalog catalog)
     {
         if (SqlStandardLibrary.IsEvaluatorForm(call.FunctionName))
@@ -234,5 +244,6 @@ internal sealed partial class SqlPlanner
         {
             throw new SqlPlanningException("COHSQLE016", $"Unknown function '{call.FunctionName}'.", call.Location);
         }
+        ValidateCallModifiers(call, catalog);
     }
 }

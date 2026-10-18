@@ -100,14 +100,14 @@ public sealed class OqlLineCommentTests
     {
         // Arrange
         string separator = Terminator(terminator);
-        string oql = "SELECT * -- note" + separator + "FROM people" + separator + "LIMIT 10";
+        string oql = "-- note" + separator + "-- another note" + separator + "MERGE INTO people";
 
         // Act
         var diagnostic = Parse(oql).Diagnostics.ShouldHaveSingleItem();
 
         // Assert
         diagnostic.Code.ShouldBe("COHDBL001");
-        diagnostic.Start.ShouldBe(oql.IndexOf("LIMIT", StringComparison.Ordinal));
+        diagnostic.Start.ShouldBe(oql.IndexOf("MERGE", StringComparison.Ordinal));
         diagnostic.Line.ShouldBe(3);
     }
 

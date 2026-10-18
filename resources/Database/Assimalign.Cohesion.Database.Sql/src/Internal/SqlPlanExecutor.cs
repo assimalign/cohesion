@@ -91,7 +91,7 @@ internal sealed partial class SqlPlanExecutor
                 var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
                 return MaterializeSelect(evaluator.Matches(constant.Where, []) ? [Array.Empty<object?>()] : [],
                     constant.Projections, constant.OrderBy, constant.Limit, constant.Offset, constant.IsDistinct,
-                    evaluator, constant.OrderByProjections);
+                    evaluator, constant.OrderByProjections, cancellationToken);
             case SqlWithPlan with:
                 foreach (var relation in with.Relations)
                 {
@@ -180,16 +180,16 @@ internal sealed partial class SqlPlanExecutor
         }
 
         return MaterializeSelect(matches, plan.Projections, plan.OrderBy, plan.Limit, plan.Offset,
-            plan.IsDistinct, evaluator, plan.OrderByProjections);
+            plan.IsDistinct, evaluator, plan.OrderByProjections, cancellationToken);
     }
 
     /// <summary>Applies the common SELECT projection, ordering, distinctness and window.</summary>
     private static DatabaseResult MaterializeSelect(List<object?[]> matches, IReadOnlyList<SqlProjection> projections,
         IReadOnlyList<SqlBoundOrdering> orderBy, long? limit, long? offset,
         bool isDistinct, SqlExpressionEvaluator evaluator,
-        IReadOnlyDictionary<SqlExpression, int>? orderByProjections)
+        IReadOnlyDictionary<SqlExpression, int>? orderByProjections, CancellationToken cancellationToken)
     {
-        var projected = ProjectAndSortRows(matches, projections, orderBy, evaluator, orderByProjections);
+        var projected = ProjectAndSortRows(matches, projections, orderBy, evaluator, orderByProjections, cancellationToken);
 
         if (isDistinct)
         {
@@ -226,7 +226,7 @@ internal sealed partial class SqlPlanExecutor
     /// </summary>
     private static List<object?[]> ProjectAndSortRows(List<object?[]> matches,
         IReadOnlyList<SqlProjection> projections, IReadOnlyList<SqlBoundOrdering> orderBy,
-        SqlExpressionEvaluator evaluator, IReadOnlyDictionary<SqlExpression, int>? outputSlots)
+        SqlExpressionEvaluator evaluator, IReadOnlyDictionary<SqlExpression, int>? outputSlots, CancellationToken cancellationToken)
     {
         if (matches.Count == 0)
         {
@@ -240,17 +240,18 @@ internal sealed partial class SqlPlanExecutor
             var rows = new List<object?[]>(matches.Count);
             foreach (var source in matches)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var row = new object?[projectionStart + projections.Count];
                 source.CopyTo(row, 0);
                 Project(source).CopyTo(row, projectionStart);
                 rows.Add(row);
             }
-            return SortRows(rows, orderBy, evaluator)
+            return SortRows(rows, orderBy, evaluator, cancellationToken)
                 .Select(row => row[projectionStart..]).ToList();
         }
         if (orderBy.Count > 0)
         {
-            matches = SortRows(matches, orderBy, evaluator);
+            matches = SortRows(matches, orderBy, evaluator, cancellationToken);
         }
 
         var projected = new List<object?[]>(matches.Count);
@@ -262,6 +263,7 @@ internal sealed partial class SqlPlanExecutor
 
         object?[] Project(object?[] row)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var output = new object?[projections.Count];
             for (int i = 0; i < output.Length; i++)
             {
@@ -286,9 +288,19 @@ internal sealed partial class SqlPlanExecutor
         }
     }
 
-    private static List<object?[]> SortRows(List<object?[]> rows, IReadOnlyList<SqlBoundOrdering> orderBy,
-        SqlExpressionEvaluator evaluator)
+    private static int CompareOrderingValues(object? left, object? right, Collation collation) => (left, right) switch
     {
+        (null, null) => 0,
+        (null, _) => -1,
+        (_, null) => 1,
+        _ => SqlValueComparer.Compare(left, right, collation),
+    };
+
+    private static List<object?[]> SortRows(List<object?[]> rows, IReadOnlyList<SqlBoundOrdering> orderBy,
+        SqlExpressionEvaluator evaluator, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        int operations = 0;
         // Precompute sort keys; OrderBy is a stable sort, satisfying determinism.
         var keyed = rows.Select(row => (Row: row, Keys: EvaluateKeys(row)));
 
@@ -298,12 +310,10 @@ internal sealed partial class SqlPlanExecutor
         {
             int index = i;
             var collation = orderBy[index].Collation.Resolve(evaluator.SubqueryValues);
-            var comparer = Comparer<object?>.Create((left, right) => (left, right) switch
+            var comparer = Comparer<object?>.Create((left, right) =>
             {
-                (null, null) => 0,
-                (null, _) => -1,
-                (_, null) => 1,
-                _ => SqlValueComparer.Compare(left, right, collation),
+                PollCancellation();
+                return CompareOrderingValues(left, right, collation);
             });
 
             if (ordered is null)
@@ -322,14 +332,16 @@ internal sealed partial class SqlPlanExecutor
 
         try
         {
-            return ordered!.Select(x => x.Row).ToList();
+            var sorted = ordered!.Select(x => x.Row).ToList();
+            cancellationToken.ThrowIfCancellationRequested();
+            return sorted;
         }
-        catch (InvalidOperationException exception) when (exception.InnerException is DatabaseException inner)
+        catch (InvalidOperationException exception) when (exception.InnerException is DatabaseException or OperationCanceledException)
         {
             // The runtime sort wraps a throwing comparer in InvalidOperationException.
             // Two keys the value order cannot compare are a statement error, so the
             // comparer's own DatabaseException is the failure, not a session-ending fault.
-            ExceptionDispatchInfo.Throw(inner);
+            ExceptionDispatchInfo.Throw(exception.InnerException);
             throw;
         }
 
@@ -338,9 +350,16 @@ internal sealed partial class SqlPlanExecutor
             var keys = new object?[orderBy.Count];
             for (int i = 0; i < keys.Length; i++)
             {
+                PollCancellation();
                 keys[i] = evaluator.Evaluate(orderBy[i].Key, row);
             }
             return keys;
+        }
+
+        void PollCancellation()
+        {
+            // Bound cancellation latency during both key evaluation and the runtime's sort.
+            if ((operations++ & 31) == 0) { cancellationToken.ThrowIfCancellationRequested(); }
         }
     }
 

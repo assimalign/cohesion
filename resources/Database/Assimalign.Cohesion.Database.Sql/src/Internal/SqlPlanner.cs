@@ -1803,7 +1803,8 @@ internal sealed partial class SqlPlanner
     internal static IEnumerable<SqlExpression> Children(SqlExpression expression) => expression switch
     {
         SqlLogicalExpression logical => logical.Operands,
-        SqlFunctionCallExpression function => function.Arguments,
+        SqlFunctionCallExpression function => function.OrderBy.Count == 0 ? function.Arguments :
+            function.Arguments.Concat(function.OrderBy.Select(key => key.Expression)),
         SqlCollateExpression or SqlBinaryExpression or SqlUnaryExpression or SqlIsNullExpression or SqlBetweenExpression
             or SqlInExpression or SqlLikeExpression or SqlCaseExpression or SqlCastExpression => Operands(expression),
         _ => [],

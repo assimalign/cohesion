@@ -13,6 +13,23 @@ omitted from result objects, while explicit null members remain null. Grouping k
 states separate; ascending order puts MISSING before NULL and descending reverses that order.
 NIL is a NULL synonym; UNDEFINED is reserved and rejected.
 
+LIMIT n, OFFSET m, LIMIT n OFFSET m and OFFSET m LIMIT n execute after HAVING, DISTINCT
+and ORDER BY, including system sources and INSERT/UPSERT SELECT. Each operand is an optionally
+signed integer literal or a parameter with an integral, non-negative signed Int64 value.
+NULL/NIL, MISSING, Boolean, string, fractional, nonfinite and out-of-range counts give OQL0007
+at the operand; literal 2.0/1e2, LIMIT ALL and arbitrary expressions are also invalid.
+Integral decimal/JSON numeric parameters normalize before checking. Missing names retain COHDOC005.
+Missing operands and duplicate clauses give OQL0002; LIMIT m, n gives one COHDBL001 before
+validating m, including ALL, negative and string operands. FETCH FIRST gives one COHDBL001
+only when FETCH starts a construct; c.fetch FIRST and c.limit ALL still reject FIRST and ALL.
+LIMIT/OFFSET are reserved: quote field names or use d.limit/d.offset; SELECT a AS limit is valid.
+UPDATE/DELETE and INSERT/UPSERT VALUES paging stays unsupported, naming the statement and clause
+(for example, DELETE LIMIT or INSERT VALUES OFFSET). Column types are computed before paging, so empty pages
+retain metadata, including Int64 COUNT. Scan and seek pages share ordinal document-ID order;
+groups use group-key order, system sources catalog order, and ORDER BY ties retain baseline order.
+Separate pages need unchanged data or a shared snapshot for repeatability. Completion counts
+only returned frames; query AffectedCount remains -1. EXPLAIN includes resolved paging counts.
+
 The [function table](DESIGN.md#supported-clause-matrix) declares META, five aggregates and 34
 SQL++ scalar functions (#1137). Scalars execute in projections, WHERE, GROUP BY, HAVING, ORDER BY,
 UPDATE expressions and INSERT/UPSERT SELECT; VALUES remains constant-only. Unknown calls report

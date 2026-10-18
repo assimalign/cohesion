@@ -56,6 +56,27 @@ before ResultHeader. GraphClientWireTests pins division by zero, overflow and in
 then reuse of the exact authenticated pooled session followed by SHOW LABELS. A combined
 OR/IN/string/arithmetic case compares wire rows with in-process rows. No wire fields change.
 
+## Core functions and CAST (#1148)
+
+Scalar element/string/math/conversion functions, CAST and niladic CURRENT_DATE/CURRENT_TIMESTAMP
+execute through the same QueryAsync exchange. Known function and CAST result types are retained
+in column metadata; dynamic math types remain unknown until values arrive. DateOnly and
+DateTimeOffset use existing scalar components. labels/keys/properties use existing composite
+negotiation and preserve list/map runtime types. Unnegotiated possible composites fail before
+writer admission with COHDBG016. No codec, capability or frame changes are introduced.
+
+The static Execute gate rejects nodes/edges/relationships/startNode/endNode entity outputs before
+mutations, including when wrapped in lists/CASE or accessed to an entity. Scalar fields through
+them are supported. A mandatory LET s=startNode(r) can be projected as a bare entity through
+QueryPathsAsync. Graph wire has no explicit transactions; datetime functions therefore share
+one captured UTC instant per statement. Their date/instant values sort without numeric coercion.
+Function and CAST value failures, including floating underflow, arrive as COHDBG013 ExecutionFailure
+before ResultHeader and retain the same authenticated pooled session. Proven incompatible kinds
+(non-integral toBoolean, Boolean numeric CAST and temporal property maps) arrive as plan-time
+COHDBG003 before writes. Unknown calls are GQL0010 ParseFailure. GraphFunctionWireTests
+pins exact values, types, raw-frame ordering, entity rejection before mutation, capability
+refusal and pooled-session reuse over InMemory and TCP.
+
 ## Aggregates (#1147)
 
 Aggregates (#1147) round-trip count and integral sums as Int64, floating averages as Double,
@@ -69,6 +90,21 @@ including aggregate aliases. Aggregate overflow is COHDBG013 before ResultHeader
 failure permits reuse of the exact authenticated pooled session. ExecutePaths retains the
 existing COHDBG001 projection diagnostic. GraphAggregateWireTests verifies both transports,
 recorded types and names, empty input, capability refusal and session reuse.
+
+## Quantified paths (#1144)
+
+QueryAsync accepts ISO quantified edges/subpaths and Cypher bracketed lengths; QueryPathsAsync
+returns the complete source-ordered trail in the existing Path frame, including intermediate
+nodes, stored relationship directions and zero-length paths. Right index anchors preserve that
+order. Group lists flow through FOR/UNWIND with their entity kinds; scalar projections after
+expansion use the existing result codec. Unnegotiated possible composite final projections
+fail statically with COHDBG016. Negotiated lists containing entities keep the existing Execute
+entity-result rejection with COHDBG001 naming lists of nodes or relationships, as collect(entity)
+does. A provably empty Max=0 group projects as `[]` on a negotiated session. No new wire tag or capability is introduced.
+Malformed bounds and adjacent comments hiding Cypher ranges return ParseFailure and keep the authenticated session; the protocol suite
+also pins the following Ping/Pong. GraphQuantifiedPathWireTests exercises rows, paths, aliases,
+linear group flow, empty group results, the negotiated entity-list gate and exact-session reuse
+over InMemory and TCP.
 
 ## Ordering and paging (#1142)
 

@@ -87,6 +87,9 @@ internal static class SqlStandardLibrary
         new SqlSumFunction(average: true),
         new SqlExtremumFunction(maximum: false),
         new SqlExtremumFunction(maximum: true),
+        new SqlStringAggregateFunction("STRING_AGG", delimiter: true),
+        new SqlStringAggregateFunction("LISTAGG", delimiter: true),
+        new SqlStringAggregateFunction("LISTAGG", delimiter: false),
     ];
 
     /// <summary>The special forms: grammar, never catalog functions.</summary>

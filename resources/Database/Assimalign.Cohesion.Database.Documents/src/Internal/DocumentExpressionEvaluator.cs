@@ -133,6 +133,8 @@ internal sealed partial class DocumentExpressionEvaluator
                 foreach (var member in obj.Members) { ValidateInputs(member.Value); }
                 break;
             case OqlSelectExpression select:
+                _ = PagingCount(select.Limit, "LIMIT");
+                _ = PagingCount(select.Offset, "OFFSET");
                 foreach (var projection in select.Projections) { ValidateInputs(projection.Expression); }
                 ValidateInputs(select.Predicate);
                 foreach (var key in select.GroupBy) { ValidateInputs(key); }
@@ -152,13 +154,15 @@ internal sealed partial class DocumentExpressionEvaluator
         }
     }
 
-    internal object? Parameter(string name)
+    internal object? Parameter(string name) => Normalize(ParameterValue(name));
+
+    private object? ParameterValue(string name)
     {
         if (_parameters is null || !_parameters.TryGetValue(ParameterBindings.BareName(name), out var value))
         {
             throw new DocumentPlanningException("COHDOC005", $"OQL parameter '{name}' has no value.");
         }
-        return Normalize(value);
+        return value;
     }
 
     private object? ReadPath(OqlPathExpression path, JsonElement document)

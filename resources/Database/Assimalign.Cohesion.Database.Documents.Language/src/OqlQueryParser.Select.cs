@@ -1,4 +1,6 @@
 using System.Collections.Generic;
+using System.Globalization;
+
 using Assimalign.Cohesion.Database.Language;
 
 namespace Assimalign.Cohesion.Database.Documents.Language;
@@ -59,8 +61,79 @@ public sealed partial class OqlQueryParser
                 ordering.Add(new OqlOrdering(expression, descending));
             } while (!Failed && Take(TokenType.Comma));
         }
+        OqlExpression? limit = null;
+        OqlExpression? offset = null;
+        while (!Failed && (Is("LIMIT") || Is("OFFSET")))
+        {
+            var clause = Current;
+            bool isLimit = Is("LIMIT");
+            if (isLimit ? limit is not null : offset is not null)
+            {
+                Error("OQL0002", $"Multiple {clause.Text.ToUpperInvariant()} clauses are not allowed.", clause);
+                break;
+            }
+            Advance();
+            // Refuse the comma spelling before validating its first count, as PostgreSQL's
+            // grammar does (src/backend/parser/gram.y:13586-13593).
+            if (isLimit && HasCommaCount())
+            {
+                _diagnostics.Add(QueryDiagnostics.UnsupportedClause("LIMIT m, n (use LIMIT n OFFSET m)", Profile.Language, Span(clause, clause)));
+                break;
+            }
+            var count = ParseCount(clause.Text.ToUpperInvariant());
+            if (isLimit) { limit = count; }
+            else { offset = count; }
+        }
         return new OqlSelectExpression(collection, alias, projections.AsReadOnly(), predicate,
-            groups.AsReadOnly(), having, ordering.AsReadOnly(), distinct, value, Span(start, Previous));
+            groups.AsReadOnly(), having, ordering.AsReadOnly(), distinct, value, limit, offset, Span(start, Previous));
+    }
+
+    private bool HasCommaCount()
+    {
+        int depth = 0;
+        for (int index = _position; index < _tokens.Count; index++)
+        {
+            var token = _tokens[index];
+            if (depth == 0)
+            {
+                if (token.Type == TokenType.Comma) { return index > _position; }
+                if (token.Type is TokenType.Eof or TokenType.Semicolon || IsWord(token, "LIMIT") || IsWord(token, "OFFSET") ||
+                    IsWord(token, "ORDER") || IsWord(token, "GROUP") || IsWord(token, "HAVING") ||
+                    IsWord(token, "WHERE") || IsWord(token, "FROM")) { return false; }
+            }
+            if (token.Type is TokenType.LeftParen or TokenType.LeftBracket or TokenType.LeftBrace) { depth++; }
+            else if (token.Type is TokenType.RightParen or TokenType.RightBracket or TokenType.RightBrace)
+            {
+                if (depth == 0) { return false; }
+                depth--;
+            }
+        }
+        return false;
+    }
+
+    private OqlExpression ParseCount(string clause)
+    {
+        var start = Current;
+        if (Current.Type is TokenType.Eof or TokenType.Semicolon || Is("LIMIT") || Is("OFFSET"))
+        {
+            Error("OQL0002", $"Expected an integer literal or parameter after {clause}.", Current);
+            return new OqlLiteralExpression(null, Span(start, start));
+        }
+        // Reuse primary parsing for the shared parameter forms and exact operand spans.
+        bool integer = Current.Type == TokenType.Integer || Current.Type is TokenType.Plus or TokenType.Minus &&
+            _tokens[_position + 1].Type == TokenType.Integer;
+        bool parameter = Current.Type == TokenType.Parameter;
+        bool all = Take("ALL");
+        var count = all ? new OqlLiteralExpression(null, Span(start, start)) : ParsePrimary();
+        if (Failed) { return count; }
+        if (!parameter && (!integer || !long.TryParse((start.Type is TokenType.Plus or TokenType.Minus ? start.Text : string.Empty) + Previous.Text,
+            NumberStyles.AllowLeadingSign | NumberStyles.AllowLeadingWhite | NumberStyles.AllowTrailingWhite,
+            CultureInfo.InvariantCulture, out long number) || number < 0))
+        {
+            Error("OQL0007", string.Format(CultureInfo.CurrentCulture, ErrorMessages.PagingCountInvalid, clause),
+                new Lexeme(start.Type, _source[start.Start..Previous.End], start.Start, Previous.End, start.Line));
+        }
+        return count;
     }
 
     private bool IsReturningClause()
@@ -71,7 +144,7 @@ public sealed partial class OqlQueryParser
         // RETURNING as that name there; otherwise leave the trailing clause for rejection.
         return next.Type is not (TokenType.Eof or TokenType.Semicolon) &&
             !IsWord(next, "WHERE") && !IsWord(next, "GROUP") && !IsWord(next, "HAVING") &&
-            !IsWord(next, "ORDER") && !(IsWord(next, "RETURNING") &&
+            !IsWord(next, "ORDER") && !IsWord(next, "LIMIT") && !IsWord(next, "OFFSET") && !(IsWord(next, "RETURNING") &&
                 _tokens[_position + 2].Type is not (TokenType.Eof or TokenType.Semicolon));
     }
 }
