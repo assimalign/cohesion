@@ -49,7 +49,7 @@ internal sealed partial class SqlPlanExecutor
                 if (include && (seen is null || seen.Add(row))) { rows.Add(row); }
             }
         }
-        return MaterializeSelect(rows, plan.Projections, plan.OrderBy, plan.Limit, plan.Offset, false, evaluator, null);
+        return MaterializeSelect(rows, plan.Projections, plan.OrderBy, plan.Limit, plan.Offset, false, evaluator, null, cancellationToken);
     }
 
     private async Task<List<object?[]>> MaterializeSetOperandAsync(SqlPlan operand,

@@ -38,7 +38,7 @@ internal sealed partial class SqlPlanExecutor
         {
             aggregateCollations[i] = aggregates[i].Collation.Resolve(_subqueryValues);
         }
-        var groups = new Dictionary<object?[], SqlAggregateAccumulator[]>(new GroupKeyComparer(keyCollations));
+        var groups = new Dictionary<object?[], GroupAggregateState[]>(new GroupKeyComparer(keyCollations));
         if (keys.Count == 0)
         {
             // The implicit global group exists even on empty input.
@@ -69,7 +69,16 @@ internal sealed partial class SqlPlanExecutor
                 {
                     await PrepareSubqueriesAsync(argument, row, statement, cancellationToken).ConfigureAwait(false);
                 }
-                AddRow(states[i], aggregates[i], aggregateCollations[i], evaluator, row, cancellationToken);
+                foreach (var ordering in aggregates[i].OrderBy)
+                {
+                    await PrepareSubqueriesAsync(ordering.Key, row, statement, cancellationToken).ConfigureAwait(false);
+                }
+                var state = states[i];
+                if (state.Inputs is null && state.Distinct is null)
+                {
+                    AddRow(state.Accumulator, aggregates[i], aggregateCollations[i], evaluator, row, cancellationToken);
+                }
+                else { AddAggregateInput(state, aggregates[i], aggregateCollations[i], evaluator, row, cancellationToken); }
             }
         }
 
@@ -83,7 +92,17 @@ internal sealed partial class SqlPlanExecutor
             for (int i = 0; i < states.Length; i++)
             {
                 // Once per group, the implicit empty group included.
-                row[key.Length + i] = states[i].Finish(cancellationToken).ToObject();
+                var state = states[i];
+                if (state.Inputs is not null)
+                {
+                    var ordered = SortRows(state.Inputs, state.Ordering, evaluator, cancellationToken);
+                    foreach (var values in ordered)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        AddAggregateValues(state.Accumulator, aggregates[i], aggregateCollations[i], values, cancellationToken);
+                    }
+                }
+                row[key.Length + i] = state.Accumulator.Finish(cancellationToken).ToObject();
             }
             await PrepareSubqueriesAsync(plan.Having, row, statement, cancellationToken).ConfigureAwait(false);
             if (!evaluator.Matches(plan.Having, row))
@@ -110,7 +129,7 @@ internal sealed partial class SqlPlanExecutor
         if (plan.OrderBy.Count > 0)
         {
             // The ordering keys were bound over the grouped row, outputs included.
-            matches = SortRows(matches, plan.OrderBy, evaluator);
+            matches = SortRows(matches, plan.OrderBy, evaluator, cancellationToken);
         }
         var projected = matches.Select(row => row[projectionStart..]).ToList();
         if (plan.IsDistinct)
@@ -128,18 +147,107 @@ internal sealed partial class SqlPlanExecutor
         return new SqlMaterializedResultSet(columns, ApplyRowWindow(projected, plan.Limit, plan.Offset));
 
         // One accumulator per group, per aggregate call, per statement, owned here and never shared.
-        SqlAggregateAccumulator[] CreateStates()
+        GroupAggregateState[] CreateStates()
         {
-            var states = new SqlAggregateAccumulator[aggregates.Count];
+            var states = new GroupAggregateState[aggregates.Count];
             for (int i = 0; i < states.Length; i++)
             {
                 var aggregate = aggregates[i];
-                states[i] = aggregate.Function.CreateAccumulator(
-                    new SqlFunctionContext(aggregate.Database, aggregateCollations[i], cancellationToken));
+                states[i] = new GroupAggregateState(aggregate.Function.CreateAccumulator(
+                    new SqlFunctionContext(aggregate.Database, aggregateCollations[i], cancellationToken)), aggregate, _subqueryValues);
             }
 
             return states;
         }
+    }
+
+    // DISTINCT belongs to the executor so an application's accumulator sees the same
+    // coerced SQL equivalence classes as built-ins. Ordered calls retain only distinct
+    // tuples when requested, choosing their first representative in stable sorted order.
+    private sealed class GroupAggregateState
+    {
+        internal readonly SqlAggregateAccumulator Accumulator;
+        internal readonly Dictionary<object?[], object?[]>? Distinct;
+        internal readonly List<object?[]>? Inputs;
+        internal readonly IReadOnlyList<SqlBoundOrdering> Ordering;
+        internal long StringLength;
+        internal long StringCount;
+
+        internal GroupAggregateState(SqlAggregateAccumulator accumulator, SqlGroupAggregate aggregate, SqlSubqueryValues? subqueries)
+        {
+            Accumulator = accumulator;
+            if (aggregate.Call.Quantifier == Language.SqlSetQuantifier.Distinct)
+            {
+                Distinct = new(new GroupKeyComparer(aggregate.ArgumentCollations.Select(collation => collation.Resolve(subqueries)).ToArray()));
+            }
+            Ordering = aggregate.OrderBy.Count == 0 ? [] : aggregate.OrderBy.Select((key, i) => key with { Key = new SqlBoundSlot(aggregate.Arguments.Length + i) }).ToArray();
+            if (Ordering.Count > 0) { Inputs = new List<object?[]>(); }
+        }
+    }
+
+    private static void AddAggregateInput(GroupAggregateState state, SqlGroupAggregate aggregate, Collation collation,
+        SqlExpressionEvaluator evaluator, object?[] source, CancellationToken cancellationToken)
+    {
+        var values = new SqlValue[aggregate.Arguments.Length];
+        EvaluateArguments(aggregate, evaluator, source, values);
+        var tuple = values.Select(value => SqlBinaryValue.CopyShared(value.ToObject())).ToArray();
+        var row = new object?[tuple.Length + aggregate.OrderBy.Count];
+        tuple.CopyTo(row, 0);
+        for (int i = 0; i < aggregate.OrderBy.Count; i++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            row[tuple.Length + i] = evaluator.Evaluate(aggregate.OrderBy[i].Key, source, copySharedBinary: true);
+        }
+        // Keys are input expressions even for rows the transition function skips.
+        if (aggregate.Function.NullBehavior == SqlNullBehavior.ReturnsNullOnNullInput && values.Any(value => value.IsNull) ||
+            aggregate.Function is SqlStringAggregateFunction && values[0].IsNull) { return; }
+        if (state.Distinct is not null)
+        {
+            if (state.Distinct.TryGetValue(tuple, out var previous))
+            {
+                // Same tuple, but possibly a different spelling under its collation. Keep
+                // the representative occurring first under the independently collated keys.
+                if (state.Inputs is not null && CompareAggregateInputs(row, previous, aggregate, evaluator, cancellationToken) < 0)
+                {
+                    row.CopyTo(previous, 0);
+                }
+                return;
+            }
+            state.Distinct.Add(tuple, row);
+        }
+        if (state.Inputs is null)
+        {
+            state.Accumulator.AddResolved(new SqlArguments(values, aggregate.Database, collation, cancellationToken));
+            return;
+        }
+        if (aggregate.Function is SqlStringAggregateFunction)
+        {
+            state.StringLength += ((string)tuple[0]!).Length + (state.StringCount++ == 0 || tuple.Length == 1 ? 0 : ((string?)tuple[1])?.Length ?? 0);
+            // Check while buffering, before sorting or allocating a group's output builder.
+            SqlBuiltinScalarFunction.CheckLength(state.StringLength);
+        }
+        state.Inputs.Add(row);
+    }
+
+    private static int CompareAggregateInputs(object?[] left, object?[] right, SqlGroupAggregate aggregate, SqlExpressionEvaluator evaluator,
+        CancellationToken cancellationToken)
+    {
+        for (int i = 0; i < aggregate.OrderBy.Count; i++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var key = aggregate.OrderBy[i];
+            int comparison = CompareOrderingValues(left[aggregate.Arguments.Length + i], right[aggregate.Arguments.Length + i], key.Collation.Resolve(evaluator.SubqueryValues));
+            if (comparison != 0) { return key.IsDescending ? -Math.Sign(comparison) : comparison; }
+        }
+        return 0;
+    }
+
+    private static void AddAggregateValues(SqlAggregateAccumulator accumulator, SqlGroupAggregate aggregate,
+        Collation collation, object?[] row, CancellationToken cancellationToken)
+    {
+        var values = new SqlValue[aggregate.Arguments.Length];
+        for (int i = 0; i < values.Length; i++) { values[i] = SqlValue.FromObject(row[i]); }
+        accumulator.AddResolved(new SqlArguments(values, aggregate.Database, collation, cancellationToken));
     }
 
     /// <summary>

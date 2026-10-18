@@ -511,7 +511,10 @@ internal sealed partial class SqlExpressionEvaluator
         var children = expression is SqlCaseExpression conditional
             ? conditional.WhenClauses.Select(clause => clause.Result).Concat(
                 conditional.ElseResult is null ? [] : new[] { conditional.ElseResult })
-            : SqlPlanner.Children(expression);
+            : expression is SqlFunctionCallExpression call
+                ? call.FunctionName.Equals("STRING_AGG", StringComparison.OrdinalIgnoreCase) || call.FunctionName.Equals("LISTAGG", StringComparison.OrdinalIgnoreCase)
+                    ? call.Arguments.Take(1) : call.Arguments
+                : SqlPlanner.Children(expression);
         var candidates = new List<SqlCollationCandidate>();
         foreach (var child in children)
         {

@@ -981,6 +981,25 @@ flowchart LR
   conversion remains cached and applies only built-in storage coercion; a domain check runs when
   the value is assigned. A canceled refresh after definition DDL has published leaves the cache
   pending; the next statement or provisioning operation rebuilds it with its own token.
+- **Aggregate modifiers (#1115).** DISTINCT and input ordering wrap the accumulator ABI in
+  the executor, including application aggregates. Coerced tuples use SqlValueComparer equality
+  and each argument's collation. Ordered calls buffer evaluated values and keys, prepare key
+  subqueries, sort stably with the ordinary ordering comparator, then add to the accumulator.
+  Aggregate and outer sorts poll the statement token at entry, completion and at most every
+  32 key evaluations/comparisons; runtime-wrapped comparer cancellation keeps its original
+  OperationCanceledException. Correlated ordering and buffered key preparation also poll.
+  Ordered DISTINCT retains one tuple per class, choosing the first sorted representative.
+  Scalar modifiers and DISTINCT keys outside the argument list fail with COHSQLE032.
+  STRING_AGG and ISO LISTAGG are ordinary catalog aggregates with nullable Text results,
+  called on NULL input: skip NULL values, omit NULL delimiters, and trim Character inputs.
+  JSON needs an explicit text CAST. Delimiters are literals or parameters. Their StringBuilder
+  limit is checked on every append and during ordered buffering before sorting. Result
+  collation comes only from the value argument. All walks and persisted equivalence include
+  ordering/quantifiers, while collation derivation excludes sort keys. Format 22 fences the
+  new function identifier quoting; no old-format reader or boundary grant is introduced.
+  Persisted equivalence normalizes explicit ALL to default while rendering retains ALL.
+  LISTAGG requires nonempty WITHIN GROUP ordering even for quoted names; missing or inner
+  ordering fails with SQL0003 before input is read.
 - **Aggregates.** The planner recognizes an aggregate call by its name in the catalog and
   resolves its overload over the input row (`SUM` and `AVG` take the numeric pseudo-type
   `SqlType.AnyNumeric`, so `SUM(text)` is `COHSQLE006` while planning). `SqlGroupAggregate` carries
@@ -1098,8 +1117,8 @@ stateDiagram-v2
 **Behavior that moved.** #1120 makes UPPER/LOWER text-only with TEXT results; numeric inputs fail planning with COHSQLE006. The other T1 leaves and special forms are documented in DIALECT.md. `SUM` and `AVG` over a
 non-numeric argument fail planning with `COHSQLE006` (`Accepted: SUM(numeric)`) instead of
 an uncoded message, a `char` parameter included, even over an empty table where they used
-to return NULL; `DISTINCT`, `ALL` and `ORDER BY` inside any call report `COHDBL001` at
-parse time, since the parser no longer keeps a list of aggregate names; a parameter of a
+to return NULL; aggregate `DISTINCT`, `ALL` and input `ORDER BY` execute through the
+catalog-aware planner and executor described above; a parameter of a
 CLR type the codec does not store widens losslessly when a function receives it (`byte` to
 SMALLINT, `char` to TEXT, so `UPPER(@p)` over a `char` returns the upper-cased string where
 it returned the `char` unchanged); and an unknown column under a sign reports `Unknown
@@ -2117,7 +2136,7 @@ utility.c:1480-1483 and namespace.c:526-531.
 
 AUTHORIZATION and nested schema elements are rejected with COHDBL001. Atomic nested statements
 would require a separate DDL execution contract because each existing statement self-commits.
-Record-space format 21 has no upgrade reader: export older databases, recreate and explicitly
+Record-space format 22 has no upgrade reader: export older databases, recreate and explicitly
 CREATE SCHEMA for non-dbo table namespaces before importing. Namespace records are not synthesized.
 
 The area root carries only the model-independent ownership contracts (`DatabaseObjectOwner`,
@@ -2527,7 +2546,7 @@ PostgreSQL references: tablecmds.c:3903-4062 (column identity), :4329-4385 (rela
   format, no upgrade path.** The catalog stores the format version of the whole
   data file set, rows and the index trees that ride it (a kind-4 record for
   versions 1–3, a kind-8 record from version 4). The engine reads and writes
-  format 21 only: format 6's stamped rows in per-object page chains whose index keys use the
+  format 22 only: format 6's stamped rows in per-object page chains whose index keys use the
   temporal identity encoding (#1099, below), in index trees of B-tree page format
   2, which order entries by key, entry reference and writer (#1194,
   `Database.Indexing` DESIGN), decoded through each table's physical column

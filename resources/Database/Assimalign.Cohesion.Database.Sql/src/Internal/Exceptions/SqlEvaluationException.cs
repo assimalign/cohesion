@@ -235,7 +235,9 @@ internal sealed class SqlEvaluationException : DatabaseException
     /// <returns>The coded failure (<c>COHSQLE006</c>, PostgreSQL's 42883).</returns>
     internal static SqlEvaluationException FunctionArgumentTypeMismatch(string functionName, string given, string usage)
         => new(FunctionSignatureMismatchCode,
-            $"Function '{functionName}' has no overload that accepts argument types ({given}). Accepted: {usage}.",
+            $"Function '{functionName}' has no overload that accepts argument types ({given}). Accepted: {usage}." +
+            (functionName.Equals("STRING_AGG", StringComparison.OrdinalIgnoreCase) || functionName.Equals("LISTAGG", StringComparison.OrdinalIgnoreCase)
+                ? ErrorMessages.StringAggregateTypeHint : string.Empty),
             null);
 
     /// <summary>Creates the failure for a call that more than one overload accepts equally well.</summary>

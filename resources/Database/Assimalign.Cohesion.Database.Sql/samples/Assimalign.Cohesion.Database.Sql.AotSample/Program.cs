@@ -241,6 +241,15 @@ internal static class Program
         await session.ExecuteAsync("ALTER TABLE altered_guard ALTER value DROP NOT NULL");
         await session.ExecuteAsync("ALTER TABLE altered_guard ALTER value SET NOT NULL");
         Check("in process: ALTER rename and frozen missing values", await RowsAsync(session, "SELECT value FROM altered_guard ORDER BY id"), [[7], [-9]]);
+        await session.ExecuteAsync("CREATE TABLE aggregate_guard (id INT, g INT)", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT INTO aggregate_guard VALUES (2, 1), (1, 1), (2, 1)", cancellationToken: CancellationToken.None);
+        foreach (string grouping in new[] { "", " GROUP BY g" })
+        {
+            Check("in process: DISTINCT, ALL and ordered aggregates" + grouping, await RowsAsync(session,
+                "SELECT COUNT(DISTINCT id), COUNT(ALL id), SUM(DISTINCT id), SUM(ALL id), STRING_AGG(CAST(id AS TEXT), ',' ORDER BY id DESC), LISTAGG(DISTINCT CAST(id AS TEXT)) WITHIN GROUP (ORDER BY CAST(id AS TEXT)) FROM aggregate_guard" + grouping), [[2L, 3L, 3m, 5m, "2,2,1", "12"]]);
+            Check("in process: single string aggregate" + grouping, await RowsAsync(session,
+                "SELECT STRING_AGG(CAST(id AS TEXT), ',') FROM aggregate_guard WHERE id = 1" + grouping), [["1"]]);
+        }
         Check("in process: T1 scalars and transaction clock", await RowsAsync(session, t1Scalars), _t1Scalars);
         await session.ExecuteAsync("CREATE TABLE action_parent (id INT PRIMARY KEY)", cancellationToken: CancellationToken.None);
         await session.ExecuteAsync("CREATE TABLE action_child (pid INT DEFAULT (1 + 1) REFERENCES action_parent(id) ON DELETE SET DEFAULT)", cancellationToken: CancellationToken.None);
@@ -336,6 +345,13 @@ internal static class Program
             "SELECT pid FROM namespace_external", timeout.Token), [[99]]);
         Check("over the wire: OFFSET FETCH", await RowsAsync(connection, "SELECT Id FROM customers ORDER BY Id OFFSET 1 ROW FETCH NEXT ROW ONLY", timeout.Token), [[2L]]);
         Check("over the wire: OFFSET before LIMIT", await RowsAsync(connection, "SELECT Id FROM customers ORDER BY Id OFFSET 1 LIMIT 1", timeout.Token), [[2L]]);
+        foreach (string grouping in new[] { "", " GROUP BY g" })
+        {
+            Check("over the wire: DISTINCT, ALL and ordered aggregates" + grouping, await RowsAsync(connection,
+                "SELECT COUNT(DISTINCT id), COUNT(ALL id), SUM(DISTINCT id), SUM(ALL id), STRING_AGG(CAST(id AS TEXT), ',' ORDER BY id DESC), LISTAGG(DISTINCT CAST(id AS TEXT)) WITHIN GROUP (ORDER BY CAST(id AS TEXT)) FROM aggregate_guard" + grouping, timeout.Token), [[2L, 3L, 3m, 5m, "2,2,1", "12"]]);
+            Check("over the wire: single string aggregate" + grouping, await RowsAsync(connection,
+                "SELECT STRING_AGG(CAST(id AS TEXT), ',') FROM aggregate_guard WHERE id = 1" + grouping, timeout.Token), [["1"]]);
+        }
         Check("over the wire: TOP after sorting", await RowsAsync(connection, "SELECT TOP 1 Id FROM customers ORDER BY Id DESC", timeout.Token), [[2L]]);
 
         await connection.ExecuteAsync("CREATE TABLE identity_wire (id INT IDENTITY(10,2))", cancellationToken: timeout.Token);

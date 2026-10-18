@@ -40,15 +40,6 @@ public class SqlAggregateParserTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Language] - Aggregates: Rejects unsupported extensions explicitly")]
-    [InlineData("SELECT COUNT(DISTINCT amount) FROM t;", "DISTINCT")]
-    [InlineData("SELECT SUM(DISTINCT amount) FROM t;", "DISTINCT")]
-    [InlineData("SELECT AVG(DISTINCT amount) FROM t;", "DISTINCT")]
-    [InlineData("SELECT MIN(DISTINCT amount) FROM t;", "DISTINCT")]
-    [InlineData("SELECT MAX(DISTINCT amount) FROM t;", "DISTINCT")]
-    [InlineData("select count(/* trivia */ distinct amount) from t;", "distinct")]
-    [InlineData("SELECT COUNT(ALL amount) FROM t;", "ALL")]
-    [InlineData("SELECT SUM(ALL amount) FROM t;", "ALL")]
-    [InlineData("SELECT SUM(amount ORDER BY id) FROM t;", "ORDER")]
     [InlineData("SELECT category, COUNT(*) FROM t GROUP BY ROLLUP(category);", "ROLLUP")]
     [InlineData("SELECT category, COUNT(*) FROM t GROUP BY CUBE(category);", "CUBE")]
     [InlineData("SELECT category, COUNT(*) FROM t GROUP BY GROUPING SETS ((category), ());", "GROUPING SETS")]
@@ -66,8 +57,7 @@ public class SqlAggregateParserTests
     [InlineData("SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY amount) FROM t;", "WITHIN GROUP")]
     [InlineData("SELECT PERCENTILE_DISC(0.5) WITHIN GROUP (ORDER BY amount) FROM t;", "WITHIN GROUP")]
     [InlineData("SELECT MODE() WITHIN GROUP (ORDER BY amount) FROM t;", "WITHIN GROUP")]
-    [InlineData("SELECT category FROM t GROUP BY category HAVING COUNT(DISTINCT amount) > 0;", "DISTINCT")]
-    [InlineData("SELECT category FROM t GROUP BY category ORDER BY COUNT(DISTINCT amount);", "DISTINCT")]
+    [InlineData("SELECT \"LISTAGG\"(name) WITHIN GROUP (ORDER BY id) FROM t;", "WITHIN GROUP")]
     public void Parse_UnsupportedAggregateForm_ReportsModelDiagnostic(string sql, string locationText)
     {
         var statement = (SqlQueryStatement)new SqlQueryParser().Parse(sql);
@@ -77,6 +67,97 @@ public class SqlAggregateParserTests
         diagnostic.Message!.ShouldContain("SQL");
         sql[diagnostic.Start!.Value..diagnostic.End!.Value].ShouldBe(locationText);
         statement.Diagnostics.ShouldNotContain(item => item.Code == "SQL0002");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Sql.Language] - Aggregates: quantifiers and input ordering survive rendering")]
+    [InlineData("COUNT(DISTINCT amount)", SqlSetQuantifier.Distinct, 0)]
+    [InlineData("SUM(DISTINCT amount)", SqlSetQuantifier.Distinct, 0)]
+    [InlineData("AVG(DISTINCT amount)", SqlSetQuantifier.Distinct, 0)]
+    [InlineData("MIN(DISTINCT amount)", SqlSetQuantifier.Distinct, 0)]
+    [InlineData("MAX(DISTINCT amount)", SqlSetQuantifier.Distinct, 0)]
+    [InlineData("count(/* trivia */ distinct amount)", SqlSetQuantifier.Distinct, 0)]
+    [InlineData("COUNT(ALL amount)", SqlSetQuantifier.All, 0)]
+    [InlineData("SUM(ALL amount)", SqlSetQuantifier.All, 0)]
+    [InlineData("SUM(amount ORDER BY id)", SqlSetQuantifier.Default, 1)]
+    [InlineData("STRING_AGG(name, ', ')", SqlSetQuantifier.Default, 0)]
+    [InlineData("STRING_AGG(name, ', ' ORDER BY id DESC, name)", SqlSetQuantifier.Default, 2)]
+    [InlineData("STRING_AGG(DISTINCT name, ',' ORDER BY name)", SqlSetQuantifier.Distinct, 1)]
+    [InlineData("LISTAGG(name, ',') WITHIN GROUP (ORDER BY id)", SqlSetQuantifier.Default, 1)]
+    [InlineData("LISTAGG(name) WITHIN GROUP (ORDER BY id)", SqlSetQuantifier.Default, 1)]
+    [InlineData("LISTAGG(DISTINCT name, ',') WITHIN GROUP (ORDER BY name)", SqlSetQuantifier.Distinct, 1)]
+    [InlineData("\"listagg\"(name) WITHIN GROUP (ORDER BY id)", SqlSetQuantifier.Default, 1)]
+    [InlineData("UPPER(ALL name ORDER BY id)", SqlSetQuantifier.All, 1)]
+    [InlineData("\"LISTAGG\"(name)", SqlSetQuantifier.Default, 0)]
+    [InlineData("\"LISTAGG\"(name ORDER BY id)", SqlSetQuantifier.Default, 1)]
+    [InlineData("\"EXTRACT\"(DISTINCT 'YEAR', d)", SqlSetQuantifier.Distinct, 0)]
+    [InlineData("\"POSITION\"(DISTINCT a, b)", SqlSetQuantifier.Distinct, 0)]
+    [InlineData("\"SUBSTRING\"(ALL a, 1, 2)", SqlSetQuantifier.All, 0)]
+    [InlineData("\"TRIM\"(a ORDER BY b)", SqlSetQuantifier.Default, 1)]
+    [InlineData("\"CURRENT_DATE\"(ALL a)", SqlSetQuantifier.All, 0)]
+    [InlineData("\"EXTRACT\"('YEAR', d ORDER BY d)", SqlSetQuantifier.Default, 1)]
+    [InlineData("\"POSITION\"(a, b ORDER BY b)", SqlSetQuantifier.Default, 1)]
+    public void Parse_AggregateModifiers_ShouldRetainCompleteTree(string expression, SqlSetQuantifier quantifier, int keys)
+    {
+        // Arrange / Act
+        var statement = (SqlQueryStatement)new SqlQueryParser().Parse($"SELECT {expression} FROM t HAVING COUNT(DISTINCT amount) > 0 ORDER BY SUM(ALL amount);");
+        // Assert
+        statement.Diagnostics.ShouldBeEmpty();
+        var call = statement.SqlExpression.ShouldBeOfType<SqlSelectExpression>().Columns[0].Expression.ShouldBeOfType<SqlFunctionCallExpression>();
+        call.Location!.Start.ShouldBe(7);
+        call.Location.End.ShouldBe(7 + expression.Length);
+        call.Quantifier.ShouldBe(quantifier);
+        call.OrderBy.Count.ShouldBe(keys);
+        var rendered = SqlExpressionRenderer.Render(call);
+        var reloaded = (SqlQueryStatement)new SqlQueryParser().Parse($"SELECT {rendered} FROM t;");
+        reloaded.Diagnostics.ShouldBeEmpty(rendered);
+        SqlTreeDump.Dump(reloaded.SqlExpression.ShouldBeOfType<SqlSelectExpression>().Columns[0].Expression).ShouldBe(SqlTreeDump.Dump(call));
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Sql.Language] - Aggregates: malformed modifiers report SQL0003")]
+    [InlineData("SELECT COUNT(DISTINCT *) FROM t;")]
+    [InlineData("SELECT COUNT(ALL *) FROM t;")]
+    [InlineData("SELECT COUNT(* ORDER BY id) FROM t;")]
+    [InlineData("SELECT COUNT(DISTINCT) FROM t;")]
+    [InlineData("SELECT COUNT(ORDER BY id) FROM t;")]
+    [InlineData("SELECT LISTAGG(name, ',') FROM t;")]
+    [InlineData("SELECT LISTAGG(name, ',' ORDER BY id) WITHIN GROUP (ORDER BY name) FROM t;")]
+    [InlineData("SELECT STRING_AGG(name, ',' ORDER BY id FROM t;")]
+    public void Parse_InvalidAggregateSyntax_ShouldReportSyntaxError(string sql)
+    {
+        // Arrange / Act
+        var statement = new SqlQueryParser().Parse(sql);
+        // Assert
+        statement.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "SQL0003");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Sql.Language] - LISTAGG: ON OVERFLOW is one contextual refusal")]
+    [InlineData("TRUNCATE '...' WITH COUNT")]
+    [InlineData("ERROR")]
+    public void Parse_ListaggOverflow_ShouldReportOneCapabilityError(string overflow)
+    {
+        // Arrange
+        string sql = $"SELECT LISTAGG(name, ',' ON OVERFLOW {overflow}) WITHIN GROUP (ORDER BY id) FROM t;";
+        // Act
+        var statement = new SqlQueryParser().Parse(sql);
+        // Assert
+        var error = statement.Diagnostics.ShouldHaveSingleItem();
+        error.Code.ShouldBe("COHDBL001");
+        sql[error.Start!.Value..error.End!.Value].ShouldBe("ON OVERFLOW");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Sql.Language] - Aggregate ordering: sort operands obey the expression depth limit")]
+    public void Parse_DeepAggregateSortKey_ShouldRespectNestingBudget()
+    {
+        // Arrange
+        var parser = new SqlQueryParser(new SqlQueryParserOptions { ExpressionNestingLimit = 32 });
+        string key = string.Concat(Enumerable.Repeat("g(", 30)) + "a" + new string(')', 30);
+        // Act
+        var atLimit = (SqlQueryStatement)parser.Parse($"SELECT f(a ORDER BY {key}) FROM t;");
+        var pastLimit = parser.Parse($"SELECT f(a ORDER BY g({key})) FROM t;");
+        // Assert
+        atLimit.Diagnostics.ShouldBeEmpty();
+        atLimit.ExpressionNestingDepth.ShouldBe(32);
+        pastLimit.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "SQL0006");
     }
 
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Language] - Grouping: Rejects missing BY or grouping expressions")]
@@ -102,9 +183,9 @@ public class SqlAggregateParserTests
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Language] - Aggregates: Leaves ordinary identifiers and literals available")]
     [InlineData("SELECT rollup, cube, grouping, filter, within, ROW_NUMBER FROM t;")]
     [InlineData("SELECT grouping sets FROM t;")]
-    [InlineData("SELECT 'COUNT(DISTINCT amount) GROUPING SETS ROLLUP() WITHIN GROUP FILTER() OVER' FROM t;")]
     [InlineData("SELECT \"ROLLUP\", \"CUBE\", \"GROUPING\", \"FILTER\" FROM t;")]
     [InlineData("SELECT amount FROM t /* GROUPING SETS ROLLUP() FILTER() WITHIN GROUP */;")]
+    [InlineData("SELECT 'COUNT(DISTINCT amount) GROUPING SETS ROLLUP() WITHIN GROUP FILTER() OVER' FROM t;")]
     [InlineData("SELECT DISTINCT COUNT(amount), SUM(amount) FROM t;")]
     public void Parse_ExtensionNamesOutsideUnsupportedSyntax_ReportsNoError(string sql)
     {

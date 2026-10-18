@@ -30,7 +30,7 @@ internal sealed partial class SqlPlanner
     {
         int minimum = int.MaxValue;
         bool unresolved = false;
-        foreach (var argument in call.Arguments) { Visit(argument, 0); }
+        foreach (var argument in Children(call)) { Visit(argument, 0); }
         return unresolved ? -1 : minimum == int.MaxValue ? 0 : minimum;
 
         void Visit(SqlExpression expression, int depth)

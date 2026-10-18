@@ -97,10 +97,19 @@ internal sealed partial class SqlPlanner
         for (int i = 0; i < boundAggregates.Length; i++)
         {
             var (call, function) = aggregates[i];
-            var arguments = sourceScope.BindArguments(call.Arguments, out SqlBoundCollation collation);
+            SqlBoundExpression[] arguments;
+            SqlBoundCollation collation;
+            if (function is SqlStringAggregateFunction)
+            {
+                arguments = new SqlBoundExpression[call.Arguments.Count];
+                arguments[0] = sourceScope.Bind(call.Arguments[0], out collation);
+                for (int j = 1; j < arguments.Length; j++) { arguments[j] = sourceScope.Bind(call.Arguments[j]); }
+            }
+            else { arguments = sourceScope.BindArguments(call.Arguments, out collation); }
             sourceScope.BindParameterCoercions(function, arguments, collation);
             boundAggregates[i] = new SqlGroupAggregate(call, function, arguments,
-                SqlFunctionResolver.CoercionTargets(function, arguments.Length), collation, _functions.Database);
+                SqlFunctionResolver.CoercionTargets(function, arguments.Length), collation, _functions.Database, BindOrdering(call.OrderBy, sourceScope),
+                call.Quantifier == SqlSetQuantifier.Distinct ? call.Arguments.Select(sourceScope.BindCollation).ToArray() : []);
         }
 
         for (int i = 0; i < projections.Count; i++)
@@ -131,8 +140,13 @@ internal sealed partial class SqlPlanner
                 // The overload is chosen by its arguments' types over the input row: SUM and AVG
                 // take a numeric argument, so SUM over text fails here with COHSQLE006, whatever
                 // the rows (#1189). The grouping executor creates the chosen function's accumulators.
+                if (call.FunctionName.Equals("LISTAGG", StringComparison.OrdinalIgnoreCase) &&
+                    (!call.HasWithinGroupOrdering || call.OrderBy.Count == 0))
+                {
+                    throw new SqlPlanningException("SQL0003", ErrorMessages.ListaggRequiresWithinGroup, call.Location);
+                }
                 var function = (SqlAggregateFunction)evaluator.ResolveFunction(call)!;
-                foreach (var argument in call.Arguments)
+                foreach (var argument in Children(call))
                 {
                     if (ContainsAggregate(argument))
                     {
@@ -142,6 +156,16 @@ internal sealed partial class SqlPlanner
                     {
                         ValidateExpression(argument, evaluator, _subqueryTypes);
                     }
+                }
+                if (call.Quantifier == SqlSetQuantifier.Distinct && call.OrderBy.Any(key =>
+                    !call.Arguments.Any(argument => SameGroupExpression(argument, key.Expression, evaluator))))
+                {
+                    throw new SqlPlanningException("COHSQLE032", ErrorMessages.DistinctOrderingArgument, call.Location);
+                }
+                if (function is SqlStringAggregateFunction && call.Arguments.Count > 1 &&
+                    call.Arguments[1] is not (SqlLiteralExpression { LiteralType: SqlLiteralType.String or SqlLiteralType.Null } or SqlParameterExpression))
+                {
+                    throw new SqlUnsupportedQueryException(ErrorMessages.StringAggregateDelimiter, location: call.Arguments[1].Location);
                 }
                 int index = aggregates.FindIndex(candidate => SameGroupExpression(candidate.Call, call, evaluator));
                 if (index < 0)
@@ -209,7 +233,11 @@ internal sealed partial class SqlPlanner
             (SqlLogicalExpression a, SqlLogicalExpression b) => a.Operator == b.Operator,
             (SqlBinaryExpression a, SqlBinaryExpression b) => a.Operator == b.Operator,
             (SqlUnaryExpression a, SqlUnaryExpression b) => a.Operator == b.Operator,
-            (SqlFunctionCallExpression a, SqlFunctionCallExpression b) => a.FunctionName.Equals(b.FunctionName, StringComparison.OrdinalIgnoreCase),
+            (SqlFunctionCallExpression a, SqlFunctionCallExpression b) => a.FunctionName.Equals(b.FunctionName, StringComparison.OrdinalIgnoreCase)
+                && (a.Quantifier == SqlSetQuantifier.Distinct) == (b.Quantifier == SqlSetQuantifier.Distinct)
+                && a.HasWithinGroupOrdering == b.HasWithinGroupOrdering
+                && a.Arguments.Count == b.Arguments.Count && a.OrderBy.Count == b.OrderBy.Count
+                && a.OrderBy.Select(key => key.IsDescending).SequenceEqual(b.OrderBy.Select(key => key.IsDescending)),
             (SqlCollateExpression a, SqlCollateExpression b) => Collation.FromName(a.CollationName) == Collation.FromName(b.CollationName),
             (SqlCastExpression a, SqlCastExpression b) => a.TargetTypeInfo?.Type == b.TargetTypeInfo?.Type
                 && a.TargetTypeInfo?.MaxLength == b.TargetTypeInfo?.MaxLength

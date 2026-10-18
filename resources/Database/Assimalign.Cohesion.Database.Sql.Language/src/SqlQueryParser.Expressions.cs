@@ -892,21 +892,21 @@ public sealed partial class SqlQueryParser
 
         var args = new List<SqlExpression>();
 
-        // Which names are aggregates is the engine's catalog to say (an application registers its
-        // own), so the parser recognizes DISTINCT, ALL and ORDER BY inside any call. No aggregate
-        // executes them yet, and PostgreSQL refuses them on a function that is not an aggregate
-        // (parse_func.c), so every call reports them here.
+        // PostgreSQL gram.y func_application: the catalog, not syntax, decides whether
+        // a name is an aggregate. ALL/DISTINCT require arguments and never accept *.
+        var quantifier = SqlSetQuantifier.Default;
         if (IsKeyword(ref lexer, "DISTINCT") || IsKeyword(ref lexer, "ALL"))
         {
-            string modifier = CurrentText(ref lexer).ToUpperInvariant();
-            AddUnsupportedSurfaceDiagnostic(lexer.Current.Position, lexer.Current.Position + modifier.Length,
-                $"The {modifier} modifier inside SQL function calls is not supported.");
+            quantifier = IsKeyword(ref lexer, "DISTINCT") ? SqlSetQuantifier.Distinct : SqlSetQuantifier.All;
             Advance(ref lexer);
+            if (lexer.Current.Type is TokenType.Asterisk or TokenType.RightParen || IsKeyword(ref lexer, "ORDER"))
+            {
+                AddExpectedDiagnostic(ref lexer, "an argument after the set quantifier (not *)");
+            }
         }
 
         if (!IsAtEnd(ref lexer) && lexer.Current.Type != TokenType.RightParen)
         {
-            // Handle COUNT(*) and similar
             if (lexer.Current.Type == TokenType.Asterisk)
             {
                 args.Add(ParseStarArgument(ref lexer));
@@ -922,16 +922,47 @@ public sealed partial class SqlQueryParser
             }
         }
 
+        var ordering = new List<SqlOrderByColumn>();
         if (IsKeyword(ref lexer, "ORDER"))
         {
-            AddUnsupportedSurfaceDiagnostic(lexer.Current.Position, lexer.Current.Position + lexer.Current.Value.Length,
-                "ORDER BY inside SQL function calls is not supported.");
+            if (args.Count == 1 && args[0] is SqlStarExpression) { AddExpectedDiagnostic(ref lexer, "')' after *"); }
+            ParseAggregateOrdering(ref lexer, ordering);
         }
-
+        bool listagg = (!quoted || name == "listagg") && name.Equals("LISTAGG", StringComparison.OrdinalIgnoreCase);
+        if (listagg && IsKeyword(ref lexer, "ON") && TryPeekToken(lexer, out string overflow, out int overflowEnd) &&
+            overflow.Equals("OVERFLOW", StringComparison.OrdinalIgnoreCase))
+        {
+            RequireSkippedConstruct(lexer.Current.Position, overflowEnd, "ON OVERFLOW");
+            SkipQueryRemainder(ref lexer);
+        }
+        int callEnd = CurrentTokenEnd(ref lexer);
         Expect(ref lexer, TokenType.RightParen, $"')' after the {name} arguments");
+        if (listagg)
+        {
+            if (IsWord(ref lexer, "WITHIN")) { Advance(ref lexer); }
+            else { AddExpectedDiagnostic(ref lexer, "WITHIN GROUP after LISTAGG"); }
+            ExpectKeyword(ref lexer, "GROUP", "GROUP after WITHIN");
+            Expect(ref lexer, TokenType.LeftParen, "'(' after WITHIN GROUP");
+            if (ordering.Count > 0) { AddExpectedDiagnostic(ref lexer, "only WITHIN GROUP ordering for LISTAGG"); }
+            ParseAggregateOrdering(ref lexer, ordering);
+            callEnd = CurrentTokenEnd(ref lexer);
+            Expect(ref lexer, TokenType.RightParen, "')' after WITHIN GROUP ordering");
+        }
         SkipCallExtensions(ref lexer);
+        return new SqlFunctionCallExpression(name, args, Location.Create(1, 1, pos, callEnd), quantifier, ordering, listagg);
+    }
 
-        return new SqlFunctionCallExpression(name, args, Location.Create(1, 1, pos, pos));
+    private void ParseAggregateOrdering(ref TokenLexer lexer, List<SqlOrderByColumn> ordering)
+    {
+        ExpectKeyword(ref lexer, "ORDER", "ORDER BY for the aggregate input");
+        ExpectKeyword(ref lexer, "BY", "BY after ORDER");
+        do
+        {
+            // A key is an operand of the call, just as an argument is (#1151).
+            ordering.Add(ParseOrderByColumn(ref lexer, aggregateInput: true));
+            if (lexer.Current.Type != TokenType.Comma) { break; }
+            Advance(ref lexer);
+        } while (!IsAtEnd(ref lexer));
     }
 
     /// <summary>

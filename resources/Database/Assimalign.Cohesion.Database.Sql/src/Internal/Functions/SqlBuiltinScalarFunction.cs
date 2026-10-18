@@ -276,7 +276,7 @@ internal sealed class SqlBuiltinScalarFunction : SqlScalarFunction
         { throw SqlEvaluationException.NumericValueOutOfRange("Requested string length is too large.", exception); }
     }
 
-    private static void CheckLength(long length)
+    internal static void CheckLength(long length)
     {
         if (length > MaximumStringLength)
         { throw SqlEvaluationException.NumericValueOutOfRange("Requested string length is too large (maximum 1048576 UTF-16 code units)."); }

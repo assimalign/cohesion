@@ -154,6 +154,8 @@ internal sealed partial class SqlPlanExecutor
         IReadOnlyList<SqlProjection> projections, IReadOnlyList<SqlBoundOrdering> orderBy, long? limit, long? offset,
         bool distinct, SqlExpressionEvaluator evaluator, SqlStatementContext statement, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+        int operations = 0;
         var keyed = new List<(object?[] Output, object?[] Keys)>();
         foreach (var source in matches)
         {
@@ -182,6 +184,7 @@ internal sealed partial class SqlPlanExecutor
             var keys = new object?[orderBy.Count];
             for (int i = 0; i < keys.Length; i++)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 await PrepareSubqueriesAsync(orderBy[i].Key, orderedRow, statement, cancellationToken).ConfigureAwait(false);
                 keys[i] = evaluator.Evaluate(orderBy[i].Key, orderedRow);
             }
@@ -192,10 +195,10 @@ internal sealed partial class SqlPlanExecutor
         {
             int key = i;
             var collation = orderBy[i].Collation.Resolve(_subqueryValues);
-            var comparer = Comparer<object?>.Create((left, right) => (left, right) switch
+            var comparer = Comparer<object?>.Create((left, right) =>
             {
-                (null, null) => 0, (null, _) => -1, (_, null) => 1,
-                _ => SqlExpressionEvaluator.Compare(left, right, collation),
+                if ((operations++ & 31) == 0) { cancellationToken.ThrowIfCancellationRequested(); }
+                return CompareOrderingValues(left, right, collation);
             });
             sorted = sorted is null
                 ? orderBy[i].IsDescending ? keyed.OrderByDescending(item => item.Keys[key], comparer) : keyed.OrderBy(item => item.Keys[key], comparer)
@@ -203,11 +206,12 @@ internal sealed partial class SqlPlanExecutor
         }
         List<object?[]> projected;
         try { projected = (sorted is null ? keyed : sorted.AsEnumerable()).Select(item => item.Output).ToList(); }
-        catch (InvalidOperationException exception) when (exception.InnerException is DatabaseException inner)
+        catch (InvalidOperationException exception) when (exception.InnerException is DatabaseException or OperationCanceledException)
         {
-            ExceptionDispatchInfo.Throw(inner);
+            ExceptionDispatchInfo.Throw(exception.InnerException);
             throw;
         }
+        cancellationToken.ThrowIfCancellationRequested();
         if (distinct) { projected = Deduplicate(projected, projections, evaluator); }
         var columns = projections.Select((projection, ordinal) => new DatabaseColumn
         {
