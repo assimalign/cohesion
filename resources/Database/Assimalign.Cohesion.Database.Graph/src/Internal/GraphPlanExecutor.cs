@@ -50,7 +50,12 @@ internal static partial class GraphPlanExecutor
         { throw new GraphPlanningException("COHDBG001", ErrorMessages.EntityListWireUnsupported, plan.Query.Location); }
         if (scalarsOnly && plan.Projections.Any(projection => projection.Kind != GraphProjectionKind.Scalar))
         { throw new GraphPlanningException("COHDBG001", ErrorMessages.ExecuteScalarRequired, plan.Query.Location); }
-        if (plan.Writes) { await database.LockWriterAsync(operation.Context, token).ConfigureAwait(false); }
+        if (plan.Writes)
+        {
+            await database.LockWriterAsync(operation.Context, token).ConfigureAwait(false);
+            await operation.RefreshWriterSnapshotAsync(token).ConfigureAwait(false);
+            plan = new GraphPlanner(database, operation.Context.Snapshot).Plan(statement.GqlExpression, parameters, paths, token);
+        }
         var bindings = new List<Dictionary<string, object?>> { new(StringComparer.Ordinal) };
         var budget = new ExpansionBudget();
         long affected = 0;
@@ -114,6 +119,9 @@ internal static partial class GraphPlanExecutor
                 case GqlDeleteStage deletion:
                     affected += await DeleteAsync(database, operation, deletion, bindings, token).ConfigureAwait(false);
                     break;
+                case GqlSetStage or GqlRemoveStage:
+                    await operation.Updates.ApplyAsync(stage, bindings, parameters, token).ConfigureAwait(false);
+                    break;
                 case GqlReturnStage projection when stageIndex != plan.Stages.Count - 1:
                     bindings = ProjectBindings(stagePlan, projection, bindings, operation.EvaluationContext, parameters, token);
                     break;
@@ -122,6 +130,7 @@ internal static partial class GraphPlanExecutor
                     break;
             }
         }
+        affected += await operation.Updates.PublishAsync(token).ConfigureAwait(false);
         if (plan.Projections.Count == 0) { return new GraphMutationResult(affected, plan.Warnings); }
         if (plan.Grouping is { } grouping) { bindings = GraphGrouping.Apply(grouping, bindings, operation.EvaluationContext, parameters, token); }
         var columns = plan.Projections.Select((projection, i) => new DatabaseColumn
@@ -170,7 +179,7 @@ internal static partial class GraphPlanExecutor
             }).ToArray();
             return new GraphPathsQueryResult(results, plan.Warnings);
         }
-        return new GraphQueryResult(columns, paged, plan.Warnings, compositeColumns);
+        return new GraphQueryResult(columns, paged, plan.Warnings, compositeColumns, plan.Writes ? affected : -1);
     }
 
     internal static async ValueTask<long> DeleteAsync(GraphDatabase database, GraphOperation operation, GqlDeleteStage deletion,
@@ -198,11 +207,13 @@ internal static partial class GraphPlanExecutor
         {
             if (database.Store.FindRelationship(id.Value, operation.Context.Snapshot) is not null) { affected++; }
             await database.Store.DeleteRelationshipAsync(id.Value, operation.Context, token).ConfigureAwait(false);
+            operation.Updates.DeletedRelationship(id.Value);
         }
         foreach (var id in nodes)
         {
             if (database.Store.FindNode(id.Value, operation.Context.Snapshot) is not null) { affected++; }
             await database.Store.DeleteNodeAsync(id.Value, deletion.Detach, operation.Context, token).ConfigureAwait(false);
+            operation.Updates.DeletedNode(id.Value);
         }
         foreach (var binding in bindings) { foreach (string variable in deletion.Variables) { binding.Remove(variable); } }
         return affected;
@@ -382,6 +393,7 @@ internal static partial class GraphPlanExecutor
             else
             {
                 nodes[i] = await database.CreateNodeCoreAsync(operation, GraphLabelEvaluator.InsertLabels(pattern), EvaluateProperties(pattern.Properties, bindings, operation.EvaluationContext, parameters), token).ConfigureAwait(false);
+                operation.Updates.Created(nodes[i]);
                 Accept(pattern.Variable, nodes[i], bindings);
                 affected++;
             }
@@ -396,6 +408,7 @@ internal static partial class GraphPlanExecutor
             var relationship = await database.CreateRelationshipCoreAsync(operation, nodes[outgoing ? i : i + 1].Id,
                 nodes[outgoing ? i + 1 : i].Id, GraphLabelEvaluator.InsertType(pattern), EvaluateProperties(pattern.Properties, bindings, operation.EvaluationContext, parameters), token).ConfigureAwait(false);
             Accept(pattern.Variable, relationship, bindings);
+            operation.Updates.Created(relationship);
             affected++;
         }
         return affected;

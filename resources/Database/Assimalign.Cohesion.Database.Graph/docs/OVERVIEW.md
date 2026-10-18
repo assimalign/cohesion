@@ -6,6 +6,7 @@ node, relationship and traversal operations of `GraphDatabase`. A session execut
 subset, including quantified paths under trail semantics with ISO {m,n}/+/* and Cypher *m..n, group lists, source-ordered MATCH/OPTIONAL MATCH with null extension, named scalar/list/map parameters, Boolean/arithmetic WHERE and RETURN expressions,
 core element/string/math functions, CAST, Cypher conversions, transaction-start CURRENT_DATE/CURRENT_TIMESTAMP,
 CASE, COALESCE, NULLIF, list/map constructors and field/index access,
+SET/REMOVE scalar properties and node labels through MVCC replacements, literal-map replacement and merge,
 COUNT, SUM, AVG, MIN, MAX and COLLECT_LIST (Cypher collect), with implicit or ISO GROUP BY,
 RETURN DISTINCT/ALL, star, aliases and standalone RETURN, ORDER BY with explicit null placement,
 OFFSET/SKIP and LIMIT, described in [Graph.Language](../../Assimalign.Cohesion.Database.Graph.Language/docs/DESIGN.md).

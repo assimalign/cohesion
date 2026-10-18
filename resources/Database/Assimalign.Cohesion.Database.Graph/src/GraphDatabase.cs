@@ -73,7 +73,7 @@ public sealed partial class GraphDatabase : DatabaseInstance
         {
             GraphStore.EnsureIndexFormat(storage);
         }
-        catch (Indexing.IndexFormatException exception)
+        catch (Exception exception) when (exception is Indexing.IndexFormatException or Assimalign.Cohesion.Database.Storage.StorageCorruptionException)
         {
             Coordinator.DisposeAsync().AsTask().GetAwaiter().GetResult();
             throw new DatabaseException($"Database '{name}' cannot be opened. {exception.Message}", exception);
@@ -437,6 +437,13 @@ public sealed partial class GraphDatabase : DatabaseInstance
         IReadOnlyDictionary<string, object?>? properties, CancellationToken token)
     {
         await LockWriterAsync(operation.Context, token).ConfigureAwait(false);
+        await ValidateNodeAsync(operation, labels, properties, token).ConfigureAwait(false);
+        return Materialize(await Store.CreateNodeAsync(labels, properties ?? new Dictionary<string, object?>(), operation.Context, token).ConfigureAwait(false));
+    }
+
+    internal async ValueTask ValidateNodeAsync(GraphOperation operation, IReadOnlyList<string> labels,
+        IReadOnlyDictionary<string, object?>? properties, CancellationToken token)
+    {
         foreach (string label in labels)
         {
             var metadata = Catalog.FindLabel(label, operation.Context.Snapshot);
@@ -448,13 +455,19 @@ public sealed partial class GraphDatabase : DatabaseInstance
             }
             await ValidatePropertiesAsync(metadata.Value.Id, properties, operation, token).ConfigureAwait(false);
         }
-        return Materialize(await Store.CreateNodeAsync(labels, properties ?? new Dictionary<string, object?>(), operation.Context, token).ConfigureAwait(false));
     }
 
     internal async ValueTask<GraphRelationship> CreateRelationshipCoreAsync(GraphOperation operation, GraphNodeId from, GraphNodeId to,
         string type, IReadOnlyDictionary<string, object?>? properties, CancellationToken token)
     {
         await LockWriterAsync(operation.Context, token).ConfigureAwait(false);
+        await ValidateRelationshipAsync(operation, type, properties, token).ConfigureAwait(false);
+        return Materialize(await Store.CreateRelationshipAsync(from.Value, to.Value, type, properties ?? new Dictionary<string, object?>(), operation.Context, token).ConfigureAwait(false));
+    }
+
+    internal async ValueTask ValidateRelationshipAsync(GraphOperation operation, string type,
+        IReadOnlyDictionary<string, object?>? properties, CancellationToken token)
+    {
         var metadata = Catalog.FindRelationshipType(type, operation.Context.Snapshot);
         if (metadata != Catalog.FindRelationshipType(type, LatestSnapshot(operation.Context))) { ThrowConflict(); }
         if (metadata is null)
@@ -463,7 +476,6 @@ public sealed partial class GraphDatabase : DatabaseInstance
             await Catalog.SaveRelationshipTypeAsync(metadata.Value, operation.Context, token).ConfigureAwait(false);
         }
         await ValidatePropertiesAsync(metadata.Value.Id, properties, operation, token).ConfigureAwait(false);
-        return Materialize(await Store.CreateRelationshipAsync(from.Value, to.Value, type, properties ?? new Dictionary<string, object?>(), operation.Context, token).ConfigureAwait(false));
     }
 
     internal static GraphNode Materialize(StoredGraphNode node) => new(new GraphNodeId(node.Id), node.Labels, node.Properties);

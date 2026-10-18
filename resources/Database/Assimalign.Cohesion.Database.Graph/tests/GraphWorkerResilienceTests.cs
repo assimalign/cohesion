@@ -461,9 +461,10 @@ public sealed class GraphWorkerResilienceTests
         var waiting = queued.ExecuteAsync("INSERT (:Item {name: 'queued'})").AsTask();
 
         // The queued writer's transaction is open beside the holder's, and its statement has not
-        // completed, on a database still online.
-        await Eventually(() => waiting.IsCompleted || failing.Coordinator.GetOpenContexts().Count == 2);
-        bool queuedWhileOnline = !waiting.IsCompleted && failing.Coordinator.GetOpenContexts().Count == 2 && !failing.IsOffline;
+        // completed, on a database still online. The ReadCommitted autocommit statement also
+        // owns a snapshot-retention pin (#1149), so there are three contexts.
+        await Eventually(() => waiting.IsCompleted || failing.Coordinator.GetOpenContexts().Count == 3);
+        bool queuedWhileOnline = !waiting.IsCompleted && failing.Coordinator.GetOpenContexts().Count == 3 && !failing.IsOffline;
         string queuedState = $"queued {waiting.Status}, {failing.Coordinator.GetOpenContexts().Count} open contexts, offline {failing.IsOffline}";
 
         // Act: the next checkpoint's header slot write, its journal fsync, or the drain of the

@@ -34,15 +34,17 @@ internal sealed class GraphOperation
         _context = context;
         _transaction = transaction;
         TransactionStart = transactionStart;
+        Updates = new GraphUpdates(database, this);
     }
 
     internal TransactionContext Context { get; private set; }
     internal DateTimeOffset TransactionStart { get; }
     internal GraphEvaluationContext EvaluationContext => new(TransactionStart, _database, this);
+    internal GraphUpdates Updates { get; }
 
     internal async ValueTask InitializeAsync(CancellationToken cancellationToken)
     {
-        if (_transaction?.IsolationLevel == IsolationLevel.ReadCommitted)
+        if (_context.IsolationLevel == IsolationLevel.ReadCommitted)
         {
             // Capture the pin before the statement snapshot. An earlier writer
             // may commit while the operation is open, so the refreshing transaction
@@ -50,6 +52,13 @@ internal sealed class GraphOperation
             _snapshotPin = await _database.Coordinator.BeginAsync(IsolationLevel.Snapshot, cancellationToken).ConfigureAwait(false);
             Context = _context.PinStatementSnapshot();
         }
+    }
+
+    internal async ValueTask RefreshWriterSnapshotAsync(CancellationToken cancellationToken)
+    {
+        if (_context.IsolationLevel != IsolationLevel.ReadCommitted) { return; }
+        await ReleaseSnapshotPinAsync().ConfigureAwait(false);
+        await InitializeAsync(cancellationToken).ConfigureAwait(false);
     }
 
     internal void EnsureActive()

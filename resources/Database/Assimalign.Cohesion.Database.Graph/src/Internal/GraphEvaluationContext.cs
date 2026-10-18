@@ -8,7 +8,7 @@ internal readonly record struct GraphEvaluationContext(DateTimeOffset Transactio
     internal GraphNode Endpoint(GraphRelationship relationship, bool start)
     {
         ulong id = start ? relationship.From.Value : relationship.To.Value;
-        if (Database is null || Operation is null || Database.Store.FindNode(id, Operation.Context.Snapshot) is not { } node)
+        if (Database is null || Operation is null || Operation.Updates.FindNode(id) is not { } node)
         { throw new GraphPlanningException("COHDBG013", ErrorMessages.FunctionEndpointMissing); }
         return GraphDatabase.Materialize(node);
     }
