@@ -29,7 +29,16 @@ internal static class GraphProjectionText
             GqlIsNullExpression test => Describe(test.Operand) + (test.IsNegated ? " IS NOT NULL" : " IS NULL"),
             GqlTruthTestExpression test => Describe(test.Operand) + (test.IsNegated ? " IS NOT " : " IS ") +
                 (test.TruthValue is null ? "UNKNOWN" : test.TruthValue.Value ? "TRUE" : "FALSE"),
-            GqlInExpression membership => Describe(membership.Operand) + " IN [" + string.Join(", ", membership.List.Items.Select(Describe)) + "]",
+            GqlListExpression list => "[" + string.Join(", ", list.Items.Select(Describe)) + "]",
+            GqlMapExpression map => "{" + string.Join(", ", map.Entries.Select(entry => Name(entry.Key) + ": " + Describe(entry.Value))) + "}",
+            GqlCaseExpression conditional => "CASE " + (conditional.Operand is null ? "" : Describe(conditional.Operand) + " ") +
+                string.Join(" ", conditional.Alternatives.Select(branch => "WHEN " + (branch.Comparison.StartsWith("IS", StringComparison.Ordinal) ? branch.Comparison : (branch.Comparison == "=" ? "" : branch.Comparison + " ") + Describe(branch.When)) + " THEN " + Describe(branch.Then))) +
+                (conditional.Otherwise is null ? "" : " ELSE " + Describe(conditional.Otherwise)) + " END",
+            GqlCoalesceExpression coalesce => "COALESCE(" + string.Join(", ", coalesce.Operands.Select(Describe)) + ")",
+            GqlNullIfExpression nullIf => "NULLIF(" + Describe(nullIf.Left) + ", " + Describe(nullIf.Right) + ")",
+            GqlSubscriptExpression subscript => Describe(subscript.Operand) + "[" + Describe(subscript.Index) + "]",
+            GqlMemberExpression member => Describe(member.Operand) + "." + Name(member.Member),
+            GqlInExpression membership => Describe(membership.Operand) + " IN " + Describe(membership.List),
             GqlStringPredicateExpression predicate => Describe(predicate.Left) + " " + (predicate.Operator switch
                 { GqlStringPredicateOperator.StartsWith => "STARTS WITH", GqlStringPredicateOperator.EndsWith => "ENDS WITH", _ => "CONTAINS" }) + " " + Describe(predicate.Right),
             GqlLabeledPredicate labeled => Name(labeled.Variable) + (labeled.IsNegated ? " IS NOT LABELED " : " IS LABELED ") + labeled.LabelExpression,

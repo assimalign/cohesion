@@ -21,12 +21,15 @@ internal sealed class GraphQueryResult : DatabaseResultSet
     /// <param name="columns">The projected result columns.</param>
     /// <param name="rows">The materialized result rows, one value array per row.</param>
     /// <param name="warnings">The statement's warnings, such as an unknown label it read (#1228).</param>
-    public GraphQueryResult(IReadOnlyList<DatabaseColumn> columns, IReadOnlyList<object?[]> rows, IReadOnlyList<Diagnostic>? warnings = null)
+    public GraphQueryResult(IReadOnlyList<DatabaseColumn> columns, IReadOnlyList<object?[]> rows, IReadOnlyList<Diagnostic>? warnings = null, IReadOnlyList<bool>? compositeColumns = null)
     {
+        CompositeColumns = compositeColumns;
         _columns = columns;
         _rows = rows;
         _warnings = warnings ?? [];
     }
+
+    internal IReadOnlyList<bool>? CompositeColumns { get; }
 
     public override DatabaseResultStatus Status => DatabaseResultStatus.Success;
     public override long AffectedCount => -1;

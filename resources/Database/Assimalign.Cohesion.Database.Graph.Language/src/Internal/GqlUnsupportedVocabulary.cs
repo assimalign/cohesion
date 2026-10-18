@@ -30,7 +30,6 @@ internal static class GqlUnsupportedVocabulary
         new("UNWIND", "UNWIND", GqlWordPosition.Clause),
         new("FOREACH", "FOREACH", GqlWordPosition.Clause),
         new("UNION", "UNION", GqlWordPosition.Clause),
-        new("CASE", "CASE", GqlWordPosition.Clause),
         new("CALL", "CALL", GqlWordPosition.Clause),
         new("YIELD", "YIELD", GqlWordPosition.Clause),
         new("FILTER", "FILTER", GqlWordPosition.Clause),

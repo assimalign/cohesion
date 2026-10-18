@@ -9,4 +9,6 @@
   <data name="GraphDiagnosticsCompletionMissing" xml:space="preserve"><value>Missing graph diagnostics completion.</value></data>
   <data name="GraphDiagnosticsOrderInvalid" xml:space="preserve"><value>Graph diagnostics must precede completion or Error.</value></data>
   <data name="PathResultAlreadyEnumerated" xml:space="preserve"><value>A graph path result can be enumerated only once.</value></data>
+  <data name="CompositeCapabilityRequired" xml:space="preserve"><value>Graph composite parameters require the graph.composite-values capability.</value></data>
+  <data name="CompositeRowMalformed" xml:space="preserve"><value>Malformed Graph composite result row.</value></data>
 </root>

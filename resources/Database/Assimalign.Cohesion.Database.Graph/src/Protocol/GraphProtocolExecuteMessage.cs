@@ -6,11 +6,11 @@ using Assimalign.Cohesion.Database.Protocol;
 namespace Assimalign.Cohesion.Database.Graph;
 
 /// <summary>
-/// A graph request carrying GQL text and named scalar parameters. Both catalog
-/// Execute and ExecutePaths use this payload with the shared scalar tuple codec.
+/// A graph request carrying GQL text and named parameters. Execute and ExecutePaths use
+/// scalar component bytes or negotiated GraphValueCodec components for each parameter.
 /// </summary>
 /// <param name="Statement">The GQL statement text.</param>
-/// <param name="Parameters">The encoded parameter tuples: name → tuple-codec component bytes.</param>
+/// <param name="Parameters">The encoded parameters: name to complete component bytes in the negotiated format.</param>
 public sealed record GraphProtocolExecuteMessage(string Statement, IReadOnlyDictionary<string, byte[]> Parameters)
 {
     /// <summary>

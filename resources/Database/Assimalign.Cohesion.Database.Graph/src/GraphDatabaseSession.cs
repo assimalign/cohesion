@@ -313,7 +313,7 @@ public sealed class GraphDatabaseSession : DatabaseLanguageSession<GraphRequest>
                 return ValueTask.FromResult<DatabaseResult>(planner.Describe(plan));
             }
             return GraphPlanExecutor.ExecuteAsync(_database, operation, request.Statement,
-                request.Parameters, cancellationToken, paths: request.Paths, scalarsOnly: request.ScalarsOnly);
+                request.Parameters, cancellationToken, paths: request.Paths, scalarsOnly: request.ScalarsOnly, compositeValues: request.CompositeValues);
         }, cancellationToken);
     }
 

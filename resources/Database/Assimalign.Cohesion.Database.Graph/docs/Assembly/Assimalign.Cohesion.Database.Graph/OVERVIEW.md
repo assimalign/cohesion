@@ -17,10 +17,12 @@
   yields distinct visited nodes, excluding the start.
 - `GraphQueryRequest.FromGql(text)` parses a request and throws `DatabaseParseException` for an
   error diagnostic. `GraphDatabaseSession.ExecuteAsync(string)` uses the same parser.
-- `GraphRequest.Parameters` supplies scalar bindings for `$name` and `@name` in property maps
-  and WHERE operands. Bare names match ordinally and case-sensitively after removing one sigil.
+- `GraphRequest.Parameters` supplies scalar, list and map bindings for `$name` and `@name` in
+  WHERE/RETURN operands; pattern property maps remain scalar-only. Bare names match ordinally and case-sensitively after removing one sigil.
   Missing bindings fail planning with `COHDBG001`, invalid values with `COHDBG003`, and
-  normalized-key collisions with `COHDBG014`. Runtime scalar types are preserved.
+  normalized-key collisions with `COHDBG014`. Runtime scalar types are preserved; lists snapshot
+  to object?[] and maps to read-only IReadOnlyDictionary<string, object?>. Values permit depth 64,
+  65,536 values and 16 MiB encoded bytes.
 - A read that names a label or relationship type the database does not have succeeds: the name
   matches nothing, and the result's `Diagnostics` carries a `COHDBG010` (label) or `COHDBG011`
   (relationship type) warning. The read does not abort an explicit transaction.
@@ -35,5 +37,9 @@
   products.
 - `GraphDatabaseEngine.Servers` exposes nested servers whose lifetime the engine owns.
   Create/open/drop/lookup now accept `DatabaseName`, including its implicit string conversion.
+
+`GraphValueCodec` encodes transient scalar/list/map values with explicit tags and the bounds above.
+`GraphProtocol.CompositeValues` registers graph.composite-values; without negotiation, clients refuse
+composite parameters locally and servers reject possible composite projections before writes.
 
 See the [design](../../DESIGN.md) for transaction behavior, ownership exceptions and supported GQL.

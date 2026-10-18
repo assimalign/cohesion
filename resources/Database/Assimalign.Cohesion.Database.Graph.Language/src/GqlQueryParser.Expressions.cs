@@ -37,6 +37,7 @@ public sealed partial class GqlQueryParser
         else if (StartsLabeledPredicate()) { left = ParseLabeledPredicate(); }
         else { left = ParseOperand(); }
 
+        left = ParsePostfix(left, start);
         bool compared = false;
         while (!Failed)
         {
@@ -78,20 +79,10 @@ public sealed partial class GqlQueryParser
             }
             else if (op == "IN")
             {
-                var listStart = Current;
-                if (!HasStackToNest(listStart)) { break; }
-                if (!Take(TokenType.LeftBracket))
-                {
-                    Error("GQL0002", "IN requires the [...] list form.", Current);
-                    break;
-                }
-                List<GqlExpression> items = [];
-                if (Current.Type != TokenType.RightBracket)
-                {
-                    do { items.Add(ParseExpression(0)); } while (!Failed && Take(TokenType.Comma));
-                }
-                Expect(TokenType.RightBracket, "']'");
-                left = new GqlInExpression(left, new GqlListExpression(items, Span(listStart, Previous)), Span(start, Previous));
+                if (Current.Type == TokenType.LeftParen && StartsTuple())
+                { Error("GQL0002", "IN requires a list value, such as the [...] list form.", Current); break; }
+                var list = ParseExpression(precedence + 1);
+                left = new GqlInExpression(left, list, Span(start, Previous));
             }
             else
             {
@@ -121,6 +112,10 @@ public sealed partial class GqlQueryParser
     private GqlExpression ParseOperand()
     {
         var start = Current;
+        if (Is("CASE")) { return ParseCase(); }
+        if (Is("COALESCE") || Is("NULLIF")) { return ParseCaseAbbreviation(); }
+        if (Current.Type == TokenType.LeftBracket) { return ParseList(); }
+        if (Current.Type == TokenType.LeftBrace) { return ParseMap(); }
         if (Current.Type is TokenType.Identifier or TokenType.QuotedIdentifier)
         {
             string variable = Identifier();
@@ -189,7 +184,7 @@ public sealed partial class GqlQueryParser
                 }
                 else { Error("GQL0004", "Floating-point literal is invalid or outside the finite double range.", start); }
             }
-            else if (Current.Type is TokenType.LeftBracket or TokenType.LeftBrace) { Unsupported("COLLECTION LITERAL", Current); }
+            else if (Current.Type is TokenType.LeftBracket or TokenType.LeftBrace) { Error("COHDBL001", Current.Type == TokenType.LeftBracket ? "List-valued properties are unsupported by graph storage." : "Map-valued properties are unsupported by graph storage.", Current); }
             else { Error("GQL0002", "Expected a scalar literal.", start); }
         }
         return new GqlLiteralExpression(value, Span(start, Previous));

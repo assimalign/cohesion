@@ -32,7 +32,7 @@ ExecutionFailure received before any result header is the server's complete reje
 response, so the exchange calls MarkResponseComplete and the pool may reuse that session. A malformed response, truncated transport,
 cancellation, or error after result output cannot certify completion.
 
-Rows require exactly the advertised number of scalar components. Columns preserve wire names
+Rows require exactly the advertised number of value components. Columns preserve wire names
 and shared DatabaseType identities. The engine rejects duplicate final result column names
 ordinally with COHDBG015 before any result output or mutation, including implicit/explicit
 collisions. The result container retains first-column lookup for manually constructed duplicate
@@ -55,6 +55,27 @@ WHERE scalar value errors (#1140) arrive as ExecutionFailure text `COHDBG013: me
 before ResultHeader. GraphClientWireTests pins division by zero, overflow and invalid conditions,
 then reuse of the exact authenticated pooled session followed by SHOW LABELS. A combined
 OR/IN/string/arithmetic case compares wire rows with in-process rows. No wire fields change.
+
+## Composite values (#1146)
+
+GraphConnection checks the negotiated graph.composite-values capability before constructing
+an exchange. When absent, GraphRequestEncoder refuses list/map parameters locally with
+ExecutionFailure and sends no frame. When present, scalar and path request parameters use
+GraphValueCodec. ResultHeader marks possible composite columns with bit 7 of their type byte.
+Unmarked ResultRow columns keep scalar tuple bytes. Marked columns carry tag 0 plus a scalar
+tuple component, or tag 1 plus a little-endian Int32 byte length and GraphValueCodec component.
+Lists materialize as object?[] and maps as read-only ordinal IReadOnlyDictionary<string, object?>,
+with nested NULLs and scalar runtime types preserved. GraphRow now carries those values.
+Column metadata stays unchanged. No GraphPathResult or Path frame format changes.
+
+The [Graph codec contract](../../Assimalign.Cohesion.Database.Graph/docs/DESIGN.md#composite-values-and-wire-framing-1146)
+defines depth 64, 65536 values and 16777216 bytes, checked before allocations while decoding.
+Malformed result components or row lengths are ProtocolViolation and discard the connection.
+The server rejects unnegotiated possible composite projections statically before writer locking
+with COHDBG016. Constructors and materialized row sizes enforce bounds inside the transaction,
+so refusals roll back writes and permit pooled-session reuse. Scalar results have no encoding
+preflight or additional value framing. Pattern property maps remain scalar-only. Protocol 2.0 and 2.1 without
+the capability retain legacy scalar bytes. Both halves ship now that #1105 has landed.
 
 ## Named scalar parameters (#1138)
 

@@ -1,10 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-
 using Shouldly;
 using Xunit;
-
 using Assimalign.Cohesion.Database.Graph.Language.Internal;
 using Assimalign.Cohesion.Database.Language;
 using Assimalign.Cohesion.Database.Types;
@@ -81,11 +79,13 @@ public sealed class GqlKeywordDispositionTests
         ["BETWEEN"] = Rejects("MATCH (a) WHERE a.x BETWEEN 1 AND 2 RETURN a", "BETWEEN"),
         ["NONE"] = Rejects("MATCH (a) WHERE NONE(a.tags) RETURN a", "NONE"),
         ["SINGLE"] = Rejects("MATCH (a) WHERE SINGLE(a.tags) RETURN a", "SINGLE"),
-        ["CASE"] = Rejects(CaseExpression, "CASE"),
-        ["WHEN"] = Rejects(CaseExpression, "CASE"),
-        ["THEN"] = Rejects(CaseExpression, "CASE"),
-        ["ELSE"] = Rejects(CaseExpression, "CASE"),
-        ["END"] = Rejects(CaseExpression, "CASE"),
+        ["CASE"] = Parses(CaseExpression),
+        ["WHEN"] = Parses(CaseExpression),
+        ["THEN"] = Parses(CaseExpression),
+        ["ELSE"] = Parses(CaseExpression),
+        ["END"] = Parses(CaseExpression),
+        ["COALESCE"] = Parses("RETURN COALESCE(NULL, 1)"),
+        ["NULLIF"] = Parses("RETURN NULLIF(1, 1)"),
         ["GRAPH"] = Rejects("CREATE GRAPH g", "GRAPH"),
         ["CALL"] = Rejects("CALL db.labels() YIELD label", "CALL"),
         ["YIELD"] = Rejects("MATCH (a)-[]->(b) YIELD a RETURN a", "YIELD"),

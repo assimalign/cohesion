@@ -17,6 +17,12 @@ internal sealed class GraphValueComparer : IEqualityComparer<object?>
         if (ReferenceEquals(left, right)) { return true; }
         if (left is null || right is null) { return false; }
         if (IsNumber(left) && IsNumber(right)) { return CompareNumbers(left, right) == 0; }
+        if (GraphCompositeValues.IsComposite(left) || GraphCompositeValues.IsComposite(right))
+        {
+            if (left is object?[] && right is object?[] || left is IReadOnlyDictionary<string, object?> && right is IReadOnlyDictionary<string, object?>)
+            { return GraphCompositeValues.Equal(left, right, grouping: true) == true; }
+            return false;
+        }
         return (left, right) switch
         {
             (GraphNode x, GraphNode y) => x.Id == y.Id,
@@ -29,9 +35,22 @@ internal sealed class GraphValueComparer : IEqualityComparer<object?>
 
     public int GetHashCode(object? value)
     {
+        System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
         if (value is null) { return 0; }
         if (TryNumber(value, out var number)) { return number.GetHashCode(); }
         if (value is float or double) { return Convert.ToDouble(value, CultureInfo.InvariantCulture).GetHashCode(); }
+        if (value is object?[] list)
+        {
+            var compositeHash = new HashCode(); compositeHash.Add(4);
+            foreach (var item in list) { compositeHash.Add(GetHashCode(item)); }
+            return compositeHash.ToHashCode();
+        }
+        if (value is IReadOnlyDictionary<string, object?> map)
+        {
+            int compositeHash = 0;
+            foreach (var entry in map) { compositeHash ^= HashCode.Combine(StringComparer.Ordinal.GetHashCode(entry.Key), GetHashCode(entry.Value)); }
+            return HashCode.Combine(5, map.Count, compositeHash);
+        }
         switch (value)
         {
             case GraphNode node: return HashCode.Combine(1, node.Id);

@@ -264,7 +264,7 @@ identifiers. A model capability begins with its lowercase family name and a dot;
 it can gate only that family's identifiers. `ProtocolChannel.Negotiate` selects
 the intersection, and `SetAgreement` applies it exactly once. Read and write gates
 reject Diagnostics, and any model capability's added frames, until agreed. A
-capability may describe a payload extension with no new frame. Future Graph composite
+capability may describe a payload extension with no new frame. Graph composite
 values (#1146) register `graph.composite-values` here without another version bump. Existing frames
 must keep their baseline encoding when the relevant capability was not agreed.
 

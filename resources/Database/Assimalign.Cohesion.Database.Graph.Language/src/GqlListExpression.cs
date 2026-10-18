@@ -3,7 +3,7 @@ using Assimalign.Cohesion.Database.Language;
 
 namespace Assimalign.Cohesion.Database.Graph.Language;
 
-/// <summary>A bracketed list of expressions, supported only as the right operand of IN.</summary>
+/// <summary>A bracketed list of expressions, usable in every value position.</summary>
 public sealed class GqlListExpression : GqlExpression
 {
     /// <summary>Initializes a list over a copy of its items.</summary>
