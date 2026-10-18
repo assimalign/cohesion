@@ -259,7 +259,8 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
                 body,
                 writeBody: HttpResponseContentRules.CarriesContent(http1Context.Response.StatusCode, http1Context.Request.Method),
                 gate,
-                writeToken).ConfigureAwait(false))
+                writeToken,
+                Connection.Output).ConfigureAwait(false))
             {
                 throw FailSlowResponse(Connection, http1Context);
             }
@@ -341,7 +342,7 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
     /// done. Body-size (413) and data-rate (408) violations surface after dispatch, on the streamed
     /// body read.
     /// </summary>
-    private async Task<Http1Context?> TryReadRequestAsync(CancellationToken cancellationToken)
+    private async ValueTask<Http1Context?> TryReadRequestAsync(CancellationToken cancellationToken)
     {
         using Http1ReadTimeout readTimeout = new(cancellationToken, _limits.KeepAliveTimeout, _limits.RequestHeadersTimeout);
 

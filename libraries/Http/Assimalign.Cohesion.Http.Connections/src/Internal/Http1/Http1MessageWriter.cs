@@ -2,6 +2,7 @@ using System;
 using System.Buffers;
 using System.Collections.Generic;
 using System.IO;
+using System.IO.Pipelines;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -151,12 +152,37 @@ internal static class Http1MessageWriter
     /// accepted within what is left of the allowance.
     /// </param>
     /// <param name="cancellationToken">A token to cancel the write.</param>
+    /// <param name="output">The connection pipe, when available, for a single bounded buffered write.</param>
     /// <returns>
     /// <see langword="true"/> once the response has been flushed; <see langword="false"/> when the peer
     /// stopped accepting it below the rate, and the caller must close the connection.
     /// </returns>
-    public static async ValueTask<bool> WriteResponseAsync(Stream stream, ReadOnlyMemory<byte> head, byte[] body, bool writeBody, MinDataRateGate? gate, CancellationToken cancellationToken)
+    public static async ValueTask<bool> WriteResponseAsync(Stream stream, ReadOnlyMemory<byte> head, byte[] body, bool writeBody, MinDataRateGate? gate, CancellationToken cancellationToken, PipeWriter? output = null)
     {
+        int bodyLength = writeBody ? body.Length : 0;
+        if (output is not null && (long)head.Length + bodyLength <= MinDataRateWait.MaxWriteSize)
+        {
+            // DuplexPipeStream.WriteAsync flushes on every write. Stage a complete small response
+            // in the pipe instead, so the head and body become visible together in one flush.
+            // The size bound preserves the rate gate's maximum credit per stalled operation.
+            cancellationToken.ThrowIfCancellationRequested();
+            int length = head.Length + bodyLength;
+            Memory<byte> destination = output.GetMemory(length);
+            head.CopyTo(destination);
+            if (bodyLength > 0)
+            {
+                body.AsMemory().CopyTo(destination[head.Length..]);
+            }
+            output.Advance(length);
+            if (gate is null)
+            {
+                await FlushPipeAsync(output, cancellationToken).ConfigureAwait(false);
+                return true;
+            }
+            gate.Record(ticksWaited: 0, bytesTransferred: length);
+            return await MinDataRateWait.TryRunAsync(gate, output, FlushPipeAsync, cancellationToken).ConfigureAwait(false);
+        }
+
         if (gate is null)
         {
             await stream.WriteAsync(head, cancellationToken).ConfigureAwait(false);
@@ -181,6 +207,15 @@ internal static class Http1MessageWriter
         }
 
         return await TryWriteWithinRateAsync(stream, ReadOnlyMemory<byte>.Empty, gate, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async ValueTask FlushPipeAsync(PipeWriter output, CancellationToken cancellationToken)
+    {
+        FlushResult result = await output.FlushAsync(cancellationToken).ConfigureAwait(false);
+        if (result.IsCanceled)
+        {
+            throw new OperationCanceledException(cancellationToken);
+        }
     }
 
     /// <summary>
