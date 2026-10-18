@@ -26,7 +26,7 @@ internal sealed partial class SqlPlanExecutor
         if (previous.Type.Type != column.Type.Type || previous.Type.Scale != column.Type.Scale ||
             !string.Equals(previous.DomainName, column.DomainName, StringComparison.OrdinalIgnoreCase) ||
             (previous.Collation ?? _catalog.DefaultCollation).Id != (column.Collation ?? _catalog.DefaultCollation).Id ||
-            !string.Equals(SqlSchemaProvisioner.CanonicalDefault(previous.DefaultLiteral),
+            !plan.AllowDefaultChange && !string.Equals(SqlSchemaProvisioner.CanonicalDefault(previous.DefaultLiteral),
                 SqlSchemaProvisioner.CanonicalDefault(column.DefaultLiteral), StringComparison.Ordinal))
         {
             throw new DatabaseException($"ALTER COLUMN '{column.Name}' requiring a storage-type, domain, collation, scale or default rewrite is not supported. Use an explicit table-copy migration; in-place rewrites are tracked by #1447.");

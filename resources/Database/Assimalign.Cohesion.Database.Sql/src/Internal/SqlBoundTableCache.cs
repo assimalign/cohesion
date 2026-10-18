@@ -168,7 +168,7 @@ internal sealed class SqlBoundTableCache
             }
         }
 
-        var adopted = new SqlBindingEntry<SqlBoundTable>(new SqlBoundTable(published, checks.ToArray(), bound.DefaultValues, bound.Domains));
+        var adopted = new SqlBindingEntry<SqlBoundTable>(new SqlBoundTable(published, checks.ToArray(), bound.DefaultValues, bound.Domains, bound.MissingValues));
         return state.Bound.GetValue(published, _ => adopted).Get(cancellationToken);
     }
 
@@ -305,6 +305,7 @@ internal sealed class SqlBoundTableCache
         }
 
         var defaults = new SqlBoundExpression?[table.Columns.Count];
+        var missing = new SqlBoundExpression?[table.Columns.Count];
         List<SqlBoundDomain>? domains = null;
         for (int ordinal = 0; ordinal < defaults.Length; ordinal++)
         {
@@ -316,13 +317,23 @@ internal sealed class SqlBoundTableCache
                     $"DEFAULT of column '{column.Name}' on table '{tableName}'", functions, _catalog.DefaultCollation, cancellationToken);
             }
 
+            if (column.MissingValueLiteral is { } text)
+            {
+                var frozen = new SqlCatalogColumn(column.Name, column.Type, true, text, column.Collation);
+                if (!SqlPersistedExpression.IsDefaultLiteral(SqlPersistedExpression.Load(text, "Missing value")))
+                {
+                    throw new DatabaseException($"Missing value of column '{column.Name}' must be a literal.");
+                }
+                missing[ordinal] = string.Equals(text, column.DefaultLiteral, StringComparison.Ordinal) ? defaults[ordinal] : SqlPlanExecutor.BindDefaultExpression(frozen,
+                    $"Missing value of column '{column.Name}' on table '{tableName}'", functions, _catalog.DefaultCollation, cancellationToken);
+            }
             if (column.DomainName is not null)
             {
                 (domains ??= []).Add(BindDomain(table, ordinal, tableName, functions, cancellationToken));
             }
         }
 
-        return new SqlBoundTable(table, checks.ToArray(), defaults, domains?.ToArray());
+        return new SqlBoundTable(table, checks.ToArray(), defaults, domains?.ToArray(), missing);
     }
 
     /// <summary>

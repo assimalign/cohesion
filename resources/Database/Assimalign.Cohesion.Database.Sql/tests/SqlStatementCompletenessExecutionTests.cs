@@ -95,7 +95,6 @@ public sealed class SqlStatementCompletenessExecutionTests
     /// <param name="sql">The ALTER TABLE statement.</param>
     /// <param name="action">The action the error names.</param>
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Completeness: an unsupported ALTER TABLE action fails at parse time")]
-    [InlineData("ALTER TABLE t RENAME TO v;", "RENAME TO")]
     [InlineData("ALTER TABLE t ALTER COLUMN age TYPE BIGINT;", "ALTER COLUMN")]
     [InlineData("ALTER TABLE t;", "requires an action")]
     public async Task ExecuteAsync_UnsupportedAlterTableAction_ShouldFailAtParseTime(string sql, string action)
@@ -111,7 +110,7 @@ public sealed class SqlStatementCompletenessExecutionTests
         var error = await Should.ThrowAsync<DatabaseParseException>(() => ExecuteAsync(session, sql));
 
         // Assert
-        error.Message.ShouldContain("SQL0003", Case.Sensitive);
+        error.Message.ShouldContain(action == "ALTER COLUMN" ? "COHDBL001" : "SQL0003", Case.Sensitive);
         error.ShouldContainMessage(action, Case.Sensitive);
         (await SnapshotAsync(session)).ShouldBe(before);
         (await RowsAsync(session, "SELECT name, age FROM t WHERE id = 1;")).ShouldHaveSingleItem().ShouldBe(new object?[] { "ann", 36 });

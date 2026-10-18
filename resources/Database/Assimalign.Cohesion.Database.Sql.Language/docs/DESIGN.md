@@ -103,7 +103,10 @@ Sql.Catalog has its own SQL-independent facet.
 Decision 49a adds `SqlAlterColumnAction`, a full column-definition action:
 `ALTER TABLE t ALTER COLUMN c INT NOT NULL`. It reuses column parsing, including bounds,
 DEFAULT and collation, and the executor checks which changes preserve storage representation.
-The PostgreSQL `TYPE ... USING`, `SET` and `DROP` variants remain explicitly refused. Lookahead
+The PostgreSQL TYPE/SET DATA TYPE variants remain explicitly refused. Separate typed actions
+for SET/DROP DEFAULT and SET/DROP NOT NULL lower onto the existing column replacement path
+(#1122); RENAME TO and RENAME [COLUMN] have their own immutable action leaves. RENAME and TO
+remain contextual, and each form uses the ordinary complete-statement terminator check. Lookahead
 copies the token lexer without changing parser bookkeeping. The action changes no clause count.
 
 Parse the declared dialect into a stable, fully-typed AST that planners, catalogs,

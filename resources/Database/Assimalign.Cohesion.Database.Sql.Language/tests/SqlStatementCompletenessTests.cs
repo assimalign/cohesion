@@ -80,6 +80,12 @@ public sealed class SqlStatementCompletenessTests
             "ALTER TABLE t DROP c",
             "ALTER TABLE t ADD CONSTRAINT ck CHECK (a > 0)",
             "ALTER TABLE t DROP CONSTRAINT ck",
+            "ALTER TABLE t RENAME TO u",
+            "ALTER TABLE t RENAME COLUMN a TO b",
+            "ALTER TABLE t ALTER COLUMN a SET DEFAULT 7",
+            "ALTER TABLE t ALTER COLUMN a DROP DEFAULT",
+            "ALTER TABLE t ALTER COLUMN a SET NOT NULL",
+            "ALTER TABLE t ALTER COLUMN a DROP NOT NULL",
         ],
         [SqlClauses.DropTable] = ["DROP TABLE t", "DROP TABLE IF EXISTS dbo.t"],
         [SqlClauses.DropIndex] = ["DROP INDEX ix ON t", "DROP INDEX IF EXISTS ix ON dbo.t"],
@@ -459,11 +465,7 @@ public sealed class SqlStatementCompletenessTests
     /// <param name="sql">The ALTER TABLE statement.</param>
     /// <param name="action">The action the diagnostic names.</param>
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Completeness: unsupported ALTER TABLE actions are named at parse time")]
-    [InlineData("ALTER TABLE t RENAME TO u;", "RENAME TO")]
-    [InlineData("ALTER TABLE t RENAME COLUMN a TO b;", "RENAME COLUMN")]
-    [InlineData("ALTER TABLE t ALTER COLUMN a TYPE BIGINT;", "ALTER COLUMN")]
     [InlineData("ALTER TABLE t MODIFY a BIGINT;", "MODIFY")]
-    [InlineData("alter table t set schema s;", "SET")]
     public void Parse_UnsupportedAlterTableAction_ShouldNameItWithoutAStubNode(string sql, string action)
     {
         // Act

@@ -135,6 +135,8 @@ internal sealed partial class SqlPlanExecutor
                 return await ExecuteDropIndexAsync(dropIndex, statement, cancellationToken).ConfigureAwait(false);
             case SqlAddColumnPlan addColumn:
                 return await ExecuteAddColumnAsync(addColumn, statement, cancellationToken).ConfigureAwait(false);
+            case SqlRenamePlan rename:
+                return await ExecuteRenameAsync(rename, statement, cancellationToken).ConfigureAwait(false);
             case SqlAlterColumnPlan alterColumn:
                 return await ExecuteAlterColumnAsync(alterColumn, statement, cancellationToken).ConfigureAwait(false);
             case SqlAddConstraintPlan addConstraint:
@@ -1284,7 +1286,7 @@ internal sealed partial class SqlPlanExecutor
     {
         var range = BuildSeekRange(table, seek);
         var snapshot = snapshotOverride ?? statement.Snapshot;
-        var defaults = _definitions.Get(table, cancellationToken).DefaultValues;
+        var defaults = _definitions.Get(table, cancellationToken).MissingValues;
 
         // The cursor materializes under the tree's read latch; synchronous
         // drain is the in-process fast path.
@@ -1478,7 +1480,7 @@ internal sealed partial class SqlPlanExecutor
         CancellationToken cancellationToken,
         SqlStatementMetrics? metrics = null)
     {
-        var defaults = _definitions.Get(table, cancellationToken).DefaultValues;
+        var defaults = _definitions.Get(table, cancellationToken).MissingValues;
         using var iterator = _storage.GetUnitIterator(table.ObjectId);
 
         while (iterator.MoveNext())

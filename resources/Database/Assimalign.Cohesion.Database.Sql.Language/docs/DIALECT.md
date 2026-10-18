@@ -60,9 +60,7 @@ MINVALUE/MAXVALUE/CYCLE/CACHE, ALTER COLUMN RESTART/SET GENERATED, and generated
 expressions also report named `COHDBL001`. Sequences, restart, overriding and populated-table
 identity backfill remain T2. RETURNING is still unavailable on this base; #1117 adds generated
 key retrieval when it lands. Full-definition ALTER COLUMN already refuses identity type changes,
-nullable definitions and DEFAULT; retaining the type and NOT NULL preserves generation. The
-separate SET DEFAULT and DROP NOT NULL spellings remain outside this base's ALTER grammar;
-#1122 must refuse them on identity columns when it lands.
+nullable definitions and DEFAULT; retaining the type and NOT NULL preserves generation. SET/DROP DEFAULT and DROP NOT NULL refuse identity columns with COHSQLE025 (#1122).
 
 ## Statement matrix
 
@@ -101,7 +99,7 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `UPDATE` | Supported | multi-column `SET`, including `c = DEFAULT`, and `WHERE` (including correlated and uncorrelated subqueries); qualified references in both use the target name or its alias, which hides the base name (PostgreSQL `parse_relation.c:3759`); hidden/unknown qualifiers fail with located `COHSQLE015` before any write and leave an explicit transaction active; aggregates in SET and outside child queries in WHERE are rejected; aggregates inside WHERE subqueries execute (see [Grouping and aggregate functions](#grouping-and-aggregate-functions-1020)) |
 | `DELETE` | Supported | optional `WHERE`, including correlated and uncorrelated subqueries; aggregates outside a child query are rejected; qualified references use the target name or its alias, which hides the base name (PostgreSQL `parse_relation.c:3759`); hidden/unknown qualifiers fail with located `COHSQLE015` before any write and leave an explicit transaction active |
 | `CREATE TABLE` | Supported | Identity columns use GENERATED ALWAYS/BY DEFAULT AS IDENTITY or the SQL Server IDENTITY alias (see identity contract above). `IF NOT EXISTS`, column definitions with parameterized types, `COLLATE <name>`, `NOT NULL`/`NULL`, `DEFAULT <literal>`, column and table `PRIMARY KEY`, `REFERENCES`/`FOREIGN KEY`, `CHECK`, and `UNIQUE`; optional `CONSTRAINT <name>` |
-| `ALTER TABLE` | Supported subset, measured | ADD/DROP COLUMN and ADD/DROP CONSTRAINT execute. Full-definition `ALTER COLUMN c TYPE [NULL | NOT NULL] [DEFAULT literal]` accepts nullability, length and precision changes that preserve storage type, scale, collation, domain and DEFAULT; tightening and every CHAR length change check existing live values and refuse changes requiring a rewrite. PostgreSQL `TYPE ... USING`, `SET` and `DROP` variants remain unsupported (49a). ADD COLUMN literal defaults backfill old-row reads and apply to subsequent inserts that omit the column; explicit NULL follows nullability. Nullable additions without a default read NULL. NOT NULL additions to populated tables require a non-null default. Invalid defaults and nonliteral expressions reject before mutation. Column COLLATE persists and governs default comparisons. See the default, atomicity and MVCC contract below (#1023). DROP COLUMN changes only the catalog: it rewrites no row, survives a crash at any point on one definition, and SELECTs running beside it read every value in its own column; see the DROP COLUMN contract below (#1241). |
+| `ALTER TABLE` | Supported subset, measured | ADD/DROP COLUMN and ADD/DROP CONSTRAINT execute. Full-definition `ALTER COLUMN c <type> [NULL | NOT NULL] [DEFAULT literal]` accepts nullability, length and precision changes that preserve storage type, scale, collation, domain and DEFAULT; tightening and every CHAR length change check existing live values and refuse changes requiring a rewrite. RENAME TO, RENAME [COLUMN], ALTER [COLUMN] SET/DROP DEFAULT and SET/DROP NOT NULL also execute (#1122). PostgreSQL TYPE/SET DATA TYPE and TYPE ... USING remain unsupported. ADD COLUMN literal defaults backfill old-row reads and apply to subsequent inserts that omit the column; explicit NULL follows nullability. Nullable additions without a default read NULL. NOT NULL additions to populated tables require a non-null default. Invalid defaults and nonliteral expressions reject before mutation. Column COLLATE persists and governs default comparisons. See the default, atomicity and MVCC contract below (#1023). DROP COLUMN changes only the catalog: it rewrites no row, survives a crash at any point on one definition, and SELECTs running beside it read every value in its own column; see the DROP COLUMN contract below (#1241). |
 | `DROP TABLE` | Supported | `IF EXISTS`; returns after catalog unpublication, with page reclamation asynchronous after older readers finish; the name may be recreated immediately |
 | `CREATE INDEX` | Supported | `CREATE [UNIQUE] INDEX [IF NOT EXISTS] <name> ON <table> (<column> [, ...])` — plain column lists only (no `ASC`/`DESC`, expressions, or `INCLUDE`; each is an additive extension) |
 | `DROP INDEX` | Supported | `DROP INDEX [IF EXISTS] <name> ON <table>` — the `ON <table>` qualifier is required: index names are scoped per table |
@@ -262,8 +260,9 @@ code when the row is evaluated. `+a` and `+(1 + 2)` reported
 [Expressions](#expressions).
 
 **ALTER TABLE actions.** `ADD [COLUMN]`, `ADD CONSTRAINT`, `DROP [COLUMN]`,
-`DROP CONSTRAINT` and full-definition `ALTER COLUMN` parse. Any other action, such as
-`RENAME TO`, `RENAME COLUMN` or `MODIFY`, reports `SQL0003` naming the action at parse time.
+`DROP CONSTRAINT`, full-definition `ALTER COLUMN`, RENAME and ALTER column default/nullability actions parse.
+TYPE/SET DATA TYPE, SET SCHEMA, RENAME CONSTRAINT and comma-separated action lists report named `COHDBL001`.
+Other unknown actions such as MODIFY report `SQL0003` at parse time.
 The statement then carries no action node. It used to carry a placeholder
 `DROP COLUMN ?` that failed later, in the catalog. A missing action, table name,
 column name or constraint name also reports `SQL0003`; `ADD` or `DROP` directly
@@ -501,12 +500,57 @@ longer fail with an unknown-column error, and `ORDER BY 1 DESC` no longer return
 the unsorted scan. Execution and wire tests use deliberately scrambled values
 whose required ordering differs from both insertion order and the actual scan.
 
+## Renames and column defaults/nullability (#1122)
+
+ALTER TABLE accepts one action: RENAME TO new_table, RENAME [COLUMN] old TO new,
+and ALTER [COLUMN] c SET DEFAULT value, DROP DEFAULT, SET NOT NULL or DROP NOT NULL.
+RENAME and TO remain contextual identifiers. Rename targets are unqualified and stay in the
+same schema; SET SCHEMA, RENAME CONSTRAINT, TYPE/SET DATA TYPE and action lists are excluded.
+Existing names and read-only system relation names cannot be overwritten.
+After the ownership check, a table name retained by a declared script object claim is refused with COHSQLD002 naming
+the script; historical targets are forward-only and cannot be silently rewritten.
+
+Renames preserve object IDs, physical column ordinals, row versions and index trees. Index
+column lists, primary keys, local and incoming/self-referencing FKs and CHECK definitions
+change together in one catalog transaction. Generated constraint and index names stay unchanged.
+CHECK rewriting replaces only column-reference identifier tokens in its single-table scope;
+strings, function names, type names and collations retain their meaning. Persisted DEFAULTs
+have no column scope; SQL function bodies bind their own parameters and cannot contain table
+subqueries. They therefore require no table-name rewrite. There are no stored view queries on
+this base; #1124 owns their dependency guard. INFORMATION_SCHEMA and COHESION_SCHEMA expose
+the published names and facets immediately. A query using an old name reports an unknown object.
+
+SET DEFAULT accepts the same literal, signed/typed literal and scalar-function-call forms as
+CREATE TABLE on this base. Conversion and bounds are checked before publication; broader
+expression defaults remain #1121. DROP DEFAULT affects later omitted-column writes. A NOT NULL
+column without a default requires an explicit value. Neither action changes old rows: ADD
+COLUMN freezes its missing value once, including NULL when it had no default. An old row still
+reads that value after changing/dropping the insert default and after restart. Explicit stored
+NULL stays NULL. This is PostgreSQL's separate missing attribute value
+(src/backend/access/common/heaptuple.c:151-180) and column-default operation
+(src/backend/commands/tablecmds.c:8201-8268).
+
+SET NOT NULL scans current live rows under the Exclusive table lock, including synthesized
+missing fields, and refuses a NULL naming the column without changing metadata. DROP NOT NULL
+allows future NULL writes but refuses a primary-key column. SET/DROP DEFAULT and DROP NOT NULL
+refuse identity columns with COHSQLE025; PostgreSQL checks identity at tablecmds.c:7858-7863
+and :8226-8233. A column already satisfying the requested facet still publishes an immutable
+replacement, so queued DML retries consistently.
+
+The target lock precedes incoming-child Exclusive locks sorted by ObjectId. Related DDL may
+form a cycle; the existing lock manager aborts a victim and releases its locks so a retry succeeds.
+DML bound before a same-name change fails with "changed while the statement was waiting";
+a queued writer behind RENAME TO reports the old table does not exist. Every action retains
+schema ownership checks and is refused with COHSQLT003 inside an explicit transaction; that
+failure leaves the transaction usable. SQL record-space format 17 and table extension 6 persist
+the split. Earlier formats are refused; there is no compatibility reader or upgrade path.
+
 ## ADD COLUMN defaults, atomicity and MVCC (#1023)
 
 `ALTER TABLE t ADD COLUMN extra INT DEFAULT 7` makes every preexisting row read
 7 while preserving all original values. The backfill is **resolved at read time
 from persisted catalog metadata**: a missing trailing field takes the added
-column's validated literal default. Existing row bytes and MVCC writer/deleter
+column's frozen missing-value literal, captured at ADD COLUMN independently of its insert default. Existing row bytes and MVCC writer/deleter
 stamps are unchanged. A stored NULL remains NULL; it is never mistaken for a
 missing field. A later UPDATE writes the resulting full row normally.
 
@@ -515,7 +559,7 @@ and typed DATE/TIME/TIMESTAMP/TIMESTAMPTZ/INTERVAL/X/N literals use this same pa
 A typed DEFAULT must match the column storage type; a mismatch fails planning before
 mutation. `DEFAULT -'x'` reports SQL0003 while the default grammar remains literal-only.
 
-A subsequent INSERT that omits the column uses the same default. Explicit NULL
+A subsequent INSERT that omits the column uses its current insert default, which SET/DROP DEFAULT can change. Explicit NULL
 is stored for nullable columns and rejected for NOT NULL columns. A nullable
 addition with no default, or with `DEFAULT NULL`, yields NULL for old rows and
 omitted inserts. On a populated table, NOT NULL requires a non-null default;
@@ -2203,7 +2247,7 @@ pin in the same change.
 | `COHDBL001` | Error | Recognized clause, keyword, function, operator or type modifier is not supported by the SQL model surface, including prefix and infix `~` (#1101), temporal precision and INTERVAL field qualifiers in declarations and CAST (#1438); the message names the construct and, for a modifier, its declaration |
 | `SQL0001` | Error | Empty query text |
 | `SQL0002` | Error | Unknown command (recognized unsupported clauses use `COHDBL001`) |
-| `SQL0003` | Error | Malformed syntax: text after a complete statement or after its terminating `;`; a missing expression, closing token, keyword, name or `VALUES` row; an unterminated string, quoted identifier or block comment; a character outside the dialect, such as `?`, `#`, `^` or a non-ASCII digit, which binds no alias or column (#1101); a numeric literal whose exponent has no digits; an `IS` form other than `[NOT] NULL`; `NOT` after an operand without `BETWEEN`, `IN` or `LIKE`; `LIKE ... ESCAPE`; `LIMIT` after `OFFSET`; an incomplete `IF [NOT] EXISTS`; `ALTER` without `TABLE`; an unsupported or incomplete `ALTER TABLE` action; and malformed transaction-control, JOIN, GROUP BY, HAVING, CAST, COLLATE, or constraint/DDL syntax |
+| `SQL0003` | Error | Malformed syntax: text after a complete statement or after its terminating `;`; a missing expression, closing token, keyword, name or `VALUES` row; an unterminated string, quoted identifier or block comment; a character outside the dialect, such as `?`, `#`, `^` or a non-ASCII digit, which binds no alias or column (#1101); a numeric literal whose exponent has no digits; an `IS` form other than `[NOT] NULL`; `NOT` after an operand without `BETWEEN`, `IN` or `LIKE`; `LIKE ... ESCAPE`; `LIMIT` after `OFFSET`; an incomplete `IF [NOT] EXISTS`; `ALTER` without `TABLE`; an unknown or incomplete `ALTER TABLE` action; and malformed transaction-control, JOIN, GROUP BY, HAVING, CAST, COLLATE, or constraint/DDL syntax |
 | `SQL0004` | — | Retired (E3): an unknown CAST target type was a parse error; a name that is not a built-in type is now resolved by the engine, and one it does not know is `COHSQLE010` |
 | `SQL0005` | Error | Invalid type modifiers at any declaration or CAST: malformed arguments (including CHAR(MAX)), out-of-range length/precision/scale (including FLOAT outside 1..53 bits), arguments a type does not take, or a rejected type spelling (BIT, SMALLDATETIME, TIME WITH TIME ZONE); names the declaration and reason. Temporal precision and INTERVAL qualifiers use COHDBL001 |
 | `SQL0006` | Error | Expression nesting exceeds the limit (256 levels by default, configurable within 32..4096), or parentheses nest deeper than the limit; an `AND`/`OR` chain counts one level. The rest of the statement is not parsed. An engine also reports it for a typed request whose statement nests deeper than the engine's limit (#1151) |

@@ -207,6 +207,17 @@ internal static class Program
         var subqueryDelete = await session.ExecuteAsync("DELETE FROM subquery_guard WHERE id > (SELECT AVG(id) FROM subquery_guard)");
         Check("in process: DELETE WHERE snapshot", subqueryDelete.AffectedCount, 1L);
         Check("in process: DML subquery rows", await RowsAsync(session, "SELECT id FROM subquery_guard"), [[2]]);
+        await session.ExecuteAsync("CREATE TABLE alter_guard (id INT PRIMARY KEY)");
+        await session.ExecuteAsync("INSERT INTO alter_guard VALUES (1)");
+        await session.ExecuteAsync("ALTER TABLE alter_guard ADD v INT NOT NULL DEFAULT 7");
+        await session.ExecuteAsync("ALTER TABLE alter_guard ALTER v SET DEFAULT -9");
+        await session.ExecuteAsync("INSERT INTO alter_guard(id) VALUES (2)");
+        await session.ExecuteAsync("ALTER TABLE alter_guard RENAME v TO value");
+        await session.ExecuteAsync("ALTER TABLE alter_guard RENAME TO altered_guard");
+        await session.ExecuteAsync("ALTER TABLE altered_guard ALTER value DROP DEFAULT");
+        await session.ExecuteAsync("ALTER TABLE altered_guard ALTER value DROP NOT NULL");
+        await session.ExecuteAsync("ALTER TABLE altered_guard ALTER value SET NOT NULL");
+        Check("in process: ALTER rename and frozen missing values", await RowsAsync(session, "SELECT value FROM altered_guard ORDER BY id"), [[7], [-9]]);
         Check("in process: strict typed literals", await RowsAsync(session, typedLiterals), _typedLiterals);
         Check("in process: ISO type names and SQL Server lexical aliases", await RowsAsync(session, typeAliases), _typeAliases);
         Check("in process: CHAR storage, cast, length, concat, LIKE and seek", await RowsAsync(session, Characters), _characters);
@@ -307,6 +318,7 @@ internal static class Program
         Check("over the wire: correlated scalar EXISTS and IN after failure", await RowsAsync(connection, correlatedRows, timeout.Token), [[1L, 100L], [2L, 200L]]);
         Check("over the wire: correlated UPDATE", await connection.ExecuteAsync("UPDATE subquery_guard SET id = id WHERE EXISTS (SELECT u.id FROM subquery_guard u WHERE u.id = subquery_guard.id)", cancellationToken: timeout.Token), 1L);
         Check("over the wire: correlated DELETE", await connection.ExecuteAsync("DELETE FROM subquery_guard WHERE id IN (SELECT u.id FROM subquery_guard u WHERE u.id = subquery_guard.id)", cancellationToken: timeout.Token), 1L);
+        Check("over the wire: ALTER rename and frozen missing values", await RowsAsync(connection, "SELECT value FROM altered_guard ORDER BY id", timeout.Token), [[7], [-9]]);
         Check("over the wire: strict typed literals", await RowsAsync(connection, typedLiterals, timeout.Token), _typedLiterals);
         Check("over the wire: ISO type names and SQL Server lexical aliases", await RowsAsync(connection, typeAliases, timeout.Token), _typeAliases);
         var fixedCodes = await connection.QueryAsync(Characters, cancellationToken: timeout.Token);

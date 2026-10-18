@@ -284,16 +284,7 @@ public sealed partial class SqlQueryParser
             else if (IsKeyword(ref lexer, "DEFAULT"))
             {
                 Advance(ref lexer);
-                // A signed numeric default uses the same unary node as an expression. The
-                // engine admits only one literal (including one numeric minus), not expressions.
-                int defaultStart = lexer.Current.Position;
-                int diagnosticsBeforeDefault = _parseDiagnostics.Count;
-                defaultValue = ParseUnary(ref lexer);
-                if (_parseDiagnostics.Count == diagnosticsBeforeDefault && defaultValue is SqlUnaryExpression { Operator: SqlUnaryOperator.Negate or SqlUnaryOperator.Plus } unary &&
-                    (unary.Operator != SqlUnaryOperator.Negate || unary.Operand is not SqlLiteralExpression { LiteralType: SqlLiteralType.Integer or SqlLiteralType.Float }))
-                {
-                    AddTypeModifierDiagnostic("DEFAULT", "A signed DEFAULT must be one numeric literal.", defaultStart, _lastTokenEnd, "SQL0003");
-                }
+                defaultValue = ParseColumnDefault(ref lexer);
             }
             else
             {
@@ -433,12 +424,20 @@ public sealed partial class SqlQueryParser
             : ParseUnaliasedTableReference(ref lexer);
 
         // Action: ADD, DROP, or a complete ALTER COLUMN definition.
-        SqlAlterAction action;
+        SqlAlterAction? action;
         if (TryRejectIdentityAlter(ref lexer))
         {
             return new SqlQueryExpression(SqlQueryCommandType.Alter, null, Location.Create(1, 1, pos, _lastTokenEnd));
         }
-        if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "ALTER") && IsAlterColumnDefinition(lexer))
+        if (IsWord(ref lexer, "RENAME"))
+        {
+            action = ParseRenameAction(ref lexer);
+        }
+        else if (IsWord(ref lexer, "ALTER") && !IsAlterColumnDefinition(lexer))
+        {
+            action = ParseAlterColumnFacet(ref lexer);
+        }
+        else if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "ALTER") && IsAlterColumnDefinition(lexer))
         {
             Advance(ref lexer);
             ExpectKeyword(ref lexer, "COLUMN", "ALTER COLUMN");
@@ -494,19 +493,118 @@ public sealed partial class SqlQueryParser
         }
         else
         {
-            RejectAlterTableAction(ref lexer);
+            if (IsWord(ref lexer, "SET")) { RejectAlterForm(ref lexer, "SET SCHEMA"); }
+            else { RejectAlterTableAction(ref lexer); }
             ConsumeRemaining(ref lexer);
             return new SqlQueryExpression(SqlQueryCommandType.Alter, null,
                 Location.Create(1, 1, pos, _lastTokenEnd));
         }
 
+        if (action is null)
+        {
+            return new SqlQueryExpression(SqlQueryCommandType.Alter, null, Location.Create(1, 1, pos, _lastTokenEnd));
+        }
+        if (lexer.Current.Type == TokenType.Comma)
+        {
+            RejectAlterForm(ref lexer, "comma-separated ALTER TABLE actions");
+        }
         return new SqlAlterTableExpression(table, action, null,
             Location.Create(1, 1, pos, _lastTokenEnd));
     }
 
+    private SqlExpression ParseColumnDefault(ref TokenLexer lexer)
+    {
+        // A signed numeric default uses the same unary node as an expression. The
+        // engine admits only one literal (including one numeric minus), not expressions.
+        int defaultStart = lexer.Current.Position;
+        int diagnosticsBeforeDefault = _parseDiagnostics.Count;
+        var value = ParseUnary(ref lexer);
+        if (_parseDiagnostics.Count == diagnosticsBeforeDefault && value is SqlUnaryExpression { Operator: SqlUnaryOperator.Negate or SqlUnaryOperator.Plus } unary &&
+            (unary.Operator != SqlUnaryOperator.Negate || unary.Operand is not SqlLiteralExpression { LiteralType: SqlLiteralType.Integer or SqlLiteralType.Float }))
+        {
+            AddTypeModifierDiagnostic("DEFAULT", "A signed DEFAULT must be one numeric literal.", defaultStart, _lastTokenEnd, "SQL0003");
+        }
+        return value;
+    }
+
+    private SqlAlterAction? ParseRenameAction(ref TokenLexer lexer)
+    {
+        Advance(ref lexer);
+        if (IsWord(ref lexer, "CONSTRAINT"))
+        {
+            RejectAlterForm(ref lexer, "RENAME CONSTRAINT");
+            return null;
+        }
+        if (IsWord(ref lexer, "TO"))
+        {
+            Advance(ref lexer);
+            string target = ReadAlterName(ref lexer, "table name after RENAME TO");
+            if (lexer.Current.Type == TokenType.Dot)
+            {
+                AddSyntaxDiagnostic(ref lexer, "RENAME TO requires an unqualified target in the same schema.");
+                ConsumeRemaining(ref lexer);
+            }
+            return new SqlAlterRenameTableAction(target);
+        }
+        if (IsWord(ref lexer, "COLUMN")) { Advance(ref lexer); }
+        string column = ReadAlterName(ref lexer, "column name after RENAME");
+        ExpectIdentityWord(ref lexer, "TO");
+        return new SqlAlterRenameColumnAction(column, ReadAlterName(ref lexer, "column name after TO"));
+    }
+
+    private SqlAlterAction? ParseAlterColumnFacet(ref TokenLexer lexer)
+    {
+        Advance(ref lexer);
+        if (IsWord(ref lexer, "COLUMN")) { Advance(ref lexer); }
+        string column = ReadAlterName(ref lexer, "column name after ALTER");
+        bool set = IsWord(ref lexer, "SET");
+        bool drop = IsWord(ref lexer, "DROP");
+        if (set || drop)
+        {
+            Advance(ref lexer);
+            if (IsWord(ref lexer, "DEFAULT"))
+            {
+                Advance(ref lexer);
+                return set ? new SqlAlterSetDefaultAction(column, ParseColumnDefault(ref lexer)) : new SqlAlterDropDefaultAction(column);
+            }
+            if (IsWord(ref lexer, "NOT"))
+            {
+                Advance(ref lexer);
+                ExpectKeyword(ref lexer, "NULL", "NOT NULL");
+                return set ? new SqlAlterSetNotNullAction(column) : new SqlAlterDropNotNullAction(column);
+            }
+        }
+        string facet = CurrentText(ref lexer).ToUpperInvariant();
+        if (set && IsWord(ref lexer, "DATA") && TryPeekToken(lexer, out string next, out _) && next.Equals("TYPE", StringComparison.OrdinalIgnoreCase))
+        {
+            facet = "DATA TYPE";
+        }
+        RejectAlterForm(ref lexer, "ALTER COLUMN " + (set ? "SET " : drop ? "DROP " : "") + facet);
+        return null;
+    }
+
+    private string ReadAlterName(ref TokenLexer lexer, string subject)
+    {
+        if (!IsIdentifierOrKeyword(ref lexer))
+        {
+            AddExpectedDiagnostic(ref lexer, subject);
+            return string.Empty;
+        }
+        string name = CurrentIdentifierText(ref lexer);
+        Advance(ref lexer);
+        return name;
+    }
+
+    private void RejectAlterForm(ref TokenLexer lexer, string action)
+    {
+        _parseDiagnostics.Add(QueryDiagnostics.UnsupportedClause(action, Profile.Language,
+            Location.Create(1, 1, lexer.Current.Position, lexer.Current.Position + lexer.Current.Value.Length)));
+        ConsumeRemaining(ref lexer);
+    }
+
     private static bool IsAlterColumnDefinition(TokenLexer lexer)
     {
-        // PostgreSQL's TYPE/USING, SET and DROP forms remain outside this dialect.
+        // TYPE/SET DATA TYPE use the capability diagnostic; facets have separate action nodes.
         // This action uses the same full column definition as CREATE and ADD.
         Next(ref lexer);
         if (!IsKeyword(ref lexer, "COLUMN"))

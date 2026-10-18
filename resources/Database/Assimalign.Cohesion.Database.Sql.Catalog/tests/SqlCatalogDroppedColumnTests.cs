@@ -100,13 +100,13 @@ public sealed class SqlCatalogDroppedColumnTests
         // Arrange: the dropped count, then the ordinals, after two live columns.
         using var storage = SqlStorage.Create(new MemoryStream(), new MemoryStream(), new MemoryStream(), "damaged");
         var record = TableRecordPrefix(1, "dbo", "damaged", ("id", false), ("note", true))
-            .AppendInt32(5).AppendInt32(0).AppendInt32(-1).AppendInt32(-1);
+            .AppendInt32(6).AppendInt32(0).AppendInt32(-1).AppendInt32(-1);
         foreach (int value in persisted)
         {
             record.AppendInt32(value);
         }
         // Complete the current format: no column domains and no function calls in either default.
-        record.AppendNull().AppendNull().AppendInt32(0).AppendInt32(0).AppendBoolean(false).AppendBoolean(false);
+        record.AppendNull().AppendNull().AppendInt32(0).AppendInt32(0).AppendBoolean(false).AppendBoolean(false).AppendNull().AppendNull();
 
         Insert(storage, record.ToArray());
 

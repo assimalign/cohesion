@@ -957,7 +957,7 @@ internal sealed partial class SqlPlanner
             var column = columns[i];
             if (primaryKey.Contains(column.Name, StringComparer.OrdinalIgnoreCase))
             {
-                columns[i] = new SqlCatalogColumn(column.Name, column.Type, false, column.DefaultLiteral, column.Collation, column.DomainName, column.DefaultFunctionCalls, column.Identity);
+                columns[i] = new SqlCatalogColumn(column.Name, column.Type, false, column.DefaultLiteral, column.Collation, column.DomainName, column.DefaultFunctionCalls, column.Identity, column.MissingValueLiteral);
             }
         }
         return new SqlCreateTablePlan(schema, create.Table.TableName, columns, primaryKey, create.IfNotExists, create.Constraints);
@@ -977,11 +977,15 @@ internal sealed partial class SqlPlanner
         {
             return type.DefaultLiteral;
         }
-        if (definition.DefaultValue is SqlLiteralExpression { LiteralType: SqlLiteralType.Null })
+        return ResolveDefaultLiteral(definition.DefaultValue, type, definition.ColumnName, table, allowFunction);
+    }
+
+    private string? ResolveDefaultLiteral(SqlExpression expression, SqlType type, string columnName, string table, bool allowFunction = true)
+    {
+        if (expression is SqlLiteralExpression { LiteralType: SqlLiteralType.Null })
         {
             return type.DefaultLiteral is null ? null : "NULL";
         }
-        var expression = definition.DefaultValue;
         if (expression is SqlLiteralExpression typed)
         {
             DatabaseType? literalType = typed.LiteralType switch
@@ -992,20 +996,20 @@ internal sealed partial class SqlPlanner
             };
             if (literalType is { } declared && declared != type.Storage.Type)
             {
-                throw new SqlPlanningException("COHSQLE013", $"Column '{definition.ColumnName}': typed DEFAULT {typed.LiteralType} does not match {type.Storage.Type}.", typed.Location);
+                throw new SqlPlanningException("COHSQLE013", $"Column '{columnName}': typed DEFAULT {typed.LiteralType} does not match {type.Storage.Type}.", typed.Location);
             }
         }
         if (!SqlPersistedExpression.IsDefaultLiteral(expression))
         {
             if (!allowFunction || expression is not SqlFunctionCallExpression)
             {
-                throw new SqlPlanningException("COHSQLE013", $"Column '{definition.ColumnName}': only literal DEFAULT values are supported.", definition.DefaultValue?.Location);
+                throw new SqlPlanningException("COHSQLE013", $"Column '{columnName}': only literal DEFAULT values are supported.", expression?.Location);
             }
             var scope = new SqlExpressionEvaluator([], null, defaultCollation: _catalog.DefaultCollation, functions: _functions, cancellationToken: _cancellationToken);
             SqlPersistedExpression.Bind(expression, scope);
             ValidateExpression(expression, scope);
         }
-        return SqlPersistedExpression.Canonicalize(expression, $"DEFAULT of column '{definition.ColumnName}' on table '{table}'");
+        return SqlPersistedExpression.Canonicalize(expression, $"DEFAULT of column '{columnName}' on table '{table}'");
     }
 
     private IReadOnlyList<string> DefaultCalls(string? text)
@@ -1086,8 +1090,34 @@ internal sealed partial class SqlPlanner
             SqlAlterAddConstraintAction add => new SqlAddConstraintPlan(ResolveTable(alter.Table), add.Constraint),
             SqlAlterDropConstraintAction drop => new SqlDropConstraintPlan(ResolveTable(alter.Table), drop.ConstraintName),
             SqlAlterColumnAction change => PlanAlterColumn(alter.Table, change),
+            SqlAlterRenameTableAction rename => new SqlRenamePlan(ResolveTable(alter.Table), null, rename.NewName),
+            SqlAlterRenameColumnAction rename => new SqlRenamePlan(ResolveTable(alter.Table), rename.ColumnName, rename.NewName),
+            SqlAlterSetDefaultAction change => PlanColumnFacet(alter.Table, change.ColumnName, change.DefaultValue, false, null),
+            SqlAlterDropDefaultAction change => PlanColumnFacet(alter.Table, change.ColumnName, null, true, null),
+            SqlAlterSetNotNullAction change => PlanColumnFacet(alter.Table, change.ColumnName, null, false, false),
+            SqlAlterDropNotNullAction change => PlanColumnFacet(alter.Table, change.ColumnName, null, false, true),
             _ => throw new SqlPlanningException("COHSQLE013", "This ALTER TABLE action is not supported by the executor yet.", alter.Location),
         };
+    }
+
+    private SqlAlterColumnPlan PlanColumnFacet(SqlTableReference reference, string name, SqlExpression? value, bool dropDefault, bool? nullable)
+    {
+        var table = ResolveTable(reference);
+        var previous = table.Columns[FindColumnOrdinal(table, name)];
+        if (previous.Identity is not null && (value is not null || dropDefault || nullable == true))
+        {
+            throw SqlPlanningException.IdentityViolation(name, ErrorMessages.IdentityAlterForbidden);
+        }
+        if (nullable == true && table.PrimaryKeyColumns.Contains(name, StringComparer.OrdinalIgnoreCase))
+        {
+            throw new SqlPlanningException("SQL0003", string.Format(CultureInfo.CurrentCulture, ErrorMessages.ColumnNullabilityConflict, name));
+        }
+        string? text = value is not null
+            ? ResolveDefaultLiteral(value, SqlType.ForStorage(previous.Type), name, $"{table.Schema}.{table.Name}")
+            : dropDefault ? null : previous.DefaultLiteral;
+        return new SqlAlterColumnPlan(table, new SqlCatalogColumn(previous.Name, previous.Type, nullable ?? previous.IsNullable,
+            text, previous.Collation, previous.DomainName, value is not null ? DefaultCalls(text) : dropDefault ? [] : previous.DefaultFunctionCalls,
+            previous.Identity, previous.MissingValueLiteral), AllowDefaultChange: value is not null || dropDefault);
     }
 
     private SqlAlterColumnPlan PlanAlterColumn(SqlTableReference reference, SqlAlterColumnAction change)
@@ -1112,7 +1142,7 @@ internal sealed partial class SqlPlanner
         return new SqlAlterColumnPlan(table, new SqlCatalogColumn(change.Column.ColumnName, type.Storage,
             change.Column.IsNullable, ResolveDefaultLiteral(change.Column, $"{table.Schema}.{table.Name}"),
             ResolveColumnCollation(change.Column, type.Storage), type.IsDomain ? type.Name : null,
-            previous.DefaultFunctionCalls, previous.Identity));
+            previous.DefaultFunctionCalls, previous.Identity, previous.MissingValueLiteral));
     }
 
     private SqlAddColumnPlan PlanAddColumn(string schema, string table, SqlAlterAddColumnAction add)
@@ -1123,6 +1153,7 @@ internal sealed partial class SqlPlanner
             throw new SqlPlanningException("COHSQLE014", string.Format(CultureInfo.CurrentCulture, ErrorMessages.TableMissing, schema, table));
         }
         var identity = ResolveIdentity(add.Column, type.Storage, current.Columns.Any(column => column.Identity is not null));
+        string? defaultLiteral = identity is null ? ResolveDefaultLiteral(add.Column, $"{schema}.{table}", allowFunction: false) : null;
         return new SqlAddColumnPlan(
             schema,
             table,
@@ -1130,9 +1161,10 @@ internal sealed partial class SqlPlanner
                 add.Column.ColumnName,
                 type.Storage,
                 add.Column.IsNullable && !add.Column.IsPrimaryKey && identity is null,
-                identity is null ? ResolveDefaultLiteral(add.Column, $"{schema}.{table}", allowFunction: false) : null,
+                defaultLiteral,
                 ResolveColumnCollation(add.Column, type.Storage),
-                type.IsDomain ? type.Name : null, identity: identity),
+                type.IsDomain ? type.Name : null, identity: identity,
+                missingValueLiteral: defaultLiteral),
             add.Column.Constraints);
     }
 

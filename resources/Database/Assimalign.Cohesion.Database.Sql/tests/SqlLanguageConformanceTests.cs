@@ -263,6 +263,22 @@ public sealed class SqlLanguageConformanceTests
         object?[][] reverseIds = [[5], [4], [3], [2], [1]];
         RequireReordering(await RowsAsync(session, "SELECT id FROM t;"), [[1], [2], [3], [4], [5]], reverseIds);
         await ExpectRowsAsync(session, "SELECT id FROM t ORDER BY 1 DESC;", reverseIds);
+        // #1122: one measured case per new ALTER action, without a new named clause.
+        await ExecuteAsync(session, "ALTER TABLE t ALTER literal_default SET DEFAULT 9;");
+        await ExecuteAsync(session, "INSERT INTO t(id) VALUES (6);");
+        await ExpectRowsAsync(session, "SELECT literal_default FROM t WHERE id = 6;", [[9]]);
+        await ExecuteAsync(session, "ALTER TABLE t ALTER literal_default DROP DEFAULT;");
+        await ExecuteAsync(session, "INSERT INTO t(id) VALUES (7);");
+        await ExpectRowsAsync(session, "SELECT literal_default FROM t WHERE id = 7;", [[null]]);
+        await ExecuteAsync(session, "UPDATE t SET literal_default = 8 WHERE id = 7;");
+        await ExecuteAsync(session, "ALTER TABLE t ALTER literal_default SET NOT NULL;");
+        await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "UPDATE t SET literal_default = NULL WHERE id = 7;"));
+        await ExecuteAsync(session, "ALTER TABLE t ALTER literal_default DROP NOT NULL;");
+        await ExecuteAsync(session, "UPDATE t SET literal_default = NULL WHERE id = 7;");
+        await ExecuteAsync(session, "ALTER TABLE t RENAME literal_default TO renamed_value;");
+        await ExpectRowsAsync(session, "SELECT renamed_value FROM t WHERE id = 6;", [[9]]);
+        await ExecuteAsync(session, "ALTER TABLE t RENAME TO renamed_table;");
+        await ExpectRowsAsync(session, "SELECT renamed_value FROM renamed_table WHERE id = 6;", [[9]]);
     }
 
     /// <summary>Uses expanded projection positions without requiring unique output names.</summary>
