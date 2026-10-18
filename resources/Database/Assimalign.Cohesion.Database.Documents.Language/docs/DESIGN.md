@@ -92,7 +92,7 @@ argument. Aggregate placement and grouped scalar arguments are validated by the 
 | SUBSTR | 2..3 | String | Propagate |
 | POSITION | 2 | Int64 | Propagate |
 | CONTAINS, STARTS_WITH, ENDS_WITH | 2 | Boolean | Propagate |
-| REPLACE | 3 | String | Propagate |
+| REPLACE | 3..4 | String | Propagate; optional integer count |
 | TRIM | 1..2 | String | Propagate |
 | CONCAT | 2..N | String | Propagate |
 | ABS | 1 | Decimal | Propagate |
@@ -119,6 +119,12 @@ arguments are parsed, avoiding secondary syntax diagnostics. Retired ODMG constr
 their positional refusals. Calls never become planner constants or index seek bounds, and
 INSERT/UPSERT VALUES continues to reject calls.
 
+REPLACE's optional fourth argument limits replacement to the first n nonoverlapping occurrences;
+an omitted or negative count replaces all, following the
+[Couchbase string-function contract](https://docs.couchbase.com/server/current/n1ql/n1ql-language-reference/stringfun.html#replace).
+A fractional count gives the engine type diagnostic COHDOC008. Plain arity errors name only
+the invalid count; the OQL0006 COUNT-star explanation appears only for an actual star operand.
+
 ### Projection semantics (#1128)
 
 The [Couchbase SELECT clause](https://docs.couchbase.com/server/current/n1ql/n1ql-language-reference/selectclause.html)
@@ -130,7 +136,10 @@ After AS, a projection label accepts reserved words, following PostgreSQL ColLab
 their positional capability refusal everywhere except directly after a clause-head SELECT (and after a dot).
 A property or projection label named select does not open a SELECT clause. The AS-label exemption
 applies only within a SELECT list; reserved unsupported FROM and INSERT aliases retain COHDBL001.
-COUNT(DISTINCT x) remains one COHDBL001 naming COUNT(DISTINCT). ARRAY comprehensions, computed
+COUNT(DISTINCT x) remains one COHDBL001 naming COUNT(DISTINCT). Function-position names in the
+recognized-unsupported table receive that same single refusal for DISTINCT/ALL:
+ARRAY_AGG(DISTINCT x) and ARRAY_AGG(ALL x) name ARRAY_AGG(DISTINCT) and ARRAY_AGG(ALL).
+ARRAY comprehensions, computed
 member names, IN's array form and path access on constructor results remain deferred.
 Member colons remain delimiters even without whitespace: `{a:DISTINCT}` receives the positional
 capability refusal, while `:distinct` in an operand keeps the parameter-form syntax diagnostic.

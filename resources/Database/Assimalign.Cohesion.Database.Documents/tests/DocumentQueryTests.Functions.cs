@@ -27,6 +27,12 @@ public sealed partial class DocumentQueryTests
         ["POSITION('abc','z')", -1L], ["POSITION('😀ab','a')", 1L], ["POSITION('abc','')", 0L],
         ["CONTAINS('Alpha','a')", true], ["STARTS_WITH('Alpha','a')", false], ["ENDS_WITH('Alpha','a')", true],
         ["REPLACE('abcabc','b','X')", "aXcaXc"], ["REPLACE('abc','','X')", "abc"],
+        ["REPLACE('abcabcabc','b','X',1)", "aXcabcabc"], ["REPLACE('abcabcabc','b','X',2)", "aXcaXcabc"],
+        ["REPLACE('abcabc','b','X',0)", "abcabc"], ["REPLACE('abcabc','b','X',-2)", "aXcaXc"],
+        ["REPLACE('abcabc','b','X',1e20)", "aXcaXc"], ["REPLACE('aaaa','aa','X',1)", "Xaa"],
+        ["REPLACE('😀a😀a','😀','x',1)", "xa😀a"], ["REPLACE(name,'A','x',amount)", "xlpha"],
+        ["REPLACE('abc','a','b',NULL)", null], ["REPLACE('abc','a','b',MISSING) IS MISSING", true],
+        ["REPLACE('abc','a','b',name)", null],
         ["REPLACE('','x','y')", ""], ["TRIM(' abc ')", "abc"], ["TRIM('😀abc😀','😀')", "abc"],
         ["TRIM('\tabc\r\n')", "abc"], ["TRIM(' \t\n\f\rabc \t\n\f\r')", "abc"],
         ["TRIM('\vabc\u00a0')", "\vabc\u00a0"], ["TRIM('\tabc\t',' ')", "\tabc\t"],
@@ -90,6 +96,7 @@ public sealed partial class DocumentQueryTests
                 ["SUBSTR({0},0,1)", "a"], ["SUBSTR({0},1048576,1)", "a"], ["SUBSTR({0},-1)", "a"],
                 ["LENGTH(SUBSTR({0},1))", 1_048_576L],
                 ["TRIM({0},'a')", ""],
+                ["REPLACE({0},'a','')", ""],
             ];
             foreach (var item in cases)
             {
@@ -123,6 +130,7 @@ public sealed partial class DocumentQueryTests
     [Theory(DisplayName = "Cohesion Test [Documents] - Scalars: literal kinds fail during planning")]
     [InlineData("SELECT SQRT('x') FROM items")]
     [InlineData("SELECT SUBSTR(name,'a') FROM items")]
+    [InlineData("SELECT REPLACE(name,'a','b','2') FROM items")]
     [InlineData("SELECT ARRAY_LENGTH({x:1}) FROM items")]
     [InlineData("UPDATE items SET n = SQRT('x')")]
     [InlineData("DELETE FROM items WHERE SUBSTR(name,'a')")]
@@ -173,6 +181,7 @@ public sealed partial class DocumentQueryTests
     [InlineData("ROUND(1,0.5)", "COHDOC019", "The OQL function argument is outside its domain.")]
     [InlineData("POWER(10,100)", "COHDOC007", "OQL numbers must fit the decimal scalar domain.")]
     [InlineData("POWER(10,1000.5)", "COHDOC007", "OQL numbers must fit the decimal scalar domain.")]
+    [InlineData("REPLACE('abc','a','b',0.5)", "COHDOC008", "The OQL REPLACE count must be an integer.")]
     [InlineData("ROUND(70000000000000000000000000000,-29)", "COHDOC007", "OQL numbers must fit the decimal scalar domain.")]
     public async Task Execute_FunctionFailure_ShouldAbortWithFixedDiagnosticAsync(string expression, string code, string message)
     {
@@ -267,6 +276,27 @@ public sealed partial class DocumentQueryTests
         Should.Throw<OperationCanceledException>(() => evaluator.Evaluate(call, default));
         parameters.ReadCount.ShouldBe(1);
         cancellation.IsCancellationRequested.ShouldBeTrue();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Documents] - Scalars: constructed results still obey the UTF-16 cap")]
+    [InlineData("LOWER($p)")]
+    [InlineData("UPPER($p)")]
+    [InlineData("SUBSTR($p,0)")]
+    [InlineData("TRIM($p)")]
+    [InlineData("REPLACE($p,'a','a')")]
+    public void Evaluate_OversizeConstructedString_ShouldKeepResultCap(string expression)
+    {
+        // Arrange
+        var parameters = new Dictionary<string, object?> { ["p"] = new string('a', 1_048_577) };
+        var evaluator = new DocumentExpressionEvaluator(null, parameters, CancellationToken.None);
+        var query = (OqlSelectExpression)((OqlQueryStatement)new OqlQueryParser().Parse("SELECT " + expression + " FROM items")).OqlExpression;
+
+        // Act
+        var error = Should.Throw<DatabaseException>(() => evaluator.Evaluate(query.Projections[0].Expression, default));
+
+        // Assert
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDOC007");
+        error.Message.ShouldBe("The OQL function string exceeds 1,048,576 UTF-16 units.");
     }
 
     [Theory(DisplayName = "Cohesion Test [Documents] - Clock: transaction start survives every row and ReadCommitted repinning")]

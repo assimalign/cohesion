@@ -166,32 +166,39 @@ internal sealed partial class DocumentExpressionEvaluator
                 while (start < end)
                 {
                     ObserveFunctionCancellation(trimIndex++);
-                    Rune.DecodeFromUtf16(text.AsSpan(start, end - start), out var rune, out int consumed);
+                    Rune.DecodeFromUtf16(text.AsSpan(start, end - start), out var rune, out int trimConsumed);
                     if (!trim.Contains(rune)) { break; }
-                    start += consumed;
+                    start += trimConsumed;
                 }
                 while (end > start)
                 {
                     ObserveFunctionCancellation(trimIndex++);
-                    Rune.DecodeLastFromUtf16(text.AsSpan(start, end - start), out var rune, out int consumed);
+                    Rune.DecodeLastFromUtf16(text.AsSpan(start, end - start), out var rune, out int trimConsumed);
                     if (!trim.Contains(rune)) { break; }
-                    end -= consumed;
+                    end -= trimConsumed;
                 }
                 return JoinRunes(text.AsSpan(start, end - start));
             case "REPLACE":
                 string old = (string)values[1]!, replacement = (string)values[2]!;
-                if (old.Length == 0) { CheckStringLength(text.Length); return text; }
+                decimal remaining = values.Length == 4 ? Number(values[3]!) : -1;
+                if (remaining != decimal.Truncate(remaining))
+                { throw new DocumentPlanningException("COHDOC008", ErrorMessages.ReplaceCountInvalid); }
+                // Couchbase stringfun.html#replace: any negative count replaces all occurrences.
+                bool replaceAll = remaining < 0;
+                if (old.Length == 0 || remaining == 0) { return text; }
                 var replaced = new StringBuilder();
                 int consumed = 0;
-                while (consumed < text.Length)
+                while (consumed < text.Length && (replaceAll || remaining > 0))
                 {
                     _cancellationToken.ThrowIfCancellationRequested();
                     int next = FindFunctionText(text, old, consumed);
-                    if (next < 0) { Append(replaced, text.AsSpan(consumed)); break; }
+                    if (next < 0) { break; }
                     Append(replaced, text.AsSpan(consumed, next - consumed));
                     Append(replaced, replacement);
                     consumed = next + old.Length;
+                    if (!replaceAll) { remaining--; }
                 }
+                Append(replaced, text.AsSpan(consumed));
                 return replaced.ToString();
             default: throw new DocumentPlanningException("COHDOC001", ErrorMessages.FunctionArgumentsInvalid);
         }
@@ -222,6 +229,18 @@ internal sealed partial class DocumentExpressionEvaluator
         if (pattern.Length == 0) { return start; }
         int end = text.Length - pattern.Length;
         if (start > end) { return -1; }
+        if (pattern.Length == 1)
+        {
+            for (int index = start; index < text.Length;)
+            {
+                _cancellationToken.ThrowIfCancellationRequested();
+                int length = Math.Min(1024, text.Length - index);
+                int found = text.AsSpan(index, length).IndexOf(pattern[0]);
+                if (found >= 0) { return index + found; }
+                index += length;
+            }
+            return -1;
+        }
 
         // PostgreSQL src/backend/utils/adt/varlena.c:1004-1070,1233-1271 uses
         // Boyer-Moore-Horspool with a fixed 256-entry skip table. Colliding UTF-16

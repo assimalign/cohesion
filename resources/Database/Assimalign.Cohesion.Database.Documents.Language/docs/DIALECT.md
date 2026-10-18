@@ -25,6 +25,10 @@ to the string, and returns NULL for a negative length or fractional index. Strin
 compare ordinally; LOWER/UPPER use invariant case conversion. TRIM defaults to SQL++ whitespace:
 space, tab, newline, form feed and carriage return, diverging from SQL's space-only default.
 Its optional second argument is a set of code points. Empty REPLACE patterns leave text unchanged.
+REPLACE accepts an optional fourth integer argument n and replaces the first n occurrences;
+omitting n or using any negative integer replaces all, as
+[Couchbase documents](https://docs.couchbase.com/server/current/n1ql/n1ql-language-reference/stringfun.html#replace).
+Zero replaces none; a fractional count gives COHDOC008.
 Constructed string results and work buffers are capped at 1,048,576 UTF-16 units; inputs are
 not capped. LENGTH, searching, string predicates and SUBSTR scan without input-sized buffers,
 and loops observe cancellation at least every 1,024 iterations.

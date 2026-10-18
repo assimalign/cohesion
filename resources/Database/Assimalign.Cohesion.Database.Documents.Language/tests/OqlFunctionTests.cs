@@ -59,6 +59,8 @@ public sealed class OqlFunctionTests
     [InlineData("NOW_MILLIS(*)", 10)]
     [InlineData("SUBSTR(a)", 6)]
     [InlineData("POSITION(a,b,c)", 8)]
+    [InlineData("REPLACE(a,b)", 7)]
+    [InlineData("REPLACE(a,b,c,d,e)", 7)]
     [InlineData("META(a,b).id", 4)]
     public void Parse_InvalidArguments_ShouldReportOql0006(string call, int length)
     {
@@ -68,6 +70,21 @@ public sealed class OqlFunctionTests
         diagnostic.Code.ShouldBe("OQL0006");
         diagnostic.Start.ShouldBe(7);
         diagnostic.End.ShouldBe(7 + length);
+        string function = call[..call.IndexOf('(')];
+        diagnostic.Message.ShouldBe(call.Contains('*')
+            ? $"Invalid argument for OQL function '{function}'; only COUNT accepts '*'."
+            : $"Invalid argument count for OQL function '{function}'.");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [OQL] - Functions: REPLACE accepts its optional numeric count")]
+    [InlineData("SELECT REPLACE(name,'a','b',2) FROM items")]
+    [InlineData("SELECT REPLACE(name,'a','b',-2) FROM items")]
+    public void Parse_ReplaceCount_ShouldAcceptFourthArgument(string query)
+    {
+        // Arrange / Act
+        var statement = new OqlQueryParser().Parse(query);
+        // Assert
+        statement.Diagnostics.ShouldBeEmpty();
     }
 
     [Theory(DisplayName = "Cohesion Test [OQL] - Functions: names stay usable as paths and aliases")]

@@ -259,7 +259,9 @@ public sealed partial class OqlQueryParser
                 else if (!Failed && (!definition!.AcceptsArity(arguments.Count) ||
                     function != "COUNT" && arguments.Any(argument => argument is OqlStarExpression)))
                 {
-                    Error("OQL0006", $"Invalid argument count for OQL function '{function}'; only COUNT accepts '*'.", start);
+                    Error("OQL0006", function != "COUNT" && arguments.Any(argument => argument is OqlStarExpression)
+                        ? $"Invalid argument for OQL function '{function}'; only COUNT accepts '*'."
+                        : $"Invalid argument count for OQL function '{function}'.", start);
                 }
                 if (function == "META")
                 {

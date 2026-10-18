@@ -365,6 +365,10 @@ SQRT and fractional POWER preserve the BCL double result through its shortest ro
 representation when converting to the decimal scalar domain, avoiding the decimal cast's
 15-significant-digit rounding. Nonfinite or overflowing results retain COHDOC007.
 A function error inside an explicit transaction aborts it through the existing statement bracket.
+REPLACE accepts a fourth integer count: the first n nonoverlapping occurrences, all occurrences
+when omitted or negative, and none for zero (Couchbase stringfun.html#replace). A fractional
+count is a COHDOC008 type error; a wrong-kind literal still fails planning. Unchanged results
+returned directly from REPLACE's empty-pattern or zero-count path need no constructed-string buffer.
 Negative-scale rounding uses the exact decimal remainder before testing the midpoint, avoiding
 the double rounding that a division by the scale factor can introduce just below a midpoint.
 
