@@ -989,6 +989,7 @@ internal sealed partial class SqlPlanExecutor
 
     private async Task<DatabaseResult> ExecuteDropTableAsync(SqlDropTablePlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
+        if (!plan.IfExists) { SqlNamespaces.Require(_catalog, plan.Schema); }
         if (SqlNamespaces.Find(_catalog, plan.Schema) is null || !_catalog.TryGetTable(plan.Schema, plan.Name, out var table))
         {
             if (plan.IfExists)

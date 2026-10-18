@@ -135,9 +135,11 @@ SQL refuses its removal with `COHSQLE031` because code-first provisioning remain
 to `dbo`. Sql.Schema builders have no target-namespace setting. Creating another namespace
 does not redirect compiled tables, constraints, indexes, domains or declared migration SQL.
 
-`CREATE TABLE s.t` requires an existing namespace (`COHSQLE028`, PostgreSQL SQLSTATE 3F000).
-Reads and ordinary DML of `missing.t` retain the missing-relation `COHSQLE014`; DROP TABLE
-keeps its missing-table behavior, including the `IF EXISTS` no-op. Unqualified table names
+`CREATE TABLE s.t`, unguarded `DROP TABLE s.t`, `ALTER TABLE s.t` and table-qualified
+`CREATE INDEX ... ON s.t` / `DROP INDEX ... ON s.t` require an existing namespace
+(`COHSQLE028`, PostgreSQL SQLSTATE 3F000). `DROP TABLE IF EXISTS missing.t` succeeds as a
+no-op, retaining its declared-script absence receipt. Reads and ordinary DML of `missing.t`
+retain the missing-relation `COHSQLE014` (42P01). Unqualified table names
 use `dbo`; an unqualified REFERENCES target uses its child table's namespace. A table created
 as `Sales.t` after `CREATE SCHEMA sales` reports `sales` in TABLES and SCHEMATA.
 INFORMATION_SCHEMA and COHESION_SCHEMA are reserved virtual namespaces: CREATE/DROP SCHEMA
@@ -151,6 +153,11 @@ parent disappear without changing that parent. Namespace, table and index compil
 and external child ownership are checked before commit using the existing ownership diagnostic
 with operation `DROP SCHEMA`. Both schema statements are self-committing DDL and receive
 `COHSQLT003` inside an explicit transaction.
+
+DROP SCHEMA acquires table locks before its definition metadata lease and revalidates the
+namespace contents before publication. A changed set receives `COHSQLE013` with a retry remedy.
+Deferred typed migration steps wait cancellably for definition metadata leases; overlapping
+schema DDL cannot fail a migration merely by holding that lease.
 
 AUTHORIZATION, including the form with no explicit namespace name, is rejected with COHDBL001
 naming AUTHORIZATION. Nested CREATE/GRANT schema elements are rejected with COHDBL001 naming
@@ -166,6 +173,8 @@ older engines, which cannot decode kind 15.
 Reference semantics: PostgreSQL `src/backend/parser/gram.y:1164-1168` defaults DROP to RESTRICT;
 `:1578-1629` defines CREATE SCHEMA and rejects elements with IF NOT EXISTS;
 `src/backend/catalog/namespace.c:673-683,3605-3616` distinguishes namespace creation lookup;
+`src/backend/commands/tablecmds.c:1498-1506,4534-4539`, `src/backend/tcop/utility.c:1480-1483`
+and `src/backend/catalog/namespace.c:526-531` distinguish missing namespaces in table/index DDL;
 `src/backend/parser/parse_relation.c:1463-1487` supplies missing-relation lookup;
 `src/backend/catalog/dependency.c:1163-1170` supplies dependent-objects wording; and
 `src/backend/catalog/pg_constraint.c:304-324` makes the FK depend on its parent rather than
@@ -1585,7 +1594,7 @@ this binding rule when their syntax becomes executable. Their current admission 
 remain as stated above.
 
 The every-relation conformance theory seeds a domain with `CREATE DOMAIN`. Its self-join
-key is the first (catalog-name) column for TABLES, COLUMNS, TABLE_CONSTRAINTS,
+key is the first (catalog-name) column for SCHEMATA, TABLES, COLUMNS, TABLE_CONSTRAINTS,
 KEY_COLUMN_USAGE, REFERENTIAL_CONSTRAINTS, CHECK_CONSTRAINTS, INDEXES and OBJECT_OWNERSHIP;
 FUNCTIONS, TYPES and DOMAINS use IS_SQL_DEFINED. Equality preserves each key's multiplicity:
 for key groups of size k the self join yields the sum of k squared rows. Catalog-name keys
@@ -2498,6 +2507,10 @@ pin in the same change.
 | `COHSQLE020` | Error | No value supplied for a parameter; rejected before rows are read or written |
 | `COHSQLE023` | Error | Caller parameter keys collide after one leading sigil is stripped |
 | `COHSQLE027` | Error | ADD COLUMN with a volatile DEFAULT on a table with live rows requires a rewrite; names the column (#1121, #1447) |
+| `COHSQLE028` | Error | SQL namespace does not exist for schema/table/index DDL (PostgreSQL SQLSTATE 3F000); DROP TABLE IF EXISTS remains a no-op |
+| `COHSQLE029` | Error | CREATE SCHEMA names an existing namespace without IF NOT EXISTS (PostgreSQL SQLSTATE 42P06) |
+| `COHSQLE030` | Error | DROP SCHEMA RESTRICT finds dependent objects; the message offers CASCADE (PostgreSQL SQLSTATE 2BP01) |
+| `COHSQLE031` | Error | DROP SCHEMA targets dbo, which code-first provisioning requires |
 
 Positions are absolute character offsets into the statement text; line/column
 presentation is computed by tooling from the source (offset → line mapping), not

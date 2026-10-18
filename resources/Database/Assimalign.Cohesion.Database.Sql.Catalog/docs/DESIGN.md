@@ -181,8 +181,10 @@ the catalog seeds nothing and commits nothing; SqlDatabase.StampNewCatalog alone
 DROP SCHEMA CASCADE serializes its complete mutation under the publication lock in one storage
 transaction: namespace/table/index removal, incoming external-FK replacement, identity-counter
 deletion, one kind-14 reclamation intent per table, registration replacement, one generation
-advance and an optional receipt. Cache changes follow commit. The ObjectsInNamespace enumeration
-defines both RESTRICT emptiness and the CASCADE drop set; views (#1124) must extend that set.
+advance and an optional receipt. Cache changes follow commit. SQL's
+SqlPlanExecutor.Schemas.ObjectsInNamespace snapshot enumeration defines RESTRICT, ordered locks,
+ownership and the CASCADE drop set; views (#1124) must extend that one enumeration and its
+revalidation. The catalog's commit-time contents check remains an independent invariant guard.
 SQL owns metadata admission, ordered object locks and ownership checks; bare catalog table
 operations continue to accept namespace strings without requiring a namespace record.
 

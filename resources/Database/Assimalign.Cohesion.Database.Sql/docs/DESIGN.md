@@ -2020,7 +2020,7 @@ Every synchronization wait reached by these paths has the following owner and te
 | Wait or retry | Apply, worker and compensation rule |
 |---|---|
 | Provisioner semaphore | Apply and Verify use `WaitAsync(0, token)` and refuse contention. The worker inherits ownership and never reacquires it. Compensation stays inside its owner's reservation. |
-| DDL admission monitor | Its critical section only checks/updates the schema name and statement count. Ownership contention throws immediately; nobody waits for a DDL lease. Inline apply keeps the lease through compensation and cleanup; the worker never requests it. |
+| DDL admission monitor | Its critical section only checks/updates the schema name and statement count. Ownership contention throws immediately. Inline apply keeps the apply lease through compensation and cleanup; the worker never requests it. A deferred step waits cancellably for a definition metadata lease to clear, without failing the migration. Definition DDL never waits for transaction locks while holding that lease. |
 | Table, referenced-parent, row and index-key locks | Real waits use `LockManager.AcquireAsync` with a live transaction sequence, so the wait-for graph and cycle detector see them. Apply keeps a read-only owner across its self-committing DDL. Handoff reserves pending tables and FK parents in object-id order before publication; the worker reuses that owner. Caller/worker cancellation and database-offline abandonment also end waits. |
 | Coordinator statement gate | Acquired after transaction-lock pre-acquisition, with cancellation. Its holder performs one physical bracket; the lock manager rejects a request that would wait while that gate is held. Worker index population releases it after each batch of at most 64 versions. Table reclamation runs outside this gate in batches of at most 32 retired pages. Other inline data work can scale with table size; the gate is not a wall-clock deadline. |
 | Catalog, index and storage metadata/page monitors; journal durability | Internal critical sections perform finite local work and do not await SQL transaction locks. Physical page ownership conflicts fail immediately. Group commit waits at most its configured batching window before flushing itself; journal durability failures take the database offline. Synchronous filesystem I/O has no hard completion deadline, so cancellation does not promise an OS-I/O timeout. |
@@ -2037,24 +2037,34 @@ reference clone). This is a behavioral reference; no implementation was copied.
 SQL namespaces (#1030) carry the same DatabaseObjectOwner and OwningSchema as tables and indexes.
 Namespaces created by declared scripts retain that schema's ownership identity; ordinary session
 CREATE SCHEMA creates Adhoc namespaces. Script receipts retain their quoted S: identities.
-They are independent catalog descriptions, never compiled-schema declarations. DROP SCHEMA checks
-namespace ownership, then takes Exclusive object locks with DdlLockOwner in ObjectId order on all
-contained tables and external children whose incoming foreign keys will be removed. It rechecks
-EnsureCanChange and EnsureSameIdentity before publication, naming the operation DROP SCHEMA in
-the existing shared ownership diagnostic. Contained indexes receive the same ownership check.
-Schema DDL enters the definition metadata interlock; concurrent table/index/constraint DDL cannot
-publish into or out of a namespace while the drop set is assembled or locks wait. The interlock
-also covers CREATE TABLE's durable reservation, which by itself reserves no namespace name.
+They are independent catalog descriptions, never compiled-schema declarations. DROP SCHEMA takes
+Exclusive object locks with DdlLockOwner in ObjectId order on all contained tables and external
+children whose incoming foreign keys will be removed, before taking the definition metadata lease.
+It then captures the catalog again and compares namespace, contained-table, external-child and
+index instances with the original enumeration. Changed contents receive COHSQLE013 with a retry
+remedy; normal statement cleanup releases every lock. Namespace, table and index ownership is
+checked against that revalidated set before publication, naming DROP SCHEMA in the existing
+ownership diagnostic. Table/index/constraint DDL cannot publish while the lease is held, including
+CREATE TABLE's durable reservation. A deferred worker step encountering a definition lease waits
+cancellably for its release. CREATE SCHEMA and other definition DDL acquire no transaction locks
+under their leases, so they cannot strand a worker holding its table reservations.
 
 CASCADE delegates the whole multi-record mutation to one SqlCatalog.DropSchemaAsync call, then
 removes live index directories after commit. The session requests reclamation for DROP SCHEMA as
-for DROP TABLE; one durable intent per table survives failure and restart. RESTRICT uses the same
-catalog ObjectsInNamespace enumeration as CASCADE, the extension point for future views (#1124).
+for DROP TABLE; one durable intent per table survives failure and restart. The executor adopts
+each surviving external child's bound CHECK and DEFAULT expressions from its previous instance;
+the next write does not reparse unchanged definitions. RESTRICT, locks, ownership and the CASCADE
+drop set use SqlPlanExecutor.Schemas.ObjectsInNamespace over a catalog snapshot. Future views
+(#1124) must extend this one SQL-side enumeration and its revalidation; the catalog's commit-time
+check remains an independent invariant guard.
 Incoming external FKs are removed while external tables survive, following PostgreSQL's constraint
 dependency direction (src/backend/catalog/pg_constraint.c:304-324). Typed external child ownership
 blocks this metadata change too. SQL namespace checks stay in planning/execution, preserving the
-bare catalog API's independent use. Reads in missing namespaces retain COHSQLE014; creation uses
-COHSQLE028, matching PostgreSQL namespace.c:673-683,3605-3616.
+bare catalog API's independent use. Reads and DML in missing namespaces retain COHSQLE014;
+CREATE TABLE, unguarded DROP TABLE, ALTER TABLE and table-qualified CREATE/DROP INDEX use
+COHSQLE028 (3F000). DROP TABLE IF EXISTS retains its no-op and declared-script absence receipt.
+PostgreSQL anchors are namespace.c:673-683,3605-3616, tablecmds.c:1498-1506,4534-4539,
+utility.c:1480-1483 and namespace.c:526-531.
 
 AUTHORIZATION and nested schema elements are rejected with COHDBL001. Atomic nested statements
 would require a separate DDL execution contract because each existing statement self-commits.

@@ -15,7 +15,8 @@ using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
-public sealed class SqlSchemaExecutionTests
+[Collection(SqlLockWaitCollection.Name)]
+public sealed partial class SqlSchemaExecutionTests
 {
     [Fact(DisplayName = "Cohesion Test [Sql] - SQL namespaces persist independently of tables and preserve their spelling")]
     public async Task ExecuteAsync_EmptyAndPopulatedNamespaces_ShouldSurviveRestart()
@@ -54,6 +55,16 @@ public sealed class SqlSchemaExecutionTests
     [Theory(DisplayName = "Cohesion Test [Sql] - Schema existence failures use creation versus relation diagnostics")]
     [InlineData("CREATE TABLE missing.t(id INT)", "COHSQLE028")]
     [InlineData("CREATE TABLE IF NOT EXISTS missing.t(id INT)", "COHSQLE028")]
+    [InlineData("DROP TABLE missing.t", "COHSQLE028")]
+    [InlineData("ALTER TABLE missing.t ADD COLUMN c INT", "COHSQLE028")]
+    [InlineData("ALTER TABLE missing.t DROP COLUMN c", "COHSQLE028")]
+    [InlineData("ALTER TABLE missing.t ADD CONSTRAINT ck CHECK (id > 0)", "COHSQLE028")]
+    [InlineData("ALTER TABLE missing.t DROP CONSTRAINT ck", "COHSQLE028")]
+    [InlineData("ALTER TABLE missing.t RENAME TO renamed", "COHSQLE028")]
+    [InlineData("ALTER TABLE missing.t ALTER COLUMN id SET DEFAULT 1", "COHSQLE028")]
+    [InlineData("CREATE INDEX ix ON missing.t(id)", "COHSQLE028")]
+    [InlineData("DROP INDEX ix ON missing.t", "COHSQLE028")]
+    [InlineData("DROP INDEX IF EXISTS ix ON missing.t", "COHSQLE028")]
     [InlineData("SELECT * FROM missing.t", "COHSQLE014")]
     [InlineData("INSERT INTO missing.t VALUES (1)", "COHSQLE014")]
     [InlineData("UPDATE missing.t SET id = 1", "COHSQLE014")]
@@ -159,6 +170,9 @@ public sealed class SqlSchemaExecutionTests
             await SeedAsync(session);
             ulong generation = database.Catalog.DdlGeneration;
             var retired = database.Catalog.Tables.Where(table => table.Schema == "sales").Select(table => table.ObjectId).ToArray();
+            var indexes = retired.SelectMany(database.Catalog.GetIndexes).ToArray();
+            indexes.ShouldNotBeEmpty();
+            foreach (var index in indexes) { database.IndexManager.TryGetIndex(index.TableObjectId, index.Name, out _).ShouldBeTrue(); }
 
             // Act
             await ExecuteAsync(session, "DROP SCHEMA SALES CASCADE");
@@ -168,6 +182,7 @@ public sealed class SqlSchemaExecutionTests
             database.Catalog.Namespaces.ShouldHaveSingleItem().Name.ShouldBe("dbo");
             database.Catalog.Tables.Select(table => table.Name).Order().ShouldBe(["external_child", "external_parent"]);
             database.Catalog.GetIndexRegistrations().ShouldNotContain(registration => retired.Contains(registration.ObjectId));
+            foreach (var index in indexes) { database.IndexManager.TryGetIndex(index.TableObjectId, index.Name, out _).ShouldBeFalse(); }
             database.Catalog.Tables.Single(table => table.Name == "external_child").Constraints.ShouldBeEmpty();
             await ExecuteAsync(session, "INSERT INTO external_child VALUES (99)");
             await ExecuteAsync(session, "DELETE FROM external_parent");
@@ -180,6 +195,37 @@ public sealed class SqlSchemaExecutionTests
         await ExecuteAsync(reader, "CREATE TABLE sales.parent(id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY)");
         await ExecuteAsync(reader, "INSERT INTO sales.parent DEFAULT VALUES");
         (await RowsAsync(reader, "SELECT id FROM sales.parent")).ShouldBe([[1]]);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sql] - CASCADE adopts surviving children's CHECK and DEFAULT bindings")]
+    public async Task ExecuteAsync_Cascade_ShouldRetainBoundExternalChildWithoutRebinding()
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("namespace-bindings", new());
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecuteAsync(session, "CREATE SCHEMA sales");
+        await ExecuteAsync(session, "CREATE TABLE sales.parent(id INT PRIMARY KEY)");
+        await ExecuteAsync(session, "CREATE TABLE child(pid INT DEFAULT (90 + 9), CONSTRAINT ck CHECK (pid > 0), CONSTRAINT fk FOREIGN KEY(pid) REFERENCES sales.parent(id))");
+        await ExecuteAsync(session, "INSERT INTO sales.parent VALUES (1)");
+        await ExecuteAsync(session, "INSERT INTO child VALUES (1)");
+        database.Catalog.TryGetTable("dbo", "child", out var previous).ShouldBeTrue();
+        database.Definitions.IsBound(previous).ShouldBeTrue();
+        long binds = database.Definitions.BindCount;
+
+        // Act
+        await ExecuteAsync(session, "DROP SCHEMA sales CASCADE");
+
+        // Assert
+        database.Catalog.TryGetTable("dbo", "child", out var child).ShouldBeTrue();
+        child.ShouldNotBeSameAs(previous);
+        child.Constraints.ShouldHaveSingleItem().Name.ShouldBe("ck");
+        database.Definitions.IsBound(child).ShouldBeTrue();
+        database.Definitions.BindCount.ShouldBe(binds);
+        await ExecuteAsync(session, "INSERT INTO child DEFAULT VALUES");
+        database.Definitions.BindCount.ShouldBe(binds);
+        (await RowsAsync(session, "SELECT pid FROM child ORDER BY pid")).ShouldBe([[1], [99]]);
+        await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "INSERT INTO child VALUES (-1)"));
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - DROP SCHEMA honors namespace, contained-table and external-child compiled ownership")]

@@ -30,7 +30,8 @@ internal readonly struct SqlStatementContext
         TransactionSequence? ddlLockOwner = null,
         Action<long, long?>? provisioningProgress = null,
         SqlCatalogScriptPublication? scriptReceipt = null,
-        DateTimeOffset? transactionStart = null)
+        DateTimeOffset? transactionStart = null,
+        SqlDdlInterlock? ddlInterlock = null)
     {
         _transactionStartTicks = (transactionStart ?? DateTimeOffset.UtcNow).UtcTicks;
         _names = provisioningSchema is null ? databaseName : new ProvisioningNames(provisioningSchema, databaseName);
@@ -42,6 +43,7 @@ internal readonly struct SqlStatementContext
         DdlLockOwner = ddlLockOwner ?? transaction.Sequence;
         ProvisioningProgress = provisioningProgress;
         ScriptReceipt = scriptReceipt;
+        DdlInterlock = ddlInterlock;
     }
 
     /// <summary>
@@ -59,6 +61,9 @@ internal readonly struct SqlStatementContext
 
     /// <summary>Gets the receipt published only by this statement's explicit commit.</summary>
     internal SqlCatalogScriptPublication? ScriptReceipt { get; }
+
+    /// <summary>The session's metadata admission; direct executor probes may omit it.</summary>
+    internal SqlDdlInterlock? DdlInterlock { get; }
 
     /// <summary>
     /// Gets the database's transaction coordinator.

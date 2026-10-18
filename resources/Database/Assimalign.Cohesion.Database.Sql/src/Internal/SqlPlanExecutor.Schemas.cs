@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Threading;
@@ -36,7 +37,35 @@ internal sealed partial class SqlPlanExecutor
         {
             throw new SqlPlanningException("COHSQLE031", ErrorMessages.DefaultNamespaceProtected);
         }
-        var schema = SqlNamespaces.Find(_catalog, plan.Name);
+        var snapshot = _catalog.CaptureSnapshot();
+        var schema = snapshot.Namespaces.FirstOrDefault(value => value.Name.Equals(plan.Name, StringComparison.OrdinalIgnoreCase));
+        var contents = ObjectsInNamespace(snapshot, plan.Name);
+        if (!plan.Cascade && contents.Tables.Length != 0)
+        {
+            throw new SqlPlanningException("COHSQLE030", string.Format(CultureInfo.CurrentCulture, ErrorMessages.NamespaceDependentObjects, plan.Name));
+        }
+        // Definition DDL must never wait for transaction locks under its metadata lease:
+        // a deferred migration owns table reservations and waits for that lease between steps.
+        foreach (var table in contents.AffectedTables)
+        {
+            await statement.Coordinator.LockManager.AcquireAsync(statement.DdlLockOwner,
+                LockResource.Object(table.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
+        }
+        using var metadata = statement.DdlInterlock is { } interlock
+            ? statement.ProvisioningSchema is not null
+                ? await interlock.EnterMetadataAsync(definition: true, cancellationToken).ConfigureAwait(false)
+                : interlock.EnterMetadata(statement.DatabaseName, definition: true)
+            : null;
+        var current = _catalog.CaptureSnapshot();
+        var currentSchema = current.Namespaces.FirstOrDefault(value => value.Name.Equals(plan.Name, StringComparison.OrdinalIgnoreCase));
+        var currentContents = ObjectsInNamespace(current, plan.Name);
+        if (!ReferenceEquals(schema, currentSchema) || !contents.Tables.SequenceEqual(currentContents.Tables) ||
+            !contents.AffectedTables.SequenceEqual(currentContents.AffectedTables) || !contents.Indexes.SequenceEqual(currentContents.Indexes))
+        {
+            // The statement's ordinary cleanup releases its complete lock set. Never publish
+            // by name using locks and ownership checks for a previous namespace image.
+            throw new SqlPlanningException("COHSQLE013", string.Format(CultureInfo.CurrentCulture, ErrorMessages.NamespaceChanged, plan.Name));
+        }
         if (schema is null)
         {
             if (!plan.IfExists) { SqlNamespaces.Require(_catalog, plan.Name); }
@@ -47,48 +76,56 @@ internal sealed partial class SqlPlanExecutor
             return new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0);
         }
         EnsureCanChange(schema.Owner, schema.Name, schema.OwningSchema, "DROP SCHEMA", statement);
-        var snapshot = _catalog.CaptureSnapshot();
-        var contained = snapshot.Tables.Where(table => table.Schema.Equals(schema.Name, StringComparison.OrdinalIgnoreCase)).ToArray();
-        if (!plan.Cascade && contained.Length != 0)
+        foreach (var table in contents.AffectedTables)
         {
-            throw new SqlPlanningException("COHSQLE030", string.Format(CultureInfo.CurrentCulture, ErrorMessages.NamespaceDependentObjects, schema.Name));
+            EnsureCanChange(table.Owner, table.Name, table.OwningSchema, "DROP SCHEMA", statement);
         }
-        var identities = contained.Select(table => table.ObjectId).ToHashSet();
-        bool ReferencesContained(SqlCatalogConstraint constraint) => constraint.Kind == SqlCatalogConstraintKind.Reference &&
-            contained.Any(table => table.Schema.Equals(constraint.ReferencedSchema, StringComparison.OrdinalIgnoreCase) &&
-                table.Name.Equals(constraint.ReferencedTable, StringComparison.OrdinalIgnoreCase));
-        // Lock both the retired tables and external children whose FK metadata changes. Schema
-        // DDL holds the definition interlock, so the complete set stays stable while locks wait.
-        var affected = snapshot.Tables.Where(table => identities.Contains(table.ObjectId) || table.Constraints.Any(ReferencesContained))
-            .OrderBy(table => table.ObjectId).ToArray();
-        foreach (var table in affected)
+        foreach (var index in contents.Indexes)
         {
-            await statement.Coordinator.LockManager.AcquireAsync(statement.DdlLockOwner,
-                LockResource.Object(table.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
-            var current = ReadCurrentTable(table);
-            EnsureCanChange(current.Owner, current.Name, current.OwningSchema, "DROP SCHEMA", statement);
-            EnsureSameIdentity(table, current);
-            if (identities.Contains(table.ObjectId))
-            {
-                foreach (var index in snapshot.GetIndexes(table.ObjectId))
-                {
-                    EnsureCanChange(index.Owner, index.Name, index.OwningSchema, "DROP SCHEMA", statement);
-                }
-            }
+            EnsureCanChange(index.Owner, index.Name, index.OwningSchema, "DROP SCHEMA", statement);
         }
         await SelfCommitAsync(statement, statement.ScriptReceipt is { } publication
             ? _catalog.DropSchemaAsync(schema.Name, plan.Cascade, publication, cancellationToken)
             : _catalog.DropSchemaAsync(schema.Name, plan.Cascade, cancellationToken)).ConfigureAwait(false);
-        foreach (var table in contained)
+        foreach (var child in contents.AffectedTables.Where(table => !table.Schema.Equals(schema.Name, StringComparison.OrdinalIgnoreCase)))
         {
-            foreach (var index in snapshot.GetIndexes(table.ObjectId))
+            _catalog.TryGetTable(child.Schema, child.Name, out var published);
+            _definitions.Adopt(published, child, cancellationToken);
+        }
+        foreach (var index in contents.Indexes)
+        {
+            if (_indexManager.TryGetIndex(index.TableObjectId, index.Name, out _))
             {
-                if (_indexManager.TryGetIndex(table.ObjectId, index.Name, out _))
-                {
-                    await _indexManager.DropIndexAsync(statement.Transaction, table.ObjectId, index.Name, cancellationToken).ConfigureAwait(false);
-                }
+                await _indexManager.DropIndexAsync(statement.Transaction, index.TableObjectId, index.Name, cancellationToken).ConfigureAwait(false);
             }
         }
         return new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0);
     }
+
+    // SQL's one namespace-contents enumeration drives RESTRICT, ordered locks, ownership
+    // and the CASCADE drop set. Views (#1124) must extend this enumeration and its revalidation.
+    // The catalog independently guards the same invariant inside its publication transaction.
+    private static NamespaceContents ObjectsInNamespace(SqlCatalogSnapshot snapshot, string name)
+    {
+        var tables = new List<SqlCatalogTable>();
+        var affected = new List<SqlCatalogTable>();
+        var indexes = new List<SqlCatalogIndex>();
+        foreach (var table in snapshot.Tables)
+        {
+            if (table.Schema.Equals(name, StringComparison.OrdinalIgnoreCase))
+            {
+                tables.Add(table);
+                affected.Add(table);
+                indexes.AddRange(snapshot.GetIndexes(table.ObjectId));
+            }
+            else if (table.Constraints.Any(constraint => constraint.Kind == SqlCatalogConstraintKind.Reference &&
+                name.Equals(constraint.ReferencedSchema, StringComparison.OrdinalIgnoreCase)))
+            {
+                affected.Add(table);
+            }
+        }
+        return new(tables.ToArray(), affected.OrderBy(table => table.ObjectId).ToArray(), indexes.ToArray());
+    }
+
+    private sealed record NamespaceContents(SqlCatalogTable[] Tables, SqlCatalogTable[] AffectedTables, SqlCatalogIndex[] Indexes);
 }

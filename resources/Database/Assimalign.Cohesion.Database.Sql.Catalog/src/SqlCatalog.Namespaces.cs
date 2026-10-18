@@ -89,8 +89,8 @@ public sealed partial class SqlCatalog
         return DropSchemaCoreAsync(name, cascade, publication, cancellationToken);
     }
 
-    // One enumeration defines namespace contents for both RESTRICT and CASCADE. Views (#1124)
-    // must extend this set when they become catalog objects.
+    // Commit-time invariant guard. SQL admission uses the snapshot enumeration in
+    // SqlPlanExecutor.Schemas.ObjectsInNamespace for RESTRICT, locks and ownership (#1124).
     private TableSlot[] ObjectsInNamespace(string name)
         => _tables.Values.Where(slot => slot.Table.Schema.Equals(name, StringComparison.OrdinalIgnoreCase)).ToArray();
 
