@@ -2184,7 +2184,12 @@ expression admission is #1121 and will reuse this carrier. CREATE TABLE and ALTE
 
 Numeric domain errors, nonfinite finite-input results, negative SUBSTRING lengths,
 numeric overflow and temporal range overflow use COHSQLE002; MOD by zero uses
-COHSQLE001. CHECK accepts only immutable functions, so clocks and random UUIDs are
+COHSQLE001. String-producing scalars limit results and Unicode work buffers to 1,048,576
+UTF-16 code units (2 MiB of character data). LPAD/RPAD conservatively budget two
+UTF-16 units per requested Unicode scalar; REPLACE checks its expanded length and
+CONCAT/CONCAT_WS check binary-to-hex expansion and joined length before allocation.
+UPPER/LOWER use the same cap; LENGTH/CHAR_LENGTH count without allocating a rune buffer. Oversized requests raise
+COHSQLE002 (requested length too large); long loops observe statement cancellation. CHECK accepts only immutable functions, so clocks and random UUIDs are
 refused before mutation. Volatile calls never become seek bounds.
 
 Every scalar position uses these rules, including JOIN ON, grouping/HAVING,

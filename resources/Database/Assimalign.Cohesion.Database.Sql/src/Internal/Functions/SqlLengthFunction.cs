@@ -1,6 +1,7 @@
 using System;
 using System.Globalization;
 using System.Text;
+using System.Threading;
 
 using Assimalign.Cohesion.Database.Types;
 
@@ -23,17 +24,21 @@ internal sealed class SqlLengthFunction : SqlScalarFunction
     {
         var value = arguments[0];
         int length = value.Type == DatabaseType.Character
-            ? CountCharacters(value.AsString().TrimEnd(' '))
+            ? CountCharacters(value.AsString().AsSpan().TrimEnd(' '), arguments.Context.CancellationToken)
             : value.Type == DatabaseType.String
-            ? CountCharacters(value.AsString())
+            ? CountCharacters(value.AsString(), arguments.Context.CancellationToken)
             : Convert.ToString(value.ToObject(), CultureInfo.InvariantCulture)?.Length ?? 0;
         return SqlValue.FromInt64(length);
     }
 
-    private static int CountCharacters(string text)
+    internal static int CountCharacters(ReadOnlySpan<char> text, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         int count = 0;
-        foreach (var rune in text.EnumerateRunes()) { count++; }
+        foreach (var rune in text.EnumerateRunes())
+        {
+            if ((++count & 1023) == 0) { cancellationToken.ThrowIfCancellationRequested(); }
+        }
         return count;
     }
 }

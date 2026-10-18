@@ -18,7 +18,6 @@ internal sealed class SqlUpperFunction : SqlScalarFunction
     /// <inheritdoc />
     protected override SqlValue InvokeCore(scoped in SqlArguments arguments)
     {
-        var value = arguments[0];
-        return value.Type is DatabaseType.String or DatabaseType.Character ? SqlValue.FromString((value.Type == DatabaseType.Character ? value.AsString().TrimEnd(' ') : value.AsString()).ToUpperInvariant()) : value;
+        return SqlBuiltinScalarFunction.ChangeCase(in arguments, upper: true);
     }
 }

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Text;
+using System.Threading;
 
 using Assimalign.Cohesion.Database.Types;
 
@@ -11,6 +12,9 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// <summary>Stateless, reflection-free leaves of the standard scalar library.</summary>
 internal sealed class SqlBuiltinScalarFunction : SqlScalarFunction
 {
+    // Bound both result strings and Unicode work buffers before allocating.
+    internal const int MaximumStringLength = 1_048_576;
+
     internal SqlBuiltinScalarFunction(string name, SqlType[] parameters, SqlType result,
         SqlFunctionVolatility volatility = SqlFunctionVolatility.Immutable,
         SqlNullBehavior nullBehavior = SqlNullBehavior.ReturnsNullOnNullInput, SqlType? variadic = null)
@@ -59,7 +63,12 @@ internal sealed class SqlBuiltinScalarFunction : SqlScalarFunction
 
     protected override SqlValue InvokeCore(scoped in SqlArguments arguments)
     {
-        try { return SqlValue.FromObject(Compute(in arguments)); }
+        try
+        {
+            arguments.Context.CancellationToken.ThrowIfCancellationRequested();
+            return SqlValue.FromObject(Compute(in arguments));
+        }
+        catch (OutOfMemoryException exception) { throw SqlEvaluationException.NumericValueOutOfRange(Name + " requested length is too large.", exception); }
         catch (ArithmeticException exception) { throw SqlEvaluationException.FromArithmetic(exception); }
         catch (ArgumentOutOfRangeException exception) { throw SqlEvaluationException.NumericValueOutOfRange(Name + " result is out of range.", exception); }
     }
@@ -81,26 +90,38 @@ internal sealed class SqlBuiltinScalarFunction : SqlScalarFunction
             case "CONCAT": case "CONCAT_WS":
                 if (Name == "CONCAT_WS" && args.IsNull(0)) { return null; }
                 var pieces = new List<string>();
+                string separator = Name == "CONCAT_WS" ? args.GetString(0) : "";
+                long joinedLength = 0;
                 for (int index = Name == "CONCAT_WS" ? 1 : 0; index < args.Count; index++)
                 {
-                    if (!args.IsNull(index)) { pieces.Add(SqlCastText.Format(args[index].ToObject()!)); }
+                    args.Context.CancellationToken.ThrowIfCancellationRequested();
+                    if (!args.IsNull(index))
+                    {
+                        object value = args[index].ToObject()!;
+                        // Binary CAST formatting expands each byte to two hexadecimal units.
+                        if (value is byte[] bytes) { CheckLength(bytes.LongLength * 2 + 2); }
+                        var piece = SqlCastText.Format(value);
+                        joinedLength += piece.Length + (pieces.Count == 0 ? 0L : separator.Length);
+                        CheckLength(joinedLength);
+                        pieces.Add(piece);
+                    }
                 }
-                return string.Join(Name == "CONCAT_WS" ? args.GetString(0) : "", pieces);
-            case "CHAR_LENGTH": case "CHARACTER_LENGTH": return (long)Runes(args.GetString(0)).Length;
+                return string.Join(separator, pieces);
+            case "CHAR_LENGTH": case "CHARACTER_LENGTH": return (long)SqlLengthFunction.CountCharacters(args.GetString(0), args.Context.CancellationToken);
             case "LTRIM": case "RTRIM": case "TRIM":
-                var text = Runes(args.GetString(0));
-                var trim = Runes(args.Count > 1 ? args.GetString(1) : " ").ToHashSet();
+                var text = Runes(args.GetString(0), args.Context.CancellationToken);
+                var trim = Runes(args.Count > 1 ? args.GetString(1) : " ", args.Context.CancellationToken).ToHashSet();
                 int start = 0, end = text.Length;
-                if (Name != "RTRIM") { while (start < end && trim.Contains(text[start])) { start++; } }
-                if (Name != "LTRIM") { while (end > start && trim.Contains(text[end - 1])) { end--; } }
-                return Join(text.AsSpan(start, end - start));
-            case "REPLACE": return args.GetString(1).Length == 0 ? args.GetString(0) : args.GetString(0).Replace(args.GetString(1), args.GetString(2), StringComparison.Ordinal);
+                if (Name != "RTRIM") { while (start < end && trim.Contains(text[start])) { ObserveCancellation(start++, args.Context.CancellationToken); } }
+                if (Name != "LTRIM") { while (end > start && trim.Contains(text[end - 1])) { ObserveCancellation(--end, args.Context.CancellationToken); } }
+                return Join(text.AsSpan(start, end - start), args.Context.CancellationToken);
+            case "REPLACE": return Replace(args.GetString(0), args.GetString(1), args.GetString(2), args.Context.CancellationToken);
             case "REVERSE":
-                var reversed = Runes(args.GetString(0)); Array.Reverse(reversed); return Join(reversed);
-            case "POSITION": return Position(args.GetString(1), args.GetString(0));
-            case "STRPOS": return Position(args.GetString(0), args.GetString(1));
+                var reversed = Runes(args.GetString(0), args.Context.CancellationToken); Array.Reverse(reversed); return Join(reversed, args.Context.CancellationToken);
+            case "POSITION": return Position(args.GetString(1), args.GetString(0), args.Context.CancellationToken);
+            case "STRPOS": return Position(args.GetString(0), args.GetString(1), args.Context.CancellationToken);
             case "SUBSTRING": case "LEFT": case "RIGHT":
-                var source = Runes(args.GetString(0));
+                var source = Runes(args.GetString(0), args.Context.CancellationToken);
                 long offset = 0, length = source.Length;
                 long count = args.GetInt64(1);
                 if (Name == "SUBSTRING")
@@ -124,19 +145,27 @@ internal sealed class SqlBuiltinScalarFunction : SqlScalarFunction
                 }
                 offset = Math.Min(offset, source.Length);
                 length = Math.Min(length, source.Length - offset);
-                return Join(source.AsSpan((int)offset, (int)length));
+                return Join(source.AsSpan((int)offset, (int)length), args.Context.CancellationToken);
             case "LPAD": case "RPAD":
-                var original = Runes(args.GetString(0));
+                var original = Runes(args.GetString(0), args.Context.CancellationToken);
                 long requested = args.GetInt64(1);
                 if (requested <= 0) { return ""; }
-                if (requested > int.MaxValue) { throw SqlEvaluationException.NumericValueOutOfRange(Name + " length is too large."); }
-                int target = (int)requested;
-                if (target <= original.Length) { return Join(original.AsSpan(0, target)); }
-                var padding = Runes(args.Count == 3 ? args.GetString(2) : " ");
+                if (requested <= original.Length) { return Join(original.AsSpan(0, (int)requested), args.Context.CancellationToken); }
+                var padding = Runes(args.Count == 3 ? args.GetString(2) : " ", args.Context.CancellationToken);
                 if (padding.Length == 0) { return args.GetString(0); }
-                var builder = new StringBuilder();
+                // PostgreSQL bounds the worst-case encoded length before allocation:
+                // src/backend/utils/adt/oracle_compat.c:199-206. A scalar takes at most two UTF-16 units.
+                CheckLength(requested > MaximumStringLength ? long.MaxValue : requested * 2);
+                int target = (int)requested;
+                var builder = new StringBuilder(target * 2);
                 if (Name == "RPAD") { builder.Append(args.GetString(0)); }
-                for (int index = 0; index < target - original.Length; index++) { builder.Append(padding[index % padding.Length].ToString()); }
+                Span<char> encoded = stackalloc char[2];
+                for (int index = 0; index < target - original.Length; index++)
+                {
+                    ObserveCancellation(index, args.Context.CancellationToken);
+                    int written = padding[index % padding.Length].EncodeToUtf16(encoded);
+                    builder.Append(encoded[..written]);
+                }
                 if (Name == "LPAD") { builder.Append(args.GetString(0)); }
                 return builder.ToString();
         }
@@ -227,18 +256,103 @@ internal sealed class SqlBuiltinScalarFunction : SqlScalarFunction
     private static double Finite(double value) => double.IsFinite(value) ? value
         : throw SqlEvaluationException.NumericValueOutOfRange("Function result is not finite.");
 
-    private static Rune[] Runes(string value) => value.EnumerateRunes().ToArray();
-
-    private static string Join(ReadOnlySpan<Rune> runes)
+    internal static SqlValue ChangeCase(scoped in SqlArguments arguments, bool upper)
     {
-        var builder = new StringBuilder();
-        foreach (var rune in runes) { builder.Append(rune.ToString()); }
+        try
+        {
+            arguments.Context.CancellationToken.ThrowIfCancellationRequested();
+            var value = arguments[0];
+            if (value.Type is not (DatabaseType.String or DatabaseType.Character)) { return value; }
+            string text = value.AsString();
+            CheckLength(text.Length);
+            if (value.Type == DatabaseType.Character) { text = text.TrimEnd(' '); }
+            return SqlValue.FromString(upper ? text.ToUpperInvariant() : text.ToLowerInvariant());
+        }
+        catch (OutOfMemoryException exception)
+        { throw SqlEvaluationException.NumericValueOutOfRange("Requested string length is too large.", exception); }
+    }
+
+    private static void CheckLength(long length)
+    {
+        if (length > MaximumStringLength)
+        { throw SqlEvaluationException.NumericValueOutOfRange("Requested string length is too large (maximum 1048576 UTF-16 code units)."); }
+    }
+
+    private static void ObserveCancellation(int index, CancellationToken cancellationToken)
+    {
+        if ((index & 1023) == 0) { cancellationToken.ThrowIfCancellationRequested(); }
+    }
+
+    private static Rune[] Runes(string value, CancellationToken cancellationToken)
+    {
+        CheckLength(value.Length);
+        var runes = new Rune[value.Length];
+        int count = 0;
+        foreach (var rune in value.EnumerateRunes())
+        {
+            ObserveCancellation(count, cancellationToken);
+            runes[count++] = rune;
+        }
+        return count == runes.Length ? runes : runes[..count];
+    }
+
+    private static string Join(ReadOnlySpan<Rune> runes, CancellationToken cancellationToken)
+    {
+        long length = 0;
+        for (int index = 0; index < runes.Length; index++)
+        {
+            ObserveCancellation(index, cancellationToken);
+            length += runes[index].Utf16SequenceLength;
+        }
+        CheckLength(length);
+        var builder = new StringBuilder((int)length);
+        Span<char> encoded = stackalloc char[2];
+        for (int index = 0; index < runes.Length; index++)
+        {
+            ObserveCancellation(index, cancellationToken);
+            int written = runes[index].EncodeToUtf16(encoded);
+            builder.Append(encoded[..written]);
+        }
         return builder.ToString();
     }
 
-    private static long Position(string text, string pattern)
+    private static string Replace(string text, string pattern, string replacement, CancellationToken cancellationToken)
     {
-        int index = Runes(text).AsSpan().IndexOf(Runes(pattern));
-        return index < 0 ? 0 : (long)index + 1;
+        CheckLength(text.Length);
+        if (pattern.Length == 0) { return text; }
+        long length = text.Length;
+        int start = 0, matches = 0, found;
+        while ((found = text.IndexOf(pattern, start, StringComparison.Ordinal)) >= 0)
+        {
+            ObserveCancellation(matches++, cancellationToken);
+            length += (long)replacement.Length - pattern.Length;
+            CheckLength(length);
+            start = found + pattern.Length;
+        }
+        if (matches == 0) { return text; }
+        var builder = new StringBuilder((int)length);
+        start = 0;
+        for (int index = 0; index < matches; index++)
+        {
+            ObserveCancellation(index, cancellationToken);
+            found = text.IndexOf(pattern, start, StringComparison.Ordinal);
+            builder.Append(text.AsSpan(start, found - start));
+            builder.Append(replacement);
+            start = found + pattern.Length;
+        }
+        builder.Append(text.AsSpan(start));
+        return builder.ToString();
+    }
+
+    private static long Position(string text, string pattern, CancellationToken cancellationToken)
+    {
+        var source = Runes(text, cancellationToken);
+        var search = Runes(pattern, cancellationToken);
+        for (int index = 0; index <= source.Length - search.Length; index++)
+        {
+            ObserveCancellation(index, cancellationToken);
+            if (source.AsSpan(index, search.Length).SequenceEqual(search)) { return (long)index + 1; }
+        }
+        return 0;
     }
 }

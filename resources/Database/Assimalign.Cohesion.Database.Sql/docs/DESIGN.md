@@ -658,6 +658,15 @@ PostgreSQL departure. Integer arithmetic with NULL retains BIGINT metadata.
 Until #1121, CREATE/ALTER TABLE planning refuses Stable/Volatile DEFAULT calls with
 COHDBL001 before any schema mutation, including calls nested under evaluator forms.
 
+String-producing scalars cap output and Unicode work buffers at 1,048,576 UTF-16 units.
+UPPER/LOWER apply the same bound; LENGTH/CHAR_LENGTH count without allocating a rune
+buffer. CONCAT checks binary-to-hex expansion before formatting as well as joined length.
+LPAD/RPAD bound two units per requested scalar; REPLACE counts nonoverlapping matches
+and bounds the expanded length before allocating. CONCAT/CONCAT_WS bound the joined
+length, and slicing/trimming/reversal bound their input work buffers. Long loops
+observe cancellation. Allocation failures are translated to COHSQLE002. PostgreSQL's
+equivalent preallocation check is `src/backend/utils/adt/oracle_compat.c:199-206`.
+
 SqlDatabaseSession captures one UTC instant from EngineOptions.TimeProvider at
 explicit transaction start, or when beginning an automatic statement transaction.
 SqlDatabaseTransaction retains it; SqlStatementContext carries it to planning.

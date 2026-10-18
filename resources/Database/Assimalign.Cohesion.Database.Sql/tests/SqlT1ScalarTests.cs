@@ -128,6 +128,12 @@ public sealed class SqlT1ScalarTests
     [InlineData("EXP(1000)", "COHSQLE002")]
     [InlineData("MOD(1, 0)", "COHSQLE001")]
     [InlineData("SUBSTRING('x' FROM 1 FOR -1)", "COHSQLE002")]
+    [InlineData("LPAD('x', 2147483647)", "COHSQLE002")]
+    [InlineData("RPAD('x', 2147483647, '😀')", "COHSQLE002")]
+    [InlineData("LPAD('x', 524289, '😀')", "COHSQLE002")]
+    [InlineData("REPLACE(LPAD('a', 50000, 'a'), 'a', LPAD('a', 50000, 'a'))", "COHSQLE002")]
+    [InlineData("CONCAT(LPAD('a', 524288), LPAD('a', 524288), 'x')", "COHSQLE002")]
+    [InlineData("CONCAT_WS('x', LPAD('a', 524288), LPAD('a', 524288))", "COHSQLE002")]
     public async Task Select_DomainFault_ShouldReturnCodedDatabaseException(string expression, string code)
     {
         // Arrange
