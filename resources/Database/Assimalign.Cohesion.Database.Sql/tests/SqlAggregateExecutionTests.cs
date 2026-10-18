@@ -585,7 +585,7 @@ public sealed class SqlAggregateExecutionTests
 
     /// <summary>T1 string signatures reject numeric inputs even inside aggregate arguments.</summary>
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Aggregates: scalar string functions reject numeric aggregate inputs")]
-    public async Task Aggregates_NumericStringFunctionOperand_ShouldMatchScalarRuntimeType()
+    public async Task Aggregates_NumericStringFunctionOperand_ShouldRejectSignature()
     {
         // Arrange
         await using var engine = CreateEngine();

@@ -39,6 +39,7 @@ internal sealed class CancellationFunctions
             builder.Functions.Add(new Aggregate(this, $"cancel_add{arity}", arity, "add"));
         }
         builder.Functions.Add(new Scalar(this, "cancel_fixed", 1, immutable: true));
+        builder.Functions.Add(new Scalar(this, "cancel_default", 1, immutable: true));
         builder.Functions.Add(new Aggregate(this, "cancel_seed", 1, "seed"));
         builder.Functions.Add(new Aggregate(this, "cancel_finish", 1, "finish"));
         builder.Functions.Add(new Scalar(this, "cancel_check", 1, check: true, immutable: true));
@@ -73,7 +74,7 @@ internal sealed class CancellationFunctions
             "INSERT INTO engine_values VALUES (0, 0)",
             "INSERT INTO sql_values VALUES (0, 0)",
             "CREATE TABLE table_check (v INT CHECK (cancel_check(v)))",
-            "CREATE TABLE function_default (id INT, v INT DEFAULT cancel_scalar1(1))",
+            "CREATE TABLE function_default (id INT, v INT DEFAULT cancel_default(1))",
             "CREATE TABLE fixed_default (id INT, v INT DEFAULT cancel_fixed(1))",
             "CREATE TABLE fixed_check (v INT CHECK (cancel_check(1)))",
         })
@@ -114,7 +115,7 @@ internal sealed class CancellationFunctions
         yield return ["SELECT cancel_finish(id) FROM t WHERE id = 0", "cancel_finish"];
         yield return ["SELECT wrapper(id) FROM t", "cancel_scalar1"];
         yield return ["INSERT INTO table_check VALUES (1)", "cancel_check"];
-        yield return ["INSERT INTO function_default (id) VALUES (1)", "cancel_scalar1"];
+        yield return ["INSERT INTO function_default (id) VALUES (1)", "cancel_default"];
         yield return ["INSERT INTO fixed_default (id) VALUES (1)", "cancel_fixed"];
         yield return ["INSERT INTO fixed_check VALUES (1)", "cancel_check"];
         foreach (string clause in new[] { "LIMIT", "OFFSET" })

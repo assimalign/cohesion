@@ -192,6 +192,9 @@ an `ExecutionFailure` with `ConnectionUsable = true`; the next command uses the 
 connection. Actual server cancellation retains the existing session teardown behavior.
 An explicit transaction also stays active: BEGIN, an earlier write, a coded function failure,
 a later write and COMMIT retain both successful writes and none from the failed statement.
+The DEFAULT cancellation fixture uses a separately named Immutable faulting scalar:
+#1120 temporarily refuses Stable/Volatile DEFAULT declarations until #1121. This
+retains the same default-evaluation cancellation/token and connection-reuse coverage.
 The cancellation wire theories cover that sequence and verify its committed state from a second
 connection, as well as checking the token on every planning and execution callback.
 

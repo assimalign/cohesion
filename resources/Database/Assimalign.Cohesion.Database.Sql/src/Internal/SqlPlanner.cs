@@ -1004,8 +1004,20 @@ internal sealed partial class SqlPlanner
             var scope = new SqlExpressionEvaluator([], null, defaultCollation: _catalog.DefaultCollation, functions: _functions, cancellationToken: _cancellationToken);
             SqlPersistedExpression.Bind(expression, scope);
             ValidateExpression(expression, scope);
+            ValidateDefaultVolatility(expression, scope);
         }
         return SqlPersistedExpression.Canonicalize(expression, $"DEFAULT of column '{definition.ColumnName}' on table '{table}'");
+    }
+
+    private static void ValidateDefaultVolatility(SqlExpression expression, SqlExpressionEvaluator scope)
+    {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+        if (expression is SqlFunctionCallExpression call && !SqlStandardLibrary.IsEvaluatorForm(call.FunctionName) &&
+            scope.ResolveFunction(call) is { Volatility: not SqlFunctionVolatility.Immutable } function)
+        {
+            throw new SqlPlanningException("COHDBL001", $"Function '{function.Name}' is not supported in DEFAULT until non-immutable DEFAULT expressions are implemented (#1121).", call.Location);
+        }
+        foreach (var child in Children(expression)) { ValidateDefaultVolatility(child, scope); }
     }
 
     private IReadOnlyList<string> DefaultCalls(string? text)
@@ -1334,13 +1346,7 @@ internal sealed partial class SqlPlanner
 
         if (expression is SqlBinaryExpression { Operator: SqlBinaryOperator.Add or SqlBinaryOperator.Subtract or SqlBinaryOperator.Multiply or SqlBinaryOperator.Divide or SqlBinaryOperator.Modulo } arithmetic)
         {
-            var left = evaluator.StaticTypeOf(arithmetic.Left);
-            var right = evaluator.StaticTypeOf(arithmetic.Right);
-            if ((SqlTemporalArithmetic.IsTemporal(left) || SqlTemporalArithmetic.IsTemporal(right)) &&
-                left != DatabaseType.Null && right != DatabaseType.Null && SqlTemporalArithmetic.ResultType(arithmetic.Operator, left, right) == DatabaseType.Null)
-            {
-                throw new SqlPlanningException("COHSQLE003", $"Invalid temporal arithmetic operands: {SqlType.NameOf(left)} {arithmetic.Operator} {SqlType.NameOf(right)}.", arithmetic.Location);
-            }
+            ValidateTemporalArithmetic(arithmetic, evaluator);
         }
 
         // After its arguments, as PostgreSQL resolves a call, so an argument's error is reported
@@ -1349,6 +1355,50 @@ internal sealed partial class SqlPlanner
         if (expression is SqlFunctionCallExpression call)
         {
             ResolveCall(call, evaluator);
+        }
+    }
+
+    internal static void ValidateTemporalArithmetic(SqlBinaryExpression arithmetic, SqlExpressionEvaluator evaluator)
+        => ValidateTemporalOperands(arithmetic, arithmetic.Left, arithmetic.Right, evaluator);
+
+    // Check the possible values of alternatives even where projection common-type inference
+    // does not run (WHERE, UPDATE and CHECK). Ordinary numeric operands allocate no walk state.
+    private static void ValidateTemporalOperands(SqlBinaryExpression arithmetic, SqlExpression leftExpression,
+        SqlExpression rightExpression, SqlExpressionEvaluator evaluator)
+    {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+        if (ValidateAlternatives(leftExpression, rightExpression, left: true) ||
+            ValidateAlternatives(rightExpression, leftExpression, left: false)) { return; }
+        var left = evaluator.StaticTypeOf(leftExpression);
+        var right = evaluator.StaticTypeOf(rightExpression);
+        if ((SqlTemporalArithmetic.IsTemporal(left) || SqlTemporalArithmetic.IsTemporal(right)) &&
+            left != DatabaseType.Null && right != DatabaseType.Null &&
+            SqlTemporalArithmetic.ResultType(arithmetic.Operator, left, right) == DatabaseType.Null)
+        { throw SqlTemporalArithmetic.InvalidOperands(arithmetic.Operator, left, right, arithmetic.Location); }
+
+        bool ValidateAlternatives(SqlExpression expression, SqlExpression other, bool left)
+        {
+            switch (expression)
+            {
+                case SqlFunctionCallExpression call when SqlStandardLibrary.IsCoalesce(call.FunctionName):
+                    foreach (var argument in call.Arguments) { ValidatePair(argument); }
+                    return true;
+                case SqlFunctionCallExpression call when call.FunctionName.Equals("NULLIF", StringComparison.OrdinalIgnoreCase):
+                    ValidatePair(call.Arguments[0]);
+                    return true;
+                case SqlCaseExpression conditional:
+                    foreach (var clause in conditional.WhenClauses) { ValidatePair(clause.Result); }
+                    if (conditional.ElseResult is not null) { ValidatePair(conditional.ElseResult); }
+                    return true;
+                case SqlCollateExpression collate:
+                    ValidatePair(collate.Operand);
+                    return true;
+                default:
+                    return false;
+            }
+
+            void ValidatePair(SqlExpression alternative)
+                => ValidateTemporalOperands(arithmetic, left ? alternative : other, left ? other : alternative, evaluator);
         }
     }
 

@@ -99,7 +99,28 @@ public sealed class SqlT1FunctionGrammarTests
         }
         foreach (string name in new[] { "position", "sign", "reverse", "ln", "exp", "now", "interval", "left", "current_date", "localtime", "localtimestamp" })
         {
-            new SqlQueryParser().Parse($"CREATE TABLE {name} (\"{name}\" INT);").Diagnostics.ShouldBeEmpty();
+            new SqlQueryParser().Parse($"CREATE TABLE {name} ({name} INT);").Diagnostics.ShouldBeEmpty();
+            // LEFT remains a clause keyword; its target-list spelling already required quotes.
+            if (name == "left")
+            {
+                new SqlQueryParser().Parse("INSERT INTO t (left) VALUES (1);").Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("SQL0003");
+            }
+            else
+            {
+                new SqlQueryParser().Parse($"INSERT INTO t ({name}) VALUES (1);").Diagnostics.ShouldBeEmpty(name);
+                new SqlQueryParser().Parse($"UPDATE t SET {name} = 1;").Diagnostics.ShouldBeEmpty(name);
+                new SqlQueryParser().Parse($"CREATE INDEX ix ON t ({name});").Diagnostics.ShouldBeEmpty(name);
+            }
+            var reference = (SqlQueryStatement)new SqlQueryParser().Parse($"SELECT {name} FROM t;");
+            reference.Diagnostics.ShouldBeEmpty();
+            if (name is "current_date" or "localtime" or "localtimestamp")
+            {
+                ((SqlSelectExpression)reference.SqlExpression).Columns[0].Expression.ShouldBeOfType<SqlFunctionCallExpression>();
+            }
+            else
+            {
+                ((SqlSelectExpression)reference.SqlExpression).Columns[0].Expression.ShouldBeOfType<SqlColumnReferenceExpression>().ColumnName.ShouldBe(name);
+            }
             new SqlQueryParser().Parse($"SELECT \"{name}\" AS {name} FROM t AS \"{name}\";").Diagnostics.ShouldBeEmpty(name);
             if (name is "current_date" or "localtime" or "localtimestamp") { continue; }
             var parsed = (SqlQueryStatement)new SqlQueryParser().Parse($"SELECT {name}.id FROM t AS \"{name}\";");

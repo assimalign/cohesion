@@ -257,19 +257,16 @@ public sealed class SqlInsertValuesValidationTests
     }
 
     /// <summary>
-    /// <c>CURRENT_DATE</c>, <c>CURRENT_TIME</c> and <c>CURRENT_TIMESTAMP</c> take no parentheses, so
-    /// they reach the planner as names. They are the dialect's recognized functions, not columns, and
-    /// report the unsupported function, as <c>NOW()</c> does, rather than a column reference; nothing
-    /// is inserted.
+    /// Window functions remain recognized but unsupported in VALUES and LIMIT; nothing is inserted.
     /// </summary>
     /// <param name="sql">The statement.</param>
     /// <param name="function">The function as written.</param>
-    [Theory(DisplayName = "Cohesion Test [SqlEngine] - INSERT VALUES/LIMIT: a niladic datetime function reports the function, not a column")]
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - INSERT VALUES/LIMIT: a window function reports its unsupported name")]
     [InlineData("INSERT INTO v (id, a) VALUES (2, RANK())", "RANK")]
     [InlineData("INSERT INTO v (id, name) VALUES (2, 'x'), (3, CAST(RANK() AS VARCHAR(20)))", "RANK")]
     [InlineData("INSERT INTO v (id, name) VALUES (2, CAST(LEAD(1) AS VARCHAR(20)))", "LEAD")]
     [InlineData("SELECT a FROM v LIMIT NTILE(1)", "NTILE")]
-    public async Task ExecuteAsync_NiladicDateTimeFunctionWithoutScope_ShouldReportUnsupportedFunction(string sql, string function)
+    public async Task ExecuteAsync_WindowFunctionWithoutScope_ShouldReportUnsupportedFunction(string sql, string function)
     {
         // Arrange
         await using var engine = CreateEngine();

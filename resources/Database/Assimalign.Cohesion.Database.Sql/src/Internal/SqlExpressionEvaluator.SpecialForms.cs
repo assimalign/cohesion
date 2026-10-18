@@ -42,7 +42,9 @@ internal sealed partial class SqlExpressionEvaluator
         {
             return first is null || second is null ? null : SqlTemporalFunctions.Extract((string)first, second);
         }
-        return first is not null && second is not null && SqlValueComparer.Compare(first, second, form.Collation.Resolve(_subqueryValues)) == 0
+        object? left = form.FirstCharacterComparand && first is string a ? new SqlCharacter(a) : first;
+        object? right = form.SecondCharacterComparand && second is string b ? new SqlCharacter(b) : second;
+        return left is not null && right is not null && SqlValueComparer.Compare(left, right, form.Collation.Resolve(_subqueryValues)) == 0
             ? null : Deliver(first, copySharedBinary);
     }
 }

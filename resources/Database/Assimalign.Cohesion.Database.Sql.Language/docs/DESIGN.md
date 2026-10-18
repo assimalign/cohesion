@@ -389,7 +389,7 @@ output (the rule is in [DIALECT.md](DIALECT.md#persisted-definitions-are-canonic
   compare the complete SqlTreeDump, including ordered definition names, column
   lists and bodies; generated query roots exercise WITH as well as scalar grammar.
   SEARCH and MATERIALIZED now render as quoted identifiers, including in persisted
-  CHECK/DEFAULT/function text; the engine's format-17 gate prevents format-15
+  CHECK/DEFAULT/function text; the engine's format-16 gate prevents format-15
   canonical CHECK text from reporting provisioning drift under the new renderer.
   A parser change that
   would read stored canonical text differently fails that suite. The engine also

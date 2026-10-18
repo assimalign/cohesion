@@ -1154,7 +1154,7 @@ internal sealed partial class SqlPlanExecutor
         /// <summary>
         /// Checks that an application function's result fits where the predicate uses it: an
         /// operand of a comparison, <c>BETWEEN</c> or <c>IN</c> list of a type its other operand
-        /// compares with, and an arithmetic operand that is a number. The evaluator would refuse
+        /// compares with, and arithmetic operands accepted by the numeric/temporal planner rules. The evaluator would refuse
         /// either on every row the call returns a value for. Calls of the standard library, and
         /// operands whose type the plan cannot tell, are not checked, so no predicate DDL accepted
         /// before is refused.
@@ -1170,8 +1170,14 @@ internal sealed partial class SqlPlanExecutor
                     break;
                 case SqlBinaryExpression binary when binary.Operator is SqlBinaryOperator.Add or SqlBinaryOperator.Subtract
                     or SqlBinaryOperator.Multiply or SqlBinaryOperator.Divide or SqlBinaryOperator.Modulo:
-                    CheckNumber(binary.Left);
-                    CheckNumber(binary.Right);
+                    SqlPlanner.ValidateTemporalArithmetic(binary, _scope);
+                    var leftType = _scope.StaticTypeOf(binary.Left);
+                    var rightType = _scope.StaticTypeOf(binary.Right);
+                    if (!SqlTemporalArithmetic.IsTemporal(leftType) && !SqlTemporalArithmetic.IsTemporal(rightType))
+                    {
+                        CheckNumber(binary.Left);
+                        CheckNumber(binary.Right);
+                    }
                     break;
                 case SqlBetweenExpression between:
                     CheckComparable(between.Operand, between.Low);
@@ -1205,7 +1211,7 @@ internal sealed partial class SqlPlanExecutor
             {
                 first = first switch { DatabaseType.Character or DatabaseType.Json => DatabaseType.String, DatabaseType.JsonBinary => DatabaseType.Binary, _ => first };
                 second = second switch { DatabaseType.Character or DatabaseType.Json => DatabaseType.String, DatabaseType.JsonBinary => DatabaseType.Binary, _ => second };
-                return first == second || IsNumber(first) && IsNumber(second);
+                return first == second || IsNumber(first) && IsNumber(second) || SqlTemporalArithmetic.IsCalendar(first) && SqlTemporalArithmetic.IsCalendar(second);
             }
         }
 

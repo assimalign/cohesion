@@ -1,5 +1,6 @@
 using System;
 
+using Assimalign.Cohesion.Database.Language;
 using Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Types;
 
@@ -35,8 +36,22 @@ internal static class SqlTemporalArithmetic
         return DatabaseType.Null;
     }
 
+    private static DateTimeOffset AddInstant(DateTimeOffset instant, TimeSpan interval)
+    {
+        var utc = new DateTimeOffset(instant.UtcDateTime.Add(interval), TimeSpan.Zero);
+        long localTicks = utc.Ticks + instant.Offset.Ticks;
+        return localTicks >= DateTime.MinValue.Ticks && localTicks <= DateTime.MaxValue.Ticks
+            ? utc.ToOffset(instant.Offset) : utc;
+    }
+
+    internal static SqlPlanningException InvalidOperands(SqlBinaryOperator op, DatabaseType left, DatabaseType right, Location? location = null)
+        => new("COHSQLE003", $"Invalid temporal arithmetic operands: {SqlType.NameOf(left)} {op switch { SqlBinaryOperator.Add => "+", SqlBinaryOperator.Subtract => "-", SqlBinaryOperator.Multiply => "*", SqlBinaryOperator.Divide => "/", SqlBinaryOperator.Modulo => "%", _ => op.ToString() }} {SqlType.NameOf(right)}.", location);
+
     internal static object Evaluate(SqlBinaryOperator op, object left, object right)
     {
+        var leftType = SqlValue.FromObject(left).Type;
+        var rightType = SqlValue.FromObject(right).Type;
+        if (ResultType(op, leftType, rightType) == DatabaseType.Null) { throw InvalidOperands(op, leftType, rightType); }
         try
         {
             if (left is DateOnly date && right is sbyte or short or int or long)
@@ -52,7 +67,7 @@ internal static class SqlTemporalArithmetic
                 {
                     DateOnly day => add ? day.ToDateTime(TimeOnly.MinValue).Add(interval) : day.ToDateTime(TimeOnly.MinValue).Subtract(interval),
                     DateTime wall => add ? wall.Add(interval) : wall.Subtract(interval),
-                    DateTimeOffset instant => add ? instant.Add(interval) : instant.Subtract(interval),
+                    DateTimeOffset instant => AddInstant(instant, add ? interval : -interval),
                     TimeSpan duration => add ? duration.Add(interval) : duration.Subtract(interval),
                     _ => throw new SqlPlanningException("COHSQLE003", "Invalid temporal arithmetic operands."),
                 };

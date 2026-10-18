@@ -8,7 +8,9 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Connections.InMemory;
 using Assimalign.Cohesion.Database.Execution;
+using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Sql.Schema;
 using Assimalign.Cohesion.Database.Types;
@@ -57,16 +59,21 @@ public sealed class SqlT1ScalarPositionsTests
         }
     }
 
-    [Theory(DisplayName = "Cohesion Test [SqlEngine] - T1 functions: every family executes across expression positions")]
-    [InlineData("REVERSE('abc')", "TEXT")]
-    [InlineData("FLOOR(2.5)", "DECIMAL")]
-    [InlineData("NULLIF('abc', 'x')", "TEXT")]
-    [InlineData("CURRENT_DATE", "DATE")]
-    [InlineData("GEN_RANDOM_UUID()", "UUID")]
-    public async Task Execute_EveryExpressionPosition_ShouldRunEachFamily(string expression, string type)
+    public static IEnumerable<object?[]> Positions() =>
+    [
+        ["REVERSE('abc')", "TEXT", "cba", "= 'cba'"],
+        ["FLOOR(2.5)", "DECIMAL", 2m, "= 2"],
+        ["NULLIF('x', 'x')", "TEXT", null, "IS NULL"],
+        ["CURRENT_DATE", "DATE", new DateOnly(2024, 3, 4), "= DATE '2024-03-04'"],
+        ["GEN_RANDOM_UUID()", "UUID", typeof(Guid), "IS NOT NULL"],
+    ];
+
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - T1 functions: every family returns values across expression positions")]
+    [MemberData(nameof(Positions))]
+    public async Task Execute_EveryExpressionPosition_ShouldReturnEachFamilyValue(string expression, string type, object? expected, string predicate)
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create("scalar-positions", new());
+        await using var engine = SqlDatabaseEngine.Create("scalar-positions", new() { TimeProvider = new ScalarClock(SqlT1ScalarTests.Instant) });
         var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await session.ExecuteAsync("CREATE TABLE t (id INT);", cancellationToken: CancellationToken.None);
@@ -74,18 +81,25 @@ public sealed class SqlT1ScalarPositionsTests
         await session.ExecuteAsync($"CREATE TABLE dest (v {type});", cancellationToken: CancellationToken.None);
 
         // Act / Assert
-        (await Rows(session, $"SELECT {expression} FROM t;")).Count.ShouldBe(2);
-        (await Rows(session, $"SELECT id FROM t WHERE {expression} IS NOT NULL;")).Count.ShouldBe(2);
-        (await Rows(session, $"SELECT a.id FROM t a JOIN t b ON {expression} IS NOT NULL;")).Count.ShouldBe(4);
-        var grouped = await Rows(session, $"SELECT {expression}, COUNT(*) FROM t GROUP BY {expression} HAVING {expression} IS NOT NULL ORDER BY {expression};");
+        var projected = await Rows(session, $"SELECT {expression} FROM t;");
+        projected.Count.ShouldBe(2);
+        foreach (var row in projected) { SqlT1ScalarTests.VerifyValue(row[0], expected); }
+        (await Rows(session, $"SELECT id FROM t WHERE {expression} {predicate} ORDER BY id;")).ShouldBe([[1], [2]]);
+        (await Rows(session, $"SELECT a.id, b.id FROM t a JOIN t b ON {expression} {predicate} ORDER BY a.id, b.id;")).ShouldBe([[1, 1], [1, 2], [2, 1], [2, 2]]);
+        var grouped = await Rows(session, $"SELECT {expression}, COUNT(*) FROM t GROUP BY {expression} HAVING {expression} {predicate} ORDER BY {expression};");
         grouped.Sum(row => (long)row[1]!).ShouldBe(2);
-        (await Rows(session, $"SELECT id FROM t ORDER BY {expression};")).Count.ShouldBe(2);
+        foreach (var row in grouped) { SqlT1ScalarTests.VerifyValue(row[0], expected); }
+        var ordered = await Rows(session, $"SELECT {expression}, id FROM t ORDER BY {expression}, id;");
+        ordered.Count.ShouldBe(2);
+        foreach (var row in ordered) { SqlT1ScalarTests.VerifyValue(row[0], expected); }
         await session.ExecuteAsync($"INSERT INTO dest VALUES ({expression});", cancellationToken: CancellationToken.None);
+        foreach (var row in await Rows(session, "SELECT v FROM dest;")) { SqlT1ScalarTests.VerifyValue(row[0], expected); }
         await session.ExecuteAsync($"INSERT INTO dest SELECT {expression} FROM t;", cancellationToken: CancellationToken.None);
+        foreach (var row in await Rows(session, "SELECT v FROM dest;")) { SqlT1ScalarTests.VerifyValue(row[0], expected); }
         await session.ExecuteAsync($"UPDATE dest SET v = {expression};", cancellationToken: CancellationToken.None);
         var assigned = await Rows(session, "SELECT v FROM dest;");
         assigned.Count.ShouldBe(3);
-        assigned.ShouldAllBe(row => row[0] != null);
+        foreach (var row in assigned) { SqlT1ScalarTests.VerifyValue(row[0], expected); }
     }
 
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - T1 numeric functions: every numeric storage width is admitted")]
@@ -169,7 +183,7 @@ public sealed class SqlT1ScalarPositionsTests
             {
                 var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
                 await using var session = await database.CreateSessionAsync(CancellationToken.None);
-                await session.ExecuteAsync("CREATE TABLE t (code TEXT CHECK (CHAR_LENGTH(code) = 3), id UUID);", cancellationToken: CancellationToken.None);
+                await session.ExecuteAsync("CREATE TABLE t (code TEXT CONSTRAINT ck_code CHECK (CHAR_LENGTH(code) = 3), id UUID);", cancellationToken: CancellationToken.None);
                 await session.ExecuteAsync("INSERT INTO t VALUES ('a😀b', GEN_RANDOM_UUID());", cancellationToken: CancellationToken.None);
                 await session.ExecuteAsync("CREATE INDEX ix_uuid ON t(id);", cancellationToken: CancellationToken.None);
             }
@@ -178,7 +192,19 @@ public sealed class SqlT1ScalarPositionsTests
             await using var second = await opened.CreateSessionAsync(CancellationToken.None);
 
             // Act / Assert
-            await Should.ThrowAsync<DatabaseException>(() => second.ExecuteAsync("INSERT INTO t VALUES ('ab', GEN_RANDOM_UUID());", cancellationToken: CancellationToken.None).AsTask());
+            await second.ExecuteAsync("INSERT INTO t VALUES ('x😀z', GEN_RANDOM_UUID());", cancellationToken: CancellationToken.None);
+            var failure = await Should.ThrowAsync<SqlConstraintViolationException>(() => second.ExecuteAsync("INSERT INTO t VALUES ('ab', GEN_RANDOM_UUID());", cancellationToken: CancellationToken.None).AsTask());
+            failure.ConstraintKind.ShouldBe("CHECK");
+            failure.ConstraintName.ShouldBe("ck_code");
+            await using var listener = new InMemoryConnectionListener();
+            await using var server = SqlDatabaseServer.Create(reopened, new() { Listener = listener });
+            await server.StartAsync(CancellationToken.None);
+            await using var client = new ProtocolTestClient(await listener.CreateFactory().ConnectAsync(listener.EndPoint, CancellationToken.None));
+            await client.HandshakeAsync(database: "db");
+            await client.SendAsync(ProtocolMessageType.Execute, ProtocolExecuteMessage.Create("INSERT INTO t VALUES ('ab', GEN_RANDOM_UUID())").Encode());
+            var error = ProtocolErrorMessage.Decode((await client.ExpectAsync(ProtocolMessageType.Error)).Payload.Span);
+            error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
+            error.Message.ShouldContain("CHECK constraint 'ck_code'", Case.Sensitive);
             (await Rows(second, "SELECT code FROM t WHERE id = GEN_RANDOM_UUID();")).ShouldBeEmpty();
             second.LastStatementMetrics.ShouldNotBeNull().AccessPath.ShouldBe("scan");
         }

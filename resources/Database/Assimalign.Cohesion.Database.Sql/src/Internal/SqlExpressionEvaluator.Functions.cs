@@ -28,7 +28,17 @@ internal sealed partial class SqlExpressionEvaluator
 
         // A call typed earlier as another call's argument resolved the same way; one that failed
         // there resolves again, so the failure is raised here.
-        return TryGetTypedCall(call, out var typed) && typed.Function is { } function ? function : Resolve(call, overloads);
+        var resolved = TryGetTypedCall(call, out var typed) && typed.Function is { } function ? function : Resolve(call, overloads);
+        if (resolved is SqlBuiltinScalarFunction { Name: "DATE_TRUNC" })
+        {
+            var field = Bind(call.Arguments[0]);
+            if (field is SqlBoundConstant or SqlBoundParameter && Evaluate(field, []) is string text &&
+                !SqlTemporalFunctions.AcceptsTruncation(text, StaticTypeOf(call.Arguments[1])))
+            {
+                throw SqlEvaluationException.FunctionArgumentTypeMismatch(call.FunctionName, text, "DATE_TRUNC(compatible field, temporal)");
+            }
+        }
+        return resolved;
     }
 
     internal void PinFunction(SqlFunctionCallExpression call, string identity)
@@ -457,7 +467,7 @@ internal sealed partial class SqlExpressionEvaluator
             return DatabaseType.Decimal;
         }
 
-        return Integer(left) && Integer(right) ? DatabaseType.Int64 : DatabaseType.Null;
+        return (Integer(left) || left == DatabaseType.Null) && (Integer(right) || right == DatabaseType.Null) ? DatabaseType.Int64 : DatabaseType.Null;
     }
 
     /// <summary>The storage type of a supplied value, or <see cref="DatabaseType.Null"/> for NULL or a CLR type without one.</summary>

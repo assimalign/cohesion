@@ -258,7 +258,7 @@ including unused constant bodies, reject aggregates in WHERE during planning
 (COHSQLE017; PostgreSQL src/backend/parser/parse_agg.c:407).
 No interface, project reference or internal grant is added.
 
-Data-storage format 17 is retained because the new SEARCH and MATERIALIZED
+Data-storage format 16 was introduced because the new SEARCH and MATERIALIZED
 vocabulary entries change canonical persisted identifier text: a CHECK previously
 stored as `search >= 0` now stores `"search" >= 0`. DEFAULT expressions and SQL
 function bodies use the same renderer. SqlSchemaProvisioner compares persisted
@@ -640,7 +640,23 @@ NULL and volatility metadata. Numeric/temporal pseudo-type rules live on the lea
 and are read by the same resolver for planning and output typing. NULLIF and EXTRACT
 join COALESCE/CASE/CAST as evaluator forms (decision 66); the parser normalizes
 SUBSTRING/TRIM/POSITION onto calls. Immutable calls fold and persisted CHECKs retain
-resolved identities. Format 17 refuses older canonical definitions; no upgrade reader.
+resolved identities. Format 17 quotes newly executable function names and
+BOTH/LEADING/TRAILING in persisted CHECK, DEFAULT and function-body text (for
+example, `sign >= 0` becomes `"sign" >= 0`). SqlT1StorageFormatTests demonstrates
+format-16 canonical CHECK drift and its open refusal. No upgrade reader exists.
+
+Definition dependency/volatility walks and correlated preparation descend through
+every evaluator form. NULLIF applies equality's CHAR comparand normalization while
+preserving its first value (PostgreSQL `src/backend/parser/parse_expr.c:1083`).
+Temporal CHECK arithmetic and calendar comparison share the planner's type rules;
+unsupported temporal operators are refused before execution, including alternatives
+inside CASE/COALESCE, and guarded again at runtime. TIMESTAMPTZ arithmetic checks
+the UTC range and retains the written offset only when its local clock is representable.
+Constant EXTRACT/DATE_TRUNC fields are validated during planning for every operand
+type. INTERVAL field extraction retains normalized TimeSpan components, a documented
+PostgreSQL departure. Integer arithmetic with NULL retains BIGINT metadata.
+Until #1121, CREATE/ALTER TABLE planning refuses Stable/Volatile DEFAULT calls with
+COHDBL001 before any schema mutation, including calls nested under evaluator forms.
 
 SqlDatabaseSession captures one UTC instant from EngineOptions.TimeProvider at
 explicit transaction start, or when beginning an automatic statement transaction.
@@ -4967,8 +4983,9 @@ PostgreSQL src/backend/utils/fmgr/fmgr.c:253 (fmgr_sql), commands/functioncmds.c
 
 One immutable per-database environment merges native and SQL definitions, rebuilt topologically
 on open and definition DDL. Namespace collisions, recursive dependencies and declarations weaker
-than their called functions are refused before publication. SQL defaults are volatile and called
-on NULL, while native shorthand keeps its strict default. SQL domain columns use E3's existing
+than their called functions are refused before publication. SQL functions default to Volatile
+and CALLED ON NULL INPUT, while native shorthand keeps its strict default. Until #1121,
+column DEFAULT calls must be explicitly Immutable; Stable/Volatile calls are refused during DDL. SQL domain columns use E3's existing
 bounds and check path. Function metadata preserves domain names for parameters and results.
 SQL functions accept the parser's delimited names; native registrations retain their identifier
 name rule. Both paths retain the same reserved-name and overload admission checks.

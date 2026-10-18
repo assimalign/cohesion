@@ -583,7 +583,12 @@ internal sealed partial class SqlExpressionEvaluator
             ValidateEvaluatorForm(call);
             var operands = BindArguments(call.Arguments, out var specialCollation);
             collation = CollationOf(call, ChildCollations(call));
-            return new SqlBoundSpecialForm(call.FunctionName.ToUpperInvariant(), operands, specialCollation);
+            // NULLIF uses equality's CHAR identity for untyped text, while returning the
+            // original first value. PostgreSQL: src/backend/parser/parse_expr.c:1083.
+            bool nullIf = call.FunctionName.Equals("NULLIF", StringComparison.OrdinalIgnoreCase);
+            bool firstCharacter = nullIf && !ReferenceEquals(operands[0], BindCharacterComparand(call.Arguments[0], operands[0], call.Arguments[1]));
+            bool secondCharacter = nullIf && !ReferenceEquals(operands[1], BindCharacterComparand(call.Arguments[1], operands[1], call.Arguments[0]));
+            return new SqlBoundSpecialForm(call.FunctionName.ToUpperInvariant(), operands, specialCollation, firstCharacter, secondCharacter);
         }
         bool coalesce = SqlStandardLibrary.IsCoalesce(call.FunctionName);
         SqlFunction? function = null;

@@ -1492,7 +1492,10 @@ extension relations are recorded in the
 TIMESTAMP and TIMESTAMPTZ support +/- day-time INTERVAL and subtraction from
 either timestamp type to produce INTERVAL. DATE +/- INTERVAL produces TIMESTAMP;
 DATE +/- integer produces DATE; DATE - DATE produces INTEGER days. INTERVAL supports
-+/- INTERVAL and unary minus. Literal, column and parameter operands behave alike.
++/- INTERVAL and unary minus. Multiplication, division and remainder over temporal
+operands are unsupported, including INTERVAL times a number. Literal, column and
+parameter operands behave alike. TIMESTAMPTZ arithmetic checks range on the UTC
+instant; it preserves the written offset when representable, otherwise uses +00:00.
 Every other temporal arithmetic pair fails planning (COHSQLE003), including empty
 inputs; values outside years 1..9999 fail evaluation with COHSQLE002.
 
@@ -2137,10 +2140,10 @@ use ordinal Unicode scalar matching.
 | FLOOR(numeric) | Numeric result | Strict | I | ISO / PG |
 | CEILING(numeric) | Numeric result | Strict | I | ISO / PG |
 | CEIL(numeric) | Numeric result | Strict | I | PG alias of CEILING |
-| POWER(numeric, numeric) | DECIMAL for exact base/integer exponent; base approximate type for integer exponent; otherwise DOUBLE PRECISION | Strict | I | ISO / PG; fractional exponent returns DOUBLE PRECISION |
+| POWER(numeric, numeric) | DECIMAL for exact base/integer exponent; base approximate type for integer exponent; otherwise DOUBLE PRECISION | Strict | I | ISO / PG; deviation for owner approval: result type follows operand types, with fractional-typed exponents returning DOUBLE PRECISION even when their value is integral |
 | SQRT(numeric) | DOUBLE PRECISION | Strict | I | ISO / PG; PG numeric-result deviation |
 | MOD(numeric, numeric) | BIGINT for integers; DECIMAL for exact decimal; DOUBLE PRECISION for approximate | Strict | I | ISO / PG; zero divisor fails |
-| SIGN(numeric) | BIGINT | Strict | I | ISO / PG |
+| SIGN(numeric) | BIGINT for every numeric input | Strict | I | PG; deviation: PG preserves NUMERIC or DOUBLE PRECISION |
 | EXP(numeric) | DOUBLE PRECISION | Strict | I | ISO / PG; PG numeric-result deviation |
 | LN(numeric) | DOUBLE PRECISION | Strict | I | ISO / PG; PG numeric-result deviation |
 | LOG10(numeric) | DOUBLE PRECISION | Strict | I | PG; PG numeric-result deviation |
@@ -2157,7 +2160,11 @@ use ordinal Unicode scalar matching.
 EXTRACT fields are YEAR, QUARTER, MONTH, WEEK (ISO week number), DAY, DOW
 (Sunday zero), DOY, HOUR, MINUTE, SECOND (with fractional seconds) and EPOCH.
 DATE admits only calendar fields and EPOCH; TIME admits hour/minute/second/epoch;
-day-time INTERVAL additionally admits day. Incompatible fields fail planning.
+day-time INTERVAL additionally admits day. Field names are case-insensitive; unknown or
+incompatible constant fields fail planning for every temporal type. INTERVAL extraction
+uses the normalized TimeSpan components: `INTERVAL '36' HOUR` has DAY 1 and HOUR 12.
+This departs from PostgreSQL's separate day/time components (DAY 0, HOUR 36).
+EPOCH always returns the full duration in seconds.
 DATE_TRUNC accepts year/quarter/month/week/day/hour/minute/second/millisecond/
 microsecond; TIME and INTERVAL admit day and finer units. Invalid field values
 fail with COHSQLE006. There is no session time zone.
@@ -2173,7 +2180,7 @@ BeginTransactionAsync for explicit transactions, statement start for auto-commit
 Planning a seek and evaluating every row, child query and later statement in the
 transaction use the same instant. COMMIT/ROLLBACK ends that lifetime. The engine's
 existing internal TimeProvider seam remains internal (owner decision 42); DEFAULT
-expression admission is #1121 and will reuse this carrier. Shared defaults without a statement instant reject clock evaluation with COHDBL001; they never sample a separate row clock.
+expression admission is #1121 and will reuse this carrier. CREATE TABLE and ALTER TABLE refuse every Stable or Volatile call in DEFAULT with COHDBL001 naming the function, before publishing any schema change. #1121 will lift this refusal.
 
 Numeric domain errors, nonfinite finite-input results, negative SUBSTRING lengths,
 numeric overflow and temporal range overflow use COHSQLE002; MOD by zero uses
@@ -2458,7 +2465,7 @@ DROP FUNCTION checks the requested normalized signature: an engine-registered ov
 COHSQLD003; an absent overload is COHSQLD001 even when the engine registers another overload
 with the same name. Type aliases and function-name casing do not change that identity.
 
-CREATE TABLE defaults additionally admit column-free scalar function calls, bound once and
+CREATE TABLE defaults additionally admit column-free Immutable scalar function calls, bound once and
 executed for each omitted value. Domain defaults, ADD COLUMN, typed DefaultSql and SDK defaults
 remain literal-only. ADD COLUMN retains the existing missing-tail representation; a volatile
 expression there would change historical rows on each read. ALTER cannot change defaults.

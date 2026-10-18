@@ -14,13 +14,31 @@ internal static class SqlTemporalFunctions
     });
 
     internal static bool AcceptsField(string field, Types.DatabaseType type)
-        => type == Types.DatabaseType.Null || type is Types.DatabaseType.DateTime or Types.DatabaseType.DateTimeOffset
-            || type == Types.DatabaseType.Date && field is "YEAR" or "QUARTER" or "MONTH" or "WEEK" or "DAY" or "DOW" or "DOY" or "EPOCH"
-            || type is Types.DatabaseType.Time or Types.DatabaseType.TimeSpan && field is "HOUR" or "MINUTE" or "SECOND" or "EPOCH"
-            || type == Types.DatabaseType.TimeSpan && field == "DAY";
+    {
+        field = field.ToUpperInvariant();
+        bool calendar = field is "YEAR" or "QUARTER" or "MONTH" or "WEEK" or "DAY" or "DOW" or "DOY" or "EPOCH";
+        bool clock = field is "HOUR" or "MINUTE" or "SECOND" or "EPOCH";
+        return type switch
+        {
+            Types.DatabaseType.Null or Types.DatabaseType.DateTime or Types.DatabaseType.DateTimeOffset => calendar || clock,
+            Types.DatabaseType.Date => calendar,
+            Types.DatabaseType.Time => clock,
+            Types.DatabaseType.TimeSpan => clock || field == "DAY",
+            _ => false,
+        };
+    }
+
+    internal static bool AcceptsTruncation(string field, Types.DatabaseType type)
+    {
+        field = field.ToUpperInvariant();
+        bool duration = field is "DAY" or "HOUR" or "MINUTE" or "SECOND" or "MILLISECOND" or "MICROSECOND";
+        return duration || type is Types.DatabaseType.Null or Types.DatabaseType.Date or Types.DatabaseType.DateTime or Types.DatabaseType.DateTimeOffset &&
+            field is "YEAR" or "QUARTER" or "MONTH" or "WEEK";
+    }
 
     internal static decimal Extract(string field, object value)
     {
+        field = field.ToUpperInvariant();
         if (!AcceptsField(field, value)) { throw SqlEvaluationException.FunctionArgumentTypeMismatch("EXTRACT", value.GetType().Name, "EXTRACT(field FROM compatible temporal value)"); }
         if (value is TimeOnly time) { return ExtractDuration(field, time.ToTimeSpan()); }
         if (value is TimeSpan interval) { return ExtractDuration(field, interval); }
