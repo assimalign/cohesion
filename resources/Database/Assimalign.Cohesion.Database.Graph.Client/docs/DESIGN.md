@@ -79,7 +79,7 @@ order. Group lists flow through FOR/UNWIND with their entity kinds; scalar proje
 expansion use the existing result codec. Unnegotiated possible composite final projections
 fail statically with COHDBG016. Negotiated lists containing entities keep the existing Execute
 entity-result rejection, as collect(entity) does. No new wire tag or capability is introduced.
-Malformed bounds return ParseFailure and keep the authenticated session; the protocol suite
+Malformed bounds and adjacent comments hiding Cypher ranges return ParseFailure and keep the authenticated session; the protocol suite
 also pins the following Ping/Pong. GraphQuantifiedPathWireTests exercises rows, paths, aliases,
 linear group flow and session reuse over InMemory and TCP.
 

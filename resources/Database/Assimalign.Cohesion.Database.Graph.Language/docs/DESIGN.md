@@ -190,7 +190,7 @@ paths        := path (',' path)*
 path         := path-primary ((edge [quantifier] path-primary) | parenthesized | node)*
 path-primary := node | parenthesized
 parenthesized:= '(' path ')' [quantifier]
-quantifier   := '{' integer [',' [integer]] '}' | '{,' integer '}' | '+' | '*'
+quantifier   := '{' integer [',' [integer]] '}' | '{,' [integer] '}' | '+' | '*'
 node         := '(' [ variable ] [ label-spec ] [ properties ] ')'
 edge         := '-[' filler ']->' | '<-[' filler ']-' | '-[' filler ']-' | '<-[' filler ']->'
               | '->' | '<-' | '-' | '<->'
@@ -271,15 +271,14 @@ catalog, storage or wire format change.
 
 | Spelling | Inclusive bounds |
 | --- | --- |
-| `->{m}`, `->{m,n}`, `->{m,}`, `->{,n}` | m..m, m..n, m..unbounded, 0..n |
+| `->{m}`, `->{m,n}`, `->{m,}`, `->{,n}`, `->{,}` | m..m, m..n, m..unbounded, 0..n, 0..unbounded |
 | `->+`, `->*` | 1..unbounded, 0..unbounded |
 | `-[r:T*]->`, `-[*..n]->` | 1..unbounded, 1..n |
 | `-[*m]->`, `-[*m..n]->`, `-[*m..]->` | m..m, m..n, m..unbounded |
 | `-[*0]->`, `-[*0..n]->` | 0..0, 0..n |
 
 The Cypher bound sits after the label expression and before the property map. ISO `{0}` and
-`{0,0}` are GQL0002; the Cypher zero-length spelling `[*0]` is accepted. Reversed or missing
-bounds are GQL0002, and a bound that cannot fit Int32 is GQL0004. A fixed edge contributes 1
+`{0,0}` are GQL0002; the Cypher zero-length spelling `[*0]` is accepted. Reversed bounds are GQL0002, and a bound that cannot fit Int32 is GQL0004. A fixed edge contributes 1
 to the path sum; a bounded segment contributes its upper bound times its body's edge count;
 an unbounded segment contributes its lower bound times that count. A text sum above 64 is
 GQL0005, including an unbounded lower bound above 64. Hand-built invalid bounds use COHDBG001.
@@ -312,7 +311,8 @@ after an edge or parenthesized path, subpath assignments, WHERE inside a parenth
 and nested quantifiers each produce one named COHDBL001. Elsewhere `?` retains the stray-character
 or unsupported-parameter diagnostic. Explicit TRAIL and other path modes/search prefixes remain
 COHDBL001. A `--` touching a subpath's `)` or quantifier's `}`, `+` or `*` is GQL0008, just as
-after a node or edge filler. Recursive subpath parsing uses the GQL0009 stack guard. Hand-built
+after a node or edge filler, including the bracketed Cypher star and its bounds. A nested `?`
+retains COHDBL001; path modes inside subpaths receive the same named capability diagnostic. Recursive subpath parsing uses the GQL0009 stack guard. Hand-built
 subpath nesting beyond 128 levels or cyclic element collections are refused iteratively with
 COHDBG001 before shape traversal.
 
@@ -324,6 +324,8 @@ default. Mixing bracketed Cypher lengths and ISO quantified subpaths in a clause
 Behavior consulted, no code copied, relative to `C:/Source/repos/neo4j/neo4j`:
 `community/cypher/front-end/expressions/src/main/scala/org/neo4j/cypher/internal/expressions/GraphPatternQuantifier.scala:26-44`
 defines plus/star emptiness and interval lower-default zero;
+`community/cypher/front-end/parser/v25/parser/src/main/antlr4/org/neo4j/cypher/internal/parser/v25/Cypher25Parser.g4:381-386`
+permits both interval bounds to be omitted (`{,}`);
 `community/cypher/ir/src/main/scala/org/neo4j/cypher/internal/ir/converters/SimplePatternConverters.scala:108-126`
 lowers legacy lengths with lower-default one; and
 `community/cypher/front-end/ast/src/main/scala/org/neo4j/cypher/internal/ast/semantics/SemanticPatternCheck.scala:609-619`

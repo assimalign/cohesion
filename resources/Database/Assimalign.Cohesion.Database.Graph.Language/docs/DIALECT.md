@@ -15,7 +15,7 @@ returns one all-null row. Comma-separated paths belong to one clause and succeed
 together. Trail uniqueness is per path, including every quantified repetition; another comma-separated
 path or a later clause may reuse a relationship. This differs from Neo4j's clause-wide uniqueness.
 
-Quantified relationships accept ISO `->{m,n}`, `{m}`, `{m,}`, `{,n}`, `->+` and `->*` in every
+Quantified relationships accept ISO `->{m,n}`, `{m}`, `{m,}`, `{,n}`, `{,}`, `->+` and `->*` in every
 supported direction, and Cypher `-[r:T*m..n]->` before the property map. Bracketed `*` and `*..n`
 start at 1; ISO postfix `*` and `{,n}` start at 0. Cypher `[*0]` is a zero-length path; ISO `{0}`
 is GQL0002. Parenthesized bodies repeat as a unit: `(a) ((x)-[:T]->(y)){2} (b)`, with adjoining

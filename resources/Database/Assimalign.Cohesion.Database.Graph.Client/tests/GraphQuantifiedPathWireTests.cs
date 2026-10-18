@@ -51,6 +51,10 @@ public sealed class GraphQuantifiedPathWireTests
             (await connection.QueryAsync("MATCH (a:V {name:'A'})-[r:T]->{2}(b) WITH r " + loop + " WITH e MATCH ()-[e]->() RETURN e.w", cancellationToken: harness.Token))
                 .Select(row => row[0]).ShouldBe(new object?[] { 1L, 2L });
         }
+        var comment = await Should.ThrowAsync<GraphClientException>(async () => await connection.QueryAsync(
+            "MATCH (a:V {name:'A'})-[:T*--1..1]->(hidden)\n]->(b) RETURN b.name", cancellationToken: harness.Token));
+        comment.Code.ShouldBe(ProtocolErrorCode.ParseFailure);
+        comment.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("GQL0008");
         var malformed = await Should.ThrowAsync<GraphClientException>(async () => await connection.QueryAsync("MATCH (a)->{3,1}(b) RETURN a.name", cancellationToken: harness.Token));
         malformed.Code.ShouldBe(ProtocolErrorCode.ParseFailure);
         malformed.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("GQL0002");

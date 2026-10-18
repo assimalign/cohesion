@@ -39,6 +39,7 @@ public sealed partial class GqlQueryParser
         {
             if (Current.Type == TokenType.LeftParen &&
                 (_tokens[_position + 1].Type == TokenType.LeftParen ||
+                 IsPathModeAt(_position + 1) ||
                  IsVariableLexeme(_tokens[_position + 1]) && _tokens[_position + 2].Type == TokenType.Equals))
             {
                 var start = Current;
@@ -46,6 +47,8 @@ public sealed partial class GqlQueryParser
                 { Error("GQL0002", "INSERT and CREATE patterns cannot contain parenthesized paths or quantifiers.", start); break; }
                 if (!HasStackToNest(start)) { break; }
                 Advance();
+                if (IsPathModeAt(_position))
+                { RejectPathMode(); break; }
                 if (IsVariableToken)
                 { Unsupported("SUBPATH VARIABLE", Current); break; }
                 var inner = ParsePath(allowQuantifiers, out long innerBound);
@@ -98,6 +101,24 @@ public sealed partial class GqlQueryParser
         { Elements = elements.AsReadOnly() };
     }
 
+    private bool IsPathModeAt(int index)
+    {
+        if (index >= _tokens.Count) { return false; }
+        var end = _tokens[index];
+        if (GqlUnsupportedVocabulary.TryFind(end.Text.ToUpperInvariant(), out var word) && word.Position == GqlWordPosition.PathMode)
+        { return StartsPathPattern(index + 1, ref end); }
+        return end.Text.ToUpperInvariant() is "ALL" or "ANY" or "SHORTEST" &&
+            TryPathSearchPrefix(index, out _, out int last) && last + 1 < _tokens.Count && _tokens[last + 1].Type == TokenType.LeftParen;
+    }
+
+    private void RejectPathMode()
+    {
+        if (Current.Text.ToUpperInvariant() is "ALL" or "ANY" or "SHORTEST" &&
+            TryPathSearchPrefix(_position, out string construct, out int last))
+        { UnsupportedConstruct(construct, Current, _tokens[last]); }
+        else { Unsupported(Current.Text.ToUpperInvariant(), Current); }
+    }
+
     private bool IsQuantifier => Current.Type is TokenType.Plus or TokenType.Asterisk ||
         Current.Type == TokenType.LeftBrace && _tokens[_position + 1].Type is TokenType.Integer or TokenType.Comma || Current.Text == "?";
 
@@ -118,6 +139,7 @@ public sealed partial class GqlQueryParser
         if (cypher)
         {
             Expect(TokenType.Asterisk, "'*'");
+            RejectLineCommentAfterElement();
             min = Current.Type == TokenType.Integer ? ParseQuantifierBound() : 1;
             max = min;
             if (Take(TokenType.DotDot)) { max = Current.Type == TokenType.Integer ? ParseQuantifierBound() : null; }
@@ -128,17 +150,19 @@ public sealed partial class GqlQueryParser
         else
         {
             Expect(TokenType.LeftBrace, "'{'");
-            bool hasLower = Current.Type == TokenType.Integer;
             min = Current.Type == TokenType.Integer ? ParseQuantifierBound() : 0;
             max = min;
             if (Take(TokenType.Comma)) { max = Current.Type == TokenType.Integer ? ParseQuantifierBound() : null; }
-            if (!Failed && !hasLower && max is null) { Error("GQL0002", "A quantifier requires at least one bound.", start); }
             Expect(TokenType.RightBrace, "'}'");
         }
-        if (!cypher) { RejectLineCommentAfterElement(); }
+        RejectLineCommentAfterElement();
         if (!Failed && (max < min || !cypher && max == 0))
         { Error("GQL0002", "A quantifier requires ordered bounds and a positive upper bound.", start); }
-        if (!Failed && IsQuantifier) { Unsupported("NESTED QUANTIFIER", Current); }
+        if (!Failed && IsQuantifier)
+        {
+            if (Current.Text == "?") { _questionedPathPositions.Add(Current.Start); }
+            Unsupported("NESTED QUANTIFIER", Current);
+        }
         return new GqlQuantifier(min, max);
     }
 
