@@ -125,8 +125,10 @@ committed updates and an in-flight indexed-name update through index seeks and l
 SET NULL removes a property; INSERT still stores explicit NULL. Map replacement removes absent
 keys and map merge preserves them. Labels and keys reuse INSERT catalog discovery and resulting
 property-set validation. Type-exact no-ops write no version and count zero. The mutation count is
-created entities plus distinct changed entities, counting an entity created then updated once;
-row-returning mutations carry the same count over the existing ResultComplete frame. EXPLAIN
+created entities plus distinct entities changed at any point, counting an entity created then
+updated once. Restoring an original value later still counts that entity; a net-identical final
+working copy needs no stored replacement. Row-returning mutations carry the same count over
+the existing ResultComplete frame. EXPLAIN
 describes update stages and their targets without executing them.
 
 Autocommit runs at ReadCommitted and pins its statement snapshot. A writing ReadCommitted

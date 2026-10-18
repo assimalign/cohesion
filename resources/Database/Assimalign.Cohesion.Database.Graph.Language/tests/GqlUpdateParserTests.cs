@@ -1,7 +1,9 @@
 using System.Linq;
-using Assimalign.Cohesion.Database.Types;
+
 using Shouldly;
 using Xunit;
+
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Graph.Language.Tests;
 

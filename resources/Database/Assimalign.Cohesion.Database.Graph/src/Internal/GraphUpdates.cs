@@ -5,6 +5,7 @@ using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
+
 using Assimalign.Cohesion.Database.Graph.Language;
 using Assimalign.Cohesion.Database.Graph.Storage;
 
@@ -18,6 +19,7 @@ internal sealed class GraphUpdates
     private readonly Dictionary<ulong, GraphNode> _nodes = [];
     private readonly Dictionary<ulong, GraphRelationship> _relationships = [];
     private readonly HashSet<(bool Node, ulong Id)> _created = [];
+    private readonly HashSet<(bool Node, ulong Id)> _changed = [];
 
     internal GraphUpdates(GraphDatabase database, GraphOperation operation) { _database = database; _operation = operation; }
 
@@ -94,14 +96,20 @@ internal sealed class GraphUpdates
                 {
                     if (FindNode(node.Id.Value) is null)
                     { throw new GraphPlanningException("COHDBG003", ErrorMessages.EntityBindingRequired, location); }
-                    _nodes[node.Id.Value] = (GraphNode)update(value);
+                    var replacement = (GraphNode)update(value);
+                    if (!node.Labels.SequenceEqual(replacement.Labels) || !Identical(node.Properties, replacement.Properties))
+                    { _changed.Add((true, node.Id.Value)); }
+                    _nodes[node.Id.Value] = replacement;
                     touchedNodes.Add(node.Id.Value);
                 }
                 else if (value is GraphRelationship relationship)
                 {
                     if (_database.Store.FindRelationship(relationship.Id.Value, _operation.Context.Snapshot) is null)
                     { throw new GraphPlanningException("COHDBG003", ErrorMessages.EntityBindingRequired, location); }
-                    _relationships[relationship.Id.Value] = (GraphRelationship)update(value);
+                    var replacement = (GraphRelationship)update(value);
+                    if (!Identical(relationship.Properties, replacement.Properties))
+                    { _changed.Add((false, relationship.Id.Value)); }
+                    _relationships[relationship.Id.Value] = replacement;
                     touchedRelationships.Add(relationship.Id.Value);
                 }
                 else { throw new GraphPlanningException("COHDBG003", ErrorMessages.EntityBindingRequired, location); }
@@ -120,17 +128,13 @@ internal sealed class GraphUpdates
         long count = 0;
         foreach (var node in _nodes.Values)
         {
-            var prior = _database.Store.FindNode(node.Id.Value, _operation.Context.Snapshot);
-            bool changed = prior is { } old && (!old.Labels.SequenceEqual(node.Labels) || !Identical(old.Properties, node.Properties));
             await _database.Store.UpdateNodeAsync(node.Id.Value, node.Labels, node.Properties, _operation.Context, token).ConfigureAwait(false);
-            if (changed && !_created.Contains((true, node.Id.Value))) { count++; }
+            if (_changed.Contains((true, node.Id.Value)) && !_created.Contains((true, node.Id.Value))) { count++; }
         }
         foreach (var edge in _relationships.Values)
         {
-            var prior = _database.Store.FindRelationship(edge.Id.Value, _operation.Context.Snapshot);
-            bool changed = prior is { } old && !Identical(old.Properties, edge.Properties);
             await _database.Store.UpdateRelationshipAsync(edge.Id.Value, edge.Properties, _operation.Context, token).ConfigureAwait(false);
-            if (changed && !_created.Contains((false, edge.Id.Value))) { count++; }
+            if (_changed.Contains((false, edge.Id.Value)) && !_created.Contains((false, edge.Id.Value))) { count++; }
         }
         return count;
     }

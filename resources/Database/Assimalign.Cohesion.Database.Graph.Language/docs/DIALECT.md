@@ -82,7 +82,9 @@ naming MERGE. `+=` must touch; GQL combines it into one operator token without c
 shared lexer. SHOW remains read-only (GQL0007).
 
 Affected counts include created entities plus distinct changed pre-existing entities. An entity
-created then updated counts once. Mutating RETURN statements report this count too. ReadCommitted
+created then updated counts once. Mutating RETURN statements report this count too. An entity
+still counts if a later item restores its original value; a net-identical
+final working copy needs no stored replacement. ReadCommitted
 updates refresh their statement snapshot after acquiring the writer lock; Snapshot updates use
 first-updater-wins. ExecutePaths refuses either mutation stage with COHDBG001.
 

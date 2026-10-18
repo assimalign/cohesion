@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+
 using Assimalign.Cohesion.Database.Language;
 
 namespace Assimalign.Cohesion.Database.Graph.Language;

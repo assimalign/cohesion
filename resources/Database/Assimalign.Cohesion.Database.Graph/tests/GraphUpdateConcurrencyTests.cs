@@ -2,11 +2,13 @@ using System;
 using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
+
+using Shouldly;
+using Xunit;
+
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Graph.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Transactions;
-using Shouldly;
-using Xunit;
 
 namespace Assimalign.Cohesion.Database.Graph.Tests;
 

@@ -2,9 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
-using Assimalign.Cohesion.Database.Protocol;
+
 using Shouldly;
 using Xunit;
+
+using Assimalign.Cohesion.Database.Protocol;
 
 namespace Assimalign.Cohesion.Database.Graph.Client.Tests;
 

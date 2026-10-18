@@ -4,13 +4,15 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+
+using Shouldly;
+using Xunit;
+
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Graph.Catalog;
 using Assimalign.Cohesion.Database.Graph.Internal;
 using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Database.Types;
-using Shouldly;
-using Xunit;
 
 namespace Assimalign.Cohesion.Database.Graph.Tests;
 
@@ -112,6 +114,9 @@ public sealed class GraphUpdateTests
 
         // Act / Assert
         (await session.ExecuteAsync("MATCH (a:P) SET a.x=1")).AffectedCount.ShouldBe(0);
+        var restored = await session.ExecuteAsync("MATCH (a:P) SET a.x=2 LET observed=a.x SET a.x=1 RETURN observed, a.x");
+        (await Read(restored)).Single().ShouldBe([2L, 1L]);
+        restored.AffectedCount.ShouldBe(1);
         (await session.ExecuteAsync("MATCH (a:P) SET a.x=1.0")).AffectedCount.ShouldBe(1);
         (await Read(await session.ExecuteAsync("MATCH (a:P) SET a={x:1}, a.y=2 RETURN keys(a)"))).Single()[0].ShouldBeOfType<object?[]>().ShouldBe(["x", "y"]);
         (await Read(await session.ExecuteAsync("MATCH (a:P) SET a.y=2, a={x:1} RETURN keys(a)"))).Single()[0].ShouldBeOfType<object?[]>().ShouldBe(["x"]);
