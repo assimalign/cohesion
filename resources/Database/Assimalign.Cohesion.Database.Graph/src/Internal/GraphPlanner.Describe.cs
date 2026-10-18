@@ -19,6 +19,7 @@ internal sealed partial class GraphPlanner
         GraphPathPlan => "ExpandPath",
         GraphProjectionPlan => "Project",
         GraphDistinctPlan => "Distinct",
+        GraphGroupingPlan => "GroupAggregate",
         GraphSortKeyPlan => "SortKey",
         GraphSortPagePlan => "SortPage",
         GraphAnchor { Property: not null } => "IndexSeek",
@@ -72,6 +73,8 @@ internal sealed partial class GraphPlanner
         }
         if (plan.Projections.Count != 0)
         {
+            if (plan.Grouping is { } grouping)
+            { Add(DescribeOperator(grouping), 0, detail: $"keys={grouping.Keys.Count}; aggregates={string.Join(",", grouping.Aggregates.Select(GraphProjectionText.Describe))}"); }
             int parent = plan.Distinct is { } distinct
                 ? Add(DescribeOperator(distinct), 0, detail: $"keys={distinct.Keys.Count}") : 0;
             foreach (var projection in plan.Projections)

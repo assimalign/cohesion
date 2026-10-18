@@ -14,6 +14,12 @@ internal static partial class GraphExpressionEvaluator
     internal static object? Evaluate(GqlExpression expression, IReadOnlyDictionary<string, object?> bindings, IReadOnlyDictionary<string, object?>? parameters = null)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
+        if (bindings is GraphGroupedBinding grouped)
+        {
+            // ORDER BY aliases shadow source variable names, including grouped entities.
+            if (expression is GqlVariableExpression name && grouped.TryGetValue(name.Variable, out var aliased)) { return aliased; }
+            if (grouped.ValuesByExpression.TryGetValue(expression, out var computed)) { return computed; }
+        }
         try
         {
             var result = expression switch

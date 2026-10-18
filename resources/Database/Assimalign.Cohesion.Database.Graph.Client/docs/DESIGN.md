@@ -37,7 +37,7 @@ and shared DatabaseType identities. The engine rejects duplicate final result co
 ordinally with COHDBG015 before any result output or mutation, including implicit/explicit
 collisions. The result container retains first-column lookup for manually constructed duplicate
 metadata. Scalar statements fully materialize before returning.
-MATCH projection metadata remains the engine's DatabaseType.Null (unknown), because graph
+Direct COUNT aggregate metadata is Int64, including empty input. Other MATCH projection metadata remains the engine's DatabaseType.Null (unknown), because graph
 properties may have heterogeneous types. The tuple codec preserves each actual value's runtime
 type. SHOW metadata retains its precisely declared catalog types.
 
@@ -55,6 +55,16 @@ WHERE scalar value errors (#1140) arrive as ExecutionFailure text `COHDBG013: me
 before ResultHeader. GraphClientWireTests pins division by zero, overflow and invalid conditions,
 then reuse of the exact authenticated pooled session followed by SHOW LABELS. A combined
 OR/IN/string/arithmetic case compares wire rows with in-process rows. No wire fields change.
+
+## Aggregates (#1147)
+
+Aggregates (#1147) round-trip count and integral sums as Int64, floating averages as Double,
+and Decimal sums/averages as Decimal. COLLECT_LIST (Cypher collect) uses the negotiated
+graph.composite-values list encoding. GROUP BY and implicit grouping run before ordering,
+including aggregate aliases. Aggregate overflow is COHDBG013 before ResultHeader; terminal
+failure permits reuse of the exact authenticated pooled session. ExecutePaths retains the
+existing COHDBG001 projection diagnostic. GraphAggregateWireTests verifies both transports,
+recorded types and names, empty input, capability refusal and session reuse.
 
 ## Ordering and paging (#1142)
 

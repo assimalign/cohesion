@@ -35,6 +35,9 @@
   <data name="PageValueInvalid" xml:space="preserve"><value>Paging requires a non-negative integer value in the signed 64-bit range.</value></data>
   <data name="PageExpressionRequired" xml:space="preserve"><value>Paging requires an unsigned integer literal or parameter.</value></data>
   <data name="DistinctSortNotProjected" xml:space="preserve"><value>ORDER BY with RETURN DISTINCT may only reference projected values.</value></data>
+  <data name="AggregatePlacement" xml:space="preserve"><value>An aggregate requires a valid function and operand in RETURN; aggregates cannot be nested or used in WHERE or GROUP BY.</value></data>
+  <data name="GroupByMismatch" xml:space="preserve"><value>GROUP BY must list exactly the non-aggregated RETURN expressions.</value></data>
+  <data name="GroupedExpressionRequired" xml:space="preserve"><value>An expression after grouping may only reference grouping keys, aggregates declared in RETURN, or their ORDER BY aliases.</value></data>
   <data name="SortShapeInvalid" xml:space="preserve"><value>Ordering and paging require a RETURN with valid sort items.</value></data>
   <data name="SortPathProperty" xml:space="preserve"><value>A path alias cannot be used as a property owner in ORDER BY.</value></data>
   <data name="SortEntityRequired" xml:space="preserve"><value>A labeled ORDER BY predicate requires a node or relationship alias.</value></data>

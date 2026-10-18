@@ -11,6 +11,7 @@ internal static class GraphValueExpressions
     {
         switch (expression)
         {
+            case GqlAggregateExpression { Operand: { } operand }: yield return operand; break;
             case GqlBinaryExpression binary: yield return binary.Left; yield return binary.Right; break;
             case GqlLogicalExpression logical:
                 foreach (var operand in logical.Operands) { yield return operand; }
@@ -60,6 +61,15 @@ internal static class GraphValueExpressions
             var (value, accesses) = item;
             switch (value)
             {
+                case GqlAggregateExpression aggregate:
+                    if (aggregate.Function == GqlAggregateFunction.CollectList)
+                    {
+                        if (!entity && accesses == 0) { return true; }
+                        if (aggregate.Operand is not null) { pending.Push((aggregate.Operand, Math.Max(0, accesses - 1))); }
+                    }
+                    else if (aggregate.Function is GqlAggregateFunction.Min or GqlAggregateFunction.Max && aggregate.Operand is not null)
+                    { pending.Push((aggregate.Operand, accesses)); }
+                    break;
                 case GqlVariableExpression:
                     if (entity && accesses == 0) { return true; }
                     break;

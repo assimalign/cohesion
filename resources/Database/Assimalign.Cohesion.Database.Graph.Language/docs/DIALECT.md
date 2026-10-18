@@ -64,6 +64,35 @@ Unbound projection variables/parameters are COHDBG001; `p.name` on a path is COH
 `RETURN a {.name}` is COHDBL001 naming MAP PROJECTION. NEXT, WITH (including WITH DISTINCT)
 and return-after-delete remain COHDBL001. CASE and composite values are described below.
 
+## Aggregates and GROUP BY
+
+RETURN accepts COUNT(*), COUNT(expr), SUM, AVG, MIN, MAX and COLLECT_LIST, with optional
+DISTINCT or ALL inside the parentheses. Cypher collect is an exact alias of COLLECT_LIST.
+COUNT(DISTINCT *) and COUNT(ALL *) are GQL0002. Every non-aggregated RETURN item is an implicit grouping key;
+ISO `GROUP BY` must list exactly those expressions, in any order. Duplicate RETURN keys
+count once. Mixed aggregate expressions may compose grouping keys or read grouped entities' properties,
+as described in [DESIGN.md](DESIGN.md#aggregates-and-grouping-1147). GROUP BY without an
+aggregate eliminates duplicate keys. Aliases bind only the later ORDER BY stage.
+
+NULLs are skipped. COUNT(*) counts rows and COUNT(expr) counts non-null values. Count is
+always Int64, including zero and wire column metadata. SUM returns Int64 for integral
+inputs, Double when any retained input is floating, and Decimal when any is Decimal or
+UInt64 (Decimal takes precedence). AVG returns Double for integers/floats and Decimal when
+any retained input is Decimal. Numeric errors use COHDBG013. MIN/MAX preserve the chosen
+input's type and use ORDER BY's exact numeric and composite ordering. DISTINCT inside an
+aggregate and grouping use RETURN's exact equality, including NULLs inside lists/maps.
+COLLECT_LIST returns a list of non-null inputs, preserving duplicates and input order unless
+DISTINCT is specified. Wire lists use the negotiated graph.composite-values capability.
+
+Empty/all-NULL input yields count 0, sum 0, avg/min/max NULL and collect an empty list.
+An aggregate without grouping keys always returns one row; an empty keyed match returns
+none. Grouping precedes projection, RETURN DISTINCT, ORDER BY, OFFSET/SKIP and LIMIT,
+so ordering by an aggregate alias sees the computed group value. Neither paging nor grouping
+reduces the input match bound. Nested aggregates, aggregates in WHERE/GROUP BY, unequal
+GROUP BY keys and ungrouped ORDER BY references fail at planning with COHDBG001.
+ExecutePaths retains its existing COHDBG001 projection message. HAVING, STDDEV_SAMP,
+STDDEV_POP, PERCENTILE_CONT and PERCENTILE_DISC are COHDBL001; WITH remains deferred to #1145.
+
 ## ORDER BY, OFFSET, SKIP and LIMIT
 
 After RETURN, `ORDER BY expression [ASC|ASCENDING|DESC|DESCENDING] [NULLS FIRST|LAST]` accepts multiple keys,

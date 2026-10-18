@@ -14,7 +14,8 @@ internal static class GraphSortPage
     internal static object?[] Keys(GraphPlan plan, Dictionary<string, object?> binding, object?[] row, CancellationToken token)
     {
         if (plan.SortPage is not { Keys.Count: > 0 } stage) { return []; }
-        var scope = new Dictionary<string, object?>(binding, StringComparer.Ordinal);
+        Dictionary<string, object?> scope = binding is GraphGroupedBinding grouped
+            ? new GraphGroupedBinding(grouped.ValuesByExpression) : new Dictionary<string, object?>(binding, StringComparer.Ordinal);
         for (int i = 0; i < plan.Projections.Count; i++) { token.ThrowIfCancellationRequested(); scope[plan.Projections[i].Name] = row[i]; }
         var keys = new object?[stage.Keys.Count];
         for (int i = 0; i < keys.Length; i++)

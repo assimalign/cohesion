@@ -19,7 +19,7 @@ public static class GqlLanguageProfile
         "CREATE", "INSERT", "DELETE", "DETACH",
         "SET", "REMOVE", "MERGE",
         // Clauses
-        "WHERE", "ORDER", "BY", "ASC", "ASCENDING", "DESC", "DESCENDING",
+        "WHERE", "GROUP", "ORDER", "BY", "ASC", "ASCENDING", "DESC", "DESCENDING",
         "LIMIT", "OFFSET", "SKIP",
         "LET", "UNWIND", "FOREACH",
         // Set operations
@@ -45,7 +45,7 @@ public static class GqlLanguageProfile
         "SHOW",
     ];
 
-    private static readonly string[] _functions = [];
+    private static readonly string[] _functions = ["count", "sum", "avg", "min", "max", "collect_list", "collect"];
 
     private static readonly string[] _clauses =
     [
@@ -53,6 +53,7 @@ public static class GqlLanguageProfile
         GqlClauses.OptionalMatch,
         GqlClauses.Explain,
         GqlClauses.Return,
+        GqlClauses.GroupBy,
         GqlClauses.OrderBy,
         GqlClauses.Offset,
         GqlClauses.Skip,

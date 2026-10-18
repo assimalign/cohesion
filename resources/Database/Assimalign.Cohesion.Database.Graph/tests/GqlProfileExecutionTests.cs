@@ -99,6 +99,11 @@ public sealed class GqlProfileExecutionTests
                 new("MATCH (a) RETURN $p", [[5], [5], [5], [5], [5]],
                     Parameters: new Dictionary<string, object?> { ["p"] = 5 }, Columns: ["$p"]),
             ],
+            [GqlClauses.GroupBy] =
+            [
+                new("MATCH (a:Person) RETURN a.active, count(*) AS n GROUP BY a.active ORDER BY n DESC",
+                    [[true, 1L], [false, 1L], [null, 1L]]),
+            ],
             [GqlClauses.OrderBy] =
             [
                 new("MATCH (a:Person) RETURN a.name ORDER BY a.age", [["Bob"], ["Isolated"], ["Alice"]]),
@@ -261,7 +266,6 @@ public sealed class GqlProfileExecutionTests
     /// <summary>The supported subset rejects broader GQL forms at parse time, before they reach planning.</summary>
     [Theory(DisplayName = "Cohesion Test [Graph] - Unsupported forms fail at parse time against a live engine")]
     [InlineData("MATCH (a)-[r*1..3]->(b) RETURN a")]
-    [InlineData("MATCH (a) RETURN count(a)")]
     [InlineData("MATCH (a) RETURN a {.name}")]
     [InlineData("INSERT (:Person {tags: [1, 2]})")]
     [InlineData("MATCH (a) DELETE a RETURN a")]
@@ -279,9 +283,17 @@ public sealed class GqlProfileExecutionTests
         error.Message.ShouldContain("COHDBL001", Case.Sensitive);
     }
 
-    // GQL currently executes no functions; #1147/#1148 add names and live cases together here.
     private static readonly IReadOnlyDictionary<string, ExecutionCase> _functionCases =
-        new Dictionary<string, ExecutionCase>(StringComparer.OrdinalIgnoreCase);
+        new Dictionary<string, ExecutionCase>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["count"] = new("MATCH (a:Person) RETURN count(a)", [[3L]]),
+            ["sum"] = new("MATCH (a:Person) RETURN sum(a.age)", [[89L]]),
+            ["avg"] = new("MATCH (a:Person) RETURN avg(a.age)", [[89d / 3]]),
+            ["min"] = new("MATCH (a:Person) RETURN min(a.age)", [[17L]]),
+            ["max"] = new("MATCH (a:Person) RETURN max(a.age)", [[42L]]),
+            ["collect_list"] = new("MATCH (a:Person) RETURN collect_list(a.active)", [[new object?[] { true, false }]]),
+            ["collect"] = new("MATCH (a:Person) RETURN collect(a.active)", [[new object?[] { true, false }]]),
+        };
 
     [Fact(DisplayName = "Cohesion Test [Graph] - Functions: every declared function has passing live evidence")]
     public async Task Profile_DeclaredFunctions_ShouldExecuteEveryCaseAsync()
@@ -336,6 +348,7 @@ public sealed class GqlProfileExecutionTests
         GqlClauses.OptionalMatch => query.MatchClauses.Any(clause => clause.Optional),
         GqlClauses.Case => query.Projections.Any(item => item.Expression is GqlCaseExpression or GqlCoalesceExpression or GqlNullIfExpression),
         GqlClauses.Return => query.Projections.Count != 0 || query.ReturnStar,
+        GqlClauses.GroupBy => query.GroupBy is not null,
         GqlClauses.OrderBy => query.OrderBy.Count != 0,
         GqlClauses.Offset => query.Offset is not null && HasKeyword(query.Text ?? string.Empty, "OFFSET"),
         GqlClauses.Skip => query.Offset is not null && HasKeyword(query.Text ?? string.Empty, "SKIP"),

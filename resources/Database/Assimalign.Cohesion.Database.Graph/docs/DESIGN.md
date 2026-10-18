@@ -526,11 +526,41 @@ existing public interfaces and does not infer paths from scalar rows.
 
 The [supported-clause matrix](../../Assimalign.Cohesion.Database.Graph.Language/docs/DESIGN.md#supported-clause-matrix)
 is the single executable-language inventory: MATCH, OPTIONAL MATCH, WHERE, RETURN, INSERT, CREATE (compatibility
-extension), DELETE, DETACH DELETE, SHOW (catalog extension) and LABEL EXPRESSION. Functions, variable-length paths, aggregations,
-graph selection and language DDL are not advertised. ORDER BY, OFFSET, SKIP and LIMIT execute
+extension), DELETE, DETACH DELETE, SHOW (catalog extension), GROUP BY and LABEL EXPRESSION.
+COUNT, SUM, AVG, MIN, MAX, COLLECT_LIST and collect execute with implicit or explicit grouping.
+Scalar functions, variable-length paths, graph selection and language DDL are not advertised. ORDER BY, OFFSET, SKIP and LIMIT execute
 after RETURN, as described below. Label/type/index management is the
 session-bound C# schema API. The ISO decision and conformance corpus are documented alongside the
 parser; this is a bounded ISO subset, not a full conformance claim.
+
+### Aggregates and grouping (#1147)
+
+GraphGroupingPlan records the non-aggregate RETURN keys and the distinct aggregate expression
+shapes. GraphPlanner validates placement, nesting and grouped scope before reads or writer
+locking. An explicit GROUP BY must name exactly the non-aggregate keys; omission derives the
+same keys. A mixed expression can reference a grouping key or a grouped entity's properties,
+but cannot introduce an ungrouped binding. ORDER BY sees aggregate aliases after grouping.
+EXPLAIN maps the record to GroupAggregate with key count and aggregate expressions, without
+evaluating arguments. Path requests retain the existing COHDBG001 projection message.
+
+After matching and mutations, GraphGrouping hashes keys using GraphRowComparer's exact
+numeric and composite equality. A group holds computed key values and statically typed
+aggregate state; it exposes no arbitrary source row. Evaluation resolves grouped expressions
+by structural shape, avoiding AST rewriting or assembly-boundary changes. Groups retain first
+input order. Each aggregate consumes non-null values; optional null-extension rows count
+for COUNT(*) only. DISTINCT inside aggregates uses GraphValueComparer. MIN/MAX prepare keys
+once per candidate and use the shared total order. Numeric totals remain exact until final
+promotion; running Double averages avoid intermediate sum overflow. Count is Int64 in values
+and column metadata. Other aggregate metadata retains unknown (DatabaseType.Null) because
+property groups can have heterogeneous result types. Full typing and empty-input rules are in
+the [language design](../../Assimalign.Cohesion.Database.Graph.Language/docs/DESIGN.md#aggregates-and-grouping-1147).
+
+The existing 100,000-binding bound caps hash-group and DISTINCT cardinality; grouping and LIMIT
+never bypass matching's bounds. COLLECT_LIST additionally checks depth 64, 65,536 total values
+and 16,777,216 encoded bytes while appending. Its wire result requires graph.composite-values;
+no new capability or wire format is added. Numeric and collection overflow uses COHDBG013
+before any result header, so failures roll back mutations and preserve pooled-session reuse.
+Aggregate syntax adds no catalog data or on-disk format; no catalog version changes.
 
 ### Ordering and paging (#1142)
 
@@ -567,8 +597,8 @@ string, Boolean, number, NULL. Lists are lexicographic; maps compare count, sort
 then values; nested NULL sorts last. Strings compare ordinally and entities by identity.
 Neo4j behavior references and full language rules are recorded in
 [Graph.Language ordering design](../../Assimalign.Cohesion.Database.Graph.Language/docs/DESIGN.md#ordering-and-paging-1142).
-Standalone ORDER BY/page statements remain COHDBL001 (owner default, T2). WITH and aggregate
-ordering remain #1145/#1147 hand-offs. No public interface, catalog or wire format changes.
+Standalone ORDER BY/page statements remain COHDBL001 (owner default, T2). WITH ordering
+remains a #1145 hand-off; aggregate ordering runs after #1147's grouping stage. No public interface, catalog or wire format changes.
 
 ### Conformance corpus timing (#1140 fix pass)
 

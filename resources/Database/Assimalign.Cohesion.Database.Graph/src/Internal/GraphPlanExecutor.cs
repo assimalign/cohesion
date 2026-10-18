@@ -126,8 +126,10 @@ internal static class GraphPlanExecutor
             await database.Store.DeleteNodeAsync(id.Value, plan.Query.DetachDelete, operation.Context, token).ConfigureAwait(false);
         }
         if (plan.Projections.Count == 0) { return new GraphMutationResult(affected, plan.Warnings); }
+        if (plan.Grouping is { } grouping) { bindings = GraphGrouping.Apply(grouping, bindings, parameters, token); }
         var columns = plan.Projections.Select((projection, i) => new DatabaseColumn
-        { Name = projection.Name, Ordinal = i, Type = DatabaseType.Null }).ToArray();
+        { Name = projection.Name, Ordinal = i, Type = projection.Expression is GqlAggregateExpression { Function: GqlAggregateFunction.Count }
+            ? DatabaseType.Int64 : DatabaseType.Null }).ToArray();
         var rows = new List<GraphOrderedRow>(bindings.Count);
         var distinct = plan.Distinct is null ? null : new HashSet<object?[]>(GraphRowComparer.Instance);
         bool unsignedColumnsAdded = false;

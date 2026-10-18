@@ -18,6 +18,7 @@ public sealed class GqlValueParserTests
     [InlineData("[1, a.name, [2]]")]
     [InlineData("[(1), (a:Person|Robot)]")]
     [InlineData("{name: a.name, n: 1}")]
+    [InlineData("{total: count(a)}")]
     [InlineData("[10, 20, 30][-1]")]
     [InlineData("{k: 1}['k']")]
     [InlineData("{k: {j: 1}}.k.j")]
@@ -51,7 +52,6 @@ public sealed class GqlValueParserTests
     }
 
     [Theory(DisplayName = "Cohesion Test [GQL] - Values: unsupported map values retain capability diagnostics")]
-    [InlineData("{total: count(a)}")]
     [InlineData("{n: abs(1)}")]
     [InlineData("{e: EXISTS {(a)->(b)}}")]
     public void Parse_UnsupportedMapValue_ShouldRetainCapabilityDiagnostic(string value)
