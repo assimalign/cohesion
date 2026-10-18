@@ -178,37 +178,7 @@ internal sealed partial class SqlPlanner
             return PlanGroup(select, table, systemView, columns, bindings, evaluator, steps);
         }
 
-        var projections = new List<SqlProjection>(select.Columns.Count);
-        foreach (var column in select.Columns)
-        {
-            if (column.Expression is SqlStarExpression)
-            {
-                for (int i = 0; i < (outputOrdinals?.Count ?? columns.Count); i++)
-                {
-                    int ordinal = outputOrdinals is null ? i : outputOrdinals[i];
-                    projections.Add(PassThrough(columns[ordinal].Name, ordinal, columns, evaluator, merged: true));
-                }
-            }
-            else if (column.Expression is SqlColumnReferenceExpression reference && !evaluator.IsOuterColumn(reference))
-            {
-                int ordinal = evaluator.ResolveColumn(reference);
-                projections.Add(PassThrough(column.Alias ?? columns[ordinal].Name, ordinal, columns, evaluator,
-                    merged: reference.TableAlias is null && reference.SchemaName is null));
-            }
-            else
-            {
-                ValidateExpression(column.Expression, evaluator, _subqueryTypes);
-                var value = evaluator.Bind(column.Expression, out SqlBoundCollation collation, out var candidate);
-                projections.Add(new SqlProjection(
-                    column.Alias ?? (column.Expression is SqlColumnReferenceExpression outerColumn
-                        ? outerColumn.ColumnName : $"column{projections.Count + 1}"), null, column.Expression,
-                    GroupExpressionType(column.Expression, columns, evaluator)) { Value = value, Collation = collation,
-                        Metadata = CaptureProjectionMetadata(candidate,
-                            UnwrapCollation(column.Expression) is SqlColumnReferenceExpression projectedColumn ? evaluator.ColumnMetadata(projectedColumn) : null),
-                        MaxLength = evaluator.MaximumLengthOf(column.Expression),
-                        IsNullable = column.Expression is not SqlColumnReferenceExpression nullableColumn || evaluator.ColumnMetadata(nullableColumn).IsNullable });
-            }
-        }
+        var projections = BindProjections(select.Columns, columns, evaluator, outputOrdinals);
 
         SqlBoundExpression? where = null;
         if (select.Where is not null)
@@ -755,15 +725,16 @@ internal sealed partial class SqlPlanner
                 }
             }
         }
+        var returning = BindReturning(insert.Returning, table, insert.Table);
         if (insert.SelectSource is not null)
         {
-            return PlanInsertSelect(table, targetOrdinals, insert.SelectSource);
+            return PlanInsertSelect(table, targetOrdinals, insert.SelectSource) with { Returning = returning };
         }
 
         if (insert.IsDefaultValues)
         {
             // Validate any column list above, then omit every column through the shared INSERT path.
-            return new SqlInsertPlan(table, [], [Array.Empty<SqlBoundExpression>()]);
+            return new SqlInsertPlan(table, [], [Array.Empty<SqlBoundExpression>()]) { Returning = returning };
         }
 
         foreach (var row in insert.Values!)
@@ -805,7 +776,7 @@ internal sealed partial class SqlPlanner
             rows[index] = bound;
         }
 
-        return new SqlInsertPlan(table, targetOrdinals, rows);
+        return new SqlInsertPlan(table, targetOrdinals, rows) { Returning = returning };
     }
 
     /// <summary>
@@ -932,7 +903,7 @@ internal sealed partial class SqlPlanner
             where = evaluator.Bind(update.Where);
         }
 
-        var input = new SqlUpdatePlan(table, assignments, where);
+        var input = new SqlUpdatePlan(table, assignments, where) { Returning = BindReturning(update.Returning, table, update.Table) };
         return WrapSubqueries(input, queries);
     }
 
@@ -955,7 +926,7 @@ internal sealed partial class SqlPlanner
             where = evaluator.Bind(delete.Where);
         }
 
-        var input = new SqlDeletePlan(table, where);
+        var input = new SqlDeletePlan(table, where) { Returning = BindReturning(delete.Returning, table, delete.Table) };
         return WrapSubqueries(input, queries);
     }
 

@@ -1,5 +1,22 @@
 # Assimalign.Cohesion.Database.Sql — Design
 
+## RETURNING execution (#1117)
+
+Existing INSERT, INSERT SELECT, UPDATE and DELETE plans retain bound Returning
+projections. Binding shares SELECT projection metadata, naming and target qualifier
+checks; INSERT sources never enter that scope. Function validation includes every
+projection, and aggregates fail before reading rows with COHSQLE017.
+RETURNING disables immutable constant folding so even foldable calls run per written
+row inside apply, after index checks, rather than during planning.
+
+The executor shares SELECT row projection and binary ownership handling. It evaluates
+each returning row after its mutation and index checks inside ApplyStatementAsync,
+so an evaluation failure rolls back the entire statement even in an explicit transaction.
+DELETE filters cascade work by direct target locations. Results are materialized before
+commit/delivery and carry the direct affected count; ordinary query sets retain -1.
+ResultComplete already carries that value. No new plan wrapper, public interface,
+visibility grant, persisted text, storage version or protocol change is needed.
+
 ## Identity execution (#1123)
 
 CREATE and ADD column planning validate the identity mode, integer type, nonzero increment,
@@ -2484,7 +2501,7 @@ PostgreSQL references: tablecmds.c:3903-4062 (column identity), :4329-4385 (rela
   executor seam did not move.
 - **Unknown functions and wrong argument counts fail before binding (#1068,
   #1189).** `SqlPlanner.Plan` walks the whole statement
-  (`ValidateFunctionCalls`), subqueries, DML values, `CHECK` predicates and
+  (`ValidateFunctionCalls`), subqueries, DML values and RETURNING projections, `CHECK` predicates and
   `DEFAULT`s included, and checks every call before it binds the catalog or
   reads a row: a name outside the engine's function catalog and outside
   `SqlLanguageProfile.Instance.Functions` and the recognized-unsupported vocabulary is `COHSQLE016`, `Unknown function '<name>'.`, and a
@@ -2520,7 +2537,7 @@ PostgreSQL references: tablecmds.c:3903-4062 (column identity), :4329-4385 (rela
   NULL rule and volatility. Until E2 the executable functions were an internal frozen
   table of ten signatures, and seven readers switched on an enumeration of the
   built-ins; E2 deleted both, with the SQL parser's own list of aggregate names.
-- **Aggregates in UPDATE and DELETE.** `PlanUpdate` and `PlanDelete` reject an
+- **Aggregates in UPDATE, DELETE and RETURNING.** `PlanUpdate` and `PlanDelete` reject an
   aggregate in an assignment or a `WHERE` filter while planning (`Aggregate
   functions are not allowed in UPDATE SET.` / `... in WHERE.`), as `PlanSelectCore`
   does for a SELECT's `WHERE` and `JOIN ... ON`, and as PostgreSQL's
@@ -2529,7 +2546,8 @@ PostgreSQL references: tablecmds.c:3903-4062 (column identity), :4329-4385 (rela
   write one row at a time, so no group exists for the aggregate to summarize; without
   the check they succeeded over an empty table and failed per row, uncoded, over a
   populated one. The arity walk runs first, so a wrong count still reports
-  `COHSQLE006`.
+  `COHSQLE006`. Every DML RETURNING list uses the same COHSQLE017 aggregate refusal,
+  because it projects one written row at a time.
 - **Access-path selection (rule-based; no cost model — the MVP planner
   contract).** The planner flattens the WHERE clause's top-level `AND`
   conjuncts into per-column sargable predicates — `column op comparand` where

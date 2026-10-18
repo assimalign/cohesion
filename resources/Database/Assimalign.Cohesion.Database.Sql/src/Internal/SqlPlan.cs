@@ -295,14 +295,23 @@ internal readonly record struct SqlSeekBound(object? Value, bool Inclusive);
 internal sealed record SqlInsertPlan(
     SqlCatalogTable Table,
     IReadOnlyList<int> TargetOrdinals,
-    IReadOnlyList<SqlBoundExpression[]> Rows) : SqlPlan;
+    IReadOnlyList<SqlBoundExpression[]> Rows) : SqlPlan
+{
+    public IReadOnlyList<SqlProjection>? Returning { get; init; }
+}
 
 internal sealed record SqlUpdatePlan(
     SqlCatalogTable Table,
     IReadOnlyList<(int Ordinal, SqlBoundExpression Value)> Assignments,
-    SqlBoundExpression? Where) : SqlPlan;
+    SqlBoundExpression? Where) : SqlPlan
+{
+    public IReadOnlyList<SqlProjection>? Returning { get; init; }
+}
 
-internal sealed record SqlDeletePlan(SqlCatalogTable Table, SqlBoundExpression? Where) : SqlPlan;
+internal sealed record SqlDeletePlan(SqlCatalogTable Table, SqlBoundExpression? Where) : SqlPlan
+{
+    public IReadOnlyList<SqlProjection>? Returning { get; init; }
+}
 
 internal sealed record SqlCreateTablePlan(
     string Schema,

@@ -163,6 +163,15 @@ Wire tests cover float, temporal, interval, UUID, BYTEA, JSON and JSONB values, 
 conversion refusals and connection reuse after a floating arithmetic overflow. JSONB remains
 validated UTF-8 bytes with byte equality; there is no new wire encoding.
 
+## RETURNING and affected counts (#1117)
+
+SqlResultSet preserves ResultComplete's long AffectedCount: -1 for SELECT, n for a
+write including RETURNING. QueryAsync is the rows-plus-count verb, ExecuteAsync returns
+the count and discards rows, and ExecuteScalarAsync reads the first returned cell.
+Observers see both row and affected counts. The existing exchange already materializes
+both values; no new verb or frame is needed. Server-side projection errors precede any
+result header and leave the connection usable. Results survive a later ROLLBACK.
+
 ## Typed projection
 
 Column names map to ordinals once, shared by every result record. First column

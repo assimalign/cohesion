@@ -22,6 +22,7 @@ public sealed class SqlInsertExpression : SqlQueryExpression
     /// <param name="isDefaultValues">Whether the statement inserts one row of defaults.</param>
     /// <param name="text">The raw statement text.</param>
     /// <param name="location">The source location.</param>
+    /// <param name="returning">The written-row projection, if specified.</param>
     internal SqlInsertExpression(
         SqlTableReference table,
         IReadOnlyList<string>? columns,
@@ -29,10 +30,12 @@ public sealed class SqlInsertExpression : SqlQueryExpression
         SqlQueryBodyExpression? selectSource,
         bool isDefaultValues,
         string? text,
-        Location? location)
+        Location? location,
+        IReadOnlyList<SqlSelectColumn>? returning = null)
         : base(SqlQueryCommandType.Insert, text, location)
     {
         Table = table;
+        Returning = returning;
         Columns = columns;
         Values = values;
         SelectSource = selectSource;
@@ -43,6 +46,9 @@ public sealed class SqlInsertExpression : SqlQueryExpression
     /// Gets the target table reference.
     /// </summary>
     public SqlTableReference Table { get; }
+
+    /// <summary>Gets the written-row projection, or null when RETURNING is absent.</summary>
+    public IReadOnlyList<SqlSelectColumn>? Returning { get; }
 
     /// <summary>
     /// Gets the column list, if specified.

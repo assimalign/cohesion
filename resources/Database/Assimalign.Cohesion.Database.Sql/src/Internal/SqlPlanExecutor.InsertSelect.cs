@@ -38,7 +38,7 @@ internal sealed partial class SqlPlanExecutor
             }
             rows.Add(row);
         }
-        return await ExecuteInsertRowsAsync(plan.Table, plan.TargetOrdinals, rows, statement, cancellationToken).ConfigureAwait(false);
+        return await ExecuteInsertRowsAsync(plan.Table, plan.TargetOrdinals, rows, statement, cancellationToken, plan.Returning).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -48,7 +48,7 @@ internal sealed partial class SqlPlanExecutor
     /// </summary>
     private async Task<DatabaseResult> ExecuteInsertRowsAsync(SqlCatalogTable table, IReadOnlyList<int> targetOrdinals,
         IReadOnlyList<object?[]> sourceRows, SqlStatementContext statement, CancellationToken cancellationToken,
-        IReadOnlyList<SqlBoundExpression[]>? valueRows = null)
+        IReadOnlyList<SqlProjection>? returning = null, IReadOnlyList<SqlBoundExpression[]>? valueRows = null)
     {
         await AcquireOutgoingReferenceIntentLocksAsync(table, statement, cancellationToken).ConfigureAwait(false);
         await statement.Coordinator.LockManager.AcquireAsync(statement.Transaction.Sequence, LockResource.Object(table.ObjectId),
@@ -135,6 +135,8 @@ internal sealed partial class SqlPlanExecutor
             CollectUniqueKeyHashes(indexes, table, values, uniqueKeyHashes);
         }
         await AcquireUniqueKeyLocksAsync(statement, table.ObjectId, uniqueKeyHashes, cancellationToken).ConfigureAwait(false);
+        var returned = returning is null ? null : new List<object?[]>(rows.Count);
+        var returningEvaluator = returning is null ? null : ExecutionEvaluator(_subqueryValues, cancellationToken);
         try
         {
             return await statement.Coordinator.ApplyStatementAsync(statement.Transaction, async bracket =>
@@ -146,8 +148,10 @@ internal sealed partial class SqlPlanExecutor
                     statement.Coordinator.VersionStore.RecordCreated(statement.Transaction.Sequence, pageId, slotIndex);
                     await InsertIndexEntriesAsync(statement, indexes, table, values,
                         SqlRecordLocation.Pack(pageId, slotIndex), cancellationToken).ConfigureAwait(false);
+                    if (returned is not null) { returned.Add(ProjectRow(values, returning!, returningEvaluator!, cancellationToken)); }
                 }
-                return (DatabaseResult)new SqlQueryResult(DatabaseResultStatus.Success, rows.Count);
+                return returned is null ? new SqlQueryResult(DatabaseResultStatus.Success, rows.Count)
+                    : MaterializeProjected(returning!, returned, rows.Count);
             }, durable: false, cancellationToken).ConfigureAwait(false);
         }
         catch (IndexUniqueViolationException exception)

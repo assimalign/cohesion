@@ -114,6 +114,7 @@ public sealed partial class SqlQueryParser
         string? previousPreviousToken,
         bool insertValues,
         bool dmlWhere,
+        bool returning,
         bool followsFromComma,
         out string clause)
     {
@@ -141,7 +142,11 @@ public sealed partial class SqlQueryParser
         else if (lexer.Current.Type == TokenType.Keyword &&
                  token.Equals("SELECT", StringComparison.OrdinalIgnoreCase) && previousToken is not null)
         {
-            if (!firstToken.Equals("SELECT", StringComparison.OrdinalIgnoreCase) &&
+            if (returning)
+            {
+                clause = "SUBQUERY in RETURNING";
+            }
+            else if (!firstToken.Equals("SELECT", StringComparison.OrdinalIgnoreCase) &&
                 !firstToken.Equals("INSERT", StringComparison.OrdinalIgnoreCase) && !dmlWhere)
             {
                 clause = $"SUBQUERY in {firstToken.ToUpperInvariant()}";

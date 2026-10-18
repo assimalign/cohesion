@@ -32,7 +32,7 @@ public sealed class SqlKeywordDispositionTests
         ["UPDATE"] = Parses("UPDATE t SET a = 1"),
         ["SET"] = Parses("UPDATE t SET a = 1"),
         ["DELETE"] = Parses("DELETE FROM t WHERE a = 1"),
-        ["RETURNING"] = Rejects("DELETE FROM t RETURNING a", SqlClauses.Returning),
+        ["RETURNING"] = Parses("DELETE FROM t RETURNING a"),
         ["FUNCTION"] = Parses("CREATE FUNCTION f(p INT) RETURNS INT VOLATILE CALLED ON NULL INPUT RETURN p"),
         ["DOMAIN"] = Parses("CREATE DOMAIN d AS INT CHECK (VALUE > 0)"),
         ["RETURNS"] = Parses("CREATE FUNCTION f(p INT) RETURNS INT VOLATILE CALLED ON NULL INPUT RETURN p"),

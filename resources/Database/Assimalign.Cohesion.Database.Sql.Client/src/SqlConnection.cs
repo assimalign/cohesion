@@ -73,7 +73,7 @@ public sealed class SqlConnection : IAsyncDisposable
     /// </summary>
     /// <param name="command">The command to execute.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
-    /// <returns>The materialized result set: typed columns and rows.</returns>
+    /// <returns>The materialized result set: typed columns, rows and affected count (-1 for SELECT, n for DML RETURNING).</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="command"/> is null.</exception>
     /// <exception cref="ObjectDisposedException">Thrown when the connection is disposed or aborted.</exception>
     /// <exception cref="InvalidOperationException">Thrown when another command is active on the connection.</exception>
@@ -94,7 +94,7 @@ public sealed class SqlConnection : IAsyncDisposable
     /// <param name="commandText">The SQL statement text.</param>
     /// <param name="parameters">Parameter values keyed by bare parameter name, or null when the statement takes none.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
-    /// <returns>The materialized result set: typed columns and rows.</returns>
+    /// <returns>The materialized result set: typed columns, rows and affected count (-1 for SELECT, n for DML RETURNING).</returns>
     /// <exception cref="ArgumentException">Thrown when <paramref name="commandText"/> is null or whitespace.</exception>
     /// <exception cref="ObjectDisposedException">Thrown when the connection is disposed or aborted.</exception>
     /// <exception cref="InvalidOperationException">Thrown when another command is active on the connection.</exception>
@@ -107,7 +107,7 @@ public sealed class SqlConnection : IAsyncDisposable
     }
 
     /// <summary>
-    /// Executes a non-row-returning command and returns the number of records it affected.
+    /// Executes a command and returns its affected count, discarding any RETURNING rows.
     /// </summary>
     /// <param name="command">The command to execute.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
@@ -126,8 +126,8 @@ public sealed class SqlConnection : IAsyncDisposable
     }
 
     /// <summary>
-    /// Executes a non-row-returning command from statement text and returns the
-    /// number of records it affected.
+    /// Executes a command from statement text and returns its affected count,
+    /// discarding any RETURNING rows.
     /// </summary>
     /// <param name="commandText">The SQL statement text.</param>
     /// <param name="parameters">Parameter values keyed by bare parameter name, or null when the statement takes none.</param>

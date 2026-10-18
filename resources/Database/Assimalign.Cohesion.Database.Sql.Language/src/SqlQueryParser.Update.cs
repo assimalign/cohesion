@@ -13,7 +13,7 @@ public sealed partial class SqlQueryParser
         Advance(ref lexer); // consume UPDATE
         RejectDmlTop(ref lexer);
 
-        var table = ParseRequiredTableReference(ref lexer);
+        var table = ParseRequiredTableReference(ref lexer, dmlTarget: true);
 
         // SET is required: UPDATE t; used to execute with no assignments.
         var assignments = new List<SqlAssignment>();
@@ -36,8 +36,10 @@ public sealed partial class SqlQueryParser
             where = ParseExpression(ref lexer);
         }
 
+        var returning = ParseReturning(ref lexer, table);
+
         return new SqlUpdateExpression(table, assignments, where, null,
-            Location.Create(1, 1, pos, _lastTokenEnd));
+            Location.Create(1, 1, pos, _lastTokenEnd), returning);
     }
 
     /// <summary>

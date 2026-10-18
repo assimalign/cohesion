@@ -75,7 +75,7 @@ must be nonnegative. Writers emit exactly the fields below with no padding.
 | 5 Execute | Client to server | string statement, i32 parameterCount, repeated (string name, i32 encodedLength, encoded scalar component) |
 | 6 ResultHeader | Server to client | i32 columnCount, repeated (string name, u8 DatabaseType) |
 | 7 ResultRow | Server to client | Concatenated self-describing scalar components, in column order; no count prefix |
-| 8 ResultComplete | Server to client | i64 affectedCount; -1 means not applicable |
+| 8 ResultComplete | Server to client | i64 affectedCount; -1 for queries, n for writes including RETURNING |
 | 9 Transaction | Reserved model identifier | No implemented payload; send transaction commands through Execute where supported |
 
 Parameter names are unique and values contain exactly one component. Returned rows
@@ -164,3 +164,7 @@ decode as null. An empty diagnostic code is never a valid code. Unlocated offset
 remain null. Ready.Capabilities and Diagnostics.Entries reject null at construction
 and through init/with assignment. Capability-name byte lengths are checked against
 the 128-character ASCII bound before decoding or allocating a name string.
+
+A write with RETURNING emits ResultHeader and ResultRow frames followed by
+ResultComplete with its affected count n. Ordinary SELECT reports -1. Projection
+failures roll back the statement before any result frame is sent.

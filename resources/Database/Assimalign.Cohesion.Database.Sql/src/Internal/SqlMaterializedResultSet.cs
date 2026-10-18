@@ -11,7 +11,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 /// <summary>
 /// A materialized result set: typed columns and fully-evaluated rows. The MVP
-/// executor materializes SELECT results (sorting and DISTINCT require it anyway);
+/// executor materializes SELECT and DML RETURNING results before delivery;
 /// streaming plans arrive with the cost-based planner.
 /// </summary>
 internal sealed class SqlMaterializedResultSet : DatabaseResultSet
@@ -19,17 +19,18 @@ internal sealed class SqlMaterializedResultSet : DatabaseResultSet
     private readonly IReadOnlyList<DatabaseColumn> _columns;
     private readonly List<object?[]> _rows;
 
-    internal SqlMaterializedResultSet(IReadOnlyList<DatabaseColumn> columns, List<object?[]> rows)
+    internal SqlMaterializedResultSet(IReadOnlyList<DatabaseColumn> columns, List<object?[]> rows, long affectedCount = -1)
     {
         _columns = columns;
         _rows = rows;
+        AffectedCount = affectedCount;
     }
 
     /// <inheritdoc />
     public override DatabaseResultStatus Status => DatabaseResultStatus.Success;
 
     /// <inheritdoc />
-    public override long AffectedCount => -1;
+    public override long AffectedCount { get; }
 
     /// <inheritdoc />
     public override IReadOnlyList<Diagnostic>? Diagnostics => null;
