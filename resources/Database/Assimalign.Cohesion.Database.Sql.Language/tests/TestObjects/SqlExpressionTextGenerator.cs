@@ -46,14 +46,24 @@ internal sealed class SqlExpressionTextGenerator
             if (index > 0) { builder.Append(", "); }
             builder.Append(names[index]);
             if (_random.Next(2) == 0) { builder.Append(" (x, y)"); }
-            builder.Append(" AS (SELECT ").Append(Value(depth)).Append(" AS x, ")
+            int paging = _random.Next(4);
+            builder.Append(" AS (SELECT ").Append(paging == 3 ? "TOP (2) " : string.Empty).Append(Value(depth)).Append(" AS x, ")
                 .Append(Value(depth)).Append(" AS y FROM ").Append(index == 0 ? "t" : names[index - 1]);
             if (_random.Next(2) == 0) { builder.Append(" WHERE ").Append(Value(depth)); }
-            builder.Append(')');
+            builder.Append(Paging(paging)).Append(')');
         }
-        return builder.Append(" SELECT x, y FROM ").Append(names[count - 1])
-            .Append(" ORDER BY x DESC LIMIT 2 OFFSET 1").ToString();
+        int rootPaging = _random.Next(4);
+        return builder.Append(rootPaging == 3 ? " SELECT TOP 2 x, y FROM " : " SELECT x, y FROM ").Append(names[count - 1])
+            .Append(" ORDER BY x DESC").Append(Paging(rootPaging)).ToString();
     }
+
+    private string Paging(int kind) => kind switch
+    {
+        0 => " LIMIT 2 OFFSET 1",
+        1 => " OFFSET 1 LIMIT 2",
+        2 => " OFFSET 1 ROWS FETCH NEXT " + Pick("2", "(1 + 1)", "(2 * (1 + 1))", "(-@n)", "ABS(-2)") + " ROWS ONLY",
+        _ => string.Empty,
+    };
 
     private string Value(int depth)
     {

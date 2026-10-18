@@ -199,6 +199,9 @@ internal static class Program
         await session.ExecuteAsync("INSERT INTO identity_guard (label) VALUES (1), (2)");
         await session.ExecuteAsync("UPDATE identity_guard SET id = DEFAULT WHERE label = 1");
         Check("in process: IDENTITY and UPDATE DEFAULT", await RowsAsync(session, "SELECT id FROM identity_guard ORDER BY id"), [[105L], [110L]]);
+        Check("in process: OFFSET FETCH", await RowsAsync(session, "SELECT Id FROM customers ORDER BY Id OFFSET 1 ROW FETCH FIRST ROW ONLY"), [[2L]]);
+        Check("in process: OFFSET before LIMIT", await RowsAsync(session, "SELECT Id FROM customers ORDER BY Id OFFSET 1 LIMIT 1"), [[2L]]);
+        Check("in process: TOP after sorting", await RowsAsync(session, "SELECT TOP (1) Id FROM customers ORDER BY Id DESC"), [[2L]]);
         Check("in process: all CAST families", await RowsAsync(session, allCasts), _allCasts);
         Check("in process: three-way USING and LEFT", await RowsAsync(session, expandedJoin), [[1L, 1L], [2L, null]]);
         Check("in process: comma and CROSS", await RowsAsync(session, crossJoin), [[8L]]);
@@ -290,6 +293,9 @@ internal static class Program
         });
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         await using SqlConnection connection = await client.ConnectAsync(timeout.Token);
+        Check("over the wire: OFFSET FETCH", await RowsAsync(connection, "SELECT Id FROM customers ORDER BY Id OFFSET 1 ROW FETCH NEXT ROW ONLY", timeout.Token), [[2L]]);
+        Check("over the wire: OFFSET before LIMIT", await RowsAsync(connection, "SELECT Id FROM customers ORDER BY Id OFFSET 1 LIMIT 1", timeout.Token), [[2L]]);
+        Check("over the wire: TOP after sorting", await RowsAsync(connection, "SELECT TOP 1 Id FROM customers ORDER BY Id DESC", timeout.Token), [[2L]]);
 
         await connection.ExecuteAsync("CREATE TABLE identity_wire (id INT IDENTITY(10,2))", cancellationToken: timeout.Token);
         await connection.ExecuteAsync("INSERT INTO identity_wire DEFAULT VALUES", cancellationToken: timeout.Token);

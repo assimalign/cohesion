@@ -41,8 +41,8 @@ public sealed class SqlLanguageConformanceTests
     {
         // The profile drives enumeration. A newly advertised clause cannot silently escape this test.
         var cases = CreateCases();
-        // #1116 adds WITH beside SUBQUERY: exactly one clause over the base's 36.
-        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(37);
+        // #1107 adds FETCH and TOP beside the existing paging clauses: exactly two over 37.
+        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(39);
         RequireExecutionCases(SqlLanguageProfile.Instance.Clauses, cases);
         cases.Keys.Except(SqlLanguageProfile.Instance.Clauses).ShouldBeEmpty("Cases must describe the current profile.");
 
@@ -483,8 +483,12 @@ public sealed class SqlLanguageConformanceTests
                 // Retain the previous verified source-expression subset beside the restored forms.
                 await ExpectRowsAsync(session, "SELECT id, age FROM ordering_rows ORDER BY age + 1 ASC, id DESC;", expected);
             }),
-        [SqlClauses.Limit] = Query("SELECT id FROM t ORDER BY id LIMIT 2;", expression => expression is SqlSelectExpression { Limit: not null },
+        [SqlClauses.Limit] = Query("SELECT id FROM t ORDER BY id LIMIT 2;", expression => expression is SqlSelectExpression { LimitSyntaxKind: SqlLimitSyntaxKind.Limit },
             [[1], [2]]),
+        [SqlClauses.Fetch] = Query("SELECT id FROM t ORDER BY id OFFSET 1 ROW FETCH NEXT 2 ROWS ONLY;",
+            expression => expression is SqlSelectExpression { LimitSyntaxKind: SqlLimitSyntaxKind.Fetch }, [[2], [3]]),
+        [SqlClauses.Top] = Query("SELECT TOP (2) id FROM t ORDER BY id;",
+            expression => expression is SqlSelectExpression { LimitSyntaxKind: SqlLimitSyntaxKind.Top }, [[1], [2]]),
         [SqlClauses.Offset] = Query("SELECT id FROM t ORDER BY id OFFSET 1;", expression => expression is SqlSelectExpression { Offset: not null },
             [[2], [3]]),
         [SqlClauses.Case] = Query("SELECT CASE WHEN age > 40 THEN 'senior' ELSE 'junior' END, CASE id WHEN 1 THEN 'first' ELSE 'later' END FROM t ORDER BY id;",

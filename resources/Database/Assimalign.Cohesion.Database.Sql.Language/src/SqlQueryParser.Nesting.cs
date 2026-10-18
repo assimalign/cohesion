@@ -91,6 +91,7 @@ public sealed partial class SqlQueryParser
         Multiplication,
         Unary,
         Collate,
+        Primary,
     }
 
     /// <summary>
@@ -115,6 +116,7 @@ public sealed partial class SqlQueryParser
             OperandRule.Addition => ParseAddition(ref lexer),
             OperandRule.Multiplication => ParseMultiplication(ref lexer),
             OperandRule.Unary => ParseUnary(ref lexer),
+            OperandRule.Primary => ParsePrimary(ref lexer),
             _ => ParseCollate(ref lexer),
         };
         _expressionDepth--;

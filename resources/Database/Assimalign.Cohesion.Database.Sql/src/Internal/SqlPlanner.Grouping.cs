@@ -116,7 +116,7 @@ internal sealed partial class SqlPlanner
             groupScope.ForOrdering(projections, orderByProjections, keys.Length + boundAggregates.Length));
 
         return new SqlGroupPlan(input, columns, bindings, keys, boundAggregates, projections,
-            having, ordering, EvaluateCount(select.Limit, "LIMIT"), EvaluateCount(select.Offset, "OFFSET"),
+            having, ordering, EvaluateCount(select.Limit, LimitClause(select)), EvaluateCount(select.Offset, "OFFSET"),
             select.IsDistinct);
 
         void BindSlots(SqlExpression expression, IReadOnlyDictionary<SqlExpression, int>? outputSlots = null)

@@ -127,6 +127,20 @@ the parser implements today. Recognized clauses outside that set produce the sha
 
 ## Why-this-not-that decisions
 
+Pagination (#1107) normalizes LIMIT, FETCH and the D1 TOP lexical alias into the existing
+Limit/Offset fields and count validator, with a nullable SqlLimitSyntaxKind on SELECT
+so tools and conformance distinguish the syntax family. No extra plan or executor is needed.
+FIRST stays contextual. Unparenthesized TOP consumes one integer or parameter, while
+TOP (expression) uses the ordinary pagination subquery ban. Canonical output uses
+LIMIT before OFFSET, FETCH FIRST n ROWS ONLY and TOP (n), preserving the syntax kind
+rather than source trivia. FETCH consumes a primary expression or signed numeric constant,
+following PostgreSQL src/backend/parser/gram.y:13674-13696; compound counts require
+parentheses, which canonical rendering restores. Renderer fuzz roots and WITH bodies
+generate all families, including parenthesized compound FETCH counts. INSERT, UPDATE and
+DELETE TOP are recognized DML TOP exclusions with COHDBL001.
+PERCENT and TIES are contextual unsupported entries; their identifier quoting requires
+the engine format-19 gate. PostgreSQL gram.y:13537-13658 supplies the offset/fetch grammar.
+
 Non-recursive WITH (#1116) uses an ordered CommonTables list on each SELECT/INSERT/
 UPDATE/DELETE root and a sealed SqlCommonTableExpression leaf. This preserves the
 existing command dispatch and exposes bodies without a wrapper statement variant.
@@ -236,8 +250,8 @@ COHDBL001. ORDER BY aliases and ordinals count visible wildcard output after USI
   and window functions are lexed so diagnostics can
   say "unsupported" precisely rather than mis-parsing them as identifiers. Gateable
   names live in `SqlClauses`; supported names are present in `SqlLanguageProfile`,
-  while reserved future clauses such as set operations, recursive/nested CTEs, windows, `FETCH`,
-  `RETURNING`, `TOP`, unsupported join forms, and views remain absent. `ParseCore` scans a copy of its configured
+  while reserved future clauses such as set operations, recursive/nested CTEs, windows,
+  `RETURNING`, unsupported join forms, and views remain absent. `ParseCore` scans a copy of its configured
   lexer before recursive descent and attaches the first rejected clause to the
   statement, so analyzers observe `COHDBL001` with the token location and the `SQL`
   surface name. An actually unknown leading command still receives `SQL0002`, even

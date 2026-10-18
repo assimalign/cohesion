@@ -11,6 +11,7 @@ public sealed partial class SqlQueryParser
     {
         var pos = lexer.Current.Position;
         Advance(ref lexer); // consume UPDATE
+        RejectDmlTop(ref lexer);
 
         var table = ParseRequiredTableReference(ref lexer);
 

@@ -64,7 +64,7 @@ nullable definitions and DEFAULT; retaining the type and NOT NULL preserves gene
 
 ## Statement matrix
 
-With non-recursive WITH (#1116), the profile measures **37 of 51 declared clauses** against the live SQL engine.
+With FETCH and TOP (#1107), the profile measures **39 of 51 declared clauses** against the live SQL engine.
 Phase 22 measured 33 of 49.
 The earlier 32/48 figure included `JOIN`, `GROUP BY`, `HAVING`, and `SUBQUERY`,
 removed in Phase 12e (#1019–#1021), plus a no-op `CAST` removed in Phase 13.
@@ -85,15 +85,15 @@ projection aliases, including aliases inside scalar expressions, and select-list
 ordinals through the SQL server/client (#1024). At Phase 22 the count remained 33/49 because
 `ALTER TABLE` and `ORDER BY` were already advertised for smaller executable subsets.
 
-The **14 excluded clauses** are set operations (`UNION`,
+The **12 excluded clauses** are set operations (`UNION`,
 `INTERSECT`, `EXCEPT`), recursive CTEs (`RECURSIVE`), window clauses (`WINDOW`,
 `OVER`, `PARTITION`), views (`CREATE VIEW`, `DROP VIEW`), `NATURAL`,
-`TOP`, `ALL`, `FETCH`, and `RETURNING`. Counts describe named clauses, not
+`ALL` and `RETURNING`. Counts describe named clauses, not
 complete ISO SQL support; the boundaries below are part of the contract.
 
 | Statement | Status | Notes |
 |---|---|---|
-| `SELECT` | Supported subset, measured | Stored tables, virtual system relations and aliased derived queries, with written-order N-way INNER/LEFT/CROSS joins and comma items over these source kinds; `DISTINCT`, projections and aliases, scalar expressions, `WHERE`, grouping, multi-expression `ORDER BY ASC/DESC`, nonnegative integer `LIMIT`/`OFFSET`. `COUNT(*)`, `COUNT(expr)`, `SUM`, `AVG`, `MIN`, and `MAX` execute in grouped and ungrouped queries. See the aggregate contract below. Top-level `SELECT` without `FROM` is rejected by the planner; CTE bodies can use one implicit row. |
+| `SELECT` | Supported subset, measured | Stored tables, virtual system relations and aliased derived queries, with written-order N-way INNER/LEFT/CROSS joins and comma items over these source kinds; `DISTINCT`, projections and aliases, scalar expressions, `WHERE`, grouping, multi-expression `ORDER BY ASC/DESC`, nonnegative integer `LIMIT`/`OFFSET`, ISO `FETCH FIRST`/`NEXT`, and the SQL Server `TOP` lexical alias. `COUNT(*)`, `COUNT(expr)`, `SUM`, `AVG`, `MIN`, and `MAX` execute in grouped and ungrouped queries. See the aggregate contract below. Top-level `SELECT` without `FROM` is rejected by the planner; CTE bodies can use one implicit row. |
 | `EXPLAIN` | Supported extension, measured | SELECT, INSERT (including query sources), UPDATE or DELETE returns the chosen plan as ordinary rows without executing it. DDL, transaction control, nested EXPLAIN and EXPLAIN ANALYZE report `COHDBL001`. |
 | `INSERT` / `VALUES` | Supported subset, measured | Optional column list, multi-row literal/scalar `VALUES` including whole-item `DEFAULT`, `INSERT ... DEFAULT VALUES` (one row of defaults, with an optional column list), and transactional `INSERT ... SELECT` with the same destination coercion, defaults, and constraints. `VALUES` expressions have no columns in scope: a column reference reports `COHSQLE005` before anything executes (see [VALUES and counts have no column scope](#values-and-counts-have-no-column-scope-1165)). Subqueries inside `VALUES` are excluded; use `INSERT ... SELECT`. |
 | `UPDATE` | Supported | multi-column `SET`, including `c = DEFAULT`, and `WHERE` (including correlated and uncorrelated subqueries); qualified references in both use the target name or its alias, which hides the base name (PostgreSQL `parse_relation.c:3759`); hidden/unknown qualifiers fail with located `COHSQLE015` before any write and leave an explicit transaction active; aggregates in SET and outside child queries in WHERE are rejected; aggregates inside WHERE subqueries execute (see [Grouping and aggregate functions](#grouping-and-aggregate-functions-1020)) |
@@ -109,8 +109,9 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `COLLATE` | Supported subset, measured | Column and expression overrides: `binary`, `case_insensitive`, `case_accent_insensitive`, plus compatibility `invariant` with scan execution only. Effective collation governs comparisons, `LIKE`, ordering, grouping, `DISTINCT`, and unique keys. See the collation contract below. |
 | `JOIN` / `USING` | Supported subset, measured | N-way INNER (or bare JOIN), LEFT [OUTER], CROSS and comma joins over stored/system/derived sources. INNER/LEFT require ON or USING; CROSS accepts neither. RIGHT/FULL, NATURAL, LATERAL and qualified wildcards remain excluded. See the precise contract below. |
 | `GROUP BY` / `HAVING` | Supported subset, measured | One or more grouping expressions; `WHERE` filters input rows and `HAVING` filters groups after aggregation. Composes with supported N-way joins, `ORDER BY`, `LIMIT`, and `OFFSET`, including server/client execution. Ungrouped, unaggregated projected columns are errors. `DISTINCT`/`ALL` aggregate modifiers, grouping extensions, windows, and ordered-set aggregates report `COHDBL001`. |
-| Subqueries / `INSERT ... SELECT` | Supported subset, measured | Correlated and uncorrelated scalar, `IN`/`NOT IN`, and `EXISTS`/`NOT EXISTS` queries in supported SELECT expressions and UPDATE/DELETE WHERE predicates, plus aliased derived tables and transactional insert-source queries. All use the outer statement snapshot; nesting is limited to 32 subquery levels, within the statement's expression nesting limit (256 levels by default, `SQL0006`). Quantified comparisons and subqueries in UPDATE SET, VALUES, CHECK/DEFAULT, and LIMIT/OFFSET expressions report `COHDBL001`. See the subquery contract below. |
-| `TOP` / `SELECT ALL` / `FETCH` | Recognized, not supported | row-limit and select modifiers rejected with `COHDBL001` |
+| Subqueries / `INSERT ... SELECT` | Supported subset, measured | Correlated and uncorrelated scalar, `IN`/`NOT IN`, and `EXISTS`/`NOT EXISTS` queries in supported SELECT expressions and UPDATE/DELETE WHERE predicates, plus aliased derived tables and transactional insert-source queries. All use the outer statement snapshot; nesting is limited to 32 subquery levels, within the statement's expression nesting limit (256 levels by default, `SQL0006`). Quantified comparisons and subqueries in UPDATE SET, VALUES, CHECK/DEFAULT, and LIMIT/OFFSET/FETCH/TOP expressions report `COHDBL001`. See the subquery contract below. |
+| `TOP` / `FETCH` | Supported subset, measured | Row counts normalize to LIMIT/Offset plan fields; see [Pagination](#pagination-1107). PERCENT, WITH TIES and DML TOP retain COHDBL001. |
+| `SELECT ALL` | Recognized, not supported | rejected with `COHDBL001` |
 | DML `RETURNING` | Recognized, not supported | rejected with `COHDBL001` |
 | `NATURAL JOIN` | Recognized, not supported | rejected with `COHDBL001` |
 | `UNION` / `INTERSECT` / `EXCEPT` | Recognized, not supported | keywords lexed; rejected with `COHDBL001` |
@@ -198,7 +199,7 @@ reports `SQL0003` at the literal; it also used to fail only at execution.
 | `DELETE FROM t WHRE id = 1` | Leftover text after the DELETE; the message adds that `WHRE` was read as an alias of table `t` | `id` |
 | `UPDATE t SET a = 1 WHRE id = 1`, `UPDATE t SET ... FROM u WHERE ...` | Leftover text after the UPDATE | `WHRE`, `FROM` |
 | `INSERT ... ON CONFLICT DO NOTHING`, `INSERT ... ON DUPLICATE KEY UPDATE ...` | Leftover text after the INSERT | `ON` |
-| `SELECT ... OFFSET 1 LIMIT 2` | `LIMIT` must precede `OFFSET` | `LIMIT` |
+| `SELECT ... LIMIT 1 FETCH FIRST 1 ROW ONLY` | two row-limit clauses in one SELECT | `FETCH` |
 | `name LIKE 'a!%' ESCAPE '!'` | `LIKE ... ESCAPE` is not supported; `%` and `_` are always wildcards | `ESCAPE` |
 | `a IS [NOT] DISTINCT FROM b`, `a IS [NOT] TRUE`, `FALSE` or `UNKNOWN` | Only `IS [NOT] NULL` is supported | `IS` |
 | `a NOT NULL`, `flag NOT FALSE`, `x NOT y` | `NOT` after an operand must begin `NOT BETWEEN`, `NOT IN` or `NOT LIKE`; it used to parse as `x AND NOT y` | the token after `NOT` |
@@ -225,7 +226,7 @@ comment, and a string literal or block comment may span lines. `//` is not a
 comment: `/` is the division operator, so `//` is a syntax error.
 
 A recognized clause outside the profile keeps its `COHDBL001`, for example
-`RETURNING` or `FETCH`. The parser stops at such a clause by design, so the text
+`RETURNING` or `WINDOW`. The parser stops at such a clause by design, so the text
 from that clause on adds no second diagnostic. Text the parser stopped at before
 it reached the clause still reports `SQL0003`: `DELETE FROM t WHRE id = 1
 RETURNING *` reports both, so fixing `RETURNING` does not reveal a new error. A
@@ -976,21 +977,64 @@ the value order cannot compare (`Cannot compare values of types ...`).
   rounding, reports `COHSQLE002`. Other source conversion failures keep
   their `CAST ... failed` message under the conversion contract below.
 
-## VALUES and counts have no column scope (#1165)
+## Pagination (#1107)
 
-`LIMIT` and `OFFSET` accept nonnegative integer counts through
+After ORDER BY, SELECT accepts PostgreSQL `LIMIT n OFFSET m` or `OFFSET m LIMIT n`,
+or ISO `[OFFSET m [ROW|ROWS]] FETCH {FIRST|NEXT} [n] {ROW|ROWS} ONLY`.
+OFFSET alone accepts an optional ROW or ROWS suffix. FETCH defaults to one row when
+its count is omitted; FIRST and NEXT, and ROW and ROWS, have identical semantics.
+FIRST remains contextual and unreserved.
+
+FETCH counts follow PostgreSQL's primary-expression (`c_expr`) or signed numeric
+constant grammar: bare `1+1` receives SQL0003, while `(1+1)` is accepted and renders
+as `(1 + 1)`. Names, parameters, function calls and CASE expressions are primary
+expressions; signs on other operands and infix operators require parentheses.
+
+The D1 SQL Server lexical aliases are `SELECT [DISTINCT] TOP (expression) ...` and
+`SELECT [DISTINCT] TOP n ...`. Unparenthesized TOP consumes exactly one integer
+literal or parameter token; a signed count or other expression requires parentheses.
+TOP applies after ordering, grouping/HAVING and DISTINCT, as every row-limit spelling does.
+Without ORDER BY, the count still applies but the choice of rows has no ordering guarantee.
+
+Each SELECT accepts one limit spelling and one OFFSET. LIMIT and OFFSET can appear in
+either order, including PostgreSQL FETCH before OFFSET; rendering uses ISO OFFSET before FETCH. LIMIT with FETCH, TOP with LIMIT/OFFSET/FETCH,
+duplicate limits/offsets, or FETCH without ONLY receive SQL0003. PERCENT, WITH TIES
+and INSERT/UPDATE/DELETE TOP receive COHDBL001 naming the form. A paging clause cannot mask
+a later unsupported WINDOW clause, and WITH TIES never becomes a CTE diagnostic.
+
+These spellings execute at every accepted SELECT position: scalar, IN and EXISTS
+children, derived/CTE bodies and INSERT SELECT sources, retaining the existing
+derived-output outer-ordering restriction. Subqueries used as counts remain
+COHDBL001 naming LIMIT, OFFSET, FETCH or TOP. Counts use the existing single
+EvaluateCount validator and Limit/Offset plan fields; negative or noninteger values
+receive COHSQLE018 naming the written clause. SqlSelectExpression.LimitSyntaxKind
+records Limit, Fetch or Top (null without a limit). Canonical rendering preserves that
+family: LIMIT before OFFSET, FETCH FIRST n ROWS ONLY, and TOP (n).
+PERCENT and TIES remain ordinary identifiers outside paging suffixes; canonical
+rendering quotes those names. Data-storage format 19 fences earlier persisted
+spellings; older databases are refused without an upgrade path.
+
+PostgreSQL's local reference grammar accepts both LIMIT/OFFSET orders at
+`src/backend/parser/gram.y:13537-13558`, FETCH's default count at `:13623-13631`,
+and OFFSET's ROW/ROWS suffix at `:13652-13658`. The ISO features measured here are
+F857/F858/F860 and F861/F862/F865; FETCH count grammar is at `:13674-13696`.
+F866 (PERCENT) and F867 (WITH TIES) remain excluded.
+
+`LIMIT`, `FETCH`, `TOP` and `OFFSET` accept nonnegative integer counts through
 `9223372036854775807` (`Int64.MaxValue`). After ordering and `DISTINCT`, `OFFSET`
 discards that many rows and `LIMIT` keeps at most that many of the remaining rows.
 A limit greater than the result size keeps every remaining row; an offset at or
 beyond the result size returns no rows. These rules apply to stored tables,
 N-way joins, virtual system relations and grouped queries, in process and
 over the SQL wire protocol (#1100). Negative and non-integer counts retain the
-`LIMIT requires a non-negative integer.` / `OFFSET requires a non-negative integer.`
+`<clause> requires a non-negative integer.`
 diagnostics.
 
+## VALUES and counts have no column scope (#1165)
+
 A row of `INSERT ... VALUES` is evaluated once, against no table row: ISO SQL
-forbids a column reference in an INSERT's table value constructor. `LIMIT` and
-`OFFSET` counts are evaluated once too, while planning. Their expressions are
+forbids a column reference in an INSERT's table value constructor. `LIMIT`, `OFFSET`,
+`FETCH` and parenthesized `TOP` counts are evaluated once too, while planning. Their expressions are
 literals, parameters, and operators, signs, `CAST`, `COLLATE`, `CASE`, predicates
 and scalar functions over them. A column reference anywhere in one of them,
 qualified or not and however deeply nested, reports `COHSQLE005` (ISO SQLSTATE
@@ -1001,7 +1045,7 @@ executes:
 COHSQLE005: Column reference 'id' is not allowed in INSERT ... VALUES, which has no columns in scope. Use literals, parameters and expressions over them, or INSERT ... SELECT to read values from a table.
 ```
 
-For a count the clause is `LIMIT` or `OFFSET` and the message ends after
+For a count the clause is `LIMIT`, `OFFSET`, `FETCH` or `TOP` and the message ends after
 "expressions over them.". Every row is checked before the first is written, so
 `VALUES (1, 1), (2, id)` inserts nothing. In process the statement throws a
 `DatabaseException` with that message; over the wire it is `ExecutionFailure` with
@@ -1213,8 +1257,8 @@ clauses nest below it, so the [expression nesting limit](#expression-nesting-lim
 
 `ANY`/`ALL`/`SOME` quantified comparisons, nested or recursive CTEs, lateral joins,
 and subqueries in UPDATE SET, INSERT VALUES, CHECK/DEFAULT,
-or LIMIT/OFFSET expressions remain excluded with `COHDBL001`. Ordinary numeric
-LIMIT/OFFSET clauses on queries containing subqueries do execute. CHECK remains
+or LIMIT/OFFSET/FETCH/TOP expressions remain excluded with `COHDBL001`. Ordinary numeric
+LIMIT/OFFSET/FETCH/TOP clauses on queries containing subqueries do execute. CHECK remains
 a deterministic row-local expression and still rejects every subquery form.
 These subset boundaries do not add named clauses to the 51-clause denominator.
 
@@ -2362,7 +2406,7 @@ pin in the same change.
 | `COHDBL001` | Error | Recognized clause, keyword, function, operator or type modifier is not supported by the SQL model surface, including prefix and infix `~` (#1101), temporal precision and INTERVAL field qualifiers in declarations and CAST (#1438); the message names the construct and, for a modifier, its declaration |
 | `SQL0001` | Error | Empty query text |
 | `SQL0002` | Error | Unknown command (recognized unsupported clauses use `COHDBL001`) |
-| `SQL0003` | Error | Malformed syntax: text after a complete statement or after its terminating `;`; a missing expression, closing token, keyword, name or `VALUES` row; an unterminated string, quoted identifier or block comment; a character outside the dialect, such as `?`, `#`, `^` or a non-ASCII digit, which binds no alias or column (#1101); a numeric literal whose exponent has no digits; an `IS` form other than `[NOT] NULL`; `NOT` after an operand without `BETWEEN`, `IN` or `LIKE`; `LIKE ... ESCAPE`; `LIMIT` after `OFFSET`; an incomplete `IF [NOT] EXISTS`; `ALTER` without `TABLE`; an unknown or incomplete `ALTER TABLE` action; and malformed transaction-control, JOIN, GROUP BY, HAVING, CAST, COLLATE, or constraint/DDL syntax |
+| `SQL0003` | Error | Malformed syntax: text after a complete statement or after its terminating `;`; a missing expression, closing token, keyword, name or `VALUES` row; an unterminated string, quoted identifier or block comment; a character outside the dialect, such as `?`, `#`, `^` or a non-ASCII digit, which binds no alias or column (#1101); a numeric literal whose exponent has no digits; an `IS` form other than `[NOT] NULL`; `NOT` after an operand without `BETWEEN`, `IN` or `LIKE`; `LIKE ... ESCAPE`; mixed or duplicate pagination clauses, incomplete FETCH, or malformed TOP; an incomplete `IF [NOT] EXISTS`; `ALTER` without `TABLE`; an unknown or incomplete `ALTER TABLE` action; and malformed transaction-control, JOIN, GROUP BY, HAVING, CAST, COLLATE, or constraint/DDL syntax |
 | `SQL0004` | — | Retired (E3): an unknown CAST target type was a parse error; a name that is not a built-in type is now resolved by the engine, and one it does not know is `COHSQLE010` |
 | `SQL0005` | Error | Invalid type modifiers at any declaration or CAST: malformed arguments (including CHAR(MAX)), out-of-range length/precision/scale (including FLOAT outside 1..53 bits), arguments a type does not take, or a rejected type spelling (BIT, SMALLDATETIME, TIME WITH TIME ZONE); names the declaration and reason. Temporal precision and INTERVAL qualifiers use COHDBL001 |
 | `SQL0006` | Error | Expression nesting exceeds the limit (256 levels by default, configurable within 32..4096), or parentheses nest deeper than the limit; an `AND`/`OR` chain counts one level. The rest of the statement is not parsed. An engine also reports it for a typed request whose statement nests deeper than the engine's limit (#1151) |
@@ -2407,8 +2451,9 @@ rejects with `COHDBL001`: `RECURSIVE`, `[NOT] MATERIALIZED`, `SEARCH`/`CYCLE`,
 the `GROUPING`, `ROLLUP`, `CUBE` and `GROUPING_ID` calls, `FILTER (...)` and
 `WITHIN GROUP` after a call, the `ANY`/`SOME` (and `ALL`) quantified comparisons,
 `LATERAL`, `~`, `SEQUENCE`, `SERIAL`, `BIGSERIAL`, `SMALLSERIAL`, `OVERRIDING`,
-`MINVALUE`, `MAXVALUE`, `CYCLE`, `CACHE`, and `RESTART`. Identifiers spelled like these
-recognized-unsupported words, including the newly added `MATERIALIZED` and `SEARCH`,
+`MINVALUE`, `MAXVALUE`, `CYCLE`, `CACHE`, `RESTART`, plus `PERCENT` and `WITH TIES` after
+FETCH or TOP. Identifiers spelled like these recognized-unsupported words,
+including `MATERIALIZED`, `SEARCH`, `percent` and `ties`,
 render quoted in canonical SQL. `WITH` remains a profile keyword; its nested-form
 refusal is a dedicated parser rule. The table also holds the recognized
 non-executing functions listed above, including the window and niladic datetime names (#1103). Profile keywords

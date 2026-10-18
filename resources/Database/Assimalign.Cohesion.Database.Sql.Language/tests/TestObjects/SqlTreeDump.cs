@@ -193,7 +193,7 @@ internal static class SqlTreeDump
             Append(builder, order.Expression);
             builder.Append(order.IsDescending ? " desc; " : " asc; ");
         }
-        builder.Append("], limit=");
+        builder.Append("], limitSyntax=").Append(select.LimitSyntaxKind).Append(", limit=");
         Append(builder, select.Limit);
         builder.Append(", offset=");
         Append(builder, select.Offset);

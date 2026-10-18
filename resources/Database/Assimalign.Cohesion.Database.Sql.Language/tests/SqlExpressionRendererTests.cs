@@ -256,8 +256,22 @@ public sealed class SqlExpressionRendererTests
     /// <param name="canonical">Its canonical text.</param>
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Renderer: queries render canonically and parse back to the same tree")]
     [InlineData("WITH top (x) AS (SELECT 1), ties (y) AS (SELECT x + 1 FROM top) SELECT y FROM ties",
-        "WITH \"top\" (x) AS (SELECT 1), ties (y) AS (SELECT x + 1 FROM \"top\") SELECT y FROM ties")]
+        "WITH \"top\" (x) AS (SELECT 1), \"ties\" (y) AS (SELECT x + 1 FROM \"top\") SELECT y FROM \"ties\"")]
     [InlineData("select * from t", "SELECT * FROM t")]
+    [InlineData("SELECT id FROM t FETCH FIRST (1+1) ROWS ONLY",
+        "SELECT id FROM t FETCH FIRST (1 + 1) ROWS ONLY")]
+    [InlineData("SELECT id FROM t FETCH NEXT (2*(1+1)) ROW ONLY",
+        "SELECT id FROM t FETCH FIRST (2 * (1 + 1)) ROWS ONLY")]
+    [InlineData("SELECT id FROM t FETCH FIRST (-@n) ROWS ONLY",
+        "SELECT id FROM t FETCH FIRST (-@n) ROWS ONLY")]
+    [InlineData("SELECT id FROM t FETCH FIRST (1 COLLATE binary) ROWS ONLY",
+        "SELECT id FROM t FETCH FIRST (1 COLLATE binary) ROWS ONLY")]
+    [InlineData("SELECT id FROM t FETCH FIRST +2 ROWS ONLY",
+        "SELECT id FROM t FETCH FIRST 2 ROWS ONLY")]
+    [InlineData("SELECT id FROM t FETCH FIRST -1.5 ROWS ONLY",
+        "SELECT id FROM t FETCH FIRST -1.5 ROWS ONLY")]
+    [InlineData("SELECT id FROM t FETCH FIRST ABS(-2) ROWS ONLY",
+        "SELECT id FROM t FETCH FIRST ABS(-2) ROWS ONLY")]
     [InlineData("SELECT DISTINCT a AS x, b y FROM dbo.t AS q WHERE a > 0 ORDER BY a DESC, 2 LIMIT 5 OFFSET 1",
         "SELECT DISTINCT a AS x, b AS y FROM dbo.t AS q WHERE a > 0 ORDER BY a DESC, 2 LIMIT 5 OFFSET 1")]
     [InlineData("SELECT a, COUNT(*) FROM t GROUP BY a HAVING COUNT(*) > 1",

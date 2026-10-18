@@ -32,6 +32,24 @@ public sealed class SqlStatementCompletenessExecutionTests
         "INSERT INTO u VALUES (1, 'x'), (4, 'y');",
     ];
 
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Completeness: OFFSET before LIMIT executes the complete two-row window")]
+    public async Task ExecuteAsync_OffsetBeforeLimit_ShouldReturnTwoRowWindow()
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("sql-completeness-paging", new());
+        var database = await engine.CreateDatabaseAsync("app", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await SeedAsync(session, withRows: true);
+
+        // Act
+        var rows = await RowsAsync(session, "SELECT id FROM t ORDER BY id OFFSET 1 LIMIT 2;");
+
+        // Assert
+        rows.Count.ShouldBe(2);
+        rows[0].ShouldBe(new object?[] { 2 });
+        rows[1].ShouldBe(new object?[] { 3 });
+    }
+
     /// <summary>
     /// Each statement used to execute a truncated prefix; every one of them would change
     /// data if that prefix ran. Both session seams refuse it and the tables are unchanged.
@@ -43,7 +61,6 @@ public sealed class SqlStatementCompletenessExecutionTests
     [InlineData("UPDATE t SET name = u.name FROM u WHERE t.id = u.id;")]
     [InlineData("INSERT INTO t (id, name, age) VALUES (5, 'new', 1) ON CONFLICT DO NOTHING;")]
     [InlineData("INSERT INTO t (id, name, age) VALUES (5, 'new', 1) ON DUPLICATE KEY UPDATE name = 'dup';")]
-    [InlineData("SELECT id FROM t ORDER BY id OFFSET 1 LIMIT 2;")]
     [InlineData("SELECT id FROM t WHERE name LIKE 'a!%' ESCAPE '!';")]
     [InlineData("DELETE FROM t WHERE name LIKE 'a%' ESCAPE '!';")]
     [InlineData("DELETE FROM t WHERE flag IS DISTINCT FROM TRUE;")]

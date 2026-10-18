@@ -10,6 +10,7 @@ public sealed partial class SqlQueryParser
     {
         var pos = lexer.Current.Position;
         Advance(ref lexer); // consume DELETE
+        RejectDmlTop(ref lexer);
 
         // FROM (optional in some dialects, but standard)
         if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "FROM"))

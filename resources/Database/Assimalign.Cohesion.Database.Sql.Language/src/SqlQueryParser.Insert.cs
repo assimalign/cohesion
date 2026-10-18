@@ -10,6 +10,7 @@ public sealed partial class SqlQueryParser
     {
         var pos = lexer.Current.Position;
         Advance(ref lexer); // consume INSERT
+        RejectDmlTop(ref lexer);
 
         // INTO
         if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "INTO"))

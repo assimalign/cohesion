@@ -91,6 +91,8 @@ public static class SqlLanguageProfile
         SqlClauses.OrderBy,
         SqlClauses.Limit,
         SqlClauses.Offset,
+        SqlClauses.Fetch,
+        SqlClauses.Top,
         SqlClauses.Values,
         SqlClauses.Subquery,
         SqlClauses.Cte,

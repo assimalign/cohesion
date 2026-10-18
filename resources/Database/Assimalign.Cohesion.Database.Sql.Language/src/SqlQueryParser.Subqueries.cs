@@ -10,6 +10,7 @@ public sealed partial class SqlQueryParser
     private const int MaximumSubqueryDepth = 32;
     private int _subqueryDepth;
     private int _paginationDepth;
+    private string _paginationClause = "LIMIT or OFFSET";
 
     private SqlSelectExpression ParseSubquery(ref TokenLexer lexer)
     {
@@ -32,7 +33,7 @@ public sealed partial class SqlQueryParser
         {
             AddUnsupportedSurfaceDiagnostic(lexer.Current.Position,
                 lexer.Current.Position + lexer.Current.Value.Length,
-                "SQL subqueries in LIMIT or OFFSET expressions are not supported.");
+                $"SQL subqueries in {_paginationClause} expressions are not supported.");
         }
 
         if (_subqueryDepth >= MaximumSubqueryDepth)
@@ -85,16 +86,19 @@ public sealed partial class SqlQueryParser
         }
     }
 
-    private SqlExpression ParsePaginationExpression(ref TokenLexer lexer)
+    private SqlExpression ParsePaginationExpression(ref TokenLexer lexer, string clause, bool primaryOnly = false)
     {
+        string previousClause = _paginationClause;
+        _paginationClause = clause;
         _paginationDepth++;
         try
         {
-            return ParseExpression(ref lexer);
+            return primaryOnly ? ParsePrimary(ref lexer) : ParseExpression(ref lexer);
         }
         finally
         {
             _paginationDepth--;
+            _paginationClause = previousClause;
         }
     }
 

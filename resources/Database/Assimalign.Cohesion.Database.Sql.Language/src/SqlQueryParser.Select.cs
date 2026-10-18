@@ -21,6 +21,16 @@ public sealed partial class SqlQueryParser
             Advance(ref lexer);
         }
 
+        SqlExpression? limit = null;
+        SqlLimitSyntaxKind? limitSyntaxKind = null;
+        if (IsKeyword(ref lexer, "TOP") && !(TryPeekToken(lexer, out string topNext, out _) && topNext == "."))
+        {
+            Advance(ref lexer);
+            limit = ParseTopCount(ref lexer);
+            limitSyntaxKind = SqlLimitSyntaxKind.Top;
+            RejectPagingSuffix(ref lexer, "TOP");
+        }
+
         // Parse SELECT column list
         var columns = ParseSelectColumns(ref lexer);
 
@@ -112,27 +122,43 @@ public sealed partial class SqlQueryParser
             }
         }
 
-        // LIMIT
-        SqlExpression? limit = null;
-        if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "LIMIT"))
-        {
-            Advance(ref lexer);
-            limit = ParsePaginationExpression(ref lexer);
-        }
-
-        // OFFSET
+        // PostgreSQL permits either limit/offset order; rendering uses ISO OFFSET ... FETCH.
         SqlExpression? offset = null;
-        if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "OFFSET"))
+        while (IsKeyword(ref lexer, "LIMIT") || IsKeyword(ref lexer, "OFFSET") || IsKeyword(ref lexer, "FETCH"))
         {
-            Advance(ref lexer);
-            offset = ParsePaginationExpression(ref lexer);
-
-            // OFFSET n LIMIT m used to keep the OFFSET and drop the LIMIT (#1068).
-            if (limit is null && IsKeyword(ref lexer, "LIMIT"))
+            string clause = CurrentText(ref lexer).ToUpperInvariant();
+            int start = lexer.Current.Position;
+            int end = start + lexer.Current.Value.Length;
+            if (clause == "OFFSET" ? offset is not null || limitSyntaxKind == SqlLimitSyntaxKind.Top : limit is not null)
             {
-                AddSyntaxDiagnostic(ref lexer, "LIMIT must precede OFFSET; write LIMIT <count> OFFSET <skip>.");
-                Advance(ref lexer);
-                ParsePaginationExpression(ref lexer); // recover past the count
+                AddSyntaxDiagnostic(start, end, "A SELECT accepts one row limit and one OFFSET; TOP cannot combine with LIMIT, OFFSET or FETCH, and LIMIT cannot combine with FETCH.");
+            }
+            Advance(ref lexer);
+            if (clause == "OFFSET")
+            {
+                offset = ParsePaginationExpression(ref lexer, "OFFSET");
+                if (IsKeyword(ref lexer, "ROW") || IsKeyword(ref lexer, "ROWS")) { Advance(ref lexer); }
+            }
+            else if (clause == "LIMIT")
+            {
+                limit = ParsePaginationExpression(ref lexer, "LIMIT");
+                limitSyntaxKind = SqlLimitSyntaxKind.Limit;
+            }
+            else
+            {
+                if (IsWord(ref lexer, "FIRST") || IsKeyword(ref lexer, "NEXT")) { Advance(ref lexer); }
+                else { AddSyntaxDiagnostic(ref lexer, "Expected FIRST or NEXT after FETCH."); }
+                limit = IsKeyword(ref lexer, "ROW") || IsKeyword(ref lexer, "ROWS")
+                    ? new SqlLiteralExpression("1", SqlLiteralType.Integer, Location.Create(1, 1, start, end))
+                    : ParseFetchCount(ref lexer);
+                limitSyntaxKind = SqlLimitSyntaxKind.Fetch;
+                RejectPagingSuffix(ref lexer, "FETCH");
+                if (IsKeyword(ref lexer, "ROW") || IsKeyword(ref lexer, "ROWS")) { Advance(ref lexer); }
+                else { AddSyntaxDiagnostic(ref lexer, "Expected ROW or ROWS after the FETCH count."); }
+                if (!RejectPagingSuffix(ref lexer, "FETCH"))
+                {
+                    ExpectKeyword(ref lexer, "ONLY", "ONLY after FETCH ... ROW or ROWS");
+                }
             }
         }
 
@@ -142,7 +168,65 @@ public sealed partial class SqlQueryParser
         return new SqlSelectExpression(
             columns, from, where, groupBy, having, orderBy,
             limit, offset, isDistinct, null,
-            Location.Create(1, 1, pos, _lastTokenEnd));
+            Location.Create(1, 1, pos, _lastTokenEnd), limitSyntaxKind);
+    }
+
+    private SqlExpression ParseFetchCount(ref TokenLexer lexer)
+    {
+        // PostgreSQL src/backend/parser/gram.y:13674-13696: c_expr or a signed numeric
+        // constant. A compound expression needs parentheses; a sign cannot prefix a name.
+        var next = lexer;
+        if (lexer.Current.Type == TokenType.Minus && AdvancePastComments(ref next) &&
+            next.Current.Type is TokenType.Integer or TokenType.Float)
+        {
+            int position = lexer.Current.Position;
+            Advance(ref lexer);
+            var operand = ParseOperand(ref lexer, OperandRule.Primary);
+            return new SqlUnaryExpression(operand, SqlUnaryOperator.Negate,
+                Location.Create(1, 1, position, _lastTokenEnd));
+        }
+        return ParsePaginationExpression(ref lexer, "FETCH", primaryOnly: true);
+    }
+
+    private SqlExpression ParseTopCount(ref TokenLexer lexer)
+    {
+        // Exactly one token without parentheses: TOP 5 * must leave the projection's star.
+        if (lexer.Current.Type is TokenType.LeftParen or TokenType.Integer or TokenType.Parameter)
+        {
+            return ParsePaginationExpression(ref lexer, "TOP", primaryOnly: true);
+        }
+        AddSyntaxDiagnostic(ref lexer, "TOP requires one integer literal or parameter, or a parenthesized count expression.");
+        return new SqlLiteralExpression("NULL", SqlLiteralType.Null,
+            Location.Create(1, 1, lexer.Current.Position, lexer.Current.Position));
+    }
+
+    private bool RejectPagingSuffix(ref TokenLexer lexer, string clause)
+    {
+        if (IsWord(ref lexer, "PERCENT"))
+        {
+            RequireSkippedConstruct(lexer.Current.Position, lexer.Current.Position + lexer.Current.Value.Length,
+                $"{clause} PERCENT");
+            Advance(ref lexer);
+            return true;
+        }
+        if (IsKeyword(ref lexer, "WITH") && TryPeekToken(lexer, out string next, out int end) &&
+            next.Equals("TIES", StringComparison.OrdinalIgnoreCase))
+        {
+            RequireSkippedConstruct(lexer.Current.Position, end, $"{clause} WITH TIES");
+            Advance(ref lexer);
+            Advance(ref lexer);
+            return true;
+        }
+        return false;
+    }
+
+    private void RejectDmlTop(ref TokenLexer lexer)
+    {
+        if (!IsKeyword(ref lexer, "TOP")) { return; }
+        RequireSkippedConstruct(lexer.Current.Position, lexer.Current.Position + lexer.Current.Value.Length, "DML TOP");
+        Advance(ref lexer);
+        ParseTopCount(ref lexer);
+        RejectPagingSuffix(ref lexer, "TOP");
     }
 
     private List<SqlSelectColumn> ParseSelectColumns(ref TokenLexer lexer)

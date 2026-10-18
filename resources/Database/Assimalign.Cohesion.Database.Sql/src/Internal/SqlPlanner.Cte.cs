@@ -45,7 +45,7 @@ internal sealed partial class SqlPlanner
         foreach (var order in select.OrderBy) { ValidateExpression(order.Expression, evaluator, _subqueryTypes, outputSlots); }
         return new SqlConstantPlan(projections, where,
             BindOrdering(select.OrderBy, evaluator.ForOrdering(projections, outputSlots, 0)),
-            EvaluateCount(select.Limit, "LIMIT"), EvaluateCount(select.Offset, "OFFSET"), select.IsDistinct, outputSlots);
+            EvaluateCount(select.Limit, LimitClause(select)), EvaluateCount(select.Offset, "OFFSET"), select.IsDistinct, outputSlots);
     }
 
     private SqlPlan PlanCommonTables(IReadOnlyList<SqlCommonTableExpression> definitions, SqlQueryExpression statement)
