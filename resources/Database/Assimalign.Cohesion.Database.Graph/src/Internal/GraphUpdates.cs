@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading;
@@ -163,15 +164,16 @@ internal sealed class GraphUpdates
     private static IReadOnlyDictionary<string, object?> Properties(object entity) => entity switch
     { GraphNode node => node.Properties, GraphRelationship edge => edge.Properties, _ => throw new GraphPlanningException("COHDBG003", ErrorMessages.EntityBindingRequired) };
 
-    private static object WithProperties(object entity, IReadOnlyDictionary<string, object?> properties) => entity switch
-    { GraphNode node => node with { Properties = properties }, GraphRelationship edge => edge with { Properties = properties },
+    private static object WithProperties(object entity, Dictionary<string, object?> properties) => entity switch
+    { GraphNode node => node with { Properties = new ReadOnlyDictionary<string, object?>(properties) },
+        GraphRelationship edge => edge with { Properties = new ReadOnlyDictionary<string, object?>(properties) },
         _ => throw new GraphPlanningException("COHDBG003", ErrorMessages.EntityBindingRequired) };
 
     private static object SetLabels(object entity, IReadOnlyList<string> labels, bool remove)
     {
         if (entity is not GraphNode node) { throw new GraphPlanningException("COHDBG003", ErrorMessages.EntityBindingRequired); }
-        return node with { Labels = (remove ? node.Labels.Except(labels, StringComparer.Ordinal) : node.Labels.Concat(labels).Distinct(StringComparer.Ordinal))
-            .Order(StringComparer.Ordinal).ToArray() };
+        return node with { Labels = Array.AsReadOnly((remove ? node.Labels.Except(labels, StringComparer.Ordinal) : node.Labels.Concat(labels).Distinct(StringComparer.Ordinal))
+            .Order(StringComparer.Ordinal).ToArray()) };
     }
 
     private void RefreshBinding(Dictionary<string, object?> binding)

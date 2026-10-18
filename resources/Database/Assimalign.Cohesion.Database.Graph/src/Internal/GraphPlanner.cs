@@ -92,6 +92,7 @@ internal sealed partial class GraphPlanner
     /// <param name="parameters">The named bindings; normalization and validation precede execution.</param>
     /// <param name="paths">Whether path-request projection shape takes precedence over duplicate column names.</param>
     /// <param name="token">Cancellation observed while validating and indexing expression structure.</param>
+    /// <param name="normalizedParameters">Whether these are the statement's already captured bindings for replanning.</param>
     /// <returns>The plan.</returns>
     /// <exception cref="DatabaseException">The statement is invalid (<c>COHDBG001</c>, <c>COHDBG003</c>, <c>COHDBG015</c>).</exception>
     internal GraphPlan Plan(GqlQueryExpression query, IReadOnlyDictionary<string, object?>? parameters = null, bool paths = false, CancellationToken token = default, bool normalizedParameters = false)

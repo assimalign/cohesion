@@ -113,7 +113,8 @@ GraphStore exposes UpdateNodeAsync and UpdateRelationshipAsync; GraphDatabase ad
 update verb. Its GQL SET/REMOVE stages use a statement-local working copy, so rows observe earlier
 rows and items evaluate left to right, while publishing one replacement per updated entity at
 statement completion. Later scans, index seeks, traversals and endpoint functions consult that
-working copy. Every binding is refreshed after an update stage, including nested lists/maps/paths.
+working copy. Every binding is refreshed after an update stage, including nested lists/maps/paths;
+updated entities retain read-only label and property collections when returned to callers.
 
 Each persisted replacement tombstones the old record and moves every property-index entry or
 both adjacency entries (one for a self-loop) to the new location in one physical bracket.
