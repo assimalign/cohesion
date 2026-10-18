@@ -43,8 +43,18 @@ public sealed partial class DocumentQueryTests
             }
             await session.ExecuteAsync($"INSERT INTO items (KEY, VALUE) VALUES ('{i:D3}', {{{string.Join(',', members)}}})", cancellationToken: CancellationToken.None);
         }
+        foreach (var (id, json) in new[]
+        {
+            ("edge1", "{\"a\":1,\"b\":2,\"c\":9999}"),
+            ("edge2", "{\"a\":1,\"b\":3,\"c\":10000}"),
+            ("edge3", "{\"a\":\"😀\",\"b\":\"\",\"c\":10001}"),
+            ("edge4", "{\"a\":\"😀\",\"b\":\"\ue000\",\"c\":10002}")
+        }) { await PutAsync(collection, session, id, json); }
         var predicates = new List<(string Text, bool Seek)>
         {
+            ("a = 1 AND b <= 2", true), ("a = 1 AND b > 2", true),
+            ("a = '😀' AND b >= ''", true), ("a = '😀' AND b <= '\ue000'", true),
+            ("a >= '😀' AND a < '\ue000'", true),
             ("a = 1", true), ("a = 1 AND b > 2", true), ("a = @p AND b = 'x'", true),
             ("b = 2", false), ("a = 2.0 AND b <= 2 AND c > 1", true),
             ("a >= 1 AND a <= 'z'", true), ("a = 2 AND a = 3", true),

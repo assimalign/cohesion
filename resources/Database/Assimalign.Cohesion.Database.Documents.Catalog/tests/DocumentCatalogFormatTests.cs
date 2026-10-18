@@ -140,4 +140,24 @@ public sealed partial class DocumentCatalogTests
         await fixture.Coordinator.CommitAsync(writer); // every b.x is MISSING, so no uniqueness conflict
     }
 
+    [Fact(DisplayName = "Cohesion Test [Documents.Catalog] - Truncated registrations fail through the catalog boundary (#1135)")]
+    public async Task EnsureIndexFormat_TruncatedRegistration_ShouldFailWithCatalogExceptionAsync()
+    {
+        // Arrange.
+        await using var fixture = await Fixture.Create();
+        await fixture.CreateIndex("ix", "a");
+        using (var registrations = fixture.Storage.GetUnitIterator(1))
+        {
+            registrations.MoveNext().ShouldBeTrue();
+            var unit = registrations.Current;
+            using var bracket = fixture.Storage.BeginTransaction();
+            fixture.Storage.UpdateEntry(bracket, unit.PageId, unit.SlotIndex, unit.Data.Span[..^1]);
+            bracket.Commit();
+        }
+
+        // Act / Assert.
+        var error = Should.Throw<DocumentCatalogException>(() => DocumentCatalog.EnsureIndexFormat(fixture.Storage));
+        error.InnerException.ShouldBeOfType<System.IO.EndOfStreamException>();
+    }
+
 }
