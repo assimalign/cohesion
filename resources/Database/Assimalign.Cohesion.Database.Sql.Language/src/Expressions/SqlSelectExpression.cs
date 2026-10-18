@@ -9,6 +9,19 @@ using Assimalign.Cohesion.Database.Language;
 /// </summary>
 public sealed class SqlSelectExpression : SqlQueryExpression
 {
+    /// <summary>Gets the statement's non-recursive WITH definitions, in declaration order.</summary>
+    public IReadOnlyList<SqlCommonTableExpression> CommonTables
+    {
+        get => _commonTables;
+        internal set
+        {
+            _commonTables = value;
+            foreach (var definition in value) { ExpressionDepth = System.Math.Max(ExpressionDepth, definition.Body.ExpressionDepth); }
+        }
+    }
+
+    private IReadOnlyList<SqlCommonTableExpression> _commonTables = [];
+
     /// <summary>
     /// Initializes a new <see cref="SqlSelectExpression"/>.
     /// </summary>
@@ -81,7 +94,7 @@ public sealed class SqlSelectExpression : SqlQueryExpression
     /// Gets the greatest <see cref="SqlExpression.Depth"/> among the query's clauses, or 0 when
     /// it has none. A subquery node is one level deeper than the query it wraps.
     /// </summary>
-    internal int ExpressionDepth { get; }
+    internal int ExpressionDepth { get; private set; }
 
     /// <inheritdoc />
     /// <remarks>

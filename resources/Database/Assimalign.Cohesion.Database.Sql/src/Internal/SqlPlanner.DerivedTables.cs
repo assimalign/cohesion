@@ -16,7 +16,7 @@ internal sealed partial class SqlPlanner
     private bool InDerivedBody => _queryScopes?.Scopes.Any(scope => scope.Derived is not null) ?? false;
 
     private SqlProjectionMetadata? CaptureProjectionMetadata(SqlCollationCandidate candidate, SqlCatalogColumn? source = null)
-        => InDerivedBody ? new(candidate, source) : null;
+        => InDerivedBody || _commonTableState?.BindingBody is not null ? new(candidate, source) : null;
 
     private SqlRelationSource BindDerivedTable(SqlDerivedTableReference derived, SqlSelectExpression? owner)
     {
@@ -49,12 +49,17 @@ internal sealed partial class SqlPlanner
         finally { _subqueryDepth--; _queryScopes.Scopes.Pop(); OuterDependencies = parentDependencies; }
         parentDependencies?.UnionWith(dependencies);
 
+        return BindDerivedOutput(child, derived.Alias!, derived.Columns, derived.Query, dependencies.Count > 0);
+    }
+
+    private SqlRelationSource BindDerivedOutput(SqlPlan child, string relationName, IReadOnlyList<string> names, SqlSelectExpression query, bool isCorrelated = false)
+    {
         var output = QueryOutput(child);
         var projections = output.Projections;
-        if (derived.Columns.Count > 0 && derived.Columns.Count != projections.Count)
+        if (names.Count > 0 && names.Count != projections.Count)
         {
             throw new SqlPlanningException("COHSQLE013",
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.DerivedColumnCount, derived.Alias, projections.Count, derived.Columns.Count), derived.Query.Location);
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.DerivedColumnCount, relationName, projections.Count, names.Count), query.Location);
         }
         var columns = new SqlCatalogColumn[projections.Count];
         SqlExpressionEvaluator? scope = null;
@@ -77,17 +82,17 @@ internal sealed partial class SqlPlanner
             // expression. Default strength must not become a declared column override.
             var candidate = type.Type is DatabaseType.String or DatabaseType.Character
                 ? (projection.Metadata?.Collation ?? default).Resolve(null) : default;
-            string name = derived.Columns.Count == 0 ? projection.Name : derived.Columns[i];
+            string name = names.Count == 0 ? projection.Name : names[i];
             if (string.IsNullOrWhiteSpace(name))
             {
-                throw new SqlPlanningException("COHSQLE013", ErrorMessages.DerivedColumnName, projection.Expression?.Location ?? derived.Query.Location);
+                throw new SqlPlanningException("COHSQLE013", ErrorMessages.DerivedColumnName, projection.Expression?.Location ?? query.Location);
             }
             columns[i] = new SqlCatalogColumn(name,
                 type, projection.IsNullable,
                 collation: candidate.Priority >= 2 ? candidate.Collation : null,
                 domainName: inherited?.DomainName);
         }
-        return new SqlRelationSource(new SqlDerivedRelation(derived.Alias!, child, columns, dependencies.Count > 0));
+        return new SqlRelationSource(new SqlDerivedRelation(relationName, child, columns, isCorrelated));
     }
 
     private IReadOnlyList<SqlSubqueryBinding> BindDmlSubqueries(SqlExpression? where, SqlTableReference table)
@@ -108,6 +113,7 @@ internal sealed partial class SqlPlanner
         try
         {
             var source = ResolveRelation(reference, owner);
+            if (source.Derived is { IsCommonTable: true } && column.SchemaName is not null) { return false; }
             var scope = new SqlExpressionEvaluator(source.Columns, _parameters, relation: reference);
             scope.ResolveColumn(column);
             return true;
@@ -126,6 +132,7 @@ internal sealed partial class SqlPlanner
         {
             if (plan is SqlSubqueryPlan wrapper) { plan = wrapper.Input; }
             else if (plan is SqlCorrelatedSubqueryPlan correlated) { plan = correlated.Input; }
+            else if (plan is SqlWithPlan with) { plan = with.Input; }
             else { break; }
         }
         if (plan is not SqlRelationPlan relation)

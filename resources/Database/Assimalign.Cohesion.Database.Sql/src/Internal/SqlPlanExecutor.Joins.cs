@@ -26,18 +26,8 @@ internal sealed partial class SqlPlanExecutor
         foreach (var binding in plan.Bindings)
         {
             if (binding.Source.Derived is not { } derived) { continue; }
-            List<object?[]> rows;
-            var frame = _subqueryValues;
-            if (!derived.IsCorrelated && frame is not null && frame.StatementRelations.TryGetValue(derived, out var cached))
-            {
-                rows = cached;
-            }
-            else
-            {
-                rows = await MaterializeDerivedAsync(derived, statement, cancellationToken).ConfigureAwait(false);
-                if (!derived.IsCorrelated) { frame?.StatementRelations.Add(derived, rows); }
-            }
-            (derivedRows ??= new(ReferenceEqualityComparer.Instance)).Add(derived, rows);
+            (derivedRows ??= new(ReferenceEqualityComparer.Instance))[derived] =
+                await MaterializeRelationAsync(derived, statement, cancellationToken).ConfigureAwait(false);
         }
         foreach (var table in plan.Bindings.Select(binding => binding.Source.Table).OfType<SqlCatalogTable>().DistinctBy(table => table.ObjectId).OrderBy(table => table.ObjectId))
         {

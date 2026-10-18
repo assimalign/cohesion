@@ -55,6 +55,7 @@
   <data name="SubqueryNestingDepth" xml:space="preserve">
     <value>Subquery nesting exceeds the supported maximum depth of 32.</value>
   </data>
+  <data name="MissingFromClauseEntry" xml:space="preserve"><value>Missing FROM-clause entry for column '{0}'.</value></data>
   <data name="UnknownColumn" xml:space="preserve">
     <value>Unknown column '{0}'.</value>
   </data>
@@ -84,6 +85,10 @@
   <data name="TableMissing" xml:space="preserve">
     <value>Table '{0}.{1}' does not exist.</value>
   </data>
+  <data name="CteDuplicateName" xml:space="preserve"><value>Common table expression name '{0}' is declared more than once.</value></data>
+  <data name="CteForwardReference" xml:space="preserve"><value>Common table expression '{0}' is referenced before its declaration.</value></data>
+  <data name="CteConstantQuery" xml:space="preserve"><value>A common table expression without FROM cannot project a wildcard.</value></data>
+  <data name="CountNonNegative" xml:space="preserve"><value>{0} requires a non-negative integer.</value></data>
   <data name="CorrelatedUngroupedColumn" xml:space="preserve"><value>Outer column '{0}' must appear in GROUP BY before it can be referenced by a grouped query's subquery.</value></data>
   <data name="OuterOnlyAggregate" xml:space="preserve"><value>An aggregate whose column references all belong to outer query scopes is not supported.</value></data>
   <data name="ScalarSubqueryCardinality" xml:space="preserve"><value>Scalar subquery returned more than one row; at most one row is allowed.</value></data>

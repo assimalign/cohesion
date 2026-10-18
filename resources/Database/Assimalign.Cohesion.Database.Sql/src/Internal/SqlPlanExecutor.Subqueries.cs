@@ -32,30 +32,6 @@ internal sealed partial class SqlPlanExecutor
         finally { _subqueryValues = parent; }
     }
 
-    private async Task<List<object?[]>> MaterializeDerivedAsync(SqlDerivedRelation derived, SqlStatementContext statement,
-        CancellationToken cancellationToken)
-    {
-        var parent = _subqueryValues;
-        _subqueryValues = parent is null ? null : new SqlSubqueryValues(parent);
-        try
-        {
-            await using var result = (DatabaseResultSet)await ExecuteAsync(derived.Query, statement, cancellationToken).ConfigureAwait(false);
-            var rows = new List<object?[]>();
-            await foreach (var row in result.GetRowsAsync(cancellationToken).ConfigureAwait(false))
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                var values = new object?[row.FieldCount];
-                for (int i = 0; i < values.Length; i++)
-                {
-                    values[i] = SqlCharacter.Input(row.GetValue(i), result.Columns[i].Type);
-                }
-                rows.Add(values);
-            }
-            return rows;
-        }
-        finally { _subqueryValues = parent; }
-    }
-
     private async Task<object?[]> MaterializeSubqueryAsync(SqlSubqueryBinding query, SqlStatementContext statement,
         CancellationToken cancellationToken)
     {

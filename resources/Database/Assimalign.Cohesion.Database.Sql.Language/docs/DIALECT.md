@@ -66,7 +66,7 @@ separate SET DEFAULT and DROP NOT NULL spellings remain outside this base's ALTE
 
 ## Statement matrix
 
-With IDENTITY (#1123), the profile measures **36 of 51 declared clauses** against the live SQL engine.
+With non-recursive WITH (#1116), the profile measures **37 of 51 declared clauses** against the live SQL engine.
 Phase 22 measured 33 of 49.
 The earlier 32/48 figure included `JOIN`, `GROUP BY`, `HAVING`, and `SUBQUERY`,
 removed in Phase 12e (#1019–#1021), plus a no-op `CAST` removed in Phase 13.
@@ -87,15 +87,15 @@ projection aliases, including aliases inside scalar expressions, and select-list
 ordinals through the SQL server/client (#1024). At Phase 22 the count remained 33/49 because
 `ALTER TABLE` and `ORDER BY` were already advertised for smaller executable subsets.
 
-The **15 excluded clauses** are set operations (`UNION`,
-`INTERSECT`, `EXCEPT`), CTEs (`WITH`, `RECURSIVE`), window clauses (`WINDOW`,
+The **14 excluded clauses** are set operations (`UNION`,
+`INTERSECT`, `EXCEPT`), recursive CTEs (`RECURSIVE`), window clauses (`WINDOW`,
 `OVER`, `PARTITION`), views (`CREATE VIEW`, `DROP VIEW`), `NATURAL`,
 `TOP`, `ALL`, `FETCH`, and `RETURNING`. Counts describe named clauses, not
 complete ISO SQL support; the boundaries below are part of the contract.
 
 | Statement | Status | Notes |
 |---|---|---|
-| `SELECT` | Supported subset, measured | Stored tables, virtual system relations and aliased derived queries, with written-order N-way INNER/LEFT/CROSS joins and comma items over these source kinds; `DISTINCT`, projections and aliases, scalar expressions, `WHERE`, grouping, multi-expression `ORDER BY ASC/DESC`, nonnegative integer `LIMIT`/`OFFSET`. `COUNT(*)`, `COUNT(expr)`, `SUM`, `AVG`, `MIN`, and `MAX` execute in grouped and ungrouped queries. See the aggregate contract below. `SELECT` without `FROM` is rejected by the planner. |
+| `SELECT` | Supported subset, measured | Stored tables, virtual system relations and aliased derived queries, with written-order N-way INNER/LEFT/CROSS joins and comma items over these source kinds; `DISTINCT`, projections and aliases, scalar expressions, `WHERE`, grouping, multi-expression `ORDER BY ASC/DESC`, nonnegative integer `LIMIT`/`OFFSET`. `COUNT(*)`, `COUNT(expr)`, `SUM`, `AVG`, `MIN`, and `MAX` execute in grouped and ungrouped queries. See the aggregate contract below. Top-level `SELECT` without `FROM` is rejected by the planner; CTE bodies can use one implicit row. |
 | `EXPLAIN` | Supported extension, measured | SELECT, INSERT (including query sources), UPDATE or DELETE returns the chosen plan as ordinary rows without executing it. DDL, transaction control, nested EXPLAIN and EXPLAIN ANALYZE report `COHDBL001`. |
 | `INSERT` / `VALUES` | Supported subset, measured | Optional column list, multi-row literal/scalar `VALUES` including whole-item `DEFAULT`, `INSERT ... DEFAULT VALUES` (one row of defaults, with an optional column list), and transactional `INSERT ... SELECT` with the same destination coercion, defaults, and constraints. `VALUES` expressions have no columns in scope: a column reference reports `COHSQLE005` before anything executes (see [VALUES and counts have no column scope](#values-and-counts-have-no-column-scope-1165)). Subqueries inside `VALUES` are excluded; use `INSERT ... SELECT`. |
 | `UPDATE` | Supported | multi-column `SET`, including `c = DEFAULT`, and `WHERE` (including correlated and uncorrelated subqueries); qualified references in both use the target name or its alias, which hides the base name (PostgreSQL `parse_relation.c:3759`); hidden/unknown qualifiers fail with located `COHSQLE015` before any write and leave an explicit transaction active; aggregates in SET and outside child queries in WHERE are rejected; aggregates inside WHERE subqueries execute (see [Grouping and aggregate functions](#grouping-and-aggregate-functions-1020)) |
@@ -116,7 +116,8 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | DML `RETURNING` | Recognized, not supported | rejected with `COHDBL001` |
 | `NATURAL JOIN` | Recognized, not supported | rejected with `COHDBL001` |
 | `UNION` / `INTERSECT` / `EXCEPT` | Recognized, not supported | keywords lexed; rejected with `COHDBL001` |
-| `WITH` / `WITH RECURSIVE` (CTEs) | Recognized, not supported | rejected with `COHDBL001` |
+| `WITH` (CTEs) | Supported subset, measured | Ordered non-recursive SELECT bodies before SELECT, INSERT, UPDATE or DELETE; optional output column lists; also INSERT INTO t WITH ... SELECT |
+| `WITH RECURSIVE` | Recognized, not supported | `COHDBL001` at RECURSIVE |
 | Window functions / `OVER` / `WINDOW` | Recognized, not supported | function names lexed; clauses rejected with `COHDBL001` |
 | `CREATE VIEW` / `DROP VIEW` | Recognized, not supported | rejected with `COHDBL001` |
 | `CONSTRAINT` / `FOREIGN KEY` / `REFERENCES` / `CHECK` / `UNIQUE` constraints | Supported subset, measured | Column and table declarations normalize into constraint definitions; UNIQUE lowers to a unique catalog index. NULL is an equal index key: a second NULL violates a single-column UNIQUE constraint. Foreign-key NULL values are allowed; CHECK accepts UNKNOWN and rejects FALSE. CHECK expressions must be deterministic Boolean row expressions with the engine's scalar functions (built-in or registered, `IMMUTABLE` only), each called with arguments its signature accepts (`COHSQLE006` otherwise); parameters and aggregates are excluded. CHECK predicates and DEFAULT literals are stored as canonical text and parsed once per table version; see [Persisted definitions are canonical](#persisted-definitions-are-canonical). |
@@ -1078,7 +1079,7 @@ and report `COHDBL001`. Which names are aggregates is the engine's function cata
 say, so the parser reports `DISTINCT`, `ALL` and `ORDER BY` inside any call, an
 application's aggregate included; PostgreSQL refuses them on a function that is not an
 aggregate. Top-level `SELECT DISTINCT` remains available. These
-boundaries do not add named clauses to the 49-clause denominator.
+boundaries do not add named clauses to the 51-clause denominator.
 
 ## Subqueries and query-source inserts (#1021)
 
@@ -1152,12 +1153,66 @@ clauses nest below it, so the [expression nesting limit](#expression-nesting-lim
 (256 levels by default) bounds the statement as a whole, subqueries included. The
 32-level subquery limit is fixed; it does not follow the configured expression limit.
 
-`ANY`/`ALL`/`SOME` quantified comparisons, CTEs, lateral joins,
+`ANY`/`ALL`/`SOME` quantified comparisons, nested or recursive CTEs, lateral joins,
 and subqueries in UPDATE SET, INSERT VALUES, CHECK/DEFAULT,
 or LIMIT/OFFSET expressions remain excluded with `COHDBL001`. Ordinary numeric
 LIMIT/OFFSET clauses on queries containing subqueries do execute. CHECK remains
 a deterministic row-local expression and still rejects every subquery form.
-These subset boundaries do not add named clauses to the 49-clause denominator.
+These subset boundaries do not add named clauses to the 51-clause denominator.
+
+## Common table expressions (#1116)
+
+`WITH a [(column, ...)] AS (SELECT ...), b AS (SELECT ... FROM a) ...`
+executes before SELECT, INSERT, UPDATE or DELETE. The ISO query-source spelling
+`INSERT INTO target WITH a AS (SELECT ...) SELECT ... FROM a` also executes.
+The public AST exposes each statement's `CommonTables` and each definition's name,
+output column list, body and source location. This adds exactly one advertised clause.
+Contextual names such as `top` and `ties` work in WITH definitions and relation
+references, including `WITH recent AS (...), top AS (SELECT ... FROM recent) SELECT ... FROM top`.
+
+Each body sees earlier definitions. Unqualified reads resolve a CTE before a stored
+table; a schema-qualified name bypasses that scope. A non-recursive self-reference
+resolves the stored table, as does a name matching a later sibling when a stored
+table exists. A CTE has no schema-qualified column identity: `t.id` or an alias
+can name its output, while `dbo.t.id` requires a stored FROM entry or an enclosing
+stored relation through correlation (otherwise COHSQLE015, missing FROM-clause
+entry). A CTE and a stored relation with the same unaliased name conflict
+(COHSQLE019); alias one to distinguish them. DML targets always resolve through the catalog, so
+`WITH t AS (SELECT 1 AS id) DELETE FROM t` deletes from stored t. A target naming
+only a CTE fails as an unknown table. Scalar and aggregate SELECT bodies may omit
+FROM and operate on one implicit row; a wildcard still requires a relation.
+This implicit row applies only to the definition's SELECT root. Subqueries and
+derived tables nested in that body retain the ordinary FROM requirement and
+ordinary diagnostics. Constant bodies run the same planning checks, including
+COHSQLE017 for aggregates in WHERE even when the definition is unused.
+The ordinary top-level SELECT-without-FROM exclusion remains.
+
+Every definition is bound before execution, including unused definitions. Duplicate
+names and unresolved references to later siblings use `COHSQLE026` before any row
+is read; a same-named stored table is resolved before the forward-reference hint.
+An empty output column list is `SQL0003`; a supplied list must have exactly the
+body's output width (`COHSQLE013`). Names use the catalog's case-insensitive rules.
+Column renaming preserves types, bounds, nullability, domains and collations.
+
+Every reachable definition materializes once per statement through the derived
+relation contract, including references in joins, scalar, IN and EXISTS subqueries.
+Unused definitions and their otherwise-unused dependencies never execute; binding
+validates their count expressions and predicates without evaluating counts or seek bounds.
+All CTEs share the statement's MVCC and catalog snapshots; catalog bindings inside
+bodies request the same catalog image under auto-commit. Retained binary cells and
+delivered copies follow the ordinary relation ownership rules.
+Before DML writes, all reachable definitions materialize in declaration order.
+Source rows cannot see rows the statement later inserts or deletes. A failure
+rolls back the whole statement and preserves an explicit transaction. Identity
+columns allocate one value for each inserted row through the existing insert path.
+EXPLAIN includes WITH, materialization and constant-source operators without running them.
+
+`WITH RECURSIVE`, WITH inside subqueries or derived tables, INSERT/UPDATE/DELETE
+bodies (including DELETE RETURNING), `AS [NOT] MATERIALIZED` and SEARCH/CYCLE
+report `COHDBL001`. RECURSIVE has one error at its token and no SQL0002.
+A WITH list followed by another command kind reports `SQL0003`.
+Capability scanning continues through advertised WITH lists, so an excluded OVER,
+NATURAL JOIN or WINDOW still reports its own clause.
 
 ## Derived tables and DML predicates (#1113, part b)
 
@@ -1359,7 +1414,7 @@ The binder requests one immutable catalog image when it first resolves a system 
 Every child query and INSERT source shares that image; no outer-AST prediction is needed.
 Snapshot transactions supply their BEGIN-time image; ReadCommitted and automatic statements
 capture on first system-relation binding. A stored-only statement needs no catalog capture.
-Derived tables and UPDATE/DELETE subqueries use this capture; future CTEs, set operands and view bodies inherit
+Derived tables, CTE bodies and UPDATE/DELETE subqueries use this capture; future set operands and view bodies inherit
 this binding rule when their syntax becomes executable. Their current admission boundaries
 remain as stated above.
 
@@ -2023,7 +2078,7 @@ storage coercion; nested arithmetic therefore sees the converted numeric value.
 
 The profile's function list is the executable built-in set: `COUNT`, `SUM`, `AVG`,
 `MIN`, `MAX`, `ABS`, `LENGTH`, `UPPER`, `LOWER`, `COALESCE` and `CAST`. It is
-not part of the 49-clause denominator. The engine's function catalog (E2) also runs
+not part of the 51-clause denominator. The engine's function catalog (E2) also runs
 the functions the application registered on the
 engine builder (`SqlDatabaseEngineBuilder.Functions`), which every database of the engine
 calls exactly as it calls the built-ins. Executable built-in scalars are `UPPER`, `LOWER`,
@@ -2187,13 +2242,16 @@ parses inside a supported clause or reports exactly one `COHDBL001` naming its
 construct. The table holds the clause keywords the preflight scan rejects,
 `UNION` through `USING` in the statement matrix. It also holds every other word or
 operator outside the profile's keywords that a dedicated rule recognizes and
-rejects with `COHDBL001`: `WITH`, `SELECT ALL`, `CREATE`/`DROP VIEW`,
+rejects with `COHDBL001`: `RECURSIVE`, `[NOT] MATERIALIZED`, `SEARCH`/`CYCLE`,
+`SELECT ALL`, `CREATE`/`DROP VIEW`,
 `CREATE COLLATION`, `CREATE FULLTEXT`, `NULLS FIRST`/`LAST`, `GROUPING SETS` and
 the `GROUPING`, `ROLLUP`, `CUBE` and `GROUPING_ID` calls, `FILTER (...)` and
 `WITHIN GROUP` after a call, the `ANY`/`SOME` (and `ALL`) quantified comparisons,
 `LATERAL`, `~`, `SEQUENCE`, `SERIAL`, `BIGSERIAL`, `SMALLSERIAL`, `OVERRIDING`,
 `MINVALUE`, `MAXVALUE`, `CYCLE`, `CACHE`, and `RESTART`. Identifiers spelled like these
-recognized-unsupported words render quoted in canonical SQL. It also holds the recognized
+recognized-unsupported words, including the newly added `MATERIALIZED` and `SEARCH`,
+render quoted in canonical SQL. `WITH` remains a profile keyword; its nested-form
+refusal is a dedicated parser rule. The table also holds the recognized
 non-executing functions listed above, including the window and niladic datetime names (#1103). Profile keywords
 that start an unsupported form by another rule, such as `LEFT` or `CROSS`, need no entry.
 A recognized construct is skipped once it is reported, so the text after it adds
@@ -2379,6 +2437,7 @@ quoted names to match uppercase vocabulary entries.
 | `COHSQLE022` | A CAST input has invalid text representation | 22P02 |
 | `COHSQLE024` | A column that disallows NULL receives NULL, including DEFAULT with no declared default | 23502 (`not_null_violation`) |
 | `COHSQLE025` | An identity definition, explicit assignment, ALTER, backfill or allocation violates its generation contract | 428C9 (`generated_always`) for explicit ALWAYS assignments; identity range and definition failures share the local code |
+| `COHSQLE026` | Duplicate CTE name or missing relation matching a later sibling, before reading rows | 42712 / 42P01 |
 
 NOT NULL failures carry one error diagnostic naming the column, with no source span at
 execution time. The existing missing-default and explicit-NULL message texts are unchanged.

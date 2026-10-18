@@ -41,8 +41,8 @@ public sealed class SqlLanguageConformanceTests
     {
         // The profile drives enumeration. A newly advertised clause cannot silently escape this test.
         var cases = CreateCases();
-        // #1123 adds IDENTITY beside CREATE TABLE: one clause over the base's 35.
-        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(36);
+        // #1116 adds WITH beside SUBQUERY: exactly one clause over the base's 36.
+        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(37);
         RequireExecutionCases(SqlLanguageProfile.Instance.Clauses, cases);
         cases.Keys.Except(SqlLanguageProfile.Instance.Clauses).ShouldBeEmpty("Cases must describe the current profile.");
 
@@ -404,6 +404,14 @@ public sealed class SqlLanguageConformanceTests
             [[1, 37L], [2, 46L], [3, 42L]]),
         [SqlClauses.From] = Query("SELECT u.name FROM dbo.t AS u WHERE id = 1;", expression => expression is SqlSelectExpression { From.Count: 1 },
             [["Ada"]]),
+        [SqlClauses.Cte] = new("WITH a AS (SELECT id FROM t WHERE age > 40), b AS (SELECT id FROM a) SELECT id FROM b ORDER BY id;", _seed,
+            expression => expression is SqlSelectExpression { CommonTables.Count: 2 },
+            async (session, result) =>
+            {
+                CheckRows(await ReadRowsAsync(result), [[2], [3]]);
+                (await session.ExecuteAsync("WITH a AS (SELECT id FROM t WHERE age > 40) DELETE FROM t WHERE id IN (SELECT id FROM a);", cancellationToken: CancellationToken.None)).AffectedCount.ShouldBe(2);
+                await ExpectRowsAsync(session, "SELECT id FROM t;", [[1]]);
+            }),
         [SqlClauses.Subquery] = new("SELECT id, (SELECT MAX(age) FROM t) AS oldest FROM t WHERE id IN (SELECT id FROM t WHERE age > 40) AND EXISTS (SELECT id FROM t WHERE age = 36) ORDER BY id;", _seed,
             expression => expression is SqlSelectExpression select && select.Columns.Any(column => column.Expression is SqlSubqueryExpression),
             async (session, result) =>

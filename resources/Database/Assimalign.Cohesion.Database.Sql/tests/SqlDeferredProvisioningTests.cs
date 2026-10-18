@@ -65,7 +65,10 @@ public sealed partial class SqlDeferredProvisioningTests
             database.Provisioning.ShouldNotBeNull().IsRunning.ShouldBeTrue();
             await using var blocked = await database.CreateSessionAsync(timeout.Token);
             await using var other = await database.CreateSessionAsync(timeout.Token);
+            await using var cteReader = await database.CreateSessionAsync(timeout.Token);
             Task<DatabaseResult> waiting = blocked.ExecuteAsync("INSERT INTO items (Id, Value) VALUES (1000, NULL)", cancellationToken: timeout.Token).AsTask();
+            Task<DatabaseResult> waitingCte = cteReader.ExecuteAsync(
+                "WITH c AS (SELECT Value FROM items) SELECT Value FROM c", cancellationToken: timeout.Token).AsTask();
             int writes = 0;
             var elapsed = Stopwatch.StartNew();
             try
@@ -75,6 +78,7 @@ public sealed partial class SqlDeferredProvisioningTests
                     await other.ExecuteAsync("INSERT INTO other (Id) VALUES (1)", cancellationToken: timeout.Token);
                     writes++;
                     waiting.IsCompleted.ShouldBeFalse();
+                    waitingCte.IsCompleted.ShouldBeFalse();
                     elapsed.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(10));
                 }
                 while (elapsed.Elapsed < TimeSpan.FromMilliseconds(150) || writes < 10);
@@ -84,6 +88,8 @@ public sealed partial class SqlDeferredProvisioningTests
                 release.Set();
             }
             var rejection = await Should.ThrowAsync<DatabaseException>(async () => await waiting);
+            await using var cteResult = (await waitingCte).ShouldBeAssignableTo<DatabaseResultSet>();
+            cteResult.Columns[0].IsNullable.ShouldBeFalse();
             rejection.Message.ShouldContain("Value");
             rejection.Message.ShouldContain("null");
             await WaitDoneAsync(database, timeout.Token);

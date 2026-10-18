@@ -51,7 +51,7 @@ internal sealed partial class SqlPlanner
     /// </summary>
     private SqlPlan PlanSubqueries(SqlSelectExpression select)
     {
-        if (select.From.Count == 0) { return PlanSelectCore(select); }
+        if (select.From.Count == 0 && !ReferenceEquals(_commonTableState?.BindingBody, select)) { return PlanSelectCore(select); }
         if (OuterScope is not null) { RejectOuterOnlyAggregates(select); }
         var queries = BindSubqueries(SubquerySources(select), select);
         var input = PlanSelectCore(select);

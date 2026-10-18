@@ -15,7 +15,7 @@ internal sealed partial class SqlPlanner
         IReadOnlyDictionary<SqlExpression, int> outputSlots, SqlExpressionEvaluator scope,
         IReadOnlyList<SqlRelationBinding>? bindings)
     {
-        if (InDerivedBody || bindings is null || !bindings.Any(binding => binding.Source.Derived is not null)) { return; }
+        if (InDerivedBody || bindings is null || !bindings.Any(binding => binding.Source.Derived is { IsCommonTable: false })) { return; }
         foreach (var order in select.OrderBy)
         {
             if (ReadsDerived(order.Expression, true))
@@ -24,7 +24,7 @@ internal sealed partial class SqlPlanner
             }
         }
 
-        bool DerivedOrdinal(int ordinal) => bindings.Any(binding => binding.Source.Derived is not null &&
+        bool DerivedOrdinal(int ordinal) => bindings.Any(binding => binding.Source.Derived is { IsCommonTable: false } &&
             ordinal >= binding.Offset && ordinal < binding.Offset + binding.Source.Columns.Count);
 
         bool ReadsDerived(SqlExpression expression, bool outputs)

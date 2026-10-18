@@ -23,6 +23,8 @@ internal sealed partial class SqlPlanner
         SqlSystemViewPlan => "SystemView",
         SqlGroupPlan => "Group",
         SqlSubqueryPlan => "Subqueries",
+        SqlWithPlan => "With",
+        SqlConstantPlan => "Constant",
         SqlCorrelatedSubqueryPlan => "CorrelatedSubqueries",
         SqlInsertSelectPlan => "InsertSelect",
         SqlInsertPlan => "Insert",
@@ -76,6 +78,7 @@ internal sealed partial class SqlPlanner
             string? detail = current switch
             {
                 SqlJoinPlan { Steps.Count: 0 } p => QueryDetail(p.Where is not null, p.OrderBy.Count, p.IsDistinct, p.Limit, p.Offset),
+                SqlConstantPlan p => QueryDetail(p.Where is not null, p.OrderBy.Count, p.IsDistinct, p.Limit, p.Offset),
                 SqlSelectPlan p => QueryDetail(p.Where is not null, p.OrderBy.Count, p.IsDistinct, p.Limit, p.Offset),
                 SqlSystemViewPlan p => QueryDetail(p.Where is not null, p.OrderBy.Count, p.IsDistinct, p.Limit, p.Offset),
                 SqlJoinPlan p => string.Join("; ", p.Steps.Select(step => $"{step.Kind}: {(step.Access is null ? "buffered inputs" : "correlated equality-prefix seek")}")) + "; " +
@@ -128,6 +131,15 @@ internal sealed partial class SqlPlanner
                     foreach (var child in subqueries.Queries) { Visit(child.Query, id); }
                     Visit(subqueries.Input, id);
                     break;
+                case SqlWithPlan with:
+                    foreach (var relation in with.Relations)
+                    {
+                        int materialization = nodes.Count;
+                        Add("Materialize", id, relation.Name);
+                        Visit(relation.Query, materialization);
+                    }
+                    Visit(with.Input, id);
+                    break;
                 case SqlInsertSelectPlan insert:
                     Visit(insert.Source, id);
                     break;
@@ -142,6 +154,11 @@ internal sealed partial class SqlPlanner
 
         void RelationScan(SqlRelationSource source, int parent)
         {
+            if (source.Derived is { IsCommonTable: true } commonTable)
+            {
+                Add("CteScan", parent, commonTable.Name);
+                return;
+            }
             if (source.Derived is { } derived)
             {
                 int id = nodes.Count;

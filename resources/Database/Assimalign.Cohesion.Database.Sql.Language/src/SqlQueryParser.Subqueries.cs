@@ -13,6 +13,21 @@ public sealed partial class SqlQueryParser
 
     private SqlSelectExpression ParseSubquery(ref TokenLexer lexer)
     {
+        if (IsKeyword(ref lexer, "WITH"))
+        {
+            RequireSkippedConstruct(lexer.Current.Position, lexer.Current.Position + lexer.Current.Value.Length,
+                "WITH inside a subquery or derived table");
+            int depth = 0;
+            while (!IsAtEnd(ref lexer) && lexer.Current.Type != TokenType.Semicolon)
+            {
+                if (lexer.Current.Type == TokenType.RightParen && depth == 0) { break; }
+                if (lexer.Current.Type == TokenType.LeftParen) { depth++; }
+                else if (lexer.Current.Type == TokenType.RightParen) { depth--; }
+                Advance(ref lexer);
+            }
+            return EmptyWithQuery();
+        }
+
         if (_paginationDepth > 0)
         {
             AddUnsupportedSurfaceDiagnostic(lexer.Current.Position,

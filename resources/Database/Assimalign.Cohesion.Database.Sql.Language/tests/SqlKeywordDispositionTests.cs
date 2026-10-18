@@ -139,8 +139,10 @@ public sealed class SqlKeywordDispositionTests
         ["ELSE"] = Parses("SELECT CASE WHEN a = 1 THEN 'x' ELSE 'y' END FROM t"),
         ["END"] = Parses("SELECT CASE WHEN a = 1 THEN 'x' ELSE 'y' END FROM t"),
         // CTEs and transactions
-        ["WITH"] = Rejects("WITH c AS (SELECT a FROM t) SELECT a FROM c", SqlClauses.Cte),
+        ["WITH"] = Parses("WITH c AS (SELECT a FROM t) SELECT a FROM c"),
         ["RECURSIVE"] = Rejects("WITH RECURSIVE c AS (SELECT a FROM t) SELECT a FROM c", SqlClauses.Recursive),
+        ["MATERIALIZED"] = Rejects("WITH c AS MATERIALIZED (SELECT a FROM t) SELECT * FROM c", "[NOT] MATERIALIZED"),
+        ["SEARCH"] = Rejects("WITH c AS (SELECT a FROM t) SEARCH DEPTH FIRST BY a SET ord SELECT * FROM c", "SEARCH/CYCLE"),
         ["BEGIN"] = Parses("BEGIN TRANSACTION"),
         ["COMMIT"] = Parses("COMMIT"),
         ["ROLLBACK"] = Parses("ROLLBACK"),

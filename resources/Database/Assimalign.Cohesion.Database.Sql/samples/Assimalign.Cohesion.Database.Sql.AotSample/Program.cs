@@ -294,6 +294,15 @@ internal static class Program
         Check("over the wire: three-way USING and LEFT", await RowsAsync(connection, expandedJoin, timeout.Token), [[1L, 1L], [2L, null]]);
         Check("over the wire: comma and CROSS", await RowsAsync(connection, crossJoin, timeout.Token), [[8L]]);
         Check("over the wire: renamed derived join", await RowsAsync(connection, derivedJoin, timeout.Token), [[1L]]);
+        Check("over the wire: chained CTEs", await RowsAsync(connection,
+            "WITH a AS (SELECT Id FROM customers), b AS (SELECT Id FROM a) SELECT Id FROM b ORDER BY Id", timeout.Token), [[1L], [2L]]);
+        await connection.ExecuteAsync("CREATE TABLE cte_wire (id BIGINT)", cancellationToken: timeout.Token);
+        Check("over the wire: WITH INSERT", await connection.ExecuteAsync(
+            "WITH a AS (SELECT Id FROM customers) INSERT INTO cte_wire SELECT Id FROM a", cancellationToken: timeout.Token), 2L);
+        Check("over the wire: WITH UPDATE", await connection.ExecuteAsync(
+            "WITH a AS (SELECT id FROM cte_wire) UPDATE cte_wire SET id = id + 10 WHERE id IN (SELECT id FROM a)", cancellationToken: timeout.Token), 2L);
+        Check("over the wire: WITH DELETE", await connection.ExecuteAsync(
+            "WITH a AS (SELECT id FROM cte_wire) DELETE FROM cte_wire WHERE id IN (SELECT id FROM a)", cancellationToken: timeout.Token), 2L);
         CheckFailure("over the wire: correlated cardinality", await FailureAsync(() => RowsAsync(connection, correlatedCardinality, timeout.Token)), "one row");
         Check("over the wire: correlated scalar EXISTS and IN after failure", await RowsAsync(connection, correlatedRows, timeout.Token), [[1L, 100L], [2L, 200L]]);
         Check("over the wire: correlated UPDATE", await connection.ExecuteAsync("UPDATE subquery_guard SET id = id WHERE EXISTS (SELECT u.id FROM subquery_guard u WHERE u.id = subquery_guard.id)", cancellationToken: timeout.Token), 1L);

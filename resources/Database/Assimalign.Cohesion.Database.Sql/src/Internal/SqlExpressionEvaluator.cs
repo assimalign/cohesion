@@ -390,7 +390,9 @@ internal sealed partial class SqlExpressionEvaluator
     }
 
     private static SqlPlanningException UnknownColumn(SqlColumnReferenceExpression column, bool localQualifier = false)
-        => new("COHSQLE015", string.Format(CultureInfo.CurrentCulture, ErrorMessages.UnknownColumn, ColumnName(column)), column.Location)
+        => new("COHSQLE015", string.Format(CultureInfo.CurrentCulture,
+            !localQualifier && column.TableAlias is not null ? ErrorMessages.MissingFromClauseEntry : ErrorMessages.UnknownColumn,
+            ColumnName(column)), column.Location)
         { UnresolvedColumn = column, HasLocalQualifier = localQualifier };
 
     /// <summary>
@@ -601,7 +603,10 @@ internal sealed partial class SqlExpressionEvaluator
 
     /// <summary>An alias hides the base name in every statement (PostgreSQL parse_relation.c:3759).</summary>
     private static bool MatchesQualifier(SqlRelationBinding binding, SqlColumnReferenceExpression column)
-        => MatchesQualifier(binding.Reference, column);
+        // A CTE has no catalog/schema qualifier identity (PostgreSQL
+        // src/backend/parser/parse_relation.c:120-168,241-279).
+        => (binding.Source.Derived is not { IsCommonTable: true } || column.SchemaName is null)
+            && MatchesQualifier(binding.Reference, column);
 
     internal static bool MatchesQualifier(SqlRelationReference reference, SqlColumnReferenceExpression column)
     {

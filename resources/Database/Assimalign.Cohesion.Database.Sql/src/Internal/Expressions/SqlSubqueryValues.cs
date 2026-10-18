@@ -32,14 +32,12 @@ internal sealed class SqlSubqueryValues
         _scope = scope;
         Queries = queries?.ToDictionary(query => query.Slot) ?? [];
         StatementValues = parent?.StatementValues ?? [];
-        StatementRelations = parent?.StatementRelations ?? new(ReferenceEqualityComparer.Instance);
         HasCorrelatedQueries = Queries.Values.Any(query => query.IsCorrelated);
         Evaluated = HasCorrelatedQueries ? new() : null;
     }
 
     internal Dictionary<int, SqlSubqueryBinding> Queries { get; }
     internal Dictionary<int, object?[]> StatementValues { get; }
-    internal Dictionary<SqlDerivedRelation, List<object?[]>> StatementRelations { get; }
     internal bool HasCorrelatedQueries { get; }
     internal object?[]? Row { get; private set; }
     internal Dictionary<SqlBoundExpression, object?>? Evaluated { get; }

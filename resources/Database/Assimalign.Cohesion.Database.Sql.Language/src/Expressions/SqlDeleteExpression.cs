@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+
 namespace Assimalign.Cohesion.Database.Sql.Language;
 
 using Assimalign.Cohesion.Database.Language;
@@ -7,6 +9,9 @@ using Assimalign.Cohesion.Database.Language;
 /// </summary>
 public sealed class SqlDeleteExpression : SqlQueryExpression
 {
+    /// <summary>Gets the statement's non-recursive WITH definitions, in declaration order.</summary>
+    public IReadOnlyList<SqlCommonTableExpression> CommonTables { get; internal set; } = [];
+
     /// <summary>
     /// Initializes a new <see cref="SqlDeleteExpression"/>.
     /// </summary>

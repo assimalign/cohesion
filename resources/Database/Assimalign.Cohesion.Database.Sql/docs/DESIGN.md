@@ -232,6 +232,42 @@ and execution evidence are in
 
 ## Subquery and insert-source operators (#1021)
 
+Non-recursive WITH (#1116) binds every definition in declaration order and resolves
+unqualified read names before the catalog. Targets and schema-qualified reads keep
+catalog resolution; self-references and names matching later siblings fall back to
+stored tables. Only a missing future relation receives COHSQLE026 (PostgreSQL
+src/backend/parser/parse_relation.c:1463-1487). CTE bindings have schema-less
+qualifier identities and conflict with same-named relations like aliases
+(parse_relation.c:120-168,241-279,461-470). A qualified column may still correlate
+to an enclosing stored relation, including a DML target. A dependency closure
+selects reachable definitions while still binding unused ones.
+An iterative read-reference walk establishes reachability before binding count
+values or seek bounds. Unused bodies still bind names, types and functions, while
+skipping those evaluations; their unused plans never execute. Referenced bodies
+retain the existing count evaluation and index selection paths.
+CTE scope fields live in one optional state object, allocated only for WITH;
+stored-only execution retains its existing allocation budget. Each definition uses
+the existing SqlDerivedRelation output contract, preserving types and collation
+provenance. One executor cache materializes uncorrelated relations by identity for the
+whole statement; correlated derived relations rematerialize per outer frame. SqlWithPlan pre-materializes reachable definitions before the input's
+first write, under the same statement context. Binary values detach on retention
+and delivery. EXPLAIN maps WITH and constant-source plans. Scalar/aggregate bodies
+without FROM use one implicit row only at the definition's exact SELECT root;
+nested queries keep their ordinary FROM requirement and diagnostics. All bodies,
+including unused constant bodies, reject aggregates in WHERE during planning
+(COHSQLE017; PostgreSQL src/backend/parser/parse_agg.c:407).
+No interface, project reference or internal grant is added.
+
+Data-storage format 16 is retained because the new SEARCH and MATERIALIZED
+vocabulary entries change canonical persisted identifier text: a CHECK previously
+stored as `search >= 0` now stores `"search" >= 0`. DEFAULT expressions and SQL
+function bodies use the same renderer. SqlSchemaProvisioner compares persisted
+CHECK text ordinally with the newly canonicalized declaration, so a format-15
+catalog would report constraint drift despite an equivalent expression tree.
+SqlCteStorageFormatTests persists both old spellings through the SQL-independent
+catalog, demonstrates that exact Verify drift, and pins the format-15 open refusal.
+No catalog tuple layout or wire payload changes; there is no upgrade path.
+
 DEFAULT assignment (#1193) uses this same insertion path. The planner binds a whole
 `SqlDefaultExpression` to an internal `SqlBoundDefaultItem` at its target ordinal;
 the executor skips that source slot so the ordinary omitted-column pass supplies
@@ -317,8 +353,8 @@ evaluator layout and synchronous execution path, preserving its allocation budge
 PostgreSQL's source references and SQL-visible errors are recorded in DIALECT.md.
 Parsing and planning enforce at most 32
 subquery levels, counting derived bodies too. UPDATE SET, VALUES, CHECK/DEFAULT and LIMIT/OFFSET expression
-subqueries, quantified comparisons, CTEs and lateral joins remain
-outside the profile. SELECT continues to require FROM. Subquery resolution binds
+subqueries, quantified comparisons, recursive/nested CTEs and lateral joins remain
+outside the profile. Ordinary top-level SELECT continues to require FROM. Subquery resolution binds
 each use site to its slot number when the statement is planned; it needs no
 language-assembly friend access or public AST constructors. See [DIALECT.md](../../Assimalign.Cohesion.Database.Sql.Language/docs/DIALECT.md#subqueries-and-query-source-inserts-1021)
 for the exact supported forms and semantics.
@@ -386,6 +422,10 @@ SQL's combined operators, not a shared or independently executable algebra:
 | `Select`, `TableScan`, `IndexSeek` | Bound projection/filter/order/distinct/window above the chosen table access; seeks name the catalog index and equality-prefix/range bounds |
 | `NestedLoopJoin`, `JoinStep` | N-way written-order join; each JoinStep describes its kind and has its own scan or correlated index seek child |
 | `Group` | Group keys, aggregates, HAVING and result modifiers above the actual input plan |
+| `With` | Reachable CTE materializations in declaration order, followed by the enclosing input |
+| `Materialize` | One named CTE's complete definition plan, evaluated once per statement |
+| `CteScan` | Read of an already materialized schema-less CTE relation |
+| `Constant` | One implicit input row for a FROM-less definition body; detail includes filter, order_keys, distinct, limit and offset |
 | `SystemView` | A qualified virtual relation; no fabricated stored-table access |
 | `DerivedTable` | Aliased materialized query source with its complete child plan; a single source has a Select parent |
 | `Subqueries` | Uncorrelated child plans in execution order, followed by the enclosing input |
@@ -1379,8 +1419,9 @@ SqlSchemaValidationException (InvalidDocument, schema.format), naming both forma
 rebuild/recreate remedy. SQL checks applied markers and pending targets before opening the data
 file set, and checks a replacement document before Apply/Verify compares hashes or plans work.
 The gate reads only the format; it never validates a pre-normalization hash or reconciles an old
-identity. Both catalog records retain a versioned document; the current record-space format 15
-gates Character identity and its index keys, without changing these document envelopes.
+identity. Both catalog records retain a versioned document. Record-space format 12
+introduced Character identity and its trimmed index keys; format 16 gates canonical
+identifier quoting, without changing these document envelopes.
 
 FLOAT(p) selects Float32 for 1..24 bits and Float64 for 25..53 bits; bare FLOAT stays Float64.
 The shared resolver supplies that storage identity everywhere, including domain bases, function
@@ -2007,7 +2048,7 @@ capture when the binder first resolves a system relation. `SqlStatementContext` 
 readonly struct: it fixes the MVCC row snapshot at construction and stores the lazy catalog
 image in the existing shared `SqlStatementMetrics` state. Every context copy and nested plan
 uses that same state,
-so subqueries, derived tables, DML predicates and INSERT sources (and future CTEs, set operands, view
+so subqueries, derived tables, CTE bodies, DML predicates and INSERT sources (and future set operands, view
 bodies) inherit capture without an AST walk. Ordinary
 stored-only statements never capture metadata or allocate a context/source/binding wrapper;
 the Release ReadCommitted allocation regression retains the pre-join per-query budget.
@@ -2275,7 +2316,7 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   format, no upgrade path.** The catalog stores the format version of the whole
   data file set, rows and the index trees that ride it (a kind-4 record for
   versions 1–3, a kind-8 record from version 4). The engine reads and writes
-  format 15 only: format 6's stamped rows in per-object page chains whose index keys use the
+  format 16 only: format 6's stamped rows in per-object page chains whose index keys use the
   temporal identity encoding (#1099, below), in index trees of B-tree page format
   2, which order entries by key, entry reference and writer (#1194,
   `Database.Indexing` DESIGN), decoded through each table's physical column

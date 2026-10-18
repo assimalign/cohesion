@@ -25,4 +25,7 @@ internal readonly struct SqlRelationSource
 }
 
 /// <summary>A child query's output schema and plan, without a storage identity.</summary>
-internal sealed record SqlDerivedRelation(string Name, SqlPlan Query, IReadOnlyList<SqlCatalogColumn> Columns, bool IsCorrelated = false);
+internal sealed record SqlDerivedRelation(string Name, SqlPlan Query, IReadOnlyList<SqlCatalogColumn> Columns, bool IsCorrelated = false)
+{
+    internal bool IsCommonTable { get; init; }
+}

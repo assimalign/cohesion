@@ -84,6 +84,17 @@ internal sealed partial class SqlPlanExecutor
     {
         switch (plan)
         {
+            case SqlConstantPlan constant:
+                var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
+                return MaterializeSelect(evaluator.Matches(constant.Where, []) ? [Array.Empty<object?>()] : [],
+                    constant.Projections, constant.OrderBy, constant.Limit, constant.Offset, constant.IsDistinct,
+                    evaluator, constant.OrderByProjections);
+            case SqlWithPlan with:
+                foreach (var relation in with.Relations)
+                {
+                    await MaterializeRelationAsync(relation, statement, cancellationToken).ConfigureAwait(false);
+                }
+                return await ExecuteAsync(with.Input, statement, cancellationToken).ConfigureAwait(false);
             case SqlDefinitionPlan definition:
                 return await ExecuteDefinitionAsync(definition, statement, cancellationToken).ConfigureAwait(false);
             case SqlSubqueryPlan subquery:

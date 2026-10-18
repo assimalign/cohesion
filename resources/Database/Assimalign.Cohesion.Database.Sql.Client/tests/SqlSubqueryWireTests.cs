@@ -11,6 +11,22 @@ namespace Assimalign.Cohesion.Database.Sql.Client.Tests;
 /// <summary>Exercises executable subquery forms through SqlDatabaseServer and the production typed client.</summary>
 public sealed class SqlSubqueryWireTests
 {
+    [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - WITH: query and all DML forms execute over the wire")]
+    public async Task ExecuteAsync_CommonTables_ShouldReturnRowsAndExactAffectedCounts()
+    {
+        // Arrange
+        await using var harness = await SqlClientTestHarness.StartAsync();
+        await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
+
+        // Act / Assert
+        (await QueryAsync(connection, "WITH picked AS (SELECT id FROM users) SELECT id FROM picked ORDER BY id")).Select(row => row[0]).ShouldBe(new object?[] { 1, 2 });
+        (await ExecuteAsync(connection, "WITH picked AS (SELECT id + 10 AS id, name, score FROM users) INSERT INTO users SELECT * FROM picked")).ShouldBe(2);
+        (await ExecuteAsync(connection, "INSERT INTO users WITH picked AS (SELECT id + 20 AS id, name, score FROM users WHERE id < 10) SELECT * FROM picked")).ShouldBe(2);
+        (await ExecuteAsync(connection, "WITH picked AS (SELECT id FROM users WHERE id > 10) UPDATE users SET name = 'changed' WHERE id IN (SELECT id FROM picked)")).ShouldBe(4);
+        (await ExecuteAsync(connection, "WITH picked AS (SELECT id FROM users WHERE name = 'changed') DELETE FROM users WHERE id IN (SELECT id FROM picked)")).ShouldBe(4);
+        (await QueryAsync(connection, "SELECT id FROM users ORDER BY id")).Select(row => row[0]).ShouldBe(new object?[] { 1, 2 });
+    }
+
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - Derived tables: blank output names fail the statement and preserve the transaction")]
     [InlineData("SELECT * FROM (SELECT id AS \"\" FROM users) d")]
     [InlineData("SELECT * FROM (SELECT id FROM users) d (\" \")")]
@@ -248,7 +264,8 @@ public sealed class SqlSubqueryWireTests
     [InlineData("SELECT id FROM users WHERE id = ALL (SELECT id FROM users)")]
     [InlineData("SELECT id FROM users WHERE id = SOME (SELECT id FROM users)")]
 
-    [InlineData("WITH picked AS (SELECT id FROM users) SELECT id FROM picked")]
+    [InlineData("WITH RECURSIVE picked AS (SELECT id FROM users) SELECT id FROM picked")]
+    [InlineData("WITH d AS (DELETE FROM users RETURNING *) SELECT * FROM d")]
 
 
     public async Task QueryAsync_ExcludedForm_ShouldReportCapabilityDiagnosticOverTheWire(string statement)

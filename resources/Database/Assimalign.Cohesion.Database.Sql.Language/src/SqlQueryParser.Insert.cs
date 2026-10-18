@@ -50,6 +50,10 @@ public sealed partial class SqlQueryParser
             Advance(ref lexer);
             isDefaultValues = ExpectKeyword(ref lexer, "VALUES", "VALUES after DEFAULT");
         }
+        else if (IsKeyword(ref lexer, "WITH"))
+        {
+            selectSource = (SqlSelectExpression)ParseWith(ref lexer, insertSource: true);
+        }
         else if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "SELECT"))
         {
             selectSource = ParseSelect(ref lexer);
