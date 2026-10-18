@@ -1,23 +1,68 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
+using System.Linq;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 /// <summary>
-/// The values one statement's subqueries materialized, by slot (<see cref="SqlSubquerySlot.Id"/>):
+/// The values one query execution frame materialized, by slot (<see cref="SqlSubquerySlot.Id"/>):
 /// what a bound scalar subquery, <c>EXISTS</c> or <c>IN (subquery)</c> reads. The executor fills a
 /// slot before it runs the plan that reads it and clears it afterwards, so evaluation never opens a
 /// query, session or read view (PostgreSQL keeps an init plan's output the same way, as a
 /// <c>PARAM_EXEC</c> parameter the plan reads by number).
 /// </summary>
 /// <remarks>
-/// One instance serves one statement, owned by its <see cref="SqlPlanExecutor"/>; the slots of every
-/// nesting level share it, because the planner numbers a statement's subqueries from zero across all
-/// levels. A statement runs on one logical thread at a time, so the store is not synchronized.
+/// Each nested query execution owns a frame linked to its enclosing frame. Correlated values and
+/// prepared lazy-branch conditions expire when the frame advances to another row; independent
+/// child values and derived rows are cached under the enclosing statement snapshot. Outer references
+/// read the row retained by the named enclosing frame. Execution has one logical thread, so these
+/// frame-local stores need no synchronization.
 /// </remarks>
 internal sealed class SqlSubqueryValues
 {
     private object?[]?[] _values = new object?[]?[4];
+    private readonly SqlSubqueryValues? _parent;
+    private readonly int _scope;
+
+    internal SqlSubqueryValues(SqlSubqueryValues? parent = null, int scope = -1,
+        IReadOnlyList<SqlSubqueryBinding>? queries = null)
+    {
+        _parent = parent;
+        _scope = scope;
+        Queries = queries?.ToDictionary(query => query.Slot) ?? [];
+        StatementValues = parent?.StatementValues ?? [];
+        StatementRelations = parent?.StatementRelations ?? new(ReferenceEqualityComparer.Instance);
+        HasCorrelatedQueries = Queries.Values.Any(query => query.IsCorrelated);
+        Evaluated = HasCorrelatedQueries ? new() : null;
+    }
+
+    internal Dictionary<int, SqlSubqueryBinding> Queries { get; }
+    internal Dictionary<int, object?[]> StatementValues { get; }
+    internal Dictionary<SqlDerivedRelation, List<object?[]>> StatementRelations { get; }
+    internal bool HasCorrelatedQueries { get; }
+    internal object?[]? Row { get; private set; }
+    internal Dictionary<SqlBoundExpression, object?>? Evaluated { get; }
+
+    internal void BeginRow(object?[] row)
+    {
+        if (ReferenceEquals(Row, row)) { return; }
+        Row = row;
+        Evaluated?.Clear();
+        foreach (var query in Queries.Values)
+        {
+            if (query.IsCorrelated) { Clear(query.Slot); }
+        }
+    }
+
+    internal SqlSubqueryValues FindScope(int scope)
+    {
+        for (var frame = this; frame is not null; frame = frame._parent)
+        {
+            if (frame._scope == scope) { return frame; }
+        }
+        throw new DatabaseException(ErrorMessages.SubqueryFrameMissing);
+    }
 
     /// <summary>Records the values a subquery materialized.</summary>
     /// <param name="slot">The subquery's slot.</param>

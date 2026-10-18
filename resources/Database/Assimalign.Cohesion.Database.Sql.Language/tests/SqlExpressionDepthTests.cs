@@ -757,12 +757,11 @@ public sealed class SqlExpressionDepthTests
     }
 
     /// <summary>
-    /// The correlation check over a subquery's clauses iterates, so its stack never depends on
-    /// the tree: a chain thousands of levels deep, which the parser builds in a loop, is checked
-    /// on a thread with little stack, and references are still reported in source order.
+    /// Deep and long subquery expressions parse within the configured limit on a small stack.
+    /// Outer references remain in the syntax tree for the engine's lexical scope binder.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [Sql.Language] - Nesting: a subquery's correlation check iterates over deep and long expressions")]
-    public void Parse_DeepSubqueryUnderHighLimit_ShouldCheckCorrelationIteratively()
+    [Fact(DisplayName = "Cohesion Test [Sql.Language] - Nesting: correlated subqueries parse deep and long expressions within the configured limit")]
+    public void Parse_DeepSubqueryUnderHighLimit_ShouldAcceptOuterReferences()
     {
         // Arrange
         var parser = new SqlQueryParser(new SqlQueryParserOptions { ExpressionNestingLimit = SqlQueryParserOptions.MaximumExpressionNestingLimit });
@@ -778,11 +777,7 @@ public sealed class SqlExpressionDepthTests
         failure.ShouldBeNull();
         Errors(statements.Item1).ShouldBeEmpty();
         statements.Item1.ExpressionNestingDepth.ShouldBe(4002);
-        Errors(statements.Item2).Where(error => error.Code == "COHDBL001").Select(error => error.Message).ShouldBe(
-        [
-            "Correlated SQL subqueries are not supported: reference 't.c10' is outside the subquery's local FROM/JOIN scope.",
-            "Correlated SQL subqueries are not supported: reference 't.c9000' is outside the subquery's local FROM/JOIN scope.",
-        ]);
+        Errors(statements.Item2).ShouldBeEmpty();
     }
 
     private static Diagnostic AssertRejected(SqlQueryStatement statement, SqlQueryCommandType command)

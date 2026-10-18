@@ -274,10 +274,10 @@ public sealed class SqlDerivedTableExecutionTests
         sql[diagnostic.Start!.Value..diagnostic.End!.Value].ShouldBe(reference);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sql] - Derived tables: enclosing query references remain ordinary deferred correlation")]
-    public async Task Execute_DerivedEnclosingReference_ShouldKeepCorrelationRefusal()
+    [Fact(DisplayName = "Cohesion Test [Sql] - Derived tables: enclosing query references execute in the outer frame")]
+    public async Task Execute_DerivedEnclosingReference_ShouldResolveEnclosingScope()
     {
-        // Arrange: part (a) will turn this marker into an execution case.
+        // Arrange
         await using var engine = SqlDatabaseEngine.Create("derived-outer", new());
         var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
@@ -285,15 +285,10 @@ public sealed class SqlDerivedTableExecutionTests
         const string sql = "SELECT * FROM t WHERE EXISTS (SELECT 1 FROM (SELECT u.id FROM t u WHERE u.id = t.id) d)";
 
         // Act
-        var result = await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None);
-        if (result is DatabaseResultSet unexpectedRows) { await unexpectedRows.DisposeAsync(); }
+        var rows = await RowsAsync(session, sql);
 
         // Assert
-        var diagnostic = result.Diagnostics.ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("COHDBL001");
-        diagnostic.Message!.ShouldContain("Correlated subqueries are not supported", Case.Sensitive);
-        diagnostic.Message!.ShouldNotContain("LATERAL", Case.Sensitive);
-        sql[diagnostic.Start!.Value..diagnostic.End!.Value].ShouldBe("t.id");
+        rows.Select(row => row[0]).ShouldBe(new object?[] { 1, 2, 3 });
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Derived tables: output ordering retains the shared pin after binding")]

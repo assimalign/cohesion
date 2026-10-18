@@ -23,6 +23,7 @@ internal sealed partial class SqlPlanner
         SqlSystemViewPlan => "SystemView",
         SqlGroupPlan => "Group",
         SqlSubqueryPlan => "Subqueries",
+        SqlCorrelatedSubqueryPlan => "CorrelatedSubqueries",
         SqlInsertSelectPlan => "InsertSelect",
         SqlInsertPlan => "Insert",
         SqlUpdatePlan => "Update",
@@ -118,6 +119,10 @@ internal sealed partial class SqlPlanner
                     break;
                 case SqlGroupPlan group:
                     Visit(group.Input, id);
+                    break;
+                case SqlCorrelatedSubqueryPlan correlated:
+                    foreach (var child in correlated.Queries) { Visit(child.Query, id); }
+                    Visit(correlated.Input, id);
                     break;
                 case SqlSubqueryPlan subqueries:
                     foreach (var child in subqueries.Queries) { Visit(child.Query, id); }

@@ -40,7 +40,7 @@ shared storage, with DDL flowing through the relational catalog
   planned with rules and executed over stored, system and derived relations: `SELECT` with `WHERE`,
   projection, aliased derived sources, `ORDER BY`, `LIMIT/OFFSET`, `DISTINCT`, grouping and aggregates;
   `INSERT` (multi-row, whole-item `DEFAULT`, `DEFAULT VALUES`, nullability);
-  `UPDATE` (including `SET c = DEFAULT`)/`DELETE` with uncorrelated WHERE subqueries and accurate
+  `UPDATE` (including `SET c = DEFAULT`)/`DELETE` with correlated and uncorrelated WHERE subqueries and accurate
   affected counts; `CREATE/ALTER/DROP TABLE`. DROP unpublishes immediately and the
   version-purge worker reclaims its data/index pages after older readers finish.
   Unsupported dialect features fail

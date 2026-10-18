@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Linq;
 
 using Assimalign.Cohesion.Database.Types;
@@ -34,21 +35,72 @@ public sealed class SqlSubqueryParserTests
         statement.Diagnostics.ShouldNotContain(item => item.Severity == DiagnosticSeverity.Error);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Database.Sql.Language] - Subquery: Rejects outer qualifiers explicitly")]
+    [Theory(DisplayName = "Cohesion Test [Database.Sql.Language] - Subquery: Accepts qualified and unqualified outer references")]
     [InlineData("SELECT (SELECT outer_row.id FROM u) FROM t outer_row;", "outer_row.id")]
     [InlineData("SELECT id FROM t WHERE EXISTS (SELECT u.id FROM u WHERE u.id = t.id);", "t.id")]
     [InlineData("SELECT id FROM t WHERE id IN (SELECT t.id FROM u);", "t.id")]
     [InlineData("SELECT (SELECT (SELECT t.id FROM v) FROM u) FROM t;", "t.id")]
     [InlineData("SELECT id FROM t WHERE EXISTS (SELECT 1 FROM u GROUP BY u.id HAVING u.id = t.id);", "t.id")]
     [InlineData("SELECT (SELECT dbo.t.id FROM dbo.u) FROM dbo.t;", "dbo.t.id")]
-    public void Parse_CorrelatedSubquery_ReportsPreciseDiagnostic(string sql, string reference)
+    [InlineData("SELECT id FROM t WHERE EXISTS (SELECT inner_id FROM u WHERE inner_id = outer_id);", "outer_id")]
+    [InlineData("SELECT t.id FROM t JOIN u ON EXISTS (SELECT v.id FROM v WHERE v.id = t.id);", "t.id")]
+    [InlineData("SELECT t.id FROM t GROUP BY t.id HAVING EXISTS (SELECT u.id FROM u WHERE u.id = t.id);", "t.id")]
+    [InlineData("UPDATE t SET id = 2 WHERE EXISTS (SELECT u.id FROM u WHERE u.id = t.id);", "t.id")]
+    [InlineData("DELETE FROM t WHERE id IN (SELECT u.id FROM u WHERE u.id = t.id);", "t.id")]
+    public void Parse_CorrelatedSubquery_ReportsNoError(string sql, string reference)
     {
-        var statement = new SqlQueryParser().Parse(sql);
+        // Arrange
+        var parser = new SqlQueryParser();
 
-        var diagnostic = statement.Diagnostics.Single(item => item.Code == "COHDBL001");
-        diagnostic.Message!.ShouldContain("Correlated SQL subqueries are not supported");
-        diagnostic.Message!.ShouldContain(reference);
-        diagnostic.Message!.ShouldContain("local FROM/JOIN scope");
+        // Act
+        var statement = parser.Parse(sql);
+
+        // Assert
+        statement.Diagnostics.ShouldNotContain(item => item.Severity == DiagnosticSeverity.Error);
+        References(statement.ShouldBeOfType<SqlQueryStatement>().SqlExpression, false)
+            .Select(column => string.Join(".", new[] { column.SchemaName, column.TableAlias, column.ColumnName }.Where(part => part is not null)))
+            .ShouldContain(reference);
+
+        static IEnumerable<SqlColumnReferenceExpression> References(SqlQueryExpression query, bool child)
+        {
+            IEnumerable<SqlExpression?> roots = query switch
+            {
+                SqlSelectExpression select => select.Columns.Select(column => column.Expression)
+                    .Concat(select.From.SelectMany(item => item.Joins).Select(join => join.Condition))
+                    .Concat(select.GroupBy).Concat(select.OrderBy.Select(order => order.Expression))
+                    .Concat(new[] { select.Where, select.Having, select.Limit, select.Offset }),
+                SqlUpdateExpression update => new[] { update.Where },
+                SqlDeleteExpression delete => new[] { delete.Where },
+                _ => [],
+            };
+            return roots.OfType<SqlExpression>().SelectMany(root => Columns(root, child));
+        }
+
+        static IEnumerable<SqlColumnReferenceExpression> Columns(SqlExpression expression, bool child)
+        {
+            if (expression is SqlColumnReferenceExpression column && child) { yield return column; }
+            var query = expression switch
+            {
+                SqlSubqueryExpression scalar => scalar.Select,
+                SqlExistsExpression exists => exists.Subquery,
+                SqlInExpression member => member.Subquery,
+                _ => null,
+            };
+            if (query is not null)
+            {
+                foreach (var reference in References(query, true)) { yield return reference; }
+            }
+            IEnumerable<SqlExpression> operands = expression switch
+            {
+                SqlBinaryExpression binary => new[] { binary.Left, binary.Right },
+                SqlInExpression member => new[] { member.Operand },
+                _ => [],
+            };
+            foreach (var operand in operands)
+            {
+                foreach (var reference in Columns(operand, child)) { yield return reference; }
+            }
+        }
     }
 
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Language] - Subquery: Excludes unsupported forms")]

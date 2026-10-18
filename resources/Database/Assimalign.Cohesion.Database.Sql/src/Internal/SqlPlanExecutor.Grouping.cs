@@ -55,6 +55,7 @@ internal sealed partial class SqlPlanExecutor
             var key = keys.Count == 0 ? [] : new object?[keys.Count];
             for (int i = 0; i < key.Length; i++)
             {
+                await PrepareSubqueriesAsync(keys[i].Value, row, statement, cancellationToken).ConfigureAwait(false);
                 key[i] = evaluator.Evaluate(keys[i].Value, row);
             }
             if (!groups.TryGetValue(key, out var states))
@@ -64,6 +65,10 @@ internal sealed partial class SqlPlanExecutor
             }
             for (int i = 0; i < states.Length; i++)
             {
+                foreach (var argument in aggregates[i].Arguments)
+                {
+                    await PrepareSubqueriesAsync(argument, row, statement, cancellationToken).ConfigureAwait(false);
+                }
                 AddRow(states[i], aggregates[i], aggregateCollations[i], evaluator, row, cancellationToken);
             }
         }
@@ -80,16 +85,27 @@ internal sealed partial class SqlPlanExecutor
                 // Once per group, the implicit empty group included.
                 row[key.Length + i] = states[i].Finish(cancellationToken).ToObject();
             }
+            await PrepareSubqueriesAsync(plan.Having, row, statement, cancellationToken).ConfigureAwait(false);
             if (!evaluator.Matches(plan.Having, row))
             {
                 continue;
             }
             for (int i = 0; i < plan.Projections.Count; i++)
             {
+                await PrepareSubqueriesAsync(plan.Projections[i].Value, row, statement, cancellationToken).ConfigureAwait(false);
                 row[projectionStart + i] = NormalizeGroupValue(
                     evaluator.Evaluate(plan.Projections[i].Value!, row, copySharedBinary: true), plan.Projections[i].Type);
             }
             matches.Add(row);
+        }
+        if (_subqueryValues is { HasCorrelatedQueries: true } && plan.OrderBy.Count > 0)
+        {
+            var output = plan.Projections.Select((projection, i) => projection with
+            {
+                Value = new SqlBoundSlot(projectionStart + i), ColumnOrdinal = null,
+            }).ToArray();
+            return await MaterializeCorrelatedSelectAsync(matches, output, plan.OrderBy, plan.Limit, plan.Offset,
+                plan.IsDistinct, evaluator, statement, cancellationToken).ConfigureAwait(false);
         }
         if (plan.OrderBy.Count > 0)
         {

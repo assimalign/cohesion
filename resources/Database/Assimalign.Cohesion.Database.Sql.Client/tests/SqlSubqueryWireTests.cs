@@ -244,7 +244,6 @@ public sealed class SqlSubqueryWireTests
     /// <summary>Excluded forms have the capability diagnostic through the server rather than a late executor rejection.</summary>
     /// <param name="statement">The unsupported form.</param>
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - Subquery: excluded forms report COHDBL001 over the wire")]
-    [InlineData("SELECT u.id FROM users u WHERE EXISTS (SELECT v.id FROM users v WHERE v.id = u.id)")]
     [InlineData("SELECT id FROM users WHERE id = ANY (SELECT id FROM users)")]
     [InlineData("SELECT id FROM users WHERE id = ALL (SELECT id FROM users)")]
     [InlineData("SELECT id FROM users WHERE id = SOME (SELECT id FROM users)")]
@@ -265,23 +264,63 @@ public sealed class SqlSubqueryWireTests
         (await QueryAsync(connection, "SELECT id FROM users ORDER BY id")).Select(row => row[0]).ShouldBe(new object?[] { 1, 2 });
     }
 
-    /// <summary>Unqualified names that require an outer scope receive the same capability diagnostic as qualified correlation.</summary>
-    [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - Subquery: unqualified outer references report COHDBL001 over the wire")]
-    public async Task QueryAsync_UnqualifiedCorrelation_ShouldReportCapabilityDiagnosticOverTheWire()
+    /// <summary>Unqualified names resolve to the enclosing scope and return its values over the wire.</summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - Subquery: unqualified outer references execute over the wire")]
+    public async Task QueryAsync_UnqualifiedCorrelation_ShouldReturnBoundOuterValuesOverTheWire()
     {
         // Arrange
         await using var harness = await SqlClientTestHarness.StartAsync();
         await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
         await ExecuteAsync(connection, "CREATE TABLE inner_rows (id INT)");
-        await ExecuteAsync(connection, "INSERT INTO inner_rows VALUES (1)");
+        await ExecuteAsync(connection, "INSERT INTO inner_rows VALUES (100)");
 
         // Act / Assert
-        var error = await Should.ThrowAsync<SqlClientException>(() => QueryAsync(connection,
-            "SELECT id FROM users WHERE EXISTS (SELECT id FROM inner_rows WHERE id = score)"));
-        error.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
-        error.Message.ShouldContain("COHDBL001", Case.Sensitive);
-        error.Message.ShouldContain("correlat");
+        (await QueryAsync(connection,
+            "SELECT id FROM users WHERE EXISTS (SELECT id FROM inner_rows WHERE id = score)"))
+            .ShouldHaveSingleItem()[0].ShouldBe(1);
         (await QueryAsync(connection, "SELECT id FROM users ORDER BY id")).Select(row => row[0]).ShouldBe(new object?[] { 1, 2 });
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - Correlation: EXISTS IN scalar and DML preserve per-row results and counts")]
+    public async Task QueryAsync_CorrelatedSubqueries_ShouldExecuteEveryFormOverTheWire()
+    {
+        // Arrange
+        await using var harness = await SqlClientTestHarness.StartAsync();
+        await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
+        await SeedAsync(connection);
+
+        // Act / Assert
+        var rows = await QueryAsync(connection, "SELECT c.id, (SELECT x.id FROM choices x WHERE x.id = c.id), " +
+            "c.id IN (SELECT x.id FROM choices x WHERE x.id = c.id) FROM candidates c " +
+            "WHERE EXISTS (SELECT x.id FROM choices x WHERE x.id = c.id)");
+        rows.ShouldHaveSingleItem()[0].ShouldBe(2);
+        rows[0][1].ShouldBe(2);
+        rows[0][2].ShouldBe(true);
+        (await ExecuteAsync(connection, "UPDATE candidates SET id = id + 10 WHERE EXISTS " +
+            "(SELECT x.id FROM choices x WHERE x.id = candidates.id)" )).ShouldBe(1L);
+        (await ExecuteAsync(connection, "DELETE FROM candidates WHERE id IN " +
+            "(SELECT x.id + 10 FROM choices x WHERE x.id + 10 = candidates.id)" )).ShouldBe(1L);
+        (await QueryAsync(connection, "SELECT id FROM candidates ORDER BY id")).Select(row => row[0])
+            .ShouldBe(new object?[] { null, 1, 3 });
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - Correlation: a later outer row cardinality failure keeps the connection usable")]
+    public async Task QueryAsync_CorrelatedScalarCardinality_ShouldReturnExecutionFailureAndKeepConnectionUsable()
+    {
+        // Arrange
+        await using var harness = await SqlClientTestHarness.StartAsync();
+        await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
+
+        // Act
+        var error = await Should.ThrowAsync<SqlClientException>(() => QueryAsync(connection,
+            "SELECT u.id, (SELECT v.id FROM users v WHERE v.id = u.id OR u.id = 2) FROM users u ORDER BY u.id"));
+
+        // Assert
+        error.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
+        error.ConnectionUsable.ShouldBeTrue();
+        error.Message.ShouldContain("one row");
+        (await QueryAsync(connection, "SELECT id FROM users ORDER BY id")).Select(row => row[0])
+            .ShouldBe(new object?[] { 1, 2 });
     }
 
     private static async Task SeedAsync(SqlConnection connection)
