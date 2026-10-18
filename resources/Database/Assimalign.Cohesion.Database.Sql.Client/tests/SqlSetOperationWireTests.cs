@@ -52,7 +52,9 @@ public sealed class SqlSetOperationWireTests
     [InlineData("SELECT id FROM users UNION SELECT id FROM users WINDOW w AS ()", "COHDBL001")]
     [InlineData("SELECT id FROM users WHERE id = ALL (SELECT id FROM users UNION SELECT id FROM users)", "COHDBL001")]
     [InlineData("SELECT id FROM users UNION SELECT id, name FROM users", "COHSQLE013")]
-    [InlineData("SELECT id FROM users UNION SELECT name FROM users", "COHSQLE029")]
+    [InlineData("SELECT id FROM users UNION SELECT name FROM users", "COHSQLE003")]
+    [InlineData("INSERT INTO users (id) SELECT id FROM users UNION SELECT id, name FROM users", "COHSQLE013")]
+    [InlineData("INSERT INTO users (id) SELECT id FROM users UNION SELECT name FROM users", "COHSQLE003")]
     [InlineData("SELECT id FROM users UNION SELECT id FROM users ORDER BY id + 1", "COHSQLE018")]
     [InlineData("SELECT id FROM users UNION SELECT id FROM users ORDER BY users.id", "COHSQLE018")]
     public async Task QueryAsync_InvalidSetOperation_ShouldKeepConnectionUsable(string sql, string code)
@@ -68,6 +70,7 @@ public sealed class SqlSetOperationWireTests
         // Assert
         error.Message.ShouldContain(code, Case.Sensitive);
         error.ConnectionUsable.ShouldBeTrue();
+        if (code == "COHSQLE003") { error.Message.ShouldContain("column 1", Case.Sensitive); }
         (await connection.QueryAsync("SELECT id FROM users ORDER BY id", cancellationToken: SqlClientTestHarness.Timeout()))
             .Select(row => row[0]).ShouldBe(new object?[] { 1, 2 });
     }

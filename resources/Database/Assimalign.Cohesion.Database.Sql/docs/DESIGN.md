@@ -249,7 +249,10 @@ CTE reachability, function validation, deferred-schema admission, aggregate scop
 and EXPLAIN descend through both operands. CTE constant rows extend to top-level set operands.
 Combined ordering binds output names and ordinals directly, without source-expression lookup.
 USING's category/implicit-cast rule is reused, with unknown handling and a set-specific mismatch
-message. Identical domains survive; differing types or modifiers clear typmods. Collation
+message (COHSQLE003 / 42804). Literal strings retain unknown provenance until the pair
+chooses its type; explicit TEXT casts remain typed (PostgreSQL parse_coerce.c:1397 and
+analyze.c:2357). Unconstrained CHAR preserves its value without the declaration default
+CHAR(1), following varchar.c:284-286. Identical domains survive; differing types or modifiers clear typmods. Collation
 provenance is captured only while binding set operands, derived or CTE bodies, keeping ordinary
 stored SELECT allocation unchanged. Outputs carry no left input expression or physical ordinal.
 
@@ -258,7 +261,11 @@ detaches retained binary values and restores Character identity before common-ty
 Conversion and calendar promotion precede GroupKeyComparer hashing. Hash sets implement UNION
 DISTINCT; right-side counts implement INTERSECT/EXCEPT ALL multiplicities, following PostgreSQL
 src/backend/executor/nodeSetOp.c:128-160. The existing stable sort and Int64 row-window helper
-apply to completed rows. Cost is O(L+R) retained rows and membership state per binary node,
+apply to completed rows. Set binding uses iterative postorder; compatible same-quantifier
+UNION nodes reuse the left operand list to build one N-way node (PostgreSQL
+prepunion.c:1380-1420), retaining pairwise type and collation decisions. Such chains retain
+O(total input) rows with no repeated prefix copying; remaining recursive execution levels
+check the stack for COHSQLE004. Other nodes cost O(L+R) rows and membership state,
 plus O(N log N) sorting; streaming and spilling remain non-goals. Structural SameQuery equivalence
 includes set operators, quantifiers, operands, WITH and tails for view canonicalization.
 

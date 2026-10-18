@@ -14,22 +14,22 @@ internal sealed partial class SqlPlanExecutor
     private async Task<DatabaseResult> ExecuteSetOperationAsync(SqlSetOperationPlan plan,
         SqlStatementContext statement, CancellationToken cancellationToken)
     {
-        var left = await MaterializeSetOperandAsync(plan.Left, plan.LeftValues, plan, statement, cancellationToken).ConfigureAwait(false);
-        var right = await MaterializeSetOperandAsync(plan.Right, plan.RightValues, plan, statement, cancellationToken).ConfigureAwait(false);
+        System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
         var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
         var comparer = new GroupKeyComparer(plan.Projections.Select(projection => projection.Collation.Resolve(_subqueryValues)).ToArray());
         var rows = new List<object?[]>();
         if (plan.Operator == SqlSetOperator.Union)
         {
             var seen = plan.IsAll ? null : new HashSet<object?[]>(comparer);
-            foreach (var row in left.Concat(right))
+            foreach (var operand in plan.Operands)
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                if (seen is null || seen.Add(row)) { rows.Add(row); }
+                await MaterializeSetOperandAsync(operand.Query, operand.Values, plan, statement, cancellationToken, rows, seen).ConfigureAwait(false);
             }
         }
         else
         {
+            var left = await MaterializeSetOperandAsync(plan.Operands[0].Query, plan.Operands[0].Values, plan, statement, cancellationToken).ConfigureAwait(false);
+            var right = await MaterializeSetOperandAsync(plan.Operands[1].Query, plan.Operands[1].Values, plan, statement, cancellationToken).ConfigureAwait(false);
             var counts = new Dictionary<object?[], int>(comparer);
             foreach (var row in right)
             {
@@ -54,15 +54,17 @@ internal sealed partial class SqlPlanExecutor
 
     private async Task<List<object?[]>> MaterializeSetOperandAsync(SqlPlan operand,
         IReadOnlyList<SqlBoundExpression> conversions, SqlSetOperationPlan plan,
-        SqlStatementContext statement, CancellationToken cancellationToken)
+        SqlStatementContext statement, CancellationToken cancellationToken,
+        List<object?[]>? destination = null, HashSet<object?[]>? seen = null)
     {
+        System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
         var parent = _subqueryValues;
         _subqueryValues = parent is null ? null : new SqlSubqueryValues(parent);
         try
         {
             await using var result = (DatabaseResultSet)await ExecuteAsync(operand, statement, cancellationToken).ConfigureAwait(false);
             var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
-            var rows = new List<object?[]>();
+            var rows = destination ?? new List<object?[]>();
             await foreach (var row in result.GetRowsAsync(cancellationToken).ConfigureAwait(false))
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -76,7 +78,7 @@ internal sealed partial class SqlPlanExecutor
                 {
                     converted[i] = SqlTemporalArithmetic.Promote(evaluator.Evaluate(conversions[i], values), plan.Projections[i].Type);
                 }
-                rows.Add(converted);
+                if (seen is null || seen.Add(converted)) { rows.Add(converted); }
             }
             return rows;
         }

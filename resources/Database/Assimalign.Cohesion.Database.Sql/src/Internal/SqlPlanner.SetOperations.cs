@@ -24,22 +24,53 @@ internal sealed partial class SqlPlanner
 
         bool Contains(SqlQueryBodyExpression query)
         {
-            RuntimeHelpers.EnsureSufficientExecutionStack();
-            return ReferenceEquals(query, select) || query is SqlSetOperationExpression set && (Contains(set.Left) || Contains(set.Right));
+            var pending = new Stack<SqlQueryBodyExpression>();
+            pending.Push(query);
+            while (pending.TryPop(out var body))
+            {
+                if (ReferenceEquals(body, select)) { return true; }
+                if (body is SqlSetOperationExpression set) { pending.Push(set.Right); pending.Push(set.Left); }
+            }
+            return false;
         }
     }
 
     private SqlSetOperationPlan PlanSetOperation(SqlSetOperationExpression set)
     {
-        SqlPlan left;
-        SqlPlan right;
+        var pending = new Stack<(SqlQueryBodyExpression Query, bool Visited)>();
+        var plans = new Stack<SqlPlan>();
+        pending.Push((set, false));
         (_queryScopes ??= new()).SetOperandDepth++;
         try
         {
-            left = PlanQuery(set.Left);
-            right = PlanQuery(set.Right);
+            while (pending.TryPop(out var item))
+            {
+                _cancellationToken.ThrowIfCancellationRequested();
+                if (item.Query is not SqlSetOperationExpression operation ||
+                    !ReferenceEquals(item.Query, set) && item.Query.CommonTables.Count > 0)
+                {
+                    plans.Push(PlanQuery(item.Query));
+                }
+                else if (!item.Visited)
+                {
+                    pending.Push((operation, true));
+                    pending.Push((operation.Right, false));
+                    pending.Push((operation.Left, false));
+                }
+                else
+                {
+                    var right = plans.Pop();
+                    var left = plans.Pop();
+                    plans.Push(CombineSetPlans(operation, left, right));
+                }
+            }
+            return (SqlSetOperationPlan)plans.Pop();
         }
         finally { _queryScopes.SetOperandDepth--; }
+    }
+
+    private SqlSetOperationPlan CombineSetPlans(SqlSetOperationExpression set, SqlPlan left, SqlPlan right)
+    {
         var first = QueryOutput(left);
         var second = QueryOutput(right);
         if (first.Projections.Count != second.Projections.Count)
@@ -58,11 +89,11 @@ internal sealed partial class SqlPlanner
             var b = SetColumn(second.Projections[i], second.Columns);
             // PostgreSQL parse_coerce.c:1362-1387,1455-1457: unknowns do not choose
             // a category; an all-unknown pair becomes text. Domains survive identical inputs.
-            var type = a.Type.Type == DatabaseType.Null
-                ? new DatabaseTypeInfo(b.Type.Type == DatabaseType.Null ? DatabaseType.String : b.Type.Type)
-                : b.Type.Type == DatabaseType.Null ? new DatabaseTypeInfo(a.Type.Type)
+            var type = a.Unknown
+                ? new DatabaseTypeInfo(b.Unknown ? DatabaseType.String : b.Type.Type)
+                : b.Unknown ? new DatabaseTypeInfo(a.Type.Type)
                 : UsingType(a.Type, b.Type, (i + 1).ToString(CultureInfo.InvariantCulture), set, setOperation: true);
-            string? domain = a.Type.Type == b.Type.Type && a.Type.MaxLength == b.Type.MaxLength &&
+            string? domain = !a.Unknown && !b.Unknown && a.Type.Type == b.Type.Type && a.Type.MaxLength == b.Type.MaxLength &&
                 a.Type.Precision == b.Type.Precision && a.Type.Scale == b.Type.Scale && string.Equals(a.Domain, b.Domain, StringComparison.OrdinalIgnoreCase) ? a.Domain : null;
             var candidate = SqlCollationCandidate.Fold(first.Projections[i].Metadata?.Collation ?? default,
                 second.Projections[i].Metadata?.Collation ?? default);
@@ -75,8 +106,8 @@ internal sealed partial class SqlPlanner
             });
             columns.Add(new SqlCatalogColumn(projections[i].Name, type, nullable,
                 collation: candidate.Priority >= 2 ? candidate.Collation : null, domainName: domain));
-            leftValues.Add(CoerceSetValue(i, a.Type.Type, type));
-            rightValues.Add(CoerceSetValue(i, b.Type.Type, type));
+            leftValues.Add(CoerceSetValue(i, a.Type.Type, type, a.Unknown ? first.Projections[i].Expression : null));
+            rightValues.Add(CoerceSetValue(i, b.Type.Type, type, b.Unknown ? second.Projections[i].Expression : null));
         }
         var ordering = new List<SqlBoundOrdering>();
         foreach (var order in set.OrderBy)
@@ -105,24 +136,41 @@ internal sealed partial class SqlPlanner
             }
             ordering.Add(new SqlBoundOrdering(new SqlBoundSlot(ordinal), order.IsDescending, projections[ordinal].Collation));
         }
-        return new SqlSetOperationPlan(left, right, set.Operator, set.IsAll, projections, columns,
-            leftValues, rightValues, ordering, EvaluateCount(set.Limit, LimitClause(set)), EvaluateCount(set.Offset, "OFFSET"));
+        // PostgreSQL prepunion.c:1380-1420: pull compatible UNION children into
+        // one Append-like node. Reuse the left list so a flat chain never copies its prefix.
+        bool CanFlatten(SqlPlan child, IReadOnlyList<SqlBoundExpression> values)
+            => set.Operator == SqlSetOperator.Union && child is SqlSetOperationPlan union &&
+                union.Operator == set.Operator && union.IsAll == set.IsAll && union.OrderBy.Count == 0 &&
+                union.Limit is null && union.Offset is null && values.All(value => value is SqlBoundSlot) &&
+                union.Columns.Select(column => column.Type).SequenceEqual(columns.Select(column => column.Type)) &&
+                union.Projections.Select(projection => projection.Collation).SequenceEqual(projections.Select(projection => projection.Collation));
+
+        var operands = CanFlatten(left, leftValues) ? ((SqlSetOperationPlan)left).Operands
+            : new List<SqlSetOperand> { new(left, leftValues) };
+        if (CanFlatten(right, rightValues)) { operands.AddRange(((SqlSetOperationPlan)right).Operands); }
+        else { operands.Add(new SqlSetOperand(right, rightValues)); }
+        return new SqlSetOperationPlan(operands, set.Operator, set.IsAll, projections, columns,
+            ordering, EvaluateCount(set.Limit, LimitClause(set)), EvaluateCount(set.Offset, "OFFSET"));
     }
 
-    private (DatabaseTypeInfo Type, string? Domain) SetColumn(SqlProjection projection, IReadOnlyList<SqlCatalogColumn> columns)
+    private (DatabaseTypeInfo Type, string? Domain, bool Unknown) SetColumn(SqlProjection projection, IReadOnlyList<SqlCatalogColumn> columns)
     {
-        if (projection.Metadata?.TypeInfo is { } setType) { return (setType, projection.Metadata.DomainName); }
+        // An unadorned literal is unknown until this operand's common type is chosen
+        // (PostgreSQL parse_coerce.c:1397; analyze.c:2357). CAST expressions stay typed.
+        bool unknown = projection.Type == DatabaseType.Null || projection.Expression is { } value &&
+            UnwrapCollation(value) is SqlLiteralExpression { LiteralType: SqlLiteralType.String };
+        if (projection.Metadata?.TypeInfo is { } setType) { return (setType, projection.Metadata.DomainName, unknown); }
         var column = projection.Metadata?.SourceColumn ?? (projection.ColumnOrdinal is int ordinal ? columns[ordinal] : null);
-        if (column is not null) { return (column.Type, column.DomainName); }
+        if (column is not null) { return (column.Type, column.DomainName, unknown); }
         if (projection.Expression is { } expression && UnwrapCollation(expression) is SqlCastExpression cast)
         {
             var type = ResolveCastTarget(cast, _functions.Types);
-            return (type.Storage, type.IsDomain ? type.Name : null);
+            return (type.Storage, type.IsDomain ? type.Name : null, false);
         }
-        return (new DatabaseTypeInfo(projection.Type, projection.MaxLength), null);
+        return (new DatabaseTypeInfo(projection.Type, projection.MaxLength), null, unknown);
     }
 
-    private SqlBoundExpression CoerceSetValue(int ordinal, DatabaseType source, DatabaseTypeInfo common)
+    private SqlBoundExpression CoerceSetValue(int ordinal, DatabaseType source, DatabaseTypeInfo common, SqlExpression? unknown)
     {
         SqlBoundExpression slot = new SqlBoundSlot(ordinal);
         if (source == common.Type || source == DatabaseType.Null || SqlTemporalArithmetic.IsCalendar(source) && SqlTemporalArithmetic.IsCalendar(common.Type))
@@ -130,8 +178,11 @@ internal sealed partial class SqlPlanner
             return slot;
         }
         var target = SqlType.ForStorage(common);
-        return new SqlBoundCast(slot, target.Name, target, _functions.Types.ResolveCasts(null, target),
+        var cast = new SqlBoundCast(slot, target.Name, target, _functions.Types.ResolveCasts(null, target),
             _functions.Database, _catalog.DefaultCollation, sourceType: source);
+        // Unknown constants are coerced during analysis, even for an empty input.
+        return unknown is not null && UnwrapCollation(unknown) is SqlLiteralExpression literal
+            ? new SqlBoundConstant(SqlCastConverter.Convert(literal.Value, cast, _cancellationToken)) : cast;
     }
 
     private static bool SetNullable(SqlPlan plan, int ordinal)

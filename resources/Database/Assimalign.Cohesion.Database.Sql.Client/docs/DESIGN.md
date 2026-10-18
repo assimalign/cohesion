@@ -390,3 +390,7 @@ Statement failures leave the server session ready. Model clients validate diagno
 ordering and preserve every code, severity, message, nullable offset and source line.
 
 DatabaseClientResult.Diagnostics and SqlResultSet.Diagnostics expose negotiated ProtocolDiagnostic values. SqlClientException retains the shared core exception and copies its existing diagnostics carrier.
+
+Set-operation type mismatches reuse COHSQLE003 (42804), retaining the one-based output
+position and both types. INSERT set-source width/type errors use the same exchange and
+leave the connection usable.

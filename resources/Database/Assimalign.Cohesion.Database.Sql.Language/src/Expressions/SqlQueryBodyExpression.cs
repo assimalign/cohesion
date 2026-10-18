@@ -5,7 +5,7 @@ using Assimalign.Cohesion.Database.Language;
 namespace Assimalign.Cohesion.Database.Sql.Language;
 
 /// <summary>Represents a SELECT or set operation wherever SQL accepts a query.</summary>
-// Deviates from the repo interface-first rule per design decision: Database has concrete query variants (database-area.md).
+// Deviates from the repo interface-first rule per design decision: Database engines are concrete-first — abstract bases with protected cores and sealed model leaves (owner, 2026-10-04; database-area.md).
 public abstract class SqlQueryBodyExpression : SqlQueryExpression
 {
     private IReadOnlyList<SqlCommonTableExpression> _commonTables = [];

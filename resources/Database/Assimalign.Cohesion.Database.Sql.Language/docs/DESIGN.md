@@ -142,7 +142,10 @@ head and parsing the result tail after the operator ladder. Parentheses use the 
 and stack guards; each left-deep set link counts as a tree level. Renderer precedence preserves
 right operands at equal precedence and operands with windows. The same scalar-subquery funnel
 admits set bodies once per subquery level. Redundant IN query parentheses now mean membership.
-Query lookahead stops at the parenthesis budget and retains the caller's query or value grammar,
+Query lookahead checks each leading wrapper at its matching close, retaining scalar value
+continuations (PostgreSQL gram.y:15645,15899,15916). Refused CORRESPONDING and parenthesized
+WITH skip to the caller's closing parenthesis and emit one diagnostic. Expression and set-shape
+fuzz require every generated input to parse. Query lookahead stops at the parenthesis budget and retains the caller's query or value grammar,
 so hostile value parentheses keep their exact diagnostic span without repeated unbounded scans.
 UNION/INTERSECT/EXCEPT stay keywords; contextual CORRESPONDING adds no vocabulary row or
 format bump. DIALECT.md and the conformance corpora pin these choices.

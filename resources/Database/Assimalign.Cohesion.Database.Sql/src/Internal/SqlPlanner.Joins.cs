@@ -176,7 +176,7 @@ internal sealed partial class SqlPlanner
             && left.Precision == right.Precision && left.Scale == right.Scale
                 ? left : new DatabaseTypeInfo(common);
 
-        void Refuse() => throw new SqlPlanningException(setOperation ? "COHSQLE029" : "COHSQLE015",
+        void Refuse() => throw new SqlPlanningException(setOperation ? "COHSQLE003" : "COHSQLE015",
             setOperation ? string.Format(CultureInfo.CurrentCulture, ErrorMessages.SetColumnTypes, name, left.Type, right.Type)
                 : $"USING column '{name}' requires a common type; found {left.Type} and {right.Type}.", select.Location);
     }

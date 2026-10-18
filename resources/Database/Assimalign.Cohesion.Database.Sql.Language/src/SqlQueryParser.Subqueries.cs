@@ -12,20 +12,25 @@ public sealed partial class SqlQueryParser
     private int _paginationDepth;
     private string _paginationClause = "LIMIT or OFFSET";
 
+    private void SkipQueryRemainder(ref TokenLexer lexer)
+    {
+        int depth = 0;
+        while (!IsAtEnd(ref lexer) && lexer.Current.Type != TokenType.Semicolon)
+        {
+            if (lexer.Current.Type == TokenType.RightParen && depth == 0) { break; }
+            if (lexer.Current.Type == TokenType.LeftParen) { depth++; }
+            else if (lexer.Current.Type == TokenType.RightParen) { depth--; }
+            Advance(ref lexer);
+        }
+    }
+
     private SqlQueryBodyExpression ParseSubquery(ref TokenLexer lexer)
     {
         if (IsKeyword(ref lexer, "WITH"))
         {
             RequireSkippedConstruct(lexer.Current.Position, lexer.Current.Position + lexer.Current.Value.Length,
                 "WITH inside a subquery or derived table");
-            int depth = 0;
-            while (!IsAtEnd(ref lexer) && lexer.Current.Type != TokenType.Semicolon)
-            {
-                if (lexer.Current.Type == TokenType.RightParen && depth == 0) { break; }
-                if (lexer.Current.Type == TokenType.LeftParen) { depth++; }
-                else if (lexer.Current.Type == TokenType.RightParen) { depth--; }
-                Advance(ref lexer);
-            }
+            SkipQueryRemainder(ref lexer);
             return EmptyWithQuery();
         }
 

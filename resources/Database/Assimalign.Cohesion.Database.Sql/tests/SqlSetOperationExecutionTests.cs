@@ -18,6 +18,117 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed class SqlSetOperationExecutionTests
 {
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Set CHAR common types: an unconstrained typmod preserves membership")]
+    [InlineData("UNION", 1)]
+    [InlineData("INTERSECT", 1)]
+    [InlineData("EXCEPT", 0)]
+    public async Task Execute_CharacterFirst_ShouldPreserveValues(string operation, int expected)
+    {
+        // Arrange
+        await using var engine = CreateEngine();
+        var database = await engine.CreateDatabaseAsync("sets");
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecuteAsync(session, "CREATE TABLE c (fixed CHAR(5), plain TEXT);");
+        await ExecuteAsync(session, "INSERT INTO c VALUES ('ab', 'ab');");
+
+        // Act
+        var rows = await RowsAsync(session, $"SELECT fixed FROM c {operation} SELECT plain FROM c;");
+
+        // Assert
+        rows.Count.ShouldBe(expected);
+        if (expected > 0) { rows[0][0].ShouldBe("ab   "); }
+        (await RowsAsync(session, "SELECT plain FROM c WHERE plain IN (SELECT fixed FROM c UNION SELECT plain FROM c);")).Count.ShouldBe(1);
+        (await RowsAsync(session, "SELECT d.fixed FROM (SELECT fixed FROM c UNION SELECT plain FROM c) d UNION SELECT plain FROM c;"))
+            .ShouldHaveSingleItem()[0].ShouldBe("ab   ");
+        await ExecuteAsync(session, "CREATE TABLE target (plain TEXT);");
+        (await ExecuteAsync(session, "INSERT INTO target SELECT fixed FROM c UNION SELECT plain FROM c;")).AffectedCount.ShouldBe(1);
+        (await RowsAsync(session, "SELECT plain FROM target;")).ShouldHaveSingleItem()[0].ShouldBe("ab");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Set CHAR common types: differing lengths and NULL keep full text")]
+    public async Task Execute_UnconstrainedCharacter_ShouldKeepTextLength()
+    {
+        // Arrange
+        await using var engine = CreateEngine();
+        var database = await engine.CreateDatabaseAsync("sets");
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecuteAsync(session, "CREATE TABLE c (fixed CHAR(5), plain TEXT);");
+        await ExecuteAsync(session, "INSERT INTO c VALUES ('ab', 'hello'), ('ab', 'hx');");
+
+        // Act / Assert
+        (await RowsAsync(session, "SELECT fixed FROM c UNION SELECT plain FROM c ORDER BY 1;"))
+            .Select(row => row[0]).ShouldBe(new object?[] { "ab   ", "hello", "hx" });
+        (await RowsAsync(session, "SELECT NULL FROM c UNION SELECT fixed FROM c UNION SELECT plain FROM c ORDER BY 1;"))
+            .Select(row => row[0]).ShouldBe(new object?[] { null, "ab   ", "hello", "hx" });
+        (await RowsAsync(session, "SELECT CAST('ab' AS CHAR(5)) FROM c UNION SELECT CAST('hello' AS CHAR(6)) FROM c ORDER BY 1;"))
+            .Select(row => row[0]).ShouldBe(new object?[] { "ab   ", "hello " });
+    }
+
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Set chains: the maximum limit executes without recursive UNION frames")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Execute_MaximumUnionChain_ShouldFlattenOnSmallStack(bool all)
+    {
+        // Arrange
+        const int count = SqlQueryParserOptions.MaximumExpressionNestingLimit;
+        await using var engine = SqlDatabaseEngine.Create("deep-sets", new() { ExpressionNestingLimit = count });
+        var database = await engine.CreateDatabaseAsync("sets");
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecuteAsync(session, "CREATE TABLE t (id INT);");
+        await ExecuteAsync(session, "INSERT INTO t VALUES (1);");
+        var parser = new SqlQueryParser(new SqlQueryParserOptions { ExpressionNestingLimit = count });
+        var statement = parser.Parse(string.Join(all ? " UNION ALL " : " UNION ", Enumerable.Repeat("SELECT id FROM t", count)))
+            .ShouldBeOfType<SqlQueryStatement>();
+        statement.Diagnostics.ShouldNotContain(item => item.Severity == DiagnosticSeverity.Error);
+        statement.ExpressionNestingDepth.ShouldBe(count);
+        using var thread = new SqlDepthTestThread(512);
+
+        // Act
+        var (rows, failure) = thread.Run(() =>
+        {
+            var plan = new SqlPlanner(database.Catalog, null, database.Definitions.Functions).Plan(statement.SqlExpression)
+                .ShouldBeOfType<SqlSetOperationPlan>();
+            plan.Operands.Count.ShouldBe(count);
+            return ReadTyped();
+        });
+        int ReadTyped()
+        {
+            var result = session.ExecuteAsync(new SqlQueryRequest(statement), cancellationToken: CancellationToken.None).AsTask().GetAwaiter().GetResult()
+                .ShouldBeAssignableTo<DatabaseResultSet>();
+            try { return ReadAsync(result).GetAwaiter().GetResult().Count; }
+            finally { result.DisposeAsync().AsTask().GetAwaiter().GetResult(); }
+        }
+
+        // Assert
+        failure.ShouldBeNull();
+        rows.ShouldBe(all ? count : 1);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Mixed set chains: recursive execution fails with COHSQLE004 on an explicit small stack")]
+    public async Task Execute_DeepMixedChain_ShouldGuardStack()
+    {
+        // Arrange
+        const int count = SqlQueryParserOptions.MaximumExpressionNestingLimit;
+        await using var engine = SqlDatabaseEngine.Create("mixed-sets", new() { ExpressionNestingLimit = count });
+        var database = await engine.CreateDatabaseAsync("sets");
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecuteAsync(session, "CREATE TABLE t (id INT);");
+        await ExecuteAsync(session, "INSERT INTO t VALUES (1);");
+        string sql = "SELECT id FROM t" + string.Concat(Enumerable.Range(1, count - 1)
+            .Select(index => index % 2 == 0 ? " UNION SELECT id FROM t" : " EXCEPT SELECT id FROM t"));
+        var statement = new SqlQueryParser(new SqlQueryParserOptions { ExpressionNestingLimit = count }).Parse(sql).ShouldBeOfType<SqlQueryStatement>();
+        statement.Diagnostics.ShouldNotContain(item => item.Severity == DiagnosticSeverity.Error);
+        statement.ExpressionNestingDepth.ShouldBe(count);
+        using var thread = new SqlDepthTestThread(512);
+
+        // Act
+        var (_, failure) = thread.Run(() => session.ExecuteAsync(new SqlQueryRequest(statement), cancellationToken: CancellationToken.None)
+            .AsTask().GetAwaiter().GetResult());
+
+        // Assert
+        failure.ShouldBeAssignableTo<DatabaseException>().Diagnostics!.ShouldContain(item => item.Code == "COHSQLE004");
+        (await RowsAsync(session, "SELECT id FROM t;")).ShouldHaveSingleItem()[0].ShouldBe(1);
+    }
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Set operations: duplicate and NULL multiplicities follow SQL bags")]
     [InlineData("UNION ALL", new int[] { 0, 0, 0, 1, 1, 1, 2, 2, 3 })]
     [InlineData("UNION", new int[] { 0, 1, 2, 3 })]
@@ -77,12 +188,13 @@ public sealed class SqlSetOperationExecutionTests
         // Act / Assert
         (await RowsAsync(session, "SELECT id FROM a WHERE id IN (SELECT id FROM a UNION SELECT id FROM b) ORDER BY id;"))
             .Select(row => row[0]).ShouldBe(new object?[] { 1, 1, 2, 2 });
-        (await RowsAsync(session, "SELECT id FROM a WHERE id NOT IN (SELECT id FROM a UNION SELECT id FROM b);")).ShouldBeEmpty();
+        (await RowsAsync(session, "SELECT id FROM b WHERE id NOT IN (SELECT id FROM a UNION SELECT id FROM a);")).ShouldBeEmpty();
         (await RowsAsync(session, "SELECT id FROM b WHERE EXISTS (SELECT id FROM a EXCEPT SELECT id FROM b);")).Count.ShouldBe(3);
         (await RowsAsync(session, "SELECT id FROM b WHERE EXISTS (SELECT id FROM a EXCEPT SELECT id FROM a);")).ShouldBeEmpty();
         (await RowsAsync(session, "SELECT (SELECT id FROM a WHERE id = 1 UNION SELECT id FROM b WHERE id = 1) FROM b LIMIT 1;"))
             .ShouldHaveSingleItem()[0].ShouldBe(1);
-        await Should.ThrowAsync<DatabaseException>(() => RowsAsync(session, "SELECT (SELECT id FROM a UNION SELECT id FROM b) FROM b;"));
+        var cardinality = await Should.ThrowAsync<DatabaseException>(() => RowsAsync(session, "SELECT (SELECT id FROM a UNION SELECT id FROM b) FROM b;"));
+        cardinality.Message.ShouldBe("Scalar subquery returned more than one row; at most one row is allowed.");
         (await RowsAsync(session, "SELECT d.id FROM (SELECT id FROM a UNION SELECT id FROM b) d;"))
             .Select(row => row[0]).OrderBy(value => value).ShouldBe(new object?[] { null, 1, 2, 3 });
         (await RowsAsync(session, "SELECT outer_b.id FROM b outer_b WHERE EXISTS (SELECT id FROM a WHERE id = outer_b.id EXCEPT SELECT id FROM b WHERE id = 3) ORDER BY 1;"))
@@ -102,7 +214,11 @@ public sealed class SqlSetOperationExecutionTests
 
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Set operations: compatibility and output ordering fail at plan time on empty inputs")]
     [InlineData("SELECT id FROM a WHERE id < 0 UNION SELECT id, id FROM b WHERE id < 0;", "COHSQLE013", "1", "2")]
-    [InlineData("SELECT id FROM a WHERE id < 0 UNION SELECT CAST(id AS TEXT) FROM b WHERE id < 0;", "COHSQLE029", "Int32", "String")]
+    [InlineData("SELECT id FROM a WHERE id < 0 UNION SELECT CAST(id AS TEXT) FROM b WHERE id < 0;", "COHSQLE003", "Int32", "String")]
+    [InlineData("SELECT id, id FROM a UNION SELECT id, CAST('1' AS TEXT) FROM b;", "COHSQLE003", "column 2", "String")]
+    [InlineData("INSERT INTO a SELECT id FROM a UNION SELECT id, id FROM b;", "COHSQLE013", "1", "2")]
+    [InlineData("INSERT INTO a SELECT id FROM a UNION SELECT CAST('1' AS TEXT) FROM b;", "COHSQLE003", "column 1", "String")]
+    [InlineData("SELECT id FROM a WHERE id < 0 UNION SELECT 'invalid' FROM b WHERE id < 0;", "COHSQLE022", "INTEGER", "numeric text")]
     [InlineData("SELECT id FROM a UNION SELECT id FROM b ORDER BY id + 1;", "COHSQLE018", "output", "ordinal")]
     [InlineData("SELECT id FROM a UNION SELECT id FROM b ORDER BY a.id;", "COHSQLE018", "output", "qualified")]
     [InlineData("SELECT id FROM a UNION SELECT id FROM b ORDER BY 9;", "COHSQLE018", "output", "ordinal")]
@@ -122,6 +238,7 @@ public sealed class SqlSetOperationExecutionTests
         exception.Message.ShouldContain(first);
         exception.Message.ShouldContain(second);
         exception.Diagnostics.ShouldContain(item => item.Code == code);
+        if (code == "COHSQLE003") { exception.Message.ShouldContain(sql.Contains("id, id") ? "column 2" : "column 1", Case.Sensitive); }
     }
 
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Set operations: values coerce before duplicate comparison")]
@@ -130,6 +247,7 @@ public sealed class SqlSetOperationExecutionTests
     [InlineData("SELECT CAST('2026-01-01' AS DATE) FROM a UNION SELECT CAST('2026-01-01 00:00:00' AS TIMESTAMP) FROM b", DatabaseType.DateTime, "date")]
     [InlineData("SELECT CAST('ab' AS TEXT) FROM a UNION SELECT CAST('ab' AS CHAR(5)) FROM b", DatabaseType.String, "ab")]
     [InlineData("SELECT NULL FROM a UNION SELECT NULL FROM b", DatabaseType.String, null)]
+    [InlineData("SELECT id FROM a WHERE id = 1 UNION SELECT '1' FROM b", DatabaseType.Int32, 1)]
     public async Task Execute_CommonType_ShouldCoerceBeforeDeduplication(string sql, DatabaseType type, object? expected)
     {
         // Arrange

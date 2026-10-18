@@ -1223,12 +1223,13 @@ Both inputs must have the same column count (COHSQLE013 names both counts).
 Types are checked before reading any row. The USING common-type rule selects a category-compatible
 type with implicit registry casts, retaining the left candidate when conversions work in both
 directions. Numeric one-way widening makes INTEGER with BIGINT produce Int64 values and metadata,
-and DECIMAL with DOUBLE produce Double. Untyped NULL takes the other input's type; an all-unknown
-pair becomes TEXT. Type mismatches use COHSQLE029, naming the one-based position and both types.
+and DECIMAL with DOUBLE produce Double. Untyped NULL and string literals are unknown and take the other input's type; an all-unknown
+pair becomes TEXT. Explicit CAST to TEXT remains typed and cannot match INTEGER. Type mismatches use COHSQLE003, naming the one-based position and both types.
 Length, precision and scale survive only when both input types and modifiers agree. A domain
 survives only when every input has the identical domain and modifiers. Values convert before
 duplicate comparison: TEXT combined with CHAR trims the latter through its registered text cast,
-and DATE combined with TIMESTAMP promotes calendar values. Output names come from the first input;
+CHAR first with differing types or typmods becomes unconstrained CHAR and preserves full values,
+including TEXT lengths; no declaration default CHAR(1) is applied. DATE combined with TIMESTAMP promotes calendar values. Output names come from the first input;
 nullability is the OR of each operand's reported result metadata.
 
 Per-column collation uses explicit COLLATE over a declared column collation over the database
@@ -1243,12 +1244,17 @@ derived tables, CTE definitions and INSERT query sources, including correlated o
 by canonical rendering. Top-level SELECT operands still require FROM; the top-level operands
 of a CTE definition may use its implicit row. Each subquery counts once toward the existing
 32-level subquery limit; set nodes count individually toward the expression depth limit.
-Query lookahead is bounded; excess grouping parentheses retain their first-offending-token span.
+Parenthesized scalar queries followed by arithmetic, comparison or a list comma remain values
+(PostgreSQL gram.y:15645,15899,15916). Parenthesized WITH retains the existing single subquery
+refusal. Query lookahead is bounded; excess grouping parentheses retain their first-offending-token span.
 All operands share one statement snapshot and catalog capture, see their transaction's own
 writes, and retain existing INSERT atomicity and scalar-cardinality checks.
 
-Each binary node materializes both operands and a hash membership/count table: O(L+R) time
-and memory before sorting, with sorting adding O(N log N). There is no streaming or spill path.
+Compatible same-quantifier UNION chains flatten to one N-way materialization with O(total input)
+time and memory before sorting; no accumulated prefix is copied per link. Other set nodes
+materialize both operands and a hash membership/count table in O(L+R). Every remaining recursive
+execution level checks the stack and reports COHSQLE004. Sorting adds O(N log N); streaming
+and spilling remain excluded.
 CORRESPONDING (including BY forms) remains T2 and reports one contextual COHDBL001.
 Nested/recursive WITH, LATERAL and outer ORDER BY keys bound to derived outputs retain their
 existing exclusions.
@@ -2491,7 +2497,7 @@ pin in the same change.
 | `SQL0100` | Information | Statement does not end with `;` |
 | `COHSQLE001` | Error | Division by zero during evaluation (ISO SQLSTATE 22012) |
 | `COHSQLE002` | Error | Numeric value out of range during evaluation, store assignment, DEFAULT conversion or built-in NUMERIC CAST, including an inexact Decimal representation after any declared-scale rounding (ISO SQLSTATE 22003) |
-| `COHSQLE003` | Error | Unary `+` or `-` over a non-numeric operand (ISO SQLSTATE 42804) |
+| `COHSQLE003` | Error | Datatype mismatch, including non-numeric signs and incompatible set-operation column types; set errors name both types and the one-based position (ISO SQLSTATE 42804) |
 | `COHSQLE004` | Error | Statement too complex: parsing it or a walk over it needs more stack than the executing thread has left, which a statement within a high configured nesting limit, a deeply backtracking `LIKE` match or a thread created with a small stack can reach (ISO SQLSTATE 54001, #1151) |
 | `COHSQLE005` | Error | Column reference in a clause with no columns in scope: an `INSERT ... VALUES` row or a `LIMIT`/`OFFSET` count, raised while planning (ISO SQLSTATE class 42, #1165) |
 | `COHSQLE006` | Error | Function call whose arguments no overload of its function accepts: a count outside every overload's (`ABS(1, 2)`, `UPPER()`, `COALESCE()`, `COUNT(a, b)`, `SUM()`), `*` for a function other than a parameterless aggregate such as `COUNT`, or argument types no overload takes (`SUM(name)` over text). Raised while planning, in every expression position, `CHECK` and `DEFAULT` included; by the evaluator for a call that reaches it unplanned; and by opening a database whose catalog stores a CHECK holding `COALESCE` with no operand (ISO SQLSTATE class 42; PostgreSQL's 42883, undefined function, #1189) |
@@ -2511,7 +2517,6 @@ pin in the same change.
 | `COHSQLE020` | Error | No value supplied for a parameter; rejected before rows are read or written |
 | `COHSQLE023` | Error | Caller parameter keys collide after one leading sigil is stripped |
 | `COHSQLE027` | Error | ADD COLUMN with a volatile DEFAULT on a table with live rows requires a rewrite; names the column (#1121, #1447) |
-| `COHSQLE029` | Error | Set-operation column types cannot be matched by implicit conversion; names both types and the one-based position (42804) |
 
 Positions are absolute character offsets into the statement text; line/column
 presentation is computed by tooling from the source (offset → line mapping), not
@@ -2717,7 +2722,7 @@ quoted names to match uppercase vocabulary entries.
 | `COHSQLE024` | A column that disallows NULL receives NULL, including DEFAULT with no declared default | 23502 (`not_null_violation`) |
 | `COHSQLE025` | An identity definition, explicit assignment, ALTER, backfill or allocation violates its generation contract | 428C9 (`generated_always`) for explicit ALWAYS assignments; identity range and definition failures share the local code |
 | `COHSQLE026` | Duplicate CTE name or missing relation matching a later sibling, before reading rows | 42712 / 42P01 |
-| `COHSQLE029` | Set-operation column types cannot be matched by implicit conversion; names both types and the one-based position | 42804 |
+| `COHSQLE003` | Set-operation column types cannot be matched by implicit conversion; names both types and the one-based position | 42804 |
 
 NOT NULL failures carry one error diagnostic naming the column, with no source span at
 execution time. The existing missing-default and explicit-NULL message texts are unchanged.

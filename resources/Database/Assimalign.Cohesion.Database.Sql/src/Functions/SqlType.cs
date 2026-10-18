@@ -327,7 +327,10 @@ public sealed class SqlType : IEquatable<SqlType>
     /// <returns>The built-in type.</returns>
     internal static SqlType ForStorage(DatabaseTypeInfo storage)
     {
-        if (storage.Type == DatabaseType.Character) { return Char(storage.MaxLength ?? 1); }
+        if (storage.Type == DatabaseType.Character)
+        {
+            return storage.MaxLength is int length ? Char(length) : new SqlType("CHAR", storage, isPseudo: false);
+        }
         int? scale = SqlTypeModifiers.NormalizeScale(storage.Type, storage.Precision, storage.Scale);
         if (scale != storage.Scale)
         {

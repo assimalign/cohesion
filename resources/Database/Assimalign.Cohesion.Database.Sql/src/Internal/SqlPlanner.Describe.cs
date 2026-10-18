@@ -53,6 +53,7 @@ internal sealed partial class SqlPlanner
 
         void Visit(SqlPlan current, int? parent)
         {
+            System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
             int id = nodes.Count;
             string? target = current switch
             {
@@ -105,8 +106,7 @@ internal sealed partial class SqlPlanner
             switch (current)
             {
                 case SqlSetOperationPlan set:
-                    Visit(set.Left, id);
-                    Visit(set.Right, id);
+                    foreach (var operand in set.Operands) { Visit(operand.Query, id); }
                     break;
                 case SqlSelectPlan select:
                     Access(select.Table, select.Access, id);

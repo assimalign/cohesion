@@ -10,14 +10,38 @@ public sealed partial class SqlQueryParser
     private bool StartsQuery(TokenLexer lexer, bool queryExpected = false)
     {
         int depth = _parenthesisDepth;
+        int wrappers = 0;
         while (lexer.Current.Type == TokenType.LeftParen)
         {
             // Bound lookahead without changing the enclosing grammar's parenthesis count.
             // Its guarded parser owns the depth diagnostic once classification stops.
             if (++depth > _nestingLimit) { return queryExpected; }
+            wrappers++;
             if (!AdvancePastComments(ref lexer)) { return false; }
         }
-        return IsKeyword(ref lexer, "SELECT") || IsKeyword(ref lexer, "WITH");
+        if (!IsKeyword(ref lexer, "SELECT") && !IsKeyword(ref lexer, "WITH")) { return false; }
+        if (queryExpected || wrappers == 0) { return true; }
+
+        // PostgreSQL gram.y:15645,15899,15916: grouped subqueries also serve as
+        // value operands. Check each leading wrapper at its matching close.
+        int nesting = wrappers;
+        int remaining = wrappers;
+        while (AdvancePastComments(ref lexer))
+        {
+            if (lexer.Current.Type == TokenType.LeftParen) { nesting++; }
+            else if (lexer.Current.Type == TokenType.RightParen && --nesting < remaining)
+            {
+                remaining--;
+                var next = lexer;
+                if (!AdvancePastComments(ref next)) { return true; }
+                bool continuation = next.Current.Type is TokenType.RightParen or TokenType.Semicolon ||
+                    IsKeyword(ref next, "UNION") || IsKeyword(ref next, "INTERSECT") || IsKeyword(ref next, "EXCEPT") ||
+                    IsKeyword(ref next, "ORDER") || IsKeyword(ref next, "LIMIT") || IsKeyword(ref next, "OFFSET") || IsKeyword(ref next, "FETCH");
+                if (!continuation) { return false; }
+                if (remaining == 0) { return true; }
+            }
+        }
+        return true;
     }
 
     private SqlQueryBodyExpression ParseQueryExpression(ref TokenLexer lexer)
@@ -43,7 +67,7 @@ public sealed partial class SqlQueryParser
             if (IsWord(ref lexer, "CORRESPONDING"))
             {
                 RequireSkippedConstruct(lexer.Current.Position, CurrentTokenEnd(ref lexer), "CORRESPONDING");
-                ConsumeRemaining(ref lexer);
+                SkipQueryRemainder(ref lexer);
                 return left;
             }
             if (!TryOpenChain(ref lexer, left.ExpressionDepth) || !TryEnterOperand(ref lexer)) { return left; }
@@ -64,6 +88,12 @@ public sealed partial class SqlQueryParser
     private SqlQueryBodyExpression ParseQueryOperand(ref TokenLexer lexer)
     {
         if (IsKeyword(ref lexer, "SELECT")) { return ParseSelect(ref lexer); }
+        if (IsKeyword(ref lexer, "WITH"))
+        {
+            RequireSkippedConstruct(lexer.Current.Position, CurrentTokenEnd(ref lexer), "WITH inside a subquery or derived table");
+            SkipQueryRemainder(ref lexer);
+            return EmptyWithQuery();
+        }
         if (lexer.Current.Type == TokenType.LeftParen)
         {
             int start = lexer.Current.Position;

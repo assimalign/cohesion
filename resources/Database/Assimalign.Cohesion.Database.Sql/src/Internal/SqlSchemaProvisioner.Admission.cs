@@ -75,11 +75,27 @@ internal sealed partial class SqlSchemaProvisioner
                 }
                 break;
             case SqlSetOperationExpression set:
-                foreach (var table in References(set.Left)) { yield return table; }
-                foreach (var table in References(set.Right)) { yield return table; }
-                foreach (var expression in set.OrderBy.Select(order => order.Expression).Append(set.Limit).Append(set.Offset))
+                var pending = new Stack<SqlQueryBodyExpression>();
+                pending.Push(set);
+                while (pending.TryPop(out var body))
                 {
-                    foreach (var table in References(expression)) { yield return table; }
+                    if (body is SqlSetOperationExpression operation)
+                    {
+                        pending.Push(operation.Right);
+                        pending.Push(operation.Left);
+                        if (!ReferenceEquals(operation, set))
+                        {
+                            foreach (var definition in operation.CommonTables)
+                            {
+                                foreach (var table in References(definition.Body)) { yield return table; }
+                            }
+                        }
+                        foreach (var expression in operation.OrderBy.Select(order => order.Expression).Append(operation.Limit).Append(operation.Offset))
+                        {
+                            foreach (var table in References(expression)) { yield return table; }
+                        }
+                    }
+                    else { foreach (var table in References(body)) { yield return table; } }
                 }
                 break;
             case SqlSelectExpression select:

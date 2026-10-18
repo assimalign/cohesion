@@ -11,6 +11,35 @@ namespace Assimalign.Cohesion.Database.Sql.Language.Tests;
 
 public sealed class SqlSetOperationParserTests
 {
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Parenthesized queries: value continuations retain expression grammar")]
+    [InlineData("SELECT ((SELECT a FROM t) + 1) FROM u")]
+    [InlineData("SELECT a FROM t WHERE a IN ((SELECT a FROM u), 2)")]
+    [InlineData("SELECT a FROM t WHERE ((SELECT COUNT(*) FROM u) > 0)")]
+    [InlineData("SELECT (((SELECT a FROM t) + 1)) FROM u")]
+    public void Parse_ParenthesizedQueryValue_ShouldRoundTrip(string sql)
+    {
+        // Arrange / Act
+        var query = Parse(sql);
+        var reloaded = Parse(SqlExpressionRenderer.Render(query));
+
+        // Assert
+        SqlTreeDump.Dump(reloaded).ShouldBe(SqlTreeDump.Dump(query));
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Refused query constructs: one diagnostic leaves caller parentheses intact")]
+    [InlineData("SELECT a FROM t WHERE a IN (SELECT a FROM u UNION CORRESPONDING SELECT a FROM v)", "CORRESPONDING")]
+    [InlineData("SELECT a FROM t WHERE a IN ((WITH q AS (SELECT a FROM u) SELECT a FROM q))", "WITH inside a subquery")]
+    [InlineData("SELECT a FROM t UNION (WITH q AS (SELECT a FROM u) SELECT a FROM q)", "WITH inside a subquery")]
+    public void Parse_RefusedNestedQuery_ShouldReportOneDiagnostic(string sql, string construct)
+    {
+        // Arrange / Act
+        var diagnostics = new SqlQueryParser().Parse(sql).Diagnostics;
+
+        // Assert
+        var error = diagnostics.Where(item => item.Severity == DiagnosticSeverity.Error).ShouldHaveSingleItem();
+        error.Code.ShouldBe("COHDBL001");
+        error.Message!.ShouldContain(construct, Case.Sensitive);
+    }
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Set operations: every quantifier and query position parses")]
     [InlineData("UNION")]
     [InlineData("UNION ALL")]

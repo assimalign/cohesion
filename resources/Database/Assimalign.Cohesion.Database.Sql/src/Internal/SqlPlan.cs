@@ -143,11 +143,12 @@ internal sealed record SqlProjection(string Name, int? ColumnOrdinal, SqlExpress
 internal sealed record SqlProjectionMetadata(SqlCollationCandidate Collation, SqlCatalogColumn? SourceColumn,
     DatabaseTypeInfo? TypeInfo = null, string? DomainName = null);
 
-/// <summary>A materialized binary set operation over common-typed outputs.</summary>
+internal sealed record SqlSetOperand(SqlPlan Query, IReadOnlyList<SqlBoundExpression> Values);
+
+/// <summary>A materialized set operation, with compatible UNION chains stored as N inputs.</summary>
 internal sealed record SqlSetOperationPlan(
-    SqlPlan Left, SqlPlan Right, SqlSetOperator Operator, bool IsAll,
+    List<SqlSetOperand> Operands, SqlSetOperator Operator, bool IsAll,
     IReadOnlyList<SqlProjection> Projections, IReadOnlyList<SqlCatalogColumn> Columns,
-    IReadOnlyList<SqlBoundExpression> LeftValues, IReadOnlyList<SqlBoundExpression> RightValues,
     IReadOnlyList<SqlBoundOrdering> OrderBy, long? Limit, long? Offset) : SqlRelationPlan
 {
     internal override IReadOnlyList<SqlProjection> OutputProjections => Projections;

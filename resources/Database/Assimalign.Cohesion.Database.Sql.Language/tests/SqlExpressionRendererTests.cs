@@ -312,10 +312,8 @@ public sealed class SqlExpressionRendererTests
             foreach (bool inPredicate in new[] { false, true })
             {
                 var declared = inPredicate ? ParseWhere(text, out var errors) : ParseSelectColumn(text, out errors);
-                if (declared is null || errors.Count > 0)
-                {
-                    continue; // the generator also writes text the dialect rejects
-                }
+                errors.ShouldBeEmpty($"Generated expression '{text}' must parse.");
+                declared.ShouldNotBeNull();
 
                 // Act
                 string rendered = SqlExpressionRenderer.Render(declared);
@@ -330,7 +328,7 @@ public sealed class SqlExpressionRendererTests
         }
 
         // Most generated text must parse, or the property would hold vacuously.
-        checkedCount.ShouldBeGreaterThan(3000);
+        checkedCount.ShouldBe(8000);
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql.Language] - Renderer: generated WITH roots preserve complete ordered definitions")]
@@ -343,7 +341,7 @@ public sealed class SqlExpressionRendererTests
         {
             string text = generator.NextQuery(depth: 1 + iteration % 3);
             var statement = (SqlQueryStatement)new SqlQueryParser().Parse(text);
-            if (statement.Diagnostics.Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)) { continue; }
+            statement.Diagnostics.ShouldNotContain(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error, text);
             var declared = statement.SqlExpression.ShouldBeAssignableTo<SqlQueryBodyExpression>();
 
             // Act
