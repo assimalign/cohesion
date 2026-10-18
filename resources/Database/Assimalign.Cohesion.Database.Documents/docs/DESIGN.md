@@ -635,8 +635,13 @@ definitions. A zero-match delete succeeds with affected count zero. Schema owner
 content mutation; system sources remain read-only and missing collections give COHDOC002.
 The existing Complete affected count reports deletions with no Document frames. USE KEYS,
 RETURNING and DELETE LIMIT remain deferred. No catalog-format or protocol change is needed.
-The process-exit fixture checks committed deletions leave neither content nor index entries,
-and an interrupted uncommitted deletion restores both during recovery.
+The process-exit fixture checks document reads and index-seek query results after committed
+and interrupted uncommitted deletions. Documents.Catalog restart tests inspect the recovered
+`by_rank` B-tree directly under the latest snapshot: a committed-deleted key has no live entry,
+and an abandoned deletion restores exactly one. The engine's journal fault-injection test also
+checks document reads and indexed lookup after an uncommitted DELETE's abort record is lost.
+These fault-injection cases defer background page write-back alongside other maintenance so
+the test flow alone drains the buffered abort record.
 
 OQL INSERT creates externally keyed documents using the [SQL++ KEY/VALUE forms](https://docs.couchbase.com/server/current/n1ql/n1ql-language-reference/insert.html).
 A collection declares no key field. Id-less AsterixDB/PartiQL forms are refused and ids are never
