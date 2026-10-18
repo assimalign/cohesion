@@ -292,33 +292,54 @@ public sealed class SqlDerivedTableExecutionTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Derived tables: output ordering executes after binding")]
-    [InlineData("SELECT q.years FROM (SELECT id AS years FROM t) q ORDER BY years")]
-    [InlineData("SELECT q.years FROM (SELECT id AS years FROM t) q ORDER BY 1")]
-    [InlineData("SELECT q.years FROM (SELECT age AS years FROM t) q ORDER BY years;")]
-    [InlineData("SELECT q.years FROM (SELECT age AS years FROM t) q ORDER BY 1;")]
-    [InlineData("SELECT * FROM (SELECT id FROM u) d ORDER BY id;")]
-    [InlineData("SELECT q.years FROM (SELECT id AS years FROM t) q ORDER BY q.years")]
-    [InlineData("SELECT q.id + 1 AS n FROM t JOIN (SELECT id FROM t) q ON t.id = q.id ORDER BY n")]
-    [InlineData("SELECT q.id FROM t JOIN (SELECT id FROM t) q ON t.id = q.id ORDER BY 1")]
-    [InlineData("SELECT q.id, COUNT(*) FROM t JOIN (SELECT id FROM t) q ON t.id = q.id GROUP BY q.id ORDER BY q.id")]
-    [InlineData("SELECT id FROM t JOIN (SELECT CAST(id AS BIGINT) AS id FROM t) q USING (id) ORDER BY id")]
-    public async Task Execute_DerivedOutputOrdering_ShouldReturnOrderedOutput(string sql)
+    [InlineData("ASC NULLS FIRST")]
+    [InlineData("ASC NULLS LAST")]
+    [InlineData("DESC NULLS FIRST")]
+    [InlineData("DESC NULLS LAST")]
+    public async Task Execute_DerivedOutputOrdering_ShouldReturnOrderedOutput(string modifier)
     {
         // Arrange
         await using var engine = SqlDatabaseEngine.Create("derived-order", new());
         var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
-        await session.ExecuteAsync("CREATE TABLE t (id INT, age INT);", cancellationToken: CancellationToken.None);
-        await session.ExecuteAsync("INSERT INTO t VALUES (1, 10);", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE t (row_key INT, id INT, age INT, name TEXT);", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT INTO t VALUES (1, 3, 30, 'B'), (2, NULL, NULL, 'z'), (3, 1, 10, 'a'), (4, NULL, NULL, NULL), (5, 2, 20, 'c');", cancellationToken: CancellationToken.None);
         await session.ExecuteAsync("CREATE TABLE u (id INT);", cancellationToken: CancellationToken.None);
-        await session.ExecuteAsync("INSERT INTO u VALUES (1);", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT INTO u VALUES (3), (NULL), (1), (NULL), (2);", cancellationToken: CancellationToken.None);
+        object?[] expected = modifier switch
+        {
+            "ASC NULLS FIRST" => [null, null, 1, 2, 3],
+            "ASC NULLS LAST" => [1, 2, 3, null, null],
+            "DESC NULLS FIRST" => [null, null, 3, 2, 1],
+            _ => [3, 2, 1, null, null],
+        };
+        (string Sql, object?[] Expected)[] queries =
+        [
+            ($"SELECT q.years FROM (SELECT id AS years FROM t) q ORDER BY years {modifier}", expected),
+            ($"SELECT q.years FROM (SELECT id AS years FROM t) q ORDER BY 1 {modifier}", expected),
+            ($"SELECT q.years FROM (SELECT age AS years FROM t) q ORDER BY years {modifier}", expected.Select(value => value is int number ? (object?)(number * 10) : null).ToArray()),
+            ($"SELECT q.years FROM (SELECT age AS years FROM t) q ORDER BY 1 {modifier}", expected.Select(value => value is int number ? (object?)(number * 10) : null).ToArray()),
+            ($"SELECT * FROM (SELECT id FROM u) d ORDER BY id {modifier}", expected),
+            ($"SELECT q.years FROM (SELECT id AS years FROM t) q ORDER BY q.years {modifier}", expected),
+            ($"SELECT q.id + 1 AS n FROM t JOIN (SELECT row_key, id FROM t) q ON t.row_key = q.row_key ORDER BY n {modifier}", expected.Select(value => value is int number ? (object?)(number + 1) : null).ToArray()),
+            ($"SELECT q.id FROM t JOIN (SELECT row_key, id FROM t) q ON t.row_key = q.row_key ORDER BY 1 {modifier}", expected),
+            ($"SELECT q.id, COUNT(*) FROM t JOIN (SELECT row_key, id FROM t) q ON t.row_key = q.row_key GROUP BY q.id ORDER BY q.id {modifier}", expected.Distinct().ToArray()),
+            ($"SELECT id FROM t LEFT JOIN (SELECT CAST(id AS BIGINT) AS id FROM t) q USING (id) ORDER BY id {modifier}", expected.Select(value => value is int number ? (object?)(long)number : null).ToArray()),
+            ($"SELECT q.id, q.total FROM (SELECT id, COUNT(*) AS total FROM t GROUP BY id) q ORDER BY q.id {modifier}", expected.Distinct().ToArray()),
+        ];
 
-        // Act
-        var rows = await RowsAsync(session, sql);
-
-        // Assert
-        rows.ShouldHaveSingleItem()[0].ShouldBe(sql.Contains("age AS", StringComparison.Ordinal) ? 10 :
-            sql.Contains("+ 1 AS", StringComparison.Ordinal) ? 2 : sql.Contains("CAST(id AS BIGINT)", StringComparison.Ordinal) ? (object)1L : 1);
+        // Act / Assert
+        foreach (var (sql, values) in queries)
+        {
+            var rows = await RowsAsync(session, sql);
+            rows.Select(row => row[0]).ShouldBe(values, sql);
+            if (rows[0].Length == 2)
+            {
+                rows.Select(row => row[1]).ShouldBe(values.Select(value => value is null ? (object?)2L : 1L), sql);
+            }
+        }
+        var collated = await RowsAsync(session, "SELECT d.n FROM (SELECT name COLLATE case_insensitive AS n FROM t) d ORDER BY d.n NULLS LAST");
+        collated.Select(row => row[0]).ShouldBe(new object?[] { "a", "B", "c", "z", null });
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Derived tables: USING composes across materialization and preserves shared domains")]
