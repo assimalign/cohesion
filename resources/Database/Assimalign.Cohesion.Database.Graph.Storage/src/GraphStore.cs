@@ -60,8 +60,8 @@ public sealed partial class GraphStore
 
     /// <summary>
     /// Checks graph record format 2 and that every index tree the storage registers is in the B-tree page format
-    /// this engine reads (<see cref="BTreeIndexManager.FormatVersion"/>), reading only
-    /// the registrations and each tree's root page. An engine calls it before the
+    /// this engine reads (<see cref="BTreeIndexManager.FormatVersion"/>), reading record
+    /// headers, registrations and each tree's root page. An engine calls it before the
     /// coordinator's recovery scrub, so a database whose indexes it cannot read is
     /// refused before anything is written to it; <see cref="Open"/> checks again as it
     /// attaches the trees. Registration records carry no MVCC stamps, so they read the
