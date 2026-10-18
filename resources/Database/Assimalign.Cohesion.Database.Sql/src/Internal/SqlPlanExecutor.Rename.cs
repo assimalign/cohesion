@@ -89,13 +89,22 @@ internal sealed partial class SqlPlanExecutor
                 : _catalog.RenameTableAsync(plan.Table, plan.NewName, checks, publication, cancellationToken)
             : publication is null ? _catalog.RenameColumnAsync(plan.Table, plan.ColumnName, plan.NewName, checks, cancellationToken)
                 : _catalog.RenameColumnAsync(plan.Table, plan.ColumnName, plan.NewName, checks, publication, cancellationToken)).ConfigureAwait(false);
-        _definitions.Get(updated, CancellationToken.None);
-        foreach (var child in children)
+        List<Exception>? failures = null;
+        foreach (var table in children.Prepend(updated))
         {
-            // The catalog republishes each incoming FK owner in the same commit.
-            _catalog.TryGetTable(child.Schema, child.Name, out var published);
-            _definitions.Get(published, CancellationToken.None);
+            try
+            {
+                // The catalog republishes each incoming FK owner in the same commit.
+                _catalog.TryGetTable(table.Schema, table.Name, out var published);
+                _definitions.Get(published, CancellationToken.None);
+            }
+            catch (Exception failure)
+            {
+                // Every published version needs binding even if an earlier one failed.
+                (failures ??= []).Add(failure);
+            }
         }
+        if (failures is not null) { throw new AggregateException(failures); }
         return new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0);
     }
 

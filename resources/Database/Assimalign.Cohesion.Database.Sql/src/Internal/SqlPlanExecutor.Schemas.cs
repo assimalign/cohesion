@@ -87,18 +87,21 @@ internal sealed partial class SqlPlanExecutor
         await SelfCommitAsync(statement, statement.ScriptReceipt is { } publication
             ? _catalog.DropSchemaAsync(schema.Name, plan.Cascade, publication, cancellationToken)
             : _catalog.DropSchemaAsync(schema.Name, plan.Cascade, cancellationToken)).ConfigureAwait(false);
+        List<Exception>? failures = null;
         foreach (var child in contents.AffectedTables.Where(table => !table.Schema.Equals(schema.Name, StringComparison.OrdinalIgnoreCase)))
         {
-            _catalog.TryGetTable(child.Schema, child.Name, out var published);
-            _definitions.Adopt(published, child, cancellationToken);
-        }
-        foreach (var index in contents.Indexes)
-        {
-            if (_indexManager.TryGetIndex(index.TableObjectId, index.Name, out _))
+            try
             {
-                await _indexManager.DropIndexAsync(statement.Transaction, index.TableObjectId, index.Name, cancellationToken).ConfigureAwait(false);
+                _catalog.TryGetTable(child.Schema, child.Name, out var published);
+                _definitions.Adopt(published, child, CancellationToken.None);
+            }
+            catch (Exception failure)
+            {
+                // Publication committed: finish every other binding and directory removal.
+                (failures ??= []).Add(failure);
             }
         }
+        await RemoveDroppedIndexesAsync(statement, contents.Indexes, failures, CancellationToken.None).ConfigureAwait(false);
         return new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0);
     }
 

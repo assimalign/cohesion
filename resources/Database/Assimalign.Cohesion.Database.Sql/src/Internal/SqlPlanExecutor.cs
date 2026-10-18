@@ -979,11 +979,27 @@ internal sealed partial class SqlPlanExecutor
         EnsureSameIdentity(before, current);
         EnsureCanDropColumn(current, plan.ColumnName, cancellationToken);
 
+        // Bind the projected version before publication, while folding still belongs to the
+        // caller's cancellable validation. The catalog remains authoritative for invalid drops.
+        int ordinal = Enumerable.Range(0, current.Columns.Count).FirstOrDefault(
+            index => current.Columns[index].Name.Equals(plan.ColumnName, StringComparison.OrdinalIgnoreCase), -1);
+        SqlCatalogTable? prepared = null;
+        if (ordinal >= 0 && current.Columns.Count > 1 &&
+            !current.PrimaryKeyColumns.Contains(plan.ColumnName, StringComparer.OrdinalIgnoreCase))
+        {
+            prepared = new SqlCatalogTable(current.ObjectId, current.Schema, current.Name,
+                current.Columns.Where((_, index) => index != ordinal).ToArray(), current.PrimaryKeyColumns,
+                current.Owner, current.OwningSchema, current.Constraints,
+                [.. current.DroppedColumnOrdinals, current.GetPhysicalOrdinal(ordinal)]);
+            _definitions.Get(prepared, cancellationToken);
+        }
+
         // The authoritative step: the catalog checks the drop again under its own lock
         // and commits it. Bind the published version before the statement completes, as
         // every DDL does, so no later write parses its definitions.
         var updated = await SelfCommitAsync(statement, (statement.ScriptReceipt is null ? _catalog.DropColumnAsync(plan.Schema, plan.Name, plan.ColumnName, cancellationToken) : _catalog.DropColumnAsync(plan.Schema, plan.Name, plan.ColumnName, statement.ScriptReceipt, cancellationToken))).ConfigureAwait(false);
-        _definitions.Get(updated, cancellationToken);
+        if (prepared is not null) { _definitions.Adopt(updated, prepared, CancellationToken.None); }
+        else { _definitions.Get(updated, CancellationToken.None); }
         return new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0);
     }
 
@@ -1028,17 +1044,34 @@ internal sealed partial class SqlPlanExecutor
 
         await SelfCommitAsync(statement, (statement.ScriptReceipt is null ? _catalog.DropTableAsync(plan.Schema, plan.Name, cancellationToken) : _catalog.DropTableAsync(plan.Schema, plan.Name, statement.ScriptReceipt, cancellationToken))).ConfigureAwait(false);
 
-        foreach (var metadata in droppedIndexes)
-        {
-            if (_indexManager.TryGetIndex(table.ObjectId, metadata.Name, out _))
-            {
-                await _indexManager.DropIndexAsync(statement.Transaction, table.ObjectId, metadata.Name, cancellationToken).ConfigureAwait(false);
-            }
-        }
+        await RemoveDroppedIndexesAsync(statement, droppedIndexes, cancellationToken: CancellationToken.None).ConfigureAwait(false);
 
         // The catalog committed the retired identity with the unpublication. The
         // version-purge worker reclaims its rows and trees after existing readers finish.
         return new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0);
+    }
+
+    // Catalog unpublication is irrevocable. Caller cancellation or a failed binding/directory
+    // removal must not leave other retired handles live when reclamation frees their pages.
+    private async Task RemoveDroppedIndexesAsync(SqlStatementContext statement,
+        IReadOnlyList<SqlCatalogIndex> indexes, List<Exception>? failures = null, CancellationToken cancellationToken = default)
+    {
+        foreach (var index in indexes)
+        {
+            try
+            {
+                if (_indexManager.TryGetIndex(index.TableObjectId, index.Name, out _))
+                {
+                    await _indexManager.DropIndexAsync(statement.Transaction, index.TableObjectId, index.Name, cancellationToken).ConfigureAwait(false);
+                }
+            }
+            catch (Exception failure)
+            {
+                // Complete the remaining mandatory removals before reporting any failures.
+                (failures ??= []).Add(failure);
+            }
+        }
+        if (failures is not null) { throw new AggregateException(failures); }
     }
 
     /// <summary>
@@ -1236,10 +1269,7 @@ internal sealed partial class SqlPlanExecutor
 
         await SelfCommitAsync(statement, (statement.ScriptReceipt is null ? _catalog.DropIndexAsync(plan.Table.ObjectId, metadata.Name, remaining, cancellationToken) : _catalog.DropIndexAsync(plan.Table.ObjectId, metadata.Name, remaining, statement.ScriptReceipt, cancellationToken))).ConfigureAwait(false);
 
-        if (_indexManager.TryGetIndex(plan.Table.ObjectId, metadata.Name, out _))
-        {
-            await _indexManager.DropIndexAsync(statement.Transaction, plan.Table.ObjectId, metadata.Name, cancellationToken).ConfigureAwait(false);
-        }
+        await RemoveDroppedIndexesAsync(statement, [metadata], cancellationToken: CancellationToken.None).ConfigureAwait(false);
 
         return new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0);
     }

@@ -2053,7 +2053,14 @@ CASCADE delegates the whole multi-record mutation to one SqlCatalog.DropSchemaAs
 removes live index directories after commit. The session requests reclamation for DROP SCHEMA as
 for DROP TABLE; one durable intent per table survives failure and restart. The executor adopts
 each surviving external child's bound CHECK and DEFAULT expressions from its previous instance;
-the next write does not reparse unchanged definitions. RESTRICT, locks, ownership and the CASCADE
+the next write does not reparse unchanged definitions. After catalog commit, binding adoption
+and live index-directory removal use CancellationToken.None; every child and index is attempted
+before cleanup failures are aggregated. DROP TABLE and DROP INDEX share the directory cleanup;
+ALTER's post-commit binding also ignores caller cancellation, and rename attempts every affected
+table before aggregating failures. DROP COLUMN binds its projected definition before publication
+with the caller's token, then adopts that binding after commit without refolding. The session
+observes cancellation after this mandatory cleanup and before its logical commit, preserving cancellation instead of wrapping it as
+a transaction-aborted error. RESTRICT, locks, ownership and the CASCADE
 drop set use SqlPlanExecutor.Schemas.ObjectsInNamespace over a catalog snapshot. Future views
 (#1124) must extend this one SQL-side enumeration and its revalidation; the catalog's commit-time
 check remains an independent invariant guard.

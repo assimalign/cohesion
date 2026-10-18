@@ -159,6 +159,11 @@ namespace contents before publication. A changed set receives `COHSQLE013` with 
 Deferred typed migration steps wait cancellably for definition metadata leases; overlapping
 schema DDL cannot fail a migration merely by holding that lease.
 
+After DROP SCHEMA/TABLE/INDEX or ALTER TABLE commits its catalog change, caller cancellation
+cannot interrupt required binding or live index-directory cleanup. Cleanup attempts every
+affected object before reporting aggregated failures; DROP's retired pages remain subject to
+asynchronous reclamation.
+
 AUTHORIZATION, including the form with no explicit namespace name, is rejected with COHDBL001
 naming AUTHORIZATION. Nested CREATE/GRANT schema elements are rejected with COHDBL001 naming
 schema elements, including with IF NOT EXISTS. SCHEMA and AUTHORIZATION stay contextual;

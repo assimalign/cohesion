@@ -317,7 +317,7 @@ internal sealed partial class SqlPlanExecutor
                 }
             }
             _definitions.Adopt(await SelfCommitAsync(statement,
-                (statement.ScriptReceipt is null ? _catalog.AddColumnAsync(plan.Schema, plan.Name, column, cancellationToken) : _catalog.AddColumnAsync(plan.Schema, plan.Name, column, statement.ScriptReceipt, cancellationToken))).ConfigureAwait(false), replacement, cancellationToken);
+                (statement.ScriptReceipt is null ? _catalog.AddColumnAsync(plan.Schema, plan.Name, column, cancellationToken) : _catalog.AddColumnAsync(plan.Schema, plan.Name, column, statement.ScriptReceipt, cancellationToken))).ConfigureAwait(false), replacement, CancellationToken.None);
             return new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0);
         }
         // Backfill is logical: missing trailing fields resolve from the immutable
@@ -348,7 +348,7 @@ internal sealed partial class SqlPlanExecutor
             // The catalog publishes its own copy of the replacement definition, built from the
             // same column and constraint instances, so it adopts the replacement's bindings.
             _definitions.Adopt(await SelfCommitAsync(statement, (statement.ScriptReceipt is null ? _catalog.AddColumnAsync(plan.Schema, plan.Name, column, cancellationToken) : _catalog.AddColumnAsync(plan.Schema, plan.Name, column, statement.ScriptReceipt, cancellationToken))).ConfigureAwait(false),
-                replacement, cancellationToken);
+                replacement, CancellationToken.None);
         }
         else
         {
@@ -365,7 +365,7 @@ internal sealed partial class SqlPlanExecutor
         {
             // The new version no longer carries the constraint, so the dropped predicate is
             // never evaluated again; it keeps the other bindings of the version it came from.
-            _definitions.Adopt(await SelfCommitAsync(statement, (statement.ScriptReceipt is null ? _catalog.DropConstraintAsync(plan.Table.Schema, plan.Table.Name, plan.ConstraintName, cancellationToken) : _catalog.DropConstraintAsync(plan.Table.Schema, plan.Table.Name, plan.ConstraintName, statement.ScriptReceipt, cancellationToken))).ConfigureAwait(false), plan.Table, cancellationToken);
+            _definitions.Adopt(await SelfCommitAsync(statement, (statement.ScriptReceipt is null ? _catalog.DropConstraintAsync(plan.Table.Schema, plan.Table.Name, plan.ConstraintName, cancellationToken) : _catalog.DropConstraintAsync(plan.Table.Schema, plan.Table.Name, plan.ConstraintName, statement.ScriptReceipt, cancellationToken))).ConfigureAwait(false), plan.Table, CancellationToken.None);
         }
         else if (_catalog.TryGetIndex(plan.Table.ObjectId, plan.ConstraintName, out var index) && index.IsUnique)
         {
