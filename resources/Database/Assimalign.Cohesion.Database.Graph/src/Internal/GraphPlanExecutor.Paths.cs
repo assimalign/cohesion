@@ -99,10 +99,13 @@ internal static partial class GraphPlanExecutor
                     case null:
                         if (plan.Pattern.Variable is { } pathVariable)
                         { state.Bindings.Add(pathVariable, new GraphPath(state.Nodes.AsReadOnly(), state.Relationships.AsReadOnly())); }
+                        // Fixed chains retain the base matcher's source-ordered nodes, then edges,
+                        // independently of the anchor. Repetitions retain reverse encounter order.
+                        var finalProperties = shape.HasQuantifier ? state.Properties : FixedProperties(shape, state);
                         bool matches = true;
-                        for (var check = state.Properties; check is not null; check = check.Previous)
+                        for (var check = finalProperties; check is not null; check = check.Previous)
                         { if (!PropertiesMatch(check.Expected, check.Actual, state.Bindings, parameters, deferUnbound)) { matches = false; break; } }
-                        if (matches) { acceptMatch(state.Bindings, state.Properties); }
+                        if (matches) { acceptMatch(state.Bindings, finalProperties); }
                         break;
                     case StartLeftTask start:
                         frontier.Push(state with { Current = start.Anchor, Task = start.Next });
@@ -113,7 +116,7 @@ internal static partial class GraphPlanExecutor
                         foreach (var pattern in nodes.Patterns)
                         {
                             if (!AcceptNode(pattern, state.Current, state.Bindings, parameters, deferUnbound: true)) { accepted = false; break; }
-                            properties = new MatchedProperties(pattern.Properties, state.Current.Properties, properties);
+                            if (shape.HasQuantifier) { properties = new MatchedProperties(pattern.Properties, state.Current.Properties, properties); }
                         }
                         if (accepted) { frontier.Push(state with { Properties = properties, Task = nodes.Next }); }
                         break;
@@ -179,11 +182,25 @@ internal static partial class GraphPlanExecutor
                         if (hop.Forward) { copy.Nodes.Add(nextNode); copy.Relationships.Add(relationship); }
                         else { copy.Nodes.Insert(0, nextNode); copy.Relationships.Insert(0, relationship); }
                         frontier.Push(copy with { Current = nextNode, Task = hop.Next,
-                            Properties = new MatchedProperties(hop.Pattern.Properties, relationship.Properties, copy.Properties) });
+                            Properties = shape.HasQuantifier
+                                ? new MatchedProperties(hop.Pattern.Properties, relationship.Properties, copy.Properties) : copy.Properties });
                         break;
                 }
             }
         }
+    }
+
+    private static MatchedProperties? FixedProperties(GraphPathShape shape, PathState state)
+    {
+        MatchedProperties? properties = null;
+        for (int i = shape.Segments.Count - 1; i >= 0; i--)
+        { properties = new MatchedProperties(shape.Segments[i].Body.Edge!.Properties, state.Relationships[i].Properties, properties); }
+        for (int i = shape.Nodes.Count - 1; i >= 0; i--)
+        {
+            for (int j = shape.Nodes[i].Count - 1; j >= 0; j--)
+            { properties = new MatchedProperties(shape.Nodes[i][j].Properties, state.Nodes[i].Properties, properties); }
+        }
+        return properties;
     }
 
     private static PathTask SegmentTasks(GraphPathSegment segment, bool forward, PathTask? next)

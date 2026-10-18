@@ -530,6 +530,10 @@ buffers and materialized results retain their existing budgets. For a fixed hop,
 precede copying the trail for descent. Each state carries the trail's relationship identity set, source-ordered entities, group lists and the actual pattern/property
 pair for every occurrence. This mapping replaces positional indexing: repeated properties and
 anonymous elements are checked correctly after full-clause binding, including forward references.
+Fixed chains recheck node maps in source order, then relationship maps in source order, regardless
+of anchor, preserving the base matcher's short-circuit behavior. Quantified paths recheck maps in
+reverse encounter order (expansion goes right then left; constraints at a boundary are encountered
+in source order); entries within each map retain their declared order.
 Zero repetitions conjoin the outer boundary nodes; a Min=0 body's unknown labels/types cannot
 set MatchesNothing on the clause, although their warnings are retained.
 
