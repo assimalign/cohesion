@@ -17,7 +17,9 @@ null extension, and finite paths including named paths such as
 `-[r:T|U]->`, every directed ISO edge in full and abbreviated form (`->`, `<-`, `-`, `<->`), scalar
 Boolean, arithmetic, null/truth, list-membership and string filters and labeled predicates (`n IS NOT LABELED A`, `n:A|B`),
 CASE, COALESCE, NULLIF, list/map literals and parameters, subscripts and map/entity property access,
-RETURN expressions and aliases, DISTINCT/ALL, RETURN * and standalone RETURN, `INSERT`, `CREATE` as an insertion compatibility extension, and restricted or
+RETURN expressions and aliases, DISTINCT/ALL, RETURN * and standalone RETURN,
+ORDER BY with ASC/DESC and NULLS FIRST/LAST, OFFSET (Cypher SKIP) and LIMIT,
+`INSERT`, `CREATE` as an insertion compatibility extension, and restricted or
 cascading deletion. Unsupported features, including the undirected tilde edges, produce
 `COHDBL001`; malformed supported syntax produces stable `GQL` diagnostics, and a Cypher arrow such
 as `(a)-->(b)`, which GQL reads as a comment, produces `GQL0008`. The parser does not throw for

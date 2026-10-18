@@ -11,6 +11,15 @@ internal static class GraphValueExpressions
     {
         switch (expression)
         {
+            case GqlBinaryExpression binary: yield return binary.Left; yield return binary.Right; break;
+            case GqlLogicalExpression logical:
+                foreach (var operand in logical.Operands) { yield return operand; }
+                break;
+            case GqlUnaryExpression unary: yield return unary.Operand; break;
+            case GqlIsNullExpression test: yield return test.Operand; break;
+            case GqlTruthTestExpression test: yield return test.Operand; break;
+            case GqlInExpression membership: yield return membership.Operand; yield return membership.List; break;
+            case GqlStringPredicateExpression predicate: yield return predicate.Left; yield return predicate.Right; break;
             case GqlCaseExpression conditional:
                 if (conditional.Alternatives is null || conditional.Alternatives.Count == 0 || conditional.Alternatives.Any(branch => branch is null || branch.Comparison is not ("=" or "<>" or "!=" or "<" or "<=" or ">" or ">=" or "IS NULL" or "IS NOT NULL")))
                 { throw new GraphPlanningException("COHDBG001", ErrorMessages.CaseInvalid, expression.Location); }

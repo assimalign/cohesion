@@ -99,6 +99,22 @@ public sealed class GqlProfileExecutionTests
                 new("MATCH (a) RETURN $p", [[5], [5], [5], [5], [5]],
                     Parameters: new Dictionary<string, object?> { ["p"] = 5 }, Columns: ["$p"]),
             ],
+            [GqlClauses.OrderBy] =
+            [
+                new("MATCH (a:Person) RETURN a.name ORDER BY a.age", [["Bob"], ["Isolated"], ["Alice"]]),
+            ],
+            [GqlClauses.Offset] =
+            [
+                new("MATCH (a:Person) RETURN a.name ORDER BY a.name OFFSET 1", [["Bob"], ["Isolated"]]),
+            ],
+            [GqlClauses.Skip] =
+            [
+                new("MATCH (a:Person) RETURN a.name ORDER BY a.name SKIP 1", [["Bob"], ["Isolated"]]),
+            ],
+            [GqlClauses.Limit] =
+            [
+                new("MATCH (a:Person) RETURN a.name ORDER BY a.name LIMIT 1", [["Alice"]]),
+            ],
             [GqlClauses.Create] =
             [
                 new("CREATE (:Person {name: $name})", [], 1,
@@ -320,6 +336,10 @@ public sealed class GqlProfileExecutionTests
         GqlClauses.OptionalMatch => query.MatchClauses.Any(clause => clause.Optional),
         GqlClauses.Case => query.Projections.Any(item => item.Expression is GqlCaseExpression or GqlCoalesceExpression or GqlNullIfExpression),
         GqlClauses.Return => query.Projections.Count != 0 || query.ReturnStar,
+        GqlClauses.OrderBy => query.OrderBy.Count != 0,
+        GqlClauses.Offset => query.Offset is not null && HasKeyword(query.Text ?? string.Empty, "OFFSET"),
+        GqlClauses.Skip => query.Offset is not null && HasKeyword(query.Text ?? string.Empty, "SKIP"),
+        GqlClauses.Limit => query.Limit is not null,
         GqlClauses.Create => query.Creates.Count != 0 && HasKeyword(query.Text ?? string.Empty, "CREATE"),
         GqlClauses.Insert => query.Creates.Count != 0 && HasKeyword(query.Text ?? string.Empty, "INSERT"),
         GqlClauses.Delete => query.DeleteVariables.Count != 0 && !query.DetachDelete,

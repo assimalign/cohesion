@@ -32,4 +32,10 @@
   <data name="CompositeRequired" xml:space="preserve"><value>This operation requires a list or map with a valid index or field name.</value></data>
   <data name="CompositeCapabilityRequired" xml:space="preserve"><value>Graph composite values require the graph.composite-values capability.</value></data>
   <data name="CaseInvalid" xml:space="preserve"><value>A CASE requires alternatives and COALESCE requires at least two operands.</value></data>
+  <data name="PageValueInvalid" xml:space="preserve"><value>Paging requires a non-negative integer value in the signed 64-bit range.</value></data>
+  <data name="PageExpressionRequired" xml:space="preserve"><value>Paging requires an unsigned integer literal or parameter.</value></data>
+  <data name="DistinctSortNotProjected" xml:space="preserve"><value>ORDER BY with RETURN DISTINCT may only reference projected values.</value></data>
+  <data name="SortShapeInvalid" xml:space="preserve"><value>Ordering and paging require a RETURN with valid sort items.</value></data>
+  <data name="SortPathProperty" xml:space="preserve"><value>A path alias cannot be used as a property owner in ORDER BY.</value></data>
+  <data name="SortEntityRequired" xml:space="preserve"><value>A labeled ORDER BY predicate requires a node or relationship alias.</value></data>
 </root>

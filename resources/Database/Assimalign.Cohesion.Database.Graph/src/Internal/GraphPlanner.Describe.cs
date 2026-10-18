@@ -19,6 +19,8 @@ internal sealed partial class GraphPlanner
         GraphPathPlan => "ExpandPath",
         GraphProjectionPlan => "Project",
         GraphDistinctPlan => "Distinct",
+        GraphSortKeyPlan => "SortKey",
+        GraphSortPagePlan => "SortPage",
         GraphAnchor { Property: not null } => "IndexSeek",
         GraphAnchor { Label: not null } => "LabelScan",
         GraphAnchor => "NodeScan",
@@ -74,6 +76,14 @@ internal sealed partial class GraphPlanner
                 ? Add(DescribeOperator(distinct), 0, detail: $"keys={distinct.Keys.Count}") : 0;
             foreach (var projection in plan.Projections)
             { Add(DescribeOperator(projection), parent, projection.Name, detail: $"kind={projection.Kind}; expression={GraphProjectionText.Describe(projection.Expression)}"); }
+        }
+        if (plan.SortPage is { } page)
+        {
+            int parent = Add(DescribeOperator(page), 0, detail: $"offset={page.Offset}; limit={page.Limit?.ToString(CultureInfo.InvariantCulture) ?? "ALL"}");
+            foreach (var key in page.Keys)
+            {
+                Add(DescribeOperator(key), parent, detail: $"expression={GraphProjectionText.Describe(key.Item.Expression)}; direction={key.Item.Direction}; nulls={key.Item.NullOrdering}");
+            }
         }
         return DatabasePlanDescription.Create(nodes, plan.Warnings);
 

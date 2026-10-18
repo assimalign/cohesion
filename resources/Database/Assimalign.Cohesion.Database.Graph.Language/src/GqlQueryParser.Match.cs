@@ -14,6 +14,9 @@ public sealed partial class GqlQueryParser
         List<GqlProjection> projections = [];
         bool detach = false;
         bool returnStar = false;
+        List<GqlSortItem> orderBy = [];
+        GqlExpression? offset = null;
+        GqlExpression? limit = null;
         var quantifier = GqlSetQuantifier.All;
         while (!Failed && (Is("MATCH") || Is("OPTIONAL")))
         {
@@ -23,6 +26,10 @@ public sealed partial class GqlQueryParser
             GqlExpression? predicate = null;
             if (!Failed && Take("WHERE")) { predicate = ParsePredicate(); }
             matches.Add(new GqlMatchClause(paths, predicate, optional));
+        }
+        if (!Failed && (Is("ORDER") || Is("OFFSET") || Is("SKIP") || Is("LIMIT")))
+        {
+            Unsupported("STANDALONE ORDER BY AND PAGE STATEMENT", Current);
         }
         if (!Failed && (Take("CREATE") || Take("INSERT"))) { creates = ParsePatterns(); }
         else if (!Failed && (Is("DETACH") || Is("DELETE")))
@@ -50,6 +57,34 @@ public sealed partial class GqlQueryParser
                     projections.Add(new GqlProjection(expression, alias));
                 } while (!Failed && Take(TokenType.Comma));
             }
+            if (!Failed && Take("ORDER"))
+            {
+                Expect("BY");
+                do
+                {
+                    var expression = ParsePredicate();
+                    var direction = Take("DESC") ? GqlSortDirection.Descending : GqlSortDirection.Ascending;
+                    if (direction == GqlSortDirection.Ascending) { Take("ASC"); }
+                    var nullOrdering = GqlNullOrdering.Default;
+                    if (Take("NULLS"))
+                    {
+                        if (Take("FIRST")) { nullOrdering = GqlNullOrdering.First; }
+                        else if (Take("LAST")) { nullOrdering = GqlNullOrdering.Last; }
+                        else { Error("GQL0002", "Expected FIRST or LAST after NULLS.", Current); }
+                    }
+                    orderBy.Add(new GqlSortItem(expression, direction, nullOrdering));
+                } while (!Failed && Take(TokenType.Comma));
+            }
+            // ISO and Cypher accept either paging order; an OFFSET/SKIP pair is one clause.
+            while (!Failed && (Is("OFFSET") || Is("SKIP") || Is("LIMIT")))
+            {
+                bool limiting = Is("LIMIT");
+                if (limiting ? limit is not null : offset is not null)
+                { Error("GQL0002", "A paging clause cannot be repeated.", Current); break; }
+                Advance();
+                var value = ParsePageValue();
+                if (limiting) { limit = value; } else { offset = value; }
+            }
         }
         if (!Failed && creates.Count == 0 && deletes.Count == 0 && projections.Count == 0 && !returnStar)
         {
@@ -60,7 +95,15 @@ public sealed partial class GqlQueryParser
             Unsupported("RETURN AFTER DELETE", Previous);
         }
         return new GqlQueryExpression(matches.AsReadOnly(), creates, deletes.AsReadOnly(), detach,
-            projections.AsReadOnly(), Span(start, Previous)) { SetQuantifier = quantifier, ReturnStar = returnStar };
+            projections.AsReadOnly(), Span(start, Previous))
+        { SetQuantifier = quantifier, ReturnStar = returnStar, OrderBy = orderBy.AsReadOnly(), Offset = offset, Limit = limit };
+    }
+
+    private GqlExpression ParsePageValue()
+    {
+        if (Current.Type is TokenType.Integer or TokenType.Parameter or TokenType.Colon || Current.Text == "?") { return ParseScalar(); }
+        Error("GQL0002", "Expected an unsigned integer or parameter.", Current);
+        return new GqlLiteralExpression(null, Span(Current, Current));
     }
 
     private static bool HasNamedBinding(IReadOnlyList<GqlPathPattern> paths)

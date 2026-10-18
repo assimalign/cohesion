@@ -62,6 +62,12 @@ public sealed class GqlQueryExpression : GqlExpression
     public GqlSetQuantifier SetQuantifier { get; init; }
     /// <summary>Gets whether RETURN * projects every named binding in declaration order.</summary>
     public bool ReturnStar { get; init; }
+    /// <summary>Gets the ORDER BY keys in priority order.</summary>
+    public IReadOnlyList<GqlSortItem> OrderBy { get; init; } = [];
+    /// <summary>Gets the non-negative integer literal or parameter for OFFSET (also spelled SKIP).</summary>
+    public GqlExpression? Offset { get; init; }
+    /// <summary>Gets the non-negative integer literal or parameter for LIMIT.</summary>
+    public GqlExpression? Limit { get; init; }
     /// <summary>Gets the optional read-only catalog subject; graph clauses cannot accompany it.</summary>
     public GqlCatalogSurface? CatalogSurface { get; init; }
 }

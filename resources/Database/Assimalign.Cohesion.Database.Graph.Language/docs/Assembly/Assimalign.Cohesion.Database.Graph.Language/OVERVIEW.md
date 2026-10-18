@@ -7,6 +7,12 @@ only executable clauses. `GqlClauses` names lexical capability keys, including d
 `GqlQueryExpression.MatchClauses` groups source-ordered `GqlMatchClause(Paths, Predicate, Optional)`
 records, followed by insertions, deletion variables and
 projections, `SetQuantifier` (GqlSetQuantifier.All or Distinct), and `ReturnStar`.
+`OrderBy` contains `GqlSortItem(Expression, Direction, NullOrdering)` records with
+`GqlSortDirection.Ascending`/`Descending` and `GqlNullOrdering.Default`/`First`/`Last`.
+Default placement is NULL last ascending, first descending. `Offset` (also spelled SKIP)
+and `Limit` hold non-negative integer literal or named parameter expressions. These members
+apply after RETURN projection and DISTINCT to both rows and paths. Invalid hand-built tails
+receive the same planner shape/value diagnostics as parsed statements.
 The original constructor still creates the single mandatory clause; `Matches` and `Predicate`
 expose that view only and return empty/null for optional or multiple clauses. The engine reads
 MatchClauses and null-extends every new binding of an unmatched optional clause. Each clause's

@@ -56,6 +56,14 @@ before ResultHeader. GraphClientWireTests pins division by zero, overflow and in
 then reuse of the exact authenticated pooled session followed by SHOW LABELS. A combined
 OR/IN/string/arithmetic case compares wire rows with in-process rows. No wire fields change.
 
+## Ordering and paging (#1142)
+
+QueryAsync and QueryPathsAsync preserve the engine's ORDER BY, OFFSET/SKIP and LIMIT sequence,
+including RETURN aliases and paging parameters with either named sigil. The server validates
+counts before emitting rows or paths; invalid counts retain COHDBG013 and terminal completion
+allows reuse of the authenticated session. GraphOrderPagingWireTests compares ordered rows and
+paths with in-process execution over InMemory and TCP. No wire bytes or capabilities change.
+
 ## Composite values (#1146)
 
 GraphConnection checks the negotiated graph.composite-values capability before constructing

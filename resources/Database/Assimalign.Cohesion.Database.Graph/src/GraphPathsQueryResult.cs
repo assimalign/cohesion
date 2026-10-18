@@ -16,7 +16,7 @@ public sealed class GraphPathsQueryResult : DatabaseResult
         _warnings = warnings;
     }
 
-    /// <summary>Gets the matched paths in match enumeration order.</summary>
+    /// <summary>Gets the projected paths after DISTINCT, ordering and paging.</summary>
     public IReadOnlyList<GraphPath> Paths { get; }
 
     /// <inheritdoc />

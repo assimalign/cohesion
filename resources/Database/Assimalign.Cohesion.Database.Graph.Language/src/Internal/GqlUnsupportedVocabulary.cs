@@ -18,14 +18,10 @@ internal static class GqlUnsupportedVocabulary
     [
         // Clauses, statements and predicates outside the executable subset.
         new("MANDATORY", GqlClauses.MandatoryMatch, GqlWordPosition.Clause),
-        new("ORDER", GqlClauses.OrderBy, GqlWordPosition.Clause),
         new("WITH", "WITH", GqlWordPosition.Clause),
         new("SET", "SET", GqlWordPosition.Clause),
         new("REMOVE", "REMOVE", GqlWordPosition.Clause),
         new("MERGE", "MERGE", GqlWordPosition.Clause),
-        new("LIMIT", "LIMIT", GqlWordPosition.Clause),
-        new("OFFSET", "OFFSET", GqlWordPosition.Clause),
-        new("SKIP", "SKIP", GqlWordPosition.Clause),
         new("LET", "LET", GqlWordPosition.Clause),
         new("UNWIND", "UNWIND", GqlWordPosition.Clause),
         new("FOREACH", "FOREACH", GqlWordPosition.Clause),
