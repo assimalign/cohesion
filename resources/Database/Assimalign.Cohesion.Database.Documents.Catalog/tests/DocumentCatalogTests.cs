@@ -11,6 +11,7 @@ using Assimalign.Cohesion.Database.Indexing.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Units;
 using Assimalign.Cohesion.Database.Transactions;
+using Assimalign.Cohesion.Database.Types;
 using Shouldly;
 using Xunit;
 
@@ -239,6 +240,63 @@ public sealed class DocumentCatalogTests
         (await catalog.SearchIndexAsync(f.Collection.Id, "value", 1m, true, 1m, true, reader.Snapshot)).Single().Id.ShouldBe("doc001");
         await coordinator.CommitAsync(reader);
         await f.Coordinator.RollbackAsync(abandoned);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Documents.Catalog] - Recovery: DELETE preserves raw index entry visibility")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task RecoverIndexesAsync_DeletedDocument_ShouldRestoreOnlyUncommittedIndexEntry(bool commit)
+    {
+        // Arrange: capture the restart image before disposal can roll back the abandoned delete.
+        await using var fixture = await Fixture.Create();
+        await fixture.CreateIndex("by_rank", "rank");
+        await fixture.Write("deleted", "{\"rank\":2}");
+        await fixture.Write("kept", "{\"rank\":3}");
+        var deleting = await fixture.Coordinator.BeginAsync(IsolationLevel.Snapshot);
+        var document = fixture.Catalog.FindDocument(fixture.Collection.Id, "deleted", deleting.Snapshot)!.Value;
+        await fixture.Catalog.DeleteDocumentAsync(fixture.Collection.Id, "deleted", deleting);
+        await fixture.Storage.TombstoneContentAsync(fixture.Coordinator, deleting, Content(document));
+        if (commit) { await fixture.Coordinator.CommitAsync(deleting); }
+        fixture.Storage.WriteAheadJournal.Flush(forceDurable: false);
+
+        // Act: ordinary storage redo, catalog scrub and index scrub, followed by recovery completion.
+        using var reopened = DocumentStorage.Open(Clone(fixture.Data), Clone(fixture.Journal), new MemoryStream(), false);
+        await using var coordinator = new TransactionCoordinator(reopened, reopened.WriteAheadJournal, reopened.Records);
+        var plan = coordinator.AnalyzeAndScrub();
+        var catalog = DocumentCatalog.Open(reopened, coordinator);
+        await catalog.RecoverIndexesAsync(plan.Aborted);
+        coordinator.CompleteRecovery();
+
+        // Assert: bypass SearchIndexAsync's catalog tombstone filtering and read the B-tree itself.
+        var latestSnapshot = new TransactionSnapshot(TransactionSequence.None, TransactionSequence.None,
+            new TransactionSequence(ulong.MaxValue), []);
+        var metadata = catalog.GetIndexes(fixture.Collection.Id, latestSnapshot).ShouldHaveSingleItem();
+        metadata.Name.ShouldBe("by_rank");
+        using var registrations = reopened.GetUnitIterator(1);
+        registrations.MoveNext().ShouldBeTrue();
+        var registration = registrations.Current.Data;
+        registration.Span[16].ShouldBe((byte)5);
+        registration.Span[17].ShouldBe((byte)1);
+        BinaryPrimitives.ReadUInt64LittleEndian(registration.Span[18..]).ShouldBe(metadata.ObjectId);
+        long rootPage = BinaryPrimitives.ReadInt64LittleEndian(registration.Span[26..]);
+        registrations.MoveNext().ShouldBeFalse();
+        var manager = BTreeIndexManager.Create(new BTreeIndexManagerOptions
+        {
+            Storage = reopened,
+            TransactionSource = _ => throw new InvalidOperationException("The test only reads the recovered tree."),
+            ExistingIndexes = [new BTreeIndexRegistration(metadata.ObjectId, new IndexDefinition(metadata.Name), rootPage)]
+        });
+        manager.TryGetIndex(metadata.ObjectId, "by_rank", out var tree).ShouldBeTrue();
+        var key = IndexKey.From(new DatabaseKeyWriter().AppendDecimal(2m));
+        await using var cursor = tree.OpenCursor(latestSnapshot, new IndexKeyRange(key, key, true, true));
+        (await cursor.MoveNextAsync()).ShouldBe(!commit);
+        if (!commit) { (await cursor.MoveNextAsync()).ShouldBeFalse(); }
+        var keptKey = IndexKey.From(new DatabaseKeyWriter().AppendDecimal(3m));
+        await using var kept = tree.OpenCursor(latestSnapshot, new IndexKeyRange(keptKey, keptKey, true, true));
+        (await kept.MoveNextAsync()).ShouldBeTrue();
+        (await kept.MoveNextAsync()).ShouldBeFalse();
+        (catalog.FindDocument(fixture.Collection.Id, "deleted", latestSnapshot) is null).ShouldBe(commit);
+        plan.Aborted.Contains(deleting.Sequence).ShouldBe(!commit);
     }
 
     [Fact]

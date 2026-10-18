@@ -25,6 +25,7 @@ internal static partial class DocumentPlanExecutor
         var plan = new DocumentPlanner(database.Catalog, operation.Context.Snapshot, parameters, cancellationToken).Plan(statement.OqlExpression);
         return plan switch
         {
+            DocumentDeletePlan delete => await ExecuteDeleteAsync(database, operation, delete, parameters, cancellationToken).ConfigureAwait(false),
             DocumentInsertPlan insert => await ExecuteInsertAsync(database, operation, insert.Collection, insert.Statement, null, parameters, cancellationToken).ConfigureAwait(false),
             DocumentInsertSelectPlan insert => await ExecuteInsertAsync(database, operation, insert.Collection, insert.Statement, insert, parameters, cancellationToken).ConfigureAwait(false),
             DocumentSystemCollectionPlan system => ExecuteSystemCollection(database, operation, system, parameters, cancellationToken),
@@ -42,11 +43,7 @@ internal static partial class DocumentPlanExecutor
     {
         var query = plan.Logical.Query;
         var evaluator = new DocumentExpressionEvaluator(query.Alias, parameters, cancellationToken, forInsert);
-        IReadOnlyList<DocumentCatalogEntry> candidates = plan.Access is DocumentIndexPath seek
-            ? await database.Catalog.SearchIndexAsync(plan.Collection.Id, seek.Index.Name,
-                seek.Lower?.Value, seek.Lower?.Inclusive ?? false, seek.Upper?.Value, seek.Upper?.Inclusive ?? false,
-                operation.Context.Snapshot, cancellationToken).ConfigureAwait(false)
-            : database.Catalog.GetDocuments(plan.Collection.Id, null, operation.Context.Snapshot);
+        var candidates = await ReadCandidatesAsync(database, operation, plan.Collection, plan.Access, cancellationToken).ConfigureAwait(false);
 
         var matches = new List<DocumentEvaluationContext>();
         // Index and scan order are deliberately erased. Identity order is the
@@ -64,6 +61,14 @@ internal static partial class DocumentPlanExecutor
 
         return ExecuteRows(plan.Logical, matches, evaluator, cancellationToken);
     }
+
+    private static ValueTask<IReadOnlyList<DocumentCatalogEntry>> ReadCandidatesAsync(DocumentDatabase database,
+        DocumentOperation operation, DocumentCollectionMetadata collection, DocumentAccessPath access, CancellationToken cancellationToken)
+        => access is DocumentIndexPath seek
+            ? database.Catalog.SearchIndexAsync(collection.Id, seek.Index.Name,
+                seek.Lower?.Value, seek.Lower?.Inclusive ?? false, seek.Upper?.Value, seek.Upper?.Inclusive ?? false,
+                operation.Context.Snapshot, cancellationToken)
+            : ValueTask.FromResult(database.Catalog.GetDocuments(collection.Id, null, operation.Context.Snapshot));
 
     private static DatabaseResult ExecuteSystemCollection(DocumentDatabase database, DocumentOperation operation,
         DocumentSystemCollectionPlan plan, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken, bool forInsert = false)

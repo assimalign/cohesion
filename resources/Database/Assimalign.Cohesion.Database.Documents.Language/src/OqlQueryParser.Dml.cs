@@ -5,6 +5,31 @@ namespace Assimalign.Cohesion.Database.Documents.Language;
 
 public sealed partial class OqlQueryParser
 {
+    private OqlDeleteExpression ParseDelete()
+    {
+        var start = Current;
+        Advance();
+        Expect("FROM");
+        string collection = CollectionName();
+        string? alias = null;
+        if (Take("AS"))
+        {
+            alias = Identifier();
+        }
+        else if (Current.Type is TokenType.Identifier or TokenType.QuotedIdentifier or TokenType.Function &&
+            !Is("LIMIT") && !IsReturningClause())
+        {
+            alias = Identifier();
+        }
+        OqlExpression? predicate = Take("WHERE") ? ParseExpression() : null;
+        // DELETE LIMIT remains deferred even after SELECT gains row limits.
+        if (!Failed && Is("LIMIT"))
+        {
+            _diagnostics.Add(QueryDiagnostics.UnsupportedClause("LIMIT", Profile.Language, Span(Current, Current)));
+        }
+        return new OqlDeleteExpression(collection, alias, predicate, Span(start, Previous));
+    }
+
     private OqlInsertExpression ParseInsert()
     {
         var start = Current;

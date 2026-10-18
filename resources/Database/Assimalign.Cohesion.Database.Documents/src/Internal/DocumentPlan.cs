@@ -10,6 +10,7 @@ internal abstract record DocumentStatementPlan;
 internal sealed record DocumentLogicalPlan(OqlSelectExpression Query, IReadOnlyList<DocumentProjection> Projections, bool IsGrouped);
 internal sealed record DocumentPlan(DocumentLogicalPlan Logical, DocumentCollectionMetadata Collection, DocumentAccessPath Access) : DocumentStatementPlan;
 internal sealed record DocumentSystemCollectionPlan(DocumentLogicalPlan Logical, string Name) : DocumentStatementPlan;
+internal sealed record DocumentDeletePlan(DocumentCollectionMetadata Collection, OqlDeleteExpression Statement, DocumentAccessPath Access) : DocumentStatementPlan;
 internal sealed record DocumentInsertPlan(DocumentCollectionMetadata Collection, OqlInsertExpression Statement) : DocumentStatementPlan;
 internal sealed record DocumentInsertSelectPlan(DocumentCollectionMetadata Collection, OqlInsertExpression Statement,
     DocumentStatementPlan Source, int KeyOrdinal, int? ValueOrdinal) : DocumentStatementPlan;

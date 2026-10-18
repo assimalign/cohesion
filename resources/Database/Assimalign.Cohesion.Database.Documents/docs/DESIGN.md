@@ -34,7 +34,7 @@ belong to the shared kernel. No kernel contract was widened. The engine, its dat
 first four leaves of the area root's bases ([Concrete types](#concrete-types-concrete-types-plan-phase-4-1260)),
 while the planner, executor, workers and storage strategy are internal.
 
-SELECT and index-DDL statements flow through these stages; INSERT uses the same pipeline. Catalog metadata informs query access-path
+SELECT and index-DDL statements flow through these stages; INSERT and DELETE use the same pipeline. Catalog metadata informs query access-path
 selection and index-DDL planning; `SELECT`, `CREATE INDEX`, and `DROP INDEX` all reach the same
 plan executor rather than an index-management side channel.
 
@@ -312,18 +312,18 @@ uncommitted catalog writes are visible. Subsequent statements observe committed
 catalog changes according to their isolation level. No metadata copy, content record,
 or synthetic collection is stored, and existing collection listing stays unchanged.
 
-The sources are read-only. `INSERT`, `CREATE COLLECTION`, `DROP COLLECTION`, `CREATE INDEX`, and `DROP INDEX` targeting either source,
+The sources are read-only. `INSERT`, `DELETE`, `CREATE COLLECTION`, `DROP COLLECTION`, `CREATE INDEX`, and `DROP INDEX` targeting either source,
 and `CreateCollectionAsync` or `DropCollectionAsync` using either reserved name,
 throw `DatabaseException` with `System collection '<canonical source>' is read-only.`
-before ordinary catalog lookup or mutation. OQL document `UPDATE` and `DELETE`
-remain unsupported and return the existing `COHDBL001` parse diagnostic. Virtual sources do not provide mutable `DocumentCollection` handles.
+before ordinary catalog lookup or mutation. OQL document `UPDATE`
+remains unsupported and returns the existing `COHDBL001` parse diagnostic. Virtual sources do not provide mutable `DocumentCollection` handles.
 
 ### Stored document queries
 
 The supported clause matrix lives in the language package's
 [DESIGN.md](../../Assimalign.Cohesion.Database.Documents.Language/docs/DESIGN.md).
 SELECT (ALL/DISTINCT and VALUE/RAW), object/array constructors, FROM, WHERE, GROUP BY, HAVING, ORDER BY, CREATE COLLECTION, DROP COLLECTION,
-CREATE INDEX, DROP INDEX, INSERT, VALUES, IN, BETWEEN, LIKE and CASE are executed. OQL retains its name with a SQL++ basis.
+CREATE INDEX, DROP INDEX, INSERT, DELETE, VALUES, IN, BETWEEN, LIKE and CASE are executed. OQL retains its name with a SQL++ basis.
 Retired ODMG constructs are rejected positionally; nested queries, deferred document mutations
 and server statements are rejected with `COHDBL001`. The parser advertises only clauses this executor
 supports.
@@ -549,8 +549,8 @@ Put/Get works on the new collection. A schema-owned DROP returns ExecutionFailur
 
 ## EXPLAIN operator vocabulary and wire shape (#1104)
 
-`EXPLAIN SELECT` and `EXPLAIN INSERT` perform ordinary parameter validation and snapshot-visible planning, then
-materializes a `DatabasePlanDescription` before reading document content or invoking the plan
+`EXPLAIN SELECT`, `EXPLAIN INSERT` and `EXPLAIN DELETE` perform ordinary parameter validation and snapshot-visible planning, then
+materialize a `DatabasePlanDescription` before reading document content or invoking the plan
 executor. Its columns and nullable count fields follow
 [Execution](../../Assimalign.Cohesion.Database.Execution/docs/DESIGN.md#plan-descriptions-1104).
 It changes no documents or catalog entries, including when its explicit transaction commits.
@@ -561,6 +561,7 @@ It changes no documents or catalog entries, including when its explicit transact
 | `Distinct` | A separate parent node above Project, ProjectValue or Group, preserving the underlying stage |
 | `CollectionScan` | Candidate retrieval from the named collection |
 | `IndexSeek` | The chosen catalog index name, collection and inclusive/exclusive path bounds |
+| `Delete` | Snapshot-filtered deletion; detail states filter presence and IndexSeek or CollectionScan, with that access as its child |
 | `Insert`, `InsertSelect` | Document creation from VALUES or a fully materialized query; SELECT children describe the source access |
 | `SystemCollection` | A virtual `COHESION_SCHEMA` collection without stored-document access |
 | `CreateCollection`, `DropCollection`, `CreateIndex`, `DropIndex` | Internal DDL mappings; EXPLAIN DDL is refused by the parser |
@@ -603,14 +604,44 @@ snapshots retain their defined visibility.
 Successful index DDL returns a command `DatabaseResult` with `Success` status and an affected count
 of zero; index definition changes are not document-row mutations.
 
-The physical planner uses applicable equality/range predicates on indexed paths,
+`ChooseAccess` takes a predicate and source alias independently of SELECT, so SELECT and DELETE
+share the same physical access selection. The planner uses applicable equality/range predicates on indexed paths,
 including parameter values, reversed operands, and conjunctive bounds. Equality
 is preferred over a range; ties choose ordinal index name. The executor reapplies
 the full predicate to candidates, preserving mixed-shape semantics. See the
 [catalog design](../../Assimalign.Cohesion.Database.Documents.Catalog/docs/DESIGN.md)
-for supported scalar keys, visibility filtering, and restart recovery.
+for supported scalar keys, visibility filtering, and restart recovery. META expressions are
+not document paths: META(alias).id comparisons stay residual filters over a scan or a content
+index chosen by another conjunct. T1 has no key-lookup access path.
 
 ## Data mutation and serialization semantics
+
+OQL DELETE FROM collection [AS? alias] [WHERE predicate] collects matching document ids from
+the statement snapshot before its first write, in ordinal identity order. Candidate retrieval
+uses the chosen scan or seek; the complete predicate is always reapplied, including metadata
+and mixed-shape values. Each candidate and deletion checks cancellation. This materialization
+prevents mutations of index entries from changing the candidate set (Halloween safety).
+
+DELETE and the public collection DeleteAsync share one internal delete primitive beside
+INSERT's write primitive: writer lock, collection/index snapshot checks, current-document
+conflict check, content tombstone and catalog/index removal. All use the statement's single
+TransactionContext. A later conflict rolls back earlier deletions, and an automatic failure
+deletes nothing. Failure inside an explicit transaction aborts all its work under #1225.
+Rollback restores documents and index visibility; an older snapshot still sees committed
+deleted documents. Re-inserting a deleted id receives a strictly higher version.
+
+Without WHERE, DELETE removes every document while retaining the collection and its index
+definitions. A zero-match delete succeeds with affected count zero. Schema ownership permits
+content mutation; system sources remain read-only and missing collections give COHDOC002.
+The existing Complete affected count reports deletions with no Document frames. USE KEYS,
+RETURNING and DELETE LIMIT remain deferred. No catalog-format or protocol change is needed.
+The process-exit fixture checks document reads and index-seek query results after committed
+and interrupted uncommitted deletions. Documents.Catalog restart tests inspect the recovered
+`by_rank` B-tree directly under the latest snapshot: a committed-deleted key has no live entry,
+and an abandoned deletion restores exactly one. The engine's journal fault-injection test also
+checks document reads and indexed lookup after an uncommitted DELETE's abort record is lost.
+These fault-injection cases defer background page write-back alongside other maintenance so
+the test flow alone drains the buffered abort record.
 
 OQL INSERT creates externally keyed documents using the [SQL++ KEY/VALUE forms](https://docs.couchbase.com/server/current/n1ql/n1ql-language-reference/insert.html).
 A collection declares no key field. Id-less AsterixDB/PartiQL forms are refused and ids are never
@@ -926,6 +957,8 @@ Co-located tests cover nested/mixed JSON, expected-version writes, explicit comm
 and rollback, both isolation levels, cross-database/session guards, direct-marked
 schema ownership, indexed-versus-scanned queries, and file reopen. Storage/catalog
 tests exercise crash images with committed and abandoned writes and index recovery.
+The advertised-clause conformance loop gives each execution case its own 30-second cancellation
+token as a hang guard, so time spent in earlier cases cannot exhaust a later case's budget.
 All serialization and activation are static BCL calls compatible with trimming
 and NativeAOT.
 

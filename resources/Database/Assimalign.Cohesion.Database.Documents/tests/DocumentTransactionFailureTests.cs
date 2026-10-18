@@ -873,6 +873,49 @@ public sealed class DocumentTransactionFailureTests
         (await IdsAsync(observer)).ShouldBe(["keep"]);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Documents] - DELETE recovery: a lost abort record preserves the indexed document")]
+    public async Task RollbackAsync_IndexedDeleteAbortRecordLost_ShouldRecoverDocumentAndIndexSeek()
+    {
+        // Arrange
+        var strategy = new FaultInjectingJournalStorageStrategy();
+        using var engine = DocumentDatabaseEngine.Create("document-engine", QuietOptions(strategy));
+        var database = await engine.CreateDatabaseAsync("test");
+        await using var session = await database.CreateSessionAsync();
+        var collection = await session.CreateCollectionAsync("items");
+        await collection.PutAsync(session, "kept", "{\"rank\":3}"u8.ToArray());
+        await session.ExecuteAsync("CREATE INDEX by_rank ON items (rank)");
+        await using var transaction = await session.BeginTransactionAsync();
+        (await session.ExecuteAsync("DELETE FROM items WHERE rank = 3")).AffectedCount.ShouldBe(1);
+
+        // Act: rollback buffers the abort; a later commit drains it and takes storage offline.
+        using (var failures = FaultInjectingJournalStorageStrategy.FailJournalWritesContaining(JournalRecordType.RollbackTransaction))
+        {
+            await transaction.RollbackAsync();
+            failures.Remaining.ShouldBe(1);
+            await Should.ThrowAsync<DatabaseTransactionCommitUnconfirmedException>(async () =>
+                await collection.PutAsync(session, "unconfirmed", "{\"rank\":4}"u8.ToArray()));
+            failures.Remaining.ShouldBe(0);
+        }
+        await session.DisposeAsync();
+        engine.Dispose();
+        await using var reopened = DocumentDatabaseEngine.Create("document-engine", QuietOptions(strategy));
+        var recovered = await reopened.OpenDatabaseAsync("test");
+        await using var observer = await recovered.CreateSessionAsync();
+        var items = await observer.GetCollectionAsync("items");
+
+        // Assert: recovery keeps both the document and its indexed lookup, with no later write.
+        transaction.State.ShouldBe(TransactionState.RolledBack);
+        (await items.GetAsync(observer, "kept")).ShouldNotBeNull();
+        (await items.GetAsync(observer, "unconfirmed")).ShouldBeNull();
+        var result = await observer.ExecuteAsync("SELECT META().id AS id FROM items WHERE rank = 3");
+        var rows = new List<string>();
+        await foreach (var row in result.ShouldBeAssignableTo<DatabaseResultSet>().GetRowsAsync(CancellationToken.None))
+        {
+            rows.Add(row.GetValue(0)!.ToString()!);
+        }
+        rows.ShouldBe(["kept"]);
+    }
+
     /// <summary>
     /// After a rollback whose abort record was lost, the transaction is rolled back like any other
     /// and COMMIT commits nothing. The record is lost with the drain that carries it (#1252), here
@@ -1190,6 +1233,7 @@ public sealed class DocumentTransactionFailureTests
     {
         StorageStrategy = strategy,
         MaintenanceInterval = TimeSpan.FromHours(1),
+        PageWriteBackInterval = TimeSpan.FromHours(1),
         CheckpointInterval = TimeSpan.FromHours(1),
         DeferredUndoRetryDelay = TimeSpan.FromHours(1),
     };
