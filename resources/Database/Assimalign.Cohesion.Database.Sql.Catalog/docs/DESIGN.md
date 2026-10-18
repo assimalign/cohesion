@@ -84,7 +84,7 @@ would tell every caller the value is changeable and then guard that promise at
 runtime.
 
 Table metadata extension version 2 introduced one collation identifier per column
-after the existing constraints. Current format 18 requires the complete table extension 6 record,
+after the existing constraints. Current format 19 requires the complete table extension 6 record,
 including resolved-call vectors, identity facets and frozen missing-value literals described below. Column additions,
 drops, and restart preserve explicit overrides. An index inherits its key
 columns' effective collations; the SQL engine verifies index eligibility and
@@ -164,7 +164,7 @@ codec, the key encoding and every comparison read, so they do not consult the do
   column (the primary key's implicit NOT NULL).
 - **Persistence: table extension version 4** (data-storage format 7). After the dropped
   ordinals, one optional string per live column, NULL for a column of a built-in type,
-  which this catalog always writes. Current format 18 also requires the call vectors, identity facets and extension 6 missing-value literals;
+  which this catalog always writes. Current format 19 also requires the call vectors, identity facets and extension 6 missing-value literals;
   the format gate refuses earlier databases rather than loading their definitions. A persisted blank
   name fails the load with `SqlCatalogException`, as does a blank `domainName` at the
   column's constructor (`ArgumentException`).
@@ -442,6 +442,8 @@ Record-space format 16 gates canonical identifier quoting for SEARCH and MATERIA
 (#1116). The engine renderer now quotes those identifiers in CHECK, DEFAULT and SQL
 function text; format-15 CHECK text would report provisioning drift on ordinal canonical
 comparison. Catalog tuple layouts are unchanged; the SQL engine owns the open-time gate.
+Current format 19 likewise gates canonical quoting for PERCENT and TIES (#1107),
+without changing catalog tuple layouts or adding an upgrade reader.
 
 Every SQL expression this catalog stores — table CHECKs, column literal and function-call
 DEFAULTs, domain CHECKs and literal DEFAULTs, and SQL function bodies — is
