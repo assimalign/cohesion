@@ -33,8 +33,10 @@ public sealed class GraphOrderKeyTests
             rows.Add(new GraphOrderedRow([i], [GraphOrderComparer.Prepare(map)], i));
         }
         var stage = new GraphSortPagePlan([new(new GqlSortItem(new GqlLiteralExpression(0L)), -1)], 0, 10);
-        // Warm the comparison and sorting paths before measuring.
+        // Warm the comparison and sorting paths at the measured size before measuring, so one-time
+        // runtime work on this thread (tiering, first use of the full-size path) is not counted.
         GraphSortPage.Apply(rows.Take(32).ToList(), stage, CancellationToken.None);
+        GraphSortPage.Apply(rows.ToList(), stage, CancellationToken.None);
         long before = GC.GetAllocatedBytesForCurrentThread();
         var watch = Stopwatch.StartNew();
         // Act
