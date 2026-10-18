@@ -31,7 +31,6 @@ public sealed class OqlParseStrictnessExecutionTests
     [InlineData("SELECT * FROM items ORDER BY amount DESC OFFSET 2", "COHDBL001")]
     [InlineData("SELECT * FROM items UNNEST items.tags AS tag", "COHDBL001")]
     [InlineData("SELECT * FROM items WHERE EVERY tag IN items.tags SATISFIES tag = 'blue' END", "COHDBL001")]
-    [InlineData("UPSERT INTO items (KEY, VALUE) VALUES ('z', {'name': 'zeta'})", "COHDBL001")]
     [InlineData("MERGE INTO items USING other ON items.name = other.name WHEN MATCHED THEN DELETE", "COHDBL001")]
     public async Task Execute_StrictnessViolation_FailsAtParseTimeWithoutEffectAsync(string oql, string code)
     {
@@ -56,6 +55,27 @@ public sealed class OqlParseStrictnessExecutionTests
         typed.Message.ShouldBe(text.Message);
         (await RowsAsync(session, "SELECT name, amount FROM items")).ShouldBe(new[] { new object?[] { "alpha", 2m } });
         (await RowsAsync(session, "SELECT INDEX_NAME FROM COHESION_SCHEMA.INDEXES")).ShouldBeEmpty();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Documents] - Strictness: UPSERT now parses and executes on both session seams")]
+    public async Task Execute_Upsert_ShouldAcceptTextAndTypedRequestsAsync()
+    {
+        // Arrange
+        await using var engine = DocumentDatabaseEngine.Create("strictness-upsert", new());
+        var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.CreateCollectionAsync("items", CancellationToken.None);
+        const string oql = "UPSERT INTO items (KEY, VALUE) VALUES ('z', {'name': 'zeta'})";
+        var statement = new OqlQueryParser().Parse(oql).ShouldBeOfType<OqlQueryStatement>();
+        // Act
+        var text = await session.ExecuteAsync(oql, cancellationToken: CancellationToken.None);
+        var typed = await session.ExecuteAsync(new DocumentQueryRequest(statement), CancellationToken.None);
+        // Assert
+        statement.Diagnostics.ShouldBeEmpty();
+        statement.OqlExpression.ShouldBeOfType<OqlUpsertExpression>();
+        text.AffectedCount.ShouldBe(1);
+        typed.AffectedCount.ShouldBe(1);
+        (await RowsAsync(session, "SELECT name FROM items")).ShouldHaveSingleItem()[0].ShouldBe("zeta");
     }
 
     private static async Task<List<object?[]>> RowsAsync(DocumentDatabaseSession session, string oql)

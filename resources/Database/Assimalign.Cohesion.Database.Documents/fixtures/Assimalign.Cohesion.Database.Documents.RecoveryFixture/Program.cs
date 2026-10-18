@@ -28,12 +28,17 @@ if (args[0] == "seed")
     await collection.PutAsync(session, "committed", Encoding.UTF8.GetBytes(original));
     await collection.PutAsync(session, "deleted", "{\"rank\":2}"u8.ToArray());
     await collection.PutAsync(session, "restored", "{\"rank\":3}"u8.ToArray());
+    await collection.PutAsync(session, "upserted", "{\"rank\":4,\"discarded\":true}"u8.ToArray());
     await session.ExecuteAsync("CREATE INDEX by_rank ON items (rank)");
     if ((await session.ExecuteAsync("DELETE FROM items WHERE rank = 2")).AffectedCount != 1)
     { throw new InvalidOperationException("Committed DELETE did not affect one document."); }
     if ((await session.ExecuteAsync("UPDATE items SET rank = rank + 10 WHERE rank = 1", cancellationToken: CancellationToken.None)).AffectedCount != 1)
     { throw new InvalidOperationException("Committed UPDATE did not affect one document."); }
+    if ((await session.ExecuteAsync("UPSERT INTO items (KEY, VALUE) VALUES ('upserted', {'rank':14})", cancellationToken: CancellationToken.None)).AffectedCount != 1)
+    { throw new InvalidOperationException("Committed UPSERT did not affect one document."); }
     await session.BeginTransactionAsync();
+    if ((await session.ExecuteAsync("UPSERT INTO items (KEY, VALUE) VALUES ('upserted', {'rank':98})", cancellationToken: CancellationToken.None)).AffectedCount != 1)
+    { throw new InvalidOperationException("Uncommitted UPSERT did not affect one document."); }
     if ((await session.ExecuteAsync("UPDATE items SET rank = 99 WHERE rank = 11", cancellationToken: CancellationToken.None)).AffectedCount != 1)
     { throw new InvalidOperationException("Uncommitted UPDATE did not affect one document."); }
     await collection.PutAsync(session, "partial", Encoding.UTF8.GetBytes(original));
@@ -62,6 +67,9 @@ else if (args[0] == "verify")
     {
         throw new InvalidOperationException("Committed document did not survive process termination.");
     }
+    var upserted = await collection.GetAsync(session, "upserted", CancellationToken.None);
+    if (upserted is null || Encoding.UTF8.GetString(upserted.Value.Content.Span) != "{\"rank\":14}")
+    { throw new InvalidOperationException("Committed UPSERT replacement did not recover exactly."); }
     if (await collection.GetAsync(session, "partial") is not null)
     {
         throw new InvalidOperationException("An uncommitted document survived process termination.");

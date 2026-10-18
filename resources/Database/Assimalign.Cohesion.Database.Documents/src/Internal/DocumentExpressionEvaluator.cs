@@ -116,6 +116,10 @@ internal sealed partial class DocumentExpressionEvaluator
                 foreach (var pair in insert.Values) { ValidateInputs(pair.Key); ValidateInputs(pair.Value); }
                 ValidateInputs(insert.Select);
                 break;
+            case OqlUpsertExpression upsert:
+                foreach (var pair in upsert.Values) { ValidateInputs(pair.Key); ValidateInputs(pair.Value); }
+                ValidateInputs(upsert.Select);
+                break;
             case OqlMetaExpression meta:
                 foreach (var argument in meta.Arguments) { ValidateInputs(argument); }
                 break;

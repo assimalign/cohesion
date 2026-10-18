@@ -76,15 +76,17 @@ internal static partial class DocumentPlanExecutor
         return new DocumentCommandResult(affected);
     }
 
-    private static async ValueTask<DatabaseResult> ExecuteInsertAsync(DocumentDatabase database, DocumentOperation operation,
-        DocumentCollectionMetadata metadata, OqlInsertExpression statement, DocumentInsertSelectPlan? select,
+    private static async ValueTask<DatabaseResult> ExecuteWriteAsync(DocumentDatabase database, DocumentOperation operation,
+        DocumentCollectionMetadata metadata, OqlExpression statement, IReadOnlyList<(OqlExpression Key, OqlExpression Value)> values,
+        (DocumentStatementPlan Source, int KeyOrdinal, int? ValueOrdinal)? select, bool insertOnly,
         IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
     {
         // Materialize and validate the complete statement snapshot before the first mutation.
         var pending = new List<(DocumentId Id, byte[] Content)>();
-        if (select is not null)
+        var keys = new HashSet<string>(StringComparer.Ordinal);
+        if (select is { } sourcePlan)
         {
-            await using var result = (DatabaseResultSet)(select.Source switch
+            await using var result = (DatabaseResultSet)(sourcePlan.Source switch
             {
                 DocumentPlan source => await ExecuteSelectAsync(database, operation, source, parameters, cancellationToken, forInsert: true).ConfigureAwait(false),
                 DocumentSystemCollectionPlan source => ExecuteSystemCollection(database, operation, source, parameters, cancellationToken, forInsert: true),
@@ -93,15 +95,15 @@ internal static partial class DocumentPlanExecutor
             await foreach (var row in result.GetRowsAsync(cancellationToken).ConfigureAwait(false))
             {
                 object? Read(int ordinal) => row.IsMissing(ordinal) ? DocumentMissing.Instance : row.GetValue(ordinal);
-                object? value = select.ValueOrdinal is int valueOrdinal ? Read(valueOrdinal) :
+                object? value = sourcePlan.ValueOrdinal is int valueOrdinal ? Read(valueOrdinal) :
                     DocumentJsonValue.Object(result.Columns.Select(column => new KeyValuePair<string, object?>(column.Name, Read(column.Ordinal))), forInsert: true);
-                Add(Read(select.KeyOrdinal), value);
+                Add(Read(sourcePlan.KeyOrdinal), value);
             }
         }
         else
         {
             var evaluator = new DocumentExpressionEvaluator(null, parameters, cancellationToken, forInsert: true);
-            foreach (var pair in statement.Values)
+            foreach (var pair in values)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 Add(evaluator.Evaluate(pair.Key, default), evaluator.Evaluate(pair.Value, default));
@@ -112,7 +114,7 @@ internal static partial class DocumentPlanExecutor
         {
             operation.EnsureActive();
             await collection.WriteAsync(operation.Context, document.Id, document.Content, null,
-                insertOnly: true, cancellationToken).ConfigureAwait(false);
+                insertOnly, cancellationToken).ConfigureAwait(false);
         }
         return new DocumentCommandResult(pending.Count);
 
@@ -127,6 +129,7 @@ internal static partial class DocumentPlanExecutor
                 throw new DocumentPlanningException("COHDOC008", ErrorMessages.InsertValueMissing, statement.Location);
             }
             var id = new DocumentId(text);
+            if (!keys.Add(text)) { throw new DocumentDuplicateKeyException(metadata.Name, id); }
             byte[] content;
             try
             {

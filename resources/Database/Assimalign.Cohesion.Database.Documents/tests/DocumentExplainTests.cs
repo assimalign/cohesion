@@ -20,6 +20,8 @@ public sealed class DocumentExplainTests
     [Theory(DisplayName = "Cohesion Test [Documents] - EXPLAIN: scans, seeks and system collections use the chosen plan")]
     [InlineData("INSERT INTO items (KEY, VALUE) VALUES ('fresh', 1)", "Insert")]
     [InlineData("INSERT INTO items (KEY k) SELECT META().id AS k FROM items", "InsertSelect")]
+    [InlineData("UPSERT INTO items (KEY, VALUE) VALUES ('a', 1)", "Upsert")]
+    [InlineData("UPSERT INTO items (KEY k, VALUE v) SELECT META().id AS k, score AS v FROM items", "UpsertSelect")]
     [InlineData("DELETE FROM items", "Delete")]
     [InlineData("DELETE FROM items WHERE score >= @minimum", "Delete")]
     [InlineData("UPDATE items SET score = score + 1", "Update")]

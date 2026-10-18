@@ -34,7 +34,7 @@ belong to the shared kernel. No kernel contract was widened. The engine, its dat
 first four leaves of the area root's bases ([Concrete types](#concrete-types-concrete-types-plan-phase-4-1260)),
 while the planner, executor, workers and storage strategy are internal.
 
-SELECT and index-DDL statements flow through these stages; INSERT, UPDATE and DELETE use the same pipeline. Catalog metadata informs query access-path
+SELECT and index-DDL statements flow through these stages; INSERT, UPSERT, UPDATE and DELETE use the same pipeline. Catalog metadata informs query access-path
 selection and index-DDL planning; `SELECT`, `CREATE INDEX`, and `DROP INDEX` all reach the same
 plan executor rather than an index-management side channel.
 
@@ -252,7 +252,7 @@ Message contains no code prefix. The Documents family is `COHDOCnnn`:
 | `COHDOC003` | Duplicate projection name; use unique aliases |
 | `COHDOC010` | Collection already exists (PostgreSQL SQLSTATE 42P07) |
 | `COHDOC011` | Collection is owned by the declared schema and cannot be dropped through a session |
-| `COHDOC012` | INSERT found a duplicate document key visible in its transaction |
+| `COHDOC012` | INSERT found an existing key, or INSERT/UPSERT repeated a key in one statement |
 | `COHDOC013` | Invalid evaluated LIKE escape or a pattern ending in its escape character |
 | `COHDOC014` | DISTINCT ORDER BY expression is absent from the projection |
 | `COHDOC015` | A SELECT array or object constructor exceeds the 256-level result limit |
@@ -315,7 +315,7 @@ uncommitted catalog writes are visible. Subsequent statements observe committed
 catalog changes according to their isolation level. No metadata copy, content record,
 or synthetic collection is stored, and existing collection listing stays unchanged.
 
-The sources are read-only. `INSERT`, `UPDATE`, `DELETE`, `CREATE COLLECTION`, `DROP COLLECTION`, `CREATE INDEX`, and `DROP INDEX` targeting either source,
+The sources are read-only. `INSERT`, `UPSERT`, `UPDATE`, `DELETE`, `CREATE COLLECTION`, `DROP COLLECTION`, `CREATE INDEX`, and `DROP INDEX` targeting either source,
 and `CreateCollectionAsync` or `DropCollectionAsync` using either reserved name,
 throw `DatabaseException` with `System collection '<canonical source>' is read-only.`
 before ordinary catalog lookup or mutation. Virtual sources do not provide mutable `DocumentCollection` handles.
@@ -325,7 +325,7 @@ before ordinary catalog lookup or mutation. Virtual sources do not provide mutab
 The supported clause matrix lives in the language package's
 [DESIGN.md](../../Assimalign.Cohesion.Database.Documents.Language/docs/DESIGN.md).
 SELECT (ALL/DISTINCT and VALUE/RAW), object/array constructors, FROM, WHERE, GROUP BY, HAVING, ORDER BY, CREATE COLLECTION, DROP COLLECTION,
-CREATE INDEX, DROP INDEX, INSERT, UPDATE, UNSET, DELETE, VALUES, IN, BETWEEN, LIKE and CASE are executed. OQL retains its name with a SQL++ basis.
+CREATE INDEX, DROP INDEX, INSERT, UPSERT, UPDATE, UNSET, DELETE, VALUES, IN, BETWEEN, LIKE and CASE are executed. OQL retains its name with a SQL++ basis.
 Retired ODMG constructs are rejected positionally; nested queries, deferred document mutations
 and server statements are rejected with `COHDBL001`. The parser advertises only clauses this executor
 supports.
@@ -617,7 +617,7 @@ no format version or upgrade reader is added.
 
 ## EXPLAIN operator vocabulary and wire shape (#1104)
 
-EXPLAIN for SELECT, INSERT, UPDATE and DELETE performs ordinary parameter validation and snapshot-visible planning, then
+EXPLAIN for SELECT, INSERT, UPSERT, UPDATE and DELETE performs ordinary parameter validation and snapshot-visible planning, then
 materialize a `DatabasePlanDescription` before reading document content or invoking the plan
 executor. Its columns and nullable count fields follow
 [Execution](../../Assimalign.Cohesion.Database.Execution/docs/DESIGN.md#plan-descriptions-1104).
@@ -632,6 +632,7 @@ It changes no documents or catalog entries, including when its explicit transact
 | `Delete` | Snapshot-filtered deletion; detail states filter presence and IndexSeek or CollectionScan, with that access as its child |
 | `Update` | Snapshot-filtered partial update; detail states filter presence and its IndexSeek or CollectionScan child |
 | `Insert`, `InsertSelect` | Document creation from VALUES or a fully materialized query; SELECT children describe the source access |
+| `Upsert`, `UpsertSelect` | Whole-document insert-or-replace from the same staged inputs; SELECT children describe the source access |
 | `SystemCollection` | A virtual `COHESION_SCHEMA` collection without stored-document access |
 | `CreateCollection`, `DropCollection`, `CreateIndex`, `DropIndex` | Internal DDL mappings; EXPLAIN DDL is refused by the parser |
 
@@ -684,6 +685,35 @@ not document paths: META(alias).id comparisons stay residual filters over a scan
 index chosen by another conjunct. T1 has no key-lookup access path.
 
 ## Data mutation and serialization semantics
+
+OQL UPSERT uses the [SQL++ KEY/VALUE grammar](https://docs.couchbase.com/server/current/n1ql/n1ql-language-reference/upsert.html)
+and INSERT's staging and validation. It has Put semantics: an absent key is inserted and an
+existing key receives the complete replacement value, with omitted properties gone. A fresh
+durable version is allocated even for identical content; other documents retain their versions.
+Both VALUES and SELECT forms validate all rows before writing, and a self-source reads the
+statement snapshot. A repeated ordinal key fails the whole statement with DocumentDuplicateKeyException
+(COHDOC012), without applying last-writer-wins. The failure rolls back autocommit or aborts the
+whole explicit transaction under #1225; the caller rolls back that transaction before reuse.
+No statement-level version precondition is supported in T1: OPTIONS remains COHDBL001 and
+expiration is not implemented. Optimistic replacement uses PutAsync(expectedVersion) or
+UPDATE WHERE META(d).version = $v. RETURNING remains deferred.
+
+UPSERT calls the same WriteAsync primitive as INSERT, UPSERT, UPDATE and PutAsync, with insert-only
+checking disabled. Old content is tombstoned and old index keys are removed before new content,
+metadata and index keys publish in the same logical transaction. Current-state checks reject
+an intervening committed writer with DatabaseTransactionAbortedException. Schema ownership
+permits content writes; virtual system collections are read-only and missing destinations
+are never created. EXPLAIN describes Upsert/UpsertSelect without mutation. Completion reports
+the written-document count and emits no Document frames. The process-exit fixture and its raw
+B-tree assertions prove committed old-key removal and abandoned new-key removal after recovery.
+The catalog layout is unchanged, so no format bump or upgrade path is introduced.
+
+The shared INSERT/UPSERT JSON writer now uses the existing RFC 8259 encoder used by UPDATE.
+Non-ASCII text (including é, CJK, < and supplementary Unicode scalars) remains UTF-8;
+quotes, backslashes and controls are escaped. VALUES parameters and constructors share the
+same serialization and storage validation. Other whitespace and original escape spelling may
+be normalized, as in INSERT. No public boundary or wire layout is widened.
+
 
 OQL DELETE FROM collection [AS? alias] [WHERE predicate] collects matching document ids from
 the statement snapshot before its first write, in ordinal identity order. Candidate retrieval

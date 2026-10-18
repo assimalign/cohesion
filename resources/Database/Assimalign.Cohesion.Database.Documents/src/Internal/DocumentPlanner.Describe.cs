@@ -18,6 +18,8 @@ internal sealed partial class DocumentPlanner
         DocumentLogicalPlan => "Project",
         DocumentSystemCollectionPlan => "SystemCollection",
         DocumentInsertPlan => "Insert",
+        DocumentUpsertPlan { Source: not null } => "UpsertSelect",
+        DocumentUpsertPlan => "Upsert",
         DocumentDeletePlan => "Delete",
         DocumentUpdatePlan => "Update",
         DocumentInsertSelectPlan => "InsertSelect",
@@ -36,6 +38,7 @@ internal sealed partial class DocumentPlanner
             DocumentPlan p => p.Collection.Name,
             DocumentSystemCollectionPlan p => p.Name,
             DocumentInsertPlan p => p.Collection.Name,
+            DocumentUpsertPlan p => p.Collection.Name,
             DocumentDeletePlan p => p.Collection.Name,
             DocumentUpdatePlan p => p.Collection.Name,
             DocumentInsertSelectPlan p => p.Collection.Name,
@@ -67,16 +70,22 @@ internal sealed partial class DocumentPlanner
         if (plan is DocumentUpdatePlan mutation) { AddAccess(mutation.Access, 0); }
         var select = plan as DocumentPlan;
         int sourceParent = 0;
-        if (plan is DocumentInsertSelectPlan insert)
+        var writeSource = plan switch
+        {
+            DocumentInsertSelectPlan insert => insert.Source,
+            DocumentUpsertPlan upsert => upsert.Source,
+            _ => null,
+        };
+        if (writeSource is not null)
         {
             sourceParent = 1;
-            if (insert.Source is DocumentPlan source)
+            if (writeSource is DocumentPlan source)
             {
                 select = source;
                 target = source.Collection.Name;
                 Add("Select", 0);
             }
-            else if (insert.Source is DocumentSystemCollectionPlan system)
+            else if (writeSource is DocumentSystemCollectionPlan system)
             {
                 target = system.Name;
                 Add("SystemCollection", 0);

@@ -25,6 +25,7 @@ public class OqlLanguageProfileTests
 
     [Theory]
     [InlineData(OqlClauses.Insert)]
+    [InlineData(OqlClauses.Upsert)]
     [InlineData(OqlClauses.Update)]
     [InlineData(OqlClauses.Unset)]
     [InlineData(OqlClauses.Delete)]

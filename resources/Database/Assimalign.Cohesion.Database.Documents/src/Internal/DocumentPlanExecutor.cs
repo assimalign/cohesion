@@ -27,8 +27,11 @@ internal static partial class DocumentPlanExecutor
         {
             DocumentDeletePlan delete => await ExecuteDeleteAsync(database, operation, delete, parameters, cancellationToken).ConfigureAwait(false),
             DocumentUpdatePlan update => await ExecuteUpdateAsync(database, operation, update, parameters, cancellationToken).ConfigureAwait(false),
-            DocumentInsertPlan insert => await ExecuteInsertAsync(database, operation, insert.Collection, insert.Statement, null, parameters, cancellationToken).ConfigureAwait(false),
-            DocumentInsertSelectPlan insert => await ExecuteInsertAsync(database, operation, insert.Collection, insert.Statement, insert, parameters, cancellationToken).ConfigureAwait(false),
+            DocumentInsertPlan insert => await ExecuteWriteAsync(database, operation, insert.Collection, insert.Statement, insert.Statement.Values, null, true, parameters, cancellationToken).ConfigureAwait(false),
+            DocumentInsertSelectPlan insert => await ExecuteWriteAsync(database, operation, insert.Collection, insert.Statement, insert.Statement.Values, (insert.Source, insert.KeyOrdinal, insert.ValueOrdinal), true, parameters, cancellationToken).ConfigureAwait(false),
+            DocumentUpsertPlan upsert => await ExecuteWriteAsync(database, operation, upsert.Collection, upsert.Statement,
+                upsert.Statement.Values, upsert.Source is { } source ? (source, upsert.KeyOrdinal, upsert.ValueOrdinal) : null,
+                false, parameters, cancellationToken).ConfigureAwait(false),
             DocumentSystemCollectionPlan system => ExecuteSystemCollection(database, operation, system, parameters, cancellationToken),
             DocumentPlan select => await ExecuteSelectAsync(database, operation, select, parameters, cancellationToken).ConfigureAwait(false),
             DocumentCreateCollectionPlan createCollection => await ExecuteCreateCollectionAsync(database, operation, createCollection, cancellationToken).ConfigureAwait(false),

@@ -60,7 +60,7 @@ internal static class OqlUnsupportedVocabulary
         new("UNION", "UNION", OqlWordPosition.Clause),
         new("INTERSECT", "INTERSECT", OqlWordPosition.Clause),
         new("EXCEPT", "EXCEPT", OqlWordPosition.Clause),
-        // SQL++ words. oql-limit-offset, oql-upsert and oql-arrays flip these pins; MERGE stays.
+        // SQL++ words. oql-limit-offset and oql-arrays flip these pins; MERGE stays.
         new("LIMIT", "LIMIT", OqlWordPosition.Clause),
         new("OFFSET", "OFFSET", OqlWordPosition.Clause),
         new("UPSERT", "UPSERT", OqlWordPosition.Statement),

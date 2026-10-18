@@ -35,7 +35,8 @@ internal sealed partial class DocumentPlanner
 
     internal DocumentStatementPlan Plan(OqlExpression expression) => expression switch
     {
-        OqlInsertExpression insert => PlanInsert(insert),
+        OqlInsertExpression insert => PlanWrite(insert, insert.Collection, insert.Values, insert.Select, insert.KeyName, insert.ValueName),
+        OqlUpsertExpression upsert => PlanWrite(upsert, upsert.Collection, upsert.Values, upsert.Select, upsert.KeyName, upsert.ValueName),
         OqlDeleteExpression delete => PlanDelete(delete),
         OqlUpdateExpression update => PlanUpdate(update),
         OqlSelectExpression select when DocumentSystemCollections.Find(select.Collection) is string name =>

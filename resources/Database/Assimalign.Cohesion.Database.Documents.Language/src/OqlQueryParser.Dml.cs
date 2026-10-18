@@ -73,21 +73,22 @@ public sealed partial class OqlQueryParser
         return new OqlDeleteExpression(collection, alias, predicate, Span(start, Previous));
     }
 
-    private OqlInsertExpression ParseInsert()
+    private OqlExpression ParseWrite(bool upsert = false)
     {
         var start = Current;
         Advance();
         Expect("INTO");
         string collection = CollectionName();
         string? alias = Take("AS") ? Identifier() : null;
-        if (!Take(TokenType.LeftParen))
-        {
-            Error("OQL0002", "INSERT requires an explicit KEY header; document ids are not generated.", Current);
-            return new OqlInsertExpression(collection, alias, [], null, null, null, Span(start, Previous));
-        }
-        Expect("KEY");
+        string verb = upsert ? "UPSERT" : "INSERT";
         string? keyName = null;
         string? valueName = null;
+        if (!Take(TokenType.LeftParen))
+        {
+            Error("OQL0002", $"{verb} requires an explicit KEY header; document ids are not generated.", Current);
+            return Build([], null);
+        }
+        Expect("KEY");
         bool valuesHeader = Take(TokenType.Comma);
         if (valuesHeader)
         {
@@ -106,7 +107,7 @@ public sealed partial class OqlQueryParser
         {
             Advance();
             _diagnostics.Add(QueryDiagnostics.UnsupportedClause("OPTIONS", Profile.Language, Span(Current, Current)));
-            return new OqlInsertExpression(collection, alias, [], null, keyName, valueName, Span(start, Current));
+            return Build([], null);
         }
         Expect(TokenType.RightParen, "')'");
         List<(OqlExpression Key, OqlExpression Value)> values = [];
@@ -132,6 +133,11 @@ public sealed partial class OqlQueryParser
         {
             Error("OQL0002", "Expected SELECT after the KEY output binding.", Current);
         }
-        return new OqlInsertExpression(collection, alias, values.AsReadOnly(), select, keyName, valueName, Span(start, Previous));
+        return Build(values.AsReadOnly(), select);
+
+        OqlExpression Build(IReadOnlyList<(OqlExpression Key, OqlExpression Value)> rows, OqlSelectExpression? source)
+            => upsert
+                ? new OqlUpsertExpression(collection, alias, rows, source, keyName, valueName, Span(start, Previous))
+                : new OqlInsertExpression(collection, alias, rows, source, keyName, valueName, Span(start, Previous));
     }
 }

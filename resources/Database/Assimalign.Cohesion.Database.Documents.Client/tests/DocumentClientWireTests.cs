@@ -283,6 +283,42 @@ public sealed class DocumentClientWireTests
         (await connection.QueryAsync("SELECT OBJECT_NAME FROM COHESION_SCHEMA.OBJECT_OWNERSHIP", cancellationToken: harness.Token)).ShouldBeEmpty();
     }
 
+    [Theory(DisplayName = "Cohesion Test [Documents.Client] - UPSERT: whole replacement, command completion and failure reuse work over both transports")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExecuteAsync_Upsert_ShouldReplaceWholeDocumentAndPreserveSessionAsync(bool tcp)
+    {
+        // Arrange
+        await using var harness = await DocumentClientTestHarness.StartAsync(tcp);
+        await using var connection = await harness.Client.ConnectAsync(harness.Token);
+        await connection.CreateCollectionAsync("items", harness.Token);
+        var original = await connection.PutAsync("items", "a", "{\"name\":\"alpha\",\"discarded\":true}"u8.ToArray(), cancellationToken: harness.Token);
+        using var replacement = JsonDocument.Parse("{\"name\":\"alpha2\",\"text\":\"é東京<😀\"}");
+        using var added = JsonDocument.Parse("{\"name\":\"zeta\"}");
+        // Act
+        var command = await connection.QueryAsync("UPSERT INTO items (KEY, VALUE) VALUES ('a', $replacement), ('z', $new)",
+            new Dictionary<string, object?> { ["replacement"] = replacement.RootElement, ["new"] = added.RootElement }, harness.Token);
+        // Assert
+        command.AffectedCount.ShouldBe(2);
+        command.ShouldBeEmpty();
+        command.Documents.ShouldBeEmpty();
+        command.Columns.ShouldBeEmpty();
+        var stored = (await connection.GetAsync("items", "a", harness.Token)).ShouldNotBeNull();
+        stored.Version.Value.ShouldBeGreaterThan(original.Version.Value);
+        using var json = JsonDocument.Parse(stored.Content);
+        JsonElement.DeepEquals(json.RootElement, replacement.RootElement).ShouldBeTrue();
+        json.RootElement.TryGetProperty("discarded", out _).ShouldBeFalse();
+        var plan = await connection.QueryAsync("EXPLAIN UPSERT INTO items (KEY, VALUE) VALUES ('a', NULL)", cancellationToken: harness.Token);
+        plan.Documents.ShouldHaveSingleItem().GetProperty("operator").GetString().ShouldBe("Upsert");
+        var failure = await Should.ThrowAsync<DocumentClientException>(async () => await connection.ExecuteAsync(
+            "UPSERT INTO items (KEY, VALUE) VALUES ('a', 0), (MISSING, 1)", cancellationToken: harness.Token));
+        failure.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDOC008");
+        (await connection.QueryAsync("SELECT name FROM items ORDER BY name", cancellationToken: harness.Token))
+            .Select(row => row[0]).ShouldBe(new object?[] { "alpha2", "zeta" });
+        (await connection.ExecuteAsync("UPSERT INTO items (KEY k, VALUE v) SELECT META().id AS k, name AS v FROM items", cancellationToken: harness.Token)).ShouldBe(2);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Documents.Client] - Scalar document roots remain whole JSON values")]
     [InlineData(false)]
     [InlineData(true)]

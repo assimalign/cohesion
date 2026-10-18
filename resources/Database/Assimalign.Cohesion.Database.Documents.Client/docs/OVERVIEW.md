@@ -34,10 +34,11 @@ namespaces. The client library itself references only the transport contracts. Q
 accept JSON scalars and `JsonElement`; object and array results remain owned `JsonElement`
 values. A stored `Document` carries its exact UTF-8 content, identity and version.
 
-OQL INSERT, UPDATE and DELETE return their affected counts through ExecuteAsync. UPDATE accepts
+OQL INSERT, UPSERT, UPDATE and DELETE return their affected counts through ExecuteAsync. UPDATE accepts
 SET and UNSET paths and reports the matched count, with a new version for every match. DELETE
 retains the collection and index definitions; EXPLAIN UPDATE/DELETE includes the chosen scan or
-index seek. A path-rule failure preserves its diagnostic and leaves the connection reusable.
+index seek. UPSERT inserts or wholly replaces using INSERT's KEY/VALUE grammar and reports
+written-document count; EXPLAIN UPSERT describes its VALUES or SELECT source. A path-rule failure preserves its diagnostic and leaves the connection reusable.
 
 `DocumentClientException.Code` describes the wire failure; its inherited `DatabaseException.Diagnostics`
 retains the server's codes and source locations, and its message preserves the composed `CODE: message`

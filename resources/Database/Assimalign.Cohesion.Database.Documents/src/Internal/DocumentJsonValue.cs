@@ -10,7 +10,7 @@ internal static class DocumentJsonValue
     internal static byte[] Encode(object? value)
     {
         var buffer = new ArrayBufferWriter<byte>();
-        using (var writer = new Utf8JsonWriter(buffer, new JsonWriterOptions { MaxDepth = 256 }))
+        using (var writer = new Utf8JsonWriter(buffer, new JsonWriterOptions { Encoder = DocumentJsonEncoder.Instance, MaxDepth = 256 }))
         {
             Write(writer, value);
         }
@@ -29,7 +29,7 @@ internal static class DocumentJsonValue
         try
         {
             var buffer = new ArrayBufferWriter<byte>();
-            using (var writer = new Utf8JsonWriter(buffer, new JsonWriterOptions { MaxDepth = forInsert ? 128 : maxDepth }))
+            using (var writer = new Utf8JsonWriter(buffer, new JsonWriterOptions { Encoder = DocumentJsonEncoder.Instance, MaxDepth = forInsert ? 128 : maxDepth }))
             {
                 writer.WriteStartObject();
                 foreach (var member in keyed)
@@ -53,7 +53,7 @@ internal static class DocumentJsonValue
         try
         {
             var buffer = new ArrayBufferWriter<byte>();
-            using (var writer = new Utf8JsonWriter(buffer, new JsonWriterOptions { MaxDepth = forInsert ? 128 : maxDepth }))
+            using (var writer = new Utf8JsonWriter(buffer, new JsonWriterOptions { Encoder = DocumentJsonEncoder.Instance, MaxDepth = forInsert ? 128 : maxDepth }))
             {
                 writer.WriteStartArray();
                 foreach (var element in elements) { Write(writer, element is DocumentMissing ? null : element); }
