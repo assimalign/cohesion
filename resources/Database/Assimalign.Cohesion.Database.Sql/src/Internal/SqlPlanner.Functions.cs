@@ -36,19 +36,24 @@ internal sealed partial class SqlPlanner
         switch (statement)
         {
             case SqlSetOperationExpression set:
-                var pending = new System.Collections.Generic.Stack<SqlQueryBodyExpression>();
-                pending.Push(set);
-                while (pending.TryPop(out var body))
+                var pending = new System.Collections.Generic.Stack<(SqlQueryBodyExpression Query, bool Visited)>();
+                pending.Push((set, false));
+                while (pending.TryPop(out var item))
                 {
-                    if (body is SqlSetOperationExpression operation)
+                    if (item.Query is SqlSetOperationExpression operation)
                     {
-                        pending.Push(operation.Right);
-                        pending.Push(operation.Left);
+                        if (!item.Visited)
+                        {
+                            pending.Push((operation, true));
+                            pending.Push((operation.Right, false));
+                            pending.Push((operation.Left, false));
+                            continue;
+                        }
                         foreach (var order in operation.OrderBy) { ValidateFunctionCalls(order.Expression); }
                         ValidateFunctionCalls(operation.Limit);
                         ValidateFunctionCalls(operation.Offset);
                     }
-                    else { ValidateFunctionCalls((SqlQueryExpression)body); }
+                    else { ValidateFunctionCalls((SqlQueryExpression)item.Query); }
                 }
                 break;
             case SqlSelectExpression select:

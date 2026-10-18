@@ -223,6 +223,7 @@ public sealed class SqlSetOperationExecutionTests
     [InlineData("SELECT id FROM a UNION SELECT id FROM b ORDER BY a.id;", "COHSQLE018", "output", "qualified")]
     [InlineData("SELECT id FROM a UNION SELECT id FROM b ORDER BY 9;", "COHSQLE018", "output", "ordinal")]
     [InlineData("SELECT id FROM a UNION SELECT ABS() FROM b;", "COHSQLE006", "ABS", "argument")]
+    [InlineData("SELECT ABS() FROM a UNION SELECT id FROM b ORDER BY LENGTH();", "COHSQLE006", "ABS", "argument")]
     public async Task Plan_InvalidCombinedOutput_ShouldRejectBeforeRows(string sql, string code, string first, string second)
     {
         // Arrange
