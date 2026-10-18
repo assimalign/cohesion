@@ -16,7 +16,7 @@ internal sealed record GraphMatchClausePlan(IReadOnlyList<GraphPathPlan> Paths, 
 internal enum GraphProjectionKind { Scalar, Node, Relationship, Path, EntityValue }
 internal sealed record GraphProjectionPlan(GqlExpression Expression, string Name, GraphProjectionKind Kind);
 internal sealed record GraphDistinctPlan(IReadOnlyList<GraphProjectionPlan> Keys);
-internal sealed record GraphGroupingPlan(IReadOnlyList<GqlExpression> Keys, IReadOnlyList<GqlAggregateExpression> Aggregates);
+internal sealed record GraphGroupingPlan(IReadOnlyList<GqlExpression> Keys, IReadOnlyList<GqlAggregateExpression> Aggregates, GraphGroupingScope Scope);
 internal sealed record GraphSortKeyPlan(GqlSortItem Item, int ProjectionIndex);
 internal sealed record GraphSortPagePlan(IReadOnlyList<GraphSortKeyPlan> Keys, long Offset, long? Limit);
 
@@ -209,7 +209,7 @@ internal sealed partial class GraphPlanner
             if (item?.Expression is null || !Enum.IsDefined(item.Direction) || !Enum.IsDefined(item.NullOrdering))
             { throw new GraphPlanningException("COHDBG001", ErrorMessages.SortShapeInvalid, query.Location); }
             ValidateExpression(item.Expression, allowAggregates: grouping is not null);
-            if (grouping is not null) { GraphGrouping.ValidateScope(item.Expression, grouping, orderAliases, token); }
+            if (grouping is not null) { grouping.Scope.Validate(item.Expression, orderAliases); }
             int projectionIndex = item.Expression is GqlVariableExpression alias && orderAliases.TryGetValue(alias.Variable, out int aliased)
                 ? aliased : orderProjections.TryGetValue(item.Expression, out int projectedIndex) ? projectedIndex : -1;
             sortKeys.Add(new GraphSortKeyPlan(item, projectionIndex));

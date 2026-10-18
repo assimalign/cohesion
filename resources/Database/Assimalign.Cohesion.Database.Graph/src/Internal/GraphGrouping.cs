@@ -41,36 +41,10 @@ internal static class GraphGrouping
         if (projections.Count == 0) { throw new GraphPlanningException("COHDBG001", ErrorMessages.GroupByMismatch, query.Location); }
         if (query.GroupBy is not null && (query.GroupBy.Count != keys.Count || !keys.SetEquals(query.GroupBy)))
         { throw new GraphPlanningException("COHDBG001", ErrorMessages.GroupByMismatch, query.Location); }
-        var plan = new GraphGroupingPlan(keyList.AsReadOnly(), aggregateList.AsReadOnly());
-        foreach (var projection in projections) { ValidateScope(projection.Expression, plan, null, token); }
+        var scope = new GraphGroupingScope(keyList, aggregateList, shape, token);
+        var plan = new GraphGroupingPlan(keyList.AsReadOnly(), aggregateList.AsReadOnly(), scope);
+        foreach (var projection in projections) { scope.Validate(projection.Expression); }
         return plan;
-    }
-
-    internal static void ValidateScope(GqlExpression root, GraphGroupingPlan plan,
-        IReadOnlyDictionary<string, int>? aliases, CancellationToken token)
-    {
-        var shape = new GraphExpressionShape(token);
-        var keys = new HashSet<GqlExpression>(plan.Keys, shape);
-        var aggregates = new HashSet<GqlExpression>(plan.Aggregates, shape);
-        var variables = plan.Keys.OfType<GqlVariableExpression>().Select(key => key.Variable).ToHashSet(StringComparer.Ordinal);
-        var pending = new Stack<GqlExpression>();
-        pending.Push(root);
-        while (pending.TryPop(out var expression))
-        {
-            token.ThrowIfCancellationRequested();
-            if (keys.Contains(expression) || aggregates.Contains(expression)) { continue; }
-            string? name = expression switch
-            {
-                GqlVariableExpression variable => variable.Variable,
-                GqlPropertyExpression property => property.Variable,
-                GqlLabeledPredicate labeled => labeled.Variable,
-                _ => null,
-            };
-            if (name is not null && (variables.Contains(name) || aliases is not null && aliases.ContainsKey(name))) { continue; }
-            if (name is not null || expression is GqlAggregateExpression)
-            { throw new GraphPlanningException("COHDBG001", ErrorMessages.GroupedExpressionRequired, expression.Location); }
-            foreach (var child in GraphValueExpressions.Children(expression)) { pending.Push(child); }
-        }
     }
 
     internal static List<Dictionary<string, object?>> Apply(GraphGroupingPlan plan,

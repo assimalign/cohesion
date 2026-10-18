@@ -316,6 +316,25 @@ public sealed class GraphAggregateTests
         }
     }
 
+    [Fact(DisplayName = "Cohesion Test [Graph] - Aggregates: wide grouped projections do not allocate a key index per column")]
+    public void Plan_WideGrouping_ShouldBoundScopeAllocation()
+    {
+        // Arrange
+        var items = Enumerable.Range(0, 1000).Select(i => new GqlProjection(new GqlLiteralExpression((long)i), "k" + i)).ToList();
+        items.Add(new GqlProjection(new GqlAggregateExpression(GqlAggregateFunction.Count), "n"));
+        var query = new GqlQueryExpression([], null, [], [], false, items);
+        var projections = items.Select(item => new GraphProjectionPlan(item.Expression, item.Alias!, GraphProjectionKind.Scalar)).ToArray();
+        GraphGrouping.Plan(query, projections, CancellationToken.None);
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        // Act
+        var plan = GraphGrouping.Plan(query, projections, CancellationToken.None);
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        // Assert: rebuilding the 1,000-key scope for every column exceeds 100 MiB.
+        plan.ShouldNotBeNull().Keys.Count.ShouldBe(1000);
+        plan.Aggregates.Count.ShouldBe(1);
+        allocated.ShouldBeLessThan(10L * 1024 * 1024);
+    }
+
     private static async Task Insert(GraphDatabaseSession session, object?[] values)
     {
         foreach (var value in values)

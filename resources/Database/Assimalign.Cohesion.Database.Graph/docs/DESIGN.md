@@ -547,7 +547,8 @@ After matching and mutations, GraphGrouping hashes keys using GraphRowComparer's
 numeric and composite equality. A group holds computed key values and statically typed
 aggregate state; it exposes no arbitrary source row. Evaluation resolves grouped expressions
 by structural shape, avoiding AST rewriting or assembly-boundary changes. Groups retain first
-input order. Each aggregate consumes non-null values; optional null-extension rows count
+input order. One cached scope index serves every RETURN and ORDER BY item, avoiding quadratic
+key-index allocation for wide projections. Each aggregate consumes non-null values; optional null-extension rows count
 for COUNT(*) only. DISTINCT inside aggregates uses GraphValueComparer. MIN/MAX prepare keys
 once per candidate and use the shared total order. Numeric totals remain exact until final
 promotion; running Double averages avoid intermediate sum overflow. Count is Int64 in values
