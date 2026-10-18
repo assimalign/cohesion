@@ -217,7 +217,7 @@ internal static partial class GraphPlanExecutor
             if (operation.Updates.FindNode(id.Value) is not null) { affected++; }
             var incident = await operation.Updates.GetIncidentAsync(id.Value, token).ConfigureAwait(false);
             if (incident.Count != 0 && !deletion.Detach)
-            { throw new GraphPlanningException("COHDBG003", ErrorMessages.ConnectedNodeDeletion, deletion.Location); }
+            { throw new InvalidOperationException(ErrorMessages.ConnectedNodeDeletion); }
             foreach (var edge in incident) { operation.Updates.DeletedRelationship(edge.Id); }
             if (!operation.Updates.IsCreated(true, id.Value))
             { await database.Store.DeleteNodeAsync(id.Value, deletion.Detach, operation.Context, token).ConfigureAwait(false); }
