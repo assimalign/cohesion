@@ -216,7 +216,7 @@ internal static partial class GraphPlanExecutor
         {
             if (operation.Updates.FindNode(id.Value) is not null) { affected++; }
             var incident = await operation.Updates.GetIncidentAsync(id.Value, token).ConfigureAwait(false);
-            if (incident.Count != 0 && !deletion.Detach)
+            if (!deletion.Detach && incident.Any(edge => operation.Updates.IsCreated(false, edge.Id)))
             { throw new InvalidOperationException(ErrorMessages.ConnectedNodeDeletion); }
             foreach (var edge in incident) { operation.Updates.DeletedRelationship(edge.Id); }
             if (!operation.Updates.IsCreated(true, id.Value))

@@ -107,6 +107,35 @@ public sealed class GraphUpdateConcurrencyTests
         allocated.ShouldBeLessThan(baseline + reads + 64L * 1024 * 1024);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Graph] - DELETE: storage decides current adjacency and Snapshot conflicts (#1149)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Execute_StaleIncidentRelationship_ShouldPreserveStorageDeleteSemantics(bool removed)
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create("updates", new());
+        var db = await engine.CreateDatabaseAsync("graph");
+        await using var first = await db.CreateSessionAsync();
+        await using var stale = await db.CreateSessionAsync();
+        await first.ExecuteAsync("INSERT (:A)-[:R]->(:B)");
+        await using var snapshot = await stale.BeginTransactionAsync(IsolationLevel.Snapshot);
+        await first.ExecuteAsync("MATCH ()-[r:R]->() " + (removed ? "DELETE r" : "SET r.w=1"));
+
+        // Act / Assert
+        if (removed)
+        {
+            (await stale.ExecuteAsync("MATCH (a:A) DELETE a")).AffectedCount.ShouldBe(1);
+            await snapshot.CommitAsync();
+            await using var rows = (DatabaseResultSet)await first.ExecuteAsync("MATCH (a:A) RETURN a");
+            await foreach (var row in rows.GetRowsAsync(CancellationToken.None)) { throw new InvalidOperationException("Deleted node survived."); }
+        }
+        else
+        {
+            await Should.ThrowAsync<DatabaseTransactionAbortedException>(async () => await stale.ExecuteAsync("MATCH (a:A) DELETE a"));
+            await snapshot.RollbackAsync();
+        }
+    }
+
     [Fact(DisplayName = "Cohesion Test [Graph] - SET: Snapshot uses first-updater-wins and old snapshots retain values (#1149)")]
     public async Task Execute_StaleSnapshotUpdate_ShouldAbortLoser()
     {
