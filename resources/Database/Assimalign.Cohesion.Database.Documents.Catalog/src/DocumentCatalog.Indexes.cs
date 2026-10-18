@@ -76,7 +76,7 @@ public sealed partial class DocumentCatalog
     /// <returns>The published index definition.</returns>
     /// <exception cref="ArgumentNullException">The paths or context are null.</exception>
     /// <exception cref="ArgumentException">A name or path is invalid.</exception>
-    /// <exception cref="DatabaseException">The path count exceeds 32 (COHDOC022).</exception>
+    /// <exception cref="DatabaseException">The path count is zero or exceeds 32 (COHDOC022).</exception>
     /// <exception cref="DocumentCatalogException">The collection is absent, the name exists, or a key exceeds 1024 bytes.</exception>
     /// <exception cref="DocumentConstraintViolationException">A UNIQUE key is duplicate or non-scalar.</exception>
     /// <exception cref="InvalidOperationException">The context is not active.</exception>
@@ -218,6 +218,8 @@ public sealed partial class DocumentCatalog
     /// <exception cref="ArgumentNullException">The name, prefix or snapshot is null.</exception>
     /// <exception cref="ArgumentException">The bounds are not scalar or exceed the index's path count.</exception>
     /// <exception cref="DocumentCatalogException">The definition or tree is absent or malformed.</exception>
+    /// <exception cref="StorageCorruptionException">A matching entry's catalog page failed its checksum or is malformed.</exception>
+    /// <exception cref="StorageIOException">A matching entry's catalog page could not be read.</exception>
     /// <exception cref="OperationCanceledException">Iteration was canceled.</exception>
     public async ValueTask<IReadOnlyList<DocumentCatalogEntry>> SearchIndexAsync(Guid collectionId, string indexName,
         IReadOnlyList<object> equalityPrefix, object? lower, bool includeLower, object? upper, bool includeUpper,
@@ -336,13 +338,14 @@ public sealed partial class DocumentCatalog
     private async ValueTask CheckUniqueAsync(List<IndexChange> changes,
         TransactionContext context, CancellationToken cancellationToken)
     {
-        // Commit marks the context Committed before releasing the writer lock,
-        // but coordinator untracking follows release. Such a writer is already visible.
-        var latest = new TransactionSnapshot(context.Sequence, TransactionSequence.None,
-            new TransactionSequence(ulong.MaxValue), _coordinator.GetOpenContexts().Where(item => item.State != TransactionState.Committed).Select(item => item.Sequence));
+        TransactionSnapshot? latest = null;
         foreach (var change in changes)
         {
             if (!change.CheckUnique || change.NewKey is not { } key) { continue; }
+            // Commit marks the context Committed before releasing the writer lock,
+            // but coordinator untracking follows release. Such a writer is already visible.
+            latest ??= new TransactionSnapshot(context.Sequence, TransactionSequence.None,
+                new TransactionSequence(ulong.MaxValue), _coordinator.GetOpenContexts().Where(item => item.State != TransactionState.Committed).Select(item => item.Sequence));
             await using var cursor = ResolveIndex(change.Metadata).OpenCursor(latest, new IndexKeyRange(key, key, true, true));
             while (await cursor.MoveNextAsync(cancellationToken).ConfigureAwait(false))
             {

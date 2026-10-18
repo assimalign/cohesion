@@ -10,4 +10,5 @@
   <data name="SeekBoundsTooWide" xml:space="preserve"><value>Seek bounds exceed the index key paths.</value></data>
   <data name="CatalogFormatMismatch" xml:space="preserve"><value>Document catalog kind {0} format: found {1}, supported {2}. Recreate the database with this engine; no upgrade or legacy reader is supported.</value></data>
   <data name="PhysicalRegistrationMalformed" xml:space="preserve"><value>Malformed physical index registration.</value></data>
+  <data name="CatalogHeaderMalformed" xml:space="preserve"><value>Malformed document catalog metadata header.</value></data>
 </root>

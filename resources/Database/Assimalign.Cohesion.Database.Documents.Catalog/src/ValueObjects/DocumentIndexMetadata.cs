@@ -39,8 +39,8 @@ public readonly record struct DocumentIndexMetadata
     public Guid CollectionId { get; }
     /// <summary>Gets the ordinal index name.</summary>
     public string Name { get; }
-    /// <summary>Gets the leading key path.</summary>
-    public string Path => Paths[0];
+    /// <summary>Gets the leading key path, or an empty string for a default definition.</summary>
+    public string Path => Paths is null ? string.Empty : Paths[0];
     /// <summary>Gets an immutable snapshot of the ordered paths.</summary>
     public IReadOnlyList<string> Paths { get; }
     /// <summary>Gets whether valued scalar keys must be unique.</summary>

@@ -73,6 +73,24 @@ public sealed partial class DocumentCatalogTests
         new[] { first }.SequenceEqual([second]).ShouldBeTrue();
         first.Paths.ShouldBe(["a", "b.c"]);
     }
+
+    [Fact(DisplayName = "Cohesion Test [Documents.Catalog] - Default index metadata has an empty leading path and can be formatted (#1135)")]
+    public void Path_DefaultMetadata_ShouldBeEmptyAndAllowFormatting()
+    {
+        // Arrange.
+        var metadata = default(DocumentIndexMetadata);
+
+        // Act.
+        string path = metadata.Path;
+        string text = metadata.ToString();
+
+        // Assert.
+        path.ShouldBeEmpty();
+        text.ShouldContain("DocumentIndexMetadata", Case.Sensitive);
+        metadata.ShouldBe(default);
+        metadata.GetHashCode().ShouldBe(default(DocumentIndexMetadata).GetHashCode());
+    }
+
     [Fact(DisplayName = "Cohesion Test [Documents.Catalog] - Composite UNIQUE records round trip on reopen (#1135)")]
     public async Task Open_CompositeUniqueIndex_ShouldRoundTripV2RecordsAsync()
     {
@@ -134,10 +152,30 @@ public sealed partial class DocumentCatalogTests
             keys[i][..prefix.Length].ShouldBe(prefix);
             keys[i][prefix.Length].ShouldBe((byte)i);
         }
-        // A separate path pins the evaluator's navigation-through-null rule for the next wave.
+        // A leading navigation path must omit every entry, including the document with b:null.
         writer = await fixture.Coordinator.BeginAsync(IsolationLevel.Snapshot);
-        await fixture.Catalog.CreateIndexAsync(fixture.Collection.Id, "navigation", ["a", "b.x"], true, writer);
-        await fixture.Coordinator.CommitAsync(writer); // every b.x is MISSING, so no uniqueness conflict
+        var navigation = await fixture.Catalog.CreateIndexAsync(fixture.Collection.Id, "navigation", ["b.x", "a"], true, writer);
+        await fixture.Coordinator.CommitAsync(writer);
+        using var navigationRegistrations = fixture.Storage.GetUnitIterator(1);
+        long navigationRoot = 0;
+        while (navigationRegistrations.MoveNext())
+        {
+            var bytes = navigationRegistrations.Current.Data.Span;
+            if (BinaryPrimitives.ReadUInt64LittleEndian(bytes[18..]) == navigation.ObjectId)
+            {
+                navigationRoot = BinaryPrimitives.ReadInt64LittleEndian(bytes[26..]);
+            }
+        }
+        navigationRoot.ShouldBeGreaterThan(0);
+        var navigationManager = BTreeIndexManager.Create(new BTreeIndexManagerOptions
+        {
+            Storage = fixture.Storage,
+            TransactionSource = _ => throw new InvalidOperationException("Only raw reads are used."),
+            ExistingIndexes = [new BTreeIndexRegistration(navigation.ObjectId, new IndexDefinition(navigation.Name), navigationRoot)]
+        });
+        navigationManager.TryGetIndex(navigation.ObjectId, navigation.Name, out var navigationTree).ShouldBeTrue();
+        await using var navigationCursor = navigationTree.OpenCursor(snapshot, new IndexKeyRange(null, null, true, true));
+        (await navigationCursor.MoveNextAsync()).ShouldBeFalse();
     }
 
     [Fact(DisplayName = "Cohesion Test [Documents.Catalog] - Truncated registrations fail through the catalog boundary (#1135)")]

@@ -84,6 +84,7 @@ versions and a recreate remedy. There is no upgrade path or legacy reader. The p
 refuses v2 physical registrations at its pre-scrub fence. Engines predating that fence must
 never open these files, as the compatibility section below records.
 Key-path lists are immutable and compare by value, including catalog conflict checks.
+A default `DocumentIndexMetadata` reports an empty leading `Path` and can be formatted safely.
 
 Kind 3 content chunks use the format in
 [Documents.Storage](../../Assimalign.Cohesion.Database.Documents.Storage/docs/DESIGN.md).
@@ -124,6 +125,7 @@ OQL order. Each scalar payload includes the shared writer's type byte and termin
 Concatenation preserves MISSING &lt; NULL &lt; FALSE &lt; TRUE &lt; number &lt; string &lt; array &lt; object.
 The complete key must fit the shared 1024-byte limit; oversize fails before publication.
 
+The latest-state uniqueness snapshot is created only when a changed UNIQUE key needs a probe.
 UNIQUE checks are immediate, under the caller's database writer lock, before the physical
 statement bracket. A latest-state snapshot includes the caller's own earlier writes and
 excludes committed contexts from its in-flight set, including during the interval between
@@ -203,8 +205,10 @@ The index trees' pages are not catalog records: `Database.Indexing` owns their B
 format (2 since #1194, entries ordered by key, entry location and writer) and checks each tree's
 root page when the catalog attaches it. Opening the catalog happens after the coordinator's
 recovery scrub, so `DocumentCatalog.EnsureIndexFormat(storage)` makes the same check first,
-reading the metadata and registration records (which carry no MVCC stamps, so the scrub does not change
-them) and each root page. The Documents engine calls it before recovery and refuses a database
+reading only metadata kind/version headers, the registration records (which carry no MVCC stamps,
+so the scrub does not change them), and each root page. `Open` decodes metadata payloads once,
+after recovery; the fence does not allocate decoded collections, documents or path lists.
+The Documents engine calls it before recovery and refuses a database
 whose indexes an engine before #1194 wrote with "Database 'x' cannot be opened. COHDBI001: …",
 the `IndexFormatException` as its inner exception. A cleanly closed database is left
 byte-identical; a crashed one has had only the storage layer's format-agnostic journal redo and
