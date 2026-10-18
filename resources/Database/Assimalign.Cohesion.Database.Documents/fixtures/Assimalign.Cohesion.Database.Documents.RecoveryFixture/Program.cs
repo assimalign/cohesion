@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database;
 using Assimalign.Cohesion.Database.Documents;
+using Assimalign.Cohesion.Database.Documents.Catalog;
 using Assimalign.Cohesion.Database.Execution;
 
 if (args.Length != 2) { throw new ArgumentException("Usage: seed|verify directory"); }
@@ -17,7 +18,7 @@ await using var engine = DocumentDatabaseEngine.Create("document-engine", new()
     PageWriteBackBatchSize = 1024,
     MaintenanceInterval = TimeSpan.FromHours(1)
 });
-string original = "{\"rank\":1,\"nested\":{\"array\":[true,null,\"" + new string('x', 40000) + "\"]}}";
+string original = "{\"marker\":7,\"rank\":1,\"nested\":{\"array\":[true,null,\"" + new string('x', 40000) + "\"]}}";
 string updated = original.Replace("\"rank\":1,", "\"rank\":11,", StringComparison.Ordinal);
 if (args[0] == "seed")
 {
@@ -30,6 +31,7 @@ if (args[0] == "seed")
     await collection.PutAsync(session, "restored", "{\"rank\":3}"u8.ToArray());
     await collection.PutAsync(session, "upserted", "{\"rank\":4,\"discarded\":true}"u8.ToArray());
     await session.ExecuteAsync("CREATE INDEX by_rank ON items (rank)");
+    await session.ExecuteAsync("CREATE UNIQUE INDEX unique_rank_marker ON items (rank, marker)");
     if ((await session.ExecuteAsync("DELETE FROM items WHERE rank = 2")).AffectedCount != 1)
     { throw new InvalidOperationException("Committed DELETE did not affect one document."); }
     if ((await session.ExecuteAsync("UPDATE items SET rank = rank + 10 WHERE rank = 1", cancellationToken: CancellationToken.None)).AffectedCount != 1)
@@ -99,6 +101,16 @@ else if (args[0] == "verify")
     {
         throw new InvalidOperationException("Recovered document does not retain SQL++ MISSING semantics.");
     }
+    await using var composite = (DatabaseResultSet)await session.ExecuteAsync("SELECT COUNT(*) FROM items WHERE rank = 11 AND marker = 7");
+    await using var compositeRows = composite.GetRowsAsync().GetAsyncEnumerator();
+    if (!await compositeRows.MoveNextAsync() || !Equals(compositeRows.Current.GetValue(0), 1L))
+    { throw new InvalidOperationException("Recovered composite seek lost a committed row."); }
+    try
+    {
+        await collection.PutAsync(session, "duplicate-probe", "{\"rank\":11,\"marker\":7}"u8.ToArray());
+        throw new InvalidOperationException("Recovered unique index accepted a duplicate.");
+    }
+    catch (DocumentConstraintViolationException) { }
     Console.WriteLine("Committed JSON and index recovered; partial writes absent.");
 }
 else { throw new ArgumentException("Unknown fixture mode."); }

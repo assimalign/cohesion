@@ -68,8 +68,8 @@ Lexical recognition preserves the established vocabulary so rejected constructs 
 | `FETCH` | No | The SQL FETCH FIRST spelling is not adopted; one COHDBL001 at FETCH |
 | `CREATE COLLECTION` | Yes | One database-local collection, optionally `IF NOT EXISTS` |
 | `DROP COLLECTION` | Yes | One database-local collection, optionally `IF EXISTS` |
-| `CREATE INDEX` | Yes | One named, nonunique index over one document path in one collection |
-| `DROP INDEX` | Yes | One named index in one collection; the `ON` qualifier is required |
+| `CREATE INDEX` | Yes | One named index over 1..32 ordered paths, optional UNIQUE and IF NOT EXISTS |
+| `DROP INDEX` | Yes | One named index in one collection, optional IF EXISTS; ON is required |
 | `SUBQUERY` | No | A nested `SELECT` reports this capability name at the inner keyword, including UPDATE SET/WHERE, DELETE and INSERT/UPSERT VALUES, with or without EXPLAIN |
 | `MERGE` | No (pin) | SQL++ merge; stays a pin with no T1 item lifting it, and #1101 owns it |
 | `UNNEST` | No (pin) | SQL++ array expansion in `FROM`; oql-arrays flips the pin |
@@ -250,7 +250,7 @@ rejected only in call position; a future positional SELECT ELEMENT needs no rese
 `STRUCT`, `LIST`, `BAG` and `TYPEOF` lose their ODMG constructor/type meaning and are likewise
 rejected only as calls. All eight freed names can be projected as unquoted fields.
 `FIRST`, `LAST` and `UNIQUE` retain SQL++ reservations and report COHDBL001 wherever a
-reserved unsupported word does; UNIQUE's index meaning belongs to oql-index-ddl.
+reserved unsupported word does; UNIQUE is executable only directly after CREATE in CREATE UNIQUE INDEX.
 `UNDEFINED` stays reserved and rejected, never a MISSING synonym. `NIL` remains a NULL synonym.
 SET and UNSET are reserved for UPDATE assignments and removals. Only SET immediately after
 UPDATE's destination and optional alias is exempt from the unsupported-word scan; SET calls
@@ -308,7 +308,7 @@ object. Descending reverses it; ties retain document identity order. GROUP BY re
 separate MISSING and NULL keys. COUNT(expr), SUM, AVG, MIN and MAX skip both; COUNT(*)
 counts documents. A MISSING value does not obscure a column's one observed scalar type.
 Result projections and object constructors omit MISSING members and retain explicit null.
-Composite/UNIQUE index keys belong to oql-index-ddl.
+Composite/UNIQUE index keys use the rules documented under Index DDL (#1135).
 
 ## Grammar, statement, and expression trees
 
@@ -334,8 +334,9 @@ object       := '{' [(string | identifier) ':' expression (',' (string | identif
 metadata     := META '(' [identifier] ')' '.' (id | version)
 create-collection := CREATE COLLECTION [IF NOT EXISTS] collection
 drop-collection   := DROP COLLECTION [IF EXISTS] collection
-create-index := CREATE INDEX identifier ON collection '(' path ')'
-drop-index   := DROP INDEX identifier ON collection
+create-index := CREATE [UNIQUE] INDEX [IF NOT EXISTS] identifier ON collection '(' index-path (',' index-path)* ')'
+index-path   := (identifier | '[' string ']') ('.' identifier | '[' integer ']' | '[' string ']')*
+drop-index   := DROP INDEX [IF EXISTS] identifier ON collection
 collection   := identifier | COHESION_SCHEMA '.' identifier
 projection   := expression [AS label]
 label        := identifier | quoted-identifier | reserved-word
@@ -467,6 +468,7 @@ The keyword-disposition corpus covers these identifiers both with and without th
 | `OQL0006` | Invalid function argument count or star operand; only COUNT accepts * |
 | `OQL0007` | Invalid LIMIT/OFFSET operand or value; same clause-specific message at parse and plan time, located at the operand |
 | `OQL0008` | Unknown function name, reported once at its name after argument parsing |
+| `OQL0009` | More than 32 index key paths, at the 33rd path |
 
 Every error has an absolute start/end span and source line. End-of-input errors use the source
 length for both offsets. A line breaks at LF, CR, NEL (U+0085), LS (U+2028) or PS (U+2029), and
@@ -504,7 +506,7 @@ extended by `CREATE COLLECTION [IF NOT EXISTS] name` and `DROP COLLECTION [IF EX
 (#1130). Collection and index statements are parsed, planned, and executed by the Documents
 engine in the same change that adds them to `OqlLanguageProfile`.
 
-`IF` remains an identifier, recognized as a modifier only immediately after `COLLECTION` when
+`IF` remains an identifier, recognized as a modifier only immediately after `COLLECTION` or `INDEX` when
 followed by `NOT` or `EXISTS`. Thus `CREATE COLLECTION if`, `CREATE COLLECTION "if"`, and
 `DROP COLLECTION if` use the name `if`. The shared DDL helper requires `NOT EXISTS` for creation
 and `EXISTS` for removal. `CREATE COLLECTION IF EXISTS c` reports `OQL0002` at `EXISTS`.
@@ -621,6 +623,28 @@ argument must be the source alias. Bare META, other members and virtual system s
 planning. The name meta remains usable as a property or an implicit FROM alias. Metadata
 predicates remain residual filters; a content index on id cannot become a metadata lookup.
 The engine design records atomicity, serialization and duplicate/conflict behavior.
+
+## Index DDL (#1135)
+
+CREATE INDEX retains Paths in source order, with Path as the first path. IsUnique and IfNotExists
+are explicit AST flags; DROP INDEX retains IfExists. Single-path constructors remain useful
+convenience forms. Quoted "if" stays an index name. Duplicate paths compare segment values, so
+`a`, `"a"` and `['a']` name the same key. Empty/duplicate paths, wildcards, expressions, ASC/DESC,
+partial WHERE and INCLUDE MISSING receive OQL0002 at the invalid token. The engine enforces the
+32-path cap on directly constructed ASTs with COHDOC022; text reports OQL0009 at the 33rd key. ALL and DISTINCT ARRAY keys receive one COHDBL001 from the key parser,
+at ALL or DISTINCT and naming that array-key form. They remain deferred independently of SELECT
+quantifiers. Capability validation computes the balanced key-list token range once, so repeated
+array-key words do not cause quadratic prefix rescans. UNIQUE elsewhere, including SELECT UNIQUE(a),
+retains COHDBL001 and is never a function.
+
+Composite keys follow SQL++'s leading-key MISSING rule. UNIQUE is a Cohesion SQL-spelled extension;
+any NULL/MISSING component exempts the key from conflicts (PostgreSQL NULLS DISTINCT). Arrays and
+objects in a UNIQUE key fail COHDOC021; duplicate valued scalar keys fail COHDOC020 (23505).
+Immediate per-row checks and the existing failed-transaction contract apply to every mutation.
+COHESION_SCHEMA.INDEXES exposes PATH, ordered PATHS and the real IS_UNIQUE. Conditional creation
+preserves an existing name even if the requested definition differs. Conditional absent DROP is
+a no-op; an existing schema-owned index still refuses removal. All snapshot conflicts precede no-ops.
+The dialect page and execution conformance corpus carry the same executable contract.
 
 ## Verification and extension
 

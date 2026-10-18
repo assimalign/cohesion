@@ -235,6 +235,7 @@ public sealed partial class OqlQueryParser : QueryParser
         int fetchHead = -2;
         int pagingHead = -2;
         int openQuantifiers = 0;
+        var (indexKeyStart, indexKeyEnd) = FindIndexKeyRange();
         for (int index = 0; index < _tokens.Count; index++)
         {
             var token = _tokens[index];
@@ -269,6 +270,10 @@ public sealed partial class OqlQueryParser : QueryParser
             // FETCH FIRST is one unsupported spelling. LIMIT ALL is an invalid count.
             // Only a recognized clause head owns the next word; a path or alias does not.
             if (value == "FIRST" && index == fetchHead + 1 || value == "ALL" && index == pagingHead + 1) { continue; }
+
+            // Array-index keys belong to the DDL parser, which emits one diagnostic at ALL/DISTINCT.
+            if (value is ("ALL" or "DISTINCT" or "ARRAY" or "FOR" or "IN" or "END") && indexKeyStart >= 0 && index > indexKeyStart && index < indexKeyEnd) { continue; }
+            if (value == "UNIQUE" && index == 1 && IsIndexStatement("CREATE")) { continue; }
 
             // DISTINCT/ALL are legal only directly after SELECT, including INSERT/UPSERT SELECT.
             if (openQuantifiers == 0 && value is "DISTINCT" or "ALL")
@@ -323,13 +328,14 @@ public sealed partial class OqlQueryParser : QueryParser
 
             // EXISTS is supported only in the positional DDL modifier. Keep malformed
             // modifiers on the syntax path too (CREATE COLLECTION IF EXISTS reports NOT).
-            if (value == "EXISTS" && IsCollectionExistenceToken(index))
+            if (value == "EXISTS" && IsDdlExistenceToken(index))
             {
                 continue;
             }
 
             if (value is "CREATE" or "DROP" && index + 1 < _tokens.Count &&
-                (IsWord(_tokens[index + 1], "INDEX") || IsWord(_tokens[index + 1], "COLLECTION")))
+                (IsWord(_tokens[index + 1], "INDEX") || IsWord(_tokens[index + 1], "COLLECTION") ||
+                    value == "CREATE" && index + 2 < _tokens.Count && IsWord(_tokens[index + 1], "UNIQUE") && IsWord(_tokens[index + 2], "INDEX")))
             {
                 bool collection = IsWord(_tokens[index + 1], "COLLECTION");
                 string compound = (value, collection) switch
@@ -344,7 +350,7 @@ public sealed partial class OqlQueryParser : QueryParser
                     var end = _tokens[index + 1];
                     result.Add((compound, new Lexeme(token.Type, compound, token.Start, end.End, token.Line)));
                 }
-                index++;
+                if (!IsWord(_tokens[index + 1], "UNIQUE")) { index++; }
                 continue;
             }
             if (value == "SELECT")
@@ -521,7 +527,8 @@ public sealed partial class OqlQueryParser : QueryParser
             TokenType.String or TokenType.Keyword or TokenType.Function;
 
     private OqlSelectExpression EmptyExpression() => new(string.Empty, null, [], null, [], null, [], false, false, null, null, Span(Current, Current));
-    private bool IsIndexStatement(string verb) => IsDdlStatement(verb, "INDEX");
+    private bool IsIndexStatement(string verb) => IsDdlStatement(verb, "INDEX") || verb == "CREATE" &&
+        IsDdlStatement("CREATE", "UNIQUE") && _position + 2 < _tokens.Count && IsWord(_tokens[_position + 2], "INDEX");
     private bool IsDdlStatement(string verb, string kind) => Is(verb) && _position + 1 < _tokens.Count &&
         IsWord(_tokens[_position + 1], kind);
     private Lexeme Current => _tokens[Math.Min(_position, _tokens.Count - 1)];

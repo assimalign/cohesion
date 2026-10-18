@@ -13,58 +13,95 @@ internal static class DocumentIndexKeys
 {
     internal static void ValidatePath(string path) => ParsePath(path);
 
-    internal static IndexKey? Read(ReadOnlyMemory<byte> content, string path)
+    // Each component begins with a Documents-owned collation byte. Scalar payloads
+    // retain DatabaseKeyWriter's self-delimiting representation; no tag is 0xFF.
+    internal static IndexKey? Read(ReadOnlyMemory<byte> content, DocumentIndexMetadata metadata, out bool distinct)
     {
         using var document = JsonDocument.Parse(content, new JsonDocumentOptions { MaxDepth = 128 });
-        var value = document.RootElement;
-        foreach (var segment in ParsePath(path))
+        var bytes = new List<byte>();
+        distinct = false;
+        for (int i = 0; i < metadata.Paths.Count; i++)
         {
-            if (segment is int index)
+            var value = document.RootElement;
+            foreach (var segment in ParsePath(metadata.Paths[i]))
             {
-                if (value.ValueKind != JsonValueKind.Array || index >= value.GetArrayLength())
+                if (segment is int index)
                 {
-                    return null;
+                    if (value.ValueKind != JsonValueKind.Array || index >= value.GetArrayLength())
+                    { value = default; break; }
+                    value = value[index];
                 }
-                value = value[index];
+                else if (value.ValueKind != JsonValueKind.Object || !value.TryGetProperty((string)segment, out value))
+                { value = default; break; }
             }
-            else if (value.ValueKind != JsonValueKind.Object || !value.TryGetProperty((string)segment, out value))
+            if (i == 0 && value.ValueKind == JsonValueKind.Undefined) { return null; }
+            switch (value.ValueKind)
             {
-                return null;
+                case JsonValueKind.Undefined: bytes.Add(0); distinct = true; break;
+                case JsonValueKind.Null: bytes.Add(1); distinct = true; break;
+                case JsonValueKind.False: bytes.Add(2); break;
+                case JsonValueKind.True: bytes.Add(3); break;
+                case JsonValueKind.Number: bytes.AddRange(Encode(value.GetDecimal()).Encoded.ToArray()); break;
+                case JsonValueKind.String: bytes.AddRange(Encode(value.GetString()!).Encoded.ToArray()); break;
+                default:
+                    if (metadata.IsUnique)
+                    {
+                        throw DocumentConstraintViolationException.NonScalar(metadata.Name, metadata.Paths[i]);
+                    }
+                    bytes.Add((byte)(value.ValueKind == JsonValueKind.Array ? 6 : 7));
+                    break;
             }
         }
-        return value.ValueKind switch
-        {
-            JsonValueKind.True => Encode(true),
-            JsonValueKind.False => Encode(false),
-            JsonValueKind.Number => Encode(value.GetDecimal()),
-            JsonValueKind.String => Encode(value.GetString()!),
-            _ => null
-        };
+        return new IndexKey(bytes.ToArray());
     }
 
     internal static IndexKey Encode(object value)
     {
+        if (value is bool boolean) { return new IndexKey(new byte[] { boolean ? (byte)3 : (byte)2 }); }
         var writer = new DatabaseKeyWriter();
-        switch (value)
+        byte tag;
+        if (value is string text)
         {
-            case bool boolean:
-                return IndexKey.From(writer.AppendBoolean(boolean));
-            case string text:
-                // UTF-16 big-endian code units match StringComparer.Ordinal exactly,
-                // including ordering supplementary characters against BMP text.
-                var bytes = new byte[checked(text.Length * 2)];
-                for (int i = 0; i < text.Length; i++)
-                {
-                    BinaryPrimitives.WriteUInt16BigEndian(bytes.AsSpan(i * 2), text[i]);
-                }
-                return IndexKey.From(writer.AppendBinary(bytes));
-            case decimal number:
-                return IndexKey.From(writer.AppendDecimal(number));
-            case byte or sbyte or short or ushort or int or uint or long or ulong:
-                return IndexKey.From(writer.AppendDecimal(Convert.ToDecimal(value, CultureInfo.InvariantCulture)));
-            default:
-                throw new ArgumentException("Index bounds require a boolean, decimal, integer, or string.", nameof(value));
+            tag = 5;
+            // UTF-16BE, including surrogate code units, matches StringComparer.Ordinal.
+            var bytes = new byte[checked(text.Length * 2)];
+            for (int i = 0; i < text.Length; i++)
+            { BinaryPrimitives.WriteUInt16BigEndian(bytes.AsSpan(i * 2), text[i]); }
+            writer.AppendBinary(bytes);
         }
+        else if (value is decimal or byte or sbyte or short or ushort or int or uint or long or ulong)
+        {
+            tag = 4;
+            writer.AppendDecimal(Convert.ToDecimal(value, CultureInfo.InvariantCulture));
+        }
+        else { throw new ArgumentException("Index bounds require a boolean, decimal, integer, or string.", nameof(value)); }
+        var payload = IndexKey.From(writer).Encoded;
+        var encoded = new byte[payload.Length + 1];
+        encoded[0] = tag;
+        payload.Span.CopyTo(encoded.AsSpan(1));
+        return new IndexKey(encoded);
+    }
+
+    internal static IndexKey EncodePrefix(IReadOnlyList<object> values, object? last = null)
+    {
+        var bytes = new List<byte>();
+        foreach (var value in values) { bytes.AddRange(Encode(value).Encoded.ToArray()); }
+        if (last is not null) { bytes.AddRange(Encode(last).Encoded.ToArray()); }
+        return new IndexKey(bytes.ToArray());
+    }
+
+    // SQL's prefix-successor rule, SqlPlanExecutor.BuildIndexRange: a prefix is
+    // [P, successor(P)), including all following components of the composite.
+    internal static IndexKey? Successor(IndexKey key)
+    {
+        var bytes = key.Encoded.ToArray();
+        for (int i = bytes.Length - 1; i >= 0; i--)
+        {
+            if (bytes[i] == byte.MaxValue) { continue; }
+            bytes[i]++;
+            return new IndexKey(bytes.AsMemory(0, i + 1));
+        }
+        return null;
     }
 
     private static List<object> ParsePath(string path)

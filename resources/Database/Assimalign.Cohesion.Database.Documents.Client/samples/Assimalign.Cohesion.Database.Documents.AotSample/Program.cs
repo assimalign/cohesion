@@ -109,6 +109,20 @@ internal static class Program
                 document.GetProperty("actual_rows").ValueKind == System.Text.Json.JsonValueKind.Null), "EXPLAIN documents");
             Check((await connection.QueryAsync("SELECT * FROM COHESION_SCHEMA.INDEXES", cancellationToken: token)).Count == 1, "catalog");
             Check(await connection.ExecuteAsync("DROP INDEX by_score ON items", cancellationToken: token) == 0, "index drop");
+            Check(await connection.ExecuteAsync("CREATE UNIQUE INDEX by_name_score ON items (name,score)", cancellationToken: token) == 0, "composite unique create");
+            Check(await connection.ExecuteAsync("CREATE INDEX IF NOT EXISTS by_name_score ON items (score)", cancellationToken: token) == 0, "index if not exists");
+            Check((await connection.QueryAsync("SELECT score FROM items WHERE name = '東京' AND score >= 3", cancellationToken: token)).Count == 1, "composite seek");
+            var indexMetadata = (await connection.QueryAsync("SELECT PATHS[1] AS p, IS_UNIQUE AS u FROM COHESION_SCHEMA.INDEXES", cancellationToken: token)).Single();
+            Check(indexMetadata["p"] is "score" && indexMetadata["u"] is true, "composite metadata");
+            try
+            {
+                await connection.PutAsync("items", "duplicate", "{\"name\":\"東京\",\"score\":3}"u8.ToArray(), cancellationToken: token);
+                throw new InvalidOperationException("Unique index accepted a duplicate.");
+            }
+            catch (DocumentClientException exception)
+            { Check(exception.Code == ProtocolErrorCode.ExecutionFailure && exception.Diagnostics.Any(d => d.Code == "COHDOC020"), "unique execution failure"); }
+            Check(await connection.ExecuteAsync("DROP INDEX IF EXISTS by_name_score ON items", cancellationToken: token) == 0, "conditional index drop");
+            Check(await connection.ExecuteAsync("DROP INDEX IF EXISTS absent ON items", cancellationToken: token) == 0, "absent index drop");
             try
             {
                 await connection.QueryAsync("MERGE INTO items", cancellationToken: token);

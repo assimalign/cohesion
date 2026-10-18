@@ -123,6 +123,27 @@ and allocates fresh versions. Failure or cancellation writes nothing under the t
 above. EXPLAIN UPDATE describes the access without writing. USE KEYS, RETURNING, LIMIT and FOR
 remain COHDBL001. DocumentUpdateTests covers paths, atomicity, serialization and matched counts.
 
+CREATE [UNIQUE] INDEX [IF NOT EXISTS] name ON collection (path [, path ...]) and
+DROP INDEX [IF EXISTS] name ON collection execute. Indexes have 1..32 distinct ordered paths;
+root bracket-string names such as ['x.y'], nested members and integer array subscripts work.
+UNIQUE is a Cohesion extension in SQL spelling and remains reserved elsewhere (SELECT UNIQUE(a)
+is COHDBL001). Conditional creation skips an existing name regardless of its definition.
+An absent conditional DROP is a no-op; existing schema ownership and snapshot conflicts still refuse.
+PATHS in COHESION_SCHEMA.INDEXES is the ordered array, PATH is its first entry, and IS_UNIQUE is real.
+
+Leading MISSING omits the entry. Components sort MISSING, NULL, FALSE, TRUE, numbers, ordinal
+strings, arrays, objects; full predicates always filter seek candidates. UNIQUE keys containing
+any NULL or MISSING do not conflict (PostgreSQL NULLS DISTINCT, diverging from Cohesion SQL).
+Duplicate valued scalar keys fail COHDOC020 (23505), naming index and collection without key data;
+array/object UNIQUE components fail COHDOC021 naming index and path. Constraints are immediate
+per row, so key swaps may fail. A failed explicit transaction requires RollbackAsync before reuse.
+The wire uses ExecutionFailure (6) without a protocol change and keeps the connection usable.
+The path-count cap reports OQL0009 at the 33rd key (COHDOC022 for a directly constructed AST). Duplicate/empty keys, expressions, wildcards, ASC/DESC, partial
+WHERE and INCLUDE MISSING receive OQL0002. ALL and DISTINCT ARRAY index keys get one COHDBL001
+at ALL/DISTINCT. The catalog uses v2 index records and refuses v1 indexes before recovery writes;
+there is no upgrade path or legacy reader. Composite seeks support a leading equality prefix
+and one range on the next path. Choice ranks prefix length, range, UNIQUE, then ordinal name.
+
 Conformance lives in OqlSqlppBasisTests, OqlKeywordDispositionTests, DocumentMissingTests,
 OqlExecutionConformanceTests, DocumentQueryTests and DocumentMissingWireTests. The wire tests
 exercise both InMemory and TCP; the recovery fixture also executes IS MISSING under NativeAOT.

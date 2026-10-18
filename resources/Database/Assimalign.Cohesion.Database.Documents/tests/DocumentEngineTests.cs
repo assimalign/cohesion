@@ -6,6 +6,8 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Database.Documents.Catalog;
+using Assimalign.Cohesion.Database.Documents.Storage;
 using Assimalign.Cohesion.Database.Indexing;
 using Assimalign.Cohesion.Database.Indexing.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Storage;
@@ -289,6 +291,76 @@ public sealed class DocumentEngineTests
             foreach (var (path, bytes) in before)
             {
                 File.ReadAllBytes(path).AsSpan().SequenceEqual(bytes).ShouldBeTrue($"{path} was modified by the refused open");
+            }
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Documents] - Format: v1 index records refuse engine open without writes and dispose the coordinator (#1135)")]
+    [InlineData((byte)4)]
+    [InlineData((byte)5)]
+    public async Task OpenDatabaseAsync_V1IndexRecord_ShouldRefuseWithoutWritesAndDisposeCoordinator(byte kind)
+    {
+        // Arrange: hand-build the complete v1 layout, independently of the current catalog codec.
+        string root = Path.Combine(Path.GetTempPath(), "cohesion-documents-catalog-format-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            string dataPath = Path.Combine(root, "document.dat");
+            string journalPath = Path.Combine(root, "document.log");
+            string backupPath = Path.Combine(root, "document.bak");
+            using (var storage = DocumentStorage.Create(StorageStream.FromFile(dataPath, FileMode.CreateNew, FileShare.None),
+                StorageStream.FromFile(journalPath, FileMode.CreateNew, FileShare.None), StorageStream.FromFile(backupPath, FileMode.CreateNew, FileShare.None), "legacy"))
+            {
+                using var record = new MemoryStream();
+                using var writer = new BinaryWriter(record, Encoding.UTF8, leaveOpen: true);
+                writer.Write(kind == 4 ? 42UL : 0UL); // An unproven definition would be scrubbed without the fence.
+                writer.Write(0UL);
+                writer.Write(kind);
+                writer.Write((byte)1);
+                if (kind == 4)
+                {
+                    writer.Write(Guid.NewGuid().ToByteArray());
+                    writer.Write(2); writer.Write("ix"u8);
+                    writer.Write(1); writer.Write("a"u8);
+                    writer.Write(1UL);
+                }
+                else
+                {
+                    writer.Write(1UL);
+                    writer.Write(1L);
+                    writer.Write(2); writer.Write("ix"u8);
+                }
+                using var bracket = storage.BeginTransaction();
+                if (kind == 4) { storage.InsertEntry(bracket, record.ToArray()); }
+                else { storage.InsertIndexRegistration(bracket, record.ToArray()); }
+                bracket.Commit();
+            }
+            var before = Directory.GetFiles(root).ToDictionary(path => path, File.ReadAllBytes);
+            using var openedStorage = DocumentStorage.Open(StorageStream.FromFile(dataPath, FileMode.Open, FileShare.None),
+                StorageStream.FromFile(journalPath, FileMode.Open, FileShare.None), StorageStream.FromFile(backupPath, FileMode.Open, FileShare.None), checkpointOnOpen: false);
+            await using var engine = DocumentDatabaseEngine.Create("document-engine", new()
+            {
+                StorageStrategy = new OpenedDocumentStorageStrategy(openedStorage)
+            });
+
+            // Act.
+            var failure = await Should.ThrowAsync<DatabaseException>(async () => await engine.OpenDatabaseAsync("legacy", CancellationToken.None));
+
+            // Assert: the manager's disposed guard must fire, even though storage has also closed.
+            failure.Message.ShouldStartWith($"Database 'legacy' cannot be opened. Document catalog kind {kind} format: found 1, supported 2.", Case.Sensitive);
+            failure.Message.ShouldContain("Recreate the database", Case.Sensitive);
+            failure.InnerException.ShouldBeOfType<DocumentCatalogException>();
+            engine.TryGetDatabase("legacy", out _).ShouldBeFalse();
+            var coordinator = openedStorage.OnOffline.ShouldNotBeNull().Target.ShouldBeOfType<TransactionCoordinator>();
+            var disposed = await Should.ThrowAsync<ObjectDisposedException>(async () =>
+                await coordinator.BeginAsync(IsolationLevel.Snapshot, CancellationToken.None));
+            disposed.ObjectName.ShouldBe(typeof(TransactionManager).FullName);
+            await engine.DisposeAsync();
+            Directory.GetFiles(root).Order(StringComparer.Ordinal).ShouldBe(before.Keys.Order(StringComparer.Ordinal));
+            foreach (var (path, bytes) in before)
+            {
+                File.ReadAllBytes(path).ShouldBe(bytes, $"{path} was modified by the refused open");
             }
         }
         finally { Directory.Delete(root, recursive: true); }

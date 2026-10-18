@@ -17,7 +17,7 @@ using Xunit;
 
 namespace Assimalign.Cohesion.Database.Documents.Catalog.Tests;
 
-public sealed class DocumentCatalogTests
+public sealed partial class DocumentCatalogTests
 {
     [Fact]
     public async Task CollectionOwnershipAndVersionsSurviveReopen()
@@ -276,7 +276,7 @@ public sealed class DocumentCatalogTests
         registrations.MoveNext().ShouldBeTrue();
         var registration = registrations.Current.Data;
         registration.Span[16].ShouldBe((byte)5);
-        registration.Span[17].ShouldBe((byte)1);
+        registration.Span[17].ShouldBe((byte)2);
         BinaryPrimitives.ReadUInt64LittleEndian(registration.Span[18..]).ShouldBe(metadata.ObjectId);
         long rootPage = BinaryPrimitives.ReadInt64LittleEndian(registration.Span[26..]);
         registrations.MoveNext().ShouldBeFalse();
@@ -287,11 +287,11 @@ public sealed class DocumentCatalogTests
             ExistingIndexes = [new BTreeIndexRegistration(metadata.ObjectId, new IndexDefinition(metadata.Name), rootPage)]
         });
         manager.TryGetIndex(metadata.ObjectId, "by_rank", out var tree).ShouldBeTrue();
-        var key = IndexKey.From(new DatabaseKeyWriter().AppendDecimal(2m));
+        var key = new IndexKey(new byte[] { 4 }.Concat(IndexKey.From(new DatabaseKeyWriter().AppendDecimal(2m)).Encoded.ToArray()).ToArray());
         await using var cursor = tree.OpenCursor(latestSnapshot, new IndexKeyRange(key, key, true, true));
         (await cursor.MoveNextAsync()).ShouldBe(!commit);
         if (!commit) { (await cursor.MoveNextAsync()).ShouldBeFalse(); }
-        var keptKey = IndexKey.From(new DatabaseKeyWriter().AppendDecimal(3m));
+        var keptKey = new IndexKey(new byte[] { 4 }.Concat(IndexKey.From(new DatabaseKeyWriter().AppendDecimal(3m)).Encoded.ToArray()).ToArray());
         await using var kept = tree.OpenCursor(latestSnapshot, new IndexKeyRange(keptKey, keptKey, true, true));
         (await kept.MoveNextAsync()).ShouldBeTrue();
         (await kept.MoveNextAsync()).ShouldBeFalse();

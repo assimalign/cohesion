@@ -133,6 +133,12 @@ Expected-version failures retain engine semantics. Collection operations return 
 a server-side `DocumentCollection` is bound to an engine session and cannot cross the wire.
 Catalog queries use `COHESION_SCHEMA.INDEXES` and `COHESION_SCHEMA.OBJECT_OWNERSHIP`.
 
+Composite and UNIQUE index DDL and IF modifiers use Execute without new frames. Duplicate Put
+and CREATE UNIQUE INDEX over duplicates return ExecutionFailure (6), preserve COHDOC020 and
+name index/collection without key contents; the same connection accepts the next query. Non-scalar
+UNIQUE keys retain COHDOC021. The AOT guard exercises the composite seek, metadata and duplicate
+failure over InMemory and TCP (#1135).
+
 ## Failures and pooling
 
 A statement or serialization failure ends the response with one terminal model `Failure` (72),
