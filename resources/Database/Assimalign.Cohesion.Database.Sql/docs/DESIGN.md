@@ -289,11 +289,25 @@ COALESCE and Boolean preparation follows lazy branches and retains condition val
 within that evaluation frame so volatile calls are not repeated. Projection and
 ordering freeze child values per outer row before sorting. Grouped references bind
 to grouping slots; ungrouped outer columns fail with COHSQLE017 naming the column.
-Outer-only aggregates remain COHDBL001. Access-path selection uses the bound scope,
+Aggregate levels use the lowest variable or aggregate dependency, descending into
+nested query bodies and adjusting levels as PostgreSQL `parse_agg.c:646-690,762,850`
+does. Outer-only aggregates report COHDBL001 before grouped-column validation,
+including explicitly and implicitly grouped ancestors; a nested local dependency
+keeps a mixed aggregate local. Arguments of an aggregate of the grouped level
+read source rows, including its ungrouped columns (`parse_agg.c:1385-1405`).
+Grouped outer columns compare bound grouping values and types, including USING
+merges and coercions (`parse_clause.c:1722`), rather than physical lookup ordinals.
+Access-path selection uses the bound scope,
 so an outer-only predicate cannot narrow an inner index. No correlation-value memoization, child
 execution metric, per-row child seek or semi/anti-join rewrite is introduced.
 EXPLAIN maps CorrelatedSubqueries and retains each complete child subtree.
 Derived siblings still require LATERAL; references to enclosing query scopes execute.
+Relation sources bind once per lexical SELECT scope: namespace construction and
+relational planning reuse the same source plans and metadata, so derived nesting
+never re-plans bodies or consumes discarded subquery slots. Every nested query
+checks statement cancellation before planning. Only uncorrelated derived relations
+may cache materialized rows across evaluations within a statement; correlated
+derived relations evaluate again for each enclosing frame.
 Independent derived relations share statement materialization, and each body has
 its own frame so it cannot replace the enclosing row. All children receive the exact
 SqlStatementContext; they open no transaction or read view. Binary delivery copies
@@ -330,7 +344,8 @@ Their EXPLAIN root is Select with a DerivedTable child; only multiple relations
 emit NestedLoopJoin and JoinStep. Output metadata follows the projected expression
 (PostgreSQL `parse_relation.c:1715-1721`): qualified USING references keep physical
 types; unqualified merged outputs keep their common type and shared domain.
-COLLATE over a column keeps that column's domain and type modifiers as well.
+COLLATE over a column captures that bound column's metadata, preserving its domain
+and type modifiers even when an inner relation has a same-named column of another type.
 Projection collation candidates retain provenance, so default-only computed text
 does not become a declared override. Declared source columns and explicit inner
 COLLATE become declared strength (2); ties between declared collations keep the
@@ -2654,7 +2669,7 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   correlated-subquery diagnosis. It now throws `COHSQLE005` at every nesting level,
   for a reference to the subquery's own columns or the outer query's: ISO SQL's
   fetch-first count is a simple value specification, which no column of any scope
-  reaches. (An explicit outer qualifier is still the parser's `COHDBL001`.) A `*` in
+  reaches. (Explicit outer qualifiers also parse and fail planning with `COHSQLE005`.) A `*` in
   a count now reports `'*' is not allowed in LIMIT.` (or `OFFSET`) instead of the
   evaluator's `Expression 'SqlStarExpression' is not supported by the executor yet.`
   A whole `DEFAULT` item instead maps to the target column's omitted-value path (#1193);

@@ -52,6 +52,7 @@ internal sealed partial class SqlPlanner
     private SqlPlan PlanSubqueries(SqlSelectExpression select)
     {
         if (select.From.Count == 0) { return PlanSelectCore(select); }
+        if (OuterScope is not null) { RejectOuterOnlyAggregates(select); }
         var queries = BindSubqueries(SubquerySources(select), select);
         var input = PlanSelectCore(select);
         return WrapSubqueries(input, queries);
@@ -135,53 +136,52 @@ internal sealed partial class SqlPlanner
     /// </summary>
     private static IEnumerable<SqlExpression> SubquerySources(SqlSelectExpression select)
     {
-        foreach (var expression in Roots())
+        foreach (var expression in SubqueryRoots(select))
         {
             foreach (var node in WalkSubqueries(expression))
             {
                 yield return node;
             }
         }
+    }
 
-        IEnumerable<SqlExpression> Roots()
+    private static IEnumerable<SqlExpression> SubqueryRoots(SqlSelectExpression select)
+    {
+        foreach (var column in select.Columns)
         {
-            foreach (var column in select.Columns)
+            yield return column.Expression;
+        }
+        if (select.From.Count > 1 || select.From.Count == 1 && select.From[0].Joins.Count > 0)
+        {
+            foreach (var condition in JoinConditions(select))
             {
-                yield return column.Expression;
-            }
-            if (select.From.Count > 1 || select.From.Count == 1 && select.From[0].Joins.Count > 0)
-            {
-                foreach (var condition in JoinConditions(select))
-                {
-                    yield return condition;
-                }
-            }
-            foreach (var key in select.GroupBy)
-            {
-                yield return key;
-            }
-            foreach (var order in select.OrderBy)
-            {
-                yield return order.Expression;
-            }
-            if (select.Where is not null)
-            {
-                yield return select.Where;
-            }
-            if (select.Having is not null)
-            {
-                yield return select.Having;
-            }
-            if (select.Limit is not null)
-            {
-                yield return select.Limit;
-            }
-            if (select.Offset is not null)
-            {
-                yield return select.Offset;
+                yield return condition;
             }
         }
-
+        foreach (var key in select.GroupBy)
+        {
+            yield return key;
+        }
+        foreach (var order in select.OrderBy)
+        {
+            yield return order.Expression;
+        }
+        if (select.Where is not null)
+        {
+            yield return select.Where;
+        }
+        if (select.Having is not null)
+        {
+            yield return select.Having;
+        }
+        if (select.Limit is not null)
+        {
+            yield return select.Limit;
+        }
+        if (select.Offset is not null)
+        {
+            yield return select.Offset;
+        }
     }
 
     private static IEnumerable<SqlExpression> WalkSubqueries(SqlExpression expression)
@@ -201,7 +201,7 @@ internal sealed partial class SqlPlanner
         }
     }
 
-    // Keep the N-input walk's loop state out of Roots' iterator object. A stored-only
+    // Keep the N-input walk's loop state out of SubqueryRoots' iterator object. A stored-only
     // SELECT never creates this iterator and retains its original allocation footprint.
     private static IEnumerable<SqlExpression> JoinConditions(SqlSelectExpression select)
     {

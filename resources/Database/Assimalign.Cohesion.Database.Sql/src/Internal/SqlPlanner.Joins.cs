@@ -41,11 +41,7 @@ internal sealed partial class SqlPlanner
                 {
                     if (ContainsAggregate(on))
                     {
-                        if (OuterScope is not null)
-                        {
-                            foreach (var expression in WalkSubqueries(on)) { RejectOuterOnlyAggregate(expression, scope); }
-                        }
-                        throw new SqlPlanningException("COHSQLE017", "Aggregate functions are not allowed in JOIN ON.", on.Location);
+                        if (!metadataOnly) { throw new SqlPlanningException("COHSQLE017", "Aggregate functions are not allowed in JOIN ON.", on.Location); }
                     }
                     if (!metadataOnly)
                     {

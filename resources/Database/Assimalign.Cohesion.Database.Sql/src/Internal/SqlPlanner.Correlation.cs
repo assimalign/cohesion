@@ -15,6 +15,7 @@ internal sealed partial class SqlPlanner
 
     private SqlCorrelationScope CreateCorrelationScope(SqlSelectExpression? select, SqlTableReference? dml)
     {
+        _queryScopes ??= new();
         IReadOnlyList<SqlCatalogColumn> columns;
         IReadOnlyList<SqlRelationBinding>? bindings = null;
         SqlRelationReference reference;
@@ -78,16 +79,6 @@ internal sealed partial class SqlPlanner
             if (UnderAggregate(child, source, aggregate)) { return true; }
         }
         return false;
-    }
-
-    private void RejectOuterOnlyAggregate(SqlExpression expression, SqlExpressionEvaluator evaluator)
-    {
-        if (expression is not SqlFunctionCallExpression call || !IsAggregate(call)) { return; }
-        var references = call.Arguments.SelectMany(WalkSubqueries).OfType<SqlColumnReferenceExpression>().ToArray();
-        if (references.Length > 0 && references.All(evaluator.IsOuterColumn))
-        {
-            throw new SqlUnsupportedQueryException(ErrorMessages.OuterOnlyAggregate, location: call.Location);
-        }
     }
 
     private static bool ContainsNode(SqlExpression expression, SqlExpression source)

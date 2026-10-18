@@ -956,8 +956,8 @@ either way). A subquery's count follows the same rule as the top level's at ever
 nesting level, whether the reference names the subquery's own columns or the outer
 query's: ISO SQL's fetch-first count is a simple value specification, so no column
 of any scope is visible to it. An explicit outer qualifier there, as in
-`(SELECT id FROM w LIMIT v.a)`, is still the parser's `COHDBL001`, reported before
-planning. To insert values read from a table, use `INSERT ... SELECT`.
+`(SELECT id FROM w LIMIT v.a)`, parses and fails while planning with `COHSQLE005`,
+just like local and unqualified columns. To insert table values, use `INSERT ... SELECT`.
 
 The same clauses reject an aggregate (`Aggregate functions are not allowed in
 INSERT ... VALUES.`, and likewise for `LIMIT` and `OFFSET`) and a bare `*` (`'*' is
@@ -1131,13 +1131,19 @@ another outer row's results. Retained BYTEA results detach on every delivery.
 In a grouped outer query, a child evaluated over completed groups may reference
 grouping-key columns only. A reference to any other outer column reports
 `COHSQLE017`, naming the column. Subqueries within aggregate arguments, WHERE and
-ON evaluate over source rows. An aggregate whose column arguments reference only
-outer scopes reports `COHDBL001`; relocating that aggregate to an enclosing query
-is outside this subset. A count expression still has no column scope: local and
+ON evaluate over source rows. Aggregate levels follow the lowest variable or
+aggregate dependency, descending into nested query bodies and adjusting levels.
+An aggregate belonging to an outer level reports `COHDBL001` before grouped-column
+validation, with explicit, implicit or absent outer grouping. Relocating it to an
+enclosing query is outside this subset. A mixed aggregate with a local dependency
+executes at its own level. A count expression still has no column scope: local and
 outer columns in LIMIT/OFFSET report `COHSQLE005` (#1165).
 PostgreSQL's reference implementation searches parent namespaces in
 `src/backend/parser/parse_relation.c:151-179`, and rejects ungrouped outer columns in
-`parse_agg.c:1545-1564`; its aggregate level analysis is at `parse_agg.c:642-679`.
+`parse_agg.c:1545-1564`; its aggregate level analysis is at `parse_agg.c:646-690,762,850`.
+Grouped outer references compare bound grouping values and types, including USING
+merges and coercions (`parse_clause.c:1722`); aggregate arguments at the grouped level
+may read its ungrouped source columns (`parse_agg.c:1385-1405`).
 Query nesting permits at
 most **32 subquery levels**, including derived bodies, below the top-level SELECT (or INSERT's
 source SELECT); level 33 reports `COHDBL001` before recursive parsing continues.

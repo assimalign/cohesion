@@ -26,8 +26,7 @@ internal sealed class SqlCorrelationScope
 
     internal SqlOuterReference Resolve(SqlColumnReferenceExpression column)
     {
-        int ordinal;
-        try { ordinal = Local.ResolveLocalColumn(column); }
+        try { Local.ResolveLocalColumn(column); }
         catch (SqlPlanningException exception) when (exception.UnresolvedColumn is not null &&
             !exception.HasLocalQualifier && Parent is not null)
         {
@@ -40,14 +39,17 @@ internal sealed class SqlCorrelationScope
             for (int i = 0; i < GroupBy.Count; i++)
             {
                 if (GroupBy[i] is not SqlColumnReferenceExpression reference) { continue; }
-                int groupedOrdinal;
-                try { groupedOrdinal = Local.ResolveLocalColumn(reference); }
+                SqlBoundExpression grouped;
+                try { Local.ResolveLocalColumn(reference); grouped = Local.Bind(reference); }
                 catch (SqlPlanningException exception) when (exception.UnresolvedColumn is not null)
                 {
                     // A key belonging to an ancestor scope cannot group this scope's local column.
                     continue;
                 }
-                if (groupedOrdinal == ordinal)
+                // USING may select the other input or coerce the merged name. Physical lookup
+                // ordinals alone do not identify the bound grouping value (parse_clause.c:1722).
+                if ((value is SqlBoundColumn a && grouped is SqlBoundColumn b && a.Ordinal == b.Ordinal ||
+                    ReferenceEquals(value, grouped)) && Local.ColumnMetadata(column).Type.Type == Local.ColumnMetadata(reference).Type.Type)
                 {
                     key = i;
                     break;

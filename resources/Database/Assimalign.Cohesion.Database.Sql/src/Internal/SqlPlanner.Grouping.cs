@@ -106,7 +106,7 @@ internal sealed partial class SqlPlanner
             var value = groupScope.Bind(projections[i].Expression!, out SqlBoundCollation collation, out var candidate);
             projections[i] = projections[i] with { Value = value, Collation = collation,
                 Metadata = CaptureProjectionMetadata(candidate,
-                    projections[i].Expression is SqlColumnReferenceExpression column ? evaluator.ColumnMetadata(column) : null) };
+                    UnwrapCollation(projections[i].Expression!) is SqlColumnReferenceExpression column ? evaluator.ColumnMetadata(column) : null) };
         }
 
         var having = select.Having is null ? null : groupScope.Bind(select.Having);

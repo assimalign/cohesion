@@ -11,4 +11,5 @@ internal sealed class SqlQueryScopeState
     internal SqlCorrelationScope? OuterScope { get; set; }
     internal HashSet<int>? OuterDependencies { get; set; }
     internal int NextScopeId { get; set; }
+    internal Dictionary<(SqlSelectExpression? Owner, SqlRelationReference Reference), SqlRelationSource> Relations { get; } = new();
 }

@@ -92,7 +92,10 @@ internal sealed partial class SqlPlanner
     }
 
     private SqlPlan PlanSelect(SqlSelectExpression select)
-        => PlanSubqueries(select);
+    {
+        _cancellationToken.ThrowIfCancellationRequested();
+        return PlanSubqueries(select);
+    }
 
     /// <summary>Binds a SELECT whose subqueries have already been lowered to value slots.</summary>
     private SqlPlan PlanSelectCore(SqlSelectExpression select)
@@ -117,13 +120,6 @@ internal sealed partial class SqlPlanner
             subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken,
             outerScope: OuterScope, outerDependencies: OuterDependencies, relation: select.From[0].Table);
 
-        if (OuterScope is not null)
-        {
-            foreach (var expression in SubquerySources(select))
-            {
-                RejectOuterOnlyAggregate(expression, evaluator);
-            }
-        }
         if (select.Where is not null && ContainsAggregate(select.Where))
         {
             throw new SqlPlanningException("COHSQLE017", "Aggregate functions are not allowed in WHERE; use HAVING to filter groups.", select.Where?.Location);
@@ -159,7 +155,7 @@ internal sealed partial class SqlPlanner
                         ? outerColumn.ColumnName : $"column{projections.Count + 1}"), null, column.Expression,
                     GroupExpressionType(column.Expression, columns, evaluator)) { Value = value, Collation = collation,
                         Metadata = CaptureProjectionMetadata(candidate,
-                            column.Expression is SqlColumnReferenceExpression projectedColumn ? evaluator.ColumnMetadata(projectedColumn) : null),
+                            UnwrapCollation(column.Expression) is SqlColumnReferenceExpression projectedColumn ? evaluator.ColumnMetadata(projectedColumn) : null),
                         MaxLength = evaluator.MaximumLengthOf(column.Expression),
                         IsNullable = column.Expression is not SqlColumnReferenceExpression nullableColumn || evaluator.ColumnMetadata(nullableColumn).IsNullable });
             }
@@ -211,6 +207,17 @@ internal sealed partial class SqlPlanner
 
     /// <summary>Resolves a read source and requests the statement's one catalog image at binding time.</summary>
     private SqlRelationSource ResolveRelation(SqlRelationReference reference, SqlSelectExpression? owner = null)
+    {
+        // The namespace and relational operators share this binding. Constructing a subquery
+        // scope must never re-plan a derived body or number its subquery slots again.
+        var key = (owner, reference);
+        if (_queryScopes is not null && _queryScopes.Relations.TryGetValue(key, out var bound)) { return bound; }
+        var source = ResolveRelationCore(reference, owner);
+        if (_queryScopes is not null) { _queryScopes.Relations[key] = source; }
+        return source;
+    }
+
+    private SqlRelationSource ResolveRelationCore(SqlRelationReference reference, SqlSelectExpression? owner)
     {
         if (reference is SqlDerivedTableReference derived)
         {
