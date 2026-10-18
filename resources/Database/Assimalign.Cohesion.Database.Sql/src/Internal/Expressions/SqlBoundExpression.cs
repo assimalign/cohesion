@@ -75,6 +75,12 @@ internal enum SqlBoundExpressionKind : byte
     /// <summary><see cref="SqlBoundIsNull"/>: <c>IS [NOT] NULL</c>.</summary>
     IsNull,
 
+    /// <summary>A null-safe distinct predicate.</summary>
+    Distinct,
+
+    /// <summary>A Boolean truth test.</summary>
+    BooleanTest,
+
     /// <summary><see cref="SqlBoundBetween"/>: <c>[NOT] BETWEEN</c>.</summary>
     Between,
 

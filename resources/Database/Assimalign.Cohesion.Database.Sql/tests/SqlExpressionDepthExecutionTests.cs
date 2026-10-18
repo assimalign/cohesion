@@ -686,17 +686,9 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
         }
     }
 
-    /// <summary>
-    /// LIKE matching recursed once per wildcard it backtracked through, so a long enough pattern
-    /// over a long enough value overflowed the stack from data alone. It now fails its statement.
-    /// </summary>
-    /// <remarks>
-    /// The statement runs on a 1 MB thread. On a thread the runtime sizes, optimized code fits
-    /// about 40 to 65 bytes a level, so the 8 MB Linux default can hold 200,000 levels and the
-    /// match completed on Ubuntu CI once the suite ran without tiering.
-    /// </remarks>
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Nesting: a LIKE match deeper than the stack fails its statement with COHSQLE004")]
-    public async Task ExecuteAsync_DeepLikeMatch_ShouldFailWithStatementTooComplex()
+    /// <summary>Data-sized patterns use an iterative matcher and no longer consume stack per wildcard.</summary>
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Nesting: a data-sized LIKE match completes on a small thread")]
+    public async Task ExecuteAsync_DeepLikeMatch_ShouldCompleteWithoutRecursionAsync()
     {
         // Arrange
         await using var engine = CreateEngine();
@@ -706,42 +698,29 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
             ["value"] = new string('a', Hostile),
             ["pattern"] = string.Concat(Enumerable.Repeat("%a", Hostile)),
         };
-
         // Act
-        var outcome = RunOnThread(1024, () =>
-            session.ExecuteAsync("SELECT id FROM t WHERE @value LIKE @pattern", parameters).AsTask().GetAwaiter().GetResult());
-
+        var outcome = RunOnThread(1024, () => ReadScalarAsync(
+            session.ExecuteAsync("SELECT id FROM t WHERE @value LIKE @pattern", parameters).AsTask().GetAwaiter().GetResult()).GetAwaiter().GetResult());
         // Assert
-        var failure = outcome.Failure.ShouldBeAssignableTo<DatabaseException>().ShouldNotBeNull();
-        AssertStatementTooComplex(failure);
+        outcome.Failure.ShouldBeNull();
+        outcome.Result.ShouldBe(1);
         (await ScalarAsync(session, "SELECT id FROM t WHERE 'abc' LIKE '%b%'")).ShouldBe(1);
     }
 
-    /// <summary>Both LIKE matchers check the stack, the index-backed one and the compatibility collation's.</summary>
-    /// <remarks>
-    /// Each step must recurse through a call that is not a tail call: <c>%</c> backtracks, so each
-    /// level waits for the one below it. A <c>_</c> step is a tail call in the compatibility matcher,
-    /// which optimized code (NativeAOT, or a JIT without tiering) turns into a loop that needs no
-    /// stack, so it cannot show that the matcher checks the stack.
-    /// </remarks>
-    /// <param name="collation">The effective collation.</param>
-    /// <param name="step">One step of a pattern that recurses once per step.</param>
-    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Nesting: both LIKE matchers check the stack before they recurse")]
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Nesting: both LIKE collations match long patterns on a small thread")]
     [InlineData("binary", "%a")]
     [InlineData("invariant", "%a")]
-    public void LikeMatches_DeeperThanStack_ShouldThrowInsufficientStack(string collation, string step)
+    public void LikeMatches_DeepPattern_ShouldCompleteWithoutRecursion(string collation, string step)
     {
-        // Arrange: with a few KB of stack left the check fails long before the value is exhausted.
+        // Arrange
         var effective = Collation.FromName(collation);
         string value = new('a', 10_000);
         string pattern = string.Concat(Enumerable.Repeat(step, 10_000));
-        SqlExpressionEvaluator.LikeMatches("abc", step + "%", effective).ShouldBeTrue();
-
         // Act
-        var outcome = NearStackLimit.Run(() => SqlExpressionEvaluator.LikeMatches(value, pattern, effective));
-
+        var outcome = RunOnThread(1024, () => SqlExpressionEvaluator.LikeMatches(value, pattern, effective));
         // Assert
-        outcome.Failure.ShouldBeOfType<InsufficientExecutionStackException>();
+        outcome.Failure.ShouldBeNull();
+        outcome.Result.ShouldBe(true);
     }
 
     /// <summary>
@@ -1074,28 +1053,17 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
         (await ScalarAsync(client, "SELECT COUNT(*) FROM users")).ShouldBe(2L);
     }
 
-    /// <summary>A LIKE match that runs out of stack is an ExecutionFailure on the wire, and the session stays ready.</summary>
-    /// <remarks>
-    /// The server runs the statement on a thread the runtime sizes, so the depth must exceed any
-    /// such thread (<see cref="HostileOnAnyThread"/>): at 200,000 levels the match completed on
-    /// Ubuntu CI, whose 8 MB threads fit it once the suite ran without tiering.
-    /// </remarks>
-    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Nesting: a LIKE match deeper than the stack is an ExecutionFailure that keeps the session")]
-    public async Task Wire_DeepLikeMatch_ShouldReturnExecutionFailureAndKeepSession()
+    /// <summary>Long patterns complete over the wire without a recursive matcher.</summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Nesting: a long LIKE match succeeds and keeps the session")]
+    public async Task Wire_DeepLikeMatch_ShouldCompleteAndKeepSessionAsync()
     {
         // Arrange
         await using var harness = await ServerTestHarness.StartAsync();
         await using var client = await harness.DialAsync();
         await client.HandshakeAsync();
-        string sql = $"SELECT id FROM users WHERE '{new string('a', HostileOnAnyThread)}' LIKE '{string.Concat(Enumerable.Repeat("%a", HostileOnAnyThread))}'";
-
-        // Act
-        await client.SendAsync(ProtocolMessageType.Execute, ProtocolExecuteMessage.Create(sql).Encode());
-        var error = ProtocolErrorMessage.Decode((await client.ExpectAsync(ProtocolMessageType.Error)).Payload.Span);
-
-        // Assert
-        error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-        error.ShouldStartWithMessage(StatementTooComplex + ":", Case.Sensitive);
+        string sql = $"SELECT COUNT(*) FROM users WHERE '{new string('a', HostileOnAnyThread)}' LIKE '{string.Concat(Enumerable.Repeat("%a", HostileOnAnyThread))}'";
+        // Act / Assert
+        (await ScalarAsync(client, sql)).ShouldBe(2L);
         harness.Server.Sessions.Count.ShouldBe(1);
         (await ScalarAsync(client, "SELECT COUNT(*) FROM users")).ShouldBe(2L);
     }

@@ -17,8 +17,8 @@ namespace Assimalign.Cohesion.Database.Sql.Language;
 /// <remarks>
 /// <para>
 /// The text is a function of the tree alone, never of how the source was written: keywords are
-/// upper case, operators and list separators are single-spaced, parentheses appear only where
-/// the parser's precedence requires them, string literals double their embedded quotes, and an
+/// upper case, operators and list separators are single-spaced, parentheses preserve the parser's precedence
+/// and conservative grouping for persisted predicates, string literals double their embedded quotes, and an
 /// identifier is delimited with <c>"</c> only when it is not a plain word of the dialect (a
 /// keyword, a builtin function name, a word the parser gives a position-specific meaning, or a
 /// name the lexer would not read as one identifier). Names, literal values and parameter names
@@ -38,12 +38,15 @@ public static class SqlExpressionRenderer
     private const int orLevel = 1;
     private const int andLevel = 2;
     private const int notLevel = 3;
-    private const int comparisonLevel = 4;
-    private const int additiveLevel = 5;
-    private const int multiplicativeLevel = 6;
-    private const int unaryLevel = 7;
-    private const int collateLevel = 8;
-    private const int primaryLevel = 9;
+    private const int isLevel = 4;
+    private const int comparisonLevel = 5;
+    private const int predicateLevel = 6;
+    private const int concatLevel = 7;
+    private const int additiveLevel = 8;
+    private const int multiplicativeLevel = 9;
+    private const int unaryLevel = 10;
+    private const int collateLevel = 11;
+    private const int primaryLevel = 12;
 
     // Words that are not profile keywords or functions but that a parser rule reads by spelling
     // in some position: the LIKE escape clause, IS UNKNOWN, and NULLS FIRST/LAST.
@@ -138,18 +141,21 @@ public static class SqlExpressionRenderer
         SqlColumnReferenceExpression column => Column(column),
         SqlParameterExpression parameter => parameter.ParameterName,
         SqlStarExpression => "*",
-        SqlIsNullExpression isNull => Operand(isNull.Operand, additiveLevel) + (isNull.IsNegated ? " IS NOT NULL" : " IS NULL"),
-        SqlBetweenExpression between => Operand(between.Operand, additiveLevel) + (between.IsNegated ? " NOT BETWEEN " : " BETWEEN ") +
-            Operand(between.Low, additiveLevel) + " AND " + Operand(between.High, additiveLevel),
+        SqlDistinctExpression distinct => Operand(distinct.Left, concatLevel) +
+            (distinct.IsNegated ? " IS NOT DISTINCT FROM " : " IS DISTINCT FROM ") + Operand(distinct.Right, comparisonLevel),
+        SqlBooleanTestExpression test => Operand(test.Operand, concatLevel) + (test.IsNegated ? " IS NOT " : " IS ") + test.TruthValue.ToString().ToUpperInvariant(),
+        SqlIsNullExpression isNull => Operand(isNull.Operand, concatLevel) + (isNull.IsNegated ? " IS NOT NULL" : " IS NULL"),
+        SqlBetweenExpression between => Operand(between.Operand, concatLevel) + (between.IsNegated ? " NOT BETWEEN " : " BETWEEN ") +
+            Operand(between.Low, concatLevel) + " AND " + Operand(between.High, concatLevel),
         SqlInExpression inExpression => In(inExpression),
-        SqlLikeExpression like => Operand(like.Operand, additiveLevel) + (like.IsNegated ? " NOT LIKE " : " LIKE ") +
-            Operand(like.Pattern, collateLevel),
+        SqlLikeExpression like => Operand(like.Operand, concatLevel) + (like.IsNegated ? " NOT LIKE " : " LIKE ") +
+            Operand(like.Pattern, collateLevel) + (like.Escape is null ? "" : " ESCAPE " + Operand(like.Escape, collateLevel)),
         SqlCollateExpression collate => Operand(collate.Operand, collateLevel) + " COLLATE " + collate.CollationName,
         SqlFunctionCallExpression function when SqlUnsupportedVocabulary.IsNiladicFunction(function.FunctionName) && function.Arguments.Count == 0 && function.Quantifier == SqlSetQuantifier.Default && function.OrderBy.Count == 0 => function.FunctionName,
         SqlFunctionCallExpression function when function.FunctionName.Equals("EXTRACT", StringComparison.OrdinalIgnoreCase) && function.Arguments.Count == 2 && function.Arguments[0] is SqlLiteralExpression field && function.Quantifier == SqlSetQuantifier.Default && function.OrderBy.Count == 0
             => "EXTRACT(" + field.Value + " FROM " + Expression(function.Arguments[1]) + ")",
         SqlFunctionCallExpression function when function.FunctionName.Equals("POSITION", StringComparison.OrdinalIgnoreCase) && function.Arguments.Count == 2 && function.Quantifier == SqlSetQuantifier.Default && function.OrderBy.Count == 0
-            => "POSITION(" + Operand(function.Arguments[0], additiveLevel) + " IN " + Expression(function.Arguments[1]) + ")",
+            => "POSITION(" + Operand(function.Arguments[0], concatLevel) + " IN " + Expression(function.Arguments[1]) + ")",
         SqlFunctionCallExpression function => AggregateCall(function),
         SqlCaseExpression caseExpression => Case(caseExpression),
         SqlCastExpression cast => "CAST(" + Expression(cast.Operand) + " AS " + CastTarget(cast.TargetType) + ")",
@@ -193,8 +199,10 @@ public static class SqlExpressionRenderer
             Operator: SqlBinaryOperator.Equal or SqlBinaryOperator.NotEqual or SqlBinaryOperator.LessThan or
                 SqlBinaryOperator.GreaterThan or SqlBinaryOperator.LessOrEqual or SqlBinaryOperator.GreaterOrEqual,
         } => comparisonLevel,
-        SqlIsNullExpression or SqlBetweenExpression or SqlInExpression or SqlLikeExpression => comparisonLevel,
-        SqlBinaryExpression { Operator: SqlBinaryOperator.Add or SqlBinaryOperator.Subtract or SqlBinaryOperator.Concat } => additiveLevel,
+        SqlIsNullExpression or SqlDistinctExpression or SqlBooleanTestExpression => isLevel,
+        SqlBetweenExpression or SqlInExpression or SqlLikeExpression => predicateLevel,
+        SqlBinaryExpression { Operator: SqlBinaryOperator.Add or SqlBinaryOperator.Subtract } => additiveLevel,
+        SqlBinaryExpression { Operator: SqlBinaryOperator.Concat } => concatLevel,
         SqlBinaryExpression { Operator: SqlBinaryOperator.Multiply or SqlBinaryOperator.Divide or SqlBinaryOperator.Modulo } => multiplicativeLevel,
         SqlBinaryExpression binary => throw new NotSupportedException($"Binary operator '{binary.Operator}' has no SQL spelling."),
         SqlUnaryExpression => unaryLevel,
@@ -212,8 +220,8 @@ public static class SqlExpressionRenderer
 
         // Arithmetic operators associate to the left, so a right operand at the operator's own
         // level needs parentheses. Comparisons do not chain at all.
-        int right = level == comparisonLevel ? additiveLevel : level + 1;
-        int left = level == comparisonLevel ? additiveLevel : level;
+        int right = level == comparisonLevel ? concatLevel : level + 1;
+        int left = level == comparisonLevel ? concatLevel : level;
         return Operand(binary.Left, left) + " " + OperatorText(binary.Operator) + " " + Operand(binary.Right, right);
     }
 
@@ -328,7 +336,7 @@ public static class SqlExpressionRenderer
         string list = expression.Subquery is not null
             ? Select(expression.Subquery)
             : List(expression.Values ?? Array.Empty<SqlExpression>());
-        return Operand(expression.Operand, additiveLevel) + (expression.IsNegated ? " NOT IN (" : " IN (") + list + ")";
+        return Operand(expression.Operand, concatLevel) + (expression.IsNegated ? " NOT IN (" : " IN (") + list + ")";
     }
 
     private static string Case(SqlCaseExpression expression)

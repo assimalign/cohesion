@@ -343,9 +343,7 @@ reports `SQL0003` at the literal; it also used to fail only at execution.
 | `UPDATE t SET a = 1 WHRE id = 1`, `UPDATE t SET ... FROM u WHERE ...` | Leftover text after the UPDATE | `WHRE`, `FROM` |
 | `INSERT ... ON CONFLICT DO NOTHING`, `INSERT ... ON DUPLICATE KEY UPDATE ...` | Leftover text after the INSERT | `ON` |
 | `SELECT ... LIMIT 1 FETCH FIRST 1 ROW ONLY` | two row-limit clauses in one SELECT | `FETCH` |
-| `name LIKE 'a!%' ESCAPE '!'` | `LIKE ... ESCAPE` is not supported; `%` and `_` are always wildcards | `ESCAPE` |
-| `a IS [NOT] DISTINCT FROM b`, `a IS [NOT] TRUE`, `FALSE` or `UNKNOWN` | Only `IS [NOT] NULL` is supported | `IS` |
-| `a NOT NULL`, `flag NOT FALSE`, `x NOT y` | `NOT` after an operand must begin `NOT BETWEEN`, `NOT IN` or `NOT LIKE`; it used to parse as `x AND NOT y` | the token after `NOT` |
+| `a NOT NULL`, `flag NOT FALSE`, `x NOT y` | `NOT` after an operand must begin a recognized predicate: BETWEEN, IN and LIKE execute; unsupported ILIKE/SIMILAR forms use COHDBL001. It used to parse as `x AND NOT y` | the token after `NOT` |
 | `WHERE id = :id`, `SET a = :a`, `WHERE id = ;`, a statement ending in `WHERE` or `=` | Expected an expression; the NULL literal the parser used to substitute is gone | the token, or the end of the text |
 | `WHERE (id = 1`, `id IN (1, 2`, `id BETWEEN 1 2`, `CASE WHEN c 'a' END`, `ORDER id`, `UPDATE t;`, `DELETE;`, `VALUES (1), ()` | The missing token, keyword, name or value | where it was expected |
 | `VARCHAR(25 5)`, `DECIMAL(10, 2, 5)`, `VARCHAR(-5)`, `CHAR(MAX)` | Type arguments must be one or two unsigned integer literals, except MAX on VARCHAR/NVARCHAR/VARBINARY | the first offending token |
@@ -737,7 +735,7 @@ is allowed, and future inserts must supply a value. The emptiness check consider
 current committed rows; historical row versions visible only to an older row
 snapshot retain a missing NULL field when such an addition has no default.
 
-Column defaults admit variable-free scalar expressions: arithmetic, unary signs, parentheses, function calls, niladic datetime forms and CAST. The top-level grammar leaves NOT/AND/OR/IS/LIKE/IN and following column constraints unconsumed. Columns, parameters, aggregates and subqueries are excluded. Immutable expressions are evaluated at DDL time, including division-by-zero and conversion errors. Catalog open and table rebinds resolve DEFAULT trees without evaluating them; a changed function implementation fails only a write assigning its default. Stable and volatile defaults evaluate per assigned row, using the transaction-start clock. A call to a name outside the engine's catalog, executable profile and recognized-unsupported vocabulary fails
+Column defaults admit variable-free scalar expressions: arithmetic, unary signs, parentheses, function calls, niladic datetime forms and CAST. The top-level restricted grammar admits comparisons and IS [NOT] DISTINCT FROM, and leaves NOT/AND/OR, truth tests, LIKE/IN and following column constraints unconsumed. Columns, parameters, aggregates and subqueries are excluded. Immutable expressions are evaluated at DDL time, including division-by-zero and conversion errors. Catalog open and table rebinds resolve DEFAULT trees without evaluating them; a changed function implementation fails only a write assigning its default. Stable and volatile defaults evaluate per assigned row, using the transaction-start clock. A call to a name outside the engine's catalog, executable profile and recognized-unsupported vocabulary fails
 first, with `COHSQLE016` and `Unknown function '<name>'.`,
 and so does a call whose arguments its function does not accept, with `COHSQLE006`
 (`DEFAULT ABS(1, 2)`; see [Statement completeness](#statement-completeness-1068)),
@@ -1047,7 +1045,7 @@ its data with the engine that wrote it (which can still open it), drop the
 database (`DropDatabaseAsync`), create it again and reload the data. A database
 whose creation was interrupted before its format was recorded reads as format 1
 and needs only the drop and create. Upgrading databases across format versions
-is tracked by #1152. New databases are created on format 24. Format 24 admits explicit NULL placement in
+is tracked by #1152. New databases are created on format 25. Format 25 admits distinct predicates, Boolean tests and LIKE ESCAPE in persisted expressions and views; format 24 admits explicit NULL placement in
 stored view bodies; earlier formats are refused at open, with no upgrade reader.
 
 From format 4 on, the catalog stores the format marker in a record that engines
@@ -1763,10 +1761,8 @@ session's system-relation scan, planning, evaluation, CHECK validation, and
 binding a persisted definition) checks the stack before it descends, and recurses
 once per level of the tree, never once per term of an `AND`/`OR` chain, whose terms
 it iterates. A statement that runs any walk out of stack fails with `COHSQLE004` as
-described above. `LIKE` matching recurses once per `%` it backtracks through, so
-its depth follows the values rather than the text: a match that needs more stack
-than the thread has, such as a pattern of 200,000 `%a` segments over a value of
-200,000 characters, fails the same way with `COHSQLE004`.
+described above. `LIKE` matching is iterative (#1111): its pattern length no
+longer consumes stack per wildcard. Long matches observe statement cancellation.
 
 ## System-view matrix (C1)
 
@@ -1886,22 +1882,37 @@ and ROLLBACK, before transaction state changes. Unbound references fail
 with COHSQLE020 before any row is read or written, including empty inputs. SQL
 GROUP BY compares parameter references by bare name. Operand `?` and `:name`
 report one SQL0003 at their complete span and name the supported forms; a trailing
-stray `?` keeps its generic message. SQL `::` keeps its existing diagnostic.
+stray `?` keeps its generic message. SQL `::` reports COHDBL001 naming CAST(x AS type).
 ParameterConformanceTests, ParameterBindingTests and SqlParameterWireTests cover
 these rules without changing SQL request payloads.
 
-Precedence, low to high: `OR` < `AND` < `NOT` < comparison (`=`, `<>`, `<`, `>`,
-`<=`, `>=`, `IS [NOT] NULL`, `[NOT] BETWEEN`, `[NOT] IN`, `[NOT] LIKE`) < additive
-(`+`, `-`, `||`) < multiplicative (`*`, `/`, `%`) < unary signs (`-`, `+`) <
-`COLLATE` < primary. Executable primary forms include literals, parameters (`$name`, `@name`, `$1`),
+Precedence, low to high: `OR` < `AND` < `NOT` < `IS` tests and distinct
+predicates < comparison (`=`, `<>`, `<`, `>`, `<=`, `>=`) < `[NOT] BETWEEN`,
+`[NOT] IN`, `[NOT] LIKE` < `ESCAPE` < concatenation (`||`) < additive (`+`, `-`)
+< multiplicative (`*`, `/`, `%`) < unary signs (`-`, `+`) < `COLLATE` < primary.
+This follows PostgreSQL `src/backend/parser/gram.y:847-853,904-906`.
+Compared with the earlier ladder, IS moves below comparison, BETWEEN/IN/LIKE
+move above comparison, LIKE pattern and ESCAPE operands include concatenation,
+concatenation moves below addition, and the lower BETWEEN bound admits restricted
+comparison/distinct expressions as PostgreSQL b_expr does. Thus `a = b IS TRUE` tests `(a = b)`,
+`a = b LIKE c` compares `a` with `(b LIKE c)`, `a IN (1) = TRUE` compares
+the IN result, and `a IS DISTINCT FROM b = c` compares `a` with `(b = c)`.
+Completed postfix tests can be followed by another operator (`a IS NULL = b`).
+Binary predicates and comparisons do not chain at their own rung without
+parentheses. Renderer parentheses remain conservative: comparison operands and
+IS operands retain their earlier grouping, and LIKE pattern/ESCAPE concatenations
+remain parenthesized. Mixed arithmetic/concatenation trees may need additional
+parentheses under the new ladder: `(a || b) + c` keeps its left grouping rather
+than rendering the formerly ambiguous `a || b + c`. Format 25 gates this change
+along with the newly storable predicates. Executable primary forms include literals, parameters,
 column references, supported function calls, simple/searched `CASE`, and
 parenthesized expressions and `CAST` within the conversion contract below.
 Correlated and uncorrelated scalar subqueries and subquery predicates execute within the contract above.
 SQL aggregates follow the grouping and aggregate contract below. Arithmetic result
 types and the `COHSQLE001`/`COHSQLE002`/`COHSQLE003` faults follow the arithmetic
 contract above.
-`IS` takes only `[NOT] NULL`, and `LIKE` has no `ESCAPE` clause; the other forms
-report `SQL0003` (see Statement completeness). An expression nests at most 256
+`IS [NOT] DISTINCT FROM`, `IS [NOT] TRUE/FALSE/UNKNOWN`, and `[NOT] LIKE ... ESCAPE`
+execute as specified below. An expression nests at most 256
 levels by default (configurable per engine within 32..4096), and its parentheses at
 most as many pairs; a chain of `AND` (or `OR`) terms is one level however long, and
 deeper text reports `SQL0006` (see [Expression nesting limit](#expression-nesting-limit-1151)).
@@ -1922,6 +1933,68 @@ for a NULL operand and threw per row otherwise. So `SELECT ~NULL;` and `~` over 
 empty table succeeded, and an infix `~` fell to the leftover-token check with a
 generic message. None of them executes now, on either session seam or over the
 wire.
+
+## Distinct predicates, Boolean tests and LIKE ESCAPE (#1111)
+
+`a IS DISTINCT FROM b` returns TRUE when exactly one operand is NULL, FALSE when
+both are NULL, and otherwise the negation of equality. `IS NOT DISTINCT FROM`
+is its complement. Both always return a non-NULL BOOLEAN. Non-NULL operands use
+the same SqlValueComparer and effective collation as `=`: incompatible types
+raise the same error, NaN equals NaN, and `'a' COLLATE case_insensitive IS NOT
+DISTINCT FROM 'A'` is TRUE. These predicates use scans in T1, including when an
+index exists; they are not extracted as seek comparisons.
+
+| Input | IS TRUE | IS NOT TRUE | IS FALSE | IS NOT FALSE | IS UNKNOWN | IS NOT UNKNOWN |
+|---|---|---|---|---|---|---|
+| TRUE | TRUE | FALSE | FALSE | TRUE | FALSE | TRUE |
+| FALSE | FALSE | TRUE | TRUE | FALSE | FALSE | TRUE |
+| NULL | FALSE | TRUE | FALSE | TRUE | TRUE | FALSE |
+
+Truth tests require BOOLEAN or NULL. A statically non-Boolean operand, including
+a supplied parameter, fails before rows are read with COHSQLE003, even on empty
+tables. All predicates participate in projections, WHERE, JOIN ON, HAVING, CASE,
+ORDER BY, GROUP BY and correlated subqueries. CHECK rejects only FALSE, so
+`CHECK (flag IS TRUE)` rejects NULL while `CHECK (flag)` accepts NULL.
+
+`value [NOT] LIKE pattern [ESCAPE escape]` supports literal, parameter, column
+and concatenated patterns and escapes. `%` matches any run, `_` one Unicode
+scalar, and an escape quotes the next scalar literally. The escape is read
+before wildcard recognition, even when the escape itself is `%` or `_`.
+`'50%' LIKE '50!%' ESCAPE '!'` is TRUE, whereas `'500'` does not match it.
+For valid patterns, NULL in any operand gives UNKNOWN; NOT LIKE complements the Boolean result.
+
+The default escape is backslash and `ESCAPE ''` disables escaping, following
+PostgreSQL and OQL. These intentionally depart from ISO's lack of an implicit
+escape and refusal of an empty escape. An escape may precede any scalar (including
+an ordinary letter), also following PostgreSQL. A nonempty escape must contain
+exactly one Unicode scalar; a longer string or trailing pattern escape raises
+COHSQLE034 (SQLSTATE 22025), naming ESCAPE. Constant and supplied-parameter
+patterns/escapes, including their concatenations, are validated during binding,
+before any row, and compiled once. Dynamic operands are validated when evaluated.
+A NULL escape is checked before escape-length validation.
+
+The matched value, pattern and ESCAPE operand all participate in effective collation
+resolution, including an explicit COLLATE on ESCAPE. Tokenization reads raw escapes
+and wildcards before collation normalization;
+only literal runs are normalized. Case folding or accent removal therefore cannot
+change an escape into a wildcard or erase it. All four collations support scalar
+escapes and scalar `_`; CHAR left operands keep their stored padding while CHAR
+patterns use their text conversion. The iterative matcher observes cancellation
+and has no data-dependent recursion. Constant patterns are cached in the bound
+node; dynamic patterns compile per evaluation. No Regex, reflection or runtime
+expression compilation is used. PostgreSQL anchors: `like_match.c:162-168,428-453,473-476`
+and `parse_expr.c:2541-2560,3085-3105`.
+
+These forms are storable in CHECK, parenthesized DEFAULT, domain definitions,
+SQL function bodies and views. Canonical CHECK text is exposed by
+INFORMATION_SCHEMA.CHECK_CONSTRAINTS. Storage format 25 refuses older files;
+there is no upgrade reader. No named clause is added; the profile count does not change.
+ESCAPE and UNKNOWN stay contextual. ILIKE, NOT ILIKE, SIMILAR TO and NOT SIMILAR
+TO are recognized positionally and report one COHDBL001; ordinary identifiers
+`ilike` and `similar` retain their canonical spelling. Binary `&`, `|`, `<<`, `>>`,
+`::` casts (use CAST(x AS type)), IS JSON, IS OF and IS NORMALIZED likewise report
+one COHDBL001 at the operator. Missing FROM/comparands or ESCAPE operands remain
+SQL0003 at the offending or missing token. Adjacent `<-` retains SQL0003.
 
 ## Literals
 
@@ -2200,7 +2273,7 @@ lengths can compare equal under the index's collation.
   LIKE sees the stored padded left operand; its pattern is text, so a CHAR pattern is stripped.
   Thus CHAR(3) 'a' fails LIKE 'a', but matches LIKE 'a  ' and LIKE 'a%'. There is no separate
   pattern operator class or OCTET_LENGTH builtin in this dialect. The compatibility invariant
-  collation's LIKE wildcard still advances UTF-16 code units; the three index-backed collations
+  collation's LIKE wildcard advances Unicode scalars, as do the three index-backed collations
   advance Unicode scalars. PostgreSQL's bpchar pattern
   ordering operators trim spaces too; they do not define LIKE's input conversion.
   Native scalar and aggregate CHAR arguments apply their declared lengths even when an argument
@@ -2676,7 +2749,7 @@ pin in the same change.
 | `COHDBL001` | Error | Recognized clause, keyword, function, operator or type modifier is not supported by the SQL model surface, including prefix and infix `~` (#1101), temporal precision and INTERVAL field qualifiers in declarations and CAST (#1438); the message names the construct and, for a modifier, its declaration |
 | `SQL0001` | Error | Empty query text |
 | `SQL0002` | Error | Unknown command (recognized unsupported clauses use `COHDBL001`) |
-| `SQL0003` | Error | Malformed syntax: text after a complete statement or after its terminating `;`; a missing expression, closing token, keyword, name or `VALUES` row; an unterminated string, quoted identifier or block comment; a character outside the dialect, such as `?`, `#`, `^` or a non-ASCII digit, which binds no alias or column (#1101); a numeric literal whose exponent has no digits; an `IS` form other than `[NOT] NULL`; `NOT` after an operand without `BETWEEN`, `IN` or `LIKE`; `LIKE ... ESCAPE`; mixed or duplicate pagination clauses, incomplete FETCH, or malformed TOP; an incomplete `IF [NOT] EXISTS`; `ALTER` without `TABLE`; an unknown or incomplete `ALTER TABLE` action; and missing set operands or an unparenthesized operand window before a set operator; malformed transaction-control, JOIN, GROUP BY, HAVING, CAST, COLLATE, or constraint/DDL syntax |
+| `SQL0003` | Error | Malformed syntax: text after a complete statement or after its terminating `;`; a missing expression, closing token, keyword, name or `VALUES` row; an unterminated string, quoted identifier or block comment; a character outside the dialect, such as `?`, `#`, `^` or a non-ASCII digit, which binds no alias or column (#1101); a numeric literal whose exponent has no digits; an incomplete or malformed IS predicate; `NOT` after an operand without a recognized predicate; an incomplete LIKE ESCAPE; mixed or duplicate pagination clauses, incomplete FETCH, or malformed TOP; an incomplete `IF [NOT] EXISTS`; `ALTER` without `TABLE`; an unknown or incomplete `ALTER TABLE` action; and missing set operands or an unparenthesized operand window before a set operator; malformed transaction-control, JOIN, GROUP BY, HAVING, CAST, COLLATE, or constraint/DDL syntax |
 | `SQL0004` | — | Retired (E3): an unknown CAST target type was a parse error; a name that is not a built-in type is now resolved by the engine, and one it does not know is `COHSQLE010` |
 | `SQL0005` | Error | Invalid type modifiers at any declaration or CAST: malformed arguments (including CHAR(MAX)), out-of-range length/precision/scale (including FLOAT outside 1..53 bits), arguments a type does not take, or a rejected type spelling (BIT, SMALLDATETIME, TIME WITH TIME ZONE); names the declaration and reason. Temporal precision and INTERVAL qualifiers use COHDBL001 |
 | `SQL0006` | Error | Expression nesting exceeds the limit (256 levels by default, configurable within 32..4096), or parentheses nest deeper than the limit; an `AND`/`OR` chain counts one level. The rest of the statement is not parsed. An engine also reports it for a typed request whose statement nests deeper than the engine's limit (#1151) |
@@ -2685,8 +2758,8 @@ pin in the same change.
 | `SQL0100` | Information | Statement does not end with `;` |
 | `COHSQLE001` | Error | Division by zero during evaluation (ISO SQLSTATE 22012) |
 | `COHSQLE002` | Error | Numeric value out of range during evaluation, store assignment, DEFAULT conversion or built-in NUMERIC CAST, including an inexact Decimal representation after any declared-scale rounding (ISO SQLSTATE 22003) |
-| `COHSQLE003` | Error | Datatype mismatch, including non-numeric signs and incompatible set-operation column types; set errors name both types and the one-based position (ISO SQLSTATE 42804) |
-| `COHSQLE004` | Error | Statement too complex: parsing it or a walk over it needs more stack than the executing thread has left, which a statement within a high configured nesting limit, a deeply backtracking `LIKE` match or a thread created with a small stack can reach (ISO SQLSTATE 54001, #1151) |
+| `COHSQLE003` | Error | Datatype mismatch, including non-numeric signs, non-Boolean IS TRUE/FALSE/UNKNOWN operands, and incompatible set-operation column types; set errors name both types and the one-based position (ISO SQLSTATE 42804) |
+| `COHSQLE004` | Error | Statement too complex: parsing it or a walk over it needs more stack than the executing thread has left, which a statement within a high configured nesting limit or a thread created with a small stack can reach (ISO SQLSTATE 54001, #1151) |
 | `COHSQLE005` | Error | Column reference in a clause with no columns in scope: an `INSERT ... VALUES` row or a `LIMIT`/`OFFSET` count, raised while planning (ISO SQLSTATE class 42, #1165) |
 | `COHSQLE006` | Error | Function call whose arguments no overload of its function accepts: a count outside every overload's (`ABS(1, 2)`, `UPPER()`, `COALESCE()`, `COUNT(a, b)`, `SUM()`), `*` for a function other than a parameterless aggregate such as `COUNT`, or argument types no overload takes (`SUM(name)` over text). Raised while planning, in every expression position, `CHECK` and `DEFAULT` included; by the evaluator for a call that reaches it unplanned; and by opening a database whose catalog stores a CHECK holding `COALESCE` with no operand (ISO SQLSTATE class 42; PostgreSQL's 42883, undefined function, #1189) |
 | `COHSQLE007` | Error | A function threw while the statement ran: anything but a `DatabaseException`, cancellation of the statement itself or an exhausted stack or memory, which is the inner exception; or a `CAST`'s registered cast threw anything but those and a value's fault (`FormatException`, `OverflowException`, `InvalidCastException`), a cancellation the statement did not ask for included (`Cast TEXT AS cents failed: ...`, E3); or a function returned a value of another type than it declares (one that widens to the declared type is converted), or NULL when it declares it never returns NULL. The message names the function (ISO SQLSTATE 38000, external routine exception; E2) |
@@ -2711,6 +2784,7 @@ pin in the same change.
 | `COHSQLE031` | Error | DROP SCHEMA targets dbo, which code-first provisioning requires |
 | `COHSQLE032` | Error | DISTINCT/ALL/input ORDER BY on a scalar function, or DISTINCT input ordering whose keys are absent from the arguments (PostgreSQL 42809 / 42P10) |
 | `COHSQLE033` | Error | Invalid persisted view declaration/replacement, changed recorded column identity, oversized view record, or otherwise uncoded stored-body binding failure |
+| `COHSQLE034` | Error | Invalid LIKE ESCAPE: escape is neither empty nor one Unicode scalar, or a pattern ends with the escape character (SQLSTATE 22025); ExecutionFailure leaves the connection usable |
 
 Positions are absolute character offsets into the statement text; line/column
 presentation is computed by tooling from the source (offset → line mapping), not

@@ -444,10 +444,12 @@ output (the rule is in [DIALECT.md](DIALECT.md#persisted-definitions-are-canonic
   `<>` for inequality, comments dropped, names and literal values as the tree holds
   them. Two spellings of one predicate store the same text, which is what lets the
   engine compare a compiled schema's CHECK with the catalog by canonical form.
-- **Parentheses follow the parser's precedence ladder, not the source.** The
+- **Parentheses follow the parser ladder and preserve conservative persisted grouping.** The
   renderer assigns each node the rung `SqlQueryParser.Expressions.cs` parses it at
-  and parenthesizes an operand only when its position parses a tighter rung, with
+  and parenthesizes an operand when its position parses a tighter rung, with
   left associativity for logical and arithmetic operators and none for comparisons.
+  IS operands retain comparison parentheses and LIKE pattern/ESCAPE operands retain
+  concatenation parentheses (#1111), preserving existing canonical predicate text.
   Four spellings are special because the lexer or parser folds them: a sign
   applied to a sign is parenthesized (`--` would start a comment), `+(1)` keeps its
   parentheses (`+1` is the literal `1`), `NOT` before a plain `EXISTS` is
@@ -713,3 +715,12 @@ are parsed independently of the foreign-key action capability flags.
 The engine's view metadata contract is documented in DIALECT: complete common type modifiers
 flow through scalar alternatives and set operands, every catalog view column is nullable, and
 catalog refusals retain structured diagnostics over the wire.
+
+## Distinct predicates, truth tests and LIKE ESCAPE (#1111)
+
+Dedicated SqlDistinctExpression and SqlBooleanTestExpression nodes retain negation;
+SqlTruthValue selects TRUE, FALSE or UNKNOWN. SqlLikeExpression adds an optional Escape
+operand. Depth accounting, canonical rendering and the complete tree dump include every
+operand. The parser uses PostgreSQL's IS/comparison/predicate/ESCAPE ladder and separates
+concatenation from addition; no named clause or keyword is added. ILIKE/SIMILAR are refused
+positionally, so ordinary identifier quoting stays unchanged. DIALECT.md specifies behavior.

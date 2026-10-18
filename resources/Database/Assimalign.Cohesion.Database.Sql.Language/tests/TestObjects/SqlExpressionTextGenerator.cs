@@ -90,8 +90,11 @@ internal sealed class SqlExpressionTextGenerator
         }
 
         int next = depth - 1;
-        return _random.Next(28) switch
+        return _random.Next(31) switch
         {
+            28 => Operand(next) + Pick(" IS DISTINCT FROM ", " IS NOT DISTINCT FROM ") + Operand(next),
+            29 => Operand(next) + Pick(" IS ", " IS NOT ") + Pick("TRUE", "FALSE", "UNKNOWN"),
+            30 => Operand(next) + Pick(" LIKE ", " NOT LIKE ") + Operand(next) + " ESCAPE " + Operand(next),
             24 => "COUNT(" + Pick("DISTINCT ", "ALL ") + Value(next) + ")",
             25 => "STRING_AGG(" + Pick("DISTINCT ", "ALL ", "") + Value(next) + ", ',' ORDER BY " + Value(next) + Pick(" DESC", " ASC", "") + ")",
             26 => "LISTAGG(" + Pick("DISTINCT ", "ALL ", "") + Value(next) + ") WITHIN GROUP (ORDER BY " + Value(next) + ")",

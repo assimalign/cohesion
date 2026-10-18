@@ -112,6 +112,8 @@ internal sealed partial class SqlPlanExecutor
         {
             case SqlBoundBinary binary: yield return binary.Left; yield return binary.Right; break;
             case SqlBoundUnary unary: yield return unary.Operand; break;
+            case SqlBoundDistinct distinct: yield return distinct.Left; yield return distinct.Right; break;
+            case SqlBoundBooleanTest test: yield return test.Operand; break;
             case SqlBoundIsNull isNull: yield return isNull.Operand; break;
             case SqlBoundBetween between:
                 yield return between.LowOperand; yield return between.HighOperand;
@@ -121,7 +123,7 @@ internal sealed partial class SqlPlanExecutor
                 foreach (var candidate in member.Candidates) { yield return candidate; }
                 break;
             case SqlBoundInSubquery member: yield return member.Operand; break;
-            case SqlBoundLike like: yield return like.Operand; yield return like.Pattern; break;
+            case SqlBoundLike like: yield return like.Operand; yield return like.Pattern; yield return like.Escape; break;
             case SqlBoundCall call:
                 foreach (var argument in call.Arguments) { yield return argument; }
                 break;

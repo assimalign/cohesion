@@ -239,8 +239,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
             // Every recursive walk over a statement (the system-relation scan, planning,
             // evaluation, CHECK validation) checks the stack before it descends (#1151). The
             // nesting limit bounds how deep a statement nests, not how much stack the walks need
-            // on the thread that runs them, so a statement within a high configured limit, a
-            // LIKE match backtracking through more wildcards than the stack holds, or a
+            // on the thread that runs them, so a statement within a high configured limit, or a
             // statement run on a thread too small for it gets here, including a stored CHECK or
             // DEFAULT the statement reads back on first use. It is PostgreSQL's backstop
             // (SQLSTATE 54001): the statement fails as this statement's error, the auto-commit

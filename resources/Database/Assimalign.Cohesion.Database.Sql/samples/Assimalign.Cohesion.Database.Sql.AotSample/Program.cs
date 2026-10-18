@@ -69,6 +69,13 @@ internal static class Program
     private static readonly object?[][] _allCasts =
         [[0.8455124082255701m, new DateTime(2024, 1, 1), new TimeOnly(23, 0), new TimeSpan(1, 2, 3), "\\x00ff", "{\"雪\":1}", "TRUE", "1.0000001"]];
 
+    private const string predicates = "SELECT NULL IS NOT DISTINCT FROM NULL, 1 IS DISTINCT FROM NULL, " +
+        "NULL IS UNKNOWN, FALSE IS NOT TRUE, 1 = 1 IS TRUE, '50%' LIKE '50X%' ESCAPE 'X', " +
+        "'a%' COLLATE case_accent_insensitive LIKE 'aé%' ESCAPE 'é', " +
+        "'A%' LIKE 'aX%' ESCAPE 'X' COLLATE case_insensitive, " +
+        "(TRUE || 'tail') LIKE TRUE || '%' ESCAPE '' FROM customers WHERE Id = 1";
+    private static readonly object?[][] _predicates = [[true, true, true, true, true, true, true, true, true]];
+
     private const string Characters = "SELECT c, CAST(c AS TEXT), LENGTH(c), c || 'b', c LIKE 'a' FROM fixed_codes WHERE c = 'a'";
     private static readonly object?[][] _characters = [["a  ", "a", 1L, "ab", false]];
 
@@ -224,6 +231,9 @@ internal static class Program
         Check("in process: OFFSET before LIMIT", await RowsAsync(session, "SELECT Id FROM customers ORDER BY Id OFFSET 1 LIMIT 1"), [[2L]]);
         Check("in process: TOP after sorting", await RowsAsync(session, "SELECT TOP (1) Id FROM customers ORDER BY Id DESC"), [[2L]]);
         Check("in process: all CAST families", await RowsAsync(session, allCasts), _allCasts);
+        Check("in process: distinct truth tests and ESCAPE", await RowsAsync(session, predicates), _predicates);
+        CheckFailure("in process: invalid ESCAPE", await FailureAsync(() => RowsAsync(session,
+            "SELECT Name LIKE 'x!' ESCAPE '!' FROM customers")), "COHSQLE034");
         Check("in process: three-way USING and LEFT", await RowsAsync(session, expandedJoin), [[1L, 1L], [2L, null]]);
         Check("in process: comma and CROSS", await RowsAsync(session, crossJoin), [[8L]]);
         Check("in process: set operations", await RowsAsync(session, setOperations), [[2L]]);
@@ -381,6 +391,12 @@ internal static class Program
         var explained = await RowsAsync(connection, "EXPLAIN SELECT c FROM fixed_codes WHERE c = 'a'", timeout.Token);
         Check("over the wire: EXPLAIN uses existing result rows", explained.Any(row => Equals(row[2], "IndexSeek") && row[4] is string && row.Length == 8), true);
         Check("over the wire: all CAST families", await RowsAsync(connection, allCasts, timeout.Token), _allCasts);
+        Check("over the wire: distinct truth tests and ESCAPE", await RowsAsync(connection, predicates, timeout.Token), _predicates);
+        CheckFailure("over the wire: invalid ESCAPE", await FailureAsync(() => RowsAsync(connection,
+            "SELECT Name LIKE 'x!' ESCAPE '!' FROM customers", timeout.Token)), "COHSQLE034");
+        Check("over the wire: parameter ESCAPE", await RowsAsync(connection,
+            "SELECT '50%' LIKE '50!%' ESCAPE @e FROM customers WHERE Id = 1", timeout.Token,
+            new Dictionary<string, object?> { ["e"] = "!" }), [[true]]);
         Check("over the wire: three-way USING and LEFT", await RowsAsync(connection, expandedJoin, timeout.Token), [[1L, 1L], [2L, null]]);
         Check("over the wire: comma and CROSS", await RowsAsync(connection, crossJoin, timeout.Token), [[8L]]);
         Check("over the wire: set operations", await RowsAsync(connection, setOperations, timeout.Token), [[2L]]);

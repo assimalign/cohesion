@@ -538,7 +538,7 @@ public sealed partial class SqlQueryParser
         // PostgreSQL gram.y:4032-4037 uses b_expr so a following NOT NULL is
         // a column constraint. Parentheses and call arguments retain full expressions.
         _columnDefault = true;
-        try { return ParseAddition(ref lexer); }
+        try { return ParsePredicates(ref lexer, 1, restricted: true); }
         finally { _columnDefault = false; }
     }
 

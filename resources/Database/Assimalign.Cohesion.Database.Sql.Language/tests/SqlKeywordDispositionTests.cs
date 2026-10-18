@@ -124,6 +124,8 @@ public sealed class SqlKeywordDispositionTests
         ["IN"] = Parses("SELECT a FROM t WHERE a IN (1, 2)"),
         ["EXISTS"] = Parses("SELECT a FROM t WHERE EXISTS (SELECT b FROM u)"),
         ["BETWEEN"] = Parses("SELECT a FROM t WHERE a BETWEEN 1 AND 2"),
+        ["ILIKE"] = Rejects("SELECT a FROM t WHERE a ILIKE 'x%'", "ILIKE"),
+        ["SIMILAR"] = Rejects("SELECT a FROM t WHERE a SIMILAR TO 'x%'", "SIMILAR TO"),
         ["LIKE"] = Parses("SELECT a FROM t WHERE a LIKE 'x%'"),
         ["IS"] = Parses("SELECT a FROM t WHERE a IS NULL"),
         ["ANY"] = Rejects("SELECT a FROM t WHERE a = ANY (SELECT b FROM u)", "ANY quantified comparison"),
@@ -264,7 +266,7 @@ public sealed class SqlKeywordDispositionTests
     private static string[] Words()
         => SqlLanguageProfile.Instance.Keywords.ToArray()
             .Concat(SqlUnsupportedVocabulary.Words.Select(word => word.Spelling))
-            .Concat(new[] { "CEILING", "CONCAT", "CURRENT_DATE", "CURRENT_TIME", "CURRENT_TIMESTAMP", "EXTRACT", "FLOOR", "LOCALTIME", "LOCALTIMESTAMP", "LTRIM", "MOD", "NOW", "NULLIF", "POWER", "REPLACE", "ROUND", "RTRIM", "SQRT", "SUBSTRING", "TRIM" })
+            .Concat(new[] { "ILIKE", "SIMILAR", "CEILING", "CONCAT", "CURRENT_DATE", "CURRENT_TIME", "CURRENT_TIMESTAMP", "EXTRACT", "FLOOR", "LOCALTIME", "LOCALTIMESTAMP", "LTRIM", "MOD", "NOW", "NULLIF", "POWER", "REPLACE", "ROUND", "RTRIM", "SQRT", "SUBSTRING", "TRIM" })
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
 

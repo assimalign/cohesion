@@ -15,8 +15,8 @@ namespace Assimalign.Cohesion.Database.Sql.Client.Tests;
 /// A 200,000-term statement used to overflow the server's stack and end its process, taking every
 /// session with it. Only genuine nesting counts now: a 10,000-term AND or OR predicate executes,
 /// text nested deeper than the engine's configured limit (256 by default) is a ParseFailure, a
-/// statement within the limit that the server's thread is too small for, or a LIKE match deeper
-/// than the stack, is a COHSQLE004 ExecutionFailure, and the connection that sent any of them
+/// statement within the limit that the server's thread is too small for is a COHSQLE004
+/// ExecutionFailure, and the connection that sent any of them
 /// keeps working.
 /// </summary>
 public sealed class SqlExpressionDepthWireTests
@@ -162,9 +162,9 @@ public sealed class SqlExpressionDepthWireTests
             .ShouldHaveSingleItem()["total"].ShouldBe(2L);
     }
 
-    /// <summary>LIKE matching that runs out of stack is a coded execution failure, not a crash.</summary>
-    [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - Nesting: a LIKE match deeper than the stack fails with COHSQLE004 and keeps the connection")]
-    public async Task QueryAsync_DeepLikeMatch_ShouldFailWithStatementTooComplex()
+    /// <summary>Data-sized LIKE patterns execute iteratively and keep the connection usable.</summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - Nesting: a data-sized LIKE match completes and keeps the connection")]
+    public async Task QueryAsync_DeepLikeMatch_ShouldCompleteAndKeepConnectionAsync()
     {
         // Arrange
         await using var harness = await SqlClientTestHarness.StartAsync();
@@ -176,13 +176,11 @@ public sealed class SqlExpressionDepthWireTests
         };
 
         // Act
-        var error = await Should.ThrowAsync<SqlClientException>(async () => await connection.QueryAsync(
-            "SELECT id FROM users WHERE @value LIKE @pattern", parameters, SqlClientTestHarness.Timeout(30)));
+        var rows = await connection.QueryAsync(
+            "SELECT id FROM users WHERE @value LIKE @pattern ORDER BY id", parameters, SqlClientTestHarness.Timeout(30));
 
         // Assert
-        error.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
-        error.Message.ShouldStartWith("COHSQLE004:", Case.Sensitive);
-        error.ConnectionUsable.ShouldBeTrue();
+        rows.Select(row => row["id"]).ShouldBe(new object?[] { 1, 2 });
         (await connection.QueryAsync("SELECT COUNT(*) AS total FROM users", cancellationToken: SqlClientTestHarness.Timeout()))
             .ShouldHaveSingleItem()["total"].ShouldBe(2L);
     }

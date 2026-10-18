@@ -220,6 +220,56 @@ public sealed class SqlProvisioningAdmissionTests
         }
     }
 
+    [Theory(DisplayName = "Cohesion Test [Sql] - Predicate admission: nested references wait for a reserved table")]
+    [InlineData("(SELECT id FROM items) = 1 IS TRUE")]
+    [InlineData("1 IS NOT DISTINCT FROM (SELECT id FROM items)")]
+    [InlineData("'a%' LIKE 'a!%' ESCAPE (SELECT '!' FROM items)")]
+    public async Task WaitForTablesAsync_PredicateChild_ShouldDiscoverReservedRelationAsync(string predicate)
+    {
+        // Arrange: only the new predicate child references the worker's reserved table.
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var release = new ManualResetEventSlim();
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var engine = SqlDatabaseEngine.Create("predicate-admission", new());
+        var database = await engine.CreateDatabaseAsync("orders", timeout.Token);
+        var items = new CompiledSchemaTable("items", "Item", [new("id", DatabaseType.Int32, false)], null, [], []);
+        await database.ApplySchemaAsync(Schema(items), timeout.Token);
+        await using var session = await database.CreateSessionAsync(timeout.Token);
+        await session.ExecuteAsync("INSERT INTO items VALUES (1)", cancellationToken: timeout.Token);
+        var desired = Schema(new CompiledSchemaTable(items.Name, items.RowType, items.Columns, null,
+            [new CompiledSchemaIndex("ix_items", ["id"])], []));
+        int steps = 0;
+        database.SchemaProvisioner.BeforeDeferredStep = (_, token) =>
+        {
+            Interlocked.Increment(ref steps);
+            entered.TrySetResult();
+            release.Wait(token);
+        };
+        Task? waiting = null;
+        try
+        {
+            await database.SchemaProvisioner.ApplyAsync(desired, timeout.Token, deferDataScalingSteps: true);
+            await entered.Task.WaitAsync(timeout.Token);
+            using var waits = new EventSourceRecorder(EventSource.GetSources().Single(source =>
+                source.Name == "Assimalign.Cohesion.Database.Transactions"), EventLevel.Verbose);
+            // Act
+            waiting = database.SchemaProvisioner.WaitForTablesAsync(SqlQueryRequest.FromSql(
+                "SELECT 1 FROM INFORMATION_SCHEMA.SCHEMATA WHERE " + predicate), timeout.Token).AsTask();
+            // Assert: the real lock wait proves traversal, without a scheduling delay.
+            waits.Events.Count(written => written.EventName == "LockWaitStart" && written.Payload is { Count: > 3 } payload &&
+                Equals(payload[0], "orders") && Equals(payload[3], "IntentShared")).ShouldBe(1);
+            waiting.IsCompleted.ShouldBeFalse();
+            steps.ShouldBe(1);
+            release.Set();
+            await waiting.WaitAsync(timeout.Token);
+        }
+        finally
+        {
+            release.Set();
+            if (waiting is not null) { await waiting.WaitAsync(timeout.Token); }
+        }
+    }
+
     private static async Task AssertIndexPlanAsync(DatabaseResult result, CancellationToken cancellationToken)
     {
         await using var description = result.ShouldBeOfType<DatabasePlanDescription>();

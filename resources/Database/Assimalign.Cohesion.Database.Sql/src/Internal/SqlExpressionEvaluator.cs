@@ -279,6 +279,10 @@ internal sealed partial class SqlExpressionEvaluator
                 return Deliver(((SqlBoundParameter)expression).Value, copySharedBinary);
             case SqlBoundExpressionKind.Unary:
                 return EvaluateUnary((SqlBoundUnary)expression, row);
+            case SqlBoundExpressionKind.Distinct:
+                return EvaluateDistinct((SqlBoundDistinct)expression, row);
+            case SqlBoundExpressionKind.BooleanTest:
+                return EvaluateBooleanTest((SqlBoundBooleanTest)expression, row);
             case SqlBoundExpressionKind.IsNull:
                 var isNull = (SqlBoundIsNull)expression;
                 return Box(EvaluateCore(isNull.Operand, row) is null != isNull.IsNegated);
@@ -998,21 +1002,40 @@ internal sealed partial class SqlExpressionEvaluator
         return hasUnknown ? null : Box(expression.IsNegated);
     }
 
+    private object EvaluateDistinct(SqlBoundDistinct expression, object?[] row)
+    {
+        object? left = EvaluateCore(expression.Left, row);
+        object? right = EvaluateCore(expression.Right, row);
+        bool distinct = left is null ? right is not null : right is null ||
+            SqlValueComparer.Compare(left, right, expression.Collation.Resolve(_subqueryValues)) != 0;
+        return Box(distinct != expression.IsNegated);
+    }
+
+    private object EvaluateBooleanTest(SqlBoundBooleanTest expression, object?[] row)
+    {
+        object? value = EvaluateCore(expression.Operand, row);
+        if (value is not null and not bool)
+        {
+            throw new SqlPlanningException("COHSQLE003", ErrorMessages.BooleanTestOperand);
+        }
+        bool matches = expression.TruthValue switch
+        {
+            SqlTruthValue.True => value is true,
+            SqlTruthValue.False => value is false,
+            _ => value is null,
+        };
+        return Box(matches != expression.IsNegated);
+    }
+
     private object? EvaluateLike(SqlBoundLike expression, object?[] row)
     {
         object? value = EvaluateCore(expression.Operand, row);
         object? pattern = EvaluateCore(expression.Pattern, row);
-
-        if (value is null || pattern is null)
-        {
-            return null;
-        }
-
-        bool matches = LikeMatches(
-            Convert.ToString(SqlCharacter.Output(value), CultureInfo.InvariantCulture) ?? string.Empty,
-            Convert.ToString(pattern, CultureInfo.InvariantCulture) ?? string.Empty,
-            expression.Collation.Resolve(_subqueryValues));
-
+        object? escape = EvaluateCore(expression.Escape, row);
+        if (value is null || pattern is null || escape is null) { return null; }
+        var collation = expression.Collation.Resolve(_subqueryValues);
+        var compiled = expression.Compiled ?? SqlLikePattern.Compile(LikeText(pattern), LikeText(escape), _cancellationToken);
+        bool matches = compiled.Match(LikeText(SqlCharacter.Output(value)), collation, _cancellationToken);
         return Box(matches != expression.IsNegated);
     }
 
@@ -1348,113 +1371,7 @@ internal sealed partial class SqlExpressionEvaluator
         _ => "%",
     };
 
-    /// <summary>
-    /// SQL LIKE with <c>%</c> (any run) and <c>_</c> (any one character), using the effective collation.
-    /// </summary>
-    /// <remarks>
-    /// Matching recurses once per <c>%</c> it backtracks through (and, for the compatibility
-    /// collation, once per character), so its depth follows the values, not the statement: a
-    /// pattern of 100,000 <c>%a</c> segments over a long enough value nested that deep and
-    /// overflowed the stack. Each step checks the stack first, so such a match fails its
-    /// statement with <c>COHSQLE004</c> instead (#1151).
-    /// </remarks>
-    /// <exception cref="InsufficientExecutionStackException">The match needs more stack than the thread has left.</exception>
+    /// <summary>Matches LIKE using the PostgreSQL default backslash escape.</summary>
     internal static bool LikeMatches(string input, string pattern, Collation? collation = null)
-    {
-        collation ??= Collation.Binary;
-        if (!collation.IsIndexBacked)
-        {
-            return LikeMatchesLegacy(input, pattern, collation);
-        }
-        input = collation.Normalize(input);
-        pattern = collation.Normalize(pattern);
-        return Matches(input.AsSpan(), pattern.AsSpan());
-
-        static bool Matches(ReadOnlySpan<char> input, ReadOnlySpan<char> pattern)
-        {
-            RuntimeHelpers.EnsureSufficientExecutionStack();
-            while (!pattern.IsEmpty)
-            {
-                char token = pattern[0];
-
-                if (token == '%')
-                {
-                    // Collapse the wildcard, then try every suffix.
-                    var rest = pattern[1..];
-
-                    if (rest.IsEmpty)
-                    {
-                        return true;
-                    }
-
-                    for (int i = 0; i <= input.Length; i++)
-                    {
-                        if (i > 0 && i < input.Length && char.IsLowSurrogate(input[i]) && char.IsHighSurrogate(input[i - 1]))
-                        {
-                            continue;
-                        }
-                        if (Matches(input[i..], rest))
-                        {
-                            return true;
-                        }
-                    }
-
-                    return false;
-                }
-
-                if (input.IsEmpty)
-                {
-                    return false;
-                }
-
-                if (token != '_' && input[0] != token)
-                {
-                    return false;
-                }
-
-                int consumed = token == '_' && input.Length > 1
-                    && char.IsHighSurrogate(input[0]) && char.IsLowSurrogate(input[1]) ? 2 : 1;
-                input = input[consumed..];
-                pattern = pattern[1..];
-            }
-
-            return input.IsEmpty;
-        }
-    }
-
-    /// <summary>Compatibility matching uses comparisons, never index keys, for legacy linguistic ordering.</summary>
-    private static bool LikeMatchesLegacy(string input, string pattern, Collation collation)
-    {
-        RuntimeHelpers.EnsureSufficientExecutionStack();
-        if (pattern.Length == 0)
-        {
-            return input.Length == 0;
-        }
-        if (pattern[0] == '%')
-        {
-            for (int i = 0; i <= input.Length; i++)
-            {
-                if (LikeMatchesLegacy(input[i..], pattern[1..], collation))
-                {
-                    return true;
-                }
-            }
-            return false;
-        }
-        if (pattern[0] == '_')
-        {
-            return input.Length > 0 && LikeMatchesLegacy(input[1..], pattern[1..], collation);
-        }
-        int length = pattern.IndexOfAny(['%', '_']);
-        length = length < 0 ? pattern.Length : length;
-        for (int i = 0; i <= input.Length; i++)
-        {
-            if (collation.Compare(input[..i], pattern[..length]) == 0
-                && LikeMatchesLegacy(input[i..], pattern[length..], collation))
-            {
-                return true;
-            }
-        }
-        return false;
-    }
+        => SqlLikePattern.Compile(pattern, "\\", default).Match(input, collation ?? Collation.Binary, default);
 }

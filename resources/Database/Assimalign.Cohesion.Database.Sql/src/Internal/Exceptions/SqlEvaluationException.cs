@@ -42,8 +42,7 @@ internal sealed class SqlEvaluationException : DatabaseException
 
     /// <summary>
     /// Parsing or running the statement needs more stack than the thread has left (ISO SQLSTATE
-    /// 54001, statement too complex): a statement within a high configured nesting limit, a
-    /// <c>LIKE</c> match that backtracks through more wildcards than the stack holds, or a
+    /// 54001, statement too complex): a statement within a high configured nesting limit, or a
     /// statement run on a thread created with too small a stack, including a stored definition
     /// the statement reads back on first use. The parser and every recursive walk check the stack
     /// before they descend, so the statement fails instead of the process: PostgreSQL's backstop
@@ -307,8 +306,7 @@ internal sealed class SqlEvaluationException : DatabaseException
     /// <returns>The coded failure.</returns>
     internal static SqlEvaluationException StatementTooComplex(InsufficientExecutionStackException innerException)
         => new(StatementTooComplexCode,
-            "Statement too complex: running it needs more stack than the executing thread has left. " +
-            "Reduce the nesting of its expressions or the number of wildcards in a LIKE pattern, or run it on a thread with a larger stack.",
+            ErrorMessages.StatementStackInsufficient,
             innerException);
 
     /// <summary>Creates the failure for a column reference in a clause that has no columns in scope.</summary>
