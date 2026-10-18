@@ -596,7 +596,7 @@ is allowed, and future inserts must supply a value. The emptiness check consider
 current committed rows; historical row versions visible only to an older row
 snapshot retain a missing NULL field when such an addition has no default.
 
-Column defaults admit variable-free scalar expressions: arithmetic, unary signs, parentheses, function calls, niladic datetime forms and CAST. The top-level grammar leaves NOT/AND/OR/IS/LIKE/IN and following column constraints unconsumed. Columns, parameters, aggregates and subqueries are excluded. Immutable expressions are evaluated at DDL time, including division-by-zero and conversion errors. Stable and volatile defaults evaluate per assigned row, using the transaction-start clock. A call to a name outside the engine's catalog, executable profile and recognized-unsupported vocabulary fails
+Column defaults admit variable-free scalar expressions: arithmetic, unary signs, parentheses, function calls, niladic datetime forms and CAST. The top-level grammar leaves NOT/AND/OR/IS/LIKE/IN and following column constraints unconsumed. Columns, parameters, aggregates and subqueries are excluded. Immutable expressions are evaluated at DDL time, including division-by-zero and conversion errors. Catalog open and table rebinds resolve DEFAULT trees without evaluating them; a changed function implementation fails only a write assigning its default. Stable and volatile defaults evaluate per assigned row, using the transaction-start clock. A call to a name outside the engine's catalog, executable profile and recognized-unsupported vocabulary fails
 first, with `COHSQLE016` and `Unknown function '<name>'.`,
 and so does a call whose arguments its function does not accept, with `COHSQLE006`
 (`DEFAULT ABS(1, 2)`; see [Statement completeness](#statement-completeness-1068)),
@@ -611,7 +611,12 @@ may be discarded, other excess characters report `COHSQLE012`, and NUMERIC round
 to its scale before checking precision (`COHSQLE002`). The code still leads a
 DEFAULT failure's message.
 Approximate floating-point defaults use normal IEEE conversion rounding, but
-nonfinite results and nonzero values that underflow to zero are rejected.
+nonfinite declaration results (literal, immutable expression, or stable ADD COLUMN missing value)
+report COHSQLE002; nonzero values that underflow to zero are rejected. Volatile DEFAULT
+results follow ordinary per-row assignment, which permits NaN and infinities for DOUBLE.
+Declaration validates storage type and bounds independently of NOT NULL. A NULL-producing
+expression is legal on a NOT NULL column; an INSERT or UPDATE assigning it fails with
+COHSQLE024. ADD COLUMN accepts it on an empty table and rejects it against live rows.
 `COLLATE` on an added string column controls its comparisons and indexes without
 changing the bounded text, just as for CREATE TABLE.
 

@@ -103,4 +103,5 @@
   <data name="RenameTableCollision" xml:space="preserve"><value>Table '{0}.{1}' already exists.</value></data>
   <data name="RenameColumnCollision" xml:space="preserve"><value>Column '{0}' already exists on '{1}'.</value></data>
   <data name="MissingValueConversion" xml:space="preserve"><value>Column '{0}': frozen missing value cannot be stored as {1}</value></data>
+  <data name="DefaultMustBeFinite" xml:space="preserve"><value>Floating-point defaults must be finite.</value></data>
 </root>

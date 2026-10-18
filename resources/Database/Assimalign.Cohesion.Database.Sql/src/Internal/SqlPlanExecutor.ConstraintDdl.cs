@@ -272,7 +272,7 @@ internal sealed partial class SqlPlanExecutor
                 _definitions.Functions, _catalog.DefaultCollation, cancellationToken, declaring: true);
             string? missing = volatility == SqlFunctionVolatility.Volatile ? null
                 : SqlPersistedExpression.IsDefaultLiteral(expression) ? column.DefaultLiteral
-                : FrozenDefaultLiteral(DefaultValue(boundDefault, cancellationToken, statement.TransactionStart), column.Type.Type);
+                : FrozenDefaultLiteral(DeclaredDefaultValue(boundDefault, column, cancellationToken, statement.TransactionStart), column.Type.Type);
             column = new SqlCatalogColumn(column.Name, column.Type, column.IsNullable, column.DefaultLiteral, column.Collation,
                 column.DomainName, column.DefaultFunctionCalls, column.Identity, missing);
         }

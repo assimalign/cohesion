@@ -139,9 +139,9 @@ internal sealed partial class SqlPlanExecutor
     }
 
     /// <summary>
-    /// Binds a column's persisted DEFAULT once per table version: literals and immutable
-    /// expressions become converted constants; stable and volatile expressions retain a
-    /// column-free tree evaluated when a write assigns the default.
+    /// Binds a column's persisted DEFAULT once per table version: literals become converted
+    /// constants; loaded expression defaults retain a column-free tree evaluated when a write
+    /// assigns the default. DDL folds immutable declarations after validating storage bounds.
     /// </summary>
     /// <remarks>
     /// DDL proves every DEFAULT converts before it publishes one, so the conversion succeeds for any
@@ -180,7 +180,7 @@ internal sealed partial class SqlPlanExecutor
             }
             return BindDefault(column, value);
         }
-        var scope = new SqlExpressionEvaluator([], null, defaultCollation: collation, functions: functions, cancellationToken: cancellationToken);
+        var scope = new SqlExpressionEvaluator([], null, defaultCollation: collation, functions: functions, cancellationToken: cancellationToken, foldConstants: false);
         SqlDefinitionBinder.PinCalls(expression, scope, column.DefaultFunctionCalls);
         try
         {
@@ -196,13 +196,13 @@ internal sealed partial class SqlPlanExecutor
             }
             var bound = new SqlBoundDefault(scope.Bind(expression), column);
             // Immutable defaults are proved at definition time, even on an empty table.
-            // Stable and volatile calls run only when a value is assigned.
-            return DefaultVolatility(expression, scope) == SqlFunctionVolatility.Immutable
-                ? new SqlBoundConstant(DefaultValue(bound, cancellationToken)) : bound;
+            // Loading retains the tree; stable and volatile calls run when a value is assigned.
+            return declaring && DefaultVolatility(expression, scope) == SqlFunctionVolatility.Immutable
+                ? new SqlBoundConstant(DeclaredDefaultValue(bound, column, cancellationToken)) : bound;
         }
         catch (SqlEvaluationException failure) when (declaring)
         {
-            throw failure.WithContext(string.Format(CultureInfo.CurrentCulture, ErrorMessages.DefaultStorageFailure, column.Name, column.Type.Type));
+            throw failure.WithContext(string.Format(CultureInfo.CurrentCulture, ErrorMessages.DefaultExpressionFailure, column.Name, "DEFAULT"));
         }
         catch (DatabaseException failure) when (!declaring && SqlDefinitionBinder.HasUnavailableCall(expression, scope))
         {
@@ -211,6 +211,39 @@ internal sealed partial class SqlPlanExecutor
         catch (DatabaseException failure) when (!declaring)
         {
             throw new DatabaseException($"{subject} cannot be loaded: {failure.Message} {SqlPersistedExpression.DamagedCatalogHint}", failure);
+        }
+    }
+
+    // Declaration validates assignment type and bounds, not a row's NOT NULL constraint.
+    // PostgreSQL heap.c:3409 coerces defaults before any row receives the value.
+    private static object? DeclaredDefaultValue(SqlBoundExpression bound, SqlCatalogColumn column,
+        CancellationToken cancellationToken, DateTimeOffset? transactionStart = null)
+    {
+        object? value = DefaultValue(bound is SqlBoundDefault expression ? expression.Value : bound,
+            cancellationToken, transactionStart);
+        try
+        {
+            value = value is null ? null : CoerceForColumn(value, column);
+            EnsureFiniteDefault(value);
+            return value;
+        }
+        catch (SqlEvaluationException failure)
+        {
+            throw failure.WithContext(string.Format(CultureInfo.CurrentCulture,
+                ErrorMessages.DefaultStorageFailure, column.Name, column.Type.Type));
+        }
+        catch (DatabaseException failure)
+        {
+            throw new SqlPlanningException("COHSQLE013", string.Format(CultureInfo.CurrentCulture,
+                ErrorMessages.DefaultStorageFailure, column.Name, column.Type.Type) + ". " + failure.Message, innerException: failure);
+        }
+    }
+
+    private static void EnsureFiniteDefault(object? value)
+    {
+        if (value is float single && !float.IsFinite(single) || value is double number && !double.IsFinite(number))
+        {
+            throw SqlEvaluationException.NumericValueOutOfRange(ErrorMessages.DefaultMustBeFinite);
         }
     }
 
@@ -318,10 +351,7 @@ internal sealed partial class SqlPlanExecutor
                 ? CoerceForColumn(SqlCastConverter.ParseNumericText(defaultValue, column.Type,
                     allowLiteralSyntax: column.DefaultLiteral is { } literal && !literal.StartsWith('\'')), column)
                 : CoerceForColumn(defaultValue, column);
-            if (value is float single && !float.IsFinite(single) || value is double number && !double.IsFinite(number))
-            {
-                throw new DatabaseException("Floating-point defaults must be finite.");
-            }
+            EnsureFiniteDefault(value);
             if (value is float and 0f or double and 0d)
             {
                 ReadOnlySpan<char> mantissa = defaultValue.AsSpan();

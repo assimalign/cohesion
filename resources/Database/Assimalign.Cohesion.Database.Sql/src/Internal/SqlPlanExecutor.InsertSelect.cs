@@ -171,6 +171,8 @@ internal sealed partial class SqlPlanExecutor
                 throw new SqlPlanningException("COHSQLE025", failure.Message, innerException: failure);
             }
         }
-        return boundDefault is not null ? DefaultValue(boundDefault, cancellationToken, statement.TransactionStart) : ResolveDefault(column, null);
+        if (boundDefault is null) { return ResolveDefault(column, null); }
+        object? value = DefaultValue(boundDefault, cancellationToken, statement.TransactionStart);
+        return value is null ? CoerceForColumn(null, column) : value;
     }
 }

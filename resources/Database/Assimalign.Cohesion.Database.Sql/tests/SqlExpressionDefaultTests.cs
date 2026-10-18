@@ -133,25 +133,211 @@ public sealed class SqlExpressionDefaultTests
         (await Rows(session, "SELECT uid FROM t")).Select(row => row[0]).Distinct().Count().ShouldBe(2);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql] - DEFAULT: invalid variable-free definitions fail before publication")]
-    [InlineData("id + 1")]
-    [InlineData("@p")]
-    [InlineData("SUM(1)")]
-    [InlineData("-'x'")]
-    [InlineData("(1 / 0)")]
-    [InlineData("CAST('x' AS INT)")]
-    [InlineData("UPPER('x')")]
-    public async Task Create_InvalidDefault_ShouldRejectBeforeMutation(string expression)
+    [Theory(DisplayName = "Cohesion Test [Sql] - DEFAULT: invalid definitions retain their diagnostic through every DDL path")]
+    [InlineData("id + 1", "COHSQLE013")]
+    [InlineData("@p", "COHSQLE013")]
+    [InlineData("SUM(1)", "COHSQLE013")]
+    [InlineData("-'x'", "COHSQLE003")]
+    [InlineData("(1 / 0)", "COHSQLE001")]
+    [InlineData("CAST('x' AS INT)", "COHSQLE022")]
+    [InlineData("UPPER('x')", "COHSQLE013")]
+    public async Task Declare_InvalidDefault_ShouldRejectEveryDdlPathBeforeMutation(string expression, string code)
     {
         // Arrange
         await using var engine = SqlDatabaseEngine.Create("invalid-default", new());
         var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE t (id INT, bad INT DEFAULT 7)", cancellationToken: CancellationToken.None);
 
         // Act / Assert
-        var failure = await Should.ThrowAsync<DatabaseException>(() => session.ExecuteAsync($"CREATE TABLE t (id INT, bad INT DEFAULT {expression})", cancellationToken: CancellationToken.None).AsTask());
-        failure.Message.ShouldContain("bad", Case.Sensitive);
-        database.Catalog.TryGetTable("dbo", "t", out _).ShouldBeFalse();
+        foreach (string sql in new[] { $"CREATE TABLE rejected (id INT, bad INT DEFAULT {expression})",
+            $"ALTER TABLE t ADD COLUMN rejected INT DEFAULT {expression}", $"ALTER TABLE t ALTER bad SET DEFAULT {expression}" })
+        {
+            var failure = await Should.ThrowAsync<DatabaseException>(() => session.ExecuteAsync(sql, cancellationToken: CancellationToken.None).AsTask());
+            failure.Diagnostics.Single().Code.ShouldBe(code);
+            failure.Message.ShouldContain(sql.Contains("ADD COLUMN", StringComparison.Ordinal) ? "rejected" : "bad", Case.Sensitive);
+            if (code == "COHSQLE001")
+            {
+                failure.Message.ShouldContain("Division by zero", Case.Sensitive);
+                failure.Message.ShouldNotContain("cannot be stored", Case.Sensitive);
+            }
+        }
+        database.Catalog.TryGetTable("dbo", "rejected", out _).ShouldBeFalse();
+        database.Catalog.TryGetTable("dbo", "t", out var table).ShouldBeTrue();
+        table.Columns.Count.ShouldBe(2);
+        await session.ExecuteAsync("INSERT INTO t (id) VALUES (1)", cancellationToken: CancellationToken.None);
+        (await Rows(session, "SELECT bad FROM t")).Single()[0].ShouldBe(7);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sql] - ALTER COLUMN: expression defaults survive all nullability alteration forms")]
+    public async Task AlterColumn_ExpressionDefault_ShouldPreserveCanonicalExpression()
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("alter-expression", new());
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE t (n INT DEFAULT 1 + 2)", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT INTO t DEFAULT VALUES", cancellationToken: CancellationToken.None);
+
+        // Act / Assert
+        foreach (string sql in new[] { "ALTER TABLE t ALTER n SET NOT NULL", "ALTER TABLE t ALTER n DROP NOT NULL",
+            "ALTER TABLE t ALTER COLUMN n INT NOT NULL DEFAULT (1 + 2)" })
+        {
+            await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None);
+            await session.ExecuteAsync("INSERT INTO t DEFAULT VALUES", cancellationToken: CancellationToken.None);
+        }
+        (await Rows(session, "SELECT n FROM t")).Select(row => row[0]).ShouldBe(new object?[] { 3, 3, 3, 3 });
+        database.Catalog.TryGetTable("dbo", "t", out var table).ShouldBeTrue();
+        table.Columns[0].IsNullable.ShouldBeFalse();
+        table.Columns[0].DefaultLiteral.ShouldBe("1 + 2");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - DEFAULT NULL: declaration checks type while assignments enforce NOT NULL")]
+    [InlineData("INT", "NULLIF(1, 1)", "1")]
+    [InlineData("INT", "CAST(NULL AS INT)", "1")]
+    [InlineData("TIMESTAMPTZ", "NULLIF(NOW(), NOW())", "CURRENT_TIMESTAMP")]
+    public async Task Declare_NullExpressionDefault_ShouldCheckNullabilityOnlyForAssignedRows(string type, string expression, string value)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("null-default", new());
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+
+        // Act: declaration and nullability alterations do not assign the default.
+        await session.ExecuteAsync($"CREATE TABLE t (n {type} NOT NULL DEFAULT {expression})", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync($"INSERT INTO t VALUES ({value})", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("ALTER TABLE t ALTER n DROP NOT NULL", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("ALTER TABLE t ALTER n SET NOT NULL", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE empty (id INT)", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync($"ALTER TABLE empty ADD n {type} NOT NULL DEFAULT {expression}", cancellationToken: CancellationToken.None);
+
+        // Assert: actual assignments fail atomically, including ADD COLUMN over live rows.
+        foreach (string sql in new[] { "INSERT INTO t DEFAULT VALUES", "UPDATE t SET n = DEFAULT",
+            "INSERT INTO empty (id) VALUES (1)", $"ALTER TABLE t ADD rejected {type} NOT NULL DEFAULT {expression}" })
+        {
+            var failure = await Should.ThrowAsync<DatabaseException>(() => session.ExecuteAsync(sql, cancellationToken: CancellationToken.None).AsTask());
+            failure.Diagnostics.Single().Code.ShouldBe("COHSQLE024");
+        }
+        (await Rows(session, "SELECT n FROM t")).Count.ShouldBe(1);
+        (await Rows(session, "SELECT id FROM empty")).ShouldBeEmpty();
+        database.Catalog.TryGetTable("dbo", "t", out var table).ShouldBeTrue();
+        table.Columns.Count.ShouldBe(1);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - DEFAULT: loading never evaluates a changed immutable function")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Open_ChangedImmutableDefault_ShouldReadAndFailOnlyWhenAssigned(bool overlong)
+    {
+        // Arrange
+        string root = Path.Combine(Path.GetTempPath(), "cohesion-default-load", Guid.NewGuid().ToString("N"));
+        bool changed = false;
+        int calls = 0;
+        SqlDatabaseEngineBuilder Builder()
+        {
+            var builder = SqlDatabaseEngine.CreateBuilder("default-load");
+            builder.Options.RootPath = root;
+            builder.Functions.Add(SqlScalarFunction.Create("tenant_code", (int _) =>
+            {
+                calls++;
+                return !changed ? "ACME" : overlong ? "TOO LONG FOR COLUMN" : throw new InvalidOperationException("changed immutable default");
+            }, SqlFunctionVolatility.Immutable));
+            return builder;
+        }
+        try
+        {
+            await using (var engine = await Builder().BuildAsync(CancellationToken.None))
+            {
+                var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+                await using var session = await database.CreateSessionAsync(CancellationToken.None);
+                await session.ExecuteAsync("CREATE TABLE t (id INT, code VARCHAR(8) DEFAULT tenant_code(1))", cancellationToken: CancellationToken.None);
+                await session.ExecuteAsync("INSERT INTO t (id) VALUES (1)", cancellationToken: CancellationToken.None);
+                calls.ShouldBe(1);
+                changed = true;
+                calls = 0;
+                // A definition-environment refresh also loads the table without running its DEFAULT.
+                await session.ExecuteAsync("CREATE FUNCTION refresh_default(x INT) RETURNS INT IMMUTABLE RETURN x", cancellationToken: CancellationToken.None);
+                (await Rows(session, "SELECT code FROM t")).Single()[0].ShouldBe("ACME");
+                calls.ShouldBe(0);
+            }
+            await using var reopened = await Builder().BuildAsync(CancellationToken.None);
+            var opened = await reopened.OpenDatabaseAsync("db", CancellationToken.None);
+            await using var second = await opened.CreateSessionAsync(CancellationToken.None);
+
+            // Act / Assert
+            calls.ShouldBe(0);
+            (await Rows(second, "SELECT id, code FROM t")).Single().ShouldBe(new object?[] { 1, "ACME" });
+            await second.ExecuteAsync("INSERT INTO t VALUES (2, 'EXPLICIT')", cancellationToken: CancellationToken.None);
+            calls.ShouldBe(0);
+            var failure = await Should.ThrowAsync<DatabaseException>(() => second.ExecuteAsync("INSERT INTO t (id) VALUES (3)", cancellationToken: CancellationToken.None).AsTask());
+            failure.Diagnostics.Single().Code.ShouldBe(overlong ? "COHSQLE012" : "COHSQLE007");
+            calls.ShouldBe(1);
+            (await Rows(second, "SELECT id FROM t ORDER BY id")).Select(row => row[0]).ShouldBe(new object?[] { 1, 2 });
+        }
+        finally { if (Directory.Exists(root)) { Directory.Delete(root, recursive: true); } }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - DEFAULT: nonfinite constants and frozen stable values share the literal diagnostic")]
+    [InlineData("NaN")]
+    [InlineData("Infinity")]
+    [InlineData("-Infinity")]
+    public async Task Declare_NonfiniteDefault_ShouldRejectBeforePublication(string text)
+    {
+        // Arrange
+        var builder = SqlDatabaseEngine.CreateBuilder("nonfinite-default");
+        builder.Functions.Add(SqlScalarFunction.Create("stable_nonfinite", (string _) => double.Parse(text, System.Globalization.CultureInfo.InvariantCulture), SqlFunctionVolatility.Stable));
+        await using var engine = await builder.BuildAsync(CancellationToken.None);
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE t (id INT, n DOUBLE PRECISION DEFAULT 7)", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT INTO t (id) VALUES (1)", cancellationToken: CancellationToken.None);
+
+        // Act / Assert
+        foreach (string expression in new[] { $"'{text}'", $"CAST('{text}' AS DOUBLE PRECISION)" })
+        {
+            foreach (string sql in new[] { $"CREATE TABLE rejected (n DOUBLE PRECISION DEFAULT {expression})",
+                $"ALTER TABLE t ADD rejected DOUBLE PRECISION DEFAULT {expression}", $"ALTER TABLE t ALTER n SET DEFAULT {expression}" })
+            {
+                var failure = await Should.ThrowAsync<DatabaseException>(() => session.ExecuteAsync(sql, cancellationToken: CancellationToken.None).AsTask());
+                failure.Diagnostics.Single().Code.ShouldBe("COHSQLE002");
+                failure.Message.ShouldContain("Floating-point defaults must be finite.", Case.Sensitive);
+                failure.Message.ShouldNotContain("must be a literal", Case.Sensitive);
+            }
+        }
+        foreach (string table in new[] { "t", "empty" })
+        {
+            if (table == "empty") { await session.ExecuteAsync("CREATE TABLE empty (id INT)", cancellationToken: CancellationToken.None); }
+            var failure = await Should.ThrowAsync<DatabaseException>(() => session.ExecuteAsync($"ALTER TABLE {table} ADD rejected DOUBLE PRECISION DEFAULT stable_nonfinite('x')", cancellationToken: CancellationToken.None).AsTask());
+            failure.Diagnostics.Single().Code.ShouldBe("COHSQLE002");
+        }
+        database.Catalog.TryGetTable("dbo", "rejected", out _).ShouldBeFalse();
+        database.Catalog.TryGetTable("dbo", "t", out var original).ShouldBeTrue();
+        original.Columns.Count.ShouldBe(2);
+        (await Rows(session, "SELECT n FROM t")).Single()[0].ShouldBe(7d);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - DEFAULT: volatile nonfinite values follow ordinary per-row assignment")]
+    [InlineData("NaN")]
+    [InlineData("Infinity")]
+    [InlineData("-Infinity")]
+    public async Task Insert_VolatileNonfiniteDefault_ShouldMatchExplicitCast(string text)
+    {
+        // Arrange
+        var builder = SqlDatabaseEngine.CreateBuilder("volatile-nonfinite");
+        builder.Functions.Add(SqlScalarFunction.Create("volatile_nonfinite", (string _) => double.Parse(text, System.Globalization.CultureInfo.InvariantCulture), SqlFunctionVolatility.Volatile));
+        await using var engine = await builder.BuildAsync(CancellationToken.None);
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE t (id INT, n DOUBLE PRECISION DEFAULT volatile_nonfinite('x'))", cancellationToken: CancellationToken.None);
+
+        // Act
+        await session.ExecuteAsync($"INSERT INTO t VALUES (1, CAST('{text}' AS DOUBLE PRECISION))", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT INTO t (id) VALUES (2)", cancellationToken: CancellationToken.None);
+
+        // Assert
+        var rows = await Rows(session, "SELECT n FROM t ORDER BY id");
+        ((double)rows[0][0]!).Equals((double)rows[1][0]!).ShouldBeTrue();
+        double.IsFinite((double)rows[1][0]!).ShouldBeFalse();
     }
 
     private static async Task<List<object?[]>> Rows(SqlDatabaseSession session, string sql)

@@ -79,6 +79,9 @@ internal sealed partial class SqlExpressionEvaluator
     /// <summary>The executing statement's cancellation token, which a called function's context carries.</summary>
     private readonly CancellationToken _cancellationToken;
 
+    // Catalog DEFAULT binding resolves calls without executing application code.
+    private readonly bool _foldConstants;
+
     /// <summary>
     /// What this scope's static typing keeps beyond its binding inputs, created only when a scope
     /// needs it: a grouping's slot scope, and the calls it typed. One field, so a scope that needs
@@ -100,7 +103,8 @@ internal sealed partial class SqlExpressionEvaluator
         bool[]? sharedColumns = null,
         SqlRelationReference? relation = null,
         SqlCorrelationScope? outerScope = null,
-        HashSet<int>? outerDependencies = null)
+        HashSet<int>? outerDependencies = null,
+        bool foldConstants = true)
     {
         _columns = columns;
         _bindingContext = bindingContext;
@@ -114,6 +118,7 @@ internal sealed partial class SqlExpressionEvaluator
         _sharedColumns = sharedColumns;
         _functions = functions ?? SqlFunctionEnvironment.Standard;
         _cancellationToken = cancellationToken;
+        _foldConstants = foldConstants;
         _typing = slotScope is null && outerScope is null ? null : new SqlTypingMemory(slotScope)
         {
             OuterScope = outerScope, OuterDependencies = outerDependencies,

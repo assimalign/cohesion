@@ -655,10 +655,9 @@ the UTC range and retains the written offset only when its local clock is repres
 Constant EXTRACT/DATE_TRUNC fields are validated during planning for every operand
 type. INTERVAL field extraction retains normalized TimeSpan components, a documented
 PostgreSQL departure. Integer arithmetic with NULL retains BIGINT metadata.
-Until #1121, CREATE/ALTER TABLE planning refuses Stable/Volatile DEFAULT calls with
-COHDBL001 before any schema mutation, including calls nested under evaluator forms.
-ADD COLUMN retains its literal-only rule, but Stable/Volatile calls receive this same
-named refusal before its general nonliteral-DEFAULT rejection.
+CREATE/ALTER TABLE accept variable-free expression DEFAULTs, including Stable/Volatile
+calls nested under evaluator forms (#1121). ADD COLUMN freezes a nonvolatile expression
+into its missing-value literal; a volatile default requires an empty table (COHSQLE027).
 
 String-producing scalars cap output and Unicode work buffers at 1,048,576 UTF-16 units.
 UPPER/LOWER apply the same bound; LENGTH/CHAR_LENGTH count without allocating a rune
@@ -920,8 +919,9 @@ flowchart LR
   is kept and fails per row, over an empty table not at all, as before. `Stable` and
   `Volatile` calls run per row. An index seek is never bounded by a comparand that calls a
   `Volatile` function, whose value could change between the plan and a row.
-  Shared SQL bodies (including each cached collation), domain/table CHECKs and DEFAULT expressions
-  fold with the token of the declaring statement, opening operation or first use that binds them.
+  Shared SQL bodies (including each cached collation) and domain/table CHECKs fold with the
+  token of the declaring statement, opening operation or first use that binds them. Column
+  DEFAULTs fold only during declaration; catalog loading binds their trees without evaluation.
   The cached trees retain no token; calls that remain use the evaluating statement's token.
   Collation cache misses serialize compilation and publish only successful bodies, so a canceled
   binding cannot cache its exception or token for a waiting or later statement. Literal DEFAULT
@@ -1664,12 +1664,11 @@ are omitted from canonical JSON. A non-null literal can backfill an added requir
 existing destructive-change opt-in. SDK extraction renders C# compile-time constants with the
 same schema renderer and preserves the same text and hash.
 
-Negative numeric defaults admit exactly one unary-minus node over one integer or floating literal,
-including values such as `-7` and `-1.2500`. The DDL parser reads that node, and provisioning,
-DDL planning and persisted-default loading apply the same literal-only rule. Arithmetic,
-nested unary expressions and function calls remain refused. Temporal values and UUIDs use quoted invariant
-text and the existing column conversions. The raw form for a date is `'2026-01-01'`;
-the `DATE '2026-01-01'` typed SQL prefix is outside the current dialect.
+Compiled-schema negative defaults admit exactly one unary-minus node over an integer or
+floating literal, including `-7` and `-1.2500`. Provisioning retains this literal-only
+contract. SQL DDL and persisted-default loading also accept arithmetic, nested signs,
+CAST and scalar calls (#1121). Compiled temporal values and UUIDs use quoted invariant
+text; SQL DDL additionally admits typed literals such as `DATE '2026-01-01'`.
 
 Binary defaults use a quoted `\x` prefix followed by an even number of hexadecimal digits;
 the typed renderer writes uppercase digits. This follows PostgreSQL's bytea hex marker
@@ -3818,7 +3817,7 @@ so child-first names and cyclic reference graphs provision deterministically.
 rows, and incoming references on parent deletes or key changes. Checks reject a
 false result; SQL unknown/null passes. Foreign keys with null components are
 not checked (MATCH SIMPLE). A non-null child key needs a parent visible through
-the statement snapshot. Delete defaults to `RESTRICT`; `CASCADE` collects the
+the statement snapshot. Delete defaults to `NO ACTION`; `CASCADE` collects the
 transitive closure of child deletions into the same statement apply bracket (see
 [The cascade walk](#the-cascade-walk-a-worklist-not-a-recursion) below); under a
 snapshot fixed at the transaction's begin, every child version in that closure must
@@ -4096,7 +4095,15 @@ reload through SqlQueryRequest.CeilingParserOptions. Binding is column-free, dis
 parameters, subqueries and aggregates while admitting CAST and arithmetic. Immutable
 defaults are evaluated and coerced during DDL so constant failures precede mutation;
 the table cache retains those validated bindings instead of evaluating them again at publication.
-stable and volatile trees run per assigned row with SqlStatementContext.TransactionStart,
+Catalog open and later rebinds resolve expression trees without evaluating them, so changed native
+implementations cannot make a DEFAULT block reads; only a write assigning it can fail.
+Declaration checks storage type and bounds without enforcing row nullability. A NULL-producing
+NOT NULL default is legal; actual INSERT/UPDATE assignment and ADD COLUMN over live rows
+enforce NOT NULL. ALTER COLUMN compares canonical persisted default text directly, preserving
+expressions through SET/DROP NOT NULL and full-definition validation-only alterations.
+Immutable declaration results and stable frozen missing values reject nonfinite floats with
+COHSQLE002, as literal defaults do; volatile row values use ordinary assignment rules.
+Stable and volatile trees run per assigned row with SqlStatementContext.TransactionStart,
 including INSERT SELECT, explicit DEFAULT and ON DELETE SET DEFAULT. ADD COLUMN evaluates
 a nonvolatile expression once into its frozen missing literal. A volatile addition to a
 table with live rows reports COHSQLE027 because physical rewrites belong to #1447; empty
@@ -4106,8 +4113,8 @@ gates the new persisted referential-action values; table extension 6 remains unc
 **The rule (owner decision, 2026-10-01: production-ready regardless of the
 pre-release).** Every SQL expression the catalog persists is stored as canonical
 SQL rendered from its parsed tree, never as the user's text: table/domain CHECKs,
-column/domain DEFAULTs and SQL function bodies. Column expression DEFAULTs (#1121) and
-view queries (#1124) must take the same path when they land; a new persisted expression may
+column/domain DEFAULTs and SQL function bodies. Column expression DEFAULTs (#1121) take
+this path, and future view queries (#1124) must too; a new persisted expression may
 not store source text, parse it on a per-row or per-statement path, or grow a
 second renderer or parser entry. The motivation is #1068: tightening the parser
 made text that an older, more lenient parser had accepted unparseable, and because
@@ -5066,7 +5073,7 @@ PostgreSQL src/backend/utils/fmgr/fmgr.c:253 (fmgr_sql), commands/functioncmds.c
 One immutable per-database environment merges native and SQL definitions, rebuilt topologically
 on open and definition DDL. Namespace collisions, recursive dependencies and declarations weaker
 than their called functions are refused before publication. SQL functions default to Volatile
-and CALLED ON NULL INPUT, while native shorthand keeps its strict default. Until #1121,
+and CALLED ON NULL INPUT, while native shorthand keeps its strict default.
 column DEFAULT calls may be Immutable, Stable or Volatile; CHECK calls must be Immutable. SQL domain columns use E3's existing
 bounds and check path. Function metadata preserves domain names for parameters and results.
 SQL functions accept the parser's delimited names; native registrations retain their identifier
@@ -5090,8 +5097,8 @@ through SQL wrappers and domain CHECKs, including domains used by casts and func
 or results; short-circuit branches cannot bypass an unresolved CHECK.
 Reopening with the compatible registration restores writes. New declarations still refuse
 incompatible calls, and CHECK is Immutable-only on every bind.
-CREATE TABLE function-call defaults bind once and run for each omitted value; ADD COLUMN stays
-literal-only because its metadata operation does not materialize missing row tails.
+Column expression defaults bind once and run when assigned. ADD COLUMN freezes nonvolatile
+values in metadata and refuses volatile backfill over live rows, avoiding a physical rewrite.
 
 The call's input collation becomes the SQL body's parameter collation, including an explicit
 COLLATE at the call site; a call without an input collation uses the database default. Body
