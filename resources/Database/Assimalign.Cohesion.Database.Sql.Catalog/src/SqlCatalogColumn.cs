@@ -29,6 +29,7 @@ public sealed class SqlCatalogColumn
     /// built-in type. <paramref name="type"/> is then the domain's base type, which the row codec
     /// stores; the name lets an engine that opens the database bind the domain again.
     /// </param>
+    /// <param name="missingValueLiteral">The frozen canonical literal for rows predating ADD COLUMN; null means a missing field reads NULL.</param>
     /// <param name="identity">The immutable identity metadata, when declared; an identity column is always nonnullable.</param>
     /// <param name="defaultFunctionCalls">Resolved normalized function signatures in expression preorder, retaining repeated calls.</param>
     /// <exception cref="ArgumentException">
@@ -36,7 +37,7 @@ public sealed class SqlCatalogColumn
     /// column, <paramref name="domainName"/> is empty or white space, or a supplied function identity is blank.
     /// </exception>
     public SqlCatalogColumn(string name, DatabaseTypeInfo type, bool isNullable = true, string? defaultLiteral = null,
-        Collation? collation = null, string? domainName = null, IReadOnlyList<string>? defaultFunctionCalls = null, SqlCatalogIdentity? identity = null)
+        Collation? collation = null, string? domainName = null, IReadOnlyList<string>? defaultFunctionCalls = null, SqlCatalogIdentity? identity = null, string? missingValueLiteral = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentNullException.ThrowIfNull(type);
@@ -54,6 +55,7 @@ public sealed class SqlCatalogColumn
         Type = type;
         IsNullable = isNullable && identity is null;
         DefaultLiteral = defaultLiteral;
+        MissingValueLiteral = missingValueLiteral;
         Collation = collation;
         DomainName = domainName;
         DefaultFunctionCalls = Array.AsReadOnly((defaultFunctionCalls ?? []).ToArray());
@@ -87,6 +89,9 @@ public sealed class SqlCatalogColumn
     /// <c>DEFAULT 'it''s'</c> is <c>'it''s'</c>), never the text as written.
     /// </summary>
     public string? DefaultLiteral { get; }
+
+    /// <summary>Gets the frozen ADD COLUMN value for physically absent fields, independent of the current insert default.</summary>
+    public string? MissingValueLiteral { get; }
 
     /// <summary>Gets each default call's resolved normalized signature in expression preorder.</summary>
     public IReadOnlyList<string> DefaultFunctionCalls { get; }

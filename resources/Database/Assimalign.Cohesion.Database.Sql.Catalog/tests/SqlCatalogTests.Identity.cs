@@ -49,9 +49,9 @@ public partial class SqlCatalogTests
         writer.AppendInt32(1).AppendInt64(1).AppendString("dbo", Collation.Binary).AppendString("ids", Collation.Binary)
             .AppendInt32(1).AppendString("id", Collation.Binary).AppendInt8((sbyte)DatabaseType.Int64)
             .AppendInt32(-1).AppendInt32(-1).AppendInt32(-1).AppendBoolean(nullable).AppendNull().AppendInt32(0)
-            .AppendInt8((sbyte)DatabaseObjectOwner.Adhoc).AppendNull().AppendInt32(5).AppendInt32(0)
+            .AppendInt8((sbyte)DatabaseObjectOwner.Adhoc).AppendNull().AppendInt32(6).AppendInt32(0)
             .AppendInt32(-1).AppendInt32(0).AppendNull().AppendInt32(0)
-            .AppendBoolean(true).AppendBoolean(true).AppendInt64(start).AppendInt64(increment);
+            .AppendBoolean(true).AppendBoolean(true).AppendInt64(start).AppendInt64(increment).AppendNull();
         using (var transaction = storage.BeginTransaction())
         {
             storage.InsertRow(transaction, writer.ToArray());

@@ -93,4 +93,8 @@
   <data name="OuterOnlyAggregate" xml:space="preserve"><value>An aggregate whose column references all belong to outer query scopes is not supported.</value></data>
   <data name="ScalarSubqueryCardinality" xml:space="preserve"><value>Scalar subquery returned more than one row; at most one row is allowed.</value></data>
   <data name="SubqueryFrameMissing" xml:space="preserve"><value>Internal invariant: the subquery evaluation frame is unavailable.</value></data>
+  <data name="DefaultTypeIncompatible" xml:space="preserve"><value>Column '{0}': DEFAULT result type {1} is incompatible with column type {2}.</value></data>
+  <data name="RenameTableCollision" xml:space="preserve"><value>Table '{0}.{1}' already exists.</value></data>
+  <data name="RenameColumnCollision" xml:space="preserve"><value>Column '{0}' already exists on '{1}'.</value></data>
+  <data name="MissingValueConversion" xml:space="preserve"><value>Column '{0}': frozen missing value cannot be stored as {1}</value></data>
 </root>

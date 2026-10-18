@@ -50,7 +50,7 @@ internal sealed partial class SqlPlanExecutor
     /// <param name="pageId">The page the record was read from.</param>
     /// <param name="slotIndex">The slot the record was read from.</param>
     /// <param name="table">The table version the statement is bound to.</param>
-    /// <param name="defaults">That version's bound DEFAULTs, by ordinal (<see cref="SqlBoundTable.DefaultValues"/>).</param>
+    /// <param name="defaults">That version's frozen missing values, by ordinal (<see cref="SqlBoundTable.MissingValues"/>).</param>
     /// <param name="writer">The record's writer stamp.</param>
     /// <param name="deleter">The record's deleter stamp.</param>
     /// <returns>The row's values, or null when the slot was reclaimed before a confirming read.</returns>
@@ -80,10 +80,9 @@ internal sealed partial class SqlPlanExecutor
             // A deleted historical version can predate a NOT NULL addition
             // to a currently empty table. Nullability validates live rows at
             // DDL/DML time, never changes the visibility of historical rows.
-            // Only literal defaults can be introduced by ADD COLUMN. A missing function-default
-            // tail belongs to an invisible version written after a trailing drop, never a value
-            // INSERT omitted. Do not run application code while decoding such a version.
-            values[ordinal] = defaults[ordinal] is { Kind: not SqlBoundExpressionKind.Default } bound ? DefaultValue(bound) : null;
+            // The frozen ADD COLUMN literal never follows a later SET/DROP DEFAULT.
+            // Reading a row never evaluates an insert-time expression default.
+            values[ordinal] = defaults[ordinal] is { } bound ? DefaultValue(bound) : null;
         }
 
         return values;
@@ -188,6 +187,7 @@ internal sealed partial class SqlPlanExecutor
             if (declaring)
             {
                 SqlPlanner.ValidateExpression(expression, scope);
+                SqlPlanner.ValidateDefaultType(expression, scope, column.Type.Type, column.Name);
             }
             return new SqlBoundDefault(scope.Bind(expression), column);
         }

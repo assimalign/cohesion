@@ -1,5 +1,9 @@
 # Database.Sql.Client — Design
 
+ALTER TABLE rename/default/nullability actions (#1122) use the existing execute exchange.
+Wire tests pin renamed query results, signed defaults on omitted inserts, and failed NOT NULL
+validation as ExecutionFailure with a reusable connection. No client API or payload changes.
+
 Non-recursive WITH queries and INSERT/UPDATE/DELETE (#1116) travel through the
 existing SQL execute exchange. Wire tests pin results, exact affected counts and
 recursive/modifying-body ParseFailure diagnostics, preserving connection reuse

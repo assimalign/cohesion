@@ -24,11 +24,12 @@ internal sealed class SqlBoundTable
     /// <param name="defaultValues">Each column's bound DEFAULT by ordinal; null where the column declares none.</param>
     /// <param name="domains">The bound domains of the columns that have one, in column order; empty when none has.</param>
     internal SqlBoundTable(SqlCatalogTable table, IReadOnlyList<SqlBoundCheck> checks, IReadOnlyList<SqlBoundExpression?> defaultValues,
-        IReadOnlyList<SqlBoundDomain>? domains = null)
+        IReadOnlyList<SqlBoundDomain>? domains = null, IReadOnlyList<SqlBoundExpression?>? missingValues = null)
     {
         Table = table;
         _checks = checks;
         DefaultValues = defaultValues;
+        MissingValues = missingValues ?? new SqlBoundExpression?[table.Columns.Count];
         Domains = domains ?? [];
         if (Domains.Count > 0)
         {
@@ -64,6 +65,8 @@ internal sealed class SqlBoundTable
     /// conversion's failure each time the default is used; null where the column declares none.
     /// </summary>
     internal IReadOnlyList<SqlBoundExpression?> DefaultValues { get; }
+
+    internal IReadOnlyList<SqlBoundExpression?> MissingValues { get; }
 
     /// <summary>Finds the bound form of one of this version's CHECK constraints.</summary>
     /// <param name="constraint">A CHECK constraint of <see cref="Table"/>.</param>

@@ -73,6 +73,9 @@ internal sealed partial class SqlPlanner
                     ValidateFunctionCalls(constraint.CheckExpression);
                 }
                 break;
+            case SqlAlterTableExpression { Action: SqlAlterSetDefaultAction change }:
+                ValidateFunctionCalls(change.DefaultValue);
+                break;
             case SqlAlterTableExpression { Action: SqlAlterAddColumnAction add }:
                 ValidateFunctionCalls(add.Column.DefaultValue);
                 foreach (var constraint in add.Column.Constraints)

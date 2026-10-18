@@ -80,9 +80,9 @@ public sealed partial class SqlCatalog
     private const int schemaStateChunkSize = 3 * 1024;
 
     // The version of a table record's trailing extension this catalog writes; it reads
-    // only the current version. Version 5 adds identity facets; version 3 adds the dropped columns' physical ordinals (#1241),
+    // only the current version. Version 6 adds frozen missing values; version 5 adds identity facets; version 3 adds the dropped columns' physical ordinals (#1241),
     // version 4 (data-storage format 7, phase E3) each column's domain name.
-    private const int tableExtensionVersion = 5;
+    private const int tableExtensionVersion = 6;
 
     private static readonly Encoding _strictUtf8 = new UTF8Encoding(
         encoderShouldEmitUTF8Identifier: false,
@@ -1734,6 +1734,10 @@ public sealed partial class SqlCatalog
                 writer.AppendBoolean(identity.IsAlways).AppendInt64(identity.Start).AppendInt64(identity.Increment);
             }
         }
+        foreach (var column in table.Columns)
+        {
+            AppendOptionalString(ref writer, column.MissingValueLiteral);
+        }
         return writer.ToArray();
     }
 
@@ -1947,6 +1951,13 @@ public sealed partial class SqlCatalog
                 columns[index] = new SqlCatalogColumn(column.Name, column.Type, column.IsNullable,
                     column.DefaultLiteral, column.Collation, column.DomainName, column.DefaultFunctionCalls, identity);
             }
+        }
+        for (int index = 0; index < columns.Count; index++)
+        {
+            var column = columns[index];
+            columns[index] = new SqlCatalogColumn(column.Name, column.Type, column.IsNullable,
+                column.DefaultLiteral, column.Collation, column.DomainName, column.DefaultFunctionCalls, column.Identity,
+                ReadOptionalString(ref reader));
         }
         ValidateColumns(schema, name, columns, primaryKey);
         if (!reader.IsAtEnd)
@@ -2361,6 +2372,10 @@ public sealed partial class SqlCatalog
         for (int ordinal = 0; kept && ordinal < existing.Columns.Count; ordinal++)
         {
             kept = string.Equals(existing.Columns[ordinal].Name, table.Columns[ordinal].Name, StringComparison.OrdinalIgnoreCase);
+            if (!string.Equals(existing.Columns[ordinal].MissingValueLiteral, table.Columns[ordinal].MissingValueLiteral, StringComparison.Ordinal))
+            {
+                throw new SqlCatalogException($"The frozen missing value of column '{existing.Columns[ordinal].Name}' cannot be changed by replacement publication.");
+            }
         }
 
         if (!kept)

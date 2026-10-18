@@ -2176,6 +2176,51 @@ returns `ExecutionFailure` with that message and keeps the connection usable.
 the refusal into a no-op. `CREATE VIEW` and `DROP VIEW` remain outside the
 declared dialect and retain their existing unsupported-clause diagnostics.
 
+## ALTER TABLE renames and column facets (#1122)
+
+SET/DROP NOT NULL reuse the full-definition column executor, retaining live-row validation,
+PK/identity protection and one replacement publication. SET/DROP DEFAULT share CREATE's
+admission and conversion path, including signed/typed literals and scalar function calls.
+Function results satisfy INSERT's assignment rule before publication (COHSQLE013 naming the
+column; PostgreSQL heap.c:3409). Facets resolve the column's actual domain: DROP re-inherits its
+default and explicit NULL keeps the override marker (rewriteHandler.c:1305-1313; heap.c:2466-2475);
+only these facet plans permit a default change. The immutable column carries both its current
+insert default and a frozen missing-value literal. ADD captures the latter, and every subsequent
+replacement preserves it. A type narrowing validates the frozen literal even when no live rows
+remain, then binds it under the replacement type in the same DDL publication; a conversion
+failure is coded and names the column. Retained invisible versions therefore still decode.
+SqlBoundTable binds separate default and missing-value arrays;
+all row decode paths use the frozen array. Reads never run an insert-time function default.
+
+Rename takes the target Exclusive lock, then incoming child Exclusive locks in ObjectId order,
+including stale-definition and ownership checks after waits. The existing lock manager detects
+cycles among related DDL; a victim leaves no publication and permits retry. Catalog renames
+pre-encode and rewrite the table, affected FK records and column index metadata in one catalog
+transaction, then publish the complete cache directory and generation. IDs, physical ordinals,
+rows, identity counters and physical index registrations remain stable. Generated object names
+stay unchanged. Table-name changes with retained declared-script object claims refuse with
+COHSQLD002 naming the script, preserving forward-only receipt verification. CHECK column-reference tokens are rewritten and canonically rendered/rebound
+before commit, using the WHERE carrier and CeilingParserOptions for every persisted CHECK.
+Strings and function/type/collation names are untouched. Every republished child version is bound
+before the DDL returns. Name collisions report COHSQLE013 with the conflicting name.
+The planner brackets the complete binding pass with the catalog's DDL generation, including
+nested queries, joins and EXPLAIN. If publication overlaps planning, it discards the plan or its
+binding error and retries with fresh scopes, CTE state and subquery slots before execution.
+Stable planning allocates no catalog capture, preserving the stored-query allocation budget.
+The system views retain their separate transaction-time snapshot. A lock-free SELECT racing
+a rename therefore uses one generation of table and index metadata. DEFAULTs bind without
+column scope and function bodies bind only parameters; persisted row expressions exclude table
+subqueries, so this base has no dependent canonical FROM text. Future views add their guard in
+#1124. SQL format 17 / table extension 6 persist the default/missing split without a legacy reader.
+
+Crash-point tests reopen every recorded storage write/flush around parent and column renames
+and require complete old or new FK metadata. Ordered lock-wait tests prove stale writers refuse
+all six actions; a related-table cycle exercises deadlock detection and retry. Explicit-transaction
+DDL remains COHSQLT003 and preserves pending DML. No new public interface, assembly grant,
+record kind, wire message, reflection or runtime code generation is introduced.
+PostgreSQL references: tablecmds.c:3903-4062 (column identity), :4329-4385 (relation name),
+:8201-8268 (default), and heaptuple.c:151-180 (frozen missing values).
+
 ## Execution model
 
 - **Rule-based planning, plan/execute split.** `SqlPlanner` binds the AST against
@@ -2316,7 +2361,7 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   format, no upgrade path.** The catalog stores the format version of the whole
   data file set, rows and the index trees that ride it (a kind-4 record for
   versions 1–3, a kind-8 record from version 4). The engine reads and writes
-  format 16 only: format 6's stamped rows in per-object page chains whose index keys use the
+  format 17 only: format 6's stamped rows in per-object page chains whose index keys use the
   temporal identity encoding (#1099, below), in index trees of B-tree page format
   2, which order entries by key, entry reference and writer (#1194,
   `Database.Indexing` DESIGN), decoded through each table's physical column
@@ -2391,7 +2436,7 @@ declared dialect and retain their existing unsupported-clause diagnostics.
 - **Schema evolution (#1023):** `ADD COLUMN` validates the literal default and
   current rows under the exclusive object lock before publishing the complete
   replacement definition in one catalog transaction. Backfill is resolved at
-  read time from persisted column metadata; no existing row bytes, locations or
+  read time from frozen missing-value column metadata, independent of the current insert default; no existing row bytes, locations or
   MVCC stamps are changed. `SqlRowCodec` reports how many fields were physically
   present, and the executor resolves only the missing tail, on both scans and
   index seeks. Explicit NULLs remain NULL. Default conversion is shared with

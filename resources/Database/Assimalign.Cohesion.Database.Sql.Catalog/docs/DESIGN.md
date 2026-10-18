@@ -84,8 +84,8 @@ would tell every caller the value is changeable and then guard that promise at
 runtime.
 
 Table metadata extension version 2 introduced one collation identifier per column
-after the existing constraints. Current format 16 requires the complete table record,
-including the resolved-call vectors described below. Column additions,
+after the existing constraints. Current format 17 requires the complete table extension 6 record,
+including resolved-call vectors, identity facets and frozen missing-value literals described below. Column additions,
 drops, and restart preserve explicit overrides. An index inherits its key
 columns' effective collations; the SQL engine verifies index eligibility and
 uses those same transforms for uniqueness enforcement.
@@ -164,7 +164,7 @@ codec, the key encoding and every comparison read, so they do not consult the do
   column (the primary key's implicit NOT NULL).
 - **Persistence: table extension version 4** (data-storage format 7). After the dropped
   ordinals, one optional string per live column, NULL for a column of a built-in type,
-  which this catalog always writes. Current format 16 also requires the call vectors and identity facets;
+  which this catalog always writes. Current format 17 also requires the call vectors, identity facets and extension 6 missing-value literals;
   the format gate refuses earlier databases rather than loading their definitions. A persisted blank
   name fails the load with `SqlCatalogException`, as does a blank `domainName` at the
   column's constructor (`ArgumentException`).
@@ -383,10 +383,28 @@ schema-owned object remains an engine/session decision. The older direct-creatio
 helpers (`CreateTableAsync` with ownership and constraints, `AddConstraintAsync`)
 remain internal and are used only by catalog tests.
 
+## Renames and frozen missing values (#1122)
+
+SqlCatalogColumn.DefaultLiteral remains the current insert-time default. MissingValueLiteral
+is the independent frozen canonical literal captured at ADD COLUMN; absent means NULL.
+Table extension 6 appends one optional missing literal per live column after the identity
+facets; SQL record-space format 17 gates it. No record kind, upgrade path or compatibility
+reader is added. Replacing column definitions preserves this facet, as it preserves ordinals.
+
+RenameTableAsync and RenameColumnAsync retain the table ObjectId and physical layout. Under
+the metadata lock they pre-encode all affected table/index records, rewrite incoming and self
+FK target names and local/key column lists, then commit those records, generation and an optional
+script receipt in one storage transaction. Cache publication follows commit. Existing index
+registrations and identity counters are keyed by ObjectId and remain valid. Constraint/index
+names remain unchanged. The engine supplies canonical CHECK text and proves its binding before
+publication; Catalog requires a complete CHECK map but remains SQL-agnostic. A stale expected
+table or any collision fails before publication. The engine takes the target Exclusive lock and
+then child locks in ascending ObjectId order, rechecking identity and ownership after waits.
+
 ## Constraint persistence
 
 Table records append a versioned extension after ownership: its current version is
-`5` (#1123), followed by constraint count and each immutable foreign-key/check definition.
+`6` (#1122), followed by constraint count and each immutable foreign-key/check definition.
 Later fields retain collations, physical layout, domains, call vectors and identity facets. A reference
 stores its ordered local and target columns, target SQL namespace/table, and
 `RESTRICT` or `CASCADE` delete action. A check stores its predicate as canonical

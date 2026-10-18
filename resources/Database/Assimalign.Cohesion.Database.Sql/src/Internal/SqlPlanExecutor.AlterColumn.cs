@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -26,10 +27,10 @@ internal sealed partial class SqlPlanExecutor
         if (previous.Type.Type != column.Type.Type || previous.Type.Scale != column.Type.Scale ||
             !string.Equals(previous.DomainName, column.DomainName, StringComparison.OrdinalIgnoreCase) ||
             (previous.Collation ?? _catalog.DefaultCollation).Id != (column.Collation ?? _catalog.DefaultCollation).Id ||
-            !string.Equals(SqlSchemaProvisioner.CanonicalDefault(previous.DefaultLiteral),
+            !plan.AllowDefaultChange && !string.Equals(SqlSchemaProvisioner.CanonicalDefault(previous.DefaultLiteral),
                 SqlSchemaProvisioner.CanonicalDefault(column.DefaultLiteral), StringComparison.Ordinal))
         {
-            throw new DatabaseException($"ALTER COLUMN '{column.Name}' requiring a storage-type, domain, collation, scale or default rewrite is not supported. Use an explicit table-copy migration; in-place rewrites are tracked by #1447.");
+            throw new SqlPlanningException("COHSQLE013", $"ALTER COLUMN '{column.Name}' requiring a storage-type, domain, collation, scale or default rewrite is not supported. Use an explicit table-copy migration; in-place rewrites are tracked by #1447.");
         }
         if (column.IsNullable && plan.Table.PrimaryKeyColumns.Contains(column.Name, StringComparer.OrdinalIgnoreCase))
         {
@@ -38,6 +39,29 @@ internal sealed partial class SqlPlanExecutor
         if (column.DefaultLiteral is not null)
         {
             BindDefaultExpression(column, $"DEFAULT of column '{column.Name}' on '{plan.Table.Name}'", _definitions.Functions, _catalog.DefaultCollation, cancellationToken, declaring: true);
+        }
+
+        if (column.MissingValueLiteral is { } missing &&
+            (previous.Type.MaxLength != column.Type.MaxLength || previous.Type.Precision != column.Type.Precision))
+        {
+            // Invisible retained versions still decode missing tails through this definition.
+            // Validate and bind the literal under the replacement type before publishing it.
+            var frozen = new SqlCatalogColumn(column.Name, column.Type, true, missing, column.Collation);
+            try
+            {
+                BindDefaultExpression(frozen, $"Missing value of column '{column.Name}' on '{plan.Table.Name}'",
+                    _definitions.Functions, _catalog.DefaultCollation, cancellationToken, declaring: true);
+            }
+            catch (SqlEvaluationException failure)
+            {
+                throw failure.WithContext(string.Format(CultureInfo.CurrentCulture,
+                    ErrorMessages.MissingValueConversion, column.Name, column.Type.Type));
+            }
+            catch (DatabaseException failure)
+            {
+                throw new SqlPlanningException("COHSQLE013", string.Format(CultureInfo.CurrentCulture,
+                    ErrorMessages.MissingValueConversion, column.Name, column.Type.Type) + ". " + failure.Message);
+            }
         }
 
         bool validatesValues = previous.IsNullable && !column.IsNullable ||
