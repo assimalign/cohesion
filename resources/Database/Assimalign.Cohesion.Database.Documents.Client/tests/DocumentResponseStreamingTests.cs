@@ -122,19 +122,19 @@ public sealed class DocumentResponseStreamingTests
     [Fact(DisplayName = "Cohesion Test [Documents.Client] - Failure after partial rows discards the result and preserves the session")]
     public async Task QueryAsync_MidStreamSizeFailure_ShouldThrowTypedErrorAndReuseSession()
     {
-        // Arrange: the second row expands past the frame limit when '<' is JSON-escaped.
+        // Arrange: repeating the escaped control value makes the second projection exceed one frame.
         await using var harness = await DocumentClientTestHarness.StartAsync();
         await using var connection = await harness.Client.ConnectAsync(harness.Token);
         await connection.CreateCollectionAsync("items", harness.Token);
         await connection.PutAsync("items", "a", "{\"text\":\"small\"}"u8.ToArray(), cancellationToken: harness.Token);
-        byte[] large = Encoding.UTF8.GetBytes("{\"text\":\"" + new string('<', 3 * 1024 * 1024) + "\"}");
+        byte[] large = Encoding.UTF8.GetBytes("{\"text\":\"" + new string('\u0001', 1536 * 1024).Replace("\u0001", "\\u0001", StringComparison.Ordinal) + "\"}");
         await connection.PutAsync("items", "b", large, cancellationToken: harness.Token);
         Guid sessionId = harness.Server.Sessions.ShouldHaveSingleItem().Id;
         using var buffers = new ResponseBufferRecorder();
 
         // Act
         var failure = await Should.ThrowAsync<DocumentClientException>(async () =>
-            await connection.QueryAsync("SELECT text FROM items", cancellationToken: harness.Token));
+            await connection.QueryAsync("SELECT text, text AS copy FROM items", cancellationToken: harness.Token));
 
         // Assert: a real server sent header and first row before the terminal Failure, no Complete.
         failure.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);

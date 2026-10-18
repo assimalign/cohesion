@@ -369,7 +369,9 @@ raises COHDOC015, naming the constructor at its expression span. INSERT retains 
 GetBytes returns unquoted UTF-8 for named string columns and empty bytes for named NULL/MISSING
 columns; named JSON objects/arrays return JSON bytes. A bare VALUE/RAW row returns JSON bytes
 (including quotes for strings and null for NULL), and a lone SELECT * returns exact stored bytes.
-The in-process row and Documents.Client share this contract.
+The in-process row and Documents.Client share this contract and the same RFC 8259 encoder:
+non-ASCII text, HTML-sensitive characters and U+2028/U+2029 retain their UTF-8 spelling;
+quotes, backslashes and U+0000 through U+001F are escaped.
 
 Projection supports whole documents, nested field paths, zero-based array element
 paths, literals, parameters, arithmetic, and aggregates. `SELECT *` returns one

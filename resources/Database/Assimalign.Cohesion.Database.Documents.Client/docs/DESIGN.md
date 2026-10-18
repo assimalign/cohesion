@@ -36,6 +36,8 @@ so embedded and wire rows agree on IsMissing=false and completion counts. Embedd
 object members remain omitted and MISSING array elements become NULL.
 GetBytes preserves exact bare-frame JSON bytes (a lone SELECT *, or VALUE/RAW). Named string
 columns return unquoted UTF-8 and named NULL/MISSING columns return empty bytes, matching the engine.
+Constructed and bare scalar rows use the engine's RFC 8259 encoder, retaining non-ASCII,
+HTML-sensitive characters and U+2028/U+2029 as UTF-8 while escaping quotes, backslashes and controls.
 
 ## Exchange and result ownership
 

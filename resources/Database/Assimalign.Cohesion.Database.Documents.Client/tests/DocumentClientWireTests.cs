@@ -293,7 +293,8 @@ public sealed class DocumentClientWireTests
         await using var connection = await harness.Client.ConnectAsync(harness.Token);
         await connection.CreateCollectionAsync("items", harness.Token);
         var original = await connection.PutAsync("items", "a", "{\"name\":\"alpha\",\"discarded\":true}"u8.ToArray(), cancellationToken: harness.Token);
-        using var replacement = JsonDocument.Parse("{\"name\":\"alpha2\",\"text\":\"é東京<😀\"}");
+        const string replacementJson = "{\"name\":\"alpha2\",\"text\":\"é東京<&😀\"}";
+        using var replacement = JsonDocument.Parse(replacementJson);
         using var added = JsonDocument.Parse("{\"name\":\"zeta\"}");
         // Act
         var command = await connection.QueryAsync("UPSERT INTO items (KEY, VALUE) VALUES ('a', $replacement), ('z', $new)",
@@ -305,6 +306,7 @@ public sealed class DocumentClientWireTests
         command.Columns.ShouldBeEmpty();
         var stored = (await connection.GetAsync("items", "a", harness.Token)).ShouldNotBeNull();
         stored.Version.Value.ShouldBeGreaterThan(original.Version.Value);
+        stored.Content.ToArray().ShouldBe(Encoding.UTF8.GetBytes(replacementJson));
         using var json = JsonDocument.Parse(stored.Content);
         JsonElement.DeepEquals(json.RootElement, replacement.RootElement).ShouldBeTrue();
         json.RootElement.TryGetProperty("discarded", out _).ShouldBeFalse();

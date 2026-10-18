@@ -310,10 +310,14 @@ public sealed class DocumentUpsertTests
         var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         var items = await SeedAsync(session);
-        const string content = "{\"é東京<😀\":\"é東京<😀\"}";
+        string text = "é東京<&😀\"\\" + new string(Enumerable.Range(0, 32).Select(value => (char)value).ToArray()) + "\u2028\u2029";
+        const string escaped = "é東京<&😀\\\"\\\\" +
+            "\\u0000\\u0001\\u0002\\u0003\\u0004\\u0005\\u0006\\u0007\\b\\t\\n\\u000b\\f\\r\\u000e\\u000f" +
+            "\\u0010\\u0011\\u0012\\u0013\\u0014\\u0015\\u0016\\u0017\\u0018\\u0019\\u001a\\u001b\\u001c\\u001d\\u001e\\u001f\u2028\u2029";
+        const string content = "{\"" + escaped + "\":\"" + escaped + "\"}";
         using var json = JsonDocument.Parse(content);
         var parameters = new Dictionary<string, object?> { ["doc"] = json.RootElement };
-        string value = parameter ? "$doc" : "{'é東京<😀':'é東京<😀'}";
+        string value = parameter ? "$doc" : "{'" + text + "':'" + text + "'}";
         // Act
         await session.ExecuteAsync($"INSERT INTO items (KEY, VALUE) VALUES ('inserted', {value})", parameters, CancellationToken.None);
         await session.ExecuteAsync($"UPSERT INTO items (KEY, VALUE) VALUES ('a', {value})", parameters, CancellationToken.None);
