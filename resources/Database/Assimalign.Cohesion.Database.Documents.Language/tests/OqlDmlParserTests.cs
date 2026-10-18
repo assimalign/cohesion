@@ -189,6 +189,9 @@ public sealed class OqlDmlParserTests
     [InlineData("INSERT INTO items (KEY, VALUE) VALUES ('e', $doc) RETURNING k", "COHDBL001", "RETURNING", "RETURNING")]
     [InlineData("INSERT INTO archive (KEY k) SELECT META(d).id AS k FROM items d WHERE d.category = 'a' RETURNING k", "COHDBL001", "RETURNING", "RETURNING")]
     [InlineData("INSERT INTO archive (KEY k) SELECT META(d).id AS k FROM items d WHERE d.details = {'score':1} RETURNING k", "COHDBL001", "RETURNING", "RETURNING")]
+    [InlineData("INSERT INTO archive (KEY k, OPTIONS o) SELECT META(d).id AS k FROM items d", "COHDBL001", "OPTIONS", "OPTIONS")]
+    [InlineData("INSERT INTO archive (KEY k, OPTIONS {'expiration': 10}) SELECT META(d).id AS k FROM items d", "COHDBL001", "OPTIONS", "OPTIONS")]
+    [InlineData("INSERT INTO archive (KEY k, VALUE v, OPTIONS o) SELECT META(d).id AS k, d AS v FROM items d", "COHDBL001", "OPTIONS", "OPTIONS")]
     public void Parse_InvalidInsert_ShouldLocateFailure(string query, string code, string token, string message)
     {
         // Arrange / Act
@@ -247,6 +250,9 @@ public sealed class OqlDmlParserTests
     [InlineData("UPSERT INTO items (KEY, VALUE) VALUES ('e', $doc) RETURNING k", "COHDBL001", "RETURNING", "RETURNING")]
     [InlineData("UPSERT INTO archive (KEY k) SELECT META(d).id AS k FROM items d WHERE d.category = 'a' RETURNING k", "COHDBL001", "RETURNING", "RETURNING")]
     [InlineData("UPSERT INTO archive (KEY k) SELECT META(d).id AS k FROM items d WHERE d.details = {'score':1} RETURNING k", "COHDBL001", "RETURNING", "RETURNING")]
+    [InlineData("UPSERT INTO archive (KEY k, OPTIONS o) SELECT META(d).id AS k FROM items d", "COHDBL001", "OPTIONS", "OPTIONS")]
+    [InlineData("UPSERT INTO archive (KEY k, OPTIONS {'expiration': 10}) SELECT META(d).id AS k FROM items d", "COHDBL001", "OPTIONS", "OPTIONS")]
+    [InlineData("UPSERT INTO archive (KEY k, VALUE v, OPTIONS o) SELECT META(d).id AS k, d AS v FROM items d", "COHDBL001", "OPTIONS", "OPTIONS")]
     public void Parse_InvalidUpsert_ShouldLocateFailure(string query, string code, string token, string message)
     {
         // Arrange / Act

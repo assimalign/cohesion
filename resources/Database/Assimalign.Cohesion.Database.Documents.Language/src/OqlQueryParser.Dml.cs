@@ -97,18 +97,14 @@ public sealed partial class OqlQueryParser
         else
         {
             keyName = Identifier();
+            if (RejectOptions()) { return Build([], null); }
             if (Take(TokenType.Comma))
             {
                 Expect("VALUE");
                 valueName = Identifier();
             }
         }
-        if (Current.Type == TokenType.Comma && _position + 1 < _tokens.Count && IsWord(_tokens[_position + 1], "OPTIONS"))
-        {
-            Advance();
-            _diagnostics.Add(QueryDiagnostics.UnsupportedClause("OPTIONS", Profile.Language, Span(Current, Current)));
-            return Build([], null);
-        }
+        if (RejectOptions()) { return Build([], null); }
         Expect(TokenType.RightParen, "')'");
         List<(OqlExpression Key, OqlExpression Value)> values = [];
         OqlSelectExpression? select = null;
@@ -134,6 +130,14 @@ public sealed partial class OqlQueryParser
             Error("OQL0002", "Expected SELECT after the KEY output binding.", Current);
         }
         return Build(values.AsReadOnly(), select);
+
+        bool RejectOptions()
+        {
+            if (Current.Type != TokenType.Comma || _position + 1 >= _tokens.Count || !IsWord(_tokens[_position + 1], "OPTIONS")) { return false; }
+            Advance();
+            _diagnostics.Add(QueryDiagnostics.UnsupportedClause("OPTIONS", Profile.Language, Span(Current, Current)));
+            return true;
+        }
 
         OqlExpression Build(IReadOnlyList<(OqlExpression Key, OqlExpression Value)> rows, OqlSelectExpression? source)
             => upsert

@@ -52,6 +52,7 @@ Lexical recognition preserves the established vocabulary so rejected constructs 
 | `UPDATE` | Yes | One collection, optional alias, SET assignments and/or UNSET paths, optional WHERE |
 | `UNSET` | Yes | Removes properties in UPDATE; a final array index is invalid |
 | `DELETE` | Yes | `DELETE FROM collection [AS? alias] [WHERE expression]`; keeps the collection and indexes |
+| `OPTIONS` | No | INSERT/UPSERT header element; one COHDBL001 at OPTIONS, including directly after KEY; no TTL or version precondition in T1 |
 | `VALUES` | Yes | One or more parenthesized key/value pairs for INSERT or UPSERT |
 | `FROM` | Yes | Exactly one unqualified collection or reserved `COHESION_SCHEMA` source and optional iteration variable, with or without `AS` |
 | `WHERE` | Yes | Scalar comparison and Boolean document filtering |
@@ -119,8 +120,9 @@ a name:
   words are not lexer keywords, so `SELECT limit, merge FROM c` and `SELECT a AS limit FROM c`
   still parse. Because the collection name ends an operand, a Clause word cannot be an AS-less
   `FROM` alias: `FROM c unnest` reports `UNNEST`, while `FROM c AS unnest` keeps it a name.
-- **Statement** (`DEFINE` and the SQL++ statement verb `MERGE`): only the first word of the
-  statement. Elsewhere they are names, so an AS-less alias such as `FROM c merge` still parses,
+- **Statement** (`DEFINE`, `MERGE` and the enabled `UPSERT` coverage entry): only the first word of the
+  statement. UPSERT bypasses refusal through OqlClauses.Upsert; its table entry retains contextual
+  keyword coverage. Elsewhere they are names, so an AS-less alias such as `FROM c merge` still parses,
   as it did before #1101.
 - **Trailing** (`RETURNING`): rejected after the parser consumes a complete statement, or at
   the statement prefix. Destinations, KEY/VALUE output binding names, properties, object keys,
@@ -236,8 +238,9 @@ query        := SELECT [ALL | DISTINCT] select-kind FROM collection [AS? identif
 select-kind  := projection (',' projection)* | (VALUE | RAW) expression
 insert       := INSERT INTO collection [AS identifier] write-input
 upsert       := UPSERT INTO collection [AS identifier] write-input
-write-input  := '(' KEY ',' VALUE ')' VALUES '(' expression ',' expression ')' (',' '(' expression ',' expression ')')*
-              | '(' KEY identifier [',' VALUE identifier] ')' query
+write-input  := '(' KEY ',' VALUE [refused-options] ')' VALUES '(' expression ',' expression ')' (',' '(' expression ',' expression ')')*
+              | '(' KEY identifier [',' VALUE identifier] [refused-options] ')' query
+refused-options := ',' OPTIONS [expression]  -- recognized header element; rejected with one COHDBL001 at OPTIONS
 delete       := DELETE FROM collection [AS? identifier] [WHERE expression]
 update       := UPDATE collection [AS? identifier] (set [unset] | unset) [WHERE expression]
 set          := SET assignment (',' assignment)*
@@ -506,7 +509,8 @@ Document keys are external: collections declare no key field and never generate 
 SQL++ KEY/VALUE forms above are the T1 mutation grammar. Id-less VALUE/VALUES forms report
 OQL0002 asking for KEY. KEY, VALUES and INTO remain non-reserved; the header reads KEY and
 VALUE by position, independently of SELECT VALUE's eventual reservation. OPTIONS in the
-header reports COHDBL001 because Documents has no TTL. A trailing RETURNING clause is recognized
+header reports one COHDBL001 at OPTIONS, including when it follows KEY directly in the SELECT
+form, because Documents has no TTL or statement-level version precondition. A trailing RETURNING clause is recognized
 but deferred; identifier positions keep `returning` as a name. General database-qualified destinations remain invalid.
 
 VALUES expressions accept constants, parameters, operators and object constructors; document

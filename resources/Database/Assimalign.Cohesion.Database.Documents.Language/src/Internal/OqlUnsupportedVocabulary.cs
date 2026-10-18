@@ -63,6 +63,7 @@ internal static class OqlUnsupportedVocabulary
         // SQL++ words. oql-limit-offset and oql-arrays flip these pins; MERGE stays.
         new("LIMIT", "LIMIT", OqlWordPosition.Clause),
         new("OFFSET", "OFFSET", OqlWordPosition.Clause),
+        // Enabled by OqlClauses.Upsert; retained for contextual keyword coverage.
         new("UPSERT", "UPSERT", OqlWordPosition.Statement),
         new("MERGE", "MERGE", OqlWordPosition.Statement),
         new("UNNEST", "UNNEST", OqlWordPosition.Clause),
@@ -117,8 +118,8 @@ internal enum OqlWordPosition
     Trailing,
 
     /// <summary>
-    /// Only as the first word of the statement, where it is a statement verb of another
-    /// language (<c>UPSERT INTO c ...</c>). Elsewhere, including an AS-less <c>FROM</c> alias, it
+    /// Only as the first word of the statement, where it is a statement verb
+    /// (<c>MERGE INTO c ...</c>). Enabled verbs bypass the capability refusal. Elsewhere, including an AS-less <c>FROM</c> alias, it
     /// is a name.
     /// </summary>
     Statement,

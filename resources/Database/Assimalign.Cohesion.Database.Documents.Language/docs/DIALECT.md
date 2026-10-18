@@ -36,7 +36,8 @@ INSERT's validation and MISSING rules. Existing identities receive complete repl
 absent properties disappear and each written identity receives a fresh version. Without VALUE,
 the complete projected row becomes the document. Every source row is staged before writes.
 A repeated key fails the whole statement with DocumentDuplicateKeyException (COHDOC012).
-OPTIONS and RETURNING remain COHDBL001. No statement-level version precondition is available;
+OPTIONS and RETURNING remain COHDBL001 at their tokens. INSERT and UPSERT both reject
+(KEY k, OPTIONS o) SELECT ... with one diagnostic naming OPTIONS, including its expression form. No statement-level version precondition is available;
 PutAsync(expectedVersion) and UPDATE WHERE META().version = $v provide optimistic replacement.
 EXPLAIN UPSERT returns Upsert or UpsertSelect; completion reports affected count without rows.
 DocumentUpsertTests, the advertised-clause corpus, wire tests and the recovery fixture cover it.
