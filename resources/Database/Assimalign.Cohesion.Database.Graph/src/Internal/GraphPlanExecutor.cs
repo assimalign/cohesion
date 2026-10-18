@@ -149,7 +149,7 @@ internal static class GraphPlanExecutor
             }
             if (!paths) { GraphResultRowEncoder.Validate(row, compositeColumns); }
             if (distinct is null || distinct.Add(row))
-            { rows.Add(new GraphOrderedRow(row, GraphSortPage.Keys(plan, binding, row), rows.Count)); }
+            { rows.Add(new GraphOrderedRow(row, GraphSortPage.Keys(plan, binding, row, token), rows.Count)); }
         }
         // A stored unsigned property is learned from the rows. Recheck earlier rows if its
         // header flag changed their framing; scalar-only results never need this pass.

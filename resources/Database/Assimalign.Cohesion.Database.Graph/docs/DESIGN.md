@@ -535,9 +535,14 @@ parser; this is a bounded ISO subset, not a full conformance claim.
 ### Ordering and paging (#1142)
 
 GraphPlanner binds sort keys against projected names and source bindings. DISTINCT admits only
-projected values, including a projected entity under any alias. Structural matching requires literal type and value to agree. A per-plan hash index caches subtree hashes for linear ORDER BY planning and observes cancellation during indexing and validation. Computed aliases that may hold entities admit label tests, with runtime COHDBG003 for non-entity values.
+projected values, including a projected entity under any alias. Structural expression matching
+ignores source spans and requires literal type and value to match. A per-plan structural hash
+index caches subtree hashes, keeping ORDER BY planning linear in expression size and observing
+cancellation while indexing and validating. Computed aliases that may hold entities permit label
+tests, with runtime COHDBG003 for a non-entity value, following #1140.
 GraphSortPagePlan records keys and validated non-negative Int64 offset/limit counts, including
-named parameters; invalid dynamic graph counts are COHDBG013 before reads or writer locking; non-finite and unsupported CLR inputs are COHDBG003 during binding.
+named parameters; invalid dynamic graph counts are COHDBG013 before reads or writer locking;
+non-finite and unsupported CLR inputs are COHDBG003 during binding.
 EXPLAIN maps SortPage and SortKey records explicitly and never executes the stage.
 
 The executor materializes all matches and applies every mutation before projecting. The common
@@ -545,7 +550,15 @@ row/path tail eliminates duplicates, caches each sort key once, sorts, offsets a
 converting entity/path columns to GraphPath results. Paging never reduces the mutation set or
 the 100,000-match / 1,000,000-candidate bounds: LIMIT 1 over the cap remains COHDBG004 (owner
 default). The cap test uses 317 nodes in a cross-product; the performance case orders 10,000
-bindings and checks the first ten rows. Sorting uses static comparison with no reflection.
+bindings and checks the first ten rows. Each map key, including maps nested inside lists or
+maps, gets canonical ordinal key/value arrays during key materialization. Map comparisons use
+those arrays without re-sorting or allocating.
+Mixed numeric comparisons cross-multiply fixed 192-bit limbs (the maximum product is 162 bits)
+and compare binary exponents, preserving exact CLR numeric order without heap allocation.
+Sorting checks cancellation before it starts and throughout comparisons (including nested
+values), and unwraps List.Sort's comparer cancellation
+so statement rollback and session/transaction state follow the ordinary cancellation path.
+Sorting uses static comparison with no reflection.
 
 NULL defaults to last ASC / first DESC, with per-key NULLS FIRST/LAST overrides (owner default,
 diverging from Cohesion SQL's NULL-first ASC). Exact numeric comparison agrees with equality,
