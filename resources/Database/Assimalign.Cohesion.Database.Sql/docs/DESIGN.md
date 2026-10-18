@@ -2386,6 +2386,9 @@ LIMIT/OFFSET/FETCH retain bound expressions evaluated once at each relation exec
 following PostgreSQL `src/backend/executor/nodeLimit.c:348`. Count descriptors are optional references,
 so absent windows do not enlarge the ordinary stored-query plan or its allocation budget. Runtime evaluation supplies the
 current statement's transaction instant and cancellation. Binding never folds application calls.
+Execution checks for a bound row window before creating its evaluator. Cancellable INSERT,
+index-seek SELECT and aggregate statements with application functions registered therefore add
+zero startup bytes compared with dispatch directly to the same statement cores (Release, tiering off).
 Catalog opens parse all views; every recoverable body binding failure is deferred to a read of
 that view, with a coded view-local exception retaining the original cause. Cancellation,
 out-of-memory, storage corruption and I/O failures still propagate. Unrelated queries, metadata
