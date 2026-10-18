@@ -2390,8 +2390,11 @@ Execution checks for a bound row window before creating its evaluator. Cancellab
 index-seek SELECT and aggregate statements with application functions registered therefore add
 zero startup bytes compared with dispatch directly to the same statement cores (Release, tiering off).
 Catalog opens parse all views; every recoverable body binding failure is deferred to a read of
-that view, with a coded view-local exception retaining the original cause. Cancellation,
-out-of-memory, storage corruption and I/O failures still propagate. Unrelated queries, metadata
+that view, with a coded view-local exception retaining the original cause. OperationCanceledException, InsufficientExecutionStackException, OutOfMemoryException,
+StorageException (every subtype, including offline, format, journal and slotted-page failures),
+and IOException propagate, including through inner exceptions and aggregates. At open, stack
+exhaustion reaches the existing larger-stack advisory; on reads it reports COHSQLE004 and
+StatementTooComplex. Unrelated queries, metadata
 and DROP remain usable. Set, CASE and COALESCE outputs carry collation metadata only for
 character/string result types. The existing bind-time system-relation
 capture seam is re-entered for cached bodies so each caller retains its own catalog image.
@@ -2404,7 +2407,7 @@ DDL-generation fast path. No snapshot generation API or friend grant was added f
 
 Views freeze names/types/modifiers/domains/collations for COLUMNS. Every view column reports
 IS_NULLABLE = YES without binding a body: PostgreSQL view attributes have no NOT NULL constraint
-(`src/backend/catalog/information_schema.sql:295`). The format-23 view column record stores no
+(`src/backend/catalog/information_schema.sql:674-676`). The format-23 view column record stores no
 nullability flag; query binding still derives current source nullability. Scalar-subquery slots
 and function outputs preserve complete precision, scale and length before contract comparison (PostgreSQL
 `src/backend/nodes/nodeFuncs.c:345`, `src/backend/commands/view.c:300`). Scalar output descriptors are captured inside the child

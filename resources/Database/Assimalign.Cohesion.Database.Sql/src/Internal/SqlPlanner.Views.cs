@@ -82,7 +82,7 @@ internal sealed partial class SqlPlanner
     }
 
     private static bool IsViewBindingFailure(Exception exception)
-        => exception is not (OperationCanceledException or OutOfMemoryException or StorageCorruptionException or StorageIOException or IOException)
+        => exception is not (OperationCanceledException or InsufficientExecutionStackException or OutOfMemoryException or StorageException or IOException)
             && (exception.InnerException is null || IsViewBindingFailure(exception.InnerException))
             && (exception is not AggregateException aggregate || aggregate.InnerExceptions.All(IsViewBindingFailure));
 
@@ -120,7 +120,7 @@ internal sealed partial class SqlPlanner
                     var child = planner.PlanOnce(query);
                     var columns = planner.BindDerivedOutput(child, view.Name, view.Columns.Select(column => column.Name).ToArray(), query).Columns;
                     if (columns.Count != view.Columns.Count || columns.Where((column, index) => !SameViewOutput(column, view.Columns[index])).Any())
-                    { throw new SqlPlanningException("COHSQLE009", string.Format(CultureInfo.CurrentCulture, ErrorMessages.ViewContractChanged, view.Schema, view.Name)); }
+                    { throw new SqlPlanningException("COHSQLE009", ErrorMessages.ViewContractChanged); }
                     return new ViewPlan(child, columns, planner.ViewDefinitionBinding.SystemRelations);
                 });
                 plans.Entries.Add(view, entry);

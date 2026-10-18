@@ -160,11 +160,14 @@ result alternative has the same type and modifier; otherwise the result is uncon
 NULLIF keeps its first argument's modifier. Set operations apply the same agreement rule per
 column, including function-call operands (PostgreSQL `src/backend/nodes/nodeFuncs.c:327-480`,
 `src/backend/parser/parse_coerce.c:1648-1678`). Every view column reports IS_NULLABLE = 'YES',
-following PostgreSQL view attributes without NOT NULL (`src/backend/catalog/information_schema.sql:295`).
+following PostgreSQL view attributes without NOT NULL (`src/backend/catalog/information_schema.sql:674-676`).
 Query output nullability follows current bound sources.
 A recoverable body binding failure affects only reads of that view, with a coded error retaining
 the original exception; it never blocks open, unrelated reads, metadata enumeration or DROP VIEW.
-Cancellation, out-of-memory, storage corruption and I/O failures still propagate.
+OperationCanceledException, InsufficientExecutionStackException, OutOfMemoryException,
+StorageException (every subtype, including offline, format, journal and slotted-page failures),
+and IOException propagate, including through inner exceptions and aggregates. At open, stack
+exhaustion retains the larger-stack advisory; reads report COHSQLE004 and StatementTooComplex.
 
 INSERT, UPDATE, DELETE, ALTER TABLE, CREATE INDEX and DROP TABLE require a table
 and refuse a view, naming its kind. DROP VIEW refuses a table, including IF EXISTS.

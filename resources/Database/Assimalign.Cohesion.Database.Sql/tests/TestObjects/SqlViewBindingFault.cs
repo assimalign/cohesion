@@ -14,6 +14,12 @@ internal static class SqlViewBindingFault
         lock (plans.Sync) { plans.Entries[view] = new SqlBindingEntry<SqlPlanner.ViewPlan>(_ => throw failure); }
     }
 
+    internal static void Clear(SqlPlanner planner)
+    {
+        var plans = CurrentViewImage(planner).Plans;
+        lock (plans.Sync) { plans.Entries.Clear(); }
+    }
+
     [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "CurrentViewImage")]
     private static extern SqlPlanner.ViewImage CurrentViewImage(SqlPlanner planner);
 }

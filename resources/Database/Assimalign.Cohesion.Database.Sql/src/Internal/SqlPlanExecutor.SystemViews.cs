@@ -93,7 +93,7 @@ internal sealed partial class SqlPlanExecutor
                     for (int i = 0; i < stored.Columns.Count; i++)
                     {
                         var column = stored.Columns[i];
-                        // PostgreSQL view attributes have no NOT NULL constraint (information_schema.sql:295).
+                        // PostgreSQL view attributes have no NOT NULL constraint (information_schema.sql:674-676).
                         yield return [database, stored.Schema, stored.Name, column.Name, (long)i + 1, null, "YES", SystemDataType(column.Type.Type),
                             column.Type.Type is DatabaseType.String or DatabaseType.Character ? (long?)column.Type.MaxLength : null,
                             null, SystemNumericPrecision(column.Type), SystemNumericRadix(column.Type.Type), SystemNumericScale(column.Type),
