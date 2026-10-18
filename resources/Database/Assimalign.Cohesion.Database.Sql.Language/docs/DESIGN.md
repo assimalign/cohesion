@@ -108,6 +108,9 @@ for SET/DROP DEFAULT and SET/DROP NOT NULL lower onto the existing column replac
 (#1122); RENAME TO and RENAME [COLUMN] have their own immutable action leaves. RENAME and TO
 remain contextual, and each form uses the ordinary complete-statement terminator check. Lookahead
 copies the token lexer without changing parser bookkeeping. The action changes no clause count.
+The SqlAlterAction constructor is private protected, closing its leaves to this assembly. Only the
+named excluded forms use COHDBL001; unknown and incomplete actions use SQL0003, including a bare
+SET or ALTER c SET/DROP. SET SCHEMA is classified only when both words are present.
 
 Parse the declared dialect into a stable, fully-typed AST that planners, catalogs,
 tooling, and the SDK schema compiler can rely on. "Declared" is the operative word:

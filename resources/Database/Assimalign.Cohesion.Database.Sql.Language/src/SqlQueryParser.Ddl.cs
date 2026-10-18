@@ -387,7 +387,7 @@ public sealed partial class SqlQueryParser
     }
 
     /// <summary>
-    /// Parses ALTER TABLE with one ADD or DROP action. Any other action is rejected here,
+    /// Parses one supported ALTER TABLE action. Unknown or incomplete actions are rejected here,
     /// naming it, and yields a bare <see cref="SqlQueryCommandType.Alter"/> expression
     /// rather than an action node: a stub action once reached the catalog as a DROP of
     /// column <c>?</c> (#1068).
@@ -423,7 +423,7 @@ public sealed partial class SqlQueryParser
             ? MissingTableReference(ref lexer)
             : ParseUnaliasedTableReference(ref lexer);
 
-        // Action: ADD, DROP, or a complete ALTER COLUMN definition.
+        // Action: ADD/DROP, RENAME, a column facet, or a complete ALTER COLUMN definition.
         SqlAlterAction? action;
         if (TryRejectIdentityAlter(ref lexer))
         {
@@ -493,7 +493,8 @@ public sealed partial class SqlQueryParser
         }
         else
         {
-            if (IsWord(ref lexer, "SET")) { RejectAlterForm(ref lexer, "SET SCHEMA"); }
+            if (IsWord(ref lexer, "SET") && TryPeekToken(lexer, out string next, out _) && next.Equals("SCHEMA", StringComparison.OrdinalIgnoreCase))
+            { RejectAlterForm(ref lexer, "SET SCHEMA"); }
             else { RejectAlterTableAction(ref lexer); }
             ConsumeRemaining(ref lexer);
             return new SqlQueryExpression(SqlQueryCommandType.Alter, null,
@@ -555,6 +556,12 @@ public sealed partial class SqlQueryParser
     private SqlAlterAction? ParseAlterColumnFacet(ref TokenLexer lexer)
     {
         Advance(ref lexer);
+        if (IsWord(ref lexer, "CONSTRAINT"))
+        {
+            RejectAlterTableAction(ref lexer);
+            ConsumeRemaining(ref lexer);
+            return null;
+        }
         if (IsWord(ref lexer, "COLUMN")) { Advance(ref lexer); }
         string column = ReadAlterName(ref lexer, "column name after ALTER");
         bool set = IsWord(ref lexer, "SET");
@@ -574,12 +581,19 @@ public sealed partial class SqlQueryParser
                 return set ? new SqlAlterSetNotNullAction(column) : new SqlAlterDropNotNullAction(column);
             }
         }
-        string facet = CurrentText(ref lexer).ToUpperInvariant();
-        if (set && IsWord(ref lexer, "DATA") && TryPeekToken(lexer, out string next, out _) && next.Equals("TYPE", StringComparison.OrdinalIgnoreCase))
+        if (!set && !drop && IsWord(ref lexer, "TYPE"))
         {
-            facet = "DATA TYPE";
+            RejectAlterForm(ref lexer, "ALTER COLUMN TYPE");
         }
-        RejectAlterForm(ref lexer, "ALTER COLUMN " + (set ? "SET " : drop ? "DROP " : "") + facet);
+        else if (set && IsWord(ref lexer, "DATA") && TryPeekToken(lexer, out string next, out _) && next.Equals("TYPE", StringComparison.OrdinalIgnoreCase))
+        {
+            RejectAlterForm(ref lexer, "ALTER COLUMN SET DATA TYPE");
+        }
+        else
+        {
+            RejectAlterTableAction(ref lexer);
+            ConsumeRemaining(ref lexer);
+        }
         return null;
     }
 
@@ -632,12 +646,11 @@ public sealed partial class SqlQueryParser
     }
 
     /// <summary>
-    /// Reports an ALTER TABLE action outside ADD and DROP, naming it: <c>RENAME TO</c>,
-    /// <c>ALTER COLUMN</c>, <c>MODIFY</c> and the like.
+    /// Reports an unknown or incomplete ALTER TABLE action with the supported grammar.
     /// </summary>
     private void RejectAlterTableAction(ref TokenLexer lexer)
     {
-        const string supported = "ADD [COLUMN], ADD CONSTRAINT, DROP [COLUMN] and DROP CONSTRAINT";
+        const string supported = "ADD [COLUMN], ADD CONSTRAINT, DROP [COLUMN], DROP CONSTRAINT, RENAME TO, RENAME [COLUMN], ALTER COLUMN, and ALTER [COLUMN] SET/DROP DEFAULT or SET/DROP NOT NULL";
         if (IsAtEnd(ref lexer) || lexer.Current.Type == TokenType.Semicolon)
         {
             AddSyntaxDiagnostic(ref lexer, $"ALTER TABLE requires an action: {supported}.");

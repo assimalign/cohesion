@@ -67,6 +67,18 @@ public sealed class SqlAlterTableParserTests
     [InlineData("RENAME a b")]
     [InlineData("RENAME TO other.next")]
     [InlineData("ALTER c SET DEFAULT")]
+    [InlineData("ALTER c")]
+    [InlineData("ALTER COLUMN c")]
+    [InlineData("ALTER c INT")]
+    [InlineData("ALTER c SET")]
+    [InlineData("ALTER c DROP")]
+    [InlineData("ALTER COLUMN c SET")]
+    [InlineData("ALTER COLUMN c DROP")]
+    [InlineData("ALTER CONSTRAINT fk DEFERRABLE")]
+    [InlineData("SET")]
+    [InlineData("SET TABLESPACE x")]
+    [InlineData("SET LOGGED")]
+    [InlineData("SET bananas")]
     [InlineData("ALTER c SET NOT")]
     [InlineData("ALTER c DROP NOT")]
     public void Parse_IncompleteAction_ShouldReportSyntax(string action)
@@ -76,6 +88,24 @@ public sealed class SqlAlterTableParserTests
 
         // Assert
         statement.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "SQL0003");
+        statement.Diagnostics.ShouldNotContain(diagnostic => diagnostic.Code == "COHDBL001");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - ALTER: syntax diagnostics list every supported action family")]
+    [InlineData("")]
+    [InlineData("MODIFY c INT")]
+    public void Parse_UnknownOrMissingAction_ShouldListSupportedGrammar(string action)
+    {
+        // Arrange / Act
+        var statement = new SqlQueryParser().Parse("ALTER TABLE t " + action);
+
+        // Assert
+        var diagnostic = statement.Diagnostics.Single(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
+        diagnostic.Code.ShouldBe("SQL0003");
+        foreach (string supported in new[] { "ADD [COLUMN]", "ADD CONSTRAINT", "DROP [COLUMN]", "DROP CONSTRAINT", "RENAME TO", "RENAME [COLUMN]", "ALTER COLUMN", "SET/DROP DEFAULT", "SET/DROP NOT NULL" })
+        {
+            diagnostic.Message!.ShouldContain(supported, Case.Sensitive);
+        }
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - ALTER: RENAME and TO remain contextual identifiers")]

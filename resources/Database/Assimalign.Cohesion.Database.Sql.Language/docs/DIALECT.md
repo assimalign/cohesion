@@ -262,7 +262,9 @@ code when the row is evaluated. `+a` and `+(1 + 2)` reported
 **ALTER TABLE actions.** `ADD [COLUMN]`, `ADD CONSTRAINT`, `DROP [COLUMN]`,
 `DROP CONSTRAINT`, full-definition `ALTER COLUMN`, RENAME and ALTER column default/nullability actions parse.
 TYPE/SET DATA TYPE, SET SCHEMA, RENAME CONSTRAINT and comma-separated action lists report named `COHDBL001`.
-Other unknown actions such as MODIFY report `SQL0003` at parse time.
+Other unknown or incomplete actions such as MODIFY, ALTER c INT, ALTER c SET/DROP,
+ALTER CONSTRAINT, bare SET, SET TABLESPACE and SET LOGGED report `SQL0003` at parse time.
+SET SCHEMA is named only when SCHEMA follows SET; syntax diagnostics list all supported actions.
 The statement then carries no action node. It used to carry a placeholder
 `DROP COLUMN ?` that failed later, in the catalog. A missing action, table name,
 column name or constraint name also reports `SQL0003`; `ADD` or `DROP` directly
