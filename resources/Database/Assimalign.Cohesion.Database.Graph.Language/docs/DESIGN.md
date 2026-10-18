@@ -469,9 +469,9 @@ their starting node, relationship sequence and length. Equal sort keys retain in
 
 ORDER BY sees RETURN aliases and projected expressions. Without DISTINCT it may also use
 unprojected bindings. With DISTINCT, every referenced binding must come from a projected
-value, including a projected entity or a structurally matching computed expression; a hidden
+value, including a projected entity under any alias or a structurally matching computed expression (literal type and value both match); a hidden
 binding is COHDBG001 at planning even on an empty graph. Aliases remain unavailable to other
-RETURN items. CASE, COALESCE and composite expressions are ordinary sort keys.
+RETURN items. CASE, COALESCE and composite expressions are ordinary sort keys. A label test on an alias that may produce an entity is validated at runtime; a non-entity value raises COHDBG003.
 
 Mutations run for every matched binding before projection. DISTINCT precedes sorting, then
 OFFSET precedes LIMIT. LIMIT 0 returns no rows; large offsets return no rows without overflow.
@@ -488,6 +488,14 @@ order. Neo4j's [ORDER BY documentation](https://neo4j.com/docs/cypher-manual/cur
 records NULL placement and RETURN alias/hidden-variable visibility, including DISTINCT.
 `community/cypher/front-end/ast/src/main/scala/org/neo4j/cypher/internal/ast/Clause.scala:1965-2025`
 checks ORDER BY in the projected scope, retaining the incoming scope only without DISTINCT or aggregation.
+`Cypher25Parser.g4:138-164` under `community/cypher/front-end/parser/v25/parser/src/main/antlr4/org/neo4j/cypher/internal/parser/v25/`
+fixes paging order and accepts both direction spellings.
+`NormalizeWithAndReturnClauses.scala:253-347` under
+`community/cypher/front-end/rewriting/src/main/scala/org/neo4j/cypher/internal/rewriting/rewriters/preparatoryRewriters/`
+uses typed AST hash keys and rewrites projected entity references.
+`SemanticExpressionCheck.scala:552-564` under
+`community/cypher/front-end/ast/src/main/scala/org/neo4j/cypher/internal/ast/semantics/`
+permits label operands that may be entities. Behavior consulted, no code copied.
 GqlOrderPagingParserTests, GqlKeywordDispositionTests, GqlProfileExecutionTests,
 GqlOrderPagingTests and GraphOrderPagingWireTests pin the executable surface.
 

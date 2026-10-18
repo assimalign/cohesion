@@ -22,6 +22,8 @@ public sealed class GqlOrderPagingTests
     [Theory(DisplayName = "Cohesion Test [Graph] - Ordering and paging: row sequences follow keys, null placement and aliases")]
     [InlineData("RETURN a.name ORDER BY a.age", "Bob,Isolated,Alice")]
     [InlineData("RETURN a.name ORDER BY a.age DESC", "Alice,Isolated,Bob")]
+    [InlineData("RETURN a.name ORDER BY a.age ASCENDING", "Bob,Isolated,Alice")]
+    [InlineData("RETURN a.name ORDER BY a.age DESCENDING", "Alice,Isolated,Bob")]
     [InlineData("RETURN a.name ORDER BY a.active", "Bob,Alice,Isolated")]
     [InlineData("RETURN a.name ORDER BY a.active DESC", "Isolated,Alice,Bob")]
     [InlineData("RETURN a.name ORDER BY a.active ASC NULLS FIRST", "Isolated,Bob,Alice")]
@@ -41,6 +43,10 @@ public sealed class GqlOrderPagingTests
     [InlineData("RETURN DISTINCT a.name ORDER BY a.name + ''", "Alice,Bob,Isolated")]
     [InlineData("RETURN a.name, {age:a.age} AS person ORDER BY person.age", "Bob,Isolated,Alice")]
     [InlineData("RETURN a.name ORDER BY CASE a.age WHEN 42 THEN a WHEN 17 THEN [] ELSE {} END", "Isolated,Alice,Bob")]
+    [InlineData("RETURN a.name, a.age / 100 AS bucket ORDER BY a.age / 100.0", "Bob,Isolated,Alice")]
+    [InlineData("RETURN a.name, a.age / 100.0 AS bucket ORDER BY a.age / 100", "Alice,Bob,Isolated")]
+    [InlineData("RETURN a.name, a AS p ORDER BY p:Person, p.name", "Alice,Bob,Isolated")]
+    [InlineData("RETURN a.name, COALESCE(a, a) AS x ORDER BY x:Person, x.name", "Alice,Bob,Isolated")]
     public async Task Execute_OrderPagingTail_ShouldReturnExpectedSequenceAsync(string tail, string names)
     {
         // Arrange
@@ -94,9 +100,29 @@ public sealed class GqlOrderPagingTests
         (await RowsAsync(session, "SHOW LABELS")).ShouldBeEmpty();
     }
 
+    [Fact(DisplayName = "Cohesion Test [Graph] - Paging: non-finite and unsupported CLR inputs keep the binding diagnostic")]
+    public async Task Execute_InvalidClrPageValue_ShouldReportBindingCodeBeforeMutationAsync()
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create("bad-clr-page", new());
+        var database = await engine.CreateDatabaseAsync("graph", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        object[] values = [double.NaN, double.PositiveInfinity, float.NegativeInfinity, '2', new object()];
+        // Act / Assert
+        foreach (object value in values)
+        {
+            var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(
+                "INSERT (:Unwritten) RETURN 1 LIMIT $page", new Dictionary<string, object?> { ["page"] = value }, CancellationToken.None));
+            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG003");
+        }
+        (await RowsAsync(session, "SHOW LABELS")).ShouldBeEmpty();
+    }
+
     [Theory(DisplayName = "Cohesion Test [Graph] - Ordering and paging: DISTINCT rejects hidden bindings and missing parameters stay coded")]
     [InlineData("MATCH (a:Person) RETURN DISTINCT a.name ORDER BY a.age")]
     [InlineData("MATCH (a:Person) RETURN DISTINCT a.name ORDER BY a.age + 1")]
+    [InlineData("MATCH (a:Person) RETURN DISTINCT a.age / 100 AS bucket ORDER BY a.age / 100.0")]
+    [InlineData("MATCH (p:Person) RETURN DISTINCT p.age / 2 AS h ORDER BY p.age / 2.0")]
     [InlineData("MATCH (a) RETURN a.name LIMIT $missing")]
     [InlineData("EXPLAIN RETURN 1 OFFSET @missing")]
     [InlineData("MATCH (a) RETURN a.name ORDER BY $missing")]
@@ -126,6 +152,102 @@ public sealed class GqlOrderPagingTests
         // Assert
         rows.Select(row => row[0]).ShouldBe(new object?[] { 31L, 18L });
         entities.Select(row => ((GraphNode)row[0]!).Properties["name"]).ShouldBe(["Bob", "Isolated", "Alice"]);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Graph] - Ordering: DISTINCT permits a projected entity through its original binding")]
+    [InlineData("a.name", "Alice,Bob,Isolated")]
+    [InlineData("a:Person, a.name", "Alice,Bob,Isolated")]
+    public async Task Execute_RenamedDistinctEntity_ShouldKeepBindingInScopeAsync(string key, string expected)
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create("renamed-order", new());
+        var database = await engine.CreateDatabaseAsync("graph", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync(seed, cancellationToken: CancellationToken.None);
+        // Act
+        var rows = await RowsAsync(session, "MATCH (a:Person) RETURN DISTINCT a AS person ORDER BY " + key);
+        // Assert
+        rows.Select(row => ((GraphNode)row[0]!).Properties["name"]).ShouldBe(expected.Split(','));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Graph] - Ordering: integer and floating literals remain distinct projection shapes")]
+    public async Task Execute_TypedLiteralKey_ShouldEvaluateWrittenArithmeticAsync()
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create("typed-order", new());
+        var database = await engine.CreateDatabaseAsync("graph", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync("INSERT (:P {v:3}), (:P {v:2})", cancellationToken: CancellationToken.None);
+        // Act
+        var rows = await RowsAsync(session, "MATCH (p:P) RETURN p.v AS v, p.v / 2 AS h ORDER BY p.v / 2.0");
+        // Assert
+        rows.Select(row => row[0]).ShouldBe(new object?[] { 2L, 3L });
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Graph] - Ordering: computed entity label tests resolve at runtime")]
+    public async Task Execute_ComputedEntityLabel_ShouldAcceptEntitiesAndRejectScalarValuesAsync()
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create("entity-label-order", new());
+        var database = await engine.CreateDatabaseAsync("graph", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync(seed, cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("MATCH (a:Person {name:'Bob'}) INSERT (a)-[:MANAGES]->(:Manager {name:'Zoe'})", cancellationToken: CancellationToken.None);
+        // Act
+        var rows = await RowsAsync(session, "MATCH (a:Person) OPTIONAL MATCH (a)-[:MANAGES]->(m) RETURN a.name, COALESCE(m, a) AS who ORDER BY who:Manager DESC, a.name");
+        var scalar = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(
+            "MATCH (a:Person) RETURN CASE WHEN a.age > 20 THEN a ELSE 1 END AS who ORDER BY who:Person", cancellationToken: CancellationToken.None));
+        var staticScalar = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(
+            "MATCH (a:Person) RETURN a.name AS n ORDER BY n:Person", cancellationToken: CancellationToken.None));
+        await using var nodeAlias = (await session.ExecuteAsync(
+            "MATCH (a:Person) RETURN a AS person ORDER BY person:Person", cancellationToken: CancellationToken.None)).ShouldBeAssignableTo<DatabaseResultSet>();
+        await using var relationshipAlias = (await session.ExecuteAsync(
+            "MATCH ()-[r:MANAGES]->() RETURN r AS relAlias ORDER BY relAlias:MANAGES", cancellationToken: CancellationToken.None)).ShouldBeAssignableTo<DatabaseResultSet>();
+        // Assert
+        rows.Select(row => row[0]).ShouldBe(["Bob", "Alice", "Isolated"]);
+        scalar.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG003");
+        staticScalar.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG003");
+        (nodeAlias.Diagnostics ?? []).ShouldBeEmpty();
+        (relationshipAlias.Diagnostics ?? []).ShouldBeEmpty();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Graph] - Ordering: stable ties preserve reverse input order beyond insertion sort")]
+    [InlineData("ASC")]
+    [InlineData("DESC")]
+    public async Task Execute_EqualKeys_ShouldKeepReverseInputOrderAsync(string direction)
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create("stable-order", new());
+        var database = await engine.CreateDatabaseAsync("graph", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        var input = Enumerable.Range(0, 64).Reverse().ToArray();
+        await session.ExecuteAsync("INSERT " + string.Join(",", input.Select(i => $"(:N {{v:{i}, k:1}})")), cancellationToken: CancellationToken.None);
+        // Act
+        var rows = await RowsAsync(session, "MATCH (a:N) RETURN a.v ORDER BY a.k " + direction);
+        // Assert
+        rows.Select(row => row[0]).ShouldBe(input.Select(i => (object?)(long)i));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Graph] - Ordering: entities, relationships, lists and paths follow identity and path sequence")]
+    public async Task Execute_EntityPathKeys_ShouldFollowRecordedOrderAsync()
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create("path-order", new());
+        var database = await engine.CreateDatabaseAsync("graph", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync("INSERT (s:S {name:'S'})-[:R {v:2}]->(b:B {name:'B'})-[:R {v:3}]->(c:C {name:'C'}), (s)-[:R {v:1}]->(c)", cancellationToken: CancellationToken.None);
+        // Act
+        var nodes = await RowsAsync(session, "MATCH (a) RETURN a.name ORDER BY a DESC");
+        var relationships = await RowsAsync(session, "MATCH ()-[r]->() RETURN r.v ORDER BY r DESC");
+        var paths = await RowsAsync(session, "MATCH p=(s:S)-[r]->(b) RETURN b.name ORDER BY p");
+        var mixed = await RowsAsync(session, "MATCH p=(s:S)-[r]->(b) RETURN b.name ORDER BY CASE b.name WHEN 'B' THEN p ELSE [] END");
+        var relationshipAlias = await RowsAsync(session, "MATCH ()-[r]->() RETURN r.v, r AS relAlias ORDER BY relAlias:R, relAlias.v");
+        // Assert
+        nodes.Select(row => row[0]).ShouldBe(["C", "B", "S"]);
+        relationships.Select(row => row[0]).ShouldBe(new object?[] { 1L, 3L, 2L });
+        paths.Select(row => row[0]).ShouldBe(["B", "C"]);
+        mixed.Select(row => row[0]).ShouldBe(["C", "B"]);
+        relationshipAlias.Select(row => row[0]).ShouldBe(new object?[] { 1L, 2L, 3L });
     }
 
     [Fact(DisplayName = "Cohesion Test [Graph] - Ordering and paging: mixed and nested values use total order and exact numbers")]
@@ -237,6 +359,8 @@ public sealed class GqlOrderPagingTests
             new([], null, [], [], false, [projection]) { OrderBy = [null!] },
             new([], null, [], [], false, [projection]) { OrderBy = [new(new GqlLiteralExpression(1L), (GqlSortDirection)99)] },
             new([], null, [], [], false, [projection]) { OrderBy = [new(new GqlLiteralExpression(1L), NullOrdering: (GqlNullOrdering)99)] },
+            new([], null, [], [], false, [projection]) { OrderBy = [new(new GqlLogicalExpression(GqlLogicalOperator.And, null!))] },
+            new([], null, [], [], false, [projection]) { OrderBy = [new(new GqlLogicalExpression(GqlLogicalOperator.And, [new GqlLiteralExpression(true), null!]))] },
             new([], null, [], [], false, [projection]) { Limit = new GqlBinaryExpression(new GqlLiteralExpression(1), "+", new GqlLiteralExpression(1)) },
             new([], null, [], [], false, []) { CatalogSurface = GqlCatalogSurface.Labels, Limit = new GqlLiteralExpression(1L) },
         };

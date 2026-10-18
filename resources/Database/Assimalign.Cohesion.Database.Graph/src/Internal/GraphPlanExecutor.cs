@@ -41,7 +41,7 @@ internal static class GraphPlanExecutor
                 string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ParameterCollision, name), statement.GqlExpression.Location));
             return GraphCatalogIntrospection.Execute(database, operation, statement.GqlExpression, surface, token);
         }
-        var plan = new GraphPlanner(database, operation.Context.Snapshot).Plan(statement.GqlExpression, parameters, paths);
+        var plan = new GraphPlanner(database, operation.Context.Snapshot).Plan(statement.GqlExpression, parameters, paths, token);
         parameters = plan.Parameters;
         // Validate result shape before locking a writer, expanding a MATCH or applying mutations.
         if (scalarsOnly && plan.Projections.Any(projection => projection.Kind != GraphProjectionKind.Scalar))

@@ -535,9 +535,9 @@ parser; this is a bounded ISO subset, not a full conformance claim.
 ### Ordering and paging (#1142)
 
 GraphPlanner binds sort keys against projected names and source bindings. DISTINCT admits only
-projected values, with structural expression matching independent of spelling and source spans.
+projected values, including a projected entity under any alias. Structural matching requires literal type and value to agree. A per-plan hash index caches subtree hashes for linear ORDER BY planning and observes cancellation during indexing and validation. Computed aliases that may hold entities admit label tests, with runtime COHDBG003 for non-entity values.
 GraphSortPagePlan records keys and validated non-negative Int64 offset/limit counts, including
-named parameters; invalid dynamic counts are COHDBG013 before reads or writer locking.
+named parameters; invalid dynamic graph counts are COHDBG013 before reads or writer locking; non-finite and unsupported CLR inputs are COHDBG003 during binding.
 EXPLAIN maps SortPage and SortKey records explicitly and never executes the stage.
 
 The executor materializes all matches and applies every mutation before projecting. The common
