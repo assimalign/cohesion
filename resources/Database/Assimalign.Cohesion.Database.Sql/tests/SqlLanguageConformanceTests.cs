@@ -418,6 +418,7 @@ public sealed class SqlLanguageConformanceTests
             {
                 CheckRows(await ReadRowsAsync(result), [[2, 45], [3, 45]]);
                 await ExpectRowsAsync(session, "SELECT d.id FROM (SELECT id FROM t WHERE age > 40 ORDER BY id LIMIT 1) d;", [[2]]);
+                await ExpectRowsAsync(session, "SELECT outer_t.id FROM t outer_t WHERE EXISTS (SELECT inner_t.id FROM t inner_t WHERE inner_t.id = outer_t.id AND inner_t.age > 40) ORDER BY outer_t.id;", [[2], [3]]);
                 (await session.ExecuteAsync("UPDATE t SET age = age WHERE id IN (SELECT id FROM t WHERE id = 2);", cancellationToken: CancellationToken.None)).AffectedCount.ShouldBe(1);
             }),
         [SqlClauses.Join] = new("SELECT t.name, p.email FROM t INNER JOIN t copy ON t.id = copy.id LEFT JOIN profiles p ON t.id = p.user_id ORDER BY t.id;",

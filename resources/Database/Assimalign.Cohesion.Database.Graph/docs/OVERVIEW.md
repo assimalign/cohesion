@@ -3,7 +3,8 @@
 `Assimalign.Cohesion.Database.Graph` is the embedded property-graph engine. It creates, opens,
 enumerates and drops logical databases, opens database-bound sessions, and implements the frozen
 node, relationship and traversal operations of `GraphDatabase`. A session executes the bounded GQL
-subset, including source-ordered MATCH/OPTIONAL MATCH with null extension, named scalar parameters, Boolean/arithmetic WHERE and RETURN expressions,
+subset, including source-ordered MATCH/OPTIONAL MATCH with null extension, named scalar/list/map parameters, Boolean/arithmetic WHERE and RETURN expressions,
+CASE, COALESCE, NULLIF, list/map constructors and field/index access,
 RETURN DISTINCT/ALL, star, aliases and standalone RETURN, described in [Graph.Language](../../Assimalign.Cohesion.Database.Graph.Language/docs/DESIGN.md).
 
 ```csharp
@@ -45,7 +46,7 @@ storage and catalog compose the shared kernel. It is `net10.0`, AOT compatible, 
 reflection nor `Microsoft.Extensions.*`. `GraphDatabaseServer` dispatches scalar GQL, mutations,
 catalog `SHOW`, and path queries to the same engine. The separate NuGet-only
 [Graph.Client](../../Assimalign.Cohesion.Database.Graph.Client/docs/OVERVIEW.md) package supplies
-pooled scalar execution and path streaming. Security policy integration, replication and
+pooled value execution with negotiated composite encoding and path streaming. Security policy integration, replication and
 compiled-schema provisioning remain outside this phase. See [DESIGN.md](DESIGN.md) for lifecycle,
 isolation, traversal bounds and the disk format.
 

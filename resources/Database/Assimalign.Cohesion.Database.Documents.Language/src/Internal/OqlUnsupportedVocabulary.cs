@@ -48,6 +48,7 @@ internal static class OqlUnsupportedVocabulary
         new("INSERT", "INSERT", OqlWordPosition.Clause),
         new("RETURNING", "RETURNING", OqlWordPosition.Trailing),
         new("UPDATE", "UPDATE", OqlWordPosition.Clause),
+        // Enabled by OqlClauses.Delete; retained here for contextual keyword coverage.
         new("DELETE", "DELETE", OqlWordPosition.Clause),
         new("USE", "USE", OqlWordPosition.Clause),
         new("BEGIN", "BEGIN", OqlWordPosition.Clause),

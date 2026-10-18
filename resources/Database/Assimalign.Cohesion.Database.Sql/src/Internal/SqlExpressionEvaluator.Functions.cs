@@ -397,6 +397,10 @@ internal sealed partial class SqlExpressionEvaluator
 
         internal SqlTypingMemory(SqlExpressionEvaluator? slotScope) => SlotScope = slotScope;
 
+        internal SqlCorrelationScope? OuterScope { get; set; }
+        internal HashSet<int>? OuterDependencies { get; set; }
+        internal List<SqlOuterReference>? OuterReferences { get; set; }
+
         /// <summary>Gets the scope a grouping's slot expressions are typed in; null outside a grouping.</summary>
         internal SqlExpressionEvaluator? SlotScope { get; }
 

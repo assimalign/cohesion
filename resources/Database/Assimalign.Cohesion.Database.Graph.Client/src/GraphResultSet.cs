@@ -6,7 +6,7 @@ using Assimalign.Cohesion.Database.Protocol;
 
 namespace Assimalign.Cohesion.Database.Graph.Client;
 
-/// <summary>A materialized scalar graph result with column metadata and an affected count.</summary>
+/// <summary>A materialized graph value result with column metadata and an affected count.</summary>
 public sealed class GraphResultSet : IReadOnlyList<GraphRow>
 {
     private readonly IReadOnlyList<GraphRow> _rows;

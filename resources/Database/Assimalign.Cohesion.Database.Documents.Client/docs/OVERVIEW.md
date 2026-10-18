@@ -34,6 +34,9 @@ namespaces. The client library itself references only the transport contracts. Q
 accept JSON scalars and `JsonElement`; object and array results remain owned `JsonElement`
 values. A stored `Document` carries its exact UTF-8 content, identity and version.
 
+OQL INSERT and DELETE return their affected counts through ExecuteAsync. DELETE retains the
+collection and index definitions; EXPLAIN DELETE returns its chosen scan or index seek.
+
 `DocumentClientException.Code` describes the wire failure; its inherited `DatabaseException.Diagnostics`
 retains the server's codes and source locations, and its message preserves the composed `CODE: message`
 text. A rejected statement leaves the session usable. A malformed or

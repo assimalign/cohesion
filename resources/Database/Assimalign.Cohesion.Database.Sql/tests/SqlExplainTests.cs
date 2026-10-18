@@ -48,6 +48,7 @@ public sealed class SqlExplainTests
     [InlineData("SELECT s.TABLE_NAME FROM INFORMATION_SCHEMA.TABLES s JOIN INFORMATION_SCHEMA.COLUMNS c ON s.TABLE_NAME = c.TABLE_NAME", "SystemView", false)]
     [InlineData("SELECT t.id FROM t JOIN INFORMATION_SCHEMA.COLUMNS c ON t.id = c.ORDINAL_POSITION", "SystemView", false)]
     [InlineData("SELECT id FROM t WHERE id IN (SELECT id FROM u)", "Subqueries", false)]
+    [InlineData("SELECT t.id FROM t WHERE EXISTS (SELECT u.id FROM u WHERE u.id = t.id)", "CorrelatedSubqueries", false)]
     [InlineData("INSERT INTO t VALUES (3, 30)", "Insert", false)]
     [InlineData("INSERT INTO t SELECT id, age FROM t", "InsertSelect", false)]
     [InlineData("UPDATE t SET age = 99 WHERE id = 1", "Update", false)]
@@ -69,6 +70,11 @@ public sealed class SqlExplainTests
         var rows = await RowsAsync(session, "EXPLAIN " + statement + ";");
         // Assert
         rows.ShouldContain(row => Equals(row[2], expected));
+        if (expected == "CorrelatedSubqueries")
+        {
+            rows.Count(row => Equals(row[2], "TableScan")).ShouldBe(2);
+            rows.ShouldContain(row => Equals(row[2], "TableScan") && Equals(row[3], "dbo.u"));
+        }
         if (statement.Contains("age >=", StringComparison.Ordinal))
         {
             var seek = rows.Single(row => Equals(row[2], "IndexSeek"));

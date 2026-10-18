@@ -15,7 +15,7 @@ flowchart LR
     Core --> Server[GraphDatabaseServer]
 ```
 
-`QueryAsync` returns scalar RETURN expressions (also standalone, DISTINCT/ALL and aliased) and the existing SHOW catalog rows as
+`QueryAsync` returns scalar, list and map RETURN expressions (also standalone, DISTINCT/ALL and aliased) and the existing SHOW catalog rows as
 `GraphResultSet`, with column metadata and rows accessible by ordinal or name.
 `ExecuteAsync` sends CREATE, INSERT, DELETE, and DETACH DELETE to the engine and returns its
 affected count. The server retains engine ownership, cycle, and database-scoping enforcement.
@@ -34,9 +34,10 @@ client to close the pool. Scalar parse/execution failures and terminal path reje
 path output retain the session; later path failures discard it. Explicit transactions are not exposed:
 BEGIN/COMMIT/ROLLBACK and the reserved Transaction message are unsupported.
 
-Parameters use the shared scalar codec and bind `$name` or `@name` in property maps, WHERE
+Parameters use scalar components, or GraphValueCodec when graph.composite-values is negotiated, and bind `$name` or `@name` in property maps, WHERE
 operands and RETURN expressions. Bare names match case-sensitively after removing one sigil; runtime scalar types are
-preserved. The client never parses GQL or retries statements.
+preserved, including nested NULLs. Lists materialize as object arrays and maps as read-only ordinal
+string dictionaries. Conditional expressions include CASE, COALESCE and NULLIF. The client never parses GQL or retries statements.
 See [design](DESIGN.md) for completion and lifetime behavior.
 
 Supply an `IDuplexConnectionFactory` through `GraphClientOptions.ConnectionFactory`; the shared pool owns the duplex connections it establishes.

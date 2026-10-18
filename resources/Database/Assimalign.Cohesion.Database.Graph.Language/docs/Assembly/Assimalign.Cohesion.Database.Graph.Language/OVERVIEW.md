@@ -24,8 +24,13 @@ and labeled-predicate (`GqlLabeledPredicate`) classes describe scalar expression
 `GqlUnaryExpression` holds NOT or a numeric sign. `GqlIsNullExpression` and
 `GqlTruthTestExpression` hold null and Boolean truth tests; a null `TruthValue` means UNKNOWN.
 `GqlStringPredicateExpression` uses `GqlStringPredicateOperator` for ordinal prefix, suffix or
-substring tests. `GqlInExpression` has an `Operand` and a `GqlListExpression` whose copied,
-read-only `Items` are supported only on IN's right side. Programmatically constructed ASTs
+substring tests. `GqlInExpression` has an `Operand` and a `List` of type `GqlExpression`, allowing any list-valued expression.
+`GqlListExpression.Items` is a copied, read-only sequence supported in every value position.
+`GqlMapExpression` holds ordinal entries; `GqlSubscriptExpression` and `GqlMemberExpression` read values.
+`GqlCaseExpression` holds the optional operand, ordered `GqlCaseAlternative` records and ELSE.
+Each alternative's `Comparison` defaults to equality and also represents comparison parts and null tests;
+comma operands expand to alternatives sharing THEN. `GqlCoalesceExpression` and `GqlNullIfExpression`
+represent the case abbreviations. Programmatically constructed ASTs
 receive planner shape validation too.
 
 `GqlParameterExpression` stores a bare, case-sensitive `Name` and the complete reference's

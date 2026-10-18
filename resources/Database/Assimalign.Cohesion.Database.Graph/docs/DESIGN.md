@@ -754,7 +754,7 @@ to exercise that enforcement path; compiled provisioning is not included.
 | `GQL0001`–`GQL0006` | Parser syntax/literal/bound errors; see language design. `GQL0005` is the 64-relationship path bound only |
 | `GQL0007` | Attempt to mutate catalog introspection results |
 | `GQL0008` | A Cypher arrow (`-->`, `--`) directly after a pattern element, which GQL reads as a comment |
-| `GQL0009` | Groups, unary expressions or IN lists nested deeper than the parsing thread's stack; `GraphQueryRequest.FromGql` and the engine report it as `COHDBG008` |
+| `GQL0009` | Groups, unary expressions, CASE or collection constructors nested deeper than the parsing thread's stack; `GraphQueryRequest.FromGql` and the engine report it as `COHDBG008` |
 | `COHDBG001` | Invalid pattern, variable binding, label expression, predicate or traversal specification, including an insertion that names `\|`, `!`, `%` or an either-direction edge, a binary `AND`, and a chain with fewer than two operands |
 | `COHDBG002` | Unknown label or relationship type in a schema write (`CreateIndexAsync`, `DropLabelAsync`, `DropRelationshipTypeAsync`), a failed statement. A read never reports it; see `COHDBG010` and `COHDBG011` |
 | `COHDBG003` | Schema/data mismatch, restricted deletion or invalid graph mutation |
@@ -767,9 +767,10 @@ to exercise that enforcement path; compiled provisioning is not included.
 | `COHDBG010` | **Warning**, not a failure: a read-only statement or `GetIndexesAsync` names a label the database does not have at the statement's snapshot. No node carries it, so the read returns the rows the expression still matches (none for a required label), reports this `DiagnosticSeverity.Warning` diagnostic in `DatabaseResult.Diagnostics` or `GraphSchemaResult<T>.Diagnostics`, and leaves an explicit transaction active. Neo4j's `UnknownLabelWarning`, GQLSTATUS 01N50. Not sent over protocol 2.0 |
 | `COHDBG011` | **Warning**, not a failure: the same for a relationship type the database does not have; no relationship has it. Neo4j's `UnknownRelationshipTypeWarning`, GQLSTATUS 01N51. Not sent over protocol 2.0 |
 | `COHDBG012` | The database is offline (#1243): a durable flush of its journal or data file failed. Every operation is refused with `DatabaseOfflineException` until `OpenDatabaseAsync` reopens it; `Unavailable` on the wire. The storage's `StorageOfflineException` (`COHDBS002`) is the inner exception ("Storage operations") |
-| `COHDBG013` | Scalar value error (#1140): non-Boolean WHERE/logical value, invalid arithmetic or concatenation types, zero divisor, overflow or non-finite result. Reused by #1146, #1147 and #1148; structured Diagnostic, code-free Message, composed as CODE: message on protocol 2.0 |
+| `COHDBG013` | Value error (#1140): non-Boolean conditions, invalid arithmetic, concatenation, container, index or field types, zero divisor, overflow or non-finite result. Reused by #1146, #1147 and #1148; structured Diagnostic, code-free Message, composed as CODE: message on protocol 2.0 |
 | `COHDBG014` | Multiple map keys normalize to the same bare parameter name |
 | `COHDBG015` | Duplicate final result column name, implicit or explicit, under ordinal case-sensitive comparison; rejected during planning before execution |
+| `COHDBG016` | A composite result requires graph.composite-values; ExecutionFailure before ResultHeader, preserving the authenticated session |
 | `COHDBI001` | `Database.Indexing`'s code, carried unchanged: opening a database whose property-index pages are in a B-tree page format this engine does not read (format 1, written before #1194) fails with "Database 'x' cannot be opened. COHDBI001: …", checked before recovery's scrub, so a cleanly closed database's files stay as they were (a crashed one has had only the storage layer's journal redo and undo, and keeps its journal) |
 | `COHDBS001` | `Database.Storage`'s code, carried unchanged: opening a database whose file set is in another storage format (#1251) fails with "Database 'x' cannot be opened. COHDBS001: …", the storage's `StorageFormatException` as its inner exception, refused before its journal is read, so the files stay as they were |
 
@@ -995,6 +996,54 @@ on its own backoff"). That later full pass is the database's own retry, a `Failu
 the failure, not the next `MaintenanceInterval` (owner decision 46), so a full pass that keeps
 failing gives up at about 101 s, like the other workers.
 
+## Composite values and wire framing (#1146)
+
+Graph owns the public GraphValueCodec in src/Protocol, shared by the server and Graph.Client
+through their existing reference. This takes the issue's public codec option; no internal
+type was promoted, interface, friend grant or project reference added. Both expressions and
+wire ship together because #1105 has landed. GraphProtocol.CompositeValues registers one
+capability, graph.composite-values, alongside diagnostics, with no protocol version bump.
+GraphPathResult and Path frames are unchanged. No catalog/storage format changes occur:
+composites are transient query values, and stored properties and index keys stay scalar-only.
+
+With the capability, each Execute/ExecutePaths parameter is one GraphValueCodec component.
+ResultHeader's column type keeps its DatabaseType identity in bits 0–6; bit 7 marks a column
+that may contain composites. An unmarked column remains one self-delimiting DatabaseValueCodec
+component, with no extra bytes even on a negotiated session. A marked column starts with tag 0
+and one scalar tuple component, or tag 1 and a little-endian i32 byte length followed by one
+GraphValueCodec component. Unsigned scalars use the latter form to preserve their CLR types.
+The underlying query metadata remains DatabaseType.Null. Without negotiation, parameters and
+rows retain their tuple bytes. Possible composite projections raise COHDBG016 statically before
+writer locking, reads or mutations, including skipped CASE arms and empty matches.
+
+Constructed values enforce depth, aggregate count and real encoded-byte bounds during evaluation,
+inside the statement transaction, with COHDBG013. Parameters enforce the same bounds while
+planning with COHDBG003. Header byte sizes are checked before writer locking; row byte sizes are checked during materialization before commit. Thus
+bounds cannot first refuse a write in wire encoding; the same authenticated session stays reusable.
+Scalar results have no encoding preflight pass, per-row stream or per-value writer. One reusable
+tuple writer allocates only the outgoing row array. Composite results reuse one stream and binary
+writer across rows, and the same tuple scratch writer across scalar components.
+
+Component tags: 0 = scalar (i32 byte length, then exactly one DatabaseValueCodec component),
+1 = list (i32 item count, then recursive components), 2 = map (i32 entry count, then each
+i32 UTF-8 key byte length, key bytes, recursive value). Tags 3/4/5/6 preserve Byte/UInt16/
+UInt32/UInt64 in 1/2/4/8 little-endian bytes because the scalar component codec has no unsigned
+tags. All counts/lengths are little-endian signed nonnegative Int32. Maps require unique
+ordinal keys and strict UTF-8. Lists decode to object?[]; maps to read-only ordinal dictionaries.
+Scalar component runtime types are preserved, including Decimal and finite floating elements.
+
+One component permits depth 64 (root depth zero), 65536 total values including root, and
+16777216 encoded bytes. A row fits the same frame byte limit. The decoder checks depth,
+aggregate counts, remaining minimum bytes and lengths before allocating a container/string.
+Malformed scalar/composite payloads, duplicate keys, invalid UTF-8, unknown tags, trailing
+bytes or exceeded bounds are ProtocolViolation, for request parameters and result rows alike.
+Encoding is explicit/static and uses no reflection, JSON serializer or runtime code generation.
+
+Expression semantics and reference-engine evidence are in
+[Graph.Language DESIGN](../../Assimalign.Cohesion.Database.Graph.Language/docs/DESIGN.md#conditional-expressions-and-composite-values-1146).
+No new plan record is needed: expressions stay in GraphProjectionPlan and EXPLAIN renders
+their syntax; the existing closed projection gate propagates entity-valued result branches.
+
 ## Graph wire family
 
 `GraphProtocol.Family` fixes the graph vocabulary for an accepted connection. Shared
@@ -1015,15 +1064,15 @@ followed by those bytes. There is no padding.
 | Byte | Direction | Payload |
 | --- | --- | --- |
 | 5 (`Execute`) | Client → server | GQL string; `int32` parameter count; repeated parameter-name string, `int32` encoded-value byte length, value bytes |
-| 6 (`ResultHeader`) | Server → client | `int32` column count; repeated column-name string and one `DatabaseType` byte |
-| 7 (`ResultRow`) | Server → client | Concatenated self-describing scalar tuple components, exactly one per declared column |
+| 6 (`ResultHeader`) | Server → client | `int32` column count; repeated column-name string and one type byte: DatabaseType in bits 0–6, negotiated composite-column flag in bit 7 |
+| 7 (`ResultRow`) | Server → client | One value per column: unmarked scalar tuple component; marked tag 0 plus scalar, or tag 1 plus little-endian Int32 length and GraphValueCodec component |
 | 8 (`ResultComplete`) | Server → client | `int64` affected count; -1 for a result set |
 | 9 (`Transaction`) | Client → server | Reserved legacy identifier; server rejects it with `ProtocolViolation` |
 | 64 (`ExecutePaths`) | Client → server | The same GQL/parameter payload as byte 5, requesting path-shaped results |
 | 65 (`Path`) | Server → client | Ordered node and relationship sequences in the format below |
 | 66 (`PathsComplete`) | Server → client | Exactly eight bytes: nonnegative `int64` count of Path frames in this exchange |
 
-Catalog parameters and tuples retain `DatabaseValueCodec` encoding; the precise scalar tags,
+Without graph.composite-values, catalog parameters and tuples retain `DatabaseValueCodec` encoding; the precise scalar tags,
 numeric transforms and variable-length escaping are specified in
 [the unchanged SQL scalar wire encoding](../../Assimalign.Cohesion.Database.Sql/docs/WIRE-PROTOCOL.md).
 The catalog response is Header, zero or more Row frames, Complete; command responses may have only
@@ -1046,11 +1095,19 @@ The other family layouts remain prose-only. `Execute` (5) and `ExecutePaths` (64
 payload: bytes 0–3 hold the signed 32-bit big-endian statement length `S`, the statement starts at
 byte 4, and bytes `4 + S`–`7 + S` hold the signed 32-bit big-endian parameter count. Each parameter
 then starts at some byte `Q` with a signed 32-bit big-endian name length `N` at `Q`, `N` name bytes
-at `Q + 4`, a signed 32-bit big-endian encoded-value length `V` at `Q + 4 + N`, and `V` tuple-codec
-bytes at `Q + 8 + N`. `ResultHeader` (6) starts with its signed 32-bit big-endian column count at
+at `Q + 4`, a signed 32-bit big-endian encoded-value length `V` at `Q + 4 + N`, and `V` value
+bytes at `Q + 8 + N`: one GraphValueCodec component when graph.composite-values is negotiated,
+otherwise one scalar tuple component. Pattern property maps remain scalar-only.
+`ResultHeader` (6) starts with its signed 32-bit big-endian column count at
 bytes 0–3; each repeated column has the same four-byte name length and name bytes followed by one
-`DatabaseType` byte. `ResultRow` (7) is self-delimiting tuple components from byte 0 through the
-payload end. The `ResultComplete` (8) encoder emits one signed 64-bit big-endian affected count at
+type byte: DatabaseType in bits 0–6, negotiated composite-column flag in bit 7.
+`ResultRow` (7) contains one value per header column from byte 0 through the payload end.
+Unmarked columns retain self-delimiting scalar tuple bytes. A marked column starts with tag 0
+plus one scalar tuple component, or tag 1 plus a little-endian i32 length and GraphValueCodec bytes.
+Negative/truncated lengths and trailing row bytes are ProtocolViolation. Lists materialize as
+object?[] and maps as read-only IReadOnlyDictionary<string, object?>. Values permit depth 64,
+65,536 values and 16 MiB; rows fit 16 MiB too. Clients refuse composite parameters locally
+without negotiation. The `ResultComplete` (8) encoder emits one signed 64-bit big-endian affected count at
 bytes 0–7. `Transaction` (9) is reserved and has no accepted graph payload. `PathsComplete` (66) is
 exactly a nonnegative signed 64-bit big-endian path count at bytes 0–7 with no trailing bytes.
 

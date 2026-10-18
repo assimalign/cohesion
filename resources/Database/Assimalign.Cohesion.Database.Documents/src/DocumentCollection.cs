@@ -161,17 +161,23 @@ public sealed class DocumentCollection
     public ValueTask<bool> DeleteAsync(DocumentDatabaseSession session, DocumentId id, DocumentVersion? expectedVersion = null, CancellationToken cancellationToken = default)
     {
         ValidateId(id);
-        return _database.RunAsync(ValidateSession(session), async operation =>
-        {
-            await _database.LockWriterAsync(operation.Context, cancellationToken).ConfigureAwait(false);
-            EnsureCollection(operation.Context, writing: true);
-            var previous = _database.Catalog.FindDocument(_collection.Id, id.Value, operation.Context.Snapshot);
-            EnsureCurrent(operation.Context, id, previous, expectedVersion);
-            if (previous is null) { return false; }
-            await _database.DataStorage.TombstoneContentAsync(_database.Coordinator, operation.Context, DocumentDatabase.Content(previous.Value), cancellationToken).ConfigureAwait(false);
-            await _database.Catalog.DeleteDocumentAsync(_collection.Id, id.Value, operation.Context, cancellationToken).ConfigureAwait(false);
-            return true;
-        }, cancellationToken);
+        return _database.RunAsync(ValidateSession(session), operation =>
+            DeleteAsync(operation.Context, id, expectedVersion, cancellationToken), cancellationToken);
+    }
+
+    // The caller owns the statement, as with WriteAsync. Content tombstones and index
+    // removal use its one context, so failure undoes every document in statement DML.
+    internal async ValueTask<bool> DeleteAsync(TransactionContext context, DocumentId id,
+        DocumentVersion? expectedVersion, CancellationToken cancellationToken)
+    {
+        await _database.LockWriterAsync(context, cancellationToken).ConfigureAwait(false);
+        EnsureCollection(context, writing: true);
+        var previous = _database.Catalog.FindDocument(_collection.Id, id.Value, context.Snapshot);
+        EnsureCurrent(context, id, previous, expectedVersion);
+        if (previous is null) { return false; }
+        await _database.DataStorage.TombstoneContentAsync(_database.Coordinator, context, DocumentDatabase.Content(previous.Value), cancellationToken).ConfigureAwait(false);
+        await _database.Catalog.DeleteDocumentAsync(_collection.Id, id.Value, context, cancellationToken).ConfigureAwait(false);
+        return true;
     }
 
     private DocumentDatabaseSession ValidateSession(DocumentDatabaseSession session)

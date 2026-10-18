@@ -2,7 +2,7 @@
 
 `Assimalign.Cohesion.Database.Documents` implements named logical databases containing
 versioned UTF-8 JSON documents. Each session is bound to one database. The engine
-supports document CRUD, OQL queries, KEY/VALUE INSERT and collection/index DDL, secondary B+Tree indexes,
+supports document CRUD, OQL queries, KEY/VALUE INSERT, DELETE and collection/index DDL, secondary B+Tree indexes,
 snapshot and read-committed transactions, durable file or in-memory storage, and a wire server.
 
 `DocumentDatabaseServer.Create(engine, options)` or `engineBuilder.AddServer(options => ...)`
@@ -30,6 +30,10 @@ OQL INSERT creates externally keyed documents from VALUES pairs or SELECT output
 reports the number inserted. META([alias]).id and .version read stored identity and version;
 missing object members are omitted and explicit NULL members are stored. Duplicates fail the
 whole statement with DocumentDuplicateKeyException (COHDOC012).
+
+OQL DELETE FROM collection [AS? alias] [WHERE predicate] reports the number deleted. It
+reuses query index seeks, filters the statement snapshot before writing, and retains the
+collection and its index definitions. EXPLAIN DELETE describes the access without writing.
 
 OQL also creates and removes collections with `CREATE COLLECTION [IF NOT EXISTS] name` and
 `DROP COLLECTION [IF EXISTS] name`. They share the C# collection operations' transaction and

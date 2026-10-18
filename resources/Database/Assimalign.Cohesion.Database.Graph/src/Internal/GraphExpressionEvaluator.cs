@@ -1,20 +1,22 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using Assimalign.Cohesion.Database.Graph.Language;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Graph.Internal;
 
 /// <summary>Evaluates scalar expressions with three-valued logic and stack-checked descent.</summary>
-internal static class GraphExpressionEvaluator
+internal static partial class GraphExpressionEvaluator
 {
     internal static object? Evaluate(GqlExpression expression, IReadOnlyDictionary<string, object?> bindings, IReadOnlyDictionary<string, object?>? parameters = null)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
         try
         {
-            return expression switch
+            var result = expression switch
             {
                 GqlLiteralExpression literal => literal.Value,
                 GqlParameterExpression parameter => Parameter(parameter, parameters),
@@ -26,10 +28,24 @@ internal static class GraphExpressionEvaluator
                 GqlUnaryExpression unary => Unary(unary, bindings, parameters),
                 GqlIsNullExpression test => (Evaluate(test.Operand, bindings, parameters) is null) != test.IsNegated,
                 GqlTruthTestExpression test => (Boolean(Evaluate(test.Operand, bindings, parameters), test.Operand) == test.TruthValue) != test.IsNegated,
+                GqlListExpression list => list.Items.Select(item => Evaluate(item, bindings, parameters)).ToArray(),
+                GqlMapExpression map => Map(map, bindings, parameters),
+                GqlCaseExpression conditional => Case(conditional, bindings, parameters),
+                GqlCoalesceExpression coalesce => Coalesce(coalesce, bindings, parameters),
+                GqlNullIfExpression nullIf => NullIf(nullIf, bindings, parameters),
+                GqlMemberExpression member => Member(Evaluate(member.Operand, bindings, parameters), member.Member, member),
+                GqlSubscriptExpression subscript => Subscript(subscript, bindings, parameters),
                 GqlInExpression membership => In(membership, bindings, parameters),
                 GqlStringPredicateExpression predicate => StringPredicate(predicate, bindings, parameters),
                 _ => throw new GraphPlanningException("COHDBG001", "Unsupported graph expression."),
             };
+            if (result is string || GraphCompositeValues.IsComposite(result))
+            {
+                try { GraphValueCodec.Measure(result); }
+                catch (DatabaseTypeException error)
+                { throw new GraphPlanningException("COHDBG013", error.Message, expression.Location, error); }
+            }
+            return result;
         }
         catch (ArithmeticException error)
         {
@@ -38,12 +54,17 @@ internal static class GraphExpressionEvaluator
     }
 
     internal static object? Scalar(GqlExpression expression, IReadOnlyDictionary<string, object?>? parameters)
-        => expression switch
+    {
+        object? value = expression switch
         {
             GqlLiteralExpression literal => literal.Value,
             GqlParameterExpression parameter => Parameter(parameter, parameters),
             _ => throw new GraphPlanningException("COHDBG001", ErrorMessages.PropertyScalarRequired, expression?.Location),
         };
+        if (GraphCompositeValues.IsComposite(value))
+        { throw new GraphPlanningException("COHDBG003", ErrorMessages.ParameterScalarRequired, expression.Location); }
+        return value;
+    }
 
     internal static object? Parameter(GqlParameterExpression parameter, IReadOnlyDictionary<string, object?>? parameters)
     {
@@ -52,14 +73,11 @@ internal static class GraphExpressionEvaluator
             throw new GraphPlanningException("COHDBG001", string.Format(CultureInfo.CurrentCulture,
                 ErrorMessages.ParameterUnbound, parameter.Name), parameter.Location);
         }
-        // Preserve the runtime value; schema matching uses the typed API's TypeOf promotion.
-        try { GraphDatabase.TypeOf(value); }
-        catch (DatabaseException error)
-        { throw new GraphPlanningException("COHDBG003", ErrorMessages.ParameterScalarRequired, parameter.Location, error); }
-        if (value is double number && !double.IsFinite(number) || value is float single && !float.IsFinite(single))
-        { throw new GraphPlanningException("COHDBG003", ErrorMessages.ParameterScalarRequired, parameter.Location); }
         return value;
     }
+
+    internal static object? ParameterOrLiteral(GqlExpression expression, IReadOnlyDictionary<string, object?>? parameters)
+        => expression is GqlParameterExpression parameter ? Parameter(parameter, parameters) : ((GqlLiteralExpression)expression).Value;
 
     // WHERE and every Boolean operator accept only Boolean or NULL; no truthiness coercion.
     internal static bool? Boolean(object? value, GqlExpression? expression = null) => value switch
@@ -135,16 +153,16 @@ internal static class GraphExpressionEvaluator
     private static object? In(GqlInExpression membership, IReadOnlyDictionary<string, object?> bindings, IReadOnlyDictionary<string, object?>? parameters)
     {
         var value = Evaluate(membership.Operand, bindings, parameters);
-        var candidates = new object?[membership.List.Items.Count];
-        for (int index = 0; index < candidates.Length; index++)
-        {
-            candidates[index] = Evaluate(membership.List.Items[index], bindings, parameters);
-        }
+        var evaluated = Evaluate(membership.List, bindings, parameters);
+        if (evaluated is null) { return null; }
+        if (evaluated is not object?[] candidates)
+        { throw new GraphPlanningException("COHDBG013", ErrorMessages.CompositeRequired, membership.List.Location); }
         bool unknown = false;
         foreach (var candidate in candidates)
         {
-            if (value is null || candidate is null) { unknown = true; }
-            else if (Equal(value, candidate)) { return true; }
+            bool? equal = GraphCompositeValues.Equal(value, candidate);
+            if (equal == true) { return true; }
+            unknown |= equal is null;
         }
         return unknown ? null : false;
     }
@@ -174,6 +192,11 @@ internal static class GraphExpressionEvaluator
             if (binary.Operator == "||" || !IsNumber(left) || !IsNumber(right))
             { throw new GraphPlanningException("COHDBG013", ErrorMessages.ArithmeticOperands, binary.Location); }
             return Arithmetic(binary.Operator, left, right);
+        }
+        if (binary.Operator is "=" or "!=" or "<>")
+        {
+            bool? equal = GraphCompositeValues.Equal(left, right);
+            return binary.Operator == "=" ? equal : !equal;
         }
         int? order = Compare(left, right);
         return binary.Operator switch
@@ -219,6 +242,31 @@ internal static class GraphExpressionEvaluator
     internal static bool Equal(object? left, object? right) => left is null ? right is null : right is not null && Compare(left, right) == 0;
     private static int? Compare(object left, object right)
     {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+        if (left is object?[] list && right is object?[] other)
+        {
+            for (int i = 0; i < Math.Min(list.Length, other.Length); i++)
+            {
+                if (list[i] is null || other[i] is null) { return null; }
+                int? comparison = Compare(list[i]!, other[i]!);
+                if (comparison != 0) { return comparison; }
+            }
+            return list.Length.CompareTo(other.Length);
+        }
+        if (left is IReadOnlyDictionary<string, object?> map && right is IReadOnlyDictionary<string, object?> second)
+        {
+            if (map.Count != second.Count) { return map.Count.CompareTo(second.Count); }
+            string[] keys = map.Keys.Order(StringComparer.Ordinal).ToArray();
+            string[] otherKeys = second.Keys.Order(StringComparer.Ordinal).ToArray();
+            for (int i = 0; i < keys.Length; i++)
+            { int result = StringComparer.Ordinal.Compare(keys[i], otherKeys[i]); if (result != 0) { return result; } }
+            foreach (string key in keys)
+            {
+                if (map[key] is null || second[key] is null) { return null; }
+                int? result = Compare(map[key]!, second[key]!); if (result != 0) { return result; }
+            }
+            return 0;
+        }
         if (IsNumber(left) && IsNumber(right))
         { return GraphValueComparer.CompareNumbers(left, right); }
         return (left, right) switch

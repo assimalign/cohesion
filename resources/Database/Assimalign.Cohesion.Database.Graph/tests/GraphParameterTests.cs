@@ -3,10 +3,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-
 using Shouldly;
 using Xunit;
-
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Graph.Catalog;
 using Assimalign.Cohesion.Database.Graph.Internal;
@@ -213,9 +211,9 @@ public sealed class GraphParameterTests
         { yield return [value]; }
     }
 
-    [Theory(DisplayName = "Cohesion Test [Graph] - Parameters: nonscalars fail before properties, predicates or indexed anchors reach storage")]
+    [Theory(DisplayName = "Cohesion Test [Graph] - Parameters: unsupported leaves fail and composites compare unequal without index seeks")]
     [MemberData(nameof(InvalidValues))]
-    public async Task Execute_UnsupportedValue_ShouldRejectBeforeStorage(object value)
+    public async Task Execute_ParameterValue_ShouldEnforcePositionRules(object value)
     {
         // Arrange
         await using var engine = GraphDatabaseEngine.Create("parameters", new());
@@ -230,6 +228,14 @@ public sealed class GraphParameterTests
             "MATCH (a) WHERE a.k = $p RETURN a", "MATCH (a:Person {name: $p}) RETURN a",
             "MATCH (a:Person) WHERE a.name = $p RETURN a", "MATCH (a:Missing) WHERE TRUE OR $p RETURN a" })
         {
+            if (value is System.Collections.IList and not byte[] or IReadOnlyDictionary<string, object?> && source.Contains("WHERE", StringComparison.Ordinal))
+            {
+                await using var result = (DatabaseResultSet)await session.ExecuteAsync(source, parameters, CancellationToken.None);
+                var rows = new List<DatabaseRow>();
+                await foreach (var row in result.GetRowsAsync(CancellationToken.None)) { rows.Add(row); }
+                rows.ShouldBeEmpty();
+                continue;
+            }
             var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(source, parameters, CancellationToken.None));
             error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG003");
         }

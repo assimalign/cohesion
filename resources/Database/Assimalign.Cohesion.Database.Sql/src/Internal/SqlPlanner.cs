@@ -103,8 +103,11 @@ internal sealed partial class SqlPlanner
     }
 
     private SqlPlan PlanSelect(SqlSelectExpression select)
-        => select.CommonTables.Count == 0 ? PlanSubqueries(select)
+    {
+        _cancellationToken.ThrowIfCancellationRequested();
+        return select.CommonTables.Count == 0 ? PlanSubqueries(select)
             : PlanCommonTables(select.CommonTables, select);
+    }
 
     /// <summary>Binds a SELECT whose subqueries have already been lowered to value slots.</summary>
     private SqlPlan PlanSelectCore(SqlSelectExpression select)
@@ -127,7 +130,8 @@ internal sealed partial class SqlPlanner
             bindings = BindJoin(select, source, out columns, out steps, out outputOrdinals);
         }
         var evaluator = new SqlExpressionEvaluator(columns, _parameters, bindings, defaultCollation: _catalog.DefaultCollation,
-            subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken, relation: select.From[0].Table);
+            subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken,
+            outerScope: OuterScope, outerDependencies: OuterDependencies, relation: select.From[0].Table);
 
         if (select.Where is not null && ContainsAggregate(select.Where))
         {
@@ -149,7 +153,7 @@ internal sealed partial class SqlPlanner
                     projections.Add(PassThrough(columns[ordinal].Name, ordinal, columns, evaluator, merged: true));
                 }
             }
-            else if (column.Expression is SqlColumnReferenceExpression reference)
+            else if (column.Expression is SqlColumnReferenceExpression reference && !evaluator.IsOuterColumn(reference))
             {
                 int ordinal = evaluator.ResolveColumn(reference);
                 projections.Add(PassThrough(column.Alias ?? columns[ordinal].Name, ordinal, columns, evaluator,
@@ -160,9 +164,13 @@ internal sealed partial class SqlPlanner
                 ValidateExpression(column.Expression, evaluator, _subqueryTypes);
                 var value = evaluator.Bind(column.Expression, out SqlBoundCollation collation, out var candidate);
                 projections.Add(new SqlProjection(
-                    column.Alias ?? $"column{projections.Count + 1}", null, column.Expression,
+                    column.Alias ?? (column.Expression is SqlColumnReferenceExpression outerColumn
+                        ? outerColumn.ColumnName : $"column{projections.Count + 1}"), null, column.Expression,
                     GroupExpressionType(column.Expression, columns, evaluator)) { Value = value, Collation = collation,
-                        Metadata = CaptureProjectionMetadata(candidate), MaxLength = evaluator.MaximumLengthOf(column.Expression) });
+                        Metadata = CaptureProjectionMetadata(candidate,
+                            UnwrapCollation(column.Expression) is SqlColumnReferenceExpression projectedColumn ? evaluator.ColumnMetadata(projectedColumn) : null),
+                        MaxLength = evaluator.MaximumLengthOf(column.Expression),
+                        IsNullable = column.Expression is not SqlColumnReferenceExpression nullableColumn || evaluator.ColumnMetadata(nullableColumn).IsNullable });
             }
         }
 
@@ -207,11 +215,22 @@ internal sealed partial class SqlPlanner
             EvaluateCount(select.Limit, "LIMIT"),
             EvaluateCount(select.Offset, "OFFSET"),
             select.IsDistinct,
-            SelectAccessPath(table!, select.Where), orderByProjections);
+            SelectAccessPath(table!, select.Where, OuterScope is null ? null : evaluator), orderByProjections);
     }
 
     /// <summary>Resolves a read source and requests the statement's one catalog image at binding time.</summary>
     private SqlRelationSource ResolveRelation(SqlRelationReference reference, SqlSelectExpression? owner = null)
+    {
+        // The namespace and relational operators share this binding. Constructing a subquery
+        // scope must never re-plan a derived body or number its subquery slots again.
+        var key = (owner, reference);
+        if (_queryScopes is not null && _queryScopes.Relations.TryGetValue(key, out var bound)) { return bound; }
+        var source = ResolveRelationCore(reference, owner);
+        if (_queryScopes is not null) { _queryScopes.Relations[key] = source; }
+        return source;
+    }
+
+    private SqlRelationSource ResolveRelationCore(SqlRelationReference reference, SqlSelectExpression? owner)
     {
         if (reference is SqlDerivedTableReference derived)
         {
@@ -285,7 +304,7 @@ internal sealed partial class SqlPlanner
     /// The full WHERE always remains the residual predicate, so a wrong-looking
     /// choice can cost performance but never correctness.
     /// </summary>
-    private SqlAccessPath SelectAccessPath(SqlCatalogTable table, SqlExpression? where)
+    private SqlAccessPath SelectAccessPath(SqlCatalogTable table, SqlExpression? where, SqlExpressionEvaluator? scope = null)
     {
         if (where is null || _commonTableState?.BindingUnused == true)
         {
@@ -301,7 +320,7 @@ internal sealed partial class SqlPlanner
 
         // Top-level AND conjuncts → per-column sargable predicates.
         var predicates = new Dictionary<int, List<(SqlBinaryOperator Op, object? Value)>>();
-        CollectSargablePredicates(table, where, predicates);
+        CollectSargablePredicates(table, where, predicates, scope);
 
         if (predicates.Count == 0)
         {
@@ -453,7 +472,7 @@ internal sealed partial class SqlPlanner
     private void CollectSargablePredicates(
         SqlCatalogTable table,
         SqlExpression expression,
-        Dictionary<int, List<(SqlBinaryOperator Op, object? Value)>> predicates)
+        Dictionary<int, List<(SqlBinaryOperator Op, object? Value)>> predicates, SqlExpressionEvaluator? scope = null)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
         if (expression is SqlLogicalExpression { Operator: SqlLogicalOperator.And } conjunction)
@@ -462,7 +481,7 @@ internal sealed partial class SqlPlanner
             // nested chain whose terms are just as mandatory.
             foreach (var term in conjunction.Operands)
             {
-                CollectSargablePredicates(table, term, predicates);
+                CollectSargablePredicates(table, term, predicates, scope);
             }
             return;
         }
@@ -470,8 +489,8 @@ internal sealed partial class SqlPlanner
         if (expression is SqlBetweenExpression { IsNegated: false } between &&
             UnwrapCollation(between.Operand) is SqlColumnReferenceExpression)
         {
-            TryAddPredicate(table, between.Operand, SqlBinaryOperator.GreaterOrEqual, between.Low, predicates);
-            TryAddPredicate(table, between.Operand, SqlBinaryOperator.LessOrEqual, between.High, predicates);
+            TryAddPredicate(table, between.Operand, SqlBinaryOperator.GreaterOrEqual, between.Low, predicates, scope: scope);
+            TryAddPredicate(table, between.Operand, SqlBinaryOperator.LessOrEqual, between.High, predicates, scope: scope);
             return;
         }
 
@@ -494,11 +513,11 @@ internal sealed partial class SqlPlanner
 
         if (UnwrapCollation(binary.Left) is SqlColumnReferenceExpression)
         {
-            TryAddPredicate(table, binary.Left, binary.Operator, binary.Right, predicates);
+            TryAddPredicate(table, binary.Left, binary.Operator, binary.Right, predicates, scope: scope);
         }
         else if (UnwrapCollation(binary.Right) is SqlColumnReferenceExpression)
         {
-            TryAddPredicate(table, binary.Right, Flip(binary.Operator), binary.Left, predicates, columnOnLeft: false);
+            TryAddPredicate(table, binary.Right, Flip(binary.Operator), binary.Left, predicates, columnOnLeft: false, scope: scope);
         }
     }
 
@@ -527,9 +546,9 @@ internal sealed partial class SqlPlanner
         SqlBinaryOperator op,
         SqlExpression comparand,
         Dictionary<int, List<(SqlBinaryOperator Op, object? Value)>> predicates,
-        bool columnOnLeft = true)
+        bool columnOnLeft = true, SqlExpressionEvaluator? scope = null)
     {
-        var evaluator = new SqlExpressionEvaluator(table.Columns, _parameters, defaultCollation: _catalog.DefaultCollation, functions: _functions, cancellationToken: _cancellationToken);
+        var evaluator = scope ?? new SqlExpressionEvaluator(table.Columns, _parameters, defaultCollation: _catalog.DefaultCollation, functions: _functions, cancellationToken: _cancellationToken);
         // A comparand that calls a volatile function can change between the plan and a row.
         if (evaluator.ReferencesTableColumn(comparand) || ContainsVolatileCall(comparand))
         {
@@ -541,6 +560,8 @@ internal sealed partial class SqlPlanner
         try
         {
             ordinal = evaluator.ResolveColumn(column);
+            // An enclosing column can filter this child's rows, but cannot narrow its index.
+            if (ordinal < 0) { return; }
             if (table.Columns[ordinal].Type.Type is DatabaseType.String or DatabaseType.Character or DatabaseType.Json)
             {
                 var indexedCollation = table.Columns[ordinal].Collation ?? _catalog.DefaultCollation;
@@ -818,7 +839,8 @@ internal sealed partial class SqlPlanner
         var queries = BindDmlSubqueries(update.Where, update.Table);
         var table = ResolveTable(update.Table);
         var evaluator = new SqlExpressionEvaluator(table.Columns, _parameters,
-            defaultCollation: _catalog.DefaultCollation, subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken, relation: update.Table);
+            defaultCollation: _catalog.DefaultCollation, subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken,
+            outerScope: OuterScope, outerDependencies: OuterDependencies, relation: update.Table);
 
         var assignments = new List<(int Ordinal, SqlBoundExpression Value)>(update.Assignments.Count);
         foreach (var assignment in update.Assignments)
@@ -850,7 +872,7 @@ internal sealed partial class SqlPlanner
         }
 
         var input = new SqlUpdatePlan(table, assignments, where);
-        return queries.Count == 0 ? input : new SqlSubqueryPlan(input, queries);
+        return WrapSubqueries(input, queries);
     }
 
     /// <summary>Binds a DELETE's row filter.</summary>
@@ -866,13 +888,14 @@ internal sealed partial class SqlPlanner
         {
             RejectAggregateInDmlWhere(delete.Where);
             var evaluator = new SqlExpressionEvaluator(table.Columns, _parameters,
-                defaultCollation: _catalog.DefaultCollation, subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken, relation: delete.Table);
+                defaultCollation: _catalog.DefaultCollation, subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken,
+                outerScope: OuterScope, outerDependencies: OuterDependencies, relation: delete.Table);
             ValidateExpression(delete.Where, evaluator, _subqueryTypes);
             where = evaluator.Bind(delete.Where);
         }
 
         var input = new SqlDeletePlan(table, where);
-        return queries.Count == 0 ? input : new SqlSubqueryPlan(input, queries);
+        return WrapSubqueries(input, queries);
     }
 
     /// <summary>
@@ -1233,7 +1256,7 @@ internal sealed partial class SqlPlanner
     /// <param name="boundSubqueries">
     /// Subquery nodes this statement has already bound to child plans. A subquery outside
     /// that set sits in a position that does not run <see cref="PlanSubqueries"/> — an
-    /// UPDATE, DELETE, VALUES, CHECK, DEFAULT or LIMIT expression — and is rejected. Null
+    /// UPDATE SET, VALUES, CHECK, DEFAULT or LIMIT/OFFSET expression — and is rejected. Null
     /// rejects every subquery, which is what the constraint validators want.
     /// </param>
     /// <param name="boundValues">ORDER BY nodes already bound to output values.</param>
@@ -1275,7 +1298,7 @@ internal sealed partial class SqlPlanner
             case SqlSubqueryExpression or SqlExistsExpression when !isBound:
                 throw new SqlPlanningException("COHDBL001", "Subqueries are supported only in SELECT expressions and INSERT ... SELECT.", expression.Location);
             case SqlColumnReferenceExpression reference:
-                evaluator.ResolveColumn(reference); // throws for unknown columns at plan time
+                evaluator.ResolveColumn(reference); // resolves innermost first, then enclosing query scopes
                 break;
             case SqlInExpression { Values: null } when !isBound:
                 throw new SqlPlanningException("COHDBL001", "IN subqueries are supported only in SELECT expressions and INSERT ... SELECT.", expression.Location);

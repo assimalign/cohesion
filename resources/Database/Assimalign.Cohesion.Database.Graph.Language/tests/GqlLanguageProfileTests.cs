@@ -1,8 +1,8 @@
 using System;
 using System.Collections.Generic;
-using Assimalign.Cohesion.Database.Language;
 using Shouldly;
 using Xunit;
+using Assimalign.Cohesion.Database.Language;
 
 namespace Assimalign.Cohesion.Database.Graph.Language.Tests;
 
@@ -24,6 +24,7 @@ public class GqlLanguageProfileTests
     [InlineData(GqlClauses.OptionalMatch)]
     [InlineData(GqlClauses.Explain)]
     [InlineData(GqlClauses.Return)]
+    [InlineData(GqlClauses.Case)]
     [InlineData(GqlClauses.Create)]
     [InlineData(GqlClauses.Insert)]
     [InlineData(GqlClauses.Delete)]
@@ -61,7 +62,7 @@ public class GqlLanguageProfileTests
     public void Profile_AdvertisesOnlyExecutableClauses()
     {
         GqlLanguageProfile.Instance.Clauses.ShouldBe([
-            GqlClauses.Match, GqlClauses.OptionalMatch, GqlClauses.Explain, GqlClauses.Return, GqlClauses.Create, GqlClauses.Insert,
+            GqlClauses.Match, GqlClauses.OptionalMatch, GqlClauses.Explain, GqlClauses.Return, GqlClauses.Case, GqlClauses.Create, GqlClauses.Insert,
             GqlClauses.Delete, GqlClauses.DetachDelete, GqlClauses.Where, GqlClauses.Show,
             GqlClauses.LabelExpression]);
     }

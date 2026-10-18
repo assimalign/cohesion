@@ -18,6 +18,7 @@ internal sealed partial class DocumentPlanner
         DocumentLogicalPlan => "Project",
         DocumentSystemCollectionPlan => "SystemCollection",
         DocumentInsertPlan => "Insert",
+        DocumentDeletePlan => "Delete",
         DocumentInsertSelectPlan => "InsertSelect",
         DocumentCreateCollectionPlan => "CreateCollection",
         DocumentDropCollectionPlan => "DropCollection",
@@ -34,6 +35,7 @@ internal sealed partial class DocumentPlanner
             DocumentPlan p => p.Collection.Name,
             DocumentSystemCollectionPlan p => p.Name,
             DocumentInsertPlan p => p.Collection.Name,
+            DocumentDeletePlan p => p.Collection.Name,
             DocumentInsertSelectPlan p => p.Collection.Name,
             DocumentCreateCollectionPlan p => p.Statement.Name,
             DocumentDropCollectionPlan p => p.Statement.Name,
@@ -53,8 +55,11 @@ internal sealed partial class DocumentPlanner
             DocumentDropIndexPlan p => p.IndexName,
             _ => null,
         };
-        Add(DescribeOperator(plan), null, indexName, detail: logical is null ? null :
-            $"filter={logical.Query.Predicate is not null}; grouped={logical.IsGrouped}; order_keys={logical.Query.OrderBy.Count}");
+        string? detail = plan is DocumentDeletePlan delete
+            ? $"filter={delete.Statement.Predicate is not null}; access={(delete.Access is DocumentIndexPath ? "IndexSeek" : "CollectionScan")}"
+            : logical is null ? null : $"filter={logical.Query.Predicate is not null}; grouped={logical.IsGrouped}; order_keys={logical.Query.OrderBy.Count}";
+        Add(DescribeOperator(plan), null, indexName, detail);
+        if (plan is DocumentDeletePlan deletion) { AddAccess(deletion.Access, 0); }
         var select = plan as DocumentPlan;
         int sourceParent = 0;
         if (plan is DocumentInsertSelectPlan insert)
@@ -82,22 +87,27 @@ internal sealed partial class DocumentPlanner
             }
             int projectionId = nodes.Count;
             Add(DescribeOperator(select.Logical), sourceParent);
-            switch (select.Access)
+            AddAccess(select.Access, projectionId);
+        }
+        return DatabasePlanDescription.Create(nodes, diagnostics);
+
+        void AddAccess(DocumentAccessPath access, int parent)
+        {
+            switch (access)
             {
                 case DocumentScanPath:
-                    Add("CollectionScan", projectionId);
+                    Add("CollectionScan", parent);
                     break;
                 case DocumentIndexPath seek:
                     var bounds = new List<string>();
                     if (seek.Lower is { } lower) { bounds.Add($"{seek.Index.Path} {(lower.Inclusive ? ">=" : ">")} {Value(lower.Value)}"); }
                     if (seek.Upper is { } upper) { bounds.Add($"{seek.Index.Path} {(upper.Inclusive ? "<=" : "<")} {Value(upper.Value)}"); }
-                    Add("IndexSeek", projectionId, seek.Index.Name, string.Join(" AND ", bounds));
+                    Add("IndexSeek", parent, seek.Index.Name, string.Join(" AND ", bounds));
                     break;
                 default:
                     throw new UnreachableException();
             }
         }
-        return DatabasePlanDescription.Create(nodes, diagnostics);
 
         void Add(string name, int? parent, string? index = null, string? detail = null)
             => nodes.Add(new DatabasePlanNode { NodeId = nodes.Count, ParentId = parent, Operator = name, Target = target, Index = index, Detail = detail });

@@ -11,9 +11,9 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 internal sealed partial class SqlPlanner
 {
-    private Stack<(SqlSelectExpression? Select, SqlTableReference? Dml, SqlDerivedTableReference? Derived)>? _queryScopes;
+    private SqlQueryScopeState? _queryScopes;
 
-    private bool InDerivedBody => _queryScopes?.Any(scope => scope.Derived is not null) ?? false;
+    private bool InDerivedBody => _queryScopes?.Scopes.Any(scope => scope.Derived is not null) ?? false;
 
     private SqlProjectionMetadata? CaptureProjectionMetadata(SqlCollationCandidate candidate, SqlCatalogColumn? source = null)
         => InDerivedBody || _commonTableState?.BindingBody == true ? new(candidate, source) : null;
@@ -24,8 +24,11 @@ internal sealed partial class SqlPlanner
         {
             throw new SqlUnsupportedQueryException(ErrorMessages.SubqueryNestingDepth, location: derived.Query.Location);
         }
+        var parentDependencies = OuterDependencies;
+        var dependencies = new HashSet<int>();
+        OuterDependencies = dependencies;
         SqlPlan child;
-        (_queryScopes ??= new()).Push((owner, null, derived));
+        (_queryScopes ??= new()).Scopes.Push((owner, null, derived));
         _subqueryDepth++;
         try
         {
@@ -34,26 +37,22 @@ internal sealed partial class SqlPlanner
         catch (SqlPlanningException exception) when (exception.UnresolvedColumn is not null && !exception.HasLocalQualifier)
         {
             var column = exception.UnresolvedColumn;
-            // This level's FROM items need LATERAL; enclosing query levels are ordinary
-            // correlation, deferred to part (a). PostgreSQL parse_relation.c:3759-3789.
+            // This level's FROM items need LATERAL. Enclosing query levels already resolve
+            // through the lexical scope chain. PostgreSQL parse_relation.c:3759-3789.
             if (owner is not null && ReferenceBindsIn(owner, column))
             {
                 throw new SqlUnsupportedQueryException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.DerivedTableOuterReference, exception.Message),
                     exception, column.Location);
             }
-            if (_queryScopes.Skip(1).ToArray().Any(scope => ReferenceBindsInScope(scope.Select, scope.Dml, column)))
-            {
-                throw new SqlUnsupportedQueryException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.CorrelatedSubquery, exception.Message),
-                    exception, column.Location);
-            }
             throw;
         }
-        finally { _subqueryDepth--; _queryScopes.Pop(); }
+        finally { _subqueryDepth--; _queryScopes.Scopes.Pop(); OuterDependencies = parentDependencies; }
+        parentDependencies?.UnionWith(dependencies);
 
-        return BindDerivedOutput(child, derived.Alias!, derived.Columns, derived.Query);
+        return BindDerivedOutput(child, derived.Alias!, derived.Columns, derived.Query, dependencies.Count > 0);
     }
 
-    private SqlRelationSource BindDerivedOutput(SqlPlan child, string relationName, IReadOnlyList<string> names, SqlSelectExpression query)
+    private SqlRelationSource BindDerivedOutput(SqlPlan child, string relationName, IReadOnlyList<string> names, SqlSelectExpression query, bool isCorrelated = false)
     {
         var output = QueryOutput(child);
         var projections = output.Projections;
@@ -73,7 +72,8 @@ internal sealed partial class SqlPlanner
             {
                 scope ??= new SqlExpressionEvaluator(output.Columns, _parameters, output.Bindings,
                     defaultCollation: _catalog.DefaultCollation, subquerySlots: _subquerySlots,
-                    functions: _functions, cancellationToken: _cancellationToken);
+                    functions: _functions, cancellationToken: _cancellationToken,
+                    outerScope: OuterScope, outerDependencies: OuterDependencies);
                 inherited = scope.ColumnMetadata(reference);
             }
             var type = inherited?.Type ?? (projection.Expression as SqlCastExpression)?.TargetTypeInfo
@@ -92,7 +92,7 @@ internal sealed partial class SqlPlanner
                 collation: candidate.Priority >= 2 ? candidate.Collation : null,
                 domainName: inherited?.DomainName);
         }
-        return new SqlRelationSource(new SqlDerivedRelation(relationName, child, columns));
+        return new SqlRelationSource(new SqlDerivedRelation(relationName, child, columns, isCorrelated));
     }
 
     private IReadOnlyList<SqlSubqueryBinding> BindDmlSubqueries(SqlExpression? where, SqlTableReference table)
@@ -100,16 +100,13 @@ internal sealed partial class SqlPlanner
         return BindSubqueries(where is null ? [] : WalkSubqueries(where), dml: table);
     }
 
-    private bool ReferenceBindsInScope(SqlSelectExpression? select, SqlTableReference? dml, SqlColumnReferenceExpression column)
-        => select is not null && ReferenceBindsIn(select, column) || ReferenceBindsTo(dml, column);
-
     private bool ReferenceBindsIn(SqlSelectExpression select, SqlColumnReferenceExpression column)
         => select.From.Any(item => ReferenceBindsTo(item.Table, column, select) ||
             item.Joins.Any(join => ReferenceBindsTo(join.Table, column, select)));
 
     private bool ReferenceBindsTo(SqlRelationReference? reference, SqlColumnReferenceExpression column, SqlSelectExpression? owner = null)
     {
-        if (reference is null || (_queryScopes?.Any(scope => ReferenceEquals(scope.Derived, reference)) ?? false) || !SqlExpressionEvaluator.MatchesQualifier(reference, column))
+        if (reference is null || (_queryScopes?.Scopes.Any(scope => ReferenceEquals(scope.Derived, reference)) ?? false) || !SqlExpressionEvaluator.MatchesQualifier(reference, column))
         {
             return false;
         }
@@ -130,9 +127,12 @@ internal sealed partial class SqlPlanner
     private static (IReadOnlyList<SqlProjection> Projections, IReadOnlyList<SqlCatalogColumn> Columns,
         IReadOnlyList<SqlRelationBinding>? Bindings) QueryOutput(SqlPlan plan)
     {
-        while (plan is SqlSubqueryPlan or SqlWithPlan)
+        while (true)
         {
-            plan = plan is SqlSubqueryPlan subquery ? subquery.Input : ((SqlWithPlan)plan).Input;
+            if (plan is SqlSubqueryPlan wrapper) { plan = wrapper.Input; }
+            else if (plan is SqlCorrelatedSubqueryPlan correlated) { plan = correlated.Input; }
+            else if (plan is SqlWithPlan with) { plan = with.Input; }
+            else { break; }
         }
         if (plan is not SqlRelationPlan relation)
         {

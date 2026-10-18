@@ -107,6 +107,10 @@ public sealed partial class OqlQueryParser : QueryParser
             {
                 expression = new OqlExplainExpression(ParseInsert(), Span(start, Previous));
             }
+            else if (Is("DELETE"))
+            {
+                expression = new OqlExplainExpression(ParseDelete(), Span(start, Previous));
+            }
             else
             {
                 _diagnostics.Add(QueryDiagnostics.UnsupportedClause($"EXPLAIN {Current.Text}", Profile.Language, Span(start, Current)));
@@ -120,6 +124,10 @@ public sealed partial class OqlQueryParser : QueryParser
         else if (Is("INSERT"))
         {
             expression = ParseInsert();
+        }
+        else if (Is("DELETE"))
+        {
+            expression = ParseDelete();
         }
         else if (IsIndexStatement("CREATE"))
         {
@@ -139,7 +147,7 @@ public sealed partial class OqlQueryParser : QueryParser
         }
         else
         {
-            Error("OQL0002", "Expected SELECT, INSERT, CREATE INDEX, DROP INDEX, CREATE COLLECTION, or DROP COLLECTION.", Current);
+            Error("OQL0002", "Expected SELECT, INSERT, DELETE, CREATE INDEX, DROP INDEX, CREATE COLLECTION, or DROP COLLECTION.", Current);
             expression = EmptyExpression();
         }
 
@@ -195,7 +203,12 @@ public sealed partial class OqlQueryParser : QueryParser
     private List<(string Clause, Lexeme Token)> FindUnsupported()
     {
         List<(string, Lexeme)> result = [];
+        int statementStart = IsWord(_tokens[0], "EXPLAIN") ? 1 : 0;
+        bool statementWithoutQuery = statementStart < _tokens.Count &&
+            (IsWord(_tokens[statementStart], "DELETE") || IsWord(_tokens[statementStart], "CREATE") ||
+                IsWord(_tokens[statementStart], "DROP"));
         bool selected = false;
+        int parentheses = 0;
         bool inSelectList = false;
         int selectHead = -2;
         int openQuantifiers = 0;
@@ -206,6 +219,9 @@ public sealed partial class OqlQueryParser : QueryParser
             {
                 break;
             }
+
+            if (token.Type == TokenType.LeftParen) { parentheses++; }
+            else if (token.Type == TokenType.RightParen) { parentheses--; }
 
             if (token.Type is not (TokenType.Keyword or TokenType.Function or TokenType.Identifier))
             {
@@ -295,7 +311,9 @@ public sealed partial class OqlQueryParser : QueryParser
             }
             if (value == "SELECT")
             {
-                if (selected)
+                // Only SELECT statements and INSERT SELECT have a query of their own.
+                // A SELECT inside an expression is nested even when it is the first one.
+                if (statementWithoutQuery || selected || parentheses > 0)
                 {
                     result.Add((OqlClauses.Subquery, token));
                 }

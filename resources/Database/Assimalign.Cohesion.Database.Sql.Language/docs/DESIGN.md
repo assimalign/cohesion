@@ -42,8 +42,8 @@ is the issue's approved public-profile option; no visibility grant or public int
 
 The UPDATE and DELETE dialect rows specify the same target qualifier rule as SELECT:
 an alias hides the base relation name, and unknown qualifiers fail with located COHSQLE015
-before any mutation. The engine supplies relation bindings; parser shapes are unchanged. #1113 adds uncorrelated WHERE subqueries; the existing
-COHDBL001 refusal is retained for UPDATE SET and correlated children. PostgreSQL `parse_relation.c:3759`
+before any mutation. The engine supplies relation bindings; parser shapes are unchanged. #1113 adds correlated and uncorrelated WHERE subqueries; the existing
+COHDBL001 refusal is retained for UPDATE SET. PostgreSQL `parse_relation.c:3759`
 is the reference for the hidden-name rule.
 
 ## System relation joins (#1106)
@@ -75,9 +75,9 @@ budgets, requires an alias, and preserves an optional column-name list. The engi
 checks full output-name width and rejects blank names with COHSQLE013 before execution.
 Rendering and query depth visit every body. Derived-name classification waits for
 catalog binding: only actual sibling references require LATERAL, enclosing-query
-references retain the correlation refusal, and unknown/hidden names retain COHSQLE015.
-Uncorrelated UPDATE/DELETE WHERE children use ordinary subquery grammar; UPDATE
-SET, lateral references and correlation remain explicit capability refusals.
+references resolve through the lexical scope chain, and unknown/hidden names retain COHSQLE015.
+Correlated and uncorrelated UPDATE/DELETE WHERE children use ordinary subquery grammar;
+UPDATE SET and lateral references remain explicit capability refusals.
 The planner applies the shared #1112 outer-ordering pin only to keys bound to
 derived outputs, including projection aliases and ordinals. Ordering inside derived
 bodies executes, including over nested derived inputs. The #1114 set-operation pin remains excluded.
@@ -130,7 +130,7 @@ FROM exposes one SqlFromItem join tree per comma item (#1109), preserving JOIN p
 and ON scopes without recovering grouping from flattened text. SqlJoinClause retains ordered
 UsingColumns separately from ON. The capability pre-scan skips advertised clauses and reports
 the first unadvertised construct, so USING cannot mask NATURAL, WINDOW or OVER.
-The renderer, nesting measure and correlation walker traverse every item and condition.
+The renderer and nesting measure traverse every item and condition; catalog-aware correlation binding belongs to the engine.
 The engine implements written-order steps; DIALECT.md defines LEFT null extension and the
 common-typed merged expressions and modifier clearing for USING. Qualified wildcards keep
 COHDBL001. ORDER BY aliases and ordinals count visible wildcard output after USING merges.
@@ -265,7 +265,7 @@ rename happened before external consumers existed.
 
 ## Non-goals (current dialect)
 
-Set operations, recursive/nested or data-modifying CTEs, window functions, views, correlated queries, LATERAL,
+Set operations, recursive/nested or data-modifying CTEs, window functions, views, LATERAL,
 outer ordering keys bound to derived outputs, UPDATE SET subqueries, `ON UPDATE`,
 `MERGE`, `RETURNING`, savepoints, isolation-level syntax, and cost-hint syntax.
 Each is an additive dialect extension when its engine feature
@@ -516,10 +516,10 @@ checks stay as PostgreSQL's backstop. The parser reports nesting past the limit 
   complex, like any other walk out of stack. Collapsing the binary rungs into one
   precedence-climbing loop would cut the cost per level, should smaller threads ever
   need to accept the deepest text the default limit admits in a debug build.
-- **The parser's own tree walk iterates.** The correlation check over a subquery's
-  clauses (`ValidateSubqueryReference`) runs after the clause is built, over a tree
-  the parser may have built in a loop thousands of levels deep, so it uses an explicit
-  stack and reports references in source order without recursing.
+- **Scope checking belongs to binding.** The parser admits qualified and unqualified
+  outer references without a post-parse correlation walk. The engine searches lexical
+  scopes using catalog metadata; deep expression chains still parse within their
+  configured budget on a small stack.
 - **Crossing the limit abandons the statement.** The parser reports `SQL0006` (or
   `SQL0007`) once, consumes the rest of the text, and every rule still on the stack
   meets the end and returns. What those rules report on the way out describes the

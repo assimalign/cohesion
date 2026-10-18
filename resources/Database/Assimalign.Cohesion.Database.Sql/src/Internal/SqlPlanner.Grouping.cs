@@ -68,11 +68,13 @@ internal sealed partial class SqlPlanner
         // then aggregate results, then the projected outputs that ordering may name). Both scopes
         // resolve columns through the same relation references as the input scope.
         var sourceScope = new SqlExpressionEvaluator(columns, _parameters, bindings, defaultCollation: _catalog.DefaultCollation,
-            subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken, relation: select.From.Count == 0 ? null : select.From[0].Table);
+            subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken,
+            outerScope: OuterScope, outerDependencies: OuterDependencies, relation: select.From.Count == 0 ? null : select.From[0].Table);
         // A call over a key or an aggregate result resolves by the slot's type over the input row,
         // as the same call does outside a grouping: describe(COUNT(*)) is describe(BIGINT).
         var groupScope = new SqlExpressionEvaluator(columns, _parameters, bindings, slots, _catalog.DefaultCollation,
-            subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken, slotScope: sourceScope, relation: select.From.Count == 0 ? null : select.From[0].Table);
+            subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken,
+            outerScope: OuterScope, outerDependencies: OuterDependencies, slotScope: sourceScope, relation: select.From.Count == 0 ? null : select.From[0].Table);
 
         var source = columns.Select((column, index) => PassThrough(column.Name, index, columns, sourceScope)).ToArray();
         var where = select.Where is null ? null : evaluator.Bind(select.Where);
@@ -82,7 +84,7 @@ internal sealed partial class SqlPlanner
                 ? new SqlSystemViewPlan(view, source, where, [], null, null, false)
                 : table is null
                     ? new SqlConstantPlan(source, where, [], null, null, false, null)
-                    : new SqlSelectPlan(table, source, where, [], null, null, false, SelectAccessPath(table, select.Where));
+                    : new SqlSelectPlan(table, source, where, [], null, null, false, SelectAccessPath(table, select.Where, OuterScope is null ? null : evaluator));
 
         var keys = new SqlBoundKey[select.GroupBy.Count];
         for (int i = 0; i < keys.Length; i++)
@@ -105,7 +107,8 @@ internal sealed partial class SqlPlanner
         {
             var value = groupScope.Bind(projections[i].Expression!, out SqlBoundCollation collation, out var candidate);
             projections[i] = projections[i] with { Value = value, Collation = collation,
-                Metadata = CaptureProjectionMetadata(candidate) };
+                Metadata = CaptureProjectionMetadata(candidate,
+                    UnwrapCollation(projections[i].Expression!) is SqlColumnReferenceExpression column ? evaluator.ColumnMetadata(column) : null) };
         }
 
         var having = select.Having is null ? null : groupScope.Bind(select.Having);
@@ -161,7 +164,7 @@ internal sealed partial class SqlPlanner
             }
             if (expression is SqlColumnReferenceExpression reference)
             {
-                evaluator.ResolveColumn(reference);
+                if (evaluator.IsOuterColumn(reference)) { return; }
                 throw new SqlPlanningException("COHSQLE017", $"Column '{reference.ColumnName}' must appear in GROUP BY or be used in an aggregate function.", reference.Location);
             }
             if (expression is SqlStarExpression)
@@ -230,7 +233,15 @@ internal sealed partial class SqlPlanner
             var second = evaluator.Bind(b);
             return first is SqlBoundColumn x && second is SqlBoundColumn y
                 ? x.Ordinal == y.Ordinal && evaluator.ColumnMetadata(a).Type.Type == evaluator.ColumnMetadata(b).Type.Type
-                : ReferenceEquals(first, second);
+                : first is SqlBoundOuterColumn outerA && second is SqlBoundOuterColumn outerB
+                    ? outerA.Reference.Scope == outerB.Reference.Scope &&
+                        ((outerA.Reference.Value, outerB.Reference.Value) switch
+                        {
+                            (SqlBoundColumn leftColumn, SqlBoundColumn rightColumn) => leftColumn.Ordinal == rightColumn.Ordinal,
+                            (SqlBoundSlot leftSlot, SqlBoundSlot rightSlot) => leftSlot.Ordinal == rightSlot.Ordinal,
+                            _ => false,
+                        }) && outerA.Reference.Column.Type.Type == outerB.Reference.Column.Type.Type
+                    : ReferenceEquals(first, second);
         }
     }
 

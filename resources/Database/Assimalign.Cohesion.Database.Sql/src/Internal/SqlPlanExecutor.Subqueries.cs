@@ -8,19 +8,40 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 internal sealed partial class SqlPlanExecutor
 {
-    /// <summary>
-    /// Runs child plans with the exact outer statement context, then stores their
-    /// materialized values in their slots before executing the enclosing relation plan.
-    /// No child session, transaction, or read view is opened.
-    /// </summary>
-    private async Task<DatabaseResult> ExecuteSubqueryAsync(SqlSubqueryPlan plan, SqlStatementContext statement,
+    /// <summary>Runs independent children once and registers correlated children in this execution's frame.</summary>
+    private async Task<DatabaseResult> ExecuteSubqueriesAsync(SqlPlan input, IReadOnlyList<SqlSubqueryBinding> queries,
+        SqlStatementContext statement, CancellationToken cancellationToken)
+    {
+        var parent = _subqueryValues;
+        var frame = new SqlSubqueryValues(parent, queries[0].ScopeId, queries);
+        _subqueryValues = frame;
+        try
+        {
+            foreach (var query in queries)
+            {
+                if (query.IsCorrelated) { continue; }
+                if (!frame.StatementValues.TryGetValue(query.Slot, out var values))
+                {
+                    values = await MaterializeSubqueryAsync(query, statement, cancellationToken).ConfigureAwait(false);
+                    frame.StatementValues.Add(query.Slot, values);
+                }
+                frame.Set(query.Slot, values);
+            }
+            return await ExecuteAsync(input, statement, cancellationToken).ConfigureAwait(false);
+        }
+        finally { _subqueryValues = parent; }
+    }
+
+    private async Task<object?[]> MaterializeSubqueryAsync(SqlSubqueryBinding query, SqlStatementContext statement,
         CancellationToken cancellationToken)
     {
-        var values = new object?[plan.Queries.Count][];
-        for (int index = 0; index < values.Length; index++)
+        cancellationToken.ThrowIfCancellationRequested();
+        var parent = _subqueryValues;
+        // A child without subqueries still has its own execution frame, so its row
+        // evaluation cannot replace the row retained by the enclosing frame.
+        _subqueryValues = new SqlSubqueryValues(parent);
+        try
         {
-            var query = plan.Queries[index];
-            cancellationToken.ThrowIfCancellationRequested();
             await using var result = (DatabaseResultSet)await ExecuteAsync(query.Query, statement, cancellationToken).ConfigureAwait(false);
             var rows = new List<object?>();
             bool found = false;
@@ -29,46 +50,16 @@ internal sealed partial class SqlPlanExecutor
                 cancellationToken.ThrowIfCancellationRequested();
                 if (query.Kind == SqlSubqueryKind.Scalar && found)
                 {
-                    throw new DatabaseException("Scalar subquery returned more than one row; at most one row is allowed.");
+                    throw new DatabaseException(ErrorMessages.ScalarSubqueryCardinality);
                 }
                 found = true;
-                if (query.Kind == SqlSubqueryKind.Exists)
-                {
-                    break;
-                }
+                if (query.Kind == SqlSubqueryKind.Exists) { break; }
                 rows.Add(SqlCharacter.Input(row.GetValue(0), result.Columns[0].Type));
             }
-            if (query.Kind == SqlSubqueryKind.Exists)
-            {
-                rows.Add(query.IsNegated ? !found : found);
-            }
-            else if (query.Kind == SqlSubqueryKind.Scalar && !found)
-            {
-                rows.Add(null); // an empty scalar subquery is a typed NULL
-            }
-            values[index] = rows.ToArray();
+            if (query.Kind == SqlSubqueryKind.Exists) { rows.Add(query.IsNegated ? !found : found); }
+            else if (query.Kind == SqlSubqueryKind.Scalar && !found) { rows.Add(null); }
+            return rows.ToArray();
         }
-
-        // The plan's bound expressions read these slots; nothing is substituted into a tree.
-        // Rebuilding the trees instead would mean reconstructing the language package's AST
-        // nodes from here, which needs its internal constructors and silently breaks whenever
-        // a new plan node appears. Each level of nesting fills its own slots, so an enclosing
-        // level's values stay visible while a nested plan runs.
-        var subqueries = _subqueryValues ??= new SqlSubqueryValues();
-        for (int index = 0; index < values.Length; index++)
-        {
-            subqueries.Set(plan.Queries[index].Slot, values[index]);
-        }
-        try
-        {
-            return await ExecuteAsync(plan.Input, statement, cancellationToken).ConfigureAwait(false);
-        }
-        finally
-        {
-            foreach (var query in plan.Queries)
-            {
-                subqueries.Clear(query.Slot);
-            }
-        }
+        finally { _subqueryValues = parent; }
     }
 }

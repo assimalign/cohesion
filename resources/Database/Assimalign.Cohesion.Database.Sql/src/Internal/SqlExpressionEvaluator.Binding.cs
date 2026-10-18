@@ -356,6 +356,7 @@ internal sealed partial class SqlExpressionEvaluator
         try
         {
             int ordinal = ResolveColumn(column);
+            if (ordinal < 0) { return new SqlBoundOuterColumn(OuterReference(ordinal)); }
             return column.TableAlias is null && column.SchemaName is null && MergedColumn(ordinal) is { } merged
                 ? merged.Value : new SqlBoundColumn(ordinal);
         }

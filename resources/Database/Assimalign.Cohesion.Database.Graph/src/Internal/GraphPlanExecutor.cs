@@ -17,7 +17,7 @@ internal static class GraphPlanExecutor
     // Finite syntax guarantees termination; this cap also bounds materialization.
     private const int MaximumMatches = 100_000;
     internal static async ValueTask<DatabaseResult> ExecuteAsync(GraphDatabase database, GraphOperation operation,
-        GqlQueryStatement statement, IReadOnlyDictionary<string, object?>? parameters, CancellationToken token, bool paths = false, bool scalarsOnly = false)
+        GqlQueryStatement statement, IReadOnlyDictionary<string, object?>? parameters, CancellationToken token, bool paths = false, bool scalarsOnly = false, bool compositeValues = true)
     {
         operation.EnsureActive();
         var error = statement.Diagnostics.FirstOrDefault(item => item.Severity == DiagnosticSeverity.Error);
@@ -46,6 +46,13 @@ internal static class GraphPlanExecutor
         // Validate result shape before locking a writer, expanding a MATCH or applying mutations.
         if (scalarsOnly && plan.Projections.Any(projection => projection.Kind != GraphProjectionKind.Scalar))
         { throw new GraphPlanningException("COHDBG001", ErrorMessages.ExecuteScalarRequired, plan.Query.Location); }
+        var compositeColumns = plan.Projections.Select(projection => GraphValueExpressions.MayReturn(projection.Expression, parameters, entity: false)).ToArray();
+        long headerLength = 4;
+        foreach (var projection in plan.Projections) { headerLength += 5L + System.Text.Encoding.UTF8.GetByteCount(projection.Name); }
+        if (headerLength > GraphValueCodec.MaxPayloadLength)
+        { throw new GraphPlanningException("COHDBG013", ErrorMessages.CompositeLimit, plan.Query.Location); }
+        if (!compositeValues && compositeColumns.Any(value => value))
+        { throw new GraphPlanningException("COHDBG016", ErrorMessages.CompositeCapabilityRequired, plan.Query.Location); }
         if (plan.Query.Creates.Count > 0 || plan.Query.DeleteVariables.Count > 0)
         { await database.LockWriterAsync(operation.Context, token).ConfigureAwait(false); }
         // An unsatisfiable mandatory clause empties the statement without reads (#1228).
@@ -142,13 +149,30 @@ internal static class GraphPlanExecutor
         { Name = projection.Name, Ordinal = i, Type = DatabaseType.Null }).ToArray();
         var rows = new List<object?[]>(bindings.Count);
         var distinct = plan.Distinct is null ? null : new HashSet<object?[]>(GraphRowComparer.Instance);
+        bool unsignedColumnsAdded = false;
         foreach (var binding in bindings)
         {
             token.ThrowIfCancellationRequested();
             var row = plan.Projections.Select(projection => GraphExpressionEvaluator.Evaluate(projection.Expression, binding, parameters)).ToArray();
+            if (scalarsOnly)
+            {
+                for (int i = 0; i < row.Length; i++)
+                {
+                    if (row[i] is byte or ushort or uint or ulong)
+                    {
+                        if (!compositeValues) { throw new GraphPlanningException("COHDBG016", ErrorMessages.CompositeCapabilityRequired, plan.Query.Location); }
+                        unsignedColumnsAdded |= !compositeColumns[i];
+                        compositeColumns[i] = true;
+                    }
+                }
+            }
+            GraphResultRowEncoder.Validate(row, compositeColumns);
             if (distinct is null || distinct.Add(row)) { rows.Add(row); }
         }
-        return new GraphQueryResult(columns, rows.ToArray(), plan.Warnings);
+        // A stored unsigned property is learned from the rows. Recheck earlier rows if its
+        // header flag changed their framing; scalar-only results never need this pass.
+        if (unsignedColumnsAdded) { foreach (var row in rows) { GraphResultRowEncoder.Validate(row, compositeColumns); } }
+        return new GraphQueryResult(columns, rows.ToArray(), plan.Warnings, compositeColumns);
     }
 
     internal static async ValueTask MatchAsync(GraphDatabase database, GraphOperation operation, GraphPathPlan plan,

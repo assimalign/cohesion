@@ -45,6 +45,9 @@ internal enum SqlBoundExpressionKind : byte
     /// <summary><see cref="SqlBoundColumn"/>: a source column, by ordinal in the row.</summary>
     Column,
 
+    /// <summary><see cref="SqlBoundOuterColumn"/>: a value in an enclosing query's evaluation frame.</summary>
+    OuterColumn,
+
     /// <summary><see cref="SqlBoundSlot"/>: a grouping key, an aggregate's result or a completed output column, by ordinal.</summary>
     Slot,
 

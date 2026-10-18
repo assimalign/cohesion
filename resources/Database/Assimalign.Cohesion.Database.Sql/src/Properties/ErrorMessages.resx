@@ -61,9 +61,6 @@
   <data name="DerivedColumnName" xml:space="preserve">
     <value>A derived output column name must not be empty or whitespace.</value>
   </data>
-  <data name="CorrelatedSubquery" xml:space="preserve">
-    <value>Correlated subqueries are not supported; a subquery column must resolve in its local FROM/JOIN scope. {0}</value>
-  </data>
   <data name="DerivedOutputOrdering" xml:space="preserve">
     <value>SQL derived-table SUBQUERY output ordering awaits the ordering extension.</value>
   </data>
@@ -91,4 +88,8 @@
   <data name="CteForwardReference" xml:space="preserve"><value>Common table expression '{0}' is referenced before its declaration.</value></data>
   <data name="CteConstantQuery" xml:space="preserve"><value>A common table expression without FROM cannot project a wildcard.</value></data>
   <data name="CountNonNegative" xml:space="preserve"><value>{0} requires a non-negative integer.</value></data>
+  <data name="CorrelatedUngroupedColumn" xml:space="preserve"><value>Outer column '{0}' must appear in GROUP BY before it can be referenced by a grouped query's subquery.</value></data>
+  <data name="OuterOnlyAggregate" xml:space="preserve"><value>An aggregate whose column references all belong to outer query scopes is not supported.</value></data>
+  <data name="ScalarSubqueryCardinality" xml:space="preserve"><value>Scalar subquery returned more than one row; at most one row is allowed.</value></data>
+  <data name="SubqueryFrameMissing" xml:space="preserve"><value>Internal invariant: the subquery evaluation frame is unavailable.</value></data>
 </root>

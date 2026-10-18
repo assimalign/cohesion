@@ -98,15 +98,25 @@ internal sealed partial class SqlPlanExecutor
             case SqlDefinitionPlan definition:
                 return await ExecuteDefinitionAsync(definition, statement, cancellationToken).ConfigureAwait(false);
             case SqlSubqueryPlan subquery:
-                return await ExecuteSubqueryAsync(subquery, statement, cancellationToken).ConfigureAwait(false);
+                return await ExecuteSubqueriesAsync(subquery.Input, subquery.Queries, statement, cancellationToken).ConfigureAwait(false);
+            case SqlCorrelatedSubqueryPlan correlated:
+                return await ExecuteSubqueriesAsync(correlated.Input, correlated.Queries, statement, cancellationToken).ConfigureAwait(false);
             case SqlInsertSelectPlan insertSelect:
                 return await ExecuteInsertSelectAsync(insertSelect, statement, cancellationToken).ConfigureAwait(false);
             case SqlGroupPlan group:
                 return await ExecuteGroupAsync(group, statement, cancellationToken).ConfigureAwait(false);
             case SqlSystemViewPlan systemView:
-                return ExecuteSystemView(systemView, statement, cancellationToken);
+                return _subqueryValues is { HasCorrelatedQueries: true }
+                    ? await ExecuteCorrelatedSelectAsync(ReadCorrelatedSystemRelation(systemView.View, statement, cancellationToken),
+                        systemView.Projections, systemView.Where, systemView.OrderBy, systemView.Limit, systemView.Offset,
+                        systemView.IsDistinct, statement, cancellationToken).ConfigureAwait(false)
+                    : ExecuteSystemView(systemView, statement, cancellationToken);
             case SqlSelectPlan select:
-                return ExecuteSelect(select, statement, cancellationToken);
+                return _subqueryValues is { HasCorrelatedQueries: true }
+                    ? await ExecuteCorrelatedSelectAsync(EnumerateRows(select, statement, cancellationToken).Select(row => row.Values),
+                        select.Projections, select.Where, select.OrderBy, select.Limit, select.Offset, select.IsDistinct,
+                        statement, cancellationToken).ConfigureAwait(false)
+                    : ExecuteSelect(select, statement, cancellationToken);
             case SqlJoinPlan join:
                 return await ExecuteJoinAsync(join, statement, cancellationToken).ConfigureAwait(false);
             case SqlInsertPlan insert:
@@ -387,6 +397,7 @@ internal sealed partial class SqlPlanExecutor
 
         foreach (var (location, values) in Scan(plan.Table, statement, cancellationToken))
         {
+            await PrepareSubqueriesAsync(plan.Where, values, statement, cancellationToken).ConfigureAwait(false);
             if (evaluator.Matches(plan.Where, values))
             {
                 targets.Add((location.PageId, location.SlotIndex, values));
@@ -499,7 +510,12 @@ internal sealed partial class SqlPlanExecutor
             LockMode.IntentExclusive, cancellationToken).ConfigureAwait(false);
         EnsureCurrentDefinition(plan.Table);
         var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
-        var targets = Scan(plan.Table, statement, cancellationToken).Where(row => evaluator.Matches(plan.Where, row.Values)).ToList();
+        var targets = new List<((PageId PageId, int SlotIndex) Location, object?[] Values)>();
+        foreach (var row in Scan(plan.Table, statement, cancellationToken))
+        {
+            await PrepareSubqueriesAsync(plan.Where, row.Values, statement, cancellationToken).ConfigureAwait(false);
+            if (evaluator.Matches(plan.Where, row.Values)) { targets.Add(row); }
+        }
 
         // Lock the directly targeted rows as one sorted batch before the cascade
         // walk reads any child table: a parent row must be exclusively locked

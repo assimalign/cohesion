@@ -27,10 +27,11 @@ internal sealed class GraphPathsExchange
     /// </summary>
     /// <param name="statement">The graph statement whose matched paths are streamed.</param>
     /// <param name="parameters">The named statement parameters, or <see langword="null"/> when the statement has none.</param>
-    public GraphPathsExchange(string statement, IReadOnlyDictionary<string, object?>? parameters)
+    /// <param name="compositeValues">Whether the session negotiated composite parameter framing.</param>
+    public GraphPathsExchange(string statement, IReadOnlyDictionary<string, object?>? parameters, bool compositeValues = false)
         : base(GraphProtocol.Family)
     {
-        _request = GraphRequestEncoder.Create(statement, parameters);
+        _request = GraphRequestEncoder.Create(statement, parameters, compositeValues);
     }
 
     protected override async ValueTask OpenCoreAsync(ProtocolFrameReader reader, ProtocolFrameWriter writer,

@@ -62,6 +62,8 @@ internal sealed class GraphCatalogTestExchange : DatabaseProtocolExchange<GraphC
                     hasResultFrames = true;
                     foreach (var column in GraphProtocolResultHeaderMessage.Decode(frame.Payload.Span).Columns)
                     {
+                        // Catalog columns stay scalar even when composite values were negotiated.
+                        if ((column.Type & 0x80) != 0) { throw new ProtocolException("Catalog columns must use scalar tuple framing."); }
                         columns.Add((column.Name, (DatabaseType)column.Type));
                     }
                     break;
@@ -96,7 +98,11 @@ internal sealed class GraphCatalogTestExchange : DatabaseProtocolExchange<GraphC
     {
         var reader = new DatabaseKeyReader(payload);
         var values = new object?[count];
-        for (int i = 0; i < count; i++) { values[i] = DatabaseValueCodec.Read(ref reader); }
+        for (int i = 0; i < count; i++)
+        {
+            if (reader.IsAtEnd) { throw new ProtocolException("Catalog tuple has too few values."); }
+            values[i] = DatabaseValueCodec.Read(ref reader);
+        }
         if (!reader.IsAtEnd) { throw new ProtocolException("Catalog tuple has extra values."); }
         return values;
     }

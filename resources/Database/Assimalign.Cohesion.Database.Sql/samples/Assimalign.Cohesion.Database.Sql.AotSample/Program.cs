@@ -88,6 +88,10 @@ internal static class Program
     private const string expandedJoin = "SELECT a.Id, c.Id FROM customers a JOIN customers b USING (Id) " +
         "LEFT JOIN customers c ON b.Id = c.Id AND c.Id = 1 ORDER BY a.Id";
     private const string crossJoin = "SELECT COUNT(*) FROM customers a, customers b CROSS JOIN customers c";
+    private const string correlatedRows = "SELECT c.Id, (SELECT other.Score FROM customers other WHERE other.Id = c.Id) FROM customers c " +
+        "WHERE EXISTS (SELECT other.Id FROM customers other WHERE other.Id = c.Id) AND c.Id IN (SELECT other.Id FROM customers other WHERE other.Id = c.Id) ORDER BY c.Id";
+    private const string correlatedCardinality = "SELECT (SELECT other.Id FROM customers other WHERE other.Id = c.Id OR c.Id = 2) FROM customers c ORDER BY c.Id";
+
     private const string derivedJoin = "SELECT d.key_id FROM customers c JOIN (SELECT Id FROM customers WHERE Id = 1) d (key_id) ON c.Id = d.key_id";
 
     private const string CannotCast = "SELECT CAST(Active AS DATE) FROM customers WHERE Id < 0";
@@ -194,9 +198,11 @@ internal static class Program
         Check("in process: three-way USING and LEFT", await RowsAsync(session, expandedJoin), [[1L, 1L], [2L, null]]);
         Check("in process: comma and CROSS", await RowsAsync(session, crossJoin), [[8L]]);
         Check("in process: renamed derived join", await RowsAsync(session, derivedJoin), [[1L]]);
+        Check("in process: correlated scalar EXISTS and IN", await RowsAsync(session, correlatedRows), [[1L, 100L], [2L, 200L]]);
+        CheckFailure("in process: correlated cardinality", await FailureAsync(() => RowsAsync(session, correlatedCardinality)), "one row");
         await session.ExecuteAsync("CREATE TABLE subquery_guard (id INT)");
         await session.ExecuteAsync("INSERT INTO subquery_guard VALUES (1), (2)");
-        var subqueryUpdate = await session.ExecuteAsync("UPDATE subquery_guard SET id = id + 10 WHERE id IN (SELECT id FROM subquery_guard WHERE id = 1)");
+        var subqueryUpdate = await session.ExecuteAsync("UPDATE subquery_guard SET id = id + 10 WHERE EXISTS (SELECT u.id FROM subquery_guard u WHERE u.id = subquery_guard.id AND u.id = 1)");
         Check("in process: UPDATE WHERE subquery", subqueryUpdate.AffectedCount, 1L);
         var subqueryDelete = await session.ExecuteAsync("DELETE FROM subquery_guard WHERE id > (SELECT AVG(id) FROM subquery_guard)");
         Check("in process: DELETE WHERE snapshot", subqueryDelete.AffectedCount, 1L);
@@ -297,6 +303,10 @@ internal static class Program
             "WITH a AS (SELECT id FROM cte_wire) UPDATE cte_wire SET id = id + 10 WHERE id IN (SELECT id FROM a)", cancellationToken: timeout.Token), 2L);
         Check("over the wire: WITH DELETE", await connection.ExecuteAsync(
             "WITH a AS (SELECT id FROM cte_wire) DELETE FROM cte_wire WHERE id IN (SELECT id FROM a)", cancellationToken: timeout.Token), 2L);
+        CheckFailure("over the wire: correlated cardinality", await FailureAsync(() => RowsAsync(connection, correlatedCardinality, timeout.Token)), "one row");
+        Check("over the wire: correlated scalar EXISTS and IN after failure", await RowsAsync(connection, correlatedRows, timeout.Token), [[1L, 100L], [2L, 200L]]);
+        Check("over the wire: correlated UPDATE", await connection.ExecuteAsync("UPDATE subquery_guard SET id = id WHERE EXISTS (SELECT u.id FROM subquery_guard u WHERE u.id = subquery_guard.id)", cancellationToken: timeout.Token), 1L);
+        Check("over the wire: correlated DELETE", await connection.ExecuteAsync("DELETE FROM subquery_guard WHERE id IN (SELECT u.id FROM subquery_guard u WHERE u.id = subquery_guard.id)", cancellationToken: timeout.Token), 1L);
         Check("over the wire: strict typed literals", await RowsAsync(connection, typedLiterals, timeout.Token), _typedLiterals);
         Check("over the wire: ISO type names and SQL Server lexical aliases", await RowsAsync(connection, typeAliases, timeout.Token), _typeAliases);
         var fixedCodes = await connection.QueryAsync(Characters, cancellationToken: timeout.Token);

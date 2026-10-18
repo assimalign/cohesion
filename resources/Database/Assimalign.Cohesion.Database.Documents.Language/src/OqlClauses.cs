@@ -21,6 +21,9 @@ public static class OqlClauses
     /// <summary>Inserts externally keyed documents.</summary>
     public const string Insert = "INSERT";
 
+    /// <summary>Deletes documents from one collection.</summary>
+    public const string Delete = "DELETE";
+
     /// <summary>Supplies key and value pairs to INSERT.</summary>
     public const string Values = "VALUES";
 
@@ -39,7 +42,7 @@ public static class OqlClauses
     /// <summary>Constructs a JSON array from expressions.</summary>
     public const string ArrayConstructor = "ARRAY CONSTRUCTOR";
 
-    /// <summary>Describes a SELECT or INSERT statement without executing it.</summary>
+    /// <summary>Describes a SELECT, INSERT or DELETE statement without executing it.</summary>
     public const string Explain = "EXPLAIN";
 
     /// <summary>Introduces the source collections and iteration variables for a query.</summary>

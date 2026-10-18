@@ -130,6 +130,14 @@ internal static class Program
             {
                 Check(exception.Code == ProtocolErrorCode.ExecutionFailure && exception.Diagnostics.Any(d => d.Code == "COHDOC012"), "INSERT duplicate diagnostic");
             }
+            Check(await connection.ExecuteAsync("DELETE FROM archive WHERE META().id = 'e'", cancellationToken: token) == 1, "DELETE META affected count");
+            Check(await connection.GetAsync("archive", "e", token) is null, "DELETE readback");
+            Check(await connection.ExecuteAsync("CREATE INDEX archive_amount ON archive (amount)", cancellationToken: token) == 0, "DELETE index setup");
+            var deletePlan = await connection.QueryAsync("EXPLAIN DELETE FROM archive WHERE amount >= 1", cancellationToken: token);
+            Check(deletePlan.Documents.Any(document => document.GetProperty("operator").GetString() == "Delete" &&
+                document.GetProperty("detail").GetString() == "filter=True; access=IndexSeek"), "DELETE EXPLAIN seek");
+            Check(await connection.ExecuteAsync("DELETE FROM archive", cancellationToken: token) == 1, "DELETE all affected count");
+            Check((await connection.QueryAsync("SELECT * FROM COHESION_SCHEMA.INDEXES WHERE COLLECTION_NAME = 'archive'", cancellationToken: token)).Count == 1, "DELETE retains index");
             Check(await connection.ExecuteAsync("DROP COLLECTION archive", cancellationToken: token) == 0, "reuse after duplicate");
             Check(await connection.ExecuteAsync("DROP COLLECTION items", cancellationToken: token) == 0, "OQL drop collection");
             Check(await connection.ExecuteAsync("DROP COLLECTION IF EXISTS items", cancellationToken: token) == 0, "absent collection");

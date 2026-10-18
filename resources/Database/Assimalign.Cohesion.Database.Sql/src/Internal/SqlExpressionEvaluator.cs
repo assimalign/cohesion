@@ -98,7 +98,9 @@ internal sealed partial class SqlExpressionEvaluator
         SqlExpressionEvaluator? slotScope = null,
         SqlBindingContext bindingContext = SqlBindingContext.Table,
         bool[]? sharedColumns = null,
-        SqlRelationReference? relation = null)
+        SqlRelationReference? relation = null,
+        SqlCorrelationScope? outerScope = null,
+        HashSet<int>? outerDependencies = null)
     {
         _columns = columns;
         _bindingContext = bindingContext;
@@ -112,7 +114,10 @@ internal sealed partial class SqlExpressionEvaluator
         _sharedColumns = sharedColumns;
         _functions = functions ?? SqlFunctionEnvironment.Standard;
         _cancellationToken = cancellationToken;
-        _typing = slotScope is null ? null : new SqlTypingMemory(slotScope);
+        _typing = slotScope is null && outerScope is null ? null : new SqlTypingMemory(slotScope)
+        {
+            OuterScope = outerScope, OuterDependencies = outerDependencies,
+        };
     }
 
     /// <summary>
@@ -170,7 +175,8 @@ internal sealed partial class SqlExpressionEvaluator
         }
         return new SqlExpressionEvaluator(_columns, _parameters, _relations as IReadOnlyList<SqlRelationBinding>, ordinals,
             _defaultCollation, sources, _subquerySlots, _subqueryValues, _functions, _cancellationToken, _typing?.SlotScope, _bindingContext,
-            relation: _relations as SqlRelationReference);
+            relation: _relations as SqlRelationReference, outerScope: _typing?.OuterScope,
+            outerDependencies: _typing?.OuterDependencies);
     }
 
     /// <summary>
@@ -224,6 +230,10 @@ internal sealed partial class SqlExpressionEvaluator
 
     private object? EvaluateCore(SqlBoundExpression expression, object?[] row, bool copySharedBinary = false)
     {
+        if (_subqueryValues?.Evaluated is { } evaluated && evaluated.TryGetValue(expression, out var prepared))
+        {
+            return Deliver(prepared, copySharedBinary);
+        }
         // Every operator recurses through here, once per level of the tree, never once per term
         // of an AND/OR chain. A tree the thread has too little stack left for fails the statement
         // instead of overflowing the stack (#1151).
@@ -231,6 +241,8 @@ internal sealed partial class SqlExpressionEvaluator
 
         switch (expression.Kind)
         {
+            case SqlBoundExpressionKind.OuterColumn:
+                return EvaluateOuter((SqlBoundOuterColumn)expression, copySharedBinary);
             case SqlBoundExpressionKind.Column:
                 int columnOrdinal = ((SqlBoundColumn)expression).Ordinal;
                 return copySharedBinary ? DeliverColumn(row, columnOrdinal) : row[columnOrdinal];
@@ -281,6 +293,15 @@ internal sealed partial class SqlExpressionEvaluator
         }
     }
 
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private object? EvaluateOuter(SqlBoundOuterColumn expression, bool copySharedBinary)
+    {
+        var outer = expression.Reference;
+        var frame = _subqueryValues!.FindScope(outer.Scope);
+        // Enclosing rows are retained while children run; output delivery detaches BYTEA.
+        return Deliver(ForExecution(frame, _cancellationToken).Evaluate(outer.Value, frame.Row!), copySharedBinary);
+    }
+
     /// <summary>Returns the shared box of a Boolean result.</summary>
     private static object Box(bool value) => value ? True : False;
 
@@ -305,6 +326,20 @@ internal sealed partial class SqlExpressionEvaluator
     }
 
     internal int ResolveColumn(SqlColumnReferenceExpression column)
+    {
+        try { return ResolveLocalColumn(column); }
+        catch (SqlPlanningException exception) when (exception.UnresolvedColumn is not null &&
+            !exception.HasLocalQualifier && _typing?.OuterScope is not null)
+        {
+            var reference = _typing.OuterScope.Resolve(column);
+            _typing.OuterDependencies?.Add(reference.Scope);
+            var references = _typing.OuterReferences ??= [];
+            references.Add(reference);
+            return -references.Count;
+        }
+    }
+
+    internal int ResolveLocalColumn(SqlColumnReferenceExpression column)
     {
         if (_relations is IReadOnlyList<SqlRelationBinding> bindings)
         {
@@ -365,14 +400,14 @@ internal sealed partial class SqlExpressionEvaluator
     /// <exception cref="DatabaseException">The column is unknown or ambiguous.</exception>
     internal DatabaseType? ResolveColumnType(SqlColumnReferenceExpression column)
     {
-        int ordinal = ResolveColumn(column);
-        return ordinal >= 0 && ordinal < _columns.Count ? ColumnMetadata(column).Type.Type : null;
+        return ColumnMetadata(column).Type.Type;
     }
 
     /// <summary>Gets unqualified USING metadata while qualified names retain their physical types.</summary>
     internal SqlCatalogColumn ColumnMetadata(SqlColumnReferenceExpression column)
     {
         int ordinal = ResolveColumn(column);
+        if (ordinal < 0) { return OuterReference(ordinal).Column; }
         return column.TableAlias is null && column.SchemaName is null && MergedColumn(ordinal) is { } merged
             ? merged.Column : _columns[ordinal];
     }
@@ -401,11 +436,21 @@ internal sealed partial class SqlExpressionEvaluator
             ?? _defaultCollation;
 
     /// <summary>Resolves a directly projected column against the database default.</summary>
-    internal Collation ResolveColumnCollation(int ordinal) => _columns[ordinal].Collation ?? _defaultCollation;
+    internal Collation ResolveColumnCollation(int ordinal)
+        => (ordinal < 0 ? OuterReference(ordinal).Column : _columns[ordinal]).Collation ?? _defaultCollation;
+
+    private SqlOuterReference OuterReference(int ordinal) => _typing!.OuterReferences![-ordinal - 1];
+
+    internal bool IsOuterColumn(SqlColumnReferenceExpression column) => ResolveColumn(column) < 0;
+
+    internal SqlExpressionEvaluator ForRelations(IReadOnlyList<SqlRelationBinding> bindings)
+        => new(_columns, _parameters, bindings, defaultCollation: _defaultCollation,
+            subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken);
 
     /// <summary>The collation a column contributes: 2 when declared on the column, 1 when inherited.</summary>
     private SqlCollationCandidate ColumnCollation(int ordinal)
-        => new(ResolveColumnCollation(ordinal), _columns[ordinal].Collation is null ? 1 : 2);
+        => new(ResolveColumnCollation(ordinal),
+            (ordinal < 0 ? OuterReference(ordinal).Column : _columns[ordinal]).Collation is null ? 1 : 2);
 
     /// <summary>
     /// Finds the collation an expression contributes to a comparison, and how strongly it binds,

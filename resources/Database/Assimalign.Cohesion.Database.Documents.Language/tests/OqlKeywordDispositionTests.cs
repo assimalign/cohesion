@@ -88,7 +88,7 @@ public sealed class OqlKeywordDispositionTests
         ["INSERT"] = Parses("INSERT INTO c (KEY, VALUE) VALUES ('k', 1)"),
         ["RETURNING"] = Rejects("INSERT INTO c (KEY, VALUE) VALUES ('k', 1) RETURNING k", "RETURNING"),
         ["UPDATE"] = Rejects("UPDATE c SET a = 1", "UPDATE"),
-        ["DELETE"] = Rejects("DELETE FROM c WHERE a IN (1)", "DELETE"),
+        ["DELETE"] = Parses("DELETE FROM c WHERE a IN (1)"),
         ["USE"] = Rejects("USE other", "USE"),
         ["BEGIN"] = Rejects("BEGIN TRANSACTION", "BEGIN"),
         ["COMMIT"] = Rejects("COMMIT", "COMMIT"),

@@ -155,6 +155,9 @@ writer set, and finally coordinator `CompleteRecovery`. Root registrations survi
 so every tree can be scrubbed before the journal's proof is checkpointed away. No query-time
 repair or lazy index rebuild is used. Tests exercise split roots, committed and abandoned updates,
 logical rollback, snapshot-pinned versions, mixed shapes, and a serialized restart image.
+The DELETE restart cases open the recovered `by_rank` B-tree directly under the latest snapshot:
+the committed-deleted key has no live entry, while an abandoned deletion restores exactly one.
+They also retain a live control key, bypassing `SearchIndexAsync`'s catalog-record filtering.
 The restart test uses an ordinary journal flush before cloning its memory streams;
 it verifies recovery and index scrub without claiming physical durable-flush support.
 

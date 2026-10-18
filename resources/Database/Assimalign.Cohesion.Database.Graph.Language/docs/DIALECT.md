@@ -62,7 +62,42 @@ or on empty matches. Path-request shape errors retain precedence. Thus `RETURN 1
 fails, while `RETURN 1 AS x, 2 AS X` succeeds.
 Unbound projection variables/parameters are COHDBG001; `p.name` on a path is COHDBG003.
 `RETURN a {.name}` is COHDBL001 naming MAP PROJECTION. NEXT, WITH (including WITH DISTINCT)
-and return-after-delete remain COHDBL001. Collections and CASE remain outside this item.
+and return-after-delete remain COHDBL001. CASE and composite values are described below.
+
+## CASE and composite values
+
+Simple and searched CASE select the first TRUE comparison/predicate; WHEN NULL never
+matches. No match without ELSE yields NULL. Selected branches evaluate lazily, preserving
+their runtime type. COALESCE returns the first non-NULL argument; NULLIF returns NULL for
+TRUE equality, otherwise its first argument. These are ISO case abbreviations, not functions.
+
+Lists [1, a.name, [2]] and maps {name:a.name, n:1} work in WHERE, IN and RETURN.
+Parameters accept IList (object arrays and List<long>, excluding binary byte[]) or
+IReadOnlyDictionary<string, object?> maps, and preserve scalar element types. Results use
+object arrays and read-only ordinal maps. Negative indexes count from the end; out-of-range
+indexes and missing fields yield NULL. {k:{j:1}}.k.j and $m.k access fields; $l[0] indexes
+a list. Invalid index/key/container types use COHDBG013. Stored a.b.c, comprehensions and
+slicing remain COHDBL001. INSERT/CREATE composite properties stay unsupported: syntax is
+COHDBL001 naming graph storage, parameters are COHDBG003. (n $props) remains COHDBL001.
+
+Equality is structural and three-valued: differing lengths/key sets or a FALSE field yields
+FALSE; otherwise a NULL field comparison yields UNKNOWN. IN, simple CASE and NULLIF
+reuse this rule and exact numbers (0.1m differs from 0.1d, 1 equals 1.0). DISTINCT groups
+corresponding NULLs structurally. Lists order lexicographically; maps compare count, sorted
+ordinal keys, then values. Encountered NULL/incomparable values yield UNKNOWN in predicates.
+ORDER BY remains outside the current profile. CASE/composite values containing possible
+entities fail the static wire Execute gate before mutations, including on empty matches.
+
+Simple CASE accepts comma-separated WHEN operands, comparison parts (=, <>, !=, <, <=, >, >=),
+and IS NULL / IS NOT NULL. Its operand evaluates once; comparisons use the same exact rule as WHERE.
+Entity expressions support scalar property reads through (a).name, COALESCE(b,a).name and a['name'].
+Constructed values exceeding depth 64, 65,536 values or 16 MiB fail with COHDBG013 inside the
+statement transaction, including in process; the statement's writes roll back.
+
+Wire composite values require graph.composite-values under existing protocol 2.1 negotiation.
+Without it, projections that may return composites fail statically with COHDBG016 before writer locking and parameters are
+refused locally. The codec bounds are depth 64, 65536 total values and 16777216 bytes.
+Malformed components are ProtocolViolation. Path result encoding is unchanged.
 
 ## Named scalar parameters
 
@@ -73,7 +108,7 @@ Names bind by their exact, case-sensitive bare name; one leading sigil on a map 
 Normalized-key collisions fail with COHDBG014, missing bindings with COHDBG001, and unsupported
 or non-finite values with COHDBG003, all while planning. EXPLAIN applies the same checks.
 Runtime scalar types are preserved (including Int32 and Decimal); schema type matching uses the
-typed graph API's promotion. List/map values remain unsupported. See
+typed graph API's promotion. Lists/maps are admitted in value positions; pattern property maps remain scalar-only. See
 [DESIGN.md](DESIGN.md#named-scalar-parameters-1102-1138) for the complete contract and hand-offs.
 `$$name` and `(n $props)` remain COHDBL001; bare sigils and parameters in
 identifier/DELETE positions are GQL0002. #1102's `?` and `:name` diagnostics are unchanged.
@@ -84,9 +119,9 @@ WHERE accepts AND, OR, XOR, NOT, comparisons, bare Boolean properties, IS [NOT]
 NULL/TRUE/FALSE/UNKNOWN, numeric + - * /, % (Cypher MOD spelling), `||`, string +,
 labeled predicates and parentheses. IN [items], STARTS WITH, ENDS WITH and CONTAINS
 are Cohesion extensions. String predicates are ordinal, case-sensitive and UNKNOWN unless
-both operands are strings. Lists are restricted to IN's right operand. LIKE, BETWEEN, =~,
+both operands are strings. IN accepts a list-valued expression, including parameters. LIKE, BETWEEN, =~,
 EXISTS, quantified predicates and nested property access remain COHDBL001; IN (1, 2)
-is GQL0002 naming the bracketed form.
+is GQL0002 naming a list value.
 
 WHERE keeps TRUE only. Logical operators use three-valued logic. Incomparable non-null values
 are unequal; UNKNOWN is a Boolean literal represented by NULL. Incomparable ordering is UNKNOWN.

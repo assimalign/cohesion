@@ -18,6 +18,9 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// </remarks>
 internal sealed record SqlSubqueryPlan(SqlPlan Input, IReadOnlyList<SqlSubqueryBinding> Queries) : SqlPlan;
 
+/// <summary>Registers children that consume enclosing rows; each evaluation frame owns its value slots.</summary>
+internal sealed record SqlCorrelatedSubqueryPlan(SqlPlan Input, IReadOnlyList<SqlSubqueryBinding> Queries) : SqlPlan;
+
 /// <summary>
 /// A child query, the slot its values fill, and the result type and collation its values carry.
 /// </summary>
@@ -27,7 +30,9 @@ internal sealed record SqlSubqueryBinding(
     DatabaseType Type,
     Collation Collation,
     SqlSubqueryKind Kind,
-    bool IsNegated);
+    bool IsNegated,
+    int ScopeId,
+    bool IsCorrelated);
 
 /// <summary>
 /// A subquery use site as the expression binder sees it: the slot its values fill, how its use site

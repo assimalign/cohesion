@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -43,15 +44,21 @@ internal sealed partial class SqlPlanExecutor
         var sharedColumns = new bool[plan.Columns.Count];
         var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken, sharedColumns);
         var matches = new List<object?[]>();
-        foreach (var row in EnumerateJoinRows(plan, statement, sharedColumns, cancellationToken, derivedRows))
+        await foreach (var row in EnumerateJoinRowsAsync(plan, statement, sharedColumns, cancellationToken, derivedRows).ConfigureAwait(false))
         {
             cancellationToken.ThrowIfCancellationRequested();
+            await PrepareSubqueriesAsync(plan.Where, row, statement, cancellationToken).ConfigureAwait(false);
             if (evaluator.Matches(plan.Where, row))
             {
                 matches.Add(row);
             }
         }
 
+        if (_subqueryValues is { HasCorrelatedQueries: true })
+        {
+            return await MaterializeCorrelatedSelectAsync(matches, plan.Projections, plan.OrderBy, plan.Limit, plan.Offset,
+                plan.IsDistinct, evaluator, statement, cancellationToken).ConfigureAwait(false);
+        }
         return MaterializeSelect(matches, plan.Projections, plan.OrderBy, plan.Limit, plan.Offset,
             plan.IsDistinct, evaluator, plan.OrderByProjections);
     }
@@ -61,8 +68,8 @@ internal sealed partial class SqlPlanExecutor
     /// At each step without a usable index, the inner input is read once, costing O(L + R)
     /// stored reads and O(L * R) predicate evaluations, with O(R) buffered rows.
     /// </summary>
-    private IEnumerable<object?[]> EnumerateJoinRows(SqlJoinPlan plan, SqlStatementContext statement,
-        bool[] sharedColumns, CancellationToken cancellationToken,
+    private async IAsyncEnumerable<object?[]> EnumerateJoinRowsAsync(SqlJoinPlan plan, SqlStatementContext statement,
+        bool[] sharedColumns, [EnumeratorCancellation] CancellationToken cancellationToken,
         IReadOnlyDictionary<SqlDerivedRelation, List<object?[]>>? derivedRows)
     {
         // Every earlier step is retained by a later loop. Only the final index inner
@@ -150,6 +157,7 @@ internal sealed partial class SqlPlanExecutor
                     {
                         var joined = (object?[])outer.Clone();
                         cursors[level]!.Current.CopyTo(joined, inner.Offset);
+                        await PrepareSubqueriesAsync(step.Condition, joined, statement, cancellationToken).ConfigureAwait(false);
                         if (evaluator.Matches(step.Condition, joined))
                         {
                             matched[level] = true;

@@ -247,6 +247,18 @@ public sealed class DocumentClientWireTests
         (await connection.QueryAsync("SELECT META(d).id AS id, d.name FROM items d WHERE category = 'z' ORDER BY id", cancellationToken: harness.Token))
             .Select(row => row[0]).ShouldBe(new object?[] { "e", "f" });
 
+        // DELETE reports affected count in Complete and emits no Document frames.
+        var deleted = await connection.QueryAsync("DELETE FROM items WHERE category = 'z'", cancellationToken: harness.Token);
+        deleted.AffectedCount.ShouldBe(2);
+        deleted.ShouldBeEmpty();
+        deleted.Documents.ShouldBeEmpty();
+        deleted.Columns.ShouldBeEmpty();
+        (await connection.GetAsync("items", "e", harness.Token)).ShouldBeNull();
+        var failedDelete = await Should.ThrowAsync<DocumentClientException>(async () => await connection.ExecuteAsync(
+            "DELETE FROM COHESION_SCHEMA.INDEXES", cancellationToken: harness.Token));
+        failedDelete.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
+        (await connection.ExecuteAsync("DELETE FROM items WHERE 0", cancellationToken: harness.Token)).ShouldBe(0);
+
         // Collection DDL shares the OQL wire path; CRUD uses the newly created collection.
         (await connection.ExecuteAsync("CREATE COLLECTION IF NOT EXISTS items", cancellationToken: harness.Token)).ShouldBe(0);
         Encoding.UTF8.GetString((await connection.GetAsync("items", "a", harness.Token)).ShouldNotBeNull().Content.Span)
