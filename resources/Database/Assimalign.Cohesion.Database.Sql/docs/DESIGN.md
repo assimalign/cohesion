@@ -2399,15 +2399,22 @@ binding a body; reference capture always reads the binding's own table image. Hi
 entries are weak and stay alive with their retained captures; ordinary view reads use a
 DDL-generation fast path. No snapshot generation API or friend grant was added for this purpose.
 
-Views freeze names/types/modifiers/domains/collations and creation-time nullability for COLUMNS,
-with current nullability on query binding. Scalar-subquery slots and function outputs preserve
-complete precision, scale and length before contract comparison (PostgreSQL
+Views freeze names/types/modifiers/domains/collations for COLUMNS. Every view column reports
+IS_NULLABLE = YES without binding a body: PostgreSQL view attributes have no NOT NULL constraint
+(`src/backend/catalog/information_schema.sql:295`). The format-23 view column record stores no
+nullability flag; query binding still derives current source nullability. Scalar-subquery slots
+and function outputs preserve complete precision, scale and length before contract comparison (PostgreSQL
 `src/backend/nodes/nodeFuncs.c:345`, `src/backend/commands/view.c:300`). Scalar output descriptors are captured inside the child
 lexical scope before restoring the parent, including correlated column projections. ALTER
 COLUMN refuses
 changes to type, length, precision or scale for any column a view reads, both in the executor
 and catalog publication (COHSQLD002; PostgreSQL `src/backend/commands/tablecmds.c:15612-15624`).
-OR REPLACE may append columns only, following PostgreSQL `src/backend/commands/view.c:266-325`.
+CASE and COALESCE preserve a modifier only when all alternatives have the same type and modifier;
+an absent ELSE or an unconstrained/different argument clears it. NULLIF retains its first
+argument's modifier. Set operands capture complete output descriptors in their own lexical
+scopes, including function calls, and apply the same agreement rule per column (PostgreSQL
+`src/backend/nodes/nodeFuncs.c:327-336,389-480`, `src/backend/parser/parse_coerce.c:1648-1678`).
+OR REPLACE compares that full contract and may append columns only, following PostgreSQL `src/backend/commands/view.c:266-325`.
 Table/column renames refuse dependencies because this engine stores textual relation names.
 Dependency collection retains stored table identities and referenced input columns, including
 predicates and nested queries, along with direct view/function/domain identities. ORDER BY

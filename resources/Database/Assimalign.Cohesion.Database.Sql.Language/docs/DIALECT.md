@@ -154,8 +154,14 @@ OR REPLACE retains every existing column's name, order, type, type modifiers,
 domain and collation and permits appended columns only. Incompatible replacement
 and dependency cycles fail atomically. Definitions are parsed once per immutable
 view and bound once per catalog generation; recorded function identities keep a
-later overload from changing a stored call. COLUMNS uses frozen creation-time metadata without binding a body, including full
-length, precision and scale. Query output nullability follows current bound sources.
+later overload from changing a stored call. COLUMNS uses frozen type metadata without binding a
+body, including full length, precision and scale. CASE and COALESCE keep modifiers when every
+result alternative has the same type and modifier; otherwise the result is unconstrained.
+NULLIF keeps its first argument's modifier. Set operations apply the same agreement rule per
+column, including function-call operands (PostgreSQL `src/backend/nodes/nodeFuncs.c:327-480`,
+`src/backend/parser/parse_coerce.c:1648-1678`). Every view column reports IS_NULLABLE = 'YES',
+following PostgreSQL view attributes without NOT NULL (`src/backend/catalog/information_schema.sql:295`).
+Query output nullability follows current bound sources.
 A recoverable body binding failure affects only reads of that view, with a coded error retaining
 the original exception; it never blocks open, unrelated reads, metadata enumeration or DROP VIEW.
 Cancellation, out-of-memory, storage corruption and I/O failures still propagate.
@@ -169,7 +175,9 @@ because canonical bodies retain textual relation names. DROP SCHEMA RESTRICT
 counts views. DROP SCHEMA CASCADE removes contained views and external views
 that depend on its tables or views. DROP VIEW [IF EXISTS] defaults to RESTRICT;
 CASCADE removes dependent views. Dependency failures name the view (COHSQLD002).
-View-specific declaration/replacement failures and oversized records use COHSQLE033; ordinary query binding diagnostics still apply, including COHSQLE013 for a column-list count mismatch.
+View-specific declaration/replacement failures and oversized records carry structured COHSQLE033
+diagnostics in process and over the wire; ordinary query binding diagnostics still apply,
+including COHSQLE013 for a column-list count mismatch.
 
 Views appear in TABLES (`TABLE_TYPE = 'VIEW'`), COLUMNS, VIEWS and OBJECT_OWNERSHIP.
 VIEWS returns canonical VIEW_DEFINITION, CHECK_OPTION `NONE` and IS_UPDATABLE `NO`.

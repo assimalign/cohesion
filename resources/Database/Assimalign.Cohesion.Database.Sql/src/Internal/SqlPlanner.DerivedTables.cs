@@ -15,8 +15,10 @@ internal sealed partial class SqlPlanner
 
     private bool InDerivedBody => _queryScopes?.Scopes.Any(scope => scope.Derived is not null) ?? false;
 
-    private SqlProjectionMetadata? CaptureProjectionMetadata(SqlCollationCandidate candidate, SqlCatalogColumn? source = null)
-        => ViewDefinitionBinding is not null || InDerivedBody || _commonTableState?.BindingOperands is not null || _queryScopes?.SetOperandDepth > 0 ? new(candidate, source) : null;
+    private SqlProjectionMetadata? CaptureProjectionMetadata(SqlCollationCandidate candidate, SqlCatalogColumn? source = null,
+        SqlExpression? expression = null, SqlExpressionEvaluator? evaluator = null)
+        => ViewDefinitionBinding is not null || InDerivedBody || _commonTableState?.BindingOperands is not null || _queryScopes?.SetOperandDepth > 0
+            ? new(candidate, source, expression is null ? null : evaluator!.OutputTypeInfo(expression)) : null;
 
     private SqlRelationSource BindDerivedTable(SqlDerivedTableReference derived, SqlSelectExpression? owner)
     {

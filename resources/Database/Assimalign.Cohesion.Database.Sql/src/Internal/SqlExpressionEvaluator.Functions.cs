@@ -138,20 +138,7 @@ internal sealed partial class SqlExpressionEvaluator
     /// <summary>The declared character/binary length of a projected expression, if fixed.</summary>
     /// <param name="expression">The projected expression.</param>
     /// <returns>The declared length, or null when no single modifier describes the result.</returns>
-    internal int? MaximumLengthOf(SqlExpression expression)
-    {
-        RuntimeHelpers.EnsureSufficientExecutionStack();
-        return expression switch
-        {
-            SqlColumnReferenceExpression column => ColumnMetadata(column).Type.MaxLength,
-            SqlCastExpression cast => TryResolveCastTarget(cast)?.Storage.MaxLength,
-            SqlSubqueryExpression => _subquerySlots is not null && _subquerySlots.TryGetValue(expression, out var slot) ? slot.TypeInfo?.MaxLength : null,
-            SqlCollateExpression collate => MaximumLengthOf(collate.Operand),
-            SqlFunctionCallExpression call when !SqlStandardLibrary.IsEvaluatorForm(call.FunctionName)
-                => ResolveFunction(call)?.ReturnType.Storage.MaxLength,
-            _ => null,
-        };
-    }
+    internal int? MaximumLengthOf(SqlExpression expression) => OutputTypeInfo(expression)?.MaxLength;
 
     /// <summary>Retains declared type facets through scalar slots, casts and function outputs.</summary>
     internal DatabaseTypeInfo? OutputTypeInfo(SqlExpression expression)
@@ -163,11 +150,42 @@ internal sealed partial class SqlExpressionEvaluator
             SqlCastExpression cast => TryResolveCastTarget(cast)?.Storage,
             SqlCollateExpression collate => OutputTypeInfo(collate.Operand),
             SqlSubqueryExpression => _subquerySlots is not null && _subquerySlots.TryGetValue(expression, out var slot) ? slot.TypeInfo : null,
+            SqlCaseExpression conditional => CaseOutputTypeInfo(conditional),
+            SqlFunctionCallExpression call when SqlStandardLibrary.IsCoalesce(call.FunctionName) => CommonOutputTypeInfo(call.Arguments),
+            // PostgreSQL nodeFuncs.c:327-336: NULLIF returns its first argument or NULL.
+            SqlFunctionCallExpression call when call.FunctionName.Equals("NULLIF", StringComparison.OrdinalIgnoreCase)
+                => call.Arguments.Count == 0 ? null : OutputTypeInfo(call.Arguments[0]),
             SqlFunctionCallExpression call when !SqlStandardLibrary.IsEvaluatorForm(call.FunctionName)
                 && ResolveFunction(call) is { ReturnType.IsPseudo: false } function => function.ReturnType.Storage,
             _ => null,
         };
     }
+
+    private DatabaseTypeInfo? CaseOutputTypeInfo(SqlCaseExpression conditional)
+    {
+        // PostgreSQL nodeFuncs.c:389-419: the implicit NULL ELSE has no typmod.
+        if (conditional.ElseResult is null || OutputTypeInfo(conditional.ElseResult) is not { } common) { return null; }
+        foreach (var clause in conditional.WhenClauses)
+        {
+            if (!SameOutputTypeInfo(common, OutputTypeInfo(clause.Result))) { return null; }
+        }
+        return common;
+    }
+
+    private DatabaseTypeInfo? CommonOutputTypeInfo(IReadOnlyList<SqlExpression> arguments)
+    {
+        // PostgreSQL nodeFuncs.c:452-480: every argument must have the same type/typmod.
+        if (arguments.Count == 0 || OutputTypeInfo(arguments[0]) is not { } common) { return null; }
+        for (int index = 1; index < arguments.Count; index++)
+        {
+            if (!SameOutputTypeInfo(common, OutputTypeInfo(arguments[index]))) { return null; }
+        }
+        return common;
+    }
+
+    private static bool SameOutputTypeInfo(DatabaseTypeInfo first, DatabaseTypeInfo? next)
+        => next is not null && first.Type == next.Type && first.MaxLength == next.MaxLength
+            && first.Precision == next.Precision && first.Scale == next.Scale;
 
     private static DatabaseType AlternativeType(DatabaseType first, DatabaseType next)
         => SqlTemporalArithmetic.IsCalendar(first) && SqlTemporalArithmetic.IsCalendar(next) ? SqlTemporalArithmetic.CommonCalendarType(first, next)

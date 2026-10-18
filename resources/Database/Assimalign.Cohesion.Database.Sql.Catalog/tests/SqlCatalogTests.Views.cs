@@ -72,7 +72,7 @@ public partial class SqlCatalogTests
         var catalog = harness.Open();
         await catalog.CreateSchemaAsync(new SqlCatalogNamespace("dbo"), CancellationToken.None);
         var table = await catalog.CreateTableAsync("dbo", "t", [Column("id", DatabaseType.Int32)], [], CancellationToken.None);
-        var columns = new List<SqlCatalogColumn> { new("label", new DatabaseTypeInfo(DatabaseType.String, 12), collation: Collation.CaseInsensitive) };
+        var columns = new List<SqlCatalogColumn> { new("label", new DatabaseTypeInfo(DatabaseType.String, 12), false, collation: Collation.CaseInsensitive) };
         var view = new SqlCatalogView("dbo", "v", "SELECT CAST(id AS VARCHAR(12)) COLLATE case_insensitive AS label FROM t", columns,
             [table.ObjectId], [SqlObjectIdentity.Column(table.ObjectId, "id")], []);
         // Act
@@ -87,8 +87,34 @@ public partial class SqlCatalogTests
         restored.Definition.ShouldBe(view.Definition);
         restored.Columns[0].Type.MaxLength.ShouldBe(12);
         restored.Columns[0].Collation.ShouldBeSameAs(Collation.CaseInsensitive);
+        restored.Columns[0].IsNullable.ShouldBeTrue();
+        snapshot.Views[0].Columns[0].IsNullable.ShouldBeTrue();
         restored.TableDependencies.ShouldBe([table.ObjectId]);
         catalog.Views.ShouldBeEmpty();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql.Catalog] - Views: contract and record size refusals carry structured diagnostics")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CreateViewAsync_InvalidReplacementOrSize_ShouldCarryViewDiagnostic(bool oversized)
+    {
+        // Arrange
+        var catalog = new CatalogHarness().Open();
+        await catalog.CreateSchemaAsync(new SqlCatalogNamespace("dbo"), CancellationToken.None);
+        var original = new SqlCatalogView("dbo", "v", "SELECT CAST(1 AS DECIMAL(5,2)) AS n",
+            [new("n", new DatabaseTypeInfo(DatabaseType.Decimal, precision: 5, scale: 2))], [], [], []);
+        await catalog.CreateViewAsync(original, cancellationToken: CancellationToken.None);
+        var replacement = new SqlCatalogView("dbo", "v", oversized ? new string('x', 9000) : "SELECT CAST(1 AS DECIMAL(6,3)) AS n",
+            [new("n", new DatabaseTypeInfo(DatabaseType.Decimal, precision: 6, scale: 3))], [], [], []);
+        ulong before = catalog.DdlGeneration;
+
+        // Act
+        var error = await Should.ThrowAsync<SqlCatalogException>(() => catalog.CreateViewAsync(replacement, true, CancellationToken.None).AsTask());
+
+        // Assert
+        error.Diagnostics[0].Code.ShouldBe("COHSQLE033");
+        catalog.Views.ShouldHaveSingleItem().ShouldBeSameAs(original);
+        catalog.DdlGeneration.ShouldBe(before);
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql.Catalog] - Views: publication guards names columns table identity and view dependencies")]
