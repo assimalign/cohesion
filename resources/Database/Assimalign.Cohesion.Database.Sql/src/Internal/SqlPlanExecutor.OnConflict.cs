@@ -103,7 +103,11 @@ internal sealed partial class SqlPlanExecutor
         var replacements = writes.Where(write => write.OldLocation.HasValue).ToList();
         ValidateRows(table, replacements.Select(write => write.Values).ToList(), statement, cancellationToken, checksOnly: true);
         var references = new List<SqlParentReference>();
-        ValidateRows(table, writes.Select(write => write.Values).ToList(), statement, cancellationToken, references: references, skipChecks: true);
+        // An RC arbiter wait can reach a new row and its parent committed together after the
+        // original statement snapshot. Refresh committed visibility, never the all-writers
+        // ConstraintCurrentSnapshot used by lock-protected referential walks and DDL.
+        ValidateRows(table, writes.Select(write => write.Values).ToList(), statement, cancellationToken, references: references, skipChecks: true,
+            foreignKeySnapshot: statement.Transaction.IsolationLevel == IsolationLevel.ReadCommitted ? statement.Transaction.Snapshot : null);
         await AcquireParentRowLocksAsync(references, statement, cancellationToken).ConfigureAwait(false);
         var released = new List<SqlParentReference>();
         CollectReleasedReferences(table, replacements.Select(write => write.OldValues!).ToList(), released, statement, cancellationToken,

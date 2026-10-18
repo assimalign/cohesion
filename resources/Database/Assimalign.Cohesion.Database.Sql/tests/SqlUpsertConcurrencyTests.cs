@@ -26,6 +26,43 @@ public sealed class SqlUpsertConcurrencyCollection
 [Collection(SqlUpsertConcurrencyCollection.Name)]
 public sealed class SqlUpsertConcurrencyTests
 {
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Upsert: ReadCommitted validates a newer row against committed parents without seeing in-flight parents")]
+    public async Task ExecuteAsync_ReadCommittedNewParent_ShouldUseRefreshedCommittedVisibility()
+    {
+        // Arrange
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        await using var engine = SqlDatabaseEngine.Create("upsert-fk-snapshot", new());
+        var database = await engine.CreateDatabaseAsync("app", timeout.Token);
+        await using var first = await database.CreateSessionAsync(timeout.Token);
+        await using var second = await database.CreateSessionAsync(timeout.Token);
+        await first.ExecuteAsync("CREATE TABLE p (id INT PRIMARY KEY)", cancellationToken: timeout.Token);
+        await first.ExecuteAsync("CREATE TABLE t (id INT PRIMARY KEY, pid INT REFERENCES p(id), v INT)", cancellationToken: timeout.Token);
+        await first.ExecuteAsync("INSERT INTO p VALUES (1)", cancellationToken: timeout.Token);
+        await first.ExecuteAsync("INSERT INTO t VALUES (1, 1, 10)", cancellationToken: timeout.Token);
+        await using var winner = await first.BeginTransactionAsync(timeout.Token);
+        await first.ExecuteAsync("INSERT INTO p VALUES (2)", cancellationToken: timeout.Token);
+        await first.ExecuteAsync("UPDATE t SET pid = 2, v = 40 WHERE id = 1", cancellationToken: timeout.Token);
+        await using var loser = await second.BeginTransactionAsync(IsolationLevel.ReadCommitted, timeout.Token);
+
+        // Act: both the updated child and its parent become visible while the upsert waits.
+        var pending = second.ExecuteAsync("INSERT INTO t VALUES (1, 1, 1) ON CONFLICT (id) DO UPDATE SET v = t.v + EXCLUDED.v", cancellationToken: timeout.Token).AsTask();
+        pending.IsCompleted.ShouldBeFalse();
+        await winner.CommitAsync(timeout.Token);
+        (await pending).AffectedCount.ShouldBe(1);
+        await loser.CommitAsync(timeout.Token);
+
+        // Assert: refreshing must still exclude a different transaction's in-flight parent.
+        (await RowsAsync(second, "SELECT pid, v FROM t")).ShouldHaveSingleItem().ShouldBe(new object?[] { 2, 41 });
+        await using var inFlight = await first.BeginTransactionAsync(timeout.Token);
+        await first.ExecuteAsync("INSERT INTO p VALUES (3)", cancellationToken: timeout.Token);
+        await using var writer = await second.BeginTransactionAsync(IsolationLevel.ReadCommitted, timeout.Token);
+        await Should.ThrowAsync<SqlConstraintViolationException>(async () => await second.ExecuteAsync(
+            "INSERT INTO t VALUES (2, 3, 1) ON CONFLICT (id) DO UPDATE SET v = EXCLUDED.v", cancellationToken: timeout.Token));
+        await writer.RollbackAsync(timeout.Token);
+        await inFlight.RollbackAsync(timeout.Token);
+        (await RowsAsync(second, "SELECT id FROM t")).Count.ShouldBe(1);
+    }
+
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Upsert: two gated Snapshot autocommit sessions produce exactly one insert and one retry")]
     public async Task ExecuteAsync_TwoAutocommitSessions_ShouldAbortOneNewKeyContender()
     {

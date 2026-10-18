@@ -21,7 +21,7 @@ public sealed partial class SqlQueryParser
                 scan.Current.Value.Equals("REPLACE", System.StringComparison.OrdinalIgnoreCase))
             {
                 RequireSkippedConstruct(lexer.Current.Position, scan.Current.Position + scan.Current.Value.Length,
-                    $"INSERT OR {CurrentText(ref scan)}; use ON CONFLICT");
+                    $"INSERT OR {CurrentText(ref scan).ToUpperInvariant()}; use ON CONFLICT");
                 SkipQueryRemainder(ref lexer);
                 return new SqlInsertExpression(new SqlTableReference(string.Empty, null, null), null, null, null, false, null,
                     Location.Create(1, 1, pos, _lastTokenEnd));
@@ -124,7 +124,7 @@ public sealed partial class SqlQueryParser
                 if (scan.Current.Type != TokenType.Comma) { break; }
                 Advance(ref scan);
             }
-            if (scan.Current.Type != TokenType.RightParen)
+            if (scan.Current.Type is not (TokenType.RightParen or TokenType.Comma or TokenType.Semicolon) && !IsAtEnd(ref scan))
             {
                 RequireSkippedConstruct(start, scan.Current.Position + scan.Current.Value.Length,
                     "ON CONFLICT inference expressions, COLLATE, ordering or operator classes");

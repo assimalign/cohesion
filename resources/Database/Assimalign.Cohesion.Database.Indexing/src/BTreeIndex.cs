@@ -362,7 +362,9 @@ public sealed class BTreeIndex
     /// The caller must hold the key's Exclusive entry lock, <c>LockResource.Entry(ObjectId, key.Hash())</c>,
     /// for the entire lookup and decision. This synchronous phase-one operation takes only the
     /// tree's read latch; it neither acquires transaction locks nor filters by a snapshot.
-    /// A live entry is committed or belongs to the caller while that lock is held.
+    /// On a unique index whose writers participate in this lock protocol, a live entry is
+    /// committed or belongs to the caller while that lock is held. Non-unique index callers
+    /// must additionally synchronize their writers if they need that stability guarantee.
     /// </remarks>
     /// <param name="key">The complete index key.</param>
     /// <returns>The live entry reference, or null if no live entry exists.</returns>

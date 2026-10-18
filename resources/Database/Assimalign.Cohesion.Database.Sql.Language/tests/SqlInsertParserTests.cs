@@ -9,6 +9,23 @@ public class SqlInsertParserTests
 {
     private readonly SqlQueryParser _parser = new();
 
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Upsert: malformed inference lists and missing actions report syntax")]
+    [InlineData("ON CONFLICT () DO NOTHING")]
+    [InlineData("ON CONFLICT (id,, a) DO NOTHING")]
+    [InlineData("ON CONFLICT (id,) DO NOTHING")]
+    [InlineData("ON CONFLICT (id")]
+    [InlineData("ON CONFLICT (id)")]
+    [InlineData("ON CONFLICT (id) DO UPDATE SET")]
+    public void Parse_IncompleteOnConflict_ShouldReportSyntax(string clause)
+    {
+        // Arrange / Act
+        var statement = _parser.Parse("INSERT INTO t VALUES (1) " + clause + ";");
+
+        // Assert
+        statement.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "SQL0003");
+        statement.Diagnostics.ShouldNotContain(diagnostic => diagnostic.Code == "COHDBL001");
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Upsert: all conflict targets consume their complete statement and RETURNING")]
     [InlineData("INSERT INTO t (id) VALUES (1) ON CONFLICT DO NOTHING", SqlOnConflictTargetKind.None, SqlOnConflictAction.DoNothing)]
     [InlineData("INSERT INTO t (a, b) VALUES (1, 2) ON CONFLICT (a, b) DO NOTHING", SqlOnConflictTargetKind.Columns, SqlOnConflictAction.DoNothing)]

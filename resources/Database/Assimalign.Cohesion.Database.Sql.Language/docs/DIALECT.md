@@ -162,7 +162,9 @@ A latest-state lookup under that key lock sees committed or own entries. **Snaps
 if a conflict was committed after the statement snapshot. In particular, two autocommit
 Snapshot sessions racing ON CONFLICT DO NOTHING on a new key insert one row and abort one
 contender; retry the aborted transaction. **ReadCommitted** instead skips that row for DO
-NOTHING or updates its newest committed version for DO UPDATE. A rolled-back contender's
+NOTHING or updates its newest committed version for DO UPDATE. FK validation refreshes
+ReadCommitted committed visibility after arbitration; parents committed with the new version
+are visible, and other transactions' in-flight parents are excluded. A rolled-back contender's
 entry is absent when its key lock releases, so the waiting proposal inserts. This follows
 PostgreSQL's [transaction-isolation contract](https://www.postgresql.org/docs/18/transaction-iso.html)
 and REPEATABLE READ visibility check (src/backend/executor/nodeModifyTable.c:377-405,2935).

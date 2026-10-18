@@ -64,6 +64,29 @@ public sealed class SqlUpsertExecutionTests
         (await RowsAsync(session, "SELECT id FROM legacy")).ShouldBeEmpty();
     }
 
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Upsert: synthetic legacy constraint names use the system view's collision suffix")]
+    public async Task ExecuteAsync_LegacyConstraintNameCollision_ShouldDistinguishUnknownAndUnindexedTargets()
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("upsert", new());
+        var database = await engine.CreateDatabaseAsync("app");
+        await database.Catalog.CreateTableAsync("dbo", "legacy", [new SqlCatalogColumn("id", new DatabaseTypeInfo(DatabaseType.Int32), false)], ["id"], CancellationToken.None);
+        await using var session = await database.CreateSessionAsync();
+        await session.ExecuteAsync("ALTER TABLE legacy ADD CONSTRAINT PrimaryKey_legacy CHECK(id > 0)");
+        string primary = (string)(await RowsAsync(session,
+            "SELECT CONSTRAINT_NAME FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS WHERE TABLE_NAME = 'legacy' AND CONSTRAINT_TYPE = 'PRIMARY KEY'"))[0][0]!;
+
+        // Act
+        var legacy = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync($"INSERT INTO legacy VALUES (1) ON CONFLICT ON CONSTRAINT {primary} DO NOTHING"));
+        var unknown = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("INSERT INTO legacy VALUES (1) ON CONFLICT ON CONSTRAINT PrimaryKey_legacy_unknown DO NOTHING"));
+
+        // Assert
+        primary.ShouldBe("PrimaryKey_legacy_1");
+        legacy.Message.ShouldContain("legacy primary key", Case.Sensitive);
+        unknown.Message.ShouldContain("No unique index or constraint with this name", Case.Sensitive);
+        (await RowsAsync(session, "SELECT id FROM legacy")).ShouldBeEmpty();
+    }
+
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Upsert: EXCLUDED aliases and target aliases obey the ordinary resolver")]
     [InlineData("excluded", "EXCLUDED.age")]
     [InlineData("x", "t.age")]

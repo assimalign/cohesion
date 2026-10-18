@@ -27,8 +27,7 @@ internal sealed partial class SqlPlanner
             if (!_catalog.TryGetIndex(table.ObjectId, clause.ConstraintName!, out var index) || !index.IsUnique)
             {
                 string reason = table.Constraints.Any(constraint => string.Equals(constraint.Name, clause.ConstraintName, StringComparison.OrdinalIgnoreCase))
-                    ? ErrorMessages.UpsertConstraintNotUnique : table.PrimaryKeyColumns.Count > 0 &&
-                        clause.ConstraintName!.StartsWith("PrimaryKey_" + table.Name, StringComparison.OrdinalIgnoreCase)
+                    ? ErrorMessages.UpsertConstraintNotUnique : IsLegacyPrimaryKey(clause.ConstraintName!)
                         ? ErrorMessages.UpsertLegacyPrimaryKey : ErrorMessages.UpsertConstraintMissing;
                 throw Invalid(reason);
             }
@@ -67,6 +66,19 @@ internal sealed partial class SqlPlanner
 
         SqlPlanningException Invalid(string reason) => new("COHSQLE040",
             string.Format(CultureInfo.CurrentCulture, ErrorMessages.UpsertArbiterInvalid, target, table.Schema, table.Name, reason), insert.Location);
+
+        bool IsLegacyPrimaryKey(string name)
+        {
+            if (table.PrimaryKeyColumns.Count == 0 || indexes.Any(index => index.IsPrimaryKey)) { return false; }
+            // Match the synthetic name reported by SystemKeyConstraints, including its collision suffix.
+            var names = new HashSet<string>(indexes.Select(index => index.Name), StringComparer.OrdinalIgnoreCase);
+            names.UnionWith(table.Constraints.Select(constraint => constraint.Name));
+            string baseName = "PrimaryKey_" + table.Name;
+            string candidate = baseName;
+            for (int suffix = 1; names.Contains(candidate); suffix++)
+            { candidate = baseName + "_" + suffix.ToString(CultureInfo.InvariantCulture); }
+            return string.Equals(name, candidate, StringComparison.OrdinalIgnoreCase);
+        }
 
         void Validate(SqlExpression expression)
         {

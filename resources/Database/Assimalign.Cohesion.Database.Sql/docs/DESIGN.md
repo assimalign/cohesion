@@ -2548,7 +2548,9 @@ SET NULL/DEFAULT cycles and plain INSERT key waits; the gate's no-wait rule is u
 
 A live conflict newer than Snapshot visibility fails retryably for either action, including
 autocommit Snapshot. ReadCommitted skips it for DO NOTHING or updates the latest committed
-row for DO UPDATE. Own writes remain visible. Rollback clears the winner's index entries
+row for DO UPDATE. FK validation then refreshes ReadCommitted committed visibility as well, so
+a parent committed with that newer row is visible while other in-flight parents remain excluded.
+Own writes remain visible. Rollback clears the winner's index entries
 before its locks release, allowing a waiting insertion. PostgreSQL anchors are
 nodeModifyTable.c:377-405 (snapshot visibility), :1108 (proposed constraints), :2826-2830
 (repeated effects), :2935-2950 (visibility and WHERE); arbiter set equality is
