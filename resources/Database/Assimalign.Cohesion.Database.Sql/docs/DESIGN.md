@@ -337,9 +337,10 @@ plan. Subquery binding, derived binding and INSERT source validation share that
 contract instead of maintaining separate closed switches. A `SqlDerivedRelation`
 is the third source kind on the N-input seam: it has output columns and a child
 plan, with no object ID, index or fabricated stored table. The executor materializes
-each body once with the enclosing statement context, buffers rows only while its
-consumer runs, and detaches retained binary cells on delivery under the existing
-ownership rules. EXPLAIN emits DerivedTable with the complete child subtree.
+uncorrelated bodies once per statement and reevaluates correlated bodies for each
+enclosing frame, always with the enclosing statement context. Buffered delivery
+detaches retained binary cells under the existing ownership rules.
+EXPLAIN emits DerivedTable with the complete child subtree.
 Single derived inputs use the same relation consumer as N-way joins.
 Their EXPLAIN root is Select with a DerivedTable child; only multiple relations
 emit NestedLoopJoin and JoinStep. Output metadata follows the projected expression
