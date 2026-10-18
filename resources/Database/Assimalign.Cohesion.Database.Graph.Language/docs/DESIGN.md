@@ -535,8 +535,9 @@ range are detected before conversion, avoiding per-row overflow exceptions. Nego
 value encoding preserves Decimal scale through parameters and results. Nested aggregates,
 aggregates in WHERE, unequal GROUP BY lists, and ungrouped
 ORDER BY references are COHDBG001 before reading data, including under EXPLAIN. Parameters
-inside aggregate operands are validated even on empty input. ExecutePaths rejects aggregates
-with its existing COHDBG001 path-request message. HAVING, STDDEV_SAMP, STDDEV_POP,
+inside aggregate operands are validated even on empty input. ExecutePaths rejects a final
+aggregate projection with its existing COHDBG001 path-request message; an intermediate
+aggregate such as WITH collect(n) AS ns UNWIND ns AS n feeds later stages (#1145). HAVING, STDDEV_SAMP, STDDEV_POP,
 PERCENTILE_CONT and PERCENTILE_DISC remain precise COHDBL001 capability diagnostics.
 WITH aggregates execute through the same per-stage grouping plan (#1145).
 
