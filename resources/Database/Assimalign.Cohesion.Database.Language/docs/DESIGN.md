@@ -92,7 +92,7 @@ language's syntax code. The rules, shared by SQL, OQL and GQL:
   `Internal` namespace (`src/Internal/`). Each language's test project reaches them through
   `InternalsVisibleTo`, and nothing else does. Later items extend the tables: shared-diagnostics
   adds function names, and oql-sqlpp-basis adds the ODMG words.
-- **Recognized-but-unsupported words stay positional.** A word such as OQL `LIMIT` or `MERGE`, or
+- **Recognized-but-unsupported words stay positional.** A word such as OQL `FETCH` or `MERGE`, or
   GQL `TRAIL` or `NODETACH`, is not added to the profile's keyword list. The lexer keeps it an
   identifier, so a field or variable of that name still parses. The table's position rule decides
   where the word starts a construct instead. Examples: the start of the statement, the token

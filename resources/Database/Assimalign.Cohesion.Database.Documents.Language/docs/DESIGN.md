@@ -63,12 +63,14 @@ Lexical recognition preserves the established vocabulary so rejected constructs 
 | `GROUP BY` | Yes | One or more grouping expressions |
 | `HAVING` | Yes | Group filtering, including aggregate calls |
 | `ORDER BY` | Yes | One or more expressions, each optionally `ASC` or `DESC` |
+| `LIMIT` | Yes | Non-negative signed Int64 integer literal or parameter, applied after ordering |
+| `OFFSET` | Yes | Non-negative signed Int64 integer literal or parameter; either order with LIMIT |
+| `FETCH` | No | The SQL FETCH FIRST spelling is not adopted; one COHDBL001 at FETCH |
 | `CREATE COLLECTION` | Yes | One database-local collection, optionally `IF NOT EXISTS` |
 | `DROP COLLECTION` | Yes | One database-local collection, optionally `IF EXISTS` |
 | `CREATE INDEX` | Yes | One named, nonunique index over one document path in one collection |
 | `DROP INDEX` | Yes | One named index in one collection; the `ON` qualifier is required |
 | `SUBQUERY` | No | A nested `SELECT` reports this capability name at the inner keyword, including UPDATE SET/WHERE, DELETE and INSERT/UPSERT VALUES, with or without EXPLAIN |
-| `LIMIT`, `OFFSET` | No (pin) | SQL++ row limits; oql-limit-offset flips the pin |
 | `MERGE` | No (pin) | SQL++ merge; stays a pin with no T1 item lifting it, and #1101 owns it |
 | `UNNEST` | No (pin) | SQL++ array expansion in `FROM`; oql-arrays flips the pin |
 | `EVERY ... SATISFIES` | No (pin) | SQL++ quantified predicate, also opened by `ANY` and `SOME`; oql-arrays flips the pin |
@@ -150,6 +152,37 @@ rule, including repeated literal names; arrays preserve source order and replace
 with JSON null. Constructors use Utf8JsonWriter and owned JsonElement values, preserving decimal
 scale and the decimal scalar domain. The existing 128-level parser limit also covers constructors.
 
+### LIMIT and OFFSET (#1129)
+
+LIMIT and OFFSET accept integer literals, optionally signed, or ordinary $name/@name/$1
+parameters. Either clause may appear alone or first, at most once each. Both operands survive
+alias rewriting. Values must be integral, non-negative and within signed Int64, including counts
+above Int32.MaxValue (the 2026-10-18 ruling supersedes the issue's original Int32 bound).
++1 and -0 are valid. Literal 2.0 and 1e2, NULL/NIL, TRUE/FALSE, MISSING, ALL, parentheses,
+arrays and document-dependent expressions are invalid counts. Integral decimal and JSON numeric
+parameter values are accepted after normalization; NULL parameters are invalid.
+
+Every invalid count has OQL0007 at its full operand span, with the message
+"LIMIT requires a non-negative integer in the signed 64-bit range." (OFFSET names OFFSET).
+A missing operand, duplicate clause (at its second keyword), arithmetic after a count or
+ORDER BY after paging retains OQL0002. LIMIT m, n reports one COHDBL001 at LIMIT before
+validating m (including ALL, negative and string operands), naming that unsupported spelling
+and asking for LIMIT n OFFSET m. Missing parameters retain COHDOC005;
+parameter lookup is the shared contract. Normalization failures, including nonfinite values and
+numbers outside the decimal domain, become OQL0007 for paging. Direct AST counts are checked too.
+No new shared public member or visibility grant is required; the two assemblies keep the message
+locally, with equality covered by planner/parser tests.
+
+Paging follows WHERE, grouping/HAVING, projection, DISTINCT and ORDER BY. INSERT and UPSERT SELECT
+sources use the same final page. UPDATE/DELETE LIMIT and OFFSET remain COHDBL001, naming the
+statement and clause (for example, DELETE LIMIT). INSERT/UPSERT VALUES paging names
+INSERT VALUES LIMIT, UPSERT VALUES OFFSET, or the corresponding clause. RETURNING as an implicit source alias may precede paging.
+EXPLAIN validates counts without reading documents and reports the resolved limit and offset.
+The PostgreSQL reference accepts either order (src/backend/parser/gram.y:13537-13566) and rejects
+the comma spelling at LIMIT (13586-13593). OQL rejects NULL and LIMIT ALL, unlike PostgreSQL's
+no-limit/zero-offset interpretation (src/backend/executor/nodeLimit.c:359-408). The Int64 bound
+agrees with Cohesion SQL #1100; these NULL and literal-grammar rules remain OQL-specific.
+
 ### Keyword disposition (#1101)
 
 The capability scan reads one static recognized-unsupported table, `OqlUnsupportedVocabulary`.
@@ -159,15 +192,15 @@ a name:
 
 - **Anywhere** (reserved unsupported SQL++ vocabulary): every occurrence except a path segment after a dot or an explicit SELECT-list AS label. All
   are lexer keywords or functions.
-- **Clause** (statements and clauses of other languages, and the SQL++ words `LIMIT`,
-  `OFFSET` and `UNNEST`): the first word of the statement, or the word directly after the end
-  of an operand. An operand ends with a name, a path segment, a literal, a parameter, `)`, `]`,
-  `NULL`/`NIL`/`TRUE`/`FALSE` or `ASC`/`DESC`. So `WHERE a = 1 LIMIT 5`, `WHERE a = 'x' LIMIT 1`
-  and `ORDER BY a DESC OFFSET 2` report `LIMIT` or `OFFSET`, where they used to fall through to
-  `OQL0002`. `FROM c UNNEST c.items` reports `UNNEST` instead of binding it as the alias. These
-  words are not lexer keywords, so `SELECT limit, merge FROM c` and `SELECT a AS limit FROM c`
-  still parse. Because the collection name ends an operand, a Clause word cannot be an AS-less
-  `FROM` alias: `FROM c unnest` reports `UNNEST`, while `FROM c AS unnest` keeps it a name.
+- **Clause** (statements and clauses of other languages, including FETCH, and SQL++ UNNEST):
+  the first word of the statement, or directly after the end of an operand. Names, literals,
+  parameters, closing delimiters and ASC/DESC end operands. FETCH FIRST is one unsupported
+  spelling at FETCH; FIRST is exempt only directly after a FETCH in construct position.
+  ALL is an invalid paging count only after an actual LIMIT/OFFSET clause head; path segments
+  such as c.fetch and c.limit grant no exemption to a following FIRST or ALL. These words remain
+  identifiers elsewhere. A Clause word cannot be an implicit FROM alias: FROM c unnest
+  reports UNNEST, while FROM c AS unnest keeps it a name. LIMIT and OFFSET execute and are
+  reserved; use quoted names or path segments such as d.limit. SELECT a AS limit still parses.
 - **Statement** (`DEFINE`, `MERGE` and the enabled `UPSERT` coverage entry): only the first word of the
   statement. UPSERT bypasses refusal through OqlClauses.Upsert; its table entry retains contextual
   keyword coverage. Elsewhere they are names, so an AS-less alias such as `FROM c merge` still parses,
@@ -207,6 +240,7 @@ Membership tests assert these lists without freezing arrays that later T1 items 
 | --- | --- |
 | Reserved | MISSING, VALUED, KNOWN, UNKNOWN, NIL, UNDEFINED, SET, ARRAY, COLLECTION, FIRST, LAST, UNIQUE |
 | Projection reservations (#1128) | VALUE, RAW |
+| Paging reservations (#1129) | LIMIT, OFFSET |
 | Predicate and conditional reservations (#1127) | CASE, WHEN, THEN, ELSE, END, ESCAPE |
 | Freed identifiers | DEFINE, ELEMENT, FLATTEN, STRUCT, LIST, BAG, LISTTOSET, TYPEOF |
 | Removed functions | ELEMENT, FLATTEN, FIRST, LAST, LISTTOSET, UNIQUE |
@@ -283,6 +317,8 @@ statement    := (query | insert | upsert | update | delete | EXPLAIN (query | in
 query        := SELECT [ALL | DISTINCT] select-kind FROM collection [AS? identifier]
                 [WHERE expression] [GROUP BY expression (',' expression)*]
                 [HAVING expression] [ORDER BY ordering (',' ordering)*]
+                [LIMIT count [OFFSET count] | OFFSET count [LIMIT count]]
+count        := ['+' | '-'] integer-literal | parameter
 select-kind  := projection (',' projection)* | (VALUE | RAW) expression
 insert       := INSERT INTO collection [AS identifier] write-input
 upsert       := UPSERT INTO collection [AS identifier] write-input
@@ -429,7 +465,7 @@ The keyword-disposition corpus covers these identifiers both with and without th
 | `OQL0004` | Malformed numeric literal (decimal-domain refusals belong to the engine's `COHDOC007`) |
 | `OQL0005` | Expression nesting exceeds the supported depth |
 | `OQL0006` | Invalid function argument count or star operand; only COUNT accepts * |
-| `OQL0007` | Reserved for LIMIT/OFFSET (#1129) |
+| `OQL0007` | Invalid LIMIT/OFFSET operand or value; same clause-specific message at parse and plan time, located at the operand |
 | `OQL0008` | Unknown function name, reported once at its name after argument parsing |
 
 Every error has an absolute start/end span and source line. End-of-input errors use the source
@@ -517,7 +553,7 @@ respectively. The [dialect page](DIALECT.md) records the executable UPDATE contr
 WHERE and SET values share ordinary parameter, numeric and META validation, and reject aggregates.
 Subqueries in either clause report COHDBL001 naming SUBQUERY at the inner SELECT, including under
 EXPLAIN. USE KEYS, RETURNING and FOR comprehensions remain COHDBL001 at USE, RETURNING or FOR.
-UPDATE's grammar itself refuses LIMIT, independently of SELECT capabilities. An update returns
+UPDATE's grammar itself refuses LIMIT and OFFSET, independently of SELECT capabilities. An update returns
 the matched-document count without rows; EXPLAIN UPDATE describes its scan or seek without writing.
 
 ### DELETE (#1132)
@@ -532,7 +568,7 @@ The public OqlDeleteExpression retains Collection, Alias, Predicate and source s
 engine chooses the existing scan or index seek, reapplies the full predicate to the statement
 snapshot, then deletes the collected identities atomically. META predicates remain residual
 filters with no key lookup in T1. USE KEYS, RETURNING and DELETE LIMIT remain COHDBL001 at
-their clause token; DELETE's parser refuses LIMIT independently of SELECT's eventual support.
+their clause token; DELETE's parser refuses LIMIT and OFFSET independently of SELECT's paging support.
 System collections are read-only; Schema-owned stored collections permit content deletion.
 Commands report the deleted-document count, including zero, through the existing completion
 affected count and emit no Document frames. EXPLAIN DELETE describes the access without writing.

@@ -35,10 +35,10 @@ public sealed partial class OqlQueryParser
             Error("OQL0002", "UPDATE requires at least one SET assignment or UNSET path.", Current);
         }
         OqlExpression? predicate = !Failed && Take("WHERE") ? ParseExpression() : null;
-        // UPDATE owns this refusal even after SELECT gains LIMIT.
-        if (!Failed && Is("LIMIT"))
+        // UPDATE paging remains unsupported independently of SELECT capabilities.
+        if (!Failed && (Is("LIMIT") || Is("OFFSET")))
         {
-            _diagnostics.Add(QueryDiagnostics.UnsupportedClause("LIMIT", Profile.Language, Span(Current, Current)));
+            _diagnostics.Add(QueryDiagnostics.UnsupportedClause("UPDATE " + Current.Text.ToUpperInvariant(), Profile.Language, Span(Current, Current)));
         }
         return new OqlUpdateExpression(collection, alias, assignments.AsReadOnly(), unset.AsReadOnly(), predicate, Span(start, Previous));
     }
@@ -65,10 +65,10 @@ public sealed partial class OqlQueryParser
             alias = Identifier();
         }
         OqlExpression? predicate = Take("WHERE") ? ParseExpression() : null;
-        // DELETE LIMIT remains deferred even after SELECT gains row limits.
-        if (!Failed && Is("LIMIT"))
+        // DELETE paging remains unsupported independently of SELECT capabilities.
+        if (!Failed && (Is("LIMIT") || Is("OFFSET")))
         {
-            _diagnostics.Add(QueryDiagnostics.UnsupportedClause("LIMIT", Profile.Language, Span(Current, Current)));
+            _diagnostics.Add(QueryDiagnostics.UnsupportedClause("DELETE " + Current.Text.ToUpperInvariant(), Profile.Language, Span(Current, Current)));
         }
         return new OqlDeleteExpression(collection, alias, predicate, Span(start, Previous));
     }
@@ -120,6 +120,10 @@ public sealed partial class OqlQueryParser
                 Expect(TokenType.RightParen, "')'");
                 values.Add((key, value));
             } while (!Failed && Take(TokenType.Comma));
+            if (!Failed && (Is("LIMIT") || Is("OFFSET")))
+            {
+                _diagnostics.Add(QueryDiagnostics.UnsupportedClause(verb + " VALUES " + Current.Text.ToUpperInvariant(), Profile.Language, Span(Current, Current)));
+            }
         }
         else if (Is("SELECT"))
         {

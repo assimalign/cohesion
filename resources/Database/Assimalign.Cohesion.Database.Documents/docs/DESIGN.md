@@ -243,7 +243,8 @@ compiled-schema provisioning authority in this engine.
 
 Planner failures are `DatabaseException` instances with structured `Diagnostics`, an Error
 severity and the offending expression's Start/End/Line when its AST has a location. Their
-Message contains no code prefix. The Documents family is `COHDOCnnn`:
+Message contains no code prefix. The Documents family is `COHDOCnnn`; paging deliberately uses
+OQL0007 for the same count rule at parse and plan time:
 
 | Code | Meaning |
 | --- | --- |
@@ -323,6 +324,39 @@ before ordinary catalog lookup or mutation. Virtual sources do not provide mutab
 
 ### Stored document queries
 
+#### Result paging (#1129)
+
+Both stored and system collections resolve LIMIT/OFFSET in planning, before collection lookup
+or document reads, including EXPLAIN and direct AST requests. Input validation visits count
+parameters through the same normalization and lookup path; wire JsonElement numbers are accepted.
+A bad node kind, NULL, negative, fractional, nonfinite, unsupported CLR value or out-of-Int64 count
+has structured OQL0007 at the operand and the same clause-specific message as bad literals.
+Missing names retain COHDOC005. Integral finite CLR floating-point counts are accepted without
+rounding; fractional inputs cannot normalize to zero or round into an integer. Counts accept signed Int64, matching SQL #1100 and superseding
+the issue's original Int32 bound under the 2026-10-18 ruling. NULL and LIMIT ALL remain invalid,
+diverging from PostgreSQL (src/backend/executor/nodeLimit.c:359-408).
+
+Paging runs last, after HAVING, DISTINCT, ORDER BY and complete column-type inference and numeric
+promotion. Alias rewrites retain both AST operands. Empty and zero-limit pages keep the header
+and static function types, including Int64 COUNT. The window clamps offset to row count, then
+limit to remaining rows; it never adds counts, so Int64.MaxValue is safe. The same output slice
+carries original whole-document bytes. Query AffectedCount stays -1; wire Complete's result
+count is the number of frames after paging. INSERT and UPSERT SELECT write only that page.
+No catalog, storage or wire layout changes are involved; no format bump or migration is needed.
+
+Scan and seek pages follow ordinal document-ID order before filtering; groups use group-key
+order. System-source catalog enumeration is ordinal by collection name, then index name.
+ORDER BY ties preserve baseline ordinal order, so pages concatenate without gaps on unchanged
+data. Writes between separate statements may shift pages; use a shared snapshot for repeatability.
+EXPLAIN's select detail includes resolved limit (none when absent) and offset (zero when absent).
+Unsorted, ungrouped, non-DISTINCT queries whose projections have fixed static result types stop reads
+once the page is complete, including scalar functions from OqlFunctions, unary and binary operators,
+META, literals and constructors. LIMIT 0 evaluates no row predicates; a completed window never
+evaluates the next predicate, following PostgreSQL src/backend/executor/nodeLimit.c:153-159.
+Paths and lone stars can observe heterogeneous scalar roots and
+still inspect all matches to guarantee page-independent column types; their result is materialized.
+This preserves the metadata contract while making early termination safe where types are fixed.
+
 #### SQL++ functions and transaction clock (#1137)
 
 Documents.Language's public immutable OqlFunctions table owns the 40 executable names (META,
@@ -384,7 +418,7 @@ columns retain long values. JSON numeric equality and wire digits are unchanged 
 
 The supported clause matrix lives in the language package's
 [DESIGN.md](../../Assimalign.Cohesion.Database.Documents.Language/docs/DESIGN.md).
-SELECT (ALL/DISTINCT and VALUE/RAW), object/array constructors, FROM, WHERE, GROUP BY, HAVING, ORDER BY, CREATE COLLECTION, DROP COLLECTION,
+SELECT (ALL/DISTINCT and VALUE/RAW), object/array constructors, FROM, WHERE, GROUP BY, HAVING, ORDER BY, LIMIT, OFFSET, CREATE COLLECTION, DROP COLLECTION,
 CREATE INDEX, DROP INDEX, INSERT, UPSERT, UPDATE, UNSET, DELETE, VALUES, IN, BETWEEN, LIKE and CASE are executed. OQL retains its name with a SQL++ basis.
 Retired ODMG constructs are rejected positionally; nested queries, deferred document mutations
 and server statements are rejected with `COHDBL001`. The parser advertises only clauses this executor
@@ -409,8 +443,7 @@ to one NULL row. This preserves Couchbase's observable bare-MISSING JSON null ou
 (query `execution/project_initial.go:128-167`, `value/missing.go:66-68` at 179bff61402a),
 while embedded object members still omit MISSING and array elements still become NULL.
 
-Evaluation proceeds through WHERE, GROUP BY/HAVING, projection, DISTINCT, then ORDER BY;
-future paging follows DISTINCT. Duplicate removal uses grouping's total-order equality and
+Evaluation proceeds through WHERE, GROUP BY/HAVING, projection, DISTINCT, ORDER BY, then OFFSET/LIMIT. Duplicate removal uses grouping's total-order equality and
 retains the first occurrence. This differs from predicate equality: two objects containing NULL
 deduplicate, and decimal values 2 and 2.0 are equal. Couchbase documents
 [duplicate result removal](https://docs.couchbase.com/server/current/n1ql/n1ql-language-reference/selectclause.html#all-distinct);

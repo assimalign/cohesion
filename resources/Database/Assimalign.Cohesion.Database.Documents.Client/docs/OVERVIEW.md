@@ -34,6 +34,10 @@ namespaces. The client library itself references only the transport contracts. Q
 accept JSON scalars and `JsonElement`; object and array results remain owned `JsonElement`
 values. A stored `Document` carries its exact UTF-8 content, identity and version.
 
+OQL LIMIT/OFFSET accepts literals or JSON parameters in either order. Empty pages retain column
+metadata, and Complete counts returned frames while query AffectedCount remains -1. Invalid
+counts retain OQL0007 and the operand location over both transports.
+
 OQL INSERT, UPSERT, UPDATE and DELETE return their affected counts through ExecuteAsync. UPDATE accepts
 SET and UNSET paths and reports the matched count, with a new version for every match. DELETE
 retains the collection and index definitions; EXPLAIN UPDATE/DELETE includes the chosen scan or

@@ -103,8 +103,9 @@ public sealed class OqlKeywordDispositionTests
         ["INTERSECT"] = Rejects("SELECT a FROM c INTERSECT SELECT a FROM d", "INTERSECT"),
         ["EXCEPT"] = Rejects("SELECT a FROM c EXCEPT SELECT a FROM d", "EXCEPT"),
         // SQL++ words
-        ["LIMIT"] = Rejects("SELECT * FROM c WHERE a = 1 LIMIT 5", "LIMIT"),
-        ["OFFSET"] = Rejects("SELECT * FROM c ORDER BY a DESC OFFSET 2", "OFFSET"),
+        ["LIMIT"] = Parses("SELECT * FROM c WHERE a = 1 LIMIT 5"),
+        ["OFFSET"] = Parses("SELECT * FROM c ORDER BY a DESC OFFSET 2"),
+        ["FETCH"] = Rejects("SELECT * FROM c ORDER BY a FETCH FIRST 5 ROWS ONLY", "FETCH"),
         ["UPSERT"] = Parses("UPSERT INTO c (KEY, VALUE) VALUES ('k', {'a': 1})"),
         ["MERGE"] = Rejects("MERGE INTO c USING d ON c.id = d.id WHEN MATCHED THEN UPDATE SET c.a = d.a", "MERGE"),
         ["UNNEST"] = Rejects("SELECT * FROM c UNNEST c.items AS i", "UNNEST"),

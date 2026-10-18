@@ -8,6 +8,9 @@ expression trees. It provides `OqlLanguageProfile`, stable `OqlClauses` names, `
 for projection, filtering, grouping, aggregates, ordering, nested properties, and array access.
 One immutable function table declares META, five aggregates and 34 SQL++ scalars, with parse-time
 arity checks, OQL0008 for unknown calls, and static result types consumed by the Documents engine.
+SELECT LIMIT/OFFSET accept signed integer literals or parameters in either order, with non-negative
+Int64 values and OQL0007 for invalid counts. LIMIT and OFFSET are reserved field names; quoting
+or a preceding dot keeps them usable, and AS labels still accept them.
 
 ```csharp
 var parser = new OqlQueryParser();

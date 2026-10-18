@@ -173,6 +173,10 @@ public sealed partial class OqlQueryParser : QueryParser
             {
                 _diagnostics.Add(QueryDiagnostics.UnsupportedClause("RETURNING", Profile.Language, Span(Current, Current)));
             }
+            else if (Is("LIMIT") || Is("OFFSET"))
+            {
+                _diagnostics.Add(QueryDiagnostics.UnsupportedClause(Current.Text.ToUpperInvariant(), Profile.Language, Span(Current, Current)));
+            }
             else if (Take(TokenType.Semicolon) && Current.Type != TokenType.Eof)
             {
                 Error("OQL0002", "Only one statement is accepted per query.", Current);
@@ -228,6 +232,8 @@ public sealed partial class OqlQueryParser : QueryParser
         int parentheses = 0;
         bool inSelectList = false;
         int selectHead = -2;
+        int fetchHead = -2;
+        int pagingHead = -2;
         int openQuantifiers = 0;
         for (int index = 0; index < _tokens.Count; index++)
         {
@@ -259,6 +265,10 @@ public sealed partial class OqlQueryParser : QueryParser
             // as use. SET is exempt only at the assignment-clause token after that header;
             // SET(...) elsewhere still refuses.
             if (index > statementStart && (index < updateHeaderEnd || index == updateClause)) { continue; }
+
+            // FETCH FIRST is one unsupported spelling. LIMIT ALL is an invalid count.
+            // Only a recognized clause head owns the next word; a path or alias does not.
+            if (value == "FIRST" && index == fetchHead + 1 || value == "ALL" && index == pagingHead + 1) { continue; }
 
             // DISTINCT/ALL are legal only directly after SELECT, including INSERT/UPSERT SELECT.
             if (openQuantifiers == 0 && value is "DISTINCT" or "ALL")
@@ -352,6 +362,12 @@ public sealed partial class OqlQueryParser : QueryParser
                 continue;
             }
 
+            if (value is "LIMIT" or "OFFSET" && !inSelectList && index > 0 && EndsOperand(index - 1))
+            {
+                pagingHead = index;
+                continue;
+            }
+
             // ODMG's quantifiers, FOR ALL x IN e: p and EXISTS x IN e: p, bind with IN too.
             if (value == "FOR" && index + 1 < _tokens.Count && IsWord(_tokens[index + 1], "ALL") &&
                 IsQuantifierBinding(index + 2))
@@ -395,7 +411,7 @@ public sealed partial class OqlQueryParser : QueryParser
             }
 
             // Words of other languages are not reserved field names: they name a construct
-            // only where it can start, so mixed-shape fields such as limit still parse. A
+            // only where it can start, so mixed-shape fields such as fetch still parse. A
             // statement verb names one only as the first word, so an AS-less FROM alias named
             // merge or upsert still parses, and a quantifier word only through the binding
             // path above, so an alias named every or satisfies does too.
@@ -424,6 +440,7 @@ public sealed partial class OqlQueryParser : QueryParser
             }
 
             result.Add((word.Construct, reported));
+            if (value == "FETCH") { fetchHead = index; }
 
             // A statement that does not start as OQL is one unsupported construct; the rest of
             // its text belongs to it (MERGE INTO c USING ...).
@@ -503,7 +520,7 @@ public sealed partial class OqlQueryParser : QueryParser
         _tokens[index - 2].Type is TokenType.Identifier or TokenType.QuotedIdentifier or
             TokenType.String or TokenType.Keyword or TokenType.Function;
 
-    private OqlSelectExpression EmptyExpression() => new(string.Empty, null, [], null, [], null, [], false, false, Span(Current, Current));
+    private OqlSelectExpression EmptyExpression() => new(string.Empty, null, [], null, [], null, [], false, false, null, null, Span(Current, Current));
     private bool IsIndexStatement(string verb) => IsDdlStatement(verb, "INDEX");
     private bool IsDdlStatement(string verb, string kind) => Is(verb) && _position + 1 < _tokens.Count &&
         IsWord(_tokens[_position + 1], kind);

@@ -247,6 +247,14 @@ public sealed class DocumentClientWireTests
         (await connection.QueryAsync("SELECT -score + 10 / 2 % 3 AS value FROM items WHERE nested.x IS NOT NULL", cancellationToken: harness.Token))
             .ShouldHaveSingleItem()[0].ShouldBe(0m);
 
+        // LIMIT and OFFSET use wire JsonElement parameters and completion counts after paging.
+        var page = await connection.QueryAsync("SELECT name FROM items ORDER BY name LIMIT $n OFFSET @skip",
+            new Dictionary<string, object?> { ["n"] = 2, ["skip"] = 1 }, harness.Token);
+        page.Select(row => row[0]).ShouldBe(new object?[] { "Bob", "Cy" });
+        page.AffectedCount.ShouldBe(-1);
+        (await connection.QueryAsync("SELECT name FROM items ORDER BY name OFFSET 2", cancellationToken: harness.Token))
+            .ShouldHaveSingleItem()[0].ShouldBe("Cy");
+
         // Whole documents and nested projected values retain JSON shape, including empty results.
         var whole = await connection.QueryAsync("SELECT * FROM items WHERE name = 'Ada'", cancellationToken: harness.Token);
         whole.IsDocumentQuery.ShouldBeTrue();

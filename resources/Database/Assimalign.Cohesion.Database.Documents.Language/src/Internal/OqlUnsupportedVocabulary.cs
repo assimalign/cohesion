@@ -6,7 +6,7 @@ namespace Assimalign.Cohesion.Database.Documents.Language.Internal;
 /// </summary>
 /// <remarks>
 /// Words outside <see cref="OqlLanguageProfile"/>'s keyword list stay identifiers to the
-/// lexer, so a field named <c>limit</c> or <c>merge</c> still parses; their
+/// lexer, so a field named <c>fetch</c> or <c>merge</c> still parses; their
 /// <see cref="OqlWordPosition"/> says where the scan treats them as a construct instead. An
 /// item that adds an entry adds its case to the keyword-disposition corpus in the same
 /// change, or <c>OqlKeywordDispositionTests</c> fails. The corpus also checks that each
@@ -64,9 +64,9 @@ internal static class OqlUnsupportedVocabulary
         new("UNION", "UNION", OqlWordPosition.Clause),
         new("INTERSECT", "INTERSECT", OqlWordPosition.Clause),
         new("EXCEPT", "EXCEPT", OqlWordPosition.Clause),
-        // SQL++ words. oql-limit-offset and oql-arrays flip these pins; MERGE stays.
-        new("LIMIT", "LIMIT", OqlWordPosition.Clause),
-        new("OFFSET", "OFFSET", OqlWordPosition.Clause),
+        // OQL uses LIMIT/OFFSET; the SQL FETCH spelling remains deferred.
+        new("FETCH", "FETCH", OqlWordPosition.Clause),
+        // SQL++ words. oql-arrays flips UNNEST; MERGE stays.
         // Enabled by OqlClauses.Upsert; retained for contextual keyword coverage.
         new("UPSERT", "UPSERT", OqlWordPosition.Statement),
         new("MERGE", "MERGE", OqlWordPosition.Statement),

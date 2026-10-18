@@ -107,16 +107,24 @@ public sealed class OqlDmlParserTests
     [InlineData("DELETE FROM items WHERE amount > 3 garbage", "OQL0002", "garbage")]
     [InlineData("DELETE FROM items; garbage", "OQL0002", "garbage")]
     [InlineData("DELETE FROM items WHERE amount > 3 RETURNING amount", "COHDBL001", "RETURNING")]
-    [InlineData("DELETE FROM items WHERE amount > 3 LIMIT 1", "COHDBL001", "LIMIT")]
-    [InlineData("DELETE FROM items LIMIT 1", "COHDBL001", "LIMIT")]
+    [InlineData("DELETE FROM items WHERE amount > 3 LIMIT 1", "COHDBL001", "LIMIT", "DELETE LIMIT")]
+    [InlineData("DELETE FROM items LIMIT 1", "COHDBL001", "LIMIT", "DELETE LIMIT")]
+    [InlineData("DELETE FROM items WHERE amount > 3 OFFSET 1", "COHDBL001", "OFFSET", "DELETE OFFSET")]
+    [InlineData("DELETE FROM items OFFSET 1", "COHDBL001", "OFFSET", "DELETE OFFSET")]
+    [InlineData("EXPLAIN DELETE FROM items LIMIT 1", "COHDBL001", "LIMIT", "DELETE LIMIT")]
+    [InlineData("EXPLAIN DELETE FROM items OFFSET 1", "COHDBL001", "OFFSET", "DELETE OFFSET")]
     [InlineData("DELETE FROM items USE KEYS 'a'", "COHDBL001", "USE")]
-    public void Parse_InvalidDelete_ShouldLocateFailure(string query, string code, string token)
+    public void Parse_InvalidDelete_ShouldLocateFailure(string query, string code, string token, string? construct = null)
     {
         // Arrange / Act
         var statement = new OqlQueryParser().Parse(query);
         // Assert
         var diagnostic = statement.Diagnostics.ShouldHaveSingleItem();
         diagnostic.Code.ShouldBe(code);
+        if (code == "COHDBL001")
+        {
+            diagnostic.Message.ShouldBe($"The {construct ?? token} clause is not supported by the OQL surface of this database model.");
+        }
         diagnostic.Start.ShouldBe(query.IndexOf(token, StringComparison.Ordinal));
         diagnostic.End.ShouldBe(diagnostic.Start + token.Length);
         diagnostic.Line.ShouldBe(1);

@@ -111,13 +111,19 @@ internal static class Program
             Check(await connection.ExecuteAsync("DROP INDEX by_score ON items", cancellationToken: token) == 0, "index drop");
             try
             {
-                await connection.QueryAsync("SELECT * FROM items LIMIT 1", cancellationToken: token);
+                await connection.QueryAsync("MERGE INTO items", cancellationToken: token);
                 throw new InvalidOperationException("Unsupported OQL succeeded.");
             }
             catch (DocumentClientException exception)
             {
                 Check(exception.Code == ProtocolErrorCode.ParseFailure && exception.Diagnostics.Any(d => d.Code == "COHDBL001"), "typed diagnostics");
             }
+            var paged = await connection.QueryAsync("SELECT name AS n FROM items ORDER BY n LIMIT @n OFFSET 0",
+                new Dictionary<string, object?> { ["n"] = 1 }, token);
+            Check(paged.Count == 1 && paged.AffectedCount == -1, "parameter paging");
+            var zero = await connection.QueryAsync("SELECT COUNT(*) FROM items LIMIT 0", cancellationToken: token);
+            Check(zero.Count == 0 && zero.Columns[0].Type == Assimalign.Cohesion.Database.Types.DatabaseType.Int64, "empty page metadata");
+            Check((await connection.QueryAsync("SELECT * FROM items OFFSET 1", cancellationToken: token)).Count == 0, "offset only");
             Check((await connection.GetCollectionsAsync(token)).SequenceEqual(["items"]), "reuse after failure");
             var updated = await connection.PutAsync("items", "one", "null"u8.ToArray(), saved.Version, token);
             Check(updated.Version.Value > saved.Version.Value, "versioned update");
