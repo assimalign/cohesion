@@ -345,9 +345,9 @@ syntax still has a `Unique` AST kind so it can preserve the declaration and name
 but execution lowers it to the same unique catalog index used by `CREATE UNIQUE
 INDEX` and `CompiledSchemaIndex(IsUnique: true)`. This keeps compiled schemas,
 SQL DDL, persistence, and concurrent uniqueness enforcement on one path.
-Foreign keys and checks remain constraint catalog records. Only `ON DELETE
-CASCADE` and `ON DELETE RESTRICT` are accepted; `ON UPDATE` stays outside the
-profile and reports `COHDBL001`.
+Foreign keys and checks remain constraint catalog records. `ON DELETE` accepts
+CASCADE, RESTRICT, NO ACTION, SET NULL and SET DEFAULT; an omitted action is NO ACTION.
+`ON UPDATE` stays outside the profile and reports `COHDBL001`.
 
 ## Canonical rendering (`SqlExpressionRenderer`)
 
@@ -366,8 +366,8 @@ binding and execution remain in Database.Sql, with no cross-assembly visibility 
 
 `SqlExpressionRenderer.Render(SqlExpression)` and `Render(SqlSelectExpression)` turn
 a parsed tree back into SQL text. It is the one AST-to-SQL renderer: every
-definition the engine persists — CHECK predicates and literal DEFAULTs today,
-expression defaults (#1121) and view queries (#1124) next — is stored as its
+definition the engine persists — CHECK predicates and literal or expression DEFAULTs,
+and future view queries (#1124) — is stored as its
 output (the rule is in [DIALECT.md](DIALECT.md#persisted-definitions-are-canonical)).
 
 - **The text is a function of the tree.** Keywords upper case, single spaces,
@@ -560,12 +560,10 @@ Directly before a numeric literal the sign stays part of the literal, so `+1` an
 `1` are the same tree and `ORDER BY +1` keeps its ordinal meaning; `+a`, `+(1 + 2)`
 and `+@p` build a unary-plus node. Typing and evaluation belong to the engine.
 
-Column DEFAULT parses through the unary rung too, so negative numeric defaults retain the same
-unary-minus node as a scalar expression. The engine's DEFAULT admission remains narrower than
-the expression grammar: one literal, or one minus over a numeric literal, plus E4's stored
-scalar-call defaults. General expression-default admission remains #1121's scope. This supports
-the schema builder's invariant rendering of negative C# numeric values without rewriting them
-as text literals; DEFAULT assignment (#1193) reuses whatever the catalog already stores.
+Column DEFAULT uses the arithmetic expression grammar, including unary signs, CAST and
+scalar calls (#1121). Negative numeric literals retain the same unary-minus node as a scalar
+expression. Compiled-schema defaults remain literal-only; DEFAULT assignment (#1193) reuses
+the canonical expression and resolved calls the catalog stores.
 
 ## AOT posture
 

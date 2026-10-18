@@ -170,6 +170,10 @@ public sealed class SqlSystemViewTests
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - System views: References identify unique constraints and delete rules")]
     [InlineData("RESTRICT")]
     [InlineData("CASCADE")]
+    [InlineData("NO ACTION")]
+    [InlineData("SET NULL")]
+    [InlineData("SET DEFAULT")]
+    [InlineData("")]
     public async Task References_ShouldExposeUniqueConstraintAndDeleteAction(string action)
     {
         // Arrange
@@ -177,12 +181,12 @@ public sealed class SqlSystemViewTests
         var database = await engine.CreateDatabaseAsync("app");
         await using var session = await database.CreateSessionAsync();
         await session.ExecuteAsync("CREATE TABLE parent (id INT PRIMARY KEY, code TEXT, CONSTRAINT uq_code UNIQUE(code))");
-        await session.ExecuteAsync($"CREATE TABLE child (code TEXT, CONSTRAINT fk_code FOREIGN KEY(code) REFERENCES parent(code) ON DELETE {action})");
+        await session.ExecuteAsync($"CREATE TABLE child (code TEXT, CONSTRAINT fk_code FOREIGN KEY(code) REFERENCES parent(code) {(action.Length == 0 ? "" : "ON DELETE " + action)})");
 
         // Act / Assert
         (await RowsAsync(session,
             "SELECT CONSTRAINT_NAME, UNIQUE_CONSTRAINT_NAME, DELETE_RULE FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS"))
-            .Single().ShouldBe(new object?[] { "fk_code", "uq_code", action });
+            .Single().ShouldBe(new object?[] { "fk_code", "uq_code", action.Length == 0 ? "NO ACTION" : action });
     }
 
     /// <summary>The Cohesion index view includes each index key and its unique and primary-key flags.</summary>
