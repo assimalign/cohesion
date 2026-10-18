@@ -16,6 +16,7 @@ using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
+[Collection(SqlTimingCollection.Name)]
 public sealed class SqlReferentialActionTests
 {
     [Theory(DisplayName = "Cohesion Test [Sql] - SET actions: snapshot conflicts name the action and preserve parent and child rows")]
