@@ -487,6 +487,41 @@ public sealed class SqlUpsertConcurrencyTests
         await loser.RollbackAsync(timeout.Token);
         (await RowsAsync(first, "SELECT id FROM t")).ShouldHaveSingleItem()[0].ShouldBe(1);
     }
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Upsert: unchanged unique values still repoint entries and expose a retryable UPDATE cycle")]
+    public async Task ExecuteAsync_ValueOnlyUpdateRowKeyCycle_ShouldDetectAndPermitRetry()
+    {
+        // Arrange: the storage update creates a fresh heap/index version even for SET v = v + 1.
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        await using var engine = SqlDatabaseEngine.Create("upsert-update-cycle", new());
+        var database = await engine.CreateDatabaseAsync("app", timeout.Token);
+        await using var updater = await database.CreateSessionAsync(timeout.Token);
+        await using var upserter = await database.CreateSessionAsync(timeout.Token);
+        await updater.ExecuteAsync("CREATE TABLE t (id INT PRIMARY KEY, v INT)", cancellationToken: timeout.Token);
+        await updater.ExecuteAsync("INSERT INTO t VALUES (1, 0)", cancellationToken: timeout.Token);
+        database.Catalog.TryGetTable("dbo", "t", out var table).ShouldBeTrue();
+        using var iterator = database.DataStorage.GetUnitIterator(table.ObjectId);
+        iterator.MoveNext().ShouldBeTrue();
+        var unit = iterator.Current;
+        await using var update = await updater.BeginTransactionAsync(timeout.Token);
+        await database.Coordinator.LockManager.AcquireAsync(update.Context.Sequence,
+            LockResource.Entry(table.ObjectId, SqlRecordLocation.Pack(unit.PageId, unit.SlotIndex)), LockMode.Exclusive, timeout.Token);
+        await using var upsert = await upserter.BeginTransactionAsync(IsolationLevel.ReadCommitted, timeout.Token);
+        using var waits = new LockWaitListener(database.Name);
+
+        // Act: wait for evidence that the upsert owns its key and queued on the row.
+        var pending = upserter.ExecuteAsync("INSERT INTO t VALUES (1, 1) ON CONFLICT(id) DO UPDATE SET v = t.v + EXCLUDED.v", cancellationToken: timeout.Token).AsTask();
+        await waits.WaitForWaitAsync(upsert.Context.Sequence, timeout.Token);
+        await Should.ThrowAsync<DatabaseTransactionDeadlockException>(async () =>
+            await updater.ExecuteAsync("UPDATE t SET v = v + 1 WHERE id = 1", cancellationToken: timeout.Token));
+        await update.RollbackAsync(timeout.Token);
+        (await pending).AffectedCount.ShouldBe(1);
+        await upsert.CommitAsync(timeout.Token);
+
+        // Assert: retry the complete victim transaction after the survivor commits.
+        (await updater.ExecuteAsync("UPDATE t SET v = v + 1 WHERE id = 1", cancellationToken: timeout.Token)).AffectedCount.ShouldBe(1);
+        (await RowsAsync(updater, "SELECT v FROM t")).ShouldHaveSingleItem()[0].ShouldBe(2);
+    }
+
     private static async Task<List<object?[]>> RowsAsync(SqlDatabaseSession session, string sql)
     {
         await using var result = (DatabaseResultSet)await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None);
