@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Threading;
 
@@ -86,7 +87,9 @@ internal sealed class SqlExpressionFunction : SqlScalarFunction
         if (type.IsDomain && type.Check is { } check && (value is not null || check.NullBehavior == SqlNullBehavior.CalledOnNullInput)
             && check.InvokeResolved(value, _resultCheckTarget, context.Database, context.Collation, context.CancellationToken) is false)
         {
-            throw new SqlConstraintViolationException($"A value of SQL function '{Name}' violates domain '{type.Name}'.", type.Name, string.Empty, "DOMAIN");
+            throw new SqlConstraintViolationException(
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.FunctionResultDomainViolation, Name, type.Name),
+                type.Name, string.Empty, "DOMAIN");
         }
     }
 }

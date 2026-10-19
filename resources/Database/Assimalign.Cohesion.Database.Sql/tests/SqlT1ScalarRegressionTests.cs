@@ -50,9 +50,9 @@ public sealed class SqlT1ScalarRegressionTests
 
             // Assert
             (await Rows(second, "SELECT nonzero(n), year_of(d) FROM t ORDER BY n")).ShouldBe([[1, 2024m], [2, 2024m]]);
-            var domain = await Should.ThrowAsync<SqlConstraintViolationException>(() => second.ExecuteAsync("INSERT INTO t VALUES (0, DATE '2024-01-01', TIMESTAMP '2024-01-01 00:00:00')", cancellationToken: CancellationToken.None).AsTask());
+            var domain = await SqlConstraintAssertions.ThrowAsync(() => second.ExecuteAsync("INSERT INTO t VALUES (0, DATE '2024-01-01', TIMESTAMP '2024-01-01 00:00:00')", cancellationToken: CancellationToken.None).AsTask());
             domain.ConstraintKind.ShouldBe("DOMAIN");
-            var check = await Should.ThrowAsync<SqlConstraintViolationException>(() => second.ExecuteAsync("INSERT INTO t VALUES (3, DATE '2024-01-01', TIMESTAMP '2023-01-01 00:00:00')", cancellationToken: CancellationToken.None).AsTask());
+            var check = await SqlConstraintAssertions.ThrowAsync(() => second.ExecuteAsync("INSERT INTO t VALUES (3, DATE '2024-01-01', TIMESTAMP '2023-01-01 00:00:00')", cancellationToken: CancellationToken.None).AsTask());
             check.ConstraintKind.ShouldBe("CHECK");
             check.Message.ShouldContain("ck_calendar", Case.Sensitive);
         }

@@ -165,7 +165,7 @@ public sealed class SqlReferentialActionTests
         // Act / Assert
         await session.ExecuteAsync("DELETE FROM p WHERE id = 1", cancellationToken: CancellationToken.None);
         (await Rows(session, "SELECT id, stamp FROM c")).Single().ShouldBe(new object?[] { 2, clock.Instant });
-        await Should.ThrowAsync<SqlConstraintViolationException>(() => session.ExecuteAsync("DELETE FROM p", cancellationToken: CancellationToken.None).AsTask());
+        await SqlConstraintAssertions.ThrowAsync(() => session.ExecuteAsync("DELETE FROM p", cancellationToken: CancellationToken.None).AsTask());
         (await Rows(session, "SELECT id FROM p")).Single()[0].ShouldBe(2);
     }
 
@@ -192,7 +192,7 @@ public sealed class SqlReferentialActionTests
         }
 
         // Act / Assert
-        var failure = await Should.ThrowAsync<SqlConstraintViolationException>(() => session.ExecuteAsync("DELETE FROM p", cancellationToken: CancellationToken.None).AsTask());
+        var failure = await SqlConstraintAssertions.ThrowAsync(() => session.ExecuteAsync("DELETE FROM p", cancellationToken: CancellationToken.None).AsTask());
         if (definition == "pid INT NOT NULL") { failure.ConstraintName.ShouldBe("fk_child"); }
         (await Rows(session, "SELECT id FROM p")).Single()[0].ShouldBe(1);
         (await Rows(session, "SELECT pid FROM c WHERE id = 1")).Single()[0].ShouldBe(1);
@@ -310,7 +310,7 @@ public sealed class SqlReferentialActionTests
         await session.ExecuteAsync("INSERT INTO t VALUES (1, NULL), (2, 1)", cancellationToken: CancellationToken.None);
 
         // Act / Assert
-        await Should.ThrowAsync<SqlConstraintViolationException>(() => session.ExecuteAsync("DELETE FROM t WHERE id = 1", cancellationToken: CancellationToken.None).AsTask());
+        await SqlConstraintAssertions.ThrowAsync(() => session.ExecuteAsync("DELETE FROM t WHERE id = 1", cancellationToken: CancellationToken.None).AsTask());
         (await Rows(session, "SELECT id FROM t ORDER BY id")).Select(row => row[0]).ShouldBe(new object?[] { 1, 2 });
         (await Rows(session, "SELECT pid FROM t WHERE id = 2")).Single()[0].ShouldBe(1);
     }

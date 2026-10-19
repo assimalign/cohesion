@@ -227,8 +227,9 @@ public sealed class SqlUniqueViolationRollbackRaceTests
                     await session.ExecuteAsync($"INSERT INTO t (id, val) VALUES {string.Join(", ", rows)}", cancellationToken: TestTimeout.Token());
                     Fail(new InvalidOperationException($"The batch ending in committed key {duplicate} was inserted."));
                 }
-                catch (SqlConstraintViolationException)
+                catch (SqlConstraintViolationException failure)
                 {
+                    SqlConstraintAssertions.Verify(failure);
                     Interlocked.Increment(ref _rollbacks);
                 }
                 catch (Exception exception)

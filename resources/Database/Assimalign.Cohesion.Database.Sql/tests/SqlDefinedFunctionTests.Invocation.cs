@@ -79,7 +79,7 @@ public sealed partial class SqlDefinedFunctionTests
         await ExecuteAsync(session, "CREATE FUNCTION echo_positive(p positive, q INT) RETURNS INT STRICT RETURN p");
 
         // Act
-        var failure = await Should.ThrowAsync<SqlConstraintViolationException>(() => RowsAsync(session, $"SELECT echo_positive({arguments}) FROM t"));
+        var failure = await SqlConstraintAssertions.ThrowAsync(() => RowsAsync(session, $"SELECT echo_positive({arguments}) FROM t"));
 
         // Assert
         failure.Message.ShouldContain("positive");
@@ -104,7 +104,7 @@ public sealed partial class SqlDefinedFunctionTests
         // Assert
         rows.ShouldBe([[null, null, null]]);
         calls.ShouldBe(0);
-        await Should.ThrowAsync<SqlConstraintViolationException>(() => RowsAsync(session, "SELECT echo_one(CAST(-1 AS INT)) FROM t"));
+        await SqlConstraintAssertions.ThrowAsync(() => RowsAsync(session, "SELECT echo_one(CAST(-1 AS INT)) FROM t"));
         calls.ShouldBe(0);
     }
 
@@ -176,7 +176,7 @@ public sealed partial class SqlDefinedFunctionTests
         await ExecuteAsync(session, "INSERT INTO t VALUES (-1, NULL)");
 
         // Act
-        var failure = await Should.ThrowAsync<SqlConstraintViolationException>(() => RowsAsync(session, "SELECT native_domain_echo(v, q) FROM t"));
+        var failure = await SqlConstraintAssertions.ThrowAsync(() => RowsAsync(session, "SELECT native_domain_echo(v, q) FROM t"));
 
         // Assert
         failure.Message.ShouldContain("native_positive");

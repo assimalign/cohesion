@@ -21,6 +21,71 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 /// </summary>
 public sealed class SqlLanguageConformanceTests
 {
+    /// <summary>Measures constraint diagnostics and statement rollback through the live SQL session.</summary>
+    /// <param name="sql">The statement that violates a constraint.</param>
+    /// <param name="code">The required engine diagnostic code.</param>
+    /// <param name="constraint">The constraint or domain name.</param>
+    /// <param name="table">The constrained table, or empty for a domain CAST.</param>
+    /// <returns>The asynchronous verification.</returns>
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Conformance: constraint failures retain exact diagnostics and roll back the statement (#1666)")]
+    [InlineData("INSERT INTO t VALUES (3,10,3,3,1)", "COHSQLE037", "uq_t", "dbo.t")]
+    [InlineData("INSERT INTO t VALUES (1,30,3,3,1)", "COHSQLE037", "pk_t", "dbo.t")]
+    [InlineData("INSERT INTO t VALUES (3,30,3,1,1)", "COHSQLE037", "uq_d", "dbo.t")]
+    [InlineData("INSERT INTO t VALUES (3,30,3,3,1),(4,10,4,4,1)", "COHSQLE037", "uq_t", "dbo.t")]
+    [InlineData("INSERT INTO t SELECT * FROM source", "COHSQLE037", "uq_t", "dbo.t")]
+    [InlineData("UPDATE t SET u = 10 WHERE id = 2", "COHSQLE037", "uq_t", "dbo.t")]
+    [InlineData("INSERT INTO t VALUES (3,30,3,3,1),(1,40,4,4,1) ON CONFLICT(id) DO UPDATE SET u = 20", "COHSQLE037", "uq_t", "dbo.t")]
+    [InlineData("INSERT INTO t VALUES (3,30,0,3,1)", "COHSQLE038", "ck_t", "dbo.t")]
+    [InlineData("UPDATE t SET qty = 0 WHERE id = 1", "COHSQLE038", "ck_t", "dbo.t")]
+    [InlineData("INSERT INTO t VALUES (3,30,3,0,1)", "COHSQLE038", "positive", "dbo.t")]
+    [InlineData("UPDATE t SET d = 0 WHERE id = 1", "COHSQLE038", "positive", "dbo.t")]
+    [InlineData("SELECT CAST(0 AS positive) FROM t", "COHSQLE038", "positive", "")]
+    [InlineData("INSERT INTO t VALUES (3,30,3,3,99)", "COHSQLE039", "fk_t", "dbo.t")]
+    [InlineData("UPDATE t SET pid = 99 WHERE id = 1", "COHSQLE039", "fk_t", "dbo.t")]
+    [InlineData("DELETE FROM p WHERE id = 1", "COHSQLE039", "fk_t", "dbo.t")]
+    public async Task ExecuteAsync_ConstraintViolation_ShouldCarryOneLocatedDiagnostic(string sql, string code, string constraint, string table)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("constraint-diagnostics", new());
+        var database = await engine.CreateDatabaseAsync("audit", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        string[] setup =
+        [
+            "CREATE DOMAIN positive AS INT CHECK(VALUE > 0)",
+            "CREATE TABLE p (id INT PRIMARY KEY)",
+            "INSERT INTO p VALUES (1)",
+            "CREATE TABLE t (id INT, u INT, qty INT, d positive, pid INT, CONSTRAINT pk_t PRIMARY KEY(id), CONSTRAINT uq_d UNIQUE(d), CONSTRAINT ck_t CHECK(qty > 0), CONSTRAINT fk_t FOREIGN KEY(pid) REFERENCES p(id) ON DELETE RESTRICT)",
+            "CREATE UNIQUE INDEX uq_t ON t(u)",
+            "INSERT INTO t VALUES (1,10,1,1,1),(2,20,2,2,1)",
+            "CREATE TABLE source (id INT, u INT, qty INT, d INT, pid INT)",
+            "INSERT INTO source VALUES (3,30,3,3,1),(4,10,4,4,1)",
+        ];
+        foreach (string statement in setup) { await ExecuteAsync(session, statement); }
+        await ExecuteAsync(session, "BEGIN");
+        await ExecuteAsync(session, "INSERT INTO p VALUES (9)");
+        var request = SqlQueryRequest.FromSql("\n  " + sql);
+
+        // Act
+        var failure = await SqlConstraintAssertions.ThrowAsync(async () => await session.ExecuteAsync(request, CancellationToken.None));
+
+        // Assert
+        var diagnostic = failure.Diagnostics.ShouldHaveSingleItem();
+        diagnostic.Code.ShouldBe(code);
+        diagnostic.Severity.ShouldBe(DiagnosticSeverity.Error);
+        diagnostic.Message.ShouldBe(failure.Message);
+        diagnostic.Start.ShouldBe(request.Statement.SqlExpression.Location!.Start);
+        diagnostic.End.ShouldBe(request.Statement.SqlExpression.Location.End);
+        diagnostic.Line.ShouldBe(1);
+        diagnostic.Location.ShouldBe(DiagnosticLocation.Absolute);
+        failure.ConstraintName.ShouldBe(constraint);
+        failure.Table.ShouldBe(table);
+        diagnostic.Message!.ShouldContain(constraint, Case.Sensitive);
+        if (table.Length > 0) { diagnostic.Message!.ShouldContain(table, Case.Sensitive); }
+        await ExpectRowsAsync(session, "SELECT id, u, qty, d, pid FROM t ORDER BY id", [[1,10,1,1,1],[2,20,2,2,1]]);
+        await ExecuteAsync(session, "COMMIT");
+        await ExpectRowsAsync(session, "SELECT id FROM p ORDER BY id", [[1],[9]]);
+    }
+
     private static readonly string[] _seed =
     [
         "CREATE TABLE t (id INT PRIMARY KEY, name TEXT, age INT);",
@@ -656,7 +721,7 @@ public sealed class SqlLanguageConformanceTests
                 var catalog = session.Database.Catalog;
                 catalog.TryGetTable("dbo", "t", out var table).ShouldBeTrue();
                 catalog.GetIndexes(table!.ObjectId).ShouldContain(index => index.Name == "ix_name" && index.IsUnique);
-                await Should.ThrowAsync<SqlConstraintViolationException>(() => ExecuteAsync(session, "INSERT INTO t VALUES (4, 'Ada', 1);"));
+                await SqlConstraintAssertions.ThrowAsync(() => ExecuteAsync(session, "INSERT INTO t VALUES (4, 'Ada', 1);"));
                 await ExpectRowsAsync(session, "SELECT id FROM t WHERE name = 'Ada';", [[1]]);
             }),
         [SqlClauses.DropIndex] = new("DROP INDEX ix_age ON t;", [.. _seed, "CREATE INDEX ix_age ON t(age);"],
@@ -678,7 +743,7 @@ public sealed class SqlLanguageConformanceTests
             async (session, _) =>
             {
                 await ExecuteAsync(session, "INSERT INTO c VALUES (1), (NULL);");
-                var error = await Should.ThrowAsync<SqlConstraintViolationException>(() => ExecuteAsync(session, "INSERT INTO c VALUES (0);"));
+                var error = await SqlConstraintAssertions.ThrowAsync(() => ExecuteAsync(session, "INSERT INTO c VALUES (0);"));
                 error.ConstraintKind.ShouldBe("CHECK");
                 await ExpectRowsAsync(session, "SELECT COUNT(*) FROM c;", [[2L]]);
             }),
@@ -697,7 +762,7 @@ public sealed class SqlLanguageConformanceTests
             async (session, result) =>
             {
                 await VerifyReferenceAsync(session, result);
-                var error = await Should.ThrowAsync<SqlConstraintViolationException>(() => ExecuteAsync(session, "DELETE FROM t WHERE id = 1;"));
+                var error = await SqlConstraintAssertions.ThrowAsync(() => ExecuteAsync(session, "DELETE FROM t WHERE id = 1;"));
                 error.ConstraintKind.ShouldBe("FOREIGN KEY");
                 await ExpectRowsAsync(session, "SELECT pid FROM c WHERE pid = 1;", [[1]]);
                 await ExpectRowsAsync(session, "SELECT id FROM t WHERE id = 1;", [[1]]);
@@ -720,7 +785,7 @@ public sealed class SqlLanguageConformanceTests
             async (session, result) =>
             {
                 await VerifyReferenceAsync(session, result);
-                await Should.ThrowAsync<SqlConstraintViolationException>(() => ExecuteAsync(session, "DELETE FROM t WHERE id = 1;"));
+                await SqlConstraintAssertions.ThrowAsync(() => ExecuteAsync(session, "DELETE FROM t WHERE id = 1;"));
                 await ExpectRowsAsync(session, "SELECT pid FROM c WHERE pid = 1;", [[1]]);
             }),
         [SqlClauses.Begin] = new("BEGIN;", _seed,
@@ -790,7 +855,7 @@ public sealed class SqlLanguageConformanceTests
         await ExecuteAsync(session, "INSERT INTO t (id, name, age) VALUES (4, 'new', 1);");
         await ExpectRowsAsync(session, "SELECT id, name, age, extra FROM t WHERE id = 4;", [[4, "new", 1, 7]]);
         await ExecuteAsync(session, "ALTER TABLE t ADD CONSTRAINT positive CHECK(extra > 0);");
-        (await Should.ThrowAsync<SqlConstraintViolationException>(() => ExecuteAsync(session, "UPDATE t SET extra = 0 WHERE id = 1;")))
+        (await SqlConstraintAssertions.ThrowAsync(() => ExecuteAsync(session, "UPDATE t SET extra = 0 WHERE id = 1;")))
             .ConstraintKind.ShouldBe("CHECK");
         await ExecuteAsync(session, "ALTER TABLE t DROP CONSTRAINT positive;");
         await ExecuteAsync(session, "UPDATE t SET extra = 0 WHERE id = 1;");
@@ -803,10 +868,10 @@ public sealed class SqlLanguageConformanceTests
     {
         result.Status.ShouldBe(DatabaseResultStatus.Success);
         await ExecuteAsync(session, "INSERT INTO c VALUES (1), (NULL);");
-        (await Should.ThrowAsync<SqlConstraintViolationException>(() => ExecuteAsync(session, "INSERT INTO c VALUES (1);")))
+        (await SqlConstraintAssertions.ThrowAsync(() => ExecuteAsync(session, "INSERT INTO c VALUES (1);")))
             .ConstraintKind.ShouldBe("UNIQUE");
         // This dialect's unique index treats NULL as a key, so a second NULL is also a duplicate.
-        (await Should.ThrowAsync<SqlConstraintViolationException>(() => ExecuteAsync(session, "INSERT INTO c VALUES (NULL);")))
+        (await SqlConstraintAssertions.ThrowAsync(() => ExecuteAsync(session, "INSERT INTO c VALUES (NULL);")))
             .ConstraintKind.ShouldBe("UNIQUE");
         await ExpectRowsAsync(session, "SELECT COUNT(*) FROM c;", [[2L]]);
     }
@@ -815,9 +880,9 @@ public sealed class SqlLanguageConformanceTests
     {
         result.Status.ShouldBe(DatabaseResultStatus.Success);
         await ExecuteAsync(session, "INSERT INTO c VALUES (1), (NULL);");
-        (await Should.ThrowAsync<SqlConstraintViolationException>(() => ExecuteAsync(session, "INSERT INTO c VALUES (99);")))
+        (await SqlConstraintAssertions.ThrowAsync(() => ExecuteAsync(session, "INSERT INTO c VALUES (99);")))
             .ConstraintKind.ShouldBe("FOREIGN KEY");
-        (await Should.ThrowAsync<SqlConstraintViolationException>(() => ExecuteAsync(session, "UPDATE t SET id = 99 WHERE id = 1;")))
+        (await SqlConstraintAssertions.ThrowAsync(() => ExecuteAsync(session, "UPDATE t SET id = 99 WHERE id = 1;")))
             .ConstraintKind.ShouldBe("FOREIGN KEY");
         await ExpectRowsAsync(session, "SELECT COUNT(*) FROM c;", [[2L]]);
     }

@@ -302,8 +302,9 @@ internal sealed class SqlLockWaitProbe
 
             return true;
         }
-        catch (SqlConstraintViolationException)
+        catch (SqlConstraintViolationException failure)
         {
+            SqlConstraintAssertions.Verify(failure);
             Interlocked.Increment(ref _violations);
             return true;
         }

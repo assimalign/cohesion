@@ -193,7 +193,7 @@ public sealed class SqlT1ScalarPositionsTests
 
             // Act / Assert
             await second.ExecuteAsync("INSERT INTO t VALUES ('x😀z', GEN_RANDOM_UUID());", cancellationToken: CancellationToken.None);
-            var failure = await Should.ThrowAsync<SqlConstraintViolationException>(() => second.ExecuteAsync("INSERT INTO t VALUES ('ab', GEN_RANDOM_UUID());", cancellationToken: CancellationToken.None).AsTask());
+            var failure = await SqlConstraintAssertions.ThrowAsync(() => second.ExecuteAsync("INSERT INTO t VALUES ('ab', GEN_RANDOM_UUID());", cancellationToken: CancellationToken.None).AsTask());
             failure.ConstraintKind.ShouldBe("CHECK");
             failure.ConstraintName.ShouldBe("ck_code");
             await using var listener = new InMemoryConnectionListener();

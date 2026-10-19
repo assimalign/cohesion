@@ -92,7 +92,7 @@ internal static class SqlCastConverter
             && check.InvokeResolved(converted, cast.CheckTarget, cast.Database, cast.Collation, cancellationToken) is false)
         {
             throw new SqlConstraintViolationException(
-                $"CAST to {cast.TargetText} failed: the value violates the check of domain '{cast.Target.Name}' ({check}).",
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.CastDomainViolation, cast.TargetText, cast.Target.Name, check),
                 cast.Target.Name, string.Empty, "DOMAIN");
         }
 

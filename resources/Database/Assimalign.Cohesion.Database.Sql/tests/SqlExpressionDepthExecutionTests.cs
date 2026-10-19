@@ -755,7 +755,7 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
             var reopened = await reopenedEngine.OpenDatabaseAsync("db");
             await using var reopenedSession = await reopened.CreateSessionAsync(CancellationToken.None);
             (await reopenedSession.ExecuteAsync("INSERT INTO c VALUES (1)")).AffectedCount.ShouldBe(1);
-            await Should.ThrowAsync<SqlConstraintViolationException>(() => reopenedSession.ExecuteAsync("INSERT INTO c VALUES (-1)").AsTask());
+            await SqlConstraintAssertions.ThrowAsync(() => reopenedSession.ExecuteAsync("INSERT INTO c VALUES (-1)").AsTask());
             return (refused, canonical, Table(reopened, "c").Constraints.Single(constraint => constraint.Name == "ck").CheckExpression);
         });
 
@@ -788,7 +788,7 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
         var reopened = await lowEngine.OpenDatabaseAsync("db");
         await using var reopenedSession = await reopened.CreateSessionAsync(CancellationToken.None);
         var inserted = await reopenedSession.ExecuteAsync("INSERT INTO c VALUES (3)");
-        var violation = await Should.ThrowAsync<SqlConstraintViolationException>(() => reopenedSession.ExecuteAsync("INSERT INTO c VALUES (2)").AsTask());
+        var violation = await SqlConstraintAssertions.ThrowAsync(() => reopenedSession.ExecuteAsync("INSERT INTO c VALUES (2)").AsTask());
         var restated = await Should.ThrowAsync<DatabaseParseException>(() =>
             reopenedSession.ExecuteAsync($"CREATE TABLE d (qty INT, CONSTRAINT ck CHECK ({predicate}))").AsTask());
 

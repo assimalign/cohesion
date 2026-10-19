@@ -44,7 +44,7 @@ public sealed class SqlUpdateForeignKeyTests
         };
 
         // Act
-        if (scenario == 0) { await Should.ThrowAsync<SqlConstraintViolationException>(async () => await session.ExecuteAsync(sql)); }
+        if (scenario == 0) { await SqlConstraintAssertions.ThrowAsync(async () => await session.ExecuteAsync(sql)); }
         else { (await session.ExecuteAsync(sql)).AffectedCount.ShouldBe(scenario == 1 ? 1 : 2); }
 
         // Assert: even the failed statement leaves its explicit transaction usable and unchanged.

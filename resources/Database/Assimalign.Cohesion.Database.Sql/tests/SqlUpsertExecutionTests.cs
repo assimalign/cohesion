@@ -116,7 +116,7 @@ public sealed class SqlUpsertExecutionTests
         await session.ExecuteAsync("INSERT INTO t VALUES (1),(2)");
 
         // Act / Assert
-        await Should.ThrowAsync<SqlConstraintViolationException>(async () => await session.ExecuteAsync(
+        await SqlConstraintAssertions.ThrowAsync(async () => await session.ExecuteAsync(
             "INSERT INTO t VALUES (1) ON CONFLICT(id) DO UPDATE SET id = 2"));
         CheckRows(await RowsAsync(session, "SELECT * FROM t ORDER BY id"), [[1], [2]]);
     }
@@ -149,7 +149,7 @@ public sealed class SqlUpsertExecutionTests
         await session.ExecuteAsync("INSERT INTO t VALUES (1, NULL, 10)");
 
         // Act / Assert
-        await Should.ThrowAsync<SqlConstraintViolationException>(async () => await session.ExecuteAsync(
+        await SqlConstraintAssertions.ThrowAsync(async () => await session.ExecuteAsync(
             "INSERT INTO t VALUES (1, NULL, 20), (2, 1, 30) ON CONFLICT (id) DO UPDATE SET id = 10, v = EXCLUDED.v"));
         CheckRows(await RowsAsync(session, "SELECT * FROM t"), [[1, null, 10]]);
     }
@@ -275,7 +275,7 @@ public sealed class SqlUpsertExecutionTests
         await session.ExecuteAsync("INSERT INTO t VALUES (1, 10, NULL)");
 
         // Act / Assert: id 2 is proposed but discarded by the label arbiter.
-        await Should.ThrowAsync<SqlConstraintViolationException>(async () => await session.ExecuteAsync(
+        await SqlConstraintAssertions.ThrowAsync(async () => await session.ExecuteAsync(
             "INSERT INTO t VALUES (2, 10, NULL), (3, 30, 2) ON CONFLICT DO NOTHING"));
         CheckRows(await RowsAsync(session, "SELECT id FROM t"), [[1]]);
     }
@@ -293,7 +293,7 @@ public sealed class SqlUpsertExecutionTests
         await session.ExecuteAsync("INSERT INTO c VALUES (1)");
 
         // Act / Assert
-        await Should.ThrowAsync<SqlConstraintViolationException>(async () => await session.ExecuteAsync(
+        await SqlConstraintAssertions.ThrowAsync(async () => await session.ExecuteAsync(
             "INSERT INTO t VALUES (1, 20) ON CONFLICT (id) DO UPDATE SET id = 2"));
         CheckRows(await RowsAsync(session, "SELECT * FROM t"), [[1, 10]]);
     }
@@ -488,7 +488,7 @@ public sealed class SqlUpsertExecutionTests
             $"INSERT INTO t VALUES (3, 30, 1), (1, 40, 1) ON CONFLICT (id) DO UPDATE SET {set}{returning}"));
 
         // Assert
-        if (returning.Length == 0) { failure.ShouldBeOfType<SqlConstraintViolationException>(); }
+        if (returning.Length == 0) { SqlConstraintAssertions.Verify(failure.ShouldBeOfType<SqlConstraintViolationException>()); }
         CheckRows(await RowsAsync(session, "SELECT id, age FROM t ORDER BY id"), [[1, 10], [2, 20]]);
         CheckRows(await RowsAsync(session, "SELECT id FROM t WHERE age = 10"), [[1]]);
         (await session.ExecuteAsync("INSERT INTO t VALUES (3, 30, 1)")).AffectedCount.ShouldBe(1);
@@ -507,7 +507,7 @@ public sealed class SqlUpsertExecutionTests
         await session.ExecuteAsync("INSERT INTO t VALUES (1, 10)");
 
         // Act / Assert
-        await Should.ThrowAsync<SqlConstraintViolationException>(async () => await session.ExecuteAsync($"INSERT INTO t VALUES (1, {value}) ON CONFLICT DO NOTHING"));
+        await SqlConstraintAssertions.ThrowAsync(async () => await session.ExecuteAsync($"INSERT INTO t VALUES (1, {value}) ON CONFLICT DO NOTHING"));
         CheckRows(await RowsAsync(session, "SELECT * FROM t"), [[1, 10]]);
     }
 

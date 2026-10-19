@@ -69,6 +69,12 @@ public sealed class SqlUpsertWireTests
         // Assert
         failure.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
         failure.Message.ShouldContain(message, Case.Sensitive);
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(message switch
+        {
+            "UNIQUE" => "COHSQLE037",
+            "CHECK" => "COHSQLE038",
+            _ => message,
+        });
         failure.ConnectionUsable.ShouldBeTrue();
         var rows = await connection.QueryAsync("SELECT id, age FROM t ORDER BY id", cancellationToken: SqlClientTestHarness.Timeout());
         rows.Select(row => (row.GetInt32(0), row.GetInt32(1))).ShouldBe([(1, 10), (2, 20)]);

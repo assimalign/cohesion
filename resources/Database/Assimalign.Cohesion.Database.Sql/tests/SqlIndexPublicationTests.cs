@@ -61,9 +61,9 @@ public sealed class SqlIndexPublicationTests
         await using var writer = await recovered.CreateSessionAsync(timeout.Token);
         await writer.ExecuteAsync("INSERT INTO a VALUES (1)", cancellationToken: timeout.Token);
         await writer.ExecuteAsync("INSERT INTO b VALUES (1)", cancellationToken: timeout.Token);
-        await Should.ThrowAsync<SqlConstraintViolationException>(async () =>
+        await SqlConstraintAssertions.ThrowAsync(async () =>
             await writer.ExecuteAsync("INSERT INTO a VALUES (1)", cancellationToken: timeout.Token));
-        await Should.ThrowAsync<SqlConstraintViolationException>(async () =>
+        await SqlConstraintAssertions.ThrowAsync(async () =>
             await writer.ExecuteAsync("INSERT INTO b VALUES (1)", cancellationToken: timeout.Token));
         recovered.Catalog.GetIndexRegistrations().Count.ShouldBe(2);
     }
@@ -132,7 +132,7 @@ public sealed class SqlIndexPublicationTests
         if (recreate)
         {
             await using var writer = await recovered.CreateSessionAsync(timeout.Token);
-            await Should.ThrowAsync<SqlConstraintViolationException>(async () =>
+            await SqlConstraintAssertions.ThrowAsync(async () =>
                 await writer.ExecuteAsync("INSERT INTO a VALUES (1)", cancellationToken: timeout.Token));
         }
     }
@@ -223,7 +223,7 @@ public sealed class SqlIndexPublicationTests
         newMatches.ShouldBe(1);
         oldMatches.ShouldBe(0);
         recovered.Catalog.GetIndexRegistrations().ShouldBe(current);
-        await Should.ThrowAsync<SqlConstraintViolationException>(async () =>
+        await SqlConstraintAssertions.ThrowAsync(async () =>
             await writer.ExecuteAsync("INSERT INTO a VALUES (30, 20)", cancellationToken: timeout.Token));
     }
 

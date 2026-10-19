@@ -106,7 +106,7 @@ public sealed class SqlUpsertConcurrencyTests
         await using var inFlight = await first.BeginTransactionAsync(timeout.Token);
         await first.ExecuteAsync("INSERT INTO p VALUES (3)", cancellationToken: timeout.Token);
         await using var writer = await second.BeginTransactionAsync(IsolationLevel.ReadCommitted, timeout.Token);
-        await Should.ThrowAsync<SqlConstraintViolationException>(async () => await second.ExecuteAsync(
+        await SqlConstraintAssertions.ThrowAsync(async () => await second.ExecuteAsync(
             "INSERT INTO t VALUES (2, 3, 1) ON CONFLICT (id) DO UPDATE SET v = EXCLUDED.v", cancellationToken: timeout.Token));
         await writer.RollbackAsync(timeout.Token);
         await inFlight.RollbackAsync(timeout.Token);

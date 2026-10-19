@@ -317,7 +317,7 @@ public sealed class SqlConcurrentDdlStressTests : IDisposable
             await session.ExecuteAsync("ALTER TABLE t ADD CONSTRAINT positive CHECK (qty > 0)");
 
             // Assert: the surviving constraint is enforced and the row is intact.
-            await Should.ThrowAsync<SqlConstraintViolationException>(async () =>
+            await SqlConstraintAssertions.ThrowAsync(async () =>
                 await session.ExecuteAsync("INSERT INTO t (id, qty) VALUES (2, -1)"));
             (await RowsAsync(session, "SELECT id, qty FROM t"))
                 .Select(Format).ShouldBe(["1,10"]);
@@ -328,7 +328,7 @@ public sealed class SqlConcurrentDdlStressTests : IDisposable
             await using var reopened = SqlDatabaseEngine.Create("ddl-stress", NewOptions(fileBacked: true));
             var database = await reopened.OpenDatabaseAsync("db");
             await using var session = await database.CreateSessionAsync();
-            await Should.ThrowAsync<SqlConstraintViolationException>(async () =>
+            await SqlConstraintAssertions.ThrowAsync(async () =>
                 await session.ExecuteAsync("INSERT INTO t (id, qty) VALUES (2, -1)"));
             (await RowsAsync(session, "SELECT id, qty FROM t"))
                 .Select(Format).ShouldBe(["1,10"]);
@@ -411,7 +411,7 @@ public sealed class SqlConcurrentDdlStressTests : IDisposable
             AssertCatalogRecordTooLarge(failure, "table 'dbo.t'");
             await session.ExecuteAsync("INSERT INTO t (id, qty) VALUES (2, 0)");
             await session.ExecuteAsync("ALTER TABLE t ADD CONSTRAINT bounded CHECK (qty > -100)");
-            await Should.ThrowAsync<SqlConstraintViolationException>(async () =>
+            await SqlConstraintAssertions.ThrowAsync(async () =>
                 await session.ExecuteAsync("INSERT INTO t (id, qty) VALUES (3, -500)"));
             (await RowsAsync(session, "SELECT id, qty FROM t ORDER BY id")).Select(Format).ShouldBe(["1,10", "2,0"]);
         }
@@ -422,7 +422,7 @@ public sealed class SqlConcurrentDdlStressTests : IDisposable
             var database = await reopened.OpenDatabaseAsync("db");
             await using var session = await database.CreateSessionAsync();
             await session.ExecuteAsync("INSERT INTO t (id, qty) VALUES (4, -1)");
-            await Should.ThrowAsync<SqlConstraintViolationException>(async () =>
+            await SqlConstraintAssertions.ThrowAsync(async () =>
                 await session.ExecuteAsync("INSERT INTO t (id, qty) VALUES (5, -500)"));
             (await RowsAsync(session, "SELECT id, qty FROM t ORDER BY id")).Select(Format).ShouldBe(["1,10", "2,0", "4,-1"]);
         }

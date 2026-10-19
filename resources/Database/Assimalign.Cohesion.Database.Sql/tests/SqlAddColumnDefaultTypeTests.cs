@@ -105,7 +105,7 @@ public sealed class SqlAddColumnDefaultTypeTests
         await ExecuteAsync(session, "INSERT INTO child VALUES (1, 'one'), (2, 'two');");
 
         // Act / Assert: failure must leave the original schema and rows available under the same names.
-        var error = await Should.ThrowAsync<SqlConstraintViolationException>(() => ExecuteAsync(session,
+        var error = await SqlConstraintAssertions.ThrowAsync(() => ExecuteAsync(session,
             "ALTER TABLE child ADD COLUMN parent_id INT NOT NULL DEFAULT 8 REFERENCES parent(id);"));
         error.ConstraintKind.ShouldBe("FOREIGN KEY");
         var unchanged = await RowsAsync(session, "SELECT * FROM child ORDER BY id;");
@@ -121,7 +121,7 @@ public sealed class SqlAddColumnDefaultTypeTests
         await ExecuteAsync(session, "INSERT INTO child (id, label) VALUES (3, 'omitted');");
         (await RowsAsync(session, "SELECT * FROM child WHERE id = 3;")).ShouldHaveSingleItem()
             .ShouldBe(new object?[] { 3, "omitted", 7 });
-        await Should.ThrowAsync<SqlConstraintViolationException>(() => ExecuteAsync(session,
+        await SqlConstraintAssertions.ThrowAsync(() => ExecuteAsync(session,
             "INSERT INTO child VALUES (4, 'orphan', 8);"));
         (await RowsAsync(session, "SELECT * FROM child WHERE id = 4;")).ShouldBeEmpty();
     }

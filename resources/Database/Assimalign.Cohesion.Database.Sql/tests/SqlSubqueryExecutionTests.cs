@@ -410,9 +410,9 @@ public sealed partial class SqlSubqueryExecutionTests
         await ExecuteAsync(session, $"INSERT INTO source_rows VALUES {sourceValues};");
 
         // Act / Assert
-        var literalError = await Should.ThrowAsync<SqlConstraintViolationException>(
+        var literalError = await SqlConstraintAssertions.ThrowAsync(
             () => ExecuteAsync(session, $"INSERT INTO target_rows VALUES {sourceValues};"));
-        var selectError = await Should.ThrowAsync<SqlConstraintViolationException>(
+        var selectError = await SqlConstraintAssertions.ThrowAsync(
             () => ExecuteAsync(session, "INSERT INTO target_rows SELECT id FROM source_rows;"));
         literalError.ConstraintKind.ShouldBe(constraintKind);
         selectError.ConstraintKind.ShouldBe(literalError.ConstraintKind);
@@ -435,7 +435,7 @@ public sealed partial class SqlSubqueryExecutionTests
         await ExecuteAsync(session, "INSERT INTO target_rows VALUES (1);");
 
         // Act / Assert
-        await Should.ThrowAsync<SqlConstraintViolationException>(
+        await SqlConstraintAssertions.ThrowAsync(
             () => ExecuteAsync(session, "INSERT INTO target_rows SELECT id FROM source_rows;"));
         (await RowsAsync(session, "SELECT id FROM target_rows;")).ShouldHaveSingleItem()[0].ShouldBe(1);
         await ExecuteAsync(session, "INSERT INTO target_rows VALUES (2);");

@@ -2964,6 +2964,17 @@ pin in the same change.
 | `COHSQLE034` | Error | Invalid LIKE ESCAPE: escape is neither empty nor one Unicode scalar, or a pattern ends with the escape character (SQLSTATE 22025); ExecutionFailure leaves the connection usable |
 | `COHSQLE035` | Error | ON CONFLICT has no matching unique arbiter, a named target is not a unique index, or DO UPDATE omitted its target (PostgreSQL 42P10) |
 | `COHSQLE036` | Error | ON CONFLICT DO UPDATE cannot affect a row a second time (PostgreSQL 21000) |
+| `COHSQLE037` | Error | UNIQUE, PRIMARY KEY or unique-index violation, including a second unique index during ON CONFLICT DO UPDATE (SQLSTATE 23505, unique_violation) |
+| `COHSQLE038` | Error | Table CHECK or domain-check violation, including writes, CAST to a domain and function domain arguments/results (SQLSTATE 23514, check_violation) |
+| `COHSQLE039` | Error | FOREIGN KEY violation: missing parent on INSERT/UPDATE, or referenced key protected by RESTRICT/NO ACTION on DELETE/UPDATE, including final-row checks (SQLSTATE 23503, foreign_key_violation) |
+
+Each SqlConstraintViolationException carries exactly one Error diagnostic. Its message names
+the constraint and table (no table for a domain CAST), without raw unique keys or unrelated
+row values. The enclosing statement span is attached when available. SQLSTATE mappings
+follow PostgreSQL `src/backend/utils/errcodes.txt:237-240`; SQLSTATE is not a separate field
+in the diagnostic carrier. NOT NULL remains COHSQLE024 (23502). The live constraint corpus
+in SqlLanguageConformanceTests and both-transport SqlConstraintDiagnosticWireTests pin the
+codes, locations, statement rollback and continued use of the session/transaction.
 
 Positions are absolute character offsets into the statement text; line/column
 presentation is computed by tooling from the source (offset → line mapping), not

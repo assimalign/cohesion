@@ -153,7 +153,7 @@ public sealed class SqlBoundExpressionTests
         var violation = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(second, "INSERT INTO t VALUES (100, 'c')"));
 
         // Assert
-        violation.ShouldBeOfType<SqlConstraintViolationException>();
+        SqlConstraintAssertions.Verify(violation.ShouldBeOfType<SqlConstraintViolationException>());
         database.Definitions.BindCount.ShouldBe(binds);
         database.Definitions.Get(table).Checks.ShouldHaveSingleItem().Bound.ShouldBeSameAs(check.Bound);
         check.Bound.ShouldBeOfType<SqlBoundLogical>().Operands.ShouldAllBe(operand => operand.Kind == SqlBoundExpressionKind.Binary);

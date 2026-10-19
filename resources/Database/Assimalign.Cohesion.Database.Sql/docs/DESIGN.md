@@ -4716,7 +4716,21 @@ for every declared name and rejects evidence for undeclared names. OQL's
 `DatabaseException` (area root) for everything user-facing: plan-time
 validation and execution errors. Named integrity violations use
 `SqlConstraintViolationException`, a `DatabaseException` carrying the constraint,
-table and safe offending value. Parse failures
+table and safe offending value. Both constructors create exactly one Error diagnostic:
+COHSQLE037 for UNIQUE, PRIMARY KEY and unique indexes (23505, unique_violation),
+COHSQLE038 for table CHECK and domain checks on writes, CAST and function arguments/results
+(23514, check_violation), COHSQLE039 for either direction of a foreign key refusal
+(23503, foreign_key_violation), and the existing COHSQLE024 for NOT NULL (23502).
+The mappings follow PostgreSQL `src/backend/utils/errcodes.txt:237-240` in the local
+reference clone. SQLSTATE is a documented mapping; the existing diagnostic carrier has no
+SQLSTATE member. A caller-supplied unrecognized constraint kind uses the generic CHECK code.
+The session attaches the enclosing statement span when available; construction without source
+text leaves the diagnostic unlocated. Messages name the constraint and table and omit raw
+unique keys and unrelated row values; OffendingValue retains its existing disclosure policy.
+The existing server DatabaseException path sends ExecutionFailure, the code-prefixed message
+and the negotiated diagnostic, keeping the session and explicit transaction usable. No public
+member, visibility grant, storage/catalog format or wire format changes.
+Parse failures
 (`SqlQueryRequest.FromSql`, and therefore the session's text-execute seam) throw
 the root's `DatabaseParseException` so callers — the wire-protocol server in
 particular — can distinguish fix-the-text errors (`ParseFailure` on the wire)

@@ -46,6 +46,7 @@ public sealed class SqlDomainWireTests
         row["filled"].ShouldBe(9);
         var failure = await Should.ThrowAsync<SqlClientException>(async () => await connection.ExecuteAsync("INSERT INTO values_table VALUES (2, -1)", cancellationToken: Timeout()));
         failure.ConnectionUsable.ShouldBeTrue();
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE038");
         await Should.ThrowAsync<SqlClientException>(async () => await connection.ExecuteAsync("CREATE FUNCTION weak(p INT) RETURNS INT IMMUTABLE RETURN fallback(p)", cancellationToken: Timeout()));
         await Should.ThrowAsync<SqlClientException>(async () => await connection.ExecuteAsync("CREATE FUNCTION recursive(p INT) RETURNS INT RETURN recursive(p)", cancellationToken: Timeout()));
         await Should.ThrowAsync<SqlClientException>(async () => await connection.ExecuteAsync("DROP DOMAIN positive", cancellationToken: Timeout()));
@@ -70,7 +71,8 @@ public sealed class SqlDomainWireTests
         // Assert
         violation.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
         violation.ConnectionUsable.ShouldBeTrue();
-        violation.Message.ShouldBe("DOMAIN constraint 'email' on 'dbo.contacts' was violated.");
+        violation.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE038");
+        violation.Message.ShouldBe("COHSQLE038: DOMAIN constraint 'email' on 'dbo.contacts' was violated.");
         SqlRow row = rows.ShouldHaveSingleItem();
         (row["email"], row["balance"], row["shown"], row["parsed"]).ShouldBe(("ann@example.com", 123L, "$1.23", 456L));
     }
@@ -95,7 +97,7 @@ public sealed class SqlDomainWireTests
                 await using var connection = await second.Client.ConnectAsync(Timeout());
                 (await Should.ThrowAsync<SqlClientException>(async () =>
                     await connection.ExecuteAsync("INSERT INTO contacts VALUES (2, 'nobody', 'b')", cancellationToken: Timeout())))
-                    .Message.ShouldContain("DOMAIN constraint 'email'", Case.Sensitive);
+                    .Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE038");
             }
 
             // Act 2: an engine whose build no longer registers it.

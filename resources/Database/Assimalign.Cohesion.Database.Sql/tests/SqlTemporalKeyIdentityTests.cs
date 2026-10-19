@@ -199,12 +199,12 @@ public sealed class SqlTemporalKeyIdentityTests
         // Act + Assert: inserts and updates of equal ticks in another kind fail.
         foreach (var equal in new[] { Noon, Utc(Noon), Local(Noon) })
         {
-            await Should.ThrowAsync<SqlConstraintViolationException>(() => ExecuteAsync(session, "INSERT INTO unique_ts VALUES (2, @p)", P(equal)));
-            await Should.ThrowAsync<SqlConstraintViolationException>(() => ExecuteAsync(session, "INSERT INTO keyed_ts VALUES (@p, 2)", P(equal)));
+            await SqlConstraintAssertions.ThrowAsync(() => ExecuteAsync(session, "INSERT INTO unique_ts VALUES (2, @p)", P(equal)));
+            await SqlConstraintAssertions.ThrowAsync(() => ExecuteAsync(session, "INSERT INTO keyed_ts VALUES (@p, 2)", P(equal)));
         }
 
         await ExecuteAsync(session, "INSERT INTO unique_ts VALUES (2, @p)", P(Utc(Noon.AddTicks(1))));
-        await Should.ThrowAsync<SqlConstraintViolationException>(() => ExecuteAsync(session, "UPDATE unique_ts SET ts = @p WHERE id = 2", P(Local(Noon))));
+        await SqlConstraintAssertions.ThrowAsync(() => ExecuteAsync(session, "UPDATE unique_ts SET ts = @p WHERE id = 2", P(Local(Noon))));
 
         // Re-writing a row's own value in another kind is not a duplicate, and
         // the row keeps the kind it was last written with.
@@ -216,8 +216,8 @@ public sealed class SqlTemporalKeyIdentityTests
         // Backfills reject rows that are duplicates only under SQL equality.
         await ExecuteAsync(session, "CREATE TABLE loose_ts (id INT, ts TIMESTAMP)");
         await ExecuteAsync(session, "INSERT INTO loose_ts VALUES (1, @a), (2, @b)", new Dictionary<string, object?> { ["a"] = Noon, ["b"] = Utc(Noon) });
-        await Should.ThrowAsync<SqlConstraintViolationException>(() => ExecuteAsync(session, "CREATE UNIQUE INDEX ux_ts ON loose_ts (ts)"));
-        await Should.ThrowAsync<SqlConstraintViolationException>(() => ExecuteAsync(session, "ALTER TABLE loose_ts ADD CONSTRAINT uq_ts UNIQUE (ts)"));
+        await SqlConstraintAssertions.ThrowAsync(() => ExecuteAsync(session, "CREATE UNIQUE INDEX ux_ts ON loose_ts (ts)"));
+        await SqlConstraintAssertions.ThrowAsync(() => ExecuteAsync(session, "ALTER TABLE loose_ts ADD CONSTRAINT uq_ts UNIQUE (ts)"));
         await ExecuteAsync(session, "CREATE INDEX ix_ts ON loose_ts (ts)");
         (await IdsAsync(session, "SELECT id FROM loose_ts WHERE ts = @p ORDER BY id", P(Local(Noon)))).ShouldBe([1, 2]);
         Metrics(session).AccessPath.ShouldBe("seek:ix_ts");
@@ -240,21 +240,21 @@ public sealed class SqlTemporalKeyIdentityTests
         // Act + Assert.
         foreach (double offset in new[] { 0, 3, -5.5, 14 })
         {
-            await Should.ThrowAsync<SqlConstraintViolationException>(() => ExecuteAsync(session, "INSERT INTO unique_at VALUES (2, @p)", P(At(Instant, offset))));
-            await Should.ThrowAsync<SqlConstraintViolationException>(() => ExecuteAsync(session, "INSERT INTO keyed_at VALUES (@p, 2)", P(At(Instant, offset))));
-            await Should.ThrowAsync<SqlConstraintViolationException>(() => ExecuteAsync(session, "INSERT INTO tenant_at VALUES (1, @p)", P(At(Instant, offset))));
+            await SqlConstraintAssertions.ThrowAsync(() => ExecuteAsync(session, "INSERT INTO unique_at VALUES (2, @p)", P(At(Instant, offset))));
+            await SqlConstraintAssertions.ThrowAsync(() => ExecuteAsync(session, "INSERT INTO keyed_at VALUES (@p, 2)", P(At(Instant, offset))));
+            await SqlConstraintAssertions.ThrowAsync(() => ExecuteAsync(session, "INSERT INTO tenant_at VALUES (1, @p)", P(At(Instant, offset))));
         }
 
         await ExecuteAsync(session, "INSERT INTO unique_at VALUES (2, @p)", P(At(Instant.AddTicks(1), 3)));
-        await Should.ThrowAsync<SqlConstraintViolationException>(() => ExecuteAsync(session, "UPDATE unique_at SET at = @p WHERE id = 2", P(At(Instant, -8))));
+        await SqlConstraintAssertions.ThrowAsync(() => ExecuteAsync(session, "UPDATE unique_at SET at = @p WHERE id = 2", P(At(Instant, -8))));
         await ExecuteAsync(session, "UPDATE unique_at SET at = @p WHERE id = 1", P(At(Instant, -8)));
         (await ValuesAsync(session, "SELECT at FROM unique_at WHERE id = 1")).Single().ShouldBeOfType<DateTimeOffset>().Offset.ShouldBe(TimeSpan.FromHours(-8));
         (await IdsAsync(session, "SELECT id FROM unique_at ORDER BY id")).ShouldBe([1, 2]);
 
         await ExecuteAsync(session, "CREATE TABLE loose_at (id INT, at TIMESTAMPTZ)");
         await ExecuteAsync(session, "INSERT INTO loose_at VALUES (1, @a), (2, @b)", new Dictionary<string, object?> { ["a"] = Instant, ["b"] = At(Instant, -5.5) });
-        await Should.ThrowAsync<SqlConstraintViolationException>(() => ExecuteAsync(session, "CREATE UNIQUE INDEX ux_at ON loose_at (at)"));
-        await Should.ThrowAsync<SqlConstraintViolationException>(() => ExecuteAsync(session, "ALTER TABLE loose_at ADD CONSTRAINT uq_at UNIQUE (at)"));
+        await SqlConstraintAssertions.ThrowAsync(() => ExecuteAsync(session, "CREATE UNIQUE INDEX ux_at ON loose_at (at)"));
+        await SqlConstraintAssertions.ThrowAsync(() => ExecuteAsync(session, "ALTER TABLE loose_at ADD CONSTRAINT uq_at UNIQUE (at)"));
     }
 
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Temporal keys: foreign keys match parents across kinds and offsets through constraint seeks (#1099)")]
@@ -282,12 +282,12 @@ public sealed class SqlTemporalKeyIdentityTests
         Metrics(session).AccessPath.ShouldStartWith("constraint-seek:");
 
         // ...unequal values do not...
-        await Should.ThrowAsync<SqlConstraintViolationException>(() => ExecuteAsync(session, "INSERT INTO day_refs VALUES (2, @p)", P(Local(Noon.AddTicks(1)))));
-        await Should.ThrowAsync<SqlConstraintViolationException>(() => ExecuteAsync(session, "INSERT INTO moment_refs VALUES (2, @p)", P(At(Instant.AddTicks(1), 3))));
+        await SqlConstraintAssertions.ThrowAsync(() => ExecuteAsync(session, "INSERT INTO day_refs VALUES (2, @p)", P(Local(Noon.AddTicks(1)))));
+        await SqlConstraintAssertions.ThrowAsync(() => ExecuteAsync(session, "INSERT INTO moment_refs VALUES (2, @p)", P(At(Instant.AddTicks(1), 3))));
 
         // ...and the reverse lookup finds the children, so RESTRICT holds.
-        await Should.ThrowAsync<SqlConstraintViolationException>(() => ExecuteAsync(session, "DELETE FROM days"));
-        await Should.ThrowAsync<SqlConstraintViolationException>(() => ExecuteAsync(session, "DELETE FROM moments"));
+        await SqlConstraintAssertions.ThrowAsync(() => ExecuteAsync(session, "DELETE FROM days"));
+        await SqlConstraintAssertions.ThrowAsync(() => ExecuteAsync(session, "DELETE FROM moments"));
         (await IdsAsync(session, "SELECT id FROM day_refs ORDER BY id")).ShouldBe([1]);
         (await IdsAsync(session, "SELECT id FROM moment_refs ORDER BY id")).ShouldBe([1]);
     }

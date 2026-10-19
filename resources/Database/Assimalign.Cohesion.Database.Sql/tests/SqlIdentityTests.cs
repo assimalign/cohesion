@@ -436,7 +436,7 @@ public sealed class SqlIdentityTests
 
         // Assert
         (await IdsAsync(session)).ShouldBe([1L]);
-        await Should.ThrowAsync<SqlConstraintViolationException>(() => ExecAsync(session, "INSERT INTO ids (label) VALUES (0)"));
+        await SqlConstraintAssertions.ThrowAsync(() => ExecAsync(session, "INSERT INTO ids (label) VALUES (0)"));
     }
 
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Identity: ALWAYS permits explicit DEFAULT and updates of other columns")]

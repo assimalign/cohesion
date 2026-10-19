@@ -61,6 +61,7 @@ public sealed class SqlUpdateForeignKeyWireTests
             var failure = await Should.ThrowAsync<SqlClientException>(async () =>
                 await connection.ExecuteAsync(sql, cancellationToken: SqlClientTestHarness.Timeout()));
             failure.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
+            failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE039");
             failure.ConnectionUsable.ShouldBeTrue();
         }
         else { (await connection.ExecuteAsync(sql, cancellationToken: SqlClientTestHarness.Timeout())).ShouldBe(scenario == 1 ? 1 : 2); }

@@ -194,7 +194,7 @@ public sealed class SqlJoinExecutionTests
         // Act / Assert
         (await RowsAsync(session, "SELECT p.name, c.id FROM parents p JOIN children c ON p.id = c.parent_id;"))
             .ShouldHaveSingleItem().ShouldBe(new object?[] { "Ada", 10 });
-        (await Should.ThrowAsync<SqlConstraintViolationException>(() => ExecuteAsync(session, "INSERT INTO children VALUES (12, 99);")))
+        (await SqlConstraintAssertions.ThrowAsync(() => ExecuteAsync(session, "INSERT INTO children VALUES (12, 99);")))
             .ConstraintKind.ShouldBe("FOREIGN KEY");
         await Should.ThrowAsync<DatabaseObjectLockedException>(() => ExecuteAsync(session, "DROP TABLE parents;"));
     }

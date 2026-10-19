@@ -77,7 +77,7 @@ public sealed class SqlStorageSemanticsParityTests
         ];
         foreach (var statement in rejectedStatements)
         {
-            var failure = await Should.ThrowAsync<SqlConstraintViolationException>(async () => await session.ExecuteAsync(statement.Sql));
+            var failure = await SqlConstraintAssertions.ThrowAsync(async () => await session.ExecuteAsync(statement.Sql));
             failure.ConstraintKind.ShouldBe(statement.Kind);
             failure.ConstraintName.ShouldBe(statement.Name);
             failure.Table.ShouldBe("dbo.child");

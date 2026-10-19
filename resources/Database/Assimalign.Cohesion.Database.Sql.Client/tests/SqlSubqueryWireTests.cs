@@ -252,6 +252,9 @@ public sealed class SqlSubqueryWireTests
             () => ExecuteAsync(connection, "INSERT INTO target_rows SELECT id FROM source_rows"));
         literalError.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
         selectError.Kind.ShouldBe(literalError.Kind);
+        string code = kind == "UNIQUE" ? "COHSQLE037" : "COHSQLE039";
+        literalError.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(code);
+        selectError.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(code);
         selectError.Message.ShouldContain(kind);
         selectError.Message.ShouldBe(literalError.Message);
         (await QueryAsync(connection, "SELECT id FROM target_rows")).ShouldBeEmpty();

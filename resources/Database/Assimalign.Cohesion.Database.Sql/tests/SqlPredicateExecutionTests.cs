@@ -307,7 +307,7 @@ public sealed class SqlPredicateExecutionTests
         (await RowsAsync(reader, "SELECT * FROM defaults")).ShouldHaveSingleItem().ShouldBe(new object?[] { true, true });
         (await RowsAsync(reader, "SELECT * FROM predicates")).ShouldHaveSingleItem().ShouldBe(new object?[] { 1, true, true, true });
         foreach (string values in new[] { "(2, NULL, 'a%', 1, 1)", "(2, TRUE, 'abc', 1, 1)", "(2, TRUE, 'a%', NULL, 1)" })
-        { await Should.ThrowAsync<SqlConstraintViolationException>(() => ExecuteAsync(reader, "INSERT INTO checks VALUES " + values)); }
+        { await SqlConstraintAssertions.ThrowAsync(() => ExecuteAsync(reader, "INSERT INTO checks VALUES " + values)); }
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Predicates: format 24 is refused before newly storable syntax is loaded")]
@@ -417,7 +417,7 @@ public sealed class SqlPredicateExecutionTests
         (await RowsAsync(session, "SELECT id FROM candidates WHERE id = 1 AND s LIKE '!%_' ESCAPE '!'")).Count.ShouldBe(expected ? 1 : 0);
         (await RowsAsync(session, "EXPLAIN SELECT id FROM candidates WHERE id = 1 AND s LIKE '!%_' ESCAPE '!'")).ShouldContain(row => Equals(row[2], "IndexSeek"));
         if (expected) { await ExecuteAsync(session, $"INSERT INTO checked VALUES ('{value}')"); }
-        else { await Should.ThrowAsync<SqlConstraintViolationException>(() => ExecuteAsync(session, $"INSERT INTO checked VALUES ('{value}')")); }
+        else { await SqlConstraintAssertions.ThrowAsync(() => ExecuteAsync(session, $"INSERT INTO checked VALUES ('{value}')")); }
         (await RowsAsync(session, "SELECT s FROM checked")).Count.ShouldBe(expected ? 1 : 0);
         (await RowsAsync(session, "SELECT '각' COLLATE case_accent_insensitive LIKE '_', '각' COLLATE case_accent_insensitive LIKE '각', 'éb' COLLATE case_accent_insensitive LIKE 'é_', '́' COLLATE case_accent_insensitive LIKE '́'" + oneRow))
             .ShouldHaveSingleItem().ShouldBe(new object?[] { true, true, true, true });
