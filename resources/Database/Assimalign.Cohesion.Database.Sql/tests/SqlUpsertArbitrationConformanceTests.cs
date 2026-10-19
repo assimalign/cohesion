@@ -507,6 +507,124 @@ public sealed class SqlUpsertArbitrationConformanceTests
             }
         });
 
+    [Theory(DisplayName = "Cohesion Test [Sql] - Upsert arbitration: preparation failures release waited rows and keys while the transaction stays open")]
+    [InlineData("COHSQLE036")]
+    [InlineData("CHECK")]
+    [InlineData("NOT NULL")]
+    [InlineData("Cancellation")]
+    public Task ExecuteAsync_PreparationFailureAfterRowWait_ShouldReleaseStatementGrants(string failureKind)
+        => RepeatAsync(async () =>
+        {
+            // Arrange: an earlier write must survive cleanup of the entire failed arbitration.
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+            using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token);
+            await using var engine = SqlDatabaseEngine.Create("upsert-failure-release", new());
+            var database = await engine.CreateDatabaseAsync("app", timeout.Token);
+            await using var writer = await database.CreateSessionAsync(timeout.Token);
+            await using var contender = await database.CreateSessionAsync(timeout.Token);
+            await writer.ExecuteAsync("CREATE TABLE t (id INT PRIMARY KEY, v INT NOT NULL CHECK(v >= 0))", cancellationToken: timeout.Token);
+            await writer.ExecuteAsync("INSERT INTO t VALUES (1, 10)", cancellationToken: timeout.Token);
+            database.Catalog.TryGetTable("dbo", "t", out var table).ShouldBeTrue();
+            var locks = database.Coordinator.LockManager;
+            await using var holder = await writer.BeginTransactionAsync(timeout.Token);
+            var row = await HoldFirstRowAsync(database, table.ObjectId, holder.Context.Sequence, timeout.Token);
+            await using var upsert = await contender.BeginTransactionAsync(IsolationLevel.ReadCommitted, timeout.Token);
+            await contender.ExecuteAsync("INSERT INTO t VALUES (9, 90)", cancellationToken: timeout.Token);
+            using var waits = new LockWaitListener(database.Name);
+            int granted = 0;
+            waits.Observed = written =>
+            {
+                if (written.EventName != "LockWaitStop" || written.Payload is not { Count: > 2 } payload ||
+                    !Equals(payload[1], (long)upsert.Context.Sequence.Value) || !Equals(payload[2], "Granted")) { return; }
+                Interlocked.Increment(ref granted);
+                // Cancel after the row was granted, before the wait helper returns its new mark.
+                if (failureKind == "Cancellation") { cancellation.Cancel(); }
+            };
+            string assignment = failureKind switch { "CHECK" => "-1", "NOT NULL" => "NULL", _ => "EXCLUDED.v" };
+            var pending = contender.ExecuteAsync(
+                "INSERT INTO t VALUES (2, 20), (1, 11), (1, 12) ON CONFLICT(id) DO UPDATE SET v = " + assignment,
+                cancellationToken: cancellation.Token).AsTask();
+
+            // Act: the holder ends, the waiter receives its row, then preparation fails before apply.
+            try
+            {
+                await waits.WaitForWaitAsync(upsert.Context.Sequence, timeout.Token);
+                await holder.RollbackAsync(timeout.Token);
+                if (failureKind == "Cancellation")
+                {
+                    await Should.ThrowAsync<OperationCanceledException>(async () => await pending);
+                }
+                else if (failureKind == "COHSQLE036")
+                {
+                    var failure = await Should.ThrowAsync<DatabaseException>(async () => await pending);
+                    failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE036");
+                }
+                else
+                {
+                    var failure = await Should.ThrowAsync<SqlConstraintViolationException>(async () => await pending);
+                    failure.ConstraintKind.ShouldBe(failureKind);
+                }
+
+                // Assert: another SQL transaction can update the waited row and its arbiter key.
+                granted.ShouldBe(1);
+                upsert.Context.State.ShouldBe(TransactionState.Active);
+                (await QueryAsync(contender, "SELECT id, v FROM t ORDER BY id")).ShouldBe(new object?[][] { [1, 10], [9, 90] });
+                await using var update = await writer.BeginTransactionAsync(IsolationLevel.ReadCommitted, timeout.Token);
+                locks.TryAcquire(update.Context.Sequence, row, LockMode.Exclusive).ShouldBeTrue();
+                locks.TryAcquire(update.Context.Sequence, LockResource.Entry(table.ObjectId, Key(1).Hash()), LockMode.Exclusive).ShouldBeTrue();
+                locks.TryAcquire(update.Context.Sequence, LockResource.Entry(table.ObjectId, Key(9).Hash()), LockMode.Exclusive).ShouldBeFalse();
+                (await writer.ExecuteAsync("UPDATE t SET id = 3, v = 30 WHERE id = 1", cancellationToken: timeout.Token)).AffectedCount.ShouldBe(1);
+                (await writer.ExecuteAsync("INSERT INTO t VALUES (2, 20)", cancellationToken: timeout.Token)).AffectedCount.ShouldBe(1);
+                await update.CommitAsync(timeout.Token);
+                upsert.Context.State.ShouldBe(TransactionState.Active);
+                await upsert.CommitAsync(timeout.Token);
+                (await QueryAsync(writer, "SELECT id, v FROM t ORDER BY id")).ShouldBe(new object?[][] { [2, 20], [3, 30], [9, 90] });
+            }
+            finally
+            {
+                cancellation.Cancel();
+                Task completed = pending;
+                await completed.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+            }
+        });
+
+    [Fact(DisplayName = "Cohesion Test [Sql] - Upsert arbitration: failure during apply keeps its row and arbiter grants")]
+    public async Task ExecuteAsync_ReturningFailure_ShouldKeepApplyGrants()
+    {
+        // Arrange
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        await using var engine = SqlDatabaseEngine.Create("upsert-apply-failure", new());
+        var database = await engine.CreateDatabaseAsync("app", timeout.Token);
+        await using var session = await database.CreateSessionAsync(timeout.Token);
+        await session.ExecuteAsync("CREATE TABLE t (id INT PRIMARY KEY, v INT)", cancellationToken: timeout.Token);
+        await session.ExecuteAsync("INSERT INTO t VALUES (1, 10)", cancellationToken: timeout.Token);
+        database.Catalog.TryGetTable("dbo", "t", out var table).ShouldBeTrue();
+        LockResource row;
+        using (var iterator = database.DataStorage.GetUnitIterator(table.ObjectId))
+        {
+            iterator.MoveNext().ShouldBeTrue();
+            row = LockResource.Entry(table.ObjectId, SqlRecordLocation.Pack(iterator.Current.PageId, iterator.Current.SlotIndex));
+        }
+        await using var upsert = await session.BeginTransactionAsync(IsolationLevel.ReadCommitted, timeout.Token);
+
+        // Act: RETURNING fails after the bracket has written the replacement row.
+        await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(
+            "INSERT INTO t VALUES (1, 20) ON CONFLICT(id) DO UPDATE SET v = EXCLUDED.v RETURNING 1 / (v - 20)",
+            cancellationToken: timeout.Token));
+
+        // Assert: apply rollback restored data, and transaction-duration locks remain held.
+        upsert.Context.State.ShouldBe(TransactionState.Active);
+        (await QueryAsync(session, "SELECT v FROM t")).ShouldHaveSingleItem()[0].ShouldBe(10);
+        var probe = await database.Coordinator.BeginAsync(IsolationLevel.ReadCommitted, timeout.Token);
+        try
+        {
+            database.Coordinator.LockManager.TryAcquire(probe.Sequence, row, LockMode.Exclusive).ShouldBeFalse();
+            database.Coordinator.LockManager.TryAcquire(probe.Sequence,
+                LockResource.Entry(table.ObjectId, Key(1).Hash()), LockMode.Exclusive).ShouldBeFalse();
+        }
+        finally { await database.Coordinator.RollbackAsync(probe, CancellationToken.None); }
+    }
+
     [Fact(DisplayName = "Cohesion Test [Sql] - Upsert arbitration: a foreign-key parent wait releases proposal keys before restarting")]
     public Task ExecuteAsync_ParentRowWait_ShouldReleaseProposalKeys()
         => RepeatAsync(async () =>

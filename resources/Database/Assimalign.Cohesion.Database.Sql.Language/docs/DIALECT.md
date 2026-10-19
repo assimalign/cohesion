@@ -204,9 +204,13 @@ entry is absent when its key lock releases, so the waiting proposal inserts. Thi
 PostgreSQL's [transaction-isolation contract](https://www.postgresql.org/docs/18/transaction-iso.html)
 and REPEATABLE READ visibility check (src/backend/executor/nodeModifyTable.c:377-405,2935).
 On a contended row, arbitration releases every lock newly acquired by this statement before
-waiting, keeps the granted row, takes a new statement mark, then restarts the whole multi-row
+waiting, keeps the granted row, takes a new retry mark, then restarts the whole multi-row
 arbitration from its first proposal (#1668). Later back-offs retain earlier waited rows too.
-This includes FK parent-row waits. A row-first UPDATE (including value-only UPDATE), DELETE,
+This includes FK parent-row waits.
+After a successful statement, rows kept by completed waits stay locked until the transaction
+ends, even if final arbitration no longer conflicts with them; for example, the holder may
+commit a rekey or delete under ReadCommitted.
+A row-first UPDATE (including value-only UPDATE), DELETE,
 or referential SET action can finish without a key/row deadlock with the upsert's new locks.
 ReadCommitted re-arbitrates against committed state and inserts if DELETE removed the
 conflict. Snapshot aborts retryably when the holder committed a change it cannot see; a
@@ -223,6 +227,11 @@ Each restart holds a superset of the rows it waited for, whose previous holders 
 Holding those rows before keys follows UPDATE/DELETE order and immediately re-grants the same
 row, preventing an endless hand-off between contenders. Cancellation is checked at every
 restart. No lock wait runs inside the apply gate.
+Any exception before apply begins releases this statement's new grants, including rows kept
+by completed waits and arbiter keys, while an explicit transaction stays active. This includes
+cancellation during or after a wait, COHSQLE036, CHECK/NOT NULL violations and an unhandled
+deadlock. Locks from earlier transaction work and their upgrades remain held. Once apply starts,
+this cleanup never releases locks, even if apply fails; transaction-duration locking applies.
 The gated [arbitration conformance cases](../../Assimalign.Cohesion.Database.Sql/tests/SqlUpsertArbitrationConformanceTests.cs)
 measure this contract, including FK parent-row back-off and the plain INSERT audit.
 

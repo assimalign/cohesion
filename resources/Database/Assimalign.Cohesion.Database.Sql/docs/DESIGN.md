@@ -2574,17 +2574,20 @@ as side-effecting. Constants and immutable expressions retain the complete up-fr
 The table retains only IX, allowing unrelated upserts and plain INSERTs to progress.
 
 **Release and retry arbitration (#1668).** Before the first proposal, execution takes an
-allocation-free LockManager.MarkStatement. DO UPDATE takes a live conflict's row with TryAcquire
+allocation-free statement mark with LockManager.MarkStatement that is never reassigned, plus a
+retry mark at the same boundary. DO UPDATE takes a live conflict's row with TryAcquire
 before reading it or evaluating its WHERE filter; a false/UNKNOWN filter keeps that row locked
 and unchanged. DO NOTHING takes no conflicting-row lock: the arbiter key protects its visibility
 check (PostgreSQL nodeModifyTable.c:1207-1211). An all-conflict DO NOTHING has no writes to protect
 and releases its new arbitration grants after those checks, so an open no-op transaction blocks
 neither UPDATE of that parent nor a child INSERT referencing it. Pre-statement grants remain held.
-If refused, ReleaseSince gives back every resource first granted after the mark, including
+If refused, ReleaseSince gives back every resource first granted after the retry mark, including
 all earlier proposals' keys and rows. AcquireAsync then waits for the row through the normal
 deadlock detector, cancellation and storage-abandonment path. Its row grant is kept, a new mark
 is taken after the grant, and the entire arbitration restarts at proposal one. Later back-offs
-retain rows kept by earlier waits. Snapshot checks
+retain rows kept by earlier waits. After a successful statement, every row kept by a completed
+wait stays locked until the transaction ends, even when final arbitration no longer conflicts
+with it; for example, the holder may commit a rekey or delete under ReadCommitted. Snapshot checks
 the waited row for a committed update/delete and aborts retryably even
 when the key is now absent; ReadCommitted looks up the newest committed state. Rollback has
 undone row/index stamps before the holder releases its locks, so a rollback waiter proceeds
@@ -2607,6 +2610,13 @@ reach rows in opposite orders; the lock manager chooses a retryable victim. This
 exposure of retaining locks to avoid symmetric back-off livelock (PostgreSQL
 src/backend/executor/execIndexing.c:85-95). Callers roll back/retry the victim transaction. Consistent input row order reduces
 that exposure, as PostgreSQL advises in doc/src/sgml/mvcc.sgml:1546-1555.
+
+Every exception before ApplyStatementAsync begins releases grants acquired since the original
+statement mark and rethrows, including cancellation during or after a wait, COHSQLE036,
+CHECK/NOT NULL violations and an unhandled deadlock. This also releases rows retained by completed
+waits, so a failed upsert does not keep its new rows or arbiter keys locked while its explicit
+transaction stays active. Pre-statement grants and their upgrades remain protected. Once apply
+begins, this cleanup never runs, even if apply fails; ordinary transaction-duration locking applies.
 
 Discarding arbitration is safe: proposals, pending index effects, affected-row identities and
 replacement records are only in-memory preparation. No target heap/index mutation, version-store
