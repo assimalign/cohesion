@@ -174,7 +174,7 @@ stateless SqlNamespaceNames.Default supplies dbo to runtime provisioning and SDK
 
 SqlQueryBodyExpression is the closed base for SELECT and SqlSetOperationExpression (#1114),
 with CommonTables and result-tail fields shared across both. All six query-bearing slots take
-the base, and Render has a base-typed overload for future views. Set operations remain a distinct
+the base, and Render has a base-typed overload that persisted views use (#1124). Set operations remain a distinct
 root so scalar-expression carriers and SDK migration validation keep refusing set-root injections.
 A two-rung query parser follows PostgreSQL gram.y:845-846,13103-13115, keeping TOP at SELECT
 head and parsing the result tail after the operator ladder. Parentheses use the existing depth
@@ -308,11 +308,11 @@ COHDBL001. ORDER BY aliases and ordinals count visible wildcard output after USI
   the engine resolves remaining domain names and reports a name it does not know. Which conversions a
   CAST may make is the engine's cast registry's question too, so every built-in type
   is a valid CAST target here.
-- **Recognized-but-unsupported tokens stay in the lexer tables.** `UNION`, `RECURSIVE`,
+- **Recognized-but-unsupported tokens stay in the lexer tables.** `RECURSIVE`
   and window functions are lexed so diagnostics can
   say "unsupported" precisely rather than mis-parsing them as identifiers. Gateable
   names live in `SqlClauses`; supported names are present in `SqlLanguageProfile`,
-  while reserved future clauses such as set operations, recursive/nested CTEs, windows,
+  while reserved future clauses such as recursive/nested CTEs, windows,
   unsupported join forms remain absent. `ParseCore` scans a copy of its configured
   lexer before recursive descent and attaches the first rejected clause to the
   statement, so analyzers observe `COHDBL001` with the token location and the `SQL`
