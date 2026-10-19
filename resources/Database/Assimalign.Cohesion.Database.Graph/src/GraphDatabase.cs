@@ -76,6 +76,16 @@ public sealed partial class GraphDatabase : DatabaseInstance
         catch (Exception exception) when (exception is Indexing.IndexFormatException or Assimalign.Cohesion.Database.Storage.StorageCorruptionException)
         {
             Coordinator.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            // Graph.Storage uses the existing storage exception with a coded message, so the
+            // engine can retain its diagnostic without adding a cross-assembly exception type.
+            const string formatCode = "COHDBG017";
+            if (exception.Message.StartsWith(formatCode + ": ", StringComparison.Ordinal))
+            {
+                string message = string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseOpenRefused,
+                    name, exception.Message[(formatCode.Length + 2)..]);
+                throw new DatabaseException(message, [new Diagnostic
+                { Code = formatCode, Message = message, Severity = DiagnosticSeverity.Error }], exception);
+            }
             throw new DatabaseException($"Database '{name}' cannot be opened. {exception.Message}", exception);
         }
 
@@ -362,7 +372,7 @@ public sealed partial class GraphDatabase : DatabaseInstance
     /// nodes are yielded.
     /// </exception>
     /// <exception cref="DatabaseException">
-    /// The traversal's depth or direction is invalid (<c>COHDBG001</c>), its physical work limit is exceeded (<c>COHDBG004</c>); the session belongs to
+    /// The traversal's depth or direction is invalid (<c>COHDBG001</c>); the session belongs to
     /// another database (<c>COHDBG005</c>), it is closed (also while the nodes are yielded), another
     /// statement holds it, or its transaction refuses statements (<c>COHDBG007</c>).
     /// </exception>
@@ -380,7 +390,6 @@ public sealed partial class GraphDatabase : DatabaseInstance
         var nodes = await RunAsync(session, async operation =>
         {
             var result = new List<GraphNode>();
-            var budget = new GraphPlanExecutor.ExpansionBudget();
             IReadOnlyCollection<Guid>? types = traversal.RelationshipType is { } name
                 ? Catalog.FindRelationshipType(name, operation.Context.Snapshot) is { } type ? new[] { type.Id } : [] : null;
             var direction = traversal.Direction switch
@@ -400,13 +409,12 @@ public sealed partial class GraphDatabase : DatabaseInstance
                 cancellationToken.ThrowIfCancellationRequested();
                 if (current.Depth >= traversal.MaxDepth) { continue; }
                 foreach (var relationship in await operation.Updates.GetIncidentAsync(current.Id, direction, types,
-                    budget, cancellationToken).ConfigureAwait(false))
+                    cancellationToken).ConfigureAwait(false))
                 {
                     bool outgoing = relationship.SourceId == current.Id;
                     ulong next = outgoing ? relationship.TargetId : relationship.SourceId;
                     if (visited.Add(next) && Store.FindNode(next, operation.Context.Snapshot) is { } node)
                     {
-                        budget.ConsumeViable();
                         result.Add(Materialize(node));
                         queue.Enqueue((next, current.Depth + 1));
                     }

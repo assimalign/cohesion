@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Assimalign.Cohesion.Database.Graph.Catalog;
+using Assimalign.Cohesion.Database.Graph.Storage;
 using Assimalign.Cohesion.Database.Indexing;
 using Assimalign.Cohesion.Database.Indexing.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Storage;
@@ -144,6 +145,57 @@ public sealed class GraphEngineTests
             reopened.TryGetDatabase("persisted", out _).ShouldBeFalse();
             await Should.ThrowAsync<DatabaseNotFoundException>(async () => await reopened.OpenDatabaseAsync("persisted"));
             await reopened.DisposeAsync(); reopened.Dispose(); reopened.State.ShouldBe(EngineState.Disposed);
+        }
+        finally { if (Directory.Exists(root)) { Directory.Delete(root, true); } }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Graph] - Format: format-2 records and registrations are refused with COHDBG017 before scrub (#1532)")]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task OpenDatabaseAsync_GraphFormatTwo_ShouldPreserveCodedRefusalAsync(ulong owner)
+    {
+        // Arrange
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        string root = Path.Combine(Path.GetTempPath(), "cohesion-graph-record-format-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            await using (var engine = GraphDatabaseEngine.Create("graph-engine", new() { RootPath = root }))
+            {
+                var database = await engine.CreateDatabaseAsync("legacy", timeout.Token);
+                await using var session = await database.CreateSessionAsync(timeout.Token);
+                await session.ExecuteAsync("INSERT (a:N)-[:T]->(b:N)", cancellationToken: timeout.Token);
+            }
+            string directory = Path.Combine(root, "legacy");
+            using (var storage = GraphStorage.Open(File.Open(Path.Combine(directory, "graph.dat"), FileMode.Open, FileAccess.ReadWrite),
+                File.Open(Path.Combine(directory, "graph.log"), FileMode.Open, FileAccess.ReadWrite),
+                File.Open(Path.Combine(directory, "graph.bak"), FileMode.OpenOrCreate, FileAccess.ReadWrite), checkpointOnOpen: false))
+            {
+                using var records = storage.GetUnitIterator(owner);
+                records.MoveNext().ShouldBeTrue();
+                var record = records.Current;
+                byte[] bytes = record.Data.ToArray();
+                bytes[17] = 2;
+                using var bracket = storage.BeginTransaction();
+                storage.UpdateEntry(bracket, record.PageId, record.SlotIndex, bytes);
+                bracket.Commit();
+            }
+            var before = Directory.GetFiles(directory).ToDictionary(path => path, File.ReadAllBytes);
+
+            // Act
+            await using var reopened = GraphDatabaseEngine.Create("graph-engine", new() { RootPath = root });
+            var failure = await Should.ThrowAsync<DatabaseException>(async () => await reopened.OpenDatabaseAsync("legacy", timeout.Token));
+
+            // Assert
+            var diagnostic = failure.Diagnostics.ShouldHaveSingleItem();
+            diagnostic.Code.ShouldBe("COHDBG017");
+            diagnostic.Severity.ShouldBe(DiagnosticSeverity.Error);
+            diagnostic.Message.ShouldBe(failure.Message);
+            failure.Message.ShouldStartWith("Database 'legacy' cannot be opened. ", Case.Sensitive);
+            failure.Message.ShouldContain("recreate the database", Case.Sensitive);
+            failure.InnerException.ShouldBeOfType<StorageCorruptionException>().Message.ShouldStartWith("COHDBG017: ", Case.Sensitive);
+            reopened.TryGetDatabase("legacy", out _).ShouldBeFalse();
+            await reopened.DisposeAsync();
+            foreach (var (path, bytes) in before) { File.ReadAllBytes(path).ShouldBe(bytes); }
         }
         finally { if (Directory.Exists(root)) { Directory.Delete(root, true); } }
     }

@@ -148,7 +148,7 @@ internal sealed partial class GraphPlanner
             : string.Join(" | ", shape.Segments.Select(segment => AdjacencyDetail(segment.Body, forward)));
 
     private static string HopDetail(GqlRelationshipPattern relationship, bool forward)
-        => $"adjacency=(node,direction,type_id,relationship); seek_direction={GraphLabelEvaluator.IncidentDirection(relationship, forward)}; type_filter={relationship.LabelExpression?.ToString() ?? relationship.Type ?? "%"}; physical=selected_records; viable=accepted_hops; physical_limit={GraphPlanExecutor.ExpansionBudget.PhysicalLimit}";
+        => $"adjacency=(node,direction,type_id,relationship); seek_direction={GraphLabelEvaluator.IncidentDirection(relationship, forward)}; type_filter={relationship.LabelExpression?.ToString() ?? relationship.Type ?? "%"}; physical=visited_candidates; viable=accepted_hops; physical_limit={GraphPlanExecutor.ExpansionBudget.PhysicalLimit}";
 
     private static string StageName(GqlStage stage) => stage switch
     {

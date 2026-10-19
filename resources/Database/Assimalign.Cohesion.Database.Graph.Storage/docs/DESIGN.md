@@ -25,12 +25,13 @@ Shared B+Tree pages use the kernel's `PageType.Index` format.
 
 One relationship record contains both directed endpoint identities and the relationship type's
 catalog GUID, supplied explicitly to CreateRelationshipAsync by the Graph engine. The store does
-not reference Graph.Catalog or hash names. One shared adjacency B+Tree, registered under object
+not verify that this ID matches relationship.Type; the engine resolves that pairing from the catalog.
+The store does not reference Graph.Catalog or hash names. One shared adjacency B+Tree, registered under object
 ID UInt64.MaxValue and name graph, maps (node, direction, type ID, relationship ID) to the packed
 physical location. Keys occupy 33 bytes: UInt64 node (big-endian), direction byte (1 outgoing,
 2 incoming), 16-byte GUID (big-endian), UInt64 relationship (big-endian). Every relationship has
-two entries, including a self-loop. Both-direction reads deduplicate a self-loop before decoding
-its second entry.
+two entries, including a self-loop. Both-direction reads skip an incoming self-loop using the
+record's fixed source field before decoding it again, without a set proportional to outgoing degree.
 
 The diagram shows endpoint adjacency references to records that retain both endpoints.
 
@@ -50,9 +51,11 @@ O(t log E + r); only snapshot-visible references are decoded. Unrelated directio
 cause no record decodes. The instance-local IncidentRecordsDecoded counter proves this with
 leaf splits and minimum-of-three-round comparisons. The unfiltered list overload and engine
 materialization sort by relationship identity; the streaming overload specifies no cross-range
-ordering. The shared B+Tree currently materializes key/reference ranges while opening a cursor;
-streaming here bounds graph record decoding and permits the caller's work budget to stop it,
-but does not change that kernel allocation or add cancellation inside OpenCursor (#1542).
+ordering. The shared B+Tree currently materializes each entire selected key/reference range under
+its read latch while opening a cursor. Cancellation is checked before each range, but allocation and
+collection inside OpenCursor cannot be interrupted or stopped by the caller's work budget (#1542).
+Graph record decoding occurs afterward. The engine collects and sorts those decoded relationships
+before DFS visits them, so its candidate budget bounds visits, not range loading or decoding.
 Creating, replacing or deleting a relationship maintains both entries in its single physical
 statement bracket, preserving the record's writer/deleter stamps.
 
@@ -107,8 +110,10 @@ replacement even when the supplied values equal the visible version. The engine 
 whose assignments were all no-ops; a changed-then-restored entity retains its write conflict. Creation accepts complete StoredGraphNode/StoredGraphRelationship
 records whose nonzero identities the caller reserves from the backing storage's durable sequence;
 duplicate identities are refused. Reserving identities before insertion lets the engine stage all
-changes before first publication. Formats 1 and 2 are refused before recovery scrub with the remedy to
-recreate the database; no legacy reader or upgrade path exists. The graph record and tree-registration version is 3; catalog and B-tree page formats are unchanged.
+changes before first publication. Formats 1 and 2 are refused before recovery scrub with COHDBG017
+and the remedy to recreate the database; no legacy reader or upgrade path exists. The existing
+StorageCorruptionException carries the code in its message; the engine preserves it in DatabaseException.Diagnostics.
+The graph record and tree-registration version is 3; catalog and B-tree page formats are unchanged.
 GraphRecordCodec.FormatVersion is the single fence used by pre-recovery validation and open.
 The owner-directed #1532 bump is shared with #1534: that later label-index tree extends version 3
 and the existing directory reconstruction/OpenIndexes path, without another bump, rebuild of

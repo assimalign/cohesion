@@ -35,7 +35,7 @@ public sealed class GqlProfileExecutionTests
                     [[0, null, "Match", null, null, "filter=False; matches_nothing=False", null, null],
                      [1, 0, "ExpandPath", null, null, null, null, null],
                      [2, 1, "LabelScan", "Person", null, "node=0; property=; value=NULL", null, null],
-                     [3, 2, "Expand", "KNOWS", null, "edge=0; direction=Outgoing; labels=KNOWS; adjacency=(node,direction,type_id,relationship); seek_direction=Outgoing; type_filter=KNOWS; physical=selected_records; viable=accepted_hops; physical_limit=1000000", null, null],
+                     [3, 2, "Expand", "KNOWS", null, "edge=0; direction=Outgoing; labels=KNOWS; adjacency=(node,direction,type_id,relationship); seek_direction=Outgoing; type_filter=KNOWS; physical=visited_candidates; viable=accepted_hops; physical_limit=1000000", null, null],
                      [4, 0, "Project", "a", null, "kind=Node; expression=a", null, null]]),
             ],
             [GqlClauses.QuantifiedPath] =

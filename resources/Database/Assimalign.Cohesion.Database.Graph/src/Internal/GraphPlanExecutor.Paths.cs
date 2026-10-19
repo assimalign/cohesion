@@ -151,7 +151,7 @@ internal static partial class GraphPlanExecutor
                     case EdgeTask edgeTask:
                         var incident = await operation.Updates.GetIncidentAsync(state.Current.Id.Value,
                             GraphLabelEvaluator.IncidentDirection(edgeTask.Pattern, edgeTask.Forward),
-                            operation.Updates.SelectTypes(edgeTask.Pattern), budget, token).ConfigureAwait(false);
+                            operation.Updates.SelectTypes(edgeTask.Pattern), token).ConfigureAwait(false);
                         frontier.Push(state with { Task = new IncidentTask(edgeTask, incident, 0) });
                         break;
                     case IncidentTask cursor:
@@ -160,6 +160,7 @@ internal static partial class GraphPlanExecutor
                         if (cursor.Index == cursor.Edges.Count) { break; }
                         frontier.Push(state with { Task = cursor with { Index = cursor.Index + 1 } });
                         budget.VisitCandidate();
+                        budget.Consume();
                         var edge = cursor.Edges[cursor.Index];
                         var hop = cursor.Hop;
                         ulong from = state.Current.Id.Value;

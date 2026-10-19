@@ -1,13 +1,14 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Diagnostics;
-using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Database.Graph.Storage.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Graph.Storage.Tests;
@@ -16,84 +17,157 @@ namespace Assimalign.Cohesion.Database.Graph.Storage.Tests;
 [Collection(nameof(GraphAdjacencyConcurrencyTests))]
 public sealed class GraphAdjacencyConcurrencyTests
 {
-    [Theory(DisplayName = "Cohesion Test [Graph.Storage] - Adjacency: overlapping updates preserve pinned ranges and every cursor exit releases its resources (#1532)")]
-    [InlineData("Complete")]
-    [InlineData("Break")]
-    [InlineData("Throw")]
-    [InlineData("Cancel")]
-    public async Task GetIncidentAsync_ConcurrentReplacementAndExit_ShouldRetainSnapshotAndReleaseCursorAsync(string exit)
+    [Fact(DisplayName = "Cohesion Test [Graph.Storage] - Adjacency: Both retains incoming snapshot after a commit between ranges (#1532)")]
+    public async Task GetIncidentAsync_WriterCommitsBetweenDirections_ShouldRetainIncomingSnapshotAsync()
     {
         // Arrange
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        using var storage = GraphStorage.Create(new MemoryStream(), new MemoryStream(), new MemoryStream(), "adjacency-race");
-        await using var coordinator = new TransactionCoordinator(storage, storage.WriteAheadJournal, storage.Records);
-        var store = GraphStore.Open(storage, coordinator);
-        var type = Guid.NewGuid();
-        var seed = await coordinator.BeginAsync(IsolationLevel.Snapshot, timeout.Token);
-        var node = await store.CreateNodeAsync(new StoredGraphNode((ulong)storage.ReserveTransactionSequence(), [], new Dictionary<string, object?>()), seed, timeout.Token);
-        var ids = new List<ulong>();
-        for (int i = 0; i < 3; i++)
-        {
-            ulong id = (ulong)storage.ReserveTransactionSequence();
-            await store.CreateRelationshipAsync(new StoredGraphRelationship(id, node.Id, node.Id, "T", Properties(0)), type, seed, timeout.Token);
-            ids.Add(id);
-        }
-        await coordinator.CommitAsync(seed, timeout.Token);
-        var old = await coordinator.BeginAsync(IsolationLevel.Snapshot, timeout.Token);
-        var elapsed = Stopwatch.StartNew();
-        int overlaps = 0, exits = 0;
-        long before = store.IncidentRecordsDecoded;
+        await using var fixture = new GraphAdjacencyFixture();
+        var seed = await fixture.Coordinator.BeginAsync(IsolationLevel.Snapshot, timeout.Token);
+        var hub = await fixture.NodeAsync(seed, timeout.Token);
+        var peer = await fixture.NodeAsync(seed, timeout.Token);
+        var outgoing = await fixture.EdgeAsync(hub.Id, peer.Id, 0, seed, timeout.Token);
+        var changed = await fixture.EdgeAsync(peer.Id, hub.Id, 0, seed, timeout.Token);
+        var deleted = await fixture.EdgeAsync(peer.Id, hub.Id, 0, seed, timeout.Token);
+        await fixture.Coordinator.CommitAsync(seed, timeout.Token);
+        var reader = await fixture.Coordinator.BeginAsync(IsolationLevel.Snapshot, timeout.Token);
+        await using var cursor = fixture.Store.GetIncidentAsync(hub.Id, GraphIncidentDirection.Both, [fixture.Type], reader.Snapshot, timeout.Token).GetAsyncEnumerator();
 
-        // Act: suspend a reader between records while a real concurrent writer replaces all entries.
-        do
+        // Act: the only outgoing entry is consumed; the incoming range has not opened yet.
+        (await cursor.MoveNextAsync()).ShouldBeTrue();
+        cursor.Current.Id.ShouldBe(outgoing.Id);
+        ulong added = await Task.Run(async () =>
         {
-            using var canceled = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token);
-            await using (var cursor = store.GetIncidentAsync(node.Id, GraphIncidentDirection.Both, [type], old.Snapshot, canceled.Token).GetAsyncEnumerator())
+            var writer = await fixture.Coordinator.BeginAsync(IsolationLevel.Snapshot, timeout.Token);
+            await fixture.Store.UpdateRelationshipAsync(changed.Id, Properties(1), writer, timeout.Token);
+            await fixture.Store.DeleteRelationshipAsync(deleted.Id, writer, timeout.Token);
+            var edge = await fixture.EdgeAsync(peer.Id, hub.Id, 1, writer, timeout.Token);
+            await fixture.Coordinator.CommitAsync(writer, timeout.Token);
+            return edge.Id;
+        }, timeout.Token);
+        var incoming = new List<StoredGraphRelationship>();
+        while (await cursor.MoveNextAsync()) { incoming.Add(cursor.Current); }
+
+        // Assert: opening the incoming range still uses the original reader's snapshot.
+        incoming.Select(edge => edge.Id).Order().ShouldBe(new[] { changed.Id, deleted.Id }.Order());
+        incoming.ShouldAllBe(edge => edge.SourceId == peer.Id && edge.TargetId == hub.Id && Equals(edge.Properties["x"], 0));
+        await fixture.Coordinator.RollbackAsync(reader, timeout.Token);
+        var current = await fixture.Coordinator.BeginAsync(IsolationLevel.Snapshot, timeout.Token);
+        var latest = await fixture.ReadAsync(hub.Id, current.Snapshot, timeout.Token);
+        latest.Select(edge => edge.Id).Order().ShouldBe(new[] { outgoing.Id, changed.Id, added }.Order());
+        latest.Where(edge => edge.TargetId == hub.Id).ShouldAllBe(edge => Equals(edge.Properties["x"], 1));
+        await fixture.Coordinator.RollbackAsync(current, timeout.Token);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Graph.Storage] - Adjacency: independent readers and writers overlap and return complete snapshots (#1532)")]
+    public async Task GetIncidentAsync_ConcurrentReaderAndWriterLoops_ShouldObserveOnlyValidSnapshotsAsync()
+    {
+        // Arrange
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var start = new Barrier(2);
+        await using var fixture = new GraphAdjacencyFixture();
+        var seed = await fixture.Coordinator.BeginAsync(IsolationLevel.Snapshot, timeout.Token);
+        var hub = await fixture.NodeAsync(seed, timeout.Token);
+        var peer = await fixture.NodeAsync(seed, timeout.Token);
+        var outgoing = await fixture.EdgeAsync(hub.Id, peer.Id, 0, seed, timeout.Token);
+        var incoming = await fixture.EdgeAsync(peer.Id, hub.Id, 0, seed, timeout.Token);
+        var replaced = await fixture.EdgeAsync(peer.Id, hub.Id, 0, seed, timeout.Token);
+        await fixture.Coordinator.CommitAsync(seed, timeout.Token);
+        var states = new ConcurrentDictionary<int, (TransactionSequence Sequence, ulong ReplacedId)>();
+        states[0] = (seed.Sequence, replaced.Id);
+        const int iterations = 64;
+        int reading = 0, writing = 0, reads = 0, writes = 0, readOverlaps = 0, writeOverlaps = 0;
+
+        // Act: independent loops yield inside operations so seeks and record reads can race
+        // mutation brackets. The barrier starts the first read and write together.
+        var readerTask = Task.Run(async () =>
+        {
+            for (int iteration = 0; iteration < iterations; iteration++)
             {
-                (await cursor.MoveNextAsync()).ShouldBeTrue();
-                cursor.Current.Properties["x"].ShouldBe(0);
-                int value = overlaps + 1;
-                await Task.Run(async () =>
+                Volatile.Write(ref reading, 1);
+                try
                 {
-                    var writer = await coordinator.BeginAsync(IsolationLevel.Snapshot, timeout.Token);
-                    foreach (ulong id in ids) { await store.UpdateRelationshipAsync(id, Properties(value), writer, timeout.Token); }
-                    if (value % 2 == 0) { await coordinator.RollbackAsync(writer, timeout.Token); }
-                    else { await coordinator.CommitAsync(writer, timeout.Token); }
-                }, timeout.Token);
-                overlaps++;
-                if (exit == "Complete")
-                {
-                    int count = 1;
-                    while (await cursor.MoveNextAsync()) { cursor.Current.Properties["x"].ShouldBe(0); count++; }
-                    count.ShouldBe(3);
-                }
-                else if (exit == "Cancel")
-                {
-                    canceled.Cancel();
-                    await Should.ThrowAsync<OperationCanceledException>(async () => await cursor.MoveNextAsync());
-                }
-                else if (exit == "Throw")
-                {
-                    await Should.ThrowAsync<InvalidOperationException>(async () =>
+                    if (iteration == 0) { start.SignalAndWait(timeout.Token); }
+                    var reader = await fixture.Coordinator.BeginAsync(IsolationLevel.Snapshot, timeout.Token);
+                    try
                     {
-                        await using var throwing = store.GetIncidentAsync(node.Id, GraphIncidentDirection.Outgoing, [type], old.Snapshot, timeout.Token).GetAsyncEnumerator();
-                        (await throwing.MoveNextAsync()).ShouldBeTrue();
-                        throw new InvalidOperationException();
-                    });
+                        var expected = states.Where(state => reader.Snapshot.IsVisible(state.Value.Sequence)).MaxBy(state => state.Key);
+                        var observed = new List<StoredGraphRelationship>();
+                        await foreach (var edge in fixture.Store.GetIncidentAsync(hub.Id, GraphIncidentDirection.Both, [fixture.Type], reader.Snapshot, timeout.Token))
+                        {
+                            if (Volatile.Read(ref writing) != 0) { Interlocked.Increment(ref readOverlaps); }
+                            observed.Add(edge);
+                            await Task.Yield();
+                        }
+                        observed.Select(edge => edge.Id).Order().ShouldBe(new[] { outgoing.Id, incoming.Id, expected.Value.ReplacedId }.Order());
+                        observed.ShouldAllBe(edge => Equals(edge.Properties["x"], expected.Key));
+                        observed.ShouldAllBe(edge => edge.SourceId != edge.TargetId &&
+                            (edge.Id == outgoing.Id ? edge.SourceId == hub.Id && edge.TargetId == peer.Id : edge.SourceId == peer.Id && edge.TargetId == hub.Id));
+                        Interlocked.Increment(ref reads);
+                    }
+                    finally { await fixture.Coordinator.RollbackAsync(reader, timeout.Token); }
                 }
-                exits++;
+                finally { Volatile.Write(ref reading, 0); }
+                await Task.Yield();
             }
-            // A reader's early exit must not retain a latch and block a following mutation.
-            var next = await coordinator.BeginAsync(IsolationLevel.Snapshot, timeout.Token);
-            await store.UpdateRelationshipAsync(ids[0], Properties(99), next, timeout.Token);
-            await coordinator.RollbackAsync(next, timeout.Token);
-        } while ((elapsed.Elapsed < TimeSpan.FromMilliseconds(250) || overlaps < 3) && elapsed.Elapsed < TimeSpan.FromSeconds(20));
+        }, timeout.Token);
+        var writerTask = Task.Run(async () =>
+        {
+            ulong prior = replaced.Id;
+            for (int version = 1; version <= iterations; version++)
+            {
+                Volatile.Write(ref writing, 1);
+                try
+                {
+                    if (version == 1) { start.SignalAndWait(timeout.Token); }
+                    var writer = await fixture.Coordinator.BeginAsync(IsolationLevel.Snapshot, timeout.Token);
+                    await fixture.Store.UpdateRelationshipAsync(outgoing.Id, Properties(version), writer, timeout.Token);
+                    if (Volatile.Read(ref reading) != 0) { Interlocked.Increment(ref writeOverlaps); }
+                    await Task.Yield();
+                    await fixture.Store.UpdateRelationshipAsync(incoming.Id, Properties(version), writer, timeout.Token);
+                    await fixture.Store.DeleteRelationshipAsync(prior, writer, timeout.Token);
+                    var next = await fixture.EdgeAsync(peer.Id, hub.Id, version, writer, timeout.Token);
+                    states[version] = (writer.Sequence, next.Id);
+                    await Task.Yield();
+                    await fixture.Coordinator.CommitAsync(writer, timeout.Token);
+                    prior = next.Id;
+                    Interlocked.Increment(ref writes);
+                }
+                finally { Volatile.Write(ref writing, 0); }
+                await Task.Yield();
+            }
+        }, timeout.Token);
+        await Task.WhenAll(readerTask, writerTask);
 
-        // Assert
-        overlaps.ShouldBeGreaterThanOrEqualTo(3);
-        exits.ShouldBe(overlaps);
-        (store.IncidentRecordsDecoded - before).ShouldBeGreaterThanOrEqualTo(overlaps * (exit == "Complete" ? 3 : 1));
-        await coordinator.RollbackAsync(old, timeout.Token);
+        // Assert: both loops completed their bounded work and saw the other inside an operation.
+        reads.ShouldBe(iterations);
+        writes.ShouldBe(iterations);
+        readOverlaps.ShouldBeGreaterThan(0);
+        writeOverlaps.ShouldBeGreaterThan(0);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Graph.Storage] - Adjacency: cancellation between directions prevents reading incoming records (#1532)")]
+    public async Task GetIncidentAsync_CanceledBetweenDirections_ShouldStopBeforeIncomingAsync()
+    {
+        // Arrange
+        using var cancellation = new CancellationTokenSource();
+        await using var fixture = new GraphAdjacencyFixture();
+        var writer = await fixture.Coordinator.BeginAsync(IsolationLevel.Snapshot, CancellationToken.None);
+        var hub = await fixture.NodeAsync(writer, CancellationToken.None);
+        var peer = await fixture.NodeAsync(writer, CancellationToken.None);
+        await fixture.EdgeAsync(hub.Id, peer.Id, 0, writer, CancellationToken.None);
+        await fixture.EdgeAsync(peer.Id, hub.Id, 0, writer, CancellationToken.None);
+        await fixture.Coordinator.CommitAsync(writer, CancellationToken.None);
+        var reader = await fixture.Coordinator.BeginAsync(IsolationLevel.Snapshot, CancellationToken.None);
+        await using var cursor = fixture.Store.GetIncidentAsync(hub.Id, GraphIncidentDirection.Both, [fixture.Type], reader.Snapshot, cancellation.Token).GetAsyncEnumerator();
+        (await cursor.MoveNextAsync()).ShouldBeTrue();
+        long decoded = fixture.Store.IncidentRecordsDecoded;
+
+        // Act / Assert
+        cancellation.Cancel();
+        await Should.ThrowAsync<OperationCanceledException>(async () => await cursor.MoveNextAsync());
+        fixture.Store.IncidentRecordsDecoded.ShouldBe(decoded);
+        await fixture.Coordinator.RollbackAsync(reader, CancellationToken.None);
     }
 
     private static IReadOnlyDictionary<string, object?> Properties(int value) => new Dictionary<string, object?> { ["x"] = value };

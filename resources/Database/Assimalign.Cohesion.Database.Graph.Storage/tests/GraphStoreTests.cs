@@ -89,7 +89,7 @@ public sealed partial class GraphStoreTests
         (await fixture.Store.GetIncidentAsync(b.Id, current.Snapshot)).ShouldBeEmpty();
     }
 
-    [Fact]
+    [Fact(DisplayName = "Cohesion Test [Graph.Storage] - Recovery: journal replay restores committed records, typed directional adjacency and indexes (#1532)")]
     public async Task CrashRecoversCommittedRecordsAndIndexesAndDiscardsPartialTransaction()
     {
         var data = new MemoryStream();
@@ -101,12 +101,16 @@ public sealed partial class GraphStoreTests
         await store.CreateIndexAsync("N", "key", write);
         var a = await store.CreateNodeAsync(new StoredGraphNode((ulong)storage.ReserveTransactionSequence(), ["N"], Properties("key", 1)), write);
         var b = await store.CreateNodeAsync(new StoredGraphNode((ulong)storage.ReserveTransactionSequence(), ["N"], Properties("key", 2)), write);
-        var edge = await store.CreateRelationshipAsync(new StoredGraphRelationship((ulong)storage.ReserveTransactionSequence(), a.Id, b.Id, "R", _empty), Guid.Parse("10000000-0000-0000-0000-000000000001"), write);
+        var type = Guid.Parse("10000000-0000-0000-0000-000000000001");
+        var otherType = Guid.Parse("10000000-0000-0000-0000-000000000002");
+        var partialType = Guid.Parse("10000000-0000-0000-0000-000000000003");
+        var edge = await store.CreateRelationshipAsync(new StoredGraphRelationship((ulong)storage.ReserveTransactionSequence(), a.Id, b.Id, "R", _empty), type, write);
+        var reverse = await store.CreateRelationshipAsync(new StoredGraphRelationship((ulong)storage.ReserveTransactionSequence(), b.Id, a.Id, "S", _empty), otherType, write);
         await coordinator.CommitAsync(write);
         var partial = await coordinator.BeginAsync(IsolationLevel.Snapshot);
         await store.DeleteNodeAsync(a.Id, true, partial);
         var uncommitted = await store.CreateNodeAsync(new StoredGraphNode((ulong)storage.ReserveTransactionSequence(), ["N"], Properties("key", 3)), partial);
-        await store.CreateRelationshipAsync(new StoredGraphRelationship((ulong)storage.ReserveTransactionSequence(), b.Id, uncommitted.Id, "PARTIAL", _empty), Guid.Parse("10000000-0000-0000-0000-000000000001"), partial);
+        await store.CreateRelationshipAsync(new StoredGraphRelationship((ulong)storage.ReserveTransactionSequence(), b.Id, uncommitted.Id, "PARTIAL", _empty), partialType, partial);
         // Drain journal buffering into the in-memory recovery image; MemoryStream
         // has no durable-flush contract.
         storage.WriteAheadJournal.Flush(forceDurable: false);
@@ -120,8 +124,20 @@ public sealed partial class GraphStoreTests
         var reader = await recovery.BeginAsync(IsolationLevel.Snapshot);
         recoveredStore.GetNodes(null, reader.Snapshot).Select(node => node.Id).ShouldBe([a.Id, b.Id]);
         recoveredStore.FindNode(uncommitted.Id, reader.Snapshot).ShouldBeNull();
-        (await recoveredStore.GetIncidentAsync(a.Id, reader.Snapshot)).Single().Id.ShouldBe(edge.Id);
-        (await recoveredStore.GetIncidentAsync(b.Id, reader.Snapshot)).Single().Id.ShouldBe(edge.Id);
+        (await recoveredStore.GetIncidentAsync(a.Id, reader.Snapshot)).Select(item => item.Id).ShouldBe([edge.Id, reverse.Id]);
+        (await recoveredStore.GetIncidentAsync(b.Id, reader.Snapshot)).Select(item => item.Id).ShouldBe([edge.Id, reverse.Id]);
+        foreach (var direction in new[] { GraphIncidentDirection.Outgoing, GraphIncidentDirection.Incoming, GraphIncidentDirection.Both })
+        {
+            foreach (var selectedType in new[] { type, otherType, partialType })
+            {
+                var fromA = await SelectedAsync(recoveredStore, a.Id, direction, [selectedType], reader.Snapshot, CancellationToken.None);
+                var fromB = await SelectedAsync(recoveredStore, b.Id, direction, [selectedType], reader.Snapshot, CancellationToken.None);
+                fromA.Select(item => item.Id).ShouldBe(selectedType == type && direction != GraphIncidentDirection.Incoming ? [edge.Id]
+                    : selectedType == otherType && direction != GraphIncidentDirection.Outgoing ? [reverse.Id] : Array.Empty<ulong>());
+                fromB.Select(item => item.Id).ShouldBe(selectedType == type && direction != GraphIncidentDirection.Outgoing ? [edge.Id]
+                    : selectedType == otherType && direction != GraphIncidentDirection.Incoming ? [reverse.Id] : Array.Empty<ulong>());
+            }
+        }
         (await recoveredStore.SearchIndexAsync("N", "key", 1m, reader.Snapshot)).Single().Id.ShouldBe(a.Id);
         (await recoveredStore.SearchIndexAsync("N", "key", 3m, reader.Snapshot)).ShouldBeEmpty();
         var newNode = await recoveredStore.CreateNodeAsync(new StoredGraphNode((ulong)recovered.ReserveTransactionSequence(), ["N"], _empty), reader);

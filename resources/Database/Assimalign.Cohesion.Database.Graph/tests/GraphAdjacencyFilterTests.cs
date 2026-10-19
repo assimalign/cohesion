@@ -82,7 +82,45 @@ public sealed class GraphAdjacencyFilterTests
         budget.Viable.ShouldBe(1);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Graph] - Adjacency: selected dead ends still trip the physical cap before matching (#1532)")]
+    [Fact(DisplayName = "Cohesion Test [Graph] - Adjacency: stopping after the first hub result charges visited candidates only (#1532)")]
+    public async Task MatchAsync_FirstHubResult_ShouldNotChargeUnvisitedSelectedEdgesAsync()
+    {
+        // Arrange
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var stopped = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token);
+        await using var engine = GraphDatabaseEngine.Create("first-result-filter", new());
+        var database = await engine.CreateDatabaseAsync("graph", timeout.Token);
+        await using var session = await database.CreateSessionAsync(timeout.Token);
+        await session.ExecuteAsync("INSERT (a:Hub), (b:Leaf) FOR k IN [1,2,3,4,5,6,7,8,9,10] INSERT (a)-[:T]->(b)", cancellationToken: timeout.Token);
+        var output = new List<Dictionary<string, object?>>();
+        var budget = new GraphPlanExecutor.ExpansionBudget
+        {
+            OnCandidate = _ =>
+            {
+                // Stop at the first-result boundary through the existing sampling hook.
+                // Public LIMIT still runs after eager MATCH materialization (#1142).
+                if (output.Count == 1) { stopped.Cancel(); stopped.Token.ThrowIfCancellationRequested(); }
+            },
+        };
+        // Two candidates remain: the anchor and one edge. The selected range has ten edges.
+        for (int i = 0; i < GraphPlanExecutor.ExpansionBudget.PhysicalLimit - 2; i++) { budget.Consume(); }
+
+        // Act
+        await database.RunAsync(session, async operation =>
+        {
+            var plan = new GraphPlanner(database, operation.Context.Snapshot).Plan(GraphQueryRequest.FromGql("MATCH (a:Hub)-[:T]->(b) RETURN a LIMIT 1").Statement.GqlExpression);
+            await Should.ThrowAsync<OperationCanceledException>(async () => await GraphPlanExecutor.MatchAsync(database, operation,
+                plan.MatchClauses[0].Paths[0], new(StringComparer.Ordinal), output, budget, null, stopped.Token));
+            return true;
+        }, timeout.Token);
+
+        // Assert: the first result was produced without charging the nine unvisited edges.
+        output.ShouldHaveSingleItem();
+        budget.Physical.ShouldBe(GraphPlanExecutor.ExpansionBudget.PhysicalLimit);
+        budget.Viable.ShouldBe(1);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Graph] - Adjacency: selected dead ends still trip the physical cap as they are visited (#1532)")]
     public async Task MatchAsync_SelectedDeadEnds_ShouldRetainPhysicalSafetyCapAsync()
     {
         // Arrange
@@ -125,6 +163,6 @@ public sealed class GraphAdjacencyFilterTests
         // Assert
         details.Single().ShouldContain("adjacency=(node,direction,type_id,relationship)", Case.Sensitive);
         details.Single().ShouldContain("seek_direction=Outgoing; type_filter=T", Case.Sensitive);
-        details.Single().ShouldContain("physical=selected_records; viable=accepted_hops; physical_limit=1000000", Case.Sensitive);
+        details.Single().ShouldContain("physical=visited_candidates; viable=accepted_hops; physical_limit=1000000", Case.Sensitive);
     }
 }

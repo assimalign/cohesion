@@ -109,20 +109,18 @@ internal sealed class GraphUpdates
     }
 
     internal ValueTask<IReadOnlyList<StoredGraphRelationship>> GetIncidentAsync(ulong id, CancellationToken token)
-        => GetIncidentAsync(id, GraphIncidentDirection.Both, null, null, token);
+        => GetIncidentAsync(id, GraphIncidentDirection.Both, null, token);
 
     internal async ValueTask<IReadOnlyList<StoredGraphRelationship>> GetIncidentAsync(ulong id, GraphIncidentDirection direction,
-        IReadOnlyCollection<Guid>? typeIds, GraphPlanExecutor.ExpansionBudget? budget, CancellationToken token)
+        IReadOnlyCollection<Guid>? typeIds, CancellationToken token)
     {
         var result = new List<StoredGraphRelationship>();
         await foreach (var edge in _database.Store.GetIncidentAsync(id, direction, typeIds, _operation.Context.Snapshot, token).ConfigureAwait(false))
         {
-            budget?.Consume();
             token.ThrowIfCancellationRequested();
             result.Add(_relationships.TryGetValue(edge.Id, out var updated)
                 ? new StoredGraphRelationship(edge.Id, updated.From.Value, updated.To.Value, updated.Type, updated.Properties) : edge);
         }
-        var seen = direction == GraphIncidentDirection.Both ? new HashSet<ulong>() : null;
         foreach (var selected in direction == GraphIncidentDirection.Both
             ? new[] { GraphIncidentDirection.Outgoing, GraphIncidentDirection.Incoming } : new[] { direction })
         {
@@ -133,9 +131,8 @@ internal sealed class GraphUpdates
                 foreach (ulong edgeId in incident)
                 {
                     token.ThrowIfCancellationRequested();
-                    if (!_relationships.ContainsKey(edgeId) || seen?.Add(edgeId) == false) { continue; }
-                    budget?.Consume();
-                    token.ThrowIfCancellationRequested();
+                    if (!_relationships.TryGetValue(edgeId, out var created) ||
+                        direction == GraphIncidentDirection.Both && selected == GraphIncidentDirection.Incoming && created.From.Value == id) { continue; }
                     result.Add(FindRelationship(edgeId)!.Value);
                 }
             }

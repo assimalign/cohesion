@@ -83,7 +83,7 @@ public sealed partial class GraphStore
     /// <param name="storage">Graph file set.</param>
     /// <exception cref="ArgumentNullException"><paramref name="storage"/> is null.</exception>
     /// <exception cref="IndexFormatException">An index tree is in another B-tree page format.</exception>
-    /// <exception cref="StorageCorruptionException">A graph record has an unsupported format, or a persisted index registration is malformed.</exception>
+    /// <exception cref="StorageCorruptionException">A graph record or registration has an unsupported format (<c>COHDBG017</c>), or a persisted index registration is malformed.</exception>
     public static void EnsureIndexFormat(GraphStorage storage)
     {
         ArgumentNullException.ThrowIfNull(storage);
@@ -155,7 +155,9 @@ public sealed partial class GraphStore
     }
 
     /// <summary>Atomically creates a relationship and both endpoint adjacency entries.</summary>
-    /// <param name="relationship">The complete relationship with an identity reserved from the backing storage.</param><param name="typeId">The stable catalog identity of the relationship type; never a name hash.</param><param name="context">Owning transaction.</param><param name="cancellationToken">Cancellation token.</param><returns>The created relationship.</returns>
+    /// <param name="relationship">The complete relationship with an identity reserved from the backing storage.</param>
+    /// <param name="typeId">The stable catalog identity of the relationship type; never a name hash. The store does not verify that this identity matches <c>relationship.Type</c>; the engine resolves it from the catalog.</param>
+    /// <param name="context">Owning transaction.</param><param name="cancellationToken">Cancellation token.</param><returns>The created relationship.</returns>
     /// <exception cref="InvalidOperationException">An endpoint does not exist in the latest committed view, or <paramref name="context"/> is not active.</exception>
     /// <exception cref="TransactionAbortedException">An endpoint was deleted after the transaction snapshot, or the transaction ended while waiting for its writer lock.</exception>
     /// <exception cref="ArgumentNullException"><paramref name="relationship"/> has null properties, or <paramref name="context"/> is null.</exception>
@@ -237,7 +239,6 @@ public sealed partial class GraphStore
         if (typeIds is { Count: 0 } || !_indexes.TryGetIndex(adjacencyId, treeName, out var index)) { yield break; }
         // Copy the caller's selection once; duplicate type ids must not duplicate visits.
         var types = typeIds?.Distinct().ToArray();
-        var seen = direction == GraphIncidentDirection.Both ? new HashSet<ulong>() : null;
         foreach (var selected in direction == GraphIncidentDirection.Both
             ? new[] { GraphIncidentDirection.Outgoing, GraphIncidentDirection.Incoming } : new[] { direction })
         {
@@ -246,6 +247,7 @@ public sealed partial class GraphStore
                 cancellationToken.ThrowIfCancellationRequested();
                 var low = AdjacencyKey(nodeId, selected, type ?? Guid.Empty, 0);
                 var high = AdjacencyKey(nodeId, selected, type ?? _maximumTypeId, ulong.MaxValue);
+                cancellationToken.ThrowIfCancellationRequested();
                 await using var cursor = index.OpenCursor(snapshot, new IndexKeyRange(low, high, true, true));
                 while (await cursor.MoveNextAsync(cancellationToken).ConfigureAwait(false))
                 {
@@ -253,13 +255,12 @@ public sealed partial class GraphStore
                     var key = cursor.CurrentKey.Encoded.Span;
                     if (key.Length != 33) { throw new StorageCorruptionException(ErrorMessages.AdjacencyKeyInvalid); }
                     ulong id = BinaryPrimitives.ReadUInt64BigEndian(key.Slice(25));
-                    if (seen?.Contains(id) == true) { continue; } // A self-loop's second direction needs no second decode.
-                    var found = ReadAt(cursor.CurrentEntryReference, snapshot);
+                    var found = ReadAt(cursor.CurrentEntryReference, snapshot,
+                        direction == GraphIncidentDirection.Both && selected == GraphIncidentDirection.Incoming ? nodeId : null);
                     if (found?.Record.Relationship is not { } edge) { continue; }
                     Interlocked.Increment(ref _incidentRecordsDecoded);
-                    if (!cursor.CurrentKey.Equals(AdjacencyKey(nodeId, selected, found.Value.Record.TypeId, edge.Id)) ||
+                    if (id != edge.Id || new Guid(key.Slice(9, 16), bigEndian: true) != found.Value.Record.TypeId ||
                         (selected == GraphIncidentDirection.Outgoing ? edge.SourceId : edge.TargetId) != nodeId) { continue; }
-                    seen?.Add(edge.Id);
                     yield return edge;
                 }
             }
@@ -459,7 +460,7 @@ public sealed partial class GraphStore
         internal History(Reference reference, History? next) { Reference = reference; Next = next; }
     }
 
-    private Found? ReadAt(ulong location, TransactionSnapshot snapshot)
+    private Found? ReadAt(ulong location, TransactionSnapshot snapshot, ulong? skipSourceId = null)
     {
         var (page, slot) = GraphStorage.UnpackLocation(location);
         // A reclaimed location reads as a stale reference; CRC and I/O errors propagate (#1342).
@@ -467,6 +468,11 @@ public sealed partial class GraphStore
         if (bytes.Length < 26) { throw new StorageCorruptionException("Truncated graph record."); }
         var (writer, deleter) = RecordVersionStamp.ReadStamps(bytes.Span);
         if (!snapshot.IsVisible(writer) || (deleter != TransactionSequence.None && snapshot.IsVisible(deleter))) { return null; }
+        GraphRecordCodec.EnsureFormat(bytes.Span);
+        // Both already returned self-loops in its outgoing pass. Inspect the fixed source
+        // field instead of retaining a set proportional to the outgoing degree or decoding twice.
+        if (skipSourceId is { } source && bytes.Length >= 50 && bytes.Span[16] == 2 &&
+            BinaryPrimitives.ReadUInt64LittleEndian(bytes.Span.Slice(34, 8)) == source) { return null; }
         var record = GraphRecordCodec.Decode(bytes);
         return new Found(new Reference(page, slot, writer, record.Revision), record);
     }

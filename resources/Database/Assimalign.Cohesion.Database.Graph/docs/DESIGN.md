@@ -58,7 +58,7 @@ All records start with the
 shared 16-byte little-endian writer/deleter transaction stamp. The graph payload's byte 16 is the
 kind, byte 17 is format version 3, bytes 18–25 are a nonzero unsigned 64-bit identity and bytes
 26–33 hold the entity's increasing revision. Formats 1 and 2 are refused before record recovery writes,
-with the remedy to recreate the database; no upgrade path exists. Graph
+with COHDBG017 and the remedy to recreate the database; no upgrade path exists. Graph
 identities are reserved from the shared storage sequence allocator, so rollback does not recycle
 an identity. Database-local IDs must always be paired with the correct session.
 
@@ -86,6 +86,8 @@ all types. Statement-local selections are cached per pattern and invalidated by 
 discovery. Fixed and quantified hops reverse direction when expanding left of the anchor.
 The overlay indexes newly created edges by the same node/direction/type tuple, so irrelevant
 pending edges add no physical candidates. Self-loops appear once for both-direction reads.
+Dropping a relationship type checks only that catalog ID's outgoing ranges and stops at the first
+in-use edge; existing schema handoff tests cover the refusal and concurrent deletion paths.
 
 The diagram shows the references stored by the adjacency and property trees; relationship records
 carry endpoint identities referring to node records.
@@ -578,21 +580,25 @@ Each hop selects direction and catalog type IDs before decoding relationships or
 path states, including quantified bodies and TraverseAsync. Relationship bindings/properties and
 safe target-node constraints still run before a viable descent, with deferred references retaining
 their existing final checks. The statement ExpansionBudget has separate physical and viable
-counters: physical includes anchor candidates and visible selected relationship records loaded
-from storage or the overlay; viable counts hops passing trail, binding, relationship and safe node
+counters: physical includes visited anchor candidates and selected relationship candidates as DFS
+visits them, after type/direction selection from storage or the overlay; loading a range charges
+nothing. Viable counts hops passing trail, binding, relationship and safe node
 checks before copying state. Physical work keeps the 1,000,000 safety cap, including dead ends.
 Its COHDBG004 message includes actual physical and viable totals; no EventSource counters are added.
-The 100,000-binding and 64-hop caps remain. The #1533 budget redesign and external R4/SF10
+The 100,000-binding and 64-hop caps remain. Public TraverseAsync uses the filtered lookup without
+a candidate-expansion cap; traversal work budgets belong to #1533 (D4). The #1533 budget redesign and external R4/SF10
 acceptance remain separate work; filtering does not guarantee a bound on genuine matching fan-out.
 
 EXPLAIN's Expand detail names the adjacency tuple, effective seek direction and type expression,
 physical/viable counting rules and physical limit. EXPLAIN does not execute, so these are counting
 semantics, not invented runtime totals; EXPLAIN ANALYZE remains unsupported. Tests inspect actual
 per-budget totals and the store's internal decode counter. They also cover replacement/rollback,
-old snapshots, reopen, self-loops and concurrent readers exiting normally, early, by exception
-and by cancellation. B+Tree OpenCursor still materializes a selected key/reference range under
-its own latch; #1542 owns cancellation inside that kernel call. Incident enumeration owns no
-writer locks and disposes every cursor on every exit. The store's mutation-gate entry documents
+old snapshots, journal replay, self-loops, cancellation between ranges, deterministic retention
+across a commit between directions and independently running reader/writer loops with overlap
+counters. B+Tree OpenCursor still materializes a selected key/reference range under its own latch;
+#1542 owns incremental, cancellable collection inside that kernel call. Incident enumeration owns
+no writer locks; the current materialized cursor holds no pages or latches and disposal releases
+nothing, so these tests make no resource-release claim. The store's mutation-gate entry documents
 lock and latch order; no new lock, friend grant or public interface is introduced.
 
 Behavior consulted, no code copied: Neo4j
@@ -1049,6 +1055,7 @@ to exercise that enforcement path; compiled provisioning is not included.
 | `COHDBG014` | Multiple map keys normalize to the same bare parameter name |
 | `COHDBG015` | Duplicate final result column name, implicit or explicit, under ordinal case-sensitive comparison; rejected during planning before execution |
 | `COHDBG016` | A composite result requires graph.composite-values; ExecutionFailure before ResultHeader, preserving the authenticated session |
+| `COHDBG017` | Unsupported graph record or tree-registration format, including format 2: opening is refused before logical recovery scrub with the remedy to recreate the database. Graph.Storage carries the code on StorageCorruptionException; the engine preserves it as an Error in DatabaseException.Diagnostics with a code-free Message. No upgrade path exists |
 | `COHDBI001` | `Database.Indexing`'s code, carried unchanged: opening a database whose property-index pages are in a B-tree page format this engine does not read (format 1, written before #1194) fails with "Database 'x' cannot be opened. COHDBI001: …", checked before recovery's scrub, so a cleanly closed database's files stay as they were (a crashed one has had only the storage layer's journal redo and undo, and keeps its journal) |
 | `COHDBS001` | `Database.Storage`'s code, carried unchanged: opening a database whose file set is in another storage format (#1251) fails with "Database 'x' cannot be opened. COHDBS001: …", the storage's `StorageFormatException` as its inner exception, refused before its journal is read, so the files stay as they were |
 
