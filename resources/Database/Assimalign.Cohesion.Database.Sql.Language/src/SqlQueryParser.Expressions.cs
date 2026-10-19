@@ -136,7 +136,8 @@ public sealed partial class SqlQueryParser
 
     // PostgreSQL gram.y:847-853: IS < comparison < BETWEEN/IN/LIKE < ESCAPE.
     // Postfix IS tests may be followed by higher-precedence operators; binary predicates
-    // at the same rung are nonassociative. Every recursive operand and loop node is bounded.
+    // at the same rung are nonassociative, except completed IN forms. Every recursive
+    // operand and loop node is bounded.
     private SqlExpression ParseComparison(ref TokenLexer lexer) => ParsePredicates(ref lexer, 1);
 
     private SqlExpression ParsePredicates(ref TokenLexer lexer, int minimum, bool restricted = false)
@@ -282,9 +283,9 @@ public sealed partial class SqlQueryParser
             else if (IsWord(ref lexer, "IN"))
             {
                 left = ParseInPredicate(ref lexer, left, notBefore);
-                // List productions end in ')' without %prec IN/NOT_LA (gram.y:15645,15668).
-                // Their completed result can be the left operand of another predicate.
-                previous = left is SqlInExpression { Subquery: null } ? 0 : 3;
+                // Both list and subquery rules are complete after the closing parenthesis
+                // (gram.y:15632-15668), so their result can feed another predicate.
+                previous = left is SqlInExpression ? 0 : 3;
                 continue;
             }
             else if (IsWord(ref lexer, "LIKE"))

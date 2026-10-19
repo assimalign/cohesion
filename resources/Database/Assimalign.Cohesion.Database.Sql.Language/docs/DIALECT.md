@@ -1951,9 +1951,10 @@ comparison/distinct expressions as PostgreSQL b_expr does. Thus `a = b IS TRUE` 
 the IN result, and `a IS DISTINCT FROM b = c` compares `a` with `(b = c)`.
 Completed postfix tests can be followed by another operator (`a IS NULL = b`).
 Binary predicates and comparisons do not chain at their own rung without
-parentheses. Completed list-form IN/NOT IN can be followed by another predicate,
-so `1 IN (1) IN (TRUE)` and `1 NOT IN (2) BETWEEN FALSE AND TRUE` operate on the
-first Boolean result (gram.y:15645,15668). Unary signs bind above COLLATE:
+parentheses. Completed IN/NOT IN forms, with a list or subquery, can be followed by
+another predicate: `1 IN (1) IN (TRUE)`, `1 IN (SELECT 1) IN (TRUE)` and
+`1 NOT IN (SELECT 2) BETWEEN FALSE AND TRUE` operate on the first Boolean result
+(gram.y:15632-15668). Unary signs bind above COLLATE:
 `-a COLLATE binary` means `(-a) COLLATE binary`. NOT stays below predicates even
 when its operand starts with EXISTS: `NOT EXISTS (q) IS TRUE` means
 `NOT ((EXISTS (q)) IS TRUE)`. Renderer parentheses remain conservative: comparison operands and
@@ -2042,9 +2043,13 @@ scalars, including combining marks and scalars whose normalized spelling expands
 (like_match.c:193-221). Case folding or accent removal therefore cannot
 change an escape into a wildcard or erase it. All four collations support scalar
 escapes and scalar `_`; CHAR left operands keep their stored padding while CHAR
-patterns use their text conversion. The iterative matcher observes cancellation
-and has no data-dependent recursion. Constant patterns are cached in the bound
-node; dynamic patterns compile per evaluation. No Regex, reflection or runtime
+patterns use their text conversion. Invariant linguistic literals compare every
+original scalar boundary, including reordered Thai/Lao prefixes (like_match.c:289-311).
+The iterative matcher observes cancellation and has no data-dependent recursion.
+Binary and case-insensitive search keep only the last `%`; the other collations
+remember visited suffixes in at most tokens × (input length + 1) bits.
+Constant patterns are cached in the bound node; dynamic patterns compile per
+evaluation. No Regex, reflection or runtime
 expression compilation is used. PostgreSQL anchors: `like_match.c:162-168,428-453,473-476`
 and `parse_expr.c:2541-2560,3085-3105`.
 

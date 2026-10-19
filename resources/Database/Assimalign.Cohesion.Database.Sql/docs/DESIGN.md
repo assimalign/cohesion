@@ -2989,8 +2989,8 @@ PostgreSQL references: tablecmds.c:3903-4062 (column identity), :4329-4385 (rela
   (`ValidateCheckSyntax`), and persisted-definition binding and comparison
   (`SqlPersistedExpression.Bind`, `AreEquivalent`, `SqlBoundTableCache`'s column
   collector). `SqlPlanner.Children` documents the rule for the next walker.
-  `LIKE` matching recurses once per `%` it backtracks through, so its depth follows
-  the values, and both matchers check too. The check costs a stack-pointer
+  `LIKE` matching uses iterative backtracking with bounded search memory and
+  cancellation checks, so its stack use is independent of the values. The tree-walk check costs a stack-pointer
   comparison per node; a tree within the default limit trips it only on a thread
   created with a small stack. `SqlDatabaseSession.ExecuteAsync`
   turns the resulting `InsufficientExecutionStackException` into
@@ -5520,6 +5520,8 @@ extraction. The distinct predicate uses the existing comparer, collation and CHA
 comparand coercion; truth tests validate known operand types at bind time. Every AST
 and bound-tree child walk includes them and LIKE's Escape, covering validation, grouping,
 collation, aggregate admission, correlation, EXPLAIN and persisted structural equality.
+Completed subquery IN/NOT IN results feed subsequent predicates through the ordinary
+membership binder and evaluator, with the same behavior as completed list forms.
 
 SqlLikePattern tokenizes raw Unicode scalars before normalizing literal runs. Its
 effective collation folds the value, pattern and escape candidates, so an ESCAPE
@@ -5529,12 +5531,14 @@ text formatter for concatenated constants; invalid fixed escapes
 fail on empty inputs too (COHSQLE034), an intentional eager-validation divergence
 from PostgreSQL. Wildcards consume original input scalars (like_match.c:193-221);
 a scalar-to-normalized-offset map preserves boundaries across expansions and ignored
-marks. Literal probes compare spans and stop once a prefix can no longer match.
-Linguistic probes use CompareInfo spans with an accent-insensitive prefix bound
-at complete text elements, so following combining marks or Hangul jamo may still
-complete a literal; equality continues to probe every original scalar boundary. Explicit continuations
-and visited suffixes avoid recursion and repeated wildcard paths; both paths observe
-statement cancellation. Runtime distinct, truth-test and escape diagnostics retain
-the bound source location. PostgreSQL's backslash default, empty escape and unrestricted quoted
+marks. Binary and simple case-insensitive matching use last-`%` backtracking with
+constant search state; simple folding preserves one scalar per original scalar.
+Accent-insensitive literal probes compare normalized spans and stop once a prefix
+can no longer match. Linguistic probes compare spans at every original scalar
+boundary, including Thai/Lao reordered prefixes (like_match.c:289-311); a prefix
+test cannot safely prune these comparisons. Explicit continuations avoid recursion;
+visited suffixes use at most one bit per token/input boundary, allocated by token
+as reached. Every path observes statement cancellation. Runtime distinct, truth-test
+and escape diagnostics retain the bound source location. PostgreSQL's backslash default, empty escape and unrestricted quoted
 scalar rules apply (like_match.c:428-453,473-476); DIALECT.md specifies the ISO differences.
 Format 25 admits the new persisted expression/view syntax and has no upgrade reader.

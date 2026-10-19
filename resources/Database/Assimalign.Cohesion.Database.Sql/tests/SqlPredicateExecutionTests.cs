@@ -68,6 +68,11 @@ public sealed class SqlPredicateExecutionTests
     [InlineData("(1 IN (1)) IN (TRUE)", true)]
     [InlineData("1 NOT IN (2) BETWEEN FALSE AND TRUE", true)]
     [InlineData("(1 NOT IN (2)) BETWEEN FALSE AND TRUE", true)]
+    [InlineData("1 IN (SELECT 1" + oneRow + ") IN (TRUE)", true)]
+    [InlineData("1 NOT IN (SELECT 2" + oneRow + ") BETWEEN FALSE AND TRUE", true)]
+    [InlineData("1 IN (SELECT 1" + oneRow + ") NOT IN (SELECT FALSE" + oneRow + ")", true)]
+    [InlineData("1 NOT IN (SELECT 2" + oneRow + ") IN (TRUE) IN (SELECT TRUE" + oneRow + ")", true)]
+    [InlineData("1 IN (SELECT 1" + oneRow + ") = TRUE", true)]
     [InlineData("CAST('a' AS CHAR(3)) IS NOT DISTINCT FROM 'a'", true)]
     [InlineData("NOT EXISTS (SELECT id FROM t) IS TRUE", false)]
     [InlineData("NOT EXISTS (SELECT id FROM t) = FALSE", true)]
@@ -425,12 +430,69 @@ public sealed class SqlPredicateExecutionTests
     public void Match_RepeatedWildcardFailure_ShouldCancelCleanly(string name)
     {
         // Arrange
-        var pattern = SqlLikePattern.Compile(string.Concat(Enumerable.Repeat("%a", 128)) + "b", "!", CancellationToken.None);
+        // A long final literal still requires backtracking after the fast path removes
+        // repeated suffix exploration; the separate resource test must finish uncancelled.
+        var pattern = SqlLikePattern.Compile(string.Concat(Enumerable.Repeat("%a", 128)) + new string('a', 100_000) + "b", "!", CancellationToken.None);
         using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
         var elapsed = System.Diagnostics.Stopwatch.StartNew();
         // Act / Assert
         Should.Throw<OperationCanceledException>(() => pattern.Match(new string('a', 200_000), Collation.FromName(name), cancellation.Token));
         elapsed.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(5));
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - LIKE: repetitive failures finish within time and allocation bounds without cancellation")]
+    [InlineData("binary", 200_000, 128, 64 * 1024, 2)]
+    [InlineData("case_insensitive", 200_000, 128, 24 * 1024 * 1024, 2)]
+    [InlineData("case_accent_insensitive", 200_000, 128, 64 * 1024 * 1024, 10)]
+    [InlineData("invariant", 256, 16, 128 * 1024, 5)]
+    public void Match_RepeatedWildcardFailure_ShouldCompleteWithinResourceBounds(string name, int length, int wildcards, long allocationLimit, int seconds)
+    {
+        // Arrange
+        var collation = Collation.FromName(name);
+        // Total matching allocations include the collation's per-scalar normalization.
+        var pattern = SqlLikePattern.Compile(string.Concat(Enumerable.Repeat("%a", wildcards)) + "b", "!", CancellationToken.None).Normalize(collation);
+        string input = new('a', length);
+        pattern.Match("aa", collation, CancellationToken.None).ShouldBeFalse();
+        var elapsed = new System.Diagnostics.Stopwatch();
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        // Act
+        elapsed.Start();
+        bool matched = pattern.Match(input, collation, CancellationToken.None);
+        elapsed.Stop();
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        // Assert
+        matched.ShouldBeFalse();
+        elapsed.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(seconds));
+        allocated.ShouldBeLessThan(allocationLimit);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - LIKE: invariant literals probe past reordered Thai and Lao prefixes")]
+    [InlineData("เก")]
+    [InlineData("ເກ")]
+    public async Task Execute_ReorderedLinguisticLiteral_ShouldMatchIdenticalTextAsync(string text)
+    {
+        // Arrange
+        await using var engine = CreateEngine();
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        // Act
+        var rows = await RowsAsync(session, $"SELECT '{text}' COLLATE invariant LIKE '{text}', '{text}' COLLATE invariant LIKE '{text}%'" + oneRow);
+        // Assert
+        rows.ShouldHaveSingleItem().ShouldBe(new object?[] { true, true });
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - LIKE: simple case folding preserves supplementary scalar wildcard boundaries")]
+    [InlineData("𐐀A", "𐐨_")]
+    [InlineData("𐐀A", "_a")]
+    [InlineData("𐐀A", "%𐐨a")]
+    public void Match_SimpleCaseFold_ShouldPreserveScalarBoundaries(string input, string text)
+    {
+        // Arrange
+        var pattern = SqlLikePattern.Compile(text, "!", CancellationToken.None);
+        // Act
+        bool matched = pattern.Match(input, Collation.CaseInsensitive, CancellationToken.None);
+        // Assert
+        matched.ShouldBeTrue();
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Predicates: runtime operand failures retain their source location")]

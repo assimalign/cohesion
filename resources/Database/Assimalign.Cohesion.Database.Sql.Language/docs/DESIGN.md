@@ -734,8 +734,8 @@ operand. Depth accounting, canonical rendering and the complete tree dump includ
 operand. The parser uses PostgreSQL's IS/comparison/predicate/ESCAPE ladder and separates
 concatenation from addition; no named clause or keyword is added. ILIKE/SIMILAR are refused
 positionally, so ordinary identifier quoting stays unchanged. ISNULL/NOTNULL are likewise
-postfix capability refusals. List-form IN/NOT IN completes at the closing parenthesis
-and can feed another predicate (gram.y:15645,15668); binary comparison, distinct,
-LIKE and BETWEEN rungs still refuse chaining once at the second operator. Unary signs
+postfix capability refusals. Both list and subquery IN/NOT IN forms complete at the
+closing parenthesis and can feed another predicate (gram.y:15632-15668); binary
+comparison, distinct, LIKE and BETWEEN rungs still refuse chaining once at the second operator. Unary signs
 bind above COLLATE (gram.y:910), and NOT EXISTS resumes the ordinary NOT operand
 grammar before choosing the compact leaf. DIALECT.md specifies behavior.
