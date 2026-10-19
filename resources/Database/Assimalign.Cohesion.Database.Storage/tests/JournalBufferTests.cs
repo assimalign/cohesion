@@ -23,9 +23,54 @@ namespace Assimalign.Cohesion.Database.Storage.Tests;
 /// WAL buffers (<c>XLogInsertRecord</c> copies into them, <c>XLogWrite</c>/<c>XLogFlush</c>
 /// write them out, <c>src/backend/access/transam/xlog.c</c>).
 /// </summary>
+[Collection(StorageRaceCollection.Name)]
 public sealed class JournalBufferTests
 {
     private static readonly byte[] Image = CreateImage();
+
+    [Fact(DisplayName = "Cohesion Test [Storage] - Journal buffer: a large checkpoint uses a direct pooled frame")]
+    public void Checkpoint_FrameLargerThanBuffer_ShouldKeepAppendBufferBounded()
+    {
+        // Arrange
+        var medium = new RecordingHandle();
+        using var journal = StorageJournal.Create(new StorageStream(medium));
+        journal.MaximumBufferBytes = 64;
+        journal.AppendCommit(1);
+        var active = Enumerable.Range(1, 100).Select(value => (long)value).ToArray();
+
+        // Act
+        long checkpoint = journal.Checkpoint(active);
+        journal.AppendCommit(2);
+        journal.Flush();
+
+        // Assert
+        journal.BufferCapacity.ShouldBeLessThanOrEqualTo(64);
+        var records = journal.ReadAll();
+        records[0].Lsn.ShouldBe(checkpoint);
+        records[0].Payload.Length.ShouldBe(active.Length * sizeof(long));
+        records[1].Lsn.ShouldBe(checkpoint + 1);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Storage] - Journal checkpoint: a failed truncation fences subsequent appends")]
+    public void Checkpoint_TruncationFails_ShouldLatchOfflineAndKeepPriorPrefix()
+    {
+        // Arrange
+        var medium = new RecordingHandle();
+        using var journal = StorageJournal.Create(new StorageStream(medium));
+        long prior = journal.AppendCommit(1);
+        journal.EnsureDurable(prior);
+        medium.FailNextTruncation = true;
+
+        // Act
+        var failure = Should.Throw<StorageOfflineException>(() => journal.Checkpoint([]));
+
+        // Assert
+        failure.Cause.ShouldBe(StorageOfflineCause.JournalFlush);
+        journal.OfflineError.ShouldBeSameAs(failure);
+        journal.EnsureDurable(prior);
+        Should.Throw<StorageOfflineException>(() => journal.AppendCommit(2));
+        Reopen(medium).Select(record => record.Lsn).ShouldBe([prior]);
+    }
 
     [Fact(DisplayName = "Cohesion Test [Storage] - Journal buffer: appends write nothing, and one drain writes them all")]
     public void Append_ManyFrames_ShouldReachTheMediumInOneWritePerDrain()
@@ -549,6 +594,8 @@ public sealed class JournalBufferTests
 
         public bool FailNextWrite { get; set; }
 
+        public bool FailNextTruncation { get; set; }
+
         public WriteCallback? OnWrite { get; set; }
 
         public IReadOnlyList<string> Log { get { lock (_gate) { return _log.ToArray(); } } }
@@ -600,6 +647,11 @@ public sealed class JournalBufferTests
             lock (_gate)
             {
                 _log.Add($"SetLength {length}");
+                if (FailNextTruncation)
+                {
+                    FailNextTruncation = false;
+                    throw new IOException("Injected journal truncation failure.");
+                }
                 _stream.SetLength(length);
             }
         }
