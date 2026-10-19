@@ -309,12 +309,12 @@ public sealed class KeyValueTransactionFailureTests
         await database.PutAsync(session, Bytes("keep"), Bytes("v"), cancellationToken: TestTimeout.Token());
         var transaction = await session.BeginTransactionAsync(TestTimeout.Token());
 
-        // A delete of a missing key takes the key's lock and writes no version, so the abort
-        // record is the rollback's only journal append.
-        (await database.TryDeleteAsync(session, Bytes("missing"), cancellationToken: TestTimeout.Token())).ShouldBeFalse();
+        // A tentative write enrolls this transaction. Drain it before arming the abort fault.
+        await database.PutAsync(session, Bytes("rolled"), Bytes("v"), cancellationToken: TestTimeout.Token());
+        database.DataStorage.WriteAheadJournal.Flush();
 
-        // Act: the rollback buffers the abort record; the other session's put needs the key's
-        // lock, and its commit drains the record, which fails.
+        // Act: the rollback buffers the abort record; the other session's put takes rolled's
+        // released lock, and its commit drains the abort record, which fails.
         int unspentAfterTheRollback;
         int unspent;
         DatabaseTransactionCommitUnconfirmedException lost;
@@ -323,7 +323,7 @@ public sealed class KeyValueTransactionFailureTests
             await transaction.RollbackAsync(TestTimeout.Token());
             unspentAfterTheRollback = failures.Remaining;
             lost = await Should.ThrowAsync<DatabaseTransactionCommitUnconfirmedException>(async () =>
-                await database.PutAsync(other, Bytes("missing"), Bytes("other"), cancellationToken: TestTimeout.Token(5)));
+                await database.PutAsync(other, Bytes("rolled"), Bytes("other"), cancellationToken: TestTimeout.Token(5)));
             unspent = failures.Remaining;
         }
 
@@ -362,7 +362,8 @@ public sealed class KeyValueTransactionFailureTests
         var session = await database.CreateSessionAsync();
         await database.PutAsync(session, Bytes("keep"), Bytes("v"), cancellationToken: TestTimeout.Token());
         var transaction = await session.BeginTransactionAsync(TestTimeout.Token());
-        (await database.TryDeleteAsync(session, Bytes("missing"), cancellationToken: TestTimeout.Token())).ShouldBeFalse();
+        await database.PutAsync(session, Bytes("rolled"), Bytes("v"), cancellationToken: TestTimeout.Token());
+        database.DataStorage.WriteAheadJournal.Flush();
         int unspent;
         using (var failures = FaultInjectingJournalStorageStrategy.FailJournalWritesContaining(JournalRecordType.RollbackTransaction))
         {

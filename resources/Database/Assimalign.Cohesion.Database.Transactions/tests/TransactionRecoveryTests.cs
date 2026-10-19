@@ -31,6 +31,7 @@ public class TransactionRecoveryTests
         await using var _ = manager;
 
         var transaction = await manager.BeginAsync();
+        manager.EnterApply(transaction).ExitApply(); // Enrollment precedes any stamped write.
 
         // Act
         await manager.CommitAsync(transaction);
@@ -80,11 +81,13 @@ public class TransactionRecoveryTests
                 TransactionLog.CreateJournalBound(journal), LockManager.Create(), versions);
 
             var committed = await manager.BeginAsync();
+            manager.EnterApply(committed).ExitApply();
             await versions.AppendVersionAsync(1, 1, Payload("survives"), committed.Sequence);
             await manager.CommitAsync(committed);
             committedSequence = committed.Sequence;
 
             var crashed = await manager.BeginAsync();
+            manager.EnterApply(crashed).ExitApply();
             await versions.AppendVersionAsync(1, 2, Payload("vanishes"), crashed.Sequence);
             crashedSequence = crashed.Sequence;
 
@@ -134,6 +137,7 @@ public class TransactionRecoveryTests
         await using var _ = manager;
 
         var transaction = await manager.BeginAsync();
+        manager.EnterApply(transaction).ExitApply(); // Enrollment precedes any stamped write.
         await manager.RollbackAsync(transaction);
 
         // Act

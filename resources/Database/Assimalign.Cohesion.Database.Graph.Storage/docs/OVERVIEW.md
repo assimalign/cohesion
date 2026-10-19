@@ -1,7 +1,8 @@
 # Graph.Storage
 
 `Assimalign.Cohesion.Database.Graph.Storage` stores property-graph nodes, relationships,
-endpoint adjacency and secondary node-property indexes. It targets .NET 10, is AOT
+endpoint adjacency and secondary node-property indexes. Filtered incident reads seek by
+node, direction and catalog type GUID before decoding relationships; self-loops appear once. It targets .NET 10, is AOT
 compatible, and uses explicit binary codecs without reflection.
 
 `GraphStorage` owns the data, journal and backup streams and delegates page allocation,

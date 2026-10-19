@@ -76,6 +76,16 @@ public sealed partial class GraphDatabase : DatabaseInstance
         catch (Exception exception) when (exception is Indexing.IndexFormatException or Assimalign.Cohesion.Database.Storage.StorageCorruptionException)
         {
             Coordinator.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            // Graph.Storage uses the existing storage exception with a coded message, so the
+            // engine can retain its diagnostic without adding a cross-assembly exception type.
+            const string formatCode = "COHDBG017";
+            if (exception.Message.StartsWith(formatCode + ": ", StringComparison.Ordinal))
+            {
+                string message = string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseOpenRefused,
+                    name, exception.Message[(formatCode.Length + 2)..]);
+                throw new DatabaseException(message, [new Diagnostic
+                { Code = formatCode, Message = message, Severity = DiagnosticSeverity.Error }], exception);
+            }
             throw new DatabaseException($"Database '{name}' cannot be opened. {exception.Message}", exception);
         }
 
@@ -380,6 +390,14 @@ public sealed partial class GraphDatabase : DatabaseInstance
         var nodes = await RunAsync(session, async operation =>
         {
             var result = new List<GraphNode>();
+            IReadOnlyCollection<Guid>? types = traversal.RelationshipType is { } name
+                ? Catalog.FindRelationshipType(name, operation.Context.Snapshot) is { } type ? new[] { type.Id } : [] : null;
+            var direction = traversal.Direction switch
+            {
+                GraphDirection.Outgoing => GraphIncidentDirection.Outgoing,
+                GraphDirection.Incoming => GraphIncidentDirection.Incoming,
+                _ => GraphIncidentDirection.Both,
+            };
             var visited = new HashSet<ulong> { traversal.Start.Value };
             var queue = new Queue<(ulong Id, int Depth)>();
             if (Store.FindNode(traversal.Start.Value, operation.Context.Snapshot) is not null)
@@ -390,12 +408,10 @@ public sealed partial class GraphDatabase : DatabaseInstance
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 if (current.Depth >= traversal.MaxDepth) { continue; }
-                foreach (var relationship in await Store.GetIncidentAsync(current.Id, operation.Context.Snapshot, cancellationToken).ConfigureAwait(false))
+                foreach (var relationship in await operation.Updates.GetIncidentAsync(current.Id, direction, types,
+                    cancellationToken).ConfigureAwait(false))
                 {
-                    if (traversal.RelationshipType is { } type && relationship.Type != type) { continue; }
                     bool outgoing = relationship.SourceId == current.Id;
-                    if (traversal.Direction == GraphDirection.Outgoing && !outgoing ||
-                        traversal.Direction == GraphDirection.Incoming && relationship.TargetId != current.Id) { continue; }
                     ulong next = outgoing ? relationship.TargetId : relationship.SourceId;
                     if (visited.Add(next) && Store.FindNode(next, operation.Context.Snapshot) is { } node)
                     {
@@ -463,11 +479,11 @@ public sealed partial class GraphDatabase : DatabaseInstance
         string type, IReadOnlyDictionary<string, object?>? properties, CancellationToken token)
     {
         await LockWriterAsync(operation, token).ConfigureAwait(false);
-        await ValidateRelationshipAsync(operation, type, properties, token).ConfigureAwait(false);
-        return Materialize(await Store.CreateRelationshipAsync(new StoredGraphRelationship((ulong)DataStorage.ReserveTransactionSequence(), from.Value, to.Value, type, properties ?? new Dictionary<string, object?>()), operation.Context, token).ConfigureAwait(false));
+        var typeId = await ValidateRelationshipAsync(operation, type, properties, token).ConfigureAwait(false);
+        return Materialize(await Store.CreateRelationshipAsync(new StoredGraphRelationship((ulong)DataStorage.ReserveTransactionSequence(), from.Value, to.Value, type, properties ?? new Dictionary<string, object?>()), typeId, operation.Context, token).ConfigureAwait(false));
     }
 
-    internal async ValueTask ValidateRelationshipAsync(GraphOperation operation, string type,
+    internal async ValueTask<Guid> ValidateRelationshipAsync(GraphOperation operation, string type,
         IReadOnlyDictionary<string, object?>? properties, CancellationToken token)
     {
         var metadata = Catalog.FindRelationshipType(type, operation.Context.Snapshot);
@@ -478,6 +494,7 @@ public sealed partial class GraphDatabase : DatabaseInstance
             await Catalog.SaveRelationshipTypeAsync(metadata.Value, operation.Context, token).ConfigureAwait(false);
         }
         await ValidatePropertiesAsync(metadata.Value.Id, properties, operation, token).ConfigureAwait(false);
+        return metadata.Value.Id;
     }
 
     internal static GraphNode Materialize(StoredGraphNode node) => new(new GraphNodeId(node.Id), node.Labels, node.Properties);

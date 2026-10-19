@@ -2,6 +2,7 @@ using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -71,7 +72,7 @@ public sealed partial class GraphStore
     }
 
     /// <summary>
-    /// Checks graph record format 2 and that every index tree the storage registers is in the B-tree page format
+    /// Checks graph record format 3 and that every index tree the storage registers is in the B-tree page format
     /// this engine reads (<see cref="BTreeIndexManager.FormatVersion"/>), reading record
     /// headers, registrations and each tree's root page. An engine calls it before the
     /// coordinator's recovery scrub, so a database whose indexes it cannot read is
@@ -82,7 +83,7 @@ public sealed partial class GraphStore
     /// <param name="storage">Graph file set.</param>
     /// <exception cref="ArgumentNullException"><paramref name="storage"/> is null.</exception>
     /// <exception cref="IndexFormatException">An index tree is in another B-tree page format.</exception>
-    /// <exception cref="StorageCorruptionException">A graph record has an unsupported format, or a persisted index registration is malformed.</exception>
+    /// <exception cref="StorageCorruptionException">A graph record or registration has an unsupported format (<c>COHDBG017</c>), or a persisted index registration is malformed.</exception>
     public static void EnsureIndexFormat(GraphStorage storage)
     {
         ArgumentNullException.ThrowIfNull(storage);
@@ -154,17 +155,20 @@ public sealed partial class GraphStore
     }
 
     /// <summary>Atomically creates a relationship and both endpoint adjacency entries.</summary>
-    /// <param name="relationship">The complete relationship with an identity reserved from the backing storage.</param><param name="context">Owning transaction.</param><param name="cancellationToken">Cancellation token.</param><returns>The created relationship.</returns>
+    /// <param name="relationship">The complete relationship with an identity reserved from the backing storage.</param>
+    /// <param name="typeId">The stable catalog identity of the relationship type; never a name hash. The store does not verify that this identity matches <c>relationship.Type</c>; the engine resolves it from the catalog.</param>
+    /// <param name="context">Owning transaction.</param><param name="cancellationToken">Cancellation token.</param><returns>The created relationship.</returns>
     /// <exception cref="InvalidOperationException">An endpoint does not exist in the latest committed view, or <paramref name="context"/> is not active.</exception>
     /// <exception cref="TransactionAbortedException">An endpoint was deleted after the transaction snapshot, or the transaction ended while waiting for its writer lock.</exception>
     /// <exception cref="ArgumentNullException"><paramref name="relationship"/> has null properties, or <paramref name="context"/> is null.</exception>
-    /// <exception cref="ArgumentException">The identity already exists, the type or a property key is null or whitespace, or a property value is not a supported scalar.</exception>
+    /// <exception cref="ArgumentException">The identity already exists, the type identity is empty, the type or a property key is null or whitespace, or a property value is not a supported scalar.</exception>
     /// <exception cref="ArgumentOutOfRangeException">The identity is zero.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
     /// <exception cref="GraphElementTooLargeException">The type and properties exceed one graph record.</exception>
-    public async ValueTask<StoredGraphRelationship> CreateRelationshipAsync(StoredGraphRelationship relationship,
+    public async ValueTask<StoredGraphRelationship> CreateRelationshipAsync(StoredGraphRelationship relationship, Guid typeId,
         TransactionContext context, CancellationToken cancellationToken = default)
     {
+        if (typeId == Guid.Empty) { throw new ArgumentException(ErrorMessages.RelationshipTypeIdInvalid, nameof(typeId)); }
         ArgumentException.ThrowIfNullOrWhiteSpace(relationship.Type);
         ArgumentNullException.ThrowIfNull(relationship.Properties);
         ArgumentOutOfRangeException.ThrowIfZero(relationship.Id);
@@ -181,17 +185,13 @@ public sealed partial class GraphStore
         }
         ulong id = relationship.Id;
         EnsureNew(2, id);
-        byte[] bytes = await EncodeAsync(new GraphRecord(2, id, Relationship: relationship), context.Sequence).ConfigureAwait(false);
+        byte[] bytes = await EncodeAsync(new GraphRecord(2, id, Relationship: relationship, TypeId: typeId), context.Sequence).ConfigureAwait(false);
         var record = GraphRecordCodec.Decode(bytes);
         var inserted = await ApplyAsync(context, async bracket =>
         {
             await EnsureAdjacencyAsync(context, cancellationToken).ConfigureAwait(false);
             var location = Insert(bracket, bytes, context);
-            await InsertIndexAsync(adjacencyId, Composite(IndexKey.FromUInt64(sourceId), id), location, context, cancellationToken).ConfigureAwait(false);
-            if (targetId != sourceId)
-            {
-                await InsertIndexAsync(adjacencyId, Composite(IndexKey.FromUInt64(targetId), id), location, context, cancellationToken).ConfigureAwait(false);
-            }
+            await InsertAdjacencyAsync(record, location, context, cancellationToken).ConfigureAwait(false);
             SaveRegistrations(bracket);
             return location;
         }, cancellationToken).ConfigureAwait(false);
@@ -206,21 +206,65 @@ public sealed partial class GraphStore
     public async ValueTask<IReadOnlyList<StoredGraphRelationship>> GetIncidentAsync(ulong nodeId, TransactionSnapshot snapshot,
         CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(snapshot);
-        if (!_indexes.TryGetIndex(adjacencyId, treeName, out var index)) { return []; }
-        var key = IndexKey.FromUInt64(nodeId);
         var result = new List<StoredGraphRelationship>();
-        await using var cursor = index.OpenCursor(snapshot, new IndexKeyRange(Composite(key, 0), Composite(key, ulong.MaxValue), true, true));
-        while (await cursor.MoveNextAsync(cancellationToken).ConfigureAwait(false))
+        await foreach (var edge in GetIncidentAsync(nodeId, GraphIncidentDirection.Both, null, snapshot, cancellationToken).ConfigureAwait(false))
+        { result.Add(edge); }
+        result.Sort(static (left, right) => left.Id.CompareTo(right.Id));
+        return result;
+    }
+
+    // Instance counters for deterministic complexity tests; no process-global telemetry.
+    private long _incidentRecordsDecoded;
+    internal long IncidentRecordsDecoded => Interlocked.Read(ref _incidentRecordsDecoded);
+
+    /// <summary>Streams visible relationships from indexed endpoint, direction and catalog-type ranges.</summary>
+    /// <param name="nodeId">Incident node identity.</param>
+    /// <param name="direction">Direction relative to the incident node.</param>
+    /// <param name="typeIds">Catalog type identities, or null for all types; an empty collection matches nothing.</param>
+    /// <param name="snapshot">Visibility snapshot, retained by the caller throughout enumeration.</param>
+    /// <param name="cancellationToken">Cancels seeking and reading, including an empty lookup.</param>
+    /// <returns>Visible relationships, each identity once; ordering is unspecified across ranges.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="snapshot"/> is null.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="direction"/> is undefined.</exception>
+    /// <exception cref="StorageCorruptionException">A selected relationship record or adjacency key is malformed.</exception>
+    /// <exception cref="OperationCanceledException">Cancellation was requested.</exception>
+    /// <remarks>Enumeration owns only B+Tree cursors. Disposal, cancellation and caller exceptions close them without taking a graph writer lock.</remarks>
+    public async IAsyncEnumerable<StoredGraphRelationship> GetIncidentAsync(ulong nodeId, GraphIncidentDirection direction,
+        IReadOnlyCollection<Guid>? typeIds, TransactionSnapshot snapshot,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        if (!Enum.IsDefined(direction)) { throw new ArgumentOutOfRangeException(nameof(direction)); }
+        cancellationToken.ThrowIfCancellationRequested();
+        if (typeIds is { Count: 0 } || !_indexes.TryGetIndex(adjacencyId, treeName, out var index)) { yield break; }
+        // Copy the caller's selection once; duplicate type ids must not duplicate visits.
+        var types = typeIds?.Distinct().ToArray();
+        foreach (var selected in direction == GraphIncidentDirection.Both
+            ? new[] { GraphIncidentDirection.Outgoing, GraphIncidentDirection.Incoming } : new[] { direction })
         {
-            var found = ReadAt(cursor.CurrentEntryReference, snapshot);
-            if (found?.Record.Relationship is { } relationship && (relationship.SourceId == nodeId || relationship.TargetId == nodeId)
-                && cursor.CurrentKey.Equals(Composite(key, relationship.Id)))
+            foreach (Guid? type in types is null ? new Guid?[] { null } : types.Select(id => (Guid?)id))
             {
-                result.Add(relationship);
+                cancellationToken.ThrowIfCancellationRequested();
+                var low = AdjacencyKey(nodeId, selected, type ?? Guid.Empty, 0);
+                var high = AdjacencyKey(nodeId, selected, type ?? _maximumTypeId, ulong.MaxValue);
+                cancellationToken.ThrowIfCancellationRequested();
+                await using var cursor = index.OpenCursor(snapshot, new IndexKeyRange(low, high, true, true));
+                while (await cursor.MoveNextAsync(cancellationToken).ConfigureAwait(false))
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var key = cursor.CurrentKey.Encoded.Span;
+                    if (key.Length != 33) { throw new StorageCorruptionException(ErrorMessages.AdjacencyKeyInvalid); }
+                    ulong id = BinaryPrimitives.ReadUInt64BigEndian(key.Slice(25));
+                    var found = ReadAt(cursor.CurrentEntryReference, snapshot,
+                        direction == GraphIncidentDirection.Both && selected == GraphIncidentDirection.Incoming ? nodeId : null);
+                    if (found?.Record.Relationship is not { } edge) { continue; }
+                    Interlocked.Increment(ref _incidentRecordsDecoded);
+                    if (id != edge.Id || new Guid(key.Slice(9, 16), bigEndian: true) != found.Value.Record.TypeId ||
+                        (selected == GraphIncidentDirection.Outgoing ? edge.SourceId : edge.TargetId) != nodeId) { continue; }
+                    yield return edge;
+                }
             }
         }
-        return result;
     }
 
     /// <summary>Deletes a node, atomically cascading incident relationships when requested.</summary>
@@ -284,11 +328,8 @@ public sealed partial class GraphStore
         TransactionContext context, CancellationToken cancellationToken)
     {
         var relationship = found.Record.Relationship!.Value;
-        await DeleteIndexEntryAsync(adjacencyId, Composite(IndexKey.FromUInt64(relationship.SourceId), relationship.Id), found.Reference.Location, context, cancellationToken).ConfigureAwait(false);
-        if (relationship.SourceId != relationship.TargetId)
-        {
-            await DeleteIndexEntryAsync(adjacencyId, Composite(IndexKey.FromUInt64(relationship.TargetId), relationship.Id), found.Reference.Location, context, cancellationToken).ConfigureAwait(false);
-        }
+        await DeleteIndexEntryAsync(adjacencyId, AdjacencyKey(relationship.SourceId, GraphIncidentDirection.Outgoing, found.Record.TypeId, relationship.Id), found.Reference.Location, context, cancellationToken).ConfigureAwait(false);
+        await DeleteIndexEntryAsync(adjacencyId, AdjacencyKey(relationship.TargetId, GraphIncidentDirection.Incoming, found.Record.TypeId, relationship.Id), found.Reference.Location, context, cancellationToken).ConfigureAwait(false);
         Tombstone(bracket, found.Reference, context);
     }
 
@@ -419,7 +460,7 @@ public sealed partial class GraphStore
         internal History(Reference reference, History? next) { Reference = reference; Next = next; }
     }
 
-    private Found? ReadAt(ulong location, TransactionSnapshot snapshot)
+    private Found? ReadAt(ulong location, TransactionSnapshot snapshot, ulong? skipSourceId = null)
     {
         var (page, slot) = GraphStorage.UnpackLocation(location);
         // A reclaimed location reads as a stale reference; CRC and I/O errors propagate (#1342).
@@ -427,6 +468,11 @@ public sealed partial class GraphStore
         if (bytes.Length < 26) { throw new StorageCorruptionException("Truncated graph record."); }
         var (writer, deleter) = RecordVersionStamp.ReadStamps(bytes.Span);
         if (!snapshot.IsVisible(writer) || (deleter != TransactionSequence.None && snapshot.IsVisible(deleter))) { return null; }
+        GraphRecordCodec.EnsureFormat(bytes.Span);
+        // Both already returned self-loops in its outgoing pass. Inspect the fixed source
+        // field instead of retaining a set proportional to the outgoing degree or decoding twice.
+        if (skipSourceId is { } source && bytes.Length >= 50 && bytes.Span[16] == 2 &&
+            BinaryPrimitives.ReadUInt64LittleEndian(bytes.Span.Slice(34, 8)) == source) { return null; }
         var record = GraphRecordCodec.Decode(bytes);
         return new Found(new Reference(page, slot, writer, record.Revision), record);
     }

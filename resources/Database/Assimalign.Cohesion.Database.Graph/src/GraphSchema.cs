@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Graph.Catalog;
 using Assimalign.Cohesion.Database.Graph.Internal;
+using Assimalign.Cohesion.Database.Graph.Storage;
 
 namespace Assimalign.Cohesion.Database.Graph;
 
@@ -272,7 +273,7 @@ public sealed class GraphSchema
             var latest = _database.LatestSnapshot(op.Context);
             foreach (var node in _database.Store.GetNodes(null, latest))
             {
-                if ((await _database.Store.GetIncidentAsync(node.Id, latest, cancellationToken).ConfigureAwait(false)).Any(edge => edge.Type == name))
+                await foreach (var edge in _database.Store.GetIncidentAsync(node.Id, GraphIncidentDirection.Outgoing, [type.Id], latest, cancellationToken).ConfigureAwait(false))
                 { throw new DatabaseException("COHDBG003: The relationship type is in use."); }
             }
             await _database.Catalog.DeleteRelationshipTypeAsync(type.Id, op.Context, cancellationToken).ConfigureAwait(false);

@@ -88,16 +88,14 @@ public sealed partial class GraphStore
         if (Find(2, id, context.Snapshot) is not { } prior) { return null; }
         var old = prior.Record.Relationship!.Value;
         var record = new GraphRecord(2, id, Relationship: new StoredGraphRelationship(id, old.SourceId, old.TargetId, old.Type, properties),
-            Revision: checked(prior.Record.Revision + 1));
+            Revision: checked(prior.Record.Revision + 1), TypeId: prior.Record.TypeId);
         byte[] bytes = await EncodeAsync(record, context.Sequence).ConfigureAwait(false);
         record = GraphRecordCodec.Decode(bytes);
         var inserted = await ApplyAsync(context, async bracket =>
         {
             var location = Insert(bracket, bytes, context);
             await RemoveRelationshipAsync(prior, bracket, context, cancellationToken).ConfigureAwait(false);
-            await InsertIndexAsync(adjacencyId, Composite(IndexKey.FromUInt64(old.SourceId), id), location, context, cancellationToken).ConfigureAwait(false);
-            if (old.TargetId != old.SourceId)
-            { await InsertIndexAsync(adjacencyId, Composite(IndexKey.FromUInt64(old.TargetId), id), location, context, cancellationToken).ConfigureAwait(false); }
+            await InsertAdjacencyAsync(record, location, context, cancellationToken).ConfigureAwait(false);
             SaveRegistrations(bracket);
             return location;
         }, cancellationToken).ConfigureAwait(false);

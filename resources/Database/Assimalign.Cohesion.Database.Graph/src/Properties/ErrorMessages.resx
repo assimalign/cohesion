@@ -4,6 +4,7 @@
   <resheader name="version"><value>2.0</value></resheader>
   <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
   <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
+  <data name="DatabaseOpenRefused" xml:space="preserve"><value>Database '{0}' cannot be opened. {1}</value></data>
   <data name="ArithmeticFailure" xml:space="preserve"><value>Graph arithmetic failed: division by zero, overflow or a non-finite result.</value></data>
   <data name="BooleanRequired" xml:space="preserve"><value>A Boolean expression requires TRUE, FALSE or NULL.</value></data>
   <data name="NumericRequired" xml:space="preserve"><value>A numeric sign requires a numeric operand.</value></data>
@@ -59,7 +60,7 @@
   <data name="GroupBindingConflict" xml:space="preserve"><value>A group variable cannot also bind a singleton or another quantified segment.</value></data>
   <data name="GroupPropertyReference" xml:space="preserve"><value>A property map inside a quantified segment cannot reference a group variable.</value></data>
   <data name="PathHopLimitExceeded" xml:space="preserve"><value>The query requires a trail exceeding 64 relationships.</value></data>
-  <data name="ExpansionLimitExceeded" xml:space="preserve"><value>The query exceeded 1000000 candidate expansions.</value></data>
+  <data name="ExpansionLimitExceeded" xml:space="preserve"><value>The query exceeded 1000000 candidate expansions (physical={0}, viable={1}).</value></data>
   <data name="FunctionArity" xml:space="preserve"><value>Function {0} has an invalid identity or argument count.</value></data>
   <data name="FunctionKind" xml:space="preserve"><value>Function {0} argument {1} has an incompatible kind.</value></data>
   <data name="FunctionValue" xml:space="preserve"><value>Function {0} cannot evaluate the supplied value.</value></data>

@@ -42,13 +42,13 @@ public static class TransactionRecovery
     /// journal holds its commit record. The anchor is what still names them when the
     /// checkpoint's own record was lost after the journal truncation. A reader is not
     /// listed and needs no classification; one that became a writer after the checkpoint
-    /// was announced again with a begin record, which the journal scan classifies.
+    /// appended its first begin record at apply admission, which the journal scan classifies.
     /// </param>
     /// <returns>The committed and aborted sequences, and the highest sequence observed.</returns>
     /// <remarks>
     /// <see cref="TransactionRecoveryPlan.MaxSequence"/> covers what the journal and the
-    /// anchor name. A reader whose begin record a checkpoint truncated is in neither, so it
-    /// is no floor for new sequences; the storage's own sequence floor
+    /// anchor name. A reader appends no lifecycle records and is in neither, so it is no
+    /// floor for new sequences; the storage's persisted sequence floor
     /// (<see cref="Storage.ReserveTransactionSequence"/> resumes above it) is.
     /// </remarks>
     /// <param name="cancellationToken">Observed between anchor entries and journal records.</param>

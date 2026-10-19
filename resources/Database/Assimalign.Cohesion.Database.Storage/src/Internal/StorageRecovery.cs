@@ -43,8 +43,8 @@ using Assimalign.Cohesion.Database.Storage.Units;
 /// so the LSN on disk does not identify its content.
 /// </para>
 /// <para>
-/// <b>Memory.</b> Three streaming passes, as before: the committed transactions; the pages the
-/// journal rebuilds, with the last record that applies to each; the ordered replay. The replay
+/// <b>Memory.</b> Initialization classifies committed transactions and plans each page while verifying
+/// frames. One further streaming pass replays records in their original order. The replay
 /// keeps a page in a bounded cache from its first image to its last record and writes it then; when
 /// more pages are open at once than the cache holds, the least recently used is written early and
 /// read back (checksum- and LSN-verified) by its next record. Memory therefore follows page
@@ -97,64 +97,20 @@ internal static class StorageRecovery
         int cacheCapacity = Storage.DefaultBufferPoolCapacity,
         CancellationToken cancellationToken = default)
     {
-        IEnumerable<JournalRecord> ReadRecords()
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            foreach (var record in journal.ReadSequential())
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                yield return record;
-            }
-        }
+        var analysis = journal.ReadRecoveryAnalysis(cancellationToken, out var replayToken);
+        long maxSequence = analysis.MaxSequence;
+        long checkpointLsn = analysis.CheckpointLsn;
+        var committed = analysis.Committed;
 
-        // Pass 1: which transactions committed, the highest sequence, and the checkpoint the
-        // journal starts at.
-        long maxSequence = 0;
-        long checkpointLsn = 0;
-        var committed = new HashSet<long>();
-        foreach (var record in ReadRecords())
-        {
-            if (record.TransactionSequence > maxSequence)
-            {
-                maxSequence = record.TransactionSequence;
-            }
-
-            if (record.Type == JournalRecordType.CommitTransaction)
-            {
-                committed.Add(record.TransactionSequence);
-            }
-            else if (record.Type == JournalRecordType.Checkpoint && record.Lsn > checkpointLsn)
-            {
-                checkpointLsn = record.Lsn;
-            }
-        }
-
-        // Pass 2: the pages the journal rebuilds — each with the last record that applies to it,
-        // when the replay writes it, and whether a committed transaction touched it.
-        var plans = new Dictionary<long, PagePlan>();
-        foreach (var record in ReadRecords())
-        {
-            if (!IsPageRecord(record.Type))
-            {
-                continue;
-            }
-
-            long pageId = (long)record.PageId;
-            bool committedRecord = committed.Contains(record.TransactionSequence);
-            if (pageId <= 0 || protectedPages?.Contains(pageId) == true || (record.Type != JournalRecordType.FullPageImage && !committedRecord))
-            {
-                continue;
-            }
-
-            plans.TryGetValue(pageId, out var plan);
-            plans[pageId] = new PagePlan(record.Lsn, plan.Committed || committedRecord);
-        }
-
+        // Planning was fused into initialization and consumed here. Copy identities before
+        // applying the recovery-specific protected-page and file-length exclusions.
+        var plans = new Dictionary<long, StorageRecoveryPagePlan>(analysis.Pages);
         long originalLength = data.Length;
         var skipped = new List<long>();
         foreach (var (pageId, plan) in plans)
         {
-            if (!plan.Committed && (pageId + 1) * Page.Size > originalLength)
+            cancellationToken.ThrowIfCancellationRequested();
+            if (protectedPages?.Contains(pageId) == true || (!plan.Committed && (pageId + 1) * Page.Size > originalLength))
             {
                 skipped.Add(pageId);
             }
@@ -170,11 +126,12 @@ internal static class StorageRecovery
             return new StorageRecoveryResult(maxSequence, checkpointLsn, new HashSet<long>());
         }
 
-        // Pass 3: the ordered replay.
+        // Redo: the ordered replay.
         var cache = new RedoCache(data, Math.Max(1, cacheCapacity));
         var imaged = new HashSet<long>();
-        foreach (var record in ReadRecords())
+        foreach (var record in journal.ReadRecoveryRecords(replayToken))
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (!IsPageRecord(record.Type) || !plans.TryGetValue((long)record.PageId, out var plan))
             {
                 continue;
@@ -265,12 +222,6 @@ internal static class StorageRecovery
         => new(
             record.PageId,
             $"Recovery cannot apply the {Describe(record.Type)} of page {(long)record.PageId} at LSN {record.Lsn}: {problem}.");
-
-    /// <summary>
-    /// What recovery does to a page: the LSN of the last record that applies to it, and whether a
-    /// committed transaction's record touches it.
-    /// </summary>
-    private readonly record struct PagePlan(long LastLsn, bool Committed);
 
     /// <summary>
     /// The pages the replay is rebuilding, at most a capacity of them in memory: a page enters with

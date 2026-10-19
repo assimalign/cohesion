@@ -375,7 +375,7 @@ internal sealed class StorageConsistencyCheck
     private byte[] Rebuild(long pageId, long pageLsn)
     {
         var committed = new HashSet<long>();
-        foreach (var record in _journal.ReadSequential())
+        foreach (var record in _journal.ReadSequentialBorrowed())
         {
             if (record.Type == JournalRecordType.CommitTransaction)
             {
@@ -384,7 +384,7 @@ internal sealed class StorageConsistencyCheck
         }
 
         byte[]? shadow = null;
-        foreach (var record in _journal.ReadSequential())
+        foreach (var record in _journal.ReadSequentialBorrowed())
         {
             if ((long)record.PageId != pageId || !StorageRecovery.IsPageRecord(record.Type))
             {

@@ -14,7 +14,8 @@
   `GraphDatabaseTransaction`. `GraphNode` and `GraphRelationship` are immutable record structs with
   scalar property maps and typed identities.
 - `GraphTraversal` selects a start, direction, optional type and maximum depth. `TraverseAsync`
-  yields distinct visited nodes, excluding the start.
+  yields distinct visited nodes in deterministic breadth-first order, excluding the start. It seeks
+  selected type/direction adjacency ranges and applies no work cap; traversal budgets belong to #1533.
 - `GraphQueryRequest.FromGql(text)` parses a request and throws `DatabaseParseException` for an
   error diagnostic. `GraphDatabaseSession.ExecuteAsync(string)` uses the same parser.
   RETURN may order by expressions/aliases with explicit null placement and page with

@@ -911,9 +911,9 @@ public sealed class BlobTransactionFailureTests
         var otherFiles = await other.GetContainerAsync("files");
         var transaction = await session.BeginTransactionAsync();
 
-        // A delete that matches nothing takes the database writer lock and writes no version, so
-        // the abort record is the rollback's only journal append.
-        (await files.DeleteAsync("missing")).ShouldBeFalse();
+        // A tentative write enrolls this transaction. Drain it before arming the abort fault.
+        await WriteAsync(files, "rolled", "rolled");
+        database.DataStorage.WriteAheadJournal.Flush();
 
         // Act: the rollback buffers the abort record; the other session's write needs the writer
         // lock, and its commit drains the record, which fails.
@@ -965,7 +965,8 @@ public sealed class BlobTransactionFailureTests
         var session = await database.CreateSessionAsync();
         var files = await session.GetContainerAsync("files");
         var transaction = await session.BeginTransactionAsync();
-        (await files.DeleteAsync("missing")).ShouldBeFalse();
+        await WriteAsync(files, "rolled", "rolled");
+        database.DataStorage.WriteAheadJournal.Flush();
         int unspent;
         using (var failures = FaultInjectingJournalStorageStrategy.FailJournalWritesContaining(JournalRecordType.RollbackTransaction))
         {

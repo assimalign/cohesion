@@ -336,7 +336,7 @@ public sealed class GraphDatabaseEngine : DatabaseEngine
     /// <exception cref="ObjectDisposedException">The engine has been disposed.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the database was opened.</exception>
     /// <exception cref="DatabaseNotFoundException">The database does not exist.</exception>
-    /// <exception cref="DatabaseException">The database's file set or index format was refused.</exception>
+    /// <exception cref="DatabaseException">The database's file set or index format was refused, or its graph record format is unsupported (<c>COHDBG017</c> in <see cref="DatabaseException.Diagnostics"/>; recreate the database).</exception>
     /// <remarks>
     /// A database a holder closed is forgotten once its close ends (owner decision 33, #1289), and
     /// this opens it again, with recovery over its files, in memory as on disk. An open that finds
@@ -359,7 +359,7 @@ public sealed class GraphDatabaseEngine : DatabaseEngine
     /// </exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled when the call is made, or while the enumeration opens a database.</exception>
     /// <exception cref="DatabaseNotFoundException">Raised while the enumeration opens a database another caller dropped meanwhile.</exception>
-    /// <exception cref="DatabaseException">Raised while the enumeration opens a database whose file set or index format is refused.</exception>
+    /// <exception cref="DatabaseException">Raised while the enumeration opens a database whose file set, index or graph record format is refused; unsupported graph records carry <c>COHDBG017</c> in <see cref="DatabaseException.Diagnostics"/>.</exception>
     public new IAsyncEnumerable<GraphDatabase> GetDatabasesAsync(CancellationToken cancellationToken = default)
         => (IAsyncEnumerable<GraphDatabase>)base.GetDatabasesAsync(cancellationToken);
 

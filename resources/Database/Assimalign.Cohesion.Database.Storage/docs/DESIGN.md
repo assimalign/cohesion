@@ -423,8 +423,10 @@ third of the 4,096-page rate ("Measurements").
   (entry, dictionary slot, LRU node: 0.6 MiB at 4,096 pages). The SQL and key-value engines open
   a second, catalog file set per database whose pool stays at 128 pages (1 MiB): the catalog is
   small and hot. So an open database costs up to about 33 MiB (34 MiB for SQL and key-value) of
-  pool memory, plus each file set's journal append buffer, 64 KiB to 1 MiB (#1252, "The append
-  buffer"); an in-memory database also holds its data and its journal in memory. The journal
+  pool memory, plus each file set's two retained journal buffers, each 64 KiB to 1 MiB
+  (up to 2 MiB per journal with a 1 MiB append buffer, 4 MiB across the data and catalog
+  journals; #1276, "The append buffer"); an in-memory database also holds its data and
+  its journal in memory. The journal
   is bounded by the checkpoint size ("Checkpoint triggers"), but its buffer is a `MemoryStream`'s,
   which doubles as it grows: when the journal passes 256 MiB the buffer becomes 512 MiB until the
   checkpoint truncates it. Truncating an in-memory stream to zero releases its buffer
@@ -692,8 +694,9 @@ Neo4j `54a7dcf7c25` and RavenDB `83399cb8bc8`.
   1 MiB, the 1/32 of the default 32 MiB pool that PostgreSQL gives its WAL buffers
   (`NBuffers / 32`, `xlog.c:5248`; Neo4j's `db.tx_log.buffer.size` is 512 KiB to 4 MiB,
   `community/configuration/src/main/java/org/neo4j/configuration/GraphDatabaseSettings.java:679-684`).
-  It never shrinks: at most 1 MiB per open journal, two for the SQL and key-value engines' data
-  and catalog file sets. A full buffer is written out in
+  It never shrinks: the append and spare/draining buffers retain at most 2 MiB per open
+  journal, 4 MiB for the SQL and key-value engines' data and catalog file sets. A full buffer
+  is written out in
   one call before the next frame is encoded. A frame larger than 1 MiB (an operation record of
   that size; no page image is) is written directly after the buffered frames, from a pooled array.
 - **The drain rule.** The buffer drains to the operating system before:
@@ -731,9 +734,24 @@ Neo4j `54a7dcf7c25` and RavenDB `83399cb8bc8`.
   the reopen's recovery reads what the file holds, as after a failed fsync. PostgreSQL raises
   `PANIC` on any failed WAL write (`xlog.c:2514-2532`). An append can therefore fail with
   `StorageOfflineException` when it has to drain a full buffer.
-- **Concurrency is unchanged.** Appends, drains and flushes are serialized by the journal's lock,
-  which a durable flush still holds across its fsync. Releasing it during the fsync, as Neo4j's
-  `force` does, would let appenders fill the buffer meanwhile; that is a separate change.
+- **Append and force have separate locks (#1276).** The medium owner swaps the append buffer
+  and captures its target LSN under the append lock, then writes and fsyncs with that lock released.
+  Appenders fill a replacement buffer during device I/O; two buffers are reused after warm-up,
+  each at most 1 MiB (an oversized direct frame uses a pooled array). A full replacement buffer
+  waits for the medium outside the append lock. The force publishes only its written/durable
+  prefix; queued force callers recheck that prefix so one fsync covers all its waiters.
+  This follows Neo4j's prepare-under-lock/force-outside-lock pattern
+  (`community/kernel/src/main/java/org/neo4j/wal/files/TransactionLogFile.java:1194-1214`)
+  and its panic-before-waking-waiters rule (`TransactionLogFile.java:1164-1173`). PostgreSQL likewise
+  rechecks its flushed prefix after acquiring `WALWriteLock` (`src/backend/access/transam/xlog.c:2935-2951`).
+  A failed write/fsync latches offline before releasing the medium; no later prefix can be
+  acknowledged. Detached frames remain readable for spilled pre-images during and after a
+  failed write. Torn-tail offsets belong to the medium lock; checkpoint truncation pauses
+  appends under that lock, drains before truncating, then writes its checkpoint. Disposal waits
+  for the medium, closes appends under the append lock, and drains all remaining frames once.
+  A borrowed stream closed while the journal is live is a write/flush failure and latches it
+  offline. ObjectDisposedException escapes without latching only during Dispose's final drain,
+  when the journal has already closed appends.
 
 **The handle keeps `FileOptions.Asynchronous | FileOptions.RandomAccess`.** The physical file
 system opens every handle overlapped with the random-access hint (`PhysicalFileSystemFile.OpenHandle`),
@@ -1277,7 +1295,7 @@ Exception)` is that entry point:
   recovery replays an intact journal; the latch is the same so that no engine path can write to a
   database it gave up on. A storage already offline returns `false` and keeps its first error.
 - **The engine calls it on a thread of its own, never a background worker's.** The latch is
-  taken under the journal's lock, which a durable flush holds through its fsync, so the call
+  taken under the journal's append lock after acquiring its medium lock, so the call
   waits for a flush in progress. Called on a worker's thread it would hold back every other
   database the worker serves for as long as one database's fsync hangs, the stall #1268's
   checkpoint lanes isolate; the root engine base queues it to the thread pool instead (owner
@@ -1292,6 +1310,13 @@ cause (offline once, refusals with the cause, nothing written, the first error k
 refusal of a device cause.
 
 ### The physical/logical bracket interplay (MVCC layering rules)
+
+Logical readers reserve storage-counter sequences but open no physical bracket and append no
+lifecycle records (#1280). The coordinator appends a logical begin only at first apply, before
+the physical bracket can stamp versions, and only enrolled writers append logical commit/abort
+records or wait for commit durability. A reader promoted after a checkpoint enrolls at that same
+point, so recovery can classify its stamps even though the checkpoint never anchored it.
+Physical bracket durability and the rules below are unchanged.
 
 The MVCC session binding (area DESIGN.md §3.8, first delivered by the SQL
 engine) added three storage-side rules that keep the logical layer sound:
@@ -1438,10 +1463,17 @@ the page's image, so replay rebuilds a page from the journal alone and never rea
 for it. And the write-ahead gate, which makes the journal durable through a page's LSN before the
 page is written, has made that image durable before any stolen write of the page reached the file.
 
-**Memory.** Three streaming passes, as before: the committed brackets (and the checkpoint the
-journal starts at); the pages the journal rebuilds, each with the LSN of the last record that
-applies to it; the ordered replay. A page is cached from its image to its last record and written
-then. When more pages are open at once than the cache holds (the buffer pool's capacity), the least
+**Memory.** Initialization verifies frames and collects committed brackets, the checkpoint,
+and each page's last applicable record. One streaming pass then replays records in file order.
+During initialization, unproven brackets retain their last record identity per page until their
+commit promotes it. A rollback releases its pending page entries and recycles their dictionary;
+only its sequence identity remains. Fresh sequences resume above the recovered maximum and
+header floor, but the adopted-sequence and journal APIs permit reuse before recovery. If a later
+commit reuses a rolled-back sequence, a fresh planning pass preserves the original rule that
+any commit admits all changes of that sequence. Other pending identities are discarded at the
+end. File ordinals keep a late commit from promoting an older record over a later full page image.
+A page is cached from its image to its last record and written then. When more pages are open at
+once than the cache holds (the buffer pool's capacity), the least
 recently used is written early, checksum-stamped, and read back — checksum- and LSN-verified — by
 its next record. Memory follows page identities plus the cache, not the journal's size.
 
@@ -1644,8 +1676,12 @@ taken in `BeginTransaction` under the transaction lock and released exactly once
 commit/rollback: a begun-but-untouched transaction holds no page lock yet has already
 appended its begin record, and the whole checkpoint now runs *under* the transaction
 lock, so no transaction can slip between the emptiness check and the truncation.
-(Lock order is transaction lock → buffer pool → journal; no path takes them in
-reverse.) A checkpoint attempted while transactions are active still throws
+(Lock order is transaction lock → header → buffer pool → journal medium → journal append;
+no path takes them in reverse. In particular, never wait for the medium while holding the
+append lock. Medium owners briefly acquire the append lock to detach or publish a prefix,
+and latch failures before yielding the medium. The offline latch may then take the group-commit
+gate; gate owners release it before calling the journal. Offline notifications run outside both
+journal locks.) A checkpoint attempted while transactions are active still throws
 `StorageTransactionException` — background checkpointers treat that as "busy, retry
 next pass".
 
@@ -1897,19 +1933,33 @@ and owner before reusing a current-write-page hint, including a hint to a page
 pending release in the same bracket. Iterators release a pin before skipping a
 page that was freed during a scan.
 
-`StorageJournal.ReadSequential` holds the synchronous append lock for the lifetime
-of an enumeration and yields one validated frame at a time. Callers consume it on
-one thread without awaiting or mutating the journal; early disposal restores the
-underlying stream position and releases the lock. `ReadAll` preserves its existing
-materialized API. Journal initialization also uses streaming enumeration. Both readers
-drain the append buffer under the same lock before they read (#1252), so they return every
-appended record; an offline journal is read as the file holds it.
+`StorageJournal.ReadSequential` holds the synchronous medium lock and pauses appends for
+the lifetime of an enumeration. Each public payload is an owned copy that remains valid after
+`MoveNext` and disposal, as are `ReadAll` payloads. Storage recovery and consistency checks use
+the internal `ReadSequentialBorrowed`: its pooled payload lasts only until the next `MoveNext`
+or disposal. Consumers stay on one thread without awaiting or checkpointing. An append from
+that thread throws `InvalidOperationException`. Completion, early disposal, cancellation and
+exceptions return the pooled buffer, restore the stream position and release the lock. Both
+paths drain before reading; offline readers see only the medium. The borrowed-reader allocation
+test measures the minimum of three warmed rounds across 20,000 frames and permits no per-frame
+allocation. Transaction recovery consumes owned public records across the assembly boundary.
 
-Physical recovery uses three streaming passes: classify committed sequences, find the
-last record that applies to each page, then replay in order through a bounded page cache
-("Recovery replay rules"). The replay memory cost is transaction/page identities plus the
-cache, not the journal payload size. This permits Blob journals larger than available
-memory to reopen.
+Initialization verifies each frame's CRC-32C and classifies commits and pages. Recovery consumes
+and releases that cached analysis, then uses a single-use token to reuse its verified prefix
+only for the immediately following redo enumeration on the same journal instance. An intervening
+read or append invalidates the token; every other public or borrowed read and every later
+analysis verifies CRCs afresh. Truncation clears both analysis and prefix before issuing
+`SetLength`, so a failed truncation cannot retain either. Replay order and transaction
+classification are unchanged.
+Restoring CRC verification on later reads adds measurable transaction-classification cost;
+recovery measurements must include it and account for tiered-JIT warm-up variation.
+Five warmed physical-file rounds still do not establish the required 5× improvement for
+50 MB recovery. This remains an independent acceptance criterion; #1511 does not replace it,
+and the owner decides closure.
+
+Replay retains transaction/page identities plus a bounded page cache, with temporary identities
+per unproven transaction/page during initialization, without retaining journal payloads. This
+permits Blob journals larger than available memory to reopen.
 
 ## #1157: the access violation under concurrent ALTER TABLE
 

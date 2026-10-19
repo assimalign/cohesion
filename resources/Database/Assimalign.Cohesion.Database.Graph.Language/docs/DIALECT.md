@@ -57,6 +57,21 @@ and optional filters/null extension. ISO `OPTIONAL { ... }` and `OPTIONAL ( ... 
 remain recognized but outside T1 (COHDBL001 naming OPTIONAL BLOCK OPERAND). MANDATORY MATCH
 remains COHDBL001. MATCH after INSERT or DELETE is a supported linear stage.
 
+## Adjacency work and EXPLAIN (#1532)
+
+Fixed and quantified hops select relationship direction and catalog type IDs before candidate
+expansion, including Boolean type expressions and statement-local INSERT edges. A self-loop
+matches once in an either-direction hop. Safe relationship and endpoint constraints precede
+viable descent; deferred predicates retain their final checks. Physical work counts anchor
+candidates plus selected visible relationships and retains its 1,000,000 safety cap even for
+dead ends. COHDBG004 includes actual physical and viable totals when that cap is exceeded;
+100,000-binding and 64-hop limits remain. The separate #1533 budget redesign is deferred.
+
+EXPLAIN Expand details include adjacency=(node,direction,type_id,relationship), effective
+seek_direction, type_filter, physical=visited_candidates, viable=accepted_hops and
+physical_limit=1000000. These describe counting rules; EXPLAIN executes no hops and has no
+runtime totals. The engine's GqlProfileExecutionTests EXPLAIN corpus pins this description.
+
 ## SET and REMOVE
 
 SET and REMOVE are source-ordered stages after an incoming clause. Leading SET/REMOVE is

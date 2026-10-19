@@ -226,7 +226,7 @@ public sealed class SqlConstraintTests
         await session.ExecuteAsync("DELETE FROM p WHERE id = 50");
         metrics = session.LastStatementMetrics.ShouldNotBeNull();
         metrics.AccessPath.ShouldBe("constraint-seek:child_parent");
-        metrics.RecordsExamined.ShouldBe(101);
+        metrics.RecordsExamined.ShouldBe(2); // One parent target seek plus one indexed child (#1274).
         (await Rows(session, "SELECT id FROM c")).ShouldBeEmpty();
     }
 
@@ -244,7 +244,7 @@ public sealed class SqlConstraintTests
         await session.ExecuteAsync("DELETE FROM p WHERE a = 1");
         var metrics = session.LastStatementMetrics.ShouldNotBeNull();
         metrics.AccessPath.ShouldBe("constraint-seek:child_b");
-        metrics.RecordsExamined.ShouldBe(5);
+        metrics.RecordsExamined.ShouldBe(3); // One parent prefix match plus two child candidates (#1274).
         (await Rows(session, "SELECT a FROM c ORDER BY a")).Select(row => row[0]).ShouldBe(new object?[] { 2, 3 });
     }
 

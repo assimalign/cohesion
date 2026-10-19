@@ -447,8 +447,8 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// <exception cref="ArgumentException"><paramref name="reason"/> is null, empty or white space.</exception>
     /// <exception cref="ArgumentNullException"><paramref name="failure"/> is null.</exception>
     /// <remarks>
-    /// Called outside every storage lock. It latches the error under the journal's lock, which a
-    /// durable flush holds through its fsync, so it waits for a flush in progress; an engine
+    /// Called outside every storage lock. It waits for the journal's medium lock, then latches
+    /// under its append lock, so it still waits for an in-flight fsync; an engine
     /// therefore calls it on a thread of its own, never on a background worker's, whose other
     /// databases would wait with it. Like <see cref="TakeOffline(StorageOfflineException)"/> it
     /// returns at once on a storage already offline, without the journal's lock.
@@ -2795,10 +2795,10 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Whether nothing has been written through this opened file set: every
-    /// transaction appends its begin record and every checkpoint its checkpoint
-    /// record, so an unchanged journal position, an unchanged sequence counter (no
-    /// reservation either) and no active transaction mean no page was dirtied and
+    /// Whether nothing has been written through this opened file set. Sequence
+    /// reservations include logical readers that append no lifecycle records.
+    /// An unchanged journal position, an unchanged sequence counter (no reservation
+    /// either) and no active physical transaction mean no page was dirtied and
     /// no header field moved since recovery finished.
     /// </summary>
     private bool IsUnwrittenSinceOpen()

@@ -240,6 +240,8 @@ internal sealed class FaultInjectingJournalStorageStrategy : KeyValueStorageStra
             return false;
         }
 
+        budget.Attempts++;
+
         if (budget.Skip > 0)
         {
             budget.Skip--;
@@ -288,12 +290,18 @@ internal sealed class FaultInjectingJournalStorageStrategy : KeyValueStorageStra
         /// <summary>Gets the number of armed failures no write or flush has spent yet.</summary>
         public int Remaining => _budget.Fail;
 
+        /// <summary>Gets the number of matching write or durable flush attempts on this flow.</summary>
+        public int Attempts => _budget.Attempts;
+
         public void Dispose() => _slot.Value = _previous;
     }
 
     /// <summary>The writes or flushes one calling flow lets through, then fails.</summary>
     internal sealed class Budget
     {
+        /// <summary>Gets or sets the number of matching attempts.</summary>
+        public int Attempts { get; set; }
+
         /// <summary>Gets or sets the number still to let through.</summary>
         public int Skip { get; set; }
 
@@ -393,6 +401,12 @@ internal sealed class FaultInjectingJournalStorageStrategy : KeyValueStorageStra
 
         public void Flush(bool durable)
         {
+            // An unfiltered scope counts data fsyncs too; only journal fsyncs can fail here.
+            if (durable && _journal is null && s_flushFailures.Value is { StorageName: null } budget)
+            {
+                budget.Attempts++;
+            }
+
             if (!durable || _journal is null)
             {
                 return;
