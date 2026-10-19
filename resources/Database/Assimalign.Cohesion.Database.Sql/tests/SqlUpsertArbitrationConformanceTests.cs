@@ -22,6 +22,323 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 [Collection(SqlUpsertConcurrencyCollection.Name)]
 public sealed class SqlUpsertArbitrationConformanceTests
 {
+    [Theory(DisplayName = "Cohesion Test [Sql] - Upsert arbitration: gated row hand-off completes each increment exactly once")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public Task ExecuteAsync_QueuedRowHandOff_ShouldKeepTheGrantedRow(bool crossArbiters)
+        => RepeatAsync(async () =>
+        {
+            // Arrange: both waiters release their proposal keys before queuing behind a third owner.
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+            using var releaseFirst = new ManualResetEventSlim();
+            using var releaseSecond = new ManualResetEventSlim();
+            await using var engine = SqlDatabaseEngine.Create("upsert-hand-off", new());
+            var database = await engine.CreateDatabaseAsync("app", timeout.Token);
+            await using var first = await database.CreateSessionAsync(timeout.Token);
+            await using var second = await database.CreateSessionAsync(timeout.Token);
+            await first.ExecuteAsync("CREATE TABLE t (id INT PRIMARY KEY, email TEXT UNIQUE, v INT)", cancellationToken: timeout.Token);
+            await first.ExecuteAsync("INSERT INTO t VALUES (1, 'mail', 0)", cancellationToken: timeout.Token);
+            database.Catalog.TryGetTable("dbo", "t", out var table).ShouldBeTrue();
+            var holder = await database.Coordinator.BeginAsync(IsolationLevel.ReadCommitted, timeout.Token);
+            await HoldFirstRowAsync(database, table.ObjectId, holder.Sequence, timeout.Token);
+            await using var one = await first.BeginTransactionAsync(IsolationLevel.ReadCommitted, timeout.Token);
+            await using var two = await second.BeginTransactionAsync(IsolationLevel.ReadCommitted, timeout.Token);
+            using var waits = new LockWaitListener(database.Name);
+            var firstGranted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var secondGranted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            int firstStops = 0;
+            int secondStops = 0;
+            waits.Observed = written =>
+            {
+                if (written.EventName != "LockWaitStop" || written.Payload is not { Count: > 2 } payload || !Equals(payload[2], "Granted")) { return; }
+                long owner = (long)payload[1]!;
+                if (owner == (long)one.Context.Sequence.Value && Interlocked.Increment(ref firstStops) == 1)
+                {
+                    firstGranted.SetResult();
+                    releaseFirst.Wait(timeout.Token);
+                }
+                if (owner == (long)two.Context.Sequence.Value && Interlocked.Increment(ref secondStops) == 1)
+                {
+                    secondGranted.SetResult();
+                    releaseSecond.Wait(timeout.Token);
+                }
+            };
+            // Cross-arbiter proposals have disjoint key sets: (1, 'other') and (2, 'mail').
+            // Each reaches the shared target through a different unique index.
+            string firstSql = "INSERT INTO t VALUES (1, '" + (crossArbiters ? "other" : "mail") +
+                "', 1) ON CONFLICT(id) DO UPDATE SET v = t.v + EXCLUDED.v RETURNING v";
+            string secondSql = "INSERT INTO t VALUES (" + (crossArbiters ? "2" : "1") +
+                ", 'mail', 2) ON CONFLICT(" + (crossArbiters ? "email" : "id") + ") DO UPDATE SET v = t.v + EXCLUDED.v RETURNING v";
+            if (crossArbiters)
+            {
+                new[] { Key(1).Hash(), Key("other").Hash() }.Intersect(new[] { Key(2).Hash(), Key("mail").Hash() }).ShouldBeEmpty();
+            }
+            var pendingOne = first.ExecuteAsync(firstSql, cancellationToken: timeout.Token).AsTask();
+            await waits.WaitForWaitAsync(one.Context.Sequence, timeout.Token);
+            var pendingTwo = second.ExecuteAsync(secondSql, cancellationToken: timeout.Token).AsTask();
+            try
+            {
+                await waits.WaitForWaitAsync(two.Context.Sequence, timeout.Token);
+
+                // Act: suspend A at its completed wait, then let A restart while B remains gated.
+                await database.Coordinator.RollbackAsync(holder, timeout.Token);
+                await firstGranted.Task.WaitAsync(timeout.Token);
+                pendingOne.IsCompleted.ShouldBeFalse();
+                pendingTwo.IsCompleted.ShouldBeFalse();
+                secondStops.ShouldBe(0);
+                releaseFirst.Set();
+                await using var firstResult = (await pendingOne.WaitAsync(timeout.Token)).ShouldBeAssignableTo<DatabaseResultSet>();
+                firstResult.AffectedCount.ShouldBe(1);
+                (await RowsAsync(firstResult)).ShouldHaveSingleItem()[0].ShouldBe(1);
+                pendingTwo.IsCompleted.ShouldBeFalse();
+                secondStops.ShouldBe(0);
+                await one.CommitAsync(timeout.Token);
+                await secondGranted.Task.WaitAsync(timeout.Token);
+                releaseSecond.Set();
+                await using var secondResult = (await pendingTwo.WaitAsync(timeout.Token)).ShouldBeAssignableTo<DatabaseResultSet>();
+                secondResult.AffectedCount.ShouldBe(1);
+                (await RowsAsync(secondResult)).ShouldHaveSingleItem()[0].ShouldBe(3);
+                await two.CommitAsync(timeout.Token);
+
+                // Assert: the same-key and disjoint-key schedules both apply each statement once.
+                firstStops.ShouldBe(1);
+                secondStops.ShouldBe(1);
+                (await QueryAsync(first, "SELECT id, email, v FROM t")).ShouldHaveSingleItem().ShouldBe(new object?[] { 1, "mail", 3 });
+            }
+            finally
+            {
+                releaseFirst.Set();
+                releaseSecond.Set();
+                timeout.Cancel();
+                if (holder.State == TransactionState.Active) { await database.Coordinator.RollbackAsync(holder, CancellationToken.None); }
+                Task completed = Task.WhenAll(pendingOne, pendingTwo);
+                await completed.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+            }
+        });
+
+    [Fact(DisplayName = "Cohesion Test [Sql] - Upsert arbitration: disjoint cross-arbiter keys and opposite rows detect a victim and permit retry")]
+    public Task ExecuteAsync_CrossArbitersOppositeRows_ShouldDetectDeadlockAndPermitRetry()
+        => RepeatAsync(async () =>
+        {
+            // Arrange: A arbitrates id in row order 1,2; B arbitrates email in row order 2,1.
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+            using var releaseFirst = new ManualResetEventSlim();
+            using var releaseSecond = new ManualResetEventSlim();
+            await using var engine = SqlDatabaseEngine.Create("upsert-cross-rows", new());
+            var database = await engine.CreateDatabaseAsync("app", timeout.Token);
+            await using var first = await database.CreateSessionAsync(timeout.Token);
+            await using var second = await database.CreateSessionAsync(timeout.Token);
+            await first.ExecuteAsync("CREATE TABLE t (id INT PRIMARY KEY, email TEXT UNIQUE, v INT)", cancellationToken: timeout.Token);
+            await first.ExecuteAsync("INSERT INTO t VALUES (1, 'one', 0), (2, 'two', 0)", cancellationToken: timeout.Token);
+            database.Catalog.TryGetTable("dbo", "t", out var table).ShouldBeTrue();
+            var locks = database.Coordinator.LockManager;
+            var holderOne = await database.Coordinator.BeginAsync(IsolationLevel.ReadCommitted, timeout.Token);
+            var holderTwo = await database.Coordinator.BeginAsync(IsolationLevel.ReadCommitted, timeout.Token);
+            await HoldFirstRowAsync(database, table.ObjectId, holderOne.Sequence, timeout.Token);
+            using (var iterator = database.DataStorage.GetUnitIterator(table.ObjectId))
+            {
+                iterator.MoveNext().ShouldBeTrue();
+                iterator.MoveNext().ShouldBeTrue();
+                var unit = iterator.Current;
+                await locks.AcquireAsync(holderTwo.Sequence, LockResource.Entry(table.ObjectId,
+                    SqlRecordLocation.Pack(unit.PageId, unit.SlotIndex)), LockMode.Exclusive, timeout.Token);
+            }
+            await using var one = await first.BeginTransactionAsync(IsolationLevel.ReadCommitted, timeout.Token);
+            await using var two = await second.BeginTransactionAsync(IsolationLevel.ReadCommitted, timeout.Token);
+            using var waits = new LockWaitListener(database.Name);
+            var firstGranted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var secondGranted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var firstBlockedAgain = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            int firstStarts = 0;
+            int firstStops = 0;
+            int secondStops = 0;
+            waits.Observed = written =>
+            {
+                if (written.Payload is not { Count: > 2 } payload) { return; }
+                long owner = (long)payload[1]!;
+                if (written.EventName == "LockWaitStart" && owner == (long)one.Context.Sequence.Value && Interlocked.Increment(ref firstStarts) == 2)
+                { firstBlockedAgain.SetResult(); }
+                if (written.EventName != "LockWaitStop" || !Equals(payload[2], "Granted")) { return; }
+                if (owner == (long)one.Context.Sequence.Value && Interlocked.Increment(ref firstStops) == 1)
+                { firstGranted.SetResult(); releaseFirst.Wait(timeout.Token); }
+                if (owner == (long)two.Context.Sequence.Value && Interlocked.Increment(ref secondStops) == 1)
+                { secondGranted.SetResult(); releaseSecond.Wait(timeout.Token); }
+            };
+            // Both batches are disjoint; their first row grants, rather than keys, conflict.
+            const string firstSql = "INSERT INTO t VALUES (1, 'a', 1), (2, 'b', 1) ON CONFLICT(id) DO UPDATE SET v = t.v + EXCLUDED.v";
+            const string secondSql = "INSERT INTO t VALUES (3, 'two', 2), (4, 'one', 2) ON CONFLICT(email) DO UPDATE SET v = t.v + EXCLUDED.v";
+            new[] { Key(1).Hash(), Key("a").Hash(), Key(2).Hash(), Key("b").Hash() }
+                .Intersect(new[] { Key(3).Hash(), Key("two").Hash(), Key(4).Hash(), Key("one").Hash() }).ShouldBeEmpty();
+            var pendingOne = first.ExecuteAsync(firstSql, cancellationToken: timeout.Token).AsTask();
+            await waits.WaitForWaitAsync(one.Context.Sequence, timeout.Token);
+            var pendingTwo = second.ExecuteAsync(secondSql, cancellationToken: timeout.Token).AsTask();
+            try
+            {
+                await waits.WaitForWaitAsync(two.Context.Sequence, timeout.Token);
+                await database.Coordinator.RollbackAsync(holderOne, timeout.Token);
+                await database.Coordinator.RollbackAsync(holderTwo, timeout.Token);
+                await Task.WhenAll(firstGranted.Task, secondGranted.Task).WaitAsync(timeout.Token);
+
+                // Act: keep A's first row while it waits for B's, then let B close the cycle.
+                releaseFirst.Set();
+                await firstBlockedAgain.Task.WaitAsync(timeout.Token);
+                releaseSecond.Set();
+                await Should.ThrowAsync<DatabaseTransactionDeadlockException>(async () => await pendingTwo);
+                await two.RollbackAsync(timeout.Token);
+                (await pendingOne).AffectedCount.ShouldBe(2);
+                await one.CommitAsync(timeout.Token);
+                await using var retry = await second.BeginTransactionAsync(IsolationLevel.ReadCommitted, timeout.Token);
+                (await second.ExecuteAsync(secondSql, cancellationToken: timeout.Token)).AffectedCount.ShouldBe(2);
+                await retry.CommitAsync(timeout.Token);
+
+                // Assert: the failed preparation applied nothing; each successful statement applied once.
+                firstStarts.ShouldBe(2);
+                firstStops.ShouldBe(2);
+                secondStops.ShouldBe(1);
+                (await QueryAsync(first, "SELECT v FROM t ORDER BY id")).Select(row => row[0]).ShouldBe(new object?[] { 3, 3 });
+            }
+            finally
+            {
+                releaseFirst.Set();
+                releaseSecond.Set();
+                timeout.Cancel();
+                if (holderOne.State == TransactionState.Active) { await database.Coordinator.RollbackAsync(holderOne, CancellationToken.None); }
+                if (holderTwo.State == TransactionState.Active) { await database.Coordinator.RollbackAsync(holderTwo, CancellationToken.None); }
+                Task completed = Task.WhenAll(pendingOne, pendingTwo);
+                await completed.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+            }
+        });
+
+    [Fact(DisplayName = "Cohesion Test [Sql] - Upsert arbitration: a pre-statement shared key retains its exclusive upgrade through restart")]
+    public Task ExecuteAsync_PreStatementSharedKey_ShouldKeepItsUpgrade()
+        => RepeatAsync(async () =>
+        {
+            // Arrange
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+            await using var engine = SqlDatabaseEngine.Create("upsert-upgrade", new());
+            var database = await engine.CreateDatabaseAsync("app", timeout.Token);
+            await using var writer = await database.CreateSessionAsync(timeout.Token);
+            await using var contender = await database.CreateSessionAsync(timeout.Token);
+            await writer.ExecuteAsync("CREATE TABLE t (id INT PRIMARY KEY, v INT)", cancellationToken: timeout.Token);
+            await writer.ExecuteAsync("INSERT INTO t VALUES (1, 10)", cancellationToken: timeout.Token);
+            database.Catalog.TryGetTable("dbo", "t", out var table).ShouldBeTrue();
+            await using var holder = await writer.BeginTransactionAsync(timeout.Token);
+            await HoldFirstRowAsync(database, table.ObjectId, holder.Context.Sequence, timeout.Token);
+            await using var upsert = await contender.BeginTransactionAsync(IsolationLevel.ReadCommitted, timeout.Token);
+            var locks = database.Coordinator.LockManager;
+            var key = LockResource.Entry(table.ObjectId, Key(1).Hash());
+            locks.TryAcquire(upsert.Context.Sequence, key, LockMode.Shared).ShouldBeTrue();
+            var probe = await database.Coordinator.BeginAsync(IsolationLevel.ReadCommitted, timeout.Token);
+            using var waits = new LockWaitListener(database.Name);
+            try
+            {
+                // Act: SQL upgrades the key to X, then backs off on the held row.
+                var pending = contender.ExecuteAsync("INSERT INTO t VALUES (1, 20) ON CONFLICT(id) DO UPDATE SET v = EXCLUDED.v", cancellationToken: timeout.Token).AsTask();
+                await waits.WaitForWaitAsync(upsert.Context.Sequence, timeout.Token);
+
+                // Assert: a shared probe would succeed if only S survived the back-off.
+                locks.TryAcquire(probe.Sequence, key, LockMode.Shared).ShouldBeFalse();
+                await holder.RollbackAsync(timeout.Token);
+                (await pending).AffectedCount.ShouldBe(1);
+                locks.TryAcquire(probe.Sequence, key, LockMode.Shared).ShouldBeFalse();
+                await upsert.CommitAsync(timeout.Token);
+                locks.TryAcquire(probe.Sequence, key, LockMode.Shared).ShouldBeTrue();
+                (await QueryAsync(writer, "SELECT v FROM t")).ShouldHaveSingleItem()[0].ShouldBe(20);
+            }
+            finally { await database.Coordinator.RollbackAsync(probe, CancellationToken.None); }
+        });
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - DO NOTHING: an existing parent takes no row lock and leaves concurrent writers unblocked")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public Task ExecuteAsync_DoNothingExistingParent_ShouldAllowConcurrentWrites(bool childInsert)
+        => RepeatAsync(async () =>
+        {
+            // Arrange: holding the parent row must not make DO NOTHING wait for it.
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+            await using var engine = SqlDatabaseEngine.Create("upsert-nothing-lock", new());
+            var database = await engine.CreateDatabaseAsync("app", timeout.Token);
+            await using var first = await database.CreateSessionAsync(timeout.Token);
+            await using var second = await database.CreateSessionAsync(timeout.Token);
+            await first.ExecuteAsync("CREATE TABLE p (id INT PRIMARY KEY, v INT)", cancellationToken: timeout.Token);
+            await first.ExecuteAsync("CREATE TABLE c (id INT PRIMARY KEY, pid INT REFERENCES p(id))", cancellationToken: timeout.Token);
+            await first.ExecuteAsync("INSERT INTO p VALUES (1, 0)", cancellationToken: timeout.Token);
+            database.Catalog.TryGetTable("dbo", "p", out var table).ShouldBeTrue();
+            await using var holder = await second.BeginTransactionAsync(timeout.Token);
+            await HoldFirstRowAsync(database, table.ObjectId, holder.Context.Sequence, timeout.Token);
+            await using var noOp = await first.BeginTransactionAsync(timeout.Token);
+
+            // Act: keep the no-op transaction open throughout the concurrent SQL write.
+            (await first.ExecuteAsync("INSERT INTO p VALUES (1, 99) ON CONFLICT DO NOTHING", cancellationToken: timeout.Token)).AffectedCount.ShouldBe(0);
+            await holder.RollbackAsync(timeout.Token);
+            (await second.ExecuteAsync(childInsert ? "INSERT INTO c VALUES (1, 1)" : "UPDATE p SET v = v + 1 WHERE id = 1",
+                cancellationToken: timeout.Token)).AffectedCount.ShouldBe(1);
+
+            // Assert
+            noOp.State.ShouldBe(TransactionState.Active);
+            await noOp.CommitAsync(timeout.Token);
+            (await QueryAsync(first, "SELECT v FROM p")).ShouldHaveSingleItem()[0].ShouldBe(childInsert ? 0 : 1);
+            (await QueryAsync(first, "SELECT id FROM c")).Count.ShouldBe(childInsert ? 1 : 0);
+        });
+
+    [Fact(DisplayName = "Cohesion Test [Sql] - DO NOTHING: Snapshot rejects a newer committed conflict without waiting for its row")]
+    public Task ExecuteAsync_DoNothingNewerCommittedRow_ShouldAbortByVisibility()
+        => RepeatAsync(async () =>
+        {
+            // Arrange: the snapshot predates the committed row, which another owner now locks.
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+            await using var engine = SqlDatabaseEngine.Create("upsert-nothing-snapshot", new());
+            var database = await engine.CreateDatabaseAsync("app", timeout.Token);
+            await using var first = await database.CreateSessionAsync(timeout.Token);
+            await using var second = await database.CreateSessionAsync(timeout.Token);
+            await first.ExecuteAsync("CREATE TABLE t (id INT PRIMARY KEY)", cancellationToken: timeout.Token);
+            await using var old = await first.BeginTransactionAsync(IsolationLevel.Snapshot, timeout.Token);
+            await second.ExecuteAsync("INSERT INTO t VALUES (1)", cancellationToken: timeout.Token);
+            database.Catalog.TryGetTable("dbo", "t", out var table).ShouldBeTrue();
+            await using var holder = await second.BeginTransactionAsync(timeout.Token);
+            await HoldFirstRowAsync(database, table.ObjectId, holder.Context.Sequence, timeout.Token);
+
+            // Act / Assert: locking first would stall behind holder instead of reporting visibility.
+            await Should.ThrowAsync<DatabaseTransactionAbortedException>(async () => await first.ExecuteAsync(
+                "INSERT INTO t VALUES (1) ON CONFLICT DO NOTHING", cancellationToken: timeout.Token));
+            await holder.RollbackAsync(timeout.Token);
+            await old.RollbackAsync(timeout.Token);
+            (await QueryAsync(second, "SELECT id FROM t")).ShouldHaveSingleItem()[0].ShouldBe(1);
+        });
+
+    [Fact(DisplayName = "Cohesion Test [Sql] - DO UPDATE: a false filter keeps the conflicting row locked and unchanged")]
+    public Task ExecuteAsync_FalseUpdateFilter_ShouldRetainTheRowLock()
+        => RepeatAsync(async () =>
+        {
+            // Arrange
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+            await using var engine = SqlDatabaseEngine.Create("upsert-filter-lock", new());
+            var database = await engine.CreateDatabaseAsync("app", timeout.Token);
+            await using var session = await database.CreateSessionAsync(timeout.Token);
+            await session.ExecuteAsync("CREATE TABLE t (id INT PRIMARY KEY, v INT)", cancellationToken: timeout.Token);
+            await session.ExecuteAsync("INSERT INTO t VALUES (1, 10)", cancellationToken: timeout.Token);
+            database.Catalog.TryGetTable("dbo", "t", out var table).ShouldBeTrue();
+            await using var upsert = await session.BeginTransactionAsync(timeout.Token);
+            var probe = await database.Coordinator.BeginAsync(IsolationLevel.ReadCommitted, timeout.Token);
+            try
+            {
+                // Act
+                (await session.ExecuteAsync("INSERT INTO t VALUES (1, 99) ON CONFLICT(id) DO UPDATE SET v = EXCLUDED.v WHERE false",
+                    cancellationToken: timeout.Token)).AffectedCount.ShouldBe(0);
+
+                // Assert: the filter does not release the X row lock it acquired before evaluation.
+                using var iterator = database.DataStorage.GetUnitIterator(table.ObjectId);
+                iterator.MoveNext().ShouldBeTrue();
+                var unit = iterator.Current;
+                var row = LockResource.Entry(table.ObjectId, SqlRecordLocation.Pack(unit.PageId, unit.SlotIndex));
+                database.Coordinator.LockManager.TryAcquire(probe.Sequence, row, LockMode.Shared).ShouldBeFalse();
+                (await QueryAsync(session, "SELECT v FROM t")).ShouldHaveSingleItem()[0].ShouldBe(10);
+                await upsert.CommitAsync(timeout.Token);
+                database.Coordinator.LockManager.TryAcquire(probe.Sequence, row, LockMode.Shared).ShouldBeTrue();
+            }
+            finally { await database.Coordinator.RollbackAsync(probe, CancellationToken.None); }
+        });
+
     [Theory(DisplayName = "Cohesion Test [Sql] - Upsert arbitration: row-first rekeys and deletes complete or serialize by isolation")]
     [InlineData(IsolationLevel.ReadCommitted, false, false)]
     [InlineData(IsolationLevel.ReadCommitted, true, false)]
@@ -267,6 +584,13 @@ public sealed class SqlUpsertArbitrationConformanceTests
     {
         var writer = new DatabaseKeyWriter();
         SqlRowCodec.AppendKeyValue(writer, DatabaseType.Int32, value, Collation.Binary);
+        return IndexKey.From(writer);
+    }
+
+    private static IndexKey Key(string value)
+    {
+        var writer = new DatabaseKeyWriter();
+        SqlRowCodec.AppendKeyValue(writer, DatabaseType.String, value, Collation.Binary);
         return IndexKey.From(writer);
     }
 

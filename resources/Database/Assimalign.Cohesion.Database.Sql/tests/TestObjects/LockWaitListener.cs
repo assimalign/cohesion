@@ -21,6 +21,9 @@ internal sealed class LockWaitListener : EventListener
         _database = database;
     }
 
+    // Invoked outside the lock table's lock, so a regression can gate a completed grant.
+    public Action<EventWrittenEventArgs>? Observed { get; set; }
+
     public async Task WaitForWaitAsync(TransactionSequence sequence, CancellationToken cancellationToken)
     {
         while (!_waiting.ContainsKey((long)sequence.Value))
@@ -40,9 +43,10 @@ internal sealed class LockWaitListener : EventListener
 
     protected override void OnEventWritten(EventWrittenEventArgs written)
     {
-        if (written.EventName == "LockWaitStart" && _database is not null && written.Payload is { Count: > 1 } payload && Equals(payload[0], _database))
+        if (_database is not null && written.Payload is { Count: > 1 } payload && Equals(payload[0], _database))
         {
-            _waiting[(long)payload[1]!] = true;
+            if (written.EventName == "LockWaitStart") { _waiting[(long)payload[1]!] = true; }
+            Observed?.Invoke(written);
         }
     }
 }
