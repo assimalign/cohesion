@@ -19,6 +19,10 @@ public sealed partial class GraphStore
     private async ValueTask<MutationLease> EnterMutationAsync(TransactionContext context, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(context);
+        // Lock order: transaction mutation gate -> database writer lock -> coordinator
+        // apply gate -> B+Tree gate -> storage page latches. Directory _sync is never held
+        // across an await. Incident readers take only index/page latches; directory readers
+        // may take _sync then page latches, never an index latch or these writer gates.
         var gate = _mutationGates.GetValue(context, _mutationGateFactory);
         await gate.Semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
         try

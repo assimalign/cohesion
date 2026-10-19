@@ -4,7 +4,9 @@
   <resheader name="version"><value>2.0</value></resheader>
   <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
   <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
-  <data name="RecordFormatUnsupported" xml:space="preserve"><value>Unsupported graph record format. This engine requires format 2; recreate the database with this engine. No upgrade path is available.</value></data>
+  <data name="RecordFormatUnsupported" xml:space="preserve"><value>Unsupported graph record format. This engine requires format 3; recreate the database with this engine. No upgrade path is available.</value></data>
+  <data name="RelationshipTypeIdInvalid" xml:space="preserve"><value>A relationship requires a nonempty catalog type identity.</value></data>
+  <data name="AdjacencyKeyInvalid" xml:space="preserve"><value>Invalid graph adjacency key length.</value></data>
   <data name="EndpointDeleted" xml:space="preserve"><value>Graph write conflict: an endpoint was deleted after the transaction snapshot.</value></data>
   <data name="IdentityAlreadyExists" xml:space="preserve">
     <value>The graph identity already exists.</value>

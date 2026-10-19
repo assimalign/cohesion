@@ -19,7 +19,9 @@ internal sealed class GraphUpdates
     private readonly GraphOperation _operation;
     private readonly Dictionary<ulong, GraphNode> _nodes = [];
     private readonly Dictionary<ulong, GraphRelationship> _relationships = [];
-    private readonly Dictionary<ulong, List<ulong>> _createdIncident = [];
+    private readonly Dictionary<(ulong Node, GraphIncidentDirection Direction), Dictionary<Guid, List<ulong>>> _createdIncident = [];
+    private readonly Dictionary<ulong, Guid> _createdTypes = [];
+    private readonly Dictionary<GqlRelationshipPattern, Guid[]?> _typeSelections = new(ReferenceEqualityComparer.Instance);
     private readonly HashSet<(bool Node, ulong Id)> _created = [];
     private readonly HashSet<(bool Node, ulong Id)> _changed = [];
 
@@ -40,18 +42,22 @@ internal sealed class GraphUpdates
     internal async ValueTask<GraphRelationship> CreateRelationshipAsync(GraphNodeId from, GraphNodeId to, string type,
         IReadOnlyDictionary<string, object?> properties, CancellationToken token)
     {
-        await _database.ValidateRelationshipAsync(_operation, type, properties, token).ConfigureAwait(false);
+        var typeId = await _database.ValidateRelationshipAsync(_operation, type, properties, token).ConfigureAwait(false);
+        _typeSelections.Clear();
         var edge = new GraphRelationship(new GraphRelationshipId((ulong)_database.DataStorage.ReserveTransactionSequence()), type, from, to,
             new ReadOnlyDictionary<string, object?>(new Dictionary<string, object?>(properties, StringComparer.Ordinal)));
         _created.Add((false, edge.Id.Value));
         _relationships.Add(edge.Id.Value, edge);
-        AddIncident(from.Value);
-        if (to != from) { AddIncident(to.Value); }
+        _createdTypes.Add(edge.Id.Value, typeId);
+        AddIncident(from.Value, GraphIncidentDirection.Outgoing);
+        AddIncident(to.Value, GraphIncidentDirection.Incoming);
         return edge;
 
-        void AddIncident(ulong id)
+        void AddIncident(ulong id, GraphIncidentDirection direction)
         {
-            if (!_createdIncident.TryGetValue(id, out var incident)) { _createdIncident.Add(id, incident = []); }
+            if (!_createdIncident.TryGetValue((id, direction), out var types))
+            { _createdIncident.Add((id, direction), types = []); }
+            if (!types.TryGetValue(typeId, out var incident)) { types.Add(typeId, incident = []); }
             incident.Add(edge.Id.Value);
         }
     }
@@ -88,13 +94,55 @@ internal sealed class GraphUpdates
                 .Select(node => new StoredGraphNode(node.Id.Value, node.Labels, node.Properties))).OrderBy(node => node.Id).ToArray();
     }
 
-    internal async ValueTask<IReadOnlyList<StoredGraphRelationship>> GetIncidentAsync(ulong id, CancellationToken token)
-        => (await _database.Store.GetIncidentAsync(id, _operation.Context.Snapshot, token).ConfigureAwait(false))
-            .Select(edge => _relationships.TryGetValue(edge.Id, out var updated)
-                ? new StoredGraphRelationship(edge.Id, updated.From.Value, updated.To.Value, updated.Type, updated.Properties) : edge)
-            .Concat((_createdIncident.TryGetValue(id, out var incident) ? incident : Enumerable.Empty<ulong>())
-                .Where(edgeId => _relationships.ContainsKey(edgeId)).Select(edgeId => FindRelationship(edgeId)!.Value))
-            .OrderBy(edge => edge.Id).ToArray();
+    internal Guid[]? SelectTypes(GqlRelationshipPattern pattern)
+    {
+        if (!_typeSelections.TryGetValue(pattern, out var types))
+        {
+            string? name = pattern.LabelExpression is GqlLabelName label ? label.Name : pattern.Type;
+            types = pattern.LabelExpression is GqlLabelWildcard || pattern.LabelExpression is null && name is null ? null
+                : name is not null ? _database.Catalog.FindRelationshipType(name, _operation.Context.Snapshot) is { } type ? [type.Id] : []
+                : _database.Catalog.GetRelationshipTypes(_operation.Context.Snapshot)
+                    .Where(type => GraphLabelEvaluator.Accepts(pattern, type.Name)).Select(type => type.Id).ToArray();
+            _typeSelections.Add(pattern, types);
+        }
+        return types;
+    }
+
+    internal ValueTask<IReadOnlyList<StoredGraphRelationship>> GetIncidentAsync(ulong id, CancellationToken token)
+        => GetIncidentAsync(id, GraphIncidentDirection.Both, null, null, token);
+
+    internal async ValueTask<IReadOnlyList<StoredGraphRelationship>> GetIncidentAsync(ulong id, GraphIncidentDirection direction,
+        IReadOnlyCollection<Guid>? typeIds, GraphPlanExecutor.ExpansionBudget? budget, CancellationToken token)
+    {
+        var result = new List<StoredGraphRelationship>();
+        await foreach (var edge in _database.Store.GetIncidentAsync(id, direction, typeIds, _operation.Context.Snapshot, token).ConfigureAwait(false))
+        {
+            budget?.Consume();
+            token.ThrowIfCancellationRequested();
+            result.Add(_relationships.TryGetValue(edge.Id, out var updated)
+                ? new StoredGraphRelationship(edge.Id, updated.From.Value, updated.To.Value, updated.Type, updated.Properties) : edge);
+        }
+        var seen = direction == GraphIncidentDirection.Both ? new HashSet<ulong>() : null;
+        foreach (var selected in direction == GraphIncidentDirection.Both
+            ? new[] { GraphIncidentDirection.Outgoing, GraphIncidentDirection.Incoming } : new[] { direction })
+        {
+            if (!_createdIncident.TryGetValue((id, selected), out var types)) { continue; }
+            foreach (var type in typeIds ?? types.Keys)
+            {
+                if (!types.TryGetValue(type, out var incident)) { continue; }
+                foreach (ulong edgeId in incident)
+                {
+                    token.ThrowIfCancellationRequested();
+                    if (!_relationships.ContainsKey(edgeId) || seen?.Add(edgeId) == false) { continue; }
+                    budget?.Consume();
+                    token.ThrowIfCancellationRequested();
+                    result.Add(FindRelationship(edgeId)!.Value);
+                }
+            }
+        }
+        result.Sort(static (left, right) => left.Id.CompareTo(right.Id));
+        return result;
+    }
 
     internal async ValueTask ApplyAsync(GqlStage stage, List<Dictionary<string, object?>> bindings,
         IReadOnlyDictionary<string, object?>? parameters, CancellationToken token)
@@ -192,7 +240,7 @@ internal sealed class GraphUpdates
         foreach (var edge in _relationships.Values)
         {
             if (IsCreated(false, edge.Id.Value))
-            { await _database.Store.CreateRelationshipAsync(new StoredGraphRelationship(edge.Id.Value, edge.From.Value, edge.To.Value, edge.Type, edge.Properties), _operation.Context, token).ConfigureAwait(false); }
+            { await _database.Store.CreateRelationshipAsync(new StoredGraphRelationship(edge.Id.Value, edge.From.Value, edge.To.Value, edge.Type, edge.Properties), _createdTypes[edge.Id.Value], _operation.Context, token).ConfigureAwait(false); }
             else
             { await _database.Store.UpdateRelationshipAsync(edge.Id.Value, edge.Properties, _operation.Context, token).ConfigureAwait(false); }
             if (_changed.Contains((false, edge.Id.Value)) && !_created.Contains((false, edge.Id.Value))) { count++; }

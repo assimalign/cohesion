@@ -149,7 +149,9 @@ internal static partial class GraphPlanExecutor
                         frontier.Push(state with { Task = end.Repeat with { Count = end.Repeat.Count + 1 } });
                         break;
                     case EdgeTask edgeTask:
-                        var incident = await operation.Updates.GetIncidentAsync(state.Current.Id.Value, token).ConfigureAwait(false);
+                        var incident = await operation.Updates.GetIncidentAsync(state.Current.Id.Value,
+                            GraphLabelEvaluator.IncidentDirection(edgeTask.Pattern, edgeTask.Forward),
+                            operation.Updates.SelectTypes(edgeTask.Pattern), budget, token).ConfigureAwait(false);
                         frontier.Push(state with { Task = new IncidentTask(edgeTask, incident, 0) });
                         break;
                     case IncidentTask cursor:
@@ -157,7 +159,7 @@ internal static partial class GraphPlanExecutor
                         // retains copies of bindings, trails, identity sets or groups in the frontier.
                         if (cursor.Index == cursor.Edges.Count) { break; }
                         frontier.Push(state with { Task = cursor with { Index = cursor.Index + 1 } });
-                        budget.Consume();
+                        budget.VisitCandidate();
                         var edge = cursor.Edges[cursor.Index];
                         var hop = cursor.Hop;
                         ulong from = state.Current.Id.Value;
@@ -177,6 +179,7 @@ internal static partial class GraphPlanExecutor
                         var nextNode = GraphDatabase.Materialize(target);
                         if (hop.Next is NodeTask targetNodes && targetNodes.Patterns.Any(pattern =>
                             !AcceptNode(pattern, nextNode, bindings, operation.EvaluationContext, parameters, deferUnbound: true))) { break; }
+                        budget.ConsumeViable();
                         var copy = state.Fork(bindings);
                         copy.Used.Add(edge.Id);
                         if (hop.Forward) { copy.Nodes.Add(nextNode); copy.Relationships.Add(relationship); }

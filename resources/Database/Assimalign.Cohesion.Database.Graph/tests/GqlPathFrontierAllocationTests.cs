@@ -39,11 +39,11 @@ public sealed class GqlPathFrontierAllocationTests
         int samples = 0;
         var budget = new GraphPlanExecutor.ExpansionBudget
         {
-            OnConsume = count =>
+            OnCandidate = count =>
             {
-                // Incident storage is already loaded at candidate 2. Measure additional live
+                // Incident storage is already loaded at candidate 1. Measure additional live
                 // search state, excluding that existing storage buffer and setup allocations.
-                if (count == 2) { baseline = GC.GetTotalMemory(forceFullCollection: true); }
+                if (count == 1) { baseline = GC.GetTotalMemory(forceFullCollection: true); }
                 else if (count % 5_000 == 0)
                 {
                     peak = Math.Max(peak, GC.GetTotalMemory(forceFullCollection: true) - baseline);

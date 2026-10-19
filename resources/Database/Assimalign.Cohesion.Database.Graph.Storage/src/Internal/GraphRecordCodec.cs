@@ -13,13 +13,15 @@ using Assimalign.Cohesion.Database.Types;
 namespace Assimalign.Cohesion.Database.Graph.Storage.Internal;
 
 internal readonly record struct GraphRecord(byte Kind, ulong Id, StoredGraphNode? Node = null,
-    StoredGraphRelationship? Relationship = null, string? Label = null, string? PropertyKey = null, ulong Revision = 0);
+    StoredGraphRelationship? Relationship = null, string? Label = null, string? PropertyKey = null, ulong Revision = 0, Guid TypeId = default);
 
 internal static class GraphRecordCodec
 {
+    // One graph format fence, shared by open and recovery; #1534 extends format 3.
+    internal const byte FormatVersion = 3;
     internal static void EnsureFormat(ReadOnlySpan<byte> bytes)
     {
-        if (bytes.Length < 18 || bytes[17] != 2)
+        if (bytes.Length < 18 || bytes[17] != FormatVersion)
         { throw new StorageCorruptionException(ErrorMessages.RecordFormatUnsupported); }
     }
 
@@ -30,7 +32,7 @@ internal static class GraphRecordCodec
         output.Write(writer.Value);
         output.Write(0UL);
         output.Write(record.Kind);
-        output.Write((byte)2);
+        output.Write(FormatVersion);
         output.Write(record.Id);
         output.Write(record.Revision);
         if (record.Node is { } node)
@@ -43,6 +45,7 @@ internal static class GraphRecordCodec
         {
             output.Write(relationship.SourceId);
             output.Write(relationship.TargetId);
+            output.Write(record.TypeId.ToByteArray());
             output.Write(relationship.Type);
             Properties(output, relationship.Properties);
         }
@@ -76,7 +79,7 @@ internal static class GraphRecordCodec
             using var input = new BinaryReader(stream, new UTF8Encoding(false, true));
             input.ReadUInt64(); input.ReadUInt64();
             byte kind = input.ReadByte();
-            if (input.ReadByte() != 2) { throw new StorageCorruptionException(ErrorMessages.RecordFormatUnsupported); }
+            if (input.ReadByte() != FormatVersion) { throw new StorageCorruptionException(ErrorMessages.RecordFormatUnsupported); }
             ulong id = input.ReadUInt64();
             ulong revision = input.ReadUInt64();
             GraphRecord record;
@@ -89,8 +92,11 @@ internal static class GraphRecordCodec
                     record = new GraphRecord(kind, id, new StoredGraphNode(id, Array.AsReadOnly(labels), Properties(input)));
                     break;
                 case 2:
+                    ulong source = input.ReadUInt64(), target = input.ReadUInt64();
+                    var typeId = new Guid(input.ReadBytes(16));
+                    if (typeId == Guid.Empty) { throw new StorageCorruptionException(ErrorMessages.RelationshipTypeIdInvalid); }
                     record = new GraphRecord(kind, id, Relationship: new StoredGraphRelationship(id,
-                        input.ReadUInt64(), input.ReadUInt64(), input.ReadString(), Properties(input)));
+                        source, target, input.ReadString(), Properties(input)), TypeId: typeId);
                     break;
                 case 3: record = new GraphRecord(kind, id, Label: input.ReadString(), PropertyKey: input.ReadString()); break;
                 default: throw new StorageCorruptionException("Unknown graph record kind.");

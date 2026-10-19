@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -425,13 +426,22 @@ internal static partial class GraphPlanExecutor
 
     internal sealed class ExpansionBudget
     {
-        private int _remaining = 1_000_000;
-        internal int Consumed => 1_000_000 - _remaining;
+        internal const int PhysicalLimit = 1_000_000;
+        private int _physical;
+        private int _viable;
+        private int _candidates;
+        internal int Consumed => _physical;
+        // Sampling after incident loading isolates the retained DFS state from read buffers.
+        internal Action<int>? OnCandidate { get; init; }
+        internal void VisitCandidate() => OnCandidate?.Invoke(++_candidates);
+        internal int Physical => _physical;
+        internal int Viable => _viable;
+        internal void ConsumeViable() => _viable++;
         internal Action<int>? OnConsume { get; init; }
         internal void Consume()
         {
             OnConsume?.Invoke(Consumed + 1);
-            if (--_remaining < 0) { throw new GraphPlanningException("COHDBG004", ErrorMessages.ExpansionLimitExceeded); }
+            if (++_physical > PhysicalLimit) { throw new GraphPlanningException("COHDBG004", string.Format(CultureInfo.CurrentCulture, ErrorMessages.ExpansionLimitExceeded, Physical, Viable)); }
         }
     }
 }

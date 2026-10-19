@@ -362,7 +362,7 @@ public sealed partial class GraphDatabase : DatabaseInstance
     /// nodes are yielded.
     /// </exception>
     /// <exception cref="DatabaseException">
-    /// The traversal's depth or direction is invalid (<c>COHDBG001</c>); the session belongs to
+    /// The traversal's depth or direction is invalid (<c>COHDBG001</c>), its physical work limit is exceeded (<c>COHDBG004</c>); the session belongs to
     /// another database (<c>COHDBG005</c>), it is closed (also while the nodes are yielded), another
     /// statement holds it, or its transaction refuses statements (<c>COHDBG007</c>).
     /// </exception>
@@ -380,6 +380,15 @@ public sealed partial class GraphDatabase : DatabaseInstance
         var nodes = await RunAsync(session, async operation =>
         {
             var result = new List<GraphNode>();
+            var budget = new GraphPlanExecutor.ExpansionBudget();
+            IReadOnlyCollection<Guid>? types = traversal.RelationshipType is { } name
+                ? Catalog.FindRelationshipType(name, operation.Context.Snapshot) is { } type ? new[] { type.Id } : [] : null;
+            var direction = traversal.Direction switch
+            {
+                GraphDirection.Outgoing => GraphIncidentDirection.Outgoing,
+                GraphDirection.Incoming => GraphIncidentDirection.Incoming,
+                _ => GraphIncidentDirection.Both,
+            };
             var visited = new HashSet<ulong> { traversal.Start.Value };
             var queue = new Queue<(ulong Id, int Depth)>();
             if (Store.FindNode(traversal.Start.Value, operation.Context.Snapshot) is not null)
@@ -390,15 +399,14 @@ public sealed partial class GraphDatabase : DatabaseInstance
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 if (current.Depth >= traversal.MaxDepth) { continue; }
-                foreach (var relationship in await Store.GetIncidentAsync(current.Id, operation.Context.Snapshot, cancellationToken).ConfigureAwait(false))
+                foreach (var relationship in await operation.Updates.GetIncidentAsync(current.Id, direction, types,
+                    budget, cancellationToken).ConfigureAwait(false))
                 {
-                    if (traversal.RelationshipType is { } type && relationship.Type != type) { continue; }
                     bool outgoing = relationship.SourceId == current.Id;
-                    if (traversal.Direction == GraphDirection.Outgoing && !outgoing ||
-                        traversal.Direction == GraphDirection.Incoming && relationship.TargetId != current.Id) { continue; }
                     ulong next = outgoing ? relationship.TargetId : relationship.SourceId;
                     if (visited.Add(next) && Store.FindNode(next, operation.Context.Snapshot) is { } node)
                     {
+                        budget.ConsumeViable();
                         result.Add(Materialize(node));
                         queue.Enqueue((next, current.Depth + 1));
                     }
@@ -463,11 +471,11 @@ public sealed partial class GraphDatabase : DatabaseInstance
         string type, IReadOnlyDictionary<string, object?>? properties, CancellationToken token)
     {
         await LockWriterAsync(operation, token).ConfigureAwait(false);
-        await ValidateRelationshipAsync(operation, type, properties, token).ConfigureAwait(false);
-        return Materialize(await Store.CreateRelationshipAsync(new StoredGraphRelationship((ulong)DataStorage.ReserveTransactionSequence(), from.Value, to.Value, type, properties ?? new Dictionary<string, object?>()), operation.Context, token).ConfigureAwait(false));
+        var typeId = await ValidateRelationshipAsync(operation, type, properties, token).ConfigureAwait(false);
+        return Materialize(await Store.CreateRelationshipAsync(new StoredGraphRelationship((ulong)DataStorage.ReserveTransactionSequence(), from.Value, to.Value, type, properties ?? new Dictionary<string, object?>()), typeId, operation.Context, token).ConfigureAwait(false));
     }
 
-    internal async ValueTask ValidateRelationshipAsync(GraphOperation operation, string type,
+    internal async ValueTask<Guid> ValidateRelationshipAsync(GraphOperation operation, string type,
         IReadOnlyDictionary<string, object?>? properties, CancellationToken token)
     {
         var metadata = Catalog.FindRelationshipType(type, operation.Context.Snapshot);
@@ -478,6 +486,7 @@ public sealed partial class GraphDatabase : DatabaseInstance
             await Catalog.SaveRelationshipTypeAsync(metadata.Value, operation.Context, token).ConfigureAwait(false);
         }
         await ValidatePropertiesAsync(metadata.Value.Id, properties, operation, token).ConfigureAwait(false);
+        return metadata.Value.Id;
     }
 
     internal static GraphNode Materialize(StoredGraphNode node) => new(new GraphNodeId(node.Id), node.Labels, node.Properties);
