@@ -7,7 +7,7 @@ namespace Assimalign.Cohesion.Database.Sql.Language;
 
 public sealed partial class SqlQueryParser
 {
-    private IReadOnlyList<SqlSelectColumn>? ParseReturning(ref TokenLexer lexer, SqlTableReference table)
+    private IReadOnlyList<SqlSelectColumn>? ParseReturning(ref TokenLexer lexer, SqlTableReference table, bool onConflict = false)
     {
         if (RejectDmlOutput(ref lexer) || !IsKeyword(ref lexer, "RETURNING")) { return null; }
         Advance(ref lexer);
@@ -35,6 +35,12 @@ public sealed partial class SqlQueryParser
             {
                 RequireSkippedConstruct(scan.Current.Position, scan.Current.Position + scan.Current.Value.Length,
                     $"RETURNING {CurrentText(ref scan).ToUpperInvariant()}.");
+            }
+            if (onConflict && !afterDot && IsWord(ref scan, "EXCLUDED") &&
+                !CurrentText(ref scan).Equals(table.Alias ?? table.TableName, StringComparison.OrdinalIgnoreCase) &&
+                IsReturningPseudoRelation(scan))
+            {
+                RequireSkippedConstruct(scan.Current.Position, scan.Current.Position + scan.Current.Value.Length, "EXCLUDED in RETURNING");
             }
             afterDot = scan.Current.Type == TokenType.Dot;
             if (!scan.MoveNext()) { break; }

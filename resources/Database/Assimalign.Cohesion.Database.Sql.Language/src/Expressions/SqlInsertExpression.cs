@@ -23,6 +23,7 @@ public sealed class SqlInsertExpression : SqlQueryExpression
     /// <param name="text">The raw statement text.</param>
     /// <param name="location">The source location.</param>
     /// <param name="returning">The written-row projection, if specified.</param>
+    /// <param name="onConflict">The unique-key conflict action, if specified.</param>
     internal SqlInsertExpression(
         SqlTableReference table,
         IReadOnlyList<string>? columns,
@@ -31,11 +32,13 @@ public sealed class SqlInsertExpression : SqlQueryExpression
         bool isDefaultValues,
         string? text,
         Location? location,
-        IReadOnlyList<SqlSelectColumn>? returning = null)
+        IReadOnlyList<SqlSelectColumn>? returning = null,
+        SqlOnConflictClause? onConflict = null)
         : base(SqlQueryCommandType.Insert, text, location)
     {
         Table = table;
         Returning = returning;
+        OnConflict = onConflict;
         Columns = columns;
         Values = values;
         SelectSource = selectSource;
@@ -49,6 +52,9 @@ public sealed class SqlInsertExpression : SqlQueryExpression
 
     /// <summary>Gets the written-row projection, or null when RETURNING is absent.</summary>
     public IReadOnlyList<SqlSelectColumn>? Returning { get; }
+
+    /// <summary>Gets the unique-key conflict action, or null for an ordinary INSERT.</summary>
+    public SqlOnConflictClause? OnConflict { get; }
 
     /// <summary>
     /// Gets the column list, if specified.

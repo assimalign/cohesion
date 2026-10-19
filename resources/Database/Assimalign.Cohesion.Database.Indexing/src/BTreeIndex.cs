@@ -357,6 +357,42 @@ public sealed class BTreeIndex
         return new BTreeCursor(results);
     }
 
+    /// <summary>Locks a unique key and finds its live entry in the latest index state.</summary>
+    /// <remarks>
+    /// Acquires the key's Exclusive entry lock before taking the tree's read latch. The lock
+    /// belongs to the transaction until commit or rollback, keeping the result stable for its
+    /// decision. Call before entering a physical apply bracket; pre-held locks are re-granted.
+    /// No snapshot filter is applied: a live entry is committed or belongs to this transaction.
+    /// </remarks>
+    /// <param name="transaction">The transaction that owns the key lock.</param>
+    /// <param name="key">The complete unique index key.</param>
+    /// <param name="cancellationToken">Cancellation token for lock acquisition.</param>
+    /// <returns>The live entry reference, or null if no live entry exists.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="transaction"/> is null.</exception>
+    /// <exception cref="InvalidOperationException">The index is not unique.</exception>
+    /// <exception cref="OperationCanceledException">Lock acquisition is canceled.</exception>
+    /// <exception cref="TransactionDeadlockException">The key lock closes a wait cycle.</exception>
+    /// <exception cref="IndexCorruptionException">A tree page is damaged.</exception>
+    public async ValueTask<ulong?> FindLiveEntryAsync(TransactionContext transaction, IndexKey key, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(transaction);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!IsUnique) { throw new InvalidOperationException(ErrorMessages.LiveLookupRequiresUnique); }
+        if (_lockManager is not null)
+        {
+            await _lockManager.AcquireAsync(transaction.Sequence, LockResource.Entry(_objectId, key.Hash()),
+                LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
+        }
+        _latch.EnterRead();
+        try
+        {
+            if (!TryFindEntry(BTreeSearchKey.AtKey(key.Encoded.Span), EntryMatch.Live, out long leafId, out int index)) { return null; }
+            using var handle = _storage.PageManager.GetPage((PageId)leafId);
+            return OpenNode(handle.Page.AsBodySpan(), leafId).GetEntryReference(index);
+        }
+        finally { _latch.ExitRead(); }
+    }
+
     /// <summary>
     /// Inserts an entry carrying explicit version stamps inside the given physical
     /// write-ahead bracket — the offline (DDL-blocking) build path: an index built

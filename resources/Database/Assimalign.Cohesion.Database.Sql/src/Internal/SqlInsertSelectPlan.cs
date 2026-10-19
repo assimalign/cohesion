@@ -14,4 +14,5 @@ internal sealed record SqlInsertSelectPlan(
     SqlPlan Source) : SqlPlan
 {
     public IReadOnlyList<SqlProjection>? Returning { get; init; }
+    public SqlOnConflictPlan? OnConflict { get; init; }
 }

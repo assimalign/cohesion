@@ -62,6 +62,11 @@ internal sealed partial class SqlPlanner
                 ValidateFunctionCalls(select);
                 break;
             case SqlInsertExpression insert:
+                if (insert.OnConflict is { } conflict)
+                {
+                    foreach (var assignment in conflict.Assignments) { ValidateFunctionCalls(assignment.Value); }
+                    ValidateFunctionCalls(conflict.Where);
+                }
                 if (insert.Returning is not null)
                 {
                     foreach (var column in insert.Returning) { ValidateFunctionCalls(column.Expression); }

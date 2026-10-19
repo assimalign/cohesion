@@ -72,6 +72,13 @@ public sealed class SqlStatementCompletenessTests
         [SqlClauses.Cast] = ["SELECT CAST(a AS INT) FROM t", "SELECT a FROM t WHERE CAST(a AS TEXT) = '1'"],
         [SqlClauses.Collate] = ["SELECT a FROM t WHERE a = 'x' COLLATE binary", "SELECT a COLLATE case_insensitive FROM t"],
         [SqlClauses.Insert] = ["INSERT INTO t VALUES (1)", "INSERT INTO t (a, b) VALUES (1, 'x')", "INSERT INTO t (b, a) DEFAULT VALUES"],
+        [SqlClauses.OnConflict] =
+        [
+            "INSERT INTO t VALUES (1) ON CONFLICT DO NOTHING",
+            "INSERT INTO t VALUES (1) ON CONFLICT (id) DO NOTHING RETURNING id",
+            "INSERT INTO t AS x VALUES (1) ON CONFLICT ON CONSTRAINT uq DO UPDATE SET a = x.a + EXCLUDED.a WHERE x.a < EXCLUDED.a",
+            "INSERT INTO t SELECT u.id FROM u JOIN w ON u.id = w.id ON CONFLICT DO NOTHING",
+        ],
         [SqlClauses.Update] = ["UPDATE t SET a = 1", "UPDATE t SET a = DEFAULT", "UPDATE dbo.t SET a = 1, b = 'x' WHERE id = 1"],
         [SqlClauses.Delete] = ["DELETE FROM t", "DELETE FROM t WHERE id = 1"],
         [SqlClauses.Returning] = ["INSERT INTO t VALUES (1) RETURNING *", "INSERT INTO t SELECT a FROM u RETURNING a", "UPDATE t SET a = 1 RETURNING a AS updated", "DELETE FROM t RETURNING *"],
@@ -218,8 +225,6 @@ public sealed class SqlStatementCompletenessTests
     [InlineData("DELETE FROM t WHRE ^id = 1;", "id")]
     [InlineData("UPDATE t SET a = 1 ^WHRE id = 1;", "WHRE")]
     [InlineData("UPDATE t SET a = 1 ^FROM u WHERE t.id = u.id;", "FROM")]
-    [InlineData("INSERT INTO t (id) VALUES (1) ^ON CONFLICT DO NOTHING;", "ON")]
-    [InlineData("INSERT INTO t (id, a) VALUES (1, 2) ^ON DUPLICATE KEY UPDATE a = 3;", "ON")]
     [InlineData("SELECT id FROM t LIMIT 1 ^FETCH FIRST 1 ROW ONLY;", "FETCH")]
     [InlineData("SELECT id FROM t WHERE id = ^:id;", ":id")]
     [InlineData("UPDATE t SET a = ^:a WHERE id = 1;", ":a")]

@@ -2520,6 +2520,89 @@ record kind, wire message, reflection or runtime code generation is introduced.
 PostgreSQL references: tablecmds.c:3903-4062 (column identity), :4329-4385 (relation name),
 :8201-8268 (default), and heaptuple.c:151-180 (frozen missing values).
 
+## UPDATE final foreign-key state (#1667)
+
+Multi-row UPDATE and ON CONFLICT share BuildConstraintUpdates: outgoing and incoming
+NO ACTION/RESTRICT probes exclude old replaced heap versions and contribute every final
+replacement. A removed parent key cannot authorize a new child; a self-reference can move
+with its key, and mutually referenced keys can swap if the final state is consistent.
+Incoming checks permit an old key retained by another replacement. UPDATE tombstones all
+replaced row/index versions before inserting any new versions in the same rollback bracket,
+so unique entries also validate the final state during a swap. Snapshot and ReadCommitted
+use the same pending view. Wire regressions select isolation via the existing server-session
+API because SQL BEGIN deliberately has no isolation clause; UPDATE/results use both transports.
+
+## INSERT ... ON CONFLICT execution (#1118)
+
+Binding rejects duplicate whole-column SET targets before execution (PostgreSQL
+src/backend/rewrite/rewriteHandler.c:1168). Live unique entries pointing at missing or
+undecodable heap rows raise StorageCorruptionException, never a serialization retry.
+
+The shared VALUES/DEFAULT VALUES/SELECT path evaluates each proposal's defaults and its
+conflict projection in source order (PostgreSQL src/backend/executor/nodeModifyTable.c:4497,2980).
+Proposed CHECK, NOT NULL and domains run before key lookup; FK validation uses only rows
+actually written. Updated
+rows reuse UPDATE coercion/defaults, assigned-domain checks, CHECK/FK validation,
+released-reference locks, incoming-reference RESTRICT and MVCC/index tombstone/reinsert
+helpers. All writes and RETURNING projections share one ApplyStatementAsync bracket.
+DO NOTHING and false/UNKNOWN filters produce no row or affected count.
+
+The conflict plan selects all matching unique column-set indexes or one named unique index;
+untargeted DO NOTHING selects all unique indexes. The plan also retains the complete unique-index
+directory. After acquiring IX, execution compares its immutable metadata identities with the
+live directory; a create, drop or replacement during the wait aborts retryably before defaults
+or identity allocation. Index-only DDL does not replace the table definition, so its existing
+identity check alone cannot protect arbiter binding. Gated tests cover all three changes.
+The parser supplies EXCLUDED, so binding
+target-plus-proposed rows needs no visibility grant or public internal type. A per-index/key
+pending map models successful earlier proposals and rekeys in source order. Repeated effects
+raise COHSQLE036 before publication; arbiter failures use COHSQLE035. Encoded index equality
+supplies collation, NULL and temporal identity unchanged. For self-referencing FKs, the existing
+referential-action pending-update view excludes replaced heap versions and supplies final
+values to FK and incoming-reference checks. A removed key cannot authorize a new child; a
+self-reference moved with its key validates against the final row.
+
+After object intent locks, statements without requested side-effecting defaults acquire the keys of
+**every unique index of every proposal**, sorted and deduplicated, before live arbitration.
+Each proposal's encoded keys are reused for hashing, lookup and pending inserts.
+BTreeIndex.FindLiveEntryAsync re-grants those locks outside the apply gate. Replacement
+old/new keys are also acquired before any row lock, then conflicting rows form a sorted
+batch and reference locks follow. Lock preparation never evaluates defaults speculatively.
+When a proposal or conflict assignment requests an identity or a default containing a
+non-immutable function call, each proposal evaluates its defaults and acquires all its unique
+keys in one sorted batch before its latest-state lookup and conflict projection. The binder
+records non-immutable calls recursively, including sequence-like application functions;
+STABLE is conservatively treated as side-effecting. Constants and immutable expressions retain
+the complete up-front proposal batch, including after definitions are reloaded. The table
+retains only IX, so unrelated single-row upserts and plain INSERTs can progress while a
+defaulted upsert waits. Replacement old/new keys and the sorted row batch follow arbitration.
+Reversed multi-row proposal orders can deadlock; the lock manager detects a retryable victim
+(the same class tracked by #1668). Ordering input rows consistently reduces this exposure,
+as PostgreSQL advises in doc/src/sgml/mvcc.sgml:1546-1555. No speculative allocation or
+default replay is needed. This is the second
+deliberate exception to row-before-key, beside the referential cascade walk. It can form
+row/key cycles with ordinary UPDATE/DELETE and SET NULL/DEFAULT. The lock manager detects
+cycles as retryable deadlocks; callers roll back/retry the victim. Gated tests exercise
+SET NULL/DEFAULT cycles, all-index plain INSERT waits and different-arbiter upserts.
+Even an UPDATE leaving every unique value unchanged tombstones and reinserts the entry
+at a new heap location, preserving old snapshots; it therefore still needs key locks.
+The accepted contract is detected and retryable: roll back the victim transaction and
+retry the complete transaction, including any earlier statements. Releasing this statement's
+keys and retrying row acquisition inside the engine remains follow-up work. The apply
+gate's no-wait rule is unchanged.
+
+A live conflict newer than Snapshot visibility fails retryably for either action, including
+autocommit Snapshot. ReadCommitted skips it for DO NOTHING or updates the latest committed
+row for DO UPDATE. FK validation then refreshes ReadCommitted committed visibility as well, so
+a parent committed with that newer row is visible while other in-flight parents remain excluded.
+Own writes remain visible. Rollback clears the winner's index entries
+before its locks release, allowing a waiting insertion. PostgreSQL anchors are
+nodeModifyTable.c:377-405 (snapshot visibility), :1108 (proposed constraints), :2826-2830
+(repeated effects), :2935-2950 (visibility and WHERE); arbiter set equality is
+optimizer/util/plancat.c:1036-1060. DIALECT specifies the NULL-key difference and retries.
+No persisted grammar, identifier quoting, catalog format, wire format, public interface,
+project reference or InternalsVisibleTo change is required.
+
 ## Execution model
 
 - **Rule-based planning, plan/execute split.** `SqlPlanner` binds the AST against
@@ -3282,10 +3365,10 @@ description + exported registrations), the engine binds them.
   instead of stalling every writer of the database). Non-unique indexes take no key locks. Key
   locks and row locks share the `LockResource.Entry` space; a hash/location
   collision only over-locks, and the class ordering keeps acquisition globally
-  consistent. **The one deliberate exception is the cascade walk**, which locks
+  consistent. **The first deliberate exception is the cascade walk**, which locks
   rows in discovery order because the closure it is discovering is what
   determines the lock set; see "Referential enforcement locks parent rows" under
-  constraints for why that trade was taken and what it costs.
+  constraints for why that trade was taken and what it costs. The second is ON CONFLICT: every proposal unique key and replacement key precedes conflicting row locks; see INSERT ... ON CONFLICT execution above.
 - **Uniqueness = the B+Tree's latest-state check under the exclusive hashed-key
   lock** (never snapshot visibility — write skew; the recorded #851 lesson).
   Violations surface as the area root's `DatabaseException` at the model

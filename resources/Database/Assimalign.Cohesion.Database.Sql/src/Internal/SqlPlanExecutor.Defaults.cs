@@ -194,10 +194,11 @@ internal sealed partial class SqlPlanExecutor
                 SqlPlanner.ValidateExpression(expression, scope);
                 SqlPlanner.ValidateDefaultType(expression, scope, column.Type.Type, column.Name);
             }
-            var bound = new SqlBoundDefault(scope.Bind(expression), column);
+            var volatility = DefaultVolatility(expression, scope);
+            var bound = new SqlBoundDefault(scope.Bind(expression), column, volatility != SqlFunctionVolatility.Immutable);
             // Immutable defaults are proved at definition time, even on an empty table.
             // Loading retains the tree; stable and volatile calls run when a value is assigned.
-            return declaring && DefaultVolatility(expression, scope) == SqlFunctionVolatility.Immutable
+            return declaring && volatility == SqlFunctionVolatility.Immutable
                 ? new SqlBoundConstant(DeclaredDefaultValue(bound, column, cancellationToken)) : bound;
         }
         catch (SqlEvaluationException failure) when (declaring)

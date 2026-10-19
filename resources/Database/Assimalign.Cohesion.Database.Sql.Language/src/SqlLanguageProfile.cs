@@ -74,6 +74,7 @@ public static class SqlLanguageProfile
         SqlClauses.Select,
         SqlClauses.Explain,
         SqlClauses.Insert,
+        SqlClauses.OnConflict,
         SqlClauses.Update,
         SqlClauses.Delete,
         SqlClauses.Returning,

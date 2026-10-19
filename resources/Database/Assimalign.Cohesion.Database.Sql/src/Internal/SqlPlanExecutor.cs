@@ -415,7 +415,7 @@ internal sealed partial class SqlPlanExecutor
             }
             values.Add(row);
         }
-        return await ExecuteInsertRowsAsync(plan.Table, plan.TargetOrdinals, values, statement, cancellationToken, plan.Returning, plan.Rows).ConfigureAwait(false);
+        return await ExecuteInsertRowsAsync(plan.Table, plan.TargetOrdinals, values, statement, cancellationToken, plan.Returning, plan.Rows, plan.OnConflict).ConfigureAwait(false);
     }
 
     private async Task<DatabaseResult> ExecuteUpdateAsync(SqlUpdatePlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
@@ -473,7 +473,10 @@ internal sealed partial class SqlPlanExecutor
         await AcquireRowWriteLocksAsync(statement, plan.Table.ObjectId, targets.ConvertAll(t => (t.PageId, t.SlotIndex)), cancellationToken).ConfigureAwait(false);
 
         var references = new List<SqlParentReference>();
-        ValidateRows(plan.Table, replacements.Select(row => row.NewValues).ToList(), statement, cancellationToken, references: references);
+        var pendingUpdates = BuildConstraintUpdates(plan.Table,
+            replacements.Select(row => (SqlRecordLocation.Pack(row.PageId, row.SlotIndex), row.OldValues, row.NewValues)), plan.Assignments);
+        ValidateRows(plan.Table, replacements.Select(row => row.NewValues).ToList(), statement, cancellationToken,
+            references: references, updates: pendingUpdates);
         await AcquireParentRowLocksAsync(references, statement, cancellationToken).ConfigureAwait(false);
 
         // A reassigned foreign key releases the row's old parent as well as taking
@@ -490,7 +493,7 @@ internal sealed partial class SqlPlanExecutor
 
         foreach (var replacement in replacements)
         {
-            ValidateParentUpdate(plan.Table, replacement.OldValues, replacement.NewValues, statement, cancellationToken);
+            ValidateParentUpdate(plan.Table, replacement.OldValues, replacement.NewValues, statement, cancellationToken, updates: pendingUpdates);
         }
 
         // Unique key locks after the row locks (the lock-ordering rule): both the
@@ -509,7 +512,7 @@ internal sealed partial class SqlPlanExecutor
         {
             return await statement.Coordinator.ApplyStatementAsync(statement.Transaction, async bracket =>
             {
-                foreach (var (pageId, slotIndex, oldValues, newValues, newVersion) in replacements)
+                foreach (var (pageId, slotIndex, oldValues, _, _) in replacements)
                 {
                     EnsureLatestVersion(plan.Table, pageId, slotIndex, statement.Transaction.Sequence);
 
@@ -523,6 +526,11 @@ internal sealed partial class SqlPlanExecutor
                     await TombstoneIndexEntriesAsync(
                         statement, indexes, plan.Table, oldValues, SqlRecordLocation.Pack(pageId, slotIndex), cancellationToken).ConfigureAwait(false);
 
+                }
+                // Release every replaced unique mapping before inserting replacements,
+                // so statement-consistent key swaps do not fail on an old live entry.
+                foreach (var (_, _, _, newValues, newVersion) in replacements)
+                {
                     var location = _storage.InsertRow(bracket, plan.Table.ObjectId, newVersion);
                     statement.Coordinator.VersionStore.RecordCreated(statement.Transaction.Sequence, location.PageId, location.SlotIndex);
                     await InsertIndexEntriesAsync(
@@ -667,6 +675,10 @@ internal sealed partial class SqlPlanExecutor
     //   1. the table's IntentExclusive object lock,
     //   2. its target rows' Exclusive locks, sorted by packed location,
     //   3. its unique-index key locks, sorted by key hash (deduplicated).
+    //
+    // ON CONFLICT is the second deliberate exception (beside the cascade walk):
+    // all proposal unique keys and replacement keys precede any row lock.
+    // Cycles with row-first writers are handled by the lock manager's deadlock detection.
     //
     // The B+Tree re-acquires the key lock inside the apply gate — a same-owner
     // re-grant that completes synchronously — so no lock wait can ever happen

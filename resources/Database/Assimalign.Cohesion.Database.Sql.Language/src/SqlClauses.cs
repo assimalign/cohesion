@@ -15,6 +15,9 @@ public static class SqlClauses
     /// <summary>An <c>INSERT</c> statement.</summary>
     public const string Insert = "INSERT";
 
+    /// <summary>An INSERT's unique-key conflict action.</summary>
+    public const string OnConflict = "ON CONFLICT";
+
     /// <summary>An <c>UPDATE</c> statement.</summary>
     public const string Update = "UPDATE";
 

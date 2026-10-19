@@ -235,6 +235,14 @@ internal static class Program
             Check("in process: RETURNING affected count", written.AffectedCount, 1L);
         }
         Check("in process: UPDATE RETURNING", await RowsAsync(session, "UPDATE returning_native SET value = value + 1 RETURNING value"), [[4]]);
+        await session.ExecuteAsync("CREATE TABLE upsert_native (id INT PRIMARY KEY, value INT DEFAULT (1 + 2))");
+        await session.ExecuteAsync("INSERT INTO upsert_native VALUES (1, 10)");
+        Check("in process: ON CONFLICT EXCLUDED RETURNING", await RowsAsync(session,
+            "INSERT INTO upsert_native (id) VALUES (1), (2) ON CONFLICT (id) DO UPDATE SET value = upsert_native.value + EXCLUDED.value RETURNING id, value"), [[1, 13], [2, 3]]);
+        await session.ExecuteAsync("CREATE TABLE upsert_self_native (id INT PRIMARY KEY, parent INT REFERENCES upsert_self_native(id))");
+        await session.ExecuteAsync("INSERT INTO upsert_self_native VALUES (1, 1)");
+        Check("in process: ON CONFLICT pending self-reference", await RowsAsync(session,
+            "INSERT INTO upsert_self_native VALUES (1, 1) ON CONFLICT (id) DO UPDATE SET id = 10, parent = 10 RETURNING id, parent"), [[10, 10]]);
         Check("in process: IDENTITY and UPDATE DEFAULT", await RowsAsync(session, "SELECT id FROM identity_guard ORDER BY id"), [[105L], [110L]]);
         await session.ExecuteAsync("CREATE TABLE null_ordering (id INT, x INT, name TEXT)");
         await session.ExecuteAsync("INSERT INTO null_ordering VALUES (2, NULL, 'b'), (1, 1, 'a'), (3, 2, 'c')");
@@ -395,6 +403,10 @@ internal static class Program
         var returned = await connection.QueryAsync("INSERT INTO returning_native DEFAULT VALUES RETURNING *", cancellationToken: timeout.Token);
         Check("over the wire: RETURNING affected count", returned.AffectedCount, 1L);
         Check("over the wire: RETURNING identity", returned[0].GetInt32(0), 2);
+        var upserted = await connection.QueryAsync(
+            "INSERT INTO upsert_native VALUES (1, 20), (3, 30) ON CONFLICT (id) DO UPDATE SET value = EXCLUDED.value RETURNING id, value", cancellationToken: timeout.Token);
+        Check("over the wire: ON CONFLICT affected count", upserted.AffectedCount, 2L);
+        Check("over the wire: ON CONFLICT EXCLUDED RETURNING", upserted.Select(row => new object?[] { row.GetInt32(0), row.GetInt32(1) }).ToArray(), [[1, 20], [3, 30]]);
         Check("over the wire: DELETE RETURNING", await RowsAsync(connection, "DELETE FROM returning_native WHERE id = 1 RETURNING value", timeout.Token), [[4]]);
         Check("over the wire: IDENTITY leaves connection usable", await RowsAsync(connection, "SELECT id FROM identity_wire", timeout.Token), [[10]]);
         await connection.ExecuteAsync("CREATE TABLE default_wire (id INT DEFAULT 7 NOT NULL, label TEXT DEFAULT 'seed', note INT)", cancellationToken: timeout.Token);

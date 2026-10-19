@@ -53,6 +53,29 @@ public sealed class SqlRecordDecodeIntegrityTests
     /// <summary>The longest the scan race waits past its minimum for the work it needs.</summary>
     private static readonly TimeSpan RaceCeiling = TimeSpan.FromSeconds(60);
 
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Upsert: damage behind a live unique entry is corruption rather than a conflict")]
+    [InlineData(RecordDamage.InvalidTag)]
+    [InlineData(RecordDamage.OtherType)]
+    [InlineData(RecordDamage.OtherObject)]
+    [InlineData(RecordDamage.Truncated)]
+    [InlineData(RecordDamage.ShorterThanStamps)]
+    public async Task ExecuteAsync_DamagedLiveUniqueRow_ShouldThrowCorruption(RecordDamage damage)
+    {
+        // Arrange
+        await using var engine = CreateEngine();
+        var database = await engine.CreateDatabaseAsync("upsert-damage");
+        await using var session = await database.CreateSessionAsync();
+        await session.ExecuteAsync("CREATE TABLE t (id INT PRIMARY KEY, val INT NOT NULL)");
+        await session.ExecuteAsync("INSERT INTO t VALUES (1,10)");
+        var damaged = RowLocation(database, id: 1);
+        Damage(database, damaged, damage);
+
+        // Act / Assert
+        var failure = await Should.ThrowAsync<StorageCorruptionException>(async () => await session.ExecuteAsync(
+            "INSERT INTO t VALUES (1,20) ON CONFLICT(id) DO UPDATE SET val = EXCLUDED.val"));
+        failure.PageId.ShouldBe(damaged.PageId);
+    }
+
     /// <summary>How a test damages a row record.</summary>
     public enum RecordDamage
     {

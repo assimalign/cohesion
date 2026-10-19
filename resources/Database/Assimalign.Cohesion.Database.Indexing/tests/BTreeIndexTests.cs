@@ -21,6 +21,55 @@ namespace Assimalign.Cohesion.Database.Indexing.Tests;
 /// </summary>
 public class BTreeIndexTests
 {
+    [Fact(DisplayName = "Cohesion Test [Database.Indexing] - BTree: latest live lookup includes own writes and follows rollback stamps")]
+    public async Task FindLiveEntryAsync_CommitDeleteAndRollback_ShouldReturnCurrentReference()
+    {
+        // Arrange
+        var (harness, index) = await CreateIndexAsync(unique: true);
+        await using var lifetime = harness;
+        var key = IndexKey.FromInt64(42);
+        var writer = await harness.BeginAsync();
+        await index.InsertAsync(writer, key, 100, CancellationToken.None);
+
+        // Act / Assert: INSERT holds the exclusive key lock for this transaction.
+        (await index.FindLiveEntryAsync(writer, key, CancellationToken.None)).ShouldBe(100UL);
+        await harness.CommitAsync(writer);
+        var deleter = await harness.BeginAsync();
+        (await index.FindLiveEntryAsync(deleter, key, CancellationToken.None)).ShouldBe(100UL);
+        await index.DeleteAsync(deleter, key, 100, CancellationToken.None);
+        (await index.FindLiveEntryAsync(deleter, key, CancellationToken.None)).ShouldBeNull();
+        await harness.RollbackAsync(deleter);
+        var rolledBackInsert = await harness.BeginAsync();
+        (await index.FindLiveEntryAsync(rolledBackInsert, key, CancellationToken.None)).ShouldBe(100UL);
+        var otherKey = IndexKey.FromInt64(43);
+        await index.InsertAsync(rolledBackInsert, otherKey, 200, CancellationToken.None);
+        (await index.FindLiveEntryAsync(rolledBackInsert, otherKey, CancellationToken.None)).ShouldBe(200UL);
+        await harness.RollbackAsync(rolledBackInsert);
+        var reader = await harness.BeginAsync();
+        (await index.FindLiveEntryAsync(reader, otherKey, CancellationToken.None)).ShouldBeNull();
+        await harness.RollbackAsync(reader);
+        var committedDelete = await harness.BeginAsync();
+        await index.DeleteAsync(committedDelete, key, 100, CancellationToken.None);
+        await harness.CommitAsync(committedDelete);
+        var final = await harness.BeginAsync();
+        (await index.FindLiveEntryAsync(final, key, CancellationToken.None)).ShouldBeNull();
+        await harness.RollbackAsync(final);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Indexing] - BTree: latest live lookup refuses a nonunique index")]
+    public async Task FindLiveEntryAsync_NonUniqueIndex_ShouldRefuse()
+    {
+        // Arrange
+        var (harness, index) = await CreateIndexAsync();
+        await using var lifetime = harness;
+        var reader = await harness.BeginAsync();
+
+        // Act / Assert
+        await Should.ThrowAsync<InvalidOperationException>(async () =>
+            await index.FindLiveEntryAsync(reader, IndexKey.FromInt64(1), CancellationToken.None));
+        await harness.RollbackAsync(reader);
+    }
+
     private static async Task<(IndexTestHarness Harness, BTreeIndex Index)> CreateIndexAsync(bool unique = false)
     {
         var harness = new IndexTestHarness();

@@ -97,7 +97,7 @@ COHDBL001 naming SUBQUERY in
 RETURNING, even after an INSERT SELECT or a supported DML WHERE subquery. Windows also
 remain COHDBL001; aggregates fail planning with COHSQLE017. Modifying CTE bodies retain
 COHDBL001 and perform no writes. Empty lists and SELECT ... RETURNING report SQL0003.
-ON CONFLICT ... RETURNING follows the sql-upsert hand-off (#1118).
+ON CONFLICT ... RETURNING returns inserted and updated rows, excluding skipped proposals (#1118).
 EXPLAIN reports the expanded RETURNING projection count and names for INSERT,
 INSERT SELECT, UPDATE and DELETE without applying the write or evaluating the projection.
 
@@ -107,9 +107,115 @@ The row-source and target-list model follows PostgreSQL
 `analyze.c:1035-1044`. OLD/NEW masking follows `analyze.c:2773-2786`.
 Subqueries are a deliberate Cohesion subset exclusion.
 
+Duplicate whole-column SET targets in DO UPDATE fail at binding before any write.
+In RETURNING, a real visible target table or alias named excluded remains referenceable;
+the EXCLUDED pseudo-relation itself is out of scope.
+
+Multi-row UPDATE validates outgoing and incoming NO ACTION/RESTRICT foreign keys against
+the complete final replacement state (#1667), under Snapshot and ReadCommitted. It refuses
+a dangling child authorized only by a replaced parent key, permits moving a self-reference
+with its key, and permits mutually referenced key swaps whose final state is consistent.
+A failure leaves every row unchanged.
+
+## INSERT ... ON CONFLICT (#1118)
+
+`INSERT ... ON CONFLICT [(column [, ...]) | ON CONSTRAINT name] DO NOTHING`
+and `... DO UPDATE SET column = expression [, ...] [WHERE predicate]` execute for
+VALUES, DEFAULT VALUES and materialized query sources. RETURNING follows the conflict
+clause and returns inserted and post-update rows only. Skipped rows and false or UNKNOWN
+DO UPDATE filters contribute neither a returned row nor an affected count. The affected
+count is inserted plus updated rows.
+
+A column target infers **every unique index whose column set equals the target set**;
+column order does not matter, and duplicate inference names collapse to that set. No matching
+unique index reports COHSQLE035 naming the target and table. ON CONSTRAINT accepts any
+unique index name on this table, including a user constraint name, a generated primary-key
+name read from INFORMATION_SCHEMA.TABLE_CONSTRAINTS, and a standalone CREATE UNIQUE INDEX
+name: the catalog reports all of them as constraints. Unknown names, CHECK and FOREIGN KEY
+names, and a legacy primary-key declaration without an index report COHSQLE035; the legacy
+case names its absent index explicitly. DO UPDATE requires a target and reports this at
+planning time with COHSQLE035. Untargeted DO NOTHING arbitrates on all unique indexes; with
+no unique indexes it inserts normally. Conflicts outside an explicit target still fail
+ordinary unique enforcement. If index-only DDL creates, drops or replaces unique indexes while the
+statement waits for its table intent lock, the bound arbiter set is invalidated and the
+transaction aborts retryably. A fresh execution binds the current indexes; an explicit target
+whose index was dropped then reports COHSQLE035.
+
+Arbiter keys use the index's collation and temporal normalization, so case_insensitive
+'ADA' conflicts with 'Ada'. **NULL conflicts with NULL** in a unique key, including a
+component of a composite key. This is Cohesion's existing UNIQUE rule and differs from
+PostgreSQL's default NULL-distinct behavior.
+
+DO UPDATE expressions see the original target row (qualified by its alias, or table name
+when there is no alias) and EXCLUDED. An alias hides the base table name. EXCLUDED contains
+the proposed stored values after coercion, defaults, expression defaults and identity
+allocation. An unqualified column common to both relations is ambiguous (COHSQLE015).
+A target named or aliased excluded makes that qualifier ambiguous too. SET expressions
+all read the original target plus proposed row; SET c = DEFAULT uses the normal UPDATE
+default resolver. ALWAYS identity assignments retain COHSQLE025. Identity values allocated
+for conflicting proposals are consumed, including skipped proposals. Each proposal and
+its conflict projection consume defaults before the next proposal (PostgreSQL
+src/backend/executor/nodeModifyTable.c:4497,2980); for example identity proposals 2 and 4
+with an intervening conflict SET id = DEFAULT write identities 3 and 4.
+
+NOT NULL, domains and CHECK validate every proposed row before arbitration. Foreign keys
+validate only inserted and updated rows, so a conflicting DO NOTHING proposal with a dangling
+foreign key is discarded without error. Discarded proposals never authorize a self-referencing
+foreign key on another inserted row. Self-reference checks use final pending replacements,
+so a rekeyed-away parent cannot authorize a dangling child, and a self-reference can move
+with its key in one update. Updated rows recheck assigned-column domains, NOT NULL,
+CHECK, foreign keys and incoming-reference UPDATE RESTRICT. All writes, index changes and
+RETURNING evaluations share one statement bracket; a failure rolls them all back.
+
+DO NOTHING discards duplicate proposed arbiter keys. DO UPDATE cannot affect a row a second
+time (COHSQLE036), whether the first effect inserted or updated it. An earlier DO UPDATE
+rekey releases its old arbiter key in pending statement state: a later proposal may insert
+that released key, matching PostgreSQL's source-order behavior. Keys introduced by an
+earlier effect still count as reaching that affected row twice. A false/UNKNOWN filter
+locks the existing row but does not mark it affected.
+
+Without requested side-effecting defaults, all keys from every unique index of every proposal
+are locked in one sorted batch before arbitration. A requested identity or a default containing
+any non-immutable function call uses source-order per-proposal locking: evaluate its defaults,
+lock all its unique keys in sorted order, then perform its latest-state lookup and conflict
+projection before evaluating the next proposal. This conservative rule includes STABLE and
+sequence-like function calls; constants and immutable expressions keep the up-front batch.
+Old/new replacement keys follow in a sorted batch before any conflicting row lock.
+Upserts hold only table IX, allowing different-key defaulted upserts and plain INSERTs to
+progress independently. Reversed multi-row proposal orders can deadlock; the detected victim
+must roll back and retry its entire transaction (#1668). Consistent input row ordering reduces
+this exposure, as [PostgreSQL advises](https://www.postgresql.org/docs/18/explicit-locking.html#LOCKING-DEADLOCKS)
+(doc/src/sgml/mvcc.sgml:1546-1555).
+A latest-state lookup under that key lock sees committed or own entries. **Snapshot**
+(the session and autocommit default) aborts retryably with DatabaseTransactionAbortedException
+if a conflict was committed after the statement snapshot. In particular, two autocommit
+Snapshot sessions racing ON CONFLICT DO NOTHING on a new key insert one row and abort one
+contender; retry the aborted transaction. **ReadCommitted** instead skips that row for DO
+NOTHING or updates its newest committed version for DO UPDATE. FK validation refreshes
+ReadCommitted committed visibility after arbitration; parents committed with the new version
+are visible, and other transactions' in-flight parents are excluded. A rolled-back contender's
+entry is absent when its key lock releases, so the waiting proposal inserts. This follows
+PostgreSQL's [transaction-isolation contract](https://www.postgresql.org/docs/18/transaction-iso.html)
+and REPEATABLE READ visibility check (src/backend/executor/nodeModifyTable.c:377-405,2935).
+Key-before-row can form cycles with ordinary UPDATE, DELETE and referential SET actions;
+deadlock detection reports DatabaseTransactionDeadlockException, and rollback/retry releases
+the victim's locks. Retry the entire victim transaction, including earlier statements.
+Even a value-only UPDATE replaces unique entries with a new heap location and still needs
+their key locks; it can therefore participate in this detected, retryable cycle. An internal
+row-wait/re-arbitration retry loop is deferred. No lock wait runs inside the apply gate.
+
+The supported shape follows [PostgreSQL INSERT](https://www.postgresql.org/docs/18/sql-insert.html).
+Expression, COLLATE, ordering (ASC/DESC/NULLS FIRST/LAST), operator-class and partial-WHERE
+inference, DO SELECT, and subqueries in DO UPDATE SET/WHERE report named COHDBL001.
+Subqueries there are named ON CONFLICT DO UPDATE after VALUES, SELECT and WITH sources.
+EXCLUDED is absent from RETURNING scope; EXCLUDED.column there reports COHDBL001.
+MySQL ON DUPLICATE KEY UPDATE and SQLite INSERT OR IGNORE/REPLACE report one COHDBL001
+suggesting ON CONFLICT and execute nothing. These spellings and CONFLICT, DO, NOTHING,
+EXCLUDED remain contextual, so stored identifier quoting is unchanged. MERGE remains SQL0002.
+
 ## Statement matrix
 
-With DML RETURNING (#1117), persisted CREATE/DROP VIEW (#1124), CREATE/DROP SCHEMA (#1030) and set operations (#1114), the profile measures **50 of 56 declared clauses** against the live SQL engine.
+With INSERT ... ON CONFLICT (#1118), DML RETURNING (#1117), persisted CREATE/DROP VIEW (#1124), CREATE/DROP SCHEMA (#1030) and set operations (#1114), the profile measures **51 of 57 declared clauses** against the live SQL engine.
 Phase 22 measured 33 of 49.
 The earlier 32/48 figure included `JOIN`, `GROUP BY`, `HAVING`, and `SUBQUERY`,
 removed in Phase 12e (#1019–#1021), plus a no-op `CAST` removed in Phase 13.
@@ -140,6 +246,7 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `SELECT` | Supported subset, measured | Stored tables, persisted read-only views, virtual system relations and aliased derived queries, with written-order N-way INNER/LEFT/CROSS joins and comma items over these source kinds; `DISTINCT`, projections and aliases, scalar expressions, `WHERE`, grouping, multi-expression `ORDER BY ASC/DESC` with per-key `NULLS FIRST`/`NULLS LAST`, nonnegative integer `LIMIT`/`OFFSET`, ISO `FETCH FIRST`/`NEXT`, and the SQL Server `TOP` lexical alias. `COUNT(*)`, `COUNT(expr)`, `SUM`, `AVG`, `MIN`, `MAX`, `STRING_AGG`, and `LISTAGG` execute in grouped and ungrouped queries, with DISTINCT/ALL and ordered inputs. See the aggregate contract below. Top-level `SELECT` without `FROM` is rejected by the planner; CTE bodies can use one implicit row. |
 | `EXPLAIN` | Supported extension, measured | SELECT, INSERT (including query sources), UPDATE or DELETE returns the chosen plan as ordinary rows without executing it. DDL, transaction control, nested EXPLAIN and EXPLAIN ANALYZE report `COHDBL001`. |
 | `INSERT` / `VALUES` | Supported subset, measured | Optional column list, multi-row literal/scalar `VALUES` including whole-item `DEFAULT`, `INSERT ... DEFAULT VALUES` (one row of defaults, with an optional column list), and transactional `INSERT ... SELECT` with the same destination coercion, defaults, and constraints. `VALUES` expressions have no columns in scope: a column reference reports `COHSQLE005` before anything executes (see [VALUES and counts have no column scope](#values-and-counts-have-no-column-scope-1165)). Subqueries inside `VALUES` are excluded; use `INSERT ... SELECT`. |
+| `INSERT ... ON CONFLICT` | Supported subset, measured | Column-set inference, ON CONSTRAINT unique-index names, untargeted DO NOTHING, and targeted DO UPDATE SET/WHERE with target and EXCLUDED scope; inserted/updated RETURNING rows and counts. See the upsert contract above. |
 | `UPDATE` | Supported | multi-column `SET`, including `c = DEFAULT`, and `WHERE` (including correlated and uncorrelated subqueries); qualified references in both use the target name or its alias, which hides the base name (PostgreSQL `parse_relation.c:3759`); hidden/unknown qualifiers fail with located `COHSQLE015` before any write and leave an explicit transaction active; aggregates in SET and outside child queries in WHERE are rejected; aggregates inside WHERE subqueries execute (see [Grouping and aggregate functions](#grouping-and-aggregate-functions-1020)) |
 | `DELETE` | Supported | optional `WHERE`, including correlated and uncorrelated subqueries; aggregates outside a child query are rejected; qualified references use the target name or its alias, which hides the base name (PostgreSQL `parse_relation.c:3759`); hidden/unknown qualifiers fail with located `COHSQLE015` before any write and leave an explicit transaction active |
 | `CREATE TABLE` | Supported | Identity columns use GENERATED ALWAYS/BY DEFAULT AS IDENTITY or the SQL Server IDENTITY alias (see identity contract above). `IF NOT EXISTS`, column definitions with parameterized types, `COLLATE <name>`, `NOT NULL`/`NULL`, `DEFAULT <expression>`, column and table `PRIMARY KEY`, `REFERENCES`/`FOREIGN KEY`, `CHECK`, and `UNIQUE`; optional `CONSTRAINT <name>` |
@@ -393,7 +500,6 @@ reports `SQL0003` at the literal; it also used to fail only at execution.
 |---|---|---|
 | `DELETE FROM t WHRE id = 1` | Leftover text after the DELETE; the message adds that `WHRE` was read as an alias of table `t` | `id` |
 | `UPDATE t SET a = 1 WHRE id = 1`, `UPDATE t SET ... FROM u WHERE ...` | Leftover text after the UPDATE | `WHRE`, `FROM` |
-| `INSERT ... ON CONFLICT DO NOTHING`, `INSERT ... ON DUPLICATE KEY UPDATE ...` | Leftover text after the INSERT | `ON` |
 | `SELECT ... LIMIT 1 FETCH FIRST 1 ROW ONLY` | two row-limit clauses in one SELECT | `FETCH` |
 | `a NOT NULL`, `flag NOT FALSE`, `x NOT y` | `NOT` after an operand must begin a recognized predicate: BETWEEN, IN and LIKE execute; unsupported ILIKE/SIMILAR forms use COHDBL001. It used to parse as `x AND NOT y` | the token after `NOT` |
 | `WHERE id = :id`, `SET a = :a`, `WHERE id = ;`, a statement ending in `WHERE` or `=` | Expected an expression; the NULL literal the parser used to substitute is gone | the token, or the end of the text |
@@ -2855,6 +2961,8 @@ pin in the same change.
 | `COHSQLE032` | Error | DISTINCT/ALL/input ORDER BY on a scalar function, or DISTINCT input ordering whose keys are absent from the arguments (PostgreSQL 42809 / 42P10) |
 | `COHSQLE033` | Error | Invalid persisted view declaration/replacement, changed recorded column identity, oversized view record, or otherwise uncoded stored-body binding failure |
 | `COHSQLE034` | Error | Invalid LIKE ESCAPE: escape is neither empty nor one Unicode scalar, or a pattern ends with the escape character (SQLSTATE 22025); ExecutionFailure leaves the connection usable |
+| `COHSQLE035` | Error | ON CONFLICT has no matching unique arbiter, a named target is not a unique index, or DO UPDATE omitted its target (PostgreSQL 42P10) |
+| `COHSQLE036` | Error | ON CONFLICT DO UPDATE cannot affect a row a second time (PostgreSQL 21000) |
 
 Positions are absolute character offsets into the statement text; line/column
 presentation is computed by tooling from the source (offset → line mapping), not
