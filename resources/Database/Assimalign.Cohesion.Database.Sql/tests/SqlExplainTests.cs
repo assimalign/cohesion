@@ -17,6 +17,38 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed class SqlExplainTests
 {
+    [Theory(DisplayName = "Cohesion Test [Sql] - EXPLAIN: primary-key DML describes bound seek values and target qualifiers (#1274)")]
+    [InlineData("UPDATE dbo.t SET v = 3 WHERE dbo.t.id = @key")]
+    [InlineData("DELETE FROM dbo.t WHERE dbo.t.id = @key")]
+    [InlineData("UPDATE dbo.t AS x SET v = 3 WHERE x.id = @key")]
+    [InlineData("DELETE FROM dbo.t AS x WHERE x.id = @key")]
+    public async Task Execute_PrimaryKeyDml_ShouldDescribeIndexSeekAsync(string sql)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("explain-dml-seek", new());
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE t (id INT PRIMARY KEY, v INT)", cancellationToken: CancellationToken.None);
+
+        // Act
+        await using var result = (await session.ExecuteAsync("EXPLAIN " + sql,
+            new Dictionary<string, object?> { ["key"] = 2L }, CancellationToken.None)).ShouldBeAssignableTo<DatabaseResultSet>();
+        var operators = new List<string>();
+        await foreach (var row in result.GetRowsAsync(CancellationToken.None))
+        {
+            operators.Add(row.GetString(2).ShouldNotBeNull());
+            if (row.GetString(2) == "IndexSeek")
+            {
+                row.GetString(3).ShouldBe("dbo.t");
+                row.GetString(4).ShouldNotBeNullOrWhiteSpace();
+                row.GetString(5).ShouldBe("id = 2");
+            }
+        }
+
+        // Assert
+        operators.ShouldBe([sql.StartsWith("UPDATE", StringComparison.Ordinal) ? "Update" : "Delete", "IndexSeek"]);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sql] - EXPLAIN: each ordering key describes bound direction and NULL placement")]
     [InlineData("SELECT id FROM t ORDER BY age {0}, id DESC")]
     [InlineData("SELECT q.id FROM (SELECT id, age FROM t) q ORDER BY q.age {0}, q.id DESC")]
@@ -80,7 +112,9 @@ public sealed class SqlExplainTests
     [InlineData("INSERT INTO t VALUES (3, 30)", "Insert", false)]
     [InlineData("INSERT INTO t SELECT id, age FROM t", "InsertSelect", false)]
     [InlineData("UPDATE t SET age = 99 WHERE id = 1", "Update", false)]
+    [InlineData("UPDATE t SET age = 99 WHERE age >= 20 AND age < 40", "IndexSeek", true)]
     [InlineData("DELETE FROM t WHERE id = 1", "Delete", false)]
+    [InlineData("DELETE FROM t WHERE age >= 20 AND age < 40", "IndexSeek", true)]
     public async Task Execute_DataPlan_ShouldDescribeChosenOperatorsAsync(string statement, string expected, bool indexes)
     {
         // Arrange

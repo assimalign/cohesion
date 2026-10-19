@@ -509,7 +509,7 @@ SQL's combined operators, not a shared or independently executable algebra:
 | `DerivedTable` | Aliased materialized query source with its complete child plan; a single source has a Select parent |
 | `Subqueries` | Uncorrelated child plans in execution order, followed by the enclosing input |
 | `CorrelatedSubqueries` | Frame-local child plans evaluated for outer rows, followed by the enclosing input |
-| `Insert`, `InsertSelect`, `Update`, `Delete` | Intended mutation and target; a source query or target scan is a child, never executed by EXPLAIN |
+| `Insert`, `InsertSelect`, `Update`, `Delete` | Intended mutation and target; a source query or chosen target scan/seek is a child, never executed by EXPLAIN |
 | `CreateTable`, `DropTable`, `AddColumn`, `AlterColumn`, `DropColumn`, `AddConstraint`, `DropConstraint`, `CreateIndex`, `DropIndex`, `Definition` | Complete internal DDL mappings, including SQL function/domain definitions; EXPLAIN DDL remains refused at parse time |
 
 Details include each bound ordering key's direction and effective NULLS FIRST/LAST placement,
@@ -2663,7 +2663,7 @@ project reference or InternalsVisibleTo change is required.
   is deliberately thin — a cost-based planner replaces the binding internals
   later without changing the executor seam (#178's plan-stage requirement, MVP
   shape). That promise paid out with index adoption: the IR gained exactly one
-  node family (`SqlAccessPath` on the SELECT plan — scan | index seek) and the
+  node family (`SqlAccessPath` on SELECT, UPDATE and DELETE plans — scan | index seek) and the
   executor seam did not move.
 - **Unknown functions and wrong argument counts fail before binding (#1068,
   #1189).** `SqlPlanner.Plan` walks the whole statement
@@ -2728,10 +2728,25 @@ project reference or InternalsVisibleTo change is required.
   byte-expressible collations) get range seeks; Guid/binary/json remain equality-only.
   String predicates with expression/index collation mismatch scan. Everything else — `OR` at the top level,
   computed columns, column-to-column comparisons, null comparands — falls
-  back to the per-object scan. **The full WHERE always remains the residual
+  back to the per-object scan. Scalar-subquery comparands also scan because
+  they are not plan-time evaluable. **The full WHERE always remains the residual
   predicate**, re-evaluated on every fetched row, so access-path selection
-  can cost performance but never correctness. SELECT only in this cut;
-  UPDATE/DELETE target collection still scans (recorded follow-up).
+  can cost performance but never correctness. UPDATE and DELETE use the same
+  selector with their own relation evaluator, so aliases and qualified keys resolve
+  identically to the residual predicate (#1274). A caller may supply its own scope
+  and applicable conjunct set for access selection.
+- **DML target materialization (#1274).** UPDATE and DELETE fully drain the chosen
+  seek or scan before taking sorted row locks, then sorted unique-key locks, then
+  entering the apply gate. Tree read latches end before residual/subquery evaluation;
+  the cursor is disposed even on evaluation failure or cancellation. Materialized
+  targets give Halloween protection when SET moves keys within the sought range.
+  The final-state `BuildConstraintUpdates` validation and `EnsureLatestVersion`
+  first-updater-wins checks are unchanged. A bound access path whose tree was
+  detached or whose catalog identity changed (including reuse of its name for a
+  different key) falls back to the residual-filtered scan; a catalog-registered but missing
+  maintenance tree still refuses writes. PostgreSQL similarly drives ModifyTable
+  from its outer child plan (`src/backend/executor/nodeModifyTable.c:4442,4497`);
+  Cohesion reuses its existing SELECT seek and retains its two-phase write discipline.
 - **Seek execution is snapshot-anchored.** The executor drives the B+Tree
   cursor through the **statement snapshot** (the `BTreeIndex.OpenCursor(snapshot,
   …)` overload — the same snapshot the equivalent scan filters through, which
@@ -2755,7 +2770,10 @@ project reference or InternalsVisibleTo change is required.
   arithmetic on the encoded component. Per-statement observability
   (`SqlStatementMetrics`: access path + records examined) is the behavioral
   proof surface — the planner suite asserts an indexed equality seek examines
-  O(matches) records while the equivalent scan examines O(table).
+  O(matches) records while the equivalent scan examines O(table). `AccessPath`
+  reports the last access path executed in the statement, including nested work;
+  an indexed cascading DELETE therefore reports its constraint seek (`constraint-seek:<index>`)
+  rather than the original target access path.
 - **Row format: MVCC stamps + object-id-prefixed tuple, in per-object page
   chains (since record-space format version 3; the current format is the one `SqlRowCodec.RecordSpaceFormatVersion` names).**
   Every data record is `[writer u64][deleter u64]` — a fixed 16-byte version-stamp header, the
@@ -5089,9 +5107,8 @@ identity tables through the ordinary SQL executor.
 RIGHT/FULL OUTER, NATURAL and LATERAL joins, qualified wildcards, UPDATE SET
 subqueries, `Serializable`
 isolation (rejected at begin), cost-based optimization (selection stays
-rule-based), index seeks for UPDATE/DELETE target collection, and index-only
-result production (a seek always fetches the row). (Row-level MVCC visibility
-and secondary indexes — DDL, write-path maintenance, and planner seek
+rule-based), and index-only result production (a seek always fetches the row).
+(Row-level MVCC visibility and secondary indexes — DDL, write-path maintenance, and planner seek
 adoption — were non-goals of earlier cuts and are now delivered; see "The MVCC
 integration", "Secondary indexes", and the access-path bullets above.)
 

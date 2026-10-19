@@ -117,7 +117,7 @@ internal sealed partial class SqlPlanExecutor
                     : ExecuteSystemView(systemView, statement, cancellationToken);
             case SqlSelectPlan select:
                 return _subqueryValues is { HasCorrelatedQueries: true }
-                    ? await ExecuteCorrelatedSelectAsync(EnumerateRows(select, statement, cancellationToken).Select(row => row.Values),
+                    ? await ExecuteCorrelatedSelectAsync(EnumerateRows(select.Table, select.Access, statement, cancellationToken).Select(row => row.Values),
                         select.Projections, select.Where, select.OrderBy, select.Limit, select.Offset, select.IsDistinct,
                         statement, cancellationToken).ConfigureAwait(false)
                     : ExecuteSelect(select, statement, cancellationToken);
@@ -172,7 +172,7 @@ internal sealed partial class SqlPlanExecutor
         // The access path narrows the candidate set; the full WHERE stays the
         // residual predicate for both paths, so seek results are equivalent to
         // scan results by construction.
-        foreach (var (_, values) in EnumerateRows(plan, statement, cancellationToken))
+        foreach (var (_, values) in EnumerateRows(plan.Table, plan.Access, statement, cancellationToken))
         {
             if (evaluator.Matches(plan.Where, values))
             {
@@ -375,7 +375,7 @@ internal sealed partial class SqlPlanExecutor
     //
     // Write statements execute in two phases (area DESIGN §3.8 step 3):
     //
-    //   Phase 1 (no physical bracket): scan through the statement snapshot,
+    //   Phase 1 (no physical bracket): seek or scan through the statement snapshot,
     //   collect targets, and acquire locks through the lock manager — an
     //   IntentExclusive lock on the table, then an Exclusive lock per target
     //   row (keyed by the version's packed location, the same identity the
@@ -429,7 +429,9 @@ internal sealed partial class SqlPlanExecutor
         var indexes = GetLiveIndexes(plan.Table);
         var targets = new List<(PageId PageId, int SlotIndex, object?[] Values)>();
 
-        foreach (var (location, values) in Scan(plan.Table, statement, cancellationToken))
+        // Fully drain and dispose the candidate cursor before row-lock waits or writes.
+        // This materialization also prevents Halloween revisits when SET moves an index key.
+        foreach (var (location, values) in EnumerateRows(plan.Table, plan.Access, statement, cancellationToken))
         {
             await PrepareSubqueriesAsync(plan.Where, values, statement, cancellationToken).ConfigureAwait(false);
             if (evaluator.Matches(plan.Where, values))
@@ -556,7 +558,7 @@ internal sealed partial class SqlPlanExecutor
         EnsureCurrentDefinition(plan.Table);
         var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
         var targets = new List<((PageId PageId, int SlotIndex) Location, object?[] Values)>();
-        foreach (var row in Scan(plan.Table, statement, cancellationToken))
+        foreach (var row in EnumerateRows(plan.Table, plan.Access, statement, cancellationToken))
         {
             await PrepareSubqueriesAsync(plan.Where, row.Values, statement, cancellationToken).ConfigureAwait(false);
             if (evaluator.Matches(plan.Where, row.Values)) { targets.Add(row); }
@@ -1371,26 +1373,32 @@ internal sealed partial class SqlPlanExecutor
     // ── Scan / seek + coercion helpers ─────────────────────────────────
 
     /// <summary>
-    /// Enumerates the SELECT's candidate rows through its access path: an index
+    /// Enumerates a statement's candidate rows through its access path: an index
     /// seek drives a B+Tree cursor with the statement snapshot; everything else
     /// is the per-object scan. A seek whose index is not attached (torn-state
     /// defense) falls back to the scan — the residual predicate makes the
     /// fallback invisible except in cost.
     /// </summary>
     private IEnumerable<((PageId PageId, int SlotIndex) Location, object?[] Values)> EnumerateRows(
-        SqlSelectPlan plan,
+        SqlCatalogTable table,
+        SqlAccessPath access,
         SqlStatementContext statement,
         CancellationToken cancellationToken)
     {
-        if (plan.Access is SqlIndexSeekPath seek &&
-            _indexManager.TryGetIndex(plan.Table.ObjectId, seek.Index.Name, out var index))
+        if (access is SqlIndexSeekPath seek &&
+            _indexManager.TryGetIndex(table.ObjectId, seek.Index.Name, out var index) &&
+            _catalog.TryGetIndex(table.ObjectId, seek.Index.Name, out var current) && ReferenceEquals(current, seek.Index))
         {
+            // DML's IX object lock stabilizes these lookups against DDL's X lock.
+            // SELECT takes no object lock: DROP removes catalog metadata before detaching
+            // the tree. A reused name must never apply old bounds to a replacement's keys.
+            // The manager and catalog directory locks are taken and released separately.
             statement.Metrics.AccessPath = $"seek:{seek.Index.Name}";
-            return SeekRows(plan.Table, seek, index, statement, cancellationToken);
+            return SeekRows(table, seek, index, statement, cancellationToken);
         }
 
         statement.Metrics.AccessPath = "scan";
-        return Scan(plan.Table, statement, cancellationToken);
+        return Scan(table, statement, cancellationToken);
     }
 
     /// <summary>
@@ -1414,8 +1422,11 @@ internal sealed partial class SqlPlanExecutor
         var snapshot = snapshotOverride ?? statement.Snapshot;
         var defaults = _definitions.Get(table, cancellationToken).MissingValues;
 
-        // The cursor materializes under the tree's read latch; synchronous
-        // drain is the in-process fast path.
+        // OpenCursor materializes entries under the tree's read latch and releases it
+        // before returning. No latch is held across residual/subquery evaluation or
+        // a DML row-lock wait. DML drains this cursor before taking sorted row locks,
+        // then sorted unique-key locks, then the apply gate and storage/index latches.
+        // The finally below also disposes on predicate failure and cancellation.
         var cursor = index.OpenCursor(snapshot, range);
 
         try

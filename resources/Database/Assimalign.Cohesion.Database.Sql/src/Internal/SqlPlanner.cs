@@ -326,7 +326,7 @@ internal sealed partial class SqlPlanner
     // ── Access-path selection (rule-based, by design) ──────────────────
 
     /// <summary>
-    /// Picks the SELECT's access path: an index seek when the WHERE clause has
+    /// Picks a statement's access path: an index seek when the WHERE clause has
     /// sargable predicates on an index's leading key columns, the per-object
     /// scan otherwise. Selection is rule-based (the MVP planner's contract —
     /// no cost model): the index with the longest equality prefix wins; ties
@@ -335,8 +335,13 @@ internal sealed partial class SqlPlanner
     /// choice can cost performance but never correctness.
     /// </summary>
     private SqlAccessPath SelectAccessPath(SqlCatalogTable table, SqlExpression? where, SqlExpressionEvaluator? scope = null)
+        => SelectAccessPath(table, where is null ? [] : [where], scope);
+
+    // A caller may supply only the conjuncts applicable to its input and that input's scope.
+    // Keep predicate collection independent of SELECT/DML binding (and of future join pushdown).
+    private SqlAccessPath SelectAccessPath(SqlCatalogTable table, IReadOnlyList<SqlExpression> conjuncts, SqlExpressionEvaluator? scope)
     {
-        if (ViewDefinitionBinding is not null || where is null || _commonTableState?.BindingUnused == true)
+        if (ViewDefinitionBinding is not null || conjuncts.Count == 0 || _commonTableState?.BindingUnused == true)
         {
             return SqlScanPath.Instance;
         }
@@ -350,7 +355,7 @@ internal sealed partial class SqlPlanner
 
         // Top-level AND conjuncts → per-column sargable predicates.
         var predicates = new Dictionary<int, List<(SqlBinaryOperator Op, object? Value)>>();
-        CollectSargablePredicates(table, where, predicates, scope);
+        foreach (var conjunct in conjuncts) { CollectSargablePredicates(table, conjunct, predicates, scope); }
 
         if (predicates.Count == 0)
         {
@@ -904,7 +909,8 @@ internal sealed partial class SqlPlanner
             where = evaluator.Bind(update.Where);
         }
 
-        var input = new SqlUpdatePlan(table, assignments, where) { Returning = BindReturning(update.Returning, table, update.Table) };
+        var input = new SqlUpdatePlan(table, assignments, where, SelectAccessPath(table, update.Where, evaluator))
+        { Returning = BindReturning(update.Returning, table, update.Table) };
         return WrapSubqueries(input, queries);
     }
 
@@ -915,19 +921,20 @@ internal sealed partial class SqlPlanner
     {
         var queries = BindDmlSubqueries(delete.Where, delete.Table);
         var table = ResolveTable(delete.Table);
+        var evaluator = new SqlExpressionEvaluator(table.Columns, _parameters,
+            defaultCollation: _catalog.DefaultCollation, subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken,
+            outerScope: OuterScope, outerDependencies: OuterDependencies, relation: delete.Table);
 
         SqlBoundExpression? where = null;
         if (delete.Where is not null)
         {
             RejectAggregateInDmlWhere(delete.Where);
-            var evaluator = new SqlExpressionEvaluator(table.Columns, _parameters,
-                defaultCollation: _catalog.DefaultCollation, subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken,
-                outerScope: OuterScope, outerDependencies: OuterDependencies, relation: delete.Table);
             ValidateExpression(delete.Where, evaluator, _subqueryTypes);
             where = evaluator.Bind(delete.Where);
         }
 
-        var input = new SqlDeletePlan(table, where) { Returning = BindReturning(delete.Returning, table, delete.Table) };
+        var input = new SqlDeletePlan(table, where, SelectAccessPath(table, delete.Where, evaluator))
+        { Returning = BindReturning(delete.Returning, table, delete.Table) };
         return WrapSubqueries(input, queries);
     }
 

@@ -309,12 +309,13 @@ internal sealed record SqlOnConflictPlan(IReadOnlyList<SqlCatalogIndex> Arbiters
 internal sealed record SqlUpdatePlan(
     SqlCatalogTable Table,
     IReadOnlyList<(int Ordinal, SqlBoundExpression Value)> Assignments,
-    SqlBoundExpression? Where) : SqlPlan
+    SqlBoundExpression? Where,
+    SqlAccessPath Access) : SqlPlan
 {
     public IReadOnlyList<SqlProjection>? Returning { get; init; }
 }
 
-internal sealed record SqlDeletePlan(SqlCatalogTable Table, SqlBoundExpression? Where) : SqlPlan
+internal sealed record SqlDeletePlan(SqlCatalogTable Table, SqlBoundExpression? Where, SqlAccessPath Access) : SqlPlan
 {
     public IReadOnlyList<SqlProjection>? Returning { get; init; }
 }
