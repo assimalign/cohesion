@@ -68,7 +68,7 @@ dead ends. COHDBG004 includes actual physical and viable totals when that cap is
 100,000-binding and 64-hop limits remain. The separate #1533 budget redesign is deferred.
 
 EXPLAIN Expand details include adjacency=(node,direction,type_id,relationship), effective
-seek_direction, type_filter, physical=selected_records, viable=accepted_hops and
+seek_direction, type_filter, physical=visited_candidates, viable=accepted_hops and
 physical_limit=1000000. These describe counting rules; EXPLAIN executes no hops and has no
 runtime totals. The engine's GqlProfileExecutionTests EXPLAIN corpus pins this description.
 

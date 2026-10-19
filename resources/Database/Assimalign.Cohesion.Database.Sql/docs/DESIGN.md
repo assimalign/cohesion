@@ -2724,8 +2724,8 @@ project reference or InternalsVisibleTo change is required.
   bound, then uniqueness, then name — deterministic), extended by range bounds
   on the next key column. **Range sargability is a type matrix**: only types
   whose evaluator comparison order provably equals the key codec's byte order
-  (integers, decimal, floats, boolean, temporal types and strings under matching
-  byte-expressible collations) get range seeks; Guid/binary/json remain equality-only.
+  (integers, decimal, boolean, temporal types and strings under matching
+  byte-expressible collations) get range seeks; floats, Guid, binary and json remain equality-only.
   String predicates with expression/index collation mismatch scan. Everything else — `OR` at the top level,
   computed columns, column-to-column comparisons, null comparands — falls
   back to the per-object scan. Scalar-subquery comparands also scan because
