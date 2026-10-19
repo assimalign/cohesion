@@ -2795,10 +2795,10 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Whether nothing has been written through this opened file set: every
-    /// transaction appends its begin record and every checkpoint its checkpoint
-    /// record, so an unchanged journal position, an unchanged sequence counter (no
-    /// reservation either) and no active transaction mean no page was dirtied and
+    /// Whether nothing has been written through this opened file set. Sequence
+    /// reservations include logical readers that append no lifecycle records.
+    /// An unchanged journal position, an unchanged sequence counter (no reservation
+    /// either) and no active physical transaction mean no page was dirtied and
     /// no header field moved since recovery finished.
     /// </summary>
     private bool IsUnwrittenSinceOpen()

@@ -1293,6 +1293,13 @@ refusal of a device cause.
 
 ### The physical/logical bracket interplay (MVCC layering rules)
 
+Logical readers reserve storage-counter sequences but open no physical bracket and append no
+lifecycle records (#1280). The coordinator appends a logical begin only at first apply, before
+the physical bracket can stamp versions, and only enrolled writers append logical commit/abort
+records or wait for commit durability. A reader promoted after a checkpoint enrolls at that same
+point, so recovery can classify its stamps even though the checkpoint never anchored it.
+Physical bracket durability and the rules below are unchanged.
+
 The MVCC session binding (area DESIGN.md §3.8, first delivered by the SQL
 engine) added three storage-side rules that keep the logical layer sound:
 

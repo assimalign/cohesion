@@ -350,9 +350,10 @@ public sealed class TransactionCoordinator : IAsyncDisposable
 
     /// <summary>
     /// Begins a logical transaction: the manager assigns the sequence from the
-    /// storage's counter (one namespace) and appends the begin record through
-    /// the journal-bound log. Physical brackets are per statement — see the
-    /// class remarks.
+    /// storage's counter (one namespace) without appending a journal record.
+    /// The first admitted statement apply enrolls it as a writer, appending its
+    /// logical begin record before opening the physical bracket. Physical brackets
+    /// are per statement — see the class remarks.
     /// </summary>
     /// <param name="isolationLevel">The isolation level the transaction runs under.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
@@ -380,11 +381,12 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     }
 
     /// <summary>
-    /// Commits the transaction through the manager: the journal-bound log
-    /// appends the commit record and awaits durability (which, by journal
-    /// ordering, also makes every statement bracket's records durable) while
-    /// the transaction is still in the manager's active table; the version
-    /// store then retains the writer's tombstones for pruning.
+    /// Commits the transaction through the manager. For an enrolled writer, the
+    /// journal-bound log appends the commit record and awaits durability (which,
+    /// by journal ordering, also makes every statement bracket's records durable)
+    /// while the transaction is still in the manager's active table; the version
+    /// store then retains the writer's tombstones for pruning. A reader ends and
+    /// releases its locks without appending a lifecycle record or awaiting durability.
     /// </summary>
     /// <param name="context">The transaction to commit.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
@@ -417,7 +419,9 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// <summary>
     /// Rolls the transaction back through the manager: the version store's
     /// ledger physically undoes the writer's stamps (created versions deleted,
-    /// tombstones cleared), the abort record is appended, and locks release.
+    /// tombstones cleared), and locks release. Only enrolled writers append an
+    /// abort record, without awaiting its durability. A reader ends and releases
+    /// its locks without appending a lifecycle record or awaiting durability.
     /// </summary>
     /// <param name="context">The transaction to roll back.</param>
     /// <param name="cancellationToken">
@@ -520,11 +524,6 @@ public sealed class TransactionCoordinator : IAsyncDisposable
 
             try
             {
-                // From here on the transaction can stamp row versions, so every checkpoint
-                // until it ends must keep it classifiable (and the journal must name it now
-                // if the last checkpoint truncated its begin record while it was a reader).
-                _log.EnterWriter((long)context.Sequence.Value);
-
                 var bracket = _storage.BeginTransaction();
 
                 lock (_sync)
@@ -1046,32 +1045,31 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// <para>
     /// <b>Only writers are anchored (#1242).</b> Recovery must classify every transaction
     /// whose row versions can be in the data pages, and only a transaction that applied a
-    /// statement can have stamped one; a reader's begin record may go with the truncation.
+    /// statement can have stamped one; readers append no lifecycle records (#1280).
     /// So a checkpoint lists the active writers alone, which keeps the storage's checkpoint
     /// anchor small under read-heavy load.
     /// </para>
     /// <para>
     /// A transaction that was a reader at a checkpoint and applies a statement afterwards is
-    /// no longer named by the journal: its begin record was truncated and the checkpoint did
-    /// not list it. Before its first statement bracket begins, <see cref="EnterWriter"/>
-    /// therefore appends its begin record again, under the gate, so a crash before its commit
-    /// still finds it unproven and scrubs its versions. A transaction whose begin record is
-    /// in the current journal, or that the last checkpoint listed, needs no second one.
+    /// named by neither the journal nor that checkpoint. Before its first statement bracket
+    /// begins, <see cref="EnterWriter"/> appends its begin record under the gate, so a crash
+    /// before its commit still finds it unproven and scrubs its versions. Later applies need
+    /// no second begin: the journal or the checkpoint anchor keeps naming the writer.
     /// </para>
     /// </remarks>
     private sealed class GatedJournalLog : TransactionLog
     {
         private readonly TransactionCoordinator _coordinator;
-        private readonly HashSet<long> _activeSequences = new();
 
         // The active transactions that applied a statement: the only ones that can have
         // stamped row versions, so the only ones a checkpoint must list. A rolled-back
         // writer whose undo is deferred stays here until its abort record is appended.
         private readonly HashSet<long> _writers = new();
 
-        // The active transactions the journal names since the last checkpoint: begun since
-        // then, announced again since then, or listed by that checkpoint (its writers).
-        private readonly HashSet<long> _journaled = new();
+        // Lock order: apply admission/checkpoint holds _applyGate before this gate;
+        // checkpoint then takes Storage's transaction lock and the journal's monitor.
+        // Enrollment and lifecycle appends take this gate before the journal's monitor.
+        // No manager/context lock is held here, and durability waits run outside this gate.
         private readonly object _gate = new();
 
         internal GatedJournalLog(TransactionCoordinator coordinator)
@@ -1083,39 +1081,29 @@ public sealed class TransactionCoordinator : IAsyncDisposable
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            lock (_gate)
-            {
-                _coordinator._journal.AppendBegin((long)sequence.Value);
-                _activeSequences.Add((long)sequence.Value);
-                _journaled.Add((long)sequence.Value);
-            }
-
+            // Readers retain their storage-counter sequence and snapshot, but have nothing
+            // to classify after a crash. The first apply enrolls them under the append gate.
             return default;
         }
 
         /// <summary>
         /// Records that a transaction is about to apply a statement and so may stamp row
-        /// versions: from now on every checkpoint lists it. When the journal no longer names
-        /// it — a checkpoint truncated its begin record while it was a reader — its begin
-        /// record is appended again first, so the journal names it before its first stamp.
+        /// versions: append its begin record before the first physical bracket, and from now
+        /// on every checkpoint lists it. A reader that outlived a checkpoint enrolls here too.
         /// </summary>
         /// <param name="sequence">The transaction's sequence.</param>
-        internal void EnterWriter(long sequence)
+        public override void EnterWriter(TransactionSequence sequence)
         {
             lock (_gate)
             {
-                if (_writers.Contains(sequence) || !_activeSequences.Contains(sequence))
+                long writer = (long)sequence.Value;
+                if (_writers.Contains(writer))
                 {
                     return;
                 }
 
-                if (!_journaled.Contains(sequence))
-                {
-                    _coordinator._journal.AppendBegin(sequence);
-                    _journaled.Add(sequence);
-                }
-
-                _writers.Add(sequence);
+                _coordinator._journal.AppendBegin(writer);
+                _writers.Add(writer);
             }
         }
 
@@ -1126,6 +1114,12 @@ public sealed class TransactionCoordinator : IAsyncDisposable
             long lsn;
             lock (_gate)
             {
+                if (!_writers.Contains((long)sequence.Value))
+                {
+                    Forget((long)sequence.Value);
+                    return default;
+                }
+
                 lsn = _coordinator._journal.AppendCommit((long)sequence.Value);
                 Forget((long)sequence.Value);
             }
@@ -1160,6 +1154,12 @@ public sealed class TransactionCoordinator : IAsyncDisposable
 
             lock (_gate)
             {
+                if (!_writers.Contains((long)sequence.Value))
+                {
+                    Forget((long)sequence.Value);
+                    return default;
+                }
+
                 try
                 {
                     _coordinator.BeforeAbortRecord?.Invoke((long)sequence.Value);
@@ -1198,27 +1198,14 @@ public sealed class TransactionCoordinator : IAsyncDisposable
 
                 writers.Sort();
 
-                try
-                {
-                    _coordinator.BeforeCheckpoint?.Invoke(writers.ToArray());
-                    storage.Checkpoint(writers);
-                }
-                finally
-                {
-                    // Whether or not the truncation ran (it may have, even when the
-                    // checkpoint record then failed), only the writers it listed are still
-                    // named for certain; any reader that becomes a writer is announced again.
-                    _journaled.Clear();
-                    _journaled.UnionWith(_writers);
-                }
+                _coordinator.BeforeCheckpoint?.Invoke(writers.ToArray());
+                storage.Checkpoint(writers);
             }
         }
 
         private void Forget(long sequence)
         {
-            _activeSequences.Remove(sequence);
             _writers.Remove(sequence);
-            _journaled.Remove(sequence);
         }
     }
 }

@@ -48,7 +48,15 @@ internal abstract class TransactionLog
     }
 
     /// <summary>
-    /// Appends a begin record for the specified transaction.
+    /// Enrolls a transaction before its first apply can stamp versions. Journal-bound logs
+    /// append its begin record here; the in-memory log and fault doubles need no enrollment.
+    /// The manager has admitted the apply, so an end waits until enrollment and apply exit.
+    /// </summary>
+    /// <param name="sequence">The transaction's sequence.</param>
+    public virtual void EnterWriter(TransactionSequence sequence) { }
+
+    /// <summary>
+    /// Registers a transaction's begin; journal-bound logs defer the record until enrollment.
     /// </summary>
     /// <param name="sequence">The transaction's sequence.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
