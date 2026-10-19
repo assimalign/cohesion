@@ -87,6 +87,10 @@ public sealed class LockManager
 
     private readonly Dictionary<LockResource, LockEntry> _table = new();
 
+    // First grants have a monotonic stamp. Re-grants and upgrades keep it, so a statement
+    // mark records the existing holdings without copying them or allocating on the fast path.
+    private ulong _grantSequence;
+
     // Every resource an owner was granted or queued for, so its release and AbandonPending visit
     // only the owner's entries instead of enumerating the whole table, which cost every transaction
     // end time in proportion to every other transaction's locks and to the table's high-water mark
@@ -462,6 +466,65 @@ public sealed class LockManager
     }
 
     /// <summary>
+    /// Marks the grants already held by an owner before an unwritten statement takes locks.
+    /// </summary>
+    /// <param name="owner">The transaction whose existing grants must be preserved.</param>
+    /// <returns>An allocation-free mark for this manager and owner.</returns>
+    /// <remarks>The caller serializes statements and lock requests within the owner.</remarks>
+    public LockStatementMark MarkStatement(TransactionSequence owner)
+    {
+        lock (_sync)
+        {
+            return new LockStatementMark(this, owner, _grantSequence);
+        }
+    }
+
+    /// <summary>
+    /// Releases resources first granted to the owner after a statement mark and wakes their
+    /// queues, without ending the owner or releasing any resource held at the mark.
+    /// </summary>
+    /// <param name="mark">The mark created before the statement acquired locks.</param>
+    /// <exception cref="ArgumentException">The mark is default or belongs to another manager.</exception>
+    /// <remarks>
+    /// The caller must have applied no writes since the mark and have no pending lock requests.
+    /// Re-grants and upgrades of a resource held at the mark are retained in full; no downgrade
+    /// occurs. An abandoned owner keeps all grants until its deferred undo completes. This
+    /// operation is available in engine mode for unwritten arbitration; written data retains
+    /// transaction-duration locking. The mark can also release the row acquired by a completed
+    /// arbitration wait before the caller restarts. Use it within the same transaction lifetime.
+    /// </remarks>
+    public void ReleaseSince(LockStatementMark mark)
+    {
+        if (!ReferenceEquals(mark.Manager, this))
+        {
+            throw new ArgumentException(ErrorMessages.LockStatementMarkInvalid, nameof(mark));
+        }
+
+        List<Waiter>? granted = null;
+        List<Waiter>? victims = null;
+        lock (_sync)
+        {
+            if (!_abandoned.Contains(mark.Owner.Value) && _owned.TryGetValue(mark.Owner.Value, out var resources))
+            {
+                foreach (var resource in resources)
+                {
+                    if (_table.TryGetValue(resource, out var entry) &&
+                        entry.Granted.TryGetValue(mark.Owner.Value, out var grant) && grant.Sequence > mark.GrantSequence)
+                    {
+                        entry.Granted.Remove(mark.Owner.Value);
+                        LeftLocked(entry);
+                    }
+                }
+            }
+
+            WakeScheduledLocked(ref granted, ref victims);
+        }
+
+        CompleteGranted(granted);
+        FailDeadlocked(victims);
+    }
+
+    /// <summary>
     /// Releases every lock held by the specified transaction, and fails its pending
     /// requests with <see cref="TransactionAbortedException"/>: the call ends the
     /// owner's participation in the lock table.
@@ -650,7 +713,7 @@ public sealed class LockManager
     /// </summary>
     private bool RefuseAbandonedLocked(LockEntry entry, ulong owner, LockMode mode)
         => _abandoned.Contains(owner)
-            && !(entry.Granted.TryGetValue(owner, out byte held) && (_conflicts[(int)mode] & ~_heldConflicts[held]) == 0);
+            && !(entry.Granted.TryGetValue(owner, out var held) && (_conflicts[(int)mode] & ~_heldConflicts[held.Modes]) == 0);
 
     // A refused request, a dequeued waiter or a release may have left the entry with nothing in it.
     // An entry the wake list still holds is removed when the list is walked.
@@ -741,9 +804,9 @@ public sealed class LockManager
         {
             if (holder == owner)
             {
-                held = modes;
+                held = modes.Modes;
             }
-            else if (Conflicts(modes, mode))
+            else if (Conflicts(modes.Modes, mode))
             {
                 blocked = true;
             }
@@ -784,7 +847,7 @@ public sealed class LockManager
     {
         foreach (var (holder, held) in entry.Granted)
         {
-            if (holder != queued.Owner && Conflicts(held, queued.Mode))
+            if (holder != queued.Owner && Conflicts(held.Modes, queued.Mode))
             {
                 return false;
             }
@@ -831,11 +894,12 @@ public sealed class LockManager
     /// <param name="victims">Collects the queued requests the grant leaves on a wait-for cycle, failed by the caller outside the lock.</param>
     private void GrantLocked(LockEntry entry, ulong owner, LockMode mode, Waiter? queued, ref List<Waiter>? victims)
     {
-        bool holder = entry.Granted.TryGetValue(owner, out byte held);
+        bool holder = entry.Granted.TryGetValue(owner, out var grant);
+        byte held = grant.Modes;
         byte holds = (byte)(held | Bit(mode));
         if (holds != held)
         {
-            entry.Granted[owner] = holds;
+            entry.Granted[owner] = new LockGrant(holds, holder ? grant.Sequence : ++_grantSequence);
         }
 
         if (!holder)
@@ -1118,7 +1182,7 @@ public sealed class LockManager
         var entry = waiter.Entry;
         foreach (var (holder, held) in entry.Granted)
         {
-            if (holder != waiter.Owner && Conflicts(held, waiter.Mode))
+            if (holder != waiter.Owner && Conflicts(held.Modes, waiter.Mode))
             {
                 frontier.Push(holder);
             }
@@ -1176,7 +1240,7 @@ public sealed class LockManager
 
         foreach (var (holder, held) in waiter.Entry.Granted)
         {
-            if (holder == waiter.Owner || !Conflicts(held, waiter.Mode))
+            if (holder == waiter.Owner || !Conflicts(held.Modes, waiter.Mode))
             {
                 continue;
             }
@@ -1190,7 +1254,7 @@ public sealed class LockManager
             described++;
             AppendSeparator(description);
             description.Append(holder.ToString(CultureInfo.InvariantCulture)).Append(':');
-            AppendModes(description, held);
+            AppendModes(description, held.Modes);
             DescribeQueuedLocked(holder, description, depth);
         }
 
@@ -1328,6 +1392,8 @@ public sealed class LockManager
         private void Report() => _manager.ReportBlocked(_waiter, _started);
     }
 
+    private readonly record struct LockGrant(byte Modes, ulong Sequence);
+
     private sealed class LockEntry
     {
         public LockEntry(LockResource resource)
@@ -1338,7 +1404,7 @@ public sealed class LockManager
         public LockResource Resource { get; }
 
         // Each holder's granted modes, as a mask with bit (int)mode set for each mode granted.
-        public Dictionary<ulong, byte> Granted { get; } = new();
+        public Dictionary<ulong, LockGrant> Granted { get; } = new();
 
         // The queued requests, in the order they queued.
         public List<Waiter> Waiters { get; } = new();
