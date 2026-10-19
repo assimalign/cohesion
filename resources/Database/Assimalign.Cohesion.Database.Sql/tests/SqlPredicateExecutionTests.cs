@@ -8,6 +8,8 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Database.Execution;
+using Assimalign.Cohesion.Database.Language;
+using Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Types;
@@ -62,6 +64,13 @@ public sealed class SqlPredicateExecutionTests
     [InlineData("1 = NULL IS NULL", true)]
     [InlineData("TRUE = 'abc' LIKE 'a%'", true)]
     [InlineData("1 IN (1) = TRUE", true)]
+    [InlineData("1 IN (1) IN (TRUE)", true)]
+    [InlineData("(1 IN (1)) IN (TRUE)", true)]
+    [InlineData("1 NOT IN (2) BETWEEN FALSE AND TRUE", true)]
+    [InlineData("(1 NOT IN (2)) BETWEEN FALSE AND TRUE", true)]
+    [InlineData("CAST('a' AS CHAR(3)) IS NOT DISTINCT FROM 'a'", true)]
+    [InlineData("NOT EXISTS (SELECT id FROM t) IS TRUE", false)]
+    [InlineData("NOT EXISTS (SELECT id FROM t) = FALSE", true)]
     [InlineData("FALSE IS DISTINCT FROM 1 = 1", true)]
     [InlineData("NULL IS NULL || '' LIKE '____'", true)]
     [InlineData("TRUE = NOT FALSE", true)]
@@ -79,6 +88,7 @@ public sealed class SqlPredicateExecutionTests
         await using var engine = CreateEngine();
         var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await SeedAsync(session);
         // Act / Assert
         (await RowsAsync(session, "SELECT " + expression + oneRow)).ShouldHaveSingleItem()[0].ShouldBe(expected);
     }
@@ -158,7 +168,9 @@ public sealed class SqlPredicateExecutionTests
         // Act
         var error = await Should.ThrowAsync<DatabaseException>(() => RowsAsync(session, "SELECT " + expression + " FROM empty_rows"));
         // Assert
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE034");
+        var diagnostic = error.Diagnostics.ShouldHaveSingleItem();
+        diagnostic.Code.ShouldBe("COHSQLE034");
+        diagnostic.Start.ShouldBe(8 + expression.IndexOf(" LIKE ", StringComparison.Ordinal));
         error.Message.ShouldContain("ESCAPE", Case.Sensitive);
         (await RowsAsync(session, "SELECT 1" + oneRow)).ShouldHaveSingleItem()[0].ShouldBe(1);
     }
@@ -179,7 +191,9 @@ public sealed class SqlPredicateExecutionTests
         var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("SELECT " + expression + " FROM empty_rows",
             new Dictionary<string, object?> { ["p"] = 1 }, CancellationToken.None));
         // Assert
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE003");
+        var diagnostic = error.Diagnostics.ShouldHaveSingleItem();
+        diagnostic.Code.ShouldBe("COHSQLE003");
+        diagnostic.Start.ShouldBe(8 + expression.IndexOf(" IS ", StringComparison.Ordinal));
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Distinct: comparer identity includes NaN, collation and incompatible-type failures")]
@@ -229,22 +243,26 @@ public sealed class SqlPredicateExecutionTests
         (await RowsAsync(session, "SELECT id FROM t o WHERE o.flag IS NOT DISTINCT FROM (SELECT i.flag FROM t i WHERE i.id = o.id) ORDER BY id")).Count.ShouldBe(3);
         (await RowsAsync(session, "SELECT id FROM t o WHERE name LIKE 'a!%' ESCAPE (SELECT i.esc FROM t i WHERE i.id = o.id)")).ShouldBeEmpty();
         (await RowsAsync(session, "SELECT name LIKE pattern ESCAPE esc FROM t ORDER BY id")).ShouldBe(new object?[][] { [true], [true], [true] });
-        (await RowsAsync(session, "EXPLAIN SELECT id FROM t WHERE flag IS TRUE AND flag IS DISTINCT FROM NULL AND name LIKE 'a!%' ESCAPE '!'"))
-            .ShouldNotBeEmpty();
+        (await RowsAsync(session, "SELECT MAX(id) IS DISTINCT FROM 3 FROM t")).ShouldHaveSingleItem()[0].ShouldBe(false);
+        (await RowsAsync(session, "WITH c AS (SELECT 2 AS x) SELECT id FROM t WHERE id IS DISTINCT FROM (SELECT x FROM c) ORDER BY id"))
+            .ShouldBe(new object?[][] { [1], [3] });
+        var plan = await RowsAsync(session, "EXPLAIN SELECT id FROM t WHERE flag IS TRUE AND flag IS DISTINCT FROM NULL AND name LIKE 'a!%' ESCAPE '!'");
+        plan.Single(row => Equals(row[2], "Select"))[5].ShouldBeOfType<string>()
+            .ShouldBe("filter=True; order_keys=0; order_by=[]; distinct=False; limit=; offset=");
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Predicate walkers: hidden columns, calls, stars and aggregate levels are validated")]
-    [InlineData("SELECT -'1' COLLATE binary FROM t")]
-    [InlineData("SELECT absent IS TRUE FROM t")]
-    [InlineData("SELECT flag IS DISTINCT FROM absent FROM t")]
-    [InlineData("SELECT name LIKE pattern ESCAPE absent FROM t")]
-    [InlineData("SELECT name LIKE pattern ESCAPE NO_SUCH_FUNCTION() FROM t")]
-    [InlineData("SELECT * IS TRUE FROM t")]
-    [InlineData("SELECT 1 IS DISTINCT FROM * FROM t")]
-    [InlineData("SELECT name LIKE pattern ESCAPE * FROM t")]
-    [InlineData("SELECT COUNT(*) FROM t WHERE COUNT(*) IS DISTINCT FROM 0")]
-    [InlineData("SELECT COUNT(*) FROM t WHERE (COUNT(*) = 1) IS TRUE")]
-    public async Task Execute_InvalidNestedOperand_ShouldFailAdmissionAsync(string sql)
+    [InlineData("SELECT -'1' COLLATE binary FROM t", "COHSQLE003")]
+    [InlineData("SELECT absent IS TRUE FROM t", "COHSQLE015")]
+    [InlineData("SELECT flag IS DISTINCT FROM absent FROM t", "COHSQLE015")]
+    [InlineData("SELECT name LIKE pattern ESCAPE absent FROM t", "COHSQLE015")]
+    [InlineData("SELECT name LIKE pattern ESCAPE NO_SUCH_FUNCTION() FROM t", "COHSQLE016")]
+    [InlineData("SELECT * IS TRUE FROM t", "COHSQLE013")]
+    [InlineData("SELECT 1 IS DISTINCT FROM * FROM t", "COHSQLE013")]
+    [InlineData("SELECT name LIKE pattern ESCAPE * FROM t", "COHSQLE013")]
+    [InlineData("SELECT COUNT(*) FROM t WHERE COUNT(*) IS DISTINCT FROM 0", "COHSQLE017")]
+    [InlineData("SELECT COUNT(*) FROM t WHERE (COUNT(*) = 1) IS TRUE", "COHSQLE017")]
+    public async Task Execute_InvalidNestedOperand_ShouldFailAdmissionAsync(string sql, string code)
     {
         // Arrange
         await using var engine = CreateEngine();
@@ -252,7 +270,8 @@ public sealed class SqlPredicateExecutionTests
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await SeedAsync(session);
         // Act / Assert
-        await Should.ThrowAsync<DatabaseException>(() => RowsAsync(session, sql));
+        var error = await Should.ThrowAsync<DatabaseException>(() => RowsAsync(session, sql));
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(code);
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Predicates: CHECK, DEFAULT, function and view text persist and reopen")]
@@ -265,6 +284,8 @@ public sealed class SqlPredicateExecutionTests
             var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
             await using var session = await database.CreateSessionAsync(CancellationToken.None);
             await ExecuteAsync(session, "CREATE TABLE plain (flag BOOLEAN CHECK (flag))");
+            await ExecuteAsync(session, "CREATE TABLE defaults (a BOOLEAN DEFAULT 1 = 1, b BOOLEAN DEFAULT 1 IS DISTINCT FROM 2 NOT NULL)");
+            await ExecuteAsync(session, "INSERT INTO defaults DEFAULT VALUES");
             await ExecuteAsync(session, "INSERT INTO plain VALUES (NULL)");
             await ExecuteAsync(session, "CREATE TABLE checks (id INT, flag BOOLEAN DEFAULT (NULL IS UNKNOWN), name TEXT, a INT, b INT, CONSTRAINT ck_truth CHECK (flag IS TRUE), CONSTRAINT ck_like CHECK (name LIKE 'a!%' ESCAPE '!'), CONSTRAINT ck_distinct CHECK (a IS NOT DISTINCT FROM b))");
             await ExecuteAsync(session, "INSERT INTO checks (id, name, a, b) VALUES (1, 'a%', NULL, NULL)");
@@ -278,6 +299,7 @@ public sealed class SqlPredicateExecutionTests
         var restored = await reopened.OpenDatabaseAsync("db", CancellationToken.None);
         await using var reader = await restored.CreateSessionAsync(CancellationToken.None);
         // Assert
+        (await RowsAsync(reader, "SELECT * FROM defaults")).ShouldHaveSingleItem().ShouldBe(new object?[] { true, true });
         (await RowsAsync(reader, "SELECT * FROM predicates")).ShouldHaveSingleItem().ShouldBe(new object?[] { 1, true, true, true });
         foreach (string values in new[] { "(2, NULL, 'a%', 1, 1)", "(2, TRUE, 'abc', 1, 1)", "(2, TRUE, 'a%', NULL, 1)" })
         { await Should.ThrowAsync<SqlConstraintViolationException>(() => ExecuteAsync(reader, "INSERT INTO checks VALUES " + values)); }
@@ -331,6 +353,140 @@ public sealed class SqlPredicateExecutionTests
         using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(20));
         // Act / Assert
         Should.Throw<OperationCanceledException>(() => pattern.Match(new string('a', 1_000_000), Collation.FromName(name), cancellation.Token));
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - Predicates: nonassociative chains refuse execution")]
+    [InlineData("a < b < c")]
+    [InlineData("a = b = c")]
+    [InlineData("a IS DISTINCT FROM b IS NULL")]
+    [InlineData("a LIKE b LIKE c")]
+    [InlineData("a BETWEEN 1 AND 2 LIKE c")]
+    public async Task Execute_NonassociativeChain_ShouldRefuseAsync(string expression)
+    {
+        // Arrange
+        await using var engine = CreateEngine();
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        // Act
+        var error = await Should.ThrowAsync<DatabaseException>(() => RowsAsync(session, "SELECT " + expression + oneRow + ";"));
+        // Assert
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("SQL0003");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - Views: functions used only by predicate operands retain dependencies")]
+    [InlineData("'a%' LIKE 'a!%' ESCAPE escape_only()", "escape_only", "TEXT", "'!'")]
+    [InlineData("1 IS DISTINCT FROM distinct_only()", "distinct_only", "INT", "2")]
+    public async Task Execute_PredicateOnlyFunction_ShouldRefuseDropAsync(string expression, string name, string type, string body)
+    {
+        // Arrange
+        await using var engine = CreateEngine();
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecuteAsync(session, $"CREATE FUNCTION {name}() RETURNS {type} IMMUTABLE RETURN {body}");
+        await ExecuteAsync(session, "CREATE VIEW v AS SELECT " + expression + " AS matched" + oneRow);
+        // Act
+        var error = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "DROP FUNCTION " + name + "()"));
+        // Assert
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLD002");
+        (await RowsAsync(session, "SELECT matched FROM v")).ShouldHaveSingleItem()[0].ShouldBe(true);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - LIKE: wildcards consume original Unicode scalars in checks, scans and seeks")]
+    [InlineData("%가", true)]
+    [InlineData("%각", true)]
+    [InlineData("%é", false)]
+    [InlineData("%ß", true)]
+    [InlineData("%́", true)]
+    public async Task Execute_OriginalScalarWildcard_ShouldPreserveInputBoundariesAsync(string value, bool expected)
+    {
+        // Arrange
+        await using var engine = CreateEngine();
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecuteAsync(session, "CREATE TABLE candidates (id INT, s TEXT COLLATE case_accent_insensitive)");
+        await ExecuteAsync(session, "CREATE INDEX by_id ON candidates (id)");
+        await ExecuteAsync(session, "CREATE TABLE checked (s TEXT COLLATE case_accent_insensitive CHECK (s LIKE '!%_' ESCAPE '!'))");
+        await ExecuteAsync(session, $"INSERT INTO candidates VALUES (1, '{value}')");
+        // Act / Assert
+        (await RowsAsync(session, "SELECT id FROM candidates WHERE s LIKE '!%_' ESCAPE '!'")).Count.ShouldBe(expected ? 1 : 0);
+        (await RowsAsync(session, "SELECT id FROM candidates WHERE id = 1 AND s LIKE '!%_' ESCAPE '!'")).Count.ShouldBe(expected ? 1 : 0);
+        (await RowsAsync(session, "EXPLAIN SELECT id FROM candidates WHERE id = 1 AND s LIKE '!%_' ESCAPE '!'")).ShouldContain(row => Equals(row[2], "IndexSeek"));
+        if (expected) { await ExecuteAsync(session, $"INSERT INTO checked VALUES ('{value}')"); }
+        else { await Should.ThrowAsync<SqlConstraintViolationException>(() => ExecuteAsync(session, $"INSERT INTO checked VALUES ('{value}')")); }
+        (await RowsAsync(session, "SELECT s FROM checked")).Count.ShouldBe(expected ? 1 : 0);
+        (await RowsAsync(session, "SELECT '각' COLLATE case_accent_insensitive LIKE '_', '각' COLLATE case_accent_insensitive LIKE '각', 'éb' COLLATE case_accent_insensitive LIKE 'é_', '́' COLLATE case_accent_insensitive LIKE '́'" + oneRow))
+            .ShouldHaveSingleItem().ShouldBe(new object?[] { true, true, true, true });
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - LIKE: repetitive nonmatching collation paths cancel within a bound")]
+    [InlineData("case_insensitive")]
+    [InlineData("case_accent_insensitive")]
+    [InlineData("invariant")]
+    public void Match_RepeatedWildcardFailure_ShouldCancelCleanly(string name)
+    {
+        // Arrange
+        var pattern = SqlLikePattern.Compile(string.Concat(Enumerable.Repeat("%a", 128)) + "b", "!", CancellationToken.None);
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
+        var elapsed = System.Diagnostics.Stopwatch.StartNew();
+        // Act / Assert
+        Should.Throw<OperationCanceledException>(() => pattern.Match(new string('a', 200_000), Collation.FromName(name), cancellation.Token));
+        elapsed.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(5));
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - Predicates: runtime operand failures retain their source location")]
+    [InlineData("distinct", "COHSQLE003")]
+    [InlineData("boolean", "COHSQLE003")]
+    [InlineData("escape", "COHSQLE034")]
+    public void Evaluate_InvalidRuntimeOperand_ShouldRetainLocation(string kind, string code)
+    {
+        // Arrange
+        var location = Location.Create(1, 1, 9, 13);
+        var collation = SqlBoundCollation.Of(default, default, Collation.Binary);
+        SqlBoundExpression expression = kind switch
+        {
+            "distinct" => new SqlBoundDistinct(new SqlBoundConstant(new PredicateFaultComparand()), new SqlBoundConstant(new PredicateFaultComparand()), false, collation, location),
+            "boolean" => new SqlBoundBooleanTest(new SqlBoundConstant(1), SqlTruthValue.True, false, location),
+            _ => new SqlBoundLike(new SqlBoundConstant("x"), new SqlBoundConstant("x!"), new SqlBoundConstant("!"), false, collation, null, location),
+        };
+        var evaluator = new SqlExpressionEvaluator([], null);
+        // Act
+        var error = Should.Throw<DatabaseException>(() => evaluator.Evaluate(expression, []));
+        // Assert
+        var diagnostic = error.Diagnostics.ShouldHaveSingleItem();
+        diagnostic.Code.ShouldBe(code);
+        diagnostic.Start.ShouldBe(9);
+        diagnostic.End.ShouldBe(13);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - LIKE: every collation advances wildcards over raw scalars")]
+    [InlineData("binary")]
+    [InlineData("case_insensitive")]
+    [InlineData("case_accent_insensitive")]
+    [InlineData("invariant")]
+    public void Match_OriginalScalars_ShouldCountBeforeCollation(string name)
+    {
+        // Arrange
+        var collation = Collation.FromName(name);
+        var pattern = SqlLikePattern.Compile("!%_", "!", CancellationToken.None);
+        // Act / Assert
+        pattern.Match("%가", collation, CancellationToken.None).ShouldBeTrue();
+        pattern.Match("%é", collation, CancellationToken.None).ShouldBeFalse();
+        pattern.Match("%ß", collation, CancellationToken.None).ShouldBeTrue();
+        pattern.Match("%́", collation, CancellationToken.None).ShouldBeTrue();
+        SqlLikePattern.Compile("a_b", "!", CancellationToken.None).Match("áb", collation, CancellationToken.None).ShouldBeTrue();
+        SqlLikePattern.Compile("é_", "!", CancellationToken.None).Match("éb", Collation.Invariant, CancellationToken.None).ShouldBeTrue();
+        SqlLikePattern.Compile("가_", "!", CancellationToken.None).Match("가b", Collation.Invariant, CancellationToken.None).ShouldBeTrue();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sql] - LIKE: the binary fast path retains scalar validation")]
+    public void Match_InvalidUtf16_ShouldRetainBinaryValidation()
+    {
+        // Arrange
+        var wildcard = SqlLikePattern.Compile("_", "!", CancellationToken.None);
+        var literal = SqlLikePattern.Compile("\ud800", "!", CancellationToken.None);
+        // Act / Assert
+        Should.Throw<DatabaseTypeException>(() => wildcard.Match("\ud800", Collation.Binary, CancellationToken.None));
+        Should.Throw<DatabaseTypeException>(() => literal.Match("x", Collation.Binary, CancellationToken.None));
     }
 
     internal static SqlDatabaseEngine CreateEngine() => SqlDatabaseEngine.Create("predicates", new());

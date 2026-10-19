@@ -5526,9 +5526,15 @@ effective collation folds the value, pattern and escape candidates, so an ESCAPE
 COLLATE participates without rewriting the escape scalar. Fixed
 patterns and supplied parameters compile once during binding, using the existing SQL
 text formatter for concatenated constants; invalid fixed escapes
-fail on empty inputs too (COHSQLE034). Index-backed matching backtracks iteratively to
-the last percent; linguistic matching uses explicit continuations and visited suffixes
-to preserve variable-length literal equality without recursion. Both observe statement
-cancellation. PostgreSQL's backslash default, empty escape and unrestricted quoted
+fail on empty inputs too (COHSQLE034), an intentional eager-validation divergence
+from PostgreSQL. Wildcards consume original input scalars (like_match.c:193-221);
+a scalar-to-normalized-offset map preserves boundaries across expansions and ignored
+marks. Literal probes compare spans and stop once a prefix can no longer match.
+Linguistic probes use CompareInfo spans with an accent-insensitive prefix bound
+at complete text elements, so following combining marks or Hangul jamo may still
+complete a literal; equality continues to probe every original scalar boundary. Explicit continuations
+and visited suffixes avoid recursion and repeated wildcard paths; both paths observe
+statement cancellation. Runtime distinct, truth-test and escape diagnostics retain
+the bound source location. PostgreSQL's backslash default, empty escape and unrestricted quoted
 scalar rules apply (like_match.c:428-453,473-476); DIALECT.md specifies the ISO differences.
 Format 25 admits the new persisted expression/view syntax and has no upgrade reader.

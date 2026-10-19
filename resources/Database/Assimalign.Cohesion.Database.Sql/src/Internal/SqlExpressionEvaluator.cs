@@ -1006,9 +1006,20 @@ internal sealed partial class SqlExpressionEvaluator
     {
         object? left = EvaluateCore(expression.Left, row);
         object? right = EvaluateCore(expression.Right, row);
-        bool distinct = left is null ? right is not null : right is null ||
-            SqlValueComparer.Compare(left, right, expression.Collation.Resolve(_subqueryValues)) != 0;
-        return Box(distinct != expression.IsNegated);
+        try
+        {
+            bool distinct = left is null ? right is not null : right is null ||
+                SqlValueComparer.Compare(left, right, expression.Collation.Resolve(_subqueryValues)) != 0;
+            return Box(distinct != expression.IsNegated);
+        }
+        catch (SqlEvaluationException exception) when (exception.Diagnostics[0].Start is null && expression.Location is not null)
+        {
+            throw exception.At(expression.Location);
+        }
+        catch (SqlPlanningException exception) when (exception.Diagnostics[0].Start is null && expression.Location is not null)
+        {
+            throw exception.At(expression.Location);
+        }
     }
 
     private object EvaluateBooleanTest(SqlBoundBooleanTest expression, object?[] row)
@@ -1016,7 +1027,7 @@ internal sealed partial class SqlExpressionEvaluator
         object? value = EvaluateCore(expression.Operand, row);
         if (value is not null and not bool)
         {
-            throw new SqlPlanningException("COHSQLE003", ErrorMessages.BooleanTestOperand);
+            throw new SqlPlanningException("COHSQLE003", ErrorMessages.BooleanTestOperand, expression.Location);
         }
         bool matches = expression.TruthValue switch
         {
@@ -1034,9 +1045,16 @@ internal sealed partial class SqlExpressionEvaluator
         object? escape = EvaluateCore(expression.Escape, row);
         if (value is null || pattern is null || escape is null) { return null; }
         var collation = expression.Collation.Resolve(_subqueryValues);
-        var compiled = expression.Compiled ?? SqlLikePattern.Compile(LikeText(pattern), LikeText(escape), _cancellationToken);
-        bool matches = compiled.Match(LikeText(SqlCharacter.Output(value)), collation, _cancellationToken);
-        return Box(matches != expression.IsNegated);
+        try
+        {
+            var compiled = expression.Compiled ?? SqlLikePattern.Compile(LikeText(pattern), LikeText(escape), _cancellationToken);
+            bool matches = compiled.Match(LikeText(SqlCharacter.Output(value)), collation, _cancellationToken);
+            return Box(matches != expression.IsNegated);
+        }
+        catch (SqlPlanningException exception) when (exception.Diagnostics[0].Start is null && expression.Location is not null)
+        {
+            throw exception.At(expression.Location);
+        }
     }
 
     private object? EvaluateCase(SqlBoundCase expression, object?[] row, bool copySharedBinary)

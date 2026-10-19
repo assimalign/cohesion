@@ -44,8 +44,8 @@ public static class SqlExpressionRenderer
     private const int concatLevel = 7;
     private const int additiveLevel = 8;
     private const int multiplicativeLevel = 9;
-    private const int unaryLevel = 10;
-    private const int collateLevel = 11;
+    private const int unaryLevel = 11;
+    private const int collateLevel = 10;
     private const int primaryLevel = 12;
 
     // Words that are not profile keywords or functions but that a parser rule reads by spelling

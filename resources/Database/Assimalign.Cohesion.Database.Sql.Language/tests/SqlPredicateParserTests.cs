@@ -15,6 +15,10 @@ public sealed class SqlPredicateParserTests
     [InlineData("a = b IS NULL", "(a = b) IS NULL")]
     [InlineData("a = b LIKE c", "a = (b LIKE c)")]
     [InlineData("a IN (1) = TRUE", "(a IN (1)) = TRUE")]
+    [InlineData("1 IN (1) IN (TRUE)", "(1 IN (1)) IN (TRUE)")]
+    [InlineData("1 NOT IN (2) BETWEEN FALSE AND TRUE", "(1 NOT IN (2)) BETWEEN FALSE AND TRUE")]
+    [InlineData("NOT EXISTS (SELECT 1) IS TRUE", "NOT ((EXISTS (SELECT 1)) IS TRUE)")]
+    [InlineData("NOT EXISTS (SELECT 1) = FALSE", "NOT ((EXISTS (SELECT 1)) = FALSE)")]
     [InlineData("a IS DISTINCT FROM b = c", "a IS DISTINCT FROM (b = c)")]
     [InlineData("a IS NULL || b", "(a IS NULL) || b")]
     [InlineData("a IS NULL COLLATE binary", "(a IS NULL) COLLATE binary")]
@@ -25,7 +29,7 @@ public sealed class SqlPredicateParserTests
     [InlineData("a || b + c", "a || (b + c)")]
     [InlineData("a + b * c", "a + (b * c)")]
     [InlineData("a * -b", "a * (-b)")]
-    [InlineData("-a COLLATE binary", "-(a COLLATE binary)")]
+    [InlineData("-a COLLATE binary", "(-a) COLLATE binary")]
     public void Parse_PrecedenceBoundary_ShouldMatchPostgreSqlTree(string text, string grouped)
     {
         // Arrange
@@ -88,6 +92,10 @@ public sealed class SqlPredicateParserTests
 
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Predicates: excluded operators have one named capability error")]
     [InlineData("a ILIKE p", "ILIKE")]
+    [InlineData("a ISNULL", "ISNULL")]
+    [InlineData("a notnull", "NOTNULL")]
+    [InlineData("a notnull FROM t", "NOTNULL")]
+    [InlineData("a notnull + 1 FROM t", "NOTNULL")]
     [InlineData("a NOT ILIKE p", "NOT ILIKE")]
     [InlineData("a SIMILAR TO p", "SIMILAR TO")]
     [InlineData("a NOT SIMILAR TO p", "NOT SIMILAR TO")]
@@ -147,6 +155,67 @@ public sealed class SqlPredicateParserTests
         var statement = parser.Parse(text);
         // Assert
         statement.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("SQL0006");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Predicates: nonassociative rungs refuse the second operator once")]
+    [InlineData("a < b < c", "<")]
+    [InlineData("a = b = c", "=")]
+    [InlineData("a IS DISTINCT FROM b IS NULL", "IS")]
+    [InlineData("a LIKE b LIKE c", "LIKE")]
+    [InlineData("a BETWEEN 1 AND 2 LIKE c", "LIKE")]
+    public void Parse_NonassociativeChain_ShouldLocateSecondOperator(string text, string second)
+    {
+        // Arrange
+        string sql = "SELECT " + text + " FROM t;";
+        // Act
+        var statement = new SqlQueryParser().Parse(sql);
+        // Assert
+        var error = statement.Diagnostics.ShouldHaveSingleItem();
+        error.Code.ShouldBe("SQL0003");
+        error.Start.ShouldBe(sql.LastIndexOf(second, System.StringComparison.Ordinal));
+        error.End.ShouldBe(error.Start + second.Length);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Predicates: restricted DEFAULT boundary round trips")]
+    [InlineData("1 = 1")]
+    [InlineData("1 IS DISTINCT FROM 2 NOT NULL")]
+    public void Parse_DefaultBoundary_ShouldRetainConstraintAndRoundTrip(string definition)
+    {
+        // Arrange / Act
+        var statement = (SqlQueryStatement)new SqlQueryParser().Parse("CREATE TABLE t (flag BOOLEAN DEFAULT " + definition + ");");
+        // Assert
+        statement.Diagnostics.ShouldBeEmpty();
+        var column = statement.SqlExpression.ShouldBeOfType<SqlCreateTableExpression>().Columns.Single();
+        string rendered = SqlExpressionRenderer.Render(column.DefaultValue!);
+        SqlTreeDump.Dump(Parse(rendered)).ShouldBe(SqlTreeDump.Dump(column.DefaultValue!));
+        column.IsNullable.ShouldBe(!definition.EndsWith("NOT NULL", System.StringComparison.Ordinal));
+        rendered.ShouldBe(definition.Replace(" NOT NULL", ""));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sql.Language] - Predicates: NOT NULL hint directs callers to IS NOT NULL")]
+    public void Parse_NotNullAfterOperand_ShouldRetainHint()
+    {
+        // Arrange / Act
+        var statement = new SqlQueryParser().Parse("SELECT a NOT NULL FROM t;");
+        // Assert
+        var error = statement.Diagnostics.ShouldHaveSingleItem();
+        error.Code.ShouldBe("SQL0003");
+        error.Message.ShouldNotBeNull().ShouldContain("write IS NOT NULL", Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sql.Language] - Predicates: compact NOT EXISTS retains the EXISTS nesting budget")]
+    public void Parse_NotExistsAtLimit_ShouldPreserveCompactDepth()
+    {
+        // Arrange
+        var parser = new SqlQueryParser(new SqlQueryParserOptions { ExpressionNestingLimit = 32 });
+        string query = "EXISTS (SELECT " + string.Concat(Enumerable.Repeat("- ", 30)) + "1)";
+        // Act
+        var positive = parser.Parse("SELECT " + query + ";").ShouldBeOfType<SqlQueryStatement>();
+        var negative = parser.Parse("SELECT NOT " + query + ";").ShouldBeOfType<SqlQueryStatement>();
+        // Assert
+        positive.Diagnostics.ShouldBeEmpty();
+        negative.Diagnostics.ShouldBeEmpty();
+        negative.ExpressionNestingDepth.ShouldBe(positive.ExpressionNestingDepth);
     }
 
     private static SqlExpression Parse(string text)

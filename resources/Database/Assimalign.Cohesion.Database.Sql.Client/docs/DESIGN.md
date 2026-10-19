@@ -437,4 +437,6 @@ the connection stays usable. The wire format and client API are unchanged.
 Existing SQL frames carry predicate truth tables and bound ESCAPE parameters on both
 transports. Invalid escape sequences (COHSQLE034) and non-Boolean truth tests
 (COHSQLE003) are ExecutionFailure responses; data and the connection remain usable.
+A volatile application function that raises a stack refusal deterministically pins
+execution-time COHSQLE004 over the wire, including a reusable connection.
 No client API or protocol format changes are needed.

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Text;
 using System.Threading;
 
@@ -13,11 +14,13 @@ internal sealed class SqlLikePattern
     // A null literal is %, an empty literal is _, and a nonempty literal is a literal run.
     private readonly string?[] _tokens;
     private readonly Collation? _normalizedFor;
+    private readonly string?[]? _normalizedTokens;
 
-    private SqlLikePattern(string?[] tokens, Collation? normalizedFor = null)
+    private SqlLikePattern(string?[] tokens, Collation? normalizedFor = null, string?[]? normalizedTokens = null)
     {
         _tokens = tokens;
         _normalizedFor = normalizedFor;
+        _normalizedTokens = normalizedTokens;
     }
 
     internal static void ValidateEscape(string escape)
@@ -67,39 +70,143 @@ internal sealed class SqlLikePattern
     internal SqlLikePattern Normalize(Collation collation)
     {
         if (!collation.IsIndexBacked || ReferenceEquals(_normalizedFor, collation)) { return this; }
-        var tokens = new List<string?>(_tokens.Length);
-        foreach (string? token in _tokens)
+        var tokens = new string?[_tokens.Length];
+        for (int index = 0; index < tokens.Length; index++)
         {
-            if (token is null || token.Length == 0) { tokens.Add(token); }
-            else
-            {
-                string normalized = collation.Normalize(token);
-                // A literal run stripped entirely by an accent-insensitive collation is empty,
-                // never the underscore wildcard represented by an empty token.
-                if (normalized.Length != 0) { tokens.Add(normalized); }
-            }
+            tokens[index] = _tokens[index] is { } literal ? collation.Normalize(literal) : null;
         }
-        return new SqlLikePattern(tokens.ToArray(), collation);
+        // Keep raw tokens: a literal reduced to empty is still distinct from '_'.
+        return new SqlLikePattern(_tokens, collation, tokens);
     }
 
     internal bool Match(string input, Collation collation, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (!collation.IsIndexBacked) { return MatchLinguistic(input, collation, cancellationToken); }
         var pattern = Normalize(collation);
-        input = collation.Normalize(input);
+        if (ReferenceEquals(collation, Collation.Binary))
+        {
+            collation.Normalize(input); // Retain validation of Unicode scalars on the binary fast path.
+            return MatchBinary(input, cancellationToken);
+        }
+        string normalized = input;
+        int[]? offsets = null;
+        bool[]? elementEnds = null;
+        if (collation.IsIndexBacked && !ReferenceEquals(collation, Collation.Binary))
+        {
+            normalized = collation.Normalize(input);
+            offsets = new int[input.Length + 1];
+            var lengths = new Dictionary<int, int>();
+            int offset = 0, mapped = 0;
+            for (int index = 0; index < input.Length;)
+            {
+                if ((mapped++ & 1023) == 0) { cancellationToken.ThrowIfCancellationRequested(); }
+                int scalar = char.ConvertToUtf32(input, index);
+                int length = ScalarLength(input, index);
+                if (!lengths.TryGetValue(scalar, out int foldedLength))
+                {
+                    foldedLength = collation.Normalize(new Rune(scalar).ToString()).Length;
+                    lengths.Add(scalar, foldedLength);
+                }
+                index += length;
+                offset += foldedLength;
+                offsets[index] = offset;
+            }
+        }
+        else if (!collation.IsIndexBacked)
+        {
+            // Preserve Collation's explicit refusal under invariant globalization.
+            collation.Compare(string.Empty, string.Empty);
+            elementEnds = new bool[input.Length + 1];
+            int elements = 0;
+            for (int end = 0; end < input.Length;)
+            {
+                if ((elements++ & 1023) == 0) { cancellationToken.ThrowIfCancellationRequested(); }
+                end += StringInfo.GetNextTextElementLength(input.AsSpan(end));
+                elementEnds[end] = true;
+            }
+        }
+
+        // PostgreSQL like_match.c:193-221 advances wildcards over original characters,
+        // comparing literal runs separately. Frames and failed suffixes bound repeated work.
+        var pending = new Stack<(int Token, int Start, int End)>();
+        var visited = new HashSet<(int Token, int Start)>();
+        pending.Push((0, 0, -1));
+        int steps = 0;
+        while (pending.TryPop(out var state))
+        {
+            if ((steps++ & 1023) == 0) { cancellationToken.ThrowIfCancellationRequested(); }
+            int index = state.Token, start = state.Start;
+            if (state.End < 0 && !visited.Add((index, start))) { continue; }
+            if (index == _tokens.Length)
+            {
+                if (start == input.Length) { return true; }
+                continue;
+            }
+            string? raw = _tokens[index];
+            if (raw is null)
+            {
+                if (index + 1 == _tokens.Length) { return true; }
+                if (start < input.Length) { pending.Push((index, start + ScalarLength(input, start), -1)); }
+                pending.Push((index + 1, start, -1));
+            }
+            else if (raw.Length == 0)
+            {
+                if (start < input.Length) { pending.Push((index + 1, start + ScalarLength(input, start), -1)); }
+            }
+            else
+            {
+                string token = pattern._normalizedTokens?[index] ?? raw;
+                int normalizedStart = offsets?[start] ?? start;
+                for (int end = state.End < 0 ? start : state.End; end <= input.Length;)
+                {
+                    if ((steps++ & 1023) == 0) { cancellationToken.ThrowIfCancellationRequested(); }
+                    bool equal;
+                    if (collation.IsIndexBacked)
+                    {
+                        var prefix = normalized.AsSpan(normalizedStart, (offsets?[end] ?? end) - normalizedStart);
+                        // Normalization is scalar-local and only appends. Once a prefix differs
+                        // or exceeds the literal, no longer original prefix can match it.
+                        if (!token.AsSpan().StartsWith(prefix, StringComparison.Ordinal)) { break; }
+                        equal = prefix.Length == token.Length;
+                    }
+                    else
+                    {
+                        var prefix = input.AsSpan(start, end - start);
+                        var compare = CultureInfo.InvariantCulture.CompareInfo;
+                        // Prune only at complete text elements: a following scalar can finish
+                        // an accent or Hangul syllable. Equality still probes every raw scalar
+                        // boundary, allowing a wildcard to consume a combining mark itself.
+                        if (elementEnds![end] && !compare.IsPrefix(token.AsSpan(), prefix, CompareOptions.IgnoreNonSpace)) { break; }
+                        equal = compare.Compare(prefix, token.AsSpan(), CompareOptions.None) == 0;
+                    }
+                    if (equal)
+                    {
+                        if (end < input.Length) { pending.Push((index, start, end + ScalarLength(input, end))); }
+                        pending.Push((index + 1, end, -1));
+                        break;
+                    }
+                    if (end == input.Length) { break; }
+                    end += ScalarLength(input, end);
+                }
+            }
+        }
+        return false;
+    }
+
+    private bool MatchBinary(string input, CancellationToken cancellationToken)
+    {
         int position = 0, tokenIndex = 0, star = -1, retry = 0, steps = 0;
         // Iterative backtracking to the last %, bounded stack even for long dynamic patterns.
         while (true)
         {
             if ((steps++ & 1023) == 0) { cancellationToken.ThrowIfCancellationRequested(); }
-            if (tokenIndex == pattern._tokens.Length && position == input.Length) { return true; }
-            if (tokenIndex < pattern._tokens.Length)
+            if (tokenIndex == _tokens.Length && position == input.Length) { return true; }
+            if (tokenIndex < _tokens.Length)
             {
-                string? token = pattern._tokens[tokenIndex];
+                string? token = _tokens[tokenIndex];
                 if (token is null)
                 {
-                    if (tokenIndex + 1 == pattern._tokens.Length) { return true; }
+                    if (tokenIndex + 1 == _tokens.Length) { return true; }
                     star = tokenIndex++;
                     retry = position;
                     continue;
@@ -122,55 +229,6 @@ internal sealed class SqlLikePattern
             position = retry;
             tokenIndex = star + 1;
         }
-    }
-
-    // Linguistic equality can match a run against prefixes of different UTF-16 lengths.
-    // Explicit continuation frames try those prefixes lazily. A visited state prevents
-    // repeated wildcard paths from re-exploring an already failed suffix.
-    private bool MatchLinguistic(string input, Collation collation, CancellationToken cancellationToken)
-    {
-        var pending = new Stack<(int Token, int Start, int End)>();
-        var visited = new HashSet<(int Token, int Start)>();
-        pending.Push((0, 0, -1));
-        int steps = 0;
-        while (pending.TryPop(out var state))
-        {
-            if ((steps++ & 1023) == 0) { cancellationToken.ThrowIfCancellationRequested(); }
-            int index = state.Token, start = state.Start;
-            if (state.End < 0 && !visited.Add((index, start))) { continue; }
-            if (index == _tokens.Length)
-            {
-                if (start == input.Length) { return true; }
-                continue;
-            }
-            string? token = _tokens[index];
-            if (token is null)
-            {
-                if (index + 1 == _tokens.Length) { return true; }
-                if (start < input.Length) { pending.Push((index, start + ScalarLength(input, start), -1)); }
-                pending.Push((index + 1, start, -1));
-            }
-            else if (token.Length == 0)
-            {
-                if (start < input.Length) { pending.Push((index + 1, start + ScalarLength(input, start), -1)); }
-            }
-            else
-            {
-                for (int end = state.End < 0 ? start : state.End; end <= input.Length;)
-                {
-                    if ((steps++ & 1023) == 0) { cancellationToken.ThrowIfCancellationRequested(); }
-                    if (collation.Compare(input[start..end], token) == 0)
-                    {
-                        if (end < input.Length) { pending.Push((index, start, end + ScalarLength(input, end))); }
-                        pending.Push((index + 1, end, -1));
-                        break;
-                    }
-                    if (end == input.Length) { break; }
-                    end += ScalarLength(input, end);
-                }
-            }
-        }
-        return false;
     }
 
     private static int ScalarLength(string text, int position)

@@ -57,7 +57,7 @@ the standard EXTRACT/POSITION and niladic arms apply only without those modifier
 
 ## Executable functions and vocabulary (#1103)
 
-Column DEFAULT uses the arithmetic expression grammar, leaving following column constraints
+Column DEFAULT uses the restricted comparison/distinct expression grammar, leaving following column constraints
 unconsumed (PostgreSQL gram.y:4032-4037). Parentheses, CAST and scalar calls execute; the
 engine enforces variable-free definitions and volatility. NO and ACTION are contextual words.
 The five delete actions are retained in the AST; omitted references use NoAction (#1121).
@@ -463,7 +463,7 @@ output (the rule is in [DIALECT.md](DIALECT.md#persisted-definitions-are-canonic
   Four spellings are special because the lexer or parser folds them: a sign
   applied to a sign is parenthesized (`--` would start a comment), `+(1)` keeps its
   parentheses (`+1` is the literal `1`), `NOT` before a plain `EXISTS` is
-  parenthesized (`NOT EXISTS` is one construct), and a call's first argument whose
+  parenthesized (preserving its unary node rather than the compact NOT EXISTS leaf), and a call's first argument whose
   text starts with `*` but is not the star itself is parenthesized (`f((* = 1))`,
   because `f(*` is read as the `COUNT(*)` star argument).
 - **Identifiers are delimited only when needed**, mirroring the lexer's identifier
@@ -642,8 +642,8 @@ Directly before a numeric literal the sign stays part of the literal, so `+1` an
 `1` are the same tree and `ORDER BY +1` keeps its ordinal meaning; `+a`, `+(1 + 2)`
 and `+@p` build a unary-plus node. Typing and evaluation belong to the engine.
 
-Column DEFAULT uses the arithmetic expression grammar, including unary signs, CAST and
-scalar calls (#1121). Negative numeric literals retain the same unary-minus node as a scalar
+Column DEFAULT uses the restricted comparison/distinct grammar, including arithmetic,
+unary signs, CAST and scalar calls (#1121, #1111). Negative numeric literals retain the same unary-minus node as a scalar
 expression. Compiled-schema defaults remain literal-only; DEFAULT assignment (#1193) reuses
 the canonical expression and resolved calls the catalog stores.
 
@@ -733,4 +733,9 @@ SqlTruthValue selects TRUE, FALSE or UNKNOWN. SqlLikeExpression adds an optional
 operand. Depth accounting, canonical rendering and the complete tree dump include every
 operand. The parser uses PostgreSQL's IS/comparison/predicate/ESCAPE ladder and separates
 concatenation from addition; no named clause or keyword is added. ILIKE/SIMILAR are refused
-positionally, so ordinary identifier quoting stays unchanged. DIALECT.md specifies behavior.
+positionally, so ordinary identifier quoting stays unchanged. ISNULL/NOTNULL are likewise
+postfix capability refusals. List-form IN/NOT IN completes at the closing parenthesis
+and can feed another predicate (gram.y:15645,15668); binary comparison, distinct,
+LIKE and BETWEEN rungs still refuse chaining once at the second operator. Unary signs
+bind above COLLATE (gram.y:910), and NOT EXISTS resumes the ordinary NOT operand
+grammar before choosing the compact leaf. DIALECT.md specifies behavior.

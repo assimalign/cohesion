@@ -787,7 +787,7 @@ is allowed, and future inserts must supply a value. The emptiness check consider
 current committed rows; historical row versions visible only to an older row
 snapshot retain a missing NULL field when such an addition has no default.
 
-Column defaults admit variable-free scalar expressions: arithmetic, unary signs, parentheses, function calls, niladic datetime forms and CAST. The top-level restricted grammar admits comparisons and IS [NOT] DISTINCT FROM, and leaves NOT/AND/OR, truth tests, LIKE/IN and following column constraints unconsumed. Columns, parameters, aggregates and subqueries are excluded. Immutable expressions are evaluated at DDL time, including division-by-zero and conversion errors. Catalog open and table rebinds resolve DEFAULT trees without evaluating them; a changed function implementation fails only a write assigning its default. Stable and volatile defaults evaluate per assigned row, using the transaction-start clock. A call to a name outside the engine's catalog, executable profile and recognized-unsupported vocabulary fails
+Column defaults admit variable-free scalar expressions: arithmetic, unary signs, parentheses, function calls, niladic datetime forms and CAST. The top-level restricted grammar admits comparisons and IS [NOT] DISTINCT FROM (`DEFAULT 1 = 1` and `DEFAULT 1 IS DISTINCT FROM 2 NOT NULL` retain their expression and following constraint), and leaves NOT/AND/OR, truth tests, LIKE/IN and following column constraints unconsumed. Columns, parameters, aggregates and subqueries are excluded. Immutable expressions are evaluated at DDL time, including division-by-zero and conversion errors. Catalog open and table rebinds resolve DEFAULT trees without evaluating them; a changed function implementation fails only a write assigning its default. Stable and volatile defaults evaluate per assigned row, using the transaction-start clock. A call to a name outside the engine's catalog, executable profile and recognized-unsupported vocabulary fails
 first, with `COHSQLE016` and `Unknown function '<name>'.`,
 and so does a call whose arguments its function does not accept, with `COHSQLE006`
 (`DEFAULT ABS(1, 2)`; see [Statement completeness](#statement-completeness-1068)),
@@ -1941,8 +1941,8 @@ these rules without changing SQL request payloads.
 Precedence, low to high: `OR` < `AND` < `NOT` < `IS` tests and distinct
 predicates < comparison (`=`, `<>`, `<`, `>`, `<=`, `>=`) < `[NOT] BETWEEN`,
 `[NOT] IN`, `[NOT] LIKE` < `ESCAPE` < concatenation (`||`) < additive (`+`, `-`)
-< multiplicative (`*`, `/`, `%`) < unary signs (`-`, `+`) < `COLLATE` < primary.
-This follows PostgreSQL `src/backend/parser/gram.y:847-853,904-906`.
+< multiplicative (`*`, `/`, `%`) < `COLLATE` < unary signs (`-`, `+`) < primary.
+This follows PostgreSQL `src/backend/parser/gram.y:847-853,904-910`.
 Compared with the earlier ladder, IS moves below comparison, BETWEEN/IN/LIKE
 move above comparison, LIKE pattern and ESCAPE operands include concatenation,
 concatenation moves below addition, and the lower BETWEEN bound admits restricted
@@ -1951,7 +1951,12 @@ comparison/distinct expressions as PostgreSQL b_expr does. Thus `a = b IS TRUE` 
 the IN result, and `a IS DISTINCT FROM b = c` compares `a` with `(b = c)`.
 Completed postfix tests can be followed by another operator (`a IS NULL = b`).
 Binary predicates and comparisons do not chain at their own rung without
-parentheses. Renderer parentheses remain conservative: comparison operands and
+parentheses. Completed list-form IN/NOT IN can be followed by another predicate,
+so `1 IN (1) IN (TRUE)` and `1 NOT IN (2) BETWEEN FALSE AND TRUE` operate on the
+first Boolean result (gram.y:15645,15668). Unary signs bind above COLLATE:
+`-a COLLATE binary` means `(-a) COLLATE binary`. NOT stays below predicates even
+when its operand starts with EXISTS: `NOT EXISTS (q) IS TRUE` means
+`NOT ((EXISTS (q)) IS TRUE)`. Renderer parentheses remain conservative: comparison operands and
 IS operands retain their earlier grouping, and LIKE pattern/ESCAPE concatenations
 remain parenthesized. Mixed arithmetic/concatenation trees may need additional
 parentheses under the new ladder: `(a || b) + c` keeps its left grouping rather
@@ -2023,12 +2028,18 @@ exactly one Unicode scalar; a longer string or trailing pattern escape raises
 COHSQLE034 (SQLSTATE 22025), naming ESCAPE. Constant and supplied-parameter
 patterns/escapes, including their concatenations, are validated during binding,
 before any row, and compiled once. Dynamic operands are validated when evaluated.
-A NULL escape is checked before escape-length validation.
+A NULL escape is checked before escape-length validation. Eager constant escape
+validation is a deliberate divergence from PostgreSQL: PostgreSQL reports a
+trailing escape only when matching reaches it, and a NULL operand returns NULL
+without matching (like_match.c:162-168,247-252). Here invalid fixed patterns fail
+during binding even for a NULL matched value; dynamic NULL operands still give NULL.
 
 The matched value, pattern and ESCAPE operand all participate in effective collation
 resolution, including an explicit COLLATE on ESCAPE. Tokenization reads raw escapes
 and wildcards before collation normalization;
-only literal runs are normalized. Case folding or accent removal therefore cannot
+only literal comparisons are normalized. Wildcards advance over the original input
+scalars, including combining marks and scalars whose normalized spelling expands
+(like_match.c:193-221). Case folding or accent removal therefore cannot
 change an escape into a wildcard or erase it. All four collations support scalar
 escapes and scalar `_`; CHAR left operands keep their stored padding while CHAR
 patterns use their text conversion. The iterative matcher observes cancellation
@@ -2041,7 +2052,9 @@ These forms are storable in CHECK, parenthesized DEFAULT, domain definitions,
 SQL function bodies and views. Canonical CHECK text is exposed by
 INFORMATION_SCHEMA.CHECK_CONSTRAINTS. Storage format 25 refuses older files;
 there is no upgrade reader. No named clause is added; the profile count does not change.
-ESCAPE and UNKNOWN stay contextual. ILIKE, NOT ILIKE, SIMILAR TO and NOT SIMILAR
+ESCAPE and UNKNOWN stay contextual. ISNULL and NOTNULL are recognized in
+postfix position and refused with one COHDBL001; explicit AS aliases and ordinary
+identifier positions keep their meaning. ILIKE, NOT ILIKE, SIMILAR TO and NOT SIMILAR
 TO are recognized positionally and report one COHDBL001; ordinary identifiers
 `ilike` and `similar` retain their canonical spelling. Binary `&`, `|`, `<<`, `>>`,
 `::` casts (use CAST(x AS type)), IS JSON, IS OF and IS NORMALIZED likewise report

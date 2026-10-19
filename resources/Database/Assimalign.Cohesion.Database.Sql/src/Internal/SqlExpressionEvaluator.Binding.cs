@@ -220,7 +220,7 @@ internal sealed partial class SqlExpressionEvaluator
         right = BindCharacterComparand(distinct.Right, right, distinct.Left);
         collation = CollationOf(distinct, [leftCollation, rightCollation]);
         return new SqlBoundDistinct(left, right, distinct.IsNegated,
-            SqlBoundCollation.Of(leftCollation, rightCollation, _defaultCollation));
+            SqlBoundCollation.Of(leftCollation, rightCollation, _defaultCollation), distinct.Location);
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
@@ -233,7 +233,7 @@ internal sealed partial class SqlExpressionEvaluator
             throw new SqlPlanningException("COHSQLE003", ErrorMessages.BooleanTestOperand, test.Location);
         }
         collation = CollationOf(test, [operandCollation]);
-        return new SqlBoundBooleanTest(operand, test.TruthValue, test.IsNegated);
+        return new SqlBoundBooleanTest(operand, test.TruthValue, test.IsNegated, test.Location);
     }
 
     private SqlBoundExpression BindIsNull(SqlIsNullExpression isNull, out SqlCollationCandidate collation)
@@ -274,16 +274,23 @@ internal sealed partial class SqlExpressionEvaluator
         // Immutable constants (including parameters) compile once, and invalid constants fail
         // before rows are read, including an empty table. NULL ESCAPE remains UNKNOWN.
         SqlLikePattern? compiled = null;
-        if (TryLikeConstant(escape, out var escapeValue) && escapeValue is not null)
+        try
         {
-            SqlLikePattern.ValidateEscape(LikeText(escapeValue));
-            if (TryLikeConstant(pattern, out var patternValue) && patternValue is not null)
+            if (TryLikeConstant(escape, out var escapeValue) && escapeValue is not null)
             {
-                compiled = SqlLikePattern.Compile(LikeText(patternValue), LikeText(escapeValue), _cancellationToken);
-                if (effective.IsFixed) { compiled = compiled.Normalize(effective.Resolve(null)); }
+                SqlLikePattern.ValidateEscape(LikeText(escapeValue));
+                if (TryLikeConstant(pattern, out var patternValue) && patternValue is not null)
+                {
+                    compiled = SqlLikePattern.Compile(LikeText(patternValue), LikeText(escapeValue), _cancellationToken);
+                    if (effective.IsFixed) { compiled = compiled.Normalize(effective.Resolve(null)); }
+                }
             }
         }
-        return new SqlBoundLike(operand, pattern, escape, like.IsNegated, effective, compiled);
+        catch (SqlPlanningException exception) when (exception.Diagnostics[0].Start is null && like.Location is not null)
+        {
+            throw exception.At(like.Location);
+        }
+        return new SqlBoundLike(operand, pattern, escape, like.IsNegated, effective, compiled, like.Location);
     }
 
     private static bool TryLikeConstant(SqlBoundExpression expression, out object? value)
