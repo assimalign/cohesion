@@ -2574,19 +2574,26 @@ as side-effecting. Constants and immutable expressions retain the complete up-fr
 The table retains only IX, allowing unrelated upserts and plain INSERTs to progress.
 
 **Release and retry arbitration (#1668).** Before the first proposal, execution takes an
-allocation-free LockManager.MarkStatement. A live conflict's row is taken with TryAcquire
-before reading it or evaluating its conflict action, including a false filter or DO NOTHING.
+allocation-free LockManager.MarkStatement. DO UPDATE takes a live conflict's row with TryAcquire
+before reading it or evaluating its WHERE filter; a false/UNKNOWN filter keeps that row locked
+and unchanged. DO NOTHING takes no conflicting-row lock: the arbiter key protects its visibility
+check (PostgreSQL nodeModifyTable.c:1207-1211). An all-conflict DO NOTHING has no writes to protect
+and releases its new arbitration grants after those checks, so an open no-op transaction blocks
+neither UPDATE of that parent nor a child INSERT referencing it. Pre-statement grants remain held.
 If refused, ReleaseSince gives back every resource first granted after the mark, including
 all earlier proposals' keys and rows. AcquireAsync then waits for the row through the normal
-deadlock detector, cancellation and storage-abandonment path. Its grant is released through
-the same mark in finally, and the entire arbitration restarts at proposal one. Snapshot checks
-the waited row for a committed update/delete before releasing it and aborts retryably even
+deadlock detector, cancellation and storage-abandonment path. Its row grant is kept, a new mark
+is taken after the grant, and the entire arbitration restarts at proposal one. Later back-offs
+retain rows kept by earlier waits. Snapshot checks
+the waited row for a committed update/delete and aborts retryably even
 when the key is now absent; ReadCommitted looks up the newest committed state. Rollback has
 undone row/index stamps before the holder releases its locks, so a rollback waiter proceeds
-as if the holder never wrote. Cancellation is checked at every restart. Every restart follows
-a completed wait; no retry cap is needed. Contending restarted statements may complete in
-either order. The gated different-arbiter test commits the first completed transaction before
-waiting for the other.
+as if the holder never wrote. Cancellation is checked at every restart. Each restart holds a
+superset of the rows it waited for, and a waited-for row's prior holder has finished. The restart
+holds those rows before taking keys, the canonical UPDATE/DELETE order, and TryAcquire re-grants
+its own row immediately. Two contenders therefore cannot repeatedly hand the same row back and
+forth. Gated LockWaitStart/LockWaitStop cases pin both the same-key schedule and disjoint proposal
+key sets arbitrating through id versus email; both increments apply exactly once.
 
 Conflicting rows are already held when replacement old/new keys are acquired in a sorted
 batch. Outgoing and released FK parent rows also use TryAcquire before their existing
@@ -2595,7 +2602,10 @@ row wait retains this statement's new keys. A resource held before the mark stay
 including any mode upgrade acquired during the statement: ReleaseSince never downgrades it.
 Earlier transaction work remains protected and can still participate in ordinary deadlocks.
 Reversed multi-row upserts can still deadlock while acquiring keys (especially source-ordered
-defaults); callers roll back/retry the victim transaction. Consistent input row order reduces
+defaults). Retained waited rows also permit row-against-row deadlocks when multi-row upserts
+reach rows in opposite orders; the lock manager chooses a retryable victim. This is the residual
+exposure of retaining locks to avoid symmetric back-off livelock (PostgreSQL
+src/backend/executor/execIndexing.c:85-95). Callers roll back/retry the victim transaction. Consistent input row order reduces
 that exposure, as PostgreSQL advises in doc/src/sgml/mvcc.sgml:1546-1555.
 
 Discarding arbitration is safe: proposals, pending index effects, affected-row identities and

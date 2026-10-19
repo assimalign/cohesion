@@ -180,8 +180,13 @@ any non-immutable function call uses source-order per-proposal locking: evaluate
 lock all its unique keys in sorted order, then perform its latest-state lookup and conflict
 projection before evaluating the next proposal. This conservative rule includes STABLE and
 sequence-like function calls; constants and immutable expressions keep the up-front batch.
-Live conflicting rows are taken without waiting during arbitration; old/new replacement keys
-follow in a sorted batch.
+DO UPDATE takes live conflicting rows without waiting during arbitration, before evaluating
+WHERE; a false/UNKNOWN filter retains the row lock without changing it. Old/new replacement
+keys follow in a sorted batch. DO NOTHING takes no conflicting-row lock, checking visibility
+under its arbiter key instead (PostgreSQL nodeModifyTable.c:1207-1211). When every proposal
+conflicts and DO NOTHING writes nothing, new arbitration grants are released after visibility
+checks. Keeping that transaction open therefore blocks neither UPDATE of the parent nor a
+child INSERT referencing it; locks from earlier transaction work stay held.
 Upserts hold only table IX, allowing different-key defaulted upserts and plain INSERTs to
 progress independently. Reversed multi-row proposal orders can deadlock; the detected victim
 must roll back and retry its entire transaction. Consistent input row ordering reduces
@@ -199,7 +204,8 @@ entry is absent when its key lock releases, so the waiting proposal inserts. Thi
 PostgreSQL's [transaction-isolation contract](https://www.postgresql.org/docs/18/transaction-iso.html)
 and REPEATABLE READ visibility check (src/backend/executor/nodeModifyTable.c:377-405,2935).
 On a contended row, arbitration releases every lock newly acquired by this statement before
-waiting, then restarts the whole multi-row arbitration from its first proposal (#1668).
+waiting, keeps the granted row, takes a new statement mark, then restarts the whole multi-row
+arbitration from its first proposal (#1668). Later back-offs retain earlier waited rows too.
 This includes FK parent-row waits. A row-first UPDATE (including value-only UPDATE), DELETE,
 or referential SET action can finish without a key/row deadlock with the upsert's new locks.
 ReadCommitted re-arbitrates against committed state and inserts if DELETE removed the
@@ -207,10 +213,15 @@ conflict. Snapshot aborts retryably when the holder committed a change it cannot
 holder's rollback permits either isolation level to proceed. The wait uses the ordinary
 lock manager, so deadlock detection, cancellation and database abandonment still apply.
 Pre-statement locks survive back-off, including any upgrades; these retained locks and
-reversed multi-row key acquisition can still cause retryable deadlocks. Identities and
+reversed multi-row key acquisition can still cause retryable deadlocks. Keeping waited rows
+also permits row-against-row deadlocks when multi-row upserts reach rows in opposite orders;
+the detector picks a victim, as with PostgreSQL's residual deadlock exposure when avoiding
+symmetric back-off livelock (src/backend/executor/execIndexing.c:85-95). Identities and
 non-immutable defaults run again on restart, so identity gaps are intentional. No rows are
 written before arbitration completes; RETURNING runs only for the final effects, each once.
-Contending restarted statements may finish in either order. Cancellation is checked at every
+Each restart holds a superset of the rows it waited for, whose previous holders have finished.
+Holding those rows before keys follows UPDATE/DELETE order and immediately re-grants the same
+row, preventing an endless hand-off between contenders. Cancellation is checked at every
 restart. No lock wait runs inside the apply gate.
 The gated [arbitration conformance cases](../../Assimalign.Cohesion.Database.Sql/tests/SqlUpsertArbitrationConformanceTests.cs)
 measure this contract, including FK parent-row back-off and the plain INSERT audit.

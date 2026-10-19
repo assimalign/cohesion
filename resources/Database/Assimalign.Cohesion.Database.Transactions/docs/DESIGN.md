@@ -428,7 +428,8 @@ with already conflicts with one of them), which changes nothing for anyone else.
 member was added for it.
 
 **Unwritten statement marks (#1668).** LockManager.MarkStatement(owner) returns an opaque,
-allocation-free LockStatementMark. Each resource's first grant to an owner carries a monotonic
+allocation-free LockStatementMark with value equality over manager identity, owner and grant
+boundary. Each resource's first grant to an owner carries a monotonic
 stamp beside its mode mask; a mark records the manager, owner and current stamp. Re-grants
 and upgrades keep that first stamp. ReleaseSince(mark) removes only resources whose first
 grant is newer, visits only that owner's resource list, and wakes the same FIFO queues as
@@ -436,17 +437,25 @@ ReleaseAll. It does not end the owner. Existing resources keep every mode, inclu
 upgrade: no downgrade is attempted. Default/foreign marks are refused; callers serialize the
 owner's lock requests, have no pending request when releasing, and use a mark only within
 one transaction lifetime. An abandoned writer retains every grant for deferred undo.
+MarkStatement reads the grant sequence atomically without taking the manager-wide lock. The
+caller serializes the owner's requests, so all its earlier grants have completed and no later
+one can race the mark; concurrent grants to other owners do not change that owner's boundary.
+First grants advance the sequence with Interlocked.Increment, paired with Interlocked.Read.
 
 This is a pre-write operation, never rollback of written data. SQL ON CONFLICT uses it to
-release its whole unapplied arbitration before an AcquireAsync row wait, then releases the
-wait's row grant through the same mark before restarting. The wait therefore remains an edge
+release its whole unapplied arbitration before an AcquireAsync row wait, then keeps the
+wait's row grant and takes a new mark before restarting. Each restart retains a superset of
+the rows it waited for, whose previous holders have finished; re-granting its own row cannot
+start another symmetric hand-off. Later back-offs keep earlier waited rows too. The wait remains an edge
 in the detector, with existing cancellation and abandonment handling; no transaction-end
 primitive is needed. Snapshot rejects a committed changed row; ReadCommitted re-arbitrates;
 rollback undoes stamps before release. Arbitration has made no heap/index or ledger change,
 opened no data apply bracket and projected no RETURNING row. Only defaults/identity allocations
 may already have side effects; replay deliberately evaluates them again. The final apply
 retains ordinary transaction-duration locks. Pre-statement grants/upgrades survive, and
-reversed multi-row key acquisition can still deadlock. PostgreSQL's reference waits and
+reversed multi-row key acquisition can still deadlock. Multi-row upserts retaining waited rows
+in opposite orders can also deadlock row-against-row; the detector chooses a retryable victim,
+the residual exposure of avoiding livelock (PostgreSQL execIndexing.c:85-95). PostgreSQL's reference waits and
 rechecks in src/backend/executor/execIndexing.c:882-901 and restarts after row changes in
 nodeModifyTable.c:1146-1172,2850-2874. No new public interface or visibility grant is needed.
 

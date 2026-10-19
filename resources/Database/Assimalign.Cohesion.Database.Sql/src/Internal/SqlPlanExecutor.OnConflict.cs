@@ -101,9 +101,11 @@ internal sealed partial class SqlPlanExecutor
             if (conflict is { } reference)
             {
                 var row = LockResource.Entry(table.ObjectId, reference);
-                if (!locks.TryAcquire(owner, row, LockMode.Exclusive))
+                // DO NOTHING needs only the arbiter key and the visibility check below
+                // (PostgreSQL nodeModifyTable.c:1207-1211). DO UPDATE locks before WHERE.
+                if (plan.DoUpdate && !locks.TryAcquire(owner, row, LockMode.Exclusive))
                 {
-                    await WaitForUpsertRowAsync(row, LockMode.Exclusive, mark, statement, table, cancellationToken).ConfigureAwait(false);
+                    mark = await WaitForUpsertRowAsync(row, LockMode.Exclusive, mark, statement, table, cancellationToken).ConfigureAwait(false);
                     goto RetryArbitration;
                 }
                 var (pageId, slotIndex) = SqlRecordLocation.Unpack(reference);
@@ -148,6 +150,15 @@ internal sealed partial class SqlPlanExecutor
             }
         }
 
+        if (!plan.DoUpdate && writes.Count == 0)
+        {
+            // Visibility has been checked under the arbiter keys. With no writes to
+            // protect, new arbitration grants need not block UPDATE until transaction end.
+            locks.ReleaseSince(mark);
+            return returning is null ? new SqlQueryResult(DatabaseResultStatus.Success, 0)
+                : MaterializeProjected(returning, [], 0);
+        }
+
         foreach (var write in writes)
         {
             if (write.OldValues is not null)
@@ -169,7 +180,7 @@ internal sealed partial class SqlPlanExecutor
             foreignKeySnapshot: statement.Transaction.IsolationLevel == IsolationLevel.ReadCommitted ? statement.Transaction.Snapshot : null);
         if (ContendedUpsertParent(references, statement) is { } parent)
         {
-            await WaitForUpsertRowAsync(parent, LockMode.Shared, mark, statement, null, cancellationToken).ConfigureAwait(false);
+            mark = await WaitForUpsertRowAsync(parent, LockMode.Shared, mark, statement, null, cancellationToken).ConfigureAwait(false);
             goto RetryArbitration;
         }
         await AcquireParentRowLocksAsync(references, statement, cancellationToken).ConfigureAwait(false);
@@ -182,7 +193,7 @@ internal sealed partial class SqlPlanExecutor
             }));
         if (ContendedUpsertParent(released, statement) is { } releasedParent)
         {
-            await WaitForUpsertRowAsync(releasedParent, LockMode.Shared, mark, statement, null, cancellationToken).ConfigureAwait(false);
+            mark = await WaitForUpsertRowAsync(releasedParent, LockMode.Shared, mark, statement, null, cancellationToken).ConfigureAwait(false);
             goto RetryArbitration;
         }
         await AcquireParentRowLocksAsync(released, statement, cancellationToken, validate: false).ConfigureAwait(false);
@@ -222,28 +233,25 @@ internal sealed partial class SqlPlanExecutor
     }
 
     // No heap/index mutation or RETURNING projection precedes the apply below arbitration.
-    // Release every proposal's locks, wait through the detector, then discard all pending state.
-    private async ValueTask WaitForUpsertRowAsync(LockResource row, LockMode mode, LockStatementMark mark,
+    // Release new proposal locks, wait through the detector, then discard all pending state.
+    // Keep the waited row across every restart: releasing it would let two waiters hand it
+    // back and forth forever. A fresh mark also preserves rows kept by earlier waits.
+    private async ValueTask<LockStatementMark> WaitForUpsertRowAsync(LockResource row, LockMode mode, LockStatementMark mark,
         SqlStatementContext statement, SqlCatalogTable? conflictTable, CancellationToken cancellationToken)
     {
         var locks = statement.Coordinator.LockManager;
         locks.ReleaseSince(mark);
-        try
+        await locks.AcquireAsync(statement.Transaction.Sequence, row, mode, cancellationToken).ConfigureAwait(false);
+        var retained = locks.MarkStatement(statement.Transaction.Sequence);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (conflictTable is not null && statement.Transaction.IsolationLevel != IsolationLevel.ReadCommitted)
         {
-            await locks.AcquireAsync(statement.Transaction.Sequence, row, mode, cancellationToken).ConfigureAwait(false);
-            cancellationToken.ThrowIfCancellationRequested();
-            if (conflictTable is not null && statement.Transaction.IsolationLevel != IsolationLevel.ReadCommitted)
-            {
-                // A committed rekey/delete must still abort Snapshot even if re-arbitration would
-                // find no live index entry. Rollback has undone the deleter before releasing the row.
-                var (pageId, slotIndex) = SqlRecordLocation.Unpack(row.EntryId);
-                EnsureLatestVersion(conflictTable, pageId, slotIndex, statement.Transaction.Sequence);
-            }
+            // A committed rekey/delete must still abort Snapshot even if re-arbitration would
+            // find no live index entry. Rollback has undone the deleter before releasing the row.
+            var (pageId, slotIndex) = SqlRecordLocation.Unpack(row.EntryId);
+            EnsureLatestVersion(conflictTable, pageId, slotIndex, statement.Transaction.Sequence);
         }
-        finally
-        {
-            locks.ReleaseSince(mark);
-        }
+        return retained;
     }
 
     private static LockResource? ContendedUpsertParent(List<SqlParentReference> references, SqlStatementContext statement)

@@ -475,10 +475,11 @@ public sealed class LockManager
     /// <remarks>The caller serializes statements and lock requests within the owner.</remarks>
     public LockStatementMark MarkStatement(TransactionSequence owner)
     {
-        lock (_sync)
-        {
-            return new LockStatementMark(this, owner, _grantSequence);
-        }
+        // The caller serializes this owner's requests, so all its earlier grants have
+        // completed and none can arrive during the mark. Other owners may advance the
+        // sequence concurrently; any atomic value between their grants is a valid boundary
+        // for this owner. No lock-table inspection or manager-wide lock is needed.
+        return new LockStatementMark(this, owner, Interlocked.Read(ref _grantSequence));
     }
 
     /// <summary>
@@ -492,8 +493,8 @@ public sealed class LockManager
     /// Re-grants and upgrades of a resource held at the mark are retained in full; no downgrade
     /// occurs. An abandoned owner keeps all grants until its deferred undo completes. This
     /// operation is available in engine mode for unwritten arbitration; written data retains
-    /// transaction-duration locking. The mark can also release the row acquired by a completed
-    /// arbitration wait before the caller restarts. Use it within the same transaction lifetime.
+    /// transaction-duration locking. To retain a completed arbitration wait's row across
+    /// restarts, take a new mark after its grant. Use marks within the same transaction lifetime.
     /// </remarks>
     public void ReleaseSince(LockStatementMark mark)
     {
@@ -901,7 +902,7 @@ public sealed class LockManager
         byte holds = (byte)(held | Bit(mode));
         if (holds != held)
         {
-            entry.Granted[owner] = new LockGrant(holds, holder ? grant.Sequence : ++_grantSequence);
+            entry.Granted[owner] = new LockGrant(holds, holder ? grant.Sequence : Interlocked.Increment(ref _grantSequence));
         }
 
         if (!holder)
