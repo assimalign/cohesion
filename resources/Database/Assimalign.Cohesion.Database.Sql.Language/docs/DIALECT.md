@@ -101,6 +101,12 @@ ON CONFLICT ... RETURNING returns inserted and updated rows, excluding skipped p
 EXPLAIN reports the expanded RETURNING projection count and names for INSERT,
 INSERT SELECT, UPDATE and DELETE without applying the write or evaluating the projection.
 
+UPDATE and DELETE choose the same indexed equality-prefix and range access paths as SELECT,
+including target aliases and qualified columns. EXPLAIN shows the chosen IndexSeek and bounds
+or TableScan below the mutation. The complete WHERE remains a residual predicate, including
+subqueries. Targets are collected through one statement snapshot before any write, so changing
+a sought key updates each original target once; RETURNING order remains unspecified (#1274).
+
 The row-source and target-list model follows PostgreSQL
 `src/backend/executor/nodeModifyTable.c:308-330` and
 `src/backend/parser/analyze.c:2796-2811`; target-only INSERT scope follows

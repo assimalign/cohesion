@@ -159,10 +159,10 @@ internal sealed partial class SqlPlanner
                     Visit(insert.Source, id);
                     break;
                 case SqlUpdatePlan update:
-                    Add("TableScan", id, Target(update.Table));
+                    Access(update.Table, update.Access, id);
                     break;
                 case SqlDeletePlan delete:
-                    Add("TableScan", id, Target(delete.Table));
+                    Access(delete.Table, delete.Access, id);
                     break;
             }
         }
