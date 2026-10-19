@@ -46,8 +46,10 @@ public sealed partial class GraphStoreTests
         }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Graph.Storage] - Format: format 1 is refused with the recreation remedy (#1149)")]
-    public async Task Open_FormatOne_ShouldRefuseBeforeRecovery()
+    [Theory(DisplayName = "Cohesion Test [Graph.Storage] - Format: earlier graph formats are refused with the recreation remedy (#1532)")]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task Open_EarlierFormat_ShouldRefuseBeforeRecovery(byte version)
     {
         // Arrange
         await using var fixture = new Fixture();
@@ -58,7 +60,7 @@ public sealed partial class GraphStoreTests
         units.MoveNext().ShouldBeTrue();
         var unit = units.Current;
         byte[] bytes = unit.Data.ToArray();
-        bytes[17] = 1;
+        bytes[17] = version;
         using (var bracket = fixture.Storage.BeginTransaction())
         {
             fixture.Storage.UpdateEntry(bracket, unit.PageId, unit.SlotIndex, bytes);
@@ -67,7 +69,7 @@ public sealed partial class GraphStoreTests
 
         // Act / Assert
         Should.Throw<StorageCorruptionException>(() => GraphStore.EnsureIndexFormat(fixture.Storage)).Message.ShouldContain("recreate the database", Case.Sensitive);
-        Should.Throw<StorageCorruptionException>(() => GraphStore.Open(fixture.Storage, fixture.Coordinator)).Message.ShouldContain("format 2", Case.Sensitive);
+        Should.Throw<StorageCorruptionException>(() => GraphStore.Open(fixture.Storage, fixture.Coordinator)).Message.ShouldContain("format 3", Case.Sensitive);
     }
 
     [Fact(DisplayName = "Cohesion Test [Graph.Storage] - Update: endpoint property changes do not conflict with relationship insertion (#1149)")]
@@ -84,7 +86,7 @@ public sealed partial class GraphStoreTests
         await fixture.Coordinator.CommitAsync(update);
 
         // Act
-        var relationship = await fixture.Store.CreateRelationshipAsync(new StoredGraphRelationship((ulong)fixture.Storage.ReserveTransactionSequence(), node.Id, node.Id, "R", _empty), stale);
+        var relationship = await fixture.Store.CreateRelationshipAsync(new StoredGraphRelationship((ulong)fixture.Storage.ReserveTransactionSequence(), node.Id, node.Id, "R", _empty), Guid.Parse("10000000-0000-0000-0000-000000000001"), stale);
         await fixture.Coordinator.CommitAsync(stale);
 
         // Assert
@@ -101,8 +103,8 @@ public sealed partial class GraphStoreTests
         await fixture.Store.CreateIndexAsync("N", "key", seed);
         var a = await fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), ["N"], Properties("key", 1)), seed);
         var b = await fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), ["N"], _empty), seed);
-        var edge = await fixture.Store.CreateRelationshipAsync(new StoredGraphRelationship((ulong)fixture.Storage.ReserveTransactionSequence(), a.Id, b.Id, "R", Properties("x", 1)), seed);
-        var self = await fixture.Store.CreateRelationshipAsync(new StoredGraphRelationship((ulong)fixture.Storage.ReserveTransactionSequence(), a.Id, a.Id, "R", Properties("x", 1)), seed);
+        var edge = await fixture.Store.CreateRelationshipAsync(new StoredGraphRelationship((ulong)fixture.Storage.ReserveTransactionSequence(), a.Id, b.Id, "R", Properties("x", 1)), Guid.Parse("10000000-0000-0000-0000-000000000001"), seed);
+        var self = await fixture.Store.CreateRelationshipAsync(new StoredGraphRelationship((ulong)fixture.Storage.ReserveTransactionSequence(), a.Id, a.Id, "R", Properties("x", 1)), Guid.Parse("10000000-0000-0000-0000-000000000001"), seed);
         await fixture.Coordinator.CommitAsync(seed);
         var old = await fixture.Begin();
         var write = await fixture.Begin();
@@ -142,7 +144,7 @@ public sealed partial class GraphStoreTests
         var seed = await fixture.Begin();
         await fixture.Store.CreateIndexAsync("N", "key", seed);
         var a = await fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), ["N"], Properties("key", 1)), seed);
-        var edge = await fixture.Store.CreateRelationshipAsync(new StoredGraphRelationship((ulong)fixture.Storage.ReserveTransactionSequence(), a.Id, a.Id, "R", Properties("x", 1)), seed);
+        var edge = await fixture.Store.CreateRelationshipAsync(new StoredGraphRelationship((ulong)fixture.Storage.ReserveTransactionSequence(), a.Id, a.Id, "R", Properties("x", 1)), Guid.Parse("10000000-0000-0000-0000-000000000001"), seed);
         await fixture.Coordinator.CommitAsync(seed);
         var stale = await fixture.Begin();
         var write = await fixture.Begin();

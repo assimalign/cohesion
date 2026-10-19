@@ -98,13 +98,13 @@ internal sealed partial class GraphPlanner
                         if (segment.Quantifier is { } quantifier)
                         {
                             parent = Add("Expand", parent, segment.Body.Edge?.Type,
-                                detail: $"edge={edge}; quantifier={{{quantifier.Min},{quantifier.Max?.ToString(CultureInfo.InvariantCulture) ?? ""}}}; body_hops={segment.Body.Bound}; trail=True");
+                                detail: $"edge={edge}; quantifier={{{quantifier.Min},{quantifier.Max?.ToString(CultureInfo.InvariantCulture) ?? ""}}}; body_hops={segment.Body.Bound}; trail=True; {AdjacencyDetail(segment.Body, edge >= anchor.NodeIndex)}");
                         }
                         else
                         {
                             var relationship = segment.Body.Edge!;
                             parent = Add("Expand", parent, relationship.Type,
-                                detail: $"edge={edge}; direction={relationship.Direction}; labels={relationship.LabelExpression}");
+                                detail: $"edge={edge}; direction={relationship.Direction}; labels={relationship.LabelExpression}; {HopDetail(relationship, edge >= anchor.NodeIndex)}");
                         }
                     }
                 }
@@ -142,6 +142,13 @@ internal sealed partial class GraphPlanner
             return id;
         }
     }
+
+    private static string AdjacencyDetail(GraphPathShape shape, bool forward)
+        => shape.Edge is { } edge ? HopDetail(edge, forward)
+            : string.Join(" | ", shape.Segments.Select(segment => AdjacencyDetail(segment.Body, forward)));
+
+    private static string HopDetail(GqlRelationshipPattern relationship, bool forward)
+        => $"adjacency=(node,direction,type_id,relationship); seek_direction={GraphLabelEvaluator.IncidentDirection(relationship, forward)}; type_filter={relationship.LabelExpression?.ToString() ?? relationship.Type ?? "%"}; physical=visited_candidates; viable=accepted_hops; physical_limit={GraphPlanExecutor.ExpansionBudget.PhysicalLimit}";
 
     private static string StageName(GqlStage stage) => stage switch
     {

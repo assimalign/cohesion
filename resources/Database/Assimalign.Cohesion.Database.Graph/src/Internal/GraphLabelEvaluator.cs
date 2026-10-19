@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using Assimalign.Cohesion.Database.Graph.Language;
+using Assimalign.Cohesion.Database.Graph.Storage;
 
 namespace Assimalign.Cohesion.Database.Graph.Internal;
 
@@ -178,6 +179,14 @@ internal static class GraphLabelEvaluator
     internal static bool Accepts(GqlRelationshipPattern pattern, string type) => pattern.LabelExpression is { } expression
         ? Matches(expression, type)
         : pattern.Type is null || string.Equals(pattern.Type, type, StringComparison.Ordinal);
+
+    internal static GraphIncidentDirection IncidentDirection(GqlRelationshipPattern pattern, bool forward)
+        => pattern.Direction switch
+        {
+            GqlPatternDirection.Outgoing => forward ? GraphIncidentDirection.Outgoing : GraphIncidentDirection.Incoming,
+            GqlPatternDirection.Incoming => forward ? GraphIncidentDirection.Incoming : GraphIncidentDirection.Outgoing,
+            _ => GraphIncidentDirection.Both,
+        };
 
     /// <summary>
     /// The labels an inserted node receives: its validated conjunction, or <c>Labels</c>, each once,

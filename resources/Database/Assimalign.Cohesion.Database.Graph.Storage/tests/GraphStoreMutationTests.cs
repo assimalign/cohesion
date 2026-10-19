@@ -53,7 +53,7 @@ public sealed class GraphStoreMutationTests
             {
                 id = (ulong)storage.ReserveTransactionSequence();
                 if (mutation != "Create")
-                { await store.CreateRelationshipAsync(new StoredGraphRelationship(id, nodeId, nodeId, "R", Properties(0)), seed, token); }
+                { await store.CreateRelationshipAsync(new StoredGraphRelationship(id, nodeId, nodeId, "R", Properties(0)), Guid.Parse("10000000-0000-0000-0000-000000000001"), seed, token); }
             }
             await coordinator.CommitAsync(seed, token);
             var write = await coordinator.BeginAsync(IsolationLevel.Snapshot, token);
@@ -117,7 +117,7 @@ public sealed class GraphStoreMutationTests
             {
                 if (mutation == "Create")
                 {
-                    if (relationship) { await store.CreateRelationshipAsync(new StoredGraphRelationship(id, nodeId, nodeId, "R", Properties(value)), context, token); }
+                    if (relationship) { await store.CreateRelationshipAsync(new StoredGraphRelationship(id, nodeId, nodeId, "R", Properties(value)), Guid.Parse("10000000-0000-0000-0000-000000000001"), context, token); }
                     else { await store.CreateNodeAsync(new StoredGraphNode(id, ["N"], Properties(value)), context, token); }
                 }
                 else if (relationship) { await store.UpdateRelationshipAsync(id, Properties(value), context, token); }
@@ -195,7 +195,7 @@ public sealed class GraphStoreMutationTests
             if (relationship)
             {
                 id = (ulong)storage.ReserveTransactionSequence();
-                await store.CreateRelationshipAsync(new StoredGraphRelationship(id, nodeId, nodeId, "R", Properties(0)), seed, token);
+                await store.CreateRelationshipAsync(new StoredGraphRelationship(id, nodeId, nodeId, "R", Properties(0)), Guid.Parse("10000000-0000-0000-0000-000000000001"), seed, token);
             }
             await coordinator.CommitAsync(seed, token);
             var writer = await coordinator.BeginAsync(IsolationLevel.Snapshot, token);

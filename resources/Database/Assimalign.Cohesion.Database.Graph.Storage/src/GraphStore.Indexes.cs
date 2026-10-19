@@ -18,6 +18,7 @@ public sealed partial class GraphStore
 {
     private const ulong adjacencyId = ulong.MaxValue;
     private const string treeName = "graph";
+    private static readonly Guid _maximumTypeId = new("ffffffff-ffff-ffff-ffff-ffffffffffff");
     private readonly Dictionary<ulong, (PageId Page, int Slot, long Root)> _registrations = new();
     private BTreeIndexManager _indexes = null!;
 
@@ -174,6 +175,23 @@ public sealed partial class GraphStore
     private BTreeIndex ResolveIndex(ulong id) => _indexes.TryGetIndex(id, treeName, out var index)
         ? index : throw new StorageCorruptionException($"Missing graph B+Tree registration '{id}'.");
 
+    private static IndexKey AdjacencyKey(ulong nodeId, GraphIncidentDirection direction, Guid typeId, ulong relationshipId)
+    {
+        var bytes = new byte[33];
+        BinaryPrimitives.WriteUInt64BigEndian(bytes, nodeId);
+        bytes[8] = (byte)direction;
+        typeId.TryWriteBytes(bytes.AsSpan(9, 16), bigEndian: true, out _);
+        BinaryPrimitives.WriteUInt64BigEndian(bytes.AsSpan(25), relationshipId);
+        return new IndexKey(bytes);
+    }
+
+    private async ValueTask InsertAdjacencyAsync(GraphRecord record, ulong location, TransactionContext context, CancellationToken token)
+    {
+        var edge = record.Relationship!.Value;
+        await InsertIndexAsync(adjacencyId, AdjacencyKey(edge.SourceId, GraphIncidentDirection.Outgoing, record.TypeId, edge.Id), location, context, token).ConfigureAwait(false);
+        await InsertIndexAsync(adjacencyId, AdjacencyKey(edge.TargetId, GraphIncidentDirection.Incoming, record.TypeId, edge.Id), location, context, token).ConfigureAwait(false);
+    }
+
     private static IndexKey Composite(IndexKey prefix, ulong id)
     {
         var bytes = new byte[prefix.Length + 8];
@@ -222,10 +240,11 @@ public sealed partial class GraphStore
             if (unit.Data.Length != 34) { throw new StorageCorruptionException("Invalid graph B+Tree registration length."); }
             using var stream = new MemoryStream(unit.Data.ToArray(), false);
             using var reader = new BinaryReader(stream);
-            if (reader.ReadUInt64() != 0 || reader.ReadUInt64() != 0 || reader.ReadByte() != 4 || reader.ReadByte() != 1)
+            if (reader.ReadUInt64() != 0 || reader.ReadUInt64() != 0 || reader.ReadByte() != 4)
             {
                 throw new StorageCorruptionException("Invalid graph B+Tree registration header.");
             }
+            if (reader.ReadByte() != GraphRecordCodec.FormatVersion) { throw new StorageCorruptionException(ErrorMessages.RecordFormatUnsupported); }
             ulong id = reader.ReadUInt64();
             long root = reader.ReadInt64();
             if (id == 0 || root <= 0 || !ids.Add(id)) { throw new StorageCorruptionException("Invalid graph B+Tree registration identity."); }
@@ -241,7 +260,7 @@ public sealed partial class GraphStore
             if (_registrations.TryGetValue(registration.ObjectId, out var prior) && prior.Root == registration.RootPageId) { continue; }
             using var stream = new MemoryStream();
             using var writer = new BinaryWriter(stream, Encoding.UTF8, true);
-            writer.Write(0UL); writer.Write(0UL); writer.Write((byte)4); writer.Write((byte)1);
+            writer.Write(0UL); writer.Write(0UL); writer.Write((byte)4); writer.Write(GraphRecordCodec.FormatVersion);
             writer.Write(registration.ObjectId); writer.Write(registration.RootPageId);
             if (_registrations.ContainsKey(registration.ObjectId))
             {
