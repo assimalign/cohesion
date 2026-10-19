@@ -1389,8 +1389,9 @@ internal sealed partial class SqlPlanExecutor
             _indexManager.TryGetIndex(table.ObjectId, seek.Index.Name, out var index) &&
             _catalog.TryGetIndex(table.ObjectId, seek.Index.Name, out var current) && ReferenceEquals(current, seek.Index))
         {
-            // The DML object lock stabilizes these lookups. A reused index name must
-            // never apply the old key bounds to a replacement tree's different keys.
+            // DML's IX object lock stabilizes these lookups against DDL's X lock.
+            // SELECT takes no object lock: DROP removes catalog metadata before detaching
+            // the tree. A reused name must never apply old bounds to a replacement's keys.
             // The manager and catalog directory locks are taken and released separately.
             statement.Metrics.AccessPath = $"seek:{seek.Index.Name}";
             return SeekRows(table, seek, index, statement, cancellationToken);

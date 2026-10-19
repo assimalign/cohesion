@@ -2728,7 +2728,8 @@ project reference or InternalsVisibleTo change is required.
   byte-expressible collations) get range seeks; Guid/binary/json remain equality-only.
   String predicates with expression/index collation mismatch scan. Everything else — `OR` at the top level,
   computed columns, column-to-column comparisons, null comparands — falls
-  back to the per-object scan. **The full WHERE always remains the residual
+  back to the per-object scan. Scalar-subquery comparands also scan because
+  they are not plan-time evaluable. **The full WHERE always remains the residual
   predicate**, re-evaluated on every fetched row, so access-path selection
   can cost performance but never correctness. UPDATE and DELETE use the same
   selector with their own relation evaluator, so aliases and qualified keys resolve
@@ -2769,7 +2770,10 @@ project reference or InternalsVisibleTo change is required.
   arithmetic on the encoded component. Per-statement observability
   (`SqlStatementMetrics`: access path + records examined) is the behavioral
   proof surface — the planner suite asserts an indexed equality seek examines
-  O(matches) records while the equivalent scan examines O(table).
+  O(matches) records while the equivalent scan examines O(table). `AccessPath`
+  reports the last access path executed in the statement, including nested work;
+  an indexed cascading DELETE therefore reports its constraint seek (`constraint-seek:<index>`)
+  rather than the original target access path.
 - **Row format: MVCC stamps + object-id-prefixed tuple, in per-object page
   chains (since record-space format version 3; the current format is the one `SqlRowCodec.RecordSpaceFormatVersion` names).**
   Every data record is `[writer u64][deleter u64]` — a fixed 16-byte version-stamp header, the
@@ -5103,9 +5107,8 @@ identity tables through the ordinary SQL executor.
 RIGHT/FULL OUTER, NATURAL and LATERAL joins, qualified wildcards, UPDATE SET
 subqueries, `Serializable`
 isolation (rejected at begin), cost-based optimization (selection stays
-rule-based), index seeks for UPDATE/DELETE target collection, and index-only
-result production (a seek always fetches the row). (Row-level MVCC visibility
-and secondary indexes — DDL, write-path maintenance, and planner seek
+rule-based), and index-only result production (a seek always fetches the row).
+(Row-level MVCC visibility and secondary indexes — DDL, write-path maintenance, and planner seek
 adoption — were non-goals of earlier cuts and are now delivered; see "The MVCC
 integration", "Secondary indexes", and the access-path bullets above.)
 

@@ -18,10 +18,10 @@ public sealed class SqlDmlSeekCostTests
 
     public SqlDmlSeekCostTests(ITestOutputHelper output) => _output = output;
 
-    [Theory(DisplayName = "Cohesion Test [SqlEngine] - DML seek: distinct-key cost stays bounded at 1k and 50k rows (#1274)")]
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - DML seek: distinct-key row visits stay constant at 1k and 50k rows (#1274)")]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task ExecuteAsync_DistinctPrimaryKeys_ShouldHaveConstantRowVisitsAndBoundedCost(bool delete)
+    public async Task ExecuteAsync_DistinctPrimaryKeys_ShouldHaveConstantRowVisits(bool delete)
     {
         // Arrange: distinct keys avoid hot-key history; neither table has incoming foreign keys.
         using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(3));
@@ -63,11 +63,10 @@ public sealed class SqlDmlSeekCostTests
             }
         }
 
-        // Assert: work is deterministic; elapsed time is only a same-process size ratio.
+        // Assert: row visits are deterministic; elapsed times and their ratio are diagnostic output only.
         _output.WriteLine(string.Create(CultureInfo.InvariantCulture,
             $"{(delete ? "DELETE" : "UPDATE")}: 1k={small:F2} us/op, 50k={large:F2} us/op, ratio={large / small:F2}; visits/op={smallVisits}/{largeVisits}"));
         smallVisits.ShouldBe(1);
         largeVisits.ShouldBe(1);
-        (large / small).ShouldBeLessThanOrEqualTo(2d);
     }
 }

@@ -101,6 +101,74 @@ public sealed class SqlDmlSeekTests
         (await RowsAsync(await session.ExecuteAsync("SELECT id FROM t", cancellationToken: CancellationToken.None))).Count.ShouldBe(4);
     }
 
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - DML seek: scalar-subquery comparands scan and mutate the correct row (#1274)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExecuteAsync_ScalarSubqueryComparand_ShouldFallBackToScan(bool delete)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("dml-scalar-comparand", new());
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE t (id INT PRIMARY KEY, v INT)", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT INTO t VALUES (1,10),(2,20),(3,30)", cancellationToken: CancellationToken.None);
+
+        // Act
+        string sql = delete ? "DELETE FROM t WHERE id = (SELECT max(id) FROM t) RETURNING id,v"
+            : "UPDATE t SET v = 99 WHERE id = (SELECT max(id) FROM t) RETURNING id,v";
+        var result = await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None);
+        var metrics = session.LastStatementMetrics.ShouldNotBeNull();
+        var rows = await RowsAsync(result);
+
+        // Assert
+        result.AffectedCount.ShouldBe(1);
+        metrics.AccessPath.ShouldBe("scan");
+        rows.ShouldHaveSingleItem().ShouldBe(new object?[] { 3, delete ? 30 : 99 });
+        var remaining = await RowsAsync(await session.ExecuteAsync("SELECT id,v FROM t ORDER BY id", cancellationToken: CancellationToken.None));
+        remaining.Count.ShouldBe(delete ? 2 : 3);
+        remaining[0].ShouldBe(new object?[] { 1, 10 });
+        remaining[1].ShouldBe(new object?[] { 2, 20 });
+        if (!delete) { remaining[2].ShouldBe(new object?[] { 3, 99 }); }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - DML seek: composite-index prefixes examine and mutate only matching rows (#1274)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExecuteAsync_CompositeIndexPrefix_ShouldSeekMatchingTargets(bool delete)
+    {
+        // Arrange: only the leading column of the composite index is constrained.
+        await using var engine = SqlDatabaseEngine.Create("dml-composite-prefix", new());
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE t (id INT PRIMARY KEY, bucket INT, v INT)", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("CREATE INDEX ix_bucket_id ON t(bucket,id)", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT INTO t VALUES (1,1,10),(2,2,20),(3,2,30),(4,3,40)", cancellationToken: CancellationToken.None);
+
+        // Act
+        string sql = delete ? "DELETE FROM t WHERE bucket = 2 RETURNING id,v"
+            : "UPDATE t SET v = v + 100 WHERE bucket = 2 RETURNING id,v";
+        var result = await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None);
+        var metrics = session.LastStatementMetrics.ShouldNotBeNull();
+        var rows = await RowsAsync(result);
+
+        // Assert
+        result.AffectedCount.ShouldBe(2);
+        metrics.AccessPath.ShouldBe("seek:ix_bucket_id");
+        metrics.RecordsExamined.ShouldBe(2);
+        rows.Count.ShouldBe(2);
+        rows[0].ShouldBe(new object?[] { 2, delete ? 20 : 120 });
+        rows[1].ShouldBe(new object?[] { 3, delete ? 30 : 130 });
+        var remaining = await RowsAsync(await session.ExecuteAsync("SELECT id,v FROM t ORDER BY id", cancellationToken: CancellationToken.None));
+        remaining.Count.ShouldBe(delete ? 2 : 4);
+        remaining[0].ShouldBe(new object?[] { 1, 10 });
+        remaining[^1].ShouldBe(new object?[] { 4, 40 });
+        if (!delete)
+        {
+            remaining[1].ShouldBe(new object?[] { 2, 120 });
+            remaining[2].ShouldBe(new object?[] { 3, 130 });
+        }
+    }
+
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - DML seek: moving keys within the sought index visits and updates each original row once (#1274)")]
     public async Task ExecuteAsync_MovingSoughtKeys_ShouldMaterializeTargetsOnce()
     {

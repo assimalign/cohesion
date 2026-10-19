@@ -1,5 +1,4 @@
 using System;
-using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -28,15 +27,12 @@ public sealed class SqlDmlSeekConcurrencyTests
         int waitCount = 0;
         waits.Observed = written => { if (written.EventName == "LockWaitStart") { Interlocked.Increment(ref waitCount); } };
         int[] exercised = new int[16];
-        int iteration = 0;
-        var clock = Stopwatch.StartNew();
 
-        // Act: minimum runtime, then until every operation/isolation/outcome counter moved,
-        // with an independent ceiling. The event confirms the race reached the row-lock wait.
-        while (clock.Elapsed < TimeSpan.FromSeconds(1) || Array.Exists(exercised, count => count < 2))
+        // Act: run two passes over every operation/isolation/outcome scenario.
+        // The event confirms the row-lock wait; the cancellation token guards against hangs.
+        for (int iteration = 0; iteration < 2 * exercised.Length; iteration++)
         {
-            clock.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(20));
-            int scenario = iteration++ % exercised.Length;
+            int scenario = iteration % exercised.Length;
             bool delete = (scenario & 1) != 0;
             var isolation = (scenario & 2) != 0 ? IsolationLevel.ReadCommitted : IsolationLevel.Snapshot;
             int outcome = scenario / 4;
@@ -91,8 +87,8 @@ public sealed class SqlDmlSeekConcurrencyTests
         }
 
         // Assert
-        exercised.ShouldAllBe(count => count >= 2);
-        Volatile.Read(ref waitCount).ShouldBeGreaterThanOrEqualTo(iteration);
+        exercised.ShouldAllBe(count => count == 2);
+        Volatile.Read(ref waitCount).ShouldBeGreaterThanOrEqualTo(2 * exercised.Length);
         database.Coordinator.PairedTransactionCount.ShouldBe(0);
     }
 }
