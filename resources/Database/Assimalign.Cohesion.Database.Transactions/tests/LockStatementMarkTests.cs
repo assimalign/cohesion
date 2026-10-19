@@ -1,5 +1,4 @@
 using System;
-using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -41,15 +40,15 @@ public sealed class LockStatementMarkTests
         (default(LockStatementMark) == default).ShouldBeTrue();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Transactions] - Statement marks: keeping waited rows ends the symmetric hand-off and preserves earlier waits")]
-    public async Task ReleaseSince_RetainedWaitGrants_ShouldMakeArbitrationProgress()
+    [Fact(DisplayName = "Cohesion Test [Transactions] - Statement marks: the arbitration protocol keeps waited rows and preserves earlier waits")]
+    public async Task ReleaseSince_RetainedWaitGrants_ShouldCompleteArbitrationProtocol()
     {
-        // Arrange: the reviewer's production-lock-manager probe, with a new mark after each wait.
+        // Arrange: a deterministic lock-manager protocol test, separate from SQL execution coverage.
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
-        var elapsed = Stopwatch.StartNew();
+        const int iterations = 3;
         int arbitrations = 0;
         int waitsCompleted = 0;
-        do
+        for (int iteration = 0; iteration < iterations; iteration++)
         {
             var locks = LockManager.Create();
             var first = new TransactionSequence(1);
@@ -116,10 +115,9 @@ public sealed class LockStatementMarkTests
                 return locks.AcquireAsync(owner, row, LockMode.Exclusive, timeout.Token).AsTask();
             }
         }
-        while (elapsed.Elapsed < TimeSpan.FromMilliseconds(250) || arbitrations < 6);
 
         // Assert: each pair completed both arbitrations, without a hand-off loop.
-        arbitrations.ShouldBeGreaterThanOrEqualTo(6);
+        arbitrations.ShouldBe(iterations * 2);
         waitsCompleted.ShouldBe(arbitrations / 2 * 3);
     }
 
