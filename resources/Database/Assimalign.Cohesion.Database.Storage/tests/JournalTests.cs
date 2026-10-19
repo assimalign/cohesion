@@ -1,4 +1,6 @@
 using System;
+using System.Buffers;
+using System.Buffers.Binary;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -55,8 +57,8 @@ public sealed class JournalTests
         journal.ReadAll().Count.ShouldBe(3);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Storage] - Sequential journal: scans allocate per enumeration, not per frame")]
-    public void ReadSequential_ManyFrames_ShouldHaveBoundedAllocation()
+    [Fact(DisplayName = "Cohesion Test [Storage] - Recovery journal: scans allocate per enumeration, not per frame")]
+    public void ReadSequentialBorrowed_ManyFrames_ShouldHaveBoundedAllocation()
     {
         // Arrange: cross chunk boundaries and reuse the pool before measuring.
         using var journal = StorageJournal.Create(new MemoryStream());
@@ -69,7 +71,7 @@ public sealed class JournalTests
         long Scan()
         {
             long total = 0;
-            foreach (var record in journal.ReadSequential())
+            foreach (var record in journal.ReadSequentialBorrowed())
             {
                 total += record.Payload.Length;
             }
@@ -92,8 +94,8 @@ public sealed class JournalTests
         allocated.ShouldBeLessThan(4096, $"{allocated} bytes for 20,000 frames");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Storage] - Journal readers: sequential payload is borrowed and ReadAll retains copies")]
-    public void ReadSequential_ReusedBuffer_ShouldKeepReadAllPayloadsIndependent()
+    [Fact(DisplayName = "Cohesion Test [Storage] - Journal readers: sequential payloads remain owned after enumeration and pool churn")]
+    public void ReadSequential_ReusedBuffer_ShouldKeepRetainedPayloadsIndependent()
     {
         // Arrange: a frame larger than a read chunk also exercises pool growth.
         using var journal = StorageJournal.Create(new MemoryStream());
@@ -103,11 +105,12 @@ public sealed class JournalTests
         journal.AppendOperation(2, [4, 5, 6]);
         var retained = journal.ReadAll();
 
-        // Act: consume each payload before advancing; retain only the ReadAll copies.
+        // Act: retain the public payload itself across MoveNext, disposal and pool churn.
+        ReadOnlyMemory<byte> sequential;
         using (var records = journal.ReadSequential().GetEnumerator())
         {
             records.MoveNext().ShouldBeTrue();
-            records.Current.Payload.ToArray().ShouldBe(first);
+            sequential = records.Current.Payload;
             records.MoveNext().ShouldBeTrue();
             records.Current.Payload.ToArray().ShouldBe(new byte[] { 4, 5, 6 });
             records.MoveNext().ShouldBeFalse();
@@ -118,9 +121,152 @@ public sealed class JournalTests
             _ = record.Payload.Length;
         }
 
+        byte[] rented = ArrayPool<byte>.Shared.Rent(524_288);
+        try
+        {
+            Array.Fill(rented, (byte)0xCC);
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(rented);
+        }
+
         // Assert
+        sequential.ToArray().ShouldBe(first);
         retained[0].Payload.ToArray().ShouldBe(first);
         retained[1].Payload.ToArray().ShouldBe(new byte[] { 4, 5, 6 });
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Storage] - Sequential journal: reentrant append is refused without spinning")]
+    public void Append_ActiveEnumerationOnSameThread_ShouldThrow()
+    {
+        // Arrange
+        using var journal = StorageJournal.Create(new MemoryStream());
+        journal.AppendCommit(1);
+        using (var records = journal.ReadSequential().GetEnumerator())
+        {
+            records.MoveNext().ShouldBeTrue();
+
+            // Act / Assert
+            Should.Throw<InvalidOperationException>(() => journal.AppendCommit(2));
+        }
+        journal.AppendCommit(2).ShouldBe(2);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Storage] - Journal disposal: an already closed borrowed stream does not take it offline")]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public void Dispose_ClosedLeaveOpenStream_ShouldNotRaiseOffline(int pending)
+    {
+        // Arrange: no pending I/O, a buffered write, or a written but unflushed prefix.
+        using var stream = new ClosedFlushStream();
+        var journal = StorageJournal.Create(stream, leaveOpen: true);
+        journal.LastLsn.ShouldBe(0);
+        int offline = 0;
+        journal.Offline = _ => offline++;
+        if (pending > 0)
+        {
+            journal.AppendCommit(1);
+            if (pending == 2)
+            {
+                journal.ReadAll();
+            }
+        }
+        stream.Dispose();
+
+        // Act
+        if (pending == 0)
+        {
+            journal.Dispose();
+        }
+        else
+        {
+            Should.Throw<ObjectDisposedException>(() => journal.Dispose());
+        }
+
+        // Assert
+        journal.IsOffline.ShouldBeFalse();
+        journal.OfflineError.ShouldBeNull();
+        offline.ShouldBe(0);
+        journal.Dispose();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Storage] - Journal tail: corrupt lengths stop before overflow or oversized reads")]
+    [InlineData(int.MaxValue, 3_000_000_000L)]
+    [InlineData(int.MaxValue - 12, 100L)]
+    [InlineData(-1, 100L)]
+    public void ReadSequential_CorruptFrameLength_ShouldStopAtValidPrefix(int bodyLength, long reportedLength)
+    {
+        // Arrange: a sparse logical file avoids allocating the corrupt length's gigabytes.
+        using var seed = new MemoryStream();
+        using (var journal = StorageJournal.Create(seed, leaveOpen: true))
+        {
+            journal.AppendCommit(1);
+            journal.Flush();
+        }
+        byte[] tail = new byte[8];
+        BinaryPrimitives.WriteInt32LittleEndian(tail, bodyLength);
+        BinaryPrimitives.WriteInt32LittleEndian(tail.AsSpan(4), 0x324C4157);
+        seed.Write(tail);
+        using var stream = new ReportedLengthStream(seed.ToArray(), reportedLength);
+        using var reopened = StorageJournal.Create(stream);
+
+        // Act
+        var records = reopened.ReadSequential().ToArray();
+
+        // Assert
+        records.ShouldHaveSingleItem().Lsn.ShouldBe(1);
+        reopened.Length.ShouldBe(38);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Storage] - Recovery reader: checkpoint truncation invalidates the verified prefix")]
+    public void ReadSequentialBorrowed_CheckpointReusesOffsets_ShouldVerifyNewFrames()
+    {
+        // Arrange
+        using var stream = new MemoryStream();
+        using var journal = StorageJournal.Create(stream, leaveOpen: true);
+        journal.AppendOperation(1, new byte[1024]);
+        journal.ReadSequentialBorrowed().Count().ShouldBe(1);
+        Should.Throw<NotSupportedException>(() => journal.Checkpoint([]));
+        stream.GetBuffer()[(int)stream.Length - 1] ^= 0xFF;
+
+        // Act / Assert: the replacement checkpoint must not inherit the old prefix's trust.
+        journal.ReadSequentialBorrowed().ShouldBeEmpty();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Storage] - Recovery analysis: interleaved outcomes retain the same last applicable page record")]
+    public void ReadRecoveryAnalysis_InterleavedTransactions_ShouldPreservePagePlanning()
+    {
+        // Arrange: an earlier delta commits after a later uncommitted image; a committed
+        // image has a later uncommitted delta; a commit precedes another record of its sequence.
+        using var journal = StorageJournal.Create(new MemoryStream());
+        journal.AppendPageRecord(1, (PageId)1L, JournalRecordType.FullPageImage, [], out _);
+        journal.AppendPageRecord(1, (PageId)1L, JournalRecordType.PageDelta, [], out _);
+        long laterImage = journal.AppendPageRecord(2, (PageId)1L, JournalRecordType.FullPageImage, [], out _);
+        journal.AppendCommit(1);
+        long committedImage = journal.AppendPageRecord(3, (PageId)2L, JournalRecordType.FullPageImage, [], out _);
+        journal.AppendPageRecord(4, (PageId)2L, JournalRecordType.PageDelta, [], out _);
+        journal.AppendCommit(3);
+        long lastDelta = journal.AppendPageRecord(3, (PageId)3L, JournalRecordType.PageDelta, [], out _);
+        journal.AppendRollback(4);
+
+        // Act
+        var analysis = journal.ReadRecoveryAnalysis(default);
+
+        // Assert: promoting an older record cannot replace a later image's position.
+        analysis.Committed.Order().ShouldBe([1L, 3L]);
+        analysis.MaxSequence.ShouldBe(4);
+        analysis.Pages[1].LastLsn.ShouldBe(laterImage);
+        analysis.Pages[1].Committed.ShouldBeTrue();
+        analysis.Pages[2].LastLsn.ShouldBe(committedImage);
+        analysis.Pages[2].Committed.ShouldBeTrue();
+        analysis.Pages[3].LastLsn.ShouldBe(lastDelta);
+        analysis.Pages[3].Committed.ShouldBeTrue();
+
+        // An append invalidates the cached analysis and makes the pending delta applicable.
+        journal.AppendCommit(4);
+        journal.ReadRecoveryAnalysis(default).Pages[2].LastLsn.ShouldBe(committedImage + 1);
     }
 
     [Fact]
@@ -374,6 +520,27 @@ public sealed class JournalTests
         Should.Throw<ArgumentNullException>(() => StorageJournal.Create((IFileSystemFileHandle)null!)).ParamName.ShouldBe("handle");
         Should.Throw<ArgumentException>(() => StorageJournal.Create(forwardOnly)).ParamName.ShouldBe("stream");
         Should.Throw<ArgumentNullException>(() => StorageJournal.FromFile("journal.log", null!)).ParamName.ShouldBe("fileSystem");
+    }
+
+    private sealed class ClosedFlushStream : MemoryStream
+    {
+        public override void Flush()
+        {
+            ObjectDisposedException.ThrowIf(!CanWrite, this);
+            base.Flush();
+        }
+    }
+
+    private sealed class ReportedLengthStream : MemoryStream
+    {
+        private readonly long _reportedLength;
+
+        internal ReportedLengthStream(byte[] content, long reportedLength) : base(content)
+        {
+            _reportedLength = reportedLength;
+        }
+
+        public override long Length => _reportedLength;
     }
 
     private sealed class ForwardOnlyStream : MemoryStream

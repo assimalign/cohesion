@@ -342,9 +342,12 @@ internal sealed class DeviceFaults
         }
     }
 
+    // Runs inside the particular stalled device force, before it can be released.
+    internal Action? JournalFlushStalled = null;
+
     private void BeforeDurableFlush()
     {
-        WaitForDevice(_journalFlushGate, ref _stalledJournalFlushes);
+        WaitForDevice(_journalFlushGate, ref _stalledJournalFlushes, JournalFlushStalled);
         if (FailJournalFlushes)
         {
             Volatile.Write(ref _journalFlushFailureThread, Thread.CurrentThread.Name ?? $"unnamed thread {Environment.CurrentManagedThreadId}");
@@ -359,7 +362,7 @@ internal sealed class DeviceFaults
     }
 
     // Shared by all stalls: tests can observe entry, release in a finally, and wait for exit.
-    private static void WaitForDevice(ManualResetEventSlim gate, ref int stalled)
+    private static void WaitForDevice(ManualResetEventSlim gate, ref int stalled, Action? onStalled = null)
     {
         if (gate.IsSet)
         {
@@ -369,6 +372,7 @@ internal sealed class DeviceFaults
         Interlocked.Increment(ref stalled);
         try
         {
+            onStalled?.Invoke();
             gate.Wait();
         }
         finally

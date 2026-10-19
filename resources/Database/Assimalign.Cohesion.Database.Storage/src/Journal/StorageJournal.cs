@@ -3,6 +3,7 @@ using System.Buffers;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.IO;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -193,6 +194,7 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
     // included, and the bytes the last full read scan verified.
     private long _length;
     private long _scannedLength;
+    private StorageRecoveryAnalysis? _recoveryAnalysis;
 
     // The size trigger: when an append takes the journal to _checkpointThreshold bytes or
     // more, _checkpointNeeded is invoked once (outside the lock), and again only after the
@@ -498,6 +500,7 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
     /// </summary>
     /// <param name="transactionSequence">The storage-level transaction sequence.</param>
     /// <returns>The assigned LSN.</returns>
+    /// <exception cref="InvalidOperationException">This thread holds an active journal enumeration.</exception>
     public long AppendBegin(long transactionSequence)
         => Append(transactionSequence, JournalRecordType.BeginTransaction, default, ReadOnlySpan<byte>.Empty);
 
@@ -523,6 +526,7 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
     /// <see cref="JournalRecordType.CommittedPageImage"/> takes its base LSN from the image's own
     /// LSN field: the LSN of the last record applied to the page before this one.
     /// </remarks>
+    /// <exception cref="InvalidOperationException">This thread holds an active journal enumeration.</exception>
     public long AppendPageImage(long transactionSequence, PageId pageId, JournalRecordType type, ReadOnlySpan<byte> image)
     {
         if (type is not (JournalRecordType.FullPageImage or JournalRecordType.CommittedPageImage))
@@ -655,6 +659,7 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
     /// <param name="transactionSequence">The storage-level transaction sequence.</param>
     /// <param name="payload">The logical payload.</param>
     /// <returns>The assigned LSN.</returns>
+    /// <exception cref="InvalidOperationException">This thread holds an active journal enumeration.</exception>
     public long AppendOperation(long transactionSequence, ReadOnlySpan<byte> payload)
         => Append(transactionSequence, JournalRecordType.Operation, default, payload);
 
@@ -664,6 +669,7 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
     /// </summary>
     /// <param name="transactionSequence">The storage-level transaction sequence.</param>
     /// <returns>The assigned LSN.</returns>
+    /// <exception cref="InvalidOperationException">This thread holds an active journal enumeration.</exception>
     public long AppendCommit(long transactionSequence)
         => Append(transactionSequence, JournalRecordType.CommitTransaction, default, ReadOnlySpan<byte>.Empty);
 
@@ -672,6 +678,7 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
     /// </summary>
     /// <param name="transactionSequence">The storage-level transaction sequence.</param>
     /// <returns>The assigned LSN.</returns>
+    /// <exception cref="InvalidOperationException">This thread holds an active journal enumeration.</exception>
     public long AppendRollback(long transactionSequence)
         => Append(transactionSequence, JournalRecordType.RollbackTransaction, default, ReadOnlySpan<byte>.Empty);
 
@@ -851,6 +858,16 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
         EnsureInitialized();
         try
         {
+            lock (_syncRoot)
+            {
+                ThrowIfDisposed();
+                if (_writtenLsn >= lsn && !_unflushed)
+                {
+                    return;
+                }
+                ThrowIfOfflineLocked();
+            }
+
             lock (_mediumLock)
             {
                 lock (_syncRoot)
@@ -939,21 +956,26 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
         }
     }
 
-    /// <summary>Enumerates journal records without retaining page-image payloads from earlier records.</summary>
+    /// <summary>Enumerates journal records with independently owned payloads.</summary>
     /// <returns>The verifiable records in append order, ending at the first torn frame.</returns>
     /// <remarks>
-    /// Each payload borrows the pooled read buffer and is valid only until the next MoveNext
-    /// or disposal of the enumerator. Copy a payload to retain it; <see cref="ReadAll"/> returns owned copies.
+    /// Each payload is an owned copy and remains valid after advancing or disposing the enumerator.
     /// Enumeration holds the synchronous medium lock and pauses appends until disposed. Consume it
-    /// synchronously on one thread, and do not append, checkpoint, or await within the loop.
-    /// Recovery uses this path so a journal larger than available memory can be replayed. The
+    /// synchronously on one thread, and do not checkpoint or await within the loop. An append on
+    /// that thread throws <see cref="InvalidOperationException"/> while enumeration is active. The
     /// append buffer drains when the enumeration starts, under the medium lock, as for
     /// <see cref="ReadAll"/>.
     /// </remarks>
     /// <exception cref="ObjectDisposedException">The journal was disposed.</exception>
     /// <exception cref="StorageOfflineException">Draining the append buffer failed.</exception>
     /// <exception cref="StorageFormatException">A verified frame has an unsupported version.</exception>
-    public IEnumerable<JournalRecord> ReadSequential()
+    public IEnumerable<JournalRecord> ReadSequential() => ReadSequentialCore(borrowPayloads: false);
+
+    // Recovery and consistency checks consume payloads before MoveNext. No borrowed memory
+    // crosses the public reader boundary.
+    internal IEnumerable<JournalRecord> ReadSequentialBorrowed() => ReadSequentialCore(borrowPayloads: true);
+
+    private IEnumerable<JournalRecord> ReadSequentialCore(bool borrowPayloads)
     {
         ThrowIfDisposed();
         EnsureInitialized();
@@ -965,10 +987,15 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
                 try
                 {
                     DrainForReadMedium();
-                    foreach (var record in ReadRecordsCore())
+                    long frameNumber = 0;
+                    long verifiedLength = 0;
+                    foreach (var frame in ReadFrames(reuseVerifiedPrefix: true))
                     {
-                        yield return record;
+                        var record = DecodeRecord(frame, ++frameNumber);
+                        verifiedLength += FramePrefixSize + frame.Length + sizeof(uint);
+                        yield return borrowPayloads ? record : record with { Payload = record.Payload.ToArray() };
                     }
+                    _scannedLength = verifiedLength;
                 }
                 finally
                 {
@@ -1010,7 +1037,7 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
 
                 try
                 {
-                    if (_initialized && _offline is null)
+                    if (_initialized && _offline is null && (_buffered > 0 || _unflushed))
                     {
                         DrainMedium(durable: false);
                     }
@@ -1029,6 +1056,7 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
                         _inFlight = [];
                         _buffered = 0;
                         _inFlightLength = 0;
+                        _recoveryAnalysis = null;
                     }
                     DisposeCore();
                 }
@@ -1073,6 +1101,10 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
                 {
                     ThrowIfDisposed();
                     ThrowIfOfflineLocked();
+                    if (_appendPauses > 0 && Monitor.IsEntered(_mediumLock))
+                    {
+                        throw new InvalidOperationException("Cannot append while this thread is enumerating the journal.");
+                    }
                     if (_appendPauses == 0 && size <= _maximumBufferSize && _buffered <= _maximumBufferSize - size)
                     {
                         lsn = BufferFrameLocked(transactionSequence, type, pageId, payload, ReadOnlySpan<long>.Empty, out offset, out frameLength);
@@ -1194,7 +1226,7 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
         {
             FlushCore(durable);
         }
-        catch (Exception exception) when (exception is not NotSupportedException)
+        catch (Exception exception) when (exception is not (ObjectDisposedException or NotSupportedException))
         {
             lock (_syncRoot)
             {
@@ -1244,7 +1276,7 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
         }
         // Any medium exception can leave a partial frame, so even an unexpected provider
         // exception must fence subsequent writes before releasing the medium lock.
-        catch (Exception exception)
+        catch (Exception exception) when (exception is not ObjectDisposedException)
         {
             // Keep the detached bytes readable after a partial write. Latch before another
             // medium owner can acknowledge any later prefix; no retry writes behind a torn tail.
@@ -1311,6 +1343,7 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
         _inFlightLength = frameLength;
         _inFlightLsn = lsn;
         Volatile.Write(ref _lastLsn, lsn);
+        _recoveryAnalysis = null;
         Volatile.Write(ref _length, _length + frameLength);
         return lsn;
     }
@@ -1343,6 +1376,7 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
         EncodeFrame(_buffer.AsSpan(_buffered, frameLength), lsn, transactionSequence, type, pageId, payload, words);
         _buffered += frameLength;
         Volatile.Write(ref _lastLsn, lsn);
+        _recoveryAnalysis = null;
         Volatile.Write(ref _length, _length + frameLength);
         return lsn;
     }
@@ -1390,40 +1424,36 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
         return records;
     }
 
-    private IEnumerable<JournalRecord> ReadRecordsCore()
+    private IEnumerable<JournalRecord> ReadRecordsCore(bool reuseVerifiedPrefix = false)
     {
         long frameNumber = 0;
         long verifiedLength = 0;
-
-        foreach (var frame in ReadFrames())
+        foreach (var frame in ReadFrames(reuseVerifiedPrefix))
         {
-            var body = frame.Span;
-            frameNumber++;
-
-            if (body.Length < BodyHeaderSize)
-            {
-                break;
-            }
-
-            // The frame verified, so it was written whole: another version is a format
-            // this engine does not read, never a torn tail to stop quietly at.
-            if (body[0] != CurrentVersion)
-            {
-                throw StorageFormatException.ForJournalFrame(frameNumber, body[0], CurrentVersion);
-            }
-
-            long lsn = BinaryPrimitives.ReadInt64LittleEndian(body[1..]);
-            long transactionSequence = BinaryPrimitives.ReadInt64LittleEndian(body[9..]);
-            var type = (JournalRecordType)body[17];
-            long pageId = BinaryPrimitives.ReadInt64LittleEndian(body[18..]);
-            var payload = frame[BodyHeaderSize..];
-            verifiedLength += FramePrefixSize + body.Length + sizeof(uint);
-
-            yield return new JournalRecord(lsn, transactionSequence, type, (PageId)pageId, payload);
+            var record = DecodeRecord(frame, ++frameNumber);
+            verifiedLength += FramePrefixSize + frame.Length + sizeof(uint);
+            yield return record;
         }
 
         // Reached only when the scan ran to the end of the verified frames.
         _scannedLength = verifiedLength;
+    }
+
+    private static JournalRecord DecodeRecord(ReadOnlyMemory<byte> frame, long frameNumber)
+    {
+        var body = frame.Span;
+        // ReadFrames already checked the body length and checksum. A verified frame of
+        // another version is unsupported format, never a torn tail to stop quietly at.
+        if (body[0] != CurrentVersion)
+        {
+            throw StorageFormatException.ForJournalFrame(frameNumber, body[0], CurrentVersion);
+        }
+
+        long lsn = BinaryPrimitives.ReadInt64LittleEndian(body[1..]);
+        long transactionSequence = BinaryPrimitives.ReadInt64LittleEndian(body[9..]);
+        var type = (JournalRecordType)body[17];
+        long pageId = BinaryPrimitives.ReadInt64LittleEndian(body[18..]);
+        return new JournalRecord(lsn, transactionSequence, type, (PageId)pageId, frame[BodyHeaderSize..]);
     }
 
     internal void EnsureInitialized(CancellationToken cancellationToken = default)
@@ -1444,21 +1474,114 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
 
             // Marked only once the scan completes: a scan refused for its format leaves the
             // journal uninitialized, so every later access refuses it the same way.
-            long lastLsn = 0;
-            foreach (var record in ReadRecordsCore())
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                lastLsn = record.Lsn;
-            }
-
-            Volatile.Write(ref _lastLsn, lastLsn);
-            Volatile.Write(ref _writtenLsn, lastLsn);
+            var analysis = ScanRecoveryAnalysis(cancellationToken);
+            Volatile.Write(ref _lastLsn, analysis.LastLsn);
+            Volatile.Write(ref _writtenLsn, analysis.LastLsn);
             Volatile.Write(ref _length, _scannedLength);
+            _recoveryAnalysis = analysis;
             _initialized = true;
             // Reading existing bytes does not prove a durable flush occurred:
             // a reopened memory store or live OS cache may contain the same bytes.
             // Only a completed explicit durable flush advances DurableLsn.
         }
+    }
+
+    // Initialization classifies commits and plans pages while it verifies frames. A live append or
+    // checkpoint invalidates the summary; recovery on a live journal rebuilds it after draining.
+    internal StorageRecoveryAnalysis ReadRecoveryAnalysis(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        EnsureInitialized(cancellationToken);
+        try
+        {
+            lock (_mediumLock)
+            {
+                PauseAppends(allowOffline: true);
+                try
+                {
+                    DrainForReadMedium();
+                    return _recoveryAnalysis ??= ScanRecoveryAnalysis(cancellationToken);
+                }
+                finally
+                {
+                    ResumeAppends();
+                }
+            }
+        }
+        finally
+        {
+            RaiseOffline();
+        }
+    }
+
+    // Startup may scan millions of frames but invoke this method only once: enter optimized
+    // code immediately instead of waiting for the tiered JIT invocation threshold.
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    private StorageRecoveryAnalysis ScanRecoveryAnalysis(CancellationToken cancellationToken)
+    {
+        long lastLsn = 0;
+        long maxSequence = 0;
+        long checkpointLsn = 0;
+        long ordinal = 0;
+        var committed = new HashSet<long>();
+        var pages = new Dictionary<long, StorageRecoveryPagePlan>();
+        var pending = new Dictionary<long, Dictionary<long, StorageRecoveryPagePlan>>();
+        var freePending = new Stack<Dictionary<long, StorageRecoveryPagePlan>>();
+
+        void Merge(long pageId, StorageRecoveryPagePlan next)
+        {
+            pages.TryGetValue(pageId, out var previous);
+            pages[pageId] = next.Ordinal >= previous.Ordinal
+                ? next with { Committed = previous.Committed || next.Committed }
+                : previous with { Committed = previous.Committed || next.Committed };
+        }
+
+        foreach (var record in ReadRecordsCore(reuseVerifiedPrefix: true))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            ordinal++;
+            lastLsn = record.Lsn;
+            maxSequence = Math.Max(maxSequence, record.TransactionSequence);
+            if (record.Type == JournalRecordType.CommitTransaction)
+            {
+                committed.Add(record.TransactionSequence);
+                if (pending.Remove(record.TransactionSequence, out var changes))
+                {
+                    foreach (var (pageId, plan) in changes)
+                    {
+                        Merge(pageId, plan with { Committed = true });
+                    }
+                    changes.Clear();
+                    freePending.Push(changes);
+                }
+            }
+            else if (record.Type == JournalRecordType.Checkpoint)
+            {
+                checkpointLsn = Math.Max(checkpointLsn, record.Lsn);
+            }
+            else if (StorageRecovery.IsPageRecord(record.Type) && (long)record.PageId > 0)
+            {
+                long pageId = (long)record.PageId;
+                bool committedRecord = committed.Contains(record.TransactionSequence);
+                var plan = new StorageRecoveryPagePlan(ordinal, record.Lsn, committedRecord);
+                if (record.Type == JournalRecordType.FullPageImage || committedRecord)
+                {
+                    Merge(pageId, plan);
+                }
+                if (!committedRecord)
+                {
+                    // Retain only the last identity for each page of an unproven bracket.
+                    // A later commit promotes it; missing commits discard it after the scan.
+                    if (!pending.TryGetValue(record.TransactionSequence, out var changes))
+                    {
+                        changes = freePending.TryPop(out var reusable) ? reusable : new Dictionary<long, StorageRecoveryPagePlan>();
+                        pending.Add(record.TransactionSequence, changes);
+                    }
+                    changes[pageId] = plan;
+                }
+            }
+        }
+        return new StorageRecoveryAnalysis(lastLsn, maxSequence, checkpointLsn, committed, pages);
     }
 
     private void ThrowIfDisposed()
@@ -1543,7 +1666,7 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
     /// bytes per page (#1253): about 470,000 small frames took 37 s to reopen from a file, three
     /// passes of three system calls each.
     /// </remarks>
-    private IEnumerable<ReadOnlyMemory<byte>> ReadFrames()
+    private IEnumerable<ReadOnlyMemory<byte>> ReadFrames(bool reuseVerifiedPrefix)
     {
         long originalPosition = _stream.Position;
         byte[] chunk = [];
@@ -1551,6 +1674,9 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
         try
         {
             long length = _handle.Length;
+            // The journal exclusively owns these bytes until checkpoint truncation. Only a
+            // completed scan advances trust; a newly written suffix still needs verification.
+            long verifiedPrefix = reuseVerifiedPrefix ? _scannedLength : 0;
             chunk = ArrayPool<byte>.Shared.Rent((int)Math.Min(ReadChunkSize, Math.Max(length, FramePrefixSize)));
             long chunkOffset = 0;
             int chunkCount = 0;
@@ -1566,7 +1692,8 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
                 int start = (int)(position - chunkOffset);
                 int bodyLength = BinaryPrimitives.ReadInt32LittleEndian(chunk.AsSpan(start));
                 int magic = BinaryPrimitives.ReadInt32LittleEndian(chunk.AsSpan(start + sizeof(int)));
-                if (magic != Magic || bodyLength < BodyHeaderSize || position + FramePrefixSize + bodyLength + sizeof(uint) > length)
+                if (magic != Magic || bodyLength < BodyHeaderSize || bodyLength > int.MaxValue - FramePrefixSize - sizeof(uint)
+                    || (long)FramePrefixSize + bodyLength + sizeof(uint) > length - position)
                 {
                     break;
                 }
@@ -1580,7 +1707,7 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
                 start = (int)(position - chunkOffset);
                 var body = chunk.AsMemory(start + FramePrefixSize, bodyLength);
                 uint expected = BinaryPrimitives.ReadUInt32LittleEndian(chunk.AsSpan(start + FramePrefixSize + bodyLength));
-                if (Crc32C.Compute(body.Span) != expected)
+                if (position + frameLength > verifiedPrefix && Crc32C.Compute(body.Span) != expected)
                 {
                     break;
                 }
@@ -1696,6 +1823,8 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
             }
         }
         _appendOffset = 0;
+        _scannedLength = 0;
+        _recoveryAnalysis = null;
         _tailUnchecked = false;
     }
 

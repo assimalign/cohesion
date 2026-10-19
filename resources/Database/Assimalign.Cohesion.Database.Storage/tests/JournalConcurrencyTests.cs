@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Concurrent;
-using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -251,10 +250,40 @@ public sealed class JournalConcurrencyTests
         }
     }
 
+    [Fact(DisplayName = "Cohesion Test [Storage] - Written prefix: confirmation bypasses an unrelated stalled force")]
+    public async Task EnsureWritten_AlreadyFlushedPrefix_ShouldBypassMediumLock()
+    {
+        // Arrange
+        var faults = new DeviceFaults();
+        using var journal = StorageJournal.Create(faults.WrapJournal(new CrashSimulationStream()));
+        long first = journal.AppendCommit(1);
+        journal.EnsureWritten(first);
+        faults.StallJournalFlushes();
+        Task force = Task.Run(() => journal.Flush(true));
+        try
+        {
+            WaitForStall(faults, write: false);
+
+            // Act: no write followed the previous OS flush, so only the append lock is needed.
+            await Task.Run(() => journal.EnsureWritten(first)).WaitAsync(TimeSpan.FromSeconds(10));
+
+            // Assert
+            faults.StalledJournalFlushes.ShouldBe(1);
+        }
+        finally
+        {
+            faults.Clear();
+            await force.WaitAsync(TimeSpan.FromSeconds(10));
+        }
+    }
+
     [Fact(DisplayName = "Cohesion Test [Storage] - Journal force stress: acknowledged prefixes survive concurrent appends and group flushes")]
     public async Task EnsureDurable_ConcurrentAppendersAndGroupGate_ShouldKeepEveryAcknowledgedCommit()
     {
-        // Arrange: stop only after the minimum duration AND every race counter moved.
+        // Arrange: each round holds one identified force on the device until all four
+        // appenders have completed their appends, or the bounded cleanup ceiling expires.
+        const int rounds = 32;
+        const int appenderCount = 4;
         var medium = new CrashSimulationStream { DurableFlushesOnly = true };
         var faults = new DeviceFaults();
         using var journal = StorageJournal.Create(faults.WrapJournal(medium), leaveOpen: true);
@@ -262,44 +291,65 @@ public sealed class JournalConcurrencyTests
         var acknowledged = new ConcurrentBag<long>();
         int overlapping = 0;
         int forces = 0;
-        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-        Task flusher = Task.Run(() =>
-        {
-            while (!stop.IsCancellationRequested)
-            {
-                if (gate.FlushPending(journal))
-                {
-                    Interlocked.Increment(ref forces);
-                }
-                Thread.Yield();
-            }
-        });
-        Task[] appenders = Enumerable.Range(1, 4).Select(sequence => Task.Run(() =>
-        {
-            while (!stop.IsCancellationRequested)
-            {
-                long lsn = journal.AppendCommit(sequence);
-                if (faults.ActiveJournalFlushes > 0)
-                {
-                    Interlocked.Increment(ref overlapping);
-                }
-                gate.AwaitDurable(lsn, TimeSpan.Zero, journal);
-                acknowledged.Add(lsn);
-            }
-        })).ToArray();
 
         // Act
-        try
+        for (int round = 0; round < rounds; round++)
         {
-            long start = Stopwatch.GetTimestamp();
-            SpinWait.SpinUntil(() => Stopwatch.GetElapsedTime(start) >= TimeSpan.FromMilliseconds(250)
-                && Volatile.Read(ref overlapping) > 100 && Volatile.Read(ref forces) > 10 && acknowledged.Count > 100,
-                TimeSpan.FromSeconds(12)).ShouldBeTrue();
-        }
-        finally
-        {
-            stop.Cancel();
-            await Task.WhenAll(appenders.Append(flusher)).WaitAsync(TimeSpan.FromSeconds(10));
+            using var pending = new ManualResetEventSlim();
+            using var entered = new ManualResetEventSlim();
+            using var observed = new ManualResetEventSlim();
+            using var appended = new CountdownEvent(appenderCount);
+            int roundOverlap = 0;
+            gate.CommitPending = pending.Set;
+            faults.JournalFlushStalled = () =>
+            {
+                entered.Set();
+                // The count is taken inside this force's device hook. Its gate remains
+                // closed until observed, so neither this force nor a later one can finish.
+                if (appended.Wait(TimeSpan.FromSeconds(10)))
+                {
+                    faults.StalledJournalFlushes.ShouldBe(1);
+                    roundOverlap = appenderCount;
+                    Interlocked.Add(ref overlapping, roundOverlap);
+                }
+                observed.Set();
+            };
+            long first = journal.AppendCommit(round * (appenderCount + 1) + 1);
+            Task committer = Task.Run(() =>
+            {
+                gate.AwaitDurable(first, TimeSpan.FromSeconds(30), journal);
+                acknowledged.Add(first);
+            });
+            Task flusher = Task.CompletedTask;
+            Task[] appenders = [];
+            faults.StallJournalFlushes();
+            try
+            {
+                pending.Wait(TimeSpan.FromSeconds(10)).ShouldBeTrue();
+                flusher = Task.Run(() =>
+                {
+                    if (gate.FlushPending(journal))
+                    {
+                        Interlocked.Increment(ref forces);
+                    }
+                });
+                entered.Wait(TimeSpan.FromSeconds(10)).ShouldBeTrue();
+                appenders = Enumerable.Range(1, appenderCount).Select(sequence => Task.Run(() =>
+                {
+                    long lsn = journal.AppendCommit(sequence);
+                    appended.Signal();
+                    gate.AwaitDurable(lsn, TimeSpan.Zero, journal);
+                    acknowledged.Add(lsn);
+                })).ToArray();
+                observed.Wait(TimeSpan.FromSeconds(20)).ShouldBeTrue();
+            }
+            finally
+            {
+                faults.ReleaseJournalFlushes();
+                await Task.WhenAll(appenders.Append(flusher).Append(committer)).WaitAsync(TimeSpan.FromSeconds(40));
+                faults.JournalFlushStalled = null;
+            }
+            roundOverlap.ShouldBe(appenderCount, $"round {round}: append completion must precede release of its force");
         }
 
         // Assert

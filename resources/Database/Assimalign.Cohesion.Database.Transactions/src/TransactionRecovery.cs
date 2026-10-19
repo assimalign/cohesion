@@ -83,8 +83,6 @@ public static class TransactionRecovery
 
         foreach (var record in journal.ReadSequential())
         {
-            // Payloads are borrowed until MoveNext: decode the checkpoint's sequence words
-            // here, retaining only their values in the classification sets.
             cancellationToken.ThrowIfCancellationRequested();
             // A checkpoint record's payload lists the writers that were still in
             // flight when the journal was truncated — their begin records were
