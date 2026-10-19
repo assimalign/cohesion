@@ -36,7 +36,9 @@ public sealed partial class SqlQueryParser
                 RequireSkippedConstruct(scan.Current.Position, scan.Current.Position + scan.Current.Value.Length,
                     $"RETURNING {CurrentText(ref scan).ToUpperInvariant()}.");
             }
-            if (onConflict && !afterDot && IsWord(ref scan, "EXCLUDED") && IsReturningPseudoRelation(scan))
+            if (onConflict && !afterDot && IsWord(ref scan, "EXCLUDED") &&
+                !CurrentText(ref scan).Equals(table.Alias ?? table.TableName, StringComparison.OrdinalIgnoreCase) &&
+                IsReturningPseudoRelation(scan))
             {
                 RequireSkippedConstruct(scan.Current.Position, scan.Current.Position + scan.Current.Value.Length, "EXCLUDED in RETURNING");
             }

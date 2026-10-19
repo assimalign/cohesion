@@ -49,8 +49,8 @@ public sealed class SqlUpsertWireTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Client] - Upsert: arbiter, cardinality and constraint failures preserve usable connections")]
-    [InlineData("INSERT INTO t VALUES (3, 30) ON CONFLICT (age) DO NOTHING", "COHSQLE040")]
-    [InlineData("INSERT INTO t VALUES (1, 30), (1, 40) ON CONFLICT (id) DO UPDATE SET age = EXCLUDED.age", "COHSQLE041")]
+    [InlineData("INSERT INTO t VALUES (3, 30) ON CONFLICT (age) DO NOTHING", "COHSQLE035")]
+    [InlineData("INSERT INTO t VALUES (1, 30), (1, 40) ON CONFLICT (id) DO UPDATE SET age = EXCLUDED.age", "COHSQLE036")]
     [InlineData("INSERT INTO t VALUES (3, 30), (1, 40) ON CONFLICT (id) DO UPDATE SET age = 20", "UNIQUE")]
     [InlineData("INSERT INTO t VALUES (1, 30) ON CONFLICT (id) DO UPDATE SET age = -1", "CHECK")]
     public async Task ExecuteAsync_UpsertFailure_ShouldKeepConnectionUsable(string sql, string message)

@@ -2522,6 +2522,10 @@ PostgreSQL references: tablecmds.c:3903-4062 (column identity), :4329-4385 (rela
 
 ## INSERT ... ON CONFLICT execution (#1118)
 
+Binding rejects duplicate whole-column SET targets before execution (PostgreSQL
+src/backend/rewrite/rewriteHandler.c:1168). Live unique entries pointing at missing or
+undecodable heap rows raise StorageCorruptionException, never a serialization retry.
+
 The shared VALUES/DEFAULT VALUES/SELECT path builds every proposed stored row before
 arbitration, including coercion, defaults and identity allocation. Proposed CHECK, NOT NULL
 and domains run before key lookup; FK validation uses only rows actually written. Updated
@@ -2539,7 +2543,7 @@ identity check alone cannot protect arbiter binding. Gated tests cover all three
 The parser supplies EXCLUDED, so binding
 target-plus-proposed rows needs no visibility grant or public internal type. A per-index/key
 pending map models successful earlier proposals and rekeys in source order. Repeated effects
-raise COHSQLE041 before publication; arbiter failures use COHSQLE040. Encoded index equality
+raise COHSQLE036 before publication; arbiter failures use COHSQLE035. Encoded index equality
 supplies collation, NULL and temporal identity unchanged. For self-referencing FKs, the existing
 referential-action pending-update view excludes replaced heap versions and supplies final
 values to FK and incoming-reference checks. A removed key cannot authorize a new child; a

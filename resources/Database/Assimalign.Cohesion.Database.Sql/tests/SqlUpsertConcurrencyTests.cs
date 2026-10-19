@@ -65,7 +65,7 @@ public sealed class SqlUpsertConcurrencyTests
             if (retryFails)
             {
                 var invalid = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(sql, cancellationToken: timeout.Token));
-                invalid.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE040");
+                invalid.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE035");
             }
             else { (await session.ExecuteAsync(sql, cancellationToken: timeout.Token)).AffectedCount.ShouldBe(retriedCount); }
         }

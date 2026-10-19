@@ -51,9 +51,14 @@ internal sealed partial class SqlPlanner
             defaultCollation: _catalog.DefaultCollation, functions: _functions, cancellationToken: _cancellationToken,
             foldConstants: false);
         var assignments = new List<(int Ordinal, SqlBoundExpression Value)>();
+        var assigned = new HashSet<int>();
         foreach (var assignment in clause.Assignments)
         {
             int ordinal = FindColumnOrdinal(table, assignment.ColumnName);
+            // PostgreSQL src/backend/rewrite/rewriteHandler.c:1168 rejects repeated whole-column assignments.
+            if (!assigned.Add(ordinal))
+            { throw new SqlPlanningException("COHSQLE019", string.Format(CultureInfo.CurrentCulture,
+                ErrorMessages.DuplicateAssignment, assignment.ColumnName), assignment.Value.Location); }
             if (table.Columns[ordinal].Identity is { IsAlways: true })
             { throw SqlPlanningException.IdentityViolation(assignment.ColumnName, ErrorMessages.IdentityUpdateForbidden); }
             if (assignment.Value is SqlDefaultExpression) { assignments.Add((ordinal, SqlBoundDefaultItem.Instance)); continue; }
@@ -64,7 +69,7 @@ internal sealed partial class SqlPlanner
         return new(arbiters, indexes.Where(index => index.IsUnique).ToArray(), clause.Action == SqlOnConflictAction.DoUpdate, assignments,
             clause.Where is null ? null : evaluator.Bind(clause.Where));
 
-        SqlPlanningException Invalid(string reason) => new("COHSQLE040",
+        SqlPlanningException Invalid(string reason) => new("COHSQLE035",
             string.Format(CultureInfo.CurrentCulture, ErrorMessages.UpsertArbiterInvalid, target, table.Schema, table.Name, reason), insert.Location);
 
         bool IsLegacyPrimaryKey(string name)

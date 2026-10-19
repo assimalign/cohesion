@@ -6,15 +6,13 @@ Every model needs ordered lookups: SQL secondary indexes, document indexes, grap
 
 ## Latest live-entry lookup (#1118)
 
-BTreeIndex.FindLiveEntry returns the first live entry reference for a complete key,
-without snapshot filtering. The caller **must hold the key's Exclusive entry lock**
-(LockResource.Entry(tableObjectId, key.Hash())) throughout lookup and decision. Like UNIQUE
-enforcement, a live entry under that lock is committed or the caller's own; every insert
-and tombstone takes the same key lock, and rollback undoes entries before releasing it.
-The method is synchronous, takes the tree's read latch, and acquires no transaction lock.
-SQL uses it only in phase one, before the coordinator's apply gate. Tombstoned keys and
-rolled-back inserts return null; rolled-back deletes restore the original reference.
-No page layout or storage-format change is needed.
+BTreeIndex.FindLiveEntryAsync accepts a transaction and acquires the complete key's
+Exclusive entry lock (LockResource.Entry(tableObjectId, key.Hash())) before taking the
+tree's read latch. The lock lives until transaction completion, as in InsertAsync and
+DeleteAsync; SQL's phase-one call re-grants its pre-acquired lock. A non-unique index
+throws InvalidOperationException. There is no snapshot filter: a live entry under this
+lock is committed or the caller's own. Tombstones and rolled-back inserts return null;
+rolled-back deletes restore their original reference. No page layout changes are needed.
 
 ## Byte-comparable keys
 

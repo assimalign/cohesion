@@ -107,6 +107,10 @@ The row-source and target-list model follows PostgreSQL
 `analyze.c:1035-1044`. OLD/NEW masking follows `analyze.c:2773-2786`.
 Subqueries are a deliberate Cohesion subset exclusion.
 
+Duplicate whole-column SET targets in DO UPDATE fail at binding before any write.
+In RETURNING, a real visible target table or alias named excluded remains referenceable;
+the EXCLUDED pseudo-relation itself is out of scope.
+
 ## INSERT ... ON CONFLICT (#1118)
 
 `INSERT ... ON CONFLICT [(column [, ...]) | ON CONSTRAINT name] DO NOTHING`
@@ -118,18 +122,18 @@ count is inserted plus updated rows.
 
 A column target infers **every unique index whose column set equals the target set**;
 column order does not matter, and duplicate inference names collapse to that set. No matching
-unique index reports COHSQLE040 naming the target and table. ON CONSTRAINT accepts any
+unique index reports COHSQLE035 naming the target and table. ON CONSTRAINT accepts any
 unique index name on this table, including a user constraint name, a generated primary-key
 name read from INFORMATION_SCHEMA.TABLE_CONSTRAINTS, and a standalone CREATE UNIQUE INDEX
 name: the catalog reports all of them as constraints. Unknown names, CHECK and FOREIGN KEY
-names, and a legacy primary-key declaration without an index report COHSQLE040; the legacy
+names, and a legacy primary-key declaration without an index report COHSQLE035; the legacy
 case names its absent index explicitly. DO UPDATE requires a target and reports this at
-planning time with COHSQLE040. Untargeted DO NOTHING arbitrates on all unique indexes; with
+planning time with COHSQLE035. Untargeted DO NOTHING arbitrates on all unique indexes; with
 no unique indexes it inserts normally. Conflicts outside an explicit target still fail
 ordinary unique enforcement. If index-only DDL creates, drops or replaces unique indexes while the
 statement waits for its table intent lock, the bound arbiter set is invalidated and the
 transaction aborts retryably. A fresh execution binds the current indexes; an explicit target
-whose index was dropped then reports COHSQLE040.
+whose index was dropped then reports COHSQLE035.
 
 Arbiter keys use the index's collation and temporal normalization, so case_insensitive
 'ADA' conflicts with 'Ada'. **NULL conflicts with NULL** in a unique key, including a
@@ -155,7 +159,7 @@ CHECK, foreign keys and incoming-reference UPDATE RESTRICT. All writes, index ch
 RETURNING evaluations share one statement bracket; a failure rolls them all back.
 
 DO NOTHING discards duplicate proposed arbiter keys. DO UPDATE cannot affect a row a second
-time (COHSQLE041), whether the first effect inserted or updated it. An earlier DO UPDATE
+time (COHSQLE036), whether the first effect inserted or updated it. An earlier DO UPDATE
 rekey releases its old arbiter key in pending statement state: a later proposal may insert
 that released key, matching PostgreSQL's source-order behavior. Keys introduced by an
 earlier effect still count as reaching that affected row twice. A false/UNKNOWN filter
@@ -2842,8 +2846,8 @@ pin in the same change.
 | `COHSQLE031` | Error | DROP SCHEMA targets dbo, which code-first provisioning requires |
 | `COHSQLE032` | Error | DISTINCT/ALL/input ORDER BY on a scalar function, or DISTINCT input ordering whose keys are absent from the arguments (PostgreSQL 42809 / 42P10) |
 | `COHSQLE033` | Error | Invalid persisted view declaration/replacement, changed recorded column identity, oversized view record, or otherwise uncoded stored-body binding failure |
-| `COHSQLE040` | Error | ON CONFLICT has no matching unique arbiter, a named target is not a unique index, or DO UPDATE omitted its target |
-| `COHSQLE041` | Error | ON CONFLICT DO UPDATE cannot affect a row a second time |
+| `COHSQLE035` | Error | ON CONFLICT has no matching unique arbiter, a named target is not a unique index, or DO UPDATE omitted its target |
+| `COHSQLE036` | Error | ON CONFLICT DO UPDATE cannot affect a row a second time |
 
 Positions are absolute character offsets into the statement text; line/column
 presentation is computed by tooling from the source (offset → line mapping), not

@@ -16,6 +16,73 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed class SqlUpsertExecutionTests
 {
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Upsert: duplicate SET targets fail before any proposal writes")]
+    [InlineData("v = 1, v = 2")]
+    [InlineData("v = DEFAULT, V = 2")]
+    public async Task ExecuteAsync_DuplicateAssignment_ShouldRejectBeforeWrites(string assignments)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("upsert-duplicate", new());
+        var database = await engine.CreateDatabaseAsync("app");
+        await using var session = await database.CreateSessionAsync();
+        await session.ExecuteAsync("CREATE TABLE t (id INT PRIMARY KEY, v INT)");
+        await session.ExecuteAsync("INSERT INTO t VALUES (1, 10)");
+
+        // Act / Assert
+        var failure = await Should.ThrowAsync<SqlPlanningException>(async () => await session.ExecuteAsync(
+            $"INSERT INTO t VALUES (2, 20), (1, 30) ON CONFLICT(id) DO UPDATE SET {assignments}"));
+        failure.Message.ShouldContain("assigned more than once", Case.Sensitive);
+        CheckRows(await RowsAsync(session, "SELECT * FROM t"), [[1, 10]]);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Upsert: a real target named excluded remains visible in RETURNING")]
+    [InlineData("excluded", "excluded")]
+    [InlineData("t", "t AS excluded")]
+    public async Task ExecuteAsync_ExcludedTargetName_ShouldReturnTarget(string name, string target)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("upsert-excluded", new());
+        var database = await engine.CreateDatabaseAsync("app");
+        await using var session = await database.CreateSessionAsync();
+        await session.ExecuteAsync($"CREATE TABLE {name} (id INT PRIMARY KEY, v INT)");
+
+        // Act / Assert
+        CheckRows(await RowsAsync(session, $"INSERT INTO {target} VALUES (1,10) ON CONFLICT DO NOTHING RETURNING excluded.id"), [[1]]);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Upsert: moving the arbiter key onto a committed key raises a unique violation")]
+    public async Task ExecuteAsync_ArbiterRekeyCollision_ShouldRejectAtomically()
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("upsert-rekey-collision", new());
+        var database = await engine.CreateDatabaseAsync("app");
+        await using var session = await database.CreateSessionAsync();
+        await session.ExecuteAsync("CREATE TABLE t (id INT PRIMARY KEY)");
+        await session.ExecuteAsync("INSERT INTO t VALUES (1),(2)");
+
+        // Act / Assert
+        await Should.ThrowAsync<SqlConstraintViolationException>(async () => await session.ExecuteAsync(
+            "INSERT INTO t VALUES (1) ON CONFLICT(id) DO UPDATE SET id = 2"));
+        CheckRows(await RowsAsync(session, "SELECT * FROM t ORDER BY id"), [[1], [2]]);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Upsert: a view target is read only")]
+    public async Task ExecuteAsync_ViewTarget_ShouldRefuse()
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("upsert-view", new());
+        var database = await engine.CreateDatabaseAsync("app");
+        await using var session = await database.CreateSessionAsync();
+        await session.ExecuteAsync("CREATE TABLE t (id INT PRIMARY KEY)");
+        await session.ExecuteAsync("CREATE VIEW v AS SELECT id FROM t");
+
+        // Act / Assert
+        var failure = await Should.ThrowAsync<SqlPlanningException>(async () => await session.ExecuteAsync(
+            "INSERT INTO v VALUES (1) ON CONFLICT DO NOTHING"));
+        failure.Message.ShouldContain("read-only", Case.Sensitive);
+        (await RowsAsync(session, "SELECT * FROM t")).ShouldBeEmpty();
+    }
+
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Upsert: a rekeyed-away parent cannot authorize a new self-referencing child")]
     public async Task ExecuteAsync_RekeyedParentAndInsertedChild_ShouldRejectDanglingReference()
     {
@@ -94,7 +161,7 @@ public sealed class SqlUpsertExecutionTests
         var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("INSERT INTO legacy VALUES (1) " + clause));
 
         // Assert
-        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE040");
+        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE035");
         failure.Message.ShouldContain(reason, Case.Sensitive);
         (await RowsAsync(session, "SELECT id FROM legacy")).ShouldBeEmpty();
     }
@@ -295,12 +362,12 @@ public sealed class SqlUpsertExecutionTests
     }
 
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Upsert: invalid arbiters and ambiguous scope fail before writing")]
-    [InlineData("ON CONFLICT (age) DO NOTHING", "COHSQLE040")]
-    [InlineData("ON CONFLICT (missing) DO NOTHING", "COHSQLE040")]
-    [InlineData("ON CONFLICT ON CONSTRAINT missing DO NOTHING", "COHSQLE040")]
-    [InlineData("ON CONFLICT ON CONSTRAINT positive DO NOTHING", "COHSQLE040")]
-    [InlineData("ON CONFLICT ON CONSTRAINT fk DO NOTHING", "COHSQLE040")]
-    [InlineData("ON CONFLICT DO UPDATE SET age = EXCLUDED.age", "COHSQLE040")]
+    [InlineData("ON CONFLICT (age) DO NOTHING", "COHSQLE035")]
+    [InlineData("ON CONFLICT (missing) DO NOTHING", "COHSQLE035")]
+    [InlineData("ON CONFLICT ON CONSTRAINT missing DO NOTHING", "COHSQLE035")]
+    [InlineData("ON CONFLICT ON CONSTRAINT positive DO NOTHING", "COHSQLE035")]
+    [InlineData("ON CONFLICT ON CONSTRAINT fk DO NOTHING", "COHSQLE035")]
+    [InlineData("ON CONFLICT DO UPDATE SET age = EXCLUDED.age", "COHSQLE035")]
     [InlineData("ON CONFLICT (id) DO UPDATE SET age = age + 1", "COHSQLE015")]
     [InlineData("ON CONFLICT (id) DO UPDATE SET age = EXCLUDED.age WHERE age = 1", "COHSQLE015")]
     public async Task ExecuteAsync_InvalidTargetOrScope_ShouldPreserveTable(string clause, string code)
@@ -338,7 +405,7 @@ public sealed class SqlUpsertExecutionTests
             "INSERT INTO t VALUES (1, 20), (1, 30) ON CONFLICT (id) DO UPDATE SET age = EXCLUDED.age"));
 
         // Assert
-        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE041");
+        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE036");
         failure.Message.ShouldContain("cannot affect a row a second time", Case.Sensitive);
         CheckRows(await RowsAsync(session, "SELECT * FROM t"), existing ? [[1, 10]] : []);
         (await session.ExecuteAsync("INSERT INTO t VALUES (2, 20), (2, 30) ON CONFLICT DO NOTHING")).AffectedCount.ShouldBe(1);

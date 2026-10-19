@@ -10,7 +10,9 @@ are positional capability refusals (REPLACE uses its existing function token). I
 expressions/options, partial WHERE and DO SELECT retain named COHDBL001. Preflight resets
 INSERT VALUES/FROM state at arbitration and names SET/WHERE subqueries ON CONFLICT DO UPDATE,
 including after WITH-prefixed INSERT SELECT. RETURNING ends that scope and refuses
-EXCLUDED.column. DIALECT specifies execution and errors.
+the EXCLUDED pseudo-relation; a visible target table or alias really named excluded masks
+that refusal, as OLD/NEW do (PostgreSQL src/backend/parser/analyze.c:1269).
+DIALECT specifies execution and errors.
 
 ## CREATE modifier dispatch (#1124 review)
 

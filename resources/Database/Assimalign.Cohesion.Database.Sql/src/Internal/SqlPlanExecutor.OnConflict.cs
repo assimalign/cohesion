@@ -67,24 +67,25 @@ internal sealed partial class SqlPlanExecutor
                     pendingConflict = true;
                     break;
                 }
-                if (arbiter.Index.FindLiveEntry(key) is { } location) { conflict = location; break; }
+                if ((await arbiter.Index.FindLiveEntryAsync(statement.Transaction, key, cancellationToken).ConfigureAwait(false)) is { } location) { conflict = location; break; }
             }
 
             SqlUpsertWrite write;
             if (pendingConflict)
             {
                 if (!plan.DoUpdate) { continue; }
-                throw new SqlPlanningException("COHSQLE041", ErrorMessages.UpsertRepeatedRow);
+                throw new SqlPlanningException("COHSQLE036", ErrorMessages.UpsertRepeatedRow);
             }
             if (conflict is { } reference)
             {
                 var (pageId, slotIndex) = SqlRecordLocation.Unpack(reference);
-                if (!_storage.TryReadRecord(pageId, slotIndex, table.ObjectId, out var record)) { throw SnapshotConflict(); }
+                if (!_storage.TryReadRecord(pageId, slotIndex, table.ObjectId, out var record)) { throw DamagedRow(); }
                 var oldValues = DecodeRow(record, pageId, slotIndex, table, bound.MissingValues, out var writer, out _);
-                if (oldValues is null || statement.Transaction.IsolationLevel != IsolationLevel.ReadCommitted && !statement.Snapshot.IsVisible(writer))
+                if (oldValues is null) { throw DamagedRow(); }
+                if (statement.Transaction.IsolationLevel != IsolationLevel.ReadCommitted && !statement.Snapshot.IsVisible(writer))
                 { throw SnapshotConflict(); }
                 if (!plan.DoUpdate) { continue; }
-                if (affected.Contains(reference)) { throw new SqlPlanningException("COHSQLE041", ErrorMessages.UpsertRepeatedRow); }
+                if (affected.Contains(reference)) { throw new SqlPlanningException("COHSQLE036", ErrorMessages.UpsertRepeatedRow); }
                 lockedRows.Add((pageId, slotIndex));
                 var scope = new object?[oldValues.Length * 2];
                 oldValues.CopyTo(scope, 0);
@@ -100,6 +101,8 @@ internal sealed partial class SqlPlanExecutor
                 if (assigned is not null) { CheckDomains(bound, updated, evaluator, assigned); }
                 affected.Add(reference);
                 write = new(reference, oldValues, updated, SqlRowCodec.Encode(table, updated, statement.Transaction.Sequence));
+                StorageCorruptionException DamagedRow() => new(pageId, string.Format(CultureInfo.CurrentCulture,
+                    ErrorMessages.UpsertLiveRowDamaged, table.Schema, table.Name, slotIndex, (long)pageId));
                 foreach (var arbiter in arbiters)
                 {
                     pending[(arbiter.Metadata.Name, BuildIndexKey(table, arbiter.KeyOrdinals, oldValues))] = null;
