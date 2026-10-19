@@ -10,7 +10,8 @@ The shared ACID substrate for every Cohesion database engine: MVCC visibility sn
 - `TransactionId` / `TransactionState` — the transaction vocabulary the area root's `DatabaseTransaction` base consumes
 - `TransactionSnapshot` / `TransactionSequence` — MVCC visibility (implemented, tested)
 - `LockManager` / `LockMode` / `LockResource` — hierarchical write locking with deadlock resolution
-  (sealed; `LockManager.Create` for a standalone table)
+  (sealed; `LockManager.Create` for a standalone table); `LockStatementMark` preserves earlier
+  grants while an unwritten statement releases its new locks and retries arbitration
 - the transaction log — the WAL binding, an internal seam since #1257 (storage owns the physical journal)
 - `VersionStore` — the version-chain base; its two leaves, `RecordSpaceVersionStore` and the
   in-memory store (`VersionStore.CreateInMemory`), both live here

@@ -677,8 +677,11 @@ internal sealed partial class SqlPlanExecutor
     //   3. its unique-index key locks, sorted by key hash (deduplicated).
     //
     // ON CONFLICT is the second deliberate exception (beside the cascade walk):
-    // all proposal unique keys and replacement keys precede any row lock.
-    // Cycles with row-first writers are handled by the lock manager's deadlock detection.
+    // proposal unique keys precede live-row arbitration. Row locks use TryAcquire:
+    // contention releases all grants since the statement mark, waits through AcquireAsync,
+    // releases the wait grant, then restarts the whole unapplied arbitration (#1668).
+    // Replacement keys follow successfully locked conflict rows. Pre-statement grants
+    // (including upgrades) survive; reversed multi-row key acquisition can still deadlock.
     //
     // The B+Tree re-acquires the key lock inside the apply gate — a same-owner
     // re-grant that completes synchronously — so no lock wait can ever happen

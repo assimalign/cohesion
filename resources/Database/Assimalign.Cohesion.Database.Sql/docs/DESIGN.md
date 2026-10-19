@@ -2565,31 +2565,82 @@ self-reference moved with its key validates against the final row.
 After object intent locks, statements without requested side-effecting defaults acquire the keys of
 **every unique index of every proposal**, sorted and deduplicated, before live arbitration.
 Each proposal's encoded keys are reused for hashing, lookup and pending inserts.
-BTreeIndex.FindLiveEntryAsync re-grants those locks outside the apply gate. Replacement
-old/new keys are also acquired before any row lock, then conflicting rows form a sorted
-batch and reference locks follow. Lock preparation never evaluates defaults speculatively.
-When a proposal or conflict assignment requests an identity or a default containing a
-non-immutable function call, each proposal evaluates its defaults and acquires all its unique
-keys in one sorted batch before its latest-state lookup and conflict projection. The binder
-records non-immutable calls recursively, including sequence-like application functions;
-STABLE is conservatively treated as side-effecting. Constants and immutable expressions retain
-the complete up-front proposal batch, including after definitions are reloaded. The table
-retains only IX, so unrelated single-row upserts and plain INSERTs can progress while a
-defaulted upsert waits. Replacement old/new keys and the sorted row batch follow arbitration.
-Reversed multi-row proposal orders can deadlock; the lock manager detects a retryable victim
-(the same class tracked by #1668). Ordering input rows consistently reduces this exposure,
-as PostgreSQL advises in doc/src/sgml/mvcc.sgml:1546-1555. No speculative allocation or
-default replay is needed. This is the second
-deliberate exception to row-before-key, beside the referential cascade walk. It can form
-row/key cycles with ordinary UPDATE/DELETE and SET NULL/DEFAULT. The lock manager detects
-cycles as retryable deadlocks; callers roll back/retry the victim. Gated tests exercise
-SET NULL/DEFAULT cycles, all-index plain INSERT waits and different-arbiter upserts.
-Even an UPDATE leaving every unique value unchanged tombstones and reinserts the entry
-at a new heap location, preserving old snapshots; it therefore still needs key locks.
-The accepted contract is detected and retryable: roll back the victim transaction and
-retry the complete transaction, including any earlier statements. Releasing this statement's
-keys and retrying row acquisition inside the engine remains follow-up work. The apply
-gate's no-wait rule is unchanged.
+BTreeIndex.FindLiveEntryAsync re-grants those locks outside the apply gate. When a proposal
+or conflict assignment requests an identity or a default containing a non-immutable function
+call, each proposal evaluates its defaults and acquires all its unique keys in a sorted batch
+before latest-state lookup and conflict projection. The binder records non-immutable calls
+recursively, including sequence-like application functions; STABLE is conservatively treated
+as side-effecting. Constants and immutable expressions retain the complete up-front batch.
+The table retains only IX, allowing unrelated upserts and plain INSERTs to progress.
+
+**Release and retry arbitration (#1668).** Before the first proposal, execution takes an
+allocation-free statement mark with LockManager.MarkStatement that is never reassigned, plus a
+retry mark at the same boundary. DO UPDATE takes a live conflict's row with TryAcquire
+before reading it or evaluating its WHERE filter; a false/UNKNOWN filter keeps that row locked
+and unchanged. DO NOTHING takes no conflicting-row lock: the arbiter key protects its visibility
+check (PostgreSQL nodeModifyTable.c:1207-1211). An all-conflict DO NOTHING has no writes to protect
+and releases its new arbitration grants after those checks, so an open no-op transaction blocks
+neither UPDATE of that parent nor a child INSERT referencing it. Pre-statement grants remain held.
+If refused, ReleaseSince gives back every resource first granted after the retry mark, including
+all earlier proposals' keys and rows. AcquireAsync then waits for the row through the normal
+deadlock detector, cancellation and storage-abandonment path. Its row grant is kept, a new mark
+is taken after the grant, and the entire arbitration restarts at proposal one. Later back-offs
+retain rows kept by earlier waits. After a successful statement, every row kept by a completed
+wait stays locked until the transaction ends, even when final arbitration no longer conflicts
+with it; for example, the holder may commit a rekey or delete under ReadCommitted. Snapshot checks
+the waited row for a committed update/delete and aborts retryably even
+when the key is now absent; ReadCommitted looks up the newest committed state. Rollback has
+undone row/index stamps before the holder releases its locks, so a rollback waiter proceeds
+as if the holder never wrote. Cancellation is checked at every restart. Each restart holds a
+superset of the rows it waited for, and a waited-for row's prior holder has finished. The restart
+holds those rows before taking keys, the canonical UPDATE/DELETE order, and TryAcquire re-grants
+its own row immediately. Two contenders therefore cannot repeatedly hand the same row back and
+forth. Gated LockWaitStart/LockWaitStop cases pin both the same-key schedule and disjoint proposal
+key sets arbitrating through id versus email; both increments apply exactly once.
+
+Conflicting rows are already held when replacement old/new keys are acquired in a sorted
+batch. Outgoing and released FK parent rows also use TryAcquire before their existing
+lock-protected validation; contention releases the same mark, waits, and restarts. Thus no
+row wait retains this statement's new keys. A resource held before the mark stays held,
+including any mode upgrade acquired during the statement: ReleaseSince never downgrades it.
+Earlier transaction work remains protected and can still participate in ordinary deadlocks.
+Reversed multi-row upserts can still deadlock while acquiring keys (especially source-ordered
+defaults). Retained waited rows also permit row-against-row deadlocks when multi-row upserts
+reach rows in opposite orders; the lock manager chooses a retryable victim. This is the residual
+exposure of retaining locks to avoid symmetric back-off livelock (PostgreSQL
+src/backend/executor/execIndexing.c:85-95). Callers roll back/retry the victim transaction. Consistent input row order reduces
+that exposure, as PostgreSQL advises in doc/src/sgml/mvcc.sgml:1546-1555.
+
+Every exception before ApplyStatementAsync begins releases grants acquired since the original
+statement mark and rethrows, including cancellation during or after a wait, COHSQLE036,
+CHECK/NOT NULL violations and an unhandled deadlock. This also releases rows retained by completed
+waits, so a failed upsert does not keep its new rows or arbiter keys locked while its explicit
+transaction stays active. Pre-statement grants and their upgrades remain protected. Once apply
+begins, this cleanup never runs, even if apply fails; ordinary transaction-duration locking applies.
+
+Discarding arbitration is safe: proposals, pending index effects, affected-row identities and
+replacement records are only in-memory preparation. No target heap/index mutation, version-store
+ledger entry, data apply bracket or RETURNING projection exists before the final
+ApplyStatementAsync. A restart re-enumerates proposals, so identities and non-immutable
+defaults are evaluated again (identity gaps are intentional, and independent catalog identity
+reservations may already be durable); pending state is rebuilt from
+scratch. The one final bracket writes and projects each affected row once. Gated conformance
+cases pin multi-row replay, identity/function allocation, RETURNING, pre-statement grants,
+cancellation, commit/rollback and both isolation levels. The apply gate's no-wait rule and
+two-phase locking for written data are unchanged. No new interface or visibility grant is used.
+
+The reference is PostgreSQL's ExecInsert retry at
+src/backend/executor/nodeModifyTable.c:1146-1172, ExecOnConflictUpdate through
+ExecOnConflictLockRow at :2918-2920 and :2846-2874 (Snapshot abort versus fresh arbitration on
+UPDATE/DELETE), and check_exclusion_or_unique_constraint in
+src/backend/executor/execIndexing.c:882-901 (end the index scan, wait for the transaction, retry).
+Cohesion discards the whole unapplied batch; PostgreSQL retries its current tuple.
+
+**Plain INSERT lock order (#1668).** ExecuteInsertRowsAsync takes shared FK parent-row
+locks before unique keys, so a parent key-changing UPDATE can finish while INSERT waits;
+the gated self-referencing case ends with the existing latest-parent serialization abort,
+without a deadlock victim. No plain INSERT change is needed; general referential cycles
+and locks from earlier transaction work keep their existing deadlock semantics.
 
 A live conflict newer than Snapshot visibility fails retryably for either action, including
 autocommit Snapshot. ReadCommitted skips it for DO NOTHING or updates the latest committed
@@ -3368,7 +3419,7 @@ description + exported registrations), the engine binds them.
   consistent. **The first deliberate exception is the cascade walk**, which locks
   rows in discovery order because the closure it is discovering is what
   determines the lock set; see "Referential enforcement locks parent rows" under
-  constraints for why that trade was taken and what it costs. The second is ON CONFLICT: every proposal unique key and replacement key precedes conflicting row locks; see INSERT ... ON CONFLICT execution above.
+  constraints for why that trade was taken and what it costs. The second is ON CONFLICT: proposal unique keys precede nonblocking row arbitration, and a contended row releases new grants before waiting and restarting; see INSERT ... ON CONFLICT execution above.
 - **Uniqueness = the B+Tree's latest-state check under the exclusive hashed-key
   lock** (never snapshot visibility — write skew; the recorded #851 lesson).
   Violations surface as the area root's `DatabaseException` at the model
