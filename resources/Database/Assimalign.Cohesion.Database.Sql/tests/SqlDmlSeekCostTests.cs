@@ -11,12 +11,6 @@ using Xunit.Abstractions;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
-[CollectionDefinition(Name, DisableParallelization = true)]
-public sealed class SqlDmlSeekCollection
-{
-    public const string Name = "SQL DML seeks";
-}
-
 [Collection(SqlDmlSeekCollection.Name)]
 public sealed class SqlDmlSeekCostTests
 {
@@ -29,7 +23,7 @@ public sealed class SqlDmlSeekCostTests
     [InlineData(true)]
     public async Task ExecuteAsync_DistinctPrimaryKeys_ShouldHaveConstantRowVisitsAndBoundedCost(bool delete)
     {
-        // Arrange: no incoming foreign keys, no repeated hot keys or purge worker.
+        // Arrange: distinct keys avoid hot-key history; neither table has incoming foreign keys.
         using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(3));
         await using var engine = SqlDatabaseEngine.Create("dml-seek-cost", new());
         var database = await engine.CreateDatabaseAsync("cost", timeout.Token);

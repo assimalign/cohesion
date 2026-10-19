@@ -2741,7 +2741,8 @@ project reference or InternalsVisibleTo change is required.
   targets give Halloween protection when SET moves keys within the sought range.
   The final-state `BuildConstraintUpdates` validation and `EnsureLatestVersion`
   first-updater-wins checks are unchanged. A bound access path whose tree was
-  detached falls back to the residual-filtered scan; a catalog-registered but missing
+  detached or whose catalog identity changed (including reuse of its name for a
+  different key) falls back to the residual-filtered scan; a catalog-registered but missing
   maintenance tree still refuses writes. PostgreSQL similarly drives ModifyTable
   from its outer child plan (`src/backend/executor/nodeModifyTable.c:4442,4497`);
   Cohesion reuses its existing SELECT seek and retains its two-phase write discipline.

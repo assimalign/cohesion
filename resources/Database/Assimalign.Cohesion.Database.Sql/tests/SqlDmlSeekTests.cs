@@ -125,9 +125,11 @@ public sealed class SqlDmlSeekTests
     }
 
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - DML seek: a detached tree falls back to the residual-filtered scan (#1274)")]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task ExecuteAsync_DetachedIndex_ShouldFallBackToScan(bool delete)
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task ExecuteAsync_DetachedIndex_ShouldFallBackToScan(bool delete, bool replaced)
     {
         // Arrange: retain a bound seek after its index is dropped. Missing runtime trees
         // still registered in the catalog must fail maintenance, never bypass constraints.
@@ -143,6 +145,7 @@ public sealed class SqlDmlSeekTests
         var seek = access.ShouldBeOfType<SqlIndexSeekPath>();
         seek.Index.Name.ShouldBe("ix");
         await session.ExecuteAsync("DROP INDEX ix ON t", cancellationToken: CancellationToken.None);
+        if (replaced) { await session.ExecuteAsync("CREATE INDEX ix ON t(v)", cancellationToken: CancellationToken.None); }
         var transaction = await database.Coordinator.BeginAsync(IsolationLevel.Snapshot, CancellationToken.None);
         try
         {

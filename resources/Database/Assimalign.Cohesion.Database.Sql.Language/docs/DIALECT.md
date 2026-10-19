@@ -106,6 +106,7 @@ including target aliases and qualified columns. EXPLAIN shows the chosen IndexSe
 or TableScan below the mutation. The complete WHERE remains a residual predicate, including
 subqueries. Targets are collected through one statement snapshot before any write, so changing
 a sought key updates each original target once; RETURNING order remains unspecified (#1274).
+Execution falls back to a scan if the bound index was dropped or replaced before execution.
 
 The row-source and target-list model follows PostgreSQL
 `src/backend/executor/nodeModifyTable.c:308-330` and
