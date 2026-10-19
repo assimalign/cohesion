@@ -1,0 +1,330 @@
+using System;
+using System.Collections.Concurrent;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+
+using Shouldly;
+using Xunit;
+
+using Assimalign.Cohesion.Database.Storage.Internal;
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+
+namespace Assimalign.Cohesion.Database.Storage.Tests;
+
+[Collection(StorageRaceCollection.Name)]
+public sealed class JournalConcurrencyTests
+{
+    [Theory(DisplayName = "Cohesion Test [Storage] - Journal tail: in-flight drains resume at the last verified frame")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task EnsureDurable_TornTailAndConcurrentAppend_ShouldWriteAtVerifiedOffset(bool write)
+    {
+        // Arrange
+        byte[] original;
+        using (var seed = new MemoryStream())
+        {
+            using var journal = StorageJournal.Create(seed, leaveOpen: true);
+            journal.AppendCommit(1);
+            journal.Flush();
+            seed.Write(new byte[] { 90, 91, 92, 93, 94, 95, 96, 97, 98 });
+            original = seed.ToArray();
+        }
+        var medium = new CrashSimulationStream(original);
+        var faults = new DeviceFaults();
+        using var reopened = StorageJournal.Create(faults.WrapJournal(medium));
+        long first = reopened.AppendCommit(2);
+        Stall(faults, write);
+        Task force = Task.Run(() => reopened.EnsureDurable(first));
+        try
+        {
+            WaitForStall(faults, write);
+
+            // Act
+            long later = reopened.AppendCommit(3);
+            faults.Clear();
+            await force.WaitAsync(TimeSpan.FromSeconds(10));
+            reopened.EnsureDurable(later);
+
+            // Assert: no record sits behind the old torn tail, and offsets remain contiguous.
+            using var crash = StorageJournal.Create(new MemoryStream(medium.CaptureDurable()));
+            crash.ReadAll().Select(record => record.Lsn).ShouldBe([1L, first, later]);
+            medium.Length.ShouldBe(3 * 38);
+        }
+        finally
+        {
+            faults.Clear();
+            await force.WaitAsync(TimeSpan.FromSeconds(10));
+        }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Storage] - Journal force: appenders proceed during device I/O and waiters share a durable prefix")]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task EnsureDurable_StalledDevice_ShouldReleaseAppendLockAndCoalesceWaiters(bool write, bool flush)
+    {
+        // Arrange
+        var faults = new DeviceFaults();
+        var medium = new CrashSimulationStream { DurableFlushesOnly = true };
+        using var journal = StorageJournal.Create(faults.WrapJournal(medium));
+        long first = journal.AppendCommit(1);
+        Stall(faults, write);
+        Task force = Task.Run(() => { if (flush) { journal.Flush(true); } else { journal.EnsureDurable(first); } });
+        Task[] waiters = [];
+
+        try
+        {
+            WaitForStall(faults, write);
+
+            // Act: the second commit is buffered while the first prefix is on the device.
+            long second = await Task.Run(() => journal.AppendCommit(2)).WaitAsync(TimeSpan.FromSeconds(10));
+            waiters = Enumerable.Range(0, 8).Select(_ => Task.Run(() => journal.EnsureDurable(first))).ToArray();
+
+            // Assert: neither the in-flight prefix nor the later commit was acknowledged yet.
+            second.ShouldBe(first + 1);
+            journal.DurableLsn.ShouldBe(0);
+            faults.Clear();
+            await Task.WhenAll(waiters.Append(force)).WaitAsync(TimeSpan.FromSeconds(10));
+            medium.FlushCount.ShouldBe(1);
+            journal.DurableLsn.ShouldBe(first);
+            using (var crash = StorageJournal.Create(new MemoryStream(medium.CaptureDurable())))
+            {
+                crash.ReadAll().Select(record => record.Lsn).ShouldBe([first]);
+            }
+
+            journal.EnsureDurable(second);
+            using var reopened = StorageJournal.Create(new MemoryStream(medium.CaptureDurable()));
+            reopened.ReadAll().Select(record => record.Lsn).ShouldBe([first, second]);
+        }
+        finally
+        {
+            faults.Clear();
+            await Task.WhenAll(waiters.Append(force)).WaitAsync(TimeSpan.FromSeconds(10));
+        }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Storage] - Journal failure: latch before any later prefix can be acknowledged")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task EnsureDurable_FailedDeviceWithLaterAppends_ShouldFenceEveryLaterLsn(bool write)
+    {
+        // Arrange
+        var faults = new DeviceFaults();
+        var medium = new CrashSimulationStream { DurableFlushesOnly = true };
+        using var journal = StorageJournal.Create(faults.WrapJournal(medium));
+        long durable = journal.AppendCommit(1);
+        journal.EnsureDurable(durable);
+        byte[] payload = [1, 2, 3, 4];
+        long first = journal.AppendPageRecord(2, (PageId)1L, JournalRecordType.FullPageImage, payload, out var location);
+        Stall(faults, write);
+        Task force = Task.Run(() => Should.Throw<StorageOfflineException>(() => journal.EnsureDurable(first)));
+        try
+        {
+            WaitForStall(faults, write);
+
+            // Act: one frame in the detached prefix, another in the replacement append buffer.
+            long later = journal.AppendPageRecord(3, (PageId)2L, JournalRecordType.FullPageImage, payload, out var buffered);
+            var read = new byte[64];
+            journal.ReadPageRecord(buffered, read).ShouldBe(payload.Length);
+            read.AsSpan(0, payload.Length).ToArray().ShouldBe(payload);
+            if (write)
+            {
+                await Task.Run(() => journal.ReadPageRecord(location, read)).WaitAsync(TimeSpan.FromSeconds(10));
+                read.AsSpan(0, payload.Length).ToArray().ShouldBe(payload);
+                faults.FailJournalWrites = true;
+            }
+            else
+            {
+                faults.FailJournalFlushes = true;
+            }
+            Task laterForce = Task.Run(() => Should.Throw<StorageOfflineException>(() => journal.EnsureDurable(later)));
+            Release(faults, write);
+            await Task.WhenAll(force, laterForce).WaitAsync(TimeSpan.FromSeconds(10));
+
+            // Assert: first error persists after the device heals; old durability stays usable.
+            faults.Clear();
+            journal.DurableLsn.ShouldBe(durable);
+            faults.ActiveJournalFlushes.ShouldBe(0);
+            faults.StalledJournalWrites.ShouldBe(0);
+            faults.StalledJournalFlushes.ShouldBe(0);
+            journal.EnsureDurable(durable);
+            Should.Throw<StorageOfflineException>(() => journal.Flush(true));
+            Should.Throw<StorageOfflineException>(() => journal.AppendCommit(4));
+            journal.ReadPageRecord(location, read).ShouldBe(payload.Length);
+            read.AsSpan(0, payload.Length).ToArray().ShouldBe(payload);
+            journal.ReadPageRecord(buffered, read).ShouldBe(payload.Length);
+            using var reopened = StorageJournal.Create(new MemoryStream(medium.CaptureDurable()));
+            reopened.ReadAll().Select(record => record.Lsn).ShouldBe([durable]);
+        }
+        finally
+        {
+            faults.Clear();
+            await force.WaitAsync(TimeSpan.FromSeconds(10));
+        }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Storage] - Journal lifecycle: offline, checkpoint and disposal wait for an in-flight fsync")]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task Flush_RacingLifecycle_ShouldCompletePrefixBeforeExclusiveOperation(int operation)
+    {
+        // Arrange
+        var faults = new DeviceFaults();
+        var medium = new CrashSimulationStream();
+        using var journal = StorageJournal.Create(faults.WrapJournal(medium), leaveOpen: true);
+        long first = journal.AppendCommit(1);
+        faults.StallJournalFlushes();
+        Task force = Task.Run(() => journal.EnsureDurable(first));
+        Exception? error = null;
+        Thread? exclusive = null;
+        try
+        {
+            WaitForStall(faults, write: false);
+            long later = journal.AppendCommit(2);
+            exclusive = new Thread(() =>
+            {
+                try
+                {
+                    if (operation == 0)
+                    {
+                        journal.TakeOffline(StorageOfflineException.Create(StorageOfflineCause.DataFlush, "test device", new IOException("test")));
+                    }
+                    else if (operation == 1)
+                    {
+                        journal.Checkpoint([]);
+                    }
+                    else
+                    {
+                        journal.Dispose();
+                    }
+                }
+                catch (Exception exception)
+                {
+                    error = exception;
+                }
+            }) { IsBackground = true };
+
+            // Act: observe the exclusive thread blocked on the medium, then release the fsync.
+            exclusive.Start();
+            SpinWait.SpinUntil(() => (exclusive.ThreadState & System.Threading.ThreadState.WaitSleepJoin) != 0, TimeSpan.FromSeconds(10)).ShouldBeTrue();
+            journal.IsOffline.ShouldBeFalse();
+            medium.Length.ShouldBe(38);
+            faults.Clear();
+            await force.WaitAsync(TimeSpan.FromSeconds(10));
+            exclusive.Join(TimeSpan.FromSeconds(10)).ShouldBeTrue();
+
+            // Assert
+            error.ShouldBeNull();
+            if (operation == 0)
+            {
+                journal.IsOffline.ShouldBeTrue();
+                journal.DurableLsn.ShouldBe(first);
+                journal.EnsureDurable(first);
+                Should.Throw<StorageOfflineException>(() => journal.EnsureDurable(later));
+            }
+            else if (operation == 1)
+            {
+                var checkpoint = journal.ReadAll().ShouldHaveSingleItem();
+                checkpoint.Lsn.ShouldBe(later + 1);
+                checkpoint.Type.ShouldBe(JournalRecordType.Checkpoint);
+            }
+            else
+            {
+                using var reopened = StorageJournal.Create(new MemoryStream(medium.CaptureLive()));
+                reopened.ReadAll().Select(record => record.Lsn).ShouldBe([first, later]);
+                Should.Throw<ObjectDisposedException>(() => journal.AppendCommit(3));
+            }
+        }
+        finally
+        {
+            faults.Clear();
+            await force.WaitAsync(TimeSpan.FromSeconds(10));
+            if (exclusive is not null)
+            {
+                exclusive.Join(TimeSpan.FromSeconds(10)).ShouldBeTrue();
+            }
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Storage] - Journal force stress: acknowledged prefixes survive concurrent appends and group flushes")]
+    public async Task EnsureDurable_ConcurrentAppendersAndGroupGate_ShouldKeepEveryAcknowledgedCommit()
+    {
+        // Arrange: stop only after the minimum duration AND every race counter moved.
+        var medium = new CrashSimulationStream { DurableFlushesOnly = true };
+        var faults = new DeviceFaults();
+        using var journal = StorageJournal.Create(faults.WrapJournal(medium), leaveOpen: true);
+        var gate = new StorageGroupCommitGate();
+        var acknowledged = new ConcurrentBag<long>();
+        int overlapping = 0;
+        int forces = 0;
+        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        Task flusher = Task.Run(() =>
+        {
+            while (!stop.IsCancellationRequested)
+            {
+                if (gate.FlushPending(journal))
+                {
+                    Interlocked.Increment(ref forces);
+                }
+                Thread.Yield();
+            }
+        });
+        Task[] appenders = Enumerable.Range(1, 4).Select(sequence => Task.Run(() =>
+        {
+            while (!stop.IsCancellationRequested)
+            {
+                long lsn = journal.AppendCommit(sequence);
+                if (faults.ActiveJournalFlushes > 0)
+                {
+                    Interlocked.Increment(ref overlapping);
+                }
+                gate.AwaitDurable(lsn, TimeSpan.Zero, journal);
+                acknowledged.Add(lsn);
+            }
+        })).ToArray();
+
+        // Act
+        try
+        {
+            long start = Stopwatch.GetTimestamp();
+            SpinWait.SpinUntil(() => Stopwatch.GetElapsedTime(start) >= TimeSpan.FromMilliseconds(250)
+                && Volatile.Read(ref overlapping) > 100 && Volatile.Read(ref forces) > 10 && acknowledged.Count > 100,
+                TimeSpan.FromSeconds(12)).ShouldBeTrue();
+        }
+        finally
+        {
+            stop.Cancel();
+            await Task.WhenAll(appenders.Append(flusher)).WaitAsync(TimeSpan.FromSeconds(10));
+        }
+
+        // Assert
+        overlapping.ShouldBeGreaterThan(100);
+        forces.ShouldBeGreaterThan(10);
+        faults.ActiveJournalFlushes.ShouldBe(0);
+        acknowledged.Count.ShouldBeGreaterThan(100);
+        using var reopened = StorageJournal.Create(new MemoryStream(medium.CaptureDurable()));
+        var survived = reopened.ReadAll().Select(record => record.Lsn).ToHashSet();
+        acknowledged.ShouldAllBe(lsn => survived.Contains(lsn));
+    }
+
+    private static void Stall(DeviceFaults faults, bool write)
+    {
+        if (write) { faults.StallJournalWrites(); } else { faults.StallJournalFlushes(); }
+    }
+
+    private static void Release(DeviceFaults faults, bool write)
+    {
+        if (write) { faults.ReleaseJournalWrites(); } else { faults.ReleaseJournalFlushes(); }
+    }
+
+    private static void WaitForStall(DeviceFaults faults, bool write)
+    {
+        SpinWait.SpinUntil(() => (write ? faults.StalledJournalWrites : faults.StalledJournalFlushes) == 1,
+            TimeSpan.FromSeconds(10)).ShouldBeTrue();
+    }
+}

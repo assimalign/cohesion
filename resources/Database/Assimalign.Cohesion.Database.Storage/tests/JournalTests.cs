@@ -3,9 +3,11 @@ using System.IO;
 using System.Linq;
 using System.Text;
 
-using Assimalign.Cohesion.FileSystem;
 using Shouldly;
 using Xunit;
+
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+using Assimalign.Cohesion.FileSystem;
 
 namespace Assimalign.Cohesion.Database.Storage.Tests;
 
@@ -13,8 +15,114 @@ namespace Assimalign.Cohesion.Database.Storage.Tests;
 /// Tests for the write-ahead log: LSN ordering, record round-trips, durability
 /// tracking, torn-tail tolerance, and checkpoint truncation (#160).
 /// </summary>
+[Collection(StorageRaceCollection.Name)]
 public sealed class JournalTests
 {
+    [Theory(DisplayName = "Cohesion Test [Storage] - Sequential journal: interrupted enumeration releases its buffer and locks")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async System.Threading.Tasks.Task ReadSequential_InterruptedConsumer_ShouldPermitAnotherThreadToAppend(bool cancel)
+    {
+        // Arrange
+        using var journal = StorageJournal.Create(new MemoryStream());
+        journal.AppendOperation(1, new byte[300_000]);
+        journal.AppendCommit(1);
+
+        // Act: both an early break and an exception must unwind the nested iterators.
+        if (cancel)
+        {
+            using var cancellation = new System.Threading.CancellationTokenSource();
+            Should.Throw<OperationCanceledException>(() =>
+            {
+                foreach (var record in journal.ReadSequential())
+                {
+                    cancellation.Cancel();
+                    cancellation.Token.ThrowIfCancellationRequested();
+                }
+            });
+        }
+        else
+        {
+            foreach (var record in journal.ReadSequential())
+            {
+                break;
+            }
+        }
+        long next = await System.Threading.Tasks.Task.Run(() => journal.AppendCommit(2)).WaitAsync(TimeSpan.FromSeconds(10));
+
+        // Assert
+        next.ShouldBe(3);
+        journal.ReadAll().Count.ShouldBe(3);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Storage] - Sequential journal: scans allocate per enumeration, not per frame")]
+    public void ReadSequential_ManyFrames_ShouldHaveBoundedAllocation()
+    {
+        // Arrange: cross chunk boundaries and reuse the pool before measuring.
+        using var journal = StorageJournal.Create(new MemoryStream());
+        byte[] payload = new byte[64];
+        for (int i = 0; i < 20_000; i++)
+        {
+            journal.AppendOperation(1, payload);
+        }
+        journal.Flush();
+        long Scan()
+        {
+            long total = 0;
+            foreach (var record in journal.ReadSequential())
+            {
+                total += record.Payload.Length;
+            }
+            return total;
+        }
+        Scan().ShouldBe(20_000L * payload.Length);
+
+        // Act: the minimum of three rounds excludes unrelated allocation-context retirement.
+        long allocated = long.MaxValue;
+        long read = 0;
+        for (int round = 0; round < 3; round++)
+        {
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            read = Scan();
+            allocated = Math.Min(allocated, GC.GetAllocatedBytesForCurrentThread() - before);
+        }
+
+        // Assert: a single object per frame would exceed 480 KiB; only iterator state is needed.
+        read.ShouldBe(20_000L * payload.Length);
+        allocated.ShouldBeLessThan(4096, $"{allocated} bytes for 20,000 frames");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Storage] - Journal readers: sequential payload is borrowed and ReadAll retains copies")]
+    public void ReadSequential_ReusedBuffer_ShouldKeepReadAllPayloadsIndependent()
+    {
+        // Arrange: a frame larger than a read chunk also exercises pool growth.
+        using var journal = StorageJournal.Create(new MemoryStream());
+        byte[] first = new byte[300_000];
+        Array.Fill(first, (byte)0xA7);
+        journal.AppendOperation(1, first);
+        journal.AppendOperation(2, [4, 5, 6]);
+        var retained = journal.ReadAll();
+
+        // Act: consume each payload before advancing; retain only the ReadAll copies.
+        using (var records = journal.ReadSequential().GetEnumerator())
+        {
+            records.MoveNext().ShouldBeTrue();
+            records.Current.Payload.ToArray().ShouldBe(first);
+            records.MoveNext().ShouldBeTrue();
+            records.Current.Payload.ToArray().ShouldBe(new byte[] { 4, 5, 6 });
+            records.MoveNext().ShouldBeFalse();
+        }
+        journal.AppendOperation(3, new byte[300_000]);
+        foreach (var record in journal.ReadSequential())
+        {
+            _ = record.Payload.Length;
+        }
+
+        // Assert
+        retained[0].Payload.ToArray().ShouldBe(first);
+        retained[1].Payload.ToArray().ShouldBe(new byte[] { 4, 5, 6 });
+    }
+
     [Fact]
     public void ReadSequential_EarlyDisposalRestoresPositionAndAllowsNextAppend()
     {

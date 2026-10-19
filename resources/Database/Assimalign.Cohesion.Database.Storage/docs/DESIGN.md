@@ -731,9 +731,21 @@ Neo4j `54a7dcf7c25` and RavenDB `83399cb8bc8`.
   the reopen's recovery reads what the file holds, as after a failed fsync. PostgreSQL raises
   `PANIC` on any failed WAL write (`xlog.c:2514-2532`). An append can therefore fail with
   `StorageOfflineException` when it has to drain a full buffer.
-- **Concurrency is unchanged.** Appends, drains and flushes are serialized by the journal's lock,
-  which a durable flush still holds across its fsync. Releasing it during the fsync, as Neo4j's
-  `force` does, would let appenders fill the buffer meanwhile; that is a separate change.
+- **Append and force have separate locks (#1276).** The medium owner swaps the append buffer
+  and captures its target LSN under the append lock, then writes and fsyncs with that lock released.
+  Appenders fill a replacement buffer during device I/O; two buffers are reused after warm-up,
+  each at most 1 MiB (an oversized direct frame uses a pooled array). A full replacement buffer
+  waits for the medium outside the append lock. The force publishes only its written/durable
+  prefix; queued force callers recheck that prefix so one fsync covers all its waiters.
+  This follows Neo4j's prepare-under-lock/force-outside-lock pattern
+  (`community/kernel/src/main/java/org/neo4j/wal/files/TransactionLogFile.java:1194-1214`)
+  and its panic-before-waking-waiters rule (`TransactionLogFile.java:1164-1173`). PostgreSQL likewise
+  rechecks its flushed prefix after acquiring `WALWriteLock` (`src/backend/access/transam/xlog.c:2935-2951`).
+  A failed write/fsync latches offline before releasing the medium; no later prefix can be
+  acknowledged. Detached frames remain readable for spilled pre-images during and after a
+  failed write. Torn-tail offsets belong to the medium lock; checkpoint truncation pauses
+  appends under that lock, drains before truncating, then writes its checkpoint. Disposal waits
+  for the medium, closes appends under the append lock, and drains all remaining frames once.
 
 **The handle keeps `FileOptions.Asynchronous | FileOptions.RandomAccess`.** The physical file
 system opens every handle overlapped with the random-access hint (`PhysicalFileSystemFile.OpenHandle`),
@@ -1277,7 +1289,7 @@ Exception)` is that entry point:
   recovery replays an intact journal; the latch is the same so that no engine path can write to a
   database it gave up on. A storage already offline returns `false` and keeps its first error.
 - **The engine calls it on a thread of its own, never a background worker's.** The latch is
-  taken under the journal's lock, which a durable flush holds through its fsync, so the call
+  taken under the journal's append lock after acquiring its medium lock, so the call
   waits for a flush in progress. Called on a worker's thread it would hold back every other
   database the worker serves for as long as one database's fsync hangs, the stall #1268's
   checkpoint lanes isolate; the root engine base queues it to the thread pool instead (owner
@@ -1644,8 +1656,12 @@ taken in `BeginTransaction` under the transaction lock and released exactly once
 commit/rollback: a begun-but-untouched transaction holds no page lock yet has already
 appended its begin record, and the whole checkpoint now runs *under* the transaction
 lock, so no transaction can slip between the emptiness check and the truncation.
-(Lock order is transaction lock → buffer pool → journal; no path takes them in
-reverse.) A checkpoint attempted while transactions are active still throws
+(Lock order is transaction lock → header → buffer pool → journal medium → journal append;
+no path takes them in reverse. In particular, never wait for the medium while holding the
+append lock. Medium owners briefly acquire the append lock to detach or publish a prefix,
+and latch failures before yielding the medium. The offline latch may then take the group-commit
+gate; gate owners release it before calling the journal. Offline notifications run outside both
+journal locks.) A checkpoint attempted while transactions are active still throws
 `StorageTransactionException` — background checkpointers treat that as "busy, retry
 next pass".
 
@@ -1897,13 +1913,19 @@ and owner before reusing a current-write-page hint, including a hint to a page
 pending release in the same bracket. Iterators release a pin before skipping a
 page that was freed during a scan.
 
-`StorageJournal.ReadSequential` holds the synchronous append lock for the lifetime
-of an enumeration and yields one validated frame at a time. Callers consume it on
-one thread without awaiting or mutating the journal; early disposal restores the
-underlying stream position and releases the lock. `ReadAll` preserves its existing
-materialized API. Journal initialization also uses streaming enumeration. Both readers
-drain the append buffer under the same lock before they read (#1252), so they return every
-appended record; an offline journal is read as the file holds it.
+`StorageJournal.ReadSequential` holds the synchronous medium lock and pauses appends for
+the lifetime of an enumeration. Each validated payload borrows a pooled chunk and is valid
+only until the next `MoveNext` or enumerator disposal; callers copy anything they retain.
+Callers consume it on one thread without awaiting or mutating the journal. Completion,
+early disposal, cancellation and exceptions return the pooled buffer, restore the stream
+position and release the lock. `ReadAll` copies each payload into its materialized result.
+Journal initialization also uses streaming enumeration. Both readers drain before reading
+with appends paused, so they return every appended record; offline readers see only the medium.
+Physical and transaction recovery consume payloads within each iteration and retain only
+decoded identities or reconstructed pages. Scanning has no allocation per frame; the allocation
+test measures the minimum of three warmed rounds across 20,000 records. The earlier chunked
+reader already removed per-frame system calls, so this pooled-reader change alone does not
+establish the issue's historical 5× recovery target; the program throughput gate is #1511.
 
 Physical recovery uses three streaming passes: classify committed sequences, find the
 last record that applies to each page, then replay in order through a bounded page cache

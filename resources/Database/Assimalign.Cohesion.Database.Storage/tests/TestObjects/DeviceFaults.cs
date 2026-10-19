@@ -28,8 +28,8 @@ public enum DeviceFault
 /// included, for as long as they are switched on: a data page write fails, a write to page 0 (the
 /// file header's slots) fails, a write of the journal (since #1252 the drain of its append buffer)
 /// fails, or a durable flush of the journal fails. Each counts the failures it injected, so a test
-/// can wait for a worker to hit the fault. A durable flush of the data file can also stall until
-/// the test releases it, as a device that does not answer an fsync leaves it, and one data page can
+/// can wait for a worker to hit the fault. Journal writes and durable flushes of either file can
+/// also stall until the test releases them, as a device that does not answer leaves them, and one data page can
 /// rot, reading back with a byte flipped (#1342). Linked into each engine's test project, whose
 /// fault-injecting storage strategy wraps a file set's handles with them (#1268).
 /// </summary>
@@ -53,6 +53,33 @@ internal sealed class DeviceFaults
     // Open while durable flushes of the data file go through; closed while they stall.
     private readonly ManualResetEventSlim _dataFlushGate = new(initialState: true);
     private int _stalledDataFlushes;
+
+    private readonly ManualResetEventSlim _journalWriteGate = new(initialState: true);
+    private readonly ManualResetEventSlim _journalFlushGate = new(initialState: true);
+    private int _stalledJournalWrites;
+    private int _stalledJournalFlushes;
+    private int _activeJournalFlushes;
+
+    /// <summary>Gets the number of journal fsync calls currently on the device, stalled calls included.</summary>
+    internal int ActiveJournalFlushes => Volatile.Read(ref _activeJournalFlushes);
+
+    /// <summary>Gets the number of journal writes currently held by the device stall.</summary>
+    internal int StalledJournalWrites => Volatile.Read(ref _stalledJournalWrites);
+
+    /// <summary>Gets the number of journal fsyncs currently held by the device stall.</summary>
+    internal int StalledJournalFlushes => Volatile.Read(ref _stalledJournalFlushes);
+
+    /// <summary>Holds journal writes until released or cleared; failures are checked after release.</summary>
+    internal void StallJournalWrites() => _journalWriteGate.Reset();
+
+    /// <summary>Releases all stalled journal writes and lets later writes proceed.</summary>
+    internal void ReleaseJournalWrites() => _journalWriteGate.Set();
+
+    /// <summary>Holds journal fsyncs until released or cleared; failures are checked after release.</summary>
+    internal void StallJournalFlushes() => _journalFlushGate.Reset();
+
+    /// <summary>Releases all stalled journal fsyncs and lets later fsyncs proceed.</summary>
+    internal void ReleaseJournalFlushes() => _journalFlushGate.Set();
 
     // The data page whose reads come back rotten, or -1 for none.
     private long _rottenPage = -1;
@@ -200,6 +227,8 @@ internal sealed class DeviceFaults
         FailJournalWrites = false;
         RottenPage = null;
         ReleaseDataFlushes();
+        ReleaseJournalWrites();
+        ReleaseJournalFlushes();
     }
 
     /// <summary>
@@ -304,6 +333,7 @@ internal sealed class DeviceFaults
 
     private void BeforeJournalWrite()
     {
+        WaitForDevice(_journalWriteGate, ref _stalledJournalWrites);
         if (FailJournalWrites)
         {
             Volatile.Write(ref _journalWriteFailureThread, Thread.CurrentThread.Name ?? $"unnamed thread {Environment.CurrentManagedThreadId}");
@@ -314,6 +344,7 @@ internal sealed class DeviceFaults
 
     private void BeforeDurableFlush()
     {
+        WaitForDevice(_journalFlushGate, ref _stalledJournalFlushes);
         if (FailJournalFlushes)
         {
             Volatile.Write(ref _journalFlushFailureThread, Thread.CurrentThread.Name ?? $"unnamed thread {Environment.CurrentManagedThreadId}");
@@ -324,19 +355,25 @@ internal sealed class DeviceFaults
 
     private void BeforeDurableDataFlush()
     {
-        if (_dataFlushGate.IsSet)
+        WaitForDevice(_dataFlushGate, ref _stalledDataFlushes);
+    }
+
+    // Shared by all stalls: tests can observe entry, release in a finally, and wait for exit.
+    private static void WaitForDevice(ManualResetEventSlim gate, ref int stalled)
+    {
+        if (gate.IsSet)
         {
             return;
         }
 
-        Interlocked.Increment(ref _stalledDataFlushes);
+        Interlocked.Increment(ref stalled);
         try
         {
-            _dataFlushGate.Wait();
+            gate.Wait();
         }
         finally
         {
-            Interlocked.Decrement(ref _stalledDataFlushes);
+            Interlocked.Decrement(ref stalled);
         }
     }
 
@@ -411,14 +448,44 @@ internal sealed class DeviceFaults
 
         public void Flush(bool durable)
         {
-            BeforeFlush(durable);
-            _inner.Flush(durable);
+            bool journalForce = _journal && durable;
+            if (journalForce)
+            {
+                Interlocked.Increment(ref _faults._activeJournalFlushes);
+            }
+            try
+            {
+                BeforeFlush(durable);
+                _inner.Flush(durable);
+            }
+            finally
+            {
+                if (journalForce)
+                {
+                    Interlocked.Decrement(ref _faults._activeJournalFlushes);
+                }
+            }
         }
 
-        public ValueTask FlushAsync(bool durable, CancellationToken cancellationToken = default)
+        public async ValueTask FlushAsync(bool durable, CancellationToken cancellationToken = default)
         {
-            BeforeFlush(durable);
-            return _inner.FlushAsync(durable, cancellationToken);
+            bool journalForce = _journal && durable;
+            if (journalForce)
+            {
+                Interlocked.Increment(ref _faults._activeJournalFlushes);
+            }
+            try
+            {
+                BeforeFlush(durable);
+                await _inner.FlushAsync(durable, cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                if (journalForce)
+                {
+                    Interlocked.Decrement(ref _faults._activeJournalFlushes);
+                }
+            }
         }
 
         private void BeforeFlush(bool durable)

@@ -19,6 +19,9 @@ namespace Assimalign.Cohesion.Database.Storage.Internal;
 internal sealed class StorageGroupCommitGate
 {
     private readonly object _syncRoot = new();
+    // The journal may take this gate from its offline latch under its append lock.
+    // Release the gate before entering the journal (medium -> append -> gate), including
+    // self-help and failure paths, so a force never waits on a gate its caller still owns.
     private long _requestedLsn;
     private long _durableLsn;
 

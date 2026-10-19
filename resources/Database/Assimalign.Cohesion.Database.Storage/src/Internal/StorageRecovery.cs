@@ -99,6 +99,8 @@ internal static class StorageRecovery
     {
         IEnumerable<JournalRecord> ReadRecords()
         {
+            // ReadSequential lends each payload until the next MoveNext. Every pass below
+            // consumes it immediately; plans and the redo cache retain identities/pages only.
             cancellationToken.ThrowIfCancellationRequested();
             foreach (var record in journal.ReadSequential())
             {
