@@ -51,7 +51,7 @@ public sealed partial class SqlDefinedFunctionTests
         {
             await ExecuteAsync(reader, "INSERT INTO defaults(id) VALUES(1)");
             (await RowsAsync(reader, "SELECT v, body(id) FROM defaults")).ShouldBe([[false, false], [false, false]]);
-            await Should.ThrowAsync<SqlConstraintViolationException>(() => ExecuteAsync(reader, "INSERT INTO checked VALUES(1)"));
+            await SqlConstraintAssertions.ThrowAsync(() => ExecuteAsync(reader, "INSERT INTO checked VALUES(1)"));
         }
         else
         {

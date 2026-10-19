@@ -35,16 +35,16 @@ public sealed class SqlConstraintTests
         await session.ExecuteAsync("CREATE TABLE parent (id INT PRIMARY KEY)");
         await session.ExecuteAsync("CREATE TABLE child (id INT PRIMARY KEY, parent_id INT REFERENCES parent(id) ON DELETE CASCADE, qty INT CHECK (qty > 0), email TEXT UNIQUE)");
         await session.ExecuteAsync("INSERT INTO parent VALUES (1), (2)");
-        var orphan = await Should.ThrowAsync<SqlConstraintViolationException>(async () => await session.ExecuteAsync("INSERT INTO child VALUES (1, 7, 1, 'x')"));
+        var orphan = await SqlConstraintAssertions.ThrowAsync(async () => await session.ExecuteAsync("INSERT INTO child VALUES (1, 7, 1, 'x')"));
         orphan.ConstraintKind.ShouldBe("FOREIGN KEY");
         orphan.Table.ShouldBe("dbo.child");
         orphan.OffendingValue.ShouldBe(7);
         await session.ExecuteAsync("INSERT INTO child VALUES (1, 1, 1, 'a'), (2, 1, 2, 'b'), (3, 2, 3, 'c')");
-        var check = await Should.ThrowAsync<SqlConstraintViolationException>(async () => await session.ExecuteAsync("UPDATE child SET qty = 0 WHERE id = 1"));
+        var check = await SqlConstraintAssertions.ThrowAsync(async () => await session.ExecuteAsync("UPDATE child SET qty = 0 WHERE id = 1"));
         check.ConstraintKind.ShouldBe("CHECK");
-        await Should.ThrowAsync<SqlConstraintViolationException>(async () => await session.ExecuteAsync("UPDATE child SET parent_id = 9 WHERE id = 1"));
-        await Should.ThrowAsync<SqlConstraintViolationException>(async () => await session.ExecuteAsync("UPDATE parent SET id = 9 WHERE id = 1"));
-        await Should.ThrowAsync<SqlConstraintViolationException>(async () => await session.ExecuteAsync("UPDATE child SET email = 'a' WHERE id = 2"));
+        await SqlConstraintAssertions.ThrowAsync(async () => await session.ExecuteAsync("UPDATE child SET parent_id = 9 WHERE id = 1"));
+        await SqlConstraintAssertions.ThrowAsync(async () => await session.ExecuteAsync("UPDATE parent SET id = 9 WHERE id = 1"));
+        await SqlConstraintAssertions.ThrowAsync(async () => await session.ExecuteAsync("UPDATE child SET email = 'a' WHERE id = 2"));
         await session.ExecuteAsync("BEGIN");
         await session.ExecuteAsync("DELETE FROM parent WHERE id = 1");
         (await Rows(session, "SELECT id FROM child ORDER BY id")).Select(row => row[0]).ShouldBe(new object?[] { 3 });
@@ -66,7 +66,7 @@ public sealed class SqlConstraintTests
         await session.ExecuteAsync("INSERT INTO p VALUES (1)");
         await session.ExecuteAsync("INSERT INTO c VALUES (2, 1)");
         await session.ExecuteAsync("INSERT INTO g VALUES (3, 2)");
-        var failure = await Should.ThrowAsync<SqlConstraintViolationException>(async () => await session.ExecuteAsync("DELETE FROM p"));
+        var failure = await SqlConstraintAssertions.ThrowAsync(async () => await session.ExecuteAsync("DELETE FROM p"));
         failure.ConstraintName.ShouldBe("fk_g");
         (await Rows(session, "SELECT id FROM p")).Count.ShouldBe(1);
         (await Rows(session, "SELECT id FROM c")).Count.ShouldBe(1);
@@ -90,7 +90,7 @@ public sealed class SqlConstraintTests
         var contender = second.ExecuteAsync("INSERT INTO t VALUES (2, 'same')", cancellationToken: TestTimeout.Token()).AsTask();
         contender.IsCompleted.ShouldBeFalse();
         await first.ExecuteAsync("COMMIT");
-        var failure = await Should.ThrowAsync<SqlConstraintViolationException>(async () => await contender);
+        var failure = await SqlConstraintAssertions.ThrowAsync(async () => await contender);
         failure.ConstraintName.ShouldBe("uq_email");
         failure.OffendingValue.ShouldBeNull();
         await second.ExecuteAsync("ROLLBACK");
@@ -106,7 +106,7 @@ public sealed class SqlConstraintTests
         await session.ExecuteAsync("CREATE TABLE t (id INT, CONSTRAINT uq_id UNIQUE(id))");
         await session.ExecuteAsync("BEGIN");
         await session.ExecuteAsync("INSERT INTO t VALUES (1)");
-        await Should.ThrowAsync<SqlConstraintViolationException>(async () => await session.ExecuteAsync("INSERT INTO t VALUES (2), (2)"));
+        await SqlConstraintAssertions.ThrowAsync(async () => await session.ExecuteAsync("INSERT INTO t VALUES (2), (2)"));
         (await Rows(session, "SELECT id FROM t")).Select(row => row[0]).ShouldBe(new object?[] { 1 });
         await session.ExecuteAsync("INSERT INTO t VALUES (2)");
         await session.ExecuteAsync("ROLLBACK");
@@ -130,7 +130,7 @@ public sealed class SqlConstraintTests
         var deletion = parent.ExecuteAsync("DELETE FROM p WHERE id = 1", cancellationToken: TestTimeout.Token()).AsTask();
         deletion.IsCompleted.ShouldBeFalse();
         await child.ExecuteAsync("COMMIT");
-        await Should.ThrowAsync<SqlConstraintViolationException>(async () => await deletion);
+        await SqlConstraintAssertions.ThrowAsync(async () => await deletion);
         await parent.ExecuteAsync("ROLLBACK");
         (await Rows(child, "SELECT id FROM p")).Count.ShouldBe(1);
     }
@@ -146,7 +146,7 @@ public sealed class SqlConstraintTests
         await parent.ExecuteAsync("CREATE TABLE c (pid INT REFERENCES p(id))");
         await child.ExecuteAsync("BEGIN");
         await parent.ExecuteAsync("INSERT INTO p VALUES (1)");
-        await Should.ThrowAsync<SqlConstraintViolationException>(async () => await child.ExecuteAsync("INSERT INTO c VALUES (1)"));
+        await SqlConstraintAssertions.ThrowAsync(async () => await child.ExecuteAsync("INSERT INTO c VALUES (1)"));
         await child.ExecuteAsync("ROLLBACK");
         await child.ExecuteAsync("BEGIN");
         await parent.ExecuteAsync("DELETE FROM p");
@@ -163,10 +163,10 @@ public sealed class SqlConstraintTests
         await session.ExecuteAsync("CREATE TABLE p (a INT, b INT, CONSTRAINT uq_pair UNIQUE(a,b))");
         await session.ExecuteAsync("CREATE TABLE c (a INT, b INT, qty INT CHECK (qty > 0), CONSTRAINT fk_pair FOREIGN KEY(a,b) REFERENCES p(a,b))");
         await session.ExecuteAsync("INSERT INTO c VALUES (NULL, 7, NULL), (7, NULL, 1)");
-        await Should.ThrowAsync<SqlConstraintViolationException>(async () => await session.ExecuteAsync("INSERT INTO c VALUES (NULL, NULL, 0)"));
+        await SqlConstraintAssertions.ThrowAsync(async () => await session.ExecuteAsync("INSERT INTO c VALUES (NULL, NULL, 0)"));
         await session.ExecuteAsync("INSERT INTO p VALUES (1, 2)");
         await session.ExecuteAsync("INSERT INTO c VALUES (1, 2, 3)");
-        await Should.ThrowAsync<SqlConstraintViolationException>(async () => await session.ExecuteAsync("INSERT INTO c VALUES (2, 1, 3)"));
+        await SqlConstraintAssertions.ThrowAsync(async () => await session.ExecuteAsync("INSERT INTO c VALUES (2, 1, 3)"));
     }
 
     [Theory]
@@ -193,8 +193,8 @@ public sealed class SqlConstraintTests
         await session.ExecuteAsync("CREATE TABLE p (id INT PRIMARY KEY)");
         await session.ExecuteAsync("CREATE TABLE c (pid INT, qty INT)");
         await session.ExecuteAsync("INSERT INTO c VALUES (1, -1)");
-        await Should.ThrowAsync<SqlConstraintViolationException>(async () => await session.ExecuteAsync("ALTER TABLE c ADD CONSTRAINT positive CHECK(qty > 0)"));
-        await Should.ThrowAsync<SqlConstraintViolationException>(async () => await session.ExecuteAsync("ALTER TABLE c ADD CONSTRAINT parent FOREIGN KEY(pid) REFERENCES p(id)"));
+        await SqlConstraintAssertions.ThrowAsync(async () => await session.ExecuteAsync("ALTER TABLE c ADD CONSTRAINT positive CHECK(qty > 0)"));
+        await SqlConstraintAssertions.ThrowAsync(async () => await session.ExecuteAsync("ALTER TABLE c ADD CONSTRAINT parent FOREIGN KEY(pid) REFERENCES p(id)"));
         await session.ExecuteAsync("INSERT INTO p VALUES (1)");
         await session.ExecuteAsync("UPDATE c SET qty = 1");
         await session.ExecuteAsync("ALTER TABLE c ADD CONSTRAINT positive CHECK(qty > 0)");
@@ -206,7 +206,7 @@ public sealed class SqlConstraintTests
         await session.ExecuteAsync("ALTER TABLE c DROP CONSTRAINT uq_qty");
         await session.ExecuteAsync("UPDATE c SET qty = -1");
         await session.ExecuteAsync("ALTER TABLE c ADD COLUMN extra INT CHECK(extra > 0)");
-        await Should.ThrowAsync<SqlConstraintViolationException>(async () => await session.ExecuteAsync("UPDATE c SET extra = -1"));
+        await SqlConstraintAssertions.ThrowAsync(async () => await session.ExecuteAsync("UPDATE c SET extra = -1"));
     }
 
     [Fact]
@@ -266,9 +266,9 @@ public sealed class SqlConstraintTests
             await using var reopenedEngine = SqlDatabaseEngine.Create("constraint-restart", new SqlDatabaseEngineOptions { RootPath = directory });
             var reopened = await reopenedEngine.OpenDatabaseAsync("db");
             await using var reopenedSession = await reopened.CreateSessionAsync();
-            await Should.ThrowAsync<SqlConstraintViolationException>(async () => await reopenedSession.ExecuteAsync("INSERT INTO c VALUES (9, 1, 'new')"));
-            await Should.ThrowAsync<SqlConstraintViolationException>(async () => await reopenedSession.ExecuteAsync("INSERT INTO c VALUES (1, -1, 'new')"));
-            await Should.ThrowAsync<SqlConstraintViolationException>(async () => await reopenedSession.ExecuteAsync("INSERT INTO c VALUES (1, 1, 'kept')"));
+            await SqlConstraintAssertions.ThrowAsync(async () => await reopenedSession.ExecuteAsync("INSERT INTO c VALUES (9, 1, 'new')"));
+            await SqlConstraintAssertions.ThrowAsync(async () => await reopenedSession.ExecuteAsync("INSERT INTO c VALUES (1, -1, 'new')"));
+            await SqlConstraintAssertions.ThrowAsync(async () => await reopenedSession.ExecuteAsync("INSERT INTO c VALUES (1, 1, 'kept')"));
             await reopenedSession.ExecuteAsync("DELETE FROM p");
             (await Rows(reopenedSession, "SELECT pid FROM c")).ShouldBeEmpty();
         }

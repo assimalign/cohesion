@@ -429,7 +429,7 @@ public sealed class SqlSecondaryIndexTests : IDisposable
             // Act: one statement inserts enough rows to split both roots, then hits a
             // duplicate key — the statement's physical bracket rolls back, splits included.
             var rows = Enumerable.Range(100, 1_000).Select(i => $"({i}, {i % 3})").Append("(5, 0)");
-            await Should.ThrowAsync<SqlConstraintViolationException>(
+            await SqlConstraintAssertions.ThrowAsync(
                 async () => await session.ExecuteAsync("INSERT INTO t VALUES " + string.Join(", ", rows)));
 
             // Assert: both indexes still serve the committed rows and keep growing.
@@ -437,7 +437,7 @@ public sealed class SqlSecondaryIndexTests : IDisposable
             await session.ExecuteAsync("INSERT INTO t VALUES " + string.Join(", ", Enumerable.Range(100, 1_000).Select(i => $"({i}, {i % 3})")));
             (await Rows(session, "SELECT id FROM t WHERE id = 1099")).Count.ShouldBe(1);
             (await Rows(session, "SELECT id FROM t WHERE v = 2")).Count.ShouldBe(3 + 333);
-            await Should.ThrowAsync<SqlConstraintViolationException>(
+            await SqlConstraintAssertions.ThrowAsync(
                 async () => await session.ExecuteAsync("INSERT INTO t VALUES (500, 0)"));
         }
 

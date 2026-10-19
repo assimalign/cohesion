@@ -27,16 +27,16 @@ public sealed class SqlSchemaConstraintProvisioningTests : IDisposable
             (await database.ApplySchemaAsync(schema)).WasAlreadyApplied.ShouldBeTrue();
             await using var session = await database.CreateSessionAsync();
 
-            var orphan = await Should.ThrowAsync<SqlConstraintViolationException>(async () =>
+            var orphan = await SqlConstraintAssertions.ThrowAsync(async () =>
                 await session.ExecuteAsync("INSERT INTO a_child VALUES (1, 99, 1, 'a')"));
             orphan.ConstraintName.ShouldBe("fk_parent");
             orphan.Table.ShouldBe("dbo.a_child");
             await session.ExecuteAsync("INSERT INTO z_parent VALUES (7)");
             await session.ExecuteAsync("INSERT INTO a_child VALUES (1, 7, 2, 'a')");
-            var invalidQuantity = await Should.ThrowAsync<SqlConstraintViolationException>(async () =>
+            var invalidQuantity = await SqlConstraintAssertions.ThrowAsync(async () =>
                 await session.ExecuteAsync("INSERT INTO a_child VALUES (2, 7, 0, 'b')"));
             invalidQuantity.ConstraintName.ShouldBe("ck_qty");
-            var duplicate = await Should.ThrowAsync<SqlConstraintViolationException>(async () =>
+            var duplicate = await SqlConstraintAssertions.ThrowAsync(async () =>
                 await session.ExecuteAsync("INSERT INTO a_child VALUES (2, 7, 1, 'a')"));
             duplicate.ConstraintName.ShouldBe("uq_email");
             await Should.ThrowAsync<DatabaseObjectLockedException>(async () =>
@@ -50,9 +50,9 @@ public sealed class SqlSchemaConstraintProvisioningTests : IDisposable
                 .WasAlreadyApplied.ShouldBeTrue();
             await using var session = await database.CreateSessionAsync();
             (await CountAsync(session, "a_child")).ShouldBe(1);
-            await Should.ThrowAsync<SqlConstraintViolationException>(async () =>
+            await SqlConstraintAssertions.ThrowAsync(async () =>
                 await session.ExecuteAsync("UPDATE a_child SET parent_id = 999 WHERE id = 1"));
-            await Should.ThrowAsync<SqlConstraintViolationException>(async () =>
+            await SqlConstraintAssertions.ThrowAsync(async () =>
                 await session.ExecuteAsync("UPDATE a_child SET qty = -1 WHERE id = 1"));
             await session.ExecuteAsync("DELETE FROM z_parent WHERE id = 7");
             (await CountAsync(session, "a_child")).ShouldBe(0);

@@ -165,6 +165,7 @@ public sealed class SqlAddColumnWireTests
         var error = await Should.ThrowAsync<SqlClientException>(() => ExecuteAsync(connection,
             $"ALTER TABLE additions ADD COLUMN extra INT {constraint}"));
         error.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(constraint == "DEFAULT 7 UNIQUE" ? "COHSQLE037" : "COHSQLE038");
         error.ConnectionUsable.ShouldBeTrue();
         await AssertUnchangedAsync(connection);
 

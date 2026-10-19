@@ -191,7 +191,7 @@ public sealed partial class SqlDefinedFunctionTests
 
         // Assert
         rows.ShouldBe([[12]]);
-        await Should.ThrowAsync<SqlConstraintViolationException>(() => RowsAsync(session, "SELECT domain_result(CAST(-v AS INT)) FROM t"));
+        await SqlConstraintAssertions.ThrowAsync(() => RowsAsync(session, "SELECT domain_result(CAST(-v AS INT)) FROM t"));
     }
 
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - SQL return-domain NULL checks honor strict and called-on-NULL input behavior")]
@@ -216,7 +216,7 @@ public sealed partial class SqlDefinedFunctionTests
         // Act
         if (calledOnNullInput && rejectNull)
         {
-            var failure = await Should.ThrowAsync<SqlConstraintViolationException>(() => RowsAsync(session, "SELECT domain_result(v) FROM t"));
+            var failure = await SqlConstraintAssertions.ThrowAsync(() => RowsAsync(session, "SELECT domain_result(v) FROM t"));
 
             // Assert
             failure.ConstraintName.ShouldBe("positive");

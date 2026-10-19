@@ -246,9 +246,9 @@ public sealed partial class SqlDefinedFunctionTests
         await using var reader = await database.CreateSessionAsync();
         // Assert
         (await RowsAsync(reader, "SELECT read_positive(2), make_positive(3) FROM t")).ShouldBe([[2, 3]]);
-        await Should.ThrowAsync<SqlConstraintViolationException>(() => RowsAsync(reader, "SELECT read_positive(CAST(-1 AS INT)) FROM t"));
-        await Should.ThrowAsync<SqlConstraintViolationException>(() => RowsAsync(reader, "SELECT make_positive(CAST(-1 AS INT)) FROM t"));
-        await Should.ThrowAsync<SqlConstraintViolationException>(() => RowsAsync(reader, "SELECT make_positive(NULL) FROM t"));
+        await SqlConstraintAssertions.ThrowAsync(() => RowsAsync(reader, "SELECT read_positive(CAST(-1 AS INT)) FROM t"));
+        await SqlConstraintAssertions.ThrowAsync(() => RowsAsync(reader, "SELECT make_positive(CAST(-1 AS INT)) FROM t"));
+        await SqlConstraintAssertions.ThrowAsync(() => RowsAsync(reader, "SELECT make_positive(NULL) FROM t"));
         (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(reader, "DROP DOMAIN positive"))).Message.ShouldContain("COHSQLD002");
     }
 

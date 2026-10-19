@@ -21,7 +21,7 @@ public sealed class SqlConstraintRaceTests
         await using var session = await database.CreateSessionAsync();
         await session.ExecuteAsync("CREATE TABLE t (id INT)");
         await session.ExecuteAsync("INSERT INTO t VALUES (7), (7)");
-        var violation = await Should.ThrowAsync<SqlConstraintViolationException>(async () =>
+        var violation = await SqlConstraintAssertions.ThrowAsync(async () =>
             await session.ExecuteAsync("CREATE UNIQUE INDEX uq ON t(id)"));
         violation.ConstraintName.ShouldBe("uq");
         violation.Table.ShouldBe("dbo.t");
@@ -39,7 +39,7 @@ public sealed class SqlConstraintRaceTests
         await using var session = await database.CreateSessionAsync();
         await session.ExecuteAsync("CREATE TABLE t (id INT CONSTRAINT uq UNIQUE)");
         await session.ExecuteAsync("INSERT INTO t VALUES (7)");
-        var violation = await Should.ThrowAsync<SqlConstraintViolationException>(async () =>
+        var violation = await SqlConstraintAssertions.ThrowAsync(async () =>
             await session.ExecuteAsync("INSERT INTO t VALUES (7)"));
         violation.ConstraintName.ShouldBe("uq");
         violation.OffendingValue.ShouldBe(7);
@@ -83,7 +83,7 @@ public sealed class SqlConstraintRaceTests
             await Should.ThrowAsync<DatabaseException>(async () => await pendingWrite);
             // A changed definition may demand a retry; a fresh statement must
             // report the actual newly published constraint, never accept data.
-            await Should.ThrowAsync<SqlConstraintViolationException>(async () => await session.ExecuteAsync(write));
+            await SqlConstraintAssertions.ThrowAsync(async () => await session.ExecuteAsync(write));
             var rows = await Rows(session, "SELECT id, val FROM t ORDER BY id");
             rows.Select(row => row[0]).ShouldBe(new object?[] { 1, 2 });
             rows.Select(row => row[1]).ShouldBe(new object?[] { 1, 2 });
@@ -208,7 +208,7 @@ public sealed class SqlConstraintRaceTests
         deletion.IsCompleted.ShouldBeFalse();
 
         await child.ExecuteAsync("ROLLBACK");
-        await Should.ThrowAsync<SqlConstraintViolationException>(async () => await deletion);
+        await SqlConstraintAssertions.ThrowAsync(async () => await deletion);
         await parent.ExecuteAsync("ROLLBACK");
         (await Rows(child, "SELECT id FROM p")).Select(row => row[0]).ShouldBe(new object?[] { 1 });
         (await Rows(child, "SELECT id FROM c")).Select(row => row[0]).ShouldBe(new object?[] { 2 });

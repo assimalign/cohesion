@@ -74,7 +74,7 @@ public sealed class SqlCascadeSnapshotConflictTests
         var parents = await RowsAsync(setup, "SELECT id FROM p");
         var children = await RowsAsync(setup, "SELECT id, pid FROM c ORDER BY id");
         var seek = await RowsAsync(setup, "SELECT id, pid FROM c WHERE id = 10");
-        var duplicate = await Should.ThrowAsync<SqlConstraintViolationException>(async () =>
+        var duplicate = await SqlConstraintAssertions.ThrowAsync(async () =>
             await setup.ExecuteAsync("INSERT INTO c (id, pid) VALUES (10, 1)", cancellationToken: TestTimeout.Token()));
         var retried = await deleterSession.ExecuteAsync(Delete, cancellationToken: TestTimeout.Token());
         var childrenAfterRetry = await RowsAsync(setup, "SELECT id FROM c");
@@ -146,7 +146,7 @@ public sealed class SqlCascadeSnapshotConflictTests
         var children = await RowsAsync(setup, "SELECT id, pid FROM c ORDER BY id");
         var grandchildren = await RowsAsync(setup, "SELECT id, cid FROM g ORDER BY id");
         var seek = await RowsAsync(setup, $"SELECT id, cid FROM g WHERE id = {grandchildKey}");
-        var duplicate = await Should.ThrowAsync<SqlConstraintViolationException>(async () =>
+        var duplicate = await SqlConstraintAssertions.ThrowAsync(async () =>
             await setup.ExecuteAsync($"INSERT INTO g (id, cid) VALUES ({grandchildKey}, 10)", cancellationToken: TestTimeout.Token()));
         var retried = await setup.ExecuteAsync(Delete, cancellationToken: TestTimeout.Token());
         var grandchildrenAfterRetry = await RowsAsync(setup, "SELECT id FROM g");
@@ -316,7 +316,7 @@ public sealed class SqlCascadeSnapshotConflictTests
         {
             var id = child.Split(',')[0];
             seeks.AddRange(await RowsAsync(setup, $"SELECT id, pid FROM c WHERE id = {id}"));
-            var duplicate = await Should.ThrowAsync<SqlConstraintViolationException>(async () =>
+            var duplicate = await SqlConstraintAssertions.ThrowAsync(async () =>
                 await setup.ExecuteAsync($"INSERT INTO c (id, pid) VALUES ({id}, 1)", cancellationToken: TestTimeout.Token()));
             duplicates.Add(duplicate.ConstraintKind);
         }

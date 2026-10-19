@@ -42,7 +42,7 @@ public sealed partial class SqlFunctionExtensibilityTests
                 first.TryGetDatabase("shop", out SqlDatabase? created).ShouldBeTrue();
                 await using var session = await created!.CreateSessionAsync(CancellationToken.None);
                 await ExecuteAsync(session, "INSERT INTO customers (Id, Email) VALUES (1, 'ann@example.com')");
-                await Should.ThrowAsync<SqlConstraintViolationException>(() =>
+                await SqlConstraintAssertions.ThrowAsync(() =>
                     ExecuteAsync(session, "INSERT INTO customers (Id, Email) VALUES (2, 'nobody')"));
             }
 
@@ -50,7 +50,7 @@ public sealed partial class SqlFunctionExtensibilityTests
             await using var second = await DeclaringBuilder(root, "is_email(Email) AND LENGTH(Email) < 100").BuildAsync();
             second.TryGetDatabase("shop", out SqlDatabase? shop).ShouldBeTrue();
             await using var again = await shop!.CreateSessionAsync(CancellationToken.None);
-            var violation = await Should.ThrowAsync<SqlConstraintViolationException>(() =>
+            var violation = await SqlConstraintAssertions.ThrowAsync(() =>
                 ExecuteAsync(again, "INSERT INTO customers (Id, Email) VALUES (3, 'still-nobody')"));
             var volatileRefusal = await Should.ThrowAsync<DatabaseException>(() =>
                 ExecuteAsync(again, "CREATE TABLE notes (body TEXT, CONSTRAINT ck CHECK (is_email_volatile(body)))"));
@@ -419,7 +419,7 @@ public sealed partial class SqlFunctionExtensibilityTests
             product.ShouldNotBeNull().State.ShouldBe(EngineState.Disposed);
             repaired.TryGetDatabase("shop", out SqlDatabase? shop).ShouldBeTrue();
             await using var session = await shop!.CreateSessionAsync(CancellationToken.None);
-            await Should.ThrowAsync<SqlConstraintViolationException>(() =>
+            await SqlConstraintAssertions.ThrowAsync(() =>
                 ExecuteAsync(session, "INSERT INTO customers (id, email) VALUES (2, 'nobody')"));
         }
         finally

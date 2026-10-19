@@ -63,18 +63,18 @@ public sealed class SqlCollationIndexTests
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await Execute(session, "CREATE TABLE t (id INT, name TEXT COLLATE case_insensitive UNIQUE)");
         await Execute(session, "INSERT INTO t VALUES (1, 'Alice'), (2, 'Bob')");
-        await Should.ThrowAsync<SqlConstraintViolationException>(() => Execute(session, "INSERT INTO t VALUES (3, 'alice')"));
-        await Should.ThrowAsync<SqlConstraintViolationException>(() => Execute(session, "UPDATE t SET name = 'ALICE' WHERE id = 2"));
+        await SqlConstraintAssertions.ThrowAsync(() => Execute(session, "INSERT INTO t VALUES (3, 'alice')"));
+        await SqlConstraintAssertions.ThrowAsync(() => Execute(session, "UPDATE t SET name = 'ALICE' WHERE id = 2"));
         (await Names(session, "SELECT name FROM t ORDER BY id")).ShouldBe(new[] { "Alice", "Bob" });
         await Execute(session, "UPDATE t SET name = 'ALICE' WHERE id = 1");
         (await Names(session, "SELECT name FROM t WHERE name = 'alice'")).ShouldBe(new[] { "ALICE" });
         await Execute(session, "CREATE TABLE duplicates (name TEXT COLLATE case_insensitive)");
         await Execute(session, "INSERT INTO duplicates VALUES ('Alice'), ('alice')");
-        await Should.ThrowAsync<SqlConstraintViolationException>(() => Execute(session, "CREATE UNIQUE INDEX ux ON duplicates(name)"));
-        await Should.ThrowAsync<SqlConstraintViolationException>(() => Execute(session, "ALTER TABLE duplicates ADD CONSTRAINT uq UNIQUE(name)"));
+        await SqlConstraintAssertions.ThrowAsync(() => Execute(session, "CREATE UNIQUE INDEX ux ON duplicates(name)"));
+        await SqlConstraintAssertions.ThrowAsync(() => Execute(session, "ALTER TABLE duplicates ADD CONSTRAINT uq UNIQUE(name)"));
         await Execute(session, "CREATE TABLE composite (tenant INT, name TEXT COLLATE case_insensitive, UNIQUE(tenant, name))");
         await Execute(session, "INSERT INTO composite VALUES (1, 'Alice'), (2, 'alice')");
-        await Should.ThrowAsync<SqlConstraintViolationException>(() => Execute(session, "INSERT INTO composite VALUES (1, 'ALICE')"));
+        await SqlConstraintAssertions.ThrowAsync(() => Execute(session, "INSERT INTO composite VALUES (1, 'ALICE')"));
     }
 
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Collation: default and column overrides survive restart with enforcing indexes")]
@@ -106,7 +106,7 @@ public sealed class SqlCollationIndexTests
                 (await Names(session, "SELECT name FROM t WHERE exact = 'alice'")).ShouldBeEmpty();
                 (await Names(session, "SELECT name FROM t WHERE accent = 'ELODIE'")).ShouldBe(new[] { "Alice" });
                 Metrics(session).AccessPath.ShouldBe("seek:ix_accent");
-                await Should.ThrowAsync<SqlConstraintViolationException>(() => Execute(session, "INSERT INTO t VALUES ('alice', 'other', 'other')"));
+                await SqlConstraintAssertions.ThrowAsync(() => Execute(session, "INSERT INTO t VALUES ('alice', 'other', 'other')"));
                 await Execute(session, "CREATE TABLE inherited (name TEXT)");
                 await Execute(session, "INSERT INTO inherited VALUES ('Bob')");
                 (await Names(session, "SELECT name FROM inherited WHERE name = 'bob'")).ShouldBe(new[] { "Bob" });

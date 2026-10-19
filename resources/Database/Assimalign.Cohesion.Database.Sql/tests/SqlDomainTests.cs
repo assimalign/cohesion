@@ -43,14 +43,14 @@ public sealed class SqlDomainTests
         // Act
         await ExecuteAsync(session, "CREATE TABLE contacts (id BIGINT PRIMARY KEY, email email NOT NULL, note TEXT, backup EMAIL)");
         await ExecuteAsync(session, "INSERT INTO contacts (id, email, note) VALUES (1, 'ann@example.com', 'first')");
-        var insertViolation = await Should.ThrowAsync<SqlConstraintViolationException>(() =>
+        var insertViolation = await SqlConstraintAssertions.ThrowAsync(() =>
             ExecuteAsync(session, "INSERT INTO contacts (id, email) VALUES (2, 'nobody')"));
         await ExecuteAsync(session, "UPDATE contacts SET note = 'changed' WHERE id = 1");
-        var updateViolation = await Should.ThrowAsync<SqlConstraintViolationException>(() =>
+        var updateViolation = await SqlConstraintAssertions.ThrowAsync(() =>
             ExecuteAsync(session, "UPDATE contacts SET backup = 'nobody' WHERE id = 1"));
         await ExecuteAsync(session, "UPDATE contacts SET backup = 'ann@backup.example' WHERE id = 1");
         await ExecuteAsync(session, "INSERT INTO contacts (id, email, backup) VALUES (3, 'bob@example.com', NULL)");
-        var selectViolation = await Should.ThrowAsync<SqlConstraintViolationException>(() =>
+        var selectViolation = await SqlConstraintAssertions.ThrowAsync(() =>
             ExecuteAsync(session, "INSERT INTO contacts (id, email) SELECT id + 10, note FROM contacts WHERE id = 1"));
 
         // Assert: the base type is stored and returned; the catalog keeps the domain's name.
@@ -84,11 +84,11 @@ public sealed class SqlDomainTests
         await ExecuteAsync(session, "INSERT INTO contacts VALUES (1)");
 
         // Act
-        var refused = await Should.ThrowAsync<SqlConstraintViolationException>(() =>
+        var refused = await SqlConstraintAssertions.ThrowAsync(() =>
             ExecuteAsync(session, "ALTER TABLE contacts ADD COLUMN email email DEFAULT 'nobody'"));
         await ExecuteAsync(session, "ALTER TABLE contacts ADD COLUMN email email DEFAULT 'ops@example.com'");
         await ExecuteAsync(session, "ALTER TABLE empty_contacts ADD COLUMN email email DEFAULT 'nobody'");
-        var defaultViolation = await Should.ThrowAsync<SqlConstraintViolationException>(() =>
+        var defaultViolation = await SqlConstraintAssertions.ThrowAsync(() =>
             ExecuteAsync(session, "INSERT INTO empty_contacts (id) VALUES (1)"));
 
         // Assert: the refused alteration changed nothing; an INSERT that takes the default is checked.
@@ -132,7 +132,7 @@ public sealed class SqlDomainTests
 
         // Act
         var converted = await RowsAsync(session, "SELECT CAST('ann@example.com' AS email), CAST(NULL AS email), CAST(id AS code) FROM t");
-        var refused = await Should.ThrowAsync<SqlConstraintViolationException>(() => RowsAsync(session, "SELECT CAST('nobody' AS email) FROM t"));
+        var refused = await SqlConstraintAssertions.ThrowAsync(() => RowsAsync(session, "SELECT CAST('nobody' AS email) FROM t"));
         var truncated = await RowsAsync(session, "SELECT CAST(id * 1000 AS code) FROM t");
         await using var typed = (await ExecuteAsync(session, "SELECT CAST(id AS code) FROM t")).ShouldBeAssignableTo<DatabaseResultSet>();
 
@@ -216,7 +216,7 @@ public sealed class SqlDomainTests
             {
                 var database = await engine.OpenDatabaseAsync("crm");
                 await using var session = await database.CreateSessionAsync(CancellationToken.None);
-                await Should.ThrowAsync<SqlConstraintViolationException>(() => ExecuteAsync(session, "INSERT INTO contacts VALUES (2, 'nobody', 'b')"));
+                await SqlConstraintAssertions.ThrowAsync(() => ExecuteAsync(session, "INSERT INTO contacts VALUES (2, 'nobody', 'b')"));
                 await ExecuteAsync(session, "INSERT INTO contacts VALUES (2, 'bob@example.com', 'b')");
             }
 
@@ -356,7 +356,7 @@ public sealed class SqlDomainTests
                     ]);
                 engine.Types.Find("money").ShouldNotBeNull().BaseType!.Storage.Scale.ShouldBe(2);
                 await using var session = await database.CreateSessionAsync(CancellationToken.None);
-                await Should.ThrowAsync<SqlConstraintViolationException>(() =>
+                await SqlConstraintAssertions.ThrowAsync(() =>
                     ExecuteAsync(session, "INSERT INTO customers VALUES (1, 'nobody', 'A', 1.5)"));
                 await ExecuteAsync(session, "INSERT INTO customers VALUES (1, 'ann@example.com', 'A', 1.5)");
             }
@@ -533,7 +533,7 @@ public sealed class SqlDomainTests
             {
                 var database = await engine.OpenDatabaseAsync("crm");
                 await using var session = await database.CreateSessionAsync(CancellationToken.None);
-                var refused = await Should.ThrowAsync<SqlConstraintViolationException>(() => RowsAsync(session, "SELECT CAST(e AS email) FROM c"));
+                var refused = await SqlConstraintAssertions.ThrowAsync(() => RowsAsync(session, "SELECT CAST(e AS email) FROM c"));
                 refused.ConstraintName.ShouldBe("email");
             }
         }

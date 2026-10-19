@@ -71,8 +71,8 @@ public sealed class SqlPersistedDefinitionTests : IDisposable
         // Assert
         Check(database, "t", "ck_qty").CheckExpression.ShouldBe("qty >= 0");
         Check(database, "t", "ck_extra").CheckExpression.ShouldBe("extra <> -1");
-        await Should.ThrowAsync<SqlConstraintViolationException>(async () => await session.ExecuteAsync("INSERT INTO t VALUES (-1, 1)"));
-        await Should.ThrowAsync<SqlConstraintViolationException>(async () => await session.ExecuteAsync("INSERT INTO t VALUES (1, -1)"));
+        await SqlConstraintAssertions.ThrowAsync(async () => await session.ExecuteAsync("INSERT INTO t VALUES (-1, 1)"));
+        await SqlConstraintAssertions.ThrowAsync(async () => await session.ExecuteAsync("INSERT INTO t VALUES (1, -1)"));
         (await session.ExecuteAsync("INSERT INTO t VALUES (1, 1)")).AffectedCount.ShouldBe(1);
     }
 
@@ -135,7 +135,7 @@ public sealed class SqlPersistedDefinitionTests : IDisposable
             await session.ExecuteAsync($"INSERT INTO t (id, qty) VALUES ({id}, {id})");
         }
         await session.ExecuteAsync("UPDATE t SET qty = qty + 1");
-        await Should.ThrowAsync<SqlConstraintViolationException>(async () => await session.ExecuteAsync("UPDATE t SET qty = 0 WHERE id = 1"));
+        await SqlConstraintAssertions.ThrowAsync(async () => await session.ExecuteAsync("UPDATE t SET qty = 0 WHERE id = 1"));
         await session.ExecuteAsync("INSERT INTO t (id, qty) SELECT id + 100, qty FROM t WHERE id <= 10");
         await session.ExecuteAsync("DELETE FROM t WHERE id > 100");
 
@@ -208,7 +208,7 @@ public sealed class SqlPersistedDefinitionTests : IDisposable
     private static async Task WriteFailsAsync(SqlDatabase database, SqlDatabaseSession session, string sql)
     {
         long before = database.Definitions.BindCount;
-        await Should.ThrowAsync<SqlConstraintViolationException>(async () => await session.ExecuteAsync(sql));
+        await SqlConstraintAssertions.ThrowAsync(async () => await session.ExecuteAsync(sql));
         database.Definitions.BindCount.ShouldBe(before, sql);
     }
 
@@ -480,7 +480,7 @@ public sealed class SqlPersistedDefinitionTests : IDisposable
         var reopened = await reopenedEngine.OpenDatabaseAsync("app");
         (await reopened.ApplySchemaAsync(schema)).WasAlreadyApplied.ShouldBeTrue();
         await using var session = await reopened.CreateSessionAsync(CancellationToken.None);
-        await Should.ThrowAsync<SqlConstraintViolationException>(async () => await session.ExecuteAsync("INSERT INTO items VALUES (1, 101)"));
+        await SqlConstraintAssertions.ThrowAsync(async () => await session.ExecuteAsync("INSERT INTO items VALUES (1, 101)"));
     }
 
     private static SqlCatalogTable Table(SqlDatabase database, string name)

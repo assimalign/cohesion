@@ -65,7 +65,7 @@ public sealed class SqlUnaryPlusExecutionTests
         (await session.ExecuteAsync("UPDATE v SET whole = +(whole + 1) WHERE +id = 1", cancellationToken: CancellationToken.None)).AffectedCount.ShouldBe(1);
         (await RowsAsync(session, "SELECT whole FROM v")).ShouldHaveSingleItem().ShouldBe(new object?[] { -69999 });
         (await session.ExecuteAsync("INSERT INTO c VALUES (+5)", cancellationToken: CancellationToken.None)).AffectedCount.ShouldBe(1);
-        await Should.ThrowAsync<SqlConstraintViolationException>(async () =>
+        await SqlConstraintAssertions.ThrowAsync(async () =>
             await session.ExecuteAsync("INSERT INTO c VALUES (+(0))", cancellationToken: CancellationToken.None));
     }
 

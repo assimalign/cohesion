@@ -167,7 +167,7 @@ public sealed class SqlCollationExecutionTests
         // Act / Assert
         (await RowsAsync(session, "SELECT n.name FROM names n JOIN matches m ON n.name = m.name;"))
             .ShouldHaveSingleItem()[0].ShouldBe("Alice");
-        await Should.ThrowAsync<SqlConstraintViolationException>(() => ExecuteAsync(session, "INSERT INTO names VALUES ('Bob');"));
+        await SqlConstraintAssertions.ThrowAsync(() => ExecuteAsync(session, "INSERT INTO names VALUES ('Bob');"));
     }
 
     /// <summary>Foreign key probes and reverse checks agree, and incompatible definitions fail before writes.</summary>
@@ -184,7 +184,7 @@ public sealed class SqlCollationExecutionTests
 
         // Act / Assert
         await ExecuteAsync(session, "INSERT INTO children VALUES ('alice');");
-        await Should.ThrowAsync<SqlConstraintViolationException>(() => ExecuteAsync(session, "DELETE FROM parents WHERE name = 'alice';"));
+        await SqlConstraintAssertions.ThrowAsync(() => ExecuteAsync(session, "DELETE FROM parents WHERE name = 'alice';"));
         var mismatch = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session,
             "CREATE TABLE wrong (name TEXT COLLATE binary REFERENCES parents(name));"));
         mismatch.Message.ShouldContain("matching column collations", Case.Sensitive);

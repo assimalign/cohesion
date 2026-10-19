@@ -157,7 +157,7 @@ public sealed class SqlCascadeDeleteDepthTests
         await session.ExecuteAsync($"INSERT INTO pin VALUES (1, {reportedDepth})");
 
         // Act
-        var failure = await Should.ThrowAsync<SqlConstraintViolationException>(() =>
+        var failure = await SqlConstraintAssertions.ThrowAsync(() =>
             session.ExecuteAsync("DELETE FROM chain WHERE id = 1", cancellationToken: Timeout()).AsTask());
         long countAfterFailure = await CountAsync(session);
         await session.ExecuteAsync("DELETE FROM pin");
@@ -187,7 +187,7 @@ public sealed class SqlCascadeDeleteDepthTests
         await SeedChainAsync(session, 1_000, action: "RESTRICT");
 
         // Act
-        var failure = await Should.ThrowAsync<SqlConstraintViolationException>(() =>
+        var failure = await SqlConstraintAssertions.ThrowAsync(() =>
             session.ExecuteAsync("DELETE FROM chain WHERE id = 1").AsTask());
         long countAfterFailure = await CountAsync(session);
         var result = await session.ExecuteAsync("DELETE FROM chain");
@@ -229,7 +229,7 @@ public sealed class SqlCascadeDeleteDepthTests
         await session.ExecuteAsync("INSERT INTO rb VALUES (21, 20)");
 
         // Act
-        var failure = await Should.ThrowAsync<SqlConstraintViolationException>(() => session.ExecuteAsync("DELETE FROM p").AsTask());
+        var failure = await SqlConstraintAssertions.ThrowAsync(() => session.ExecuteAsync("DELETE FROM p").AsTask());
 
         // Assert
         failure.ConstraintName.ShouldBe("fk_ra");
@@ -322,7 +322,7 @@ public sealed class SqlCascadeDeleteDepthTests
         await session.ExecuteAsync($"INSERT INTO pin VALUES (1, {length - 1})");
 
         // Act
-        var failure = await Should.ThrowAsync<SqlConstraintViolationException>(() =>
+        var failure = await SqlConstraintAssertions.ThrowAsync(() =>
             session.ExecuteAsync("DELETE FROM chain WHERE id = 1", cancellationToken: Timeout()).AsTask());
         long chainAfterFailure = await CountAsync(session);
         object? tagsAfterFailure = await ScalarAsync(session, "SELECT COUNT(*) FROM tag");

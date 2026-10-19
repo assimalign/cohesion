@@ -463,7 +463,7 @@ public sealed class SqlAlterTableExecutionTests
         ExecuteOnStack(reader, "ALTER TABLE u RENAME b TO d");
         ExecuteOnStack(reader, "ALTER TABLE u RENAME TO v");
         (await RowsAsync(reader, "SELECT c, d FROM v"))[0].ShouldBe(new object?[] { 1, 2 });
-        stack.Run(() => { ExecuteAsync(reader, "INSERT INTO v VALUES (-1, 2)").GetAwaiter().GetResult(); return true; }).Failure.ShouldBeOfType<SqlConstraintViolationException>();
+        SqlConstraintAssertions.Verify(stack.Run(() => { ExecuteAsync(reader, "INSERT INTO v VALUES (-1, 2)").GetAwaiter().GetResult(); return true; }).Failure.ShouldBeOfType<SqlConstraintViolationException>());
     }
 
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - RENAME: all republished children bind before their next write")]

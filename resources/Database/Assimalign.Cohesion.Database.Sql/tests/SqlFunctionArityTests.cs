@@ -165,7 +165,7 @@ public sealed class SqlFunctionArityTests : IDisposable
         // Act
         var refused = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "CREATE TABLE ck1 (c INT CHECK (ABS(c, 1) > 0));"));
         await ExecuteAsync(session, "CREATE TABLE ck1 (c INT CHECK (ABS(c) < 5));");
-        var violation = await Should.ThrowAsync<SqlConstraintViolationException>(() => ExecuteAsync(session, "INSERT INTO ck1 VALUES (-5);"));
+        var violation = await SqlConstraintAssertions.ThrowAsync(() => ExecuteAsync(session, "INSERT INTO ck1 VALUES (-5);"));
         var accepted = await ExecuteAsync(session, "INSERT INTO ck1 VALUES (-4);");
 
         // Assert

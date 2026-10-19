@@ -296,7 +296,7 @@ public sealed class SqlIndexDuplicateKeyTests
         // ones, rejects a second live one, and frees a deleted row's code.
         (await IdsAsync(session, $"SELECT id FROM t WHERE code = {hotRow + 100_000}")).ShouldBe(new[] { hotRow });
         AccessPathOf(session).ShouldBe("seek:ux_code");
-        var duplicate = await Should.ThrowAsync<SqlConstraintViolationException>(
+        var duplicate = await SqlConstraintAssertions.ThrowAsync(
             async () => await session.ExecuteAsync($"INSERT INTO t VALUES (90000, 1, {hotRow + 100_000}, 'dup')"));
         duplicate.ConstraintKind.ShouldBe("UNIQUE");
 
@@ -399,7 +399,7 @@ public sealed class SqlIndexDuplicateKeyTests
             await session.ExecuteAsync($"INSERT INTO c VALUES ({i}, 150)");
             AccessPathOf(session).ShouldBe("constraint-seek:ux_p_k");
 
-            var duplicate = await Should.ThrowAsync<SqlConstraintViolationException>(
+            var duplicate = await SqlConstraintAssertions.ThrowAsync(
                 async () => await session.ExecuteAsync($"INSERT INTO p VALUES ({1_000 + i}, 150, 'dup')"),
                 $"iteration {i}");
             duplicate.ConstraintKind.ShouldBe("UNIQUE");
@@ -414,7 +414,7 @@ public sealed class SqlIndexDuplicateKeyTests
         // The children's 400 equal keys span leaf splits; a RESTRICT parent delete
         // must see them, and once they are gone the key is free again.
         (await CountAsync(session, "SELECT COUNT(*) FROM c WHERE pk = 150")).ShouldBe(400);
-        var restricted = await Should.ThrowAsync<SqlConstraintViolationException>(
+        var restricted = await SqlConstraintAssertions.ThrowAsync(
             async () => await session.ExecuteAsync("DELETE FROM p WHERE k = 150"));
         restricted.ConstraintKind.ShouldBe("FOREIGN KEY");
 
@@ -482,7 +482,7 @@ public sealed class SqlIndexDuplicateKeyTests
         (await CountAsync(session, "SELECT COUNT(*) FROM pp WHERE a = 1 AND b = 4")).ShouldBe(1);
         AccessPathOf(session).ShouldBe("seek:ux_pp_ab");
 
-        var duplicate = await Should.ThrowAsync<SqlConstraintViolationException>(
+        var duplicate = await SqlConstraintAssertions.ThrowAsync(
             async () => await session.ExecuteAsync("INSERT INTO pp VALUES (1, 4, 'dup')"));
         duplicate.ConstraintKind.ShouldBe("UNIQUE");
 

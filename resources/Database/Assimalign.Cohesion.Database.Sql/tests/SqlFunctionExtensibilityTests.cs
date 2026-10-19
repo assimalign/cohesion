@@ -232,7 +232,7 @@ public sealed partial class SqlFunctionExtensibilityTests
             ExecuteAsync(session, "CREATE TABLE a (email TEXT, CONSTRAINT ck CHECK (is_email_stable(email)))"));
         await ExecuteAsync(session, "CREATE TABLE a (email TEXT, CONSTRAINT ck CHECK (is_email(email)))");
         await ExecuteAsync(session, "INSERT INTO a VALUES ('ann@example.com'), (NULL)");
-        var violation = await Should.ThrowAsync<SqlConstraintViolationException>(() => ExecuteAsync(session, "INSERT INTO a VALUES ('nobody')"));
+        var violation = await SqlConstraintAssertions.ThrowAsync(() => ExecuteAsync(session, "INSERT INTO a VALUES ('nobody')"));
 
         // Assert
         volatileRefusal.Message.ShouldBe("Function 'is_email_volatile' is VOLATILE, and a CHECK admits only IMMUTABLE functions. " +
@@ -265,7 +265,7 @@ public sealed partial class SqlFunctionExtensibilityTests
             await using var reopened = await BuildAsync(Register, root);
             var shop = await reopened.OpenDatabaseAsync("shop");
             await using var again = await shop.CreateSessionAsync(CancellationToken.None);
-            var violation = await Should.ThrowAsync<SqlConstraintViolationException>(() => ExecuteAsync(again, "INSERT INTO customers VALUES ('nobody')"));
+            var violation = await SqlConstraintAssertions.ThrowAsync(() => ExecuteAsync(again, "INSERT INTO customers VALUES ('nobody')"));
             await ExecuteAsync(again, "INSERT INTO customers VALUES ('bob@example.com')");
 
             // Assert
