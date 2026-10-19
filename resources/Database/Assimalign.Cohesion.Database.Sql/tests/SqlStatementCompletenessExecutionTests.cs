@@ -50,6 +50,24 @@ public sealed class SqlStatementCompletenessExecutionTests
         rows[1].ShouldBe(new object?[] { 3 });
     }
 
+    [Theory(DisplayName = "Cohesion Test [Sql] - Completeness: newly executable predicates use the complete statement")]
+    [InlineData("DELETE FROM t WHERE name LIKE 'a%' ESCAPE '!';", 1)]
+    [InlineData("DELETE FROM t WHERE flag IS DISTINCT FROM TRUE;", 1)]
+    [InlineData("DELETE FROM t WHERE flag IS TRUE;", 2)]
+    public async Task ExecuteAsync_PreviouslyRejectedPredicate_ShouldExecuteAsync(string statement, int remaining)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("predicates-completeness", new());
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await SeedAsync(session, withRows: true);
+        // Act
+        await ExecuteAsync(session, statement);
+        // Assert
+        (await RowsAsync(session, "SELECT id FROM t")).Count.ShouldBe(remaining);
+        (await RowsAsync(session, "SELECT id FROM t WHERE name LIKE 'a!%' ESCAPE '!';")).ShouldBeEmpty();
+    }
+
     /// <summary>
     /// Each statement used to execute a truncated prefix; every one of them would change
     /// data if that prefix ran. Both session seams refuse it and the tables are unchanged.
@@ -61,10 +79,6 @@ public sealed class SqlStatementCompletenessExecutionTests
     [InlineData("UPDATE t SET name = u.name FROM u WHERE t.id = u.id;")]
     [InlineData("INSERT INTO t (id, name, age) VALUES (5, 'new', 1) ON CONFLICT DO NOTHING;")]
     [InlineData("INSERT INTO t (id, name, age) VALUES (5, 'new', 1) ON DUPLICATE KEY UPDATE name = 'dup';")]
-    [InlineData("SELECT id FROM t WHERE name LIKE 'a!%' ESCAPE '!';")]
-    [InlineData("DELETE FROM t WHERE name LIKE 'a%' ESCAPE '!';")]
-    [InlineData("DELETE FROM t WHERE flag IS DISTINCT FROM TRUE;")]
-    [InlineData("DELETE FROM t WHERE flag IS TRUE;")]
     [InlineData("DELETE FROM t WHERE id = :id;")]
     [InlineData("UPDATE t SET name = :name WHERE id = 1;")]
     [InlineData("DELETE FROM t WHERE id = 1; DELETE FROM t;")]

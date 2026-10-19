@@ -2163,7 +2163,7 @@ utility.c:1480-1483 and namespace.c:526-531.
 
 AUTHORIZATION and nested schema elements are rejected with COHDBL001. Atomic nested statements
 would require a separate DDL execution contract because each existing statement self-commits.
-Record-space format 24 has no upgrade reader: export older databases, recreate and explicitly
+Record-space format 25 has no upgrade reader: export older databases, recreate and explicitly
 CREATE SCHEMA for non-dbo table namespaces before importing. Namespace records are not synthesized.
 
 The area root carries only the model-independent ownership contracts (`DatabaseObjectOwner`,
@@ -2661,7 +2661,7 @@ PostgreSQL references: tablecmds.c:3903-4062 (column identity), :4329-4385 (rela
   format, no upgrade path.** The catalog stores the format version of the whole
   data file set, rows and the index trees that ride it (a kind-4 record for
   versions 1–3, a kind-8 record from version 4). The engine reads and writes
-  format 24 only: format 6's stamped rows in per-object page chains whose index keys use the
+  format 25 only: format 6's stamped rows in per-object page chains whose index keys use the
   temporal identity encoding (#1099, below), in index trees of B-tree page format
   2, which order entries by key, entry reference and writer (#1194,
   `Database.Indexing` DESIGN), decoded through each table's physical column
@@ -2895,8 +2895,9 @@ PostgreSQL references: tablecmds.c:3903-4062 (column identity), :4329-4385 (rela
   reject predicates, comparisons with null are null, `AND`/`OR` are three-valued
   and skip the right operand once `FALSE AND` or `TRUE OR` decides the result),
   overflow-checked BIGINT arithmetic for exact integers and promotion to decimal
-  otherwise, ordinal string comparison, hand-rolled `LIKE`
-  (`%`/`_`), `CASE`, `BETWEEN`, `IN` (lists), `IS NULL`, parameters (`@name`
+  otherwise, collation-aware comparisons, iterative cancellable `LIKE`
+  (`%`/`_` and explicit/default ESCAPE), null-safe `IS [NOT] DISTINCT FROM`,
+  Boolean truth tests (`IS [NOT] TRUE/FALSE/UNKNOWN`), `CASE`, `BETWEEN`, `IN` (lists), `IS NULL`, parameters (`@name`
   bound by bare name), the special form `COALESCE`, and every scalar of the engine's
   function catalog (`UPPER`, `LOWER`, `LENGTH`, `ABS` and the application's own,
   [Functions (E2)](#functions-e2)). It walks the bound
@@ -2988,8 +2989,8 @@ PostgreSQL references: tablecmds.c:3903-4062 (column identity), :4329-4385 (rela
   (`ValidateCheckSyntax`), and persisted-definition binding and comparison
   (`SqlPersistedExpression.Bind`, `AreEquivalent`, `SqlBoundTableCache`'s column
   collector). `SqlPlanner.Children` documents the rule for the next walker.
-  `LIKE` matching recurses once per `%` it backtracks through, so its depth follows
-  the values, and both matchers check too. The check costs a stack-pointer
+  `LIKE` matching uses iterative backtracking with bounded search memory and
+  cancellation checks, so its stack use is independent of the values. The tree-walk check costs a stack-pointer
   comparison per node; a tree within the default limit trips it only on a thread
   created with a small stack. `SqlDatabaseSession.ExecuteAsync`
   turns the resulting `InsufficientExecutionStackException` into
@@ -5511,3 +5512,33 @@ Diagnostic overflow is preflighted before output and retains a source-order pref
 COHDBP001 with exact retained/omitted counts; the original Error category/message or
 successful result is preserved and the session stays reusable. Both the 4,096-entry
 and 1 MiB bounds include the notice. See [wire policy](WIRE-PROTOCOL.md#negotiated-statement-diagnostics-1105).
+
+## Predicate execution (#1111)
+
+Dedicated E1 distinct and Boolean-test nodes avoid binary null propagation and seek
+extraction. The distinct predicate uses the existing comparer, collation and CHAR
+comparand coercion; truth tests validate known operand types at bind time. Every AST
+and bound-tree child walk includes them and LIKE's Escape, covering validation, grouping,
+collation, aggregate admission, correlation, EXPLAIN and persisted structural equality.
+Completed subquery IN/NOT IN results feed subsequent predicates through the ordinary
+membership binder and evaluator, with the same behavior as completed list forms.
+
+SqlLikePattern tokenizes raw Unicode scalars before normalizing literal runs. Its
+effective collation folds the value, pattern and escape candidates, so an ESCAPE
+COLLATE participates without rewriting the escape scalar. Fixed
+patterns and supplied parameters compile once during binding, using the existing SQL
+text formatter for concatenated constants; invalid fixed escapes
+fail on empty inputs too (COHSQLE034), an intentional eager-validation divergence
+from PostgreSQL. Wildcards consume original input scalars (like_match.c:193-221);
+a scalar-to-normalized-offset map preserves boundaries across expansions and ignored
+marks. Binary and simple case-insensitive matching use last-`%` backtracking with
+constant search state; simple folding preserves one scalar per original scalar.
+Accent-insensitive literal probes compare normalized spans and stop once a prefix
+can no longer match. Linguistic probes compare spans at every original scalar
+boundary, including Thai/Lao reordered prefixes (like_match.c:289-311); a prefix
+test cannot safely prune these comparisons. Explicit continuations avoid recursion;
+visited suffixes use at most one bit per token/input boundary, allocated by token
+as reached. Every path observes statement cancellation. Runtime distinct, truth-test
+and escape diagnostics retain the bound source location. PostgreSQL's backslash default, empty escape and unrestricted quoted
+scalar rules apply (like_match.c:428-453,473-476); DIALECT.md specifies the ISO differences.
+Format 25 admits the new persisted expression/view syntax and has no upgrade reader.

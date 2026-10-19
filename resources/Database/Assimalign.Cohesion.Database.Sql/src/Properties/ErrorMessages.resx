@@ -19,6 +19,9 @@
     <value>Column '{0}' does not allow NULL.</value>
   </data>
   <data name="ColumnNullabilityConflict" xml:space="preserve"><value>Conflicting NULL/NOT NULL declarations for column '{0}'.</value></data>
+  <data name="BooleanTestOperand" xml:space="preserve"><value>IS TRUE, FALSE or UNKNOWN requires a BOOLEAN operand.</value></data>
+  <data name="LikeEscapeInvalid" xml:space="preserve"><value>Invalid LIKE ESCAPE sequence: ESCAPE must be empty or one Unicode scalar, and a pattern must not end with the escape character.</value></data>
+  <data name="StatementStackInsufficient" xml:space="preserve"><value>Statement too complex: running it needs more stack than the executing thread has left. Reduce the nesting of its expressions or run it on a thread with a larger stack.</value></data>
   <data name="CastIntervalTimeRange" xml:space="preserve">
     <value>INTERVAL must be at least zero and less than 24 hours for TIME.</value>
   </data>

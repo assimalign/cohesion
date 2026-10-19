@@ -15,22 +15,15 @@ public sealed partial class SqlQueryParser
     //   ParseExpression         → ParseOr
     //   ParseOr                 → ParseAnd (OR ParseAnd)*      one n-ary node per chain
     //   ParseAnd                → ParseNot (AND ParseNot)*     one n-ary node per chain
-    //   ParseNot                → NOT? ParseComparison
-    //   ParseComparison         → ParseComparisonCore
-    //                            (an infix ~ after IS NULL, IN, LIKE or BETWEEN reports COHDBL001)
-    //   ParseComparisonCore     → ParseAddition ((=|<>|<|>|<=|>=) ParseAddition
-    //                            | IS [NOT] NULL
-    //                            | [NOT] BETWEEN ... AND ...
-    //                            | [NOT] IN (...)
-    //                            | [NOT] LIKE ...)?
-    //                            (op ANY|SOME|ALL (...) reports COHDBL001 and is skipped)
-    //   ParseAddition           → ParseMultiplication ((+|-||) ParseMultiplication)*
-    //                            (an infix ~, ~*, ~~, !~ ... here reports COHDBL001)
-    //   ParseMultiplication     → ParseUnary ((*|/|%) ParseUnary)*
-    //   ParseUnary              → (-|+|~) ParseUnary | ParseCollate
+    //   ParseNot                 → NOT ParseNot | ParseComparison
+    //   ParseComparison          → IS (low), comparison, BETWEEN/IN/LIKE (high), nonassociative
+    //   ParseConcat              → ParseAddition (|| ParseAddition)*
+    //   ParseAddition            → ParseMultiplication ((+|-) ParseMultiplication)*
+    //   ParseMultiplication     → ParseCollate ((*|/|%) ParseCollate)*
+    //   ParseUnary              → (-|+|~) ParseUnary | ParsePrimary
     //                            (a prefix ~ reports COHDBL001; a + directly before a
     //                            numeric literal is part of the literal, see ParsePrimary)
-    //   ParseCollate            → ParsePrimary (COLLATE name)*
+    //   ParseCollate            → ParseUnary (COLLATE name)*
     //   ParsePrimary            → literal | column_ref | param | function(...)
     //                            | (expr) | (SELECT ...) | CASE | CAST | EXISTS | *
     //                            (a ~ here, as in LIKE ~'x' or DEFAULT ~1, goes to ParseUnary)
@@ -124,167 +117,270 @@ public sealed partial class SqlQueryParser
             var pos = lexer.Current.Position;
             Advance(ref lexer);
 
-            // Check for NOT EXISTS
-            if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "EXISTS"))
+            // NOT binds below predicates, including those following EXISTS (gram.y:846-853).
+            bool startsExists = IsWord(ref lexer, "EXISTS");
+            // The compact NOT EXISTS leaf has the same depth as EXISTS. If a following
+            // predicate requires a separate NOT node, Nest charges that level afterwards.
+            var operand = startsExists ? ParseComparison(ref lexer) : ParseOperand(ref lexer, OperandRule.Not);
+            if (startsExists && operand is SqlExistsExpression { IsNegated: false } exists)
             {
-                return ParseExists(ref lexer, isNegated: true, pos);
+                return new SqlExistsExpression(exists.Subquery, true, Location.Create(1, 1, pos, pos));
             }
 
-            var operand = ParseOperand(ref lexer, OperandRule.Not);
-            return new SqlUnaryExpression(operand, SqlUnaryOperator.Not,
-                Location.Create(1, 1, pos, pos));
+            return Nest(ref lexer, new SqlUnaryExpression(operand, SqlUnaryOperator.Not,
+                Location.Create(1, 1, pos, pos)));
         }
 
         return ParseComparison(ref lexer);
     }
 
-    private SqlExpression ParseComparison(ref TokenLexer lexer)
+    // PostgreSQL gram.y:847-853: IS < comparison < BETWEEN/IN/LIKE < ESCAPE.
+    // Postfix IS tests may be followed by higher-precedence operators; binary predicates
+    // at the same rung are nonassociative, except completed IN forms. Every recursive
+    // operand and loop node is bounded.
+    private SqlExpression ParseComparison(ref TokenLexer lexer) => ParsePredicates(ref lexer, 1);
+
+    private SqlExpression ParsePredicates(ref TokenLexer lexer, int minimum, bool restricted = false)
     {
-        var result = ParseComparisonCore(ref lexer);
-
-        // IS NULL, IN (...), LIKE and BETWEEN complete without returning to the additive
-        // loop, so an infix ~ after them fell to the leftover-token check with a generic
-        // SQL0003 instead of naming the operator (#1101).
-        while (IsInfixTilde(ref lexer))
+        var left = !restricted && IsWord(ref lexer, "NOT") ? ParseNot(ref lexer) : ParseConcat(ref lexer);
+        int previous = 0;
+        while (!IsAtEnd(ref lexer))
         {
-            RejectInfixTilde(ref lexer, afterPredicate: true);
-        }
-
-        return result;
-    }
-
-    private SqlExpression ParseComparisonCore(ref TokenLexer lexer)
-    {
-        var left = ParseAddition(ref lexer);
-
-        if (IsAtEnd(ref lexer) || lexer.Current.Type == TokenType.Semicolon)
-        {
-            return left;
-        }
-
-        // IS [NOT] NULL
-        if (IsKeyword(ref lexer, "IS"))
-        {
-            var pos = lexer.Current.Position;
-            Advance(ref lexer);
-            bool negated = false;
-            if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "NOT"))
+            if (IsInfixTilde(ref lexer))
             {
-                negated = true;
-                Advance(ref lexer);
+                RejectInfixTilde(ref lexer, afterPredicate: true);
+                continue;
             }
-            if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "NULL"))
+            int pos = lexer.Current.Position;
+            if (IsWord(ref lexer, "ISNULL") || IsWord(ref lexer, "NOTNULL"))
+            {
+                RequireSkippedConstruct(pos, CurrentTokenEnd(ref lexer), CurrentText(ref lexer).ToUpperInvariant());
+                Advance(ref lexer);
+                continue;
+            }
+            if (IsWord(ref lexer, "IS"))
+            {
+                if (minimum > 1) { break; }
+                if (restricted)
+                {
+                    var next = lexer;
+                    while (next.MoveNext() && next.Current.Type == TokenType.Comment) { }
+                    if (IsWord(ref next, "NOT")) { while (next.MoveNext() && next.Current.Type == TokenType.Comment) { } }
+                    if (!IsWord(ref next, "DISTINCT")) { break; }
+                }
+                if (previous == 1) { AddSyntaxDiagnostic(ref lexer, "IS DISTINCT FROM predicates require parentheses to chain."); SkipQueryRemainder(ref lexer); break; }
+                Advance(ref lexer);
+                bool negated = IsWord(ref lexer, "NOT");
+                if (negated) { Advance(ref lexer); }
+                if (IsWord(ref lexer, "NULL"))
+                {
+                    Advance(ref lexer);
+                    left = Nest(ref lexer, new SqlIsNullExpression(left, negated, Location.Create(1, 1, pos, pos)));
+                    previous = 0;
+                    continue;
+                }
+                if (IsWord(ref lexer, "TRUE") || IsWord(ref lexer, "FALSE") || IsWord(ref lexer, "UNKNOWN"))
+                {
+                    var truth = IsWord(ref lexer, "TRUE") ? SqlTruthValue.True :
+                        IsWord(ref lexer, "FALSE") ? SqlTruthValue.False : SqlTruthValue.Unknown;
+                    Advance(ref lexer);
+                    left = Nest(ref lexer, new SqlBooleanTestExpression(left, truth, negated, Location.Create(1, 1, pos, pos)));
+                    previous = 0;
+                    continue;
+                }
+                if (IsWord(ref lexer, "DISTINCT"))
+                {
+                    Advance(ref lexer);
+                    ExpectKeyword(ref lexer, "FROM", "FROM after IS [NOT] DISTINCT");
+                    var right = ParseOperand(ref lexer, restricted ? OperandRule.RestrictedComparison : OperandRule.ComparisonOperand);
+                    left = Nest(ref lexer, new SqlDistinctExpression(left, right, negated, Location.Create(1, 1, pos, pos)));
+                    previous = 1;
+                    continue;
+                }
+                if (IsWord(ref lexer, "JSON") || IsWord(ref lexer, "OF") || IsWord(ref lexer, "NORMALIZED"))
+                {
+                    RejectPredicateOperator(ref lexer, pos, "IS " + (negated ? "NOT " : "") + CurrentText(ref lexer).ToUpperInvariant());
+                    break;
+                }
+                AddExpectedDiagnostic(ref lexer, "NULL, TRUE, FALSE, UNKNOWN or DISTINCT FROM after IS [NOT]");
+                break;
+            }
+
+            // A completed postfix form has no right operand to absorb a following
+            // tighter operator (NULL IS NULL || 'x', or a IN (1) + 1). Resume that
+            // operator over the completed left node, as PostgreSQL's a_expr does.
+            var arithmetic = lexer.Current.Type switch
+            {
+                TokenType.Concat => ((SqlBinaryOperator?)SqlBinaryOperator.Concat, OperandRule.Addition),
+                TokenType.Plus => (SqlBinaryOperator.Add, OperandRule.Multiplication),
+                TokenType.Minus => (SqlBinaryOperator.Subtract, OperandRule.Multiplication),
+                TokenType.Asterisk => (SqlBinaryOperator.Multiply, OperandRule.Collate),
+                TokenType.Slash => (SqlBinaryOperator.Divide, OperandRule.Collate),
+                TokenType.Percent => (SqlBinaryOperator.Modulo, OperandRule.Collate),
+                _ => ((SqlBinaryOperator?)null, OperandRule.Unary),
+            };
+            if (arithmetic.Item1 is { } arithmeticOperator)
             {
                 Advance(ref lexer);
+                var right = ParseOperand(ref lexer, arithmetic.Item2);
+                left = Nest(ref lexer, new SqlBinaryExpression(left, arithmeticOperator, right, Location.Create(1, 1, pos, pos)));
+                previous = 0;
+                continue;
+            }
+            if (!_columnDefault && IsWord(ref lexer, "COLLATE"))
+            {
+                Advance(ref lexer);
+                string name = ParseCollationName(ref lexer);
+                left = Nest(ref lexer, new SqlCollateExpression(left, name, Location.Create(1, 1, pos, _lastTokenEnd)));
+                previous = 0;
+                continue;
+            }
+
+            var op = GetComparisonOperator(ref lexer);
+            if (op.HasValue)
+            {
+                // << and >> are unsupported operators, rather than two comparisons.
+                if ((lexer.Current.Type is TokenType.LessThan or TokenType.GreaterThan) &&
+                    TryPeekToken(lexer, out string next, out int end) && next == CurrentText(ref lexer))
+                {
+                    RejectPredicateOperator(ref lexer, pos, next + next);
+                    break;
+                }
+                if (minimum > 2) { break; }
+                if (previous == 2) { AddSyntaxDiagnostic(ref lexer, "Comparison operators require parentheses to chain."); SkipQueryRemainder(ref lexer); break; }
+                Advance(ref lexer);
+                var right = SkipQuantifiedComparison(ref lexer) ?? ParseOperand(ref lexer, restricted ? OperandRule.RestrictedPredicate : OperandRule.PredicateOperand);
+                left = Nest(ref lexer, new SqlBinaryExpression(left, op.Value, right, Location.Create(1, 1, pos, pos)));
+                previous = 2;
+                continue;
+            }
+
+            if (lexer.Current.Type is TokenType.Ampersand or TokenType.Pipe or TokenType.ColonColon)
+            {
+                RejectPredicateOperator(ref lexer, pos, lexer.Current.Type == TokenType.ColonColon ? ":: cast; use CAST(x AS type)" : CurrentText(ref lexer));
+                break;
+            }
+            bool notBefore = IsWord(ref lexer, "NOT");
+            bool predicate = notBefore || IsWord(ref lexer, "BETWEEN") || IsWord(ref lexer, "IN") ||
+                IsWord(ref lexer, "LIKE") || IsWord(ref lexer, "ILIKE") || IsWord(ref lexer, "SIMILAR");
+            if (restricted || !predicate || minimum > 3) { break; }
+            if (previous == 3) { AddSyntaxDiagnostic(ref lexer, "Predicates require parentheses to chain."); SkipQueryRemainder(ref lexer); break; }
+            if (notBefore) { Advance(ref lexer); }
+            if (IsWord(ref lexer, "ILIKE") || IsWord(ref lexer, "SIMILAR"))
+            {
+                RejectPredicateOperator(ref lexer, pos, (notBefore ? "NOT " : "") +
+                    (IsWord(ref lexer, "ILIKE") ? "ILIKE" : "SIMILAR TO"));
+                break;
+            }
+            if (IsWord(ref lexer, "BETWEEN"))
+            {
+                Advance(ref lexer);
+                var low = ParseOperand(ref lexer, OperandRule.Restricted);
+                ExpectKeyword(ref lexer, "AND", "AND between the BETWEEN bounds");
+                var high = ParseOperand(ref lexer, OperandRule.PatternOperand);
+                left = Nest(ref lexer, new SqlBetweenExpression(left, low, high, notBefore, Location.Create(1, 1, pos, pos)));
+            }
+            else if (IsWord(ref lexer, "IN"))
+            {
+                left = ParseInPredicate(ref lexer, left, notBefore);
+                // Both list and subquery rules are complete after the closing parenthesis
+                // (gram.y:15632-15668), so their result can feed another predicate.
+                previous = left is SqlInExpression ? 0 : 3;
+                continue;
+            }
+            else if (IsWord(ref lexer, "LIKE"))
+            {
+                Advance(ref lexer);
+                var pattern = ParseOperand(ref lexer, OperandRule.PatternOperand);
+                SqlExpression? escape = null;
+                if (IsWord(ref lexer, "ESCAPE"))
+                {
+                    Advance(ref lexer);
+                    escape = ParseOperand(ref lexer, OperandRule.PatternOperand);
+                }
+                left = Nest(ref lexer, new SqlLikeExpression(left, pattern, notBefore, Location.Create(1, 1, pos, pos), escape));
             }
             else
             {
-                RejectIsPredicate(ref lexer, pos, negated);
-            }
-            return Nest(ref lexer, new SqlIsNullExpression(left, negated, Location.Create(1, 1, pos, pos)));
-        }
-
-        // [NOT] BETWEEN ... AND ...
-        bool notBefore = false;
-        if (IsKeyword(ref lexer, "NOT"))
-        {
-            notBefore = true;
-            Advance(ref lexer);
-
-            if (!IsKeyword(ref lexer, "BETWEEN") && !IsKeyword(ref lexer, "IN") && !IsKeyword(ref lexer, "LIKE"))
-            {
-                // x NOT y is not a predicate. It used to parse as x AND NOT y, so SQLite's
-                // postfix a NOT NULL filtered out every row and flag NOT FALSE matched only
-                // TRUE rows (#1068). The token after NOT stays in place, so the leftover
-                // check finds it already reported.
-                AddSyntaxDiagnostic(ref lexer, IsAtEnd(ref lexer)
-                    ? "Expected BETWEEN, IN or LIKE after NOT before the end of the statement."
-                    : $"Expected BETWEEN, IN or LIKE after NOT but found {DescribeToken(ref lexer)}; write IS NOT NULL, or put NOT before the whole predicate.");
-                return left;
-            }
-        }
-
-        if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "BETWEEN"))
-        {
-            var pos = lexer.Current.Position;
-            Advance(ref lexer);
-            var low = ParseOperand(ref lexer, OperandRule.Addition);
-            ExpectKeyword(ref lexer, "AND", "AND between the BETWEEN bounds");
-
-            var high = ParseOperand(ref lexer, OperandRule.Addition);
-            return Nest(ref lexer, new SqlBetweenExpression(left, low, high, notBefore, Location.Create(1, 1, pos, pos)));
-        }
-
-        // [NOT] IN (...)
-        if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "IN"))
-        {
-            var pos = lexer.Current.Position;
-            Advance(ref lexer);
-            if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.LeftParen)
-            {
-                Advance(ref lexer);
-
-                // Check if it's a subquery: IN (SELECT ...)
-                if (!IsAtEnd(ref lexer) && StartsQuery(lexer))
+                if (notBefore && IsWord(ref lexer, "NULL"))
                 {
-                    var subquery = ParseSubquery(ref lexer);
-                    Expect(ref lexer, TokenType.RightParen, "')' after the IN subquery");
-
-                    return Nest(ref lexer, new SqlInExpression(left, null, subquery, notBefore, Location.Create(1, 1, pos, pos)));
+                    AddSyntaxDiagnostic(ref lexer, "Unexpected NULL after NOT; write IS NOT NULL.");
+                    Advance(ref lexer);
                 }
-
-                // Value list
-                var values = new List<SqlExpression>();
-                if (!IsAtEnd(ref lexer) && lexer.Current.Type != TokenType.RightParen)
-                {
-                    values.Add(ParseOperand(ref lexer, OperandRule.Expression));
-                    while (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.Comma)
-                    {
-                        Advance(ref lexer);
-                        values.Add(ParseOperand(ref lexer, OperandRule.Expression));
-                    }
-                }
-                Expect(ref lexer, TokenType.RightParen, "')' after the IN list");
-
-                return Nest(ref lexer, new SqlInExpression(left, values, null, notBefore, Location.Create(1, 1, pos, pos)));
+                else { AddExpectedDiagnostic(ref lexer, "BETWEEN, IN or LIKE after NOT"); }
+                break;
             }
-
-            AddExpectedDiagnostic(ref lexer, "'(' after IN");
-            return Nest(ref lexer, new SqlInExpression(left, Array.Empty<SqlExpression>(), null, notBefore, Location.Create(1, 1, pos, pos)));
+            previous = 3;
         }
-
-        // [NOT] LIKE pattern
-        if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "LIKE"))
-        {
-            var pos = lexer.Current.Position;
-            Advance(ref lexer);
-            var pattern = ParseOperand(ref lexer, OperandRule.Collate);
-            if (IsWord(ref lexer, "ESCAPE"))
-            {
-                // Without this check the escape clause was left behind, and in a select
-                // list ESCAPE even became the column alias (#1068).
-                AddSyntaxDiagnostic(ref lexer,
-                    "LIKE ... ESCAPE is not supported by the SQL surface; '%' and '_' in a LIKE pattern are always wildcards.");
-                Advance(ref lexer);
-                if (CanStartOperand(ref lexer))
-                {
-                    ParseOperand(ref lexer, OperandRule.Collate); // recover past the escape character
-                }
-            }
-            return Nest(ref lexer, new SqlLikeExpression(left, pattern, notBefore, Location.Create(1, 1, pos, pos)));
-        }
-
-        // Standard comparison operators
-        SqlBinaryOperator? op = GetComparisonOperator(ref lexer);
-        if (op.HasValue)
-        {
-            var pos = lexer.Current.Position;
-            Advance(ref lexer);
-            var right = SkipQuantifiedComparison(ref lexer) ?? ParseOperand(ref lexer, OperandRule.Addition);
-            return Nest(ref lexer, new SqlBinaryExpression(left, op.Value, right, Location.Create(1, 1, pos, pos)));
-        }
-
         return left;
+    }
+
+    private void RejectPredicateOperator(ref TokenLexer lexer, int start, string form)
+    {
+        int end = lexer.Current.Position + lexer.Current.Value.Length;
+        bool pair = form is "<<" or ">>";
+        bool similar = IsWord(ref lexer, "SIMILAR");
+        bool cast = lexer.Current.Type == TokenType.ColonColon;
+        bool of = IsWord(ref lexer, "OF");
+        bool terminal = IsWord(ref lexer, "JSON") || IsWord(ref lexer, "NORMALIZED");
+        if ((pair || similar) && TryPeekToken(lexer, out string next, out int nextEnd) &&
+            (pair || next.Equals("TO", StringComparison.OrdinalIgnoreCase)))
+        {
+            end = nextEnd;
+            Advance(ref lexer);
+        }
+        RequireSkippedConstruct(start, end, form);
+        Advance(ref lexer);
+        if (terminal) { return; }
+        if (of || cast)
+        {
+            if (cast && CanStartOperand(ref lexer)) { Advance(ref lexer); }
+            if (lexer.Current.Type == TokenType.LeftParen) { SkipParenthesized(ref lexer); }
+            return;
+        }
+        if (CanStartOperand(ref lexer)) { ParseOperand(ref lexer, OperandRule.Concat); }
+        if (IsWord(ref lexer, "ESCAPE"))
+        {
+            Advance(ref lexer);
+            if (CanStartOperand(ref lexer)) { ParseOperand(ref lexer, OperandRule.Concat); }
+        }
+    }
+
+    private SqlExpression ParseInPredicate(ref TokenLexer lexer, SqlExpression left, bool notBefore)
+    {
+        var pos = lexer.Current.Position;
+        Advance(ref lexer);
+        if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.LeftParen)
+        {
+            Advance(ref lexer);
+
+            // Check if it's a subquery: IN (SELECT ...)
+            if (!IsAtEnd(ref lexer) && StartsQuery(lexer))
+            {
+                var subquery = ParseSubquery(ref lexer);
+                Expect(ref lexer, TokenType.RightParen, "')' after the IN subquery");
+
+                return Nest(ref lexer, new SqlInExpression(left, null, subquery, notBefore, Location.Create(1, 1, pos, pos)));
+            }
+
+            // Value list
+            var values = new List<SqlExpression>();
+            if (!IsAtEnd(ref lexer) && lexer.Current.Type != TokenType.RightParen)
+            {
+                values.Add(ParseOperand(ref lexer, OperandRule.Expression));
+                while (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.Comma)
+                {
+                    Advance(ref lexer);
+                    values.Add(ParseOperand(ref lexer, OperandRule.Expression));
+                }
+            }
+            Expect(ref lexer, TokenType.RightParen, "')' after the IN list");
+
+            return Nest(ref lexer, new SqlInExpression(left, values, null, notBefore, Location.Create(1, 1, pos, pos)));
+        }
+
+        AddExpectedDiagnostic(ref lexer, "'(' after IN");
+        return Nest(ref lexer, new SqlInExpression(left, Array.Empty<SqlExpression>(), null, notBefore, Location.Create(1, 1, pos, pos)));
     }
 
     /// <summary>
@@ -309,47 +405,6 @@ public sealed partial class SqlQueryParser
         return new SqlLiteralExpression("NULL", SqlLiteralType.Null, Location.Create(1, 1, start, start));
     }
 
-    /// <summary>
-    /// Rejects an IS predicate other than <c>IS [NOT] NULL</c>. The ISO boolean test
-    /// (<c>IS [NOT] TRUE|FALSE|UNKNOWN</c>) and distinct predicate
-    /// (<c>IS [NOT] DISTINCT FROM</c>) used to parse as <c>IS NULL</c> with their operand
-    /// left behind, so <c>DELETE ... WHERE flag IS TRUE</c> deleted the NULL rows (#1068).
-    /// The rest of the predicate is consumed for recovery.
-    /// </summary>
-    private void RejectIsPredicate(ref TokenLexer lexer, int start, bool negated)
-    {
-        string form = negated ? "IS NOT" : "IS";
-        if (IsWord(ref lexer, "TRUE") || IsWord(ref lexer, "FALSE") || IsWord(ref lexer, "UNKNOWN"))
-        {
-            string test = CurrentText(ref lexer).ToUpperInvariant();
-            AddSyntaxDiagnostic(start, lexer.Current.Position + lexer.Current.Value.Length,
-                $"The {form} {test} predicate is not supported by the SQL surface; only IS [NOT] NULL is.");
-            Advance(ref lexer);
-            return;
-        }
-
-        if (IsKeyword(ref lexer, "DISTINCT"))
-        {
-            int end = lexer.Current.Position + lexer.Current.Value.Length;
-            Advance(ref lexer);
-            if (IsKeyword(ref lexer, "FROM"))
-            {
-                end = lexer.Current.Position + lexer.Current.Value.Length;
-                Advance(ref lexer);
-            }
-
-            AddSyntaxDiagnostic(start, end,
-                $"The {form} DISTINCT FROM predicate is not supported by the SQL surface; only IS [NOT] NULL is.");
-            if (CanStartOperand(ref lexer))
-            {
-                ParseOperand(ref lexer, OperandRule.Addition); // recover past the comparand
-            }
-            return;
-        }
-
-        AddSyntaxDiagnostic(ref lexer, $"Expected NULL after {form}.");
-    }
-
     private static SqlBinaryOperator? GetComparisonOperator(ref TokenLexer lexer)
     {
         return lexer.Current.Type switch
@@ -362,6 +417,19 @@ public sealed partial class SqlQueryParser
             TokenType.GreaterEqual => SqlBinaryOperator.GreaterOrEqual,
             _ => null,
         };
+    }
+
+    private SqlExpression ParseConcat(ref TokenLexer lexer)
+    {
+        var left = ParseAddition(ref lexer);
+        while (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.Concat)
+        {
+            int pos = lexer.Current.Position;
+            Advance(ref lexer);
+            var right = ParseOperand(ref lexer, OperandRule.Addition);
+            left = Nest(ref lexer, new SqlBinaryExpression(left, SqlBinaryOperator.Concat, right, Location.Create(1, 1, pos, pos)));
+        }
+        return left;
     }
 
     private SqlExpression ParseAddition(ref TokenLexer lexer)
@@ -378,10 +446,6 @@ public sealed partial class SqlQueryParser
             else if (lexer.Current.Type == TokenType.Minus)
             {
                 op = SqlBinaryOperator.Subtract;
-            }
-            else if (lexer.Current.Type == TokenType.Concat)
-            {
-                op = SqlBinaryOperator.Concat;
             }
             else if (IsInfixTilde(ref lexer))
             {
@@ -404,7 +468,7 @@ public sealed partial class SqlQueryParser
 
     private SqlExpression ParseMultiplication(ref TokenLexer lexer)
     {
-        var left = ParseUnary(ref lexer);
+        var left = ParseCollate(ref lexer);
 
         while (!IsAtEnd(ref lexer))
         {
@@ -428,7 +492,7 @@ public sealed partial class SqlQueryParser
 
             var pos = lexer.Current.Position;
             Advance(ref lexer);
-            var right = ParseOperand(ref lexer, OperandRule.Unary);
+            var right = ParseOperand(ref lexer, OperandRule.Collate);
             left = Nest(ref lexer, new SqlBinaryExpression(left, op, right, Location.Create(1, 1, pos, pos)));
         }
 
@@ -482,7 +546,7 @@ public sealed partial class SqlQueryParser
                 Location.Create(1, 1, pos, pos));
         }
 
-        return _columnDefault ? ParsePrimary(ref lexer) : ParseCollate(ref lexer);
+        return ParsePrimary(ref lexer);
     }
 
     /// <summary>

@@ -222,6 +222,29 @@ public sealed class SqlFunctionExtensibilityWireTests
         }
     }
 
+    [Fact(DisplayName = "Cohesion Test [Sql.Client] - Execution: a function stack refusal reports COHSQLE004 and preserves the connection")]
+    public async Task QueryAsync_RuntimeStackFailure_ShouldReturnCodedFailureAsync()
+    {
+        // Arrange
+        int calls = 0;
+        await using var harness = await FunctionHarness.StartAsync(functions => functions.Add(
+            SqlScalarFunction.Create<int, int>("stack_refusal", _ =>
+            {
+                calls++;
+                throw new InsufficientExecutionStackException();
+            }, SqlFunctionVolatility.Volatile)));
+        await using var connection = await harness.Client.ConnectAsync(Timeout());
+        // Act
+        var error = await Should.ThrowAsync<SqlClientException>(async () =>
+            await connection.QueryAsync("SELECT stack_refusal(id) FROM users", cancellationToken: Timeout()));
+        // Assert
+        calls.ShouldBe(1);
+        error.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE004");
+        error.ConnectionUsable.ShouldBeTrue();
+        (await connection.QueryAsync("SELECT COUNT(*) FROM users", cancellationToken: Timeout())).ShouldHaveSingleItem()[0].ShouldBe(2L);
+    }
+
     private static CancellationToken Timeout(int seconds = 10) => SqlClientTestHarness.Timeout(seconds);
 
     private static void Register(SqlFunctionCollection functions)

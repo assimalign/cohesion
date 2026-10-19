@@ -1617,7 +1617,7 @@ internal sealed partial class SqlPlanner
             SqlBinaryExpression { Operator: SqlBinaryOperator.Concat } => DatabaseType.String,
             SqlBinaryExpression { Operator: not (SqlBinaryOperator.Add or SqlBinaryOperator.Subtract or SqlBinaryOperator.Multiply
                 or SqlBinaryOperator.Divide or SqlBinaryOperator.Modulo) } => DatabaseType.Boolean,
-            SqlIsNullExpression or SqlBetweenExpression or SqlInExpression or SqlLikeExpression or SqlExistsExpression => DatabaseType.Boolean,
+            SqlDistinctExpression or SqlBooleanTestExpression or SqlIsNullExpression or SqlBetweenExpression or SqlInExpression or SqlLikeExpression or SqlExistsExpression => DatabaseType.Boolean,
             SqlSubqueryExpression when boundSubqueries is not null && boundSubqueries.TryGetValue(expression, out var type) => type,
             // A scalar call's resolved result type: UPPER and LOWER take their argument's type, so
             // UPPER over text is text. CAST's binder fallback also types aggregate results.
@@ -1756,7 +1756,7 @@ internal sealed partial class SqlPlanner
         SqlLogicalExpression logical => logical.Operands,
         SqlFunctionCallExpression function => function.OrderBy.Count == 0 ? function.Arguments :
             function.Arguments.Concat(function.OrderBy.Select(key => key.Expression)),
-        SqlCollateExpression or SqlBinaryExpression or SqlUnaryExpression or SqlIsNullExpression or SqlBetweenExpression
+        SqlCollateExpression or SqlBinaryExpression or SqlUnaryExpression or SqlDistinctExpression or SqlBooleanTestExpression or SqlIsNullExpression or SqlBetweenExpression
             or SqlInExpression or SqlLikeExpression or SqlCaseExpression or SqlCastExpression => Operands(expression),
         _ => [],
     };
@@ -1775,6 +1775,13 @@ internal sealed partial class SqlPlanner
                 break;
             case SqlUnaryExpression unary:
                 yield return unary.Operand;
+                break;
+            case SqlDistinctExpression distinct:
+                yield return distinct.Left;
+                yield return distinct.Right;
+                break;
+            case SqlBooleanTestExpression test:
+                yield return test.Operand;
                 break;
             case SqlIsNullExpression isNull:
                 yield return isNull.Operand;
@@ -1797,6 +1804,7 @@ internal sealed partial class SqlPlanner
             case SqlLikeExpression like:
                 yield return like.Operand;
                 yield return like.Pattern;
+                if (like.Escape is not null) { yield return like.Escape; }
                 break;
             case SqlCaseExpression caseExpression:
                 if (caseExpression.Input is not null)

@@ -6,8 +6,8 @@ public sealed partial class SqlQueryParser
 {
     private SqlExpression ParseCollate(ref TokenLexer lexer)
     {
-        var expression = ParsePrimary(ref lexer);
-        while (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "COLLATE"))
+        var expression = ParseUnary(ref lexer);
+        while (!_columnDefault && !IsAtEnd(ref lexer) && IsKeyword(ref lexer, "COLLATE"))
         {
             int position = lexer.Current.Position;
             Advance(ref lexer);

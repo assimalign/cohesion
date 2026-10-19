@@ -65,6 +65,18 @@ internal static class SqlTreeDump
             case SqlStarExpression:
                 builder.Append("Star");
                 break;
+            case SqlDistinctExpression distinct:
+                builder.Append("Distinct(").Append(distinct.IsNegated).Append(", ");
+                Append(builder, distinct.Left);
+                builder.Append(", ");
+                Append(builder, distinct.Right);
+                builder.Append(')');
+                break;
+            case SqlBooleanTestExpression test:
+                builder.Append("BooleanTest(").Append(test.TruthValue).Append(", ").Append(test.IsNegated).Append(", ");
+                Append(builder, test.Operand);
+                builder.Append(')');
+                break;
             case SqlIsNullExpression isNull:
                 builder.Append("IsNull(").Append(isNull.IsNegated).Append(", ");
                 Append(builder, isNull.Operand);
@@ -98,6 +110,8 @@ internal static class SqlTreeDump
                 Append(builder, like.Operand);
                 builder.Append(", ");
                 Append(builder, like.Pattern);
+                builder.Append(", ");
+                Append(builder, like.Escape);
                 builder.Append(')');
                 break;
             case SqlCollateExpression collate:

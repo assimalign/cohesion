@@ -220,15 +220,7 @@ public sealed class SqlStatementCompletenessTests
     [InlineData("UPDATE t SET a = 1 ^FROM u WHERE t.id = u.id;", "FROM")]
     [InlineData("INSERT INTO t (id) VALUES (1) ^ON CONFLICT DO NOTHING;", "ON")]
     [InlineData("INSERT INTO t (id, a) VALUES (1, 2) ^ON DUPLICATE KEY UPDATE a = 3;", "ON")]
-    [InlineData("SELECT id FROM t WHERE name LIKE 'a!%' ^ESCAPE '!';", "ESCAPE")]
     [InlineData("SELECT id FROM t LIMIT 1 ^FETCH FIRST 1 ROW ONLY;", "FETCH")]
-    [InlineData("SELECT id FROM t WHERE a ^IS DISTINCT FROM b;", "IS DISTINCT FROM")]
-    [InlineData("SELECT id FROM t WHERE a ^IS NOT DISTINCT FROM b;", "IS NOT DISTINCT FROM")]
-    [InlineData("SELECT id FROM t WHERE flag ^IS TRUE;", "IS TRUE")]
-    [InlineData("SELECT id FROM t WHERE flag ^IS NOT FALSE;", "IS NOT FALSE")]
-    [InlineData("SELECT id FROM t WHERE flag ^IS UNKNOWN;", "IS UNKNOWN")]
-    [InlineData("SELECT flag ^IS TRUE FROM t;", "IS TRUE")]
-    [InlineData("SELECT name LIKE 'a%' ^ESCAPE '!' FROM t;", "ESCAPE")]
     [InlineData("SELECT id FROM t WHERE id = ^:id;", ":id")]
     [InlineData("UPDATE t SET a = ^:a WHERE id = 1;", ":a")]
     [InlineData("DELETE FROM t WHERE id = 1; ^DELETE FROM t;", "DELETE")]
@@ -295,8 +287,8 @@ public sealed class SqlStatementCompletenessTests
     [InlineData("ALTER TABLE ^ADD COLUMN c INT;", "ADD")]
     [InlineData("CREATE TABLE c (a INT DEFAULT ^:x);", ":x")]
     [InlineData("CREATE TABLE c (a INT DEFAULT 1 ^FOO BAR, b INT);", "FOO")]
-    [InlineData("SELECT a ^IS DISTINCT FROM;", "IS DISTINCT FROM")]
-    [InlineData("DELETE FROM t WHERE id = 1 AND name LIKE 'x' ^ESCAPE;", "ESCAPE")]
+    [InlineData("SELECT a IS DISTINCT FROM^;", ";")]
+    [InlineData("DELETE FROM t WHERE id = 1 AND name LIKE 'x' ESCAPE^;", ";")]
     public void Parse_MissingToken_ShouldReportOneSyntaxErrorWhereExpected(string marked, string located)
         => AssertOneSyntaxErrorAt(marked, located);
 
@@ -462,7 +454,7 @@ public sealed class SqlStatementCompletenessTests
     [InlineData("UPDATE t SET a =", "Expected an expression before the end of the statement.", "")]
     [InlineData("DELETE FROM t WHERE", "Expected an expression before the end of the statement.", "")]
     [InlineData("SELECT +", "Expected an expression before the end of the statement.", "")]
-    [InlineData("SELECT id FROM t WHERE a IS;", "Expected NULL after IS.", ";")]
+    [InlineData("SELECT id FROM t WHERE a IS;", "Expected NULL, TRUE, FALSE, UNKNOWN or DISTINCT FROM after IS [NOT] but found ';'.", ";")]
     public void Parse_MissingExpression_ShouldReportSyntaxError(string sql, string message, string located)
     {
         // Act

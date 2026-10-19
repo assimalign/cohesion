@@ -247,6 +247,8 @@ internal sealed partial class SqlPlanner
                 // A domain target is not a built-in type the parser resolved: the same domain is the same
                 // name as the catalog resolves it, ignoring case and quotes.
                 && (a.TargetTypeInfo is not null || SqlTypeRules.SameTypeName(a.TargetType, b.TargetType)),
+            (SqlDistinctExpression a, SqlDistinctExpression b) => a.IsNegated == b.IsNegated,
+            (SqlBooleanTestExpression a, SqlBooleanTestExpression b) => a.IsNegated == b.IsNegated && a.TruthValue == b.TruthValue,
             (SqlIsNullExpression a, SqlIsNullExpression b) => a.IsNegated == b.IsNegated,
             (SqlBetweenExpression a, SqlBetweenExpression b) => a.IsNegated == b.IsNegated,
             (SqlInExpression a, SqlInExpression b) => a.IsNegated == b.IsNegated,
@@ -345,7 +347,7 @@ internal sealed partial class SqlPlanner
         SqlBinaryExpression binary when binary.Operator is SqlBinaryOperator.Add or SqlBinaryOperator.Subtract
             or SqlBinaryOperator.Multiply or SqlBinaryOperator.Divide or SqlBinaryOperator.Modulo
             => SqlExpressionEvaluator.ArithmeticType(binary.Operator, GroupExpressionType(binary.Left, columns, evaluator), GroupExpressionType(binary.Right, columns, evaluator)),
-        SqlLogicalExpression or SqlBinaryExpression or SqlIsNullExpression or SqlBetweenExpression or SqlInExpression
+        SqlLogicalExpression or SqlBinaryExpression or SqlDistinctExpression or SqlBooleanTestExpression or SqlIsNullExpression or SqlBetweenExpression or SqlInExpression
             or SqlLikeExpression => DatabaseType.Boolean,
         SqlCaseExpression @case => CaseGroupType(@case, columns, evaluator),
         _ => DatabaseType.Null,

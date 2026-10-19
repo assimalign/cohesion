@@ -52,7 +52,8 @@ internal static class SqlRowCodec
     /// <summary>
     /// The format version of the database's data storage (rows and the index
     /// trees that share its file set) this engine reads and writes, persisted in
-    /// the catalog: 24 admits explicit NULL placement in persisted view query text (#1112);
+    /// the catalog: 25 admits distinct predicates, Boolean tests and LIKE ESCAPE in persisted SQL (#1111);
+    /// 24 admits explicit NULL placement in persisted view query text (#1112);
     /// 23 adds persisted read-only views (#1124);
     /// 22 quotes STRING_AGG and LISTAGG identifiers in persisted SQL (#1115);
     /// 21 adds first-class SQL namespaces (catalog kind 15, #1030);
@@ -83,7 +84,7 @@ internal static class SqlRowCodec
     /// There is no upgrade path (owner decisions of 2026-10-01 and 2026-10-02;
     /// upgrades are #1152).
     /// </summary>
-    internal const int RecordSpaceFormatVersion = 24;
+    internal const int RecordSpaceFormatVersion = 25;
 
     /// <summary>
     /// The size of the fixed version-stamp header preceding the tuple payload.

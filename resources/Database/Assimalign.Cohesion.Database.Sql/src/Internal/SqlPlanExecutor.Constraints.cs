@@ -1160,7 +1160,7 @@ internal sealed partial class SqlPlanExecutor
                 SqlLogicalExpression => true,
                 SqlBinaryExpression binary => binary.Operator is SqlBinaryOperator.Equal or SqlBinaryOperator.NotEqual or SqlBinaryOperator.LessThan or SqlBinaryOperator.GreaterThan or SqlBinaryOperator.LessOrEqual or SqlBinaryOperator.GreaterOrEqual,
                 SqlUnaryExpression unary => unary.Operator == SqlUnaryOperator.Not,
-                SqlIsNullExpression or SqlBetweenExpression or SqlInExpression or SqlLikeExpression => true,
+                SqlDistinctExpression or SqlBooleanTestExpression or SqlIsNullExpression or SqlBetweenExpression or SqlInExpression or SqlLikeExpression => true,
                 SqlLiteralExpression literal => literal.LiteralType is SqlLiteralType.Boolean or SqlLiteralType.Null,
                 SqlColumnReferenceExpression column => _table.Columns[FindColumnOrdinal(_table, column.ColumnName)].Type.Type == DatabaseType.Boolean,
                 // COALESCE over Boolean arguments, or a function declared to return BOOLEAN.
@@ -1206,6 +1206,9 @@ internal sealed partial class SqlPlanExecutor
                         CheckNumber(binary.Left);
                         CheckNumber(binary.Right);
                     }
+                    break;
+                case SqlDistinctExpression distinct:
+                    CheckComparable(distinct.Left, distinct.Right);
                     break;
                 case SqlBetweenExpression between:
                     CheckComparable(between.Operand, between.Low);

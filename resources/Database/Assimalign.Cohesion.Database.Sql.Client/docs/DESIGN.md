@@ -431,3 +431,12 @@ leave the connection usable.
 View DDL, SELECT/JOIN sources and INFORMATION_SCHEMA.VIEWS use ordinary SQL
 requests and typed result sets. A table-only write against a view is ExecutionFailure;
 the connection stays usable. The wire format and client API are unchanged.
+
+## Distinct, truth tests and LIKE ESCAPE (#1111)
+
+Existing SQL frames carry predicate truth tables and bound ESCAPE parameters on both
+transports. Invalid escape sequences (COHSQLE034) and non-Boolean truth tests
+(COHSQLE003) are ExecutionFailure responses; data and the connection remain usable.
+A volatile application function that raises a stack refusal deterministically pins
+execution-time COHSQLE004 over the wire, including a reusable connection.
+No client API or protocol format changes are needed.

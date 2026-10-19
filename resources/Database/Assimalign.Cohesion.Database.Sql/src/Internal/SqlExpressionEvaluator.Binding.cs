@@ -106,6 +106,10 @@ internal sealed partial class SqlExpressionEvaluator
                 return BindBinary(binary, out collation);
             case SqlUnaryExpression unary:
                 return BindUnary(unary, out collation);
+            case SqlDistinctExpression distinct:
+                return BindDistinct(distinct, out collation);
+            case SqlBooleanTestExpression test:
+                return BindBooleanTest(test, out collation);
             case SqlIsNullExpression isNull:
                 return BindIsNull(isNull, out collation);
             case SqlBetweenExpression between:
@@ -207,6 +211,31 @@ internal sealed partial class SqlExpressionEvaluator
             ? new SqlBoundCast(value, "TEXT", SqlType.Text, _functions.Types.ResolveCasts(null, SqlType.Text), _functions.Database, _defaultCollation)
             : value;
 
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private SqlBoundExpression BindDistinct(SqlDistinctExpression distinct, out SqlCollationCandidate collation)
+    {
+        var left = Bind(distinct.Left, out SqlCollationCandidate leftCollation);
+        var right = Bind(distinct.Right, out SqlCollationCandidate rightCollation);
+        left = BindCharacterComparand(distinct.Left, left, distinct.Right);
+        right = BindCharacterComparand(distinct.Right, right, distinct.Left);
+        collation = CollationOf(distinct, [leftCollation, rightCollation]);
+        return new SqlBoundDistinct(left, right, distinct.IsNegated,
+            SqlBoundCollation.Of(leftCollation, rightCollation, _defaultCollation), distinct.Location);
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private SqlBoundExpression BindBooleanTest(SqlBooleanTestExpression test, out SqlCollationCandidate collation)
+    {
+        var operand = Bind(test.Operand, out SqlCollationCandidate operandCollation);
+        var type = StaticTypeOf(test.Operand);
+        if (type is not (DatabaseType.Boolean or DatabaseType.Null))
+        {
+            throw new SqlPlanningException("COHSQLE003", ErrorMessages.BooleanTestOperand, test.Location);
+        }
+        collation = CollationOf(test, [operandCollation]);
+        return new SqlBoundBooleanTest(operand, test.TruthValue, test.IsNegated, test.Location);
+    }
+
     private SqlBoundExpression BindIsNull(SqlIsNullExpression isNull, out SqlCollationCandidate collation)
     {
         var operand = Bind(isNull.Operand, out SqlCollationCandidate operandCollation);
@@ -237,10 +266,49 @@ internal sealed partial class SqlExpressionEvaluator
     {
         var operand = Bind(like.Operand, out SqlCollationCandidate operandCollation);
         var pattern = Bind(like.Pattern, out SqlCollationCandidate patternCollation);
-        collation = CollationOf(like, [operandCollation, patternCollation]);
-        return new SqlBoundLike(operand, pattern, like.IsNegated,
-            SqlBoundCollation.Of(operandCollation, patternCollation, _defaultCollation));
+        SqlCollationCandidate escapeCollation = default;
+        var escape = like.Escape is null ? new SqlBoundConstant("\\") : Bind(like.Escape, out escapeCollation);
+        collation = CollationOf(like, [operandCollation, patternCollation, escapeCollation]);
+        var effective = SqlBoundCollation.Of(operandCollation,
+            SqlCollationCandidate.Fold(patternCollation, escapeCollation), _defaultCollation);
+        // Immutable constants (including parameters) compile once, and invalid constants fail
+        // before rows are read, including an empty table. NULL ESCAPE remains UNKNOWN.
+        SqlLikePattern? compiled = null;
+        try
+        {
+            if (TryLikeConstant(escape, out var escapeValue) && escapeValue is not null)
+            {
+                SqlLikePattern.ValidateEscape(LikeText(escapeValue));
+                if (TryLikeConstant(pattern, out var patternValue) && patternValue is not null)
+                {
+                    compiled = SqlLikePattern.Compile(LikeText(patternValue), LikeText(escapeValue), _cancellationToken);
+                    if (effective.IsFixed) { compiled = compiled.Normalize(effective.Resolve(null)); }
+                }
+            }
+        }
+        catch (SqlPlanningException exception) when (exception.Diagnostics[0].Start is null && like.Location is not null)
+        {
+            throw exception.At(like.Location);
+        }
+        return new SqlBoundLike(operand, pattern, escape, like.IsNegated, effective, compiled, like.Location);
     }
+
+    private static bool TryLikeConstant(SqlBoundExpression expression, out object? value)
+    {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+        switch (expression)
+        {
+            case SqlBoundConstant constant: value = constant.Value; return true;
+            case SqlBoundParameter parameter: value = parameter.Value; return true;
+            case SqlBoundBinary { Operator: SqlBinaryOperator.Concat } concat
+                when TryLikeConstant(concat.Left, out var left) && TryLikeConstant(concat.Right, out var right):
+                value = left is null || right is null ? null : SqlCastText.Format(left) + SqlCastText.Format(right);
+                return true;
+            default: value = null; return false;
+        }
+    }
+
+    private static string LikeText(object? value) => Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty;
 
     /// <remarks>
     /// The target resolves once, here: a built-in type the parser resolved, or a domain of the engine's

@@ -378,6 +378,8 @@ internal static class SqlPersistedExpression
             Same(a.ColumnName, b.ColumnName) && Same(a.TableAlias, b.TableAlias) && Same(a.SchemaName, b.SchemaName),
         (SqlParameterExpression a, SqlParameterExpression b) => Same(a.ParameterName, b.ParameterName),
         (SqlStarExpression, SqlStarExpression) => true,
+        (SqlDistinctExpression a, SqlDistinctExpression b) => a.IsNegated == b.IsNegated,
+        (SqlBooleanTestExpression a, SqlBooleanTestExpression b) => a.IsNegated == b.IsNegated && a.TruthValue == b.TruthValue,
         (SqlIsNullExpression a, SqlIsNullExpression b) => a.IsNegated == b.IsNegated,
         (SqlBetweenExpression a, SqlBetweenExpression b) => a.IsNegated == b.IsNegated,
         (SqlLikeExpression a, SqlLikeExpression b) => a.IsNegated == b.IsNegated,

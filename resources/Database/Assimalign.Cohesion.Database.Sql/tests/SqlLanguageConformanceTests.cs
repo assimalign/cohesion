@@ -97,6 +97,35 @@ public sealed class SqlLanguageConformanceTests
         (await ReadRowsAsync(result)).ShouldHaveSingleItem().ShouldBe(new object?[] { expected });
     }
 
+    [Theory(DisplayName = "Cohesion Test [Sql] - Conformance: distinct predicates execute without adding clauses")]
+    [InlineData("NULL IS DISTINCT FROM 1", true)]
+    [InlineData("NULL IS NOT DISTINCT FROM NULL", true)]
+    public async Task Execute_DistinctPredicate_ShouldReturnBooleanAsync(string expression, bool expected)
+        => await VerifyPredicateAsync(expression, expected);
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - Conformance: truth tests execute without adding clauses")]
+    [InlineData("NULL IS UNKNOWN", true)]
+    [InlineData("NULL IS NOT FALSE", true)]
+    [InlineData("TRUE IS TRUE", true)]
+    public async Task Execute_BooleanTest_ShouldReturnBooleanAsync(string expression, bool expected)
+        => await VerifyPredicateAsync(expression, expected);
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - Conformance: LIKE ESCAPE executes without adding clauses")]
+    [InlineData("'a%' LIKE 'a!%' ESCAPE '!'", true)]
+    [InlineData("'abc' NOT LIKE 'a!%' ESCAPE '!'", true)]
+    public async Task Execute_LikeEscape_ShouldReturnBooleanAsync(string expression, bool expected)
+        => await VerifyPredicateAsync(expression, expected);
+
+    private static async Task VerifyPredicateAsync(string expression, bool expected)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("predicates-conformance", new());
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        // Act / Assert
+        (await RowsAsync(session, "SELECT " + expression + " FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = 'dbo'")).ShouldHaveSingleItem()[0].ShouldBe(expected);
+    }
+
     /// <summary>Restores the audit's valid conversion cases with target values and metadata.</summary>
     /// <param name="sql">The conversion to submit through the session text entry point.</param>
     /// <param name="expected">The expected value, whose runtime type differs from the operand.</param>

@@ -45,7 +45,7 @@ public sealed partial class SqlQueryParser
         }
         else if (name == "POSITION")
         {
-            arguments.Add(ParseOperand(ref lexer, OperandRule.Addition));
+            arguments.Add(ParseOperand(ref lexer, OperandRule.Concat));
             ExpectWord(ref lexer, "IN");
             arguments.Add(ParseOperand(ref lexer, OperandRule.Expression));
         }

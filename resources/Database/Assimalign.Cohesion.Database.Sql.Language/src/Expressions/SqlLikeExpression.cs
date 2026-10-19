@@ -14,13 +14,15 @@ public sealed class SqlLikeExpression : SqlExpression
     /// <param name="pattern">The pattern expression.</param>
     /// <param name="isNegated">Whether the predicate is negated (<c>NOT LIKE</c>).</param>
     /// <param name="location">The source location.</param>
-    internal SqlLikeExpression(SqlExpression operand, SqlExpression pattern, bool isNegated, Location? location)
+    /// <param name="escape">The explicit escape expression, or null for the default backslash.</param>
+    internal SqlLikeExpression(SqlExpression operand, SqlExpression pattern, bool isNegated, Location? location, SqlExpression? escape = null)
         : base(location)
     {
         Operand = operand;
         Pattern = pattern;
+        Escape = escape;
         IsNegated = isNegated;
-        Depth = 1 + System.Math.Max(operand.Depth, pattern.Depth);
+        Depth = 1 + System.Math.Max(System.Math.Max(operand.Depth, pattern.Depth), escape?.Depth ?? 0);
     }
 
     /// <summary>
@@ -32,6 +34,9 @@ public sealed class SqlLikeExpression : SqlExpression
     /// Gets the pattern expression.
     /// </summary>
     public SqlExpression Pattern { get; }
+
+    /// <summary>Gets the explicit ESCAPE expression, or null for the default backslash.</summary>
+    public SqlExpression? Escape { get; }
 
     /// <summary>
     /// Gets whether the predicate is negated (<c>NOT LIKE</c>).
