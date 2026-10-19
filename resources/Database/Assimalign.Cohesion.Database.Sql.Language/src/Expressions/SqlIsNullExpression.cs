@@ -18,6 +18,7 @@ public sealed class SqlIsNullExpression : SqlExpression
     {
         Operand = operand;
         IsNegated = isNegated;
+        Depth = 1 + operand.Depth;
     }
 
     /// <summary>

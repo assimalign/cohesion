@@ -4,6 +4,7 @@ using System.Collections.Generic;
 namespace Assimalign.Cohesion.Database.Sql.Language;
 
 using Assimalign.Cohesion.Database.Language;
+using Assimalign.Cohesion.Database.Types;
 
 public sealed partial class SqlQueryParser
 {
@@ -20,39 +21,34 @@ public sealed partial class SqlQueryParser
             Advance(ref lexer);
         }
 
+        SqlExpression? limit = null;
+        SqlLimitSyntaxKind? limitSyntaxKind = null;
+        if (IsKeyword(ref lexer, "TOP") && !(TryPeekToken(lexer, out string topNext, out _) && topNext == "."))
+        {
+            Advance(ref lexer);
+            limit = ParseTopCount(ref lexer);
+            limitSyntaxKind = SqlLimitSyntaxKind.Top;
+            RejectPagingSuffix(ref lexer, "TOP");
+        }
+
         // Parse SELECT column list
         var columns = ParseSelectColumns(ref lexer);
 
         // FROM
-        SqlTableReference? from = null;
+        var from = new List<SqlFromItem>();
         if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "FROM"))
         {
             Advance(ref lexer);
-            if (!IsAtEnd(ref lexer) && IsIdentifierOrKeyword(ref lexer))
+            do
             {
-                from = ParseTableReference(ref lexer);
-            }
-        }
-
-        // JOINs
-        var joins = ParseJoinClauses(ref lexer);
-        if (joins.Count > 0)
-        {
-            bool joinsSystemRelation = IsSystemJoinReference(from);
-            foreach (var join in joins)
-            {
-                joinsSystemRelation |= IsSystemJoinReference(join.Table);
-            }
-            if (joinsSystemRelation)
-            {
-                AddUnsupportedSurfaceDiagnostic(pos, _lastTokenEnd,
-                    "The SQL JOIN surface supports stored tables only; joins with INFORMATION_SCHEMA or COHESION_SCHEMA relations are not supported.");
-            }
-        }
-        if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.Comma)
-        {
-            AddUnsupportedSurfaceDiagnostic(lexer.Current.Position, lexer.Current.Position + 1,
-                "Comma-separated SQL FROM tables are not supported; use a two-table INNER JOIN with an ON predicate.");
+                var table = ParseRelationReference(ref lexer);
+                from.Add(new SqlFromItem(table, ParseJoinClauses(ref lexer)));
+                if (IsAtEnd(ref lexer) || lexer.Current.Type != TokenType.Comma)
+                {
+                    break;
+                }
+                Advance(ref lexer);
+            } while (true);
         }
 
         // WHERE
@@ -111,47 +107,71 @@ public sealed partial class SqlQueryParser
             }
         }
 
-        // ORDER BY
-        var orderBy = new List<SqlOrderByColumn>();
-        if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "ORDER"))
-        {
-            Advance(ref lexer);
-            if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "BY"))
-            {
-                Advance(ref lexer);
-            }
-
-            orderBy.Add(ParseOrderByColumn(ref lexer));
-            while (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.Comma)
-            {
-                Advance(ref lexer);
-                orderBy.Add(ParseOrderByColumn(ref lexer));
-            }
-        }
-
-        // LIMIT
-        SqlExpression? limit = null;
-        if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "LIMIT"))
-        {
-            Advance(ref lexer);
-            limit = ParsePaginationExpression(ref lexer);
-        }
-
-        // OFFSET
-        SqlExpression? offset = null;
-        if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "OFFSET"))
-        {
-            Advance(ref lexer);
-            offset = ParsePaginationExpression(ref lexer);
-        }
-
         // Consume trailing semicolon (don't advance past it so ParseCore picks it up)
         // The semicolon is tracked by TrackToken when we advance
 
         return new SqlSelectExpression(
-            columns, from, joins, where, groupBy, having, orderBy,
-            limit, offset, isDistinct, null,
-            Location.Create(1, 1, pos, _lastTokenEnd));
+            columns, from, where, groupBy, having, [],
+            limit, null, isDistinct, null,
+            Location.Create(1, 1, pos, _lastTokenEnd), limitSyntaxKind);
+    }
+
+    private SqlExpression ParseFetchCount(ref TokenLexer lexer)
+    {
+        // PostgreSQL src/backend/parser/gram.y:13674-13696: c_expr or a signed numeric
+        // constant. A compound expression needs parentheses; a sign cannot prefix a name.
+        var next = lexer;
+        if (lexer.Current.Type == TokenType.Minus && AdvancePastComments(ref next) &&
+            next.Current.Type is TokenType.Integer or TokenType.Float)
+        {
+            int position = lexer.Current.Position;
+            Advance(ref lexer);
+            var operand = ParseOperand(ref lexer, OperandRule.Primary);
+            return new SqlUnaryExpression(operand, SqlUnaryOperator.Negate,
+                Location.Create(1, 1, position, _lastTokenEnd));
+        }
+        return ParsePaginationExpression(ref lexer, "FETCH", primaryOnly: true);
+    }
+
+    private SqlExpression ParseTopCount(ref TokenLexer lexer)
+    {
+        // Exactly one token without parentheses: TOP 5 * must leave the projection's star.
+        if (lexer.Current.Type is TokenType.LeftParen or TokenType.Integer or TokenType.Parameter)
+        {
+            return ParsePaginationExpression(ref lexer, "TOP", primaryOnly: true);
+        }
+        AddSyntaxDiagnostic(ref lexer, "TOP requires one integer literal or parameter, or a parenthesized count expression.");
+        return new SqlLiteralExpression("NULL", SqlLiteralType.Null,
+            Location.Create(1, 1, lexer.Current.Position, lexer.Current.Position));
+    }
+
+    private bool RejectPagingSuffix(ref TokenLexer lexer, string clause)
+    {
+        if (IsWord(ref lexer, "PERCENT"))
+        {
+            RequireSkippedConstruct(lexer.Current.Position, lexer.Current.Position + lexer.Current.Value.Length,
+                $"{clause} PERCENT");
+            Advance(ref lexer);
+            return true;
+        }
+        if (IsKeyword(ref lexer, "WITH") && TryPeekToken(lexer, out string next, out int end) &&
+            next.Equals("TIES", StringComparison.OrdinalIgnoreCase))
+        {
+            RequireSkippedConstruct(lexer.Current.Position, end, $"{clause} WITH TIES");
+            Advance(ref lexer);
+            Advance(ref lexer);
+            return true;
+        }
+        return false;
+    }
+
+    private void RejectDmlTop(ref TokenLexer lexer)
+    {
+        if (!IsKeyword(ref lexer, "TOP")) { return; }
+        RequireSkippedConstruct(lexer.Current.Position, lexer.Current.Position + lexer.Current.Value.Length, "DML TOP");
+        Advance(ref lexer);
+        ParseTopCount(ref lexer);
+        RejectPagingSuffix(ref lexer, "TOP");
     }
 
     private List<SqlSelectColumn> ParseSelectColumns(ref TokenLexer lexer)
@@ -235,12 +255,7 @@ public sealed partial class SqlQueryParser
             }
 
             // Expect table reference after JOIN keyword
-            SqlTableReference? table = null;
-            if (!IsAtEnd(ref lexer) && IsIdentifierOrKeyword(ref lexer))
-            {
-                table = ParseTableReference(ref lexer);
-            }
-            table ??= new SqlTableReference("?", null, null);
+            var table = ParseRelationReference(ref lexer);
 
             // ON condition
             SqlExpression? condition = null;
@@ -259,38 +274,104 @@ public sealed partial class SqlQueryParser
                 }
             }
 
-            if (joins.Count > 0)
+            var usingColumns = new List<string>();
+            bool hasUsing = IsKeyword(ref lexer, "USING");
+            if (hasUsing)
             {
-                AddUnsupportedSurfaceDiagnostic(joinStart, joinEnd,
-                    "The SQL JOIN surface supports exactly two tables; additional JOIN clauses are not supported.");
-            }
-            else if (!SqlLanguageProfile.SupportsJoin(joinType.Value))
-            {
-                string form = joinType.Value switch
+                Advance(ref lexer);
+                if (lexer.Current.Type != TokenType.LeftParen)
                 {
-                    SqlJoinType.LeftOuter => "LEFT OUTER JOIN",
-                    SqlJoinType.RightOuter => "RIGHT OUTER JOIN",
-                    SqlJoinType.FullOuter => "FULL OUTER JOIN",
-                    _ => "CROSS JOIN",
-                };
-                AddUnsupportedSurfaceDiagnostic(joinStart, joinEnd,
-                    $"The {form} form is not supported by the SQL surface; only two-table INNER JOIN with an ON predicate executes.");
+                    AddSyntaxDiagnostic(ref lexer, "Expected '(' after USING.");
+                }
+                else
+                {
+                    Advance(ref lexer);
+                    while (true)
+                    {
+                        if (!IsIdentifierOrKeyword(ref lexer) || IsStatementBoundaryKeyword(ref lexer))
+                        {
+                            AddSyntaxDiagnostic(ref lexer, "Expected a column name in USING.");
+                            break;
+                        }
+                        usingColumns.Add(CurrentIdentifierText(ref lexer));
+                        Advance(ref lexer);
+                        if (lexer.Current.Type != TokenType.Comma) { break; }
+                        Advance(ref lexer);
+                    }
+                    if (lexer.Current.Type == TokenType.RightParen) { Advance(ref lexer); }
+                    else { AddSyntaxDiagnostic(ref lexer, "Expected ')' after USING columns."); }
+                }
             }
-            else if (!hasOn && !IsKeyword(ref lexer, "USING"))
+            if (!SqlLanguageProfile.SupportsJoin(joinType.Value))
             {
                 AddUnsupportedSurfaceDiagnostic(joinStart, joinEnd,
-                    "The SQL JOIN surface requires an ON predicate; only two-table INNER JOIN with ON executes.");
+                    "SQL supports INNER, LEFT [OUTER] and CROSS JOIN; RIGHT OUTER JOIN and FULL OUTER JOIN are not supported.");
+            }
+            else if (joinType == SqlJoinType.Cross && (hasOn || hasUsing))
+            {
+                AddSyntaxDiagnostic(joinStart, joinEnd, "CROSS JOIN cannot have ON or USING.");
+            }
+            else if (joinType != SqlJoinType.Cross && !hasOn && !hasUsing)
+            {
+                AddUnsupportedSurfaceDiagnostic(joinStart, joinEnd, "INNER and LEFT JOIN require ON or USING.");
+            }
+            if (hasOn && hasUsing)
+            {
+                AddSyntaxDiagnostic(joinStart, joinEnd, "JOIN accepts exactly one of ON or USING.");
             }
 
-            joins.Add(new SqlJoinClause(joinType.Value, table, condition));
+            joins.Add(new SqlJoinClause(joinType.Value, table, condition, usingColumns));
         }
 
         return joins;
     }
 
-    private static bool IsSystemJoinReference(SqlTableReference? table) =>
-        string.Equals(table?.SchemaName, "INFORMATION_SCHEMA", StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(table?.SchemaName, "COHESION_SCHEMA", StringComparison.OrdinalIgnoreCase);
+    private SqlRelationReference ParseRelationReference(ref TokenLexer lexer)
+    {
+        if (lexer.Current.Type != TokenType.LeftParen)
+        {
+            return ParseRequiredTableReference(ref lexer);
+        }
+
+        Advance(ref lexer);
+        if (!StartsQuery(lexer, queryExpected: true))
+        {
+            AddSyntaxDiagnostic(ref lexer, "Expected SELECT in a derived table.");
+            return new SqlTableReference("?", null, null);
+        }
+        var query = ParseSubquery(ref lexer);
+        if (lexer.Current.Type == TokenType.RightParen) { Advance(ref lexer); }
+        else { AddSyntaxDiagnostic(ref lexer, "Expected ')' after the derived query."); }
+        if (IsKeyword(ref lexer, "AS")) { Advance(ref lexer); }
+        string alias = "?";
+        if (IsIdentifierOrKeyword(ref lexer) && !IsStatementBoundaryKeyword(ref lexer))
+        {
+            alias = CurrentIdentifierText(ref lexer);
+            Advance(ref lexer);
+        }
+        else { AddSyntaxDiagnostic(ref lexer, "A derived table requires an alias."); }
+
+        var columns = new List<string>();
+        if (lexer.Current.Type == TokenType.LeftParen)
+        {
+            Advance(ref lexer);
+            while (true)
+            {
+                if (!IsIdentifierOrKeyword(ref lexer) || IsStatementBoundaryKeyword(ref lexer))
+                {
+                    AddSyntaxDiagnostic(ref lexer, "Expected a derived column name.");
+                    break;
+                }
+                columns.Add(CurrentIdentifierText(ref lexer));
+                Advance(ref lexer);
+                if (lexer.Current.Type != TokenType.Comma) { break; }
+                Advance(ref lexer);
+            }
+            if (lexer.Current.Type == TokenType.RightParen) { Advance(ref lexer); }
+            else { AddSyntaxDiagnostic(ref lexer, "Expected ')' after derived column names."); }
+        }
+        return new SqlDerivedTableReference(query, alias, columns.AsReadOnly());
+    }
 
     private void AddUnsupportedSurfaceDiagnostic(int start, int end, string message)
     {
@@ -388,9 +469,9 @@ public sealed partial class SqlQueryParser
         }
     }
 
-    private SqlOrderByColumn ParseOrderByColumn(ref TokenLexer lexer)
+    private SqlOrderByColumn ParseOrderByColumn(ref TokenLexer lexer, bool aggregateInput = false)
     {
-        var expr = ParseExpression(ref lexer);
+        var expr = aggregateInput ? ParseOperand(ref lexer, OperandRule.Expression) : ParseExpression(ref lexer);
         bool isDescending = false;
 
         if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "DESC"))
@@ -403,18 +484,18 @@ public sealed partial class SqlQueryParser
             Advance(ref lexer);
         }
 
+        var nullPlacement = SqlNullPlacement.Default;
         if (!IsAtEnd(ref lexer) && lexer.Current.Type is TokenType.Identifier or TokenType.Keyword &&
             CurrentText(ref lexer).Equals("NULLS", StringComparison.OrdinalIgnoreCase) &&
-            TryPeekToken(lexer, out string placement, out int end) &&
+            TryPeekToken(lexer, out string placement, out _) &&
             (placement.Equals("FIRST", StringComparison.OrdinalIgnoreCase) ||
              placement.Equals("LAST", StringComparison.OrdinalIgnoreCase)))
         {
-            AddUnsupportedSurfaceDiagnostic(lexer.Current.Position, end,
-                "SQL ORDER BY NULLS FIRST and NULLS LAST are not supported; NULL sorts first in ASC and last in DESC.");
+            nullPlacement = placement.Equals("FIRST", StringComparison.OrdinalIgnoreCase) ? SqlNullPlacement.First : SqlNullPlacement.Last;
             Advance(ref lexer);
             Advance(ref lexer);
         }
 
-        return new SqlOrderByColumn(expr, isDescending);
+        return new SqlOrderByColumn(expr, isDescending, nullPlacement);
     }
 }

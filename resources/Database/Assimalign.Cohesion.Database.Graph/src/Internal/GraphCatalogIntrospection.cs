@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 
 using Assimalign.Cohesion.Database.Execution;
@@ -10,17 +11,20 @@ namespace Assimalign.Cohesion.Database.Graph.Internal;
 
 internal static class GraphCatalogIntrospection
 {
-    internal static QueryResult Execute(GraphDatabaseInstance database, GraphOperation operation,
+    internal static DatabaseResult Execute(GraphDatabase database, GraphOperation operation,
         GqlQueryExpression query, GqlCatalogSurface surface, CancellationToken token)
     {
         // A hand-built AST must obey the same read-only rule as a parsed SHOW statement.
-        if (query.Creates.Count != 0 || query.DeleteVariables.Count != 0 || query.DetachDelete)
+        if (query.Creates.Count != 0 || query.DeleteVariables.Count != 0 || query.DetachDelete ||
+            query.Stages.Any(stage => stage is GqlInsertStage or GqlDeleteStage))
         {
-            throw new DatabaseException("GQL0007: Graph catalog introspection is read-only.");
+            throw new GraphPlanningException("GQL0007", "Graph catalog introspection is read-only.", query.Location);
         }
-        if (query.Matches.Count != 0 || query.Predicate is not null || query.Projections.Count != 0)
+        if (query.Stages.Count != 0 || query.MatchClauses is null || query.MatchClauses.Count != 0 || query.Projections.Count != 0 ||
+            query.ReturnStar || query.SetQuantifier != GqlSetQuantifier.All || query.OrderBy is null ||
+            query.OrderBy.Count != 0 || query.Offset is not null || query.Limit is not null)
         {
-            throw new DatabaseException("COHDBG001: SHOW cannot be composed with graph clauses.");
+            throw new GraphPlanningException("COHDBG001", "SHOW cannot be composed with graph clauses.", query.Location);
         }
 
         var columns = Columns(surface);
@@ -78,7 +82,7 @@ internal static class GraphCatalogIntrospection
                 owner == DatabaseObjectOwner.Schema ? "Schema" : "Adhoc", schema]);
     }
 
-    private static QueryColumn[] Columns(GqlCatalogSurface surface)
+    private static DatabaseColumn[] Columns(GqlCatalogSurface surface)
     {
         (string Name, DatabaseType Type)[] definitions = surface switch
         {
@@ -96,12 +100,12 @@ internal static class GraphCatalogIntrospection
                 [("DATABASE_NAME", DatabaseType.String), ("DEFINITION_TYPE", DatabaseType.String), ("DEFINITION_ID", DatabaseType.Guid),
                  ("DEFINITION_NAME", DatabaseType.String), ("OBJECT_TYPE", DatabaseType.String), ("OBJECT_NAME", DatabaseType.String),
                  ("OWNER", DatabaseType.String), ("OWNING_SCHEMA", DatabaseType.String)],
-            _ => throw new DatabaseException("COHDBG001: Unknown graph catalog introspection subject."),
+            _ => throw new GraphPlanningException("COHDBG001", "Unknown graph catalog introspection subject."),
         };
-        var columns = new QueryColumn[definitions.Length];
+        var columns = new DatabaseColumn[definitions.Length];
         for (int ordinal = 0; ordinal < definitions.Length; ordinal++)
         {
-            columns[ordinal] = new QueryColumn
+            columns[ordinal] = new DatabaseColumn
             {
                 Name = definitions[ordinal].Name,
                 Type = definitions[ordinal].Type,

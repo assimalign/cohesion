@@ -28,7 +28,7 @@ public sealed class DatabaseStreamingExchangeTests
         // Act: metadata makes a live stream available while the peer is still gated mid-response.
         await using var stream = await harness.Client.ExecuteStreamingAsync(StreamingClientTestHarness.CreateExchange(), timeout.Token);
         await harness.FirstChunkSent.Task.WaitAsync(timeout.Token);
-        Task<IDatabaseConnection> pending = harness.Client.RentAsync(timeout.Token).AsTask();
+        Task<DatabaseConnection> pending = harness.Client.RentAsync(timeout.Token).AsTask();
         pending.IsCompleted.ShouldBeFalse();
         harness.TransferSent.Task.IsCompleted.ShouldBeFalse();
         stream.CanRead.ShouldBeTrue();
@@ -64,7 +64,7 @@ public sealed class DatabaseStreamingExchangeTests
         await using var harness = new StreamingClientTestHarness();
         await using var stream = await harness.Client.ExecuteStreamingAsync(StreamingClientTestHarness.CreateExchange(), timeout.Token);
         (await stream.ReadAsync(new byte[1024], timeout.Token)).ShouldBeGreaterThan(0);
-        Task<IDatabaseConnection> pending = harness.Client.RentAsync(timeout.Token).AsTask();
+        Task<DatabaseConnection> pending = harness.Client.RentAsync(timeout.Token).AsTask();
         pending.IsCompleted.ShouldBeFalse();
 
         // Act
@@ -85,7 +85,7 @@ public sealed class DatabaseStreamingExchangeTests
         await using var harness = new StreamingClientTestHarness();
         await using var stream = await harness.Client.ExecuteStreamingAsync(StreamingClientTestHarness.CreateExchange(), request.Token);
         await stream.ReadExactlyAsync(new byte[StreamingClientTestHarness.ChunkLength], timeout.Token);
-        Task<IDatabaseConnection> pending = harness.Client.RentAsync(timeout.Token).AsTask();
+        Task<DatabaseConnection> pending = harness.Client.RentAsync(timeout.Token).AsTask();
         pending.IsCompleted.ShouldBeFalse();
 
         // Act: cancellation must release the pool even if the caller never reads or disposes again.
@@ -109,7 +109,7 @@ public sealed class DatabaseStreamingExchangeTests
         await stream.ReadExactlyAsync(new byte[StreamingClientTestHarness.ChunkLength], timeout.Token);
         Task<int> read = stream.ReadAsync(new byte[1], readCancellation.Token).AsTask();
         read.IsCompleted.ShouldBeFalse();
-        Task<IDatabaseConnection> pending = harness.Client.RentAsync(timeout.Token).AsTask();
+        Task<DatabaseConnection> pending = harness.Client.RentAsync(timeout.Token).AsTask();
 
         // Act
         readCancellation.Cancel();
@@ -132,7 +132,7 @@ public sealed class DatabaseStreamingExchangeTests
         await using var harness = new StreamingClientTestHarness(response);
         await using var stream = await harness.Client.ExecuteStreamingAsync(StreamingClientTestHarness.CreateExchange(), timeout.Token);
         await stream.ReadExactlyAsync(new byte[StreamingClientTestHarness.ChunkLength], timeout.Token);
-        Task<IDatabaseConnection> pending = harness.Client.RentAsync(timeout.Token).AsTask();
+        Task<DatabaseConnection> pending = harness.Client.RentAsync(timeout.Token).AsTask();
 
         // Act
         harness.ContinueResponse.TrySetResult();
@@ -169,6 +169,24 @@ public sealed class DatabaseStreamingExchangeTests
         (await next.ExecuteAsync(StreamingClientTestHarness.CreatePing(), timeout.Token)).ShouldBe(ProtocolMessageType.Pong);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Database.Client] - Streaming: a client-owned stream of another family is rejected before a connection is dialed")]
+    public async Task ExecuteStreamingAsync_DifferentFamily_ShouldRejectBeforeRenting()
+    {
+        // Arrange
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await using var harness = new StreamingClientTestHarness();
+        var other = StreamingClientTestHarness.CreateExchange(new ProtocolMessageFamily("another-document-transfer", 64, 65, 66, 67));
+
+        // Act
+        await Should.ThrowAsync<ArgumentException>(async () =>
+            await harness.Client.ExecuteStreamingAsync(other, timeout.Token));
+
+        // Assert
+        harness.AcceptedConnections.ShouldBe(0);
+        await using var stream = await harness.Client.ExecuteStreamingAsync(StreamingClientTestHarness.CreateExchange(), timeout.Token);
+        harness.AcceptedConnections.ShouldBe(1);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database.Client] - Streaming: concurrent disposal returns exactly one lease and cannot close its next owner")]
     public async Task ExecuteStreamingAsync_ConcurrentDisposal_ShouldReturnExactlyOnce()
     {
@@ -178,7 +196,7 @@ public sealed class DatabaseStreamingExchangeTests
         await using var stream = await harness.Client.ExecuteStreamingAsync(StreamingClientTestHarness.CreateExchange(), timeout.Token);
         harness.ContinueResponse.TrySetResult();
         await stream.CopyToAsync(Stream.Null, timeout.Token);
-        Task<IDatabaseConnection> pending = harness.Client.RentAsync(timeout.Token).AsTask();
+        Task<DatabaseConnection> pending = harness.Client.RentAsync(timeout.Token).AsTask();
         var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         Task[] disposing = Enumerable.Range(0, 16).Select(_ => Task.Run(async () =>
         {
@@ -194,7 +212,7 @@ public sealed class DatabaseStreamingExchangeTests
 
         // Assert: no duplicate return may admit another renter or shut down the new owner's session.
         using var excessCancellation = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token);
-        Task<IDatabaseConnection> excess = harness.Client.RentAsync(excessCancellation.Token).AsTask();
+        Task<DatabaseConnection> excess = harness.Client.RentAsync(excessCancellation.Token).AsTask();
         excess.IsCompleted.ShouldBeFalse();
         excessCancellation.Cancel();
         await Should.ThrowAsync<OperationCanceledException>(async () => await excess);
@@ -220,7 +238,7 @@ public sealed class DatabaseStreamingExchangeTests
         await stream.CopyToAsync(Stream.Null, timeout.Token);
         await stream.DisposeAsync();
         (await original.ExecuteAsync(StreamingClientTestHarness.CreatePing(), timeout.Token)).ShouldBe(ProtocolMessageType.Pong);
-        Task<IDatabaseConnection> pending = harness.Client.RentAsync(timeout.Token).AsTask();
+        Task<DatabaseConnection> pending = harness.Client.RentAsync(timeout.Token).AsTask();
         pending.IsCompleted.ShouldBeFalse();
         await original.DisposeAsync();
         await using var next = await pending;
@@ -237,7 +255,7 @@ public sealed class DatabaseStreamingExchangeTests
         var original = await harness.Client.RentAsync(timeout.Token);
         await using var stream = await original.ExecuteStreamingAsync(StreamingClientTestHarness.CreateExchange(), timeout.Token);
         (await stream.ReadAsync(new byte[1], timeout.Token)).ShouldBe(1);
-        Task<IDatabaseConnection> pending = harness.Client.RentAsync(timeout.Token).AsTask();
+        Task<DatabaseConnection> pending = harness.Client.RentAsync(timeout.Token).AsTask();
 
         // Act
         await original.DisposeAsync();
@@ -267,7 +285,7 @@ public sealed class DatabaseStreamingExchangeTests
 
         // Act: after one byte, stop consuming; the large producer write must remain bounded.
         completed.Task.IsCompleted.ShouldBeFalse();
-        Task<IDatabaseConnection> pending = harness.Client.RentAsync(timeout.Token).AsTask();
+        Task<DatabaseConnection> pending = harness.Client.RentAsync(timeout.Token).AsTask();
         await original.DisposeAsync().AsTask().WaitAsync(timeout.Token);
         await using var next = await pending;
 

@@ -18,18 +18,15 @@ public sealed class DatabaseApplication : Host<DatabaseApplicationContext>, IDat
     private readonly object _disposeGate = new();
     private Task? _disposeTask;
     private bool _startAttempted;
-
-    /// <summary>Builds an application from copied legacy borrowed inputs and local default infrastructure.</summary>
-    /// <param name="options">The host settings and caller-owned inputs.</param>
-    public DatabaseApplication(DatabaseApplicationOptions options)
-        : this(new DatabaseApplicationBuilder(options).BuildComposition()) { }
+    private long _startingTimestamp;
+    private long _stoppingTimestamp;
 
     internal DatabaseApplication(DatabaseApplicationComposition composition) : base(composition.Options)
     {
         _context = composition.Context;
         _ownership = composition.Ownership;
-        var services = new List<IHostService>(composition.Options.Services);
-        foreach (IDatabaseServer server in composition.Context.Servers)
+        var services = new List<IHostService>(composition.Services);
+        foreach (DatabaseServer server in composition.Context.Servers)
         {
             services.Add(new DatabaseServerHostService(server));
         }
@@ -40,12 +37,20 @@ public sealed class DatabaseApplication : Host<DatabaseApplicationContext>, IDat
     /// <summary>Gets final infrastructure and the fixed runtime engine/server registry.</summary>
     public override DatabaseApplicationContext Context => _context;
 
-    /// <summary>Creates a builder with default settings and no command-line arguments.</summary>
+    /// <summary>
+    /// Creates a builder with default settings, an empty configuration and no command-line
+    /// arguments, as <c>WebApplication.CreateBuilder()</c> does.
+    /// </summary>
     /// <returns>A new builder.</returns>
     public static DatabaseApplicationBuilder CreateBuilder() => new(new DatabaseApplicationOptions());
 
-    /// <summary>Captures application arguments for configuration loaded at Build.</summary>
-    /// <param name="args">The arguments, copied before returning.</param>
+    /// <summary>
+    /// Creates a builder whose configuration loads the default sources now: optional
+    /// <c>appsettings.json</c> and <c>appsettings.{Environment}.json</c> under the content root,
+    /// environment variables prefixed <c>COHESION_CONFIG__</c>, the ambient resource settings and
+    /// <paramref name="args"/>, later sources winning.
+    /// </summary>
+    /// <param name="args">The arguments, loaded before returning.</param>
     /// <returns>A new builder honoring the existing enabled-resource host integration when present.</returns>
     public static DatabaseApplicationBuilder CreateBuilder(string[] args)
     {
@@ -53,11 +58,6 @@ public sealed class DatabaseApplication : Host<DatabaseApplicationContext>, IDat
         Assembly resourceAssembly = Assembly.GetEntryAssembly() ?? typeof(DatabaseApplication).Assembly;
         return new DatabaseApplicationBuilder(new DatabaseApplicationOptions(), resourceAssembly, args);
     }
-
-    /// <summary>Creates a builder from host settings and borrowed legacy inputs.</summary>
-    /// <param name="options">The options copied at Build.</param>
-    /// <returns>A new builder.</returns>
-    public static DatabaseApplicationBuilder CreateBuilder(DatabaseApplicationOptions options) => new(options);
 
     /// <inheritdoc />
     protected override Task OnStartingAsync(CancellationToken cancellationToken = default)
@@ -73,6 +73,36 @@ public sealed class DatabaseApplication : Host<DatabaseApplicationContext>, IDat
         }
 
         _startAttempted = true;
+        _startingTimestamp = DatabaseHostingEventSource.Log.LifecycleTimestamp();
+        DatabaseHostingEventSource.Log.ApplicationStarting(_context);
+        return Task.CompletedTask;
+    }
+
+    /// <inheritdoc />
+    protected override Task OnStartedAsync(CancellationToken cancellationToken = default)
+    {
+        DatabaseHostingEventSource.Log.ApplicationStarted(_context, _startingTimestamp);
+        return Task.CompletedTask;
+    }
+
+    /// <inheritdoc />
+    protected override Task OnStartFailedAsync(Exception exception, CancellationToken cancellationToken = default)
+    {
+        DatabaseHostingEventSource.Log.ApplicationStartFailed(_context, exception);
+        return Task.CompletedTask;
+    }
+
+    /// <inheritdoc />
+    protected override Task OnStoppingAsync(CancellationToken cancellationToken = default)
+    {
+        _stoppingTimestamp = DatabaseHostingEventSource.Log.LifecycleTimestamp();
+        return Task.CompletedTask;
+    }
+
+    /// <inheritdoc />
+    protected override Task OnStoppedAsync(CancellationToken cancellationToken = default)
+    {
+        DatabaseHostingEventSource.Log.ApplicationStopped(_context, _stoppingTimestamp);
         return Task.CompletedTask;
     }
 
@@ -105,6 +135,7 @@ public sealed class DatabaseApplication : Host<DatabaseApplicationContext>, IDat
         await _ownership.DisposeAsync(failures).ConfigureAwait(false);
         if (failures.Count > 0)
         {
+            DatabaseHostingEventSource.Log.ApplicationDisposeFailed(_context, failures.Count, failures[0]);
             throw new AggregateException("Database application disposal failed.", failures);
         }
     }

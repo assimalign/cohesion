@@ -203,6 +203,65 @@ public class StorageBufferPoolTests
         stream.Dispose();
     }
 
+    [Theory(DisplayName = "Cohesion Test [Storage] - BufferPool: a page whose header claims an overflow area past its buffer is refused")]
+    [InlineData(Page.Size, false)]
+    [InlineData(Page.Size, true)]
+    [InlineData(-1, true)]
+    public unsafe void Pin_HeaderOverflowPastTheBuffer_ShouldThrowAndStayOutOfCache(int overflowSize, bool stamped)
+    {
+        // Arrange: Page.AsSpan sizes its span from the overflow header. An unstamped page
+        // (checksum zero) is never verified, and a stamped one verifies whatever its header
+        // says, so the header alone must not size a span past the 8 KiB buffer.
+        var bytes = new byte[Page.Size];
+        fixed (byte* pointer = bytes)
+        {
+            var page = new Page(pointer);
+            page.Type = PageType.Data;
+            page.Flags = PageFlags.Overflow;
+            page.OverflowSize = overflowSize;
+        }
+
+        if (stamped)
+        {
+            PageChecksum.Stamp(bytes);
+        }
+
+        using var stream = new StorageStream(new MemoryStream(bytes));
+        using var pool = new StorageBufferPool(2);
+
+        // Act
+        var exception = Should.Throw<StorageCorruptionException>(() => pool.Pin((PageId)0L, stream));
+
+        // Assert
+        exception.Message.ShouldContain("overflow");
+        pool.Count.ShouldBe(0);
+        pool.CheckInvariants();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Storage] - BufferPool: a page whose overflow area fits its buffer loads")]
+    public unsafe void Pin_HeaderOverflowInsideTheBuffer_ShouldLoad()
+    {
+        // Arrange
+        var bytes = new byte[Page.Size];
+        fixed (byte* pointer = bytes)
+        {
+            var page = new Page(pointer);
+            page.Type = PageType.Data;
+            page.Flags = PageFlags.Overflow;
+            page.OverflowSize = Page.Size - Page.HeaderSize;
+        }
+
+        PageChecksum.Stamp(bytes);
+        using var stream = new StorageStream(new MemoryStream(bytes));
+        using var pool = new StorageBufferPool(2);
+
+        // Act
+        using var handle = pool.Pin((PageId)0L, stream);
+
+        // Assert
+        handle.Page.AsSpan().Length.ShouldBe(Page.Size);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Storage] - BufferPool: concurrent pin/unpin churn stays consistent")]
     public async Task Pin_ConcurrentChurn_ShouldStayConsistent()
     {
@@ -273,7 +332,7 @@ public class StorageBufferPoolTests
         using var stream = NewStream();
         var pool = new StorageBufferPool(4);
         var map = new StorageFreeSpaceMap();
-        using var manager = new StoragePageManager(stream, pool, map);
+        var manager = new StoragePageManager(stream, pool, map);
 
         var first = manager.AllocatePage(PageType.Data);
         long firstId = (long)first.Id;
@@ -297,10 +356,79 @@ public class StorageBufferPoolTests
         using var stream = NewStream();
         var pool = new StorageBufferPool(4);
         var map = new StorageFreeSpaceMap();
-        using var manager = new StoragePageManager(stream, pool, map);
+        var manager = new StoragePageManager(stream, pool, map);
 
         // Act / Assert
         Should.Throw<StorageIOException>(() => manager.GetPage((PageId)7L));
+        pool.Dispose();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Storage] - BufferPool: a pin for overwrite neither reads nor verifies a page that is not resident")]
+    public void PinForOverwrite_PageNotResident_ShouldNotReadIt()
+    {
+        // Arrange: page 0 on the stream carries garbage under a checksum that does not match.
+        var bytes = new byte[Page.Size];
+        new Random(3).NextBytes(bytes);
+        using var stream = new StorageStream(new MemoryStream(bytes));
+        using var pool = new StorageBufferPool(2);
+        Should.Throw<StorageCorruptionException>(() => pool.Pin((PageId)0L, stream));
+
+        // Act
+        using var handle = pool.PinForOverwrite((PageId)0L, stream);
+
+        // Assert: a zeroed buffer, cached and pinned like any other.
+        handle.Page.Id.ShouldBe(0L);
+        handle.Page.AsSpan().ToArray().ShouldAllBe(value => value == 0);
+        handle.PinCount.ShouldBe(1);
+        pool.Count.ShouldBe(1);
+        pool.CheckInvariants();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Storage] - BufferPool: a pin for overwrite returns a resident page as it is")]
+    public void PinForOverwrite_ResidentPage_ShouldShareTheEntry()
+    {
+        // Arrange
+        using var stream = StreamWithPages(1);
+        using var pool = new StorageBufferPool(2);
+        using var first = pool.Pin((PageId)0L, stream);
+        first.Page.AsBodySpan()[0] = 42;
+
+        // Act
+        using var second = pool.PinForOverwrite((PageId)0L, stream);
+
+        // Assert
+        second.Page.AsBodySpan()[0].ShouldBe((byte)42);
+        second.PinCount.ShouldBe(2);
+        pool.CheckInvariants();
+    }
+
+    /// <summary>
+    /// Allocation clears the page, so it must not read the free page first: a free page whose
+    /// last write a crash tore (an unjournaled checkpoint anchor page has no journal image to
+    /// repair it) used to fail its checksum and refuse the allocation (#1251).
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Storage] - PageManager: allocating a free page whose bytes do not verify succeeds")]
+    public void AllocatePage_FreePageWithTornBytes_ShouldNotReadIt()
+    {
+        // Arrange: page 1 is free in the map, and its bytes on the stream are a torn write.
+        using var stream = StreamWithPages(2);
+        var torn = new byte[Page.Size];
+        stream.ReadPage((PageId)1L, torn);
+        torn.AsSpan(Page.HeaderSize, 1024).Fill(0xEE);
+        stream.WritePage((PageId)1L, torn);
+        var pool = new StorageBufferPool(4);
+        var map = new StorageFreeSpaceMap();
+        map.MarkAllocated((PageId)0L);
+        map.MarkFree((PageId)1L);
+        var manager = new StoragePageManager(stream, pool, map);
+
+        // Act
+        using var handle = manager.AllocatePage(PageType.Data);
+
+        // Assert
+        ((long)handle.Id).ShouldBe(1L);
+        handle.Page.Type.ShouldBe(PageType.Data);
+        handle.Page.AsBodySpan().ToArray().ShouldAllBe(value => value == 0);
         pool.Dispose();
     }
 }

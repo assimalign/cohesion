@@ -15,7 +15,7 @@ using Xunit;
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 /// <summary>Proves subquery truth semantics, cardinality, composition, snapshot visibility and constrained inserts.</summary>
-public sealed class SqlSubqueryExecutionTests
+public sealed partial class SqlSubqueryExecutionTests
 {
     /// <summary>Membership distinguishes matching, nonmatching, null-containing and empty sets.</summary>
     /// <param name="predicate">The membership predicate.</param>
@@ -111,7 +111,7 @@ public sealed class SqlSubqueryExecutionTests
         await using var result = (await ExecuteAsync(session,
             "SELECT (SELECT id FROM choices WHERE id IS NOT NULL) AS picked, " +
             "(SELECT id FROM choices WHERE id < 0) AS absent FROM candidates WHERE id = 1;"))
-            .ShouldBeAssignableTo<QueryResultSet>();
+            .ShouldBeAssignableTo<DatabaseResultSet>();
 
         // Assert
         result.Columns.Select(column => column.Name).ShouldBe(["picked", "absent"]);
@@ -227,13 +227,13 @@ public sealed class SqlSubqueryExecutionTests
         error.Message.ShouldContain("32", Case.Sensitive);
     }
 
-    /// <summary>Outer references have a capability diagnostic, including when the outer table is empty.</summary>
+    /// <summary>Outer references execute correctly with empty and populated outer tables.</summary>
     /// <param name="statement">The correlated expression.</param>
-    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Subquery: correlated references are precisely rejected")]
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Subquery: correlated references execute over empty and populated inputs")]
     [InlineData("SELECT c.id FROM candidates c WHERE EXISTS (SELECT x.id FROM choices x WHERE x.id = c.id);")]
     [InlineData("SELECT (SELECT x.id FROM choices x WHERE x.id = c.id) FROM candidates c;")]
     [InlineData("SELECT c.id FROM candidates c WHERE c.id IN (SELECT x.id FROM choices x WHERE x.id = c.id);")]
-    public async Task Subquery_CorrelatedReference_ShouldReportCapabilityDiagnostic(string statement)
+    public async Task Subquery_CorrelatedReference_ShouldEvaluatePerOuterRow(string statement)
     {
         // Arrange
         await using var engine = CreateEngine();
@@ -243,18 +243,22 @@ public sealed class SqlSubqueryExecutionTests
         await ExecuteAsync(session, "CREATE TABLE choices (id INT);");
 
         // Act / Assert
-        var error = await Should.ThrowAsync<DatabaseException>(() => RowsAsync(session, statement));
-        error.Message.ShouldContain("COHDBL001", Case.Sensitive);
-        error.Message.ShouldContain("correlat");
+        (await RowsAsync(session, statement)).ShouldBeEmpty();
+        await ExecuteAsync(session, "INSERT INTO candidates VALUES (2);");
+        await ExecuteAsync(session, "INSERT INTO choices VALUES (2);");
+        (await RowsAsync(session, statement)).ShouldHaveSingleItem()[0].ShouldBe(2);
     }
 
     /// <summary>ReadCommitted inner and outer plans consume the statement's captured view after concurrent changes.</summary>
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Subquery: all forms share the captured MVCC statement snapshot")]
-    public async Task Subquery_ConcurrentCommit_ShouldKeepCapturedSnapshot()
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Subquery: all forms share the captured MVCC statement snapshot")]
+    [InlineData(false)]
+    [InlineData(true)]
+    [InlineData(false, true)]
+    public async Task Subquery_ConcurrentCommit_ShouldKeepCapturedSnapshot(bool derived, bool correlated = false)
     {
         // Arrange
         await using var engine = CreateEngine();
-        var database = (SqlDatabaseInstance)await engine.CreateDatabaseAsync("subquery");
+        var database = await engine.CreateDatabaseAsync("subquery");
         await using var writer = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await ExecuteAsync(writer, "CREATE TABLE candidates (id INT);");
         await ExecuteAsync(writer, "CREATE TABLE choices (id INT);");
@@ -264,10 +268,13 @@ public sealed class SqlSubqueryExecutionTests
         try
         {
             var captured = new SqlStatementContext(transaction, database.Coordinator);
-            var request = SqlQueryRequest.FromSql(
+            var request = SqlQueryRequest.FromSql(derived
+                ? "SELECT d.id, c.id FROM (SELECT id FROM candidates) d JOIN choices c ON d.id = c.id;"
+                : correlated ? "SELECT c.id, (SELECT x.id FROM choices x WHERE x.id = c.id) FROM candidates c " +
+                    "WHERE EXISTS (SELECT x.id FROM choices x WHERE x.id = c.id);" :
                 "SELECT id, (SELECT id FROM choices) FROM candidates WHERE id IN (SELECT id FROM choices) " +
                 "AND EXISTS (SELECT id FROM choices WHERE id IN (SELECT id FROM candidates));");
-            var executor = new SqlQueryExecutor(database.DataStorage, database.Catalog, database.IndexManager);
+            var executor = new SqlQueryExecutor(database.DataStorage, database.Catalog, database.IndexManager, database.Definitions);
 
             // Act: change both outer and nested inputs after the ReadCommitted statement captured its view.
             var update = await writer.BeginTransactionAsync(cancellationToken: CancellationToken.None);
@@ -275,10 +282,10 @@ public sealed class SqlSubqueryExecutionTests
             await ExecuteAsync(writer, "UPDATE choices SET id = 2;");
             await update.CommitAsync(CancellationToken.None);
             await using var oldResult = (await executor.ExecuteAsync(request, captured, CancellationToken.None))
-                .ShouldBeAssignableTo<QueryResultSet>();
+                .ShouldBeAssignableTo<DatabaseResultSet>();
             await using var newResult = (await executor.ExecuteAsync(request,
                 new SqlStatementContext(transaction, database.Coordinator), CancellationToken.None))
-                .ShouldBeAssignableTo<QueryResultSet>();
+                .ShouldBeAssignableTo<DatabaseResultSet>();
 
             // Assert
             (await ReadRowsAsync(oldResult)).ShouldHaveSingleItem().ShouldBe(new object?[] { 1, 1 });
@@ -403,9 +410,9 @@ public sealed class SqlSubqueryExecutionTests
         await ExecuteAsync(session, $"INSERT INTO source_rows VALUES {sourceValues};");
 
         // Act / Assert
-        var literalError = await Should.ThrowAsync<SqlConstraintViolationException>(
+        var literalError = await SqlConstraintAssertions.ThrowAsync(
             () => ExecuteAsync(session, $"INSERT INTO target_rows VALUES {sourceValues};"));
-        var selectError = await Should.ThrowAsync<SqlConstraintViolationException>(
+        var selectError = await SqlConstraintAssertions.ThrowAsync(
             () => ExecuteAsync(session, "INSERT INTO target_rows SELECT id FROM source_rows;"));
         literalError.ConstraintKind.ShouldBe(constraintKind);
         selectError.ConstraintKind.ShouldBe(literalError.ConstraintKind);
@@ -428,7 +435,7 @@ public sealed class SqlSubqueryExecutionTests
         await ExecuteAsync(session, "INSERT INTO target_rows VALUES (1);");
 
         // Act / Assert
-        await Should.ThrowAsync<SqlConstraintViolationException>(
+        await SqlConstraintAssertions.ThrowAsync(
             () => ExecuteAsync(session, "INSERT INTO target_rows SELECT id FROM source_rows;"));
         (await RowsAsync(session, "SELECT id FROM target_rows;")).ShouldHaveSingleItem()[0].ShouldBe(1);
         await ExecuteAsync(session, "INSERT INTO target_rows VALUES (2);");
@@ -488,7 +495,7 @@ public sealed class SqlSubqueryExecutionTests
     {
         // Arrange
         await using var engine = CreateEngine();
-        var database = (SqlDatabaseInstance)await engine.CreateDatabaseAsync("subquery");
+        var database = await engine.CreateDatabaseAsync("subquery");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
 
         // Act / Assert
@@ -499,9 +506,9 @@ public sealed class SqlSubqueryExecutionTests
     }
 
     private static SqlDatabaseEngine CreateEngine()
-        => SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "subquery-tests" });
+        => SqlDatabaseEngine.Create("subquery-tests", new SqlDatabaseEngineOptions());
 
-    private static async Task SeedMembershipAsync(IDatabaseSession session)
+    private static async Task SeedMembershipAsync(SqlDatabaseSession session)
     {
         await ExecuteAsync(session, "CREATE TABLE candidates (id INT);");
         await ExecuteAsync(session, "CREATE TABLE choices (id INT);");
@@ -509,18 +516,18 @@ public sealed class SqlSubqueryExecutionTests
         await ExecuteAsync(session, "INSERT INTO choices VALUES (2), (NULL);");
     }
 
-    private static Task<QueryResult> ExecuteAsync(IDatabaseSession session, string sql)
+    private static Task<DatabaseResult> ExecuteAsync(SqlDatabaseSession session, string sql)
         => session.ExecuteAsync(sql, cancellationToken: CancellationToken.None).AsTask();
 
-    private static async Task<List<object?[]>> RowsAsync(IDatabaseSession session, string sql)
+    private static async Task<List<object?[]>> RowsAsync(SqlDatabaseSession session, string sql)
     {
-        await using var result = (await ExecuteAsync(session, sql)).ShouldBeAssignableTo<QueryResultSet>();
+        await using var result = (await ExecuteAsync(session, sql)).ShouldBeAssignableTo<DatabaseResultSet>();
         return await ReadRowsAsync(result);
     }
 
-    private static async Task<List<object?[]>> ReadRowsAsync(QueryResultSet result)
+    private static async Task<List<object?[]>> ReadRowsAsync(DatabaseResultSet result)
     {
-        result.Status.ShouldBe(QueryResultStatus.Success);
+        result.Status.ShouldBe(DatabaseResultStatus.Success);
         var rows = new List<object?[]>();
         await foreach (var row in result.GetRowsAsync(CancellationToken.None))
         {

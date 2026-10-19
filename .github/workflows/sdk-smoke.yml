@@ -28,7 +28,6 @@ on:
       - "resources/Database/Assimalign.Cohesion.Database.ApplicationModel/**"
       - "resources/Database/Assimalign.Cohesion.Database.Client/**"
       - "resources/Database/Assimalign.Cohesion.Database.Execution/**"
-      - "resources/Database/Assimalign.Cohesion.Database.Governance/**"
       - "resources/Database/Assimalign.Cohesion.Database.Hosting/**"
       - "resources/Database/Assimalign.Cohesion.Database.Indexing/**"
       - "resources/Database/Assimalign.Cohesion.Database.Language/**"
@@ -78,7 +77,6 @@ on:
       - "resources/Database/Assimalign.Cohesion.Database.ApplicationModel/**"
       - "resources/Database/Assimalign.Cohesion.Database.Client/**"
       - "resources/Database/Assimalign.Cohesion.Database.Execution/**"
-      - "resources/Database/Assimalign.Cohesion.Database.Governance/**"
       - "resources/Database/Assimalign.Cohesion.Database.Hosting/**"
       - "resources/Database/Assimalign.Cohesion.Database.Indexing/**"
       - "resources/Database/Assimalign.Cohesion.Database.Language/**"
@@ -346,7 +344,6 @@ jobs:
             "Assimalign.Cohesion.Database.Sql.Schema"
             "Assimalign.Cohesion.Database.Sql.Storage"
             "Assimalign.Cohesion.Database.Execution"
-            "Assimalign.Cohesion.Database.Governance"
             "Assimalign.Cohesion.Database.Indexing"
             "Assimalign.Cohesion.Database.Language"
             "Assimalign.Cohesion.Database.Protocol"
@@ -419,7 +416,6 @@ jobs:
             "Assimalign.Cohesion.Database.Sql.Schema"
             "Assimalign.Cohesion.Database.Sql.Storage"
             "Assimalign.Cohesion.Database.Execution"
-            "Assimalign.Cohesion.Database.Governance"
             "Assimalign.Cohesion.Database.Indexing"
             "Assimalign.Cohesion.Database.Language"
             "Assimalign.Cohesion.Database.Protocol"
@@ -527,7 +523,10 @@ jobs:
             throw "ApplicationModel SDK package-boundary tests failed with exit code $LASTEXITCODE."
           }
 
+      # Independent of the base and ApplicationModel SDK tests above: a failure there must not
+      # hide whether the Database schema compiler and migrations still pass.
       - name: Run Database SDK tests
+        if: ${{ !cancelled() }}
         shell: pwsh
         run: |
           dotnet test `

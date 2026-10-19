@@ -2100,7 +2100,11 @@ public class LocalGatewayTests
         }
 
         int count = 0;
-        foreach (string line in File.ReadAllLines(path))
+        // The child appends while readiness/liveness polling reads this log. A default
+        // File.ReadAllLines handle denies the writer on Windows and can crash the fixture.
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        using var reader = new StreamReader(stream);
+        while (reader.ReadLine() is string line)
         {
             if (line.Contains(value, StringComparison.Ordinal))
             {

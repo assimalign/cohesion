@@ -1,0 +1,457 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Text.Json;
+using System.Threading.Tasks;
+
+using Shouldly;
+using Xunit;
+
+using Assimalign.Cohesion.Database.Client;
+using Assimalign.Cohesion.Database.Protocol;
+
+namespace Assimalign.Cohesion.Database.Documents.Client.Tests;
+
+public sealed class DocumentClientWireTests
+{
+    [Theory(DisplayName = "Cohesion Test [Documents.Client] - SQL++ function categories preserve embedded values and Int64 types")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task QueryAsync_ScalarFunctions_ShouldMatchEmbeddedResultsAsync(bool tcp)
+    {
+        // Arrange
+        await using var harness = await DocumentClientTestHarness.StartAsync(tcp);
+        await using var connection = await harness.Client.ConnectAsync(harness.Token);
+        await connection.CreateCollectionAsync("items", harness.Token);
+        await connection.PutAsync("items", "a", "{\"name\":\"😀Alpha\",\"tags\":[\"blue\"]}"u8.ToArray(), cancellationToken: harness.Token);
+        const string query = "SELECT LOWER(name) AS s, ROUND(-2.5) AS n, MILLIS_TO_STR(0) AS d, TYPE(tags) AS t, ARRAY_CONTAINS(tags,'blue') AS a, IFMISSING(absent,'x') AS c, LENGTH(name) AS l, POSITION(name,'A') AS p, ARRAY_LENGTH(tags) AS z FROM items";
+        await using var session = await harness.Database.CreateSessionAsync(harness.Token);
+        await using var embedded = (Assimalign.Cohesion.Database.Execution.DatabaseResultSet)await session.ExecuteAsync(query, cancellationToken: harness.Token);
+        var expected = new List<object?[]>();
+        await foreach (var row in embedded.GetRowsAsync(harness.Token)) { expected.Add(Enumerable.Range(0, row.FieldCount).Select(row.GetValue).ToArray()); }
+        // Act
+        var remote = await connection.QueryAsync(query, cancellationToken: harness.Token);
+        var count = await connection.QueryAsync("SELECT COUNT(*) FROM items", cancellationToken: harness.Token);
+        // Assert
+        remote.ShouldHaveSingleItem().ToArray().ShouldBe(expected.ShouldHaveSingleItem());
+        remote[0].ToArray().ShouldBe(new object?[] { "😀alpha", -3m, "1970-01-01T00:00:00.000Z", "array", true, "x", 6L, 1L, 1L });
+        remote.Columns.Select(column => column.Type).ShouldBe(embedded.Columns.Select(column => column.Type));
+        count.Columns[0].Type.ShouldBe(Assimalign.Cohesion.Database.Types.DatabaseType.Int64);
+        count.ShouldHaveSingleItem()[0].ShouldBeOfType<long>().ShouldBe(1L);
+        var failure = await Should.ThrowAsync<DocumentClientException>(async () =>
+            await connection.QueryAsync("SELECT SQRT(-1) FROM items", cancellationToken: harness.Token));
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDOC019");
+        (await connection.QueryAsync("SELECT LENGTH(name) FROM items", cancellationToken: harness.Token)).ShouldHaveSingleItem()[0].ShouldBe(6L);
+        await connection.PutAsync("items", "b", "{\"name\":\"Beta\",\"tags\":[]}"u8.ToArray(), cancellationToken: harness.Token);
+        foreach (string mixed in new[]
+        {
+            "SELECT CASE WHEN META().id = 'a' THEN 1 ELSE LENGTH(name) END AS n FROM items",
+            "SELECT CASE WHEN META().id = 'a' THEN 'text' ELSE LENGTH(name) END AS n FROM items",
+        })
+        {
+            await using var inProcess = (Assimalign.Cohesion.Database.Execution.DatabaseResultSet)await session.ExecuteAsync(mixed, cancellationToken: harness.Token);
+            var embeddedValues = new List<object?>();
+            await foreach (var resultRow in inProcess.GetRowsAsync(harness.Token)) { embeddedValues.Add(resultRow.GetValue(0)); }
+            var wire = await connection.QueryAsync(mixed, cancellationToken: harness.Token);
+            wire.Select(resultRow => resultRow[0]).ShouldBe(embeddedValues);
+            wire[1][0].ShouldBeOfType<decimal>().ShouldBe(4m);
+            wire.Columns[0].Type.ShouldBe(inProcess.Columns[0].Type);
+        }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Documents.Client] - Advertised predicates preserve in-process rows over both transports")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task QueryAsync_AdvertisedPredicates_ShouldPreserveConformanceRowsAsync(bool tcp)
+    {
+        // Arrange
+        await using var harness = await DocumentClientTestHarness.StartAsync(tcp);
+        await using var connection = await harness.Client.ConnectAsync(harness.Token);
+        await connection.CreateCollectionAsync("items", harness.Token);
+        await connection.PutAsync("items", "a", "{\"name\":\"alpha\",\"category\":\"a\",\"amount\":2}"u8.ToArray(), cancellationToken: harness.Token);
+        await connection.PutAsync("items", "b", "{\"name\":\"beta\",\"category\":\"a\",\"amount\":6}"u8.ToArray(), cancellationToken: harness.Token);
+        await connection.PutAsync("items", "c", "{\"name\":\"gamma\",\"category\":\"b\",\"amount\":4}"u8.ToArray(), cancellationToken: harness.Token);
+        await connection.PutAsync("items", "d", "{\"name\":\"delta\",\"category\":\"a\",\"amount\":null}"u8.ToArray(), cancellationToken: harness.Token);
+        (string Query, object?[][] Rows)[] cases =
+        [
+            ("SELECT name FROM items WHERE category IN ('b', 'z')", [["gamma"]]),
+            ("SELECT name FROM items WHERE amount NOT BETWEEN 3 AND 5", [["alpha"], ["beta"]]),
+            ("SELECT name FROM items WHERE name LIKE '%ta'", [["beta"], ["delta"]]),
+            ("SELECT name FROM items WHERE name LIKE 'b_ta' ESCAPE '!'", [["beta"]]),
+            ("SELECT CASE amount WHEN 2 THEN 'two' ELSE 'other' END AS kind FROM items", [["two"], ["other"], ["other"], ["other"]]),
+            ("SELECT name, CASE WHEN amount > 3 THEN 'big' WHEN amount IS NULL THEN 'none' ELSE 'small' END AS size FROM items",
+                [["alpha", "small"], ["beta", "big"], ["gamma", "big"], ["delta", "none"]]),
+            ("SELECT CASE WHEN amount > 3 THEN 'big' ELSE 'small' END AS size, COUNT(*) AS n FROM items GROUP BY CASE WHEN amount > 3 THEN 'big' ELSE 'small' END",
+                [["big", 2L], ["small", 2L]]),
+            ("SELECT SUM(CASE WHEN amount > 3 THEN 1 ELSE 0 END) AS big FROM items", [[2m]]),
+        ];
+        // Act / Assert
+        foreach (var (query, expected) in cases)
+        {
+            var rows = await connection.QueryAsync(query, cancellationToken: harness.Token);
+            rows.Count.ShouldBe(expected.Length, query);
+            for (int i = 0; i < expected.Length; i++) { rows[i].ToArray().ShouldBe(expected[i], query); }
+        }
+        var unknowns = await connection.QueryAsync("SELECT MISSING IN (1) AS i, 0 BETWEEN 1 AND MISSING AS b, NULL LIKE MISSING AS l, CASE MISSING WHEN 1 THEN 2 END AS c FROM items WHERE name = 'alpha'", cancellationToken: harness.Token);
+        var row = unknowns.ShouldHaveSingleItem();
+        for (int i = 0; i < 3; i++) { row.IsMissing(i).ShouldBeTrue(); row.IsNull(i).ShouldBeFalse(); }
+        row.IsNull(3).ShouldBeTrue();
+        var failure = await Should.ThrowAsync<DocumentClientException>(async () =>
+            await connection.QueryAsync("SELECT name LIKE 'z\\' FROM items", cancellationToken: harness.Token));
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDOC013");
+        (await connection.QueryAsync("SELECT name FROM items WHERE name LIKE 'a%'", cancellationToken: harness.Token))
+            .ShouldHaveSingleItem()[0].ShouldBe("alpha");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Documents.Client] - Object constructors resolve repeated names in SELECT and INSERT over both transports")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExecuteAsync_RepeatedObjectMember_ShouldStoreOneMember(bool tcp)
+    {
+        // Arrange
+        await using var harness = await DocumentClientTestHarness.StartAsync(tcp);
+        await using var connection = await harness.Client.ConnectAsync(harness.Token);
+        await connection.CreateCollectionAsync("items", harness.Token);
+        await connection.PutAsync("items", "seed", "{}"u8.ToArray(), cancellationToken: harness.Token);
+
+        // Act
+        var rows = await connection.QueryAsync("SELECT {'a':1, 'a':2} AS o FROM items", cancellationToken: harness.Token);
+        var affected = await connection.ExecuteAsync("INSERT INTO items (KEY, VALUE) VALUES ('object', {'a':1, 'a':2})", cancellationToken: harness.Token);
+
+        // Assert
+        rows.ShouldHaveSingleItem()[0].ShouldBeOfType<JsonElement>().GetRawText().ShouldBe("{\"a\":2}");
+        affected.ShouldBe(1);
+        var stored = (await connection.GetAsync("items", "object", harness.Token)).ShouldNotBeNull();
+        Encoding.UTF8.GetString(stored.Content.Span).ShouldBe("{\"a\":2}");
+        connection.IsOpen.ShouldBeTrue();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Documents.Client] - Eighty-level documents survive whole and projected results")]
+    [InlineData("SELECT * FROM items", true)]
+    [InlineData("SELECT nested FROM items", false)]
+    public async Task QueryAsync_DeepDocument_ShouldHonorConfiguredJsonDepth(string statement, bool whole)
+    {
+        // Arrange
+        await using var harness = await DocumentClientTestHarness.StartAsync();
+        await using var connection = await harness.Client.ConnectAsync(harness.Token);
+        await connection.CreateCollectionAsync("items", harness.Token);
+        string nested = new string('[', 80) + "0" + new string(']', 80);
+        byte[] content = Encoding.UTF8.GetBytes("{\"nested\":" + nested + "}");
+        await connection.PutAsync("items", "deep", content, cancellationToken: harness.Token);
+
+        // Act
+        var result = await connection.QueryAsync(statement, cancellationToken: harness.Token);
+
+        // Assert
+        (await connection.GetAsync("items", "deep", harness.Token)).ShouldNotBeNull().Content.ToArray().ShouldBe(content);
+        var value = result.ShouldHaveSingleItem()[0].ShouldBeOfType<JsonElement>();
+        (whole ? value.GetProperty("nested") : value).GetRawText().ShouldBe(nested);
+        connection.IsOpen.ShouldBeTrue();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Documents.Client] - Eighty-level parameters cross the wire and return as JSON")]
+    public async Task QueryAsync_DeepParameter_ShouldHonorConfiguredJsonDepth()
+    {
+        // Arrange
+        await using var harness = await DocumentClientTestHarness.StartAsync();
+        await using var connection = await harness.Client.ConnectAsync(harness.Token);
+        await connection.CreateCollectionAsync("items", harness.Token);
+        await connection.PutAsync("items", "one", "{}"u8.ToArray(), cancellationToken: harness.Token);
+        string nested = new string('[', 80) + "0" + new string(']', 80);
+        using var json = JsonDocument.Parse(nested, new JsonDocumentOptions { MaxDepth = 256 });
+
+        // Act
+        var result = await connection.QueryAsync("SELECT @value AS nested FROM items",
+            new Dictionary<string, object?> { ["value"] = json.RootElement }, harness.Token);
+
+        // Assert
+        result.ShouldHaveSingleItem()[0].ShouldBeOfType<JsonElement>().GetRawText().ShouldBe(nested);
+        connection.IsOpen.ShouldBeTrue();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Documents.Client] - CRUD preserves versions, bytes and collections on both transports")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Commands_BothTransports_ShouldPreserveMutationSemantics(bool tcp)
+    {
+        // Arrange
+        await using var harness = await DocumentClientTestHarness.StartAsync(tcp);
+        await using var connection = await harness.Client.ConnectAsync(harness.Token);
+        byte[] content = " {\"city\":\"東京\", \"nested\":[1,null,{\"active\":true}]} "u8.ToArray();
+
+        // Act / Assert
+        (await connection.GetCollectionsAsync(harness.Token)).ShouldBeEmpty();
+        (await connection.CreateCollectionAsync("items", harness.Token)).ShouldBe("items");
+        (await connection.GetCollectionAsync("items", harness.Token)).ShouldBe("items");
+        (await connection.GetCollectionsAsync(harness.Token)).ShouldBe(["items"]);
+        (await connection.GetAsync("items", "one", harness.Token)).ShouldBeNull();
+        var saved = await connection.PutAsync("items", "one", content, cancellationToken: harness.Token);
+        saved.Id.Value.ShouldBe("one");
+        saved.Content.ToArray().ShouldBe(content);
+        saved.Version.Value.ShouldBeGreaterThan(0UL);
+        var read = (await connection.GetAsync("items", "one", harness.Token)).ShouldNotBeNull();
+        read.Version.ShouldBe(saved.Version);
+        read.Content.ToArray().ShouldBe(content);
+        var replaced = await connection.PutAsync("items", "one", "[1,true,null]"u8.ToArray(), saved.Version, harness.Token);
+        replaced.Version.Value.ShouldBeGreaterThan(saved.Version.Value);
+        var stale = await Should.ThrowAsync<DocumentClientException>(async () =>
+            await connection.PutAsync("items", "one", "{}"u8.ToArray(), saved.Version, harness.Token));
+        stale.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
+        connection.IsOpen.ShouldBeTrue();
+        (await connection.GetAsync("items", "one", harness.Token)).ShouldNotBeNull().Content.ToArray().ShouldBe("[1,true,null]"u8.ToArray());
+        await Should.ThrowAsync<DocumentClientException>(async () => await connection.DeleteAsync("items", "one", saved.Version, harness.Token));
+        (await connection.DeleteAsync("items", "one", replaced.Version, harness.Token)).ShouldBeTrue();
+        (await connection.DeleteAsync("items", "one", cancellationToken: harness.Token)).ShouldBeFalse();
+        (await connection.GetAsync("items", "one", harness.Token)).ShouldBeNull();
+        var reinserted = await connection.PutAsync("items", "one", "null"u8.ToArray(), cancellationToken: harness.Token);
+        reinserted.Version.Value.ShouldBeGreaterThan(replaced.Version.Value);
+        await connection.CreateCollectionAsync("Other", harness.Token);
+        (await connection.GetCollectionsAsync(harness.Token)).ShouldBe(["Other", "items"]);
+        await connection.DropCollectionAsync("items", harness.Token);
+        (await connection.GetCollectionsAsync(harness.Token)).ShouldBe(["Other"]);
+        await Should.ThrowAsync<DocumentClientException>(async () => await connection.GetCollectionAsync("items", harness.Token));
+        await connection.DropCollectionAsync("Other", harness.Token);
+        (await connection.GetCollectionsAsync(harness.Token)).ShouldBeEmpty();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Documents.Client] - Every advertised OQL clause crosses both transports")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task QueryAsync_AllSupportedClauses_ShouldPreserveEngineResults(bool tcp)
+    {
+        // Arrange
+        await using var harness = await DocumentClientTestHarness.StartAsync(tcp);
+        await using var connection = await harness.Client.ConnectAsync(harness.Token);
+        (await connection.ExecuteAsync("CREATE COLLECTION items", cancellationToken: harness.Token)).ShouldBe(0);
+        await connection.PutAsync("items", "a", "{\"name\":\"Ada\",\"group\":\"A\",\"score\":2,\"active\":true,\"nested\":{\"x\":5},\"array\":[9,null]}"u8.ToArray(), cancellationToken: harness.Token);
+        await connection.PutAsync("items", "b", "{\"name\":\"Bob\",\"group\":\"A\",\"score\":4,\"active\":false}"u8.ToArray(), cancellationToken: harness.Token);
+        await connection.PutAsync("items", "c", "{\"name\":\"Cy\",\"group\":\"B\",\"score\":1,\"active\":true}"u8.ToArray(), cancellationToken: harness.Token);
+
+        // Act / Assert: SELECT, FROM alias, WHERE, paths, parameters, ORDER BY and arithmetic.
+        var rows = await connection.QueryAsync("SELECT d.name AS person, d.nested.x AS x, d.array[0] AS entry_value, d.score * 2 + 1 AS value FROM items AS d WHERE d.score >= @min AND NOT d.active = false ORDER BY \"value\" DESC",
+            new Dictionary<string, object?> { ["min"] = 2 }, harness.Token);
+        rows.Columns.Select(column => column.Name).ShouldBe(["person", "x", "entry_value", "value"]);
+        rows.Columns.Select(column => column.Ordinal).ShouldBe([0, 1, 2, 3]);
+        rows.ShouldHaveSingleItem().ToArray().ShouldBe(new object?[] { "Ada", 5m, 9m, 5m });
+        rows[0]["person"].ShouldBe("Ada");
+        rows.AffectedCount.ShouldBe(-1);
+        rows.IsDocumentQuery.ShouldBeFalse();
+        rows.Documents.ShouldBeEmpty();
+        var grouped = await connection.QueryAsync("SELECT d.group AS category, COUNT(*) AS n, SUM(d.score) AS total, AVG(d.score) AS average, MIN(d.score) AS low, MAX(d.score) AS high FROM items d GROUP BY d.group HAVING SUM(d.score) > 2 ORDER BY total DESC", cancellationToken: harness.Token);
+        grouped.ShouldHaveSingleItem().ToArray().ShouldBe(new object?[] { "A", 2L, 6m, 3m, 2m, 4m });
+        var expanded = await connection.QueryAsync("SELECT t, COUNT(*) AS n FROM items d UNNEST d.array t GROUP BY t ORDER BY t", cancellationToken: harness.Token);
+        expanded.Select(row => row.ToArray()).ShouldBe(new[] { new object?[] { null, 1L }, new object?[] { 9m, 1L } });
+        (await connection.QueryAsync("SELECT name FROM items d WHERE ANY t IN d.array SATISFIES t = 9 END", cancellationToken: harness.Token))
+            .ShouldHaveSingleItem()[0].ShouldBe("Ada");
+        var leftRows = await connection.QueryAsync("SELECT name, t FROM items d LEFT UNNEST d.array t ORDER BY name, t", cancellationToken: harness.Token);
+        leftRows.Count.ShouldBe(4);
+        leftRows[0].IsNull(1).ShouldBeTrue();
+        leftRows[2].IsMissing(1).ShouldBeTrue();
+        leftRows[2][1].ShouldBeNull();
+        var expandedStar = await connection.QueryAsync("SELECT * FROM items d LEFT UNNEST d.array t ORDER BY name, t", cancellationToken: harness.Token);
+        expandedStar.IsDocumentQuery.ShouldBeTrue();
+        expandedStar.Documents.Count.ShouldBe(4);
+        expandedStar.Documents[1].GetProperty("d").GetProperty("name").GetString().ShouldBe("Ada");
+        expandedStar.Documents[1].GetProperty("t").GetDecimal().ShouldBe(9m);
+        expandedStar.Documents[2].TryGetProperty("t", out _).ShouldBeFalse();
+        (await connection.QueryAsync("SELECT name FROM items WHERE nested.x IS MISSING OR score < 0 ORDER BY name ASC", cancellationToken: harness.Token))
+            .Select(row => row[0]).ShouldBe(new object?[] { "Bob", "Cy" });
+        (await connection.QueryAsync("SELECT name FROM items WHERE score <> 2 AND score != 4 AND score <= 1 AND score > 0", cancellationToken: harness.Token))
+            .ShouldHaveSingleItem()[0].ShouldBe("Cy");
+        (await connection.QueryAsync("SELECT -score + 10 / 2 % 3 AS value FROM items WHERE nested.x IS NOT NULL", cancellationToken: harness.Token))
+            .ShouldHaveSingleItem()[0].ShouldBe(0m);
+
+        // LIMIT and OFFSET use wire JsonElement parameters and completion counts after paging.
+        var page = await connection.QueryAsync("SELECT name FROM items ORDER BY name LIMIT $n OFFSET @skip",
+            new Dictionary<string, object?> { ["n"] = 2, ["skip"] = 1 }, harness.Token);
+        page.Select(row => row[0]).ShouldBe(new object?[] { "Bob", "Cy" });
+        page.AffectedCount.ShouldBe(-1);
+        (await connection.QueryAsync("SELECT name FROM items ORDER BY name OFFSET 2", cancellationToken: harness.Token))
+            .ShouldHaveSingleItem()[0].ShouldBe("Cy");
+
+        // Whole documents and nested projected values retain JSON shape, including empty results.
+        var whole = await connection.QueryAsync("SELECT * FROM items WHERE name = 'Ada'", cancellationToken: harness.Token);
+        whole.IsDocumentQuery.ShouldBeTrue();
+        whole.Documents.ShouldHaveSingleItem().GetProperty("nested").GetProperty("x").GetInt32().ShouldBe(5);
+        whole[0][0].ShouldBeOfType<JsonElement>().GetProperty("array")[1].ValueKind.ShouldBe(JsonValueKind.Null);
+        var nested = await connection.QueryAsync("SELECT d.nested, d.array FROM items d WHERE name = 'Ada'", cancellationToken: harness.Token);
+        nested[0][0].ShouldBeOfType<JsonElement>().GetProperty("x").GetDecimal().ShouldBe(5m);
+        var empty = await connection.QueryAsync("SELECT * FROM items WHERE score < 0", cancellationToken: harness.Token);
+        empty.IsDocumentQuery.ShouldBeTrue();
+        empty.ShouldBeEmpty();
+        empty.Columns.Count.ShouldBe(1);
+        using var parameter = JsonDocument.Parse("{\"x\":5}");
+        (await connection.QueryAsync("SELECT name FROM items WHERE nested = @object", new Dictionary<string, object?> { ["object"] = parameter.RootElement }, harness.Token))
+            .ShouldHaveSingleItem()[0].ShouldBe("Ada");
+
+        // CREATE INDEX, DROP INDEX and both virtual catalog collections use the same wire path.
+        (await connection.ExecuteAsync("CREATE INDEX by_score ON items (score)", cancellationToken: harness.Token)).ShouldBe(0);
+        var explained = await connection.QueryAsync("EXPLAIN SELECT name FROM items WHERE score >= 2", cancellationToken: harness.Token);
+        explained.IsDocumentQuery.ShouldBeTrue();
+        explained.Documents.ShouldContain(document => document.GetProperty("operator").GetString() == "IndexSeek" &&
+            document.GetProperty("index").GetString() == "by_score");
+        (await connection.QueryAsync("SELECT name FROM items WHERE score >= 2 ORDER BY score DESC", cancellationToken: harness.Token))
+            .Select(row => row[0]).ShouldBe(new object?[] { "Bob", "Ada" });
+        var indexes = await connection.QueryAsync("SELECT COLLECTION_CATALOG, COLLECTION_NAME, INDEX_NAME, PATH, IS_UNIQUE FROM COHESION_SCHEMA.INDEXES", cancellationToken: harness.Token);
+        indexes.ShouldHaveSingleItem().ToArray().ShouldBe(new object?[] { "documents", "items", "by_score", "score", false });
+        (await connection.QueryAsync("SELECT OBJECT_NAME, OWNER FROM COHESION_SCHEMA.OBJECT_OWNERSHIP", cancellationToken: harness.Token))
+            .ShouldHaveSingleItem().ToArray().ShouldBe(new object?[] { "items", "Adhoc" });
+        (await connection.ExecuteAsync("DROP INDEX by_score ON items", cancellationToken: harness.Token)).ShouldBe(0);
+        (await connection.QueryAsync("SELECT * FROM COHESION_SCHEMA.INDEXES", cancellationToken: harness.Token)).ShouldBeEmpty();
+        // INSERT and META share the same completion and reusable failure boundary.
+        using var epsilon = JsonDocument.Parse("""{"name":"epsilon","category":"z"}""");
+        using var phi = JsonDocument.Parse("""{"name":"phi","category":"z"}""");
+        (await connection.ExecuteAsync("INSERT INTO items (KEY, VALUE) VALUES ('e', $e), ('f', $f)",
+            new Dictionary<string, object?> { ["e"] = epsilon.RootElement, ["f"] = phi.RootElement }, harness.Token)).ShouldBe(2);
+        using var readE = JsonDocument.Parse((await connection.GetAsync("items", "e", harness.Token)).ShouldNotBeNull().Content);
+        using var readF = JsonDocument.Parse((await connection.GetAsync("items", "f", harness.Token)).ShouldNotBeNull().Content);
+        JsonElement.DeepEquals(epsilon.RootElement, readE.RootElement).ShouldBeTrue();
+        JsonElement.DeepEquals(phi.RootElement, readF.RootElement).ShouldBeTrue();
+        var duplicate = await Should.ThrowAsync<DocumentClientException>(async () => await connection.ExecuteAsync(
+            "INSERT INTO items (KEY, VALUE) VALUES ('e', 1)", cancellationToken: harness.Token));
+        duplicate.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
+        duplicate.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDOC012");
+        (await connection.QueryAsync("SELECT META(d).id AS id, d.name FROM items d WHERE category = 'z' ORDER BY id", cancellationToken: harness.Token))
+            .Select(row => row[0]).ShouldBe(new object?[] { "e", "f" });
+
+        // UPDATE and UNSET share the command completion and reusable execution-failure path.
+        var updated = await connection.QueryAsync("UPDATE items d SET d.nested.score = 9, d.tags = ['red'] UNSET d.category WHERE category = 'z'", cancellationToken: harness.Token);
+        updated.AffectedCount.ShouldBe(2);
+        updated.ShouldBeEmpty();
+        updated.Documents.ShouldBeEmpty();
+        updated.Columns.ShouldBeEmpty();
+        using var patched = JsonDocument.Parse((await connection.GetAsync("items", "e", harness.Token)).ShouldNotBeNull().Content);
+        patched.RootElement.GetProperty("nested").GetProperty("score").GetInt32().ShouldBe(9);
+        patched.RootElement.TryGetProperty("category", out _).ShouldBeFalse();
+        var failedUpdate = await Should.ThrowAsync<DocumentClientException>(async () => await connection.ExecuteAsync(
+            "UPDATE items SET name.first = 'x' WHERE META().id = 'e'", cancellationToken: harness.Token));
+        failedUpdate.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
+        failedUpdate.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDOC016");
+        (await connection.ExecuteAsync("UPDATE items UNSET tags WHERE nested.score = 9", cancellationToken: harness.Token)).ShouldBe(2);
+
+        // DELETE reports affected count in Complete and emits no Document frames.
+        var deleted = await connection.QueryAsync("DELETE FROM items WHERE nested.score = 9", cancellationToken: harness.Token);
+        deleted.AffectedCount.ShouldBe(2);
+        deleted.ShouldBeEmpty();
+        deleted.Documents.ShouldBeEmpty();
+        deleted.Columns.ShouldBeEmpty();
+        (await connection.GetAsync("items", "e", harness.Token)).ShouldBeNull();
+        var failedDelete = await Should.ThrowAsync<DocumentClientException>(async () => await connection.ExecuteAsync(
+            "DELETE FROM COHESION_SCHEMA.INDEXES", cancellationToken: harness.Token));
+        failedDelete.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
+        (await connection.ExecuteAsync("DELETE FROM items WHERE 0", cancellationToken: harness.Token)).ShouldBe(0);
+
+        // Collection DDL shares the OQL wire path; CRUD uses the newly created collection.
+        (await connection.ExecuteAsync("CREATE COLLECTION IF NOT EXISTS items", cancellationToken: harness.Token)).ShouldBe(0);
+        Encoding.UTF8.GetString((await connection.GetAsync("items", "a", harness.Token)).ShouldNotBeNull().Content.Span)
+            .ShouldContain("\"name\":\"Ada\"", Case.Sensitive);
+        (await connection.ExecuteAsync("DROP COLLECTION items", cancellationToken: harness.Token)).ShouldBe(0);
+        (await connection.ExecuteAsync("DROP COLLECTION IF EXISTS items", cancellationToken: harness.Token)).ShouldBe(0);
+        (await connection.QueryAsync("SELECT OBJECT_NAME FROM COHESION_SCHEMA.OBJECT_OWNERSHIP", cancellationToken: harness.Token)).ShouldBeEmpty();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Documents.Client] - UPSERT: whole replacement, command completion and failure reuse work over both transports")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExecuteAsync_Upsert_ShouldReplaceWholeDocumentAndPreserveSessionAsync(bool tcp)
+    {
+        // Arrange
+        await using var harness = await DocumentClientTestHarness.StartAsync(tcp);
+        await using var connection = await harness.Client.ConnectAsync(harness.Token);
+        await connection.CreateCollectionAsync("items", harness.Token);
+        var original = await connection.PutAsync("items", "a", "{\"name\":\"alpha\",\"discarded\":true}"u8.ToArray(), cancellationToken: harness.Token);
+        const string replacementJson = "{\"name\":\"alpha2\",\"text\":\"é東京<&😀\"}";
+        using var replacement = JsonDocument.Parse(replacementJson);
+        using var added = JsonDocument.Parse("{\"name\":\"zeta\"}");
+        // Act
+        var command = await connection.QueryAsync("UPSERT INTO items (KEY, VALUE) VALUES ('a', $replacement), ('z', $new)",
+            new Dictionary<string, object?> { ["replacement"] = replacement.RootElement, ["new"] = added.RootElement }, harness.Token);
+        // Assert
+        command.AffectedCount.ShouldBe(2);
+        command.ShouldBeEmpty();
+        command.Documents.ShouldBeEmpty();
+        command.Columns.ShouldBeEmpty();
+        var stored = (await connection.GetAsync("items", "a", harness.Token)).ShouldNotBeNull();
+        stored.Version.Value.ShouldBeGreaterThan(original.Version.Value);
+        stored.Content.ToArray().ShouldBe(Encoding.UTF8.GetBytes(replacementJson));
+        using var json = JsonDocument.Parse(stored.Content);
+        JsonElement.DeepEquals(json.RootElement, replacement.RootElement).ShouldBeTrue();
+        json.RootElement.TryGetProperty("discarded", out _).ShouldBeFalse();
+        var plan = await connection.QueryAsync("EXPLAIN UPSERT INTO items (KEY, VALUE) VALUES ('a', NULL)", cancellationToken: harness.Token);
+        plan.Documents.ShouldHaveSingleItem().GetProperty("operator").GetString().ShouldBe("Upsert");
+        var failure = await Should.ThrowAsync<DocumentClientException>(async () => await connection.ExecuteAsync(
+            "UPSERT INTO items (KEY, VALUE) VALUES ('a', 0), (MISSING, 1)", cancellationToken: harness.Token));
+        failure.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDOC008");
+        failure.Diagnostics[0].Message.ShouldBe("UPSERT KEY must evaluate to a nonblank string.");
+        failure.Message.ShouldBe("COHDOC008: UPSERT KEY must evaluate to a nonblank string.");
+        var repeated = await Should.ThrowAsync<DocumentClientException>(async () => await connection.ExecuteAsync(
+            "UPSERT INTO items (KEY, VALUE) VALUES ('n', 1), ('n', 2)", cancellationToken: harness.Token));
+        repeated.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
+        repeated.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDOC012");
+        repeated.Diagnostics[0].Message.ShouldBe("Document key 'n' appears more than once in one statement.");
+        repeated.Message.ShouldBe("COHDOC012: Document key 'n' appears more than once in one statement.");
+        (await connection.GetAsync("items", "n", harness.Token)).ShouldBeNull();
+        (await connection.QueryAsync("SELECT name FROM items ORDER BY name", cancellationToken: harness.Token))
+            .Select(row => row[0]).ShouldBe(new object?[] { "alpha2", "zeta" });
+        (await connection.ExecuteAsync("UPSERT INTO items (KEY k, VALUE v) SELECT META().id AS k, name AS v FROM items", cancellationToken: harness.Token)).ShouldBe(2);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Documents.Client] - Scalar document roots remain whole JSON values")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task QueryAsync_ScalarRoots_ShouldPreserveJsonKinds(bool tcp)
+    {
+        // Arrange
+        await using var harness = await DocumentClientTestHarness.StartAsync(tcp);
+        await using var connection = await harness.Client.ConnectAsync(harness.Token);
+        await connection.CreateCollectionAsync("roots", harness.Token);
+        string[] json = ["null", "true", "42.5", "\"東京\"", "[1,null]", "{}"];
+        for (int index = 0; index < json.Length; index++)
+        {
+            await connection.PutAsync("roots", index.ToString(), Encoding.UTF8.GetBytes(json[index]), cancellationToken: harness.Token);
+        }
+
+        // Act
+        var invalid = await Should.ThrowAsync<DocumentClientException>(async () =>
+            await connection.PutAsync("roots", "invalid", "1e100"u8.ToArray(), cancellationToken: harness.Token));
+        var result = await connection.QueryAsync("SELECT * FROM roots", cancellationToken: harness.Token);
+
+        // Assert
+        invalid.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
+        result.Documents.Select(value => value.ValueKind).ShouldBe([JsonValueKind.Null, JsonValueKind.True, JsonValueKind.Number, JsonValueKind.String, JsonValueKind.Array, JsonValueKind.Object]);
+        result.Documents[3].GetString().ShouldBe("東京");
+        result[2][0].ShouldBeOfType<JsonElement>().GetRawText().ShouldBe("42.5");
+        result[0].IsNull(0).ShouldBeTrue();
+        foreach (var row in result) { row.SupportsMissing.ShouldBeTrue(); row.IsMissing(0).ShouldBeFalse(); }
+        result.AffectedCount.ShouldBe(-1);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Documents.Client] - Handshake database binding scopes all operations")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ConnectAsync_SecondDatabase_ShouldKeepCatalogAndDataSeparate(bool tcp)
+    {
+        // Arrange
+        await using var harness = await DocumentClientTestHarness.StartAsync(tcp);
+        await harness.Engine.CreateDatabaseAsync("other", harness.Token);
+        await using var first = await harness.Client.ConnectAsync(harness.Token);
+        await first.CreateCollectionAsync("visible", harness.Token);
+        await using var client = DocumentClient.Create(new()
+        {
+            Settings = new DatabaseConnectionSettings { Database = "other", EndPoint = harness.Listener.EndPoint },
+            ConnectionFactory = harness.Factory,
+        });
+
+        // Act
+        await using var second = await client.ConnectAsync(harness.Token);
+
+        // Assert
+        second.Database.ShouldBe("other");
+        (await second.GetCollectionsAsync(harness.Token)).ShouldBeEmpty();
+        (await second.QueryAsync("SELECT * FROM COHESION_SCHEMA.OBJECT_OWNERSHIP", cancellationToken: harness.Token)).ShouldBeEmpty();
+        await Should.ThrowAsync<DocumentClientException>(async () => await second.GetCollectionAsync("visible", harness.Token));
+        (await first.GetCollectionAsync("visible", harness.Token)).ShouldBe("visible");
+    }
+}

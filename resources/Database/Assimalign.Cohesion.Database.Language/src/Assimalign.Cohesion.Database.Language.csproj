@@ -2,4 +2,9 @@
 	<PropertyGroup>
 		<RootNamespace>Assimalign.Cohesion.Database.Language</RootNamespace>
 	</PropertyGroup>
+	<ItemGroup>
+		<!-- Diagnostic, DiagnosticSeverity and DiagnosticLocation live in Types, below both
+		     Language and Execution, so a result's diagnostics reach no language assembly. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Types" />
+	</ItemGroup>
 </Project>

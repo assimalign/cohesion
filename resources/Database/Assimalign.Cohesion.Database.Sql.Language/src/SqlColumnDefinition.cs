@@ -1,5 +1,7 @@
 using System.Collections.Generic;
 
+using Assimalign.Cohesion.Database.Types;
+
 namespace Assimalign.Cohesion.Database.Sql.Language;
 
 /// <summary>
@@ -17,12 +19,19 @@ public sealed class SqlColumnDefinition
     /// <param name="defaultValue">The default value expression, if any.</param>
     /// <param name="constraints">The normalized column constraints.</param>
     /// <param name="collationName">The declared collation name, or null to inherit the database default.</param>
+    /// <param name="identity">The identity generation facet, when declared.</param>
+    /// <param name="resolvedType">The resolved built-in type, or null for an engine-resolved domain.</param>
+    /// <param name="isExplicitlyNullable">Whether a NULL declaration was written, for table-constraint conflict checking.</param>
     internal SqlColumnDefinition(string columnName, string dataType, bool isNullable, bool isPrimaryKey, SqlExpression? defaultValue,
-        IReadOnlyList<SqlConstraintDefinition>? constraints = null, string? collationName = null)
+        IReadOnlyList<SqlConstraintDefinition>? constraints = null, string? collationName = null, DatabaseTypeInfo? resolvedType = null, SqlIdentityDefinition? identity = null,
+        bool isExplicitlyNullable = false)
     {
+        Identity = identity;
         ColumnName = columnName;
         DataType = dataType;
+        ResolvedType = resolvedType;
         IsNullable = isNullable;
+        IsExplicitlyNullable = isExplicitlyNullable;
         IsPrimaryKey = isPrimaryKey;
         DefaultValue = defaultValue;
         Constraints = constraints ?? [];
@@ -40,9 +49,17 @@ public sealed class SqlColumnDefinition
     public string DataType { get; }
 
     /// <summary>
+    /// Gets the built-in type resolved during parsing, or null when the name requires
+    /// the engine's domain catalog or the type is invalid.
+    /// </summary>
+    public DatabaseTypeInfo? ResolvedType { get; }
+
+    /// <summary>
     /// Gets whether the column allows NULL values.
     /// </summary>
     public bool IsNullable { get; }
+
+    internal bool IsExplicitlyNullable { get; }
 
     /// <summary>
     /// Gets whether the column is marked as a primary key.
@@ -53,6 +70,9 @@ public sealed class SqlColumnDefinition
     /// Gets the default value expression, if present.
     /// </summary>
     public SqlExpression? DefaultValue { get; }
+
+    /// <summary>Gets the identity facet, or null for an ordinary column.</summary>
+    public SqlIdentityDefinition? Identity { get; }
 
     /// <summary>Gets normalized constraints declared on this column.</summary>
     public IReadOnlyList<SqlConstraintDefinition> Constraints { get; }

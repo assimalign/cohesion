@@ -56,7 +56,7 @@ public sealed class BlobStorageTests
         {
             published++;
             await coordinator.CommitAsync(writer);
-        }, () => coordinator.RollbackAsync(writer)))
+        }, _ => coordinator.RollbackAsync(writer)))
         {
             await upload.WriteAsync(Pattern(9000));
             await upload.FlushAsync();
@@ -79,7 +79,7 @@ public sealed class BlobStorageTests
         {
             published = true;
             return default;
-        }, () => coordinator.RollbackAsync(writer));
+        }, _ => coordinator.RollbackAsync(writer));
         await upload.WriteAsync(Pattern(2_000_000));
         Count(storage).ShouldBeGreaterThan(128);
 
@@ -105,7 +105,7 @@ public sealed class BlobStorageTests
         {
             published = true;
             return default;
-        }, () => coordinator.RollbackAsync(writer), cancellation.Token);
+        }, _ => coordinator.RollbackAsync(writer), cancellation.Token);
         cancellation.Cancel();
         await Should.ThrowAsync<OperationCanceledException>(() => upload.DisposeAsync().AsTask());
         published.ShouldBeFalse();
@@ -153,7 +153,7 @@ public sealed class BlobStorageTests
         var committed = await WriteAsync(storage, coordinator, content);
         int committedChunks = Count(storage);
         var writer = await coordinator.BeginAsync(IsolationLevel.Snapshot);
-        var abandoned = storage.OpenWrite(coordinator, writer, _ => default, () => coordinator.RollbackAsync(writer));
+        var abandoned = storage.OpenWrite(coordinator, writer, _ => default, _ => coordinator.RollbackAsync(writer));
         await abandoned.WriteAsync(Pattern(2_000_000));
         // Drain journal buffering into the in-memory crash image. MemoryStream
         // has no durable-flush contract; physical persistence is tested separately.
@@ -237,7 +237,7 @@ public sealed class BlobStorageTests
         {
             reference = value;
             await coordinator.CommitAsync(writer);
-        }, () => coordinator.RollbackAsync(writer)))
+        }, _ => coordinator.RollbackAsync(writer)))
         {
             for (int offset = 0; offset < content.Length; offset += 1237)
             {

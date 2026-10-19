@@ -1,6 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
+using Assimalign.Cohesion.Database.Documents.Language.Internal;
 using Assimalign.Cohesion.Database.Language;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Documents.Language;
 
@@ -12,6 +15,7 @@ public sealed partial class OqlQueryParser : QueryParser
     private string _source = string.Empty;
     private readonly List<Lexeme> _tokens = [];
     private readonly List<Diagnostic> _diagnostics = [];
+    private readonly HashSet<int> _parameterFormPositions = [];
     private int _position;
     private int _depth;
 
@@ -37,6 +41,7 @@ public sealed partial class OqlQueryParser : QueryParser
     {
         _tokens.Clear();
         _diagnostics.Clear();
+        _parameterFormPositions.Clear();
         _position = 0;
         _depth = 0;
         int line = 1;
@@ -44,13 +49,10 @@ public sealed partial class OqlQueryParser : QueryParser
         while (lexer.MoveNext())
         {
             var token = lexer.Current;
-            while (scanned < token.Position)
-            {
-                if (_source[scanned++] == '\n')
-                {
-                    line++;
-                }
-            }
+            // Lines break where the lexer ends a line comment (#1150). Counting each gap on its
+            // own is exact: a token never starts with LF, so no CR LF straddles two gaps.
+            line += TokenLexer.CountLineBreaks(_source.AsSpan(scanned, token.Position - scanned));
+            scanned = token.Position;
 
             var item = new Lexeme(token.Type, token.Value.ToString(), token.Position,
                 token.Position + token.Value.Length, line);
@@ -68,15 +70,15 @@ public sealed partial class OqlQueryParser : QueryParser
                 {
                     Error("OQL0003", "Unterminated quoted text.", item);
                 }
+                else if (token.Type == TokenType.Unrecognized && token.Value[0] != '?')
+                {
+                    // A character OQL does not use is never a name or an expression, so the
+                    // statement is not parsed and nothing is bound (#1101).
+                    Error("OQL0002", $"Unexpected character {DescribeCharacter(item.Text)}; it is not part of OQL.", item);
+                }
             }
         }
-        while (scanned < _source.Length)
-        {
-            if (_source[scanned++] == '\n')
-            {
-                line++;
-            }
-        }
+        line += TokenLexer.CountLineBreaks(_source.AsSpan(scanned));
 
         _tokens.Add(new Lexeme(TokenType.Eof, string.Empty, _source.Length, _source.Length, line));
 
@@ -93,9 +95,55 @@ public sealed partial class OqlQueryParser : QueryParser
             Error("OQL0001", "Query text is empty.", Current);
             expression = EmptyExpression();
         }
+        else if (Is("EXPLAIN"))
+        {
+            var start = Current;
+            _position++;
+            if (Is("SELECT"))
+            {
+                expression = new OqlExplainExpression(ParseSelect(), Span(start, _tokens[_position - 1]));
+            }
+            else if (Is("INSERT"))
+            {
+                expression = new OqlExplainExpression(ParseWrite(), Span(start, Previous));
+            }
+            else if (Is("UPSERT"))
+            {
+                expression = new OqlExplainExpression(ParseWrite(upsert: true), Span(start, Previous));
+            }
+            else if (Is("DELETE"))
+            {
+                expression = new OqlExplainExpression(ParseDelete(), Span(start, Previous));
+            }
+            else if (Is("UPDATE"))
+            {
+                expression = new OqlExplainExpression(ParseUpdate(), Span(start, Previous));
+            }
+            else
+            {
+                _diagnostics.Add(QueryDiagnostics.UnsupportedClause($"EXPLAIN {Current.Text}", Profile.Language, Span(start, Current)));
+                expression = EmptyExpression();
+            }
+        }
         else if (Is("SELECT"))
         {
             expression = ParseSelect();
+        }
+        else if (Is("INSERT"))
+        {
+            expression = ParseWrite();
+        }
+        else if (Is("UPSERT"))
+        {
+            expression = ParseWrite(upsert: true);
+        }
+        else if (Is("DELETE"))
+        {
+            expression = ParseDelete();
+        }
+        else if (Is("UPDATE"))
+        {
+            expression = ParseUpdate();
         }
         else if (IsIndexStatement("CREATE"))
         {
@@ -105,15 +153,31 @@ public sealed partial class OqlQueryParser : QueryParser
         {
             expression = ParseDropIndex();
         }
+        else if (IsDdlStatement("CREATE", "COLLECTION"))
+        {
+            expression = ParseCreateCollection();
+        }
+        else if (IsDdlStatement("DROP", "COLLECTION"))
+        {
+            expression = ParseDropCollection();
+        }
         else
         {
-            Error("OQL0002", "Expected SELECT, CREATE INDEX, or DROP INDEX.", Current);
+            Error("OQL0002", "Expected SELECT, INSERT, UPSERT, UPDATE, DELETE, CREATE INDEX, DROP INDEX, CREATE COLLECTION, or DROP COLLECTION.", Current);
             expression = EmptyExpression();
         }
 
         if (unsupported.Count == 0 && _diagnostics.Count == 0)
         {
-            if (Take(TokenType.Semicolon) && Current.Type != TokenType.Eof)
+            if (Is("RETURNING"))
+            {
+                _diagnostics.Add(QueryDiagnostics.UnsupportedClause("RETURNING", Profile.Language, Span(Current, Current)));
+            }
+            else if (Is("LIMIT") || Is("OFFSET"))
+            {
+                _diagnostics.Add(QueryDiagnostics.UnsupportedClause(Current.Text.ToUpperInvariant(), Profile.Language, Span(Current, Current)));
+            }
+            else if (Take(TokenType.Semicolon) && Current.Type != TokenType.Eof)
             {
                 Error("OQL0002", "Only one statement is accepted per query.", Current);
             }
@@ -123,6 +187,18 @@ public sealed partial class OqlQueryParser : QueryParser
             }
         }
 
+        // '?' still binds nothing. Only an operand receives the parameter-form message;
+        // names, paths and trailing positions keep lexical strictness's generic message.
+        foreach (var token in _tokens)
+        {
+            if (token.Type != TokenType.Unrecognized || token.Text != "?") { continue; }
+            if (!_parameterFormPositions.Contains(token.Start))
+            {
+                _diagnostics.RemoveAll(diagnostic => diagnostic.Start == token.Start);
+                Error("OQL0002", "Unexpected character '?'; it is not part of OQL.", token);
+            }
+            expression = EmptyExpression();
+        }
         expression.SetStatementText(_source);
         var statement = new OqlQueryStatement(expression);
         foreach (var (clause, token) in unsupported)
@@ -138,10 +214,28 @@ public sealed partial class OqlQueryParser : QueryParser
         return statement;
     }
 
+    /// <summary>
+    /// Finds every recognized construct outside the executable profile, using the
+    /// recognized-unsupported table (<see cref="OqlUnsupportedVocabulary"/>). Each construct
+    /// is reported once, so a statement whose first word is not OQL reports that word only,
+    /// and a quantified predicate reports its quantifier rather than its <c>IN</c>.
+    /// </summary>
     private List<(string Clause, Lexeme Token)> FindUnsupported()
     {
         List<(string, Lexeme)> result = [];
+        int statementStart = IsWord(_tokens[0], "EXPLAIN") ? 1 : 0;
+        bool statementWithoutQuery = statementStart < _tokens.Count &&
+            (IsWord(_tokens[statementStart], "DELETE") || IsWord(_tokens[statementStart], "UPDATE") || IsWord(_tokens[statementStart], "CREATE") ||
+                IsWord(_tokens[statementStart], "DROP"));
+        var (updateHeaderEnd, updateClause) = FindUpdateClause(statementStart);
         bool selected = false;
+        int parentheses = 0;
+        bool inSelectList = false;
+        int selectHead = -2;
+        int fetchHead = -2;
+        int pagingHead = -2;
+        int openQuantifiers = 0;
+        var (indexKeyStart, indexKeyEnd) = FindIndexKeyRange();
         for (int index = 0; index < _tokens.Count; index++)
         {
             var token = _tokens[index];
@@ -150,74 +244,320 @@ public sealed partial class OqlQueryParser : QueryParser
                 break;
             }
 
+            if (token.Type == TokenType.LeftParen) { parentheses++; }
+            else if (token.Type == TokenType.RightParen) { parentheses--; }
+
             if (token.Type is not (TokenType.Keyword or TokenType.Function or TokenType.Identifier))
             {
                 continue;
             }
 
-            if (index > 0 && _tokens[index - 1].Type == TokenType.Dot)
+            // A keyword-shaped name in adjacent :name is part of the rejected operand,
+            // not a clause, subquery or unsupported operation. Syntax parsing owns it.
+            if (index > 0 && (_tokens[index - 1].Type == TokenType.Dot ||
+                _tokens[index - 1].Type == TokenType.Colon && _tokens[index - 1].End == token.Start &&
+                !IsObjectMemberValue(index)))
             {
                 continue;
             }
 
             string value = token.Text.ToUpperInvariant();
-            if (value is "CREATE" or "DROP" && index + 1 < _tokens.Count &&
-                string.Equals(_tokens[index + 1].Text, "INDEX", StringComparison.OrdinalIgnoreCase))
+            // UPDATE's parsed destination and alias keep ordinary contextual names such
+            // as use. SET is exempt only at the assignment-clause token after that header;
+            // SET(...) elsewhere still refuses.
+            if (index > statementStart && (index < updateHeaderEnd || index == updateClause)) { continue; }
+            // An unsupported source expansion owns the remainder of UPDATE. Syntax parsing
+            // locates it after the destination, rather than guessing from expression names.
+            if (index == updateHeaderEnd && updateClause < 0 && IsUnnestClause(index)) { break; }
+
+            // FETCH FIRST is one unsupported spelling. LIMIT ALL is an invalid count.
+            // Only a recognized clause head owns the next word; a path or alias does not.
+            if (value == "FIRST" && index == fetchHead + 1 || value == "ALL" && index == pagingHead + 1) { continue; }
+
+            // Array-index keys belong to the DDL parser, which emits one diagnostic at ALL/DISTINCT.
+            if (value is ("ALL" or "DISTINCT" or "ARRAY" or "FOR" or "IN" or "END") && indexKeyStart >= 0 && index > indexKeyStart && index < indexKeyEnd) { continue; }
+            if (value == "UNIQUE" && index == 1 && IsIndexStatement("CREATE")) { continue; }
+
+            // DISTINCT/ALL are legal only directly after SELECT, including INSERT/UPSERT SELECT.
+            if (openQuantifiers == 0 && value is "DISTINCT" or "ALL")
             {
-                string compound = value == "CREATE" ? OqlClauses.CreateIndex : OqlClauses.DropIndex;
+                if (index == selectHead + 1) { continue; }
+                bool function = index > 1 && _tokens[index - 1].Type == TokenType.LeftParen &&
+                    (_tokens[index - 2].Type == TokenType.Function ||
+                        OqlUnsupportedVocabulary.TryFind(_tokens[index - 2].Text.ToUpperInvariant(), out var unsupportedFunction) &&
+                        unsupportedFunction.Position == OqlWordPosition.Function);
+                string construct = function
+                    ? _tokens[index - 2].Text.ToUpperInvariant() + "(" + value + ")" : value;
+                // A deferred function was already recognized at its name. Its quantifier
+                // refines that one construct rather than adding a second refusal.
+                if (function && result.Count > 0 && result[^1].Item2.Start == _tokens[index - 2].Start)
+                { result.RemoveAt(result.Count - 1); }
+                _diagnostics.Add(QueryDiagnostics.UnsupportedClause(construct, Profile.Language, Span(token, token)));
+                break;
+            }
+            // ColLabel accepts reserved words after AS; quantifier pins remain positional.
+            if (inSelectList && index > 0 && IsWord(_tokens[index - 1], "AS")) { continue; }
+            if (value == "FROM") { inSelectList = false; }
+
+            // A SQL++ quantified predicate, EVERY x IN ... SATISFIES ... END, is one construct:
+            // its binding IN is not the IN predicate, and its text up to END belongs to it.
+            bool quantifier = value is "EVERY" or "ANY" or "SOME" && IsQuantifierBinding(index + 1);
+            if (openQuantifiers > 0)
+            {
+                if (quantifier)
+                {
+                    openQuantifiers++;
+                    index += 2;
+                }
+                else if (value == "CASE" || value == "ARRAY" && index + 1 < _tokens.Count && _tokens[index + 1].Type != TokenType.LeftParen)
+                {
+                    // CASE shares END with quantified predicates. Its END must not expose
+                    // the rest of the unsupported predicate to independent capability scans.
+                    openQuantifiers++;
+                }
+                else if (value == "END")
+                {
+                    openQuantifiers--;
+                }
+                continue;
+            }
+            if (quantifier)
+            {
+                string clause = value == "EVERY" ? OqlClauses.Every : OqlClauses.Any;
+                if (!Supports(clause))
+                {
+                    AddUnsupported(result, clause, token);
+                    openQuantifiers++;
+                }
+                index += 2;
+                continue;
+            }
+
+            if (value == "ARRAY" && index + 1 < _tokens.Count && _tokens[index + 1].Type != TokenType.LeftParen)
+            {
+                AddUnsupported(result, "ARRAY", token);
+                openQuantifiers++;
+                continue;
+            }
+            if (value == "ANY" && index + 2 < _tokens.Count && IsWord(_tokens[index + 1], "AND") && IsWord(_tokens[index + 2], "EVERY"))
+            {
+                AddUnsupported(result, "ANY AND EVERY", token);
+                openQuantifiers++;
+                index += 2;
+                continue;
+            }
+            // The binding itself is not array membership. WITHIN remains deferred.
+            if (value is "ANY" or "SOME" or "EVERY" && index + 2 < _tokens.Count && IsWord(_tokens[index + 2], "WITHIN"))
+            { continue; }
+            if (value == "MERGE" && index > 0 && index + 1 < _tokens.Count && IsWord(_tokens[index + 1], "INTO") &&
+                (IsWord(_tokens[index - 1], "SATISFIES") || IsWord(_tokens[index - 1], "THEN") ||
+                    IsWord(_tokens[index - 1], "ELSE") || _tokens[index - 1].Type == TokenType.LeftParen))
+            {
+                // A nested MERGE statement owns its text, while a field named merge
+                // remains an ordinary expression in SATISFIES.
+                AddUnsupported(result, "MERGE", token);
+                break;
+            }
+
+            // EXISTS is supported only in the positional DDL modifier. Keep malformed
+            // modifiers on the syntax path too (CREATE COLLECTION IF EXISTS reports NOT).
+            if (value == "EXISTS" && IsDdlExistenceToken(index))
+            {
+                continue;
+            }
+
+            if (value is "CREATE" or "DROP" && index + 1 < _tokens.Count &&
+                (IsWord(_tokens[index + 1], "INDEX") || IsWord(_tokens[index + 1], "COLLECTION") ||
+                    value == "CREATE" && index + 2 < _tokens.Count && IsWord(_tokens[index + 1], "UNIQUE") && IsWord(_tokens[index + 2], "INDEX")))
+            {
+                bool collection = IsWord(_tokens[index + 1], "COLLECTION");
+                string compound = (value, collection) switch
+                {
+                    ("CREATE", true) => OqlClauses.CreateCollection,
+                    ("DROP", true) => OqlClauses.DropCollection,
+                    ("CREATE", false) => OqlClauses.CreateIndex,
+                    _ => OqlClauses.DropIndex,
+                };
                 if (!Supports(compound))
                 {
                     var end = _tokens[index + 1];
                     result.Add((compound, new Lexeme(token.Type, compound, token.Start, end.End, token.Line)));
                 }
+                if (!IsWord(_tokens[index + 1], "UNIQUE")) { index++; }
                 continue;
             }
             if (value == "SELECT")
             {
-                if (selected)
+                // Only SELECT statements and INSERT/UPSERT SELECT have a query of their own.
+                // A SELECT inside an expression is nested even when it is the first one.
+                if (statementWithoutQuery || selected || parentheses > 0)
                 {
                     result.Add((OqlClauses.Subquery, token));
                 }
 
                 selected = true;
+                selectHead = index;
+                inSelectList = true;
                 continue;
             }
-            string? clause = value switch
+
+            if (value is "LIMIT" or "OFFSET" && !inSelectList && index > 0 && EndsOperand(index - 1))
             {
-                "DEFINE" => OqlClauses.Define,
-                "ELEMENT" => OqlClauses.Element,
-                "FLATTEN" => OqlClauses.Flatten,
-                "DISTINCT" or "ALL" or "IN" or "EXISTS" or "LIKE" or "BETWEEN" or
-                "FOR" or "SOME" or "ANY" or "STRUCT" or "LIST" or "SET" or "BAG" or
-                "ARRAY" or "COLLECTION" or "FIRST" or "LAST" or "UNIQUE" or "LISTTOSET" or
-                "TYPEOF" or "UNDEFINED" or "ABS" => value,
-                "CREATE" or "DROP" or "ALTER" or "INSERT" or "UPDATE" or "DELETE" or
-                "USE" or "BEGIN" or "COMMIT" or "ROLLBACK" or "WITH" or "JOIN" or
-                "LIMIT" or "OFFSET" or "UNION" or "INTERSECT" or "EXCEPT" => value,
-                _ => null,
-            };
-            // Non-OQL command names are not reserved field names. Reject them
-            // only in command/clause position, preserving mixed-shape fields.
-            if (token.Type == TokenType.Identifier && index > 0 &&
-                !IsClausePosition(index))
-            {
-                clause = null;
+                pagingHead = index;
+                continue;
             }
 
-            if (clause is not null && !Supports(clause))
+            // ODMG's quantifiers, FOR ALL x IN e: p and EXISTS x IN e: p, bind with IN too.
+            if (value == "FOR" && index + 1 < _tokens.Count && IsWord(_tokens[index + 1], "ALL") &&
+                IsQuantifierBinding(index + 2))
             {
-                result.Add((clause, token));
+                AddUnsupported(result, "FOR ALL", token);
+                index += 3;
+                continue;
+            }
+            if (value == "EXISTS" && IsQuantifierBinding(index + 1))
+            {
+                AddUnsupported(result, "EXISTS", token);
+                index += 2;
+                continue;
+            }
+
+            if (value == "FOR" && statementStart < _tokens.Count && IsWord(_tokens[statementStart], "UPDATE"))
+            {
+                AddUnsupported(result, "FOR", token);
+                break;
+            }
+            if (statementStart < _tokens.Count && IsWord(_tokens[statementStart], "UPDATE"))
+            {
+                if (value == "USE" && EndsOperand(index - 1))
+                {
+                    AddUnsupported(result, "USE", token);
+                    break;
+                }
+                // Keep the UPDATE grammar responsible for its own LIMIT refusal.
+                if (value == "LIMIT") { continue; }
+            }
+
+            if (!OqlUnsupportedVocabulary.TryFind(value, out var word) || Supports(word.Construct))
+            {
+                continue;
+            }
+
+            // Words of other languages are not reserved field names: they name a construct
+            // only where it can start, so mixed-shape fields such as fetch still parse. A
+            // statement verb names one only as the first word, so an AS-less FROM alias named
+            // merge or upsert still parses, and a quantifier word only through the binding
+            // path above, so an alias named every or satisfies does too.
+            bool constructPosition = word.Position switch
+            {
+                OqlWordPosition.Anywhere => true,
+                OqlWordPosition.Clause => index == 0 || EndsOperand(index - 1),
+                OqlWordPosition.Statement => index == 0,
+                OqlWordPosition.Trailing => index == 0,
+                OqlWordPosition.Function => index + 1 < _tokens.Count && _tokens[index + 1].Type == TokenType.LeftParen,
+                _ => false,
+            };
+            if (!constructPosition)
+            {
+                continue;
+            }
+
+            // UNION ALL and UNION DISTINCT are one set operation, not a set operation plus the
+            // ALL or DISTINCT word.
+            var reported = token;
+            if (value is "UNION" or "INTERSECT" or "EXCEPT" && index + 1 < _tokens.Count &&
+                (IsWord(_tokens[index + 1], "ALL") || IsWord(_tokens[index + 1], "DISTINCT")))
+            {
+                var modifier = _tokens[++index];
+                reported = new Lexeme(token.Type, token.Text, token.Start, modifier.End, token.Line);
+            }
+
+            result.Add((word.Construct, reported));
+            if (value == "FETCH") { fetchHead = index; }
+
+            // A statement that does not start as OQL is one unsupported construct; the rest of
+            // its text belongs to it (MERGE INTO c USING ...).
+            if (index == 0)
+            {
+                break;
+            }
+
+            // Each operand of a set operation starts its own SELECT, which is not a subquery.
+            if (value is "UNION" or "INTERSECT" or "EXCEPT")
+            {
+                selected = false;
             }
         }
         return result;
     }
 
-    private bool IsClausePosition(int index) => index > 0 &&
-        _tokens[index - 1].Type is TokenType.Identifier or TokenType.QuotedIdentifier or TokenType.RightParen;
+    private (int HeaderEnd, int Clause) FindUpdateClause(int start)
+    {
+        if (start >= _tokens.Count || !IsWord(_tokens[start], "UPDATE")) { return (-1, -1); }
+        int saved = _position;
+        int diagnostics = _diagnostics.Count;
+        _position = start + 1;
+        CollectionName();
+        if (Take("AS")) { Identifier(); }
+        else if (IsUpdateAlias()) { Identifier(); }
+        var result = (_position, Is("SET") || Is("UNSET") ? _position : -1);
+        _position = saved;
+        _diagnostics.RemoveRange(diagnostics, _diagnostics.Count - diagnostics);
+        return result;
+    }
 
-    private OqlSelectExpression EmptyExpression() => new(string.Empty, null, [], null, [], null, [], Span(Current, Current));
-    private bool IsIndexStatement(string verb) => Is(verb) && _position + 1 < _tokens.Count &&
-        string.Equals(_tokens[_position + 1].Text, "INDEX", StringComparison.OrdinalIgnoreCase);
+    private void AddUnsupported(List<(string, Lexeme)> result, string construct, Lexeme token)
+    {
+        if (!Supports(construct))
+        {
+            result.Add((construct, token));
+        }
+    }
+
+    /// <summary>
+    /// Whether the tokens at <paramref name="index"/> bind a quantifier variable:
+    /// <c>name IN</c>, as in <c>EVERY x IN c.items</c> or ODMG's <c>FOR ALL x IN c.items</c>.
+    /// </summary>
+    private bool IsQuantifierBinding(int index) => index + 1 < _tokens.Count &&
+        _tokens[index].Type is TokenType.Identifier or TokenType.QuotedIdentifier or TokenType.Function &&
+        IsWord(_tokens[index + 1], "IN");
+
+    /// <summary>
+    /// Whether the token at <paramref name="index"/> ends an operand, so that the word after
+    /// it starts a clause: a name, a path segment, a literal, a parameter, a closing bracket,
+    /// or <c>ASC</c>/<c>DESC</c>. <c>WHERE a = 1 LIMIT 5</c> and <c>ORDER BY a DESC OFFSET 2</c>
+    /// end an operand; <c>SELECT limit</c>, <c>, merge</c> and <c>AS limit</c> do not.
+    /// </summary>
+    private bool EndsOperand(int index)
+    {
+        var token = _tokens[index];
+        return token.Type switch
+        {
+            TokenType.Identifier or TokenType.QuotedIdentifier or TokenType.Function or
+            TokenType.RightParen or TokenType.RightBracket or TokenType.RightBrace or TokenType.Parameter or
+            TokenType.Integer or TokenType.Float or TokenType.String => true,
+            TokenType.Keyword => index > 0 && _tokens[index - 1].Type == TokenType.Dot ||
+                token.Text.ToUpperInvariant() is "NULL" or "MISSING" or "NIL" or "TRUE" or "FALSE" or "VALUED" or "END" or "ASC" or "DESC",
+            _ => false,
+        };
+    }
+
+    private static bool IsWord(Lexeme token, string word) =>
+        token.Type is TokenType.Keyword or TokenType.Identifier or TokenType.Function &&
+        string.Equals(token.Text, word, StringComparison.OrdinalIgnoreCase);
+
+    // In {key:expr}, the colon belongs to the member rather than an adjacent :name
+    // parameter. Keys follow an opening brace or a member comma and are literal names.
+    private bool IsObjectMemberValue(int index) => index >= 3 &&
+        _tokens[index - 3].Type is TokenType.LeftBrace or TokenType.Comma &&
+        _tokens[index - 2].Type is TokenType.Identifier or TokenType.QuotedIdentifier or
+            TokenType.String or TokenType.Keyword or TokenType.Function;
+
+    private OqlSelectExpression EmptyExpression() => new(string.Empty, null, [], null, [], null, [], false, false, null, null, Span(Current, Current));
+    private bool IsIndexStatement(string verb) => IsDdlStatement(verb, "INDEX") || verb == "CREATE" &&
+        IsDdlStatement("CREATE", "UNIQUE") && _position + 2 < _tokens.Count && IsWord(_tokens[_position + 2], "INDEX");
+    private bool IsDdlStatement(string verb, string kind) => Is(verb) && _position + 1 < _tokens.Count &&
+        IsWord(_tokens[_position + 1], kind);
     private Lexeme Current => _tokens[Math.Min(_position, _tokens.Count - 1)];
     private Lexeme Previous => _tokens[Math.Max(0, _position - 1)];
     private bool Failed => _diagnostics.Count != 0;
@@ -263,7 +603,7 @@ public sealed partial class OqlQueryParser : QueryParser
         }
     }
     private static Location Span(Lexeme start, Lexeme end) =>
-        Location.Create(start.Line, end.Line + end.Text.AsSpan().Count('\n'), start.Start, end.End);
+        Location.Create(start.Line, end.Line + TokenLexer.CountLineBreaks(end.Text), start.Start, end.End);
 
     private string CollectionName()
     {
@@ -300,11 +640,41 @@ public sealed partial class OqlQueryParser : QueryParser
         return string.Empty;
     }
 
-    private void Error(string code, string message, Lexeme token) => _diagnostics.Add(new Diagnostic
+    private void Error(string code, string message, Lexeme token)
     {
-        Code = code, Message = message, Start = token.Start, End = token.End,
-        Line = token.Line, Severity = DiagnosticSeverity.Error, Location = DiagnosticLocation.Absolute,
-    });
+        // Recovery can reach one bad token from several rules, as with SELECT ~a FROM c. It is
+        // one mistake, so a second error with the same code at the same span is dropped (#1101).
+        foreach (var existing in _diagnostics)
+        {
+            if (existing.Code == code && existing.Start == token.Start && existing.End == token.End)
+            {
+                return;
+            }
+        }
+
+        _diagnostics.Add(new Diagnostic
+        {
+            Code = code, Message = message, Start = token.Start, End = token.End,
+            Line = token.Line, Severity = DiagnosticSeverity.Error, Location = DiagnosticLocation.Absolute,
+        });
+    }
+
+    /// <summary>
+    /// Names a character as written, or by code point when it is invisible or is a
+    /// supplementary character (the lexer keeps a surrogate pair together as one token).
+    /// </summary>
+    private static string DescribeCharacter(string text)
+    {
+        if (text.Length == 2 && char.IsSurrogatePair(text[0], text[1]))
+        {
+            return $"U+{char.ConvertToUtf32(text[0], text[1]):X4}";
+        }
+
+        return char.IsControl(text[0]) || char.IsSurrogate(text[0]) ||
+               char.GetUnicodeCategory(text[0]) is UnicodeCategory.Format
+            ? $"U+{(int)text[0]:X4}"
+            : $"'{text}'";
+    }
 
     private static bool IsCompleteQuoted(string text)
     {

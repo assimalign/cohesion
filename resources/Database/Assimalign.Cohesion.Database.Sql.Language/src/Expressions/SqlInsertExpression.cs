@@ -9,6 +9,9 @@ using Assimalign.Cohesion.Database.Language;
 /// </summary>
 public sealed class SqlInsertExpression : SqlQueryExpression
 {
+    /// <summary>Gets the statement's non-recursive WITH definitions, in declaration order.</summary>
+    public IReadOnlyList<SqlCommonTableExpression> CommonTables { get; internal set; } = [];
+
     /// <summary>
     /// Initializes a new <see cref="SqlInsertExpression"/>.
     /// </summary>
@@ -16,27 +19,42 @@ public sealed class SqlInsertExpression : SqlQueryExpression
     /// <param name="columns">The column list, if specified.</param>
     /// <param name="values">The VALUES rows, if using value lists.</param>
     /// <param name="selectSource">The SELECT source, if using INSERT...SELECT.</param>
+    /// <param name="isDefaultValues">Whether the statement inserts one row of defaults.</param>
     /// <param name="text">The raw statement text.</param>
     /// <param name="location">The source location.</param>
+    /// <param name="returning">The written-row projection, if specified.</param>
+    /// <param name="onConflict">The unique-key conflict action, if specified.</param>
     internal SqlInsertExpression(
         SqlTableReference table,
         IReadOnlyList<string>? columns,
         IReadOnlyList<IReadOnlyList<SqlExpression>>? values,
-        SqlSelectExpression? selectSource,
+        SqlQueryBodyExpression? selectSource,
+        bool isDefaultValues,
         string? text,
-        Location? location)
+        Location? location,
+        IReadOnlyList<SqlSelectColumn>? returning = null,
+        SqlOnConflictClause? onConflict = null)
         : base(SqlQueryCommandType.Insert, text, location)
     {
         Table = table;
+        Returning = returning;
+        OnConflict = onConflict;
         Columns = columns;
         Values = values;
         SelectSource = selectSource;
+        IsDefaultValues = isDefaultValues;
     }
 
     /// <summary>
     /// Gets the target table reference.
     /// </summary>
     public SqlTableReference Table { get; }
+
+    /// <summary>Gets the written-row projection, or null when RETURNING is absent.</summary>
+    public IReadOnlyList<SqlSelectColumn>? Returning { get; }
+
+    /// <summary>Gets the unique-key conflict action, or null for an ordinary INSERT.</summary>
+    public SqlOnConflictClause? OnConflict { get; }
 
     /// <summary>
     /// Gets the column list, if specified.
@@ -51,5 +69,11 @@ public sealed class SqlInsertExpression : SqlQueryExpression
     /// <summary>
     /// Gets the SELECT source for INSERT...SELECT, if applicable.
     /// </summary>
-    public SqlSelectExpression? SelectSource { get; }
+    public SqlQueryBodyExpression? SelectSource { get; }
+
+    /// <summary>
+    /// Gets whether DEFAULT VALUES inserts one row with every column omitted.
+    /// </summary>
+    /// <remarks>Both <see cref="Values"/> and <see cref="SelectSource"/> are null for this form.</remarks>
+    public bool IsDefaultValues { get; }
 }

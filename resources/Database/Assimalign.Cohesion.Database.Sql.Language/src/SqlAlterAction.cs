@@ -8,7 +8,7 @@ public abstract class SqlAlterAction
     /// <summary>
     /// Initializes a new <see cref="SqlAlterAction"/>.
     /// </summary>
-    protected internal SqlAlterAction()
+    private protected SqlAlterAction()
     {
     }
 }

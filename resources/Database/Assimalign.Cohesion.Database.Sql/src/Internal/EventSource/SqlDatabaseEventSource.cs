@@ -1,0 +1,573 @@
+using System;
+using System.Diagnostics;
+using System.Diagnostics.Tracing;
+using System.Threading;
+
+using Assimalign.Cohesion.Database.Protocol;
+using Assimalign.Cohesion.Database.Sql.Language;
+using Assimalign.Cohesion.Database.Sql.Schema;
+
+namespace Assimalign.Cohesion.Database.Sql.Internal;
+
+/// <summary>
+/// The SQL model's diagnostics: its wire server's accept loop and the lifecycle of each server
+/// session (accepted, rejected, refused at the handshake, timed out, closed, terminated by a
+/// protocol violation or an unexpected fault, aborted at shutdown), and the server-session counters.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Internal by the repository's EventSource convention (<c>.claude/rules/event-source.md</c>). Tools
+/// enable it by its assembly name, <c>Assimalign.Cohesion.Database.Sql</c>; applications forward it
+/// into their logging with <c>Assimalign.Cohesion.Logging.EventSource</c>. The Key-value, Graph and
+/// Blob servers write events 1-9 with the same ids, names and payloads from their own sources
+/// (database event-sources plan, D2), so one provider list and one log query cover all four.
+/// </para>
+/// <para>
+/// Provisioning uses ids 13-15 and 18-21; id 17 is retired. Statement execution detail and
+/// extension registration use ids 10-12 and 16. A statement's own outcome is the root source's
+/// (<c>Assimalign.Cohesion.Database</c>), so the server does not repeat it. Every write sits
+/// behind <see cref="EventSource.IsEnabled(EventLevel, EventKeywords)"/>, and every argument that
+/// allocates is computed inside that check. The counters' backing fields are maintained whether or
+/// not anyone listens, on the accept and close transitions only, never per frame or per row.
+/// </para>
+/// </remarks>
+[EventSource(Name = "Assimalign.Cohesion.Database.Sql")]
+internal sealed class SqlDatabaseEventSource : EventSource
+{
+    public static readonly SqlDatabaseEventSource Log = new();
+
+    // The longest name (database, principal) and text (a refusal's detail, a violation) a payload
+    // carries. Each can quote what a peer sent, before authentication too, and a frame may hold
+    // 16 MB, so a longer value is cut and marked (event-source.md rule 11: bounded payloads).
+    private const int MaxNameLength = 256;
+    private const int MaxTextLength = 1024;
+
+    private PollingCounter? _currentSessionsCounter;
+    private PollingCounter? _totalSessionsCounter;
+    private PollingCounter? _rejectedSessionsCounter;
+    private long _currentSessions;
+    private long _totalSessions;
+    private long _rejectedSessions;
+
+    private SqlDatabaseEventSource()
+    {
+    }
+
+    /// <summary>
+    /// The source's keywords: explicit bits below the reserved top 16.
+    /// </summary>
+    public static class Keywords
+    {
+        /// <summary>The per-session lifecycle detail: accepted and closed sessions.</summary>
+        public const EventKeywords Sessions = (EventKeywords)0x1;
+
+        /// <summary>Per-statement access paths and catalog self-commits.</summary>
+        public const EventKeywords Statements = (EventKeywords)0x2;
+    }
+
+    /// <summary>
+    /// Why a server session ended, as <c>SessionClosed</c> reports it.
+    /// </summary>
+    internal static class CloseReason
+    {
+        /// <summary>The peer ended its stream at a frame boundary.</summary>
+        public const string PeerClosed = "PeerClosed";
+
+        /// <summary>The peer sent Terminate.</summary>
+        public const string Terminated = "Terminated";
+
+        /// <summary>The session idled past the server's idle timeout.</summary>
+        public const string IdleTimeout = "IdleTimeout";
+
+        /// <summary>The server's graceful drain closed the idle session at a frame boundary.</summary>
+        public const string Shutdown = "Shutdown";
+
+        /// <summary>The handshake did not complete within the authentication timeout.</summary>
+        public const string HandshakeTimedOut = "HandshakeTimedOut";
+
+        /// <summary>The handshake was refused with a coded error frame.</summary>
+        public const string HandshakeRefused = "HandshakeRefused";
+
+        /// <summary>A framing or message-order violation terminated the session.</summary>
+        public const string ProtocolViolation = "ProtocolViolation";
+
+        /// <summary>The session was aborted, its connection closed, or the stop arrived mid-frame.</summary>
+        public const string Cancelled = "Cancelled";
+
+        /// <summary>The connection was aborted under the session.</summary>
+        public const string ConnectionAborted = "ConnectionAborted";
+
+        /// <summary>The transport failed under the session.</summary>
+        public const string TransportFailed = "TransportFailed";
+
+        /// <summary>An unexpected server error terminated the session.</summary>
+        public const string Faulted = "Faulted";
+
+        /// <summary>The pump ended without a classified outcome (an out-of-memory failure, which it does not catch).</summary>
+        public const string Unknown = "Unknown";
+    }
+
+    /// <summary>
+    /// Why the accept loop turned a connection away, as <c>SessionRejected</c> reports it.
+    /// </summary>
+    internal static class RejectReason
+    {
+        /// <summary>The server held its maximum of sessions.</summary>
+        public const string SessionLimit = "SessionLimit";
+    }
+
+    /// <summary>The server sessions accepted and not yet completed.</summary>
+    internal long CurrentServerSessions => Volatile.Read(ref _currentSessions);
+
+    /// <summary>The server sessions accepted since the process started.</summary>
+    internal long TotalServerSessions => Volatile.Read(ref _totalSessions);
+
+    /// <summary>The connections the accept loop rejected since the process started.</summary>
+    internal long TotalRejectedSessions => Volatile.Read(ref _rejectedSessions);
+
+    /// <summary>
+    /// Reads the timestamp a session's <c>SessionClosed</c> duration starts from, only while that
+    /// event is enabled.
+    /// </summary>
+    /// <returns>A <see cref="Stopwatch"/> timestamp, or zero while the event is disabled.</returns>
+    [NonEvent]
+    public long SessionTimestamp()
+        => IsEnabled(EventLevel.Verbose, Keywords.Sessions) ? Stopwatch.GetTimestamp() : 0;
+
+    /// <summary>
+    /// Writes that the accept loop made a connection a server session.
+    /// </summary>
+    /// <param name="engine">The engine the server fronts.</param>
+    /// <param name="session">The accepted session.</param>
+    /// <param name="activeSessions">The sessions the server holds, this one included, as the accept loop counted them.</param>
+    [NonEvent]
+    public void SessionAccepted(DatabaseEngine engine, DatabaseServerSession session, int activeSessions)
+    {
+        Interlocked.Increment(ref _currentSessions);
+        Interlocked.Increment(ref _totalSessions);
+
+        if (IsEnabled(EventLevel.Verbose, Keywords.Sessions))
+        {
+            SessionAccepted(engine.Name, session.Id, activeSessions);
+        }
+    }
+
+    /// <summary>
+    /// Writes that the accept loop turned a connection away before it became a session.
+    /// </summary>
+    /// <param name="engine">The engine the server fronts.</param>
+    /// <param name="reason">A <see cref="RejectReason"/> value.</param>
+    /// <param name="activeSessions">The sessions the server held.</param>
+    /// <param name="maxSessions">The server's session limit.</param>
+    [NonEvent]
+    public void SessionRejected(DatabaseEngine engine, string reason, int activeSessions, int maxSessions)
+    {
+        Interlocked.Increment(ref _rejectedSessions);
+
+        if (IsEnabled(EventLevel.Warning, EventKeywords.None))
+        {
+            SessionRejected(engine.Name, reason, activeSessions, maxSessions);
+        }
+    }
+
+    /// <summary>
+    /// Writes that the handshake refused a session with a coded error frame.
+    /// </summary>
+    /// <param name="session">The refused session.</param>
+    /// <param name="database">The database the startup named; empty before the startup was read. Written cut to 256 characters.</param>
+    /// <param name="principal">The principal the startup claimed; empty before the startup was read. Written cut to 256 characters.</param>
+    /// <param name="code">The error frame's code.</param>
+    /// <param name="detail">The error frame's message. Written cut to 1024 characters.</param>
+    [NonEvent]
+    public void HandshakeRefused(DatabaseServerSession session, string database, string principal, ProtocolErrorCode code, string detail)
+    {
+        if (IsEnabled(EventLevel.Warning, EventKeywords.None))
+        {
+            HandshakeRefused(session.Id, Bound(database, MaxNameLength), Bound(principal, MaxNameLength), code.ToString(), Bound(detail, MaxTextLength));
+        }
+    }
+
+    /// <summary>
+    /// Writes that a session did not complete its handshake within the authentication timeout and
+    /// was dropped.
+    /// </summary>
+    /// <param name="session">The dropped session.</param>
+    /// <param name="timeout">The server's authentication timeout.</param>
+    [NonEvent]
+    public void HandshakeTimedOut(DatabaseServerSession session, TimeSpan timeout)
+    {
+        if (IsEnabled(EventLevel.Warning, EventKeywords.None))
+        {
+            HandshakeTimedOut(session.Id, timeout.TotalMilliseconds);
+        }
+    }
+
+    /// <summary>
+    /// Writes that a server session completed and left the server.
+    /// </summary>
+    /// <param name="session">The session.</param>
+    /// <param name="reason">A <see cref="CloseReason"/> value.</param>
+    /// <param name="acceptedTimestamp">The session's <see cref="SessionTimestamp"/>; zero when it was accepted while the event was disabled, which writes a zero duration.</param>
+    [NonEvent]
+    public void SessionClosed(DatabaseServerSession session, string reason, long acceptedTimestamp)
+    {
+        Interlocked.Decrement(ref _currentSessions);
+
+        if (IsEnabled(EventLevel.Verbose, Keywords.Sessions))
+        {
+            SessionClosed(session.Id, reason, acceptedTimestamp == 0 ? 0 : Stopwatch.GetElapsedTime(acceptedTimestamp).TotalMilliseconds);
+        }
+    }
+
+    /// <summary>
+    /// Writes that a framing or message-order violation terminated a session.
+    /// </summary>
+    /// <param name="session">The terminated session.</param>
+    /// <param name="message">The violation, as the error frame states it. Written cut to 1024 characters.</param>
+    [NonEvent]
+    public void SessionProtocolViolation(DatabaseServerSession session, string message)
+    {
+        if (IsEnabled(EventLevel.Warning, EventKeywords.None))
+        {
+            SessionProtocolViolation(session.Id, Bound(message, MaxTextLength));
+        }
+    }
+
+    /// <summary>
+    /// Writes that an unexpected server error terminated a session; the peer receives an internal
+    /// error frame only.
+    /// </summary>
+    /// <param name="session">The terminated session.</param>
+    /// <param name="exception">The failure.</param>
+    [NonEvent]
+    public void SessionFaulted(DatabaseServerSession session, Exception exception)
+    {
+        if (IsEnabled(EventLevel.Error, EventKeywords.None))
+        {
+            SessionFaulted(session.Id, exception.GetType().FullName ?? exception.GetType().Name, exception.Message);
+        }
+    }
+
+    /// <summary>
+    /// Writes that a session failed to release a resource while it closed; the close continues.
+    /// </summary>
+    /// <param name="session">The closing session.</param>
+    /// <param name="exception">The failure the close swallowed.</param>
+    [NonEvent]
+    public void SessionCleanupFailed(DatabaseServerSession session, Exception exception)
+    {
+        if (IsEnabled(EventLevel.Warning, EventKeywords.None))
+        {
+            SessionCleanupFailed(session.Id, exception.GetType().FullName ?? exception.GetType().Name, exception.Message);
+        }
+    }
+
+    /// <summary>
+    /// Writes that a stopping server aborted the sessions its drain budget did not close.
+    /// </summary>
+    /// <param name="engine">The engine the server fronts.</param>
+    /// <param name="sessions">The sessions the server aborted.</param>
+    /// <param name="drainTimeout">The server's drain budget.</param>
+    [NonEvent]
+    public void SessionsAborted(DatabaseEngine engine, int sessions, TimeSpan drainTimeout)
+    {
+        if (IsEnabled(EventLevel.Warning, EventKeywords.None))
+        {
+            SessionsAborted(engine.Name, sessions, drainTimeout.TotalMilliseconds);
+        }
+    }
+
+    [NonEvent]
+    public void StatementPlanned(DatabaseName database, SqlStatementMetrics metrics)
+    {
+        if (IsEnabled(EventLevel.Verbose, Keywords.Statements))
+        {
+            StatementPlanned(database.ToString(), Bound(metrics.AccessPath, MaxNameLength), metrics.RecordsExamined);
+        }
+    }
+
+    [NonEvent]
+    public void StatementTooComplex(DatabaseName database, int depth)
+    {
+        if (IsEnabled(EventLevel.Warning, EventKeywords.None))
+        {
+            StatementTooComplex(database.ToString(), depth);
+        }
+    }
+
+    [NonEvent]
+    public void DdlSelfCommitted(DatabaseName database, SqlQueryCommandType commandType)
+    {
+        if (IsEnabled(EventLevel.Verbose, Keywords.Statements))
+        {
+            DdlSelfCommitted(database.ToString(), commandType.ToString());
+        }
+    }
+
+    [NonEvent]
+    public void ExtensionRegistered(SqlFunction function)
+    {
+        if (IsEnabled(EventLevel.Verbose, EventKeywords.None))
+        {
+            ExtensionRegistered(function.Kind.ToString(), Bound(function.Name, MaxNameLength));
+        }
+    }
+
+    [NonEvent]
+    public void ExtensionRegistered(SqlType type)
+    {
+        if (IsEnabled(EventLevel.Verbose, EventKeywords.None))
+        {
+            ExtensionRegistered("Type", Bound(type.Name, MaxNameLength));
+        }
+    }
+
+    [NonEvent]
+    public void ExtensionRegistered(SqlCast cast)
+    {
+        if (IsEnabled(EventLevel.Verbose, EventKeywords.None))
+        {
+            ExtensionRegistered("Cast", Bound(cast.Source.Name, MaxNameLength) + " -> " + Bound(cast.Target.Name, MaxNameLength));
+        }
+    }
+
+    [NonEvent]
+    public long ProvisioningStart(SqlDatabase database, SqlCompiledSchema schema, string mode)
+    {
+        if (!IsEnabled(EventLevel.Informational, EventKeywords.None))
+        {
+            return 0;
+        }
+        ProvisioningStart(database.Engine.Name, database.Name.ToString(), Bound(schema.Name, MaxNameLength), schema.Hash, mode, -1);
+        return Stopwatch.GetTimestamp();
+    }
+
+    [NonEvent]
+    public void ProvisioningStop(SqlDatabase database, SqlProvisioningTrace trace)
+    {
+        if (trace.Started != 0 && IsEnabled(EventLevel.Informational, EventKeywords.None))
+        {
+            ProvisioningStop(database.Engine.Name, database.Name.ToString(), Bound(trace.Schema.Name, MaxNameLength), trace.Schema.Hash,
+                trace.StepCount, trace.Outcome, Stopwatch.GetElapsedTime(trace.Started).TotalMilliseconds);
+        }
+    }
+
+    [NonEvent]
+    public void ProvisioningFailed(SqlDatabase database, SqlProvisioningTrace trace)
+    {
+        if (trace.Failure is { } failure && IsEnabled(EventLevel.Error, EventKeywords.None))
+        {
+            ProvisioningFailed(database.Engine.Name, database.Name.ToString(), Bound(trace.Schema.Name, MaxNameLength),
+                trace.Position, trace.Kind, trace.Code, failure.GetType().FullName ?? failure.GetType().Name);
+        }
+    }
+
+    [NonEvent]
+    public long DeferredStepBound(SqlDatabase database, SqlProvisioningTrace trace)
+    {
+        if (!IsEnabled(EventLevel.Informational, EventKeywords.None))
+        {
+            return 0;
+        }
+        DeferredStepBound(database.Engine.Name, database.Name.ToString(), Bound(trace.Table, MaxNameLength), Bound(trace.ObjectName, MaxNameLength),
+            trace.Kind, trace.Position, trace.StepCount, trace.RowsProcessed, trace.TotalRows);
+        return Stopwatch.GetTimestamp();
+    }
+
+    [NonEvent]
+    public void DeferredStepProgress(SqlDatabase database, SqlProvisioningTrace trace)
+    {
+        if (IsEnabled(EventLevel.Verbose, EventKeywords.None))
+        {
+            DeferredStepProgress(database.Engine.Name, database.Name.ToString(), Bound(trace.Table, MaxNameLength), Bound(trace.ObjectName, MaxNameLength),
+                trace.Kind, trace.Position, trace.StepCount, trace.RowsProcessed, trace.TotalRows);
+        }
+    }
+
+    [NonEvent]
+    public void DeferredStepCompleted(SqlDatabase database, SqlProvisioningTrace trace)
+    {
+        if (IsEnabled(EventLevel.Informational, EventKeywords.None))
+        {
+            DeferredStepCompleted(database.Engine.Name, database.Name.ToString(), Bound(trace.Table, MaxNameLength), Bound(trace.ObjectName, MaxNameLength),
+                trace.Kind, trace.Position, trace.StepCount, trace.RowsProcessed, trace.TotalRows, trace.Outcome,
+                trace.Started == 0 ? 0 : Stopwatch.GetElapsedTime(trace.Started).TotalMilliseconds);
+        }
+    }
+
+    [NonEvent]
+    public void DeferredStepFailed(SqlDatabase database, SqlProvisioningTrace trace, Exception failure)
+    {
+        if (IsEnabled(EventLevel.Error, EventKeywords.None))
+        {
+            DeferredStepFailed(database.Engine.Name, database.Name.ToString(), Bound(trace.Table, MaxNameLength), Bound(trace.ObjectName, MaxNameLength),
+                trace.Kind, trace.Position, trace.StepCount, trace.RowsProcessed, trace.TotalRows,
+                SqlProvisioningCodes.StepFailed, failure.GetType().FullName ?? failure.GetType().Name);
+        }
+    }
+
+    /// <summary>Reports a completed declared script without logging its SQL body.</summary>
+    /// <param name="database">The provisioned database.</param>
+    /// <param name="name">The stable script name.</param>
+    /// <param name="hash">The body SHA-256.</param>
+    [NonEvent]
+    public void ScriptApplied(SqlDatabase database, string name, string hash)
+    {
+        if (IsEnabled(EventLevel.Informational, EventKeywords.None))
+        {
+            ScriptApplied(database.Engine.Name, database.Name.ToString(), Bound(name, MaxNameLength), hash);
+        }
+    }
+
+    [Event(22, Level = EventLevel.Informational, Message = "Applied declared script {0}/{1}/{2} ({3}).")]
+    private void ScriptApplied(string engineName, string database, string script, string hash)
+        => WriteEvent(22, engineName, database, script, hash);
+
+    [NonEvent]
+    internal void TableReclamationStarted(SqlDatabase database, ulong objectId)
+    {
+        if (IsEnabled(EventLevel.Informational, EventKeywords.None))
+        {
+            TableReclamationStarted(database.Engine.Name, database.Name.ToString(), objectId);
+        }
+    }
+
+    [Event(23, Level = EventLevel.Informational, Message = "Reclaiming dropped table {2} in {0}/{1}.")]
+    private void TableReclamationStarted(string engineName, string database, ulong objectId)
+        => WriteEvent(23, engineName, database, objectId);
+
+    [NonEvent]
+    internal void TableReclamationCompleted(SqlDatabase database, ulong objectId, long pages)
+    {
+        if (IsEnabled(EventLevel.Informational, EventKeywords.None))
+        {
+            TableReclamationCompleted(database.Engine.Name, database.Name.ToString(), objectId, pages);
+        }
+    }
+
+    [Event(24, Level = EventLevel.Informational, Message = "Reclaimed dropped table {2} in {0}/{1}: {3} pages in this process.")]
+    private void TableReclamationCompleted(string engineName, string database, ulong objectId, long pages)
+        => WriteEvent(24, engineName, database, objectId, pages);
+
+    [Event(1, Level = EventLevel.Verbose, Keywords = Keywords.Sessions, Message = "The server of engine {0} accepted session {1}; {2} session(s) active.")]
+    private void SessionAccepted(string engineName, Guid sessionId, int activeSessions)
+        => WriteEvent(1, engineName, sessionId, activeSessions);
+
+    [Event(2, Level = EventLevel.Warning, Message = "The server of engine {0} rejected a connection ({1}): {2} of {3} session(s) active.")]
+    private void SessionRejected(string engineName, string reason, int activeSessions, int maxSessions)
+        => WriteEvent(2, engineName, reason, activeSessions, maxSessions);
+
+    [Event(3, Level = EventLevel.Warning, Message = "Session {0} was refused at its handshake for database '{1}' and principal '{2}' with {3}: {4}")]
+    private void HandshakeRefused(Guid sessionId, string database, string principal, string code, string detail)
+        => WriteEvent(3, sessionId, database, principal, code, detail);
+
+    [Event(4, Level = EventLevel.Warning, Message = "Session {0} did not complete its handshake within {1} ms and was dropped.")]
+    private void HandshakeTimedOut(Guid sessionId, double timeoutMilliseconds)
+        => WriteEvent(4, sessionId, timeoutMilliseconds);
+
+    [Event(5, Level = EventLevel.Verbose, Keywords = Keywords.Sessions, Message = "Session {0} closed ({1}) after {2} ms.")]
+    private void SessionClosed(Guid sessionId, string reason, double durationMilliseconds)
+        => WriteEvent(5, sessionId, reason, durationMilliseconds);
+
+    [Event(6, Level = EventLevel.Warning, Message = "Session {0} violated the protocol and was terminated: {1}")]
+    private void SessionProtocolViolation(Guid sessionId, string exceptionMessage)
+        => WriteEvent(6, sessionId, exceptionMessage);
+
+    [Event(7, Level = EventLevel.Error, Message = "Session {0} was terminated by an unexpected server error: {1}: {2}")]
+    private void SessionFaulted(Guid sessionId, string exceptionType, string exceptionMessage)
+        => WriteEvent(7, sessionId, exceptionType, exceptionMessage);
+
+    [Event(8, Level = EventLevel.Warning, Message = "Session {0} failed to release a resource while closing: {1}: {2}")]
+    private void SessionCleanupFailed(Guid sessionId, string exceptionType, string exceptionMessage)
+        => WriteEvent(8, sessionId, exceptionType, exceptionMessage);
+
+    [Event(9, Level = EventLevel.Warning, Message = "The server of engine {0} aborted {1} session(s) its {2} ms drain did not close.")]
+    private void SessionsAborted(string engineName, int sessions, double drainTimeoutMilliseconds)
+        => WriteEvent(9, engineName, sessions, drainTimeoutMilliseconds);
+
+    [Event(10, Level = EventLevel.Verbose, Keywords = Keywords.Statements, Message = "Database '{0}' executed access path '{1}', examining {2} record(s).")]
+    private void StatementPlanned(string database, string accessPath, long recordsExamined)
+        => WriteEvent(10, database, accessPath, recordsExamined);
+
+    [Event(11, Level = EventLevel.Warning, Message = "Database '{0}' refused a statement too complex to execute (depth {1}; -1 means unknown).")]
+    private void StatementTooComplex(string database, int depth)
+        => WriteEvent(11, database, depth);
+
+    [Event(12, Level = EventLevel.Verbose, Keywords = Keywords.Statements, Message = "Database '{0}' self-committed catalog changes for {1}.")]
+    private void DdlSelfCommitted(string database, string commandType)
+        => WriteEvent(12, database, commandType);
+
+    [Event(13, Level = EventLevel.Informational, Message = "Provisioning {0}/{1} schema {2} ({3}), mode {4}, steps {5} (-1 before planning).")]
+    private void ProvisioningStart(string engineName, string database, string schema, string schemaHash, string mode, int stepCount)
+        => WriteEvent(13, engineName, database, schema, schemaHash, mode, stepCount);
+
+    [Event(14, Level = EventLevel.Informational, Message = "Provisioned {0}/{1} schema {2} ({3}): {4} steps, {5}, {6} ms.")]
+    private void ProvisioningStop(string engineName, string database, string schema, string schemaHash, int stepCount, string outcome, double durationMilliseconds)
+        => WriteEvent(14, engineName, database, schema, schemaHash, stepCount, outcome, durationMilliseconds);
+
+    [Event(15, Level = EventLevel.Error, Message = "Provisioning {0}/{1} schema {2} failed at step {3} ({4}): {5}, {6}.")]
+    private void ProvisioningFailed(string engineName, string database, string schema, int position, string kind, string code, string exceptionType)
+        => WriteEvent(15, engineName, database, schema, position, kind, code, exceptionType);
+
+    [Event(16, Level = EventLevel.Verbose, Message = "Registered SQL extension {0} '{1}'.")]
+    private void ExtensionRegistered(string kind, string name)
+        => WriteEvent(16, kind, name);
+
+    // Id 17 (IndexRegistrationsSaved) is retired and never reused: B2 publishes an index's
+    // registration atomically with its description (#1355), so no separate save remains to report;
+    // the index DDL itself is event 12.
+
+    [Event(18, Level = EventLevel.Informational, Message = "DeferredStepBound {0}/{1}, {2}.{3}, {4} step {5} of {6}, {7} of {8} rows.")]
+    private void DeferredStepBound(string engineName, string database, string table, string objectName, string kind, int position, int stepCount, long rowsProcessed, long totalRows)
+        => WriteEvent(18, engineName, database, table, objectName, kind, position, stepCount, rowsProcessed, totalRows);
+
+    [Event(19, Level = EventLevel.Verbose, Message = "DeferredStepProgress {0}/{1}, {2}.{3}, {4} step {5} of {6}, {7} of {8} rows.")]
+    private void DeferredStepProgress(string engineName, string database, string table, string objectName, string kind, int position, int stepCount, long rowsProcessed, long totalRows)
+        => WriteEvent(19, engineName, database, table, objectName, kind, position, stepCount, rowsProcessed, totalRows);
+
+    [Event(20, Level = EventLevel.Informational, Message = "DeferredStepCompleted {0}/{1}, {2}.{3}, {4} step {5} of {6}, {7} of {8} rows.")]
+    private void DeferredStepCompleted(string engineName, string database, string table, string objectName, string kind, int position, int stepCount, long rowsProcessed, long totalRows, string outcome, double durationMilliseconds)
+        => WriteEvent(20, engineName, database, table, objectName, kind, position, stepCount, rowsProcessed, totalRows, outcome, durationMilliseconds);
+
+    [Event(21, Level = EventLevel.Error, Message = "DeferredStepFailed {0}/{1}, {2}.{3}, {4} step {5} of {6}, {7} of {8} rows.")]
+    private void DeferredStepFailed(string engineName, string database, string table, string objectName, string kind, int position, int stepCount, long rowsProcessed, long totalRows, string code, string exceptionType)
+        => WriteEvent(21, engineName, database, table, objectName, kind, position, stepCount, rowsProcessed, totalRows, code, exceptionType);
+
+    /// <inheritdoc />
+    protected override void OnEventCommand(EventCommandEventArgs command)
+    {
+        if (command.Command != EventCommand.Enable)
+        {
+            return;
+        }
+
+        // Created on the first enable command and kept for the source's lifetime. The backing
+        // fields are maintained whether or not anyone listens, so a tool that attaches late still
+        // reads exact values.
+        _currentSessionsCounter ??= new PollingCounter("current-server-sessions", this, () => Volatile.Read(ref _currentSessions))
+        {
+            DisplayName = "Current Server Sessions",
+        };
+        _totalSessionsCounter ??= new PollingCounter("total-server-sessions", this, () => Volatile.Read(ref _totalSessions))
+        {
+            DisplayName = "Total Server Sessions",
+        };
+        _rejectedSessionsCounter ??= new PollingCounter("total-rejected-sessions", this, () => Volatile.Read(ref _rejectedSessions))
+        {
+            DisplayName = "Total Rejected Sessions",
+        };
+    }
+
+    // Cuts a peer-supplied string to its payload bound and marks the cut; never splits a surrogate
+    // pair. Called only inside an IsEnabled check.
+    private static string Bound(string value, int maxLength)
+    {
+        if (value.Length <= maxLength)
+        {
+            return value;
+        }
+
+        int length = char.IsHighSurrogate(value[maxLength - 1]) ? maxLength - 1 : maxLength;
+        return string.Concat(value.AsSpan(0, length), "...");
+    }
+}

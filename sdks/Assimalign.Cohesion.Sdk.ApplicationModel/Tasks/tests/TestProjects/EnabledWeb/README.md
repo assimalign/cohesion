@@ -10,5 +10,5 @@ Three design calls do not yet have matching runtime APIs and use the nearest ava
 - The optional `Resource.References.IdentityHub.Https` and `JwtBearerOptions.Authority` calls use
   the resource's own `http` endpoint with `JwtBearerOptions.ValidIssuers`; no IdentityHub fixture
   or `Authority` property exists.
-- `ISqlClient` has no `Get` or `List` query helpers, so the route handlers return deterministic
+- `SqlClient` has no `Get` or `List` query helpers, so the route handlers return deterministic
   placeholder responses while retaining the real SQL client composition and registration.

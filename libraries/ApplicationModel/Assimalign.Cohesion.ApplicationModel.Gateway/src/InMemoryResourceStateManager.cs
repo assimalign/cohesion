@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
+
 namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 
 // Deviates from the repo interface-first rule per signed-off design item 18: the concrete
@@ -81,6 +83,16 @@ public sealed class InMemoryResourceStateManager : IApplicationResourceStateMana
         }
     }
 
+    internal ResourceStateObservation GetObservation(ResourceId id)
+    {
+        lock (_gate)
+        {
+            return _entries.TryGetValue(id, out Entry? entry)
+                ? new ResourceStateObservation(entry.State, entry.Detail)
+                : new ResourceStateObservation(ResourceLifecycle.Unknown, null);
+        }
+    }
+
     /// <inheritdoc/>
     public IReadOnlyList<ResourceEndpoint> GetObservedEndpoints(ResourceId id)
     {
@@ -144,7 +156,7 @@ public sealed class InMemoryResourceStateManager : IApplicationResourceStateMana
         {
             foreach (Waiter waiter in completed)
             {
-                waiter.Completion.TrySetResult(state);
+                waiter.Completion.TrySetResult(new ResourceStateObservation(state, detail));
             }
         }
 
@@ -156,6 +168,13 @@ public sealed class InMemoryResourceStateManager : IApplicationResourceStateMana
 
     /// <inheritdoc/>
     public async Task<ResourceLifecycle> WaitForStateAsync(
+        ResourceId id,
+        IReadOnlySet<ResourceLifecycle> terminals,
+        TimeSpan budget,
+        CancellationToken cancellationToken = default)
+        => (await WaitForObservationAsync(id, terminals, budget, cancellationToken).ConfigureAwait(false)).State;
+
+    internal async Task<ResourceStateObservation> WaitForObservationAsync(
         ResourceId id,
         IReadOnlySet<ResourceLifecycle> terminals,
         TimeSpan budget,
@@ -176,7 +195,7 @@ public sealed class InMemoryResourceStateManager : IApplicationResourceStateMana
 
             if (terminals.Contains(current))
             {
-                return current;
+                return new ResourceStateObservation(current, existing?.Detail);
             }
 
             if (existing is null)
@@ -218,23 +237,23 @@ public sealed class InMemoryResourceStateManager : IApplicationResourceStateMana
 
     private void TimeoutWaiter(Waiter waiter)
     {
-        if (TryRemoveWaiter(waiter, out ResourceLifecycle current))
+        if (TryRemoveWaiter(waiter, out ResourceStateObservation current))
         {
             waiter.Completion.TrySetResult(current);
         }
     }
 
-    private bool TryRemoveWaiter(Waiter waiter, out ResourceLifecycle current)
+    private bool TryRemoveWaiter(Waiter waiter, out ResourceStateObservation current)
     {
         lock (_gate)
         {
-            current = ResourceLifecycle.Unknown;
+            current = new ResourceStateObservation(ResourceLifecycle.Unknown, null);
             if (!_entries.TryGetValue(waiter.Id, out Entry? entry) || entry.Waiters is null)
             {
                 return false;
             }
 
-            current = entry.State;
+            current = new ResourceStateObservation(entry.State, entry.Detail);
             if (!entry.Waiters.Remove(waiter))
             {
                 return false;
@@ -282,7 +301,7 @@ public sealed class InMemoryResourceStateManager : IApplicationResourceStateMana
 
         public CancellationToken CancellationToken { get; }
 
-        public TaskCompletionSource<ResourceLifecycle> Completion { get; } =
+        public TaskCompletionSource<ResourceStateObservation> Completion { get; } =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public void Cancel() => Owner.CancelWaiter(this);

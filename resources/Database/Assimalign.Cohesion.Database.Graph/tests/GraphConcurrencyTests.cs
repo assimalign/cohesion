@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Graph.Catalog;
+using Assimalign.Cohesion.Database.Graph.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Database.Types;
 
@@ -12,6 +14,7 @@ using Xunit;
 
 namespace Assimalign.Cohesion.Database.Graph.Tests;
 
+[Collection(nameof(GraphConcurrencyCollection))]
 public sealed class GraphConcurrencyTests
 {
     [Theory]
@@ -19,8 +22,8 @@ public sealed class GraphConcurrencyTests
     [InlineData(true)]
     public async Task UnsignedValues_ShouldRespectPromotedSchemaTypesAndRetainTheirStoredValue(bool relationship)
     {
-        await using var engine = GraphDatabaseEngine.Create(new());
-        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("graph");
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
+        var database = await engine.CreateDatabaseAsync("graph");
         await using var session = await database.CreateSessionAsync();
         var properties = new Dictionary<string, object?>
         {
@@ -64,8 +67,8 @@ public sealed class GraphConcurrencyTests
     [InlineData(DatabaseType.JsonBinary)]
     public async Task UnsupportedSchemaScalar_ShouldBeRejectedWithoutPublishingMetadata(DatabaseType unsupported)
     {
-        await using var engine = GraphDatabaseEngine.Create(new());
-        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("graph");
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
+        var database = await engine.CreateDatabaseAsync("graph");
         await using var session = await database.CreateSessionAsync();
         var schema = GraphSchema.Open(database, session);
         var label = new GraphLabelMetadata(Guid.NewGuid(), "Person");
@@ -81,8 +84,8 @@ public sealed class GraphConcurrencyTests
     [Fact]
     public async Task ClosingSessionWhileWaitingForWriter_ShouldAbortAndReleaseALaterGrant()
     {
-        await using var engine = GraphDatabaseEngine.Create(new());
-        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("graph");
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
+        var database = await engine.CreateDatabaseAsync("graph");
         await using var blocker = await database.CreateSessionAsync();
         await using var waiting = await database.CreateSessionAsync();
         await using var observer = await database.CreateSessionAsync();
@@ -105,8 +108,8 @@ public sealed class GraphConcurrencyTests
     [Fact]
     public async Task CancellingWriterWait_ShouldReleaseSessionAndLeaveOtherTransactionsUsable()
     {
-        await using var engine = GraphDatabaseEngine.Create(new());
-        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("graph");
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
+        var database = await engine.CreateDatabaseAsync("graph");
         await using var blocker = await database.CreateSessionAsync();
         await using var waiting = await database.CreateSessionAsync();
         await database.CreateNodeAsync(blocker, ["Person"]);
@@ -125,8 +128,8 @@ public sealed class GraphConcurrencyTests
     [Fact]
     public async Task StaleSnapshot_ShouldRejectNodeWriteAfterPropertyConstraintChanged()
     {
-        await using var engine = GraphDatabaseEngine.Create(new());
-        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("graph");
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
+        var database = await engine.CreateDatabaseAsync("graph");
         await using var stale = await database.CreateSessionAsync();
         await using var writer = await database.CreateSessionAsync();
         var label = new GraphLabelMetadata(Guid.NewGuid(), "Person");
@@ -134,7 +137,12 @@ public sealed class GraphConcurrencyTests
         await schema.SaveLabelAsync(label);
         await using var transaction = await stale.BeginTransactionAsync();
         await schema.SavePropertyKeyAsync(new GraphPropertyKeyMetadata(label.Id, "age", DatabaseType.Int64, true));
-        await Should.ThrowAsync<DatabaseTransactionAbortedException>(async () => await database.CreateNodeAsync(stale, ["Person"]));
+        var conflict = await Should.ThrowAsync<DatabaseTransactionAbortedException>(async () => await database.CreateNodeAsync(stale, ["Person"]));
+        // The engine aborted the explicit transaction: it stays Faulted and refuses work until the caller rolls back (#1188).
+        transaction.State.ShouldBe(TransactionState.Faulted);
+        (await Should.ThrowAsync<DatabaseException>(async () => await database.CreateNodeAsync(stale, ["Person"])))
+            .InnerException.ShouldBeSameAs(conflict);
+        await transaction.RollbackAsync();
         transaction.State.ShouldBe(TransactionState.RolledBack);
         (await database.CreateNodeAsync(writer, ["Person"], new Dictionary<string, object?> { ["age"] = 42L })).Properties["age"].ShouldBe(42L);
     }
@@ -144,8 +152,8 @@ public sealed class GraphConcurrencyTests
     [InlineData(true)]
     public async Task StaleDrop_ShouldRefuseNewlyCommittedGraphData(bool relationship)
     {
-        await using var engine = GraphDatabaseEngine.Create(new());
-        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("graph");
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
+        var database = await engine.CreateDatabaseAsync("graph");
         await using var stale = await database.CreateSessionAsync();
         await using var writer = await database.CreateSessionAsync();
         var writerSchema = GraphSchema.Open(database, writer);
@@ -165,6 +173,8 @@ public sealed class GraphConcurrencyTests
             else { await schema.DropLabelAsync("Person"); }
         });
         error.Message.ShouldContain("in use");
+        transaction.State.ShouldBe(TransactionState.Faulted);
+        await transaction.RollbackAsync();
         transaction.State.ShouldBe(TransactionState.RolledBack);
         (await writerSchema.GetLabelsAsync()).ShouldHaveSingleItem().Name.ShouldBe("Person");
         (await writerSchema.GetRelationshipTypesAsync()).ShouldHaveSingleItem().Name.ShouldBe("FRIEND");
@@ -175,8 +185,8 @@ public sealed class GraphConcurrencyTests
     [InlineData(true)]
     public async Task PropertyConstraintChange_ShouldValidateExistingNodesAndRelationships(bool relationship)
     {
-        await using var engine = GraphDatabaseEngine.Create(new());
-        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("graph");
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
+        var database = await engine.CreateDatabaseAsync("graph");
         await using var session = await database.CreateSessionAsync();
         var first = await database.CreateNodeAsync(session, ["Person"], new Dictionary<string, object?> { ["age"] = "unknown" });
         var second = await database.CreateNodeAsync(session, ["Person"]);
@@ -193,5 +203,49 @@ public sealed class GraphConcurrencyTests
         error.Message.ShouldContain("COHDBG003");
         (await schema.GetPropertyKeysAsync(definitionId)).ShouldHaveSingleItem().Type.ShouldBeNull();
         (await database.GetNodeAsync(session, first.Id)).ShouldNotBeNull().Properties["age"].ShouldBe("unknown");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Graph] - Composition: writer locking precedes every stage and empty writes retain the lock")]
+    public async Task Execute_LinearWrite_ShouldLockBeforeFirstStageAsync()
+    {
+        // Arrange
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        var token = timeout.Token;
+        await using var engine = GraphDatabaseEngine.Create("linear-lock", new());
+        var database = await engine.CreateDatabaseAsync("graph", token);
+        await using var first = await database.CreateSessionAsync(token);
+        await using var second = await database.CreateSessionAsync(token);
+        int blockedErrors = 0, blockedWriters = 0;
+        var elapsed = Stopwatch.StartNew();
+        // Act: exercise both lock edges for at least 250 ms and at least two complete rounds.
+        do
+        {
+            await using (var transaction = await first.BeginTransactionAsync(token))
+            {
+                await first.ExecuteAsync("INSERT (:Holding)", cancellationToken: token);
+                var pending = second.ExecuteAsync("LET x = 1 / 0 INSERT (:NeverWritten)", cancellationToken: token).AsTask();
+                await Task.WhenAny(pending, Task.Delay(10, token));
+                bool blockedBeforeExpression = !pending.IsCompleted;
+                await transaction.RollbackAsync(token);
+                var error = await Should.ThrowAsync<DatabaseException>(async () => await pending);
+                error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG013");
+                blockedBeforeExpression.ShouldBeTrue("a write statement must wait before evaluating its first LET");
+                blockedErrors++;
+            }
+            await using (var transaction = await first.BeginTransactionAsync(token))
+            {
+                await first.ExecuteAsync("FILTER FALSE INSERT (:NeverWritten)", cancellationToken: token);
+                var pending = second.ExecuteAsync("INSERT (:Other)", cancellationToken: token).AsTask();
+                await Task.WhenAny(pending, Task.Delay(10, token));
+                bool blockedBehindEmptyWrite = !pending.IsCompleted;
+                await transaction.CommitAsync(token);
+                (await pending).AffectedCount.ShouldBe(1);
+                blockedBehindEmptyWrite.ShouldBeTrue("an empty write pipeline must already hold its writer lock");
+                blockedWriters++;
+            }
+        } while ((elapsed.Elapsed < TimeSpan.FromMilliseconds(250) || blockedErrors < 2 || blockedWriters < 2) && elapsed.Elapsed < TimeSpan.FromSeconds(10));
+        // Assert
+        blockedErrors.ShouldBeGreaterThanOrEqualTo(2);
+        blockedWriters.ShouldBe(blockedErrors);
     }
 }

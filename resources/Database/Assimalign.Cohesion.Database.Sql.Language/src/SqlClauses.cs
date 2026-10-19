@@ -9,8 +9,14 @@ public static class SqlClauses
     /// <summary>A <c>SELECT</c> statement.</summary>
     public const string Select = "SELECT";
 
+    /// <summary>An <c>EXPLAIN</c> description of a data statement.</summary>
+    public const string Explain = "EXPLAIN";
+
     /// <summary>An <c>INSERT</c> statement.</summary>
     public const string Insert = "INSERT";
+
+    /// <summary>An INSERT's unique-key conflict action.</summary>
+    public const string OnConflict = "ON CONFLICT";
 
     /// <summary>An <c>UPDATE</c> statement.</summary>
     public const string Update = "UPDATE";
@@ -21,6 +27,12 @@ public static class SqlClauses
     /// <summary>A <c>CREATE TABLE</c> statement.</summary>
     public const string CreateTable = "CREATE TABLE";
 
+    /// <summary>A <c>CREATE SCHEMA</c> SQL namespace definition.</summary>
+    public const string CreateSchema = "CREATE SCHEMA";
+
+    /// <summary>A generated identity column, including the SQL Server lexical alias.</summary>
+    public const string Identity = "IDENTITY";
+
     /// <summary>A <c>CREATE INDEX</c> statement.</summary>
     public const string CreateIndex = "CREATE INDEX";
 
@@ -29,6 +41,9 @@ public static class SqlClauses
 
     /// <summary>A <c>DROP TABLE</c> statement.</summary>
     public const string DropTable = "DROP TABLE";
+
+    /// <summary>A <c>DROP SCHEMA</c> SQL namespace removal.</summary>
+    public const string DropSchema = "DROP SCHEMA";
 
     /// <summary>A <c>DROP INDEX</c> statement.</summary>
     public const string DropIndex = "DROP INDEX";
@@ -141,6 +156,15 @@ public static class SqlClauses
     /// <summary>A referential <c>RESTRICT</c> action.</summary>
     public const string Restrict = "RESTRICT";
 
+    /// <summary>Assigns NULL through a foreign-key deletion action.</summary>
+    public const string SetNull = "SET NULL";
+
+    /// <summary>Assigns defaults through a foreign-key deletion action.</summary>
+    public const string SetDefault = "SET DEFAULT";
+
+    /// <summary>Checks foreign-key references at statement end.</summary>
+    public const string NoAction = "NO ACTION";
+
     /// <summary>A <c>BEGIN</c> transaction-control statement.</summary>
     public const string Begin = "BEGIN";
 
@@ -150,6 +174,6 @@ public static class SqlClauses
     /// <summary>A <c>ROLLBACK</c> transaction-control statement.</summary>
     public const string Rollback = "ROLLBACK";
 
-    /// <summary>The optional <c>TRANSACTION</c> keyword on transaction-control statements.</summary>
+    /// <summary>The <c>TRANSACTION</c> keyword, required after <c>START</c> and optional (with <c>WORK</c> as a synonym) after <c>BEGIN</c>, <c>COMMIT</c>, or <c>ROLLBACK</c>.</summary>
     public const string Transaction = "TRANSACTION";
 }

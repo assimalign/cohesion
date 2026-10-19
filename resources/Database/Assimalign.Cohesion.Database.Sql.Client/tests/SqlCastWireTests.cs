@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
 
@@ -249,7 +250,7 @@ public sealed class SqlCastWireTests
         updated.ShouldHaveSingleItem()["value"].ShouldBeOfType<string>().ShouldBe("7");
     }
 
-    /// <summary>Invalid values, overflow, discarded fractions, and truncation fail through the client.</summary>
+    /// <summary>Invalid values, overflow, and fractional integer conversions fail through the client.</summary>
     /// <param name="expression">The invalid CAST expression.</param>
     /// <returns>The asynchronous test operation.</returns>
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - CAST: invalid values return execution failures over the wire")]
@@ -267,10 +268,8 @@ public sealed class SqlCastWireTests
     [InlineData("CAST(0.00000000000000000000000000001 AS DECIMAL)")]
     [InlineData("CAST('1.5' AS INT)")]
     [InlineData("CAST(1.5 AS INT)")]
-    [InlineData("CAST('12.34' AS DECIMAL(3, 1))")]
+    [InlineData("CAST('99.95' AS DECIMAL(3, 1))")]
     [InlineData("CAST('123.4' AS DECIMAL(3, 1))")]
-    [InlineData("CAST(123 AS VARCHAR(2))")]
-    [InlineData("CAST('abc' AS VARCHAR(2))")]
     [InlineData("CAST(TRUE AS INT)")]
     [InlineData("CAST(1 AS BOOLEAN)")]
     public async Task QueryAsync_InvalidValue_ShouldReturnExecutionFailure(string expression)
@@ -287,14 +286,258 @@ public sealed class SqlCastWireTests
         failure.Message.ShouldContain("CAST", Case.Sensitive);
     }
 
-    /// <summary>Unknown types, unsupported targets, and illegal modifiers fail before any rows are read.</summary>
+    /// <summary>Explicit modifiers round decimals, truncate text, and preserve the precision-overflow evaluation code.</summary>
+    /// <returns>The asynchronous test operation.</returns>
+    [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - CAST: modifiers round and truncate while numeric overflow carries its code")]
+    public async Task QueryAsync_TypeModifiers_ShouldBoundValuesAndCodeOverflow()
+    {
+        // Arrange
+        await using var harness = await SqlClientTestHarness.StartAsync();
+        await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
+
+        // Act
+        SqlResultSet result = await connection.QueryAsync("SELECT CAST('12.34' AS DECIMAL(3, 1)), " +
+            "CAST('12.35' AS DECIMAL(3, 1)), CAST('-12.35' AS DECIMAL(3, 1)), " +
+            "CAST(123 AS VARCHAR(2)), CAST('abc' AS VARCHAR(2)) FROM users WHERE id = 1",
+            cancellationToken: SqlClientTestHarness.Timeout());
+        var error = await Should.ThrowAsync<SqlClientException>(async () => await connection.QueryAsync(
+            "SELECT CAST('99.95' AS DECIMAL(3, 1)) FROM users WHERE id = 1", cancellationToken: SqlClientTestHarness.Timeout()));
+
+        // Assert
+        SqlRow row = result.ShouldHaveSingleItem();
+        row[0].ShouldBe(12.3m);
+        row[1].ShouldBe(12.4m);
+        row[2].ShouldBe(-12.4m);
+        row[3].ShouldBe("12");
+        row[4].ShouldBe("ab");
+        error.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
+        error.Message.ShouldStartWith("COHSQLE002:", Case.Sensitive);
+        error.ConnectionUsable.ShouldBeTrue();
+    }
+
+    /// <summary>Text rounds at the target scale before Decimal conversion on every wire write and CAST path.</summary>
+    /// <param name="text">The full precision numeric text.</param>
+    /// <param name="target">The bounded numeric destination.</param>
+    /// <param name="expectedText">The value after one rounding operation.</param>
+    /// <returns>The asynchronous test operation.</returns>
+    [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - NUMERIC: full precision text rounds once across writes, CAST and defaults")]
+    [InlineData("1.23499999999999999999999999995", "NUMERIC(4, 2)", "1.23")]
+    [InlineData("9.94999999999999999999999999999", "NUMERIC(2, 1)", "9.9")]
+    [InlineData("-1.23499999999999999999999999995", "NUMERIC(4, 2)", "-1.23")]
+    [InlineData("-9.94999999999999999999999999999", "NUMERIC(2, 1)", "-9.9")]
+    [InlineData("-1.23500000000000000000000000000", "NUMERIC(4, 2)", "-1.24")]
+    [InlineData(" \t+1.23499999999999999999999999995\r\n", "NUMERIC(4, 2)", "1.23")]
+    public async Task ExecuteAsync_FullPrecisionNumericText_ShouldRoundOnceAcrossEveryPath(
+        string text, string target, string expectedText)
+    {
+        // Arrange
+        await using var harness = await SqlClientTestHarness.StartAsync();
+        await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
+        decimal expected = decimal.Parse(expectedText, CultureInfo.InvariantCulture);
+        await connection.ExecuteAsync($"CREATE TABLE numeric_text (id INT PRIMARY KEY, value {target} DEFAULT '{text}')",
+            cancellationToken: SqlClientTestHarness.Timeout());
+        await connection.ExecuteAsync("CREATE TABLE numeric_source (id INT PRIMARY KEY, value TEXT)",
+            cancellationToken: SqlClientTestHarness.Timeout());
+        await connection.ExecuteAsync(new SqlCommand("INSERT INTO numeric_source VALUES (3, @value)").WithParameter("value", text),
+            SqlClientTestHarness.Timeout());
+        await connection.ExecuteAsync("CREATE TABLE numeric_backfill (id INT PRIMARY KEY)",
+            cancellationToken: SqlClientTestHarness.Timeout());
+        await connection.ExecuteAsync("INSERT INTO numeric_backfill VALUES (1)",
+            cancellationToken: SqlClientTestHarness.Timeout());
+
+        // Act
+        await connection.ExecuteAsync($"INSERT INTO numeric_text VALUES (1, '{text}')",
+            cancellationToken: SqlClientTestHarness.Timeout());
+        await connection.ExecuteAsync(new SqlCommand("INSERT INTO numeric_text VALUES (2, @value)").WithParameter("value", text),
+            SqlClientTestHarness.Timeout());
+        await connection.ExecuteAsync("INSERT INTO numeric_text SELECT id, value FROM numeric_source",
+            cancellationToken: SqlClientTestHarness.Timeout());
+        await connection.ExecuteAsync("INSERT INTO numeric_text VALUES (4, 0)",
+            cancellationToken: SqlClientTestHarness.Timeout());
+        await connection.ExecuteAsync(new SqlCommand("UPDATE numeric_text SET value = @value WHERE id = 4").WithParameter("value", text),
+            SqlClientTestHarness.Timeout());
+        await connection.ExecuteAsync("INSERT INTO numeric_text (id) VALUES (5)",
+            cancellationToken: SqlClientTestHarness.Timeout());
+        await connection.ExecuteAsync($"ALTER TABLE numeric_backfill ADD COLUMN value {target} DEFAULT '{text}'",
+            cancellationToken: SqlClientTestHarness.Timeout());
+        await connection.ExecuteAsync("INSERT INTO numeric_backfill (id) VALUES (2)",
+            cancellationToken: SqlClientTestHarness.Timeout());
+        SqlResultSet casts = await connection.QueryAsync(new SqlCommand(
+            $"SELECT CAST('{text}' AS {target}), CAST(@value AS {target}) FROM users WHERE id = 1")
+            .WithParameter("value", text), SqlClientTestHarness.Timeout());
+
+        // Assert
+        SqlResultSet stored = await connection.QueryAsync("SELECT value FROM numeric_text ORDER BY id",
+            cancellationToken: SqlClientTestHarness.Timeout());
+        stored.Select(row => row[0]).ShouldBe(new object?[] { expected, expected, expected, expected, expected });
+        SqlRow cast = casts.ShouldHaveSingleItem();
+        cast[0].ShouldBeOfType<decimal>().ShouldBe(expected);
+        cast[1].ShouldBeOfType<decimal>().ShouldBe(expected);
+        SqlResultSet backfilled = await connection.QueryAsync("SELECT value FROM numeric_backfill ORDER BY id",
+            cancellationToken: SqlClientTestHarness.Timeout());
+        backfilled.Select(row => row[0]).ShouldBe(new object?[] { expected, expected });
+    }
+
+    /// <summary>Rounding overflow and text that cannot fit an unscaled Decimal have the same code over the wire.</summary>
+    /// <param name="text">The rejected numeric text.</param>
+    /// <param name="target">The numeric destination.</param>
+    /// <returns>The asynchronous test operation.</returns>
+    [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - NUMERIC: rounding and representation failures keep their code across paths")]
+    [InlineData("9.995", "NUMERIC(3, 2)")]
+    [InlineData("-9.995", "NUMERIC(3, 2)")]
+    [InlineData("1.23499999999999999999999999995", "NUMERIC")]
+    [InlineData("79228162514264337593543950336", "NUMERIC")]
+    public async Task ExecuteAsync_UnrepresentableNumericText_ShouldCodeEveryFailureAndPreserveRows(string text, string target)
+    {
+        // Arrange
+        await using var harness = await SqlClientTestHarness.StartAsync();
+        await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
+        await connection.ExecuteAsync($"CREATE TABLE numeric_rejected (id INT PRIMARY KEY, value {target})",
+            cancellationToken: SqlClientTestHarness.Timeout());
+        await connection.ExecuteAsync("INSERT INTO numeric_rejected VALUES (1, 0)",
+            cancellationToken: SqlClientTestHarness.Timeout());
+        await connection.ExecuteAsync("CREATE TABLE rejected_source (id INT PRIMARY KEY, value TEXT)",
+            cancellationToken: SqlClientTestHarness.Timeout());
+        await connection.ExecuteAsync(new SqlCommand("INSERT INTO rejected_source VALUES (2, @value)").WithParameter("value", text),
+            SqlClientTestHarness.Timeout());
+        SqlCommand[] commands =
+        [
+            new($"INSERT INTO numeric_rejected VALUES (2, '{text}')"),
+            new SqlCommand("INSERT INTO numeric_rejected VALUES (2, @value)").WithParameter("value", text),
+            new("INSERT INTO numeric_rejected SELECT id, value FROM rejected_source"),
+            new SqlCommand("UPDATE numeric_rejected SET value = @value WHERE id = 1").WithParameter("value", text),
+            new($"SELECT CAST('{text}' AS {target}) FROM users WHERE id = 1"),
+            new SqlCommand($"SELECT CAST(@value AS {target}) FROM users WHERE id = 1").WithParameter("value", text),
+            new($"CREATE TABLE rejected_default (id INT, value {target} DEFAULT '{text}')"),
+            new($"ALTER TABLE numeric_rejected ADD COLUMN extra {target} DEFAULT '{text}'"),
+        ];
+
+        // Act
+        var failures = new List<SqlClientException>();
+        foreach (SqlCommand command in commands)
+        {
+            failures.Add(await Should.ThrowAsync<SqlClientException>(async () =>
+                await connection.ExecuteAsync(command, SqlClientTestHarness.Timeout())));
+        }
+
+        // Assert
+        foreach (SqlClientException failure in failures)
+        {
+            failure.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
+            failure.Message.ShouldStartWith("COHSQLE002:", Case.Sensitive);
+            failure.ConnectionUsable.ShouldBeTrue();
+        }
+        SqlResultSet rows = await connection.QueryAsync("SELECT * FROM numeric_rejected",
+            cancellationToken: SqlClientTestHarness.Timeout());
+        rows.Columns.Select(column => column.Name).ShouldBe(new[] { "id", "value" });
+        SqlRow row = rows.ShouldHaveSingleItem();
+        row["id"].ShouldBe(1);
+        row["value"].ShouldBe(0m);
+    }
+
+    /// <summary>Exponent text remains outside the shared NUMERIC grammar used by CAST, writes and defaults.</summary>
+    /// <returns>The asynchronous test operation.</returns>
+    [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - NUMERIC: exponent text is rejected consistently with CAST")]
+    public async Task ExecuteAsync_NumericExponentText_ShouldRejectAcrossEveryPath()
+    {
+        // Arrange
+        await using var harness = await SqlClientTestHarness.StartAsync();
+        await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
+        await connection.ExecuteAsync("CREATE TABLE numeric_exponent (id INT PRIMARY KEY, value NUMERIC(4, 0))",
+            cancellationToken: SqlClientTestHarness.Timeout());
+        await connection.ExecuteAsync("INSERT INTO numeric_exponent VALUES (1, 0)",
+            cancellationToken: SqlClientTestHarness.Timeout());
+        string[] statements =
+        [
+            "INSERT INTO numeric_exponent VALUES (2, '1.5e2')",
+            "INSERT INTO numeric_exponent VALUES (2, @value)",
+            "INSERT INTO numeric_exponent SELECT 2, name FROM users WHERE id = 1",
+            "UPDATE numeric_exponent SET value = @value WHERE id = 1",
+            "SELECT CAST(@value AS NUMERIC(4, 0)) FROM users WHERE id = 1",
+            "CREATE TABLE exponent_default (id INT, value NUMERIC(4, 0) DEFAULT '1.5e2')",
+            "ALTER TABLE numeric_exponent ADD COLUMN extra NUMERIC(4, 0) DEFAULT '1.5e2'",
+        ];
+        await connection.ExecuteAsync("UPDATE users SET name = '1.5e2' WHERE id = 1",
+            cancellationToken: SqlClientTestHarness.Timeout());
+
+        // Act
+        var failures = new List<SqlClientException>();
+        foreach (string statement in statements)
+        {
+            failures.Add(await Should.ThrowAsync<SqlClientException>(async () => await connection.ExecuteAsync(
+                new SqlCommand(statement).WithParameter("value", "1.5e2"), SqlClientTestHarness.Timeout())));
+        }
+
+        // Assert
+        foreach (SqlClientException failure in failures)
+        {
+            failure.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
+            failure.ConnectionUsable.ShouldBeTrue();
+        }
+        SqlResultSet rows = await connection.QueryAsync("SELECT value FROM numeric_exponent",
+            cancellationToken: SqlClientTestHarness.Timeout());
+        rows.ShouldHaveSingleItem()[0].ShouldBe(0m);
+    }
+
+    /// <summary>
+    /// A name the engine's type catalog does not know fails while planning with <c>COHSQLE010</c>,
+    /// before any row is read: the parser leaves a name that is not a built-in type to the engine (E3).
+    /// </summary>
+    /// <returns>The asynchronous test operation.</returns>
+    [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - CAST: an unknown target type is a coded execution failure before execution")]
+    public async Task QueryAsync_UnknownTarget_ShouldBeCodedBeforeExecution()
+    {
+        // Arrange
+        await using var harness = await SqlClientTestHarness.StartAsync();
+        await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
+
+        // Act
+        SqlClientException failure = await Should.ThrowAsync<SqlClientException>(async () =>
+            await connection.QueryAsync("SELECT CAST(name AS NOTATYPE) AS converted FROM users WHERE id = 0",
+                cancellationToken: SqlClientTestHarness.Timeout()));
+
+        // Assert
+        failure.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
+        failure.ConnectionUsable.ShouldBeTrue();
+        failure.Message.ShouldStartWith("COHSQLE010: CAST target: type 'NOTATYPE' does not exist", Case.Sensitive);
+    }
+
+    /// <summary>
+    /// Text reaches the date, time, UUID and binary floating-point types through <c>CAST</c> (E3), and
+    /// the client decodes each value as its type.
+    /// </summary>
+    /// <returns>The asynchronous test operation.</returns>
+    [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - CAST: text converts to DATE, TIME, TIMESTAMP, TIMESTAMPTZ, INTERVAL, UUID, REAL and DOUBLE over the wire")]
+    public async Task QueryAsync_TextToTypedTargets_ShouldConvert()
+    {
+        // Arrange
+        await using var harness = await SqlClientTestHarness.StartAsync();
+        await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
+
+        // Act
+        SqlRow row = (await connection.QueryAsync(
+            "SELECT CAST('2026-02-01' AS DATE) AS d, CAST('13:45:30' AS TIME) AS t, CAST('2026-02-01T13:45:30' AS TIMESTAMP) AS ts, " +
+            "CAST('2026-02-01T13:45:30+02:00' AS TIMESTAMPTZ) AS tz, CAST('01:30:00' AS INTERVAL) AS i, " +
+            "CAST('6f9619ff-8b86-d011-b42d-00c04fc964ff' AS UUID) AS u, CAST('1.5' AS REAL) AS r, CAST(id AS DOUBLE) AS f " +
+            "FROM users WHERE id = 1", cancellationToken: SqlClientTestHarness.Timeout())).ShouldHaveSingleItem();
+
+        // Assert
+        row["d"].ShouldBe(new DateOnly(2026, 2, 1));
+        row["t"].ShouldBe(new TimeOnly(13, 45, 30));
+        row["ts"].ShouldBe(new DateTime(2026, 2, 1, 13, 45, 30));
+        row["tz"].ShouldBe(new DateTimeOffset(2026, 2, 1, 13, 45, 30, TimeSpan.FromHours(2)));
+        row["i"].ShouldBe(TimeSpan.FromMinutes(90));
+        row["u"].ShouldBe(Guid.Parse("6f9619ff-8b86-d011-b42d-00c04fc964ff"));
+        row["r"].ShouldBe(1.5f);
+        row["f"].ShouldBe(1d);
+    }
+
+    /// <summary>Illegal modifiers fail before any rows are read.</summary>
     /// <param name="typeName">The invalid target specification.</param>
     /// <param name="diagnostic">The precise parser diagnostic.</param>
     /// <returns>The asynchronous test operation.</returns>
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - CAST: invalid target specifications return parse failures")]
-    [InlineData("NOTATYPE", "SQL0004")]
-    [InlineData("FLOAT", "SQL0005")]
-    [InlineData("DATE", "SQL0005")]
+    [InlineData("DATE(3)", "SQL0005")]
     [InlineData("INT(3)", "SQL0005")]
     [InlineData("VARCHAR(0)", "SQL0005")]
     [InlineData("VARCHAR(3, 1)", "SQL0005")]
@@ -314,16 +557,16 @@ public sealed class SqlCastWireTests
         failure.Message.ShouldContain(diagnostic, Case.Sensitive);
     }
 
-    /// <summary>Unsupported wire source types cannot escape conversion by targeting text.</summary>
+    /// <summary>New source families produce canonical text over the wire.</summary>
     /// <param name="source">The unsupported source identity.</param>
     /// <returns>The asynchronous test operation.</returns>
-    [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - CAST: unsupported source types are rejected over the wire")]
+    [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - CAST: new source families render canonical text over the wire")]
     [InlineData(DatabaseType.Float32)]
     [InlineData(DatabaseType.Float64)]
     [InlineData(DatabaseType.Guid)]
     [InlineData(DatabaseType.Binary)]
     [InlineData(DatabaseType.DateTime)]
-    public async Task QueryAsync_UnsupportedSource_ShouldReturnExecutionFailure(DatabaseType source)
+    public async Task QueryAsync_NewSourceFamily_ShouldReturnCanonicalText(DatabaseType source)
     {
         // Arrange
         await using var harness = await SqlClientTestHarness.StartAsync();
@@ -340,11 +583,98 @@ public sealed class SqlCastWireTests
         var command = new SqlCommand("SELECT CAST(@value AS VARCHAR(100)) AS converted FROM users WHERE id = 1")
             .WithParameter("value", value);
 
-        // Act / Assert
-        SqlClientException failure = await Should.ThrowAsync<SqlClientException>(async () =>
-            await connection.QueryAsync(command, SqlClientTestHarness.Timeout()));
+        // Act
+        var result = await connection.QueryAsync(command, SqlClientTestHarness.Timeout());
+
+        // Assert
+        result.Columns[0].Type.ShouldBe(DatabaseType.String);
+        string expected = source switch
+        {
+            DatabaseType.Float32 or DatabaseType.Float64 => "42",
+            DatabaseType.Guid => "00000000-0000-0000-0000-000000000000",
+            DatabaseType.Binary => "\\x2a",
+            DatabaseType.DateTime => "2026-01-01 00:00:00",
+            _ => throw new ArgumentOutOfRangeException(nameof(source)),
+        };
+        result.ShouldHaveSingleItem()[0].ShouldBe(expected);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - CAST: every new family preserves values and metadata on the wire")]
+    public async Task QueryAsync_NewCastFamilies_ShouldPreserveValuesAndMetadata()
+    {
+        // Arrange
+        await using var harness = await SqlClientTestHarness.StartAsync();
+        await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
+        string json = " {\"雪\": [1, true]} ";
+
+        // Act
+        var result = await connection.QueryAsync(
+            "SELECT CAST(CAST('1.25' AS DOUBLE PRECISION) AS DECIMAL), " +
+            "CAST(DATE '2024-01-01' AS TIMESTAMP WITH TIME ZONE), " +
+            "CAST(TIMESTAMPTZ '2024-01-01 01:00:00+02:00' AS TIMESTAMP), " +
+            "CAST(TIME '01:02:03.1234567' AS INTERVAL), CAST(INTERVAL '1 hour' AS TIME), " +
+            "CAST('00112233-4455-6677-8899-aabbccddeeff' AS UNIQUEIDENTIFIER), " +
+            "CAST('\\x00ff' AS BYTEA), CAST('雪' AS BINARY VARYING(3)), " +
+            $"CAST('{json}' AS JSON), CAST(CAST('{json}' AS JSON) AS JSONB), " +
+            $"CAST(CAST('{json}' AS JSONB) AS JSON), TRUE || '', DATE '2024-01-01' || '' " +
+            "FROM users WHERE id = 1", cancellationToken: SqlClientTestHarness.Timeout());
+
+        // Assert
+        result.Columns.Select(column => column.Type).ShouldBe(new[]
+        {
+            DatabaseType.Decimal, DatabaseType.DateTimeOffset, DatabaseType.DateTime, DatabaseType.TimeSpan,
+            DatabaseType.Time, DatabaseType.Guid, DatabaseType.Binary, DatabaseType.Binary,
+            DatabaseType.Json, DatabaseType.JsonBinary, DatabaseType.Json, DatabaseType.String, DatabaseType.String,
+        });
+        var row = result.ShouldHaveSingleItem();
+        row[0].ShouldBe(1.25m);
+        row[1].ShouldBe(new DateTimeOffset(2024, 1, 1, 0, 0, 0, TimeSpan.Zero));
+        row[2].ShouldBeOfType<DateTime>().ShouldBe(new DateTime(2023, 12, 31, 23, 0, 0));
+        row[2].ShouldBeOfType<DateTime>().Kind.ShouldBe(DateTimeKind.Unspecified);
+        row[3].ShouldBe(new TimeSpan(1, 2, 3).Add(TimeSpan.FromTicks(1234567)));
+        row[4].ShouldBe(new TimeOnly(1, 0));
+        row[5].ShouldBe(Guid.Parse("00112233-4455-6677-8899-aabbccddeeff"));
+        row[6].ShouldBe(new byte[] { 0, 255 });
+        row[7].ShouldBe(System.Text.Encoding.UTF8.GetBytes("雪"));
+        row[8].ShouldBe(json);
+        row[9].ShouldBe(System.Text.Encoding.UTF8.GetBytes(json));
+        row[10].ShouldBe(json);
+        row[11].ShouldBe("TRUE");
+        row[12].ShouldBe("2024-01-01");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - CAST: new conversion faults and float arithmetic preserve the connection")]
+    [InlineData("CAST('2024-02-30' AS DATE)")]
+    [InlineData("CAST('1e400' AS DOUBLE PRECISION)")]
+    [InlineData("CAST('1e-50' AS REAL)")]
+    [InlineData("CAST(CAST('1.5' AS DOUBLE PRECISION) AS INT)")]
+    [InlineData("CAST(CAST('1e300' AS DOUBLE PRECISION) AS REAL)")]
+    [InlineData("CAST(CAST('NaN' AS DOUBLE PRECISION) AS DECIMAL)")]
+    [InlineData("CAST(INTERVAL '25 hours' AS TIME)")]
+    [InlineData("CAST('1 year' AS INTERVAL)")]
+    [InlineData("CAST('\\xZZ' AS BYTEA)")]
+    [InlineData("CAST('{bad' AS JSON)")]
+    [InlineData("CAST('{bad' AS JSONB)")]
+    [InlineData("CAST('00112233-4455-6677-8899-aabbccddeefg' AS UUID)")]
+    [InlineData("CAST('\\x00ff' AS VARBINARY(1))")]
+    [InlineData("CAST(CAST('1' AS JSON) AS INTEGER)")]
+    [InlineData("CAST(X'00' AS JSONB)")]
+    [InlineData("CAST('1e300' AS DOUBLE PRECISION) + 1")]
+    public async Task QueryAsync_NewConversionFailure_ShouldKeepConnectionUsable(string expression)
+    {
+        // Arrange
+        await using var harness = await SqlClientTestHarness.StartAsync();
+        await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
+
+        // Act
+        var failure = await Should.ThrowAsync<SqlClientException>(async () => await connection.QueryAsync(
+            $"SELECT {expression} FROM users WHERE id = 1", cancellationToken: SqlClientTestHarness.Timeout()));
+        var recovered = await connection.QueryAsync("SELECT CAST('42' AS INT) FROM users WHERE id = 1", cancellationToken: SqlClientTestHarness.Timeout());
+
+        // Assert
         failure.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
-        failure.Message.ShouldContain("CAST", Case.Sensitive);
+        failure.ConnectionUsable.ShouldBeTrue();
+        recovered.ShouldHaveSingleItem()[0].ShouldBe(42);
     }
 
     /// <summary>Write storage cannot conceal failed conversions, and a failure leaves CAST usable on the same connection.</summary>

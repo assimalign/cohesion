@@ -23,6 +23,12 @@ flowchart LR
 | `Assimalign.Cohesion.Database.Storage` | Pages, page CRC, storage brackets and journal |
 | `Assimalign.Cohesion.Database` | Shared object ownership vocabulary |
 
+`BlobCatalog.Open` returns the sealed `BlobCatalog`, which has a private constructor; its record
+and codec are internal. The former `IBlobCatalog` interface, `BlobCatalog` static factory and
+internal `DefaultBlobCatalog` collapsed into it (concrete-types plan, phase 4, #1260); the members
+and their argument checks are the implementation's, unchanged. Public metadata records are
+immutable values.
+
 ## Directory and visibility
 
 At open, the catalog scans only owner-zero metadata pages into a directory from ordinal
@@ -32,8 +38,14 @@ Blob.Storage; it never scans chunk content. Each reread takes the kernel page pa
 CRC validation. Candidate writer stamps and logical identities must still match, so reclaimed
 slots or pages cannot make stale directory entries address a different record.
 Lookups discard reclaimed references and remove directory keys whose final reference has been
-reclaimed. Listing performs the same cleanup across the selected metadata names. Live malformed
-records raise a catalog error; a checksum-valid but malformed record is not treated as missing.
+reclaimed. Listing performs the same cleanup across the selected metadata names. A reference is
+reclaimed when `Storage.TryReadRecord` with owner zero says so: its slot was deleted or reverted,
+its metadata page was freed by the purge, or the page was reallocated to a chunk chain or as an
+index node. A page that fails its CRC or cannot be read throws instead (#1342). Before #1342 the
+reread caught only the slot exceptions, so a reference into a freed metadata page failed the
+lookup with "Page N is not allocated" (250 versions of one blob's metadata and a purge pass).
+Live malformed records raise a catalog error; a checksum-valid but malformed record is not
+treated as missing.
 
 Writers acquire model locks in the engine before reaching the catalog. A save tombstones the
 snapshot-visible old metadata record and inserts the new version in one coordinator physical
@@ -43,8 +55,9 @@ deleters. Rollback clears old tombstones and removes newly created records; dire
 observe those physical changes directly. Snapshot-safe purge later reclaims obsolete records.
 
 Open-time recovery scrubs uncommitted stamps before loading the directory. Metadata that
-references an unfinished chain is therefore absent after restart. The factory retains neither
-storage nor coordinator ownership; the engine controls their lifecycle. This assembly contains
+references an unfinished chain is therefore absent after restart. The catalog keeps references
+to the storage and the coordinator but does not own them; the engine that opens it disposes them.
+This assembly contains
 no local pager, journal, transaction manager, or model-lock implementation.
 
 ## Metadata disk format, version 1

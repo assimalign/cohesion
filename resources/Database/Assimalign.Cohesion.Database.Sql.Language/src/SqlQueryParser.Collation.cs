@@ -6,14 +6,14 @@ public sealed partial class SqlQueryParser
 {
     private SqlExpression ParseCollate(ref TokenLexer lexer)
     {
-        var expression = ParsePrimary(ref lexer);
-        while (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "COLLATE"))
+        var expression = ParseUnary(ref lexer);
+        while (!_columnDefault && !IsAtEnd(ref lexer) && IsKeyword(ref lexer, "COLLATE"))
         {
             int position = lexer.Current.Position;
             Advance(ref lexer);
             string name = ParseCollationName(ref lexer);
-            expression = new SqlCollateExpression(expression, name,
-                Location.Create(1, 1, position, _lastTokenEnd));
+            expression = Nest(ref lexer, new SqlCollateExpression(expression, name,
+                Location.Create(1, 1, position, _lastTokenEnd)));
         }
         return expression;
     }

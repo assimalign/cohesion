@@ -125,13 +125,13 @@ a name, token, path, location, HTTP field name or value, or an identifier. Make 
 
 ### `.NET 10 extension(...)` syntax for extension members
 ```csharp
-public static class DatabaseExtensions
+public static class CacheExtensions
 {
     extension(IServiceCollection services)
     {
-        public IServiceCollection AddDatabase()
+        public IServiceCollection AddCache()
         {
-            services.AddSingleton<IDatabase, Database>();
+            services.AddSingleton<ICache, MemoryCache>();
             return services;
         }
     }
@@ -177,13 +177,13 @@ Standing architectural commitment. No exceptions without explicit user confirmat
 ### Public classes without XML documentation
 ```csharp
 // ❌ WRONG
-public interface IDatabase { }
+public interface ICache { }
 
 // ✅ CORRECT
 /// <summary>
-/// Provides database access functionality.
+/// Provides cache access functionality.
 /// </summary>
-public interface IDatabase { }
+public interface ICache { }
 ```
 
 ### `ThrowHelper` / `ThrowHelpers` types
@@ -233,7 +233,7 @@ patterns, so they stay.
 ### Types
 | Kind | Convention | Example |
 |---|---|---|
-| Interface | `I` prefix | `IDatabase`, `IConfigurationProvider` |
+| Interface | `I` prefix | `ICache`, `IConfigurationProvider` |
 | Class | PascalCase, noun | `DatabaseEngine`, `ConfigurationBuilder` |
 | Exception | `Exception` suffix | `DatabaseConnectionException` |
 | Extension container | `Extensions` suffix | `ServiceCollectionExtensions` |
@@ -351,9 +351,11 @@ namespace Assimalign.Cohesion.Database;
    ```
 2. **Public APIs use interfaces.**
    ```csharp
-   public interface IDatabase { }
-   internal class Database : IDatabase { }
+   public interface ICertificateManager { }
+   internal sealed class CertificateManager : ICertificateManager { }
    ```
+   Exception: `resources/Database/**` is concrete-first and follows `database-area.md`
+   instead (owner decision 2026-10-04).
 3. **Extension containers:** always `public static`, with members inside `extension(...)`.
 4. **Nested types:** match outer type visibility unless explicitly different.
 5. **Before introducing a new abstraction, check whether one already exists** in the same service root or shared library. Placeholder folders and placeholder projects are not final architecture boundaries — add projects when needed to preserve modularity and clean dependency flow.
@@ -518,6 +520,8 @@ internal sealed class QuicMultiplexedConnection : MultiplexedConnection { /* ...
 ```
 
 The interface remains the canonical public surface; concrete types derive from the base and stay `internal` where possible. Use the explicit-implementation forwarding only where the base can offer a richer, concrete-typed member; members without a richer counterpart are declared `public`/`protected abstract` directly.
+
+**Exception: Database engines are the reverse.** In `resources/Database/**` the abstract base is the canonical public surface, no interface ships beside it, and leaves are sealed. A base exists only where real variants exist, where Hosting must stay model-agnostic, or where a lower assembly drives a seam that a higher assembly or the application implements. See `database-area.md` (owner decision 2026-10-04). Every other area keeps this rule.
 
 ## Service composition
 

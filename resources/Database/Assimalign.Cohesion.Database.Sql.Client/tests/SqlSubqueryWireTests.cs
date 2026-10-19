@@ -11,6 +11,83 @@ namespace Assimalign.Cohesion.Database.Sql.Client.Tests;
 /// <summary>Exercises executable subquery forms through SqlDatabaseServer and the production typed client.</summary>
 public sealed class SqlSubqueryWireTests
 {
+    [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - WITH: query and all DML forms execute over the wire")]
+    public async Task ExecuteAsync_CommonTables_ShouldReturnRowsAndExactAffectedCounts()
+    {
+        // Arrange
+        await using var harness = await SqlClientTestHarness.StartAsync();
+        await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
+
+        // Act / Assert
+        (await QueryAsync(connection, "WITH picked AS (SELECT id FROM users) SELECT id FROM picked ORDER BY id")).Select(row => row[0]).ShouldBe(new object?[] { 1, 2 });
+        (await ExecuteAsync(connection, "WITH picked AS (SELECT id + 10 AS id, name, score FROM users) INSERT INTO users SELECT * FROM picked")).ShouldBe(2);
+        (await ExecuteAsync(connection, "INSERT INTO users WITH picked AS (SELECT id + 20 AS id, name, score FROM users WHERE id < 10) SELECT * FROM picked")).ShouldBe(2);
+        (await ExecuteAsync(connection, "WITH picked AS (SELECT id FROM users WHERE id > 10) UPDATE users SET name = 'changed' WHERE id IN (SELECT id FROM picked)")).ShouldBe(4);
+        (await ExecuteAsync(connection, "WITH picked AS (SELECT id FROM users WHERE name = 'changed') DELETE FROM users WHERE id IN (SELECT id FROM picked)")).ShouldBe(4);
+        (await QueryAsync(connection, "SELECT id FROM users ORDER BY id")).Select(row => row[0]).ShouldBe(new object?[] { 1, 2 });
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - Derived tables: blank output names fail the statement and preserve the transaction")]
+    [InlineData("SELECT * FROM (SELECT id AS \"\" FROM users) d")]
+    [InlineData("SELECT * FROM (SELECT id FROM users) d (\" \")")]
+    public async Task QueryAsync_BlankDerivedName_ShouldKeepConnectionUsable(string sql)
+    {
+        // Arrange
+        await using var harness = await SqlClientTestHarness.StartAsync();
+        await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
+        await ExecuteAsync(connection, "BEGIN TRANSACTION");
+        await ExecuteAsync(connection, "UPDATE users SET name = 'pending' WHERE id = 1");
+
+        // Act
+        var error = await Should.ThrowAsync<SqlClientException>(() => QueryAsync(connection, sql));
+
+        // Assert
+        error.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
+        error.ConnectionUsable.ShouldBeTrue();
+        error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE013");
+        (await QueryAsync(connection, "SELECT name FROM users WHERE id = 1")).ShouldHaveSingleItem()[0].ShouldBe("pending");
+        await ExecuteAsync(connection, "ROLLBACK");
+        (await QueryAsync(connection, "SELECT name FROM users WHERE id = 1")).ShouldHaveSingleItem()[0].ShouldBe("ada");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - Subquery: derived joins and DML predicates execute over the wire")]
+    public async Task ExecuteAsync_DerivedAndDmlSubqueries_ShouldReturnRowsAndAffectedCounts()
+    {
+        // Arrange
+        await using var harness = await SqlClientTestHarness.StartAsync();
+        await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
+
+        // Act
+        var rows = await QueryAsync(connection, "SELECT u.id, d.label FROM users u JOIN (SELECT id, name FROM users WHERE id = 1) d (key_id, label) ON u.id = d.key_id");
+        var updated = await ExecuteAsync(connection, "UPDATE users SET name = 'changed' WHERE id IN (SELECT id FROM users WHERE id = 1)");
+        var deleted = await ExecuteAsync(connection, "DELETE FROM users WHERE EXISTS (SELECT id FROM users WHERE name = 'changed')");
+
+        // Assert
+        rows.ShouldHaveSingleItem()[0].ShouldBe(1);
+        rows[0][1].ShouldBe("ada");
+        updated.ShouldBe(1);
+        deleted.ShouldBe(2);
+        (await QueryAsync(connection, "SELECT id FROM users")).ShouldBeEmpty();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - Subquery: DML scalar cardinality failure preserves rows and connection")]
+    public async Task ExecuteAsync_DmlScalarCardinality_ShouldFailBeforeMutation()
+    {
+        // Arrange
+        await using var harness = await SqlClientTestHarness.StartAsync();
+        await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
+
+        // Act
+        var failure = await Should.ThrowAsync<SqlClientException>(() => ExecuteAsync(connection,
+            "DELETE FROM users WHERE id = (SELECT id FROM users)"));
+
+        // Assert
+        failure.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
+        failure.ConnectionUsable.ShouldBeTrue();
+        failure.Message.ShouldContain("more than one row");
+        (await QueryAsync(connection, "SELECT id FROM users ORDER BY id")).Select(row => row[0]).ShouldBe(new object?[] { 1, 2 });
+    }
+
     /// <summary>Wire execution preserves membership matches and the NOT IN null trap.</summary>
     [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - Subquery: IN NOT IN nulls and empty sources execute over the wire")]
     public async Task QueryAsync_Membership_ShouldPreserveNullAndEmptySemanticsOverTheWire()
@@ -175,6 +252,9 @@ public sealed class SqlSubqueryWireTests
             () => ExecuteAsync(connection, "INSERT INTO target_rows SELECT id FROM source_rows"));
         literalError.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
         selectError.Kind.ShouldBe(literalError.Kind);
+        string code = kind == "UNIQUE" ? "COHSQLE037" : "COHSQLE039";
+        literalError.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(code);
+        selectError.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(code);
         selectError.Message.ShouldContain(kind);
         selectError.Message.ShouldBe(literalError.Message);
         (await QueryAsync(connection, "SELECT id FROM target_rows")).ShouldBeEmpty();
@@ -183,14 +263,14 @@ public sealed class SqlSubqueryWireTests
     /// <summary>Excluded forms have the capability diagnostic through the server rather than a late executor rejection.</summary>
     /// <param name="statement">The unsupported form.</param>
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - Subquery: excluded forms report COHDBL001 over the wire")]
-    [InlineData("SELECT u.id FROM users u WHERE EXISTS (SELECT v.id FROM users v WHERE v.id = u.id)")]
     [InlineData("SELECT id FROM users WHERE id = ANY (SELECT id FROM users)")]
     [InlineData("SELECT id FROM users WHERE id = ALL (SELECT id FROM users)")]
     [InlineData("SELECT id FROM users WHERE id = SOME (SELECT id FROM users)")]
-    [InlineData("SELECT d.id FROM (SELECT id FROM users) d")]
-    [InlineData("WITH picked AS (SELECT id FROM users) SELECT id FROM picked")]
-    [InlineData("UPDATE users SET name = 'changed' WHERE id IN (SELECT id FROM users)")]
-    [InlineData("DELETE FROM users WHERE EXISTS (SELECT id FROM users)")]
+
+    [InlineData("WITH RECURSIVE picked AS (SELECT id FROM users) SELECT id FROM picked")]
+    [InlineData("WITH d AS (DELETE FROM users RETURNING *) SELECT * FROM d")]
+
+
     public async Task QueryAsync_ExcludedForm_ShouldReportCapabilityDiagnosticOverTheWire(string statement)
     {
         // Arrange
@@ -204,26 +284,66 @@ public sealed class SqlSubqueryWireTests
         (await QueryAsync(connection, "SELECT id FROM users ORDER BY id")).Select(row => row[0]).ShouldBe(new object?[] { 1, 2 });
     }
 
-    /// <summary>Unqualified names that require an outer scope receive the same capability diagnostic as qualified correlation.</summary>
-    [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - Subquery: unqualified outer references report COHDBL001 over the wire")]
-    public async Task QueryAsync_UnqualifiedCorrelation_ShouldReportCapabilityDiagnosticOverTheWire()
+    /// <summary>Unqualified names resolve to the enclosing scope and return its values over the wire.</summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - Subquery: unqualified outer references execute over the wire")]
+    public async Task QueryAsync_UnqualifiedCorrelation_ShouldReturnBoundOuterValuesOverTheWire()
     {
         // Arrange
         await using var harness = await SqlClientTestHarness.StartAsync();
         await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
         await ExecuteAsync(connection, "CREATE TABLE inner_rows (id INT)");
-        await ExecuteAsync(connection, "INSERT INTO inner_rows VALUES (1)");
+        await ExecuteAsync(connection, "INSERT INTO inner_rows VALUES (100)");
 
         // Act / Assert
-        var error = await Should.ThrowAsync<SqlClientException>(() => QueryAsync(connection,
-            "SELECT id FROM users WHERE EXISTS (SELECT id FROM inner_rows WHERE id = score)"));
-        error.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
-        error.Message.ShouldContain("COHDBL001", Case.Sensitive);
-        error.Message.ShouldContain("correlat");
+        (await QueryAsync(connection,
+            "SELECT id FROM users WHERE EXISTS (SELECT id FROM inner_rows WHERE id = score)"))
+            .ShouldHaveSingleItem()[0].ShouldBe(1);
         (await QueryAsync(connection, "SELECT id FROM users ORDER BY id")).Select(row => row[0]).ShouldBe(new object?[] { 1, 2 });
     }
 
-    private static async Task SeedAsync(ISqlConnection connection)
+    [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - Correlation: EXISTS IN scalar and DML preserve per-row results and counts")]
+    public async Task QueryAsync_CorrelatedSubqueries_ShouldExecuteEveryFormOverTheWire()
+    {
+        // Arrange
+        await using var harness = await SqlClientTestHarness.StartAsync();
+        await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
+        await SeedAsync(connection);
+
+        // Act / Assert
+        var rows = await QueryAsync(connection, "SELECT c.id, (SELECT x.id FROM choices x WHERE x.id = c.id), " +
+            "c.id IN (SELECT x.id FROM choices x WHERE x.id = c.id) FROM candidates c " +
+            "WHERE EXISTS (SELECT x.id FROM choices x WHERE x.id = c.id)");
+        rows.ShouldHaveSingleItem()[0].ShouldBe(2);
+        rows[0][1].ShouldBe(2);
+        rows[0][2].ShouldBe(true);
+        (await ExecuteAsync(connection, "UPDATE candidates SET id = id + 10 WHERE EXISTS " +
+            "(SELECT x.id FROM choices x WHERE x.id = candidates.id)" )).ShouldBe(1L);
+        (await ExecuteAsync(connection, "DELETE FROM candidates WHERE id IN " +
+            "(SELECT x.id + 10 FROM choices x WHERE x.id + 10 = candidates.id)" )).ShouldBe(1L);
+        (await QueryAsync(connection, "SELECT id FROM candidates ORDER BY id")).Select(row => row[0])
+            .ShouldBe(new object?[] { null, 1, 3 });
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - Correlation: a later outer row cardinality failure keeps the connection usable")]
+    public async Task QueryAsync_CorrelatedScalarCardinality_ShouldReturnExecutionFailureAndKeepConnectionUsable()
+    {
+        // Arrange
+        await using var harness = await SqlClientTestHarness.StartAsync();
+        await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
+
+        // Act
+        var error = await Should.ThrowAsync<SqlClientException>(() => QueryAsync(connection,
+            "SELECT u.id, (SELECT v.id FROM users v WHERE v.id = u.id OR u.id = 2) FROM users u ORDER BY u.id"));
+
+        // Assert
+        error.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
+        error.ConnectionUsable.ShouldBeTrue();
+        error.Message.ShouldContain("one row");
+        (await QueryAsync(connection, "SELECT id FROM users ORDER BY id")).Select(row => row[0])
+            .ShouldBe(new object?[] { 1, 2 });
+    }
+
+    private static async Task SeedAsync(SqlConnection connection)
     {
         await ExecuteAsync(connection, "CREATE TABLE candidates (id INT)");
         await ExecuteAsync(connection, "CREATE TABLE choices (id INT)");
@@ -231,9 +351,9 @@ public sealed class SqlSubqueryWireTests
         await ExecuteAsync(connection, "INSERT INTO choices VALUES (2), (NULL)");
     }
 
-    private static Task<long> ExecuteAsync(ISqlConnection connection, string sql)
+    private static Task<long> ExecuteAsync(SqlConnection connection, string sql)
         => connection.ExecuteAsync(sql, cancellationToken: SqlClientTestHarness.Timeout()).AsTask();
 
-    private static Task<SqlResultSet> QueryAsync(ISqlConnection connection, string sql)
+    private static Task<SqlResultSet> QueryAsync(SqlConnection connection, string sql)
         => connection.QueryAsync(sql, cancellationToken: SqlClientTestHarness.Timeout()).AsTask();
 }

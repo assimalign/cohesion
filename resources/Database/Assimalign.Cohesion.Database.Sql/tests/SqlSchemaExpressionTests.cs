@@ -14,7 +14,7 @@ public class SqlSchemaExpressionTests
         Expression<Func<OrderLine, object?>> selector = line => line.Quantity * line.UnitPrice;
         Expression<Func<OrderLine, bool>> predicate = line => line.OrderId == 42;
 
-        ISqlAggregateExpression expression = Sql.Sum(selector, predicate);
+        SqlAggregateExpression expression = Sql.Sum(selector, predicate);
 
         expression.SourceType.ShouldBe(typeof(OrderLine));
         expression.Selector.ShouldBeSameAs(selector);

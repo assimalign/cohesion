@@ -1,0 +1,164 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <data name="UpsertArbiterInvalid" xml:space="preserve"><value>ON CONFLICT target '{0}' on '{1}.{2}': {3}</value></data>
+  <data name="UpsertTargetRequired" xml:space="preserve"><value>DO UPDATE requires a column or ON CONSTRAINT target.</value></data>
+  <data name="UpsertConstraintNotUnique" xml:space="preserve"><value>The constraint has no associated unique index (CHECK and FOREIGN KEY cannot arbitrate).</value></data>
+  <data name="UpsertLegacyPrimaryKey" xml:space="preserve"><value>The legacy primary key has no associated unique index.</value></data>
+  <data name="UpsertConstraintMissing" xml:space="preserve"><value>No unique index or constraint with this name exists on the target table.</value></data>
+  <data name="UpsertIndexMissing" xml:space="preserve"><value>No unique index or constraint matches the ON CONFLICT specification.</value></data>
+  <data name="UpsertAggregate" xml:space="preserve"><value>Aggregate functions are not allowed in ON CONFLICT DO UPDATE.</value></data>
+  <data name="UpsertStar" xml:space="preserve"><value>'*' is not allowed in ON CONFLICT DO UPDATE.</value></data>
+  <data name="UpsertRepeatedRow" xml:space="preserve"><value>ON CONFLICT DO UPDATE cannot affect a row a second time.</value></data>
+  <data name="UpsertSnapshotConflict" xml:space="preserve"><value>Write-write conflict on '{0}.{1}': ON CONFLICT reached a row version this transaction's snapshot does not see. Retry the transaction.</value></data>
+  <data name="UpsertIndexesChanged" xml:space="preserve"><value>ON CONFLICT unique index definitions on '{0}.{1}' changed while the statement was waiting. Retry the transaction.</value></data>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms</value>
+  </resheader>
+  <data name="ColumnDefaultMissing" xml:space="preserve">
+    <value>Column '{0}' does not allow NULL and has no default.</value>
+  </data>
+  <data name="ColumnNullNotAllowed" xml:space="preserve">
+    <value>Column '{0}' does not allow NULL.</value>
+  </data>
+  <data name="ConstraintViolation" xml:space="preserve"><value>{0} constraint '{1}' on '{2}' was violated.</value></data>
+  <data name="UniqueConstraintViolation" xml:space="preserve"><value>{0} constraint '{1}' on '{2}' was violated by a duplicate key.</value></data>
+  <data name="FunctionArgumentDomainViolation" xml:space="preserve"><value>An argument of function '{0}' violates domain '{1}'.</value></data>
+  <data name="FunctionResultDomainViolation" xml:space="preserve"><value>A value of SQL function '{0}' violates domain '{1}'.</value></data>
+  <data name="CastDomainViolation" xml:space="preserve"><value>CAST to {0} failed: the value violates the check of domain '{1}' ({2}).</value></data>
+  <data name="ColumnNullabilityConflict" xml:space="preserve"><value>Conflicting NULL/NOT NULL declarations for column '{0}'.</value></data>
+  <data name="BooleanTestOperand" xml:space="preserve"><value>IS TRUE, FALSE or UNKNOWN requires a BOOLEAN operand.</value></data>
+  <data name="LikeEscapeInvalid" xml:space="preserve"><value>Invalid LIKE ESCAPE sequence: ESCAPE must be empty or one Unicode scalar, and a pattern must not end with the escape character.</value></data>
+  <data name="StatementStackInsufficient" xml:space="preserve"><value>Statement too complex: running it needs more stack than the executing thread has left. Reduce the nesting of its expressions or run it on a thread with a larger stack.</value></data>
+  <data name="CastIntervalTimeRange" xml:space="preserve">
+    <value>INTERVAL must be at least zero and less than 24 hours for TIME.</value>
+  </data>
+  <data name="CastDoubleOverflow" xml:space="preserve">
+    <value>Text overflows DOUBLE.</value>
+  </data>
+  <data name="CastDoubleUnderflow" xml:space="preserve">
+    <value>Text underflows DOUBLE.</value>
+  </data>
+  <data name="CastIntegerRange" xml:space="preserve">
+    <value>A non-finite value is out of range for an integer target.</value>
+  </data>
+  <data name="CastIntegerWhole" xml:space="preserve">
+    <value>An integer target requires a finite whole number; truncation is not supported.</value>
+  </data>
+  <data name="CastBinaryText" xml:space="preserve">
+    <value>BYTEA text requires \x hexadecimal digits or backslash-free UTF-8 text.</value>
+  </data>
+  <data name="CastUtf8Text" xml:space="preserve">
+    <value>CAST text must be valid UTF-8.</value>
+  </data>
+  <data name="CastJsonText" xml:space="preserve">
+    <value>Invalid JSON text (maximum depth 128).</value>
+  </data>
+  <data name="DerivedTableOuterReference" xml:space="preserve">
+    <value>A derived table cannot reference sibling relations without LATERAL. {0}</value>
+  </data>
+  <data name="SetColumnTypes" xml:space="preserve">
+    <value>Set operation column {0}: types {1} and {2} cannot be matched by implicit conversion.</value>
+  </data>
+  <data name="DerivedColumnCount" xml:space="preserve">
+    <value>Derived table '{0}' has {1} output columns but {2} column names.</value>
+  </data>
+  <data name="QuerySourceRequired" xml:space="preserve">
+    <value>A query source requires a SELECT result.</value>
+  </data>
+  <data name="SubqueryNestingDepth" xml:space="preserve">
+    <value>Subquery nesting exceeds the supported maximum depth of 32.</value>
+  </data>
+  <data name="MissingFromClauseEntry" xml:space="preserve"><value>Missing FROM-clause entry for column '{0}'.</value></data>
+  <data name="UnknownColumn" xml:space="preserve">
+    <value>Unknown column '{0}'.</value>
+  </data>
+  <data name="DerivedColumnName" xml:space="preserve">
+    <value>A derived output column name must not be empty or whitespace.</value>
+  </data>
+  <data name="SetOrderOutput" xml:space="preserve">
+    <value>ORDER BY on a combined result requires an unqualified output column name or an ordinal within the output column count; expressions and qualified references are not supported.</value>
+  </data>
+  <data name="SetOrderAmbiguous" xml:space="preserve">
+    <value>Ambiguous combined-result ORDER BY column '{0}'.</value>
+  </data>
+  <data name="SetColumnCount" xml:space="preserve">
+    <value>{0} inputs have {1} and {2} columns; both counts must match.</value>
+  </data>
+  <data name="SubqueryColumnCount" xml:space="preserve">
+    <value>{0} subquery requires exactly one output column; found {1}.</value>
+  </data>
+  <data name="IdentityIntegerRequired" xml:space="preserve"><value>IDENTITY requires a built-in integer type</value></data>
+  <data name="IdentityAlreadyDeclared" xml:space="preserve"><value>a table may have only one identity column</value></data>
+  <data name="IdentityZeroIncrement" xml:space="preserve"><value>INCREMENT must not be zero</value></data>
+  <data name="IdentityDefaultConflict" xml:space="preserve"><value>IDENTITY cannot be combined with DEFAULT</value></data>
+  <data name="IdentityStartOutOfRange" xml:space="preserve"><value>START is outside the identity generator's bounds</value></data>
+  <data name="IdentityUpdateForbidden" xml:space="preserve"><value>GENERATED ALWAYS forbids every UPDATE assignment</value></data>
+  <data name="IdentityAlterForbidden" xml:space="preserve"><value>ALTER COLUMN cannot change identity generation, nullability or defaults</value></data>
+  <data name="IdentityInsertForbidden" xml:space="preserve"><value>GENERATED ALWAYS forbids an explicit INSERT value</value></data>
+  <data name="IdentityBackfillForbidden" xml:space="preserve"><value>ADD COLUMN IDENTITY requires a table with no live rows</value></data>
+  <data name="IdentityTypeChangeForbidden" xml:space="preserve"><value>ALTER COLUMN cannot change an identity storage type</value></data>
+  <data name="IdentitySchemaOwnedForbidden" xml:space="preserve"><value>{0}: {1}: schema-owned column '{2}' cannot declare identity metadata. Nothing was changed.</value></data>
+  <data name="IdentityColumnViolation" xml:space="preserve">
+    <value>Identity column '{0}': {1}.</value>
+  </data>
+  <data name="TableMissing" xml:space="preserve">
+    <value>Table '{0}.{1}' does not exist.</value>
+  </data>
+  <data name="NamespaceMissing" xml:space="preserve"><value>Schema '{0}' does not exist.</value></data>
+  <data name="NamespaceChanged" xml:space="preserve"><value>Schema '{0}' changed while DROP SCHEMA was waiting. Retry the statement.</value></data>
+  <data name="NamespaceExists" xml:space="preserve"><value>Schema '{0}' already exists.</value></data>
+  <data name="NamespaceDependentObjects" xml:space="preserve"><value>Cannot drop schema '{0}' because other objects depend on it. Use DROP SCHEMA ... CASCADE to drop the dependent objects too.</value></data>
+  <data name="DefaultNamespaceProtected" xml:space="preserve"><value>Cannot drop schema 'dbo': code-first provisioning depends on this pre-existing SQL namespace.</value></data>
+  <data name="SystemNamespaceReadOnly" xml:space="preserve"><value>System namespace '{0}' is read-only.</value></data>
+  <data name="ScriptNamespaceTypedObjects" xml:space="preserve"><value>COHSQLS005: Declared script '{0}' cannot DROP SCHEMA '{1}' CASCADE over typed schema objects; declare the change in the typed schema. Nothing was opened or written.</value></data>
+  <data name="CteDuplicateName" xml:space="preserve"><value>Common table expression name '{0}' is declared more than once.</value></data>
+  <data name="CteForwardReference" xml:space="preserve"><value>Common table expression '{0}' is referenced before its declaration.</value></data>
+  <data name="CteConstantQuery" xml:space="preserve"><value>A common table expression without FROM cannot project a wildcard.</value></data>
+  <data name="CountNonNegative" xml:space="preserve"><value>{0} requires a non-negative integer.</value></data>
+  <data name="CorrelatedUngroupedColumn" xml:space="preserve"><value>Outer column '{0}' must appear in GROUP BY before it can be referenced by a grouped query's subquery.</value></data>
+  <data name="OuterOnlyAggregate" xml:space="preserve"><value>An aggregate whose column references all belong to outer query scopes is not supported.</value></data>
+  <data name="ScalarSubqueryCardinality" xml:space="preserve"><value>Scalar subquery returned more than one row; at most one row is allowed.</value></data>
+  <data name="SubqueryFrameMissing" xml:space="preserve"><value>Internal invariant: the subquery evaluation frame is unavailable.</value></data>
+  <data name="DefaultTypeIncompatible" xml:space="preserve"><value>Column '{0}': DEFAULT result type {1} is incompatible with column type {2}.</value></data>
+  <data name="DefaultVariablesForbidden" xml:space="preserve"><value>Column '{0}': DEFAULT requires a variable-free scalar expression without columns, parameters, subqueries or aggregates.</value></data>
+  <data name="DefaultExpressionFailure" xml:space="preserve"><value>Column '{0}': {1}</value></data>
+  <data name="DefaultStorageFailure" xml:space="preserve"><value>Column '{0}': DEFAULT value cannot be stored as {1}</value></data>
+  <data name="VolatileDefaultBackfill" xml:space="preserve"><value>Column '{0}': ADD COLUMN with a VOLATILE DEFAULT on a populated table requires a table rewrite (#1447).</value></data>
+  <data name="CompiledDeleteActionInvalid" xml:space="preserve"><value>Schema-owned foreign keys cannot use ON DELETE {0}; compiled schemas support RESTRICT and CASCADE.</value></data>
+  <data name="DeleteActionUnknown" xml:space="preserve"><value>Unknown referential delete action.</value></data>
+  <data name="RenameTableCollision" xml:space="preserve"><value>Table '{0}.{1}' already exists.</value></data>
+  <data name="RenameColumnCollision" xml:space="preserve"><value>Column '{0}' already exists on '{1}'.</value></data>
+  <data name="MissingValueConversion" xml:space="preserve"><value>Column '{0}': frozen missing value cannot be stored as {1}</value></data>
+  <data name="DefaultMustBeFinite" xml:space="preserve"><value>Floating-point defaults must be finite.</value></data>
+  <data name="ViewTargetIsTable" xml:space="preserve"><value>The target is a table, not a view.</value></data>
+  <data name="ViewAlreadyExists" xml:space="preserve"><value>A relation with this view name already exists.</value></data>
+  <data name="ViewRoundTrip" xml:space="preserve"><value>The canonical view query does not reproduce its definition. The catalog is damaged or the engine has a defect.</value></data>
+  <data name="ViewParameters" xml:space="preserve"><value>Parameters are not allowed in a persisted view body.</value></data>
+  <data name="ViewDuplicateColumns" xml:space="preserve"><value>View output column names must be unique.</value></data>
+  <data name="ViewFunctionMissing" xml:space="preserve"><value>A recorded view function identity cannot be resolved.</value></data>
+  <data name="ViewReadOnly" xml:space="preserve"><value>View &#x27;{0}.{1}&#x27; is read-only; this statement requires a table.</value></data>
+  <data name="ViewMissing" xml:space="preserve"><value>View &#x27;{0}.{1}&#x27; does not exist.</value></data>
+  <data name="ViewDependent" xml:space="preserve"><value>Cannot change the object because view '{0}.{1}' depends on it.</value></data>
+  <data name="ViewLoadInvalid" xml:space="preserve"><value>{0} cannot be loaded as a query. {1}</value></data>
+  <data name="ViewDropDependent" xml:space="preserve"><value>Cannot drop '{0}' because other objects depend on it: view '{1}.{2}' depends on it.</value></data>
+  <data name="ViewBindingFailed" xml:space="preserve"><value>View '{0}.{1}' cannot be bound. {2}</value></data>
+  <data name="ViewContractChanged" xml:space="preserve"><value>A source definition changed its output type, modifiers, domain or collation.</value></data>
+  <data name="AggregateModifiersOnScalar" xml:space="preserve"><value>DISTINCT, ALL or ORDER BY specified, but '{0}' is not an aggregate function.</value></data>
+  <data name="DistinctOrderingArgument" xml:space="preserve"><value>In an aggregate with DISTINCT, ORDER BY expressions must appear in the argument list.</value></data>
+  <data name="StringAggregateTypeHint" xml:space="preserve"><value> Use CAST(... AS TEXT) for non-text inputs; the delimiter must be a string constant or parameter.</value></data>
+  <data name="StringAggregateDelimiter" xml:space="preserve"><value>STRING_AGG/LISTAGG delimiter must be a string constant or parameter known at plan time.</value></data>
+  <data name="ListaggRequiresWithinGroup" xml:space="preserve"><value>LISTAGG requires WITHIN GROUP (ORDER BY keys) and does not accept an inner ORDER BY.</value></data>
+  <data name="ViewColumnChanged" xml:space="preserve"><value>View '{0}.{1}' cannot be bound because a recorded column identity changed.</value></data>
+  <data name="ReturningAggregate" xml:space="preserve"><value>Aggregate functions are not allowed in RETURNING.</value></data>
+  <data name="DuplicateAssignment" xml:space="preserve"><value>Column '{0}' is assigned more than once.</value></data>
+  <data name="UpsertLiveRowDamaged" xml:space="preserve"><value>The live index entry for table '{0}.{1}' points to an unreadable row in slot {2} of page {3}.</value></data>
+</root>

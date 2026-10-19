@@ -23,21 +23,20 @@ public sealed class SqlSchemaConstraintProvisioningTests : IDisposable
         await using (var engine = CreateEngine())
         {
             var database = await engine.CreateDatabaseAsync("app");
-            var provisioner = database.ShouldBeAssignableTo<IDatabaseSchemaProvisioner>();
-            (await provisioner.ApplySchemaAsync(schema)).WasAlreadyApplied.ShouldBeFalse();
-            (await provisioner.ApplySchemaAsync(schema)).WasAlreadyApplied.ShouldBeTrue();
+            (await database.ApplySchemaAsync(schema)).WasAlreadyApplied.ShouldBeFalse();
+            (await database.ApplySchemaAsync(schema)).WasAlreadyApplied.ShouldBeTrue();
             await using var session = await database.CreateSessionAsync();
 
-            var orphan = await Should.ThrowAsync<SqlConstraintViolationException>(async () =>
+            var orphan = await SqlConstraintAssertions.ThrowAsync(async () =>
                 await session.ExecuteAsync("INSERT INTO a_child VALUES (1, 99, 1, 'a')"));
             orphan.ConstraintName.ShouldBe("fk_parent");
             orphan.Table.ShouldBe("dbo.a_child");
             await session.ExecuteAsync("INSERT INTO z_parent VALUES (7)");
             await session.ExecuteAsync("INSERT INTO a_child VALUES (1, 7, 2, 'a')");
-            var invalidQuantity = await Should.ThrowAsync<SqlConstraintViolationException>(async () =>
+            var invalidQuantity = await SqlConstraintAssertions.ThrowAsync(async () =>
                 await session.ExecuteAsync("INSERT INTO a_child VALUES (2, 7, 0, 'b')"));
             invalidQuantity.ConstraintName.ShouldBe("ck_qty");
-            var duplicate = await Should.ThrowAsync<SqlConstraintViolationException>(async () =>
+            var duplicate = await SqlConstraintAssertions.ThrowAsync(async () =>
                 await session.ExecuteAsync("INSERT INTO a_child VALUES (2, 7, 1, 'a')"));
             duplicate.ConstraintName.ShouldBe("uq_email");
             await Should.ThrowAsync<DatabaseObjectLockedException>(async () =>
@@ -47,13 +46,13 @@ public sealed class SqlSchemaConstraintProvisioningTests : IDisposable
         await using (var reopenedEngine = CreateEngine())
         {
             var database = await reopenedEngine.OpenDatabaseAsync("app");
-            (await database.ShouldBeAssignableTo<IDatabaseSchemaProvisioner>().ApplySchemaAsync(schema))
+            (await database.ApplySchemaAsync(schema))
                 .WasAlreadyApplied.ShouldBeTrue();
             await using var session = await database.CreateSessionAsync();
             (await CountAsync(session, "a_child")).ShouldBe(1);
-            await Should.ThrowAsync<SqlConstraintViolationException>(async () =>
+            await SqlConstraintAssertions.ThrowAsync(async () =>
                 await session.ExecuteAsync("UPDATE a_child SET parent_id = 999 WHERE id = 1"));
-            await Should.ThrowAsync<SqlConstraintViolationException>(async () =>
+            await SqlConstraintAssertions.ThrowAsync(async () =>
                 await session.ExecuteAsync("UPDATE a_child SET qty = -1 WHERE id = 1"));
             await session.ExecuteAsync("DELETE FROM z_parent WHERE id = 7");
             (await CountAsync(session, "a_child")).ShouldBe(0);
@@ -73,12 +72,12 @@ public sealed class SqlSchemaConstraintProvisioningTests : IDisposable
             new CompiledSchemaKey("pk_right", ["id"]), [],
             [new CompiledSchemaConstraint("fk_left", CompiledSchemaConstraintKind.Reference,
                 ["left_id"], "a_left", ["id"], OnDelete: CompiledSchemaReferentialAction.Cascade)]);
-        var schema = new SqlCompiledSchema(SqlCompiledSchema.CurrentFormat, "app", EngineModel.Sql, false,
-            [], [left, right], [], [], [], []);
+        var schema = new SqlCompiledSchema(SqlCompiledSchema.CurrentFormat, "app", false,
+            [], [left, right], []);
 
         await using var engine = CreateEngine();
         var database = await engine.CreateDatabaseAsync("app");
-        await database.ShouldBeAssignableTo<IDatabaseSchemaProvisioner>().ApplySchemaAsync(schema);
+        await database.ApplySchemaAsync(schema);
         await using var session = await database.CreateSessionAsync();
         await session.ExecuteAsync("INSERT INTO a_left VALUES (1, NULL)");
         await session.ExecuteAsync("INSERT INTO z_right VALUES (2, 1)");
@@ -98,7 +97,7 @@ public sealed class SqlSchemaConstraintProvisioningTests : IDisposable
     }
 
     private static SqlCompiledSchema CreateSchema()
-        => new(SqlCompiledSchema.CurrentFormat, "app", EngineModel.Sql, false, [],
+        => new(SqlCompiledSchema.CurrentFormat, "app", false, [],
             [
                 new CompiledSchemaTable("a_child", "Tests.Child",
                     [new("id", DatabaseType.Int32, false), new("parent_id", DatabaseType.Int32, false),
@@ -111,15 +110,15 @@ public sealed class SqlSchemaConstraintProvisioningTests : IDisposable
                         ["qty"], null, [], new CompiledSchemaExpression("qty > 0"))]),
                 new CompiledSchemaTable("z_parent", "Tests.Parent", [new("id", DatabaseType.Int32, false)],
                     new CompiledSchemaKey("pk_parent", ["id"]), [], []),
-            ], [], [], [], []);
+            ], []);
 
     private SqlDatabaseEngine CreateEngine()
-        => SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "schema-constraints", RootPath = _rootPath });
+        => SqlDatabaseEngine.Create("schema-constraints", new SqlDatabaseEngineOptions { RootPath = _rootPath });
 
-    private static async Task<long> CountAsync(IDatabaseSession session, string table)
+    private static async Task<long> CountAsync(SqlDatabaseSession session, string table)
     {
         await using var result = (await session.ExecuteAsync($"SELECT COUNT(*) FROM {table}"))
-            .ShouldBeAssignableTo<QueryResultSet>();
+            .ShouldBeAssignableTo<DatabaseResultSet>();
         await foreach (var row in result.GetRowsAsync())
         {
             return row.GetValue(0).ShouldBeOfType<long>();

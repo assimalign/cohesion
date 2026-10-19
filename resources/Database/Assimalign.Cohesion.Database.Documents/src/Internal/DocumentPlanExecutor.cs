@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+
 using Assimalign.Cohesion.Database.Documents.Catalog;
 using Assimalign.Cohesion.Database.Documents.Language;
 using Assimalign.Cohesion.Database.Execution;
@@ -12,73 +13,169 @@ using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Documents.Internal;
 
-internal static class DocumentPlanExecutor
+internal static partial class DocumentPlanExecutor
 {
-    internal static async ValueTask<QueryResult> ExecuteAsync(DocumentDatabaseInstance database, DocumentOperation operation,
+    internal static async ValueTask<DatabaseResult> ExecuteAsync(DocumentDatabase database, DocumentOperation operation,
         OqlQueryStatement statement, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
     {
         operation.EnsureActive();
         cancellationToken.ThrowIfCancellationRequested();
         var error = statement.Diagnostics.FirstOrDefault(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
-        if (error is not null) { throw new DatabaseParseException($"OQL parse error {error.Code}: {error.Message}"); }
-        var plan = new DocumentPlanner(database.Catalog, operation.Context.Snapshot, parameters).Plan(statement.OqlExpression);
+        if (error is not null) { throw new DatabaseParseException($"OQL parse error {error.Code}: {error.Message}", statement.Diagnostics); }
+        var plan = new DocumentPlanner(database.Catalog, operation.Context.Snapshot, parameters, cancellationToken).Plan(statement.OqlExpression);
         return plan switch
         {
+            DocumentDeletePlan delete => await ExecuteDeleteAsync(database, operation, delete, parameters, cancellationToken).ConfigureAwait(false),
+            DocumentUpdatePlan update => await ExecuteUpdateAsync(database, operation, update, parameters, cancellationToken).ConfigureAwait(false),
+            DocumentInsertPlan insert => await ExecuteWriteAsync(database, operation, insert.Collection, insert.Statement, insert.Statement.Values, null, true, parameters, cancellationToken).ConfigureAwait(false),
+            DocumentInsertSelectPlan insert => await ExecuteWriteAsync(database, operation, insert.Collection, insert.Statement, insert.Statement.Values, (insert.Source, insert.KeyOrdinal, insert.ValueOrdinal), true, parameters, cancellationToken).ConfigureAwait(false),
+            DocumentUpsertPlan upsert => await ExecuteWriteAsync(database, operation, upsert.Collection, upsert.Statement,
+                upsert.Statement.Values, upsert.Source is { } source ? (source, upsert.KeyOrdinal, upsert.ValueOrdinal) : null,
+                false, parameters, cancellationToken).ConfigureAwait(false),
             DocumentSystemCollectionPlan system => ExecuteSystemCollection(database, operation, system, parameters, cancellationToken),
             DocumentPlan select => await ExecuteSelectAsync(database, operation, select, parameters, cancellationToken).ConfigureAwait(false),
+            DocumentCreateCollectionPlan createCollection => await ExecuteCreateCollectionAsync(database, operation, createCollection, cancellationToken).ConfigureAwait(false),
+            DocumentDropCollectionPlan dropCollection => await ExecuteDropCollectionAsync(database, operation, dropCollection, cancellationToken).ConfigureAwait(false),
             DocumentCreateIndexPlan createIndex => await ExecuteCreateIndexAsync(database, operation, createIndex, cancellationToken).ConfigureAwait(false),
             DocumentDropIndexPlan dropIndex => await ExecuteDropIndexAsync(database, operation, dropIndex, cancellationToken).ConfigureAwait(false),
-            _ => throw new DatabaseException("The document plan is not executable."),
+            _ => throw new DocumentPlanningException("COHDOC001", "The document plan is not executable.", statement.OqlExpression.Location),
         };
     }
 
-    private static async ValueTask<QueryResult> ExecuteSelectAsync(DocumentDatabaseInstance database, DocumentOperation operation,
-        DocumentPlan plan, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
+    private static async ValueTask<DatabaseResult> ExecuteSelectAsync(DocumentDatabase database, DocumentOperation operation,
+        DocumentPlan plan, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken, string? writeVerb = null)
     {
         var query = plan.Logical.Query;
-        var evaluator = new DocumentExpressionEvaluator(query.Alias, parameters);
-        IReadOnlyList<DocumentCatalogEntry> candidates = plan.Access is DocumentIndexPath seek
-            ? await database.Catalog.SearchIndexAsync(plan.Collection.Id, seek.Index.Name,
-                seek.Lower?.Value, seek.Lower?.Inclusive ?? false, seek.Upper?.Value, seek.Upper?.Inclusive ?? false,
-                operation.Context.Snapshot, cancellationToken).ConfigureAwait(false)
-            : database.Catalog.GetDocuments(plan.Collection.Id, null, operation.Context.Snapshot);
+        var evaluator = new DocumentExpressionEvaluator(query.Alias, parameters, cancellationToken, writeVerb, operation.TransactionStart,
+            query.Unnest.Count > 0 ? query.Alias ?? query.Collection : null);
+        var candidates = await ReadCandidatesAsync(database, operation, plan.Collection, plan.Access, cancellationToken).ConfigureAwait(false);
 
-        var matches = new List<JsonElement>();
+        var matches = new List<DocumentEvaluationContext>();
         // Index and scan order are deliberately erased. Identity order is the
         // baseline for row output and the tie break of every subsequent sort.
         foreach (var entry in candidates.OrderBy(entry => entry.Id, StringComparer.Ordinal))
         {
+            if (PageComplete(plan.Logical, matches.Count)) { break; }
             cancellationToken.ThrowIfCancellationRequested();
             operation.EnsureActive();
             var document = database.ReadDocument(entry);
             using var json = JsonDocument.Parse(document.Content, new JsonDocumentOptions { MaxDepth = 128 });
-            if (evaluator.Matches(query.Predicate, json.RootElement)) { matches.Add(json.RootElement.Clone()); }
+            var context = new DocumentEvaluationContext(json.RootElement, entry.Id, entry.Version,
+                query.Unnest.Count == 0 && query.Projections.Count == 1 && query.Projections[0].Expression is OqlStarExpression ? document.Content : default);
+            if (query.Unnest.Count == 0)
+            {
+                if (evaluator.Matches(query.Predicate, context)) { matches.Add(context with { Content = json.RootElement.Clone() }); }
+            }
+            else
+            {
+                CollectMatches(plan.Logical, context with { Content = json.RootElement.Clone() }, matches, evaluator, operation, cancellationToken);
+            }
         }
 
         return ExecuteRows(plan.Logical, matches, evaluator, cancellationToken);
     }
 
-    private static QueryResult ExecuteSystemCollection(DocumentDatabaseInstance database, DocumentOperation operation,
-        DocumentSystemCollectionPlan plan, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
+    private static ValueTask<IReadOnlyList<DocumentCatalogEntry>> ReadCandidatesAsync(DocumentDatabase database,
+        DocumentOperation operation, DocumentCollectionMetadata collection, DocumentAccessPath access, CancellationToken cancellationToken)
+        => access is DocumentIndexPath seek
+            ? database.Catalog.SearchIndexAsync(collection.Id, seek.Index.Name, seek.EqualityPrefix ?? [],
+                seek.Lower?.Value, seek.Lower?.Inclusive ?? false, seek.Upper?.Value, seek.Upper?.Inclusive ?? false,
+                operation.Context.Snapshot, cancellationToken)
+            : ValueTask.FromResult(database.Catalog.GetDocuments(collection.Id, null, operation.Context.Snapshot));
+
+    private static DatabaseResult ExecuteSystemCollection(DocumentDatabase database, DocumentOperation operation,
+        DocumentSystemCollectionPlan plan, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken, string? writeVerb = null)
     {
-        var evaluator = new DocumentExpressionEvaluator(plan.Logical.Query.Alias, parameters);
-        var matches = new List<JsonElement>();
+        var query = plan.Logical.Query;
+        var evaluator = new DocumentExpressionEvaluator(query.Alias, parameters, cancellationToken, writeVerb, operation.TransactionStart,
+            query.Unnest.Count > 0 ? query.Alias ?? query.Collection : null);
+        var matches = new List<DocumentEvaluationContext>();
         foreach (var document in DocumentSystemCollections.Enumerate(database, operation.Context.Snapshot, plan.Name, cancellationToken))
         {
+            if (PageComplete(plan.Logical, matches.Count)) { break; }
             operation.EnsureActive();
-            if (evaluator.Matches(plan.Logical.Query.Predicate, document)) { matches.Add(document); }
+            CollectMatches(plan.Logical, new DocumentEvaluationContext(document), matches, evaluator, operation, cancellationToken);
         }
         return ExecuteRows(plan.Logical, matches, evaluator, cancellationToken);
     }
 
-    private static QueryResult ExecuteRows(DocumentLogicalPlan logical, List<JsonElement> matches,
+    private static void CollectMatches(DocumentLogicalPlan logical, DocumentEvaluationContext source,
+        List<DocumentEvaluationContext> matches, DocumentExpressionEvaluator evaluator, DocumentOperation operation, CancellationToken cancellationToken)
+    {
+        if (logical.Query.Unnest.Count == 0)
+        {
+            if (evaluator.Matches(logical.Query.Predicate, source)) { matches.Add(source); }
+            return;
+        }
+        using var rows = Expand(logical.Query, source, evaluator, operation, cancellationToken).GetEnumerator();
+        // Test the completed window before advancing, including within one source document.
+        while (!PageComplete(logical, matches.Count) && rows.MoveNext())
+        {
+            if (evaluator.Matches(logical.Query.Predicate, rows.Current)) { matches.Add(rows.Current); }
+        }
+    }
+
+    // Internal so tests can cancel from reads of borrowed JSON during expansion without a timer.
+    internal static IEnumerable<DocumentEvaluationContext> Expand(OqlSelectExpression query, DocumentEvaluationContext source,
+        DocumentExpressionEvaluator evaluator, DocumentOperation operation, CancellationToken cancellationToken)
+    {
+        var pending = new Stack<(DocumentEvaluationContext Row, int Next, JsonElement.ArrayEnumerator Items)>();
+        var row = source;
+        int next = 0;
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            operation.EnsureActive();
+            if (next == query.Unnest.Count) { yield return row; }
+            else
+            {
+                var binding = query.Unnest[next];
+                var value = evaluator.Evaluate(binding.Collection, row);
+                if (value is JsonElement { ValueKind: JsonValueKind.Array } array && array.GetArrayLength() > 0)
+                {
+                    var items = array.EnumerateArray();
+                    items.MoveNext();
+                    pending.Push((row, next + 1, items));
+                    row = row.Bind(binding.Variable, items.Current);
+                    next++;
+                    continue;
+                }
+                if (binding.IsLeft)
+                {
+                    row = row.Bind(binding.Variable, DocumentMissing.Instance);
+                    next++;
+                    continue;
+                }
+            }
+            bool resumed = false;
+            while (pending.TryPop(out var frame))
+            {
+                var items = frame.Items;
+                if (!items.MoveNext()) { continue; }
+                pending.Push((frame.Row, frame.Next, items));
+                row = frame.Row.Bind(query.Unnest[frame.Next - 1].Variable, items.Current);
+                next = frame.Next;
+                resumed = true;
+                break;
+            }
+            if (!resumed) { yield break; }
+        }
+    }
+
+    // Use the planner's fixed result types, including function, operator and META results.
+    // Synthetic UNNEST stars always produce objects; plain stars can have scalar roots.
+    private static bool PageComplete(DocumentLogicalPlan logical, int matched)
+        => logical.CanStopEarly &&
+            logical.Limit is long limit && Math.Max(0L, matched - logical.Offset) >= limit;
+
+    private static DatabaseResult ExecuteRows(DocumentLogicalPlan logical, List<DocumentEvaluationContext> matches,
         DocumentExpressionEvaluator evaluator, CancellationToken cancellationToken)
     {
         var query = logical.Query;
         var output = new List<EvaluatedRow>();
         if (logical.IsGrouped)
         {
-            var groups = new SortedDictionary<object?[], List<JsonElement>>(TupleComparer.Instance);
+            var groups = new SortedDictionary<object?[], List<DocumentEvaluationContext>>(TupleComparer.Instance);
             if (query.GroupBy.Count == 0) { groups.Add([], matches); }
             else
             {
@@ -101,8 +198,25 @@ internal static class DocumentPlanExecutor
         {
             foreach (var document in matches) { cancellationToken.ThrowIfCancellationRequested(); Project(document, null); }
         }
+        if (query.IsDistinct)
+        {
+            var seen = new SortedSet<object?[]>(TupleComparer.Instance);
+            var distinct = new List<EvaluatedRow>();
+            foreach (var row in output)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (seen.Add(row.Values)) { distinct.Add(row); }
+            }
+            output = distinct;
+        }
         if (query.OrderBy.Count > 0)
         {
+            foreach (var row in output)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                row.OrderKeys = query.OrderBy.Select((order, index) => query.IsValue && logical.ProjectedOrdering[index]
+                        ? row.Values[0] : evaluator.Evaluate(order.Expression, row.Document, row.Group)).ToArray();
+            }
             output.Sort((left, right) =>
             {
                 for (int i = 0; i < query.OrderBy.Count; i++)
@@ -113,71 +227,113 @@ internal static class DocumentPlanExecutor
                 return left.Ordinal.CompareTo(right.Ordinal);
             });
         }
-        var columns = new QueryColumn[logical.Projections.Count];
+        var columns = new DatabaseColumn[logical.Projections.Count];
         for (int i = 0; i < columns.Length; i++)
         {
             var types = output.Select(row => GetType(row.Values[i])).Where(type => type != DatabaseType.Null).Distinct().ToArray();
-            columns[i] = new QueryColumn { Name = logical.Projections[i].Name, Ordinal = i, Type = types.Length == 1 ? types[0] : DatabaseType.Null };
+            var columnType = types.Length == 0 ? logical.Projections[i].Type : types.Length == 1 ? types[0] :
+                types.All(kind => kind is DatabaseType.Int64 or DatabaseType.Decimal) ? DatabaseType.Decimal : DatabaseType.Null;
+            // JSON has one number kind. An Int64 header is the evidence the client uses
+            // to recover long values; other numeric cells use the decimal scalar domain.
+            if (columnType != DatabaseType.Int64 && types.Contains(DatabaseType.Int64))
+            {
+                foreach (var row in output)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (row.Values[i] is long integer) { row.Values[i] = (decimal)integer; }
+                }
+            }
+            columns[i] = new DatabaseColumn { Name = logical.Projections[i].Name, Ordinal = i, Type = columnType };
         }
-        return new DocumentQueryResult(columns, output.Select(row => row.Values).ToList());
+        // Infer and normalize column types over the complete result before slicing.
+        int start = (int)Math.Min(logical.Offset, output.Count);
+        int take = (int)Math.Min(logical.Limit ?? long.MaxValue, output.Count - start);
+        if (start != 0 || take != output.Count) { output = output.GetRange(start, take); }
+        bool wholeDocument = query.Projections.Count == 1 && query.Projections[0].Expression is OqlStarExpression;
+        return new DocumentQueryResult(columns, output.Select(row => row.Values).ToList(),
+            query.IsValue || wholeDocument, wholeDocument ? output.Select(row => row.Document.RawContent).ToArray() : null);
 
-        void Project(JsonElement document, IReadOnlyList<JsonElement>? group)
+        void Project(DocumentEvaluationContext document, IReadOnlyList<DocumentEvaluationContext>? group)
         {
-            var values = logical.Projections.Select(projection => evaluator.Evaluate(projection.Expression, document, group)).ToArray();
-            var orderKeys = query.OrderBy.Select(order => evaluator.Evaluate(order.Expression, document, group)).ToArray();
-            output.Add(new EvaluatedRow(values, orderKeys, output.Count));
+            var values = logical.Projections.Select(projection => evaluator.EvaluateProjection(projection.Expression, document, group, query.IsValue)).ToArray();
+            // Normalize the JSON root before DISTINCT, projected ordering and counting.
+            if (query.IsValue && values[0] is DocumentMissing) { values[0] = null; }
+            output.Add(new EvaluatedRow(values, document, group, output.Count));
         }
     }
 
-    private static async ValueTask<QueryResult> ExecuteCreateIndexAsync(DocumentDatabaseInstance database, DocumentOperation operation,
+    private static async ValueTask<DatabaseResult> ExecuteCreateCollectionAsync(DocumentDatabase database, DocumentOperation operation,
+        DocumentCreateCollectionPlan plan, CancellationToken cancellationToken)
+    {
+        var create = plan.Statement;
+        await database.CreateCollectionCoreAsync(create.Name, create.IfNotExists, operation, cancellationToken, create.Location).ConfigureAwait(false);
+        return DocumentCommandResult.Success;
+    }
+
+    private static async ValueTask<DatabaseResult> ExecuteDropCollectionAsync(DocumentDatabase database, DocumentOperation operation,
+        DocumentDropCollectionPlan plan, CancellationToken cancellationToken)
+    {
+        var drop = plan.Statement;
+        await database.DropCollectionCoreAsync(drop.Name, drop.IfExists, operation, cancellationToken, drop.Location).ConfigureAwait(false);
+        return DocumentCommandResult.Success;
+    }
+
+    private static async ValueTask<DatabaseResult> ExecuteCreateIndexAsync(DocumentDatabase database, DocumentOperation operation,
         DocumentCreateIndexPlan plan, CancellationToken cancellationToken)
     {
         await PrepareIndexChangeAsync(database, operation, plan.Collection, "CREATE INDEX", cancellationToken).ConfigureAwait(false);
-        await database.Catalog.CreateIndexAsync(plan.Collection.Id, plan.IndexName, plan.Path,
+        if (plan.IfNotExists && database.Catalog.GetIndexes(plan.Collection.Id, operation.Context.Snapshot).Any(index => index.Name == plan.IndexName))
+        { return DocumentCommandResult.Success; }
+        await database.Catalog.CreateIndexAsync(plan.Collection.Id, plan.IndexName, plan.Paths, plan.IsUnique,
             operation.Context, cancellationToken).ConfigureAwait(false);
         return DocumentCommandResult.Success;
     }
 
-    private static async ValueTask<QueryResult> ExecuteDropIndexAsync(DocumentDatabaseInstance database, DocumentOperation operation,
+    private static async ValueTask<DatabaseResult> ExecuteDropIndexAsync(DocumentDatabase database, DocumentOperation operation,
         DocumentDropIndexPlan plan, CancellationToken cancellationToken)
     {
-        await PrepareIndexChangeAsync(database, operation, plan.Collection, "DROP INDEX", cancellationToken).ConfigureAwait(false);
+        await PrepareIndexChangeAsync(database, operation, plan.Collection, "DROP INDEX", cancellationToken, plan.IfExists ? plan.IndexName : null).ConfigureAwait(false);
+        if (plan.IfExists && !database.Catalog.GetIndexes(plan.Collection.Id, operation.Context.Snapshot).Any(index => index.Name == plan.IndexName))
+        { return DocumentCommandResult.Success; }
         await database.Catalog.DeleteIndexAsync(plan.Collection.Id, plan.IndexName,
             operation.Context, cancellationToken).ConfigureAwait(false);
         return DocumentCommandResult.Success;
     }
 
-    private static async ValueTask PrepareIndexChangeAsync(DocumentDatabaseInstance database, DocumentOperation operation,
-        DocumentCollectionMetadata collection, string operationName, CancellationToken cancellationToken)
+    private static async ValueTask PrepareIndexChangeAsync(DocumentDatabase database, DocumentOperation operation,
+        DocumentCollectionMetadata collection, string operationName, CancellationToken cancellationToken, string? absentNoOp = null)
     {
         await database.LockWriterAsync(operation.Context, cancellationToken).ConfigureAwait(false);
         if (collection != database.Catalog.FindCollection(collection.Name, database.LatestSnapshot(operation.Context)))
         {
-            DocumentDatabaseInstance.ThrowConflict();
+            DocumentDatabase.ThrowConflict();
         }
-        if (collection.Owner == DatabaseObjectOwner.Schema)
-        {
-            throw new DatabaseObjectLockedException(collection.Name, collection.OwningSchema!, operationName);
-        }
+        if (collection.Owner == DatabaseObjectOwner.Schema &&
+            (absentNoOp is null || database.Catalog.GetIndexes(collection.Id, operation.Context.Snapshot).Any(index => index.Name == absentNoOp)))
+        { throw new DatabaseObjectLockedException(collection.Name, collection.OwningSchema!, operationName); }
         if (!database.Catalog.GetDocuments(collection.Id, null, operation.Context.Snapshot)
                 .SequenceEqual(database.Catalog.GetDocuments(collection.Id, null, database.LatestSnapshot(operation.Context))) ||
             !database.Catalog.GetIndexes(collection.Id, operation.Context.Snapshot)
                 .SequenceEqual(database.Catalog.GetIndexes(collection.Id, database.LatestSnapshot(operation.Context))))
         {
-            DocumentDatabaseInstance.ThrowConflict();
+            DocumentDatabase.ThrowConflict();
         }
     }
 
     private static DatabaseType GetType(object? value) => value switch
     {
         bool => DatabaseType.Boolean,
+        long => DatabaseType.Int64,
         decimal => DatabaseType.Decimal,
         string => DatabaseType.String,
         JsonElement => DatabaseType.Json,
         _ => DatabaseType.Null,
     };
 
-    private sealed record EvaluatedRow(object?[] Values, object?[] OrderKeys, int Ordinal);
+    private sealed record EvaluatedRow(object?[] Values, DocumentEvaluationContext Document, IReadOnlyList<DocumentEvaluationContext>? Group, int Ordinal)
+    {
+        internal object?[] OrderKeys { get; set; } = [];
+    }
 
     private sealed class TupleComparer : IComparer<object?[]>
     {

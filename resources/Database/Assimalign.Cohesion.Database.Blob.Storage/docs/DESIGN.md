@@ -5,7 +5,7 @@
 `BlobStorage` derives from the shared `Storage` implementation. It adds record
 encoding and bounded content streams; it does not implement another allocator,
 page cache, journal, lock manager, or recovery system. `BlobTransactionRecordSpace`
-implements the existing `ITransactionRecordSpace` seam for the coordinator's
+implements the existing `TransactionRecordSpace` seam for the coordinator's
 `RecordSpaceVersionStore`. All catalog records and chunk records begin with the
 same 16-byte writer/deleter prefix.
 
@@ -31,10 +31,20 @@ A database has the kernel's data, journal, and backup streams. Data pages are
 record directory entries. Kernel page CRC covers every persisted page, including
 the chunk header and content. Blob adds no separate physical file header.
 
-Catalog records occupy owner-zero data pages. Chunk pages use the creating
-transaction sequence with bit 63 set as their owner ID; this separates payload
-pages from metadata. Several writes in one transaction can share that owner.
-Owner IDs are locality hints, never content identity or visibility proofs.
+Catalog records occupy owner-zero data pages. Every chunk page carries one
+content owner, `1UL << 63` (`BlobStorage.ContentOwner`), which separates payload
+pages from metadata. All transactions share it. The kernel fills only an owner's
+current write page, so the former owner per creating transaction gave every
+upload a fresh page: a 2 KiB blob took a whole 8 KiB page, 1.012 pages per
+upload. With the shared owner three such chunks fill a page, as PostgreSQL's
+per-relation insert target packs tuples (`src/backend/access/heap/hio.c:571-596`,
+`RelationGetBufferForTuple`). Owner IDs are locality hints, never content
+identity or visibility proofs: visibility is per record, and every chunk bracket
+runs under the coordinator's apply gate. A full 8,064-byte chunk still takes a
+page alone; the partly filled page it passes over is not revisited until the
+kernel tracks partial free space (Database.Storage DESIGN.md, "Per-owner record
+chains"). A file written with per-transaction owners needs no migration: its
+chunks stay readable, and its pages simply take no new chunks.
 
 Every integer in a chunk record is unsigned little-endian unless stated otherwise.
 The chunk format is version 1:
@@ -88,8 +98,10 @@ That callback publishes the metadata head and commits an automatic transaction;
 an explicit session transaction retains publication until its own commit. The
 old chain remains untouched for readers. `Flush` alone never publishes metadata.
 The kernel's logical commit record makes all preceding physical brackets durable.
-A write/flush error or lifetime cancellation poisons the stream and invokes the
-abort callback once. Disposing a poisoned stream cannot publish it.
+A write/flush error, a publication failure or lifetime cancellation poisons the
+stream and invokes the abort callback once, with the exception the stream then
+throws to its caller, so an engine can record what aborted an explicit
+transaction (#1225). Disposing a poisoned stream cannot publish it.
 
 Read and write streams are sequential and do not support seeking or concurrent
 operations on one stream. Metadata publication, overwrite locking, and session
@@ -103,12 +115,14 @@ the deleting logical context. The catalog tombstone shares that logical context,
 so rollback restores both. Committed tombstones are reclaimed only after every
 snapshot that could see their content has closed. The shared `DeleteRecord`
 returns an empty page to the free-space map at physical commit; rollback restores
-the page and its owner membership. Reused pages can belong to another upload.
+the page and its owner membership. A page holds chunks of several uploads, so it
+is reclaimed only with the last of them. Reused pages can belong to another upload.
 
 The version store batches undo, pruning, and recovery scrub at 64 mutations per
-physical bracket so their retained before-images cannot grow to object size.
-Journal recovery streams page images and retains only transaction identities and
-winning image LSNs per page. Live ledger entries and page directories still use
+physical bracket so their retained pre-images cannot grow to object size (since #1253 a
+bracket also spills pre-images past a budget to the journal, Storage DESIGN.md "The memory
+bound of pre-images"). Journal recovery streams page records and retains only transaction
+identities, the last applying LSN per page and a bounded page cache. Live ledger entries and page directories still use
 memory proportional to chunk count, approximately one entry per 8 KB; payload
 memory is bounded independently of the object length.
 

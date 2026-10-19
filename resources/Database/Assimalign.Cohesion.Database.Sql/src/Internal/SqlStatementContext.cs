@@ -1,3 +1,5 @@
+using System;
+
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Transactions;
 
@@ -14,26 +16,54 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// </summary>
 internal readonly struct SqlStatementContext
 {
+    private readonly long _transactionStartTicks;
+    // Normal statements carry only their database name. Provisioning needs both names and
+    // uses a shared immutable pair, leaving room for the clock without growing normal contexts.
+    private readonly object _names;
+
     internal SqlStatementContext(
-        ITransactionContext transaction,
+        TransactionContext transaction,
         TransactionCoordinator coordinator,
         string? provisioningSchema = null,
         string databaseName = "",
-        ISqlCatalogSnapshot? catalogSnapshot = null)
+        SqlCatalogSnapshot? catalogSnapshot = null,
+        TransactionSequence? ddlLockOwner = null,
+        Action<long, long?>? provisioningProgress = null,
+        SqlCatalogScriptPublication? scriptReceipt = null,
+        DateTimeOffset? transactionStart = null,
+        SqlDdlInterlock? ddlInterlock = null)
     {
+        _transactionStartTicks = (transactionStart ?? DateTimeOffset.UtcNow).UtcTicks;
+        _names = provisioningSchema is null ? databaseName : new ProvisioningNames(provisioningSchema, databaseName);
         Transaction = transaction;
         Coordinator = coordinator;
         Snapshot = transaction.Snapshot;
         Metrics = new SqlStatementMetrics();
-        ProvisioningSchema = provisioningSchema;
-        DatabaseName = databaseName;
-        CatalogSnapshot = catalogSnapshot;
+        Metrics.CatalogSnapshot = catalogSnapshot;
+        DdlLockOwner = ddlLockOwner ?? transaction.Sequence;
+        ProvisioningProgress = provisioningProgress;
+        ScriptReceipt = scriptReceipt;
+        DdlInterlock = ddlInterlock;
     }
 
     /// <summary>
     /// Gets the MVCC transaction context the statement executes under.
     /// </summary>
-    internal ITransactionContext Transaction { get; }
+    internal TransactionContext Transaction { get; }
+
+    internal DateTimeOffset TransactionStart => new(_transactionStartTicks, TimeSpan.Zero);
+
+    // Schema steps keep their table locks until the entire apply and compensation end,
+    // while each statement's data/catalog brackets retain their existing commit lifetime.
+    internal TransactionSequence DdlLockOwner { get; }
+
+    internal Action<long, long?>? ProvisioningProgress { get; }
+
+    /// <summary>Gets the receipt published only by this statement's explicit commit.</summary>
+    internal SqlCatalogScriptPublication? ScriptReceipt { get; }
+
+    /// <summary>The session's metadata admission; direct executor probes may omit it.</summary>
+    internal SqlDdlInterlock? DdlInterlock { get; }
 
     /// <summary>
     /// Gets the database's transaction coordinator.
@@ -52,11 +82,30 @@ internal readonly struct SqlStatementContext
     internal SqlStatementMetrics Metrics { get; }
 
     /// <summary>Gets the applying compiled schema's name, or null for a live-session statement.</summary>
-    internal string? ProvisioningSchema { get; }
+    internal string? ProvisioningSchema => (_names as ProvisioningNames)?.Schema;
 
     /// <summary>Gets the current database's catalog identifier for metadata rows.</summary>
-    internal string DatabaseName { get; }
+    internal string DatabaseName => _names is string name ? name : ((ProvisioningNames)_names).Database;
 
     /// <summary>Gets the catalog directory paired with this statement's visibility lifetime.</summary>
-    internal ISqlCatalogSnapshot? CatalogSnapshot { get; }
+    internal SqlCatalogSnapshot? CatalogSnapshot => Metrics.CatalogSnapshot;
+
+    /// <summary>Requires binding to have supplied the catalog image before execution, including empty inputs.</summary>
+    internal SqlCatalogSnapshot RequireCatalogSnapshot()
+        => CatalogSnapshot ?? throw new DatabaseException("Internal invariant: a bound system relation requires a captured catalog snapshot.");
+
+    /// <summary>Captures lazily in the existing shared statement state; context copies use the same image.</summary>
+    internal void CaptureCatalogSnapshot(SqlCatalog catalog) => Metrics.CaptureCatalogSnapshot(catalog);
+
+    private sealed class ProvisioningNames
+    {
+        internal ProvisioningNames(string schema, string database)
+        {
+            Schema = schema;
+            Database = database;
+        }
+
+        internal string Schema { get; }
+        internal string Database { get; }
+    }
 }

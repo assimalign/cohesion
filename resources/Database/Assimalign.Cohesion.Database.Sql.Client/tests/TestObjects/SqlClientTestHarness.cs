@@ -1,20 +1,23 @@
 using System;
+using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Connections;
 using Assimalign.Cohesion.Connections.InMemory;
+using Assimalign.Cohesion.Connections.Tcp;
 using Assimalign.Cohesion.Database.Client;
 using Assimalign.Cohesion.Database.Sql;
 
 namespace Assimalign.Cohesion.Database.Sql.Client.Tests;
 
 /// <summary>
-/// A live SQL engine + in-memory listener + running server + typed SQL client, with
-/// a seeded <c>users</c> table, for typed-client end-to-end tests without sockets.
+/// A live SQL engine, InMemory or loopback TCP listener, running server and typed SQL client,
+/// with a seeded <c>users</c> table for typed-client end-to-end tests.
 /// </summary>
 internal sealed class SqlClientTestHarness : IAsyncDisposable
 {
-    private SqlClientTestHarness(SqlDatabaseEngine engine, InMemoryConnectionListener listener, SqlDatabaseServer server, ISqlClient client)
+    private SqlClientTestHarness(SqlDatabaseEngine engine, IDuplexConnectionListener listener, SqlDatabaseServer server, SqlClient client)
     {
         Engine = engine;
         Listener = listener;
@@ -24,30 +27,38 @@ internal sealed class SqlClientTestHarness : IAsyncDisposable
 
     public SqlDatabaseEngine Engine { get; }
 
-    public InMemoryConnectionListener Listener { get; }
+    public IDuplexConnectionListener Listener { get; }
 
     public SqlDatabaseServer Server { get; }
 
-    public ISqlClient Client { get; }
+    public SqlClient Client { get; }
 
     public const string DatabaseName = "app";
 
     public static async Task<SqlClientTestHarness> StartAsync(
         Action<SqlDatabaseServerOptions>? configureServer = null,
         Action<DatabaseConnectionSettings>? configureSettings = null,
-        ISqlClientObserver? observer = null)
+        SqlClientObserver? observer = null,
+        Action<SqlDatabaseEngineOptions>? configureEngine = null,
+        bool reopen = false,
+        bool tcp = false)
     {
-        var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-typed-client-e2e" });
+        var engineOptions = new SqlDatabaseEngineOptions();
+        configureEngine?.Invoke(engineOptions);
+        var engine = SqlDatabaseEngine.Create("sql-typed-client-e2e", engineOptions);
 
-        var database = await engine.CreateDatabaseAsync(DatabaseName);
+        var database = reopen ? await engine.OpenDatabaseAsync(DatabaseName) : await engine.CreateDatabaseAsync(DatabaseName);
 
-        await using (var session = await database.CreateSessionAsync())
+        if (!reopen)
         {
+            await using var session = await database.CreateSessionAsync();
             await session.ExecuteAsync("CREATE TABLE users (id INT NOT NULL, name VARCHAR(100), score BIGINT)");
             await session.ExecuteAsync("INSERT INTO users (id, name, score) VALUES (1, 'ada', 100), (2, 'grace', 200)");
         }
 
-        var listener = new InMemoryConnectionListener();
+        IDuplexConnectionListener listener = tcp
+            ? TcpConnectionListener.Create(options => options.EndPoint = new IPEndPoint(IPAddress.Loopback, 0))
+            : new InMemoryConnectionListener();
         var serverOptions = new SqlDatabaseServerOptions { Listener = listener };
 
         configureServer?.Invoke(serverOptions);
@@ -67,7 +78,7 @@ internal sealed class SqlClientTestHarness : IAsyncDisposable
         var client = SqlClient.Create(new SqlClientOptions
         {
             Settings = settings,
-            ConnectionFactory = listener.CreateFactory(),
+            ConnectionFactory = tcp ? new TcpConnectionFactory() : ((InMemoryConnectionListener)listener).CreateFactory(),
             Observer = observer,
         });
 

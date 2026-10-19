@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -16,15 +17,56 @@ internal sealed partial class SqlPlanExecutor
 {
     private async Task CreateConstrainedTableAsync(SqlCreateTablePlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
+        // Every DEFAULT must convert to its column before anything is reserved, as ADD COLUMN
+        // requires: a default the column cannot store would otherwise be published and fail
+        // every later INSERT that omits the column.
+        var defaults = new SqlBoundExpression?[plan.Columns.Count];
+        for (int ordinal = 0; ordinal < plan.Columns.Count; ordinal++)
+        {
+            var column = plan.Columns[ordinal];
+            if (column.DefaultLiteral is not null)
+            {
+                defaults[ordinal] = BindDefaultExpression(column, $"DEFAULT of column '{column.Name}' on table '{plan.Schema}.{plan.Name}'", _definitions.Functions, _catalog.DefaultCollation, cancellationToken, declaring: true);
+            }
+        }
+
         var provisional = new SqlCatalogTable(0, plan.Schema, plan.Name, plan.Columns, plan.PrimaryKey);
         var constraints = BindConstraints(provisional, plan.Constraints);
         await LockReferencedTablesAsync(constraints, statement, cancellationToken).ConfigureAwait(false);
         // Rebind after waiting: a parent definition might have changed while acquiring its lock.
         constraints = BindConstraints(provisional, plan.Constraints);
-        var table = await SqlCatalog.ReserveTableAsync(_catalog, plan.Schema, plan.Name, plan.Columns, plan.PrimaryKey, constraints,
+        // Durable, but not a self-commit the session counts (#1272): the reservation persists only
+        // the object-id counter, and the table stays invisible until the publish.
+        var table = await (statement.ScriptReceipt is null ? _catalog.ReserveTableAsync(plan.Schema, plan.Name, plan.Columns, plan.PrimaryKey, constraints,
             statement.ProvisioningSchema is null ? DatabaseObjectOwner.Adhoc : DatabaseObjectOwner.Schema,
-            statement.ProvisioningSchema, cancellationToken).ConfigureAwait(false);
-        await PublishConstrainedTableAsync(table, plan.Constraints, statement, cancellationToken, replaceExisting: false).ConfigureAwait(false);
+            statement.ProvisioningSchema, cancellationToken) : _catalog.ReserveTableAsync(plan.Schema, plan.Name, plan.Columns, plan.PrimaryKey, constraints,
+            statement.ProvisioningSchema is null ? DatabaseObjectOwner.Adhoc : DatabaseObjectOwner.Schema,
+            statement.ProvisioningSchema, statement.ScriptReceipt, cancellationToken)).ConfigureAwait(false);
+        SqlCatalogScriptPublication? publication = null;
+        if (statement.ScriptReceipt is { } expected)
+        {
+            // Reservation advances exactly one generation and preserves the completed prefix.
+            // Derive that expected state instead of accepting a fresh snapshot that could include
+            // an intervening publication through the public catalog API.
+            var previous = expected.Previous!;
+            ulong reservedGeneration = checked(expected.ExpectedGeneration + 1);
+            var reserved = new SqlCatalogScript(previous.Name, previous.ContentHash, previous.StatementCount,
+                previous.CompletedStatements, previous.BaseGeneration, reservedGeneration, previous.SchemaHash,
+                previous.Objects, previous.StatementObjects, previous.StatementParameterTypes);
+            publication = new SqlCatalogScriptPublication(expected.Name, expected.ContentHash, expected.StatementCount,
+                reserved, reservedGeneration, expected.SchemaHash, expected.ExpectedObject);
+        }
+
+        // Lock before publication, and retain the apply's owner through its final marker
+        // or compensation. PostgreSQL tablecmds.c:1112-1118,1390-1394 likewise retains
+        // AccessExclusiveLock on the newly created relation through transaction end.
+        await statement.Coordinator.LockManager.AcquireAsync(statement.DdlLockOwner,
+            LockResource.Object(table.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
+
+        // Bind the persisted definitions of the version about to be published, from their
+        // stored text, so no write to the new table ever parses them.
+        _definitions.GetDeclared(table, defaults, cancellationToken);
+        await PublishConstrainedTableAsync(table, plan.Constraints, statement, cancellationToken, replaceExisting: false, publication).ConfigureAwait(false);
     }
 
     private async Task LockReferencedTablesAsync(IReadOnlyList<SqlCatalogConstraint> constraints, SqlStatementContext statement, CancellationToken cancellationToken)
@@ -40,7 +82,7 @@ internal sealed partial class SqlPlanExecutor
 
         foreach (ulong parent in parents)
         {
-            await statement.Coordinator.LockManager.AcquireAsync(statement.Transaction.Sequence, LockResource.Object(parent),
+            await statement.Coordinator.LockManager.AcquireAsync(statement.DdlLockOwner, LockResource.Object(parent),
                 LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
         }
     }
@@ -49,8 +91,9 @@ internal sealed partial class SqlPlanExecutor
     // publish. A crash can leak unpublished tree pages, but cannot expose a table
     // whose declared uniqueness has no enforcing index.
     private async Task PublishConstrainedTableAsync(SqlCatalogTable table, IReadOnlyList<SqlConstraintDefinition> definitions,
-        SqlStatementContext statement, CancellationToken cancellationToken, bool replaceExisting)
+        SqlStatementContext statement, CancellationToken cancellationToken, bool replaceExisting, SqlCatalogScriptPublication? publication = null)
     {
+        publication ??= statement.ScriptReceipt;
         var indexes = new List<SqlCatalogIndex>();
         bool primaryCreated = false;
         for (int i = 0; i < definitions.Count; i++)
@@ -84,7 +127,7 @@ internal sealed partial class SqlPlanExecutor
             foreach (string name in metadata.ColumnNames)
             {
                 var column = table.Columns[FindColumnOrdinal(table, name)];
-                if (column.Type.Type is Types.DatabaseType.String or Types.DatabaseType.Json
+                if (column.Type.Type is Types.DatabaseType.String or Types.DatabaseType.Character or Types.DatabaseType.Json
                     && !(column.Collation ?? _catalog.DefaultCollation).IsIndexBacked)
                 {
                     throw new DatabaseException($"Collation 'invariant' is not index-backed; column '{name}' cannot have an index or indexed constraint.");
@@ -97,32 +140,47 @@ internal sealed partial class SqlPlanExecutor
         {
             if (indexes.Count > 0)
             {
-                await statement.Coordinator.ApplyStatementAsync<bool>(statement.Transaction, async bracket =>
+                if (statement.ProvisioningProgress is not null)
                 {
                     foreach (var metadata in indexes)
                     {
-                        var index = await _indexManager.CreateIndexAsync(statement.Transaction, table.ObjectId,
-                            new IndexDefinition(metadata.Name, IndexKind.BTree, true), cancellationToken).ConfigureAwait(false);
-                        created.Add(metadata.Name);
-                        var ordinals = metadata.ColumnNames.Select(column => FindColumnOrdinal(table, column)).ToArray();
-                        var keys = new HashSet<string>(StringComparer.Ordinal);
-                        foreach (var version in ScanVersions(table, cancellationToken))
-                        {
-                            var key = BuildIndexKey(table, ordinals, version.Values);
-                            if (version.Deleter == TransactionSequence.None && !keys.Add(Convert.ToHexString(key.Encoded.Span)))
-                            {
-                                throw new SqlConstraintViolationException(metadata.Name, $"{table.Schema}.{table.Name}", "UNIQUE");
-                            }
-
-                            await index.InsertVersionAsync(bracket, key, SqlRecordLocation.Pack(version.Location.PageId, version.Location.SlotIndex),
-                                version.Writer, version.Deleter, cancellationToken).ConfigureAwait(false);
-                        }
+                        await BuildDeferredIndexAsync(table, new IndexDefinition(metadata.Name, IndexKind.BTree, true),
+                            metadata.ColumnNames.Select(column => FindColumnOrdinal(table, column)).ToArray(), statement,
+                            () => created.Add(metadata.Name), cancellationToken).ConfigureAwait(false);
                     }
-                    return true;
-                }, durable: true, cancellationToken).ConfigureAwait(false);
+                }
+                else
+                {
+                    // Durable, but not a self-commit the session counts (#1272): the trees are orphaned
+                    // pages until the publish below describes them.
+                    await statement.Coordinator.ApplyStatementAsync<bool>(statement.Transaction, async bracket =>
+                    {
+                        foreach (var metadata in indexes)
+                        {
+                            var index = await _indexManager.CreateIndexAsync(statement.Transaction, table.ObjectId,
+                                new IndexDefinition(metadata.Name, IndexKind.BTree, true), cancellationToken).ConfigureAwait(false);
+                            created.Add(metadata.Name);
+                            var ordinals = metadata.ColumnNames.Select(column => FindColumnOrdinal(table, column)).ToArray();
+                            var keys = new HashSet<string>(StringComparer.Ordinal);
+                            foreach (var version in ScanVersions(table, cancellationToken))
+                            {
+                                var key = BuildIndexKey(table, ordinals, version.Values);
+                                if (version.Deleter == TransactionSequence.None && !keys.Add(Convert.ToHexString(key.Encoded.Span)))
+                                {
+                                    throw new SqlConstraintViolationException(metadata.Name, $"{table.Schema}.{table.Name}", "UNIQUE");
+                                }
+
+                                await index.InsertVersionAsync(bracket, key, SqlRecordLocation.Pack(version.Location.PageId, version.Location.SlotIndex),
+                                    version.Writer, version.Deleter, cancellationToken).ConfigureAwait(false);
+                            }
+                        }
+                        return true;
+                    }, durable: true, cancellationToken).ConfigureAwait(false);
+                }
             }
-            await SqlCatalog.PublishTableAsync(_catalog, table, indexes, ((IIndexRegistry)_indexManager).ExportRegistrations(),
-                replaceExisting, cancellationToken).ConfigureAwait(false);
+            await SelfCommitAsync(statement, (publication is null ? _catalog.PublishTableAsync(table, indexes, PublishedRegistrations(indexes),
+                replaceExisting, cancellationToken) : _catalog.PublishTableAsync(table, indexes, PublishedRegistrations(indexes),
+                replaceExisting, publication, cancellationToken))).ConfigureAwait(false);
         }
         catch
         {
@@ -135,7 +193,7 @@ internal sealed partial class SqlPlanExecutor
         }
     }
 
-    private async Task<QueryResult> ExecuteAddConstraintAsync(SqlAddConstraintPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
+    private async Task<DatabaseResult> ExecuteAddConstraintAsync(SqlAddConstraintPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         // The backfill below validates every existing row against latest state, so
         // it needs table-grain exclusivity, not the row-grain referential locks
@@ -154,24 +212,31 @@ internal sealed partial class SqlPlanExecutor
         constraints = BindConstraints(plan.Table, [plan.Constraint]);
         var primary = plan.Constraint.Kind == SqlConstraintKind.PrimaryKey ? plan.Constraint.Columns : plan.Table.PrimaryKeyColumns;
         var columns = plan.Table.Columns.Select(column => primary.Contains(column.Name, StringComparer.OrdinalIgnoreCase)
-            ? new SqlCatalogColumn(column.Name, column.Type, false, column.DefaultLiteral, column.Collation) : column).ToArray();
+            ? new SqlCatalogColumn(column.Name, column.Type, false, column.DefaultLiteral, column.Collation, column.DomainName, column.DefaultFunctionCalls, column.Identity, column.MissingValueLiteral) : column).ToArray();
         var replacement = new SqlCatalogTable(plan.Table.ObjectId, plan.Table.Schema, plan.Table.Name, columns,
-            primary, plan.Table.Owner, plan.Table.OwningSchema, plan.Table.Constraints.Concat(constraints).ToArray());
+            primary, plan.Table.Owner, plan.Table.OwningSchema, plan.Table.Constraints.Concat(constraints).ToArray(),
+            plan.Table.DroppedColumnOrdinals);
         var rows = Scan(plan.Table, statement, cancellationToken, ConstraintCurrentSnapshot(statement)).Select(row => row.Values).ToList();
+        _definitions.Get(replacement, cancellationToken);
+        long processed = 0;
+        statement.ProvisioningProgress?.Invoke(0, rows.Count);
         foreach (var row in rows)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             for (int i = 0; i < columns.Length; i++)
             {
                 CoerceForColumn(row[i], columns[i]);
             }
+            ValidateRows(replacement, [row], statement, cancellationToken, current: true);
+            statement.ProvisioningProgress?.Invoke(++processed, rows.Count);
         }
 
-        ValidateRows(replacement, rows, statement, cancellationToken, current: true);
+        // The backfill binds the replacement version, which is the instance published below.
         await PublishConstrainedTableAsync(replacement, [plan.Constraint], statement, cancellationToken, replaceExisting: true).ConfigureAwait(false);
-        return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
+        return new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0);
     }
 
-    private async Task<QueryResult> ExecuteAddColumnAsync(SqlAddColumnPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
+    private async Task<DatabaseResult> ExecuteAddColumnAsync(SqlAddColumnPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         await AcquireObjectLockAsync(statement, plan.Schema, plan.Name, "ALTER TABLE ADD COLUMN", cancellationToken).ConfigureAwait(false);
         _catalog.TryGetTable(plan.Schema, plan.Name, out var table);
@@ -180,15 +245,39 @@ internal sealed partial class SqlPlanExecutor
             throw new DatabaseException($"Column '{plan.Column.Name}' already exists.");
         }
 
+        if (plan.Column.Identity is not null && Scan(table, statement, cancellationToken, ConstraintCurrentSnapshot(statement)).Any())
+        {
+            throw SqlPlanningException.IdentityViolation(plan.Column.Name, ErrorMessages.IdentityBackfillForbidden);
+        }
+
         // Validate even on an empty table: publishing an unusable default would
         // defer the failure until a later INSERT. No catalog or row writes occur
         // until every default and existing-row constraint has been checked.
-        if (plan.Column.DefaultLiteral is not null)
+        var column = plan.Column;
+        SqlBoundExpression? boundDefault = null;
+        if (column.DefaultLiteral is not null)
         {
-            ResolveDefault(plan.Column);
+            var expression = SqlPersistedExpression.Load(column.DefaultLiteral, "ADD COLUMN DEFAULT");
+            var scope = new SqlExpressionEvaluator([], null, defaultCollation: _catalog.DefaultCollation,
+                functions: _definitions.Functions, cancellationToken: cancellationToken);
+            SqlDefinitionBinder.PinCalls(expression, scope, column.DefaultFunctionCalls);
+            SqlPersistedExpression.Bind(expression, scope);
+            var volatility = DefaultVolatility(expression, scope);
+            if (volatility == SqlFunctionVolatility.Volatile &&
+                Scan(table, statement, cancellationToken, ConstraintCurrentSnapshot(statement)).Any())
+            {
+                throw new SqlPlanningException("COHSQLE027", string.Format(CultureInfo.CurrentCulture, ErrorMessages.VolatileDefaultBackfill, column.Name));
+            }
+            boundDefault = BindDefaultExpression(column, $"DEFAULT of column '{column.Name}' on table '{plan.Schema}.{plan.Name}'",
+                _definitions.Functions, _catalog.DefaultCollation, cancellationToken, declaring: true);
+            string? missing = volatility == SqlFunctionVolatility.Volatile ? null
+                : SqlPersistedExpression.IsDefaultLiteral(expression) ? column.DefaultLiteral
+                : FrozenDefaultLiteral(DeclaredDefaultValue(boundDefault, column, cancellationToken, statement.TransactionStart), column.Type.Type);
+            column = new SqlCatalogColumn(column.Name, column.Type, column.IsNullable, column.DefaultLiteral, column.Collation,
+                column.DomainName, column.DefaultFunctionCalls, column.Identity, missing);
         }
 
-        var columns = table.Columns.Append(plan.Column).ToArray();
+        var columns = table.Columns.Append(column).ToArray();
         var primaryDefinition = plan.Constraints.FirstOrDefault(c => c.Kind == SqlConstraintKind.PrimaryKey);
         if (primaryDefinition is not null && table.PrimaryKeyColumns.Count > 0)
         {
@@ -196,40 +285,87 @@ internal sealed partial class SqlPlanExecutor
         }
 
         var primary = primaryDefinition?.Columns ?? table.PrimaryKeyColumns;
-        var provisional = new SqlCatalogTable(table.ObjectId, table.Schema, table.Name, columns, primary, table.Owner, table.OwningSchema, table.Constraints);
+        // The added column takes the next physical ordinal: the replacement keeps the
+        // table's dropped ordinals, so every existing column keeps its own (the catalog
+        // refuses a replacement that does not).
+        var provisional = new SqlCatalogTable(table.ObjectId, table.Schema, table.Name, columns, primary, table.Owner, table.OwningSchema,
+            table.Constraints, table.DroppedColumnOrdinals);
         var constraints = BindConstraints(provisional, plan.Constraints);
         await LockReferencedTablesAsync(constraints, statement, cancellationToken).ConfigureAwait(false);
         constraints = BindConstraints(provisional, plan.Constraints);
         var replacement = new SqlCatalogTable(table.ObjectId, table.Schema, table.Name, columns, primary, table.Owner, table.OwningSchema,
-            table.Constraints.Concat(constraints).ToArray());
+            table.Constraints.Concat(constraints).ToArray(), table.DroppedColumnOrdinals);
+        _definitions.GetDeclared(replacement, [.. _definitions.Get(table, cancellationToken).DefaultValues, boundDefault], cancellationToken);
+        if (plan.Column.IsNullable && plan.Constraints.Count == 0)
+        {
+            // Existing columns and constraints are unchanged. A nullable field's missing
+            // value is one immutable literal, so validate it once instead of scanning rows.
+            var definition = _definitions.Get(replacement, cancellationToken);
+            var row = new object?[columns.Length];
+            row[^1] = definition.MissingValues[^1] is { } literal ? DefaultValue(literal, cancellationToken) : null;
+            try
+            {
+                CheckDomains(definition, row, ExecutionEvaluator(null, cancellationToken), [columns.Length - 1]);
+            }
+            catch (SqlConstraintViolationException)
+            {
+                // An empty table assigns no missing value. Keep that DDL legal even
+                // when all retained versions are tombstoned. Valid defaults never scan.
+                if (Scan(table, statement, cancellationToken, ConstraintCurrentSnapshot(statement)).Any())
+                {
+                    throw;
+                }
+            }
+            _definitions.Adopt(await SelfCommitAsync(statement,
+                (statement.ScriptReceipt is null ? _catalog.AddColumnAsync(plan.Schema, plan.Name, column, cancellationToken) : _catalog.AddColumnAsync(plan.Schema, plan.Name, column, statement.ScriptReceipt, cancellationToken))).ConfigureAwait(false), replacement, CancellationToken.None);
+            return new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0);
+        }
         // Backfill is logical: missing trailing fields resolve from the immutable
         // replacement metadata. Existing row bytes and MVCC stamps never change;
         // one durable catalog publication makes the complete addition visible.
         var rows = Scan(replacement, statement, cancellationToken, ConstraintCurrentSnapshot(statement)).Select(row => row.Values).ToList();
+        var bound = rows.Count == 0 || plan.Column.DomainName is null ? null : _definitions.Get(replacement, cancellationToken);
+        var evaluator = bound is null ? null : ExecutionEvaluator(null, cancellationToken);
+
+        // Each existing row is assigned the new column's default, or NULL, of its domain (phase E3).
+        int[]? added = bound is null ? null : [columns.Length - 1];
+        long processed = 0;
+        statement.ProvisioningProgress?.Invoke(0, rows.Count);
         foreach (var row in rows)
         {
-            CoerceForColumn(row[^1], plan.Column);
+            cancellationToken.ThrowIfCancellationRequested();
+            row[^1] = CoerceForColumn(row[^1], column);
+            if (added is not null)
+            {
+                CheckDomains(bound!, row, evaluator!, added);
+            }
+            statement.ProvisioningProgress?.Invoke(++processed, rows.Count);
         }
 
         ValidateRows(replacement, rows, statement, cancellationToken, current: true);
         if (plan.Constraints.Count == 0)
         {
-            await _catalog.AddColumnAsync(plan.Schema, plan.Name, plan.Column, cancellationToken).ConfigureAwait(false);
+            // The catalog publishes its own copy of the replacement definition, built from the
+            // same column and constraint instances, so it adopts the replacement's bindings.
+            _definitions.Adopt(await SelfCommitAsync(statement, (statement.ScriptReceipt is null ? _catalog.AddColumnAsync(plan.Schema, plan.Name, column, cancellationToken) : _catalog.AddColumnAsync(plan.Schema, plan.Name, column, statement.ScriptReceipt, cancellationToken))).ConfigureAwait(false),
+                replacement, CancellationToken.None);
         }
         else
         {
             await PublishConstrainedTableAsync(replacement, plan.Constraints, statement, cancellationToken, replaceExisting: true).ConfigureAwait(false);
         }
-        return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
+        return new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0);
     }
 
-    private async Task<QueryResult> ExecuteDropConstraintAsync(SqlDropConstraintPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
+    private async Task<DatabaseResult> ExecuteDropConstraintAsync(SqlDropConstraintPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         await AcquireObjectLockAsync(statement, plan.Table.Schema, plan.Table.Name, "ALTER TABLE DROP CONSTRAINT", cancellationToken).ConfigureAwait(false);
         EnsureCurrentDefinition(plan.Table);
         if (plan.Table.Constraints.Any(c => string.Equals(c.Name, plan.ConstraintName, StringComparison.OrdinalIgnoreCase)))
         {
-            await SqlCatalog.DropConstraintAsync(_catalog, plan.Table.Schema, plan.Table.Name, plan.ConstraintName, cancellationToken).ConfigureAwait(false);
+            // The new version no longer carries the constraint, so the dropped predicate is
+            // never evaluated again; it keeps the other bindings of the version it came from.
+            _definitions.Adopt(await SelfCommitAsync(statement, (statement.ScriptReceipt is null ? _catalog.DropConstraintAsync(plan.Table.Schema, plan.Table.Name, plan.ConstraintName, cancellationToken) : _catalog.DropConstraintAsync(plan.Table.Schema, plan.Table.Name, plan.ConstraintName, statement.ScriptReceipt, cancellationToken))).ConfigureAwait(false), plan.Table, CancellationToken.None);
         }
         else if (_catalog.TryGetIndex(plan.Table.ObjectId, plan.ConstraintName, out var index) && index.IsUnique)
         {
@@ -240,7 +376,7 @@ internal sealed partial class SqlPlanExecutor
             throw new DatabaseException($"Constraint '{plan.ConstraintName}' does not exist on '{plan.Table.Name}'.");
         }
 
-        return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
+        return new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0);
     }
 
     private void EnsureCanDropIndex(SqlCatalogTable table, SqlCatalogIndex index)
@@ -252,18 +388,76 @@ internal sealed partial class SqlPlanExecutor
         }
     }
 
-    private void EnsureCanDropColumn(SqlCatalogTable table, string columnName)
+    /// <summary>
+    /// Refuses to drop a column a constraint uses, naming the constraint to drop first, with
+    /// the catalog's wording. A missing column and a primary-key column are left to the
+    /// catalog's own refusals, which name them as such.
+    /// </summary>
+    private void EnsureCanDropColumn(SqlCatalogTable table, string columnName, CancellationToken cancellationToken)
     {
-        if (table.Constraints.Any(c => c.Columns.Contains(columnName, StringComparer.OrdinalIgnoreCase)) ||
-            IncomingReferences(table).Any(reference => reference.Constraint.ReferencedColumns!.Contains(columnName, StringComparer.OrdinalIgnoreCase)))
+        int ordinal = -1;
+        for (int index = 0; index < table.Columns.Count; index++)
         {
-            throw new DatabaseException($"Column '{columnName}' participates in a constraint and cannot be dropped.");
+            if (string.Equals(table.Columns[index].Name, columnName, StringComparison.OrdinalIgnoreCase))
+            {
+                ordinal = index;
+                break;
+            }
         }
 
-        var columns = table.Columns.Where(column => !string.Equals(column.Name, columnName, StringComparison.OrdinalIgnoreCase)).ToArray();
-        foreach (var check in table.Constraints.Where(c => c.Kind == SqlCatalogConstraintKind.Check))
+        if (ordinal < 0 || table.PrimaryKeyColumns.Contains(columnName, StringComparer.OrdinalIgnoreCase))
         {
-            SqlPlanner.ValidateExpression(ParseCheck(check.CheckExpression!), new SqlExpressionEvaluator(columns, null, defaultCollation: _catalog.DefaultCollation, subqueryValues: _subqueryValues));
+            return;
         }
+
+        foreach (var constraint in table.Constraints)
+        {
+            if (constraint.Columns.Contains(columnName, StringComparer.OrdinalIgnoreCase))
+            {
+                throw UsedByConstraint(constraint);
+            }
+        }
+
+        foreach (var reference in IncomingReferences(table))
+        {
+            if (reference.Constraint.ReferencedColumns!.Contains(columnName, StringComparer.OrdinalIgnoreCase))
+            {
+                throw UsedByConstraint(reference.Constraint);
+            }
+        }
+
+        // A table-level CHECK lists no columns; its bound predicate records every column it
+        // reads. Binding the predicate without the column (binding only, as at load, so a
+        // declaration rule tightened since the check was stored cannot block an unrelated
+        // drop) backs that up, and either way the refusal names the CHECK, not the binder's
+        // unknown column.
+        var columns = table.Columns.Where((_, index) => index != ordinal).ToArray();
+        foreach (var check in _definitions.Get(table, cancellationToken).Checks)
+        {
+            if (check.ColumnOrdinals.Contains(ordinal))
+            {
+                throw UsedByConstraint(check.Constraint);
+            }
+
+            // A predicate bound as unresolved (a function the engine does not register) cannot bind
+            // again either; its columns, all it needs here, are its ordinals above.
+            if (check.Unresolved is not null)
+            {
+                continue;
+            }
+
+            try
+            {
+                _ = BindPersistedCheck(check.Predicate, new SqlCatalogTable(0, table.Schema, table.Name, columns),
+                    _catalog.DefaultCollation, _definitions.Functions, check.Constraint.CheckFunctionCalls, cancellationToken);
+            }
+            catch (DatabaseException exception)
+            {
+                throw UsedByConstraint(check.Constraint, exception);
+            }
+        }
+
+        DatabaseException UsedByConstraint(SqlCatalogConstraint constraint, Exception? cause = null)
+            => new($"Column '{columnName}' is referenced by constraint '{constraint.Name}'. Drop the constraint first.", cause);
     }
 }

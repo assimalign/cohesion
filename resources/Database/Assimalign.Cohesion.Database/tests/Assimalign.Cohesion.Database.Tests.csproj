@@ -9,7 +9,20 @@
 		<CohesionPackageReference Include="xunit" />
 		<CohesionPackageReference Include="xunit.runner.visualstudio" />
 		<CohesionPackageReference Include="Shouldly" />
+		<!-- Compiler-backed consumer tests keep Roslyn test-only. -->
+		<CohesionPackageReference Include="Microsoft.CodeAnalysis.CSharp" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database" />
+		<!--
+			The root event source's tests drive real in-memory engines (the event-sources plan, §7):
+			database lifecycle, explicit transactions and statements on a Sql engine, and the
+			statement re-entry of the Graph and Documents text overloads.
+		-->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Graph" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Documents" />
+		<!-- The compile probes cover the typed-only and non-executing model sessions too. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.KeyValuePair" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Blob" />
 	</ItemGroup>
 	<ItemGroup>
 		<Content Include="xunit.runner.json" />

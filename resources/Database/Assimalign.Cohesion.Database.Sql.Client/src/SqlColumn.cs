@@ -9,4 +9,5 @@ namespace Assimalign.Cohesion.Database.Sql.Client;
 /// <param name="Name">The column name.</param>
 /// <param name="Ordinal">The zero-based ordinal position of the column.</param>
 /// <param name="Type">The column's shared type identity.</param>
-public sealed record SqlColumn(string Name, int Ordinal, DatabaseType Type);
+/// <param name="MaxLength">The declared character or binary length; null if unbounded or computed.</param>
+public sealed record SqlColumn(string Name, int Ordinal, DatabaseType Type, int? MaxLength = null);

@@ -38,10 +38,16 @@ public enum SqlBinaryOperator
     /// <summary>Greater than or equal (<c>&gt;=</c>).</summary>
     GreaterOrEqual,
 
-    /// <summary>Logical AND.</summary>
+    /// <summary>
+    /// Logical AND. The parser no longer builds a binary node with this operator: every
+    /// <c>AND</c> chain is a <see cref="SqlLogicalExpression"/> (#1151).
+    /// </summary>
     And,
 
-    /// <summary>Logical OR.</summary>
+    /// <summary>
+    /// Logical OR. The parser no longer builds a binary node with this operator: every
+    /// <c>OR</c> chain is a <see cref="SqlLogicalExpression"/> (#1151).
+    /// </summary>
     Or,
 
     /// <summary>String concatenation (<c>||</c>).</summary>

@@ -5,6 +5,8 @@ using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 
+using Assimalign.Cohesion.Database.Language;
+using Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Sql.Schema;
 using Assimalign.Cohesion.Database.Types;
 
@@ -13,15 +15,28 @@ using Microsoft.Build.Framework;
 namespace Assimalign.Cohesion.Sdk.Database.Tasks;
 
 /// <summary>
-/// Creates an ordered SQL migration and matching compiled-schema baseline.
+/// Creates an ordered SQL migration and matching compiled-schema baseline for one declared database.
 /// </summary>
 public sealed partial class CreateDatabaseMigrationTask : DatabaseTask
 {
-    /// <summary>The desired compiled schema produced by <see cref="CompileDatabaseSchemaTask"/>.</summary>
+    /// <summary>
+    /// The directory <see cref="CompileDatabaseSchemaTask"/> wrote each declared database's desired
+    /// schema to, as <c>&lt;database&gt;.schema.json</c>, with the manifest that lists them.
+    /// </summary>
     [Required]
-    public string SchemaModelPath { get; set; } = string.Empty;
+    public string SchemaDirectory { get; set; } = string.Empty;
 
-    /// <summary>The directory generated migration files are written to.</summary>
+    /// <summary>
+    /// The declared database the migration is for (<c>CohesionDatabaseName</c>); it compares ignoring
+    /// case, as database names do. Optional when the project declares exactly one database.
+    /// </summary>
+    public string DatabaseName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The root of the migration folders: a database's migrations are written to the folder under it
+    /// named for the database, so each database numbers its own. The folder's name compares ignoring
+    /// case, as database names do, so a declaration renamed only in case keeps its folder.
+    /// </summary>
     [Required]
     public string MigrationsRoot { get; set; } = string.Empty;
 
@@ -96,23 +111,73 @@ public sealed partial class CreateDatabaseMigrationTask : DatabaseTask
         try
         {
             string projectDirectory = Path.GetFullPath(ProjectDirectory);
-            string schemaPath = ResolvePath(SchemaModelPath, projectDirectory);
-            if (!File.Exists(schemaPath))
+            string schemaDirectory = ResolvePath(SchemaDirectory, projectDirectory);
+            // The databases the compile task wrote artifacts for, from its manifest: a foreign
+            // *.schema.json in an overridden output directory is not a declared database.
+            string[] declared = CompileDatabaseSchemaTask.ReadManifest(schemaDirectory)
+                .Order(StringComparer.Ordinal)
+                .ToArray();
+            string databaseName = DatabaseName.Trim();
+            if (databaseName.Length == 0 && declared.Length == 1)
+            {
+                // A project that declares one database needs no CohesionDatabaseName.
+                databaseName = declared[0];
+            }
+            else if (databaseName.Length == 0 && declared.Length > 1)
+            {
+                Log.LogError(
+                    null,
+                    "COHDBSDK207",
+                    null,
+                    null,
+                    0,
+                    0,
+                    0,
+                    0,
+                    "CohesionDatabaseName is required when the project declares more than one database: it names the " +
+                    $"declared database the migration is for (declared: {string.Join(", ", declared)}).");
+                return false;
+            }
+
+            string? declaredName = declared.FirstOrDefault(name => string.Equals(name, databaseName, StringComparison.OrdinalIgnoreCase));
+            if (declaredName is null)
             {
                 Log.LogError(
                     null,
                     "COHDBSDK203",
                     null,
-                    schemaPath,
+                    schemaDirectory,
                     0,
                     0,
                     0,
                     0,
-                    "The compiled database schema does not exist. Build the project before creating a migration.");
+                    (databaseName.Length == 0
+                        ? "No database's compiled schema exists"
+                        : $"The compiled schema of database '{databaseName}' does not exist") +
+                    (declared.Length == 0 ? "" : $" (declared: {string.Join(", ", declared)})") +
+                    ". Build the project before creating a migration.");
                 return false;
             }
 
-            string migrationsRoot = ResolvePath(MigrationsRoot, projectDirectory);
+            string schemaPath = Path.Combine(schemaDirectory, declaredName + CompileDatabaseSchemaTask.SchemaFileSuffix);
+            string allMigrations = ResolvePath(MigrationsRoot, projectDirectory);
+            string? migrationsRoot = FindMigrationsDirectory(allMigrations, declaredName, out string[] matches);
+            if (migrationsRoot is null)
+            {
+                Log.LogError(
+                    null,
+                    "COHDBSDK208",
+                    null,
+                    allMigrations,
+                    0,
+                    0,
+                    0,
+                    0,
+                    $"Database '{declaredName}' has more than one migrations folder ({string.Join(", ", matches.Select(Path.GetFileName))}): " +
+                    "database names compare ignoring case, so its migrations belong in one folder. Merge them into one.");
+                return false;
+            }
+
             Directory.CreateDirectory(migrationsRoot);
             BaselineFile? latest = FindLatestBaseline(migrationsRoot);
             SqlCompiledSchema desired = SqlCompiledSchemaSerializer.Read(schemaPath);
@@ -174,6 +239,27 @@ public sealed partial class CreateDatabaseMigrationTask : DatabaseTask
             Log.LogError(null, "COHDBSDK206", null, null, 0, 0, 0, 0, exception.Message);
             return false;
         }
+    }
+
+    // A database's migrations folder: the one folder under the root whose name equals the
+    // database's ignoring case, as database names compare, so a declaration renamed only in case
+    // keeps its history on a case-sensitive file system too (#1392); a new folder named as the
+    // database is declared when there is none. Null when more than one folder matches, which only
+    // a case-sensitive file system can hold; matches then holds them.
+    private static string? FindMigrationsDirectory(string root, string databaseName, out string[] matches)
+    {
+        matches = Directory.Exists(root)
+            ? Directory.EnumerateDirectories(root)
+                .Where(directory => string.Equals(Path.GetFileName(directory), databaseName, StringComparison.OrdinalIgnoreCase))
+                .Order(StringComparer.Ordinal)
+                .ToArray()
+            : [];
+        return matches.Length switch
+        {
+            0 => Path.Combine(root, databaseName),
+            1 => matches[0],
+            _ => null,
+        };
     }
 
     private static BaselineFile? FindLatestBaseline(string migrationsRoot)
@@ -253,11 +339,11 @@ public sealed partial class CreateDatabaseMigrationTask : DatabaseTask
                     break;
                 case SqlSchemaMigrationOperationKind.AddColumn:
                     CompiledSchemaColumn addedColumn = Required(operation.Column, operation);
-                    if (!addedColumn.IsNullable)
+                    if (!addedColumn.IsNullable && CanonicalDefault(addedColumn.DefaultLiteral) is null)
                     {
                         throw Unsupported(
                             operation,
-                            "adding a non-nullable column requires a default or backfill, which the SQL DDL dialect does not model");
+                            "adding a non-nullable column requires a non-null literal default or a backfill");
                     }
                     builder.Append("ALTER TABLE ").Append(QualifiedTable(Required(operation.ParentName, operation)))
                         .Append(" ADD COLUMN ");
@@ -279,6 +365,13 @@ public sealed partial class CreateDatabaseMigrationTask : DatabaseTask
                     break;
                 case SqlSchemaMigrationOperationKind.AlterTable:
                     throw Unsupported(operation, "ALTER metadata is not implemented by the SQL DDL dialect");
+                case SqlSchemaMigrationOperationKind.AddDomain or SqlSchemaMigrationOperationKind.DropDomain:
+                    // A SQL engine's domains are registered on the engine, not stored in the database
+                    // (phase E3): the step has no statement, and the engine that declares the database
+                    // registers the schema's domains when it builds.
+                    builder.Append("-- ").Append(operation.Kind == SqlSchemaMigrationOperationKind.AddDomain ? "Domain added: " : "Domain dropped: ")
+                        .Append(Identifier(operation.ObjectName)).Append(" (registered by the SQL engine; no statement)\n");
+                    break;
                 default:
                     throw Unsupported(operation, "the operation kind is unknown");
             }
@@ -328,14 +421,58 @@ public sealed partial class CreateDatabaseMigrationTask : DatabaseTask
             }
 
             builder.Append(isPrimaryKey || !column.IsNullable ? " NOT NULL" : " NULL");
+            if (column.DefaultLiteral is not null)
+            {
+                builder.Append(" DEFAULT ").Append(CanonicalDefault(column.DefaultLiteral) ?? "NULL");
+            }
         }
+
+        private static string? CanonicalDefault(string? text)
+        {
+            if (text is null)
+            {
+                return null;
+            }
+
+            // Match the runtime's literal-only declaration admission. The second parse prevents
+            // a terminator or trailing comment from escaping the expression; render only the AST.
+            SqlExpression literal = ParseDefault(text);
+            _ = ParseDefault($"({text})");
+            return literal is SqlLiteralExpression { LiteralType: SqlLiteralType.Null } ? null : SqlExpressionRenderer.Render(literal);
+        }
+
+        private static SqlExpression ParseDefault(string text)
+        {
+            const string carrierTable = "__migration_default";
+            var statement = new SqlQueryParser().Parse($"SELECT * FROM {carrierTable} WHERE {text}");
+            if (statement.Diagnostics.Any(static diagnostic => diagnostic.Severity == DiagnosticSeverity.Error) ||
+                statement is not SqlQueryStatement { SqlExpression: SqlSelectExpression select } ||
+                select.Where is not { } literal || !IsDefaultLiteral(literal) || select.IsDistinct || select.Columns.Count != 1 ||
+                select.Columns[0] is not { Expression: SqlStarExpression, Alias: null } ||
+                select.From is not [{ Table: SqlTableReference { TableName: carrierTable, SchemaName: null, Alias: null }, Joins.Count: 0 }] ||
+                select.GroupBy.Count > 0 || select.Having is not null ||
+                select.OrderBy.Count > 0 || select.Limit is not null || select.Offset is not null)
+            {
+                throw new InvalidOperationException($"DEFAULT '{text}' must be exactly one supported SQL literal.");
+            }
+
+            return literal;
+        }
+
+        private static bool IsDefaultLiteral(SqlExpression expression)
+            => expression is SqlLiteralExpression or SqlUnaryExpression
+            {
+                Operator: SqlUnaryOperator.Negate,
+                Operand: SqlLiteralExpression { LiteralType: SqlLiteralType.Integer or SqlLiteralType.Float }
+            };
 
         private static string SqlType(CompiledSchemaColumn column)
         {
             if (!string.IsNullOrWhiteSpace(column.CustomType))
             {
-                throw new InvalidOperationException(
-                    $"Column '{column.Name}' uses custom type '{column.CustomType}', which the SQL DDL executor does not support yet.");
+                // A domain's name or a built-in type name as declared (phase E3); the compiled schema
+                // checked its shape, an identifier with up to two unsigned arguments.
+                return column.CustomType;
             }
 
             return column.Type switch
@@ -348,6 +485,7 @@ public sealed partial class CreateDatabaseMigrationTask : DatabaseTask
                 DatabaseType.Float32 => "REAL",
                 DatabaseType.Float64 => "DOUBLE",
                 DatabaseType.Decimal => DecimalTypeName(column),
+                DatabaseType.Character => SizedTypeName("CHAR", "CHAR", column.MaxLength ?? 1),
                 DatabaseType.String => SizedTypeName("VARCHAR", "TEXT", column.MaxLength),
                 DatabaseType.Binary => SizedTypeName("VARBINARY", "BLOB", column.MaxLength),
                 DatabaseType.Date => "DATE",
@@ -392,7 +530,7 @@ public sealed partial class CreateDatabaseMigrationTask : DatabaseTask
         private static string ColumnList(System.Collections.Generic.IReadOnlyList<string> columns)
             => string.Join(", ", columns.Select(Identifier));
 
-        private static string QualifiedTable(string tableName) => $"dbo.{Identifier(tableName)}";
+        private static string QualifiedTable(string tableName) => $"{Assimalign.Cohesion.Database.Sql.Language.Internal.SqlNamespaceNames.Default}.{Identifier(tableName)}";
 
         private static string Identifier(string value)
         {

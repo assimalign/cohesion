@@ -26,5 +26,5 @@ public sealed class KeyValueClientOptions
     /// <summary>
     /// Gets or sets an optional telemetry observer invoked around every command.
     /// </summary>
-    public IKeyValueClientObserver? Observer { get; set; }
+    public KeyValueClientObserver? Observer { get; set; }
 }

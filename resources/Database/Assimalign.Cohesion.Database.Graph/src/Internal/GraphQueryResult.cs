@@ -7,29 +7,37 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Assimalign.Cohesion.Database.Execution;
-using Assimalign.Cohesion.Database.Language;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Graph.Internal;
 
-internal sealed class GraphQueryResult : QueryResultSet
+internal sealed class GraphQueryResult : DatabaseResultSet
 {
-    private readonly IReadOnlyList<QueryColumn> _columns;
+    private readonly IReadOnlyList<DatabaseColumn> _columns;
     private readonly IReadOnlyList<object?[]> _rows;
+    private readonly IReadOnlyList<Diagnostic> _warnings;
+    private readonly long _affected;
 
     /// <summary>Initializes a new instance of the <see cref="GraphQueryResult"/> class.</summary>
     /// <param name="columns">The projected result columns.</param>
     /// <param name="rows">The materialized result rows, one value array per row.</param>
-    public GraphQueryResult(IReadOnlyList<QueryColumn> columns, IReadOnlyList<object?[]> rows)
+    /// <param name="warnings">The statement's warnings, such as an unknown label it read (#1228).</param>
+    public GraphQueryResult(IReadOnlyList<DatabaseColumn> columns, IReadOnlyList<object?[]> rows, IReadOnlyList<Diagnostic>? warnings = null, IReadOnlyList<bool>? compositeColumns = null, long affected = -1)
     {
+        CompositeColumns = compositeColumns;
         _columns = columns;
         _rows = rows;
+        _warnings = warnings ?? [];
+        _affected = affected;
     }
 
-    public override QueryResultStatus Status => QueryResultStatus.Success;
-    public override long AffectedCount => -1;
-    public override IReadOnlyList<Diagnostic>? Diagnostics => null;
-    public override IReadOnlyList<QueryColumn> Columns => _columns;
-    public override async IAsyncEnumerable<QueryRow> GetRowsAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
+    internal IReadOnlyList<bool>? CompositeColumns { get; }
+
+    public override DatabaseResultStatus Status => DatabaseResultStatus.Success;
+    public override long AffectedCount => _affected;
+    public override IReadOnlyList<Diagnostic>? Diagnostics => _warnings.Count == 0 ? null : _warnings;
+    public override IReadOnlyList<DatabaseColumn> Columns => _columns;
+    public override async IAsyncEnumerable<DatabaseRow> GetRowsAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         foreach (var row in _rows)
         {
@@ -40,7 +48,7 @@ internal sealed class GraphQueryResult : QueryResultSet
     }
     public override ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
-    private sealed class GraphQueryRow : QueryRow
+    private sealed class GraphQueryRow : DatabaseRow
     {
         private readonly object?[] _values;
 

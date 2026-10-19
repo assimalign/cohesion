@@ -29,4 +29,22 @@ public enum SqlLiteralType
     /// A boolean literal (<c>TRUE</c> or <c>FALSE</c>).
     /// </summary>
     Boolean,
+
+    /// <summary>A DATE literal with canonical yyyy-MM-dd text.</summary>
+    Date,
+
+    /// <summary>A zone-less TIME literal with canonical HH:mm:ss[.fffffff] text.</summary>
+    Time,
+
+    /// <summary>A zone-less TIMESTAMP literal with canonical date and time text.</summary>
+    Timestamp,
+
+    /// <summary>A TIMESTAMPTZ literal with canonical date, time and offset text.</summary>
+    TimestampWithTimeZone,
+
+    /// <summary>A day-time INTERVAL literal with canonical ISO 8601 duration text.</summary>
+    Interval,
+
+    /// <summary>An X'...' binary literal with uppercase hexadecimal text.</summary>
+    Binary,
 }

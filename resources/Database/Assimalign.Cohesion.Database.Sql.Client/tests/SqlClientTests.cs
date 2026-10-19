@@ -17,6 +17,25 @@ namespace Assimalign.Cohesion.Database.Sql.Client.Tests;
 /// </summary>
 public class SqlClientTests
 {
+    [Fact(DisplayName = "Cohesion Test [Sql.Client] - Views: persisted reads metadata and errors use the existing wire contract")]
+    public async Task QueryAsync_ViewStatements_ShouldReadJoinAndKeepConnectionUsable()
+    {
+        // Arrange
+        await using var harness = await SqlClientTestHarness.StartAsync();
+        await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
+        await connection.ExecuteAsync("CREATE VIEW active_users AS SELECT id, name FROM users", cancellationToken: SqlClientTestHarness.Timeout());
+        // Act
+        var rows = await connection.QueryAsync("SELECT active_users.name FROM users JOIN active_users ON users.id = active_users.id ORDER BY active_users.id", cancellationToken: SqlClientTestHarness.Timeout());
+        var metadata = await connection.QueryAsync("SELECT CHECK_OPTION, IS_UPDATABLE FROM INFORMATION_SCHEMA.VIEWS WHERE TABLE_NAME = 'active_users'", cancellationToken: SqlClientTestHarness.Timeout());
+        var error = await Should.ThrowAsync<SqlClientException>(async () => await connection.ExecuteAsync("DELETE FROM active_users", cancellationToken: SqlClientTestHarness.Timeout()));
+        var after = await connection.QueryAsync("SELECT COUNT(*) AS n FROM active_users", cancellationToken: SqlClientTestHarness.Timeout());
+        // Assert
+        rows.Count.ShouldBe(2);
+        metadata.ShouldHaveSingleItem().GetString("IS_UPDATABLE").ShouldBe("NO");
+        error.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
+        after.ShouldHaveSingleItem().GetInt64("n").ShouldBe(2L);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - Query: SELECT materializes typed columns and rows")]
     public async Task QueryAsync_Select_ShouldMaterializeTypedColumnsAndRows()
     {
@@ -30,7 +49,7 @@ public class SqlClientTests
         // Assert
         result.Columns.Count.ShouldBe(2);
         result.Columns[0].ShouldBe(new SqlColumn("id", 0, DatabaseType.Int32));
-        result.Columns[1].ShouldBe(new SqlColumn("name", 1, DatabaseType.String));
+        result.Columns[1].ShouldBe(new SqlColumn("name", 1, DatabaseType.String, 100));
 
         result.Count.ShouldBe(2);
         result[0].GetInt32("id").ShouldBe(1);
@@ -185,6 +204,26 @@ public class SqlClientTests
         observer.Failed.ShouldHaveSingleItem().Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - Telemetry: an observer overrides only the hooks it needs, and a throwing hook changes no outcome")]
+    public async Task QueryAsync_WithPartialThrowingObserver_ShouldKeepEachCommandOutcome()
+    {
+        // Arrange
+        var observer = new FailureOnlyObserver();
+        await using var harness = await SqlClientTestHarness.StartAsync(observer: observer);
+        await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
+
+        // Act
+        SqlResultSet rows = await connection.QueryAsync("SELECT id FROM users ORDER BY id", cancellationToken: SqlClientTestHarness.Timeout());
+        var failure = await Should.ThrowAsync<SqlClientException>(
+            async () => await connection.QueryAsync("SELECT id FROM missing_table", cancellationToken: SqlClientTestHarness.Timeout()));
+
+        // Assert: the base's empty hooks ran for the success, and the throwing failure hook masked nothing.
+        rows.Count.ShouldBe(2);
+        failure.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
+        observer.Failures.ShouldBe(1);
+        connection.IsOpen.ShouldBeTrue();
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - Pooling: reconnecting reuses the authenticated session")]
     public async Task ConnectAsync_AfterDispose_ShouldReuseSession()
     {
@@ -201,7 +240,29 @@ public class SqlClientTests
         await second.DisposeAsync();
 
         // Assert: only one server session ever existed — the pool reused it
-        harness.Server.Context.Sessions.ShouldHaveSingleItem();
+        harness.Server.Sessions.ShouldHaveSingleItem();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - Pooling: a disposed connection refuses commands after the pool rents its session again")]
+    public async Task QueryAsync_AfterDisposeAndReRent_ShouldThrowObjectDisposedException()
+    {
+        // Arrange: one pooled session, so the second connect re-rents the first's.
+        await using var harness = await SqlClientTestHarness.StartAsync(configureSettings: settings => settings.MaxPoolSize = 1);
+        var first = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
+        await first.DisposeAsync();
+        await using var second = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
+
+        // Act: the stale handle is refused, and neither a second dispose nor an abort may reach the new rental.
+        await Should.ThrowAsync<ObjectDisposedException>(async () =>
+            await first.QueryAsync("SELECT id FROM users ORDER BY id", cancellationToken: SqlClientTestHarness.Timeout()));
+        await first.DisposeAsync();
+        await first.AbortAsync();
+
+        // Assert: the second rental still owns the one session.
+        first.IsOpen.ShouldBeFalse();
+        second.IsOpen.ShouldBeTrue();
+        (await second.QueryAsync("SELECT id FROM users ORDER BY id", cancellationToken: SqlClientTestHarness.Timeout())).Count.ShouldBe(2);
+        harness.Server.Sessions.ShouldHaveSingleItem();
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - Options: creation validates settings and factory")]
@@ -214,5 +275,17 @@ public class SqlClientTests
         {
             Settings = new DatabaseConnectionSettings { Database = "app" }, // no factory
         }));
+    }
+
+    // Overrides one hook; the base's empty bodies cover the other two.
+    private sealed class FailureOnlyObserver : SqlClientObserver
+    {
+        internal int Failures { get; private set; }
+
+        protected internal override void OnFailed(string commandText, SqlClientException exception, TimeSpan elapsed)
+        {
+            Failures++;
+            throw new InvalidOperationException("The observer failed.");
+        }
     }
 }

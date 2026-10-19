@@ -54,12 +54,38 @@ public sealed class SqlCastTests
         yield return ["12.3400", "NUMERIC(4, 2)", DatabaseType.Decimal, 12.34m];
         yield return ["1.000", "DECIMAL(2, 0)", DatabaseType.Decimal, 1m];
         yield return ["0.001", "DECIMAL(3, 3)", DatabaseType.Decimal, .001m];
+        yield return ["1.234", "DECIMAL(4, 2)", DatabaseType.Decimal, 1.23m];
+        yield return ["0.001", "DECIMAL(2, 2)", DatabaseType.Decimal, 0m];
+        yield return [123, "VARCHAR(2)", DatabaseType.String, "12"];
+        yield return ["abc", "CHAR(2)", DatabaseType.Character, "ab"];
+        yield return ["😀", "VARCHAR(1)", DatabaseType.String, "😀"];
         yield return ["79228162514264337593543950335", "DECIMAL", DatabaseType.Decimal, decimal.MaxValue];
         yield return [" TrUe ", "BOOL", DatabaseType.Boolean, true];
         yield return ["FALSE", "BOOLEAN", DatabaseType.Boolean, false];
-        yield return [true, "CHARACTER(4)", DatabaseType.String, "TRUE"];
+        yield return [true, "CHARACTER(4)", DatabaseType.Character, "TRUE"];
         yield return [false, "VARCHAR(5)", DatabaseType.String, "FALSE"];
         yield return [12.25m, "TEXT", DatabaseType.String, "12.25"];
+
+        // Registry targets use strict literal text, with REAL and DOUBLE also from numbers.
+        yield return ["2026-02-01", "DATE", DatabaseType.Date, new DateOnly(2026, 2, 1)];
+        yield return [new DateTime(2026, 2, 1, 13, 45, 30), "DATE", DatabaseType.Date, new DateOnly(2026, 2, 1)];
+        yield return ["13:45:30", "TIME", DatabaseType.Time, new TimeOnly(13, 45, 30)];
+        yield return ["2026-02-01T13:45:30", "TIMESTAMP", DatabaseType.DateTime, new DateTime(2026, 2, 1, 13, 45, 30)];
+        yield return ["2026-02-01T13:45:30+02:00", "TIMESTAMPTZ", DatabaseType.DateTimeOffset,
+            new DateTimeOffset(2026, 2, 1, 13, 45, 30, TimeSpan.FromHours(2))];
+        yield return ["01:30:00", "INTERVAL", DatabaseType.TimeSpan, TimeSpan.FromMinutes(90)];
+        yield return ["6f9619ff-8b86-d011-b42d-00c04fc964ff", "UUID", DatabaseType.Guid, Guid.Parse("6f9619ff-8b86-d011-b42d-00c04fc964ff")];
+        yield return [" 1.5 ", "REAL", DatabaseType.Float32, 1.5f];
+        // Direct REAL parsing avoids a DOUBLE midpoint introduced by a first rounding.
+        yield return ["1.0000000596046448", "REAL", DatabaseType.Float32, 1.0000001f];
+        yield return ["-2.5e3", "DOUBLE", DatabaseType.Float64, -2500d];
+        yield return [1.5f, "DOUBLE", DatabaseType.Float64, 1.5d];
+        yield return [1.5d, "REAL", DatabaseType.Float32, 1.5f];
+        foreach (object source in numericSources)
+        {
+            yield return [source, "REAL", DatabaseType.Float32, 42f];
+            yield return [source, "DOUBLE", DatabaseType.Float64, 42d];
+        }
     }
 
     /// <summary>Proves projection values, CLR types, and metadata agree with the target.</summary>
@@ -71,13 +97,13 @@ public sealed class SqlCastTests
     [MemberData(nameof(SuccessfulConversions))]
     public async Task Cast_SupportedPair_ShouldConvertProjection(object source, string target, DatabaseType type, object expected)
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "cast-projection" });
+        await using var engine = SqlDatabaseEngine.Create("cast-projection", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("cast");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await SeedAsync(session);
 
         await using var result = (await ExecuteAsync(session, $"SELECT CAST(@value AS {target}) AS converted FROM t;",
-            new Dictionary<string, object?> { ["value"] = source })).ShouldBeAssignableTo<QueryResultSet>();
+            new Dictionary<string, object?> { ["value"] = source })).ShouldBeAssignableTo<DatabaseResultSet>();
 
         object? value = (await ReadRowsAsync(result)).ShouldHaveSingleItem()[0];
         result.Columns[0].Type.ShouldBe(type);
@@ -87,7 +113,7 @@ public sealed class SqlCastTests
 
     /// <summary>Rejects lossy or invalid conversion instead of accepting the original value.</summary>
     /// <param name="expression">The conversion expression that must fail.</param>
-    [Theory(DisplayName = "Cohesion Test [SqlEngine] - CAST: invalid text overflow scale and length fail explicitly")]
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - CAST: invalid text and overflow fail explicitly")]
     [InlineData("CAST('abc' AS INT)")]
     [InlineData("CAST('invalid' AS INT)")]
     [InlineData("CAST('' AS INT)")]
@@ -108,18 +134,22 @@ public sealed class SqlCastTests
     [InlineData("CAST(0.00000000000000000000000000001 AS DECIMAL)")]
     [InlineData("CAST(1e-29 AS DECIMAL)")]
     [InlineData("CAST(1.00000000000000000000000000001 AS DECIMAL)")]
-    [InlineData("CAST('1.234' AS DECIMAL(4, 2))")]
     [InlineData("CAST('123.45' AS DECIMAL(4, 2))")]
-    [InlineData("CAST('0.001' AS DECIMAL(2, 2))")]
-    [InlineData("CAST(123 AS VARCHAR(2))")]
-    [InlineData("CAST('abc' AS CHAR(2))")]
-    [InlineData("CAST('😀' AS VARCHAR(1))")]
     [InlineData("CAST('yes' AS BOOLEAN)")]
     [InlineData("CAST(1 AS BOOLEAN)")]
     [InlineData("CAST(TRUE AS INT)")]
+    [InlineData("CAST('not a date' AS DATE)")]
+    [InlineData("CAST(1 AS DATE)")]
+    [InlineData("CAST('25:00' AS TIME)")]
+    [InlineData("CAST('x' AS UUID)")]
+    [InlineData("CAST(1.5 AS UUID)")]
+    [InlineData("CAST('1,5' AS DOUBLE)")]
+    [InlineData("CAST(TRUE AS DOUBLE)")]
+    [InlineData("CAST('{bad' AS JSON)")]
+    [InlineData("CAST(1 AS BINARY)")]
     public async Task Cast_InvalidValue_ShouldReportConversionError(string expression)
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "cast-errors" });
+        await using var engine = SqlDatabaseEngine.Create("cast-errors", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("cast");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await SeedAsync(session);
@@ -127,6 +157,228 @@ public sealed class SqlCastTests
         var error = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, $"SELECT {expression} FROM t;"));
 
         error.Message.ShouldContain("CAST", Case.Sensitive);
+    }
+
+    /// <summary>
+    /// A cast between types of the cast registry fails with the conversion's reason, naming the
+    /// registry's pair when none converts, and REAL refuses what it overflows or underflows (E3).
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - CAST: the registry names a missing pair, and REAL refuses overflow and underflow")]
+    public async Task Cast_RegistryFailures_ShouldNameThePairOrTheRange()
+    {
+        await using var engine = SqlDatabaseEngine.Create("cast-registry", new SqlDatabaseEngineOptions());
+        var database = await engine.CreateDatabaseAsync("cast");
+        await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
+        await SeedAsync(session);
+
+        var missing = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "SELECT CAST(id AS DATE) FROM t;"));
+        var overflow = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "SELECT CAST(@value AS REAL) FROM t;",
+            new Dictionary<string, object?> { ["value"] = 1e300 }));
+        var underflow = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "SELECT CAST(@value AS REAL) FROM t;",
+            new Dictionary<string, object?> { ["value"] = 1e-300 }));
+        await using var infinite = (await ExecuteAsync(session, "SELECT CAST(@value AS REAL) FROM t;",
+            new Dictionary<string, object?> { ["value"] = double.PositiveInfinity })).ShouldBeAssignableTo<DatabaseResultSet>();
+
+        missing.DiagnosticDetail("COHSQLE011").ShouldBe("Cannot CAST type INTEGER to DATE: no cast from INTEGER to DATE is registered. " +
+            "Register one on the engine's builder (SqlDatabaseEngineBuilder.Types.AddCast) before Build.");
+        overflow.Message.ShouldContain("is out of range for REAL", Case.Sensitive);
+        underflow.Message.ShouldContain("underflows REAL", Case.Sensitive);
+        (await ReadRowsAsync(infinite)).ShouldHaveSingleItem()[0].ShouldBe(float.PositiveInfinity);
+    }
+
+    /// <summary>
+    /// A CAST no registered cast performs fails while planning whenever the plan knows the operand's
+    /// type, so it fails over an empty table as over a populated one (<c>COHSQLE011</c>, PostgreSQL's
+    /// 42846 from parse analysis); before E3 the parser refused these targets outright.
+    /// </summary>
+    /// <param name="expression">A CAST of a statically typed operand that no cast converts.</param>
+    /// <param name="pair">The pair the message names.</param>
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - CAST: a pair no cast converts fails while planning with COHSQLE011, rows or not")]
+    [InlineData("CAST(1 AS DATE)", "BIGINT to DATE")]
+    [InlineData("CAST(TRUE AS DOUBLE)", "BOOLEAN to DOUBLE")]
+    [InlineData("CAST(TRUE AS INT)", "BOOLEAN to INTEGER")]
+    [InlineData("CAST(1 AS BOOLEAN)", "BIGINT to BOOLEAN")]
+    [InlineData("CAST(1.5 AS UUID)", "NUMERIC to UUID")]
+    [InlineData("CAST(1 AS BINARY)", "BIGINT to BINARY")]
+    [InlineData("CAST(CAST('1' AS JSON) AS INT)", "JSON to INTEGER")]
+    [InlineData("CAST(CASE WHEN TRUE THEN CAST('1' AS JSON) ELSE CAST('2' AS JSON) END AS INT)", "JSON to INTEGER")]
+    [InlineData("CAST(CASE id WHEN 1 THEN CAST('1' AS JSONB) ELSE CAST('2' AS JSONB) END AS INT)", "JSONB to INTEGER")]
+    [InlineData("CAST(CASE WHEN TRUE THEN CAST('1' AS JSON) END AS INT)", "JSON to INTEGER")]
+    [InlineData("CAST(COALESCE(NULL, CAST('1' AS JSON)) AS INT)", "JSON to INTEGER")]
+    [InlineData("CAST(NULLIF(CAST('1' AS JSON), CAST('2' AS JSON)) AS INT)", "JSON to INTEGER")]
+    [InlineData("CAST(1 + 2 AS DATE)", "BIGINT to DATE")]
+    [InlineData("CAST(-id AS DATE)", "BIGINT to DATE")]
+    [InlineData("CAST(+id AS DATE)", "INTEGER to DATE")]
+    [InlineData("CAST(INTERVAL '1 hour' AS DATE)", "INTERVAL to DATE")]
+    [InlineData("CAST(id AS DATE)", "INTEGER to DATE")]
+    [InlineData("CAST(id = 1 AS DATE)", "BOOLEAN to DATE")]
+    public async Task Cast_NoRegisteredCast_ShouldFailWhilePlanning(string expression, string pair)
+    {
+        await using var engine = SqlDatabaseEngine.Create("cast-planning", new SqlDatabaseEngineOptions());
+        var database = await engine.CreateDatabaseAsync("cast");
+        await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
+        await SeedAsync(session);
+
+        var empty = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, $"SELECT {expression} FROM t WHERE id < 0;"));
+        var populated = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, $"SELECT {expression} FROM t;"));
+        var written = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, $"UPDATE t SET id = 2 WHERE {expression} IS NULL;"));
+
+        empty.DiagnosticDetail("COHSQLE011").ShouldStartWith($"Cannot CAST type {pair}: ", Case.Sensitive);
+        populated.Message.ShouldBe(empty.Message);
+        written.Message.ShouldBe(empty.Message);
+        (await RowsAsync(session, "SELECT id FROM t;")).ShouldHaveSingleItem()[0].ShouldBe(1);
+    }
+
+    /// <summary>
+    /// The planner's check sees the value a row holds, as the evaluator converts it: a JSON column's
+    /// value is text, so it casts to text, as it did before the cast registry.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - CAST: a JSON column casts to text, the planner typing it as the row holds it")]
+    public async Task Cast_JsonColumnToText_ShouldPlanAsTheRowHoldsIt()
+    {
+        await using var engine = SqlDatabaseEngine.Create("cast-json", new SqlDatabaseEngineOptions());
+        var database = await engine.CreateDatabaseAsync("cast");
+        await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
+        await ExecuteAsync(session, "CREATE TABLE j (id INT, doc JSON);");
+        await ExecuteAsync(session, "INSERT INTO j VALUES (1, '{\"a\":1}');");
+
+        var rows = await RowsAsync(session, "SELECT CAST(doc AS TEXT), CAST(doc AS VARCHAR(10)) FROM j;");
+        var empty = await RowsAsync(session, "SELECT CAST(doc AS TEXT) FROM j WHERE id < 0;");
+
+        rows.ShouldHaveSingleItem().ShouldBe(["{\"a\":1}", "{\"a\":1}"]);
+        empty.ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// A parameter's type only its value reveals, so a CAST of a parameter no cast converts plans, and
+    /// fails with the same code when a row evaluates it.
+    /// </summary>
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - CAST: a parameter no cast converts fails with COHSQLE011 when a row evaluates it")]
+    [InlineData("@value", "INTEGER")]
+    [InlineData("CASE WHEN TRUE THEN @value ELSE NULL END", "INTEGER")]
+    [InlineData("COALESCE(NULL, @value)", "INTEGER")]
+    [InlineData("NULLIF(@value, NULL)", "INTEGER")]
+    [InlineData("+@value", "INTEGER")]
+    [InlineData("@value + 0", "BIGINT")]
+    public async Task Cast_ParameterWithoutACast_ShouldFailWhenEvaluated(string expression, string source)
+    {
+        await using var engine = SqlDatabaseEngine.Create("cast-parameter", new SqlDatabaseEngineOptions());
+        var database = await engine.CreateDatabaseAsync("cast");
+        await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
+        await SeedAsync(session);
+        var parameters = new Dictionary<string, object?> { ["value"] = 5 };
+
+        await using var empty = (await ExecuteAsync(session, $"SELECT CAST({expression} AS DATE) FROM t WHERE id < 0;", parameters))
+            .ShouldBeAssignableTo<DatabaseResultSet>();
+        (await ReadRowsAsync(empty)).ShouldBeEmpty();
+        var populated = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, $"SELECT CAST({expression} AS DATE) FROM t;", parameters));
+
+        populated.DiagnosticDetail("COHSQLE011").ShouldStartWith($"Cannot CAST type {source} to DATE: ", Case.Sensitive);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - CAST: static CASE results reject unsupported pairs before any input rows")]
+    [InlineData("CASE WHEN @condition THEN CAST('1' AS JSON) ELSE CAST('2' AS JSON) END")]
+    [InlineData("CASE id WHEN 1 THEN CAST('1' AS JSON) ELSE CAST('2' AS JSON) END")]
+    [InlineData("COALESCE(NULL, CASE WHEN @condition THEN CAST('1' AS JSON) END)")]
+    public async Task Cast_StaticConditional_ShouldRejectBeforeReadingRows(string expression)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("cast-static-conditional", new());
+        var database = await engine.CreateDatabaseAsync("db");
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecuteAsync(session, "CREATE TABLE t (id INT);");
+        var parameters = new Dictionary<string, object?> { ["condition"] = true };
+
+        // Act
+        var empty = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, $"SELECT CAST({expression} AS INTEGER) FROM t;", parameters));
+        await ExecuteAsync(session, "INSERT INTO t VALUES (1);");
+        var populated = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, $"SELECT CAST({expression} AS INTEGER) FROM t;", parameters));
+
+        // Assert
+        empty.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE011");
+        empty.DiagnosticDetail("COHSQLE011").ShouldStartWith("Cannot CAST type JSON to INTEGER: ", Case.Sensitive);
+        populated.Message.ShouldBe(empty.Message);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - CAST: aggregate result types reject unsupported pairs while planning")]
+    [InlineData("CAST(MIN(CAST('1' AS JSON)) AS INT)", "JSON to INTEGER")]
+    [InlineData("CAST(COUNT(*) AS DATE)", "BIGINT to DATE")]
+    public async Task Cast_StaticAggregate_ShouldRejectBeforeReadingRows(string expression, string pair)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("cast-static-aggregate", new());
+        var database = await engine.CreateDatabaseAsync("db");
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecuteAsync(session, "CREATE TABLE t (id INT);");
+
+        // Act
+        var empty = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, $"SELECT {expression} FROM t;"));
+        await ExecuteAsync(session, "INSERT INTO t VALUES (1);");
+        var populated = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, $"SELECT {expression} FROM t;"));
+
+        // Assert
+        empty.DiagnosticDetail("COHSQLE011").ShouldStartWith($"Cannot CAST type {pair}: ", Case.Sensitive);
+        populated.Message.ShouldBe(empty.Message);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - CAST: NULLIF result participates in plan-time cast validation")]
+    public async Task Cast_NullIfOperand_ShouldValidateResultCast()
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("cast-nullif", new());
+        var database = await engine.CreateDatabaseAsync("db");
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecuteAsync(session, "CREATE TABLE t (id INT);");
+        const string sql = "SELECT CAST(NULLIF(CAST('1' AS JSON), CAST('2' AS JSON)) AS INTEGER) FROM t;";
+
+        // Act
+        var empty = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, sql));
+        await ExecuteAsync(session, "INSERT INTO t VALUES (1);");
+        var populated = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, sql));
+
+        // Assert
+        empty.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE011");
+        populated.Message.ShouldBe(empty.Message);
+    }
+
+    /// <summary>
+    /// DATE, TIMESTAMP and TIMESTAMPTZ text reads independently of the host, whatever the host's
+    /// clock and time zone: an ISO date first, TIMESTAMP keeps the written clock time (PostgreSQL's <c>timestamp_in</c>), TIMESTAMPTZ without an offset is UTC.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - CAST: temporal text reads independently of the host's clock and time zone")]
+    public async Task Cast_TemporalText_ShouldNotDependOnTheHost()
+    {
+        await using var engine = SqlDatabaseEngine.Create("cast-temporal", new SqlDatabaseEngineOptions());
+        var database = await engine.CreateDatabaseAsync("cast");
+        await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
+        await SeedAsync(session);
+        await ExecuteAsync(session, "CREATE TABLE times (id INT, d DATE, ts TIMESTAMP, tz TIMESTAMPTZ);");
+
+        var cast = (await RowsAsync(session,
+            "SELECT CAST('2026-01-01T00:00:00' AS TIMESTAMP), CAST('2026-01-01 08:30:00' AS TIMESTAMP), " +
+            "CAST('2026-01-01 00:00:00' AS TIMESTAMPTZ), CAST('2026-02-01' AS TIMESTAMPTZ), " +
+            "CAST('2026-02-01T13:45:30+02:00' AS TIMESTAMPTZ) FROM t;")).ShouldHaveSingleItem();
+        await ExecuteAsync(session, "INSERT INTO times VALUES (1, '2026-02-01', '2026-01-01T00:00:00+05:00', '2026-01-01 00:00:00');");
+        var inserted = (await RowsAsync(session, "SELECT d, ts, tz FROM times;")).ShouldHaveSingleItem();
+        var missingYear = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "SELECT CAST('1.5' AS DATE) FROM t;"));
+        var shortYear = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "SELECT CAST('12.345' AS DATE) FROM t;"));
+        var timestamp = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "SELECT CAST('1.5 10:00' AS TIMESTAMP) FROM t;"));
+        var insertRefused = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "INSERT INTO times (id, d) VALUES (2, '1.5');"));
+
+        var clock = cast[0].ShouldBeOfType<DateTime>();
+        clock.ShouldBe(new DateTime(2026, 1, 1, 0, 0, 0));
+        clock.Kind.ShouldBe(DateTimeKind.Unspecified);
+        cast[1].ShouldBe(new DateTime(2026, 1, 1, 8, 30, 0));
+        cast[2].ShouldBe(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+        cast[2].ShouldBeOfType<DateTimeOffset>().Offset.ShouldBe(TimeSpan.Zero);
+        cast[3].ShouldBeOfType<DateTimeOffset>().Offset.ShouldBe(TimeSpan.Zero);
+        cast[4].ShouldBeOfType<DateTimeOffset>().Offset.ShouldBe(TimeSpan.FromHours(2));
+        inserted.ShouldBe([new DateOnly(2026, 2, 1), new DateTime(2026, 1, 1, 0, 0, 0), new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero)]);
+        inserted[2].ShouldBeOfType<DateTimeOffset>().Offset.ShouldBe(TimeSpan.Zero);
+        missingYear.Message.ShouldContain("CAST from TEXT to DATE failed", Case.Sensitive);
+        shortYear.Message.ShouldContain("DATE text must be a valid ISO 8601 date", Case.Sensitive);
+        timestamp.Message.ShouldContain("TIMESTAMP text requires yyyy-mm-dd", Case.Sensitive);
+        insertRefused.Message.ShouldStartWith("Cannot convert value '1.5' to column 'd'", Case.Sensitive);
     }
 
     /// <summary>Supplies runtime types outside the explicitly supported source set.</summary>
@@ -137,15 +389,6 @@ public sealed class SqlCastTests
         yield return [1u];
         yield return [1ul];
         yield return ['1'];
-        yield return [1.5f];
-        yield return [1.5d];
-        yield return [new byte[] { 1 }];
-        yield return [new DateOnly(2026, 1, 1)];
-        yield return [new TimeOnly(1, 2)];
-        yield return [new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)];
-        yield return [new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero)];
-        yield return [TimeSpan.FromMinutes(1)];
-        yield return [Guid.Empty];
     }
 
     /// <summary>Rejects unsupported source types even for a textual target.</summary>
@@ -154,7 +397,7 @@ public sealed class SqlCastTests
     [MemberData(nameof(UnsupportedSources))]
     public async Task Cast_UnsupportedSource_ShouldReject(object source)
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "cast-source" });
+        await using var engine = SqlDatabaseEngine.Create("cast-source", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("cast");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await SeedAsync(session);
@@ -165,53 +408,80 @@ public sealed class SqlCastTests
         error.Message.ShouldContain("CAST", Case.Sensitive);
     }
 
-    /// <summary>Rejects unknown targets before execution, even when no rows can be produced.</summary>
+    /// <summary>
+    /// Rejects unknown targets while planning, even when no rows can be produced: the parser leaves a
+    /// name that is not a built-in type to the engine's type catalog (phase E3), which does not know it.
+    /// </summary>
     /// <param name="target">The unknown target name.</param>
+    /// <param name="invalidModifier">Whether parsing rejects modifiers before catalog lookup.</param>
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - CAST: unknown target fails before row evaluation")]
-    [InlineData("NOTATYPE")]
-    [InlineData("unknown_type")]
-    public async Task Cast_UnknownTarget_ShouldRejectAtParseTime(string target)
+    [InlineData("NOTATYPE", false)]
+    [InlineData("unknown_type", false)]
+    [InlineData("unknown_type(4)", true)]
+    public async Task Cast_UnknownTarget_ShouldRejectBeforeExecution(string target, bool invalidModifier)
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "cast-target" });
+        await using var engine = SqlDatabaseEngine.Create("cast-target", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("cast");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await SeedAsync(session);
 
-        var error = await Should.ThrowAsync<DatabaseParseException>(() => ExecuteAsync(session,
+        var error = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session,
             $"SELECT CAST(id AS {target}) FROM t WHERE id < 0;"));
 
-        error.Message.ShouldContain("SQL0004", Case.Sensitive);
-        error.Message.ShouldContain("CAST", Case.Sensitive);
-        error.Message.ShouldContain(target, Case.Sensitive);
+        if (invalidModifier)
+        {
+            error.ShouldBeOfType<DatabaseParseException>();
+            error.Message.ShouldContain("SQL0005", Case.Sensitive);
+            error.Message.ShouldContain("CAST target", Case.Sensitive);
+        }
+        else
+        {
+            error.ShouldNotBeOfType<DatabaseParseException>();
+            error.DiagnosticDetail("COHSQLE010").ShouldStartWith("CAST target: type '" + target + "' does not exist", Case.Sensitive);
+            error.Message.ShouldContain("SqlDatabaseEngineBuilder.Types", Case.Sensitive);
+        }
     }
 
-    /// <summary>Rejects CAST in schema expressions that cannot yet execute it honestly.</summary>
-    /// <param name="statement">The unsupported schema statement.</param>
-    [Theory(DisplayName = "Cohesion Test [SqlEngine] - CAST: unsupported defaults and CHECK expressions fail explicitly")]
+    /// <summary>Executes CAST in defaults while CHECK retains its explicit boundary.</summary>
+    /// <param name="statement">The schema statement.</param>
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - CAST: defaults execute and CHECK rejects casts")]
     [InlineData("CREATE TABLE defaults (value INT DEFAULT CAST('42' AS INT));")]
     [InlineData("ALTER TABLE t ADD COLUMN value INT DEFAULT CAST('42' AS INT);")]
     [InlineData("CREATE TABLE checks (value TEXT CHECK(CAST(value AS INT) > 0));")]
-    public async Task Cast_UnsupportedSchemaExpression_ShouldReject(string statement)
+    public async Task Cast_SchemaExpression_ShouldFollowDefaultAndCheckRules(string statement)
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "cast-schema" });
+        await using var engine = SqlDatabaseEngine.Create("cast-schema", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("cast");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await SeedAsync(session);
 
-        await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, statement));
+        if (statement.Contains("DEFAULT", StringComparison.Ordinal))
+        {
+            await ExecuteAsync(session, statement);
+            string table = statement.StartsWith("CREATE", StringComparison.Ordinal) ? "defaults" : "t";
+            if (table == "defaults") { await ExecuteAsync(session, "INSERT INTO defaults DEFAULT VALUES;"); }
+            await using var result = (await ExecuteAsync(session, $"SELECT value FROM {table};")).ShouldBeAssignableTo<DatabaseResultSet>();
+            var rows = await ReadRowsAsync(result);
+            rows.ShouldNotBeEmpty();
+            rows.ShouldAllBe(row => Equals(row[0], 42));
+        }
+        else
+        {
+            await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, statement));
+        }
     }
 
     /// <summary>Preserves typed nulls and target metadata without sampling result values.</summary>
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - CAST: null and empty projections retain target metadata")]
     public async Task Cast_NullAndEmptyResults_ShouldRetainTargetMetadata()
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "cast-null" });
+        await using var engine = SqlDatabaseEngine.Create("cast-null", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("cast");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await SeedAsync(session);
 
         await using var nullResult = (await ExecuteAsync(session, "SELECT CAST(NULL AS INT), CAST(NULL AS DECIMAL(5, 2)), CAST(NULL AS BOOLEAN), CAST('42' AS INT) FROM t;"))
-            .ShouldBeAssignableTo<QueryResultSet>();
+            .ShouldBeAssignableTo<DatabaseResultSet>();
         object?[] row = (await ReadRowsAsync(nullResult)).ShouldHaveSingleItem();
         (nullResult.Columns[0].Type, row[0]).ShouldBe((DatabaseType.Int32, (object?)null));
         (nullResult.Columns[1].Type, row[1]).ShouldBe((DatabaseType.Decimal, (object?)null));
@@ -219,7 +489,7 @@ public sealed class SqlCastTests
         row[3].ShouldBeOfType<int>().ShouldBe(42);
 
         await using var emptyResult = (await ExecuteAsync(session, "SELECT CAST('42' AS BIGINT) FROM t WHERE id < 0;"))
-            .ShouldBeAssignableTo<QueryResultSet>();
+            .ShouldBeAssignableTo<DatabaseResultSet>();
         (emptyResult.Columns[0].Type, (await ReadRowsAsync(emptyResult)).Count).ShouldBe((DatabaseType.Int64, 0));
     }
 
@@ -227,16 +497,16 @@ public sealed class SqlCastTests
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - CAST: WHERE predicates consume target values")]
     public async Task Cast_InPredicate_ShouldUseConvertedValues()
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "cast-predicate" });
+        await using var engine = SqlDatabaseEngine.Create("cast-predicate", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("cast");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await SeedAsync(session);
 
         await using var numeric = (await ExecuteAsync(session, "SELECT id FROM t WHERE CAST('10' AS INT) > 9;"))
-            .ShouldBeAssignableTo<QueryResultSet>();
+            .ShouldBeAssignableTo<DatabaseResultSet>();
         (await ReadRowsAsync(numeric)).ShouldHaveSingleItem()[0].ShouldBe(1);
         await using var boolean = (await ExecuteAsync(session, "SELECT id FROM t WHERE CAST('TRUE' AS BOOLEAN);"))
-            .ShouldBeAssignableTo<QueryResultSet>();
+            .ShouldBeAssignableTo<DatabaseResultSet>();
         (await ReadRowsAsync(boolean)).ShouldHaveSingleItem()[0].ShouldBe(1);
     }
 
@@ -250,7 +520,7 @@ public sealed class SqlCastTests
     [InlineData("id = CAST('1.5' AS DECIMAL)", new int[] { })]
     public async Task Cast_IndexedPredicate_ShouldPreserveExactBounds(string predicate, int[] expected)
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "cast-index" });
+        await using var engine = SqlDatabaseEngine.Create("cast-index", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("cast");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await SeedAsync(session);
@@ -258,7 +528,7 @@ public sealed class SqlCastTests
         await ExecuteAsync(session, "CREATE INDEX ix_id ON t(id);");
 
         await using var result = (await ExecuteAsync(session, $"SELECT id FROM t WHERE {predicate} ORDER BY id;"))
-            .ShouldBeAssignableTo<QueryResultSet>();
+            .ShouldBeAssignableTo<DatabaseResultSet>();
 
         var rows = await ReadRowsAsync(result);
         rows.Count.ShouldBe(expected.Length);
@@ -273,13 +543,13 @@ public sealed class SqlCastTests
     [InlineData(".5", "0.5")]
     public async Task Cast_NumericLiteral_ShouldConvertExactly(string literal, string expected)
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "cast-literal" });
+        await using var engine = SqlDatabaseEngine.Create("cast-literal", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("cast");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await SeedAsync(session);
 
         await using var result = (await ExecuteAsync(session, $"SELECT CAST({literal} AS TEXT) FROM t;"))
-            .ShouldBeAssignableTo<QueryResultSet>();
+            .ShouldBeAssignableTo<DatabaseResultSet>();
 
         (await ReadRowsAsync(result)).ShouldHaveSingleItem()[0].ShouldBeOfType<string>().ShouldBe(expected);
         result.Columns[0].Type.ShouldBe(DatabaseType.String);
@@ -294,12 +564,12 @@ public sealed class SqlCastTests
     [InlineData("SELECT CAST('12' AS BIGINT) FROM t LIMIT CAST('1' AS SMALLINT);", 12L)]
     public async Task Cast_SmallSignedTarget_ShouldWorkDownstream(string statement, long expected)
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "cast-small-integer" });
+        await using var engine = SqlDatabaseEngine.Create("cast-small-integer", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("cast");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await SeedAsync(session);
 
-        await using var result = (await ExecuteAsync(session, statement)).ShouldBeAssignableTo<QueryResultSet>();
+        await using var result = (await ExecuteAsync(session, statement)).ShouldBeAssignableTo<DatabaseResultSet>();
 
         (await ReadRowsAsync(result)).ShouldHaveSingleItem()[0].ShouldBeOfType<long>().ShouldBe(expected);
     }
@@ -308,7 +578,7 @@ public sealed class SqlCastTests
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - CAST: INSERT and UPDATE expressions convert before storage")]
     public async Task Cast_InWriteExpression_ShouldConvertBeforeStorage()
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "cast-write" });
+        await using var engine = SqlDatabaseEngine.Create("cast-write", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("cast");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await SeedAsync(session);
@@ -317,20 +587,26 @@ public sealed class SqlCastTests
         await ExecuteAsync(session, "UPDATE t SET id = CAST('41' AS INT) + 2 WHERE id = 42;");
 
         await using var result = (await ExecuteAsync(session, "SELECT CAST(id AS TEXT) FROM t WHERE id > 1;"))
-            .ShouldBeAssignableTo<QueryResultSet>();
+            .ShouldBeAssignableTo<DatabaseResultSet>();
         (await ReadRowsAsync(result)).ShouldHaveSingleItem()[0].ShouldBe("43");
     }
 
-    private static async Task SeedAsync(IDatabaseSession session)
+    private static async Task SeedAsync(SqlDatabaseSession session)
     {
         await ExecuteAsync(session, "CREATE TABLE t (id INT);");
         await ExecuteAsync(session, "INSERT INTO t VALUES (1);");
     }
 
-    private static Task<QueryResult> ExecuteAsync(IDatabaseSession session, string sql, IReadOnlyDictionary<string, object?>? parameters = null)
+    private static Task<DatabaseResult> ExecuteAsync(SqlDatabaseSession session, string sql, IReadOnlyDictionary<string, object?>? parameters = null)
         => session.ExecuteAsync(sql, parameters, cancellationToken: CancellationToken.None).AsTask();
 
-    private static async Task<List<object?[]>> ReadRowsAsync(QueryResultSet result)
+    private static async Task<List<object?[]>> RowsAsync(SqlDatabaseSession session, string sql)
+    {
+        await using var result = (await ExecuteAsync(session, sql)).ShouldBeAssignableTo<DatabaseResultSet>();
+        return await ReadRowsAsync(result);
+    }
+
+    private static async Task<List<object?[]>> ReadRowsAsync(DatabaseResultSet result)
     {
         var rows = new List<object?[]>();
         await foreach (var row in result.GetRowsAsync(CancellationToken.None))

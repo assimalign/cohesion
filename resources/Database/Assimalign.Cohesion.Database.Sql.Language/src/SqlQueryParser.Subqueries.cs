@@ -10,14 +10,35 @@ public sealed partial class SqlQueryParser
     private const int MaximumSubqueryDepth = 32;
     private int _subqueryDepth;
     private int _paginationDepth;
+    private string _paginationClause = "LIMIT or OFFSET";
 
-    private SqlSelectExpression ParseSubquery(ref TokenLexer lexer)
+    private void SkipQueryRemainder(ref TokenLexer lexer)
     {
+        int depth = 0;
+        while (!IsAtEnd(ref lexer) && lexer.Current.Type != TokenType.Semicolon)
+        {
+            if (lexer.Current.Type == TokenType.RightParen && depth == 0) { break; }
+            if (lexer.Current.Type == TokenType.LeftParen) { depth++; }
+            else if (lexer.Current.Type == TokenType.RightParen) { depth--; }
+            Advance(ref lexer);
+        }
+    }
+
+    private SqlQueryBodyExpression ParseSubquery(ref TokenLexer lexer)
+    {
+        if (IsKeyword(ref lexer, "WITH"))
+        {
+            RequireSkippedConstruct(lexer.Current.Position, lexer.Current.Position + lexer.Current.Value.Length,
+                "WITH inside a subquery or derived table");
+            SkipQueryRemainder(ref lexer);
+            return EmptyWithQuery();
+        }
+
         if (_paginationDepth > 0)
         {
             AddUnsupportedSurfaceDiagnostic(lexer.Current.Position,
                 lexer.Current.Position + lexer.Current.Value.Length,
-                "SQL subqueries in LIMIT or OFFSET expressions are not supported.");
+                $"SQL subqueries in {_paginationClause} expressions are not supported.");
         }
 
         if (_subqueryDepth >= MaximumSubqueryDepth)
@@ -46,33 +67,43 @@ public sealed partial class SqlQueryParser
                 Advance(ref lexer);
             }
 
-            return new SqlSelectExpression([], null, [], null, [], null, [],
+            return new SqlSelectExpression([], [], null, [], null, [],
+                null, null, false, null, null);
+        }
+
+        // The subquery node (scalar, IN or EXISTS) encloses the query's clauses, so they parse
+        // one level deeper; the expression limit spans the whole statement (#1151).
+        if (!TryEnterOperand(ref lexer))
+        {
+            return new SqlSelectExpression([], [], null, [], null, [],
                 null, null, false, null, null);
         }
 
         _subqueryDepth++;
         try
         {
-            var select = ParseSelect(ref lexer);
-            ValidateSubqueryReferences(select);
-            return select;
+            return ParseQueryExpression(ref lexer);
         }
         finally
         {
             _subqueryDepth--;
+            _expressionDepth--;
         }
     }
 
-    private SqlExpression ParsePaginationExpression(ref TokenLexer lexer)
+    private SqlExpression ParsePaginationExpression(ref TokenLexer lexer, string clause, bool primaryOnly = false)
     {
+        string previousClause = _paginationClause;
+        _paginationClause = clause;
         _paginationDepth++;
         try
         {
-            return ParseExpression(ref lexer);
+            return primaryOnly ? ParsePrimary(ref lexer) : ParseExpression(ref lexer);
         }
         finally
         {
             _paginationDepth--;
+            _paginationClause = previousClause;
         }
     }
 
@@ -82,6 +113,10 @@ public sealed partial class SqlQueryParser
         string? previousToken,
         string? previousPreviousToken,
         bool insertValues,
+        bool dmlWhere,
+        bool returning,
+        bool onConflictUpdate,
+        bool followsFromComma,
         out string clause)
     {
         clause = string.Empty;
@@ -101,21 +136,23 @@ public sealed partial class SqlQueryParser
         }
         else if (token.Equals("LATERAL", StringComparison.OrdinalIgnoreCase) &&
                  (string.Equals(previousToken, "FROM", StringComparison.OrdinalIgnoreCase) ||
-                  string.Equals(previousToken, "JOIN", StringComparison.OrdinalIgnoreCase)))
+                  string.Equals(previousToken, "JOIN", StringComparison.OrdinalIgnoreCase) || previousToken == "," && followsFromComma))
         {
             clause = "LATERAL subquery";
         }
         else if (lexer.Current.Type == TokenType.Keyword &&
                  token.Equals("SELECT", StringComparison.OrdinalIgnoreCase) && previousToken is not null)
         {
-            if (previousToken == "(" &&
-                (string.Equals(previousPreviousToken, "FROM", StringComparison.OrdinalIgnoreCase) ||
-                 string.Equals(previousPreviousToken, "JOIN", StringComparison.OrdinalIgnoreCase)))
+            if (onConflictUpdate)
             {
-                clause = "derived-table SUBQUERY in FROM or JOIN";
+                clause = "SUBQUERY in ON CONFLICT DO UPDATE";
+            }
+            else if (returning)
+            {
+                clause = "SUBQUERY in RETURNING";
             }
             else if (!firstToken.Equals("SELECT", StringComparison.OrdinalIgnoreCase) &&
-                     !firstToken.Equals("INSERT", StringComparison.OrdinalIgnoreCase))
+                !firstToken.Equals("INSERT", StringComparison.OrdinalIgnoreCase) && !dmlWhere)
             {
                 clause = $"SUBQUERY in {firstToken.ToUpperInvariant()}";
             }
@@ -128,117 +165,4 @@ public sealed partial class SqlQueryParser
         return clause.Length > 0;
     }
 
-    private void ValidateSubqueryReferences(SqlSelectExpression select)
-    {
-        var qualifiers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        AddSubqueryQualifier(select.From, qualifiers);
-        foreach (var join in select.Joins)
-        {
-            AddSubqueryQualifier(join.Table, qualifiers);
-        }
-
-        foreach (var column in select.Columns)
-        {
-            ValidateSubqueryReference(column.Expression, qualifiers);
-        }
-        foreach (var join in select.Joins)
-        {
-            ValidateSubqueryReference(join.Condition, qualifiers);
-        }
-        ValidateSubqueryReference(select.Where, qualifiers);
-        foreach (var group in select.GroupBy)
-        {
-            ValidateSubqueryReference(group, qualifiers);
-        }
-        ValidateSubqueryReference(select.Having, qualifiers);
-        foreach (var order in select.OrderBy)
-        {
-            ValidateSubqueryReference(order.Expression, qualifiers);
-        }
-        ValidateSubqueryReference(select.Limit, qualifiers);
-        ValidateSubqueryReference(select.Offset, qualifiers);
-    }
-
-    private static void AddSubqueryQualifier(SqlTableReference? table, HashSet<string> qualifiers)
-    {
-        if (table is null)
-        {
-            return;
-        }
-        qualifiers.Add(table.Alias ?? table.TableName);
-        if (table.Alias is null)
-        {
-            // An omitted schema is resolved by the catalog. Its eventual fully
-            // qualified column reference must not be mistaken for correlation.
-            qualifiers.Add($"{table.SchemaName ?? "*"}.{table.TableName}");
-        }
-    }
-
-    private void ValidateSubqueryReference(SqlExpression? expression, HashSet<string> qualifiers)
-    {
-        switch (expression)
-        {
-            case SqlColumnReferenceExpression { TableAlias: not null } column:
-                string qualifier = column.SchemaName is null
-                    ? column.TableAlias : $"{column.SchemaName}.{column.TableAlias}";
-                if (!qualifiers.Contains(qualifier) &&
-                    !(column.SchemaName is not null && qualifiers.Contains($"*.{column.TableAlias}")))
-                {
-                    AddUnsupportedSurfaceDiagnostic(column.Location?.Start ?? 0, column.Location?.End ?? 0,
-                        $"Correlated SQL subqueries are not supported: reference '{qualifier}.{column.ColumnName}' is outside the subquery's local FROM/JOIN scope.");
-                }
-                break;
-            case SqlBinaryExpression binary:
-                ValidateSubqueryReference(binary.Left, qualifiers);
-                ValidateSubqueryReference(binary.Right, qualifiers);
-                break;
-            case SqlUnaryExpression unary:
-                ValidateSubqueryReference(unary.Operand, qualifiers);
-                break;
-            case SqlBetweenExpression between:
-                ValidateSubqueryReference(between.Operand, qualifiers);
-                ValidateSubqueryReference(between.Low, qualifiers);
-                ValidateSubqueryReference(between.High, qualifiers);
-                break;
-            case SqlInExpression membership:
-                ValidateSubqueryReference(membership.Operand, qualifiers);
-                if (membership.Values is not null)
-                {
-                    foreach (var value in membership.Values)
-                    {
-                        ValidateSubqueryReference(value, qualifiers);
-                    }
-                }
-                break;
-            case SqlLikeExpression like:
-                ValidateSubqueryReference(like.Operand, qualifiers);
-                ValidateSubqueryReference(like.Pattern, qualifiers);
-                break;
-            case SqlIsNullExpression isNull:
-                ValidateSubqueryReference(isNull.Operand, qualifiers);
-                break;
-            case SqlCaseExpression choice:
-                ValidateSubqueryReference(choice.Input, qualifiers);
-                foreach (var when in choice.WhenClauses)
-                {
-                    ValidateSubqueryReference(when.Condition, qualifiers);
-                    ValidateSubqueryReference(when.Result, qualifiers);
-                }
-                ValidateSubqueryReference(choice.ElseResult, qualifiers);
-                break;
-            case SqlCastExpression cast:
-                ValidateSubqueryReference(cast.Operand, qualifiers);
-                break;
-            case SqlCollateExpression collate:
-                ValidateSubqueryReference(collate.Operand, qualifiers);
-                break;
-            case SqlFunctionCallExpression function:
-                foreach (var argument in function.Arguments)
-                {
-                    ValidateSubqueryReference(argument, qualifiers);
-                }
-                break;
-            // Nested query bodies have already been checked in their own scope.
-        }
-    }
 }

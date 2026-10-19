@@ -1,3 +1,4 @@
+using System;
 using System.Linq;
 using System.Threading.Tasks;
 
@@ -11,6 +12,28 @@ namespace Assimalign.Cohesion.Database.Sql.Client.Tests;
 /// <summary>Verifies ADD COLUMN defaults and atomic errors through the SQL server and typed client.</summary>
 public sealed class SqlAddColumnWireTests
 {
+    [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - Delete actions and clock defaults: effects and TIMESTAMP types cross connections")]
+    public async Task ExecuteAsync_SetNullAndClockDefault_ShouldRoundTripAcrossConnections()
+    {
+        // Arrange
+        await using var harness = await SqlClientTestHarness.StartAsync();
+        await using var writer = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
+        await using var reader = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
+        await ExecuteAsync(writer, "CREATE TABLE p (id INT PRIMARY KEY)");
+        await ExecuteAsync(writer, "CREATE TABLE c (pid INT REFERENCES p(id) ON DELETE SET NULL, stamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP)");
+        await ExecuteAsync(writer, "INSERT INTO p VALUES (1)");
+        await ExecuteAsync(writer, "INSERT INTO c (pid) VALUES (1)");
+
+        // Act
+        await ExecuteAsync(writer, "DELETE FROM p");
+
+        // Assert
+        var rows = await QueryAsync(reader, "SELECT pid, stamp FROM c");
+        rows.ShouldHaveSingleItem()[0].ShouldBeNull();
+        rows.Columns[1].Type.ShouldBe(DatabaseType.DateTime);
+        rows[0][1].ShouldBeOfType<DateTime>().Kind.ShouldBe(DateTimeKind.Unspecified);
+    }
+
     /// <summary>Existing rows and omitted-column inserts receive the same typed default.</summary>
     /// <param name="notNull">Whether the added column rejects explicit null values.</param>
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - ADD COLUMN: old and new rows receive literal defaults over the wire")]
@@ -58,27 +81,22 @@ public sealed class SqlAddColumnWireTests
         updated[0][1].ShouldBe(7);
     }
 
-    /// <summary>A nonliteral default fails with the CREATE TABLE diagnostic before publishing a column.</summary>
-    [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - ADD COLUMN: nonliteral defaults reject atomically over the wire")]
-    public async Task ExecuteAsync_NonliteralDefault_ShouldRejectAndLeaveTableUnchanged()
+    /// <summary>An expression default backfills old rows and supplies omitted inserts.</summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - ADD COLUMN: expression defaults execute over the wire")]
+    public async Task ExecuteAsync_NonliteralDefault_ShouldBackfillAndInsert()
     {
         // Arrange
         await using var harness = await SqlClientTestHarness.StartAsync();
         await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
         await SeedAsync(connection);
 
-        // Act / Assert: this statement previously succeeded while silently discarding its expression.
-        var error = await Should.ThrowAsync<SqlClientException>(() => ExecuteAsync(connection,
-            "ALTER TABLE additions ADD COLUMN extra INT DEFAULT (1 + 2)"));
-        error.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
-        error.Message.ShouldContain("Column 'extra': only literal DEFAULT values are supported.", Case.Sensitive);
-        error.ConnectionUsable.ShouldBeTrue();
-        await AssertUnchangedAsync(connection);
+        // Act
+        await ExecuteAsync(connection, "ALTER TABLE additions ADD COLUMN extra INT DEFAULT (1 + 2)");
+        await ExecuteAsync(connection, "INSERT INTO additions (id, label) VALUES (3, 'new')");
 
-        // The failed attempt must not reserve the name or leave a partly changed row layout.
-        await ExecuteAsync(connection, "ALTER TABLE additions ADD COLUMN extra INT DEFAULT 7");
+        // Assert
         (await QueryAsync(connection, "SELECT extra FROM additions ORDER BY id"))
-            .Select(row => row[0]).ShouldBe(new object?[] { 7, 7 });
+            .Select(row => row[0]).ShouldBe(new object?[] { 3, 3, 3 });
     }
 
     /// <summary>Invalid literal conversions reject atomically rather than publishing unusable metadata.</summary>
@@ -87,7 +105,7 @@ public sealed class SqlAddColumnWireTests
     [InlineData("INT DEFAULT 2147483648")]
     [InlineData("INT DEFAULT 'not-an-integer'")]
     [InlineData("VARCHAR(2) DEFAULT 'long'")]
-    [InlineData("DECIMAL(3, 1) DEFAULT 12.34")]
+    [InlineData("DECIMAL(3, 1) DEFAULT 99.95")]
     [InlineData("DECIMAL(3, 1) DEFAULT 123.4")]
     [InlineData("DECIMAL DEFAULT 0.00000000000000000000000000001")]
     [InlineData("REAL DEFAULT 1e1000")]
@@ -108,6 +126,29 @@ public sealed class SqlAddColumnWireTests
         await AssertUnchangedAsync(connection);
     }
 
+    /// <summary>Numeric defaults round before backfill and precision overflow reaches the client with its evaluation code.</summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - ADD COLUMN: numeric defaults round and precision overflow carries its code")]
+    public async Task ExecuteAsync_NumericDefaultBounds_ShouldRoundAndCodePrecisionOverflow()
+    {
+        // Arrange
+        await using var harness = await SqlClientTestHarness.StartAsync();
+        await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
+        await SeedAsync(connection);
+
+        // Act
+        var error = await Should.ThrowAsync<SqlClientException>(() => ExecuteAsync(connection,
+            "ALTER TABLE additions ADD COLUMN extra DECIMAL(3, 1) DEFAULT 99.95"));
+        await ExecuteAsync(connection, "ALTER TABLE additions ADD COLUMN extra DECIMAL(3, 1) DEFAULT 12.34");
+        await ExecuteAsync(connection, "INSERT INTO additions (id) VALUES (3)");
+
+        // Assert
+        error.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
+        error.Message.ShouldStartWith("COHSQLE002:", Case.Sensitive);
+        error.ConnectionUsable.ShouldBeTrue();
+        (await QueryAsync(connection, "SELECT extra FROM additions ORDER BY id"))
+            .Select(row => row[0]).ShouldBe(new object?[] { 12.3m, 12.3m, 12.3m });
+    }
+
     /// <summary>A later row's constraint failure leaves both the column and its backing objects unpublished.</summary>
     /// <param name="constraint">A constraint that the second old row violates.</param>
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - ADD COLUMN: failed old-row constraints publish no partial change")]
@@ -124,6 +165,7 @@ public sealed class SqlAddColumnWireTests
         var error = await Should.ThrowAsync<SqlClientException>(() => ExecuteAsync(connection,
             $"ALTER TABLE additions ADD COLUMN extra INT {constraint}"));
         error.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(constraint == "DEFAULT 7 UNIQUE" ? "COHSQLE037" : "COHSQLE038");
         error.ConnectionUsable.ShouldBeTrue();
         await AssertUnchangedAsync(connection);
 
@@ -225,13 +267,13 @@ public sealed class SqlAddColumnWireTests
             .Select(row => row[0]).ShouldBe(new object?[] { 7, 7 });
     }
 
-    private static async Task SeedAsync(ISqlConnection connection)
+    private static async Task SeedAsync(SqlConnection connection)
     {
         await ExecuteAsync(connection, "CREATE TABLE additions (id INT PRIMARY KEY, label TEXT)");
         await ExecuteAsync(connection, "INSERT INTO additions VALUES (1, 'original'), (2, NULL)");
     }
 
-    private static async Task AssertUnchangedAsync(ISqlConnection connection)
+    private static async Task AssertUnchangedAsync(SqlConnection connection)
     {
         var rows = await QueryAsync(connection, "SELECT * FROM additions ORDER BY id");
         rows.Columns.Select(column => column.Name).ShouldBe(["id", "label"]);
@@ -239,9 +281,9 @@ public sealed class SqlAddColumnWireTests
         rows.Select(row => row["label"]).ShouldBe(new object?[] { "original", null });
     }
 
-    private static Task<long> ExecuteAsync(ISqlConnection connection, string sql)
+    private static Task<long> ExecuteAsync(SqlConnection connection, string sql)
         => connection.ExecuteAsync(sql, cancellationToken: SqlClientTestHarness.Timeout()).AsTask();
 
-    private static Task<SqlResultSet> QueryAsync(ISqlConnection connection, string sql)
+    private static Task<SqlResultSet> QueryAsync(SqlConnection connection, string sql)
         => connection.QueryAsync(sql, cancellationToken: SqlClientTestHarness.Timeout()).AsTask();
 }

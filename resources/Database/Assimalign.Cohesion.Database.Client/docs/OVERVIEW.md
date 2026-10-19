@@ -7,14 +7,19 @@ handshake, runs model-owned framed exchanges, and pools authenticated connection
 
 ## Scope
 
-- **`IDatabaseClient`** — the pooling entry point (`DatabaseClient.Create`):
+- **`DatabaseClient`** — the sealed pooling entry point (`DatabaseClient.Create`):
   `RentAsync` returns an open, authenticated connection; disposing a rented
   connection returns it to the pool with its server session intact.
-- **`IDatabaseConnection`** — one protocol session: `OpenAsync` (handshake) and
-  `ExecuteAsync<TResult>(IDatabaseProtocolExchange<TResult>)` returning the model's
-  result. The exchange supplies codecs and materialization policy.
-  Streaming Blob downloads keep this exchange active while the caller reads;
-  content stream disposal cancels unfinished work before releasing the rental.
+  `ExecuteStreamingAsync(DatabaseStreamingExchange)` rents on the caller's behalf
+  and hands back a stream that owns the rental.
+- **`DatabaseConnection`** — one sealed protocol session, rented already open:
+  `ExecuteAsync<TResult>(DatabaseProtocolExchange<TResult>)` returns the model's
+  result, and `ExecuteStreamingAsync(DatabaseStreamingExchange)` keeps a streaming
+  exchange active while the caller reads; disposing the content stream cancels
+  unfinished work before releasing the rental.
+- **`DatabaseProtocolExchange<TResult>` and `DatabaseStreamingExchange`** — the
+  abstract exchange bases a model client derives from. The exchange supplies codecs
+  and materialization policy through protected cores; only the connection runs it.
 - **`DatabaseClientOptions.Family`** — the model family fixed for every connection
   in the pool. The exchange must use the exact same family instance.
 - **`DatabaseConnectionSettings`** — typed settings with a minimal `key=value;`
@@ -22,7 +27,8 @@ handshake, runs model-owned framed exchanges, and pools authenticated connection
   `MaxPoolSize`), plus `For(Uri)` for generated or ambient resource
   endpoints.
 - **`DatabaseClientException`** — the client error root, carrying the wire's
-  stable `ProtocolErrorCode`.
+  stable `ProtocolErrorCode`. A failed dial carries `ConnectionFailure`, names the
+  endpoint, and keeps the transport's exception as its inner exception.
 
 ## Dependencies
 
@@ -75,7 +81,7 @@ afterward. The two-argument factory still creates a transport owned and disposed
 Both overloads perform the same endpoint and credential validation; a null supplied transport
 throws `ArgumentNullException`. The client does not discover application trust.
 
-IDatabaseCommandClient is the separate HTTP admin command contract. DatabaseCommandClient.Create
+The sealed `DatabaseCommandClient` is the separate HTTP admin command client. `DatabaseCommandClient.Create`
 accepts the full manifest control-plane URI (including its path) and an opaque bootstrap bearer.
 SendCommandAsync posts the camel-case id/kind/owner/key/payload envelope to commands; payload is
 base64. DeleteCommandAsync sends DELETE to the same route and envelope. Both return package-local

@@ -3,6 +3,9 @@
 		<RootNamespace>Assimalign.Cohesion.Database.Sql</RootNamespace>
 	</PropertyGroup>
 	<ItemGroup>
+		<CohesionSharedSource Include="Assimalign.Cohesion.Database.Execution" />
+		<CohesionSharedSource Include="Assimalign.Cohesion.Database.Sql.Language" />
+		<CohesionSharedSource Include="Assimalign.Cohesion.Database.Sql.Catalog" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database" />
         <CohesionSharedSource Include="Assimalign.Cohesion.Database" />
 		<!-- Transport listeners/connections for the SQL model's wire-protocol server
@@ -16,7 +19,7 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Catalog" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Schema" />
 		<!-- Direct (not just transitive via Sql.Storage): the engine's public options
-		     surface exposes StorageCommitDurability and its workers drive the IStorage
+		     surface exposes StorageCommitDurability and its workers drive the Storage
 		     worker seams. -->
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Storage" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Types" />

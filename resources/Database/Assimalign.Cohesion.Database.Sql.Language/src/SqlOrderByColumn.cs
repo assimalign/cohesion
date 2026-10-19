@@ -10,10 +10,12 @@ public sealed class SqlOrderByColumn
     /// </summary>
     /// <param name="expression">The sort expression.</param>
     /// <param name="isDescending">Whether the sort is descending.</param>
-    internal SqlOrderByColumn(SqlExpression expression, bool isDescending)
+    /// <param name="nullPlacement">The explicit NULL placement, or the dialect default.</param>
+    internal SqlOrderByColumn(SqlExpression expression, bool isDescending, SqlNullPlacement nullPlacement)
     {
         Expression = expression;
         IsDescending = isDescending;
+        NullPlacement = nullPlacement;
     }
 
     /// <summary>
@@ -25,4 +27,9 @@ public sealed class SqlOrderByColumn
     /// Gets whether the sort direction is descending.
     /// </summary>
     public bool IsDescending { get; }
+
+    /// <summary>
+    /// Gets the written NULL placement, or <see cref="SqlNullPlacement.Default"/> when omitted.
+    /// </summary>
+    public SqlNullPlacement NullPlacement { get; }
 }

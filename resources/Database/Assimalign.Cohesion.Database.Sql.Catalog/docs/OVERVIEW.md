@@ -1,23 +1,45 @@
 # Assimalign.Cohesion.Database.Sql.Catalog — Overview
 
-The relational catalog of the SQL model: schemas, tables, columns, and constraints
+The relational catalog of the SQL model: SQL namespaces, tables, columns, and constraints
 (`SqlCatalogTable`/`SqlCatalogColumn`), persisted through the storage kernel so
 metadata gets the same page/WAL durability as data, plus persistence for the
 physical index registrations exported by `Database.Indexing`.
 
 ## Scope
 
+- **SQL namespaces** — immutable `SqlCatalogNamespace` descriptions persist empty namespaces
+  and join statement catalog snapshots. CREATE SCHEMA and DROP SCHEMA are durable catalog
+  publications; CASCADE removes contained tables/indexes and external incoming foreign keys
+  atomically. Namespace ownership is separate from compiled-schema identity.
+
+- **Fixed-length characters** — columns retain Character identity and length; domains and
+  function signatures retain CHAR(n). The [current record-space format](../../Assimalign.Cohesion.Database.Sql/docs/DESIGN.md#execution-model)
+  retains this identity and trimmed index keys; applied and pending compiled documents use schema format v7.
+
 - **Metadata model** — table descriptions with stable `ObjectId`s, ordered columns
   typed by the shared type system (`DatabaseTypeInfo`), nullability, default
   literals, and primary-key constraints.
 - **Transactional DDL** — create/drop table, add/drop column; each operation is a
   self-committing storage transaction (durable when the call returns).
-- **Index registration persistence** — `SaveIndexRegistrationsAsync` /
-  `GetIndexRegistrations` store the `BTreeIndexRegistration` set so indexes
-  re-attach when the database reopens.
+  DROP atomically records the retired identity for the SQL worker to reclaim afterwards.
+- **Physical column layout** — each table records which physical ordinals its
+  dropped columns kept (`DroppedColumnOrdinals`, `PhysicalColumnCount`,
+  `GetPhysicalOrdinal`): drop marks a column's ordinal dropped and never renumbers
+  the others, and add appends a new ordinal, so stored rows are never rewritten
+  (#1241).
+- **Atomic index publication** — `CreateIndexAsync` and `PublishTableAsync` require
+  each new index description and its matching physical registration together.
+  `GetIndexRegistrations` returns the committed directory for re-attachment on reopen;
+  checkpoint and shutdown cannot replace it with an independently captured snapshot.
 - **Applied-schema state** — `SchemaState` / `SaveSchemaStateAsync` atomically
-  retain the canonical `CompiledSchema` document and deterministic hash used for
-  idempotent provisioning and live-catalog reconciliation.
+  retain the canonical `SqlCompiledSchema` document, deterministic hash and DDL
+  generation used for constant-time already-applied checks. Every committed catalog
+  change advances `DdlGeneration` in its own transaction, so interrupted provisioning
+  and later DDL trigger live-catalog reconciliation.
+
+- **SQL definitions and scripts** — the current format retains format 10's function bodies, domains, dependencies,
+  ownership, statement-prefix script receipts and a script-set reconciliation marker. Catalog
+  mutations can enlist a receipt in their existing transaction; the catalog remains language-free.
 
 ## Dependencies
 
@@ -30,7 +52,7 @@ planner's job.
 ## Usage
 
 ```csharp
-var catalogStorage = SqlStorage.Create(dataStream, journalStream, backupStream, "mydb.catalog");
+var catalogStorage = SqlStorage.Create(dataStream, journalStream, backupStream, "mydb/catalog");
 var catalog = SqlCatalog.Open(catalogStorage);
 
 var users = await catalog.CreateTableAsync("dbo", "users", new[]

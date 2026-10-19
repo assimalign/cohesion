@@ -12,5 +12,7 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Graph.Client" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Graph" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.InMemory" />
+		<!-- Dial-failure tests (owner decision 39): a refused TCP dial. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.Tcp" />
 	</ItemGroup>
 </Project>

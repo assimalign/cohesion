@@ -1,25 +1,37 @@
 # The Key-Value Command Grammar
 
-**Status: contract.** This grammar is the key-value model's statement surface —
-the text the session's text-execute seam parses
-(`IDatabaseSession.ExecuteAsync(string, parameters)`), and therefore exactly what
-rides the wire protocol's Execute message. Like the SQL dialect's `DIALECT.md`,
-changes here change a contract: update the parser
-(`Internal/KeyValueCommandParser.cs`), this document, and the corpus tests
-(`tests/KeyValueCommandTests.cs` and `tests/KeyValueIntrospectionTests.cs`) together, always.
+**Status: wire contract.** The server's internal `ExecuteCommandTextAsync` entry parses
+the text and parameters of the protocol's Execute message into typed `KeyValueRequest`
+objects. The public `KeyValueDatabaseSession` derives from
+`DatabaseExecutionSession<KeyValueRequest>` and accepts typed requests only.
 
-## Why a command grammar (the text-seam decision, 2026-07-14)
+## Why a command grammar
 
-The key-value model has **no query language** (the area's recorded layout
-verdict) — but the area's wire protocol carries statements as *text plus named
-tuple-codec parameters* (`Execute`), and the root's session contract carries the
-matching text-execute seam. Giving the model a small command grammar makes it
-**wire-compatible with the existing Execute message and the generic server
-session pump with zero protocol changes** — the alternative (model-specific
-binary command frames) would have forked the protocol and the server machinery
-for no expressiveness gain. The grammar is deliberately not a language: no
-expressions, no literals except the `LIMIT` count, no composition — every data
-operand is a named parameter.
+The model has no query language. Its grammar is deliberately not a language: no expressions,
+composition or literals except the `LIMIT` count; data operands are named parameters.
+The 2026-07-14 decision reused the existing Execute frame and then-shared server pump.
+Per-model servers later replaced that pump. The owner decision of 2026-10-16 keeps the
+wire encoding and removes the inherited public text capability (#1576).
+
+Update `Internal/KeyValueCommandParser.cs`, this document, and the command/introspection
+corpus tests together whenever the grammar changes.
+
+## Validation and reporting order
+
+1. The server decodes the Execute frame and each tuple-codec parameter. Malformed encoding
+   returns fatal `ProtocolViolation` before session checks or grammar parsing.
+2. The internal entry checks closed session, blank command, cancellation, offline database,
+   then a refusing explicit transaction, in that order.
+3. Parse the command and operands into the model's request. Parse failures report event 10,
+   `StatementParseFailed`, before returning `ParseFailure`; the connection stays ready.
+4. Execute through the public typed NVI, including its validation and tracing. Root statement
+   events name the verb request type. Pre-parse refusals and parse failures do not enter this
+   NVI and produce no root statement event. Offline refusal returns `Unavailable` and an
+   aborted transaction returns `ExecutionFailure`.
+
+Event 10 reports at most once per second with `suppressedCount`. The
+`total-statement-parse-failures` counter counts every occurrence, including suppressed
+events and failures with no listener. See [DESIGN.md](DESIGN.md) for event payloads.
 
 ## Grammar
 
@@ -55,6 +67,35 @@ limit    :=  <non-negative integer literal> | @limit
 A missing parameter, a non-`@` operand token, or a wrong operand type is a
 **parse error** (`DatabaseParseException` → `ParseFailure` on the wire) — the
 command never reaches execution.
+
+## Diagnostic codes (#1105)
+
+Statement Error text is `CODE: message`. In-process DatabaseParseException.Message
+remains code-free and Diagnostics carries the code. These codes are append-only;
+all parser refusals use ParseFailure and keep the session ready. COHKV019 is the
+ExecutionFailure fallback when the engine supplies no structured error code.
+
+| Code | Refusal |
+|---|---|
+| `COHKV001` | Empty command |
+| `COHKV002` | Attempted catalog mutation |
+| `COHKV003` | Unknown command verb |
+| `COHKV004` | Request-constructor validation failed |
+| `COHKV005` | Invalid PUT arity |
+| `COHKV006` | PUT requires IF |
+| `COHKV007` | Invalid DELETE arity |
+| `COHKV008` | DELETE requires IF |
+| `COHKV009` | SCAN clause operand missing |
+| `COHKV010` | Repeated SCAN clause |
+| `COHKV011` | Unknown SCAN clause |
+| `COHKV012` | Byte operand required |
+| `COHKV013` | Integer etag required |
+| `COHKV014` | Nonnegative LIMIT literal required |
+| `COHKV015` | Nonnegative integer LIMIT parameter required |
+| `COHKV016` | Parameter reference required |
+| `COHKV017` | Parameter value missing |
+| `COHKV018` | Command arity mismatch |
+| `COHKV019` | Execution failure without an engine diagnostic |
 
 ## Semantics and result shapes
 
@@ -106,7 +147,7 @@ not exist in this model, so there are no invented owner/schema columns.
 
 The surface is read-only. `PUT KEYSPACES ...` and `DELETE KEYSPACES ...` fail
 with `DatabaseParseException` (`ParseFailure` over the wire) and the stable
-message `The KEYSPACES catalog surface is read-only.` A parameter-bound key
+wire text `COHKV002: The KEYSPACES catalog surface is read-only.` A parameter-bound key
 whose bytes spell `KEYSPACES` remains ordinary user data. The typed equivalent
 is `KeyValueKeySpacesRequest`, executed through the existing session interface.
 

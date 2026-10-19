@@ -3,7 +3,7 @@ using Assimalign.Cohesion.Database.Language;
 
 namespace Assimalign.Cohesion.Database.Documents.Language;
 
-/// <summary>A null, Boolean, decimal number, or string literal.</summary>
+/// <summary>A null, Boolean, number, or string literal.</summary>
 public sealed class OqlLiteralExpression : OqlExpression
 {
     /// <summary>Initializes a new instance of the <see cref="OqlLiteralExpression"/> class.</summary>
@@ -14,6 +14,6 @@ public sealed class OqlLiteralExpression : OqlExpression
         Value = value;
     }
 
-    /// <summary>Gets the literal's BCL value.</summary>
+    /// <summary>Gets the literal's BCL value; parsed numbers retain their digits in a System.Text.Json.JsonElement until engine validation.</summary>
     public object? Value { get; }
 }

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -20,14 +21,71 @@ public sealed class OqlExecutionConformanceTests
     private static readonly IReadOnlyDictionary<string, ExecutionCase[]> _cases =
         new Dictionary<string, ExecutionCase[]>(StringComparer.OrdinalIgnoreCase)
         {
+            [OqlClauses.Explain] =
+            [
+                new("EXPLAIN SELECT name FROM items",
+                    [[0, null, "Select", "items", null, "filter=False; grouped=False; order_keys=0; limit=none; offset=0", null, null],
+                     [1, 0, "Project", "items", null, null, null, null],
+                     [2, 1, "CollectionScan", "items", null, null, null, null]]),
+            ],
+            [OqlClauses.Insert] =
+            [
+                InsertCase(),
+                new("INSERT INTO items (KEY, VALUE) VALUES ('object', {'absent': MISSING, 'null_value': NULL})", [[true, true]],
+                    VerificationStatement: "SELECT absent IS MISSING AS absent_value, null_value IS NULL AS null_value FROM items WHERE META().id = 'object'",
+                    ExpectedAffectedCount: 1),
+            ],
+            [OqlClauses.Upsert] =
+            [
+                UpsertCase(),
+            ],
+            [OqlClauses.Update] =
+            [
+                new("UPDATE items SET amount = amount + 1, details.score = 9 WHERE category = 'a'",
+                    [["alpha", 3m, 9m], ["beta", 7m, 9m], ["delta", null, 9m], ["gamma", 4m, 2m]],
+                    VerificationStatement: "SELECT name, amount, details.score AS score FROM items ORDER BY name", ExpectedAffectedCount: 3),
+            ],
+            [OqlClauses.Unset] =
+            [
+                new("UPDATE items UNSET tags WHERE name = 'delta'", [[true]],
+                    VerificationStatement: "SELECT tags IS MISSING FROM items WHERE name = 'delta'", ExpectedAffectedCount: 1),
+            ],
+            [OqlClauses.Delete] =
+            [
+                new("DELETE FROM items WHERE category = 'a'", [["gamma"]],
+                    VerificationStatement: "SELECT name FROM items", ExpectedAffectedCount: 3),
+                new("DELETE FROM items", [], VerificationStatement: "SELECT name FROM items", ExpectedAffectedCount: 4),
+                new("DELETE FROM items", [["by_score"]], ["CREATE INDEX by_score ON items (details.score)"],
+                    "SELECT INDEX_NAME FROM COHESION_SCHEMA.INDEXES", ExpectedAffectedCount: 4),
+            ],
+            [OqlClauses.Values] =
+            [
+                InsertCase(),
+            ],
             [OqlClauses.Select] =
             [
                 new("SELECT d.name AS label, d.details.score + @increment AS adjusted, d.tags[0] AS tag FROM items AS d WHERE d.name = 'alpha'",
-                    [["alpha", 3m, "blue"]]),
+                    [["alpha", 3m, "blue"]], Parameters: new Dictionary<string, object?> { ["increment"] = 2 }),
                 new("SELECT COUNT(*) AS total, COUNT(amount) AS present, SUM(amount) AS sum, AVG(amount) AS average, MIN(amount) AS minimum, MAX(amount) AS maximum FROM items",
-                    [[4m, 3m, 12m, 4m, 2m, 6m]]),
+                    [[4L, 3L, 12m, 4m, 2m, 6m]]),
                 new("SELECT COUNT(*) AS total, SUM(amount) AS sum, AVG(amount) AS average, MIN(amount) AS minimum, MAX(amount) AS maximum FROM items WHERE amount > 100",
-                    [[0m, null, null, null, null]]),
+                    [[0L, null, null, null, null]]),
+            ],
+            [OqlClauses.Distinct] =
+            [
+                new("SELECT DISTINCT category FROM items ORDER BY category", [["a"], ["b"]]),
+            ],
+            [OqlClauses.SelectValue] =
+            [
+                new("SELECT VALUE name FROM items WHERE category = 'b'", [["gamma"]]),
+            ],
+            [OqlClauses.ObjectConstructor] =
+            [
+                new("SELECT VALUE {\"n\": name, \"t\": tags} FROM items WHERE name = 'alpha'", [[Json("{\"n\":\"alpha\",\"t\":[\"blue\"]}")]]),
+            ],
+            [OqlClauses.ArrayConstructor] =
+            [
+                new("SELECT [name, amount] AS pair FROM items WHERE name = 'beta'", [[Json("[\"beta\",6]")]]),
             ],
             [OqlClauses.From] =
             [
@@ -37,20 +95,64 @@ public sealed class OqlExecutionConformanceTests
             [OqlClauses.Where] =
             [
                 new("SELECT name FROM items WHERE (amount >= @minimum AND amount < 6) OR amount IS NULL",
-                    [["gamma"], ["delta"]]),
-                new("SELECT name FROM items WHERE details.score IS NULL AND NOT (amount IS NOT NULL)", [["delta"]]),
+                    [["gamma"], ["delta"]], Parameters: new Dictionary<string, object?> { ["minimum"] = 3 }),
+                new("SELECT name FROM items WHERE details.score IS NULL AND NOT (amount IS NOT NULL)", []),
+                new("SELECT name FROM items WHERE details.score IS MISSING", [["delta"]]),
+                new("SELECT name FROM items WHERE amount IS MISSING", []),
+                new("SELECT name FROM items WHERE details.score IS NOT MISSING", [["alpha"], ["beta"], ["gamma"]]),
+                new("SELECT name FROM items WHERE amount IS NOT VALUED", [["delta"]]),
+                new("SELECT name FROM items WHERE details.score IS VALUED", [["alpha"], ["beta"], ["gamma"]]),
+            ],
+            [OqlClauses.Unnest] =
+            [
+                new("SELECT d.name, t FROM items d UNNEST d.tags AS t ORDER BY d.name", [["alpha", "blue"], ["beta", "green"], ["gamma", "blue"]]),
+                new("SELECT t, COUNT(*) AS n FROM items d UNNEST d.tags t GROUP BY t ORDER BY t", [["blue", 2L], ["green", 1L]]),
+            ],
+            [OqlClauses.LeftUnnest] =
+            [
+                new("SELECT d.name, t FROM items d LEFT UNNEST d.tags t ORDER BY d.name", [["alpha", "blue"], ["beta", "green"], ["delta", null], ["gamma", "blue"]], Missing: [(2, 1)]),
+            ],
+            [OqlClauses.Any] =
+            [
+                new("SELECT name FROM items d WHERE ANY t IN d.tags SATISFIES t = 'blue' END", [["alpha"], ["gamma"]]),
+                new("SELECT name FROM items d WHERE SOME t IN d.tags SATISFIES t = 'blue' END", [["alpha"], ["gamma"]]),
+            ],
+            [OqlClauses.Every] =
+            [
+                new("SELECT name FROM items d WHERE EVERY t IN d.tags SATISFIES t = 'blue' END", [["alpha"], ["gamma"], ["delta"]]),
+            ],
+            [OqlClauses.In] =
+            [
+                new("SELECT name FROM items WHERE category IN ('b', 'z')", [["gamma"]]),
+                new("SELECT name FROM items d WHERE 'green' IN d.tags", [["beta"]]),
+            ],
+            [OqlClauses.Between] =
+            [
+                new("SELECT name FROM items WHERE amount NOT BETWEEN 3 AND 5", [["alpha"], ["beta"]]),
+            ],
+            [OqlClauses.Like] =
+            [
+                new("SELECT name FROM items WHERE name LIKE '%ta'", [["beta"], ["delta"]]),
+            ],
+            [OqlClauses.Case] =
+            [
+                new("SELECT name, CASE WHEN amount > 3 THEN 'big' WHEN amount IS NULL THEN 'none' ELSE 'small' END AS size FROM items",
+                    [["alpha", "small"], ["beta", "big"], ["gamma", "big"], ["delta", "none"]]),
+                new("SELECT CASE WHEN amount > 3 THEN 'big' ELSE 'small' END AS size, COUNT(*) AS n FROM items GROUP BY CASE WHEN amount > 3 THEN 'big' ELSE 'small' END",
+                    [["big", 2L], ["small", 2L]]),
+                new("SELECT SUM(CASE WHEN amount > 3 THEN 1 ELSE 0 END) AS big FROM items", [[2m]]),
             ],
             [OqlClauses.GroupBy] =
             [
                 new("SELECT category, COUNT(*) AS total, COUNT(amount) AS present, SUM(amount) AS sum, AVG(amount) AS average, MIN(amount) AS minimum, MAX(amount) AS maximum FROM items GROUP BY category ORDER BY category",
-                    [["a", 3m, 2m, 8m, 4m, 2m, 6m], ["b", 1m, 1m, 4m, 4m, 4m, 4m]]),
+                    [["a", 3L, 2L, 8m, 4m, 2m, 6m], ["b", 1L, 1L, 4m, 4m, 4m, 4m]]),
                 new("SELECT category, tags[0] AS tag, COUNT(*) AS total FROM items GROUP BY category, tags[0] ORDER BY category, tag",
-                    [["a", null, 1m], ["a", "blue", 1m], ["a", "green", 1m], ["b", "blue", 1m]]),
+                    [["a", null, 1L], ["a", "blue", 1L], ["a", "green", 1L], ["b", "blue", 1L]], Missing: [(0, 1)]),
             ],
             [OqlClauses.Having] =
             [
                 new("SELECT category, SUM(amount) AS total FROM items GROUP BY category HAVING SUM(amount) > 5", [["a", 8m]]),
-                new("SELECT COUNT(*) AS total FROM items HAVING COUNT(*) > 3", [[4m]]),
+                new("SELECT COUNT(*) AS total FROM items HAVING COUNT(*) > 3", [[4L]]),
                 new("SELECT COUNT(*) AS total FROM items HAVING COUNT(*) > 4", []),
             ],
             [OqlClauses.OrderBy] =
@@ -58,15 +160,51 @@ public sealed class OqlExecutionConformanceTests
                 new("SELECT name AS label, amount FROM items ORDER BY amount DESC, label ASC",
                     [["beta", 6m], ["gamma", 4m], ["alpha", 2m], ["delta", null]]),
             ],
+            [OqlClauses.Limit] =
+            [
+                new("SELECT name FROM items ORDER BY name LIMIT 2", [["alpha"], ["beta"]]),
+                new("SELECT name FROM items ORDER BY name LIMIT 2 OFFSET 1", [["beta"], ["delta"]]),
+                new("SELECT name FROM items ORDER BY name LIMIT 0", []),
+                new("SELECT name FROM items ORDER BY name LIMIT @minimum", [["alpha"], ["beta"], ["delta"]],
+                    Parameters: new Dictionary<string, object?> { ["minimum"] = 3 }),
+            ],
+            [OqlClauses.Offset] =
+            [
+                new("SELECT name FROM items ORDER BY name OFFSET 3", [["gamma"]]),
+                new("SELECT name FROM items ORDER BY name OFFSET 1 LIMIT 2", [["beta"], ["delta"]]),
+            ],
+            [OqlClauses.CreateCollection] =
+            [
+                new("CREATE COLLECTION extra", [["extra", "Adhoc"], ["items", "Adhoc"]],
+                    VerificationStatement: "SELECT OBJECT_NAME, OWNER FROM COHESION_SCHEMA.OBJECT_OWNERSHIP ORDER BY OBJECT_NAME"),
+                new("CREATE COLLECTION IF NOT EXISTS extra", [["extra", "Adhoc"], ["items", "Adhoc"]],
+                    VerificationStatement: "SELECT OBJECT_NAME, OWNER FROM COHESION_SCHEMA.OBJECT_OWNERSHIP ORDER BY OBJECT_NAME"),
+            ],
+            [OqlClauses.DropCollection] =
+            [
+                new("DROP COLLECTION items", [],
+                    VerificationStatement: "SELECT OBJECT_NAME, OWNER FROM COHESION_SCHEMA.OBJECT_OWNERSHIP ORDER BY OBJECT_NAME"),
+                new("DROP COLLECTION IF EXISTS items", [],
+                    VerificationStatement: "SELECT OBJECT_NAME, OWNER FROM COHESION_SCHEMA.OBJECT_OWNERSHIP ORDER BY OBJECT_NAME"),
+            ],
             [OqlClauses.CreateIndex] =
             [
                 new("CREATE INDEX by_score ON items (details.score)", [["by_score", "details.score", false]],
                     VerificationStatement: "SELECT INDEX_NAME, PATH, IS_UNIQUE FROM COHESION_SCHEMA.INDEXES"),
+                new("CREATE UNIQUE INDEX by_name ON items (name)", [["by_name", "name", "name", null, true]],
+                    VerificationStatement: "SELECT INDEX_NAME, PATH, PATHS[0], PATHS[1], IS_UNIQUE FROM COHESION_SCHEMA.INDEXES ORDER BY INDEX_NAME",
+                    Missing: [(0, 3)]),
+                new("CREATE INDEX by_cat_amount ON items (category, amount)", [["by_cat_amount", "category", "category", "amount", false]],
+                    VerificationStatement: "SELECT INDEX_NAME, PATH, PATHS[0], PATHS[1], IS_UNIQUE FROM COHESION_SCHEMA.INDEXES ORDER BY INDEX_NAME"),
+                new("CREATE INDEX IF NOT EXISTS by_score ON items (details.score)", [["by_score", "details.score", "details.score", null, false]],
+                    ["CREATE INDEX by_score ON items (details.score)"],
+                    "SELECT INDEX_NAME, PATH, PATHS[0], PATHS[1], IS_UNIQUE FROM COHESION_SCHEMA.INDEXES ORDER BY INDEX_NAME", Missing: [(0, 3)]),
                 new("CREATE INDEX by_tag ON items (tags[0])", [["by_tag", "tags[0]", false]],
                     VerificationStatement: "SELECT INDEX_NAME, PATH, IS_UNIQUE FROM COHESION_SCHEMA.INDEXES"),
             ],
             [OqlClauses.DropIndex] =
             [
+                new("DROP INDEX IF EXISTS absent ON items", [], VerificationStatement: "SELECT INDEX_NAME FROM COHESION_SCHEMA.INDEXES"),
                 new("DROP INDEX by_score ON items", [], ["CREATE INDEX by_score ON items (details.score)"],
                     "SELECT INDEX_NAME FROM COHESION_SCHEMA.INDEXES"),
             ],
@@ -79,40 +217,38 @@ public sealed class OqlExecutionConformanceTests
         // Arrange: the profile drives enumeration; the case table cannot omit a new capability.
         var profile = OqlLanguageProfile.Instance;
         VerifyCoverage(profile);
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        var cancellationToken = timeout.Token;
-
         foreach (string clause in profile.Clauses)
         {
             foreach (var execution in _cases[clause])
             {
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+                var cancellationToken = timeout.Token;
                 string context = $"OQL clause '{clause}': {execution.Statement}";
                 var parsed = new OqlQueryParser().Parse(execution.Statement).ShouldBeOfType<OqlQueryStatement>();
                 parsed.Diagnostics.ShouldBeEmpty(context);
                 ContainsClause(parsed.OqlExpression, clause).ShouldBeTrue(context);
 
-                await using var engine = DocumentDatabaseEngine.Create(new());
-                var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("conformance", cancellationToken);
-                var collection = await database.CreateCollectionAsync("items", cancellationToken);
+                await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
+                var database = await engine.CreateDatabaseAsync("conformance", cancellationToken);
                 await using var session = await database.CreateSessionAsync(cancellationToken);
+                var collection = await session.CreateCollectionAsync("items", cancellationToken);
                 await SeedAsync(collection, session, cancellationToken);
                 foreach (string setup in execution.Setup ?? [])
                 {
-                    (await session.ExecuteAsync(setup, cancellationToken: cancellationToken)).Status.ShouldBe(QueryResultStatus.Success, context);
+                    (await session.ExecuteAsync(setup, cancellationToken: cancellationToken)).Status.ShouldBe(DatabaseResultStatus.Success, context);
                 }
 
                 // Act: text takes the production parse, planner, transaction and executor path.
-                var parameters = new Dictionary<string, object?> { ["increment"] = 2, ["minimum"] = 3 };
-                var result = await session.ExecuteAsync(execution.Statement, parameters, cancellationToken);
+                var result = await session.ExecuteAsync(execution.Statement, execution.Parameters, cancellationToken);
 
                 // Assert: DDL must change catalog state; queries must return the exact values and order.
-                result.Status.ShouldBe(QueryResultStatus.Success, context);
+                result.Status.ShouldBe(DatabaseResultStatus.Success, context);
                 if (execution.VerificationStatement is string verification)
                 {
-                    result.AffectedCount.ShouldBe(0L, context);
+                    result.AffectedCount.ShouldBe(execution.ExpectedAffectedCount, context);
                     result = await session.ExecuteAsync(verification, cancellationToken: cancellationToken);
                 }
-                await VerifyRowsAsync(result, execution.ExpectedRows, context, cancellationToken);
+                await VerifyRowsAsync(result, execution.ExpectedRows, context, cancellationToken, execution.Missing);
             }
         }
     }
@@ -141,16 +277,112 @@ public sealed class OqlExecutionConformanceTests
     public async Task Execute_InvalidAggregateContext_ReturnsIntendedErrorAsync(string statement, string message)
     {
         new OqlQueryParser().Parse(statement).Diagnostics.ShouldBeEmpty();
-        await using var engine = DocumentDatabaseEngine.Create(new());
-        var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("conformance", CancellationToken.None);
-        await database.CreateCollectionAsync("items", CancellationToken.None);
+        await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
+        var database = await engine.CreateDatabaseAsync("conformance", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.CreateCollectionAsync("items", CancellationToken.None);
 
         var exception = await Should.ThrowAsync<DatabaseException>(async () =>
             await session.ExecuteAsync(statement, cancellationToken: CancellationToken.None));
 
         exception.Message.ShouldBe(message);
     }
+
+    private static readonly IReadOnlyDictionary<string, FunctionCase> _functionCases =
+        new Dictionary<string, FunctionCase>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["META"] = new("META().id", [["a"], ["b"], ["c"], ["d"]]),
+            ["LOWER"] = ScalarCase("LOWER('AbC')", "abc"),
+            ["UPPER"] = ScalarCase("UPPER('AbC')", "ABC"),
+            ["LENGTH"] = ScalarCase("LENGTH('😀a')", 2L),
+            ["SUBSTR"] = ScalarCase("SUBSTR('😀ab', 1, 1)", "a"),
+            ["POSITION"] = ScalarCase("POSITION('abc', 'z')", -1L),
+            ["CONTAINS"] = ScalarCase("CONTAINS('abc', 'b')", true),
+            ["STARTS_WITH"] = ScalarCase("STARTS_WITH('abc', 'a')", true),
+            ["ENDS_WITH"] = ScalarCase("ENDS_WITH('abc', 'c')", true),
+            ["REPLACE"] = ScalarCase("REPLACE('abc', 'b', 'x')", "axc"),
+            ["TRIM"] = ScalarCase("TRIM(' abc ')", "abc"),
+            ["CONCAT"] = ScalarCase("CONCAT('a', 'b')", "ab"),
+            ["ABS"] = ScalarCase("ABS(-2)", 2m),
+            ["ROUND"] = ScalarCase("ROUND(2.5)", 3m),
+            ["TRUNC"] = ScalarCase("TRUNC(2.567, 2)", 2.56m),
+            ["FLOOR"] = ScalarCase("FLOOR(2.5)", 2m),
+            ["CEIL"] = ScalarCase("CEIL(2.5)", 3m),
+            ["POWER"] = ScalarCase("POWER(2, 3)", 8m),
+            ["SQRT"] = ScalarCase("SQRT(4)", 2m),
+            ["NOW_STR"] = ScalarCase("STR_TO_MILLIS(NOW_STR()) = NOW_MILLIS()", true),
+            ["NOW_MILLIS"] = ScalarCase("NOW_MILLIS() = NOW_MILLIS()", true),
+            ["STR_TO_MILLIS"] = ScalarCase("STR_TO_MILLIS('1970-01-01T00:00:00Z')", 0L),
+            ["MILLIS_TO_STR"] = ScalarCase("MILLIS_TO_STR(0)", "1970-01-01T00:00:00.000Z"),
+            ["TYPE"] = ScalarCase("TYPE(tags)", "array"),
+            ["IS_ARRAY"] = ScalarCase("IS_ARRAY(tags)", true),
+            ["IS_OBJECT"] = ScalarCase("IS_OBJECT(tags)", false),
+            ["IS_STRING"] = ScalarCase("IS_STRING(name)", true),
+            ["IS_NUMBER"] = ScalarCase("IS_NUMBER(1)", true),
+            ["IS_BOOLEAN"] = ScalarCase("IS_BOOLEAN(TRUE)", true),
+            ["ARRAY_LENGTH"] = ScalarCase("ARRAY_LENGTH([1,2])", 2L),
+            ["ARRAY_CONTAINS"] = new("ARRAY_CONTAINS(tags, 'blue')", [[true], [false], [true], [false]]),
+            ["COALESCE"] = ScalarCase("COALESCE(MISSING, NULL, 1)", 1m),
+            ["IFMISSING"] = ScalarCase("IFMISSING(absent, 'x')", "x"),
+            ["IFNULL"] = new("IFNULL(amount, 0)", [[2m], [6m], [4m], [0m]]),
+            ["IFMISSINGORNULL"] = ScalarCase("IFMISSINGORNULL(absent, NULL, 1)", 1m),
+            ["COUNT"] = new("COUNT(*)", [[4L]]),
+            ["SUM"] = new("SUM(amount)", [[12m]]),
+            ["AVG"] = new("AVG(amount)", [[4m]]),
+            ["MIN"] = new("MIN(amount)", [[2m]]),
+            ["MAX"] = new("MAX(amount)", [[6m]]),
+        };
+
+    private static FunctionCase ScalarCase(string expression, object? value)
+        => new(expression, Enumerable.Range(0, 4).Select(_ => new object?[] { value }).ToArray());
+
+    [Fact(DisplayName = "Cohesion Test [Documents] - Functions: every declaration has live execution evidence")]
+    public async Task Profile_DeclaredFunctions_ShouldExecuteEveryCaseAsync()
+    {
+        // Arrange
+        RequireFunctionCoverage(OqlLanguageProfile.Instance.Functions.ToArray(), _functionCases.Keys);
+        await using var engine = DocumentDatabaseEngine.Create("document-functions", new());
+        var database = await engine.CreateDatabaseAsync("functions", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        var collection = await session.CreateCollectionAsync("items", CancellationToken.None);
+        await SeedAsync(collection, session, CancellationToken.None);
+
+        // Act / Assert
+        foreach (string name in OqlLanguageProfile.Instance.Functions.ToArray())
+        {
+            var execution = _functionCases[name];
+            var result = await session.ExecuteAsync($"SELECT {execution.Expression} FROM items", cancellationToken: CancellationToken.None);
+            await VerifyRowsAsync(result, execution.ExpectedRows, name, CancellationToken.None);
+        }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Documents] - Functions: coverage rejects missing evidence and retired cases")]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public void Profile_FunctionCoverageMismatch_ShouldFail(int mismatch)
+    {
+        // Arrange
+        var declarations = OqlLanguageProfile.Instance.Functions.ToArray();
+        // Act / Assert
+        Should.Throw<ShouldAssertException>(() => RequireFunctionCoverage(
+            mismatch == 0 ? declarations.Append("FUTURE") : mismatch == 2 ? declarations.Where(name => name != "COUNT") : declarations,
+            mismatch == 1 ? _functionCases.Keys.Append("RETIRED") : _functionCases.Keys));
+    }
+
+    private static void RequireFunctionCoverage(IEnumerable<string> declarations, IEnumerable<string> cases)
+    {
+        declarations.Except(cases, StringComparer.OrdinalIgnoreCase).ShouldBeEmpty();
+        cases.Except(declarations, StringComparer.OrdinalIgnoreCase).ShouldBeEmpty();
+    }
+
+    private static JsonElement Json(string text)
+    {
+        using var json = JsonDocument.Parse(text);
+        return json.RootElement.Clone();
+    }
+
+    private sealed record FunctionCase(string Expression, object?[][] ExpectedRows);
 
     private static void VerifyCoverage(QueryLanguageProfile profile)
     {
@@ -165,18 +397,44 @@ public sealed class OqlExecutionConformanceTests
 
     private static bool ContainsClause(OqlExpression expression, string clause) => clause switch
     {
+        OqlClauses.Explain => expression is OqlExplainExpression,
+        OqlClauses.Insert => expression is OqlInsertExpression,
+        OqlClauses.Upsert => expression is OqlUpsertExpression,
+        OqlClauses.Delete => expression is OqlDeleteExpression,
+        OqlClauses.Update => expression is OqlUpdateExpression,
+        OqlClauses.Unset => expression is OqlUpdateExpression { Unset.Count: > 0 },
+        OqlClauses.Values => expression is OqlInsertExpression { Values.Count: > 0 },
         OqlClauses.Select => expression is OqlSelectExpression { Projections.Count: > 0 },
+        OqlClauses.Distinct => expression is OqlSelectExpression { IsDistinct: true },
+        OqlClauses.SelectValue => expression is OqlSelectExpression { IsValue: true },
+        OqlClauses.ObjectConstructor => expression is OqlSelectExpression objectQuery && objectQuery.Projections.Any(p => p.Expression is OqlObjectExpression),
+        OqlClauses.ArrayConstructor => expression is OqlSelectExpression arrayQuery && arrayQuery.Projections.Any(p => p.Expression is OqlArrayExpression),
         OqlClauses.From => expression is OqlSelectExpression { Collection.Length: > 0 },
+        OqlClauses.Unnest => expression is OqlSelectExpression unnestQuery && unnestQuery.Unnest.Any(binding => !binding.IsLeft),
+        OqlClauses.LeftUnnest => expression is OqlSelectExpression leftQuery && leftQuery.Unnest.Any(binding => binding.IsLeft),
+        OqlClauses.Any => expression is OqlSelectExpression { Predicate: OqlQuantifiedExpression { IsEvery: false } },
+        OqlClauses.Every => expression is OqlSelectExpression { Predicate: OqlQuantifiedExpression { IsEvery: true } },
         OqlClauses.Where => expression is OqlSelectExpression { Predicate: not null },
+        OqlClauses.In => expression is OqlSelectExpression { Predicate: OqlInExpression },
+        OqlClauses.Between => expression is OqlSelectExpression { Predicate: OqlBetweenExpression },
+        OqlClauses.Like => expression is OqlSelectExpression { Predicate: OqlLikeExpression },
+        OqlClauses.Case => expression is OqlSelectExpression select && select.Projections.Any(projection => ContainsCase(projection.Expression)),
         OqlClauses.GroupBy => expression is OqlSelectExpression { GroupBy.Count: > 0 },
         OqlClauses.Having => expression is OqlSelectExpression { Having: not null },
         OqlClauses.OrderBy => expression is OqlSelectExpression { OrderBy.Count: > 0 },
+        OqlClauses.Limit => expression is OqlSelectExpression { Limit: not null },
+        OqlClauses.Offset => expression is OqlSelectExpression { Offset: not null },
+        OqlClauses.CreateCollection => expression is OqlCreateCollectionExpression,
+        OqlClauses.DropCollection => expression is OqlDropCollectionExpression,
         OqlClauses.CreateIndex => expression is OqlCreateIndexExpression,
         OqlClauses.DropIndex => expression is OqlDropIndexExpression,
         _ => false,
     };
 
-    private static async Task SeedAsync(IDocumentCollection collection, IDatabaseSession session, CancellationToken cancellationToken)
+    private static bool ContainsCase(OqlExpression expression) => expression is OqlCaseExpression ||
+        expression is OqlCallExpression call && call.Arguments.Any(ContainsCase);
+
+    private static async Task SeedAsync(DocumentCollection collection, DocumentDatabaseSession session, CancellationToken cancellationToken)
     {
         (string Id, string Json)[] documents =
         [
@@ -191,21 +449,58 @@ public sealed class OqlExecutionConformanceTests
         }
     }
 
-    private static async Task VerifyRowsAsync(QueryResult result, object?[][] expected, string context, CancellationToken cancellationToken)
+    private static async Task VerifyRowsAsync(DatabaseResult result, object?[][] expected, string context, CancellationToken cancellationToken,
+        (int Row, int Column)[]? missing = null)
     {
-        await using var rows = result.ShouldBeAssignableTo<QueryResultSet>(context);
+        await using var rows = result.ShouldBeAssignableTo<DatabaseResultSet>(context);
         var actual = new List<object?[]>();
         await foreach (var row in rows.GetRowsAsync(cancellationToken))
         {
+            for (int ordinal = 0; ordinal < row.FieldCount; ordinal++)
+            {
+                // MISSING is an optional row capability (#1126): a row that cannot report it, such as
+                // an EXPLAIN description row (#1104), has every field present.
+                bool isMissing = row.SupportsMissing && row.IsMissing(ordinal);
+                isMissing.ShouldBe(missing?.Contains((actual.Count, ordinal)) ?? false, context);
+            }
             actual.Add(Enumerable.Range(0, rows.Columns.Count).Select(row.GetValue).ToArray());
         }
         actual.Count.ShouldBe(expected.Length, context);
         for (int index = 0; index < expected.Length; index++)
         {
-            actual[index].ShouldBe(expected[index], context);
+            actual[index].Length.ShouldBe(expected[index].Length, context);
+            for (int ordinal = 0; ordinal < expected[index].Length; ordinal++)
+            {
+                if (expected[index][ordinal] is JsonElement json)
+                {
+                    JsonElement.DeepEquals(actual[index][ordinal].ShouldBeOfType<JsonElement>(), json).ShouldBeTrue(context);
+                }
+                else { actual[index][ordinal].ShouldBe(expected[index][ordinal], context); }
+            }
         }
     }
 
     private sealed record ExecutionCase(string Statement, object?[][] ExpectedRows,
-        string[]? Setup = null, string? VerificationStatement = null);
+        string[]? Setup = null, string? VerificationStatement = null, (int Row, int Column)[]? Missing = null,
+        long ExpectedAffectedCount = 0, IReadOnlyDictionary<string, object?>? Parameters = null);
+
+    private static ExecutionCase UpsertCase()
+    {
+        using var replacement = JsonDocument.Parse("""{"name":"alpha2","category":"a"}""");
+        using var added = JsonDocument.Parse("""{"name":"zeta","category":"z"}""");
+        return new("UPSERT INTO items (KEY, VALUE) VALUES ('a', $replacement), ('z', $new)",
+            [["a", "alpha2", null], ["b", "beta", 6m], ["c", "gamma", 4m], ["d", "delta", null], ["z", "zeta", null]],
+            VerificationStatement: "SELECT META(d).id AS id, d.name AS name, d.amount AS amount FROM items d ORDER BY id",
+            Missing: [(0, 2), (4, 2)], ExpectedAffectedCount: 2,
+            Parameters: new Dictionary<string, object?> { ["replacement"] = replacement.RootElement.Clone(), ["new"] = added.RootElement.Clone() });
+    }
+
+    private static ExecutionCase InsertCase()
+    {
+        using var e = JsonDocument.Parse("""{"name":"epsilon","category":"z"}""");
+        using var f = JsonDocument.Parse("""{"name":"phi","category":"z"}""");
+        return new("INSERT INTO items (KEY, VALUE) VALUES ('e', $e), ('f', $f)", [["e", "epsilon"], ["f", "phi"]],
+            VerificationStatement: "SELECT META(d).id AS id, d.name AS name FROM items d WHERE d.category = 'z' ORDER BY id",
+            ExpectedAffectedCount: 2, Parameters: new Dictionary<string, object?> { ["e"] = e.RootElement.Clone(), ["f"] = f.RootElement.Clone() });
+    }
 }

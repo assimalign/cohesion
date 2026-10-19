@@ -1,7 +1,7 @@
 {
   "schema": "cohesion.database.tiers/2",
   "generated": "2026-10-16",
-  "revised": "2026-10-16: v2 roadmap model (realign-v2/skill-changes.md 4.1). The 110 issue-body dependency edges left this file: the live bodies and native links supply them on every run. Plan decisions D4a and D5a recorded; board fields (status, priority, wave, state) removed from items, because the board is read live. Later on 2026-10-16: the two MISSING owner calls recorded as decisions D2a and D2b, and the execution seam #1576-#1580 added as Prerequisite items (owner request).",
+  "revised": "2026-10-16: v2 roadmap model (realign-v2/skill-changes.md 4.1). The 110 issue-body dependency edges left this file: the live bodies and native links supply them on every run. Plan decisions D4a and D5a recorded; board fields (status, priority, wave, state) removed from items, because the board is read live. Later on 2026-10-16: the two MISSING owner calls recorded as decisions D2a and D2b, and the execution seam #1576-#1580 added as Prerequisite items (owner request). 2026-10-17: decision D7 (bulk ingest, placement delegated by the owner) and the unfiled family slots sql-copy (T2) and gql-load-csv (T3), each appended to its language table.",
   "source": {
     "plan": "Database query languages: what runs, what to add (owner-approved 2026-09-30, decisions D1-D6)",
     "planDump": "plan-tiers.txt",
@@ -74,6 +74,12 @@
       "date": "2026-10-16",
       "topic": "QueryRow.IsMissing (owner call under D2)",
       "ruling": "Retracted: the additive QueryRow.IsMissing would be a public virtual member, which rule 4 of the Database area's concrete-first rules forbids (\"Public members are non-virtual\"; database-area.md, on the integration branch until #1168 merges). #1126 designs a rule-4-compliant way to expose MISSING when it starts."
+    },
+    {
+      "id": "D7",
+      "date": "2026-10-17",
+      "topic": "Bulk ingest (owner request: bulk upload for every engine)",
+      "ruling": "(a) Bulk ingest is engine, wire and client work outside the language tiers. #1656 (under #1519, category L03.02.01.C16: it spans models) is the one contract; each engine path keeps its model's category (C16 boundary): #1545, #1546 and #1547 under #1519, #1657 under #1612, #1658 under #1613, #1659 under #1614. (b) Each batch is its own transaction, committed in order; a failed batch leaves earlier ones committed; a load is refused inside an explicit transaction. PostgreSQL COPY is instead all-or-nothing in the caller's transaction; RavenDB cuts server batches past 16 MiB or at 8,192 operations and awaits each (src/Raven.Server/Documents/Handlers/Processors/BulkInsert/AbstractBulkInsertHandlerProcessor.cs:119-123). (c) bulk is a core capability gating shared frames; capabilities extend 2.1 without a version bump (Database.Protocol/docs/DESIGN.md:267-268). (d) A reject carries the single-record write's error: message, and code where one exists. (e) Only spellings join the plan: sql-copy (T2; server-side files and PROGRAM stay COHDBL001, as PostgreSQL reserves them to the pg_read_server_files, pg_write_server_files and pg_execute_server_program roles, src/backend/commands/copy.c:82, :93, :102) and gql-load-csv (T3; Cypher with no ISO GQL counterpart, Neo4j community/cypher/front-end/ast/src/main/scala/org/neo4j/cypher/internal/ast/Clause.scala:446, read from a client-sent stream, an exception to D3's 1:1 rule). OQL gets no statement: Couchbase loads with cbimport, and RavenDB bulk-inserts through an endpoint, not RQL (src/Raven.Server/Documents/Handlers/BulkInsert/BulkInsertHandler.cs:10). (f) sql-copy is appended after the SQL table, so #1545 positions no other SQL T2 family; SQL T2 grows from D4a's 15 steps to 16. Placement delegated by the owner."
     }
   ],
   "epics": [
@@ -539,6 +545,19 @@
       "unfiled": [],
       "notes": "New views arrive with the features that need them (VIEWS with #1124, SCHEMATA with #1030, SEQUENCES with T2 sequences).",
       "bodySlugs": ["sql-catalog-joinable"]
+    },
+    {
+      "id": "sql-copy",
+      "language": "SQL",
+      "group": "Bulk load",
+      "name": "COPY ... FROM STDIN / TO STDOUT",
+      "today": "No; COPY is an unknown command (SQL0002)",
+      "expected": "PG COPY FROM STDIN / TO STDOUT; SQL Server BULK INSERT; MySQL LOAD DATA [LOCAL] INFILE",
+      "add": "T2: FROM STDIN and TO STDOUT; server-side files and PROGRAM get COHDBL001 (D7); BULK INSERT and LOAD DATA are not added (D1)",
+      "tiers": ["T2"],
+      "items": {},
+      "unfiled": ["T2"],
+      "notes": "Spelling only (D7). FROM STDIN runs on #1545's bulk stream (the filed task depends on #1545), and rows pass INSERT's admission (ExecuteInsertRowsAsync, SqlPlanExecutor.InsertSelect.cs:49), as PostgreSQL COPY FROM runs ExecConstraints per row (copyfrom.c:1360). Batches commit on their own (D7 b), so COPY inside BEGIN gets a coded error, as does COPY without the negotiated bulk capability (#1656). TO STDOUT streams through DatabaseStreamingExchange, as Blob downloads do (BlobConnection.cs:503)."
     },
     {
       "id": "oql-sqlpp-basis",
@@ -1116,6 +1135,19 @@
       "items": {},
       "unfiled": [],
       "notes": ""
+    },
+    {
+      "id": "gql-load-csv",
+      "language": "GQL",
+      "group": "Bulk load",
+      "name": "LOAD CSV [WITH HEADERS] FROM ... AS row",
+      "today": "No; generic COHDBL001 (LOAD is not in the unsupported-word table)",
+      "expected": "Cypher only; no ISO GQL counterpart",
+      "add": "T3, a Cypher extension read from a client-sent stream, not a URL (D7)",
+      "tiers": ["T3"],
+      "items": {},
+      "unfiled": ["T3"],
+      "notes": "Spelling only (D7). Cypher's FROM is a URL the server fetches; Neo4j gates file: URLs with two settings (GraphDatabaseSettings.java:427, :437) and http(s): only with an internal IP blocklist (GraphDatabaseInternalSettings.java:82). Both stay COHDBL001: FROM names a client-sent stream (the filed task picks the spelling) whose rows feed #1547's online batches, bound as lists or, WITH HEADERS, maps (#1145, #1146). Client-built batches already work as UNWIND $rows AS row CREATE (#1145, #1146, #1138); this family adds server-side CSV parsing."
     },
     {
       "id": "x-parse-strictness",

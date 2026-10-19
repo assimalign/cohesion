@@ -11,9 +11,10 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Tests;
 using static KeyValueTestHarness;
 
 /// <summary>
-/// The text-execute command grammar (docs/COMMANDS.md) — the corpus that makes
-/// the grammar a contract: every supported form executes end-to-end through the
-/// session's text seam, and every violation fails as a parse error.
+/// The command grammar (docs/COMMANDS.md) — the corpus that makes the grammar a
+/// contract: every supported form executes end-to-end through the session's
+/// internal command entry (the one the wire server calls), and every violation
+/// fails as a parse error.
 /// </summary>
 public class KeyValueCommandTests
 {
@@ -29,14 +30,14 @@ public class KeyValueCommandTests
         return parameters;
     }
 
-    private static async Task<List<object?[]>> MaterializeAsync(QueryResult result)
+    private static async Task<List<object?[]>> MaterializeAsync(DatabaseResult result)
     {
         var rows = new List<object?[]>();
-        var set = (QueryResultSet)result;
+        var set = (DatabaseResultSet)result;
 
         await using (set)
         {
-            await foreach (QueryRow row in set.GetRowsAsync(TestTimeout.Token()))
+            await foreach (DatabaseRow row in set.GetRowsAsync(TestTimeout.Token()))
             {
                 var values = new object?[row.FieldCount];
                 for (int ordinal = 0; ordinal < row.FieldCount; ordinal++)
@@ -60,11 +61,11 @@ public class KeyValueCommandTests
         await using var session = await database.CreateSessionAsync();
 
         // Act
-        var putResult = await session.ExecuteAsync("PUT @k @v", Parameters(("k", Bytes("user:1")), ("v", Bytes("ada"))), TestTimeout.Token());
+        var putResult = await session.ExecuteCommandTextAsync("PUT @k @v", Parameters(("k", Bytes("user:1")), ("v", Bytes("ada"))), TestTimeout.Token());
         var putRows = await MaterializeAsync(putResult);
 
         var getRows = await MaterializeAsync(
-            await session.ExecuteAsync("GET @k", Parameters(("k", Bytes("user:1"))), TestTimeout.Token()));
+            await session.ExecuteCommandTextAsync("GET @k", Parameters(("k", Bytes("user:1"))), TestTimeout.Token()));
 
         // Assert: PUT reports [applied, etag]; GET reports [key, value, etag].
         putRows.ShouldHaveSingleItem();
@@ -86,9 +87,9 @@ public class KeyValueCommandTests
         await using var session = await database.CreateSessionAsync();
 
         // Act
-        await session.ExecuteAsync("put @k @v", Parameters(("k", Bytes("k")), ("v", Bytes("v"))), TestTimeout.Token());
+        await session.ExecuteCommandTextAsync("put @k @v", Parameters(("k", Bytes("k")), ("v", Bytes("v"))), TestTimeout.Token());
         var rows = await MaterializeAsync(
-            await session.ExecuteAsync("exists @k", Parameters(("k", Bytes("k"))), TestTimeout.Token()));
+            await session.ExecuteCommandTextAsync("exists @k", Parameters(("k", Bytes("k"))), TestTimeout.Token()));
 
         // Assert
         rows.ShouldHaveSingleItem()[0].ShouldBe(true);
@@ -103,14 +104,14 @@ public class KeyValueCommandTests
         await using var session = await database.CreateSessionAsync();
 
         var first = await MaterializeAsync(
-            await session.ExecuteAsync("PUT @k @v IF ABSENT", Parameters(("k", Bytes("k")), ("v", Bytes("v1"))), TestTimeout.Token()));
+            await session.ExecuteCommandTextAsync("PUT @k @v IF ABSENT", Parameters(("k", Bytes("k")), ("v", Bytes("v1"))), TestTimeout.Token()));
         long etag = (long)first[0][1]!;
 
         // Act: a second IF ABSENT misses; a CAS on the current etag applies.
         var absentMiss = await MaterializeAsync(
-            await session.ExecuteAsync("PUT @k @v IF ABSENT", Parameters(("k", Bytes("k")), ("v", Bytes("v2"))), TestTimeout.Token()));
+            await session.ExecuteCommandTextAsync("PUT @k @v IF ABSENT", Parameters(("k", Bytes("k")), ("v", Bytes("v2"))), TestTimeout.Token()));
         var swap = await MaterializeAsync(
-            await session.ExecuteAsync("PUT @k @v IF @etag", Parameters(("k", Bytes("k")), ("v", Bytes("v3")), ("etag", etag)), TestTimeout.Token()));
+            await session.ExecuteCommandTextAsync("PUT @k @v IF @etag", Parameters(("k", Bytes("k")), ("v", Bytes("v3")), ("etag", etag)), TestTimeout.Token()));
 
         // Assert
         first[0][0].ShouldBe(true);
@@ -127,17 +128,17 @@ public class KeyValueCommandTests
         await using var _ = engine;
         await using var session = await database.CreateSessionAsync();
         var put = await MaterializeAsync(
-            await session.ExecuteAsync("PUT @k @v", Parameters(("k", Bytes("k")), ("v", Bytes("v"))), TestTimeout.Token()));
+            await session.ExecuteCommandTextAsync("PUT @k @v", Parameters(("k", Bytes("k")), ("v", Bytes("v"))), TestTimeout.Token()));
         long etag = (long)put[0][1]!;
 
         // Act / Assert: stale etag deletes nothing; the current one deletes.
-        var staleDelete = await session.ExecuteAsync("DELETE @k IF @etag", Parameters(("k", Bytes("k")), ("etag", etag + 1000)), TestTimeout.Token());
+        var staleDelete = await session.ExecuteCommandTextAsync("DELETE @k IF @etag", Parameters(("k", Bytes("k")), ("etag", etag + 1000)), TestTimeout.Token());
         staleDelete.AffectedCount.ShouldBe(0);
 
-        var delete = await session.ExecuteAsync("DELETE @k IF @etag", Parameters(("k", Bytes("k")), ("etag", etag)), TestTimeout.Token());
+        var delete = await session.ExecuteCommandTextAsync("DELETE @k IF @etag", Parameters(("k", Bytes("k")), ("etag", etag)), TestTimeout.Token());
         delete.AffectedCount.ShouldBe(1);
 
-        var missingDelete = await session.ExecuteAsync("DELETE @k", Parameters(("k", Bytes("k"))), TestTimeout.Token());
+        var missingDelete = await session.ExecuteCommandTextAsync("DELETE @k", Parameters(("k", Bytes("k"))), TestTimeout.Token());
         missingDelete.AffectedCount.ShouldBe(0);
     }
 
@@ -151,18 +152,18 @@ public class KeyValueCommandTests
 
         foreach (string key in new[] { "a:1", "a:2", "b:1", "b:2", "c:1" })
         {
-            await session.ExecuteAsync("PUT @k @v", Parameters(("k", Bytes(key)), ("v", Bytes("v"))), TestTimeout.Token());
+            await session.ExecuteCommandTextAsync("PUT @k @v", Parameters(("k", Bytes(key)), ("v", Bytes("v"))), TestTimeout.Token());
         }
 
         // Act
         var range = await MaterializeAsync(
-            await session.ExecuteAsync("SCAN FROM @s TO @e", Parameters(("s", Bytes("a:2")), ("e", Bytes("b:2"))), TestTimeout.Token()));
+            await session.ExecuteCommandTextAsync("SCAN FROM @s TO @e", Parameters(("s", Bytes("a:2")), ("e", Bytes("b:2"))), TestTimeout.Token()));
         var prefixed = await MaterializeAsync(
-            await session.ExecuteAsync("SCAN PREFIX @p", Parameters(("p", Bytes("b:"))), TestTimeout.Token()));
+            await session.ExecuteCommandTextAsync("SCAN PREFIX @p", Parameters(("p", Bytes("b:"))), TestTimeout.Token()));
         var limited = await MaterializeAsync(
-            await session.ExecuteAsync("SCAN LIMIT 2", null, TestTimeout.Token()));
+            await session.ExecuteCommandTextAsync("SCAN LIMIT 2", null, TestTimeout.Token()));
         var limitedByParameter = await MaterializeAsync(
-            await session.ExecuteAsync("SCAN LIMIT @n", Parameters(("n", 3)), TestTimeout.Token()));
+            await session.ExecuteCommandTextAsync("SCAN LIMIT @n", Parameters(("n", 3)), TestTimeout.Token()));
 
         // Assert
         range.Count.ShouldBe(2); // a:2, b:1 — start inclusive, end exclusive.
@@ -192,7 +193,7 @@ public class KeyValueCommandTests
 
         // Act / Assert
         await Should.ThrowAsync<DatabaseParseException>(async () =>
-            await session.ExecuteAsync(command, parameters, TestTimeout.Token()));
+            await session.ExecuteCommandTextAsync(command, parameters, TestTimeout.Token()));
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Commands: A missing parameter binding fails as a parse error")]
@@ -205,7 +206,7 @@ public class KeyValueCommandTests
 
         // Act / Assert
         var failure = await Should.ThrowAsync<DatabaseParseException>(async () =>
-            await session.ExecuteAsync("GET @unbound", null, TestTimeout.Token()));
+            await session.ExecuteCommandTextAsync("GET @unbound", null, TestTimeout.Token()));
 
         failure.Message.ShouldContain("unbound");
     }
@@ -220,27 +221,6 @@ public class KeyValueCommandTests
 
         // Act / Assert: keys are byte[] operands, not strings.
         await Should.ThrowAsync<DatabaseParseException>(async () =>
-            await session.ExecuteAsync("GET @k", Parameters(("k", "not-bytes")), TestTimeout.Token()));
-    }
-
-    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Commands: A non-key-value request is rejected by the typed seam")]
-    public async Task Execute_ForeignRequestType_ShouldThrow()
-    {
-        // Arrange
-        var (engine, database) = await CreateAsync();
-        await using var _ = engine;
-        await using var session = await database.CreateSessionAsync();
-
-        // Act / Assert
-        await Should.ThrowAsync<DatabaseException>(async () =>
-            await session.ExecuteAsync(new ForeignRequest(), TestTimeout.Token()));
-    }
-
-    private sealed class ForeignRequest : QueryRequest
-    {
-        internal ForeignRequest()
-            : base(new KeyValueStatement(KeyValueOperation.Get))
-        {
-        }
+            await session.ExecuteCommandTextAsync("GET @k", Parameters(("k", "not-bytes")), TestTimeout.Token()));
     }
 }

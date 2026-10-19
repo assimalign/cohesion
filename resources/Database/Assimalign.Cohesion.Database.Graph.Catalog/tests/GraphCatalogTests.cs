@@ -348,7 +348,7 @@ public sealed class GraphCatalogTests
         internal MemoryStream Journal { get; } = new();
         internal GraphStorage Storage { get; }
         internal TransactionCoordinator Coordinator { get; }
-        internal IGraphCatalog Catalog { get; }
+        internal GraphCatalog Catalog { get; }
 
         internal TestDatabase()
         {

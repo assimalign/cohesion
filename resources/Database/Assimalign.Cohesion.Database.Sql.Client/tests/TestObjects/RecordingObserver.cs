@@ -7,7 +7,7 @@ namespace Assimalign.Cohesion.Database.Sql.Client.Tests;
 /// A telemetry observer that records the executing / executed / failed callbacks it
 /// receives, for asserting the telemetry hook fires around commands.
 /// </summary>
-internal sealed class RecordingObserver : ISqlClientObserver
+internal sealed class RecordingObserver : SqlClientObserver
 {
     public List<string> Executing { get; } = new();
 
@@ -15,11 +15,11 @@ internal sealed class RecordingObserver : ISqlClientObserver
 
     public List<(string CommandText, SqlClientErrorKind Kind)> Failed { get; } = new();
 
-    public void OnExecuting(string commandText, int parameterCount) => Executing.Add(commandText);
+    protected internal override void OnExecuting(string commandText, int parameterCount) => Executing.Add(commandText);
 
-    public void OnExecuted(string commandText, long rowCount, long affectedCount, TimeSpan elapsed)
+    protected internal override void OnExecuted(string commandText, long rowCount, long affectedCount, TimeSpan elapsed)
         => Executed.Add((commandText, rowCount, affectedCount));
 
-    public void OnFailed(string commandText, SqlClientException exception, TimeSpan elapsed)
+    protected internal override void OnFailed(string commandText, SqlClientException exception, TimeSpan elapsed)
         => Failed.Add((commandText, exception.Kind));
 }

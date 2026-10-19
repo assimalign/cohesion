@@ -79,7 +79,7 @@ Kubernetes — is the *same* algorithm with different hooks, so it is written on
    compile the immutable plan plus artifact, inputs, and observed dependencies, and call
    `ReconcileAsync`. A controller may set `Skipped`; its dependents become `Skipped` while
    independent resources continue.
-6. **Gate once from the plan**: call `WaitForStateAsync` with
+6. **Gate once from the plan**: wait on the gateway's state manager with
    `plan.Workload.Gate.Terminals` and a per-resource budget, then admit the resource exactly when
    `Gate.Satisfying` contains the reached state. Long-running kinds satisfy on `Running`; a Job
    satisfies on `Stopped`. `Degraded` is observational and never re-gates an admitted dependent.
@@ -95,6 +95,34 @@ state comparison. Deployment, StatefulSet, and DaemonSet plans terminate on
 `{Running, Failed, Stopped}` and satisfy only on `Running`; Job plans terminate on
 `{Stopped, Failed}` and satisfy only on `Stopped`. This is the cohesion-side contract referenced
 by the `cohesion-platforms` rule 2 amendment; that sibling repository is not edited here.
+
+A rejected readiness gate throws an `InvalidOperationException` naming the observed state and
+detail associated with that state, plus every other resource currently Failed according to its
+manager's `GetState`, qualified by application and resource name. This includes startup exceptions
+and readiness-budget expiry, so a caller does not need access to the in-memory state to learn why
+reconciliation failed. A null failure detail never inherits an earlier state's text.
+
+Readiness always comes from the gateway's manager. For `InMemoryResourceStateManager`, the gate
+uses its internal `WaitForObservationAsync`, which captures lifecycle and detail together under the
+same lock as state writes and waiter registration. An application-scoped view over that manager
+forwards internally with the scoped resource id. Later state updates cannot replace the pair that
+completed this waiter. Other Failed resources use the manager's internal atomic snapshot, also
+forwarded by the scoped view; if the snapshot is no longer Failed its detail is omitted.
+
+For any other manager, its own `WaitForStateAsync` alone decides the gate's lifecycle. Successful
+readiness returns immediately, independent of events. For a rejected terminal state, the gateway
+accepts detail only when the tracker's latest `StateChanged` observation has that same lifecycle.
+It allows up to **250 ms**, capped by the readiness budget remaining after the manager wait, for
+that pairing: enough for an event-dispatch/scheduler handoff (including a briefly held subscriber),
+while bounding failure-report latency when events are absent. Expiry reports `(none reported)`;
+it never turns a manager terminal result into a readiness timeout. Caller cancellation abandons
+the detail wait. A budget-expired nonterminal result retains the gateway's own timeout detail.
+For other Failed resources a foreign manager's tracked detail is used only if its latest event
+is also Failed, without another grace period. The public contract cannot distinguish separate
+transitions to the same lifecycle, so foreign detail pairing promises a matching latest lifecycle,
+not an exact transition identity. The tracker subscribes before realization and detaches when the
+session ends. Event delivery may race or reverse state-write order; it never decides readiness or
+which resources are Failed. No public state or gateway contract is widened for diagnostics.
 
 `LocalPlanController` keeps compilation pure:
 `Compile(plan, artifact, inputs, observedDependencies, options)` only produces the local desired
@@ -121,6 +149,35 @@ the registration under the same lock.
   gateway never falls back to the managed assembly DLL. A plain or orchestration-disabled
   executable can launch only through `AddExecutable(name, path, options)`, with an explicit
   readiness probe or per-resource stdout marker.
+- **Windows long paths**: before launch, a fully resolved executable path of 260 characters or
+  more is converted with `GetShortPathNameW`. Only a result shorter than 260 characters is used;
+  success with the original long name (possible when 8.3 names are disabled) is a refusal too.
+  The native lookup accepts an extended-length path, but `ProcessStartInfo.FileName` receives an
+  ordinary drive or UNC path, never the `\\?\` prefix. The child working directory comes from
+  that launch path. On Windows, paired surrounding quotes are removed before resolving a
+  resource executable, deriving a working directory, or looking up a long command's short name.
+  Exec probes retain a fully qualified command under 260 characters verbatim, quoted or unquoted,
+  and a bare name stays on PATH, preserving `Process.Start` file lookup and argument handling.
+  A relative command or working directory is passed in its full form, resolved against the
+  gateway's current directory as CreateProcess would resolve it: CreateProcess measures a relative
+  path joined to a deep current directory before it removes `..` segments, and refuses one past
+  260 characters even when its full form is short. A qualified path 260+ characters as written is
+  normalized the same way. The working directory is still the configured host's directory, or
+  inherited when empty; only a directory long in its full form is shortened.
+  The command and working directory are resolved independently, so a probe does not require a
+  short name for a host executable it never starts. Render and gather share the Windows quote rule.
+  `COHLOCAL001` refuses a launch without a usable short name before `Process.Start`, naming the
+  original path, its character count, and the remedies: move to a shorter location, or enable
+  8.3 names on the volume and recreate the affected directories/files. `LongPathsEnabled` alone
+  does not remove the `CreateProcess` restriction. The supervisor records the coded refusal as
+  Failed and the readiness-gate exception includes it.
+  Content-root and mount environment values keep their original resolved paths. A child's
+  `AppContext.BaseDirectory` may use 8.3 components; `FileSystemPath` accepts both forms and both
+  resolve the same content. Recovery comparisons normalize existing files to the same short
+  spelling when available, so PID/start-time/executable verification can adopt or stop a child
+  regardless of which spelling the registration or process reports. The lookup is a
+  source-generated `LibraryImport` with UTF-16 input and a bounded native output buffer; no
+  reflection, runtime marshalling generation, or shell launcher is introduced.
 - **Render**: `--mode render` compiles the declaration-ordered models into
   `cohesion/local-plan-set/v1` process units. The document resolves artifact paths syntactically,
   folds plan services, exposures, and volumes into deferred loopback endpoint and mount requests,
@@ -692,6 +749,24 @@ cover persisted ports and contract environment, default and explicit HTTP readin
 injection and startup gating, optional absence, Composite re-export names, mount materialization,
 prefixed stdout/stderr, `AddExecutable` marker readiness, the full exponential-backoff sequence,
 graceful and forced stop classification, PID-file re-attachment, and explicit orphan restart.
+Windows long-path tests copy the real test apphost below a temporary directory past MAX_PATH,
+exercise a long working directory and exec probe, read content through both base-directory and
+resource-content-root paths, write a resource mount, and adopt an 8.3-launched orphan whose
+registration uses its long name. Discovery skips these tests outside Windows or when the temporary
+file system cannot create the fixture; successful-launch tests also skip when that volume has no
+usable short name. A per-gateway internal resolver seam forces the no-short-name result without
+changing the volume, and portable unit tests cover absent/unchanged/too-long results and the
+259/260-character boundary. Process tests compare direct `Process.Start` with probes for quoted
+and unquoted short absolute, relative, and PATH commands, including empty arguments, embedded
+quotes, spaces, and trailing backslashes; the direct launch of a relative command uses its full
+form, because from a deep checkout the relative path itself passes MAX_PATH. Unit tests pin a
+relative command and directory that are 260+ characters as written but short in full form,
+whatever the current directory's depth. Quoted short and long resource launches also retain
+their working directories. Reconcile tests cover multiple failures, latest details, equal resource
+names in separate applications, a forwarding manager with an earlier subscriber holding its
+Failed event, late or absent foreign terminal events, deterministically reversed built-in events,
+manager-owned selection of other failures, and later updates that must not change an already
+completed built-in failure observation.
 Item #968 tests additionally cover literal/parameter/store resolution, typed certificate
 unavailability, fresh audience-bound ES256 credentials, per-application persisted trust keys,
 bounded developer tokens, digest enforcement for `AddContainer`, and parameter CLI precedence.

@@ -41,21 +41,20 @@ public class SqlExecutionPipelineTests : IDisposable
 
     private async Task<SqlDatabaseEngine> CreateEngine()
     {
-        var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions
+        var engine = SqlDatabaseEngine.Create("test-engine", new SqlDatabaseEngineOptions
         {
-            EngineName = "test-engine",
             RootPath = _rootPath
         });
         return engine;
     }
 
-    private static Task<QueryResult> Sql(IDatabaseSession session, string sql, IReadOnlyDictionary<string, object?>? parameters = null)
+    private static Task<DatabaseResult> Sql(SqlDatabaseSession session, string sql, IReadOnlyDictionary<string, object?>? parameters = null)
         => session.ExecuteAsync(SqlQueryRequest.FromSql(sql, parameters)).AsTask();
 
-    private static async Task<List<object?[]>> Rows(IDatabaseSession session, string sql, IReadOnlyDictionary<string, object?>? parameters = null)
+    private static async Task<List<object?[]>> Rows(SqlDatabaseSession session, string sql, IReadOnlyDictionary<string, object?>? parameters = null)
     {
         var result = await Sql(session, sql, parameters);
-        var resultSet = result.ShouldBeAssignableTo<QueryResultSet>();
+        var resultSet = result.ShouldBeAssignableTo<DatabaseResultSet>();
 
         var rows = new List<object?[]>();
         await foreach (var row in resultSet!.GetRowsAsync())
@@ -71,7 +70,7 @@ public class SqlExecutionPipelineTests : IDisposable
         return rows;
     }
 
-    private static async Task<IDatabaseSession> OpenSeededSessionAsync(IDatabase database)
+    private static async Task<SqlDatabaseSession> OpenSeededSessionAsync(SqlDatabase database)
     {
         var session = await database.CreateSessionAsync();
         await Sql(session, "CREATE TABLE users (id BIGINT PRIMARY KEY, name VARCHAR(100), age INT);");
@@ -370,7 +369,7 @@ public class SqlExecutionPipelineTests : IDisposable
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Engine: in-memory strategy works without a root path")]
     public async Task Engine_InMemoryStrategy_ShouldExecuteSql()
     {
-        var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "memory" });
+        var engine = SqlDatabaseEngine.Create("memory", new SqlDatabaseEngineOptions());
         await using var _ = engine;
 
         var db = await engine.CreateDatabaseAsync("mem-db");
@@ -402,7 +401,7 @@ public class SqlExecutionPipelineTests : IDisposable
 
         // Assert
         insert.AffectedCount.ShouldBe(1);
-        var resultSet = result.ShouldBeAssignableTo<QueryResultSet>();
+        var resultSet = result.ShouldBeAssignableTo<DatabaseResultSet>();
         await foreach (var row in resultSet!.GetRowsAsync())
         {
             row.GetString(0).ShouldBe("five");

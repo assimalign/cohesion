@@ -14,5 +14,7 @@
 	<ItemGroup>
 		<Content Include="xunit.runner.json" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Documents.Catalog" />
+		<!-- Rewrites index pages into the layouts the old-format refusal tests need (#1194). -->
+		<Compile Include="..\..\Assimalign.Cohesion.Database.Indexing\tests\TestObjects\LegacyBTreePages.cs" Link="TestObjects\LegacyBTreePages.cs" />
 	</ItemGroup>
 </Project>

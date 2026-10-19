@@ -48,7 +48,7 @@ public sealed class SqlCatalogCollationTests
         table.FindColumn("exact")!.Collation.ShouldBe(Collation.Binary);
         table.FindColumn("accent")!.Collation.ShouldBe(Collation.CaseAccentInsensitive);
         table.FindColumn("legacy").ShouldBeNull();
-        SqlCatalog.CaptureSnapshot(reopened).DefaultCollation.ShouldBe(Collation.CaseInsensitive);
+        reopened.CaptureSnapshot().DefaultCollation.ShouldBe(Collation.CaseInsensitive);
     }
 
     /// <summary>Existing indexes cannot silently acquire a different inherited collation.</summary>
@@ -77,11 +77,11 @@ public sealed class SqlCatalogCollationTests
         exception.Message.ShouldContain("existing index keys");
     }
 
-    /// <summary>Pre-collation catalog records retain binary behavior.</summary>
-    [Theory(DisplayName = "Cohesion Test [Sql.Catalog] - Collation: legacy table formats inherit Binary")]
+    /// <summary>Pre-collation catalog records cannot supply format 10 function identities.</summary>
+    [Theory(DisplayName = "Cohesion Test [Sql.Catalog] - Collation: legacy table formats are refused without function identities")]
     [InlineData(false)]
     [InlineData(true)]
-    public void Open_LegacyTableFormats_ShouldInheritBinary(bool hasConstraintExtension)
+    public void Open_LegacyTableFormats_ShouldRefuseMissingFunctionIdentities(bool hasConstraintExtension)
     {
         // Arrange
         using var storage = SqlStorage.Create(new MemoryStream(), new MemoryStream(), new MemoryStream(), "legacy");
@@ -101,13 +101,8 @@ public sealed class SqlCatalogCollationTests
             transaction.Commit();
         }
 
-        // Act
-        var catalog = SqlCatalog.Open(storage);
-
-        // Assert
-        catalog.DefaultCollation.ShouldBe(Collation.Binary);
-        catalog.TryGetTable("dbo", "people", out var table).ShouldBeTrue();
-        table.Columns[0].Collation.ShouldBeNull();
+        // Act / Assert
+        Should.Throw<SqlCatalogException>(() => SqlCatalog.Open(storage)).Message.ShouldContain(hasConstraintExtension ? "Unsupported table-constraint metadata version 1" : "missing format 10 function-call identities");
     }
 
     /// <summary>A collation is meaningful only on a string column.</summary>

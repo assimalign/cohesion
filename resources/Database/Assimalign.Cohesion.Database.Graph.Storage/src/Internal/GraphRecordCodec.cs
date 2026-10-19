@@ -13,10 +13,16 @@ using Assimalign.Cohesion.Database.Types;
 namespace Assimalign.Cohesion.Database.Graph.Storage.Internal;
 
 internal readonly record struct GraphRecord(byte Kind, ulong Id, StoredGraphNode? Node = null,
-    StoredGraphRelationship? Relationship = null, string? Label = null, string? PropertyKey = null);
+    StoredGraphRelationship? Relationship = null, string? Label = null, string? PropertyKey = null, ulong Revision = 0);
 
 internal static class GraphRecordCodec
 {
+    internal static void EnsureFormat(ReadOnlySpan<byte> bytes)
+    {
+        if (bytes.Length < 18 || bytes[17] != 2)
+        { throw new StorageCorruptionException(ErrorMessages.RecordFormatUnsupported); }
+    }
+
     internal static byte[] Encode(GraphRecord record, TransactionSequence writer)
     {
         using var stream = new MemoryStream();
@@ -24,8 +30,9 @@ internal static class GraphRecordCodec
         output.Write(writer.Value);
         output.Write(0UL);
         output.Write(record.Kind);
-        output.Write((byte)1);
+        output.Write((byte)2);
         output.Write(record.Id);
+        output.Write(record.Revision);
         if (record.Node is { } node)
         {
             output.Write(node.Labels.Count);
@@ -46,21 +53,32 @@ internal static class GraphRecordCodec
         }
         if (stream.Length > SlottedPage.MaxRecordSize)
         {
-            throw new ArgumentException($"Graph record exceeds the {SlottedPage.MaxRecordSize}-byte slotted-record limit.");
+            // One record holds the whole element, so its size is the user's input, not a store
+            // fault: a typed failure lets the engine fail the statement and keep the session.
+            string element = record.Kind switch
+            {
+                1 => "A node's labels and properties",
+                2 => "A relationship's type and properties",
+                _ => "A property index definition's label and property key",
+            };
+            throw new GraphElementTooLargeException(
+                $"{element} encode to {stream.Length} bytes, more than the {SlottedPage.MaxRecordSize} bytes one graph record can hold.");
         }
         return stream.ToArray();
     }
 
     internal static GraphRecord Decode(ReadOnlyMemory<byte> bytes)
     {
+        EnsureFormat(bytes.Span);
         try
         {
             using var stream = new MemoryStream(bytes.ToArray(), false);
             using var input = new BinaryReader(stream, new UTF8Encoding(false, true));
             input.ReadUInt64(); input.ReadUInt64();
             byte kind = input.ReadByte();
-            if (input.ReadByte() != 1) { throw new StorageCorruptionException("Unknown graph record version."); }
+            if (input.ReadByte() != 2) { throw new StorageCorruptionException(ErrorMessages.RecordFormatUnsupported); }
             ulong id = input.ReadUInt64();
+            ulong revision = input.ReadUInt64();
             GraphRecord record;
             switch (kind)
             {
@@ -78,7 +96,7 @@ internal static class GraphRecordCodec
                 default: throw new StorageCorruptionException("Unknown graph record kind.");
             }
             if (id == 0 || stream.Position != stream.Length) { throw new StorageCorruptionException("Invalid graph record identity or trailing payload."); }
-            return record;
+            return record with { Revision = revision };
         }
         catch (Exception error) when (error is EndOfStreamException or DecoderFallbackException or FormatException or ArgumentException or OverflowException)
         {
@@ -144,10 +162,31 @@ internal static class GraphRecordCodec
         return new System.Collections.ObjectModel.ReadOnlyDictionary<string, object?>(properties);
     }
 
-    internal static IndexKey Key(object? value)
+    /// <summary>The longest scalar key prefix, leaving the 8-byte node identity within the 1,024-byte B+Tree key.</summary>
+    internal const int MaximumKeyPrefix = 1016;
+
+    /// <summary>The index key prefix of a stored property value.</summary>
+    /// <param name="value">The property value.</param>
+    /// <returns>The key prefix.</returns>
+    /// <exception cref="ArgumentException">The value is not a supported index scalar.</exception>
+    /// <exception cref="GraphElementTooLargeException">The value encodes past <see cref="MaximumKeyPrefix"/> bytes.</exception>
+    internal static IndexKey Key(object? value) => TryKey(value, out var key) ? key
+        : throw new GraphElementTooLargeException(
+            $"An indexed property value encodes to {key.Length} bytes, more than the {MaximumKeyPrefix}-byte index key it must fit.");
+
+    /// <summary>
+    /// The index key prefix of a property value, or <see langword="false"/> when it encodes past
+    /// <see cref="MaximumKeyPrefix"/> bytes. No stored entry holds such a key, so a search for it
+    /// matches nothing.
+    /// </summary>
+    /// <param name="value">The property value.</param>
+    /// <param name="key">The key prefix, oversized when the method returns <see langword="false"/>.</param>
+    /// <returns><see langword="true"/> when the key fits.</returns>
+    /// <exception cref="ArgumentException">The value is not a supported index scalar.</exception>
+    internal static bool TryKey(object? value, out IndexKey key)
     {
         var writer = new DatabaseKeyWriter();
-        var key = value switch
+        key = value switch
         {
             null => IndexKey.From(writer.AppendNull()),
             bool boolean => IndexKey.From(writer.AppendBoolean(boolean)),
@@ -156,8 +195,7 @@ internal static class GraphRecordCodec
                 => IndexKey.From(writer.AppendFloat64(NumberKey(value))),
             _ => throw new ArgumentException("Unsupported graph property index scalar.", nameof(value))
         };
-        if (key.Length > 1016) { throw new ArgumentException("Graph property index scalar exceeds 1016 bytes before its 8-byte node identity suffix.", nameof(value)); }
-        return key;
+        return key.Length <= MaximumKeyPrefix;
     }
 
     // Float64 is a candidate projection: large integers/nearby decimals may share a key.

@@ -56,4 +56,12 @@ public enum PageType : byte
     /// A free space map (allocation bitmap) page.
     /// </summary>
     FreeSpaceMap = 8,
+
+    /// <summary>
+    /// An overflow page of the checkpoint anchor: the logical transaction sequences a header
+    /// slot of page 0 cannot hold itself, chained from that slot (storage format 2). Written
+    /// only by checkpoints and other header writes, never journaled, and never touched by a
+    /// transaction.
+    /// </summary>
+    CheckpointAnchor = 9,
 }

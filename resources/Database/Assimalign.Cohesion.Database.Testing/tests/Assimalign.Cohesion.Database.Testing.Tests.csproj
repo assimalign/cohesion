@@ -17,6 +17,9 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.ApplicationModel" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Client" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Client" />
+		<!-- Opens the stopped sample's files to check the schema hash its engine build recorded
+		     against the SDK's compiled artifact. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.Tcp" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Core" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting" />

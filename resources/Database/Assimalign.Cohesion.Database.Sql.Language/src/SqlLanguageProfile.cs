@@ -1,17 +1,23 @@
 namespace Assimalign.Cohesion.Database.Sql.Language;
 
+using System;
+using System.Collections.Generic;
+using System.Linq;
+
 using Assimalign.Cohesion.Database.Language;
+using Assimalign.Cohesion.Database.Sql.Language.Internal;
 
 /// <summary>
-/// Exposes the lexical vocabulary and supported clause surface of the SQL model.
+/// Exposes the SQL lexical vocabulary, executable built-in functions and supported clauses.
 /// </summary>
 public static class SqlLanguageProfile
 {
     private static readonly string[] _keywords =
     [
         // DML
-        "SELECT", "FROM", "WHERE", "INSERT", "UPDATE", "DELETE",
+        "SELECT", "EXPLAIN", "FROM", "WHERE", "INSERT", "UPDATE", "DELETE",
         "SET", "VALUES", "INTO", "RETURNING",
+        "FUNCTION", "DOMAIN", "RETURNS", "RETURN", "IMMUTABLE", "STABLE", "VOLATILE", "STRICT", "CALLED", "INPUT",
         // DDL
         "CREATE", "DROP", "ALTER", "TABLE", "INDEX", "VIEW", "IF",
         "ADD", "COLUMN",
@@ -46,44 +52,59 @@ public static class SqlLanguageProfile
     private static readonly string[] _functions =
     [
         // Aggregate
-        "COUNT", "SUM", "AVG", "MIN", "MAX",
+        "COUNT", "SUM", "AVG", "MIN", "MAX", "STRING_AGG", "LISTAGG",
         // Null handling
         "COALESCE", "NULLIF",
         // Type
         "CAST",
         // String
-        "TRIM", "LTRIM", "RTRIM", "UPPER", "LOWER",
-        "SUBSTRING", "LENGTH", "REPLACE", "CONCAT",
+        "UPPER", "LOWER", "LENGTH", "CHAR_LENGTH", "CHARACTER_LENGTH",
+        "TRIM", "LTRIM", "RTRIM", "SUBSTRING", "REPLACE", "CONCAT", "CONCAT_WS",
+        "POSITION", "STRPOS", "LEFT", "RIGHT", "LPAD", "RPAD", "REVERSE",
         // Numeric
-        "ABS", "CEILING", "FLOOR", "ROUND", "POWER", "SQRT", "MOD",
-        // Date and time
-        "NOW", "CURRENT_DATE", "CURRENT_TIME", "CURRENT_TIMESTAMP", "EXTRACT",
-        // Window
-        "ROW_NUMBER", "RANK", "DENSE_RANK",
-        "LEAD", "LAG", "FIRST_VALUE", "LAST_VALUE", "NTH_VALUE", "NTILE",
+        "ABS", "ROUND", "FLOOR", "CEILING", "CEIL", "POWER", "SQRT", "MOD", "SIGN", "EXP", "LN", "LOG10",
+        // Temporal
+        "CURRENT_DATE", "CURRENT_TIME", "CURRENT_TIMESTAMP", "LOCALTIME", "LOCALTIMESTAMP", "NOW", "EXTRACT", "DATE_TRUNC",
+        // UUID
+        "GEN_RANDOM_UUID",
     ];
 
     private static readonly string[] _clauses =
     [
         SqlClauses.Select,
+        SqlClauses.Explain,
         SqlClauses.Insert,
+        SqlClauses.OnConflict,
         SqlClauses.Update,
         SqlClauses.Delete,
+        SqlClauses.Returning,
         SqlClauses.CreateTable,
+        SqlClauses.CreateSchema,
+        SqlClauses.Identity,
         SqlClauses.CreateIndex,
         SqlClauses.AlterTable,
         SqlClauses.DropTable,
+        SqlClauses.CreateView,
+        SqlClauses.DropView,
+        SqlClauses.DropSchema,
         SqlClauses.DropIndex,
         SqlClauses.From,
         SqlClauses.Join,
+        SqlClauses.Using,
         SqlClauses.Where,
         SqlClauses.GroupBy,
         SqlClauses.Having,
         SqlClauses.OrderBy,
         SqlClauses.Limit,
         SqlClauses.Offset,
+        SqlClauses.Fetch,
+        SqlClauses.Top,
         SqlClauses.Values,
+        SqlClauses.SetOperation,
+        SqlClauses.Intersect,
+        SqlClauses.Except,
         SqlClauses.Subquery,
+        SqlClauses.Cte,
         SqlClauses.Case,
         SqlClauses.Cast,
         SqlClauses.Collate,
@@ -94,6 +115,9 @@ public static class SqlLanguageProfile
         SqlClauses.UniqueConstraint,
         SqlClauses.Cascade,
         SqlClauses.Restrict,
+        SqlClauses.SetNull,
+        SqlClauses.SetDefault,
+        SqlClauses.NoAction,
         SqlClauses.Begin,
         SqlClauses.Commit,
         SqlClauses.Rollback,
@@ -111,10 +135,17 @@ public static class SqlLanguageProfile
         _clauses);
 
     /// <summary>
+    /// Gets the recognized but unsupported SQL spellings. Renderers quote identifiers matching
+    /// these words; executable functions are listed separately by <see cref="Instance"/>.
+    /// </summary>
+    public static IReadOnlyList<string> RecognizedUnsupportedVocabulary { get; } =
+        Array.AsReadOnly(SqlUnsupportedVocabulary.Words.Select(word => word.Spelling).ToArray());
+
+    /// <summary>
     /// Reports whether a join type executes in the SQL surface. Supported joins
-    /// require an ON predicate and are limited to two tables per SELECT.
+    /// run left-deep in written order. INNER and LEFT require ON or USING; CROSS has neither.
     /// </summary>
     /// <param name="joinType">The parsed join type.</param>
-    /// <returns><see langword="true"/> only for INNER JOIN (including bare JOIN).</returns>
-    public static bool SupportsJoin(SqlJoinType joinType) => joinType == SqlJoinType.Inner;
+    /// <returns><see langword="true"/> for INNER (including bare JOIN), LEFT OUTER and CROSS JOIN.</returns>
+    public static bool SupportsJoin(SqlJoinType joinType) => joinType is SqlJoinType.Inner or SqlJoinType.LeftOuter or SqlJoinType.Cross;
 }

@@ -19,15 +19,40 @@ public class OqlLanguageProfileTests
         profile.Keywords.ToArray().ShouldContain("DROP");
         profile.Keywords.ToArray().ShouldContain("ON");
         profile.Functions.ToArray().ShouldContain("COUNT");
+        profile.Functions.ToArray().ShouldContain("META");
+        foreach (string word in new[] { "KEY", "VALUES", "INTO" }) { profile.Keywords.ToArray().ShouldNotContain(word); }
     }
 
     [Theory]
+    [InlineData(OqlClauses.Insert)]
+    [InlineData(OqlClauses.Upsert)]
+    [InlineData(OqlClauses.Update)]
+    [InlineData(OqlClauses.Unset)]
+    [InlineData(OqlClauses.Delete)]
+    [InlineData(OqlClauses.Values)]
     [InlineData(OqlClauses.Select)]
+    [InlineData(OqlClauses.Distinct)]
+    [InlineData(OqlClauses.SelectValue)]
+    [InlineData(OqlClauses.ObjectConstructor)]
+    [InlineData(OqlClauses.ArrayConstructor)]
+    [InlineData(OqlClauses.Explain)]
     [InlineData(OqlClauses.From)]
+    [InlineData(OqlClauses.Unnest)]
+    [InlineData(OqlClauses.LeftUnnest)]
+    [InlineData(OqlClauses.Any)]
+    [InlineData(OqlClauses.Every)]
     [InlineData(OqlClauses.Where)]
+    [InlineData(OqlClauses.In)]
+    [InlineData(OqlClauses.Between)]
+    [InlineData(OqlClauses.Like)]
+    [InlineData(OqlClauses.Case)]
     [InlineData(OqlClauses.GroupBy)]
     [InlineData(OqlClauses.Having)]
     [InlineData(OqlClauses.OrderBy)]
+    [InlineData(OqlClauses.Limit)]
+    [InlineData(OqlClauses.Offset)]
+    [InlineData(OqlClauses.CreateCollection)]
+    [InlineData(OqlClauses.DropCollection)]
     [InlineData(OqlClauses.CreateIndex)]
     [InlineData(OqlClauses.DropIndex)]
     public void Instance_DeclaredClause_IsSupported(string clause)
@@ -42,9 +67,7 @@ public class OqlLanguageProfileTests
     }
 
     [Theory]
-    [InlineData(OqlClauses.Define)]
-    [InlineData(OqlClauses.Element)]
-    [InlineData(OqlClauses.Flatten)]
+    [InlineData("RETURNING")]
     [InlineData(OqlClauses.Subquery)]
     public void Instance_UnimplementedClause_IsNotSupported(string clause)
     {

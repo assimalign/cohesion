@@ -3,7 +3,7 @@ using Assimalign.Cohesion.Database.Language;
 
 namespace Assimalign.Cohesion.Database.Documents.Language;
 
-/// <summary>A supported aggregate function call.</summary>
+/// <summary>A supported scalar or aggregate function call.</summary>
 public sealed class OqlCallExpression : OqlExpression
 {
     /// <summary>Initializes a new instance of the <see cref="OqlCallExpression"/> class.</summary>

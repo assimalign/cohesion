@@ -57,6 +57,9 @@ public sealed class SqlCollationWireTests
         var error = await Should.ThrowAsync<SqlClientException>(async () => await connection.ExecuteAsync(
             "INSERT INTO collated_unique VALUES ('cafe')", cancellationToken: SqlClientTestHarness.Timeout()));
         error.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE037");
+        error.Message.ShouldNotContain("cafe", Case.Sensitive);
+        error.Message.ShouldNotContain("CAFÉ", Case.Sensitive);
         error.ConnectionUsable.ShouldBeTrue();
         (await connection.QueryAsync("SELECT name FROM collated_unique WHERE name LIKE 'ca_e'", cancellationToken: SqlClientTestHarness.Timeout()))
             .ShouldHaveSingleItem()["name"].ShouldBe("CAFÉ");

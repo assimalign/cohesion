@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
+using System.Runtime.CompilerServices;
 
 using Assimalign.Cohesion.Database.Sql.Language;
 
@@ -8,13 +10,20 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 internal sealed partial class SqlPlanner
 {
+    private static bool NullsFirst(SqlOrderByColumn order) => order.NullPlacement switch
+    {
+        SqlNullPlacement.First => true,
+        SqlNullPlacement.Last => false,
+        _ => !order.IsDescending,
+    };
+
     /// <summary>
     /// Binds ORDER BY aliases and standalone numeric ordinals to completed output
     /// slots. Shared by stored, joined, virtual and grouped relations. Compound
     /// numeric expressions remain expressions: ORDER BY 1 + 1 is not ordinal 2.
     /// </summary>
-    private static Dictionary<SqlExpression, int> BindOrderByProjections(
-        SqlSelectExpression select, IReadOnlyList<SqlProjection> projections, int sourceColumnCount)
+    private Dictionary<SqlExpression, int> BindOrderByProjections(
+        SqlSelectExpression select, IReadOnlyList<SqlProjection> projections, int wildcardColumnCount)
     {
         var aliases = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         int projectionIndex = 0;
@@ -28,7 +37,7 @@ internal sealed partial class SqlPlanner
                     aliases[alias] = -1;
                 }
             }
-            projectionIndex += column.Expression is SqlStarExpression ? sourceColumnCount : 1;
+            projectionIndex += column.Expression is SqlStarExpression ? wildcardColumnCount : 1;
         }
 
         var slots = new Dictionary<SqlExpression, int>();
@@ -48,16 +57,16 @@ internal sealed partial class SqlPlanner
                 string text = negative ? $"-{literal.Value}" : literal.Value;
                 if (literal.LiteralType != SqlLiteralType.Integer)
                 {
-                    throw new DatabaseException($"ORDER BY ordinal '{text}' must be an integer.");
+                    throw new SqlPlanningException("COHSQLE018", $"ORDER BY ordinal '{text}' must be an integer.", order.Expression.Location);
                 }
                 if (negative || literal.Value.TrimStart('0').Length == 0)
                 {
-                    throw new DatabaseException($"ORDER BY ordinal '{text}' must be a positive integer.");
+                    throw new SqlPlanningException("COHSQLE018", $"ORDER BY ordinal '{text}' must be a positive integer.", order.Expression.Location);
                 }
                 if (!int.TryParse(literal.Value, NumberStyles.None, CultureInfo.InvariantCulture, out int ordinal)
                     || ordinal > projections.Count)
                 {
-                    throw new DatabaseException($"ORDER BY ordinal '{text}' is out of range for {projections.Count} output columns.");
+                    throw new SqlPlanningException("COHSQLE018", $"ORDER BY ordinal '{text}' is out of range for {projections.Count} output columns.", order.Expression.Location);
                 }
                 slots.Add(order.Expression, ordinal - 1);
             }
@@ -70,12 +79,13 @@ internal sealed partial class SqlPlanner
 
         void BindAliases(SqlExpression expression)
         {
+            RuntimeHelpers.EnsureSufficientExecutionStack();
             if (expression is SqlColumnReferenceExpression { TableAlias: null, SchemaName: null } reference
                 && aliases.TryGetValue(reference.ColumnName, out int index))
             {
                 if (index < 0)
                 {
-                    throw new DatabaseException($"Ambiguous ORDER BY alias '{reference.ColumnName}'.");
+                    throw new SqlPlanningException("COHSQLE019", $"Ambiguous ORDER BY alias '{reference.ColumnName}'.", reference.Location);
                 }
                 slots.Add(expression, index);
                 return;

@@ -1,0 +1,148 @@
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+
+using Assimalign.Cohesion.Database.Protocol;
+
+using Shouldly;
+using Xunit;
+
+namespace Assimalign.Cohesion.Database.Sql.Client.Tests;
+
+/// <summary>
+/// A column reference in a row of <c>INSERT ... VALUES</c> through the real SQL server and the typed
+/// client (#1165): the statement is a coded execution failure on a connection that stays usable,
+/// nothing is inserted, and literals and parameters keep inserting on the same connection. Before
+/// the fix the reference escaped the engine as an <c>IndexOutOfRangeException</c>, which the server
+/// reported as <c>Internal</c> and answered by closing the session.
+/// </summary>
+public sealed class SqlInsertValuesWireTests
+{
+    private const string ColumnReferenceNotAllowed = "COHSQLE005";
+
+    [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - DEFAULT: VALUES, DEFAULT VALUES and UPDATE share defaults over both transports")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExecuteAsync_DefaultAssignments_ShouldResolveDefaultsOverWire(bool tcp)
+    {
+        // Arrange
+        await using var harness = await SqlClientTestHarness.StartAsync(tcp: tcp);
+        await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
+        await connection.ExecuteAsync("CREATE TABLE defaults (id INT DEFAULT 7 NOT NULL, label TEXT DEFAULT 'seed', note INT)",
+            cancellationToken: SqlClientTestHarness.Timeout());
+
+        // Act
+        long inserted = await connection.ExecuteAsync("INSERT INTO defaults (label, id) VALUES (DEFAULT, 1), (NULL, 2)",
+            cancellationToken: SqlClientTestHarness.Timeout());
+        long allDefaults = await connection.ExecuteAsync("INSERT INTO defaults (label) DEFAULT VALUES",
+            cancellationToken: SqlClientTestHarness.Timeout());
+        long updated = await connection.ExecuteAsync("UPDATE defaults SET label = DEFAULT, note = DEFAULT WHERE id = 2",
+            cancellationToken: SqlClientTestHarness.Timeout());
+        var failure = await Should.ThrowAsync<SqlClientException>(async () =>
+            await connection.ExecuteAsync("INSERT INTO defaults VALUES (3, 'ok', 3), (NULL, DEFAULT, DEFAULT)",
+                cancellationToken: SqlClientTestHarness.Timeout()));
+        var invalid = await Should.ThrowAsync<SqlClientException>(async () =>
+            await connection.ExecuteAsync("INSERT INTO defaults VALUES (4, COALESCE(DEFAULT, 'x'), DEFAULT)",
+                cancellationToken: SqlClientTestHarness.Timeout()));
+
+        // Assert
+        inserted.ShouldBe(2);
+        allDefaults.ShouldBe(1);
+        updated.ShouldBe(1);
+        failure.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
+        failure.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
+        failure.Message.ShouldBe("COHSQLE024: Column 'id' does not allow NULL.");
+        failure.ConnectionUsable.ShouldBeTrue();
+        invalid.Kind.ShouldBe(SqlClientErrorKind.ParseFailure);
+        invalid.Message.ShouldContain("SQL0003", Case.Sensitive);
+        invalid.ConnectionUsable.ShouldBeTrue();
+        var rows = await connection.QueryAsync("SELECT id, label, note FROM defaults ORDER BY id",
+            cancellationToken: SqlClientTestHarness.Timeout());
+        rows.Select(row => (row["id"], row["label"], row["note"])).ShouldBe([(1, "seed", null), (2, "seed", null), (7, "seed", null)]);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - DEFAULT: NOT NULL failures retain their code and usable connection over both transports")]
+    [InlineData(false, "INSERT INTO n VALUES (DEFAULT)", true)]
+    [InlineData(true, "INSERT INTO n VALUES (DEFAULT)", true)]
+    [InlineData(false, "INSERT INTO n DEFAULT VALUES", true)]
+    [InlineData(true, "INSERT INTO n DEFAULT VALUES", true)]
+    [InlineData(false, "UPDATE n SET id = DEFAULT", true)]
+    [InlineData(true, "UPDATE n SET id = DEFAULT", true)]
+    [InlineData(false, "INSERT INTO n VALUES (NULL)", false)]
+    [InlineData(true, "INSERT INTO n VALUES (NULL)", false)]
+    [InlineData(false, "UPDATE n SET id = NULL", false)]
+    [InlineData(true, "UPDATE n SET id = NULL", false)]
+    public async Task ExecuteAsync_NotNullFailure_ShouldKeepCodeAndConnection(bool tcp, string sql, bool missingDefault)
+    {
+        // Arrange
+        await using var harness = await SqlClientTestHarness.StartAsync(tcp: tcp);
+        await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
+        await connection.ExecuteAsync("CREATE TABLE n (id INT NOT NULL)", cancellationToken: SqlClientTestHarness.Timeout());
+        await connection.ExecuteAsync("INSERT INTO n VALUES (1)", cancellationToken: SqlClientTestHarness.Timeout());
+
+        // Act
+        var failure = await Should.ThrowAsync<SqlClientException>(async () =>
+            await connection.ExecuteAsync(sql, cancellationToken: SqlClientTestHarness.Timeout()));
+
+        // Assert
+        failure.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
+        failure.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
+        failure.Message.ShouldBe(missingDefault
+            ? "COHSQLE024: Column 'id' does not allow NULL and has no default."
+            : "COHSQLE024: Column 'id' does not allow NULL.");
+        failure.ConnectionUsable.ShouldBeTrue();
+        var rows = await connection.QueryAsync("SELECT id FROM n", cancellationToken: SqlClientTestHarness.Timeout());
+        rows.ShouldHaveSingleItem()["id"].ShouldBe(1);
+        (await connection.ExecuteAsync("INSERT INTO n VALUES (2)", cancellationToken: SqlClientTestHarness.Timeout())).ShouldBe(1);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - INSERT VALUES: a column reference is a coded failure on a usable connection")]
+    [InlineData("INSERT INTO users (id, name, score) VALUES (id, 'lin', 1)", "id")]
+    [InlineData("INSERT INTO users (id, name, score) VALUES (3, 'lin', score + 1)", "score")]
+    [InlineData("INSERT INTO users (id, name, score) VALUES (3, 'lin', 1), (4, users.name, 2)", "users.name")]
+    public async Task ExecuteAsync_ColumnReferenceInValues_ShouldFailWithCode(string statement, string reference)
+    {
+        // Arrange
+        await using var harness = await SqlClientTestHarness.StartAsync();
+        await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
+
+        // Act
+        SqlClientException failure = await Should.ThrowAsync<SqlClientException>(async () =>
+            await connection.ExecuteAsync(statement, cancellationToken: SqlClientTestHarness.Timeout()));
+
+        // Assert
+        failure.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
+        failure.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
+        failure.ConnectionUsable.ShouldBeTrue();
+        failure.Message.ShouldBe($"{ColumnReferenceNotAllowed}: Column reference '{reference}' is not allowed in INSERT ... VALUES, " +
+            "which has no columns in scope. Use literals, parameters and expressions over them, or INSERT ... SELECT to read values from a table.");
+        SqlResultSet ones = await connection.QueryAsync("SELECT 1 AS one FROM users", cancellationToken: SqlClientTestHarness.Timeout());
+        ones.Select(row => row["one"]).ShouldBe(new object?[] { 1L, 1L });
+        SqlResultSet users = await connection.QueryAsync("SELECT id, score FROM users ORDER BY id",
+            cancellationToken: SqlClientTestHarness.Timeout());
+        users.Select(row => (row["id"], row["score"])).ShouldBe([(1, 100L), (2, 200L)]);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - INSERT VALUES: parameters and expressions over them still insert after a failure")]
+    public async Task ExecuteAsync_ParametersAfterFailure_ShouldInsert()
+    {
+        // Arrange
+        await using var harness = await SqlClientTestHarness.StartAsync();
+        await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
+        var parameters = new Dictionary<string, object?> { ["id"] = 3, ["name"] = "lin", ["score"] = 150L };
+        await Should.ThrowAsync<SqlClientException>(async () =>
+            await connection.ExecuteAsync("INSERT INTO users (id, name, score) VALUES (id, name, score)",
+                cancellationToken: SqlClientTestHarness.Timeout()));
+
+        // Act
+        long affected = await connection.ExecuteAsync(
+            "INSERT INTO users (id, name, score) VALUES (@id, UPPER(@name), @score * 2), (@id + 1, 'kay' || '!', -@score)",
+            parameters, SqlClientTestHarness.Timeout());
+
+        // Assert
+        affected.ShouldBe(2);
+        SqlResultSet users = await connection.QueryAsync("SELECT id, name, score FROM users WHERE id > 2 ORDER BY id",
+            cancellationToken: SqlClientTestHarness.Timeout());
+        users.Select(row => (row["id"], row["name"], row["score"])).ShouldBe([(3, "LIN", 300L), (4, "kay!", -150L)]);
+    }
+}

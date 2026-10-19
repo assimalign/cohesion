@@ -88,6 +88,103 @@ internal static class KeyComponentEncoding
     }
 
     /// <summary>
+    /// Advances <paramref name="position"/> past an escaped, terminated byte payload
+    /// without copying it, validating the escape sequences exactly as
+    /// <see cref="ReadEscaped"/> does.
+    /// </summary>
+    internal static void SkipEscaped(ReadOnlySpan<byte> source, ref int position)
+    {
+        while (true)
+        {
+            int escape = source[position..].IndexOf(Escape);
+            if (escape < 0)
+            {
+                throw new DatabaseTypeException("Malformed key: unterminated variable-length component.");
+            }
+
+            position += escape + 1;
+            if (position >= source.Length)
+            {
+                throw new DatabaseTypeException("Malformed key: truncated escape sequence.");
+            }
+
+            byte marker = source[position++];
+            if (marker == Terminator)
+            {
+                return;
+            }
+
+            if (marker != EscapedZero)
+            {
+                throw new DatabaseTypeException($"Malformed key: invalid escape marker 0x{marker:X2}.");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Advances <paramref name="position"/> past a decimal written by
+    /// <see cref="WriteDecimal"/> without parsing it, validating its sign byte, its
+    /// digit bytes and its terminator exactly as <see cref="ReadDecimal"/> does.
+    /// </summary>
+    internal static void SkipDecimal(ReadOnlySpan<byte> source, ref int position)
+    {
+        if (position >= source.Length)
+        {
+            throw new DatabaseTypeException("Malformed key: truncated decimal component.");
+        }
+
+        byte sign = source[position++];
+
+        if (sign == decimalZero)
+        {
+            return;
+        }
+
+        if (sign is not (decimalNegative or decimalPositive))
+        {
+            throw new DatabaseTypeException($"Malformed key: invalid decimal sign byte 0x{sign:X2}.");
+        }
+
+        bool negative = sign == decimalNegative;
+
+        if (position >= source.Length)
+        {
+            throw new DatabaseTypeException("Malformed key: truncated decimal exponent.");
+        }
+
+        position++;
+        int digits = 0;
+
+        while (true)
+        {
+            if (position >= source.Length)
+            {
+                throw new DatabaseTypeException("Malformed key: unterminated decimal digits.");
+            }
+
+            byte raw = source[position++];
+            byte encoded = negative ? (byte)~raw : raw;
+
+            if (encoded == 0x00)
+            {
+                break;
+            }
+
+            if (encoded is < 1 or > 10)
+            {
+                throw new DatabaseTypeException($"Malformed key: invalid decimal digit byte 0x{raw:X2}.");
+            }
+
+            digits++;
+        }
+
+        if (digits == 0)
+        {
+            throw new DatabaseTypeException("Malformed key: decimal component has no digits.");
+        }
+    }
+
+    /// <summary>
     /// Folds IEEE-754 double bits into an unsigned value whose ascending order matches
     /// the numeric total order (negatives reversed, sign bit flipped for positives).
     /// NaN canonicalizes above positive infinity; negative zero orders below zero.

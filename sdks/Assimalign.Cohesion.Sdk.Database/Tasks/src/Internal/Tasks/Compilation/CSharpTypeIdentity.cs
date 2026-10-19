@@ -43,11 +43,6 @@ internal static class CSharpTypeIdentity
         return $"{assembly}:{metadataName}[{string.Join(';', AllTypeArguments(named).Select(Create))}]";
     }
 
-    internal static string Create(ITypeSymbol type, RefKind refKind)
-        => refKind is RefKind.Ref or RefKind.Out or RefKind.In or RefKind.RefReadOnlyParameter
-            ? Create(type) + "&"
-            : Create(type);
-
     private static IEnumerable<ITypeSymbol> AllTypeArguments(INamedTypeSymbol type)
     {
         if (type.ContainingType is not null)

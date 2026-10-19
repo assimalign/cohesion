@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.Database.Sql.Schema;
 
@@ -17,7 +16,7 @@ public sealed class SqlSchemaMigrationException : DatabaseException
     /// <param name="message">The failure message.</param>
     /// <param name="innerException">The underlying cause.</param>
     public SqlSchemaMigrationException(string message, Exception innerException)
-        : base(message, innerException)
+        : base(message, innerException is DatabaseException failure ? failure.Diagnostics : [], innerException)
     {
     }
 }

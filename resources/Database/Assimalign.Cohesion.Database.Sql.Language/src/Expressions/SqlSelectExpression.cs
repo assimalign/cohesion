@@ -7,14 +7,13 @@ using Assimalign.Cohesion.Database.Language;
 /// <summary>
 /// Represents a parsed SELECT statement.
 /// </summary>
-public sealed class SqlSelectExpression : SqlQueryExpression
+public sealed class SqlSelectExpression : SqlQueryBodyExpression
 {
     /// <summary>
     /// Initializes a new <see cref="SqlSelectExpression"/>.
     /// </summary>
     /// <param name="columns">The columns in the SELECT list.</param>
-    /// <param name="from">The FROM table reference.</param>
-    /// <param name="joins">The JOIN clauses.</param>
+    /// <param name="from">The comma-separated FROM join trees.</param>
     /// <param name="where">The WHERE filter expression.</param>
     /// <param name="groupBy">The GROUP BY expressions.</param>
     /// <param name="having">The HAVING filter expression.</param>
@@ -24,10 +23,10 @@ public sealed class SqlSelectExpression : SqlQueryExpression
     /// <param name="isDistinct">Whether DISTINCT was specified.</param>
     /// <param name="text">The raw statement text.</param>
     /// <param name="location">The source location.</param>
+    /// <param name="limitSyntaxKind">The spelling that supplied the row limit.</param>
     internal SqlSelectExpression(
         IReadOnlyList<SqlSelectColumn> columns,
-        SqlTableReference? from,
-        IReadOnlyList<SqlJoinClause> joins,
+        IReadOnlyList<SqlFromItem> from,
         SqlExpression? where,
         IReadOnlyList<SqlExpression> groupBy,
         SqlExpression? having,
@@ -36,19 +35,49 @@ public sealed class SqlSelectExpression : SqlQueryExpression
         SqlExpression? offset,
         bool isDistinct,
         string? text,
-        Location? location)
-        : base(SqlQueryCommandType.Select, text, location)
+        Location? location,
+        SqlLimitSyntaxKind? limitSyntaxKind = null)
+        : base(text, location)
     {
         Columns = columns;
         From = from;
-        Joins = joins;
         Where = where;
         GroupBy = groupBy;
         Having = having;
         OrderBy = orderBy;
         Limit = limit;
+        LimitSyntaxKind = limit is null ? null : limitSyntaxKind ?? SqlLimitSyntaxKind.Limit;
         Offset = offset;
         IsDistinct = isDistinct;
+
+        int depth = System.Math.Max(SqlExpression.DepthOf(where), SqlExpression.DepthOf(having));
+        depth = System.Math.Max(depth, System.Math.Max(SqlExpression.DepthOf(limit), SqlExpression.DepthOf(offset)));
+        depth = System.Math.Max(depth, SqlExpression.DepthOf(groupBy));
+        foreach (var column in columns)
+        {
+            depth = System.Math.Max(depth, column.Expression.Depth);
+        }
+        foreach (var item in from)
+        {
+            if (item.Table is SqlDerivedTableReference derived)
+            {
+                depth = System.Math.Max(depth, 1 + derived.Query.ExpressionDepth);
+            }
+            foreach (var join in item.Joins)
+            {
+                if (join.Table is SqlDerivedTableReference joined)
+                {
+                    depth = System.Math.Max(depth, 1 + joined.Query.ExpressionDepth);
+                }
+                depth = System.Math.Max(depth, SqlExpression.DepthOf(join.Condition));
+            }
+        }
+        foreach (var order in orderBy)
+        {
+            depth = System.Math.Max(depth, order.Expression.Depth);
+        }
+
+        ExpressionDepth = depth;
     }
 
     /// <summary>
@@ -57,14 +86,10 @@ public sealed class SqlSelectExpression : SqlQueryExpression
     public IReadOnlyList<SqlSelectColumn> Columns { get; }
 
     /// <summary>
-    /// Gets the FROM table reference, if present.
+    /// Gets the comma-separated FROM join trees; JOIN binds more tightly than comma.
     /// </summary>
-    public SqlTableReference? From { get; }
+    public IReadOnlyList<SqlFromItem> From { get; }
 
-    /// <summary>
-    /// Gets the JOIN clauses.
-    /// </summary>
-    public IReadOnlyList<SqlJoinClause> Joins { get; }
 
     /// <summary>
     /// Gets the WHERE filter expression, if present.
@@ -80,21 +105,6 @@ public sealed class SqlSelectExpression : SqlQueryExpression
     /// Gets the HAVING filter expression, if present.
     /// </summary>
     public SqlExpression? Having { get; }
-
-    /// <summary>
-    /// Gets the ORDER BY columns.
-    /// </summary>
-    public IReadOnlyList<SqlOrderByColumn> OrderBy { get; }
-
-    /// <summary>
-    /// Gets the LIMIT expression, if present.
-    /// </summary>
-    public SqlExpression? Limit { get; }
-
-    /// <summary>
-    /// Gets the OFFSET expression, if present.
-    /// </summary>
-    public SqlExpression? Offset { get; }
 
     /// <summary>
     /// Gets whether DISTINCT was specified.

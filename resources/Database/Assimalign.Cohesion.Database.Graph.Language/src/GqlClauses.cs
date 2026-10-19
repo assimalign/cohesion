@@ -11,6 +11,12 @@ public static class GqlClauses
     /// <summary>Matches a graph pattern.</summary>
     public const string Match = "MATCH";
 
+    /// <summary>Matches quantified relationships and parenthesized paths under trail semantics.</summary>
+    public const string QuantifiedPath = "QUANTIFIED PATH";
+
+    /// <summary>The Cohesion extension that describes a data statement without executing it.</summary>
+    public const string Explain = "EXPLAIN";
+
     /// <summary>Matches a graph pattern without requiring a result.</summary>
     public const string OptionalMatch = "OPTIONAL MATCH";
 
@@ -19,6 +25,12 @@ public static class GqlClauses
 
     /// <summary>Projects values from a graph query.</summary>
     public const string Return = "RETURN";
+
+    /// <summary>Starts a following linear query segment.</summary>
+    public const string Next = "NEXT";
+
+    /// <summary>Groups by exactly the non-aggregated RETURN expressions.</summary>
+    public const string GroupBy = "GROUP BY";
 
     /// <summary>Passes projected values to a following query stage.</summary>
     public const string With = "WITH";
@@ -47,6 +59,13 @@ public static class GqlClauses
     /// <summary>Restricts graph results by a predicate.</summary>
     public const string Where = "WHERE";
 
+    /// <summary>
+    /// ISO/IEC 39075 label expressions (<c>|</c>, <c>&amp;</c>, <c>!</c>, <c>%</c>, parentheses and
+    /// <c>IS</c>) in node and edge patterns, and the labeled predicate
+    /// (<c>n IS [NOT] LABELED A</c>, <c>n:A</c>) in <c>WHERE</c>.
+    /// </summary>
+    public const string LabelExpression = "LABEL EXPRESSION";
+
     /// <summary>Orders graph results by one or more expressions.</summary>
     public const string OrderBy = "ORDER BY";
 
@@ -61,6 +80,9 @@ public static class GqlClauses
 
     /// <summary>Binds a value for use by later query stages.</summary>
     public const string Let = "LET";
+
+    /// <summary>Expands a list into one row for each element.</summary>
+    public const string For = "FOR";
 
     /// <summary>Expands a collection into individual query rows.</summary>
     public const string Unwind = "UNWIND";

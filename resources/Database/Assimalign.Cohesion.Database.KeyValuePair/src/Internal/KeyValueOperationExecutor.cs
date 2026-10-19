@@ -64,53 +64,57 @@ internal sealed class KeyValueOperationExecutor
     /// </summary>
     internal const string PrimaryIndexName = "key";
 
-    private static readonly IReadOnlyList<QueryColumn> _entryColumns =
+    // How many times DecodeConfirmed reads a slot again before it reports a record that does not
+    // decode; it stops sooner when two reads agree.
+    private const int confirmingReads = 2;
+
+    private static readonly IReadOnlyList<DatabaseColumn> _entryColumns =
     [
-        new QueryColumn { Name = "key", Ordinal = 0, Type = DatabaseType.Binary },
-        new QueryColumn { Name = "value", Ordinal = 1, Type = DatabaseType.Binary },
-        new QueryColumn { Name = "etag", Ordinal = 2, Type = DatabaseType.Int64 },
+        new DatabaseColumn { Name = "key", Ordinal = 0, Type = DatabaseType.Binary },
+        new DatabaseColumn { Name = "value", Ordinal = 1, Type = DatabaseType.Binary },
+        new DatabaseColumn { Name = "etag", Ordinal = 2, Type = DatabaseType.Int64 },
     ];
 
-    private static readonly IReadOnlyList<QueryColumn> _putColumns =
+    private static readonly IReadOnlyList<DatabaseColumn> _putColumns =
     [
-        new QueryColumn { Name = "applied", Ordinal = 0, Type = DatabaseType.Boolean },
-        new QueryColumn { Name = "etag", Ordinal = 1, Type = DatabaseType.Int64, IsNullable = true },
+        new DatabaseColumn { Name = "applied", Ordinal = 0, Type = DatabaseType.Boolean },
+        new DatabaseColumn { Name = "etag", Ordinal = 1, Type = DatabaseType.Int64, IsNullable = true },
     ];
 
-    private static readonly IReadOnlyList<QueryColumn> _existsColumns =
+    private static readonly IReadOnlyList<DatabaseColumn> _existsColumns =
     [
-        new QueryColumn { Name = "exists", Ordinal = 0, Type = DatabaseType.Boolean },
+        new DatabaseColumn { Name = "exists", Ordinal = 0, Type = DatabaseType.Boolean },
     ];
 
-    private static readonly IReadOnlyList<QueryColumn> _keySpaceColumns =
+    private static readonly IReadOnlyList<DatabaseColumn> _keySpaceColumns =
     [
-        new QueryColumn { Name = "database_name", Ordinal = 0, Type = DatabaseType.String },
-        new QueryColumn { Name = "keyspace_id", Ordinal = 1, Type = DatabaseType.Int64 },
-        new QueryColumn { Name = "entry_space_format_version", Ordinal = 2, Type = DatabaseType.Int32 },
-        new QueryColumn { Name = "primary_index_name", Ordinal = 3, Type = DatabaseType.String },
-        new QueryColumn { Name = "index_kind", Ordinal = 4, Type = DatabaseType.String },
-        new QueryColumn { Name = "is_unique", Ordinal = 5, Type = DatabaseType.Boolean },
+        new DatabaseColumn { Name = "database_name", Ordinal = 0, Type = DatabaseType.String },
+        new DatabaseColumn { Name = "keyspace_id", Ordinal = 1, Type = DatabaseType.Int64 },
+        new DatabaseColumn { Name = "entry_space_format_version", Ordinal = 2, Type = DatabaseType.Int32 },
+        new DatabaseColumn { Name = "primary_index_name", Ordinal = 3, Type = DatabaseType.String },
+        new DatabaseColumn { Name = "index_kind", Ordinal = 4, Type = DatabaseType.String },
+        new DatabaseColumn { Name = "is_unique", Ordinal = 5, Type = DatabaseType.Boolean },
     ];
 
     private readonly DatabaseName _databaseName;
-    private readonly IKeyValueCatalog _catalog;
+    private readonly KeyValueCatalog _catalog;
     private readonly KeyValueStorage _storage;
-    private readonly IIndex _primaryIndex;
-    private readonly RecordVersionIndex _primaryIndexVersions;
+    private readonly BTreeIndex _primaryIndex;
+    private readonly BTreeRecordVersionIndex _primaryIndexVersions;
 
-    internal KeyValueOperationExecutor(DatabaseName databaseName, IKeyValueCatalog catalog, KeyValueStorage storage, IIndex primaryIndex)
+    internal KeyValueOperationExecutor(DatabaseName databaseName, KeyValueCatalog catalog, KeyValueStorage storage, BTreeIndex primaryIndex)
     {
         _databaseName = databaseName;
         _catalog = catalog;
         _storage = storage;
         _primaryIndex = primaryIndex;
-        _primaryIndexVersions = new RecordVersionIndex(primaryIndex);
+        _primaryIndexVersions = BTreeRecordVersionIndex.Create(primaryIndex);
     }
 
     /// <summary>
     /// Executes one key-value request under the given command context.
     /// </summary>
-    internal async ValueTask<QueryResult> ExecuteAsync(KeyValueRequest request, KeyValueStatementContext context, CancellationToken cancellationToken)
+    internal async ValueTask<DatabaseResult> ExecuteAsync(KeyValueRequest request, KeyValueStatementContext context, CancellationToken cancellationToken)
     {
         return request switch
         {
@@ -126,10 +130,10 @@ internal sealed class KeyValueOperationExecutor
 
     // ── Reads ──────────────────────────────────────────────────────────
 
-    private QueryResult ExecuteKeySpaces(CancellationToken cancellationToken)
+    private DatabaseResult ExecuteKeySpaces(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var catalog = KeyValueCatalog.CaptureSnapshot(_catalog);
+        var catalog = _catalog.CaptureSnapshot();
         var rows = new List<object?[]>();
 
         // Only the implicit key space is supported. Catalog registrations are
@@ -149,7 +153,7 @@ internal sealed class KeyValueOperationExecutor
         return new KeyValueMaterializedResultSet(_keySpaceColumns, rows);
     }
 
-    private async ValueTask<QueryResult> ExecuteGetAsync(KeyValueGetRequest request, KeyValueStatementContext context, CancellationToken cancellationToken)
+    private async ValueTask<DatabaseResult> ExecuteGetAsync(KeyValueGetRequest request, KeyValueStatementContext context, CancellationToken cancellationToken)
     {
         var rows = new List<object?[]>(1);
         var current = await ResolveCurrentAsync(request.Key, context, cancellationToken).ConfigureAwait(false);
@@ -162,14 +166,14 @@ internal sealed class KeyValueOperationExecutor
         return new KeyValueMaterializedResultSet(_entryColumns, rows);
     }
 
-    private async ValueTask<QueryResult> ExecuteExistsAsync(KeyValueExistsRequest request, KeyValueStatementContext context, CancellationToken cancellationToken)
+    private async ValueTask<DatabaseResult> ExecuteExistsAsync(KeyValueExistsRequest request, KeyValueStatementContext context, CancellationToken cancellationToken)
     {
         var current = await ResolveCurrentAsync(request.Key, context, cancellationToken).ConfigureAwait(false);
 
         return new KeyValueMaterializedResultSet(_existsColumns, [[current is not null]]);
     }
 
-    private async ValueTask<QueryResult> ExecuteScanAsync(KeyValueScanRequest request, KeyValueStatementContext context, CancellationToken cancellationToken)
+    private async ValueTask<DatabaseResult> ExecuteScanAsync(KeyValueScanRequest request, KeyValueStatementContext context, CancellationToken cancellationToken)
     {
         IndexKeyRange range = BuildScanRange(request);
         var rows = new List<object?[]>();
@@ -202,14 +206,13 @@ internal sealed class KeyValueOperationExecutor
 
     // ── Writes ─────────────────────────────────────────────────────────
 
-    private async ValueTask<QueryResult> ExecutePutAsync(KeyValuePutRequest request, KeyValueStatementContext context, CancellationToken cancellationToken)
+    private async ValueTask<DatabaseResult> ExecutePutAsync(KeyValuePutRequest request, KeyValueStatementContext context, CancellationToken cancellationToken)
     {
         var indexKey = new IndexKey(request.Key);
 
         // Phase one: the key's exclusive lock — the model's single conflict
         // arbiter — acquired before the gate, per the lock-ordering rule.
-        await context.Coordinator.LockManager.AcquireAsync(
-            context.Transaction.Sequence, LockResource.Entry(KeySpaceObjectId, indexKey.Hash()), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
+        await AcquireKeyLockAsync(context, indexKey, cancellationToken).ConfigureAwait(false);
 
         // Resolve the visible version and re-validate it as latest under the
         // lock: a set deleter from another transaction is a concurrently
@@ -268,18 +271,17 @@ internal sealed class KeyValueOperationExecutor
         return new KeyValueMaterializedResultSet(_putColumns, [[true, (long)context.Transaction.Sequence.Value]], affectedCount: 1);
     }
 
-    private async ValueTask<QueryResult> ExecuteDeleteAsync(KeyValueDeleteRequest request, KeyValueStatementContext context, CancellationToken cancellationToken)
+    private async ValueTask<DatabaseResult> ExecuteDeleteAsync(KeyValueDeleteRequest request, KeyValueStatementContext context, CancellationToken cancellationToken)
     {
         var indexKey = new IndexKey(request.Key);
 
-        await context.Coordinator.LockManager.AcquireAsync(
-            context.Transaction.Sequence, LockResource.Entry(KeySpaceObjectId, indexKey.Hash()), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
+        await AcquireKeyLockAsync(context, indexKey, cancellationToken).ConfigureAwait(false);
 
         var current = await ResolveCurrentAsync(request.Key, context, cancellationToken).ConfigureAwait(false);
 
         if (current is null)
         {
-            return new KeyValueQueryResult(QueryResultStatus.Success, affectedCount: 0);
+            return new KeyValueResult(DatabaseResultStatus.Success, affectedCount: 0);
         }
 
         EnsureLatestVersion(current.Value.Location, context.Transaction.Sequence);
@@ -287,7 +289,7 @@ internal sealed class KeyValueOperationExecutor
         if (request.ExpectedETag is { } expected && expected != (long)current.Value.Writer.Value)
         {
             // Compare-and-swap miss: a first-class no-delete outcome.
-            return new KeyValueQueryResult(QueryResultStatus.Success, affectedCount: 0);
+            return new KeyValueResult(DatabaseResultStatus.Success, affectedCount: 0);
         }
 
         await context.Coordinator.ApplyStatementAsync<bool>(context.Transaction, async bracket =>
@@ -297,7 +299,44 @@ internal sealed class KeyValueOperationExecutor
             return true;
         }, durable: false, cancellationToken).ConfigureAwait(false);
 
-        return new KeyValueQueryResult(QueryResultStatus.Success, affectedCount: 1);
+        return new KeyValueResult(DatabaseResultStatus.Success, affectedCount: 1);
+    }
+
+    /// <summary>
+    /// Acquires the key's exclusive lock for the command's transaction, and gives the grant
+    /// back when the transaction ended while the request waited.
+    /// </summary>
+    /// <remarks>
+    /// The transaction can end on another thread while its command waits: a caller's
+    /// rollback, the session closing, or a host rolling back a wire session's transaction.
+    /// The end fails the requests it finds queued (<c>LockManager.ReleaseAll</c>), but a
+    /// request queued just after that release is granted later, to a transaction that will
+    /// never release it again, so every later writer of the key would wait forever. The
+    /// kernel already refuses the command's bracket for an ended transaction; this check
+    /// releases the late grant, as the Graph, Documents and Blob engines do for their writer
+    /// lock. While the transaction manager still tracks the transaction (a rollback whose undo
+    /// is deferred, #1226), the coordinator's lock manager leaves that release to the manager,
+    /// which makes it once the undo completes; the end still failed the requests it found
+    /// queued. A grant to a transaction that is still active is kept even when the command
+    /// then fails: the transaction stays usable (a command is statement-atomic), and
+    /// releasing all of its locks would expose the keys its earlier commands wrote.
+    /// </remarks>
+    /// <exception cref="TransactionAbortedException">The command's transaction ended while the request waited.</exception>
+    private static async ValueTask AcquireKeyLockAsync(KeyValueStatementContext context, IndexKey indexKey, CancellationToken cancellationToken)
+    {
+        var owner = context.Transaction.Sequence;
+
+        await context.Coordinator.LockManager.AcquireAsync(
+            owner, LockResource.Entry(KeySpaceObjectId, indexKey.Hash()), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
+
+        // The kernel sets an ended transaction's state before it releases its locks, so a
+        // grant made after that release always observes the end here.
+        if (context.Transaction.State != TransactionState.Active)
+        {
+            context.Coordinator.LockManager.ReleaseAll(owner);
+            throw new TransactionAbortedException(
+                $"Transaction {owner} ended while the command waited for the key lock; the command was not applied.");
+        }
     }
 
     // ── Version resolution and validation ──────────────────────────────
@@ -334,36 +373,104 @@ internal sealed class KeyValueOperationExecutor
     /// <summary>
     /// Reads and decodes the record behind an index entry, returning it only when
     /// its stamps admit it through the snapshot (visible writer, no visible
-    /// deleter). A missing or reverted slot reads as absence.
+    /// deleter). An entry whose record was reclaimed beneath it (a deleted or
+    /// reverted slot, a freed or reallocated page) reads as absence; a page that
+    /// fails its checksum or cannot be read fails the command (#1342).
     /// </summary>
+    /// <remarks>
+    /// The read holds a pin, not a latch, so it can copy a slot while a writer reclaims it (the
+    /// version purge freeing and clearing it; a failed command's bracket rollback restoring the
+    /// page did too until #1371, when the storage read began confirming itself against the
+    /// restore), and that copy is torn rather than damaged. A record that does not decode is
+    /// therefore confirmed before it is reported (#1362, <see cref="DecodeConfirmed"/>). The
+    /// confirmation narrows the window and does not close it: a writer descheduled half-way
+    /// through rewriting the page leaves the same torn bytes for every read.
+    /// </remarks>
+    /// <exception cref="StorageCorruptionException">
+    /// The entry page failed its checksum or is malformed, or the record does not decode. The read
+    /// checked the page's type and owner, so a record it returned is a key-space entry record, and
+    /// one that does not decode is damaged, not reclaimed or reused: it fails the command instead
+    /// of reading the key as missing (#1342, #1362), as the Graph, Documents and Blob codecs raise
+    /// on a malformed record.
+    /// </exception>
     private ResolvedVersion? ReadVisibleVersion(ulong entryReference, TransactionSnapshot snapshot)
     {
         var (pageId, slotIndex) = KeyValueRecordLocation.Unpack(entryReference);
 
-        ReadOnlyMemory<byte> record;
-        try
+        if (!_storage.TryReadRecord(pageId, slotIndex, KeySpaceObjectId, out var record))
         {
-            record = _storage.ReadEntry(pageId, slotIndex);
-        }
-        catch (StorageException)
-        {
-            return null;
-        }
-        catch (ArgumentOutOfRangeException)
-        {
-            // The slot was reverted out of existence by a bracket rollback.
             return null;
         }
 
-        if (!KeyValueRecordCodec.TryDecode(record.Span, out byte[] key, out byte[] value, out var writer, out var deleter))
+        byte[] key;
+        byte[] value;
+        TransactionSequence writer;
+        TransactionSequence deleter;
+
+        try
         {
-            return null;
+            KeyValueRecordCodec.Decode(record.Span, out key, out value, out writer, out deleter);
+        }
+        catch (DatabaseTypeException)
+        {
+            if (!DecodeConfirmed(record, pageId, slotIndex, out key, out value, out writer, out deleter))
+            {
+                return null;
+            }
         }
 
         bool visible = snapshot.IsVisible(writer)
             && (deleter == TransactionSequence.None || !snapshot.IsVisible(deleter));
 
         return visible ? new ResolvedVersion(key, value, writer, entryReference) : null;
+    }
+
+    /// <summary>
+    /// Confirms an entry record whose read did not decode (<see cref="ReadVisibleVersion"/>) by
+    /// reading its slot again, with the key space's owner check: a slot reclaimed by then reads
+    /// as absence, and a re-read that decodes is the entry. A re-read that does not decode is
+    /// corrupt when it returns the same bytes as the read before it, because damage is stable and
+    /// a copy a writer tore is not; a re-read that differs means the slot is still changing, so
+    /// the slot is read once more, up to <see cref="confirmingReads"/> re-reads.
+    /// </summary>
+    /// <param name="failed">The copy that did not decode.</param>
+    /// <param name="pageId">The page the record was read from.</param>
+    /// <param name="slotIndex">The slot the record was read from.</param>
+    /// <param name="key">The entry's key.</param>
+    /// <param name="value">The entry's value.</param>
+    /// <param name="writer">The record's writer stamp.</param>
+    /// <param name="deleter">The record's deleter stamp.</param>
+    /// <returns><c>true</c> when a re-read decodes; <c>false</c> when the slot was reclaimed.</returns>
+    /// <exception cref="StorageCorruptionException">The record does not decode, and the reads agree or ran out.</exception>
+    private bool DecodeConfirmed(ReadOnlyMemory<byte> failed, PageId pageId, int slotIndex,
+        out byte[] key, out byte[] value, out TransactionSequence writer, out TransactionSequence deleter)
+    {
+        for (int read = 1; ; read++)
+        {
+            if (!_storage.TryReadRecord(pageId, slotIndex, KeySpaceObjectId, out var record))
+            {
+                key = [];
+                value = [];
+                writer = default;
+                deleter = default;
+                return false;
+            }
+
+            try
+            {
+                KeyValueRecordCodec.Decode(record.Span, out key, out value, out writer, out deleter);
+                return true;
+            }
+            catch (DatabaseTypeException defect) when (read == confirmingReads || record.Span.SequenceEqual(failed.Span))
+            {
+                throw new StorageCorruptionException(
+                    pageId, $"The key-value entry record in slot {slotIndex} of page {(long)pageId} does not decode: {defect.Message}");
+            }
+            catch (DatabaseTypeException)
+            {
+                failed = record;
+            }
+        }
     }
 
     /// <summary>
@@ -375,28 +482,26 @@ internal sealed class KeyValueOperationExecutor
     /// target row.)
     /// </summary>
     /// <exception cref="TransactionAbortedException">The key was modified by a concurrently committed transaction.</exception>
+    /// <exception cref="StorageCorruptionException">
+    /// The version's page failed its checksum, or the version's live slot holds a record too short
+    /// for its stamps: a damaged page or record is not a conflict to retry (#1342, #1362).
+    /// </exception>
     private void EnsureLatestVersion(ulong entryReference, TransactionSequence self)
     {
         var (pageId, slotIndex) = KeyValueRecordLocation.Unpack(entryReference);
 
-        ReadOnlyMemory<byte> record;
-        try
+        if (!_storage.TryReadRecord(pageId, slotIndex, KeySpaceObjectId, out var record))
         {
-            record = _storage.ReadEntry(pageId, slotIndex);
-        }
-        catch (StorageException)
-        {
-            record = ReadOnlyMemory<byte>.Empty;
-        }
-        catch (ArgumentOutOfRangeException)
-        {
-            record = ReadOnlyMemory<byte>.Empty;
+            throw new TransactionAbortedException(
+                "Write-write conflict: the target entry version was reclaimed by a concurrent transaction. Retry the transaction.");
         }
 
         if (record.Length < KeyValueRecordCodec.StampHeaderSize)
         {
-            throw new TransactionAbortedException(
-                "Write-write conflict: the target entry version was reclaimed by a concurrent transaction. Retry the transaction.");
+            throw new StorageCorruptionException(
+                pageId,
+                $"The key-value entry record in slot {slotIndex} of page {(long)pageId} holds {record.Length} bytes, " +
+                $"fewer than its {KeyValueRecordCodec.StampHeaderSize}-byte version-stamp header.");
         }
 
         var (_, deleter) = KeyValueRecordCodec.ReadStamps(record.Span);
@@ -413,7 +518,7 @@ internal sealed class KeyValueOperationExecutor
     /// same-length in-place tombstone write — and records it in the version-store
     /// ledger for logical undo and pruning.
     /// </summary>
-    private void TombstoneVersion(KeyValueStatementContext context, IStorageTransaction bracket, ulong entryReference)
+    private void TombstoneVersion(KeyValueStatementContext context, StorageTransaction bracket, ulong entryReference)
     {
         var (pageId, slotIndex) = KeyValueRecordLocation.Unpack(entryReference);
         var current = _storage.ReadEntry(pageId, slotIndex);

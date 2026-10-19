@@ -10,6 +10,7 @@ public sealed partial class SqlQueryParser
     {
         var pos = lexer.Current.Position;
         Advance(ref lexer); // consume DELETE
+        RejectDmlTop(ref lexer);
 
         // FROM (optional in some dialects, but standard)
         if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "FROM"))
@@ -17,13 +18,7 @@ public sealed partial class SqlQueryParser
             Advance(ref lexer);
         }
 
-        // Table reference
-        SqlTableReference? table = null;
-        if (!IsAtEnd(ref lexer) && IsIdentifierOrKeyword(ref lexer))
-        {
-            table = ParseTableReference(ref lexer);
-        }
-        table ??= new SqlTableReference("?", null, null);
+        var table = ParseRequiredTableReference(ref lexer, dmlTarget: true);
 
         // WHERE
         SqlExpression? where = null;
@@ -33,7 +28,9 @@ public sealed partial class SqlQueryParser
             where = ParseExpression(ref lexer);
         }
 
+        var returning = ParseReturning(ref lexer, table);
+
         return new SqlDeleteExpression(table, where, null,
-            Location.Create(1, 1, pos, _lastTokenEnd));
+            Location.Create(1, 1, pos, _lastTokenEnd), returning);
     }
 }

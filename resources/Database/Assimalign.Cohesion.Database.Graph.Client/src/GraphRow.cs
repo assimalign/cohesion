@@ -4,7 +4,7 @@ using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.Database.Graph.Client;
 
-/// <summary>A scalar projection row with ordinal and column-name access.</summary>
+/// <summary>A value projection row with ordinal and column-name access.</summary>
 public sealed class GraphRow : IReadOnlyList<object?>
 {
     private readonly object?[] _values;
@@ -16,18 +16,18 @@ public sealed class GraphRow : IReadOnlyList<object?>
         _ordinals = ordinals;
     }
 
-    /// <summary>Gets the number of scalar values.</summary>
+    /// <summary>Gets the number of values.</summary>
     public int Count => _values.Length;
 
-    /// <summary>Gets a scalar value by ordinal.</summary>
+    /// <summary>Gets a value by ordinal.</summary>
     /// <param name="index">The zero-based column ordinal.</param>
-    /// <returns>The boxed scalar or null.</returns>
+    /// <returns>The scalar, object array, read-only ordinal map, or null.</returns>
     /// <exception cref="IndexOutOfRangeException">The ordinal is outside the row.</exception>
     public object? this[int index] => _values[index];
 
-    /// <summary>Gets a scalar value by column name; the first duplicate name wins.</summary>
+    /// <summary>Gets a value by column name; the first duplicate name wins.</summary>
     /// <param name="name">The exact column name.</param>
-    /// <returns>The boxed scalar or null.</returns>
+    /// <returns>The scalar, object array, read-only ordinal map, or null.</returns>
     /// <exception cref="ArgumentNullException">The name is null.</exception>
     /// <exception cref="KeyNotFoundException">No column has that name.</exception>
     public object? this[string name] => _values[_ordinals[name]];

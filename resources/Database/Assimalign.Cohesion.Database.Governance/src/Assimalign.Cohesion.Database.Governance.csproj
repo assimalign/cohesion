@@ -1,6 +1,0 @@
-<Project Sdk="Microsoft.NET.Sdk">
-	<PropertyGroup>
-		<RootNamespace>Assimalign.Cohesion.Database.Governance</RootNamespace>
-	</PropertyGroup>
-
-</Project>

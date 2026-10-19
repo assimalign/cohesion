@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
+using System.Runtime.CompilerServices;
 
 using Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Types;
@@ -10,6 +12,21 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 internal sealed partial class SqlPlanner
 {
     private int _subqueryDepth;
+    // Use the existing optional query-scope reference: stored-only planning must not
+    // grow its allocation footprint just because correlated queries are available.
+    private SqlCorrelationScope? OuterScope
+    {
+        get => _queryScopes?.OuterScope;
+        set => (_queryScopes ??= new()).OuterScope = value;
+    }
+
+    private HashSet<int>? OuterDependencies
+    {
+        get => _queryScopes?.OuterDependencies;
+        set => (_queryScopes ??= new()).OuterDependencies = value;
+    }
+
+    private int NextCorrelationScope() => (_queryScopes ??= new()).NextScopeId++;
 
     /// <summary>
     /// The result type of every subquery bound while planning this statement, keyed by
@@ -19,62 +36,108 @@ internal sealed partial class SqlPlanner
     private readonly Dictionary<SqlExpression, DatabaseType> _subqueryTypes = new();
 
     /// <summary>
-    /// Binds each uncorrelated child independently, then binds the ordinary
-    /// relational operators over typed slots. Scalar evaluation never runs a query.
+    /// The slot every subquery bound while planning this statement fills, keyed by its source node
+    /// and numbered from zero across every nesting level: the expression binder turns each such node
+    /// into a read of its slot (<see cref="SqlBoundSubquery"/>, <see cref="SqlBoundInSubquery"/>).
+    /// </summary>
+    private readonly Dictionary<SqlExpression, SqlSubquerySlot> _subquerySlots = new();
+
+    /// <summary>The number of subquery slots this statement has numbered so far.</summary>
+    private int _subquerySlotCount;
+
+    /// <summary>
+    /// Binds children through lexical scopes, then binds the ordinary relational operators over
+    /// typed slots. The executor awaits correlated children; scalar evaluation never runs a query.
     /// </summary>
     private SqlPlan PlanSubqueries(SqlSelectExpression select)
     {
+        if (select.From.Count == 0 && !IsCommonTableOperand(select)) { return PlanSelectCore(select); }
+        if (OuterScope is not null) { RejectOuterOnlyAggregates(select); }
+        var queries = BindSubqueries(SubquerySources(select), select);
+        var input = PlanSelectCore(select);
+        return WrapSubqueries(input, queries);
+    }
+
+    private IReadOnlyList<SqlSubqueryBinding> BindSubqueries(IEnumerable<SqlExpression> sources,
+        SqlSelectExpression? owner = null, SqlTableReference? dml = null)
+    {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
         var queries = new List<SqlSubqueryBinding>();
-        foreach (var expression in SubquerySources(select))
+        SqlCorrelationScope? scope = null;
+        foreach (var expression in sources)
         {
             switch (expression)
             {
                 case SqlSubqueryExpression scalar:
-                    Bind(scalar, scalar.Select, SqlSubqueryKind.Scalar, false);
+                    BindSubquery(scalar, scalar.Select, SqlSubqueryKind.Scalar, false, queries, owner, dml, ref scope);
                     break;
                 case SqlExistsExpression exists:
-                    Bind(exists, exists.Subquery, SqlSubqueryKind.Exists, exists.IsNegated);
+                    BindSubquery(exists, exists.Subquery, SqlSubqueryKind.Exists, exists.IsNegated, queries, owner, dml, ref scope);
                     break;
                 case SqlInExpression { Subquery: not null } member:
-                    Bind(member, member.Subquery, SqlSubqueryKind.Set, false);
+                    BindSubquery(member, member.Subquery, SqlSubqueryKind.Set, false, queries, owner, dml, ref scope);
                     break;
             }
         }
 
-        var input = PlanSelectCore(select);
-        return queries.Count == 0 ? input : new SqlSubqueryPlan(input, queries);
+        return queries;
+    }
 
-        void Bind(SqlExpression source, SqlSelectExpression query, SqlSubqueryKind kind, bool negated)
+    // Keep child binding out of a closure: a stored-only query allocates no scope state.
+    private void BindSubquery(SqlExpression source, SqlQueryBodyExpression query, SqlSubqueryKind kind, bool negated,
+        List<SqlSubqueryBinding> queries, SqlSelectExpression? owner, SqlTableReference? dml,
+        ref SqlCorrelationScope? scope)
+    {
+        if (_subqueryDepth >= 32)
         {
-            if (_subqueryDepth >= 32)
-            {
-                throw new SqlUnsupportedQueryException("Subquery nesting exceeds the supported maximum depth of 32.");
-            }
-            SqlPlan child;
-            _subqueryDepth++;
-            try
-            {
-                child = PlanSelect(query);
-            }
-            catch (DatabaseException exception) when (exception.Message.StartsWith("Unknown column '", StringComparison.Ordinal))
-            {
-                throw new SqlUnsupportedQueryException($"Correlated subqueries are not supported; a subquery column must resolve in its local FROM/JOIN scope. {exception.Message}", exception);
-            }
-            finally
-            {
-                _subqueryDepth--;
-            }
-            var projections = SubqueryProjections(child);
-            if (kind != SqlSubqueryKind.Exists && projections.Count != 1)
-            {
-                throw new DatabaseException($"{(kind == SqlSubqueryKind.Scalar ? "Scalar" : "IN")} subquery requires exactly one output column; found {projections.Count}.");
-            }
-            var type = kind == SqlSubqueryKind.Exists ? DatabaseType.Boolean : projections[0].Type;
-            _subqueryTypes[source] = type;
-            queries.Add(new SqlSubqueryBinding(child, source, type,
-                kind == SqlSubqueryKind.Exists ? _catalog.DefaultCollation : SubqueryCollation(child),
-                kind, negated));
+            throw new SqlUnsupportedQueryException(ErrorMessages.SubqueryNestingDepth, location: source.Location);
         }
+        scope ??= CreateCorrelationScope(owner, dml);
+        var parent = OuterScope;
+        var parentDependencies = OuterDependencies;
+        var dependencies = new HashSet<int>();
+        OuterScope = SubqueryScope(scope, owner, source);
+        OuterDependencies = dependencies;
+        SqlPlan child;
+        DatabaseTypeInfo? typeInfo = null;
+        string? domainName = null;
+        (_queryScopes ??= new()).Scopes.Push((owner, dml, null));
+        _subqueryDepth++;
+        try
+        {
+            child = PlanQuery(query);
+            if (kind == SqlSubqueryKind.Scalar)
+            {
+                var column = BindDerivedOutput(child, "scalar", [], query).Columns[0];
+                typeInfo = column.Type;
+                domainName = column.DomainName;
+            }
+        }
+        finally
+        {
+            _subqueryDepth--;
+            _queryScopes.Scopes.Pop();
+            OuterScope = parent;
+            OuterDependencies = parentDependencies;
+        }
+        foreach (int dependency in dependencies)
+        {
+            if (dependency != scope.Id) { parentDependencies?.Add(dependency); }
+        }
+        var projections = SubqueryProjections(child);
+        if (kind != SqlSubqueryKind.Exists && projections.Count != 1)
+        {
+            throw new SqlPlanningException("COHSQLE013", string.Format(CultureInfo.CurrentCulture,
+                ErrorMessages.SubqueryColumnCount, kind == SqlSubqueryKind.Scalar ? "Scalar" : "IN", projections.Count), source.Location);
+        }
+        var type = kind == SqlSubqueryKind.Exists ? DatabaseType.Boolean : projections[0].Type;
+        var collation = kind == SqlSubqueryKind.Exists ? _catalog.DefaultCollation : SubqueryCollation(child);
+        var slot = new SqlSubquerySlot(_subquerySlotCount++, kind, collation, type, typeInfo, domainName);
+        // The slot keeps the membership element type; the predicate itself produces BOOLEAN.
+        _subqueryTypes[source] = kind == SqlSubqueryKind.Scalar ? type : DatabaseType.Boolean;
+        _subquerySlots[source] = slot;
+        queries.Add(new SqlSubqueryBinding(child, slot.Id, type, collation, kind, negated,
+            scope.Id, dependencies.Count > 0));
     }
 
     /// <summary>
@@ -84,99 +147,90 @@ internal sealed partial class SqlPlanner
     /// </summary>
     private static IEnumerable<SqlExpression> SubquerySources(SqlSelectExpression select)
     {
-        foreach (var expression in Roots())
+        foreach (var expression in SubqueryRoots(select))
         {
-            foreach (var node in Walk(expression))
+            foreach (var node in WalkSubqueries(expression))
             {
                 yield return node;
             }
         }
+    }
 
-        IEnumerable<SqlExpression> Roots()
+    private static IEnumerable<SqlExpression> SubqueryRoots(SqlSelectExpression select)
+    {
+        foreach (var column in select.Columns)
         {
-            foreach (var column in select.Columns)
+            yield return column.Expression;
+        }
+        if (select.From.Count > 1 || select.From.Count == 1 && select.From[0].Joins.Count > 0)
+        {
+            foreach (var condition in JoinConditions(select))
             {
-                yield return column.Expression;
+                yield return condition;
             }
-            foreach (var join in select.Joins)
+        }
+        foreach (var key in select.GroupBy)
+        {
+            yield return key;
+        }
+        foreach (var order in select.OrderBy)
+        {
+            yield return order.Expression;
+        }
+        if (select.Where is not null)
+        {
+            yield return select.Where;
+        }
+        if (select.Having is not null)
+        {
+            yield return select.Having;
+        }
+        if (select.Limit is not null)
+        {
+            yield return select.Limit;
+        }
+        if (select.Offset is not null)
+        {
+            yield return select.Offset;
+        }
+    }
+
+    private static IEnumerable<SqlExpression> WalkSubqueries(SqlExpression expression)
+    {
+        // Each level is a nested iterator, so the stack grows with the tree (#1151).
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+        yield return expression;
+
+        // Children treats a subquery as opaque, which is what keeps a child scope's
+        // own subqueries out of this statement's bindings.
+        foreach (var child in Children(expression))
+        {
+            foreach (var node in WalkSubqueries(child))
+            {
+                yield return node;
+            }
+        }
+    }
+
+    // Keep the N-input walk's loop state out of SubqueryRoots' iterator object. A stored-only
+    // SELECT never creates this iterator and retains its original allocation footprint.
+    private static IEnumerable<SqlExpression> JoinConditions(SqlSelectExpression select)
+    {
+        foreach (var item in select.From)
+        {
+            foreach (var join in item.Joins)
             {
                 if (join.Condition is not null)
                 {
                     yield return join.Condition;
                 }
             }
-            foreach (var key in select.GroupBy)
-            {
-                yield return key;
-            }
-            foreach (var order in select.OrderBy)
-            {
-                yield return order.Expression;
-            }
-            if (select.Where is not null)
-            {
-                yield return select.Where;
-            }
-            if (select.Having is not null)
-            {
-                yield return select.Having;
-            }
-            if (select.Limit is not null)
-            {
-                yield return select.Limit;
-            }
-            if (select.Offset is not null)
-            {
-                yield return select.Offset;
-            }
-        }
-
-        static IEnumerable<SqlExpression> Walk(SqlExpression expression)
-        {
-            yield return expression;
-
-            // Children treats a subquery as opaque, which is what keeps a child scope's
-            // own subqueries out of this statement's bindings.
-            foreach (var child in Children(expression))
-            {
-                foreach (var node in Walk(child))
-                {
-                    yield return node;
-                }
-            }
         }
     }
 
     /// <summary>Reads output metadata without executing a child query, including empty results.</summary>
-    private static IReadOnlyList<SqlProjection> SubqueryProjections(SqlPlan plan) => plan switch
-    {
-        SqlSubqueryPlan subquery => SubqueryProjections(subquery.Input),
-        SqlSelectPlan select => select.Projections,
-        SqlJoinPlan join => join.Projections,
-        SqlGroupPlan group => group.Projections,
-        SqlSystemViewPlan view => view.Projections,
-        _ => throw new DatabaseException("A subquery requires a SELECT result."),
-    };
+    private static IReadOnlyList<SqlProjection> SubqueryProjections(SqlPlan plan) => QueryOutput(plan).Projections;
 
     /// <summary>Preserves the child column's comparison collation across materialization.</summary>
-    private Collation SubqueryCollation(SqlPlan plan)
-    {
-        if (plan is SqlSubqueryPlan subquery)
-        {
-            return SubqueryCollation(subquery.Input);
-        }
-        var columns = plan switch
-        {
-            SqlSelectPlan select => select.Table.Columns,
-            SqlJoinPlan join => join.Columns,
-            SqlGroupPlan group => group.SourceColumns,
-            SqlSystemViewPlan view => view.View.Columns,
-            _ => throw new DatabaseException("A subquery requires a SELECT result."),
-        };
-        var bindings = plan switch { SqlJoinPlan join => join.Bindings, SqlGroupPlan group => group.Bindings, _ => null };
-        var projection = SubqueryProjections(plan)[0];
-        var evaluator = new SqlExpressionEvaluator(columns, _parameters, bindings, defaultCollation: _catalog.DefaultCollation);
-        return projection.ColumnOrdinal is int ordinal ? evaluator.ResolveColumnCollation(ordinal)
-            : evaluator.ResolveCollation(projection.Expression);
-    }
+    private static Collation SubqueryCollation(SqlPlan plan) => QueryOutput(plan).Projections[0].Collation.Resolve(null);
 }

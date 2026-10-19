@@ -2,7 +2,6 @@ using System;
 using System.IO;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Database.Graph.Internal;
 using Assimalign.Cohesion.Database.Storage;
 
 using Shouldly;
@@ -23,9 +22,9 @@ public sealed class GraphStorageDurabilityTests
         var options = new GraphDatabaseEngineOptions { RootPath = physical ? FileSystemPath.Parse(directory) : (FileSystemPath?)null, Durability = configured };
         try
         {
-            await using (var engine = GraphDatabaseEngine.Create(options))
+            await using (var engine = GraphDatabaseEngine.Create("graph-engine", options))
             {
-                var database = (GraphDatabaseInstance)await engine.CreateDatabaseAsync("db");
+                var database = await engine.CreateDatabaseAsync("db");
                 database.DataStorage.SupportsDurableFlush.ShouldBe(physical);
                 database.DataStorage.CommitDurability.ShouldBe(expected);
                 using var transaction = database.DataStorage.BeginTransaction();
@@ -41,8 +40,8 @@ public sealed class GraphStorageDurabilityTests
             }
             if (physical)
             {
-                await using var reopened = GraphDatabaseEngine.Create(options);
-                var database = (GraphDatabaseInstance)await reopened.OpenDatabaseAsync("db");
+                await using var reopened = GraphDatabaseEngine.Create("graph-engine", options);
+                var database = await reopened.OpenDatabaseAsync("db");
                 database.DataStorage.CommitDurability.ShouldBe(expected);
             }
         }
@@ -60,7 +59,7 @@ public sealed class GraphStorageDurabilityTests
     [InlineData(StorageCommitDurability.Grouped)]
     public async Task ExplicitDurabilityOnMemory_ShouldRejectBeforeDatabasePublication(StorageCommitDurability durability)
     {
-        await using var engine = GraphDatabaseEngine.Create(new GraphDatabaseEngineOptions { Durability = durability });
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new GraphDatabaseEngineOptions { Durability = durability });
         var failure = await Should.ThrowAsync<NotSupportedException>(async () => await engine.CreateDatabaseAsync("memory-store"));
         failure.Message.ShouldContain("GraphStorage");
         failure.Message.ShouldContain("memory-store");

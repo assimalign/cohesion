@@ -15,7 +15,7 @@ public class SqlDatabaseServerLifecycleTests
     public async Task StartAsync_WhileListenerBindIsPending_ShouldWaitForBind()
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "server-bind-gate" });
+        await using var engine = SqlDatabaseEngine.Create("server-bind-gate", new SqlDatabaseEngineOptions());
         var listener = new ControlledConnectionListener();
         await using var server = SqlDatabaseServer.Create(engine, new SqlDatabaseServerOptions { Listener = listener });
 
@@ -43,7 +43,7 @@ public class SqlDatabaseServerLifecycleTests
     public async Task StartAsync_WhenListenerBindFails_ShouldPropagateAndReleaseListener()
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "server-bind-failure" });
+        await using var engine = SqlDatabaseEngine.Create("server-bind-failure", new SqlDatabaseEngineOptions());
         var listener = new ControlledConnectionListener();
         await using var server = SqlDatabaseServer.Create(engine, new SqlDatabaseServerOptions { Listener = listener });
         var expected = new InvalidOperationException("Bind failed.");
@@ -63,7 +63,7 @@ public class SqlDatabaseServerLifecycleTests
     public async Task StopAsync_WithBoundTcpListener_ShouldAllowFreshServerToBindSamePort()
     {
         // Arrange
-        await using var firstEngine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "server-port-first" });
+        await using var firstEngine = SqlDatabaseEngine.Create("server-port-first", new SqlDatabaseEngineOptions());
         TcpConnectionListener firstListener = TcpConnectionListener.Create(
             options => options.EndPoint = new IPEndPoint(IPAddress.Loopback, 0));
         await using var firstServer = SqlDatabaseServer.Create(
@@ -76,7 +76,7 @@ public class SqlDatabaseServerLifecycleTests
         // Act
         await firstServer.StopAsync(TestTimeout.Token());
 
-        await using var secondEngine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "server-port-second" });
+        await using var secondEngine = SqlDatabaseEngine.Create("server-port-second", new SqlDatabaseEngineOptions());
         TcpConnectionListener secondListener = TcpConnectionListener.Create(
             options => options.EndPoint = fixedEndPoint);
         await using var secondServer = SqlDatabaseServer.Create(

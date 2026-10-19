@@ -167,7 +167,7 @@ public sealed class SqlCollationExecutionTests
         // Act / Assert
         (await RowsAsync(session, "SELECT n.name FROM names n JOIN matches m ON n.name = m.name;"))
             .ShouldHaveSingleItem()[0].ShouldBe("Alice");
-        await Should.ThrowAsync<SqlConstraintViolationException>(() => ExecuteAsync(session, "INSERT INTO names VALUES ('Bob');"));
+        await SqlConstraintAssertions.ThrowAsync(() => ExecuteAsync(session, "INSERT INTO names VALUES ('Bob');"));
     }
 
     /// <summary>Foreign key probes and reverse checks agree, and incompatible definitions fail before writes.</summary>
@@ -184,21 +184,21 @@ public sealed class SqlCollationExecutionTests
 
         // Act / Assert
         await ExecuteAsync(session, "INSERT INTO children VALUES ('alice');");
-        await Should.ThrowAsync<SqlConstraintViolationException>(() => ExecuteAsync(session, "DELETE FROM parents WHERE name = 'alice';"));
+        await SqlConstraintAssertions.ThrowAsync(() => ExecuteAsync(session, "DELETE FROM parents WHERE name = 'alice';"));
         var mismatch = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session,
             "CREATE TABLE wrong (name TEXT COLLATE binary REFERENCES parents(name));"));
         mismatch.Message.ShouldContain("matching column collations", Case.Sensitive);
     }
 
     private static SqlDatabaseEngine CreateEngine()
-        => SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "collation-execution" });
+        => SqlDatabaseEngine.Create("collation-execution", new SqlDatabaseEngineOptions());
 
-    private static Task<QueryResult> ExecuteAsync(IDatabaseSession session, string statement)
+    private static Task<DatabaseResult> ExecuteAsync(SqlDatabaseSession session, string statement)
         => session.ExecuteAsync(statement, cancellationToken: CancellationToken.None).AsTask();
 
-    private static async Task<List<object?[]>> RowsAsync(IDatabaseSession session, string statement)
+    private static async Task<List<object?[]>> RowsAsync(SqlDatabaseSession session, string statement)
     {
-        await using var result = (await ExecuteAsync(session, statement)).ShouldBeAssignableTo<QueryResultSet>();
+        await using var result = (await ExecuteAsync(session, statement)).ShouldBeAssignableTo<DatabaseResultSet>();
         var rows = new List<object?[]>();
         await foreach (var row in result.GetRowsAsync(CancellationToken.None))
         {

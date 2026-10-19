@@ -5,7 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Execution;
-using Assimalign.Cohesion.Database.Language;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.KeyValuePair.Internal;
 
@@ -15,13 +15,13 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Internal;
 /// are bounded by the caller), so materialization keeps the wire exchange and
 /// the typed decode simple.
 /// </summary>
-internal sealed class KeyValueMaterializedResultSet : QueryResultSet
+internal sealed class KeyValueMaterializedResultSet : DatabaseResultSet
 {
-    private readonly IReadOnlyList<QueryColumn> _columns;
+    private readonly IReadOnlyList<DatabaseColumn> _columns;
     private readonly List<object?[]> _rows;
     private readonly long _affectedCount;
 
-    internal KeyValueMaterializedResultSet(IReadOnlyList<QueryColumn> columns, List<object?[]> rows, long affectedCount = -1)
+    internal KeyValueMaterializedResultSet(IReadOnlyList<DatabaseColumn> columns, List<object?[]> rows, long affectedCount = -1)
     {
         _columns = columns;
         _rows = rows;
@@ -29,7 +29,7 @@ internal sealed class KeyValueMaterializedResultSet : QueryResultSet
     }
 
     /// <inheritdoc />
-    public override QueryResultStatus Status => QueryResultStatus.Success;
+    public override DatabaseResultStatus Status => DatabaseResultStatus.Success;
 
     /// <inheritdoc />
     public override long AffectedCount => _affectedCount;
@@ -38,10 +38,10 @@ internal sealed class KeyValueMaterializedResultSet : QueryResultSet
     public override IReadOnlyList<Diagnostic>? Diagnostics => null;
 
     /// <inheritdoc />
-    public override IReadOnlyList<QueryColumn> Columns => _columns;
+    public override IReadOnlyList<DatabaseColumn> Columns => _columns;
 
     /// <inheritdoc />
-    public override async IAsyncEnumerable<QueryRow> GetRowsAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
+    public override async IAsyncEnumerable<DatabaseRow> GetRowsAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         foreach (var row in _rows)
         {

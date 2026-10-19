@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
@@ -27,14 +28,14 @@ public class SqlCatalogIndexTests
         private readonly MemoryStream _data = new();
         private readonly MemoryStream _journal = new();
 
-        public ISqlCatalog Open()
+        public SqlCatalog Open()
         {
             var storage = SqlStorage.Create(
                 new NonClosingStream(_data), new NonClosingStream(_journal), new MemoryStream(), "index-catalog-test");
             return SqlCatalog.Open(storage);
         }
 
-        public ISqlCatalog Reopen()
+        public SqlCatalog Reopen()
         {
             var dataCopy = new MemoryStream();
             dataCopy.Write(_data.ToArray());
@@ -46,7 +47,7 @@ public class SqlCatalogIndexTests
         }
     }
 
-    private static async Task<(ISqlCatalog Catalog, CatalogHarness Harness, SqlCatalogTable Table)> OpenWithTableAsync()
+    private static async Task<(SqlCatalog Catalog, CatalogHarness Harness, SqlCatalogTable Table)> OpenWithTableAsync()
     {
         var harness = new CatalogHarness();
         var catalog = harness.Open();
@@ -94,7 +95,7 @@ public class SqlCatalogIndexTests
         var (catalog, _, table) = await OpenWithTableAsync();
         await catalog.CreateIndexAsync(
             new SqlCatalogIndex(table.ObjectId, "ix_email", new[] { "email" }, isUnique: false),
-            Array.Empty<BTreeIndexRegistration>());
+            [Registration(table.ObjectId, "ix_email", false, 7)]);
 
         // Act + Assert
         await Should.ThrowAsync<SqlCatalogException>(async () => await catalog.CreateIndexAsync(
@@ -117,7 +118,7 @@ public class SqlCatalogIndexTests
         var (catalog, _, table) = await OpenWithTableAsync();
         await catalog.CreateIndexAsync(
             new SqlCatalogIndex(table.ObjectId, "ix_email", new[] { "email" }, isUnique: false),
-            Array.Empty<BTreeIndexRegistration>());
+            [Registration(table.ObjectId, "ix_email", false, 7)]);
 
         // Act + Assert: guarded while the index exists...
         var exception = await Should.ThrowAsync<SqlCatalogException>(
@@ -157,5 +158,102 @@ public class SqlCatalogIndexTests
         reopened.GetIndexes(table.ObjectId).ShouldBeEmpty();
         reopened.GetIndexes(other.ObjectId).Count.ShouldBe(1);
         reopened.GetIndexRegistrations().Single().ObjectId.ShouldBe(other.ObjectId);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql.Catalog] - Index publication: invalid registration snapshots leave all metadata unchanged")]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task PublishIndex_InvalidRegistrationSnapshots_ShouldLeaveCatalogUnchanged(int publication)
+    {
+        // Arrange: exercise standalone index creation, new-table publication and replacement.
+        var (catalog, harness, original) = await OpenWithTableAsync();
+        var existing = Registration(original.ObjectId, "ix_age", false, 7);
+        await catalog.CreateIndexAsync(new SqlCatalogIndex(original.ObjectId, "ix_age", ["age"], false),
+            [existing], CancellationToken.None);
+        var table = publication == 1
+            ? await catalog.ReserveTableAsync("dbo", "new_users", original.Columns, [], [],
+                DatabaseObjectOwner.Adhoc, null, CancellationToken.None)
+            : new SqlCatalogTable(original.ObjectId, original.Schema, original.Name,
+                [.. original.Columns, Column("added", DatabaseType.Int32)]);
+        var index = new SqlCatalogIndex(table.ObjectId, "ix_email", ["email"], true);
+        var valid = Registration(table.ObjectId, index.Name, true, 9);
+        BTreeIndexRegistration[][] invalidSnapshots =
+        [
+            [],
+            [valid with { ObjectId = 9999 }],
+            [Registration(table.ObjectId, "other", true, 9)],
+            [Registration(table.ObjectId, index.Name, false, 9)],
+            [valid, Registration(table.ObjectId, "IX_EMAIL", true, 10)],
+            [valid with { Definition = new IndexDefinition(index.Name, IndexKind.Hash, true) }],
+            [valid with { RootPageId = 0 }],
+            [valid with { RootPageId = -1 }],
+        ];
+        ulong generation = catalog.DdlGeneration;
+
+        foreach (var registrations in invalidSnapshots)
+        {
+            // Act
+            await Should.ThrowAsync<SqlCatalogException>(async () =>
+            {
+                if (publication == 0)
+                {
+                    await catalog.CreateIndexAsync(index, registrations, CancellationToken.None);
+                }
+                else
+                {
+                    await catalog.PublishTableAsync(table, [index], registrations,
+                        replaceExisting: publication == 2, CancellationToken.None);
+                }
+            });
+
+            // Assert: no description, directory, table alteration or generation was committed.
+            catalog.DdlGeneration.ShouldBe(generation);
+            catalog.TryGetIndex(table.ObjectId, index.Name, out _).ShouldBeFalse();
+            catalog.GetIndexRegistrations().ShouldBe([existing]);
+            catalog.Tables.ShouldHaveSingleItem().Columns.Select(column => column.Name).ShouldBe(["id", "email", "age"]);
+            var reopened = harness.Reopen();
+            reopened.DdlGeneration.ShouldBe(generation);
+            reopened.TryGetIndex(table.ObjectId, index.Name, out _).ShouldBeFalse();
+            reopened.GetIndexRegistrations().ShouldBe([existing]);
+            reopened.Tables.ShouldHaveSingleItem().Columns.Select(column => column.Name).ShouldBe(["id", "email", "age"]);
+        }
+
+        // A matching registration uses the catalog's case-insensitive name identity.
+        var matching = Registration(table.ObjectId, "IX_EMAIL", true, 9);
+        if (publication == 0)
+        {
+            await catalog.CreateIndexAsync(index, [matching], CancellationToken.None);
+        }
+        else
+        {
+            await catalog.PublishTableAsync(table, [index], [matching],
+                replaceExisting: publication == 2, CancellationToken.None);
+        }
+        var published = harness.Reopen();
+        published.DdlGeneration.ShouldBe(generation + 1);
+        published.TryGetIndex(table.ObjectId, index.Name, out _).ShouldBeTrue();
+        published.GetIndexRegistrations().ShouldBe([existing, matching]);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sql.Catalog] - Indexes: a stale drop snapshot retains a later unrelated publication")]
+    public async Task DropIndex_SnapshotBeforeUnrelatedPublication_ShouldRetainPublishedRegistration()
+    {
+        // Arrange: DROP captured the directory before the age index published.
+        var (catalog, harness, table) = await OpenWithTableAsync();
+        await catalog.CreateIndexAsync(new SqlCatalogIndex(table.ObjectId, "ix_email", ["email"], false),
+            [Registration(table.ObjectId, "ix_email", false, 7)]);
+        var remaining = Array.Empty<BTreeIndexRegistration>();
+        var age = Registration(table.ObjectId, "ix_age", false, 9);
+        await catalog.CreateIndexAsync(new SqlCatalogIndex(table.ObjectId, "ix_age", ["age"], false), [age]);
+
+        // Act
+        await catalog.DropIndexAsync(table.ObjectId, "ix_email", remaining);
+
+        // Assert
+        catalog.GetIndexRegistrations().ShouldBe([age]);
+        var reopened = harness.Reopen();
+        reopened.GetIndexRegistrations().ShouldBe([age]);
+        reopened.GetIndexes(table.ObjectId).Single().Name.ShouldBe("ix_age");
     }
 }

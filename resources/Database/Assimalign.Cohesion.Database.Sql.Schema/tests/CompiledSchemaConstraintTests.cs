@@ -84,5 +84,5 @@ public sealed class CompiledSchemaConstraintTests
             new CompiledSchemaKey($"pk_{name}", ["id"]), indexes ?? [], constraints);
 
     private static SqlCompiledSchema Schema(params CompiledSchemaTable[] tables)
-        => new(SqlCompiledSchema.CurrentFormat, "constraints", EngineModel.Sql, false, [], tables, [], [], [], []);
+        => new(SqlCompiledSchema.CurrentFormat, "constraints", false, [], tables, []);
 }

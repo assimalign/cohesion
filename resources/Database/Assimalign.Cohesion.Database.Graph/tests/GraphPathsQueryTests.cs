@@ -19,15 +19,15 @@ public sealed class GraphPathsQueryTests
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var token = timeout.Token;
-        await using var engine = GraphDatabaseEngine.Create(new());
-        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("paths", token);
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
+        var database = await engine.CreateDatabaseAsync("paths", token);
         await using var session = await database.CreateSessionAsync(token);
         await session.ExecuteAsync("CREATE (:Vertex {name: 'A'})-[:LINK {weight: 2}]->(:Vertex {name: 'B'})-[:LINK {weight: 3}]->(:Vertex {name: 'C'})", cancellationToken: token);
         await GraphSchema.Open(database, session).CreateIndexAsync("Vertex", "by_name", "name", token);
 
         var result = (await session.ExecuteAsync(GraphPathsQueryRequest.FromGql(statement), token)).ShouldBeOfType<GraphPathsQueryResult>();
 
-        result.Status.ShouldBe(QueryResultStatus.Success);
+        result.Status.ShouldBe(DatabaseResultStatus.Success);
         result.AffectedCount.ShouldBe(-1);
         result.Diagnostics.ShouldBeNull();
         var path = result.Paths.Single();
@@ -49,8 +49,8 @@ public sealed class GraphPathsQueryTests
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var token = timeout.Token;
-        await using var engine = GraphDatabaseEngine.Create(new());
-        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("entities", token);
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
+        var database = await engine.CreateDatabaseAsync("entities", token);
         await using var session = await database.CreateSessionAsync(token);
         var properties = new Dictionary<string, object?>
         {
@@ -80,7 +80,7 @@ public sealed class GraphPathsQueryTests
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var token = timeout.Token;
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var database = await engine.CreateDatabaseAsync("cycles", token);
         await using var session = await database.CreateSessionAsync(token);
         await session.ExecuteAsync("CREATE (a:Vertex {name: 'A'})-[:LINK]->(:Vertex {name: 'B'})-[:LINK]->(a)", cancellationToken: token);
@@ -106,7 +106,7 @@ public sealed class GraphPathsQueryTests
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var token = timeout.Token;
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var database = await engine.CreateDatabaseAsync("rejections", token);
         await using var session = await database.CreateSessionAsync(token);
         await session.ExecuteAsync("CREATE (:Vertex {name: 'Original'})", cancellationToken: token);
@@ -114,7 +114,7 @@ public sealed class GraphPathsQueryTests
         var failure = await Should.ThrowAsync<DatabaseException>(async () =>
             await session.ExecuteAsync(GraphPathsQueryRequest.FromGql(statement), token));
 
-        failure.Message.ShouldContain("COHDBG001", Case.Sensitive);
+        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHDBG001");
         var after = (await session.ExecuteAsync(GraphPathsQueryRequest.FromGql("MATCH (a:Vertex) RETURN a"), token)).ShouldBeOfType<GraphPathsQueryResult>();
         after.Paths.Single().Nodes.Single().Properties["name"].ShouldBe("Original");
     }
@@ -128,14 +128,14 @@ public sealed class GraphPathsQueryTests
     [InlineData("MATCH p = (a), p = (b) RETURN p")]
     public async Task Execute_PathVariableUsedAsEntity_RejectsBeforeMatching(string statement)
     {
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var database = await engine.CreateDatabaseAsync("binding", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
 
         var error = await Should.ThrowAsync<DatabaseException>(async () =>
             await session.ExecuteAsync(statement, cancellationToken: CancellationToken.None));
 
-        error.Message.ShouldContain("COHDBG003", Case.Sensitive);
+        error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHDBG003");
     }
 
     [Fact(DisplayName = "Cohesion Test [Graph] - Materialized paths release the operation and retain their snapshot")]
@@ -143,7 +143,7 @@ public sealed class GraphPathsQueryTests
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var token = timeout.Token;
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var database = await engine.CreateDatabaseAsync("snapshot", token);
         await using var session = await database.CreateSessionAsync(token);
         await session.ExecuteAsync("CREATE (:Vertex {name: 'Original'})", cancellationToken: token);

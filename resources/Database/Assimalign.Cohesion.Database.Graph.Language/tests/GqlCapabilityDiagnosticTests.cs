@@ -1,5 +1,4 @@
 using System.Linq;
-
 using Shouldly;
 using Xunit;
 
@@ -18,5 +17,6 @@ public sealed class GqlCapabilityDiagnosticTests
         var statement = new GqlQueryParser().Parse(source);
 
         statement.Diagnostics.Select(diagnostic => diagnostic.Code).ShouldBe(["COHDBL001"]);
+        statement.Diagnostics.Single().Message.ShouldNotBeNull().ShouldContain("unsupported by graph storage", Case.Sensitive);
     }
 }

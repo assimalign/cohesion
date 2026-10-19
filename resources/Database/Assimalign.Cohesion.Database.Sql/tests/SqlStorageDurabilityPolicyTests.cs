@@ -1,3 +1,4 @@
+using System.Threading;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -8,9 +9,10 @@ using Xunit;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
+using Assimalign.Cohesion.Database.Execution;
+using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Sql.Storage;
 using Assimalign.Cohesion.Database.Storage;
-using Assimalign.Cohesion.Database.Execution;
 
 /// <summary>
 /// Engine durability follows the backing capability, while explicit durable
@@ -28,13 +30,13 @@ public sealed class SqlStorageDurabilityPolicyTests : IDisposable
         StorageCommitDurability? durability)
     {
         var options = new SqlDatabaseEngineOptions { Durability = durability };
-        await using var engine = SqlDatabaseEngine.Create(options);
+        await using var engine = SqlDatabaseEngine.Create("sql-engine", options);
         var database = await engine.CreateDatabaseAsync("memory-default");
         await using var session = await database.CreateSessionAsync();
 
         await session.ExecuteAsync("CREATE TABLE items (id INT NOT NULL)");
         await session.ExecuteAsync("INSERT INTO items (id) VALUES (7)");
-        var result = (await session.ExecuteAsync("SELECT id FROM items")).ShouldBeAssignableTo<QueryResultSet>();
+        var result = (await session.ExecuteAsync("SELECT id FROM items")).ShouldBeAssignableTo<DatabaseResultSet>();
         var values = new List<int>();
         await foreach (var row in result!.GetRowsAsync())
         {
@@ -60,7 +62,7 @@ public sealed class SqlStorageDurabilityPolicyTests : IDisposable
     public async Task PhysicalBacking_ShouldDeriveOrHonorDurablePolicy(
         StorageCommitDurability? configured, StorageCommitDurability expected)
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions
+        await using var engine = SqlDatabaseEngine.Create("sql-engine", new SqlDatabaseEngineOptions
         {
             RootPath = _rootPath,
             Durability = configured,
@@ -86,7 +88,7 @@ public sealed class SqlStorageDurabilityPolicyTests : IDisposable
         StorageCommitDurability durability, bool openExisting)
     {
         var strategy = new NonDurableStorageStrategy();
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions
+        await using var engine = SqlDatabaseEngine.Create("sql-engine", new SqlDatabaseEngineOptions
         {
             StorageStrategy = strategy,
             Durability = durability,
@@ -125,23 +127,23 @@ public sealed class SqlStorageDurabilityPolicyTests : IDisposable
         }
     }
 
-    private sealed class NonDurableStorageStrategy : ISqlStorageStrategy
+    private sealed class NonDurableStorageStrategy : SqlStorageStrategy
     {
         internal List<MemoryStream> Streams { get; } = [];
 
-        public SqlStorage CreateStorage(string databaseName)
+        public override SqlStorage CreateStorage(string databaseName, bool catalog)
         {
             var data = new MemoryStream();
             var journal = new MemoryStream();
             var backup = new MemoryStream();
             Streams.AddRange([data, journal, backup]);
-            return SqlStorage.Create(data, journal, backup, databaseName);
+            return SqlStorage.Create(data, journal, backup, GetLabel(databaseName, catalog));
         }
 
-        public SqlStorage OpenStorage(string databaseName) => CreateStorage(databaseName);
+        public override SqlStorage OpenStorage(string databaseName, bool catalog, CancellationToken cancellationToken = default) => CreateStorage(databaseName, catalog);
 
-        public bool StorageExists(string databaseName) => true;
+        public override bool StorageExists(string databaseName, bool catalog) => true;
 
-        public void DropStorage(string databaseName) { }
+        public override void DropStorage(string databaseName) { }
     }
 }

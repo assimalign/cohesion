@@ -5,6 +5,12 @@ The Database framework inventory is declared in this producer's
 so both runtime and reference packs consume this inventory, and an SDK consumer receives the
 public Database family without adding model package references by hand.
 
+`Documents.Client` and `Graph.Client` ship as NuGet-only packages. Consumers add those clients
+explicitly; neither belongs to the shared framework's member list. The Documents engine and
+wire server remain framework members through `Database.Documents`, while `Documents.Security`
+is still deferred. The installer release inventory and Database CI matrix include the delivered
+client packages independently of framework membership.
+
 The inventory includes `Assimalign.Cohesion.Database.Sql.Schema` beside the SQL engine
 and catalog. This package carries SQL declarations, canonical compiled schemas, validation,
 and migration planning. The area root retains model-independent compiled-schema identity,

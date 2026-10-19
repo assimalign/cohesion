@@ -18,8 +18,8 @@ public sealed class GraphCatalogIntrospectionTests
     [Fact]
     public async Task ShowExposesCatalogDefinitionsWithoutRequiringGraphData()
     {
-        await using var engine = GraphDatabaseEngine.Create(new());
-        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("catalog");
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
+        var database = await engine.CreateDatabaseAsync("catalog");
         await using var session = await database.CreateSessionAsync();
         var schema = GraphSchema.Open(database, session);
         Guid label = Guid.NewGuid();
@@ -40,7 +40,7 @@ public sealed class GraphCatalogIntrospectionTests
         (await Rows(session, "SHOW INDEXES")).Single().ShouldBe(new object?[] { "catalog", label, "Person", "by_name", "name", false });
         (await Rows(session, "MATCH (n) RETURN n")).ShouldBeEmpty();
 
-        await using var result = (QueryResultSet)await session.ExecuteAsync("SHOW PROPERTY KEYS");
+        await using var result = (DatabaseResultSet)await session.ExecuteAsync("SHOW PROPERTY KEYS");
         result.Columns.Select(column => column.Name).ShouldBe([
             "DATABASE_NAME", "DEFINITION_TYPE", "DEFINITION_ID", "DEFINITION_NAME", "PROPERTY_KEY", "DATA_TYPE", "IS_REQUIRED"]);
         result.Columns.Select(column => column.Type).ShouldBe([
@@ -51,8 +51,8 @@ public sealed class GraphCatalogIntrospectionTests
     [Fact]
     public async Task OwnershipReportsActualDefinitionAuthorityAndChildEnforcement()
     {
-        await using var engine = GraphDatabaseEngine.Create(new());
-        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("ownership");
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
+        var database = await engine.CreateDatabaseAsync("ownership");
         await using var session = await database.CreateSessionAsync();
         var schema = GraphSchema.Open(database, session);
         Guid managed = Guid.NewGuid();
@@ -68,7 +68,7 @@ public sealed class GraphCatalogIntrospectionTests
         var adhoc = rows.Single(row => Equals(row[5], "Adhoc"));
         adhoc[6].ShouldBe("Adhoc");
         adhoc[7].ShouldBeNull();
-        await using var ownership = (QueryResultSet)await session.ExecuteAsync("SHOW OBJECT OWNERSHIP");
+        await using var ownership = (DatabaseResultSet)await session.ExecuteAsync("SHOW OBJECT OWNERSHIP");
         ownership.Columns[7].IsNullable.ShouldBeTrue();
         var managedRows = rows.Where(row => Equals(row[3], "Managed")).ToArray();
         managedRows.Select(row => row[4]).ShouldBe(["LABEL", "PROPERTY KEY", "INDEX"]);
@@ -86,8 +86,8 @@ public sealed class GraphCatalogIntrospectionTests
     [InlineData(IsolationLevel.ReadCommitted)]
     public async Task CatalogReadsUseSessionVisibilityAndFreshStatementsObserveCommittedChanges(IsolationLevel isolation)
     {
-        await using var engine = GraphDatabaseEngine.Create(new());
-        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("visibility");
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
+        var database = await engine.CreateDatabaseAsync("visibility");
         await using var reader = await database.CreateSessionAsync();
         await using var writer = await database.CreateSessionAsync();
         var schema = GraphSchema.Open(database, writer);
@@ -112,8 +112,8 @@ public sealed class GraphCatalogIntrospectionTests
     [Fact]
     public async Task UncommittedDefinitionsStayPrivateAndRollbackLeavesNoMaterializedCatalogRows()
     {
-        await using var engine = GraphDatabaseEngine.Create(new());
-        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("rollback");
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
+        var database = await engine.CreateDatabaseAsync("rollback");
         await using var writer = await database.CreateSessionAsync();
         await using var reader = await database.CreateSessionAsync();
         await using var transaction = await writer.BeginTransactionAsync();
@@ -125,34 +125,52 @@ public sealed class GraphCatalogIntrospectionTests
         foreach (string subject in Subjects) { (await Rows(writer, "SHOW " + subject)).ShouldBeEmpty(); }
     }
 
-    [Theory]
+    [Theory(DisplayName = "Cohesion Test [Graph] - Catalog mutations: carry stable diagnostics without effects")]
     [InlineData("LABELS", "DELETE n")]
     [InlineData("RELATIONSHIP TYPES", "DETACH DELETE r")]
     [InlineData("PROPERTY KEYS", "SET key.name = 'changed'")]
     [InlineData("INDEXES", "DROP INDEX by_name")]
     [InlineData("OBJECT OWNERSHIP", "INSERT (:Injected)")]
-    public async Task CatalogMutationFailsWithStableDiagnosticAndNoEffects(string subject, string mutation)
+    public async Task Execute_CatalogMutation_ShouldCarryDiagnosticAndHaveNoEffectsAsync(string subject, string mutation)
     {
-        await using var engine = GraphDatabaseEngine.Create(new());
-        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("readonly");
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
+        var database = await engine.CreateDatabaseAsync("readonly");
         await using var session = await database.CreateSessionAsync();
+
+        // Act
         var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync($"SHOW {subject} {mutation}"));
+
+        // Assert
         error.Message.ShouldContain("GQL0007: Graph catalog introspection is read-only.");
+        var parsedDiagnostic = error.Diagnostics.ShouldHaveSingleItem();
+        parsedDiagnostic.Code.ShouldBe("GQL0007");
+        parsedDiagnostic.Start.ShouldNotBeNull();
+        parsedDiagnostic.End.ShouldNotBeNull();
         (await Rows(session, "SHOW LABELS")).ShouldBeEmpty();
 
+        // Arrange
         var expression = new GqlQueryExpression([], null,
-            [new GqlPathPattern([new GqlNodePattern("n", ["Injected"], new Dictionary<string, object?>())], [])], [], false, [])
+            [new GqlPathPattern([new GqlNodePattern("n", ["Injected"], new Dictionary<string, GqlExpression>())], [])], [], false, [])
             { CatalogSurface = GqlCatalogSurface.Labels };
+
+        // Act
         var direct = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(new GraphQueryRequest(new GqlQueryStatement(expression))));
-        direct.Message.ShouldBe("GQL0007: Graph catalog introspection is read-only.");
+
+        // Assert
+        direct.Message.ShouldBe("Graph catalog introspection is read-only.");
+        var diagnostic = direct.Diagnostics.ShouldHaveSingleItem();
+        diagnostic.Code.ShouldBe("GQL0007");
+        diagnostic.Start.ShouldBeNull();
+        diagnostic.End.ShouldBeNull();
         (await Rows(session, "SHOW LABELS")).ShouldBeEmpty();
     }
 
     internal static readonly string[] Subjects = ["LABELS", "RELATIONSHIP TYPES", "PROPERTY KEYS", "INDEXES", "OBJECT OWNERSHIP"];
 
-    internal static async Task<List<object?[]>> Rows(IDatabaseSession session, string command)
+    internal static async Task<List<object?[]>> Rows(GraphDatabaseSession session, string command)
     {
-        await using var result = (QueryResultSet)await session.ExecuteAsync(command);
+        await using var result = (DatabaseResultSet)await session.ExecuteAsync(command);
         var rows = new List<object?[]>();
         await foreach (var row in result.GetRowsAsync())
         {

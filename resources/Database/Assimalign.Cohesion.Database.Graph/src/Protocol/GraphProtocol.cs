@@ -5,18 +5,21 @@ namespace Assimalign.Cohesion.Database.Graph;
 /// <summary>The graph endpoint's immutable protocol family.</summary>
 public static class GraphProtocol
 {
+    /// <summary>Gets the capability enabling composite parameters and result rows.</summary>
+    public static ProtocolCapability CompositeValues { get; } = new("graph.composite-values");
+
     /// <summary>Gets the graph family, including the unchanged catalog exchange and path results.</summary>
-    public static ProtocolMessageFamily Family { get; } = new("Graph", 5, 6, 7, 8, 9, 64, 65, 66);
+    public static ProtocolMessageFamily Family { get; } = new("Graph", [ProtocolCapability.Diagnostics, CompositeValues], 5, 6, 7, 8, 9, 64, 65, 66);
 }
 
 /// <summary>Message identifiers scoped to graph endpoints.</summary>
 public enum GraphProtocolMessageType : byte
 {
-    /// <summary>A scalar graph statement or catalog SHOW request.</summary>
+    /// <summary>A graph value statement or catalog SHOW request.</summary>
     Execute = 5,
     /// <summary>Result column names and scalar types.</summary>
     ResultHeader = 6,
-    /// <summary>One scalar result tuple.</summary>
+    /// <summary>One result tuple using the session's negotiated value encoding.</summary>
     ResultRow = 7,
     /// <summary>Statement exchange completion and affected count.</summary>
     ResultComplete = 8,

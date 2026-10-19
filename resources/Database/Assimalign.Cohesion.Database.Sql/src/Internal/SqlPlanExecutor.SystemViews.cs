@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Text;
 using System.Threading;
 
 using Assimalign.Cohesion.Database.Execution;
@@ -13,13 +14,14 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 internal sealed partial class SqlPlanExecutor
 {
-    private QueryResult ExecuteSystemView(SqlSystemViewPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
+    private DatabaseResult ExecuteSystemView(SqlSystemViewPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
-        var evaluator = new SqlExpressionEvaluator(plan.View.Columns, _parameters, defaultCollation: _catalog.DefaultCollation, subqueryValues: _subqueryValues);
+        var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
         var matches = new List<object?[]>();
         statement.Metrics.AccessPath = "system-view";
 
-        foreach (var values in EnumerateSystemViewRows(plan.View, statement, cancellationToken))
+        var rows = ReadSystemRelation(plan.View, statement, cancellationToken);
+        foreach (var values in rows)
         {
             cancellationToken.ThrowIfCancellationRequested();
             statement.Metrics.RecordsExamined++;
@@ -29,46 +31,78 @@ internal sealed partial class SqlPlanExecutor
             }
         }
 
-        var projected = ProjectAndSortRows(matches, plan.Projections, plan.OrderBy, evaluator, plan.OrderByProjections);
+        var projected = ProjectAndSortRows(matches, plan.Projections, plan.OrderBy, evaluator, plan.OrderByProjections, cancellationToken);
 
         if (plan.IsDistinct)
         {
             projected = Deduplicate(projected, plan.Projections, evaluator);
         }
 
-        IEnumerable<object?[]> window = projected;
-        if (plan.Offset is long offset)
-        {
-            window = window.Skip((int)offset);
-        }
-        if (plan.Limit is long limit)
-        {
-            window = window.Take((int)limit);
-        }
-
-        var columns = new QueryColumn[plan.Projections.Count];
+        var columns = new DatabaseColumn[plan.Projections.Count];
         for (int i = 0; i < plan.Projections.Count; i++)
         {
-            columns[i] = new QueryColumn
+            columns[i] = new DatabaseColumn
             {
                 Name = plan.Projections[i].Name, Ordinal = i, Type = plan.Projections[i].Type,
-                IsNullable = plan.Projections[i].Expression is SqlCastExpression,
+                MaxLength = plan.Projections[i].MaxLength,
+                IsNullable = plan.Projections[i].IsNullable,
             };
         }
-        return new SqlMaterializedResultSet(columns, window.ToList());
+        return new SqlMaterializedResultSet(columns, ApplyRowWindow(projected, plan.Limit, plan.Offset));
     }
 
-    private static IEnumerable<object?[]> EnumerateSystemViewRows(
+    private IEnumerable<object?[]> ReadSystemRelation(
+        SqlSystemViewDefinition view, SqlStatementContext statement, CancellationToken cancellationToken)
+    {
+        var snapshot = statement.RequireCatalogSnapshot();
+        return view.Schema == "COHESION_SCHEMA" ? view.Name switch
+        {
+            SqlSystemViews.FunctionsView => EnumerateFunctionRows(_definitions.Functions.Catalog, snapshot),
+            "TYPES" => EnumerateTypeRows(false, snapshot),
+            "DOMAINS" => EnumerateTypeRows(true, snapshot),
+            _ => EnumerateSystemViewRows(view, statement, cancellationToken),
+        } : EnumerateSystemViewRows(view, statement, cancellationToken);
+    }
+
+    private IEnumerable<object?[]> EnumerateSystemViewRows(
         SqlSystemViewDefinition view, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         // Tables, columns, constraints, and indexes all come from the same
         // immutable catalog snapshot as the statement, including FK targets.
-        var catalog = statement.CatalogSnapshot;
-        if (catalog is null)
+        var catalog = statement.RequireCatalogSnapshot();
+        string database = statement.DatabaseName;
+        if (view.Name == "SCHEMATA")
         {
+            foreach (var schema in catalog.Namespaces)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                // DatabaseObjectOwner describes compiled ownership, not an SQL principal.
+                yield return [database, schema.Name, null, null, null, null, null];
+            }
             yield break;
         }
-        string database = statement.DatabaseName;
+        foreach (var stored in catalog.Views)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            switch (view.Name)
+            {
+                case "TABLES": yield return [database, stored.Schema, stored.Name, "VIEW"]; break;
+                case "VIEWS": yield return [database, stored.Schema, stored.Name, stored.Definition, "NONE", "NO"]; break;
+                case "OBJECT_OWNERSHIP": yield return [database, stored.Schema, stored.Name, "VIEW", stored.Name, SystemOwner(stored.Owner), stored.OwningSchema]; break;
+                case "COLUMNS":
+                    for (int i = 0; i < stored.Columns.Count; i++)
+                    {
+                        var column = stored.Columns[i];
+                        // PostgreSQL view attributes have no NOT NULL constraint (information_schema.sql:674-676).
+                        yield return [database, stored.Schema, stored.Name, column.Name, (long)i + 1, null, "YES", SystemDataType(column.Type.Type),
+                            column.Type.Type is DatabaseType.String or DatabaseType.Character ? (long?)column.Type.MaxLength : null,
+                            null, SystemNumericPrecision(column.Type), SystemNumericRadix(column.Type.Type), SystemNumericScale(column.Type),
+                            SystemDateTimePrecision(column.Type.Type), "NO", null, null, null, null, null, null];
+                    }
+                    break;
+            }
+        }
+        if (view.Name == "VIEWS") { yield break; }
         foreach (var table in catalog.Tables)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -86,10 +120,17 @@ internal sealed partial class SqlPlanExecutor
                         [
                             database, table.Schema, table.Name, column.Name, (long)ordinal + 1,
                             SystemColumnDefault(column), column.IsNullable ? "YES" : "NO", SystemDataType(column.Type.Type),
-                            column.Type.Type == DatabaseType.String ? (long?)column.Type.MaxLength : null,
+                            column.Type.Type is DatabaseType.String or DatabaseType.Character ? (long?)column.Type.MaxLength : null,
                             null, // No character-set byte bound is stored in the catalog.
                             SystemNumericPrecision(column.Type), SystemNumericRadix(column.Type.Type), SystemNumericScale(column.Type),
                             SystemDateTimePrecision(column.Type.Type),
+                            column.Identity is null ? "NO" : "YES",
+                            column.Identity is { } identity ? identity.IsAlways ? "ALWAYS" : "BY DEFAULT" : null,
+                            column.Identity?.Start.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                            column.Identity?.Increment.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                            column.Identity is null ? null : SqlPlanner.IdentityTypeBounds(column.Type.Type, column.Identity.Increment).Maximum.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                            column.Identity is null ? null : SqlPlanner.IdentityTypeBounds(column.Type.Type, column.Identity.Increment).Minimum.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                            column.Identity is null ? null : "NO",
                         ];
                     }
                     break;
@@ -153,7 +194,15 @@ internal sealed partial class SqlPlanExecutor
                             referencedConstraint is null ? null : database,
                             referencedConstraint is null ? null : referencedTable!.Schema,
                             referencedConstraint, "NONE", "RESTRICT",
-                            constraint.OnDelete == SqlCatalogReferentialAction.Cascade ? "CASCADE" : "RESTRICT",
+                            constraint.OnDelete switch
+                            {
+                                SqlCatalogReferentialAction.Cascade => "CASCADE",
+                                SqlCatalogReferentialAction.Restrict => "RESTRICT",
+                                SqlCatalogReferentialAction.NoAction => "NO ACTION",
+                                SqlCatalogReferentialAction.SetNull => "SET NULL",
+                                SqlCatalogReferentialAction.SetDefault => "SET DEFAULT",
+                                _ => throw new DatabaseException(ErrorMessages.DeleteActionUnknown),
+                            },
                         ];
                     }
                     break;
@@ -193,8 +242,80 @@ internal sealed partial class SqlPlanExecutor
         }
     }
 
+    private IEnumerable<object?[]> EnumerateTypeRows(bool domainsOnly, SqlCatalogSnapshot snapshot)
+    {
+        foreach (var type in _definitions.Functions.Types)
+        {
+            if (type.IsSqlDefined) { continue; }
+            if (domainsOnly)
+            {
+                if (type.IsDomain) { yield return [type.Name, type.BaseType!.Name, "NO"]; }
+            }
+            else { yield return [type.Name, type.BaseType?.Name ?? type.Name, type.IsDomain ? "YES" : "NO", "NO"]; }
+        }
+        foreach (var domain in snapshot.Domains)
+        {
+            yield return domainsOnly ? [domain.Name, domain.BaseType, "YES"] : [domain.Name, domain.BaseType, "YES", "YES"];
+        }
+    }
+
+    /// <summary>Frozen native overloads, persisted SQL overloads from the catalog snapshot, and special forms.</summary>
+    private static IEnumerable<object?[]> EnumerateFunctionRows(SqlFunctionCatalog catalog, SqlCatalogSnapshot snapshot)
+    {
+        foreach (var function in catalog)
+        {
+            if (function is SqlExpressionFunction) { continue; }
+            var types = new StringBuilder();
+            var parameters = function.Parameters;
+            for (int index = 0; index < parameters.Count; index++)
+            {
+                types.Append(index == 0 ? string.Empty : ", ").Append(parameters[index].Name);
+            }
+            if (function.VariadicParameter is { } variadic)
+            {
+                types.Append(parameters.Count == 0 ? string.Empty : ", ").Append(variadic.Name).Append(" ...");
+            }
+            else if (parameters.Count == 0 && function.Kind == SqlFunctionKind.Aggregate)
+            {
+                types.Append('*'); // a parameterless aggregate is called as name(*), as COUNT(*) is
+            }
+
+            yield return
+            [
+                function.Name,
+                function.Kind == SqlFunctionKind.Scalar ? "SCALAR" : "AGGREGATE",
+                types.ToString(),
+                (long)parameters.Count,
+                function.ReturnType.Name,
+                // An aggregate is never folded and never admitted in a CHECK, so volatility does not
+                // apply to it: NULL, rather than a VOLATILE that would call SUM non-deterministic.
+                function.Kind == SqlFunctionKind.Aggregate ? null : function.Volatility switch
+                {
+                    SqlFunctionVolatility.Immutable => "IMMUTABLE",
+                    SqlFunctionVolatility.Stable => "STABLE",
+                    _ => "VOLATILE",
+                },
+                function.NullBehavior == SqlNullBehavior.ReturnsNullOnNullInput ? "RETURNS NULL ON NULL INPUT" : "CALLED ON NULL INPUT",
+                SqlStandardLibrary.Contains(function) ? "YES" : "NO",
+                "NO",
+            ];
+        }
+
+        foreach (var function in snapshot.Functions)
+        {
+            yield return [function.Name, "SCALAR", string.Join(", ", function.ParameterTypes),
+                (long)function.ParameterTypes.Count, function.ReturnType, function.Volatility,
+                function.IsStrict ? "RETURNS NULL ON NULL INPUT" : "CALLED ON NULL INPUT", "NO", "YES"];
+        }
+
+        foreach (string form in SqlStandardLibrary.SpecialForms)
+        {
+            yield return [form, "SPECIAL FORM", null, null, null, null, null, "YES", "NO"];
+        }
+    }
+
     private static IEnumerable<(string Name, IReadOnlyList<string> Columns, bool IsPrimaryKey)> SystemKeyConstraints(
-        ISqlCatalogSnapshot catalog, SqlCatalogTable table)
+        SqlCatalogSnapshot catalog, SqlCatalogTable table)
     {
         var indexes = catalog.GetIndexes(table.ObjectId);
         // Catalogs created before primary indexes existed still retain the
@@ -221,19 +342,24 @@ internal sealed partial class SqlPlanExecutor
     private static string SystemOwner(DatabaseObjectOwner owner)
         => owner == DatabaseObjectOwner.Schema ? "Schema" : "Adhoc";
 
+    // The catalog stores a DEFAULT as the canonical SQL text of its literal, which is the
+    // default clause ISO's COLUMN_DEFAULT reports.
     private static string? SystemColumnDefault(SqlCatalogColumn column)
     {
-        if (column.DefaultLiteral is not string literal)
+        if (column.DefaultLiteral is null) { return null; }
+        var expression = SqlPersistedExpression.Load(column.DefaultLiteral, $"DEFAULT of column '{column.Name}'");
+        if (expression is not SqlLiteralExpression { LiteralType: SqlLiteralType.String } literal) { return column.DefaultLiteral; }
+        if (column.Type.Type is not (DatabaseType.Date or DatabaseType.Time or DatabaseType.DateTime or DatabaseType.DateTimeOffset or DatabaseType.TimeSpan or DatabaseType.Binary)) { return column.DefaultLiteral; }
+        object? value = ResolveDefault(column, literal.Value);
+        return value switch
         {
-            return null;
-        }
-        return column.Type.Type switch
-        {
-            DatabaseType.String or DatabaseType.Json or DatabaseType.Date or DatabaseType.Time or
-                DatabaseType.DateTime or DatabaseType.DateTimeOffset or DatabaseType.TimeSpan or DatabaseType.Guid
-                => "'" + literal.Replace("'", "''", StringComparison.Ordinal) + "'",
-            DatabaseType.Boolean when bool.TryParse(literal, out bool value) => value ? "TRUE" : "FALSE",
-            _ => literal,
+            DateOnly date => "DATE '" + date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + "'",
+            TimeOnly time => "TIME '" + time.ToString("HH:mm:ss.FFFFFFF", CultureInfo.InvariantCulture).TrimEnd('.') + "'",
+            DateTime timestamp => "TIMESTAMP '" + timestamp.ToString("yyyy-MM-dd HH:mm:ss.FFFFFFF", CultureInfo.InvariantCulture).TrimEnd('.') + "'",
+            DateTimeOffset instant => "TIMESTAMPTZ '" + instant.ToString("yyyy-MM-dd HH:mm:ss.fffffffzzz", CultureInfo.InvariantCulture) + "'",
+            TimeSpan interval => "INTERVAL '" + (interval.Ticks < 0 ? "-PT" : "PT") + (Math.Abs((decimal)interval.Ticks) / TimeSpan.TicksPerSecond).ToString("0.#######", CultureInfo.InvariantCulture) + "S'",
+            byte[] bytes => "X'" + Convert.ToHexString(bytes) + "'",
+            _ => column.DefaultLiteral,
         };
     }
 
@@ -249,6 +375,7 @@ internal sealed partial class SqlPlanExecutor
         DatabaseType.Float32 => "REAL",
         DatabaseType.Float64 => "DOUBLE PRECISION",
         DatabaseType.Decimal => "NUMERIC",
+        DatabaseType.Character => "CHARACTER",
         DatabaseType.String => "CHARACTER VARYING",
         DatabaseType.Binary => "BINARY VARYING",
         DatabaseType.Date => "DATE",

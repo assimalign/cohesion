@@ -6,6 +6,7 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Hosting;
+using Assimalign.Cohesion.Database.Sql;
 using Assimalign.Cohesion.Database.Sql.Schema;
 
 namespace Assimalign.Cohesion.Database.Hosting.Tests;
@@ -47,12 +48,13 @@ public class DatabaseApplicationBuilderTests
         // Arrange
         var log = new List<string>();
         var service = new RecordingService(log, "service");
-        var server = new RecordingServer(log, "server");
+        var engine = new RecordingEngine();
+        engine.AddServer(owner => new RecordingServer(log, "server", owner));
         DatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder();
 
         // Act
         DatabaseApplicationBuilder returnedBuilder = builder.AddService(service);
-        builder.Options.Servers.Add(server);
+        builder.AddEngine(engine);
         await using IDatabaseApplication application = builder.Build();
         await application.StartAsync(DatabaseHostTestHarness.Timeout());
         await application.StopAsync(DatabaseHostTestHarness.Timeout());
@@ -108,16 +110,17 @@ public class DatabaseApplicationBuilderTests
     [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Builder: Deferred engine factory nests its endpoint and observes preceding engines")]
     public async Task Build_WithDeferredServerFactory_ShouldComposeEndpointOverContext()
     {
-        // Arrange: engine factories observe earlier registrations and construct
-        // servers only after their own engine exists.
+        // Arrange: engine factories, registered by name through the root seam the model verbs
+        // call, observe earlier registrations and construct servers only after their own engine
+        // exists.
         var log = new List<string>();
         var engine = new RecordingEngine();
         RecordingServer? server = null;
-        IReadOnlyList<IDatabaseEngine>? observedEngines = null;
+        IReadOnlyList<DatabaseEngine>? observedEngines = null;
 
         DatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder();
         builder.AddEngine(engine);
-        builder.AddEngine(context =>
+        ((IDatabaseApplicationBuilder)builder).AddEngine("endpoint-engine", context =>
         {
             observedEngines = [.. context.Engines];
             var endpointEngine = new RecordingEngine("endpoint-engine");
@@ -149,7 +152,7 @@ public class DatabaseApplicationBuilderTests
         RecordingServer? second = null;
 
         DatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder();
-        builder.AddEngine(_ =>
+        builder.AddEngine("recording-engine", _ =>
         {
             var engine = new RecordingEngine();
             engine.AddServer(owner => first = new RecordingServer(log, "first", owner));
@@ -169,74 +172,67 @@ public class DatabaseApplicationBuilderTests
         log.ShouldBe(["first:start", "second:start", "second:stop", "first:stop"]);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Provision: completes before server accept regardless of verb order")]
-    public async Task Provision_WhenRegisteredAfterServer_ShouldCompleteBeforeServerStarts()
-    {
-        // Arrange: call the server verb first to prove composition-call order cannot move
-        // provisioning behind endpoint accept.
-        var log = new List<string>();
-        var engine = new ProvisioningEngine(log);
-        var server = new RecordingServer(log, "server", engine);
-        DatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder();
-        builder.Options.Servers.Add(server);
-        CompiledSchema schema = CompileSchema("app");
-        builder.Provision(engine.Name, schema);
-
-        // Act
-        await using DatabaseApplication application = builder.Build();
-        await ((IHost)application).StartAsync(DatabaseHostTestHarness.Timeout());
-        await ((IHost)application).StopAsync(DatabaseHostTestHarness.Timeout());
-
-        // Assert: a first launch attempts open, creates the missing database, and only then
-        // starts the server. The server still drains before the provisioner stops.
-        builder.Schemas.ShouldHaveSingleItem().ShouldBeSameAs(schema);
-        log.ShouldBe(["engine:open", "engine:create", "engine:apply", "server:start", "server:stop"]);
-    }
-
-    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Provision: unrelated database failures propagate without creating")]
-    public async Task Provision_WhenOpenFailsForAnotherReason_ShouldPropagate()
+    /// <summary>
+    /// The engine's own Build provisions the databases it declares, inside the application's Build
+    /// (owner decision 49 of 2026-10-09), and servers start only when the application starts: so
+    /// provisioning precedes accept (area DESIGN, R4) with no schema knowledge in the hosting layer.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Provisioning: a declared database is provisioned by Build, before any server accepts")]
+    public async Task AddSql_DeclaredDatabase_ShouldBeProvisionedByBuildBeforeAnyServerStarts()
     {
         // Arrange
         var log = new List<string>();
-        var failure = new DatabaseException("The database storage could not be opened.");
-        var engine = new ProvisioningEngine(log, openException: failure);
+        RecordingServer? server = null;
         DatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder();
-        builder.AddEngine(engine);
-        builder.Provision(engine.Name, CompileSchema("app"));
+        builder.AddSql("orders-sql", sql =>
+        {
+            sql.AddServer(engine => server = new RecordingServer(log, "server", engine));
+            sql.AddDatabase("orders", database => database.Schema(schema =>
+                schema.Table<Order>("orders", table => table.Key(order => order.Id))));
+        });
 
         // Act
         await using DatabaseApplication application = builder.Build();
-        DatabaseException actual = await Should.ThrowAsync<DatabaseException>(async () =>
-            await ((IHost)application).StartAsync(DatabaseHostTestHarness.Timeout()));
+        string[] loggedAtBuild = [.. log];
+        var engine = application.Context.GetEngine<SqlDatabaseEngine>("orders-sql");
+        engine.TryGetDatabase("orders", out SqlDatabase? orders).ShouldBeTrue();
+        await using (var session = await orders!.CreateSessionAsync())
+        {
+            await session.ExecuteAsync("INSERT INTO orders VALUES (1)");
+        }
 
-        // Assert
-        actual.ShouldBeSameAs(failure);
-        log.ShouldBe(["engine:open"]);
-    }
-
-    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - AddDatabase: retains code-first schema and provisions it before accept")]
-    public async Task AddDatabase_WithSchema_ShouldRetainAndProvisionBeforeServerStarts()
-    {
-        // Arrange
-        var log = new List<string>();
-        var engine = new ProvisioningEngine(log);
-        var server = new RecordingServer(log, "server", engine);
-        DatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder();
-        builder.Options.Servers.Add(server);
-
-        // Act
-        SqlCompiledSchema schema = CompileSchema("orders");
-        builder.AddDatabase(engine.Name, "orders", schema);
-        await using DatabaseApplication application = builder.Build();
         await ((IHost)application).StartAsync(DatabaseHostTestHarness.Timeout());
         await ((IHost)application).StopAsync(DatabaseHostTestHarness.Timeout());
 
+        // Assert: the table existed when Build returned, and no server had started.
+        server.ShouldNotBeNull().Engine.ShouldBeSameAs(engine);
+        loggedAtBuild.ShouldBeEmpty();
+        log.ShouldBe(["server:start", "server:stop"]);
+    }
+
+    /// <summary>
+    /// A declaration the engine refuses fails the application's Build, and the application
+    /// disposes what it had built before it.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Provisioning: a refused declaration fails Build and disposes the engines built before it")]
+    public void AddSql_DeclarationRefused_ShouldFailBuildAndDisposeEarlierEngines()
+    {
+        // Arrange
+        var earlier = new RecordingEngine("earlier");
+        DatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder();
+        builder.AddEngine("earlier", _ => earlier);
+        builder.AddSql("refusing", sql => sql.AddDatabase("orders", database => database.Schema(schema =>
+        {
+            schema.Table<Order>("orders", table => table.Key(order => order.Id));
+            schema.Principal("reader", principal => principal.Grant(SqlPermission.Read, "orders"));
+        })));
+
+        // Act
+        var failure = Should.Throw<SqlSchemaMigrationException>(() => builder.Build());
+
         // Assert
-        schema.Name.ShouldBe("orders");
-        schema.Tables.ShouldHaveSingleItem().RowType.ShouldBe(
-            $"{typeof(Order).Assembly.GetName().Name}:{typeof(Order).FullName}");
-        builder.Schemas.ShouldHaveSingleItem().ShouldBeSameAs(schema);
-        log.ShouldBe(["engine:open", "engine:create", "engine:apply", "server:start", "server:stop"]);
+        failure.Message.ShouldStartWith("COHSQLP001: SQL engine 'refusing' cannot provision database 'orders'", Case.Sensitive);
+        earlier.DisposeCount.ShouldBe(1);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Builder: Building twice is rejected")]
@@ -256,15 +252,11 @@ public class DatabaseApplicationBuilderTests
     {
         // Arrange
         DatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder();
-        builder.AddEngine(_ => null!);
+        builder.AddEngine("null", _ => null!);
 
         // Act + Assert
         Should.Throw<InvalidOperationException>(() => builder.Build());
     }
 
     private sealed record Order(int Id);
-
-    private static SqlCompiledSchema CompileSchema(string name)
-        => SqlSchema.Compile(name, database =>
-            database.Table<Order>("orders", table => table.Key(order => order.Id)));
 }

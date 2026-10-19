@@ -15,7 +15,7 @@ public class KeyValueDatabaseServerLifecycleTests
     public async Task StartAsync_WhileListenerBindIsPending_ShouldWaitForBind()
     {
         // Arrange
-        await using var engine = KeyValueDatabaseEngine.Create(new KeyValueDatabaseEngineOptions { EngineName = "server-bind-gate" });
+        await using var engine = KeyValueDatabaseEngine.Create("server-bind-gate", new KeyValueDatabaseEngineOptions());
         var listener = new ControlledConnectionListener();
         await using var server = KeyValueDatabaseServer.Create(engine, new KeyValueDatabaseServerOptions { Listener = listener });
 
@@ -43,7 +43,7 @@ public class KeyValueDatabaseServerLifecycleTests
     public async Task StartAsync_WhenListenerBindFails_ShouldPropagateAndReleaseListener()
     {
         // Arrange
-        await using var engine = KeyValueDatabaseEngine.Create(new KeyValueDatabaseEngineOptions { EngineName = "server-bind-failure" });
+        await using var engine = KeyValueDatabaseEngine.Create("server-bind-failure", new KeyValueDatabaseEngineOptions());
         var listener = new ControlledConnectionListener();
         await using var server = KeyValueDatabaseServer.Create(engine, new KeyValueDatabaseServerOptions { Listener = listener });
         var expected = new InvalidOperationException("Bind failed.");
@@ -63,7 +63,7 @@ public class KeyValueDatabaseServerLifecycleTests
     public async Task StopAsync_WithBoundTcpListener_ShouldAllowFreshServerToBindSamePort()
     {
         // Arrange
-        await using var firstEngine = KeyValueDatabaseEngine.Create(new KeyValueDatabaseEngineOptions { EngineName = "server-port-first" });
+        await using var firstEngine = KeyValueDatabaseEngine.Create("server-port-first", new KeyValueDatabaseEngineOptions());
         TcpConnectionListener firstListener = TcpConnectionListener.Create(
             options => options.EndPoint = new IPEndPoint(IPAddress.Loopback, 0));
         await using var firstServer = KeyValueDatabaseServer.Create(
@@ -76,7 +76,7 @@ public class KeyValueDatabaseServerLifecycleTests
         // Act
         await firstServer.StopAsync(TestTimeout.Token());
 
-        await using var secondEngine = KeyValueDatabaseEngine.Create(new KeyValueDatabaseEngineOptions { EngineName = "server-port-second" });
+        await using var secondEngine = KeyValueDatabaseEngine.Create("server-port-second", new KeyValueDatabaseEngineOptions());
         TcpConnectionListener secondListener = TcpConnectionListener.Create(
             options => options.EndPoint = fixedEndPoint);
         await using var secondServer = KeyValueDatabaseServer.Create(

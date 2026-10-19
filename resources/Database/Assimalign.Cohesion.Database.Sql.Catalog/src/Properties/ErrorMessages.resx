@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <data name="IdentityTableChanged" xml:space="preserve"><value>Table '{0}.{1}' changed before identity allocation.</value></data>
+  <data name="IdentityColumnMissing" xml:space="preserve"><value>Table '{0}.{1}' has no identity column.</value></data>
+  <data name="IdentityRangeExhausted" xml:space="preserve"><value>Identity column '{0}' has exhausted its {1} range ({2}).</value></data>
+  <data name="IdentityIntegerRequired" xml:space="preserve"><value>An identity column requires an integer storage type.</value></data>
+  <data name="IdentityCounterMalformed" xml:space="preserve"><value>Malformed or duplicate identity counter record.</value></data>
+  <data name="IdentityCounterOrphaned" xml:space="preserve"><value>An identity counter has no owning identity column.</value></data>
+  <data name="IdentityCounterInvalid" xml:space="preserve"><value>Identity counter of column '{0}' is invalid.</value></data>
+  <data name="IdentityMetadataInvalid" xml:space="preserve"><value>Column '{0}' has invalid or duplicate identity metadata.</value></data>
+  <data name="NamespaceMissing" xml:space="preserve"><value>COHSQLE028: Schema '{0}' does not exist.</value></data>
+  <data name="NamespaceDependentObjects" xml:space="preserve"><value>COHSQLE030: Cannot drop schema '{0}' because other objects depend on it. Use DROP SCHEMA ... CASCADE to drop the dependent objects too.</value></data>
+  <data name="NamespaceRecordMalformed" xml:space="preserve"><value>Malformed or duplicate SQL namespace record.</value></data>
+  <data name="ViewMetadataInvalid" xml:space="preserve"><value>Invalid persisted view metadata.</value></data>
+  <data name="ViewRecordTooLarge" xml:space="preserve"><value>The view definition exceeds the catalog record limit of 8,092 bytes.</value></data>
+  <data name="ViewNameIsTable" xml:space="preserve"><value>The target is a table, not a view.</value></data>
+  <data name="ViewExists" xml:space="preserve"><value>Relation &#x27;{0}.{1}&#x27; already exists.</value></data>
+  <data name="ViewMissing" xml:space="preserve"><value>View &#x27;{0}.{1}&#x27; does not exist.</value></data>
+  <data name="ViewReplacementInvalid" xml:space="preserve"><value>CREATE OR REPLACE VIEW must retain existing column names, order, types, type modifiers, domains and collations; only appended columns are allowed.</value></data>
+  <data name="ViewDependencyChanged" xml:space="preserve"><value>A view dependency changed before publication. Retry the statement.</value></data>
+  <data name="ViewCycle" xml:space="preserve"><value>A view cannot depend on itself, directly or indirectly.</value></data>
+  <data name="ViewDependent" xml:space="preserve"><value>COHSQLD002: Cannot change the object because view &#x27;{0}.{1}&#x27; depends on it.</value></data>
+  <data name="ViewDropDependent" xml:space="preserve"><value>COHSQLD002: Cannot drop '{0}' because other objects depend on it: view '{1}.{2}' depends on it.</value></data>
+</root>

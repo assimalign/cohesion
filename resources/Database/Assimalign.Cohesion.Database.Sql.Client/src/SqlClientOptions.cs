@@ -26,5 +26,5 @@ public sealed class SqlClientOptions
     /// <summary>
     /// Gets or sets an optional telemetry observer invoked around every command.
     /// </summary>
-    public ISqlClientObserver? Observer { get; set; }
+    public SqlClientObserver? Observer { get; set; }
 }

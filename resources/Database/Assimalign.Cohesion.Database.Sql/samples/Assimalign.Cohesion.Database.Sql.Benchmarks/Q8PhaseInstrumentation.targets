@@ -1,0 +1,22 @@
+<Project>
+  <Target Name="ReplaceB2ProvisioningPhaseTimerSource"
+          BeforeTargets="CoreCompile"
+          Condition="'$(MSBuildProjectName)' == 'Assimalign.Cohesion.Database.Sql'">
+    <Error Condition="'$(B2PhaseTimerSource)' == '' Or !Exists('$(B2PhaseTimerSource)')"
+           Text="B2PhaseTimerSource must name the prepared benchmark-only SqlDeclaredDatabase.cs copy." />
+    <PropertyGroup>
+      <_B2OriginalProvisioningSource>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)/Internal/SqlDeclaredDatabase.cs'))</_B2OriginalProvisioningSource>
+    </PropertyGroup>
+    <ItemGroup>
+      <_B2OriginalProvisioningCompile Include="@(Compile)"
+                                     Condition="'%(Compile.FullPath)' == '$(_B2OriginalProvisioningSource)'" />
+    </ItemGroup>
+    <Error Condition="'@(_B2OriginalProvisioningCompile->Count())' != '1'"
+           Text="Expected exactly one original SqlDeclaredDatabase.cs Compile item before benchmark instrumentation." />
+    <ItemGroup>
+      <Compile Remove="@(_B2OriginalProvisioningCompile)" />
+      <Compile Include="$(B2PhaseTimerSource)" Link="Internal/SqlDeclaredDatabase.cs" />
+    </ItemGroup>
+    <Message Importance="High" Text="B2 benchmark-only phase instrumentation: $(B2PhaseTimerSource)" />
+  </Target>
+</Project>

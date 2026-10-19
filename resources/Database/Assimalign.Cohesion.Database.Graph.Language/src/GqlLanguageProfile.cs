@@ -1,3 +1,4 @@
+using Assimalign.Cohesion.Database.Graph.Language.Internal;
 using Assimalign.Cohesion.Database.Language;
 
 namespace Assimalign.Cohesion.Database.Graph.Language;
@@ -8,19 +9,20 @@ namespace Assimalign.Cohesion.Database.Graph.Language;
 /// <remarks>The executable ISO/IEC 39075 subset includes documented Cohesion CREATE and SHOW extensions.</remarks>
 public static class GqlLanguageProfile
 {
+    // EXPLAIN is recognized only at the statement prefix; elsewhere it remains an identifier.
     private static readonly string[] _keywords =
     [
         // Pattern matching
         "MATCH", "OPTIONAL", "MANDATORY",
         // Projection
-        "RETURN", "WITH", "AS",
+        "RETURN", "NEXT", "WITH", "AS",
         // Mutation
         "CREATE", "INSERT", "DELETE", "DETACH",
         "SET", "REMOVE", "MERGE",
         // Clauses
-        "WHERE", "ORDER", "BY", "ASC", "DESC",
+        "WHERE", "GROUP", "ORDER", "BY", "ASC", "ASCENDING", "DESC", "DESCENDING",
         "LIMIT", "OFFSET", "SKIP",
-        "LET", "UNWIND", "FOREACH",
+        "LET", "FOR", "UNWIND", "FOREACH",
         // Set operations
         "UNION", "DISTINCT", "ALL",
         // Logical
@@ -31,9 +33,9 @@ public static class GqlLanguageProfile
         // Quantifiers
         "ANY", "NONE", "SINGLE",
         // Literals / Constants
-        "NULL", "TRUE", "FALSE",
+        "NULL", "TRUE", "FALSE", "UNKNOWN",
         // CASE
-        "CASE", "WHEN", "THEN", "ELSE", "END",
+        "CASE", "WHEN", "THEN", "ELSE", "END", "COALESCE", "NULLIF",
         // Graph elements
         "NODE", "RELATIONSHIP", "EDGE",
         "PATH", "SHORTEST", "GRAPH",
@@ -44,18 +46,40 @@ public static class GqlLanguageProfile
         "SHOW",
     ];
 
-    private static readonly string[] _functions = [];
+    private static readonly string[] _functions =
+    [
+        .. GqlScalarFunctions.Signatures.Keys, "cast",
+        "count", "sum", "avg", "min", "max", "collect_list", "collect",
+    ];
 
     private static readonly string[] _clauses =
     [
         GqlClauses.Match,
+        GqlClauses.QuantifiedPath,
+        GqlClauses.OptionalMatch,
+        GqlClauses.Explain,
         GqlClauses.Return,
+        GqlClauses.Next,
+        GqlClauses.With,
+        GqlClauses.GroupBy,
+        GqlClauses.OrderBy,
+        GqlClauses.Offset,
+        GqlClauses.Skip,
+        GqlClauses.Limit,
+        GqlClauses.Case,
         GqlClauses.Create,
         GqlClauses.Insert,
+        GqlClauses.Set,
+        GqlClauses.Remove,
         GqlClauses.Delete,
         GqlClauses.DetachDelete,
         GqlClauses.Where,
+        GqlClauses.Filter,
+        GqlClauses.Let,
+        GqlClauses.For,
+        GqlClauses.Unwind,
         GqlClauses.Show,
+        GqlClauses.LabelExpression,
     ];
     /// <summary>Gets the ISO GQL language profile used by graph-model query consumers.</summary>
     public static QueryLanguageProfile Instance { get; } = new(

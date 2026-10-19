@@ -10,11 +10,39 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// Defines the non-null SQL value order shared by predicates, sorting, grouping
 /// and extrema. Numeric equality compares represented values without rounding.
 /// </summary>
+/// <remarks>
+/// Temporal identity (#1099): <c>TIMESTAMP</c> values compare by their
+/// wall-clock ticks alone — <see cref="DateTimeKind"/> is not part of the value —
+/// and <c>TIMESTAMPTZ</c> values compare by instant alone — the offset is not part
+/// of the value. Index keys encode exactly these identities
+/// (<see cref="SqlRowCodec.ToKeyIdentity"/>), so key byte equality, seek bounds
+/// and unique enforcement agree with this comparer.
+/// </remarks>
 internal static class SqlValueComparer
 {
     /// <summary>Compares two non-null values using the resolved string collation.</summary>
     internal static int Compare(object left, object right, Collation? collation = null)
     {
+        if (left is SqlCharacter firstCharacter) { left = firstCharacter.Text; }
+        if (right is SqlCharacter secondCharacter) { right = secondCharacter.Text; }
+        if (left is DateOnly firstDate && right is DateTime or DateTimeOffset) { left = firstDate.ToDateTime(TimeOnly.MinValue); }
+        if (right is DateOnly secondDate && left is DateTime or DateTimeOffset) { right = secondDate.ToDateTime(TimeOnly.MinValue); }
+        if (left is DateTime firstTimestamp && right is DateTime secondTimestamp)
+        {
+            return firstTimestamp.Ticks.CompareTo(secondTimestamp.Ticks);
+        }
+        if (left is DateTimeOffset firstInstant && right is DateTimeOffset secondInstant)
+        {
+            return firstInstant.UtcTicks.CompareTo(secondInstant.UtcTicks);
+        }
+        if (left is DateTime wallClock && right is DateTimeOffset instant)
+        {
+            return wallClock.Ticks.CompareTo(instant.UtcTicks);
+        }
+        if (left is DateTimeOffset firstOffset && right is DateTime secondClock)
+        {
+            return firstOffset.UtcTicks.CompareTo(secondClock.Ticks);
+        }
         if (IsNumber(left) && IsNumber(right))
         {
             bool leftApproximate = left is float or double;
@@ -60,7 +88,8 @@ internal static class SqlValueComparer
         {
             return comparable.CompareTo(right);
         }
-        throw new DatabaseException($"Cannot compare values of types {left.GetType().Name} and {right.GetType().Name}.");
+        string hint = left is DateOnly && right is string || left is string && right is DateOnly ? " Use DATE 'yyyy-mm-dd' for a date literal." : string.Empty;
+        throw new DatabaseException($"Cannot compare values of types {left.GetType().Name} and {right.GetType().Name}.{hint}");
     }
 
     /// <summary>
@@ -102,7 +131,15 @@ internal static class SqlValueComparer
             }
             return hash.ToHashCode();
         }
-        return value is string text ? collation.GetHashCode(text) : value.GetHashCode();
+        return value switch
+        {
+            SqlCharacter character => collation.GetHashCode(character.Text),
+            string text => collation.GetHashCode(text),
+            DateOnly date => date.ToDateTime(TimeOnly.MinValue).Ticks.GetHashCode(),
+            DateTime timestamp => timestamp.Ticks.GetHashCode(),
+            DateTimeOffset instant => instant.UtcTicks.GetHashCode(),
+            _ => value.GetHashCode(),
+        };
     }
 
     /// <summary>Recognizes the signed integer, decimal and IEEE SQL numeric families.</summary>

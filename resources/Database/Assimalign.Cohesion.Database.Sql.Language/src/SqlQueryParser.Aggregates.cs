@@ -3,6 +3,7 @@ using System;
 namespace Assimalign.Cohesion.Database.Sql.Language;
 
 using Assimalign.Cohesion.Database.Language;
+using Assimalign.Cohesion.Database.Sql.Language.Internal;
 
 public sealed partial class SqlQueryParser
 {
@@ -37,12 +38,6 @@ public sealed partial class SqlQueryParser
         }
         return expression;
     }
-
-    /// <summary>
-    /// Identifies the aggregate names implemented by the SQL grouping executor.
-    /// </summary>
-    private static bool IsAggregateFunction(string name) => name.ToUpperInvariant() is
-        "COUNT" or "SUM" or "AVG" or "MIN" or "MAX";
 
     /// <summary>
     /// Recognizes aggregate extensions without reserving their names as column identifiers.
@@ -86,9 +81,7 @@ public sealed partial class SqlQueryParser
     /// Recognizes calls to window functions even when their required OVER clause is absent.
     /// </summary>
     private static bool IsWindowFunctionCall(TokenLexer lexer) =>
-        lexer.Current.Type == TokenType.Function &&
-        CurrentText(ref lexer).ToUpperInvariant() is
-            "ROW_NUMBER" or "RANK" or "DENSE_RANK" or "LEAD" or "LAG" or
-            "FIRST_VALUE" or "LAST_VALUE" or "NTH_VALUE" or "NTILE" &&
+        lexer.Current.Type is TokenType.Function or TokenType.Identifier &&
+        SqlUnsupportedVocabulary.IsWindowFunction(CurrentText(ref lexer)) &&
         TryPeekToken(lexer, out string next, out _) && next == "(";
 }

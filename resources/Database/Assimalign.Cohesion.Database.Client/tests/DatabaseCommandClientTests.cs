@@ -12,7 +12,7 @@ public sealed class DatabaseCommandClientTests
     {
         // Arrange
         using var transport = new RecordingHttpMessageInvoker();
-        using IDatabaseCommandClient client = DatabaseCommandClient.Create(
+        using DatabaseCommandClient client = DatabaseCommandClient.Create(
             new Uri("https://resource.test:8443/custom/control"), "bootstrap-token", transport);
 
         // Act

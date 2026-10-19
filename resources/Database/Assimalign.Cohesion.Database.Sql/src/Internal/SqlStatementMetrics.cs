@@ -1,3 +1,8 @@
+using System;
+using System.Collections.Generic;
+
+using Assimalign.Cohesion.Database.Sql.Catalog;
+
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 /// <summary>
@@ -7,8 +12,35 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// records where the equivalent scan examines O(table) — consumed by tests
 /// through the session's last-statement view.
 /// </summary>
+/// <remarks>
+/// It also records the catalog changes a self-committing statement (DDL) committed by itself,
+/// which decide how the session reports the statement's failure on an offline storage (#1272).
+/// </remarks>
 internal sealed class SqlStatementMetrics
 {
+    private bool _capturedCatalogSnapshot;
+
+    // One slot for a scalar path or ordered join paths: plain stored queries pay no extra field.
+    private object _accessPath = string.Empty;
+
+    /// <summary>The shared catalog image, supplied at BEGIN or captured lazily by binding.</summary>
+    internal SqlCatalogSnapshot? CatalogSnapshot { get; set; }
+
+    /// <summary>Catalog images captured by binding; zero when using a BEGIN-time image.</summary>
+    internal int CatalogSnapshotCaptures => _capturedCatalogSnapshot ? 1 : 0;
+
+    internal void CaptureCatalogSnapshot(SqlCatalog catalog)
+    {
+        if (CatalogSnapshot is null)
+        {
+            CatalogSnapshot = catalog.CaptureSnapshot();
+            _capturedCatalogSnapshot = true;
+        }
+    }
+
+    /// <summary>Whether the planner produced a plan, including one whose execution later failed.</summary>
+    internal bool IsPlanned { get; set; }
+
     /// <summary>
     /// Gets or sets the number of stored records the statement examined: units
     /// decoded by a scan, or entries fetched by an index seek.
@@ -17,8 +49,37 @@ internal sealed class SqlStatementMetrics
 
     /// <summary>
     /// Gets or sets the access path the executor drove ("scan", or
-    /// "seek:&lt;index&gt;", "join-scan", or "join-seek:&lt;index&gt;"), empty for
+    /// "seek:&lt;index&gt;", or one "join-scan"/"join-seek:&lt;index&gt;" entry per join step separated by semicolons), empty for
     /// statements with no table access.
     /// </summary>
-    internal string AccessPath { get; set; } = string.Empty;
+    internal string AccessPath
+    {
+        get => _accessPath is string text ? text
+            : _accessPath is IReadOnlyList<string> { Count: 1 } paths ? paths[0]
+            : string.Join("; ", (IReadOnlyList<string>)_accessPath);
+        set => _accessPath = value;
+    }
+
+    /// <summary>Gets the executed join access paths, one entry per step in written order, including empty inputs.</summary>
+    internal IReadOnlyList<string> JoinAccessPaths
+    {
+        get => _accessPath as IReadOnlyList<string> ?? Array.Empty<string>();
+        set => _accessPath = value;
+    }
+
+    /// <summary>
+    /// Gets the number of catalog changes the statement committed by itself that a reopened
+    /// database shows: a DDL statement's catalog self-commits that publish, alter or remove a
+    /// definition, each counted once its commit returned. A durable step nothing reaches before
+    /// such a commit (a table's identity reservation, index trees not yet described) is not
+    /// counted. Zero for every other statement, and for a DDL statement that met an offline storage
+    /// before it committed such a change, which is then reported as refused rather than unconfirmed
+    /// (#1272).
+    /// </summary>
+    internal int SelfCommits { get; private set; }
+
+    /// <summary>
+    /// Records one catalog change the statement committed by itself (<see cref="SelfCommits"/>).
+    /// </summary>
+    internal void RecordSelfCommit() => SelfCommits++;
 }

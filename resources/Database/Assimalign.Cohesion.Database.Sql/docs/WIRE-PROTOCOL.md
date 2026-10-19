@@ -6,8 +6,9 @@
 owns `SqlProtocolMessageType`, ProtocolExecuteMessage, ProtocolResultHeaderMessage,
 and ProtocolResultCompleteMessage. The frame, startup, error, and lifecycle formats
 come from [Database.Protocol](../../Assimalign.Cohesion.Database.Protocol/docs/DESIGN.md).
-Protocol version remains **1.0**: identifiers, payload bytes, order, authentication,
-and error codes are unchanged for deployed clients. The model's Client package owns
+The shared startup version is **2.1** since #1105's additive negotiation change;
+incompatible majors are refused before authentication. SQL identifiers, payload bytes,
+order, authentication and error codes are unchanged by that bump. The model's Client package owns
 parameter encoding and result materialization; the shared Client only runs exchanges.
 
 For source compatibility, this model exports C# static extension properties on the
@@ -23,6 +24,27 @@ one statement at a time. Result-bearing statements return a header, zero or more
 rows, and completion. Other statements return completion alone. Error ends the
 current exchange without completion. ParseFailure and ExecutionFailure leave the
 session ready; malformed payloads, unknown messages, and bad ordering close it.
+Evaluation faults are ExecutionFailure: division by zero, numeric overflow and a
+sign over a non-numeric operand carry messages that begin with `COHSQLE001:`,
+`COHSQLE002:` and `COHSQLE003:`, and a statement whose parse or walk needs more
+stack than the server's thread has left, such as one within a high configured
+nesting limit or a `LIKE` match that backtracks through more wildcards than the
+stack holds, carries `COHSQLE004:` (see the dialect's diagnostics table). A
+statement nested deeper than the engine's expression nesting limit (256 levels by
+default, configured per engine within 32..4096) is a ParseFailure whose message
+carries `SQL0006`; it is refused before anything executes. A chain of `AND` or `OR`
+terms counts one level however long it is, so a 10,000-term predicate executes (see
+the dialect's expression nesting limit, #1151).
+A column reference in an `INSERT ... VALUES` row or a `LIMIT` or `OFFSET` count,
+a subquery's included, is an ExecutionFailure carrying `COHSQLE005:`, raised while
+planning, so nothing executes and the session stays ready (#1165; a reference to a
+target column in VALUES used to end the session with `Internal`, and one in a
+subquery's count carried `COHDBL001:`).
+A function call whose arguments its function does not accept, such as `ABS(1, 2)`,
+`UPPER()`, `COALESCE()` or `COUNT(a, b)`, is an ExecutionFailure carrying
+`COHSQLE006:`, raised while planning in every expression position, so nothing
+executes and the session stays ready (#1189; such a call used to return NULL, and a
+CHECK built on one was stored and never fired).
 There is no pipelining or multiplexing. Terminate closes; Ping receives Pong while ready.
 
 The model-owned exchange has this order.
@@ -53,7 +75,7 @@ must be nonnegative. Writers emit exactly the fields below with no padding.
 | 5 Execute | Client to server | string statement, i32 parameterCount, repeated (string name, i32 encodedLength, encoded scalar component) |
 | 6 ResultHeader | Server to client | i32 columnCount, repeated (string name, u8 DatabaseType) |
 | 7 ResultRow | Server to client | Concatenated self-describing scalar components, in column order; no count prefix |
-| 8 ResultComplete | Server to client | i64 affectedCount; -1 means not applicable |
+| 8 ResultComplete | Server to client | i64 affectedCount; -1 for queries, n for writes including RETURNING |
 | 9 Transaction | Reserved model identifier | No implemented payload; send transaction commands through Execute where supported |
 
 Parameter names are unique and values contain exactly one component. Returned rows
@@ -105,5 +127,44 @@ byte after the sign, including the terminator (FF). This is System.Decimal's
 Golden payload examples (hex): Execute("X", no parameters) =
 `00 00 00 01 58 00 00 00 00`; one header column ("id", Int64) =
 `00 00 00 01 00 00 00 02 69 64 05`; completion(42) =
-`00 00 00 00 00 00 00 2A`. The existing server tests exercise the 1.0 wire unchanged;
+`00 00 00 00 00 00 00 2A`. The existing server tests exercise these model payloads;
 ProtocolMessageTests additionally fixes these payload bytes.
+
+## Negotiated statement diagnostics (#1105)
+
+The shared protocol is 2.1. Startup optionally appends the client's capability names;
+Ready returns the agreed version and the two-sided intersection. A negotiated 2.0
+session retains empty Ready and the existing model and Error bytes. An empty Ready
+from an older endpoint means 2.0 with no capabilities. Different majors are refused.
+Capability names are ordinal and append-only; model names are scoped with the
+lowercase endpoint family followed by a dot. The core owns `diagnostics` and frame 14.
+
+SQL and Graph register `ProtocolCapability.Diagnostics`. When agreed, one Diagnostics
+frame carries the bounded Warning/Error list immediately before Error on failure,
+or immediately before ResultComplete (PathsComplete for graph paths) on success.
+Information, including SQL0100, is never sent. Error and result payloads are unchanged.
+Statement failures leave the server session ready. Model clients validate diagnostic
+ordering and preserve every code, severity, message, nullable offset and source line.
+
+Outbound SQL and Graph diagnostics are preflighted before any result or Error output.
+If the filtered Warning/Error list exceeds 4,096 entries or 1,048,576 encoded bytes,
+the endpoint retains the longest leading prefix that fits both limits with a final
+Warning notice, code COHDBP001. The notice counts toward both limits and states the
+retained count, original filtered count and omitted count. Once an entry does not fit,
+it and every following entry are omitted, even if a later entry would fit. Entries
+are never shortened. A 4,097-entry list of small diagnostics therefore keeps the first
+4,095 and the notice; a first entry larger than the byte limit leaves only the notice.
+The original failure still sends exactly one Error with its original error category
+and message. Success still sends its result and normal completion with the bounded
+warning list. Overflow alone never terminates the session or changes transaction state.
+Malformed incoming diagnostic frames remain fatal protocol violations.
+
+Null diagnostic codes and messages encode as zero-length strings; zero-length strings
+decode as null. An empty diagnostic code is never a valid code. Unlocated offsets
+remain null. Ready.Capabilities and Diagnostics.Entries reject null at construction
+and through init/with assignment. Capability-name byte lengths are checked against
+the 128-character ASCII bound before decoding or allocating a name string.
+
+A write with RETURNING emits ResultHeader and ResultRow frames followed by
+ResultComplete with its affected count n. Ordinary SELECT reports -1. Projection
+failures roll back the statement before any result frame is sent.

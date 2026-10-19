@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -22,6 +23,8 @@ internal sealed class RecordingController : IApplicationResourceController
     private readonly bool _leaveStarting;
     private readonly IReadOnlyDictionary<string, ResourceLifecycle> _observedStates;
     private readonly TaskCompletionSource? _reconciledSignal;
+
+    public Action<IResourceControlContext>? AfterReconcile { get; set; }
 
     public RecordingController(
         List<string> reconciled,
@@ -63,6 +66,7 @@ internal sealed class RecordingController : IApplicationResourceController
         }
 
         context.State.SetState(context.Resource.Id, state);
+        AfterReconcile?.Invoke(context);
         _reconciledSignal?.TrySetResult();
         return Task.CompletedTask;
     }

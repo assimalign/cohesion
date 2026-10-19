@@ -33,7 +33,7 @@ public sealed class SqlClientException : DatabaseException
     /// <param name="message">The error message.</param>
     /// <param name="innerException">The underlying cause.</param>
     public SqlClientException(SqlClientErrorKind kind, ProtocolErrorCode code, string message, Exception? innerException)
-        : base(message, innerException)
+        : base(message, (innerException as DatabaseException)?.Diagnostics ?? [], innerException)
     {
         Kind = kind;
         Code = code;
@@ -70,6 +70,7 @@ public sealed class SqlClientException : DatabaseException
     {
         SqlClientErrorKind kind = exception.Code switch
         {
+            ProtocolErrorCode.ConnectionFailure => SqlClientErrorKind.ConnectionFailure,
             ProtocolErrorCode.UnsupportedVersion => SqlClientErrorKind.ConnectionFailure,
             ProtocolErrorCode.DatabaseNotFound => SqlClientErrorKind.ConnectionFailure,
             ProtocolErrorCode.AuthenticationFailed => SqlClientErrorKind.AuthenticationFailure,

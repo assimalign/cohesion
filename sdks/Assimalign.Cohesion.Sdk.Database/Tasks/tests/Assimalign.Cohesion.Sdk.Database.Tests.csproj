@@ -9,12 +9,17 @@
 		<IsTestProject>true</IsTestProject>
 	</PropertyGroup>
 	<ItemGroup>
+    <Compile Include="$(CohesionRepositoryDirectory)resources\Database\Assimalign.Cohesion.Database.Sql.Language\tests\TestObjects\SqlTypeModifierCases.cs" Link="TestObjects\SqlTypeModifierCases.cs" />
 		<!-- An explicit ProjectPath: the name-only resolver indexes libraries/ and resources/,
 		     not sdks/, so an SDK task project has to be named by path. Relative to this test
 		     project, which sits at Tasks/tests/ beside the task project's Tasks/src/. -->
 		<CohesionProjectReference
 			Include="Assimalign.Cohesion.Sdk.Database.Tasks"
 			ProjectPath="..\src\Assimalign.Cohesion.Sdk.Database.Tasks.csproj" />
+		<!-- The engine builder the SDK anchors on by metadata name (SqlDatabaseBuilder.Schema inside
+		     SqlDatabaseEngineBuilder.AddDatabase). The task itself references Sql.Schema and Sql.Language; the
+		     test compiles consumer sources against the real engine assembly so a rename fails here. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql" />
 	</ItemGroup>
 	<ItemGroup>
 		<CohesionPackageReference Include="Microsoft.Build" />

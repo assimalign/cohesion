@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+
 namespace Assimalign.Cohesion.Database.Sql.Language;
 
 /// <summary>
@@ -9,13 +11,15 @@ public sealed class SqlJoinClause
     /// Initializes a new <see cref="SqlJoinClause"/>.
     /// </summary>
     /// <param name="joinType">The type of join.</param>
-    /// <param name="table">The table being joined.</param>
+    /// <param name="table">The named or derived relation being joined.</param>
     /// <param name="condition">The ON condition, if any.</param>
-    internal SqlJoinClause(SqlJoinType joinType, SqlTableReference table, SqlExpression? condition)
+    /// <param name="usingColumns">The ordered USING column names; empty for ON or CROSS.</param>
+    internal SqlJoinClause(SqlJoinType joinType, SqlRelationReference table, SqlExpression? condition, IReadOnlyList<string> usingColumns)
     {
         JoinType = joinType;
         Table = table;
         Condition = condition;
+        UsingColumns = usingColumns;
     }
 
     /// <summary>
@@ -24,12 +28,15 @@ public sealed class SqlJoinClause
     public SqlJoinType JoinType { get; }
 
     /// <summary>
-    /// Gets the table being joined.
+    /// Gets the named or derived relation being joined.
     /// </summary>
-    public SqlTableReference Table { get; }
+    public SqlRelationReference Table { get; }
 
     /// <summary>
     /// Gets the ON condition expression, if present.
     /// </summary>
     public SqlExpression? Condition { get; }
+
+    /// <summary>Gets the ordered USING column names; empty for ON or CROSS.</summary>
+    public IReadOnlyList<string> UsingColumns { get; }
 }

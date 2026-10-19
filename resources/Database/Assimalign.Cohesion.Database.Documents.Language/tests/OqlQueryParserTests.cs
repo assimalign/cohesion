@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
-using Assimalign.Cohesion.Database.Language;
+using System.Text.Json;
+using Assimalign.Cohesion.Database.Types;
 using Shouldly;
 using Xunit;
 
@@ -68,7 +69,7 @@ public sealed class OqlQueryParserTests
     [InlineData("SELECT * FROM people /* unfinished", "OQL0003")]
     [InlineData("SELECT * FROM people /* outer /* inner */", "OQL0003")]
     [InlineData("SELECT 1e FROM people", "OQL0004")]
-    [InlineData("SELECT 1e100 FROM people", "OQL0004")]
+    [InlineData("SELECT 1. FROM people", "OQL0002")]
     [InlineData("SELECT COUNT() FROM people", "OQL0006")]
     [InlineData("SELECT SUM(*) FROM people", "OQL0006")]
     [InlineData("SELECT MAX(a,b) FROM people", "OQL0006")]
@@ -82,6 +83,10 @@ public sealed class OqlQueryParserTests
         var statement = Parse(query);
 
         statement.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == code);
+        if (query == "SELECT ? FROM people")
+        {
+            statement.Diagnostics.ShouldHaveSingleItem().Message!.ShouldContain("use $name, @name, or $1");
+        }
         foreach (var diagnostic in statement.Diagnostics)
         {
             diagnostic.Severity.ShouldBe(DiagnosticSeverity.Error);
@@ -96,10 +101,7 @@ public sealed class OqlQueryParserTests
     [InlineData("SELECT ELEMENT(address) FROM people", "ELEMENT", 7)]
     [InlineData("SELECT FLATTEN(address) FROM people", "FLATTEN", 7)]
     [InlineData("SELECT (SELECT city FROM addresses) FROM people", "SUBQUERY", 8)]
-    [InlineData("SELECT DISTINCT name FROM people", "DISTINCT", 7)]
-    [InlineData("SELECT ABS(age) FROM people", "ABS", 7)]
-    [InlineData("SELECT * FROM people LIMIT 10", "LIMIT", 21)]
-    [InlineData("SELECT * FROM people WHERE age BETWEEN 1 AND 2", "BETWEEN", 31)]
+    [InlineData("SELECT ARRAY_AGG(age) FROM people", "ARRAY_AGG", 7)]
     [InlineData("CREATE DATABASE other", "CREATE", 0)]
     [InlineData("DROP DATABASE other", "DROP", 0)]
     [InlineData("USE other", "USE", 0)]
@@ -109,7 +111,7 @@ public sealed class OqlQueryParserTests
 
         diagnostic.Message!.ShouldContain(clause);
         diagnostic.Start.ShouldBe(start);
-        diagnostic.End.ShouldBe(start + (clause == "SUBQUERY" ? "SELECT".Length : clause.Length));
+        diagnostic.End.ShouldBe(start + (clause == "SUBQUERY" ? "SELECT".Length : clause == "IN array form" ? 2 : clause.Length));
         diagnostic.Line.ShouldBe(1);
     }
 
@@ -174,7 +176,7 @@ public sealed class OqlQueryParserTests
         var call = select.Projections[1].Expression.ShouldBeOfType<OqlCallExpression>();
         call.Name.ShouldBe("COUNT");
         call.Arguments.ShouldHaveSingleItem().ShouldBeOfType<OqlStarExpression>();
-        select.Having.ShouldBeOfType<OqlBinaryExpression>().Right.ShouldBeOfType<OqlLiteralExpression>().Value.ShouldBe(2m);
+        select.Having.ShouldBeOfType<OqlBinaryExpression>().Right.ShouldBeOfType<OqlLiteralExpression>().Value.ShouldBeOfType<JsonElement>().GetDecimal().ShouldBe(2m);
     }
 
     [Fact]
@@ -193,7 +195,7 @@ public sealed class OqlQueryParserTests
         var expressions = ParseSelect("SELECT 'it''s', 1.25e2, TRUE, NULL FROM people").Projections;
 
         expressions[0].Expression.ShouldBeOfType<OqlLiteralExpression>().Value.ShouldBe("it's");
-        expressions[1].Expression.ShouldBeOfType<OqlLiteralExpression>().Value.ShouldBe(125m);
+        expressions[1].Expression.ShouldBeOfType<OqlLiteralExpression>().Value.ShouldBeOfType<JsonElement>().GetRawText().ShouldBe("1.25e2");
         expressions[2].Expression.ShouldBeOfType<OqlLiteralExpression>().Value.ShouldBe(true);
         expressions[3].Expression.ShouldBeOfType<OqlLiteralExpression>().Value.ShouldBeNull();
     }
