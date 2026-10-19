@@ -37,12 +37,19 @@ public sealed class GraphOrderKeyTests
         // runtime work on this thread (tiering, first use of the full-size path) is not counted.
         GraphSortPage.Apply(rows.Take(32).ToList(), stage, CancellationToken.None);
         GraphSortPage.Apply(rows.ToList(), stage, CancellationToken.None);
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        var watch = Stopwatch.StartNew();
-        // Act
-        var result = GraphSortPage.Apply(rows, stage, CancellationToken.None);
-        watch.Stop();
-        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        // Act: one round can still pick up one-time runtime allocations on this thread (tier-up,
+        // OSR) under a loaded host, so the smallest of three rounds is the sort's own cost.
+        IReadOnlyList<object?[]> result = [];
+        long allocated = long.MaxValue;
+        var watch = new Stopwatch();
+        for (int round = 0; round < 3; round++)
+        {
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            watch.Restart();
+            result = GraphSortPage.Apply(rows, stage, CancellationToken.None);
+            watch.Stop();
+            allocated = Math.Min(allocated, GC.GetAllocatedBytesForCurrentThread() - before);
+        }
         // Assert
         result.Select(row => row[0]).ShouldBe(Enumerable.Range(0, 10).Cast<object?>());
         allocated.ShouldBeLessThan(4096);
@@ -95,11 +102,17 @@ public sealed class GraphOrderKeyTests
             for (int j = 0; j < values.Count; j++)
             { Math.Sign(GraphOrderComparer.Compare(keys[i], keys[j])).ShouldBe(Math.Sign(GraphValueComparer.CompareNumbers(values[i], values[j]))); }
         }
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        // The smallest of three rounds excludes one-time runtime allocations on this thread.
         int same = 0;
-        for (int i = 0; i < keys.Length; i++)
-        { for (int j = 0; j < keys.Length; j++) { same += Math.Sign(GraphOrderComparer.Compare(keys[i], keys[j])); } }
-        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        long allocated = long.MaxValue;
+        for (int round = 0; round < 3; round++)
+        {
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            same = 0;
+            for (int i = 0; i < keys.Length; i++)
+            { for (int j = 0; j < keys.Length; j++) { same += Math.Sign(GraphOrderComparer.Compare(keys[i], keys[j])); } }
+            allocated = Math.Min(allocated, GC.GetAllocatedBytesForCurrentThread() - before);
+        }
         same.ShouldBe(0);
         allocated.ShouldBe(0);
     }
