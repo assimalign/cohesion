@@ -303,7 +303,7 @@ internal sealed record SqlInsertPlan(
 }
 
 /// <summary>Bound unique-index arbiters and the target-plus-EXCLUDED update expressions.</summary>
-internal sealed record SqlOnConflictPlan(IReadOnlyList<SqlCatalogIndex> Arbiters, bool DoUpdate,
+internal sealed record SqlOnConflictPlan(IReadOnlyList<SqlCatalogIndex> Arbiters, IReadOnlyList<SqlCatalogIndex> UniqueIndexes, bool DoUpdate,
     IReadOnlyList<(int Ordinal, SqlBoundExpression Value)> Assignments, SqlBoundExpression? Where);
 
 internal sealed record SqlUpdatePlan(

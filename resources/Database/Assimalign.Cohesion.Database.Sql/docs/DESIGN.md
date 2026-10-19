@@ -2531,7 +2531,12 @@ helpers. All writes and RETURNING projections share one ApplyStatementAsync brac
 DO NOTHING and false/UNKNOWN filters produce no row or affected count.
 
 The conflict plan selects all matching unique column-set indexes or one named unique index;
-untargeted DO NOTHING selects all unique indexes. The parser supplies EXCLUDED, so binding
+untargeted DO NOTHING selects all unique indexes. The plan also retains the complete unique-index
+directory. After acquiring IX, execution compares its immutable metadata identities with the
+live directory; a create, drop or replacement during the wait aborts retryably before defaults
+or identity allocation. Index-only DDL does not replace the table definition, so its existing
+identity check alone cannot protect arbiter binding. Gated tests cover all three changes.
+The parser supplies EXCLUDED, so binding
 target-plus-proposed rows needs no visibility grant or public internal type. A per-index/key
 pending map models successful earlier proposals and rekeys in source order. Repeated effects
 raise COHSQLE041 before publication; arbiter failures use COHSQLE040. Encoded index equality

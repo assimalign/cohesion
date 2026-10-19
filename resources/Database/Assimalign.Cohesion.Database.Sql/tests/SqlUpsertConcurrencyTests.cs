@@ -26,6 +26,55 @@ public sealed class SqlUpsertConcurrencyCollection
 [Collection(SqlUpsertConcurrencyCollection.Name)]
 public sealed class SqlUpsertConcurrencyTests
 {
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Upsert: unique-index DDL while waiting invalidates the bound arbiter set")]
+    [InlineData("CREATE UNIQUE INDEX by_v ON t(v)", "INSERT INTO t VALUES (2, 1) ON CONFLICT DO NOTHING", false, 0)]
+    [InlineData("DROP INDEX uq ON t", "INSERT INTO t VALUES (1, 2) ON CONFLICT (id) DO UPDATE SET v = EXCLUDED.v", true, 0)]
+    [InlineData("DROP INDEX uq ON t|CREATE UNIQUE INDEX uq ON t(id)", "INSERT INTO t VALUES (1, 2) ON CONFLICT ON CONSTRAINT uq DO UPDATE SET v = EXCLUDED.v", false, 1)]
+    public async Task ExecuteAsync_ArbiterDdlWhileWaiting_ShouldAbortAndRequireFreshBinding(string ddl, string sql, bool retryFails, int retriedCount)
+    {
+        // Arrange: block the write after planning, as SqlConstraintRaceTests gates index DDL.
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        await using var engine = SqlDatabaseEngine.Create("upsert-arbiter-ddl", new());
+        var database = await engine.CreateDatabaseAsync("app", timeout.Token);
+        await using var session = await database.CreateSessionAsync(timeout.Token);
+        await session.ExecuteAsync("CREATE TABLE t (id INT, v INT)", cancellationToken: timeout.Token);
+        await session.ExecuteAsync("CREATE UNIQUE INDEX uq ON t(id)", cancellationToken: timeout.Token);
+        await session.ExecuteAsync("INSERT INTO t VALUES (1, 1)", cancellationToken: timeout.Token);
+        database.Catalog.TryGetTable("dbo", "t", out var table).ShouldBeTrue();
+        var holder = await database.Coordinator.BeginAsync(IsolationLevel.Snapshot, timeout.Token);
+        try
+        {
+            await database.Coordinator.LockManager.AcquireAsync(holder.Sequence,
+                LockResource.Object(table.ObjectId), LockMode.Exclusive, timeout.Token);
+            var pending = session.ExecuteAsync(sql, cancellationToken: timeout.Token).AsTask();
+            pending.IsCompleted.ShouldBeFalse();
+
+            // Act: publish real index changes before the statement obtains its object intent lock.
+            var executor = new SqlQueryExecutor(database.DataStorage, database.Catalog, database.IndexManager, database.Definitions);
+            foreach (string change in ddl.Split('|'))
+            {
+                await executor.ExecuteAsync(SqlQueryRequest.FromSql(change),
+                    new SqlStatementContext(holder, database.Coordinator), timeout.Token);
+            }
+            await database.Coordinator.CommitAsync(holder, timeout.Token);
+
+            // Assert: no discarded arbiter can silently turn the statement into a plain insert.
+            var failure = await Should.ThrowAsync<DatabaseTransactionAbortedException>(async () => await pending);
+            failure.Message.ShouldContain("unique index definitions", Case.Sensitive);
+            (await RowsAsync(session, "SELECT id, v FROM t")).ShouldHaveSingleItem().ShouldBe(new object?[] { 1, 1 });
+            if (retryFails)
+            {
+                var invalid = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(sql, cancellationToken: timeout.Token));
+                invalid.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE040");
+            }
+            else { (await session.ExecuteAsync(sql, cancellationToken: timeout.Token)).AffectedCount.ShouldBe(retriedCount); }
+        }
+        finally
+        {
+            if (holder.State == TransactionState.Active) { await database.Coordinator.RollbackAsync(holder, CancellationToken.None); }
+        }
+    }
+
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Upsert: ReadCommitted validates a newer row against committed parents without seeing in-flight parents")]
     public async Task ExecuteAsync_ReadCommittedNewParent_ShouldUseRefreshedCommittedVisibility()
     {

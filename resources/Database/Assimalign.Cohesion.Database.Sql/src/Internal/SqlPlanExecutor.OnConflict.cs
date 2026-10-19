@@ -17,7 +17,21 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 internal sealed partial class SqlPlanExecutor
 {
     private static readonly string _upsertSnapshotConflict = ErrorMessages.UpsertSnapshotConflict;
+    private static readonly string _upsertIndexesChanged = ErrorMessages.UpsertIndexesChanged;
     private sealed record SqlUpsertWrite(ulong? OldLocation, object?[]? OldValues, object?[] Values, byte[] Record);
+
+    private static void EnsureUpsertIndexes(SqlCatalogTable table, List<SqlLiveIndex> indexes, SqlOnConflictPlan? plan)
+    {
+        if (plan is null) { return; }
+        // Index-only DDL keeps the table definition object. Check the bound unique directory
+        // after acquiring IX so dropped/replaced arbiters cannot become a plain insert.
+        if (indexes.Count(index => index.Metadata.IsUnique) != plan.UniqueIndexes.Count ||
+            plan.UniqueIndexes.Any(expected => !indexes.Any(current => ReferenceEquals(current.Metadata, expected))))
+        {
+            throw new TransactionAbortedException(string.Format(CultureInfo.CurrentCulture,
+                _upsertIndexesChanged, table.Schema, table.Name));
+        }
+    }
 
     private async Task<DatabaseResult> ExecuteUpsertRowsAsync(SqlCatalogTable table, List<SqlLiveIndex> indexes,
         List<(byte[] Record, object?[] Values)> proposals, SqlOnConflictPlan plan, IReadOnlyList<SqlProjection>? returning,

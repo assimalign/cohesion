@@ -61,7 +61,7 @@ internal sealed partial class SqlPlanner
             assignments.Add((ordinal, evaluator.Bind(assignment.Value)));
         }
         if (clause.Where is not null) { Validate(clause.Where); }
-        return new(arbiters, clause.Action == SqlOnConflictAction.DoUpdate, assignments,
+        return new(arbiters, indexes.Where(index => index.IsUnique).ToArray(), clause.Action == SqlOnConflictAction.DoUpdate, assignments,
             clause.Where is null ? null : evaluator.Bind(clause.Where));
 
         SqlPlanningException Invalid(string reason) => new("COHSQLE040",

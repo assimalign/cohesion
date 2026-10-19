@@ -126,7 +126,10 @@ names, and a legacy primary-key declaration without an index report COHSQLE040; 
 case names its absent index explicitly. DO UPDATE requires a target and reports this at
 planning time with COHSQLE040. Untargeted DO NOTHING arbitrates on all unique indexes; with
 no unique indexes it inserts normally. Conflicts outside an explicit target still fail
-ordinary unique enforcement.
+ordinary unique enforcement. If index-only DDL creates, drops or replaces unique indexes while the
+statement waits for its table intent lock, the bound arbiter set is invalidated and the
+transaction aborts retryably. A fresh execution binds the current indexes; an explicit target
+whose index was dropped then reports COHSQLE040.
 
 Arbiter keys use the index's collation and temporal normalization, so case_insensitive
 'ADA' conflicts with 'Ada'. **NULL conflicts with NULL** in a unique key, including a

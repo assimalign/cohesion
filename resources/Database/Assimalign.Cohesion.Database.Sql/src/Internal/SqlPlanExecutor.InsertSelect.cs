@@ -59,6 +59,7 @@ internal sealed partial class SqlPlanExecutor
             LockMode.IntentExclusive, cancellationToken).ConfigureAwait(false);
         EnsureCurrentDefinition(table);
         var indexes = GetLiveIndexes(table);
+        EnsureUpsertIndexes(table, indexes, onConflict);
         var bound = _definitions.Get(table, cancellationToken);
         var defaults = bound.DefaultValues;
         var domainEvaluator = bound.Domains.Count == 0 ? null : ExecutionEvaluator(null, cancellationToken);
