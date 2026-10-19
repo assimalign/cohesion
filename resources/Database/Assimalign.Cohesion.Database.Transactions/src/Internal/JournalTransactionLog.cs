@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -16,6 +17,11 @@ using Assimalign.Cohesion.Database.Storage;
 internal sealed class JournalTransactionLog : TransactionLog
 {
     private readonly StorageJournal _journal;
+    private readonly HashSet<ulong> _writers = new();
+
+    // Enrollment and ends take this gate before the journal's monitor. The manager releases
+    // its context/active-table locks first; durable waits run after this gate is released.
+    private readonly object _gate = new();
 
     internal JournalTransactionLog(StorageJournal journal)
     {
@@ -26,15 +32,39 @@ internal sealed class JournalTransactionLog : TransactionLog
     public override ValueTask AppendBeginAsync(TransactionSequence sequence, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        _journal.AppendBegin((long)sequence.Value);
         return default;
+    }
+
+    /// <inheritdoc />
+    public override void EnterWriter(TransactionSequence sequence)
+    {
+        lock (_gate)
+        {
+            if (_writers.Contains(sequence.Value))
+            {
+                return;
+            }
+
+            _journal.AppendBegin((long)sequence.Value);
+            _writers.Add(sequence.Value);
+        }
     }
 
     /// <inheritdoc />
     public override ValueTask AppendCommitAsync(TransactionSequence sequence, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        long lsn = _journal.AppendCommit((long)sequence.Value);
+        long lsn;
+        lock (_gate)
+        {
+            if (!_writers.Contains(sequence.Value))
+            {
+                return default;
+            }
+
+            lsn = _journal.AppendCommit((long)sequence.Value);
+            _writers.Remove(sequence.Value);
+        }
 
         try
         {
@@ -64,7 +94,15 @@ internal sealed class JournalTransactionLog : TransactionLog
     public override ValueTask AppendAbortAsync(TransactionSequence sequence, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        _journal.AppendRollback((long)sequence.Value);
+        lock (_gate)
+        {
+            if (_writers.Remove(sequence.Value))
+            {
+                // Undo is complete: even a refused advisory record must forget this writer.
+                _journal.AppendRollback((long)sequence.Value);
+            }
+        }
+
         return default;
     }
 }

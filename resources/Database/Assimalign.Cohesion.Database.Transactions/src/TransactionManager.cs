@@ -427,8 +427,9 @@ public sealed class TransactionManager : IAsyncDisposable
     }
 
     /// <summary>
-    /// Durably commits the specified transaction. Returns only after the commit
-    /// record is durable per the engine's durability policy.
+    /// Commits the specified transaction. A writer returns only after its commit record is
+    /// durable per the engine's durability policy; a read-only transaction writes no record
+    /// and waits on no durable flush.
     /// </summary>
     /// <param name="context">The transaction to commit.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
@@ -578,7 +579,17 @@ public sealed class TransactionManager : IAsyncDisposable
                 $"Transaction {context.Sequence} ended while its statement was running; the statement was not applied.");
         }
 
-        return owned;
+        try
+        {
+            _log.EnterWriter(owned.Sequence);
+            return owned;
+        }
+        catch
+        {
+            // A refused first begin must release admission too, or an end would wait forever.
+            owned.ExitApply();
+            throw;
+        }
     }
 
     /// <summary>

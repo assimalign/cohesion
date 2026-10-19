@@ -786,9 +786,9 @@ public sealed class GraphTransactionFailureTests
         await session.ExecuteAsync("INSERT (:Keep {name: 'keep'})");
         var transaction = await session.BeginTransactionAsync();
 
-        // A delete that matches nothing takes the database writer lock and writes no version, so
-        // the abort record is the rollback's only journal append.
-        await session.ExecuteAsync("MATCH (n:Keep) WHERE n.name = 'missing' DELETE n");
+        // A tentative write enrolls this transaction. Drain it before arming the abort fault.
+        await session.ExecuteAsync("INSERT (:Keep {name: 'rolled'})");
+        database.DataStorage.WriteAheadJournal.Flush();
 
         // Act: the rollback buffers the abort record; the other session's statement needs the
         // writer lock, and its commit drains the record, which fails.
@@ -840,7 +840,8 @@ public sealed class GraphTransactionFailureTests
         var session = await database.CreateSessionAsync();
         await session.ExecuteAsync("INSERT (:Keep {name: 'keep'})");
         var transaction = await session.BeginTransactionAsync();
-        await session.ExecuteAsync("MATCH (n:Keep) WHERE n.name = 'missing' DELETE n");
+        await session.ExecuteAsync("INSERT (:Keep {name: 'rolled'})");
+        database.DataStorage.WriteAheadJournal.Flush();
         int unspent;
         using (var failures = FaultInjectingJournalStorageStrategy.FailJournalWritesContaining(JournalRecordType.RollbackTransaction))
         {

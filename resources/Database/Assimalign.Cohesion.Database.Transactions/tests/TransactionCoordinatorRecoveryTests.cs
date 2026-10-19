@@ -1,5 +1,6 @@
 using System;
 using System.Buffers.Binary;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -16,8 +17,125 @@ namespace Assimalign.Cohesion.Database.Transactions.Tests;
 /// Exercises the shared coordinator's recovery ordering and snapshot purge bound
 /// against real record pages and a real write-ahead journal.
 /// </summary>
+[Collection("Journal enrollment")]
 public class TransactionCoordinatorRecoveryTests
 {
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Lazy enrollment: cancellation before admission leaves a reader and a failed callback releases the gate (#1280)")]
+    public async Task ApplyStatement_CancellationAndCallbackFailure_ShouldReleaseAdmissionAndKeepClassification()
+    {
+        // Arrange
+        using var storage = CoordinatorStorage.Create();
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
+        long lsn = storage.Log.LastLsn;
+        long length = storage.JournalLength;
+        var reader = await coordinator.BeginAsync(IsolationLevel.Snapshot, CancellationToken.None);
+        using var canceled = new CancellationTokenSource();
+        canceled.Cancel();
+
+        // Act: cancellation takes no admission and never enrolls the reader.
+        await Should.ThrowAsync<OperationCanceledException>(async () =>
+            await coordinator.ApplyStatementAsync(reader, _ => 0, cancellationToken: canceled.Token));
+        await coordinator.CommitAsync(reader, CancellationToken.None);
+
+        // Assert
+        storage.Log.LastLsn.ShouldBe(lsn);
+        storage.JournalLength.ShouldBe(length);
+
+        // Act: an admitted callback is conservatively a writer even when it throws before writing.
+        var failed = await coordinator.BeginAsync(IsolationLevel.Snapshot, CancellationToken.None);
+        await Should.ThrowAsync<InvalidOperationException>(async () =>
+            await coordinator.ApplyStatementAsync<int>(failed, (Func<StorageTransaction, int>)(_ =>
+                throw new InvalidOperationException("Injected apply failure.")), cancellationToken: CancellationToken.None));
+        await coordinator.RollbackAsync(failed, CancellationToken.None).AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+        var next = await coordinator.BeginAsync(IsolationLevel.Snapshot, CancellationToken.None);
+        await coordinator.ApplyStatementAsync(next, _ => 0, cancellationToken: CancellationToken.None)
+            .AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+        await coordinator.CommitAsync(next, CancellationToken.None);
+
+        // Assert: neither failure kept the semaphore or admission, and recovery sees both outcomes.
+        var plan = TransactionRecovery.Analyze(storage.Log);
+        plan.Aborted.ShouldContain(failed.Sequence);
+        plan.Committed.ShouldContain(next.Sequence);
+        plan.Committed.ShouldNotContain(reader.Sequence);
+        plan.Aborted.ShouldNotContain(reader.Sequence);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Lazy enrollment: repeated checkpoint races classify each promoted reader and release admission (#1280)")]
+    public async Task ApplyStatement_CheckpointRacesWithFirstWrite_ShouldEnrollEveryPromotedReader()
+    {
+        // Arrange: each round holds a checkpoint while a reader queues its first apply.
+        using var storage = CoordinatorStorage.Create();
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
+        var clock = Stopwatch.StartNew();
+        int queuedPromotions = 0;
+        int completedCheckpoints = 0;
+
+        // Act: run for a minimum interval and until counters prove the race was exercised.
+        do
+        {
+            using var entered = new ManualResetEventSlim();
+            using var release = new ManualResetEventSlim();
+            coordinator.BeforeCheckpoint = _ =>
+            {
+                entered.Set();
+                release.Wait(TimeSpan.FromSeconds(10)).ShouldBeTrue();
+            };
+            var checkpoint = Task.Run(coordinator.Checkpoint);
+            TransactionContext? reader = null;
+            Task<int>? applying = null;
+            try
+            {
+                entered.Wait(TimeSpan.FromSeconds(5)).ShouldBeTrue();
+                reader = await coordinator.BeginAsync(IsolationLevel.Snapshot, cancellationToken: CancellationToken.None);
+                var promoted = reader;
+                applying = coordinator.ApplyStatementAsync(promoted, bracket =>
+                {
+                    var location = storage.Insert(bracket, Stamped(promoted.Sequence, TransactionSequence.None));
+                    coordinator.VersionStore.RecordCreated(promoted.Sequence, location.PageId, location.SlotIndex);
+                    return location.SlotIndex;
+                }, cancellationToken: CancellationToken.None).AsTask();
+                if (!applying.IsCompleted)
+                {
+                    queuedPromotions++;
+                }
+            }
+            finally
+            {
+                release.Set();
+                await checkpoint.WaitAsync(TimeSpan.FromSeconds(5));
+                completedCheckpoints++;
+                if (applying is not null)
+                {
+                    await applying.WaitAsync(TimeSpan.FromSeconds(5));
+                }
+                coordinator.BeforeCheckpoint = null;
+            }
+
+            var writer = reader.ShouldNotBeNull();
+            storage.Log.ReadAll().Where(record => record.TransactionSequence == (long)writer.Sequence.Value)
+                .Select(record => record.Type).ShouldBe([JournalRecordType.BeginTransaction]);
+            if ((queuedPromotions & 1) == 0)
+            {
+                await coordinator.CommitAsync(writer, CancellationToken.None);
+                TransactionRecovery.Analyze(storage.Log).Committed.ShouldContain(writer.Sequence);
+            }
+            else
+            {
+                await coordinator.RollbackAsync(writer, CancellationToken.None);
+                TransactionRecovery.Analyze(storage.Log).Aborted.ShouldContain(writer.Sequence);
+            }
+        }
+        while ((clock.Elapsed < TimeSpan.FromMilliseconds(100) || queuedPromotions < 16)
+            && clock.Elapsed < TimeSpan.FromSeconds(10));
+
+        // Assert: both the checkpoint and promotion completed on every exercised overlap.
+        queuedPromotions.ShouldBeGreaterThanOrEqualTo(16);
+        completedCheckpoints.ShouldBe(queuedPromotions);
+        coordinator.GetOpenContexts().ShouldBeEmpty();
+        coordinator.Checkpoint();
+        storage.CheckpointActiveTransactions.ShouldBeEmpty();
+    }
+
     [Theory(DisplayName = "Cohesion Test [Database.Transactions] - Coordinator: lifecycle appends cannot interleave with checkpoint truncation")]
     [InlineData(false)]
     [InlineData(true)]
@@ -48,7 +166,7 @@ public class TransactionCoordinatorRecoveryTests
         try
         {
             checkpointEntered.Wait(TimeSpan.FromSeconds(5)).ShouldBeTrue();
-            // For begin, the allocator signals that the operation reached the
+            // For enrollment, the allocator signals that the operation reached the
             // coordinator while its journal gate is held by the checkpoint.
             coordinator.SequenceReserved = () => lifecycleStarted.Set();
             lifecycle = Task.Factory.StartNew(() =>
@@ -60,7 +178,11 @@ public class TransactionCoordinatorRecoveryTests
                     return active;
                 }
 
-                return coordinator.BeginAsync(IsolationLevel.Snapshot).AsTask().GetAwaiter().GetResult();
+                var promoted = coordinator.BeginAsync(IsolationLevel.Snapshot).AsTask().GetAwaiter().GetResult();
+                coordinator.ApplyStatementAsync(promoted, bracket =>
+                    storage.Insert(bracket, Stamped(promoted.Sequence, TransactionSequence.None)).SlotIndex)
+                    .AsTask().GetAwaiter().GetResult();
+                return promoted;
             }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
 
             lifecycleStarted.Wait(TimeSpan.FromSeconds(5)).ShouldBeTrue();
@@ -89,7 +211,7 @@ public class TransactionCoordinatorRecoveryTests
         }
         else
         {
-            // The old begin is represented by the checkpoint; the new begin
+            // The old writer is represented by the checkpoint; the new begin
             // survives after it. Both still require crash-time undo.
             plan.Aborted.ShouldContain(active.Sequence);
             plan.Aborted.ShouldContain(appended.Sequence);
@@ -329,18 +451,19 @@ public class TransactionCoordinatorRecoveryTests
     }
 
     /// <summary>
-    /// A reader's begin record goes with a checkpoint's truncation, and the checkpoint does not
-    /// list it. When it then applies a statement, the coordinator appends its begin record again
+    /// A reader has no begin record, and the checkpoint does not list it.
+    /// When it then applies a statement, the coordinator appends its first begin record
     /// before the statement's bracket, so a crash before its commit still finds it unproven and
     /// scrubs what it wrote. Without that, recovery would read its version as committed.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Coordinator checkpoint: a reader that writes after a checkpoint is announced again and scrubbed after a crash")]
-    public async Task Checkpoint_ReaderWritesAfterTheCheckpoint_ShouldBeAnnouncedAgainAndScrubbedAfterACrash()
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Coordinator checkpoint: a reader that writes after a checkpoint is enrolled and scrubbed after a crash")]
+    public async Task Checkpoint_ReaderWritesAfterTheCheckpoint_ShouldEnrollAndScrubAfterACrash()
     {
-        // Arrange: a reader across a checkpoint, which truncates its begin record.
+        // Arrange: a reader across a checkpoint, with no begin record before or after it.
         using var storage = CoordinatorStorage.Create();
         var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
         var late = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        storage.Log.ReadAll().ShouldNotContain(record => record.TransactionSequence == (long)late.Sequence.Value);
         coordinator.Checkpoint();
         bool namedAfterTheCheckpoint = storage.Log.ReadAll().Any(record => record.TransactionSequence == (long)late.Sequence.Value);
 
@@ -357,7 +480,7 @@ public class TransactionCoordinatorRecoveryTests
         var plan = recovered.AnalyzeAndScrub();
         recovered.CompleteRecovery();
 
-        // Assert: the uncommitted version is gone — the loss of the re-announcement would leave it
+        // Assert: the uncommitted version is gone — the loss of enrollment would leave it
         // readable as committed — and the begin record is what named the transaction.
         plan.Aborted.ShouldContain(late.Sequence);
         RecordCount(reopened).ShouldBe(0);

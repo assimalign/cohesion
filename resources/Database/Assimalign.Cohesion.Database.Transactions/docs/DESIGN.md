@@ -76,7 +76,7 @@ scrubbing instead of treating the remaining abandoned stamps as committed.
 
 ## Identity vs. ordering: `TransactionId` vs. `TransactionSequence`
 
-`TransactionId` is a GUID — a good *external* identity for sessions, diagnostics, and the wire protocol, but unordered. Visibility decisions need a total order, so this project also has `TransactionSequence`, a monotonically increasing `ulong` assigned at begin. The split mirrors PostgreSQL's virtual-txid vs. xid distinction and keeps the public session surface free of MVCC mechanics.
+`TransactionId` is a GUID — a good *external* identity for sessions, diagnostics, and the wire protocol, but unordered. Visibility decisions need a total order, so this project also has `TransactionSequence`, a monotonically increasing `ulong` assigned at begin. Readers and writers both keep storage-counter sequences; no virtual identifier is introduced, and the public session surface remains free of MVCC mechanics.
 
 ## Snapshot semantics
 
@@ -939,44 +939,53 @@ torn) and checks after each that the reopened coordinator scrubs every writer an
 committed version, and that the scrub's records are deltas based on the recovered LSNs with no new
 image.
 
-During normal operation, begin/commit/abort appends and changes to the log's
-active and writer sets share one monitor with checkpoint capture and truncation.
-A begin cannot land between capturing the checkpoint's list and truncating
-the journal. The storage writes that list twice: into a new generation of its file
-header, made durable before the truncation, and into the checkpoint record appended after
-it. The header copy is the one that survives a lost checkpoint record, and it holds any
-number of sequences (`Database.Storage` DESIGN.md, "Checkpoints").
+During normal operation, writer enrollment, commit/abort appends and changes to the log's
+writer set share one monitor with checkpoint capture and truncation. The storage writes the
+writer list twice: into a new generation of its file header, made durable before truncation,
+and into the checkpoint record appended after it. The header copy survives a lost checkpoint
+record and holds any number of sequences (Storage DESIGN.md, "Checkpoints").
 
-**Only writers are listed (#1242).** Recovery must classify every transaction whose row
-versions can be in the data pages, and only one that applied a statement can have stamped
-any. The log therefore tracks, besides the active set, the writers: a transaction joins
-when its first statement enters the apply gate (before its storage bracket begins), and
-leaves with its commit or abort record; a rolled-back writer whose undo is deferred stays
-until its abort record is appended. A checkpoint lists the writers alone, so readers cost
-the anchor nothing and a read-heavy load no longer pushes it past a capacity. A reader's
-begin record goes with the truncation; if it later applies a statement, the log first
-appends its begin record again — under the same monitor, so no checkpoint can intervene —
-and the journal names it before its first stamp exists. The log knows which active
-transactions the current journal names (begun or announced since the last checkpoint, or
-listed by it), and resets that knowledge to the listed writers at every checkpoint, whether
-or not the checkpoint completed, since a failed checkpoint may still have truncated.
-`TransactionCoordinatorRecoveryTests` covers both: a checkpoint with two readers and a writer
-lists the writer only, and a reader that writes after a checkpoint and then crashes is
-announced, classified aborted and scrubbed (with the announcement removed, its version reads
-as committed). `TransactionCoordinatorRollbackTests` anchors 1,000 writers — beyond the old
-980-entry cap — through a lost checkpoint record and scrubs every one, and
-`TransactionCoordinatorCheckpointCrashTests` cuts power at every write of a coordinator
-checkpoint (data pages, the header slot, the truncation, the checkpoint record; whole and torn)
-with 40 writers and a reader in flight: after each crash every writer is classified aborted and
-scrubbed, the committed version stays visible, and LSNs keep increasing. Listing an empty
-anchor instead fails it.
+**Lazy enrollment and read-only ends (#1280).** Begin still reserves a storage-counter sequence
+and inserts the context into the manager's active table under its begin lock, capturing exactly
+the same snapshot as before. The journal-bound log's begin call observes cancellation but appends
+nothing and tracks no reader. The first admitted apply calls EnterWriter before opening its
+physical bracket: it appends one logical begin record and adds the sequence to the writer set.
+An apply remains a writer even if its callback makes no changes or its bracket rolls back; this
+conservative classification avoids inspecting model mutations. Later applies append no second
+logical begin. A commit or abort of a sequence outside that set merely forgets it: no lifecycle
+record and no durable wait. This includes autocommit reads, explicit read-only transactions,
+read-committed snapshot pins and readers aborted during disposal. They still end through the
+manager, leave the active table and release their locks; visibility and pruning horizons do not
+change. A reader cannot report an unconfirmed commit because it appends no commit record. The
+engines' offline refusal and the storage sequence allocator's offline check still apply.
 
-Commit appends and removes its sequence under that monitor,
-then calls `EnsureDurable` outside it; a checkpoint that truncates first has
-already durably flushed the outcome. The manager keeps the transaction active
-until durability completes, or ends it as committed when the flush fails after the
-append ("A commit record that was written but not made durable", above). This ordering has not been replaced with an
-independent manager-table snapshot.
+Only writers are anchored (#1242). A transaction joins the writer set before its first stamp,
+and leaves with its commit or abort record; a rolled-back writer whose undo is deferred stays
+until undo completes. A reader spanning a checkpoint has no record or anchor entry. If it later
+writes, its first begin record enrolls it under the same monitor, before any bracket or stamp,
+so recovery still classifies and scrubs it after a crash. There is no separate active-log or
+journaled-reader set to reconcile after a failed checkpoint. The standalone
+JournalTransactionLog follows the same rule, enrolled by the manager's apply admission; it does
+not own checkpoints. Its internal callers must admit every stamped write and provide any
+checkpoint's writer list themselves. Public standalone managers use an in-memory log.
+
+The lock order is apply semaphore, log monitor, storage transaction lock for checkpoint, then
+journal monitor. Manager and context locks are released before enrollment. If its begin append
+fails, admission is released before the error escapes, so end and disposal can still drain.
+Commit appends and removes its writer under the log monitor, then waits for durability outside
+it; a checkpoint that truncates first has already durably flushed the outcome. The manager keeps
+the writer active until durability completes, or ends it as committed when the flush fails after
+the append ("A commit record that was written but not made durable", above).
+
+TransactionCoordinatorRecoveryTests covers writer-only anchors, a reader promoted after a
+checkpoint and scrubbed after a crash, and repeated checkpoint/enrollment races until counters
+prove the overlap occurred. JournalEnrollmentTests covers standalone read-only ends, locks,
+cancellation and refused enrollment. Every model's read-only transaction tests count durable
+flush attempts, journal bytes and LSN changes across read loops and every read-only end, including
+read-committed pins. TransactionCoordinatorRollbackTests anchors 1,000 writers through a lost
+checkpoint record; TransactionCoordinatorCheckpointCrashTests cuts power at every whole or torn
+write of a checkpoint with 40 writers and a reader. Writer durability and crash classification
+keep the same guarantees.
 
 Statement apply, logical undo, and pruning share one semaphore. Engine conflict
 locks are acquired before statement apply, keeping genuine lock waits outside
@@ -1111,7 +1120,7 @@ only through this package's `InternalsVisibleTo` grant to its own tests:
 | Hook | Where it runs | Used for |
 |---|---|---|
 | `BeforeCheckpoint(long[] writers)` | under the lifecycle append gate, just before `storage.Checkpoint(writers)`, inside the same `try` | the writers a checkpoint lists, a checkpoint held open against a concurrent lifecycle append, a failed checkpoint |
-| `SequenceReserved()` | in the manager's sequence allocator, after the storage reserved the sequence and before the begin record's append | a begin that reached the coordinator while a checkpoint holds the append gate |
+| `SequenceReserved()` | in the manager's sequence allocator, after the storage reserved the sequence and before the context returns | a begin that reached the coordinator while a checkpoint holds the append gate (the reader may now finish; its first apply waits) |
 | `BeforeAbortRecord(long sequence)` | inside the `try` of the abort record's append, before the journal append; a throw rejects the record | a lost abort record on a storage that stays online |
 
 Each is `null` unless a test sets it and runs once per checkpoint, sequence reservation or
@@ -1241,8 +1250,7 @@ reads exact values.
 The transaction counters count the coordinator's transactions, the same population as the gauge;
 the lock counters count every lock manager. The transaction counters move once at a kernel
 transaction's begin and once at its end, which is once per autocommit statement (plan D6 reads
-statement throughput from `transactions-per-second`), beside a per-database lock and a journal
-append. No counter moves per row or per frame. The six backing fields are process-global and sit
+statement throughput from `transactions-per-second`), beside a per-database lock; only writers append journal records (#1280). No counter moves per row or per frame. The six backing fields are process-global and sit
 together, so the begin and end `Interlocked` operations of every database in the process share
 them (plan D6 sanctions these counters).
 
