@@ -446,16 +446,26 @@ public sealed class SqlUpsertConcurrencyTests
         await using var two = await second.BeginTransactionAsync(IsolationLevel.ReadCommitted, timeout.Token);
         using var waits = new LockWaitListener(database.Name);
 
-        // Act: first queues on the row; second must queue on the already-owned unique batch.
+        // Act: both wait on the held row after releasing their unique keys. Either restart can win.
         var pendingOne = first.ExecuteAsync("INSERT INTO t VALUES (1, 'mail', 1) ON CONFLICT(id) DO UPDATE SET v = t.v + EXCLUDED.v", cancellationToken: timeout.Token).AsTask();
         await waits.WaitForWaitAsync(one.Context.Sequence, timeout.Token);
         var pendingTwo = second.ExecuteAsync("INSERT INTO t VALUES (1, 'mail', 2) ON CONFLICT(email) DO UPDATE SET v = t.v + EXCLUDED.v", cancellationToken: timeout.Token).AsTask();
         await waits.WaitForWaitAsync(two.Context.Sequence, timeout.Token);
         await database.Coordinator.RollbackAsync(gate, timeout.Token);
-        (await pendingOne).AffectedCount.ShouldBe(1);
-        await one.CommitAsync(timeout.Token);
-        (await pendingTwo).AffectedCount.ShouldBe(1);
-        await two.CommitAsync(timeout.Token);
+        var completed = await Task.WhenAny(pendingOne, pendingTwo);
+        (await completed).AffectedCount.ShouldBe(1);
+        if (ReferenceEquals(completed, pendingOne))
+        {
+            await one.CommitAsync(timeout.Token);
+            (await pendingTwo).AffectedCount.ShouldBe(1);
+            await two.CommitAsync(timeout.Token);
+        }
+        else
+        {
+            await two.CommitAsync(timeout.Token);
+            (await pendingOne).AffectedCount.ShouldBe(1);
+            await one.CommitAsync(timeout.Token);
+        }
 
         // Assert
         (await RowsAsync(first, "SELECT v FROM t")).ShouldHaveSingleItem()[0].ShouldBe(3);

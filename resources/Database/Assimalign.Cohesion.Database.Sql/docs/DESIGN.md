@@ -2584,7 +2584,9 @@ the waited row for a committed update/delete before releasing it and aborts retr
 when the key is now absent; ReadCommitted looks up the newest committed state. Rollback has
 undone row/index stamps before the holder releases its locks, so a rollback waiter proceeds
 as if the holder never wrote. Cancellation is checked at every restart. Every restart follows
-a completed wait; no retry cap is needed.
+a completed wait; no retry cap is needed. Contending restarted statements may complete in
+either order. The gated different-arbiter test commits the first completed transaction before
+waiting for the other.
 
 Conflicting rows are already held when replacement old/new keys are acquired in a sorted
 batch. Outgoing and released FK parent rows also use TryAcquire before their existing
@@ -2614,12 +2616,11 @@ UPDATE/DELETE), and check_exclusion_or_unique_constraint in
 src/backend/executor/execIndexing.c:882-901 (end the index scan, wait for the transaction, retry).
 Cohesion discards the whole unapplied batch; PostgreSQL retries its current tuple.
 
-**Plain INSERT audit (#1668).** ExecuteInsertRowsAsync already takes shared FK parent-row
-locks before any unique-key lock. A self-referencing INSERT of (id=3,pid=1) gated on parent
-row 1 therefore leaves key 3 free for UPDATE of that parent from id=1 to id=3. The UPDATE
-commits; INSERT's existing latest-parent check aborts retryably. The gated test reproduces
-that ordering without a victim, so plain INSERT needs no change. General referential cycles
-and locks retained from earlier transaction work keep their existing deadlock semantics.
+**Plain INSERT lock order (#1668).** ExecuteInsertRowsAsync takes shared FK parent-row
+locks before unique keys, so a parent key-changing UPDATE can finish while INSERT waits;
+the gated self-referencing case ends with the existing latest-parent serialization abort,
+without a deadlock victim. No plain INSERT change is needed; general referential cycles
+and locks from earlier transaction work keep their existing deadlock semantics.
 
 A live conflict newer than Snapshot visibility fails retryably for either action, including
 autocommit Snapshot. ReadCommitted skips it for DO NOTHING or updates the latest committed

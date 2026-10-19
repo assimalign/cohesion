@@ -20,7 +20,9 @@ namespace Assimalign.Cohesion.Database.Transactions;
 /// <remarks>
 /// <para>
 /// MVCC keeps readers lock-free; the lock manager arbitrates writers. Locks are owned by
-/// transaction sequences and are released as a set at commit or rollback. A request whose wait
+/// transaction sequences and are released as a set at commit or rollback. Before applying any
+/// writes, a statement may use <see cref="MarkStatement"/> and <see cref="ReleaseSince"/> to
+/// release only its new resources and retry arbitration. A request whose wait
 /// would close a cycle is chosen as the deadlock victim and fails with
 /// <see cref="TransactionDeadlockException"/>.
 /// </para>

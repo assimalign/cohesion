@@ -210,7 +210,8 @@ Pre-statement locks survive back-off, including any upgrades; these retained loc
 reversed multi-row key acquisition can still cause retryable deadlocks. Identities and
 non-immutable defaults run again on restart, so identity gaps are intentional. No rows are
 written before arbitration completes; RETURNING runs only for the final effects, each once.
-Cancellation is checked at every restart. No lock wait runs inside the apply gate.
+Contending restarted statements may finish in either order. Cancellation is checked at every
+restart. No lock wait runs inside the apply gate.
 The gated [arbitration conformance cases](../../Assimalign.Cohesion.Database.Sql/tests/SqlUpsertArbitrationConformanceTests.cs)
 measure this contract, including FK parent-row back-off and the plain INSERT audit.
 
