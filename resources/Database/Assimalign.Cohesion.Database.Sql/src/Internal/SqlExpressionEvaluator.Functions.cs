@@ -165,9 +165,11 @@ internal sealed partial class SqlExpressionEvaluator
     {
         // PostgreSQL nodeFuncs.c:389-419: the implicit NULL ELSE has no typmod.
         if (conditional.ElseResult is null || OutputTypeInfo(conditional.ElseResult) is not { } common) { return null; }
+        string? domain = OutputDomainName(conditional.ElseResult);
         foreach (var clause in conditional.WhenClauses)
         {
-            if (!SameOutputTypeInfo(common, OutputTypeInfo(clause.Result))) { return null; }
+            if (!SameOutputTypeInfo(common, OutputTypeInfo(clause.Result)) ||
+                !string.Equals(domain, OutputDomainName(clause.Result), StringComparison.OrdinalIgnoreCase)) { return null; }
         }
         return common;
     }
@@ -176,9 +178,11 @@ internal sealed partial class SqlExpressionEvaluator
     {
         // PostgreSQL nodeFuncs.c:452-480: every argument must have the same type/typmod.
         if (arguments.Count == 0 || OutputTypeInfo(arguments[0]) is not { } common) { return null; }
+        string? domain = OutputDomainName(arguments[0]);
         for (int index = 1; index < arguments.Count; index++)
         {
-            if (!SameOutputTypeInfo(common, OutputTypeInfo(arguments[index]))) { return null; }
+            if (!SameOutputTypeInfo(common, OutputTypeInfo(arguments[index])) ||
+                !string.Equals(domain, OutputDomainName(arguments[index]), StringComparison.OrdinalIgnoreCase)) { return null; }
         }
         return common;
     }
@@ -186,6 +190,38 @@ internal sealed partial class SqlExpressionEvaluator
     private static bool SameOutputTypeInfo(DatabaseTypeInfo first, DatabaseTypeInfo? next)
         => next is not null && first.Type == next.Type && first.MaxLength == next.MaxLength
             && first.Precision == next.Precision && first.Scale == next.Scale;
+
+    /// <summary>Preserves a domain only when every result branch has that same type identity.</summary>
+    internal string? OutputDomainName(SqlExpression expression)
+    {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+        // PostgreSQL parse_coerce.c:1360-1363,1658-1660: domain identity is part
+        // of type agreement, even when two domains share their base type/facets.
+        switch (expression)
+        {
+            case SqlColumnReferenceExpression column: return ColumnMetadata(column).DomainName;
+            case SqlCastExpression cast: return TryResolveCastTarget(cast) is { IsDomain: true } domain ? domain.Name : null;
+            case SqlCollateExpression collate: return OutputDomainName(collate.Operand);
+            case SqlSubqueryExpression: return _subquerySlots is not null && _subquerySlots.TryGetValue(expression, out var slot) ? slot.DomainName : null;
+            case SqlCaseExpression conditional:
+                if (conditional.ElseResult is null || OutputDomainName(conditional.ElseResult) is not { } name) { return null; }
+                foreach (var clause in conditional.WhenClauses)
+                {
+                    if (!string.Equals(name, OutputDomainName(clause.Result), StringComparison.OrdinalIgnoreCase)) { return null; }
+                }
+                return name;
+            case SqlFunctionCallExpression call when SqlStandardLibrary.IsCoalesce(call.FunctionName):
+                if (call.Arguments.Count == 0 || OutputDomainName(call.Arguments[0]) is not { } common) { return null; }
+                for (int index = 1; index < call.Arguments.Count; index++)
+                {
+                    if (!string.Equals(common, OutputDomainName(call.Arguments[index]), StringComparison.OrdinalIgnoreCase)) { return null; }
+                }
+                return common;
+            case SqlFunctionCallExpression call when !SqlStandardLibrary.IsEvaluatorForm(call.FunctionName):
+                return ResolveFunction(call) is { ReturnType.IsDomain: true } function ? function.ReturnType.Name : null;
+            default: return null;
+        }
+    }
 
     private static DatabaseType AlternativeType(DatabaseType first, DatabaseType next)
         => SqlTemporalArithmetic.IsCalendar(first) && SqlTemporalArithmetic.IsCalendar(next) ? SqlTemporalArithmetic.CommonCalendarType(first, next)

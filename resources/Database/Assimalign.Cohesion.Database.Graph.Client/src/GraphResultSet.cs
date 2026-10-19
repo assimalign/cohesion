@@ -35,7 +35,7 @@ public sealed class GraphResultSet : IReadOnlyList<GraphRow>
     /// <summary>Gets the negotiated warning and error diagnostics.</summary>
     public IReadOnlyList<ProtocolDiagnostic> Diagnostics { get; }
 
-    /// <summary>Gets the mutation count, or -1 for a row-returning statement.</summary>
+    /// <summary>Gets the mutation count, including mutations returning rows, or -1 for a read-only statement.</summary>
     public long AffectedCount { get; }
 
     /// <summary>Gets the number of materialized rows.</summary>
@@ -51,4 +51,3 @@ public sealed class GraphResultSet : IReadOnlyList<GraphRow>
 
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 }
-

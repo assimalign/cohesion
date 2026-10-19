@@ -49,6 +49,7 @@ public sealed partial class SqlViewTests
 
         // Assert
         error.Diagnostics[0].Code.ShouldBe("COHSQLE009");
+        error.Message.ShouldBe("View 'dbo.v' cannot be bound. A source definition changed its output type, modifiers, domain or collation.");
         error.InnerException.ShouldBeOfType<SqlPlanningException>();
         metadata.ShouldHaveSingleItem().ShouldBe(["CHARACTER VARYING"]);
         rows.ShouldHaveSingleItem().ShouldBe([1L]);
@@ -83,13 +84,15 @@ public sealed partial class SqlViewTests
         database.Catalog.Views.ShouldBeEmpty();
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql] - Views: cancellation memory corruption and I/O failures propagate during open binding")]
+    [Theory(DisplayName = "Cohesion Test [Sql] - Views: engine failures propagate during open and read binding")]
     [InlineData(0)]
     [InlineData(1)]
     [InlineData(2)]
     [InlineData(3)]
     [InlineData(4)]
     [InlineData(5)]
+    [InlineData(6)]
+    [InlineData(7)]
     public async Task BindViews_FatalFailure_ShouldPropagate(int kind)
     {
         // Arrange
@@ -99,6 +102,8 @@ public sealed partial class SqlViewTests
         await SeedAsync(session);
         await ExecuteAsync(session, "CREATE VIEW v AS SELECT id FROM t");
         var planner = new SqlPlanner(database.Catalog, null, database.Definitions.Functions);
+        var offline = await engine.CreateDatabaseAsync("offline", CancellationToken.None);
+        offline.DataStorage.TakeOffline(StorageOfflineCause.CheckpointFailures, "binding offline", new IOException("device failure")).ShouldBeTrue();
         Exception failure = kind switch
         {
             0 => new OperationCanceledException(),
@@ -106,14 +111,19 @@ public sealed partial class SqlViewTests
             2 => new StorageCorruptionException("corrupt"),
             3 => new StorageIOException("I/O"),
             4 => new IOException("I/O"),
+            6 => new InsufficientExecutionStackException(),
+            7 => offline.DataStorage.OfflineError!,
             _ => new AggregateException(new InvalidOperationException("wrapped I/O", new IOException("I/O"))),
         };
         SqlViewBindingFault.Inject(planner, database.Catalog.Views.Single(), failure);
 
         // Act
         var error = Should.Throw<Exception>(() => planner.BindViews());
+        var query = (Language.SqlQueryStatement)new Language.SqlQueryParser().Parse("SELECT * FROM v");
+        var readError = Should.Throw<Exception>(() => planner.Plan(query.SqlExpression!));
 
         // Assert
         error.ShouldBeSameAs(failure);
+        readError.ShouldBeSameAs(failure);
     }
 }

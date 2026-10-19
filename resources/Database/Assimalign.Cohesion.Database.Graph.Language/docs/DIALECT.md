@@ -57,6 +57,38 @@ and optional filters/null extension. ISO `OPTIONAL { ... }` and `OPTIONAL ( ... 
 remain recognized but outside T1 (COHDBL001 naming OPTIONAL BLOCK OPERAND). MANDATORY MATCH
 remains COHDBL001. MATCH after INSERT or DELETE is a supported linear stage.
 
+## SET and REMOVE
+
+SET and REMOVE are source-ordered stages after an incoming clause. Leading SET/REMOVE is
+GQL0002. `SET n.p = expression` writes a scalar; NULL removes the key, while INSERT retains
+explicit NULL properties. `SET n = {map}` replaces all properties, leaving labels unchanged;
+Cypher `SET n += {map}` merges. NULL map values remove their keys. Items evaluate left to right,
+and each row observes earlier rows' writes: k occurrences of one node with `SET n.x=n.x+1`
+increment it k times. The final working copy is published once per updated entity per statement.
+Type-and-value-identical assignments, adding an existing label and removing an absent key/label
+are no-ops. Integer 1 and floating 1.0 are different stored values.
+
+`SET n IS Admin`, `SET n:Admin` and D3 `SET n:A:B` add node labels; REMOVE accepts the same
+label spellings and `REMOVE n.p`. Relationships allow property changes and retain their one
+immutable type; setting or removing relationship labels is COHDBG003. Path, group and scalar
+targets are COHDBG003. OPTIONAL NULL targets do nothing and count zero. SET/REMOVE refresh
+all carried occurrences, including entities inside lists, maps and paths. New labels and keys
+use INSERT's catalog discovery and schema validation; later MATCH stages see them.
+
+Only literal whole maps are supported: `$p` and `properties(other)` as whole-map operands
+are COHDBL001. Literal composite properties, including parenthesized literals, are COHDBL001; computed composite property values
+are COHDBG003. MERGE, including both ON CREATE SET and ON MATCH SET, remains one COHDBL001
+naming MERGE. `+=` must touch; GQL combines it into one operator token without changing the
+shared lexer. SHOW remains read-only (GQL0007).
+
+Affected counts include created entities plus distinct changed pre-existing entities. An entity
+created then updated counts once. Mutating RETURN statements report this count too. An entity
+still counts and publishes a replacement if a later item restores its original value, preserving
+Snapshot write conflicts. Only assignments that were all no-ops skip storage. INSERT followed
+by SET stores the final working copy once, with the same identity throughout the statement. ReadCommitted
+updates refresh their statement snapshot after acquiring the writer lock; Snapshot updates use
+first-updater-wins. ExecutePaths refuses either mutation stage with COHDBG001.
+
 ## RETURN
 
 RETURN accepts optional DISTINCT/ALL and either `*` or comma-separated expressions with optional

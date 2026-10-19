@@ -41,8 +41,8 @@ public sealed class SqlLanguageConformanceTests
     {
         // The profile drives enumeration. A newly advertised clause cannot silently escape this test.
         var cases = CreateCases();
-        // #1124 adds CREATE/DROP VIEW: exactly two over #1114's 47.
-        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(49);
+        // #1117 adds RETURNING: exactly one over #1124's 49.
+        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(50);
         RequireExecutionCases(SqlLanguageProfile.Instance.Clauses, cases);
         cases.Keys.Except(SqlLanguageProfile.Instance.Clauses).ShouldBeEmpty("Cases must describe the current profile.");
 
@@ -568,6 +568,15 @@ public sealed class SqlLanguageConformanceTests
             {
                 result.AffectedCount.ShouldBe(1);
                 await ExpectRowsAsync(session, "SELECT age FROM t ORDER BY id;", [[46], [45], [41]]);
+            }),
+        [SqlClauses.Returning] = new("UPDATE t SET age = age + 1 WHERE id = 1 RETURNING id, age;", _seed,
+            expression => expression is SqlUpdateExpression { Returning: not null },
+            async (_, result) =>
+            {
+                result.ShouldBeAssignableTo<DatabaseResultSet>().Columns.Select(column => (column.Name, column.Type))
+                    .ShouldBe([("id", DatabaseType.Int32), ("age", DatabaseType.Int32)]);
+                result.AffectedCount.ShouldBe(1);
+                CheckRows(await ReadRowsAsync(result), [[1, 37]]);
             }),
         [SqlClauses.Delete] = new("DELETE FROM t WHERE id = 2;", _seed,
             expression => expression is SqlDeleteExpression,

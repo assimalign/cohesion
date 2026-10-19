@@ -22,6 +22,7 @@ public class SqlLanguageProfileTests
     [InlineData(SqlClauses.Except, "SELECT a FROM t EXCEPT SELECT a FROM u;")]
     [InlineData(SqlClauses.Explain, "EXPLAIN SELECT * FROM t;")]
     [InlineData(SqlClauses.Insert, "INSERT INTO t (id) VALUES (1);")]
+    [InlineData(SqlClauses.Returning, "INSERT INTO t (id) VALUES (1) RETURNING id;")]
     [InlineData(SqlClauses.Update, "UPDATE t SET id = 1;")]
     [InlineData(SqlClauses.Delete, "DELETE FROM t;")]
     [InlineData(SqlClauses.Identity, "CREATE TABLE t (id INT IDENTITY);")]
@@ -104,7 +105,6 @@ public class SqlLanguageProfileTests
     [InlineData(SqlClauses.Recursive)]
     [InlineData(SqlClauses.Over)]
     [InlineData(SqlClauses.Partition)]
-    [InlineData(SqlClauses.Returning)]
     [InlineData(SqlClauses.All)]
     [InlineData(SqlClauses.Natural)]
     public void Profile_UnsupportedClause_IsNotDeclared(string clause)
@@ -117,7 +117,6 @@ public class SqlLanguageProfileTests
     [InlineData(SqlClauses.Recursive, "WITH RECURSIVE cte AS (SELECT * FROM t) SELECT * FROM cte;")]
     [InlineData(SqlClauses.Over, "SELECT ROW_NUMBER() OVER () FROM t;")]
     [InlineData(SqlClauses.Partition, "SELECT ROW_NUMBER() PARTITION BY id FROM t;")]
-    [InlineData(SqlClauses.Returning, "INSERT INTO t (id) VALUES (1) RETURNING id;")]
     [InlineData(SqlClauses.All, "SELECT ALL id FROM t;")]
     [InlineData(SqlClauses.Natural, "SELECT * FROM t NATURAL JOIN u;")]
     public void Parse_UnsupportedClause_EmitsModelSpecificDiagnostic(string clause, string sql)

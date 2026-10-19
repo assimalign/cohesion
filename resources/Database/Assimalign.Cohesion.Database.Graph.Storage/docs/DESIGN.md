@@ -54,13 +54,13 @@ protection against a duplicate-key lower-bound seek starting in a later leaf aft
 shared B+Tree split. A regression creates 240 incident edges, forces splits, reopens the
 file set, and checks all edges. There is no kernel change.
 
-## Version 1 record format
+## Version 2 record format
 
 All multibyte fixed-width values below are little-endian unless a key explicitly says
 otherwise. Every slotted record starts with the shared 16-byte stamp prefix: writer
 sequence at offsets 0-7, deleter sequence at offsets 8-15. Zero deleter means live.
-Graph records have kind at offset 16, format version `1` at offset 17 and a nonzero
-64-bit logical identity at offsets 18-25. The remaining payload is:
+Graph records have kind at offset 16, format version `2` at offset 17 and a nonzero
+64-bit logical identity at offsets 18-25 and a UInt64 revision at offsets 26-33. Revision starts at zero and increases with each replacement. The remaining payload is:
 
 | Kind | Meaning | Payload after identity |
 | --- | --- | --- |
@@ -94,8 +94,15 @@ is written: the size is the element's, not a store fault, so the Graph engine re
 as the statement failure `COHDBG009` and keeps the session. This version does not define
 arrays, nested objects or overflow chains; Neo4j spills large label sets to dynamic label
 records and long values to property chains, and an overflow-record format is a follow-up. Nodes and
-relationships are immutable versions; the frozen engine surface has create/delete
-operations and no property-update member.
+relationships are immutable versions. UpdateNodeAsync replaces labels and properties;
+UpdateRelationshipAsync replaces properties and preserves endpoints and type. Both publish a
+replacement even when the supplied values equal the visible version. The engine filters entities
+whose assignments were all no-ops; a changed-then-restored entity retains its write conflict. Creation accepts complete StoredGraphNode/StoredGraphRelationship
+records whose nonzero identities the caller reserves from the backing storage's durable sequence;
+duplicate identities are refused. Reserving identities before insertion lets the engine stage all
+changes before first publication. Format 1 is refused before recovery scrub with the remedy to
+recreate the database; no legacy reader or upgrade path exists. Catalog, registration and B-tree
+formats are unchanged.
 
 Owner-one physical registration records are exactly 34 bytes: a zero stamp prefix,
 kind `4`, version `1`, UInt64 object ID, and Int64 root page ID. Every tree is named
@@ -152,7 +159,7 @@ candidate range by node identities zero and `UInt64.MaxValue`; the identity suff
 also makes a heavily repeated property value safe across B+Tree leaf splits.
 
 Index creation backfills visible nodes under the database writer lock and preserves
-source record stamps. Every subsequent node create/delete maintains all current
+source record stamps. Every subsequent node create/update/delete maintains all current
 definitions in its transaction. Dropping an index tombstones its logical definition;
 older snapshots retain the tree and their view. This MVP retains dropped physical trees
 for later reclamation rather than recycling them while snapshots may still reference
@@ -162,9 +169,19 @@ collisions and retained versions; ordering its `m` visible matches adds `O(m log
 ## Atomicity, conflicts and recovery
 
 All graph writers acquire the shared database-level exclusive lock and retain it until
-logical commit/rollback; readers use MVCC snapshots. The lock is deliberately coarse
-for the MVP. After a wait, the store checks cancellation and active transaction state
-and releases a grant received after rollback. Endpoint and deletion checks compare the
+logical commit/rollback; readers use MVCC snapshots. A weakly associated per-transaction
+async gate serializes complete store mutations, including statement views of the same
+transaction, from lookup and encoding through directory publication. The gate is allocated
+once per transaction; repeated uncontended entries and their value-type leases allocate
+nothing. The physical apply gate alone cannot protect a prior-version lookup or the later
+publication. The lock is deliberately coarse
+for the MVP. Once the writer lock is acquired, a mutation given the transaction's original
+ReadCommitted context captures a fresh statement snapshot. A caller-pinned statement view
+retains its horizon and reports conflicts against that view; the caller decides whether to
+refresh and retry, as PostgreSQL's executor does (`src/backend/executor/nodeModifyTable.c:2636-2665`).
+Snapshot isolation retains its fixed horizon.
+After a wait, the store checks cancellation and active transaction state
+and releases a grant received after rollback. Update and deletion checks compare the
 caller's snapshot with the latest committed view while holding the lock; a changed
 record produces `TransactionAbortedException`. A stale detach cannot silently cascade
 a relationship that appeared after its snapshot.
@@ -189,6 +206,19 @@ without disposing the live database. MemoryStream has no durable-flush contract;
 these serialized images test recovery replay and scrub, not physical persistence. They
 prove committed nodes, relationships and property indexes survive while a partially
 applied logical transaction disappears. The graph store keeps an in-memory identity
-directory rebuilt in `O(V + E + I)` at open; label scans examine `O(V)` records and sort
-their `m` visible matches in `O(m log m)`. Traversal path
+directory of every retained version, rebuilt in `O(R log R)` for `R` retained records.
+Chains are ordered by descending persisted revision; reads choose the first visible version.
+Single-version identities keep their reference inline in the directory. Older versions form a
+linked history, so publication prepends in constant time. A rotating sweep checks at most four
+older references per publication; it validates fixed identity headers without decoding properties.
+Lookup also removes encountered reclaimed or reused references and decodes only visible records.
+Repeated updates in one transaction therefore allocate and decode linearly in their count.
+Label scans examine node identities and retained versions and sort their `m` visible matches in `O(m log m)`. Traversal path
 enumeration and cycle limits are owned and documented by the Graph root.
+
+Updates encode the replacement and every new index key before mutation. They move every
+property-index entry, or both adjacency entries (one for a self-loop), to the new physical
+location and tombstone the old record in one physical bracket. Rollback restores old stamps
+and removes new versions. Relationship insertion checks endpoint existence in the latest
+committed view, so property updates do not conflict with insertion. Snapshot pins protect
+old versions from purge.

@@ -685,7 +685,7 @@ domains/collations, stored-table ObjectIds, column/view/function/domain dependen
 ordered resolved calls and ownership. SqlCatalogView and snapshot Views expose
 immutable descriptions; tables retain their own stored-only shape. View columns are always nullable
 in catalog metadata, following PostgreSQL's unconstrained view attributes
-(`src/backend/catalog/information_schema.sql:295`). The new format-23 record stores no nullability
+(`src/backend/catalog/information_schema.sql:674-676`). The new format-23 record stores no nullability
 flag, and COLUMNS never needs to bind a view body. No interface, friend grant or language reference
 was added. Format **23** fences kind 17; table extension 6 is unchanged. Older
 formats are refused, with no upgrade reader. The encoded record must fit one page

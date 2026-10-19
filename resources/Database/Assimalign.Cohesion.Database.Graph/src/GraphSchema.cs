@@ -285,7 +285,7 @@ public sealed class GraphSchema
     {
         await _database.RunAsync(_session, async op =>
         {
-            await _database.LockWriterAsync(op.Context, token).ConfigureAwait(false);
+            await _database.LockWriterAsync(op, token).ConfigureAwait(false);
             await action(op).ConfigureAwait(false);
             return true;
         }, token).ConfigureAwait(false);

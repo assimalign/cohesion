@@ -26,6 +26,12 @@ sequenceDiagram
 
 ## Scalar completion
 
+SET and REMOVE execute through existing requests and ResultComplete affected counts (#1149).
+QueryAsync returns post-update values and the distinct mutation count. NULL optional targets
+count zero. Label removal is visible to subsequent reads. Schema/kind refusals arrive as
+ExecutionFailure with COHDBG003 before rows and preserve the authenticated session; ExecutePaths
+refuses either update stage with COHDBG001. No protocol, codec or capability changes are needed.
+
 GraphExecuteExchange derives from DatabaseProtocolExchange, whose run entry clears the completion
 evidence before each run. A successful ResultComplete certifies completion. A ParseFailure or
 ExecutionFailure received before any result header is the server's complete rejected-statement

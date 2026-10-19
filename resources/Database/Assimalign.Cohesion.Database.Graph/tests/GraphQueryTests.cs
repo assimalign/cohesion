@@ -149,6 +149,17 @@ public sealed class GraphQueryTests
             (await Plan(database, session, query)).MatchClauses.Single().Paths.Single().Anchor.Property.ShouldBe("name");
             (await Rows(session, query)).Single().GetString(0).ShouldBe(value);
         }
+        await session.ExecuteAsync("MATCH (a:Person {name:'seed'}) SET a.name='updated'");
+        (await Rows(session, "MATCH (a:Person {name:'seed'}) RETURN a")).ShouldBeEmpty();
+        (await Plan(database, session, "MATCH (a:Person {name:'updated'}) RETURN a")).MatchClauses.Single().Paths.Single().Anchor.Property.ShouldBe("name");
+        await session.ExecuteAsync("MATCH (a:Person {name:'updated'}) SET a.extra=1");
+        (await Rows(session, "MATCH (a:Person {name:'updated'}) RETURN a.extra")).Single().GetInt64(0).ShouldBe(1);
+        await session.ExecuteAsync("MATCH (a:Person {name:'updated'}) REMOVE a.name");
+        (await Rows(session, "MATCH (a:Person {name:'updated'}) RETURN a")).ShouldBeEmpty();
+        await session.ExecuteAsync("INSERT (n {name:'labeled'}) SET n:Person");
+        (await Rows(session, "MATCH (a:Person {name:'labeled'}) RETURN a.name")).Single().GetString(0).ShouldBe("labeled");
+        await session.ExecuteAsync("MATCH (a:Person {name:'labeled'}) REMOVE a:Person");
+        (await Rows(session, "MATCH (a:Person {name:'labeled'}) RETURN a")).ShouldBeEmpty();
         await database.DeleteNodeAsync(session, direct.Id);
         await session.ExecuteAsync("MATCH (a:Person {name: 'create'}) DELETE a");
         await session.ExecuteAsync("MATCH (a:Person {name: 'insert'}) DETACH DELETE a");

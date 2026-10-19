@@ -62,6 +62,10 @@ internal sealed partial class SqlPlanner
                 ValidateFunctionCalls(select);
                 break;
             case SqlInsertExpression insert:
+                if (insert.Returning is not null)
+                {
+                    foreach (var column in insert.Returning) { ValidateFunctionCalls(column.Expression); }
+                }
                 if (insert.Values is not null)
                 {
                     foreach (var row in insert.Values)
@@ -78,6 +82,10 @@ internal sealed partial class SqlPlanner
                 }
                 break;
             case SqlUpdateExpression update:
+                if (update.Returning is not null)
+                {
+                    foreach (var column in update.Returning) { ValidateFunctionCalls(column.Expression); }
+                }
                 foreach (var assignment in update.Assignments)
                 {
                     ValidateFunctionCalls(assignment.Value);
@@ -85,6 +93,10 @@ internal sealed partial class SqlPlanner
                 ValidateFunctionCalls(update.Where);
                 break;
             case SqlDeleteExpression delete:
+                if (delete.Returning is not null)
+                {
+                    foreach (var column in delete.Returning) { ValidateFunctionCalls(column.Expression); }
+                }
                 ValidateFunctionCalls(delete.Where);
                 break;
             case SqlCreateTableExpression create:

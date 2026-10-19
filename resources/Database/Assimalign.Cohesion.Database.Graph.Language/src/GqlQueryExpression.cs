@@ -86,6 +86,11 @@ public sealed class GqlQueryExpression : GqlExpression
         }
     }
 
+    /// <summary>Gets SET items across all stages in source order.</summary>
+    public IReadOnlyList<GqlSetItem> SetItems => Stages.OfType<GqlSetStage>().SelectMany(stage => stage.Items).ToArray();
+    /// <summary>Gets REMOVE items across all stages in source order.</summary>
+    public IReadOnlyList<GqlRemoveItem> RemoveItems => Stages.OfType<GqlRemoveStage>().SelectMany(stage => stage.Items).ToArray();
+
     /// <summary>Gets the linear segments separated by explicit NEXT boundaries.</summary>
     public IReadOnlyList<GqlQuerySegment> Segments
     {

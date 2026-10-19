@@ -73,7 +73,10 @@ public sealed partial class GqlQueryParser : QueryParser
             }
             else
             {
-                _tokens.Add(lexeme);
+                // GQL's D3 merge operator is one token, without changing SQL/OQL lexing.
+                if (token.Type == TokenType.Equals && _tokens.Count > 0 && _tokens[^1] is { Type: TokenType.Plus } plus && plus.End == lexeme.Start)
+                { _tokens[^1] = plus with { Type = TokenType.Unrecognized, Text = "+=", End = lexeme.End }; }
+                else { _tokens.Add(lexeme); }
                 if (token.Type is TokenType.String or TokenType.QuotedIdentifier && !IsCompleteQuoted(lexeme.Text))
                 {
                     Error("GQL0003", "Unterminated quoted text.", lexeme);
@@ -123,7 +126,7 @@ public sealed partial class GqlQueryParser : QueryParser
             {
                 Unsupported("STANDALONE ORDER BY AND PAGE STATEMENT", Current);
             }
-            else if (Is("DELETE") || Is("DETACH") || Is("WHERE"))
+            else if (Is("DELETE") || Is("DETACH") || Is("WHERE") || Is("SET") || Is("REMOVE"))
             {
                 Error("GQL0002", "Expected MATCH, INSERT, CREATE, RETURN, LET, FILTER, FOR, UNWIND, or WITH before this clause.", Current);
             }
@@ -175,6 +178,7 @@ public sealed partial class GqlQueryParser : QueryParser
         bool inValueExpression = false;
         bool inPattern = false;
         bool sawCall = false;
+        bool inUpdate = false;
         var label = LabelScan.None;
         int labelParens = 0;
         for (int i = 0; i < _tokens.Count; i++)
@@ -270,7 +274,9 @@ public sealed partial class GqlQueryParser : QueryParser
                 }
                 continue;
             }
-            if (patternDepth == 0 && value is "WHERE" or "RETURN" or "WITH" or "LET" or "FILTER" or "FOR" or "UNWIND") { inValueExpression = true; inPattern = false; }
+            if (patternDepth == 0 && value is "WHERE" or "RETURN" or "WITH" or "LET" or "FILTER" or "FOR" or "UNWIND" or "SET" or "REMOVE") { inValueExpression = true; inPattern = false; }
+            if (patternDepth == 0 && value is "MATCH" or "RETURN" or "WITH" or "LET" or "FILTER" or "FOR" or "UNWIND" or "INSERT" or "CREATE" or "NEXT") { inUpdate = false; }
+            if (patternDepth == 0 && value is "SET" or "REMOVE") { inUpdate = true; }
             if (patternDepth == 0 && (value is "MATCH" or "CREATE" or "INSERT" or "DELETE" || value == "NEXT" && IsQueryStartAt(i + 1))) { inValueExpression = false; }
             if (patternDepth == 0 && value is "MATCH" or "CREATE" or "INSERT") { inPattern = true; }
             if (patternDepth == 0 && value == "DELETE") { inPattern = false; }
@@ -281,6 +287,9 @@ public sealed partial class GqlQueryParser : QueryParser
             // here: words inside a pattern are names.
             if (value == "IS" && valuePosition)
             {
+                if (inUpdate && i > 1 && IsVariableLexeme(_tokens[i - 1]) &&
+                    (IsWordAt(i - 2, "SET") || IsWordAt(i - 2, "REMOVE") || _tokens[i - 2].Type == TokenType.Comma))
+                { label = LabelScan.ExpectPrimary; continue; }
                 int labeled = IsWordAt(i + 1, "NOT") ? i + 2 : i + 1;
                 if (IsWordAt(labeled, GqlLabelVocabulary.Labeled))
                 {

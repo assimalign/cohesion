@@ -313,7 +313,7 @@ COHDBL001. ORDER BY aliases and ordinals count visible wildcard output after USI
   say "unsupported" precisely rather than mis-parsing them as identifiers. Gateable
   names live in `SqlClauses`; supported names are present in `SqlLanguageProfile`,
   while reserved future clauses such as set operations, recursive/nested CTEs, windows,
-  `RETURNING`, unsupported join forms, and views remain absent. `ParseCore` scans a copy of its configured
+  unsupported join forms remain absent. `ParseCore` scans a copy of its configured
   lexer before recursive descent and attaches the first rejected clause to the
   statement, so analyzers observe `COHDBL001` with the token location and the `SQL`
   surface name. An actually unknown leading command still receives `SQL0002`, even
@@ -349,11 +349,21 @@ Types live in `Assimalign.Cohesion.Database.Sql.Language`, matching the assembly
 name (the repo rule). Earlier scaffolding used `...Database.Language.Sql`; the
 rename happened before external consumers existed.
 
+## Written-row projections (#1117)
+
+The three DML nodes expose optional Returning lists. Parsing shares the SELECT list
+grammar; the preflight resets VALUES/WHERE position flags on RETURNING so excluded
+subqueries retain their precise name. OUTPUT, OLD/NEW and INTO are contextual IsWord
+checks, preserving canonical identifier quoting and requiring no storage-format bump.
+The profile advertises one new clause; DIALECT.md specifies its complete contract.
+The OUTPUT alias stop applies only to INSERT and DELETE targets; UPDATE retains
+its ordinary bare output alias before SET.
+
 ## Non-goals (current dialect)
 
-CORRESPONDING, recursive/nested or data-modifying CTEs, window functions, views, LATERAL,
+CORRESPONDING, recursive/nested or data-modifying CTEs, window functions, LATERAL,
 UPDATE SET subqueries, `ON UPDATE`,
-`MERGE`, `RETURNING`, savepoints, isolation-level syntax, and cost-hint syntax.
+`MERGE`, RETURNING subqueries/OLD/NEW/INTO, savepoints, isolation-level syntax, and cost-hint syntax.
 Each is an additive dialect extension when its engine feature
 lands.
 

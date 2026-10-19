@@ -31,10 +31,10 @@ internal static partial class GraphExpressionEvaluator
                 GqlLiteralExpression literal => literal.Value,
                 GqlParameterExpression parameter => Parameter(parameter, parameters),
                 GqlVariableExpression variable => bindings[variable.Variable],
-                GqlPropertyExpression property => Member(bindings[property.Variable], property.Property, property),
+                GqlPropertyExpression property => Member(context.Current(bindings[property.Variable]), property.Property, property),
                 GqlBinaryExpression binary => Binary(binary, bindings, context, parameters),
                 GqlLogicalExpression logical => Logical(logical, bindings, context, parameters),
-                GqlLabeledPredicate labeled => Labeled(labeled, bindings),
+                GqlLabeledPredicate labeled => Labeled(labeled, bindings, context),
                 GqlUnaryExpression unary => Unary(unary, bindings, context, parameters),
                 GqlIsNullExpression test => (Evaluate(test.Operand, bindings, context, parameters) is null) != test.IsNegated,
                 GqlTruthTestExpression test => (Boolean(Evaluate(test.Operand, bindings, context, parameters), test.Operand) == test.TruthValue) != test.IsNegated,
@@ -49,6 +49,7 @@ internal static partial class GraphExpressionEvaluator
                 GqlStringPredicateExpression predicate => StringPredicate(predicate, bindings, context, parameters),
                 _ => throw new GraphPlanningException("COHDBG001", "Unsupported graph expression."),
             };
+            result = context.Current(result);
             if (result is string || GraphCompositeValues.IsComposite(result))
             {
                 try { GraphValueCodec.Measure(result); }
@@ -134,10 +135,10 @@ internal static partial class GraphExpressionEvaluator
     // ISO <labeled predicate>: true or false for a bound element. A variable with no binding (a
     // null-extended optional match) is UNKNOWN; AND propagates UNKNOWN unless an
     // operand is false, and WHERE keeps only true.
-    private static object? Labeled(GqlLabeledPredicate labeled, IReadOnlyDictionary<string, object?> bindings)
+    private static object? Labeled(GqlLabeledPredicate labeled, IReadOnlyDictionary<string, object?> bindings, GraphEvaluationContext context)
     {
         if (!bindings.TryGetValue(labeled.Variable, out var entity) || entity is null) { return null; }
-        bool matches = entity switch
+        bool matches = context.Current(entity) switch
         {
             GraphNode node => GraphLabelEvaluator.Matches(labeled.LabelExpression, node.Labels),
             GraphRelationship relationship => GraphLabelEvaluator.Matches(labeled.LabelExpression, relationship.Type),

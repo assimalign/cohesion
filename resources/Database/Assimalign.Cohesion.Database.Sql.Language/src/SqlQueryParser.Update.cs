@@ -36,8 +36,10 @@ public sealed partial class SqlQueryParser
             where = ParseExpression(ref lexer);
         }
 
+        var returning = ParseReturning(ref lexer, table);
+
         return new SqlUpdateExpression(table, assignments, where, null,
-            Location.Create(1, 1, pos, _lastTokenEnd));
+            Location.Create(1, 1, pos, _lastTokenEnd), returning);
     }
 
     /// <summary>

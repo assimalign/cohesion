@@ -58,12 +58,13 @@ public sealed partial class GraphStore
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(label);
         ArgumentException.ThrowIfNullOrWhiteSpace(propertyKey);
-        await LockAsync(context, cancellationToken).ConfigureAwait(false);
+        using var mutation = await EnterMutationAsync(context, cancellationToken).ConfigureAwait(false);
+        context = mutation.RefreshSnapshot(context);
         var latest = Latest(context);
         if (Definition(label, propertyKey, latest) is not null) { throw new InvalidOperationException($"A node-property index already exists for '{label}.{propertyKey}'."); }
         ulong id = (ulong)_storage.ReserveTransactionSequence();
         var record = new GraphRecord(3, id, Label: label, PropertyKey: propertyKey);
-        byte[] bytes = GraphRecordCodec.Encode(record, context.Sequence);
+        byte[] bytes = await EncodeAsync(record, context.Sequence).ConfigureAwait(false);
         var entries = GetNodes(label, latest).Where(node => node.Properties.ContainsKey(propertyKey))
             .Select(node => (Found: Find(1, node.Id, latest)!.Value, Key: Composite(GraphRecordCodec.Key(node.Properties[propertyKey]), node.Id))).ToArray();
         var inserted = await ApplyAsync(context, async bracket =>
@@ -89,7 +90,8 @@ public sealed partial class GraphStore
     /// <exception cref="TransactionAbortedException">The index changed after the transaction snapshot, or the transaction ended while waiting for its writer lock.</exception>
     public async ValueTask DropIndexAsync(string label, string propertyKey, TransactionContext context, CancellationToken cancellationToken = default)
     {
-        await LockAsync(context, cancellationToken).ConfigureAwait(false);
+        using var mutation = await EnterMutationAsync(context, cancellationToken).ConfigureAwait(false);
+        context = mutation.RefreshSnapshot(context);
         var definition = Definition(label, propertyKey, context.Snapshot)
             ?? throw new InvalidOperationException($"No visible node-property index exists for '{label}.{propertyKey}'.");
         if (Definition(label, propertyKey, Latest(context))?.Id != definition.Id)
