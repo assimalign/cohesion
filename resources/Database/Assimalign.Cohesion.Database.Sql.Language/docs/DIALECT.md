@@ -174,10 +174,18 @@ that released key, matching PostgreSQL's source-order behavior. Keys introduced 
 earlier effect still count as reaching that affected row twice. A false/UNKNOWN filter
 locks the existing row but does not mark it affected.
 
-All keys from every unique index of every proposal, plus old/new replacement keys,
-are locked in sorted batches before any conflicting row lock. Upserts requesting declared
-defaults or identities hold a table Exclusive lock for the transaction's lifetime so that
-source-order default evaluation and arbitration finish before the complete key batch is locked.
+Without requested side-effecting defaults, all keys from every unique index of every proposal
+are locked in one sorted batch before arbitration. A requested identity or a default containing
+any non-immutable function call uses source-order per-proposal locking: evaluate its defaults,
+lock all its unique keys in sorted order, then perform its latest-state lookup and conflict
+projection before evaluating the next proposal. This conservative rule includes STABLE and
+sequence-like function calls; constants and immutable expressions keep the up-front batch.
+Old/new replacement keys follow in a sorted batch before any conflicting row lock.
+Upserts hold only table IX, allowing different-key defaulted upserts and plain INSERTs to
+progress independently. Reversed multi-row proposal orders can deadlock; the detected victim
+must roll back and retry its entire transaction (#1668). Consistent input row ordering reduces
+this exposure, as [PostgreSQL advises](https://www.postgresql.org/docs/18/explicit-locking.html#LOCKING-DEADLOCKS)
+(doc/src/sgml/mvcc.sgml:1546-1555).
 A latest-state lookup under that key lock sees committed or own entries. **Snapshot**
 (the session and autocommit default) aborts retryably with DatabaseTransactionAbortedException
 if a conflict was committed after the statement snapshot. In particular, two autocommit

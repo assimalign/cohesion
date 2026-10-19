@@ -52,27 +52,27 @@ internal sealed partial class SqlPlanExecutor
         IReadOnlyList<SqlProjection>? returning = null, IReadOnlyList<SqlBoundExpression[]>? valueRows = null,
         SqlOnConflictPlan? onConflict = null)
     {
-        // Defaults cannot be run during lock preparation: one proposal and its conflict
-        // projection must finish before the next proposal consumes an identity or function.
-        bool orderedDefaults = onConflict is not null && Enumerable.Range(0, table.Columns.Count).Any(ordinal =>
-        {
-            var column = table.Columns[ordinal];
-            if (column.Identity is null && column.DefaultLiteral is null && column.DomainName is null) { return false; }
-            int target = -1;
-            for (int i = 0; i < targetOrdinals.Count; i++) { if (targetOrdinals[i] == ordinal) { target = i; break; } }
-            return target < 0 || valueRows?.Any(row => row[target].Kind == SqlBoundExpressionKind.DefaultItem) == true ||
-                onConflict.Assignments.Any(assignment => assignment.Ordinal == ordinal && assignment.Value.Kind == SqlBoundExpressionKind.DefaultItem);
-        });
         await AcquireOutgoingReferenceIntentLocksAsync(table, statement, cancellationToken).ConfigureAwait(false);
         if (onConflict?.DoUpdate == true)
         { await AcquireIncomingReferenceIntentLocksAsync(table, statement, cancellationToken).ConfigureAwait(false); }
         await statement.Coordinator.LockManager.AcquireAsync(statement.Transaction.Sequence, LockResource.Object(table.ObjectId),
-            orderedDefaults ? LockMode.Exclusive : LockMode.IntentExclusive, cancellationToken).ConfigureAwait(false);
+            LockMode.IntentExclusive, cancellationToken).ConfigureAwait(false);
         EnsureCurrentDefinition(table);
         var indexes = GetLiveIndexes(table);
         EnsureUpsertIndexes(table, indexes, onConflict);
         var bound = _definitions.Get(table, cancellationToken);
         var defaults = bound.DefaultValues;
+        // Identity and non-immutable calls (including sequence functions) must interleave
+        // with conflict projection. Constants and immutable expressions keep batch locking.
+        bool orderedDefaults = onConflict is not null && Enumerable.Range(0, table.Columns.Count).Any(ordinal =>
+        {
+            if (table.Columns[ordinal].Identity is null && defaults[ordinal] is not SqlBoundDefault { RequiresSourceOrder: true })
+            { return false; }
+            int target = -1;
+            for (int i = 0; i < targetOrdinals.Count; i++) { if (targetOrdinals[i] == ordinal) { target = i; break; } }
+            return target < 0 || valueRows?.Any(row => row[target].Kind == SqlBoundExpressionKind.DefaultItem) == true ||
+                onConflict.Assignments.Any(assignment => assignment.Ordinal == ordinal && assignment.Value.Kind == SqlBoundExpressionKind.DefaultItem);
+        });
         var domainEvaluator = bound.Domains.Count == 0 ? null : ExecutionEvaluator(null, cancellationToken);
         var rows = new List<(byte[] Record, object?[] Values)>(sourceRows.Count);
         int identityOrdinal = -1;

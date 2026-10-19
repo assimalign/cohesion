@@ -2562,19 +2562,24 @@ referential-action pending-update view excludes replaced heap versions and suppl
 values to FK and incoming-reference checks. A removed key cannot authorize a new child; a
 self-reference moved with its key validates against the final row.
 
-After object intent locks, statements without requested defaults acquire the keys of
+After object intent locks, statements without requested side-effecting defaults acquire the keys of
 **every unique index of every proposal**, sorted and deduplicated, before live arbitration.
 Each proposal's encoded keys are reused for hashing, lookup and pending inserts.
 BTreeIndex.FindLiveEntryAsync re-grants those locks outside the apply gate. Replacement
 old/new keys are also acquired before any row lock, then conflicting rows form a sorted
 batch and reference locks follow. Lock preparation never evaluates defaults speculatively.
-When a proposal or conflict assignment requests a declared default or identity, the table
-is locked Exclusive instead of IX before evaluation. That permits stable latest-state
-cursor probes while each proposal and projection consumes defaults in source order;
-the complete proposal/replacement key batch is collected afterward, before row locks.
-This deliberately serializes writers on that table for the transaction's lifetime;
-it avoids guessing future identity values or replaying side-effecting application defaults.
-This is the second
+When a proposal or conflict assignment requests an identity or a default containing a
+non-immutable function call, each proposal evaluates its defaults and acquires all its unique
+keys in one sorted batch before its latest-state lookup and conflict projection. The binder
+records non-immutable calls recursively, including sequence-like application functions;
+STABLE is conservatively treated as side-effecting. Constants and immutable expressions retain
+the complete up-front proposal batch, including after definitions are reloaded. The table
+retains only IX, so unrelated single-row upserts and plain INSERTs can progress while a
+defaulted upsert waits. Replacement old/new keys and the sorted row batch follow arbitration.
+Reversed multi-row proposal orders can deadlock; the lock manager detects a retryable victim
+(the same class tracked by #1668). Ordering input rows consistently reduces this exposure,
+as PostgreSQL advises in doc/src/sgml/mvcc.sgml:1546-1555. No speculative allocation or
+default replay is needed. This is the second
 deliberate exception to row-before-key, beside the referential cascade walk. It can form
 row/key cycles with ordinary UPDATE/DELETE and SET NULL/DEFAULT. The lock manager detects
 cycles as retryable deadlocks; callers roll back/retry the victim. Gated tests exercise

@@ -16,6 +16,30 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed class SqlUpsertExecutionTests
 {
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Upsert: nested non-immutable default calls interleave proposals and conflict projections")]
+    [InlineData(SqlFunctionVolatility.Stable)]
+    [InlineData(SqlFunctionVolatility.Volatile)]
+    public async Task ExecuteAsync_NonImmutableDefaultSourceOrder_ShouldInterleaveConflictProjection(SqlFunctionVolatility volatility)
+    {
+        // Arrange: a sequence-like application function exposes every allocation.
+        int allocations = 0;
+        var builder = SqlDatabaseEngine.CreateBuilder("upsert-function-default-order");
+        builder.Functions.Add(SqlScalarFunction.Create("next_default", (int _) => ++allocations, volatility));
+        await using var engine = await builder.BuildAsync(CancellationToken.None);
+        var database = await engine.CreateDatabaseAsync("app", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE t (id INT DEFAULT (next_default(0) + 0) PRIMARY KEY, k INT UNIQUE, CHECK(k <> 1 OR id < 4))", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT INTO t(k) VALUES (1)", cancellationToken: CancellationToken.None);
+
+        // Act
+        var result = await session.ExecuteAsync("INSERT INTO t(k) VALUES (1), (2) ON CONFLICT(k) DO UPDATE SET id = DEFAULT", cancellationToken: CancellationToken.None);
+
+        // Assert
+        result.AffectedCount.ShouldBe(2);
+        allocations.ShouldBe(4);
+        CheckRows(await RowsAsync(session, "SELECT id, k FROM t ORDER BY k"), [[3, 1], [4, 2]]);
+    }
+
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Upsert: proposal and conflict identity defaults follow source order")]
     [InlineData(false, false)]
     [InlineData(true, false)]

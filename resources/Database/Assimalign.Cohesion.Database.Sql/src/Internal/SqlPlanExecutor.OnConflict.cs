@@ -41,7 +41,7 @@ internal sealed partial class SqlPlanExecutor
         var unique = indexes.Where(index => index.Metadata.IsUnique).ToList();
         var hashes = new List<ulong>();
         // Build each proposal's keys once, sharing them between locking, arbitration and
-        // pending inserts. Without defaults the full batch precedes every live lookup.
+        // pending inserts. Without side-effecting defaults the full batch precedes lookup.
         IEnumerable<(byte[] Record, object?[] Values, IndexKey[] Keys)> prepared = proposals.Select(proposal =>
             (proposal.Record, proposal.Values, unique.Select(index => BuildIndexKey(table, index.KeyOrdinals, proposal.Values)).ToArray()));
         if (!orderedDefaults)
@@ -50,9 +50,9 @@ internal sealed partial class SqlPlanExecutor
             foreach (var proposal in prepared) { hashes.AddRange(proposal.Keys.Select(key => key.Hash())); }
             await AcquireUniqueKeyLocksAsync(statement, table.ObjectId, hashes, cancellationToken).ConfigureAwait(false);
         }
-        // A table Exclusive lock makes latest-state cursor reads stable without key locks.
-        // This path interleaves default evaluation with conflict projection, then acquires
-        // all proposal AND replacement keys in one sorted batch before any row lock.
+        // Ordered defaults stay lazy: acquire each proposal's sorted unique keys after
+        // evaluating its defaults and before latest-state arbitration or any row lock.
+        // Reversed proposal orders can deadlock; the lock manager reports a retryable victim.
         var arbiterOrdinals = arbiters.Select(arbiter => unique.IndexOf(arbiter)).ToArray();
         var pending = new Dictionary<(string Index, IndexKey Key), SqlUpsertWrite?>();
         var affected = new HashSet<ulong>();
@@ -66,7 +66,12 @@ internal sealed partial class SqlPlanExecutor
             cancellationToken.ThrowIfCancellationRequested();
             // PostgreSQL nodeModifyTable.c:1108: proposed constraints precede arbitration.
             ValidateRows(table, [proposal.Values], statement, cancellationToken, checksOnly: true);
-            if (orderedDefaults) { hashes.AddRange(proposal.Keys.Select(key => key.Hash())); }
+            if (orderedDefaults)
+            {
+                hashes.Clear();
+                hashes.AddRange(proposal.Keys.Select(key => key.Hash()));
+                await AcquireUniqueKeyLocksAsync(statement, table.ObjectId, hashes, cancellationToken).ConfigureAwait(false);
+            }
             ulong? conflict = null;
             bool pendingConflict = false;
             for (int arbiterIndex = 0; arbiterIndex < arbiters.Count; arbiterIndex++)
@@ -79,13 +84,7 @@ internal sealed partial class SqlPlanExecutor
                     pendingConflict = true;
                     break;
                 }
-                ulong? live;
-                if (orderedDefaults)
-                {
-                    await using var cursor = arbiter.Index.OpenCursor(ConstraintCurrentSnapshot(statement), new IndexKeyRange(key, key, true, true));
-                    live = await cursor.MoveNextAsync(cancellationToken).ConfigureAwait(false) ? cursor.CurrentEntryReference : null;
-                }
-                else { live = await arbiter.Index.FindLiveEntryAsync(statement.Transaction, key, cancellationToken).ConfigureAwait(false); }
+                ulong? live = await arbiter.Index.FindLiveEntryAsync(statement.Transaction, key, cancellationToken).ConfigureAwait(false);
                 if (live is { } location) { conflict = location; break; }
             }
 
