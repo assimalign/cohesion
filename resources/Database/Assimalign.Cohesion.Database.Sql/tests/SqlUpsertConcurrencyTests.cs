@@ -280,10 +280,10 @@ public sealed class SqlUpsertConcurrencyTests
         (await session.ExecuteAsync("INSERT INTO t VALUES (2, 20), (3, 30)")).AffectedCount.ShouldBe(2);
     }
 
-    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Upsert: referential row/key cycles are detected and the surviving upsert completes")]
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Upsert: referential row/key waits release arbitration keys and complete without a victim")]
     [InlineData("SET NULL")]
     [InlineData("SET DEFAULT")]
-    public async Task ExecuteAsync_ReferentialActionRowKeyCycle_ShouldReportDeadlock(string action)
+    public async Task ExecuteAsync_ReferentialActionRowKeyCycle_ShouldCompleteWithoutVictim(string action)
     {
         // Arrange: hold the exact child row a referential action will update, before its key locks.
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
@@ -303,20 +303,19 @@ public sealed class SqlUpsertConcurrencyTests
         await using var deletion = await deleter.BeginTransactionAsync(timeout.Token);
         await database.Coordinator.LockManager.AcquireAsync(deletion.Context.Sequence,
             LockResource.Entry(child.ObjectId, location), LockMode.Exclusive, timeout.Token);
-        await using var upsert = await upserter.BeginTransactionAsync(timeout.Token);
+        await using var upsert = await upserter.BeginTransactionAsync(IsolationLevel.ReadCommitted, timeout.Token);
 
-        // Act: upsert owns the arbiter key and waits for the child row. The SET action needs that key.
+        // Act: upsert releases the arbiter key before waiting for the child row. The SET action can take it.
         using var waits = new LockWaitListener(database.Name);
         var pending = upserter.ExecuteAsync("INSERT INTO c VALUES (10, 1, 1) ON CONFLICT (id) DO UPDATE SET v = EXCLUDED.v", cancellationToken: timeout.Token).AsTask();
         await waits.WaitForWaitAsync(upsert.Context.Sequence, timeout.Token);
-        await Should.ThrowAsync<DatabaseTransactionDeadlockException>(async () =>
-            await deleter.ExecuteAsync("DELETE FROM p WHERE id = 1", cancellationToken: timeout.Token));
-        await deletion.RollbackAsync(timeout.Token);
+        (await deleter.ExecuteAsync("DELETE FROM p WHERE id = 1", cancellationToken: timeout.Token)).AffectedCount.ShouldBe(1);
+        await deletion.CommitAsync(timeout.Token);
         (await pending).AffectedCount.ShouldBe(1);
         await upsert.CommitAsync(timeout.Token);
 
         // Assert
-        (await RowsAsync(deleter, "SELECT pid, v FROM c")).ShouldHaveSingleItem().ShouldBe(new object?[] { 1, 1 });
+        (await RowsAsync(deleter, "SELECT pid, v FROM c")).ShouldHaveSingleItem().ShouldBe(new object?[] { action == "SET NULL" ? null : 2, 1 });
     }
 
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Upsert: sorted multi-row locks interoperate with a concurrent plain INSERT")]
@@ -487,8 +486,8 @@ public sealed class SqlUpsertConcurrencyTests
         await loser.RollbackAsync(timeout.Token);
         (await RowsAsync(first, "SELECT id FROM t")).ShouldHaveSingleItem()[0].ShouldBe(1);
     }
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Upsert: unchanged unique values still repoint entries and expose a retryable UPDATE cycle")]
-    public async Task ExecuteAsync_ValueOnlyUpdateRowKeyCycle_ShouldDetectAndPermitRetry()
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Upsert: unchanged unique values repoint entries after arbitration releases its row wait keys")]
+    public async Task ExecuteAsync_ValueOnlyUpdateRowKeyCycle_ShouldCompleteWithoutVictim()
     {
         // Arrange: the storage update creates a fresh heap/index version even for SET v = v + 1.
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
@@ -508,17 +507,15 @@ public sealed class SqlUpsertConcurrencyTests
         await using var upsert = await upserter.BeginTransactionAsync(IsolationLevel.ReadCommitted, timeout.Token);
         using var waits = new LockWaitListener(database.Name);
 
-        // Act: wait for evidence that the upsert owns its key and queued on the row.
+        // Act: wait for evidence that the upsert released its key and queued on the row.
         var pending = upserter.ExecuteAsync("INSERT INTO t VALUES (1, 1) ON CONFLICT(id) DO UPDATE SET v = t.v + EXCLUDED.v", cancellationToken: timeout.Token).AsTask();
         await waits.WaitForWaitAsync(upsert.Context.Sequence, timeout.Token);
-        await Should.ThrowAsync<DatabaseTransactionDeadlockException>(async () =>
-            await updater.ExecuteAsync("UPDATE t SET v = v + 1 WHERE id = 1", cancellationToken: timeout.Token));
-        await update.RollbackAsync(timeout.Token);
+        (await updater.ExecuteAsync("UPDATE t SET v = v + 1 WHERE id = 1", cancellationToken: timeout.Token)).AffectedCount.ShouldBe(1);
+        await update.CommitAsync(timeout.Token);
         (await pending).AffectedCount.ShouldBe(1);
         await upsert.CommitAsync(timeout.Token);
 
-        // Assert: retry the complete victim transaction after the survivor commits.
-        (await updater.ExecuteAsync("UPDATE t SET v = v + 1 WHERE id = 1", cancellationToken: timeout.Token)).AffectedCount.ShouldBe(1);
+        // Assert: both statements committed exactly once.
         (await RowsAsync(updater, "SELECT v FROM t")).ShouldHaveSingleItem()[0].ShouldBe(2);
     }
 

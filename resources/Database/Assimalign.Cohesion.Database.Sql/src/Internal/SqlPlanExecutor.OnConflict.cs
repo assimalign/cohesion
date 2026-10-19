@@ -39,6 +39,11 @@ internal sealed partial class SqlPlanExecutor
     {
         var arbiters = indexes.Where(index => plan.Arbiters.Any(arbiter => arbiter.Name == index.Metadata.Name)).ToList();
         var unique = indexes.Where(index => index.Metadata.IsUnique).ToList();
+        var locks = statement.Coordinator.LockManager;
+        var owner = statement.Transaction.Sequence;
+        var mark = locks.MarkStatement(owner);
+    RetryArbitration:
+        cancellationToken.ThrowIfCancellationRequested();
         var hashes = new List<ulong>();
         // Build each proposal's keys once, sharing them between locking, arbitration and
         // pending inserts. Without side-effecting defaults the full batch precedes lookup.
@@ -57,7 +62,6 @@ internal sealed partial class SqlPlanExecutor
         var pending = new Dictionary<(string Index, IndexKey Key), SqlUpsertWrite?>();
         var affected = new HashSet<ulong>();
         var writes = new List<SqlUpsertWrite>();
-        var lockedRows = new List<(PageId PageId, int SlotIndex)>();
         var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
         var bound = _definitions.Get(table, cancellationToken);
         int[]? assigned = bound.Domains.Count == 0 ? null : plan.Assignments.Select(assignment => assignment.Ordinal).ToArray();
@@ -96,6 +100,12 @@ internal sealed partial class SqlPlanExecutor
             }
             if (conflict is { } reference)
             {
+                var row = LockResource.Entry(table.ObjectId, reference);
+                if (!locks.TryAcquire(owner, row, LockMode.Exclusive))
+                {
+                    await WaitForUpsertRowAsync(row, LockMode.Exclusive, mark, statement, table, cancellationToken).ConfigureAwait(false);
+                    goto RetryArbitration;
+                }
                 var (pageId, slotIndex) = SqlRecordLocation.Unpack(reference);
                 if (!_storage.TryReadRecord(pageId, slotIndex, table.ObjectId, out var record)) { throw DamagedRow(); }
                 var oldValues = DecodeRow(record, pageId, slotIndex, table, bound.MissingValues, out var writer, out _);
@@ -104,7 +114,6 @@ internal sealed partial class SqlPlanExecutor
                 { throw SnapshotConflict(); }
                 if (!plan.DoUpdate) { continue; }
                 if (affected.Contains(reference)) { throw new SqlPlanningException("COHSQLE036", ErrorMessages.UpsertRepeatedRow); }
-                lockedRows.Add((pageId, slotIndex));
                 var scope = new object?[oldValues.Length * 2];
                 oldValues.CopyTo(scope, 0);
                 proposal.Values.CopyTo(scope, oldValues.Length);
@@ -148,7 +157,6 @@ internal sealed partial class SqlPlanExecutor
             }
         }
         await AcquireUniqueKeyLocksAsync(statement, table.ObjectId, hashes, cancellationToken).ConfigureAwait(false);
-        await AcquireRowWriteLocksAsync(statement, table.ObjectId, lockedRows, cancellationToken).ConfigureAwait(false);
         var replacements = writes.Where(write => write.OldLocation.HasValue).ToList();
         var pendingUpdates = BuildConstraintUpdates(table,
             replacements.Select(write => (write.OldLocation!.Value, write.OldValues!, write.Values)), plan.Assignments);
@@ -159,6 +167,11 @@ internal sealed partial class SqlPlanExecutor
         ValidateRows(table, writes.Select(write => write.Values).ToList(), statement, cancellationToken, references: references,
             updates: pendingUpdates, skipChecks: true,
             foreignKeySnapshot: statement.Transaction.IsolationLevel == IsolationLevel.ReadCommitted ? statement.Transaction.Snapshot : null);
+        if (ContendedUpsertParent(references, statement) is { } parent)
+        {
+            await WaitForUpsertRowAsync(parent, LockMode.Shared, mark, statement, null, cancellationToken).ConfigureAwait(false);
+            goto RetryArbitration;
+        }
         await AcquireParentRowLocksAsync(references, statement, cancellationToken).ConfigureAwait(false);
         var released = new List<SqlParentReference>();
         CollectReleasedReferences(table, replacements.Select(write => write.OldValues!).ToList(), released, statement, cancellationToken,
@@ -167,6 +180,11 @@ internal sealed partial class SqlPlanExecutor
                 int ordinal = FindColumnOrdinal(table, column);
                 return !ValuesEqual(replacements[index].Values[ordinal], replacements[index].OldValues![ordinal]);
             }));
+        if (ContendedUpsertParent(released, statement) is { } releasedParent)
+        {
+            await WaitForUpsertRowAsync(releasedParent, LockMode.Shared, mark, statement, null, cancellationToken).ConfigureAwait(false);
+            goto RetryArbitration;
+        }
         await AcquireParentRowLocksAsync(released, statement, cancellationToken, validate: false).ConfigureAwait(false);
 
         foreach (var write in writes)
@@ -201,6 +219,44 @@ internal sealed partial class SqlPlanExecutor
 
         TransactionAbortedException SnapshotConflict() => new(string.Format(CultureInfo.CurrentCulture,
             _upsertSnapshotConflict, table.Schema, table.Name));
+    }
+
+    // No heap/index mutation or RETURNING projection precedes the apply below arbitration.
+    // Release every proposal's locks, wait through the detector, then discard all pending state.
+    private async ValueTask WaitForUpsertRowAsync(LockResource row, LockMode mode, LockStatementMark mark,
+        SqlStatementContext statement, SqlCatalogTable? conflictTable, CancellationToken cancellationToken)
+    {
+        var locks = statement.Coordinator.LockManager;
+        locks.ReleaseSince(mark);
+        try
+        {
+            await locks.AcquireAsync(statement.Transaction.Sequence, row, mode, cancellationToken).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (conflictTable is not null && statement.Transaction.IsolationLevel != IsolationLevel.ReadCommitted)
+            {
+                // A committed rekey/delete must still abort Snapshot even if re-arbitration would
+                // find no live index entry. Rollback has undone the deleter before releasing the row.
+                var (pageId, slotIndex) = SqlRecordLocation.Unpack(row.EntryId);
+                EnsureLatestVersion(conflictTable, pageId, slotIndex, statement.Transaction.Sequence);
+            }
+        }
+        finally
+        {
+            locks.ReleaseSince(mark);
+        }
+    }
+
+    private static LockResource? ContendedUpsertParent(List<SqlParentReference> references, SqlStatementContext statement)
+    {
+        foreach (var reference in references)
+        {
+            var row = LockResource.Entry(reference.Parent.ObjectId, reference.EntryId);
+            if (!statement.Coordinator.LockManager.TryAcquire(statement.Transaction.Sequence, row, LockMode.Shared))
+            {
+                return row;
+            }
+        }
+        return null;
     }
 
     private static object? CoerceUpsertColumn(SqlCatalogTable table, int ordinal, object? value)

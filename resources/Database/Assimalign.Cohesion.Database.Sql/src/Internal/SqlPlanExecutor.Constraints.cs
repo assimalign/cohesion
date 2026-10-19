@@ -128,7 +128,10 @@ internal sealed partial class SqlPlanExecutor
     // serialized nearly all writers. The cost of narrowing is that referential
     // waits can now form wait-for cycles (the closure's object-id ordering made
     // them impossible); they surface as the lock manager's requester-closes-cycle
-    // abort, the same retryable deadlock the row-write path already produces.
+    // abort, the same retryable deadlock the row-write path already produces. ON CONFLICT
+    // instead tries parent-row grants without waiting: on contention it releases its
+    // unwritten arbitration's new grants, waits through the lock manager, then restarts
+    // the whole arbitration (#1668). Plain INSERT takes parent rows before unique keys.
 
     /// <summary>
     /// Takes the table-grain <see cref="LockMode.IntentShared"/> locks on the
