@@ -749,6 +749,9 @@ Neo4j `54a7dcf7c25` and RavenDB `83399cb8bc8`.
   failed write. Torn-tail offsets belong to the medium lock; checkpoint truncation pauses
   appends under that lock, drains before truncating, then writes its checkpoint. Disposal waits
   for the medium, closes appends under the append lock, and drains all remaining frames once.
+  A borrowed stream closed while the journal is live is a write/flush failure and latches it
+  offline. ObjectDisposedException escapes without latching only during Dispose's final drain,
+  when the journal has already closed appends.
 
 **The handle keeps `FileOptions.Asynchronous | FileOptions.RandomAccess`.** The physical file
 system opens every handle overlapped with the random-access hint (`PhysicalFileSystemFile.OpenHandle`),
@@ -1456,10 +1459,14 @@ page is written, has made that image durable before any stolen write of the page
 **Memory.** Initialization verifies frames and collects committed brackets, the checkpoint,
 and each page's last applicable record. One streaming pass then replays records in file order.
 During initialization, unproven brackets retain their last record identity per page until their
-commit promotes it; pending identities without a commit are discarded at the end. File ordinals
-keep a late commit from promoting an older record over a later full page image. A page is cached
-from its image to its last record and written
-then. When more pages are open at once than the cache holds (the buffer pool's capacity), the least
+commit promotes it. A rollback releases its pending page entries and recycles their dictionary;
+only its sequence identity remains. Fresh sequences resume above the recovered maximum and
+header floor, but the adopted-sequence and journal APIs permit reuse before recovery. If a later
+commit reuses a rolled-back sequence, a fresh planning pass preserves the original rule that
+any commit admits all changes of that sequence. Other pending identities are discarded at the
+end. File ordinals keep a late commit from promoting an older record over a later full page image.
+A page is cached from its image to its last record and written then. When more pages are open at
+once than the cache holds (the buffer pool's capacity), the least
 recently used is written early, checksum-stamped, and read back — checksum- and LSN-verified — by
 its next record. Memory follows page identities plus the cache, not the journal's size.
 
@@ -1930,10 +1937,15 @@ paths drain before reading; offline readers see only the medium. The borrowed-re
 test measures the minimum of three warmed rounds across 20,000 frames and permits no per-frame
 allocation. Transaction recovery consumes owned public records across the assembly boundary.
 
-Initialization verifies each frame's CRC-32C once. Later sequential scans reuse that verified
-prefix, checking each new suffix; checkpoint truncation resets its bounds. Initialization also
-classifies commits and plans pages, leaving only ordered redo and transaction classification
-to scan the journal again. Replay decisions and transaction classification are unchanged.
+Initialization verifies each frame's CRC-32C and classifies commits and pages. Recovery consumes
+and releases that cached analysis, then uses a single-use token to reuse its verified prefix
+only for the immediately following redo enumeration on the same journal instance. An intervening
+read or append invalidates the token; every other public or borrowed read and every later
+analysis verifies CRCs afresh. Truncation clears both analysis and prefix before issuing
+`SetLength`, so a failed truncation cannot retain either. Replay order and transaction
+classification are unchanged.
+Restoring CRC verification on later reads adds measurable transaction-classification cost;
+recovery measurements must include it and account for tiered-JIT warm-up variation.
 Five warmed physical-file rounds still do not establish the required 5× improvement for
 50 MB recovery. This remains an independent acceptance criterion; #1511 does not replace it,
 and the owner decides closure.

@@ -153,6 +153,49 @@ public sealed class JournalTests
         journal.AppendCommit(2).ShouldBe(2);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Storage] - Journal writes: closing a borrowed stream while live latches offline")]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public void Flush_ClosedBorrowedStreamWhileLive_ShouldLatchOffline(int pending)
+    {
+        // Arrange: buffered write, written prefix awaiting flush, or a direct oversized frame.
+        using var stream = new ClosedFlushStream();
+        using var journal = StorageJournal.Create(stream, leaveOpen: true);
+        journal.MaximumBufferBytes = 64;
+        journal.AppendCommit(1);
+        if (pending > 0)
+        {
+            journal.ReadAll();
+        }
+        int offline = 0;
+        journal.Offline = _ => offline++;
+        stream.Dispose();
+
+        // Act
+        var failure = Should.Throw<StorageOfflineException>(() =>
+        {
+            if (pending == 2)
+            {
+                journal.AppendOperation(1, new byte[128]);
+            }
+            else
+            {
+                journal.Flush();
+            }
+        });
+
+        // Assert: provider disposal is a medium failure until the journal itself closes.
+        failure.InnerException.ShouldBeOfType<ObjectDisposedException>();
+        failure.Cause.ShouldBe(StorageOfflineCause.JournalFlush);
+        journal.IsOffline.ShouldBeTrue();
+        journal.OfflineError.ShouldBeSameAs(failure);
+        offline.ShouldBe(1);
+        Should.Throw<StorageOfflineException>(() => journal.AppendCommit(2));
+        journal.Dispose();
+        offline.ShouldBe(1);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Storage] - Journal disposal: an already closed borrowed stream does not take it offline")]
     [InlineData(0)]
     [InlineData(1)]
@@ -252,7 +295,7 @@ public sealed class JournalTests
         journal.AppendRollback(4);
 
         // Act
-        var analysis = journal.ReadRecoveryAnalysis(default);
+        var analysis = journal.ReadRecoveryAnalysis(default, out _);
 
         // Assert: promoting an older record cannot replace a later image's position.
         analysis.Committed.Order().ShouldBe([1L, 3L]);
@@ -266,7 +309,7 @@ public sealed class JournalTests
 
         // An append invalidates the cached analysis and makes the pending delta applicable.
         journal.AppendCommit(4);
-        journal.ReadRecoveryAnalysis(default).Pages[2].LastLsn.ShouldBe(committedImage + 1);
+        journal.ReadRecoveryAnalysis(default, out _).Pages[2].LastLsn.ShouldBe(committedImage + 1);
     }
 
     [Fact]

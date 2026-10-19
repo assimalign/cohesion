@@ -97,13 +97,13 @@ internal static class StorageRecovery
         int cacheCapacity = Storage.DefaultBufferPoolCapacity,
         CancellationToken cancellationToken = default)
     {
-        var analysis = journal.ReadRecoveryAnalysis(cancellationToken);
+        var analysis = journal.ReadRecoveryAnalysis(cancellationToken, out var replayToken);
         long maxSequence = analysis.MaxSequence;
         long checkpointLsn = analysis.CheckpointLsn;
         var committed = analysis.Committed;
 
-        // Planning was fused into initialization. Copy identities so protected-page and
-        // file-length exclusions never mutate the journal's reusable analysis.
+        // Planning was fused into initialization and consumed here. Copy identities before
+        // applying the recovery-specific protected-page and file-length exclusions.
         var plans = new Dictionary<long, StorageRecoveryPagePlan>(analysis.Pages);
         long originalLength = data.Length;
         var skipped = new List<long>();
@@ -129,7 +129,7 @@ internal static class StorageRecovery
         // Redo: the ordered replay.
         var cache = new RedoCache(data, Math.Max(1, cacheCapacity));
         var imaged = new HashSet<long>();
-        foreach (var record in journal.ReadSequentialBorrowed())
+        foreach (var record in journal.ReadRecoveryRecords(replayToken))
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (!IsPageRecord(record.Type) || !plans.TryGetValue((long)record.PageId, out var plan))

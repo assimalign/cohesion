@@ -195,6 +195,7 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
     private long _length;
     private long _scannedLength;
     private StorageRecoveryAnalysis? _recoveryAnalysis;
+    private object? _recoveryReplayToken;
 
     // The size trigger: when an append takes the journal to _checkpointThreshold bytes or
     // more, _checkpointNeeded is invoked once (outside the lock), and again only after the
@@ -609,6 +610,8 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
             lock (_syncRoot)
             {
                 ThrowIfDisposed();
+                _recoveryAnalysis = null;
+                _recoveryReplayToken = null;
                 copied = CopyBufferedFrameLocked(location, bytes);
             }
 
@@ -619,6 +622,8 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
                     lock (_syncRoot)
                     {
                         ThrowIfDisposed();
+                        _recoveryAnalysis = null;
+                        _recoveryReplayToken = null;
                         copied = CopyBufferedFrameLocked(location, bytes);
                     }
 
@@ -941,6 +946,8 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
                 PauseAppends(allowOffline: true);
                 try
                 {
+                    _recoveryAnalysis = null;
+                    _recoveryReplayToken = null;
                     DrainForReadMedium();
                     return ReadAllCore();
                 }
@@ -975,7 +982,10 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
     // crosses the public reader boundary.
     internal IEnumerable<JournalRecord> ReadSequentialBorrowed() => ReadSequentialCore(borrowPayloads: true);
 
-    private IEnumerable<JournalRecord> ReadSequentialCore(bool borrowPayloads)
+    internal IEnumerable<JournalRecord> ReadRecoveryRecords(object replayToken)
+        => ReadSequentialCore(borrowPayloads: true, replayToken);
+
+    private IEnumerable<JournalRecord> ReadSequentialCore(bool borrowPayloads, object? replayToken = null)
     {
         ThrowIfDisposed();
         EnsureInitialized();
@@ -986,10 +996,13 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
                 PauseAppends(allowOffline: true);
                 try
                 {
+                    bool reuseVerifiedPrefix = replayToken is not null && ReferenceEquals(replayToken, _recoveryReplayToken);
+                    _recoveryReplayToken = null;
+                    _recoveryAnalysis = null;
                     DrainForReadMedium();
                     long frameNumber = 0;
                     long verifiedLength = 0;
-                    foreach (var frame in ReadFrames(reuseVerifiedPrefix: true))
+                    foreach (var frame in ReadFrames(reuseVerifiedPrefix))
                     {
                         var record = DecodeRecord(frame, ++frameNumber);
                         verifiedLength += FramePrefixSize + frame.Length + sizeof(uint);
@@ -1012,12 +1025,16 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
     /// <inheritdoc />
     /// <remarks>
     /// The append buffer drains before the medium is released, as a clean close must not lose
-    /// appended records. An offline journal writes nothing. A drain that fails takes the journal
-    /// offline; the medium is released, and the <see cref="StorageOfflineException"/> is thrown.
+    /// appended records. An offline journal writes nothing. A drain failure takes the journal
+    /// offline and throws <see cref="StorageOfflineException"/>, except when a borrowed medium
+    /// was already closed: only this final drain propagates <see cref="ObjectDisposedException"/>
+    /// without latching offline. The medium is released in either case.
     /// The journal is marked disposed under its append lock, which every append, flush, read and
     /// checkpoint re-checks under the same lock, so none of them runs after the final drain; a
     /// second or concurrent call returns without releasing the medium again.
     /// </remarks>
+    /// <exception cref="ObjectDisposedException">A borrowed medium was closed before the final drain.</exception>
+    /// <exception cref="StorageOfflineException">The final drain failed.</exception>
     public void Dispose()
     {
         bool disposing = false;
@@ -1039,7 +1056,7 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
                 {
                     if (_initialized && _offline is null && (_buffered > 0 || _unflushed))
                     {
-                        DrainMedium(durable: false);
+                        DrainMedium(durable: false, disposing: true);
                     }
                 }
                 finally
@@ -1057,6 +1074,7 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
                         _buffered = 0;
                         _inFlightLength = 0;
                         _recoveryAnalysis = null;
+                        _recoveryReplayToken = null;
                     }
                     DisposeCore();
                 }
@@ -1218,15 +1236,15 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
         }
     }
 
-    private void DrainMedium(bool durable)
+    private void DrainMedium(bool durable, bool disposing = false)
     {
-        WriteOutMedium();
+        WriteOutMedium(disposing);
         long target = _writtenLsn;
         try
         {
             FlushCore(durable);
         }
-        catch (Exception exception) when (exception is not (ObjectDisposedException or NotSupportedException))
+        catch (Exception exception) when (exception is not NotSupportedException && (!disposing || exception is not ObjectDisposedException))
         {
             lock (_syncRoot)
             {
@@ -1244,7 +1262,7 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
         }
     }
 
-    private void WriteOutMedium()
+    private void WriteOutMedium(bool disposing = false)
     {
         lock (_syncRoot)
         {
@@ -1265,10 +1283,10 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
             _spareBuffer = [];
             _buffered = 0;
         }
-        WriteInFlightMedium(pooled: false);
+        WriteInFlightMedium(pooled: false, disposing);
     }
 
-    private void WriteInFlightMedium(bool pooled)
+    private void WriteInFlightMedium(bool pooled, bool disposing = false)
     {
         try
         {
@@ -1276,7 +1294,7 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
         }
         // Any medium exception can leave a partial frame, so even an unexpected provider
         // exception must fence subsequent writes before releasing the medium lock.
-        catch (Exception exception) when (exception is not ObjectDisposedException)
+        catch (Exception exception) when (!disposing || exception is not ObjectDisposedException)
         {
             // Keep the detached bytes readable after a partial write. Latch before another
             // medium owner can acknowledge any later prefix; no retry writes behind a torn tail.
@@ -1344,6 +1362,7 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
         _inFlightLsn = lsn;
         Volatile.Write(ref _lastLsn, lsn);
         _recoveryAnalysis = null;
+        _recoveryReplayToken = null;
         Volatile.Write(ref _length, _length + frameLength);
         return lsn;
     }
@@ -1377,6 +1396,7 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
         _buffered += frameLength;
         Volatile.Write(ref _lastLsn, lsn);
         _recoveryAnalysis = null;
+        _recoveryReplayToken = null;
         Volatile.Write(ref _length, _length + frameLength);
         return lsn;
     }
@@ -1486,9 +1506,9 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
         }
     }
 
-    // Initialization classifies commits and plans pages while it verifies frames. A live append or
-    // checkpoint invalidates the summary; recovery on a live journal rebuilds it after draining.
-    internal StorageRecoveryAnalysis ReadRecoveryAnalysis(CancellationToken cancellationToken)
+    // Initialization classifies commits and plans pages while it verifies frames. Recovery consumes
+    // the summary; a later analysis on a live journal drains and verifies it afresh.
+    internal StorageRecoveryAnalysis ReadRecoveryAnalysis(CancellationToken cancellationToken, out object replayToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         EnsureInitialized(cancellationToken);
@@ -1500,7 +1520,14 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
                 try
                 {
                     DrainForReadMedium();
-                    return _recoveryAnalysis ??= ScanRecoveryAnalysis(cancellationToken);
+                    var analysis = _recoveryAnalysis;
+                    _recoveryAnalysis = null;
+                    _recoveryReplayToken = null;
+                    analysis ??= ScanRecoveryAnalysis(cancellationToken);
+                    // Only the immediately following recovery replay may reuse this scan's CRCs.
+                    // The token retains no planning state and is consumed before enumeration.
+                    _recoveryReplayToken = replayToken = new object();
+                    return analysis;
                 }
                 finally
                 {
@@ -1527,6 +1554,8 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
         var pages = new Dictionary<long, StorageRecoveryPagePlan>();
         var pending = new Dictionary<long, Dictionary<long, StorageRecoveryPagePlan>>();
         var freePending = new Stack<Dictionary<long, StorageRecoveryPagePlan>>();
+        var rolledBack = new HashSet<long>();
+        bool replan = false;
 
         void Merge(long pageId, StorageRecoveryPagePlan next)
         {
@@ -1536,7 +1565,7 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
                 : previous with { Committed = previous.Committed || next.Committed };
         }
 
-        foreach (var record in ReadRecordsCore(reuseVerifiedPrefix: true))
+        foreach (var record in ReadRecordsCore())
         {
             cancellationToken.ThrowIfCancellationRequested();
             ordinal++;
@@ -1544,6 +1573,7 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
             maxSequence = Math.Max(maxSequence, record.TransactionSequence);
             if (record.Type == JournalRecordType.CommitTransaction)
             {
+                replan |= rolledBack.Contains(record.TransactionSequence);
                 committed.Add(record.TransactionSequence);
                 if (pending.Remove(record.TransactionSequence, out var changes))
                 {
@@ -1551,6 +1581,15 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
                     {
                         Merge(pageId, plan with { Committed = true });
                     }
+                    changes.Clear();
+                    freePending.Push(changes);
+                }
+            }
+            else if (record.Type == JournalRecordType.RollbackTransaction)
+            {
+                if (pending.Remove(record.TransactionSequence, out var changes))
+                {
+                    rolledBack.Add(record.TransactionSequence);
                     changes.Clear();
                     freePending.Push(changes);
                 }
@@ -1578,6 +1617,26 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
                         pending.Add(record.TransactionSequence, changes);
                     }
                     changes[pageId] = plan;
+                }
+            }
+        }
+        if (replan)
+        {
+            // Fresh allocation resumes above MaxSequence, but BeginTransaction(long) and the
+            // journal append API permit reusing an adopted sequence after rollback. Base gates
+            // every change of that sequence on any commit, even one after the rollback. Rebuild
+            // identities on this rare path rather than retaining all rolled-back page entries.
+            pages.Clear();
+            ordinal = 0;
+            foreach (var record in ReadRecordsCore())
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                ordinal++;
+                bool committedRecord = committed.Contains(record.TransactionSequence);
+                if (StorageRecovery.IsPageRecord(record.Type) && (long)record.PageId > 0
+                    && (record.Type == JournalRecordType.FullPageImage || committedRecord))
+                {
+                    Merge((long)record.PageId, new StorageRecoveryPagePlan(ordinal, record.Lsn, committedRecord));
                 }
             }
         }
@@ -1674,8 +1733,8 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
         try
         {
             long length = _handle.Length;
-            // The journal exclusively owns these bytes until checkpoint truncation. Only a
-            // completed scan advances trust; a newly written suffix still needs verification.
+            // Trust is single-use and confined to recovery immediately after its analysis on
+            // this instance. Public readers and every later borrowed scan verify every CRC.
             long verifiedPrefix = reuseVerifiedPrefix ? _scannedLength : 0;
             chunk = ArrayPool<byte>.Shared.Rent((int)Math.Min(ReadChunkSize, Math.Max(length, FramePrefixSize)));
             long chunkOffset = 0;
@@ -1809,6 +1868,9 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
     /// </summary>
     private void TruncateCore()
     {
+        _scannedLength = 0;
+        _recoveryAnalysis = null;
+        _recoveryReplayToken = null;
         try
         {
             _stream.SetLength(0);
@@ -1823,8 +1885,6 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
             }
         }
         _appendOffset = 0;
-        _scannedLength = 0;
-        _recoveryAnalysis = null;
         _tailUnchecked = false;
     }
 
