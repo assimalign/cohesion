@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Threading;
 
 using Assimalign.Cohesion.Database.Sql.Catalog;
@@ -43,7 +44,8 @@ internal sealed class SqlBoundDomainArgument : SqlBoundExpression
             && check.InvokeResolved(value, _checkTarget, _database, _collation.Resolve(subqueries), cancellationToken) is false)
         {
             throw new SqlConstraintViolationException(
-                $"An argument of function '{_functionName}' violates domain '{_domain.Name}'.", _domain.Name, string.Empty, "DOMAIN");
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.FunctionArgumentDomainViolation, _functionName, _domain.Name),
+                _domain.Name, string.Empty, "DOMAIN");
         }
         return value;
     }

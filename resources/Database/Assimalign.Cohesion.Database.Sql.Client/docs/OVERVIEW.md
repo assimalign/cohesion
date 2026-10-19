@@ -34,6 +34,11 @@ The model reference supplies wire codecs; the client never calls its parser.
 - `SqlClientObserver`: an abstract, allocation-free telemetry hook fired around every
   command; an observer overrides only the hooks it needs.
 
+For a constraint failure, catch `SqlClientException` and read
+`exception.Diagnostics[0].Code`: COHSQLE037 (unique), COHSQLE038 (CHECK/domain),
+COHSQLE039 (foreign key), or COHSQLE024 (NOT NULL). `exception.Code` is the protocol
+category; the engine code also prefixes the message when diagnostics are not negotiated.
+
 ## Dependencies
 
 - `Assimalign.Cohesion.Database` — the `DatabaseException` area root.

@@ -18,6 +18,18 @@ Blank derived output names fail planning with COHSQLE013 and arrive as an
 ExecutionFailure with ConnectionUsable true. The connection and an explicit
 transaction remain usable; the wire regression verifies pending writes and rollback.
 
+## Constraint diagnostics (#1666)
+
+SqlConnection preserves the existing ExecutionFailure category and exposes the single
+constraint diagnostic through SqlClientException.Diagnostics: COHSQLE037 (23505) for
+uniqueness, COHSQLE038 (23514) for CHECK/domain checks, COHSQLE039 (23503) for foreign
+keys; NOT NULL stays COHSQLE024 (23502). Read Diagnostics[0].Code for the engine code;
+SqlClientException.Code remains the protocol error category. Negotiated diagnostics retain
+the statement span and message. Without diagnostics negotiation, the composed message
+still starts with the engine code. The connection and explicit transaction remain usable.
+Both-transport tests assert rollback of earlier rows in multi-row INSERT, INSERT SELECT and
+upsert failures. There is no API or wire-format change.
+
 ## UPDATE final foreign-key state (#1667)
 
 Both transports pin dangling-reference rejection without writes, moving self-references,

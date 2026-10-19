@@ -232,9 +232,20 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
             // keeps its own type. Both lead with COHSQLT004.
             throw translated;
         }
-        catch (Exception exception) when (exception is InsufficientExecutionStackException
+        catch (Exception exception) when (exception is SqlConstraintViolationException or InsufficientExecutionStackException
             or SqlEvaluationException { Code: SqlEvaluationException.StatementTooComplexCode })
         {
+            // Share the existing catch slot: an additional catch variable grows the Debug
+            // async state machine and allocates another eight bytes on every statement.
+            if (exception is SqlConstraintViolationException)
+            {
+                if (((SqlConstraintViolationException)exception).Diagnostics[0].Start is null
+                    && request.Statement.SqlExpression.Location is not null)
+                {
+                    throw ((SqlConstraintViolationException)exception).At(request.Statement.SqlExpression.Location);
+                }
+                throw;
+            }
             SqlDatabaseEventSource.Log.StatementTooComplex(_database.Name, -1);
             // Every recursive walk over a statement (the system-relation scan, planning,
             // evaluation, CHECK validation) checks the stack before it descends (#1151). The

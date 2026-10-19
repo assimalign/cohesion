@@ -155,9 +155,9 @@ public sealed class SqlReturningExecutionTests
         }
         else
         {
-            // UNIQUE, CHECK and FOREIGN KEY use the existing typed constraint contract,
-            // which has no diagnostic code. A parser rejection cannot pass this assertion.
-            failure.ShouldBeOfType<SqlConstraintViolationException>().ConstraintKind.ShouldBe(failureKind);
+            var violation = failure.ShouldBeOfType<SqlConstraintViolationException>();
+            violation.ConstraintKind.ShouldBe(failureKind);
+            SqlConstraintAssertions.Verify(violation);
         }
         calls.ShouldBe(expectedCalls);
         await using var result = await QueryAsync(session, "SELECT * FROM t");
