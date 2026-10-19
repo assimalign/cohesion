@@ -147,7 +147,10 @@ allocation. An unqualified column common to both relations is ambiguous (COHSQLE
 A target named or aliased excluded makes that qualifier ambiguous too. SET expressions
 all read the original target plus proposed row; SET c = DEFAULT uses the normal UPDATE
 default resolver. ALWAYS identity assignments retain COHSQLE025. Identity values allocated
-for conflicting proposals are consumed, including skipped proposals.
+for conflicting proposals are consumed, including skipped proposals. Each proposal and
+its conflict projection consume defaults before the next proposal (PostgreSQL
+src/backend/executor/nodeModifyTable.c:4497,2980); for example identity proposals 2 and 4
+with an intervening conflict SET id = DEFAULT write identities 3 and 4.
 
 NOT NULL, domains and CHECK validate every proposed row before arbitration. Foreign keys
 validate only inserted and updated rows, so a conflicting DO NOTHING proposal with a dangling
@@ -165,7 +168,10 @@ that released key, matching PostgreSQL's source-order behavior. Keys introduced 
 earlier effect still count as reaching that affected row twice. A false/UNKNOWN filter
 locks the existing row but does not mark it affected.
 
-All proposed arbiter keys are locked once in sorted order before any conflicting row lock.
+All keys from every unique index of every proposal, plus old/new replacement keys,
+are locked in sorted batches before any conflicting row lock. Upserts requesting declared
+defaults or identities hold a table Exclusive lock for the transaction's lifetime so that
+source-order default evaluation and arbitration finish before the complete key batch is locked.
 A latest-state lookup under that key lock sees committed or own entries. **Snapshot**
 (the session and autocommit default) aborts retryably with DatabaseTransactionAbortedException
 if a conflict was committed after the statement snapshot. In particular, two autocommit
@@ -179,7 +185,10 @@ PostgreSQL's [transaction-isolation contract](https://www.postgresql.org/docs/18
 and REPEATABLE READ visibility check (src/backend/executor/nodeModifyTable.c:377-405,2935).
 Key-before-row can form cycles with ordinary UPDATE, DELETE and referential SET actions;
 deadlock detection reports DatabaseTransactionDeadlockException, and rollback/retry releases
-the victim's locks. No lock wait runs inside the apply gate.
+the victim's locks. Retry the entire victim transaction, including earlier statements.
+Even a value-only UPDATE replaces unique entries with a new heap location and still needs
+their key locks; it can therefore participate in this detected, retryable cycle. An internal
+row-wait/re-arbitration retry loop is deferred. No lock wait runs inside the apply gate.
 
 The supported shape follows [PostgreSQL INSERT](https://www.postgresql.org/docs/18/sql-insert.html).
 Expression, COLLATE, ordering (ASC/DESC/NULLS FIRST/LAST), operator-class and partial-WHERE
@@ -2846,8 +2855,8 @@ pin in the same change.
 | `COHSQLE031` | Error | DROP SCHEMA targets dbo, which code-first provisioning requires |
 | `COHSQLE032` | Error | DISTINCT/ALL/input ORDER BY on a scalar function, or DISTINCT input ordering whose keys are absent from the arguments (PostgreSQL 42809 / 42P10) |
 | `COHSQLE033` | Error | Invalid persisted view declaration/replacement, changed recorded column identity, oversized view record, or otherwise uncoded stored-body binding failure |
-| `COHSQLE035` | Error | ON CONFLICT has no matching unique arbiter, a named target is not a unique index, or DO UPDATE omitted its target |
-| `COHSQLE036` | Error | ON CONFLICT DO UPDATE cannot affect a row a second time |
+| `COHSQLE035` | Error | ON CONFLICT has no matching unique arbiter, a named target is not a unique index, or DO UPDATE omitted its target (PostgreSQL 42P10) |
+| `COHSQLE036` | Error | ON CONFLICT DO UPDATE cannot affect a row a second time (PostgreSQL 21000) |
 
 Positions are absolute character offsets into the statement text; line/column
 presentation is computed by tooling from the source (offset → line mapping), not

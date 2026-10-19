@@ -2526,9 +2526,10 @@ Binding rejects duplicate whole-column SET targets before execution (PostgreSQL
 src/backend/rewrite/rewriteHandler.c:1168). Live unique entries pointing at missing or
 undecodable heap rows raise StorageCorruptionException, never a serialization retry.
 
-The shared VALUES/DEFAULT VALUES/SELECT path builds every proposed stored row before
-arbitration, including coercion, defaults and identity allocation. Proposed CHECK, NOT NULL
-and domains run before key lookup; FK validation uses only rows actually written. Updated
+The shared VALUES/DEFAULT VALUES/SELECT path evaluates each proposal's defaults and its
+conflict projection in source order (PostgreSQL src/backend/executor/nodeModifyTable.c:4497,2980).
+Proposed CHECK, NOT NULL and domains run before key lookup; FK validation uses only rows
+actually written. Updated
 rows reuse UPDATE coercion/defaults, assigned-domain checks, CHECK/FK validation,
 released-reference locks, incoming-reference RESTRICT and MVCC/index tombstone/reinsert
 helpers. All writes and RETURNING projections share one ApplyStatementAsync bracket.
@@ -2549,14 +2550,29 @@ referential-action pending-update view excludes replaced heap versions and suppl
 values to FK and incoming-reference checks. A removed key cannot authorize a new child; a
 self-reference moved with its key validates against the final row.
 
-After object intent locks, the statement acquires **all proposed arbiter key locks once,
-sorted and deduplicated, before any row lock**. BTreeIndex.FindLiveEntry runs under those
-locks and its read latch, outside the apply gate. Conflicting row locks then form one sorted
-batch; reference locks and remaining old/new unique-key locks follow. This is the second
+After object intent locks, statements without requested defaults acquire the keys of
+**every unique index of every proposal**, sorted and deduplicated, before live arbitration.
+Each proposal's encoded keys are reused for hashing, lookup and pending inserts.
+BTreeIndex.FindLiveEntryAsync re-grants those locks outside the apply gate. Replacement
+old/new keys are also acquired before any row lock, then conflicting rows form a sorted
+batch and reference locks follow. Lock preparation never evaluates defaults speculatively.
+When a proposal or conflict assignment requests a declared default or identity, the table
+is locked Exclusive instead of IX before evaluation. That permits stable latest-state
+cursor probes while each proposal and projection consumes defaults in source order;
+the complete proposal/replacement key batch is collected afterward, before row locks.
+This deliberately serializes writers on that table for the transaction's lifetime;
+it avoids guessing future identity values or replaying side-effecting application defaults.
+This is the second
 deliberate exception to row-before-key, beside the referential cascade walk. It can form
 row/key cycles with ordinary UPDATE/DELETE and SET NULL/DEFAULT. The lock manager detects
 cycles as retryable deadlocks; callers roll back/retry the victim. Gated tests exercise
-SET NULL/DEFAULT cycles and plain INSERT key waits; the gate's no-wait rule is unchanged.
+SET NULL/DEFAULT cycles, all-index plain INSERT waits and different-arbiter upserts.
+Even an UPDATE leaving every unique value unchanged tombstones and reinserts the entry
+at a new heap location, preserving old snapshots; it therefore still needs key locks.
+The accepted contract is detected and retryable: roll back the victim transaction and
+retry the complete transaction, including any earlier statements. Releasing this statement's
+keys and retrying row acquisition inside the engine remains follow-up work. The apply
+gate's no-wait rule is unchanged.
 
 A live conflict newer than Snapshot visibility fails retryably for either action, including
 autocommit Snapshot. ReadCommitted skips it for DO NOTHING or updates the latest committed
@@ -3334,7 +3350,7 @@ description + exported registrations), the engine binds them.
   consistent. **The first deliberate exception is the cascade walk**, which locks
   rows in discovery order because the closure it is discovering is what
   determines the lock set; see "Referential enforcement locks parent rows" under
-  constraints for why that trade was taken and what it costs. The second is ON CONFLICT: all proposed arbiter keys precede all conflicting row locks, sorted once for the complete statement; see INSERT ... ON CONFLICT execution above.
+  constraints for why that trade was taken and what it costs. The second is ON CONFLICT: every proposal unique key and replacement key precedes conflicting row locks; see INSERT ... ON CONFLICT execution above.
 - **Uniqueness = the B+Tree's latest-state check under the exclusive hashed-key
   lock** (never snapshot visibility — write skew; the recorded #851 lesson).
   Violations surface as the area root's `DatabaseException` at the model

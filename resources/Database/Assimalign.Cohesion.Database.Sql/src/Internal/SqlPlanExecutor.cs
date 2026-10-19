@@ -669,7 +669,7 @@ internal sealed partial class SqlPlanExecutor
     //   3. its unique-index key locks, sorted by key hash (deduplicated).
     //
     // ON CONFLICT is the second deliberate exception (beside the cascade walk):
-    // all proposed arbiter keys are acquired once, sorted, before any row lock.
+    // all proposal unique keys and replacement keys precede any row lock.
     // Cycles with row-first writers are handled by the lock manager's deadlock detection.
     //
     // The B+Tree re-acquires the key lock inside the apply gate — a same-owner

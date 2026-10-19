@@ -34,18 +34,26 @@ internal sealed partial class SqlPlanExecutor
     }
 
     private async Task<DatabaseResult> ExecuteUpsertRowsAsync(SqlCatalogTable table, List<SqlLiveIndex> indexes,
-        List<(byte[] Record, object?[] Values)> proposals, SqlOnConflictPlan plan, IReadOnlyList<SqlProjection>? returning,
-        SqlStatementContext statement, CancellationToken cancellationToken)
+        IEnumerable<(byte[] Record, object?[] Values)> proposals, SqlOnConflictPlan plan, IReadOnlyList<SqlProjection>? returning,
+        SqlStatementContext statement, bool orderedDefaults, CancellationToken cancellationToken)
     {
-        // PostgreSQL validates proposed NOT NULL/CHECK before arbitration (nodeModifyTable.c:1108).
-        // FK checks see only rows actually written, so a discarded proposal cannot authorize a self reference.
-        ValidateRows(table, proposals.Select(row => row.Values).ToList(), statement, cancellationToken, checksOnly: true);
         var arbiters = indexes.Where(index => plan.Arbiters.Any(arbiter => arbiter.Name == index.Metadata.Name)).ToList();
+        var unique = indexes.Where(index => index.Metadata.IsUnique).ToList();
         var hashes = new List<ulong>();
-        foreach (var proposal in proposals) { CollectUniqueKeyHashes(arbiters, table, proposal.Values, hashes); }
-        // Second exception to row-before-key: the complete statement's arbiter keys precede every row lock.
-        await AcquireUniqueKeyLocksAsync(statement, table.ObjectId, hashes, cancellationToken).ConfigureAwait(false);
-
+        // Build each proposal's keys once, sharing them between locking, arbitration and
+        // pending inserts. Without defaults the full batch precedes every live lookup.
+        IEnumerable<(byte[] Record, object?[] Values, IndexKey[] Keys)> prepared = proposals.Select(proposal =>
+            (proposal.Record, proposal.Values, unique.Select(index => BuildIndexKey(table, index.KeyOrdinals, proposal.Values)).ToArray()));
+        if (!orderedDefaults)
+        {
+            prepared = prepared.ToList();
+            foreach (var proposal in prepared) { hashes.AddRange(proposal.Keys.Select(key => key.Hash())); }
+            await AcquireUniqueKeyLocksAsync(statement, table.ObjectId, hashes, cancellationToken).ConfigureAwait(false);
+        }
+        // A table Exclusive lock makes latest-state cursor reads stable without key locks.
+        // This path interleaves default evaluation with conflict projection, then acquires
+        // all proposal AND replacement keys in one sorted batch before any row lock.
+        var arbiterOrdinals = arbiters.Select(arbiter => unique.IndexOf(arbiter)).ToArray();
         var pending = new Dictionary<(string Index, IndexKey Key), SqlUpsertWrite?>();
         var affected = new HashSet<ulong>();
         var writes = new List<SqlUpsertWrite>();
@@ -53,21 +61,32 @@ internal sealed partial class SqlPlanExecutor
         var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
         var bound = _definitions.Get(table, cancellationToken);
         int[]? assigned = bound.Domains.Count == 0 ? null : plan.Assignments.Select(assignment => assignment.Ordinal).ToArray();
-        foreach (var proposal in proposals)
+        foreach (var proposal in prepared)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            // PostgreSQL nodeModifyTable.c:1108: proposed constraints precede arbitration.
+            ValidateRows(table, [proposal.Values], statement, cancellationToken, checksOnly: true);
+            if (orderedDefaults) { hashes.AddRange(proposal.Keys.Select(key => key.Hash())); }
             ulong? conflict = null;
             bool pendingConflict = false;
-            foreach (var arbiter in arbiters)
+            for (int arbiterIndex = 0; arbiterIndex < arbiters.Count; arbiterIndex++)
             {
-                var key = BuildIndexKey(table, arbiter.KeyOrdinals, proposal.Values);
+                var arbiter = arbiters[arbiterIndex];
+                var key = proposal.Keys[arbiterOrdinals[arbiterIndex]];
                 if (pending.TryGetValue((arbiter.Metadata.Name, key), out var prior))
                 {
                     if (prior is null) { continue; } // An earlier update released this key.
                     pendingConflict = true;
                     break;
                 }
-                if ((await arbiter.Index.FindLiveEntryAsync(statement.Transaction, key, cancellationToken).ConfigureAwait(false)) is { } location) { conflict = location; break; }
+                ulong? live;
+                if (orderedDefaults)
+                {
+                    await using var cursor = arbiter.Index.OpenCursor(ConstraintCurrentSnapshot(statement), new IndexKeyRange(key, key, true, true));
+                    live = await cursor.MoveNextAsync(cancellationToken).ConfigureAwait(false) ? cursor.CurrentEntryReference : null;
+                }
+                else { live = await arbiter.Index.FindLiveEntryAsync(statement.Transaction, key, cancellationToken).ConfigureAwait(false); }
+                if (live is { } location) { conflict = location; break; }
             }
 
             SqlUpsertWrite write;
@@ -99,23 +118,37 @@ internal sealed partial class SqlPlanExecutor
                         : CoerceUpsertColumn(table, ordinal, evaluator.Evaluate(expression, scope, copySharedBinary: true));
                 }
                 if (assigned is not null) { CheckDomains(bound, updated, evaluator, assigned); }
+                ValidateRows(table, [updated], statement, cancellationToken, checksOnly: true);
                 affected.Add(reference);
                 write = new(reference, oldValues, updated, SqlRowCodec.Encode(table, updated, statement.Transaction.Sequence));
                 StorageCorruptionException DamagedRow() => new(pageId, string.Format(CultureInfo.CurrentCulture,
                     ErrorMessages.UpsertLiveRowDamaged, table.Schema, table.Name, slotIndex, (long)pageId));
-                foreach (var arbiter in arbiters)
+                for (int arbiterIndex = 0; arbiterIndex < arbiters.Count; arbiterIndex++)
                 {
+                    var arbiter = arbiters[arbiterIndex];
                     pending[(arbiter.Metadata.Name, BuildIndexKey(table, arbiter.KeyOrdinals, oldValues))] = null;
                 }
             }
             else { write = new(null, null, proposal.Values, proposal.Record); }
             writes.Add(write);
-            foreach (var arbiter in arbiters)
+            for (int arbiterIndex = 0; arbiterIndex < arbiters.Count; arbiterIndex++)
             {
-                pending[(arbiter.Metadata.Name, BuildIndexKey(table, arbiter.KeyOrdinals, write.Values))] = write;
+                var arbiter = arbiters[arbiterIndex];
+                var key = write.OldLocation.HasValue ? BuildIndexKey(table, arbiter.KeyOrdinals, write.Values)
+                    : proposal.Keys[arbiterOrdinals[arbiterIndex]];
+                pending[(arbiter.Metadata.Name, key)] = write;
             }
         }
 
+        foreach (var write in writes)
+        {
+            if (write.OldValues is not null)
+            {
+                CollectUniqueKeyHashes(indexes, table, write.OldValues, hashes);
+                CollectUniqueKeyHashes(indexes, table, write.Values, hashes);
+            }
+        }
+        await AcquireUniqueKeyLocksAsync(statement, table.ObjectId, hashes, cancellationToken).ConfigureAwait(false);
         await AcquireRowWriteLocksAsync(statement, table.ObjectId, lockedRows, cancellationToken).ConfigureAwait(false);
         var replacements = writes.Where(write => write.OldLocation.HasValue).ToList();
         SqlConstraintUpdates? pendingUpdates = null;
@@ -134,7 +167,6 @@ internal sealed partial class SqlPlanExecutor
             }
             pendingUpdates = new SqlConstraintUpdates(pendingRows);
         }
-        ValidateRows(table, replacements.Select(write => write.Values).ToList(), statement, cancellationToken, checksOnly: true);
         var references = new List<SqlParentReference>();
         // An RC arbiter wait can reach a new row and its parent committed together after the
         // original statement snapshot. Refresh committed visibility, never the all-writers
@@ -151,17 +183,14 @@ internal sealed partial class SqlPlanExecutor
                 return !ValuesEqual(replacements[index].Values[ordinal], replacements[index].OldValues![ordinal]);
             }));
         await AcquireParentRowLocksAsync(released, statement, cancellationToken, validate: false).ConfigureAwait(false);
-        hashes.Clear();
+
         foreach (var write in writes)
         {
             if (write.OldValues is not null)
             {
                 ValidateParentUpdate(table, write.OldValues, write.Values, statement, cancellationToken, updates: pendingUpdates);
-                CollectUniqueKeyHashes(indexes, table, write.OldValues, hashes);
             }
-            CollectUniqueKeyHashes(indexes, table, write.Values, hashes);
         }
-        await AcquireUniqueKeyLocksAsync(statement, table.ObjectId, hashes, cancellationToken).ConfigureAwait(false);
         var returned = returning is null ? null : new List<object?[]>(writes.Count);
         return await statement.Coordinator.ApplyStatementAsync(statement.Transaction, async bracket =>
         {
