@@ -68,8 +68,12 @@ public sealed class SqlConstraintViolationException : DatabaseException
     }
 
     /// <summary>Attaches the executing statement's span when the failure has no location.</summary>
+    /// <remarks>
+    /// The located copy keeps the original violation as its inner exception (or that violation's own
+    /// inner exception, when it wraps one), so the validator and executor frames are not lost.
+    /// </remarks>
     internal SqlConstraintViolationException At(Location? location) => Diagnostics[0].Start is not null || location is null
-        ? this : new(Message, ConstraintName, Table, ConstraintKind, location, OffendingValue, InnerException);
+        ? this : new(Message, ConstraintName, Table, ConstraintKind, location, OffendingValue, InnerException ?? this);
 
     /// <summary>Gets the declared or generated constraint name; a domain's name for kind <c>DOMAIN</c>.</summary>
     public string ConstraintName { get; }

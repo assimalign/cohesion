@@ -74,4 +74,30 @@ public sealed class SqlConstraintDiagnosticTests
         failure.At(null).ShouldBeSameAs(failure);
         located.At(Location.Create(1, 1, 0, 1)).ShouldBeSameAs(located);
     }
+
+    /// <summary>A thrown violation without a cause keeps its own stack when a location is attached.</summary>
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Constraint locations: attaching a span keeps the thrown violation's stack as the inner exception")]
+    public void At_ThrownViolationWithoutCause_ShouldKeepOriginalStack()
+    {
+        // Arrange
+        SqlConstraintViolationException thrown;
+        try
+        {
+            throw new SqlConstraintViolationException("named_constraint", "dbo.items", "CHECK");
+        }
+        catch (SqlConstraintViolationException exception)
+        {
+            thrown = exception;
+        }
+
+        // Act
+        var located = thrown.At(Location.Create(1, 1, 0, 10));
+
+        // Assert
+        located.ShouldNotBeSameAs(thrown);
+        located.InnerException.ShouldBeSameAs(thrown);
+        thrown.StackTrace.ShouldNotBeNull();
+        thrown.StackTrace!.ShouldContain(nameof(At_ThrownViolationWithoutCause_ShouldKeepOriginalStack), Case.Sensitive);
+        located.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE038");
+    }
 }
