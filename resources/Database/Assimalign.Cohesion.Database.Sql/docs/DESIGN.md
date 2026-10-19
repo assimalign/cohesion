@@ -2520,6 +2520,18 @@ record kind, wire message, reflection or runtime code generation is introduced.
 PostgreSQL references: tablecmds.c:3903-4062 (column identity), :4329-4385 (relation name),
 :8201-8268 (default), and heaptuple.c:151-180 (frozen missing values).
 
+## UPDATE final foreign-key state (#1667)
+
+Multi-row UPDATE and ON CONFLICT share BuildConstraintUpdates: outgoing and incoming
+NO ACTION/RESTRICT probes exclude old replaced heap versions and contribute every final
+replacement. A removed parent key cannot authorize a new child; a self-reference can move
+with its key, and mutually referenced keys can swap if the final state is consistent.
+Incoming checks permit an old key retained by another replacement. UPDATE tombstones all
+replaced row/index versions before inserting any new versions in the same rollback bracket,
+so unique entries also validate the final state during a swap. Snapshot and ReadCommitted
+use the same pending view. Wire regressions select isolation via the existing server-session
+API because SQL BEGIN deliberately has no isolation clause; UPDATE/results use both transports.
+
 ## INSERT ... ON CONFLICT execution (#1118)
 
 Binding rejects duplicate whole-column SET targets before execution (PostgreSQL

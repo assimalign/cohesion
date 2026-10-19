@@ -111,6 +111,12 @@ Duplicate whole-column SET targets in DO UPDATE fail at binding before any write
 In RETURNING, a real visible target table or alias named excluded remains referenceable;
 the EXCLUDED pseudo-relation itself is out of scope.
 
+Multi-row UPDATE validates outgoing and incoming NO ACTION/RESTRICT foreign keys against
+the complete final replacement state (#1667), under Snapshot and ReadCommitted. It refuses
+a dangling child authorized only by a replaced parent key, permits moving a self-reference
+with its key, and permits mutually referenced key swaps whose final state is consistent.
+A failure leaves every row unchanged.
+
 ## INSERT ... ON CONFLICT (#1118)
 
 `INSERT ... ON CONFLICT [(column [, ...]) | ON CONSTRAINT name] DO NOTHING`

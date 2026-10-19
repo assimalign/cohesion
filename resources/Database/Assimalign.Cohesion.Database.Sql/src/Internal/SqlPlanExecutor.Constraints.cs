@@ -558,6 +558,10 @@ internal sealed partial class SqlPlanExecutor
             }
             bool changed = constraint.ReferencedColumns!.Select((column, i) => !ValuesEqual(newValues[FindColumnOrdinal(table, column)], keys[i],
                 table.Columns[FindColumnOrdinal(table, column)].Collation ?? _catalog.DefaultCollation)).Any(value => value);
+            // A different replacement may retain the old referenced key (a swap). Only
+            // removing that key from the final parent state can orphan an incoming child.
+            if (changed && updates?.Find(table, constraint.ReferencedColumns!, keys,
+                _catalog.DefaultCollation, cancellationToken).Any() == true) { continue; }
             if (changed && FinalConstraintRows(child, constraint.Columns, keys, statement, cancellationToken,
                 deletions, updates, ConstraintCurrentSnapshot(statement)).Any())
             {

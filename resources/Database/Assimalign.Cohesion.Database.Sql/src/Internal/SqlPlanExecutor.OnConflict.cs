@@ -151,22 +151,8 @@ internal sealed partial class SqlPlanExecutor
         await AcquireUniqueKeyLocksAsync(statement, table.ObjectId, hashes, cancellationToken).ConfigureAwait(false);
         await AcquireRowWriteLocksAsync(statement, table.ObjectId, lockedRows, cancellationToken).ConfigureAwait(false);
         var replacements = writes.Where(write => write.OldLocation.HasValue).ToList();
-        SqlConstraintUpdates? pendingUpdates = null;
-        if (replacements.Count > 0 && table.Constraints.Any(constraint => constraint.Kind == SqlCatalogConstraintKind.Reference &&
-            string.Equals(constraint.ReferencedSchema, table.Schema, StringComparison.OrdinalIgnoreCase) &&
-            string.Equals(constraint.ReferencedTable, table.Name, StringComparison.OrdinalIgnoreCase)))
-        {
-            // The existing referential-action view excludes replaced heap versions and contributes
-            // their final values. An old self-referenced key must not authorize a new dangling child.
-            var pendingRows = new Dictionary<(ulong ObjectId, ulong Location), SqlConstraintUpdate>();
-            var assignedColumns = plan.Assignments.Select(assignment => assignment.Ordinal).ToHashSet();
-            foreach (var write in replacements)
-            {
-                pendingRows.Add((table.ObjectId, write.OldLocation!.Value), new SqlConstraintUpdate(table,
-                    SqlRecordLocation.Unpack(write.OldLocation.Value), write.OldValues!, write.Values, assignedColumns));
-            }
-            pendingUpdates = new SqlConstraintUpdates(pendingRows);
-        }
+        var pendingUpdates = BuildConstraintUpdates(table,
+            replacements.Select(write => (write.OldLocation!.Value, write.OldValues!, write.Values)), plan.Assignments);
         var references = new List<SqlParentReference>();
         // An RC arbiter wait can reach a new row and its parent committed together after the
         // original statement snapshot. Refresh committed visibility, never the all-writers

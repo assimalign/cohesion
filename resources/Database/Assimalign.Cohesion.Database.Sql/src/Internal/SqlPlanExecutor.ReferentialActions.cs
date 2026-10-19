@@ -13,6 +13,22 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 internal sealed partial class SqlPlanExecutor
 {
+    // UPDATE and ON CONFLICT share one final-state view, including incoming references
+    // whose old parent key may be provided by a different replacement in a key swap.
+    private static SqlConstraintUpdates BuildConstraintUpdates(SqlCatalogTable table,
+        IEnumerable<(ulong Location, object?[] OldValues, object?[] NewValues)> replacements,
+        IReadOnlyList<(int Ordinal, SqlBoundExpression Value)> assignments)
+    {
+        var rows = new Dictionary<(ulong ObjectId, ulong Location), SqlConstraintUpdate>();
+        var assigned = assignments.Select(assignment => assignment.Ordinal).ToHashSet();
+        foreach (var row in replacements)
+        {
+            rows.Add((table.ObjectId, row.Location), new SqlConstraintUpdate(table,
+                SqlRecordLocation.Unpack(row.Location), row.OldValues, row.NewValues, assigned));
+        }
+        return new SqlConstraintUpdates(rows);
+    }
+
     // Constraint validation sees the statement's final row set. Lookups still use the
     // existing indexes and snapshot; pending replacements contribute their final keys.
     private IEnumerable<((PageId PageId, int SlotIndex) Location, object?[] Values)> FinalConstraintRows(

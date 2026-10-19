@@ -18,6 +18,13 @@ Blank derived output names fail planning with COHSQLE013 and arrive as an
 ExecutionFailure with ConnectionUsable true. The connection and an explicit
 transaction remain usable; the wire regression verifies pending writes and rollback.
 
+## UPDATE final foreign-key state (#1667)
+
+Both transports pin dangling-reference rejection without writes, moving self-references,
+and consistent mutually referenced key swaps, with NO ACTION and RESTRICT under Snapshot
+and ReadCommitted. Tests begin through the existing server-session API to choose isolation;
+the UPDATE, error, result and COMMIT exchanges all use the wire. No protocol changes.
+
 ## INSERT ... ON CONFLICT (#1118)
 
 Existing execute/query exchanges carry inserted-plus-updated affected counts and RETURNING
