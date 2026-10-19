@@ -959,6 +959,11 @@ manager, leave the active table and release their locks; visibility and pruning 
 change. A reader cannot report an unconfirmed commit because it appends no commit record. The
 engines' offline refusal and the storage sequence allocator's offline check still apply.
 
+A reader's sequence number may be reissued after a crash: allocation resumes above the
+maximum sequence in the surviving journal and the persisted storage sequence floor, which
+may not include that reader's reservation. This is harmless because readers stamp no versions
+and persist nothing; no durable state can refer to the reissued reader sequence.
+
 Only writers are anchored (#1242). A transaction joins the writer set before its first stamp,
 and leaves with its commit or abort record; a rolled-back writer whose undo is deferred stays
 until undo completes. A reader spanning a checkpoint has no record or anchor entry. If it later

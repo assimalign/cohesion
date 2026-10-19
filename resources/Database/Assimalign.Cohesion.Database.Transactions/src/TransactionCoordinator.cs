@@ -350,9 +350,10 @@ public sealed class TransactionCoordinator : IAsyncDisposable
 
     /// <summary>
     /// Begins a logical transaction: the manager assigns the sequence from the
-    /// storage's counter (one namespace) and appends the begin record through
-    /// the journal-bound log. Physical brackets are per statement — see the
-    /// class remarks.
+    /// storage's counter (one namespace) without appending a journal record.
+    /// The first admitted statement apply enrolls it as a writer, appending its
+    /// logical begin record before opening the physical bracket. Physical brackets
+    /// are per statement — see the class remarks.
     /// </summary>
     /// <param name="isolationLevel">The isolation level the transaction runs under.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
@@ -380,11 +381,12 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     }
 
     /// <summary>
-    /// Commits the transaction through the manager: the journal-bound log
-    /// appends the commit record and awaits durability (which, by journal
-    /// ordering, also makes every statement bracket's records durable) while
-    /// the transaction is still in the manager's active table; the version
-    /// store then retains the writer's tombstones for pruning.
+    /// Commits the transaction through the manager. For an enrolled writer, the
+    /// journal-bound log appends the commit record and awaits durability (which,
+    /// by journal ordering, also makes every statement bracket's records durable)
+    /// while the transaction is still in the manager's active table; the version
+    /// store then retains the writer's tombstones for pruning. A reader ends and
+    /// releases its locks without appending a lifecycle record or awaiting durability.
     /// </summary>
     /// <param name="context">The transaction to commit.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
@@ -417,7 +419,9 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// <summary>
     /// Rolls the transaction back through the manager: the version store's
     /// ledger physically undoes the writer's stamps (created versions deleted,
-    /// tombstones cleared), the abort record is appended, and locks release.
+    /// tombstones cleared), and locks release. Only enrolled writers append an
+    /// abort record, without awaiting its durability. A reader ends and releases
+    /// its locks without appending a lifecycle record or awaiting durability.
     /// </summary>
     /// <param name="context">The transaction to roll back.</param>
     /// <param name="cancellationToken">

@@ -313,8 +313,8 @@ public sealed class KeyValueTransactionFailureTests
         await database.PutAsync(session, Bytes("rolled"), Bytes("v"), cancellationToken: TestTimeout.Token());
         database.DataStorage.WriteAheadJournal.Flush();
 
-        // Act: the rollback buffers the abort record; the other session's put needs the key's
-        // lock, and its commit drains the record, which fails.
+        // Act: the rollback buffers the abort record; the other session's put takes rolled's
+        // released lock, and its commit drains the abort record, which fails.
         int unspentAfterTheRollback;
         int unspent;
         DatabaseTransactionCommitUnconfirmedException lost;
@@ -323,7 +323,7 @@ public sealed class KeyValueTransactionFailureTests
             await transaction.RollbackAsync(TestTimeout.Token());
             unspentAfterTheRollback = failures.Remaining;
             lost = await Should.ThrowAsync<DatabaseTransactionCommitUnconfirmedException>(async () =>
-                await database.PutAsync(other, Bytes("missing"), Bytes("other"), cancellationToken: TestTimeout.Token(5)));
+                await database.PutAsync(other, Bytes("rolled"), Bytes("other"), cancellationToken: TestTimeout.Token(5)));
             unspent = failures.Remaining;
         }
 
