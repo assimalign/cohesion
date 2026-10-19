@@ -208,7 +208,8 @@ The supported shape follows [PostgreSQL INSERT](https://www.postgresql.org/docs/
 Expression, COLLATE, ordering (ASC/DESC/NULLS FIRST/LAST), operator-class and partial-WHERE
 inference, DO SELECT, and subqueries in DO UPDATE SET/WHERE report named COHDBL001.
 Subqueries there are named ON CONFLICT DO UPDATE after VALUES, SELECT and WITH sources.
-EXCLUDED is absent from RETURNING scope; EXCLUDED.column there reports COHDBL001.
+EXCLUDED is absent from RETURNING scope; EXCLUDED.column there reports COHDBL001, unless
+a real target table or alias is named excluded, which stays referenceable (PostgreSQL).
 MySQL ON DUPLICATE KEY UPDATE and SQLite INSERT OR IGNORE/REPLACE report one COHDBL001
 suggesting ON CONFLICT and execute nothing. These spellings and CONFLICT, DO, NOTHING,
 EXCLUDED remain contextual, so stored identifier quoting is unchanged. MERGE remains SQL0002.
