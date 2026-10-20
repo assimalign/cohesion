@@ -2216,13 +2216,15 @@ original scalar boundary, including reordered Thai/Lao prefixes (like_match.c:28
 Invariant matching has a work budget of 64 × (input UTF-16 length + raw pattern
 UTF-16 length + 1). Each search transition and boundary probe costs one unit; each
 linguistic comparison additionally costs the sum of its two span lengths (at least
-one unit). Exhaustion raises located COHSQLE040 as an ExecutionFailure and leaves
+one unit). Each zero-initialized 32-bit visited-state word costs one unit, charged
+before allocation. Exhaustion raises located COHSQLE040 as an ExecutionFailure and leaves
 the connection usable; LIKE and NOT LIKE both fail rather than returning an estimate.
 This is a deliberate resource limit on linguistic matching (#1166). Other collations
 keep their O(input × pattern) search. The iterative matcher observes the executing
 statement's cancellation token inside row-time matching and has no data-dependent recursion.
 Binary and case-insensitive search keep only the last `%`; the other collations
-remember visited suffixes in at most tokens × (input length + 1) bits.
+keep the first visited boundary inline per token, expanding to at most
+tokens × (input length + 1) bits when additional starts arrive.
 Accent-insensitive literals map normalized ends to original scalar boundaries and
 coalesce ignored-mark continuations. A final linguistic literal compares the complete
 remaining text once, so a long exact match does not spend its budget probing prefixes.

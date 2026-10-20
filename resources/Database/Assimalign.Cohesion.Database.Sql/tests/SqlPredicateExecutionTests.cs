@@ -485,7 +485,7 @@ public sealed class SqlPredicateExecutionTests
     [InlineData("binary", 0)]
     [InlineData("case_insensitive", 1024 * 1024)]
     [InlineData("case_accent_insensitive", 8 * 1024 * 1024)]
-    [InlineData("invariant", 8 * 1024 * 1024)]
+    [InlineData("invariant", 4 * 1024 * 1024)]
     public void Match_ThousandsOfWildcards_ShouldBoundWorkAndAllocation(string name, long allocationLimit)
     {
         // Arrange: tokenization and fixed-pattern normalization stay outside the match.
@@ -583,47 +583,75 @@ public sealed class SqlPredicateExecutionTests
         bool matched = pattern.Match(input, Collation.Invariant, CancellationToken.None, out long work);
         // Assert
         matched.ShouldBeTrue();
-        work.ShouldBeLessThanOrEqualTo(2L * input.Length + 1);
+        work.ShouldBeLessThanOrEqualTo(3L * input.Length);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql] - LIKE: one-row engine execution retains its cancellation token")]
-    [InlineData("SELECT @input COLLATE invariant LIKE @pattern FROM slow")]
-    [InlineData("SELECT s FROM slow WHERE @input COLLATE invariant LIKE @pattern")]
-    [InlineData("SELECT matched FROM slow_view")]
-    public async Task ExecuteAsync_OneRowLike_ShouldObserveStatementCancellationAsync(string sql)
+    [Theory(DisplayName = "Cohesion Test [Sql] - LIKE: plans retain cancellation only when they contain LIKE")]
+    [InlineData("SELECT s COLLATE invariant LIKE '%b' FROM slow", true)]
+    [InlineData("SELECT s FROM slow WHERE s COLLATE invariant LIKE '%b'", true)]
+    [InlineData("SELECT CASE WHEN s LIKE '%b' THEN 1 ELSE 0 END FROM slow", true)]
+    [InlineData("WITH x AS (SELECT s LIKE '%b' AS matched FROM slow) SELECT matched FROM x", true)]
+    [InlineData("SELECT s FROM slow WHERE EXISTS (SELECT s FROM slow child WHERE child.s LIKE '%b')", true)]
+    [InlineData("SELECT s FROM slow", false)]
+    public async Task Plan_LikeExpressions_ShouldRetainCancellationFlagAsync(string sql, bool expected)
     {
-        // Arrange: no application functions. A dedicated observer cancels only after the
-        // first stored record is read, beyond the scan's between-row cancellation check.
+        // Arrange
         await using var engine = CreateEngine();
         var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
-        await ExecuteAsync(session, "CREATE TABLE slow (s TEXT, p TEXT)");
-        await ExecuteAsync(session, "INSERT INTO slow VALUES ('a', '%b')");
-        await ExecuteAsync(session, "CREATE VIEW slow_view AS SELECT RPAD('a', 500000, 'a') COLLATE invariant LIKE ('%' || RPAD('a', 100000, 'a') || 'b') AS matched FROM slow");
-        // Warm the immutable cached view plan with an empty read, without matching.
-        _ = new SqlPlanner(database.Catalog, new Dictionary<string, object?> { ["input"] = "a", ["pattern"] = "%b" }, database.Definitions.Functions).Plan(SqlQueryRequest.FromSql(sql).Statement.SqlExpression);
-        var parameters = new Dictionary<string, object?> { ["input"] = new string('a', 1_000_000), ["pattern"] = "%" + new string('a', 100_000) + "b" };
-        var previous = session.LastStatementMetrics;
-        using var cancellation = new CancellationTokenSource();
-        using var finished = new CancellationTokenSource();
-        var observer = Task.Factory.StartNew(() =>
+        await ExecuteAsync(session, "CREATE TABLE slow (s TEXT)");
+        // Act
+        var plan = new SqlPlanner(database.Catalog, null, database.Definitions.Functions).Plan(SqlQueryRequest.FromSql(sql).Statement.SqlExpression);
+        // Assert
+        plan.ContainsLike.ShouldBe(expected);
+        database.Definitions.Functions.RunsApplicationCode.ShouldBeFalse();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - LIKE: cancellation at row-time match entry uses the current statement token")]
+    [InlineData("SELECT matched FROM slow_view", true)]
+    [InlineData("INSERT INTO checked_values VALUES (2, 'aaa')", false)]
+    [InlineData("UPDATE checked_values SET s = 'aaa' WHERE id = 1", false)]
+    public async Task ExecuteAsync_OneRowLike_ShouldObserveStatementCancellationAsync(string sql, bool view)
+    {
+        // Arrange: cached patterns are bound with no cancellation token. A per-pattern
+        // owning-assembly hook cancels at Match entry, after operand evaluation, without
+        // registering application code or racing a faster work-budget refusal.
+        await using var engine = CreateEngine();
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        string literal = new string('a', 1000) + "b";
+        await ExecuteAsync(session, "CREATE TABLE slow (s TEXT)");
+        await ExecuteAsync(session, "INSERT INTO slow VALUES ('a')");
+        await ExecuteAsync(session, "CREATE VIEW slow_view AS SELECT RPAD('a', 500000, 'a') COLLATE invariant LIKE '%" + literal + "' AS matched FROM slow");
+        await ExecuteAsync(session, "CREATE TABLE checked_values (id INT, s TEXT CHECK (s COLLATE invariant LIKE '%" + literal + "'))");
+        await ExecuteAsync(session, "INSERT INTO checked_values VALUES (1, '" + literal + "')");
+        SqlBoundLike like;
+        if (view)
         {
-            bool read = SpinWait.SpinUntil(() =>
-                !ReferenceEquals(previous, session.LastStatementMetrics) && session.LastStatementMetrics?.RecordsExamined > 0 || finished.IsCancellationRequested,
-                TimeSpan.FromSeconds(10));
-            if (read && !finished.IsCancellationRequested) { cancellation.Cancel(); return true; }
-            return false;
-        }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+            var outer = new SqlPlanner(database.Catalog, null, database.Definitions.Functions).Plan(SqlQueryRequest.FromSql(sql).Statement.SqlExpression).ShouldBeOfType<SqlJoinPlan>();
+            var child = outer.Bindings[0].Source.Derived!.Query.ShouldBeOfType<SqlSelectPlan>();
+            like = child.Projections[0].Value.ShouldBeOfType<SqlBoundLike>();
+        }
+        else
+        {
+            database.Catalog.TryGetTable("dbo", "checked_values", out var table).ShouldBeTrue();
+            like = database.Definitions.Get(table!).Checks[0].Bound.ShouldBeOfType<SqlBoundLike>();
+        }
+        var compiled = like.Compiled.ShouldNotBeNull();
+        using var cancellation = new CancellationTokenSource();
+        int entered = 0;
+        compiled.BeforeMatch = () => { entered++; cancellation.Cancel(); };
+        database.Definitions.Functions.RunsApplicationCode.ShouldBeFalse();
         // Act
         try
         {
-            await Should.ThrowAsync<OperationCanceledException>(async () => await session.ExecuteAsync(sql, parameters, cancellationToken: cancellation.Token));
-            (await observer).ShouldBeTrue();
+            await Should.ThrowAsync<OperationCanceledException>(async () => await session.ExecuteAsync(sql, cancellationToken: cancellation.Token));
         }
-        finally { finished.Cancel(); await observer; }
-        // Assert: exactly the one candidate was visited and cleanup leaves the session usable.
-        session.LastStatementMetrics!.RecordsExamined.ShouldBe(1);
-        (await RowsAsync(session, "SELECT COUNT(*) FROM slow")).ShouldHaveSingleItem()[0].ShouldBe(1L);
+        finally { compiled.BeforeMatch = null; }
+        // Assert: the matcher was reached, cancellation escaped, and writes rolled back.
+        entered.ShouldBe(1);
+        if (view) { session.LastStatementMetrics!.RecordsExamined.ShouldBe(1); }
+        (await RowsAsync(session, "SELECT id FROM checked_values")).ShouldHaveSingleItem()[0].ShouldBe(1);
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - LIKE: invariant literals probe past reordered Thai and Lao prefixes")]

@@ -5772,10 +5772,13 @@ Accent-insensitive literal probes compare normalized spans and stop once a prefi
 can no longer match. Linguistic probes compare spans at every original scalar
 boundary, including Thai/Lao reordered prefixes (like_match.c:289-311); a prefix
 test cannot safely prune these comparisons. Explicit continuations avoid recursion;
-visited suffixes use at most one bit per token/input boundary, allocated by token
-as reached. Invariant search charges every transition and boundary probe, plus both
+visited suffixes keep one boundary inline per token and expand to at most one bit
+per token/input boundary when another start arrives. Invariant search charges every transition and boundary probe, plus both
 UTF-16 span lengths before each linguistic comparison, to a per-match budget of
-64 × (input UTF-16 length + raw pattern UTF-16 length + 1). Exhaustion raises located
+64 × (input UTF-16 length + raw pattern UTF-16 length + 1). Each zero-initialized
+32-bit visited-state word also costs one unit, charged before allocating its row;
+many literal tokens therefore cannot bypass the budget through state initialization.
+Exhaustion raises located
 COHSQLE040; it never returns a guessed Boolean. This bounds comparison work even when
 a single probe scans a long equal prefix, while preserving reordered and ignorable
 scalar semantics for admitted matches (#1166). Cancellation wins over budget refusal.

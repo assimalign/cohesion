@@ -17,6 +17,9 @@ internal sealed class SqlLikePattern
     private readonly Collation? _normalizedFor;
     private readonly string?[]? _normalizedTokens;
 
+    // Owning-assembly test seam: cancellation at row-time entry of a cached pattern.
+    internal Action? BeforeMatch { get; set; }
+
     private SqlLikePattern(string?[] tokens, int sourceLength, Collation? normalizedFor = null, string?[]? normalizedTokens = null)
     {
         _tokens = tokens;
@@ -89,6 +92,7 @@ internal sealed class SqlLikePattern
     internal bool Match(string input, Collation collation, CancellationToken cancellationToken, out long work)
     {
         work = 0;
+        BeforeMatch?.Invoke();
         cancellationToken.ThrowIfCancellationRequested();
         long limit = WorkLimit(input.Length);
         var pattern = Normalize(collation);
@@ -144,6 +148,8 @@ internal sealed class SqlLikePattern
         // Allocate rows lazily: at most one bit per token/input boundary, rather
         // than one hash entry per state on repetitive nonmatching input.
         var visited = new uint[_tokens.Length][];
+        var firstVisited = new int[_tokens.Length];
+        Array.Fill(firstVisited, -1);
         pending.Push((0, 0, -1));
         int steps = 0;
         while (pending.TryPop(out var state))
@@ -158,10 +164,26 @@ internal sealed class SqlLikePattern
             }
             if (state.End < 0)
             {
-                var row = visited[index] ??= new uint[(int)(((long)input.Length + 32) / 32)];
-                uint mask = 1u << (start & 31);
-                if ((row[start >> 5] & mask) != 0) { continue; }
-                row[start >> 5] |= mask;
+                int first = firstVisited[index];
+                if (first == start) { continue; }
+                if (first < 0) { firstVisited[index] = start; }
+                else
+                {
+                    var row = visited[index];
+                    if (row is null)
+                    {
+                        int words = (int)(((long)input.Length + 32) / 32);
+                        // One boundary needs only an inline slot. Charge expansion before
+                        // allocating, so a simple successful path stays cheap while many
+                        // alternative starts cannot bypass the linguistic work budget.
+                        Charge(ref work, words, limit, collation, cancellationToken);
+                        visited[index] = row = new uint[words];
+                        row[first >> 5] |= 1u << (first & 31);
+                    }
+                    uint mask = 1u << (start & 31);
+                    if ((row[start >> 5] & mask) != 0) { continue; }
+                    row[start >> 5] |= mask;
+                }
             }
             string? raw = _tokens[index];
             if (raw is null)
@@ -236,8 +258,9 @@ internal sealed class SqlLikePattern
                         // An earlier arrival at this suffix already queued its ignored
                         // extensions. Coalesce those continuations as well as suffixes,
                         // so an ignored run cannot be enumerated once per raw start.
-                        if (collation.IsIndexBacked && visited[index + 1] is { } suffixes &&
-                            (suffixes[end >> 5] & (1u << (end & 31))) != 0) { break; }
+                        if (collation.IsIndexBacked && (firstVisited[index + 1] == end ||
+                            visited[index + 1] is { } suffixes &&
+                            (suffixes[end >> 5] & (1u << (end & 31))) != 0)) { break; }
                         if (end < input.Length)
                         {
                             int next = end + ScalarLength(input, end);
