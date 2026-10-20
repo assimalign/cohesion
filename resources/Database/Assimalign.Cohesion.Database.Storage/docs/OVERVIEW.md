@@ -66,8 +66,8 @@ and the Storage components inside each `Database.{Model}` engine assembly.
 
 ## Usage
 
-Models derive a thin facade from `Storage` (see `Assimalign.Cohesion.Database.Sql.Storage`
-for the canonical example):
+Models derive a thin facade from `Storage` (see `SqlStorage` in the SQL engine's
+`src/Storage/` component, namespace `Assimalign.Cohesion.Database.Sql.Storage`, for the canonical example):
 
 ```csharp
 public sealed class SqlStorage : Storage

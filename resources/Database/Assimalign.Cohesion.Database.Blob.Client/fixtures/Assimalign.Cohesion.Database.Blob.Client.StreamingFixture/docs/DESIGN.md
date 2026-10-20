@@ -8,13 +8,15 @@ SHA-256 rather than a memory stream. A separate bounded loop derives the expecte
 digest before the transfer.
 
 The executable references the typed client, the server's engine package, and the test transport.
+The client and engine independently reference `Database.Blob.Protocol` for the wire contracts.
 
 ```mermaid
 flowchart LR
     Fixture["Blob wire streaming fixture"] --> Client["Database.Blob.Client"]
     Fixture --> Blob["Database.Blob"]
     Fixture --> Transport["Connections.InMemory"]
-    Client --> Blob
+    Client --> Wire["Database.Blob.Protocol"]
+    Blob --> Wire
     Client --> Shared["Database.Client"]
 ```
 

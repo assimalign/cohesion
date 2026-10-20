@@ -1729,7 +1729,7 @@ The endpoint participates in protocol 2.1: Startup may carry capability names an
 
 ## Catalog component
 
-The following content moved from Assimalign.Cohesion.Database.Documents.Catalog; project and assembly references in this retained material now describe folders in Assimalign.Cohesion.Database.Documents. The [model component boundaries](DESIGN.md#model-component-boundaries) govern these components.
+The Catalog component is part of `Assimalign.Cohesion.Database.Documents`, with public types in `src/Catalog/` and helpers in `src/Internal/Catalog/`. Its namespaces are unchanged; it is not a separate project or assembly. The [model component boundaries](DESIGN.md#model-component-boundaries) govern its dependencies.
 
 ### Catalog: Document catalog design
 
@@ -1737,17 +1737,18 @@ The following content moved from Assimalign.Cohesion.Database.Documents.Catalog;
 
 Documents.Catalog depends on the Database root for ownership vocabulary, Documents.Storage for
 record/content access, Database.Transactions for MVCC and statement brackets, Database.Indexing
-for B+Trees, and Database.Types for scalar key encoding. The engine depends on this package and
+for B+Trees, and Database.Types for scalar key encoding. The engine uses this component and
 owns sessions, OQL planning/execution, lock acquisition, ownership enforcement, and
 commit/rollback. There is no Hosting or ApplicationModel dependency and no compiled-schema
 provisioning.
 
-The dependency diagram shows the same reference direction as the prose.
+Catalog and Storage live within `Database.Documents`; the diagram shows their internal
+dependency direction and references to shared packages.
 
 ```mermaid
 flowchart LR
-    Cat["Documents.Catalog"] --> Root["Database"]
-    Cat --> Doc["Documents.Storage"]
+    Cat["Documents Catalog component"] --> Root["Database"]
+    Cat --> Doc["Documents Storage component"]
     Cat --> Tx["Database.Transactions"]
     Cat --> Tree["Database.Indexing"]
     Cat --> Types["Database.Types"]
@@ -1837,7 +1838,7 @@ layer. Document content has its separate multi-page chunk mechanism.
 
 Index definitions are lower-level catalog mutations, not a second public engine entry point. The
 Documents planner turns OQL `CREATE INDEX` and `DROP INDEX` expressions into catalog-operation
-plans, and the plan executor invokes this package under the statement's `TransactionContext`
+plans, and the plan executor invokes this component under the statement's `TransactionContext`
 after lock acquisition and ownership enforcement. `DocumentDatabase` therefore needs no index
 members, and the catalog and B+Tree updates retain the same transaction as the DDL statement.
 
@@ -1961,7 +1962,7 @@ dynamic code generation, or Microsoft.Extensions dependencies.
 
 ## Storage component
 
-The following content moved from Assimalign.Cohesion.Database.Documents.Storage; project and assembly references in this retained material now describe folders in Assimalign.Cohesion.Database.Documents. The [model component boundaries](DESIGN.md#model-component-boundaries) govern these components.
+The Storage component is part of `Assimalign.Cohesion.Database.Documents`, with public types in `src/Storage/` and helpers in `src/Internal/Storage/`. Its namespaces are unchanged; it is not a separate project or assembly. The [model component boundaries](DESIGN.md#model-component-boundaries) govern its dependencies.
 
 ### Storage: Document storage design
 
@@ -1976,7 +1977,7 @@ The dependency direction is shown below; both arrows mean references.
 
 ```mermaid
 flowchart LR
-    Doc["Documents.Storage"] --> Storage["Database.Storage"]
+    Doc["Documents Storage component"] --> Storage["Database.Storage"]
     Doc --> Tx["Database.Transactions"]
 ```
 
@@ -2094,7 +2095,7 @@ are not supported as engine file sets. Its retained low-level record APIs remain
 and do not validate or stamp data. They are intentionally excluded from engine composition.
 
 Compiled-schema provisioning, compression, binary-JSON field-offset tables, encryption,
-replication, and a wire streaming protocol are outside this package's scope.
+replication, and a wire streaming protocol are outside this component's scope.
 
 
 ## Public assembly identity changes

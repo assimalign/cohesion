@@ -7,8 +7,8 @@ public Database family without adding model package references by hand.
 
 `Documents.Client` and `Graph.Client` ship as NuGet-only packages. Consumers add those clients
 explicitly; neither belongs to the shared framework's member list. The Documents engine and
-wire server remain framework members through `Database.Documents`, while `Documents.Security`
-is still deferred. The installer release inventory and Database CI matrix include the delivered
+wire server remain framework members through `Database.Documents`. Future model-specific security
+belongs in that engine assembly; the empty Security satellite has been removed. The installer release inventory and Database CI matrix include the delivered
 client packages independently of framework membership.
 
 The inventory includes `Assimalign.Cohesion.Database.Sql.Schema` beside the SQL engine

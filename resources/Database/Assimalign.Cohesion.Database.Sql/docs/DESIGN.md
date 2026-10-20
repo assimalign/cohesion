@@ -5830,9 +5830,9 @@ mutable test-hook field on the shared pattern.
 
 ## Catalog component
 
-The following content moved from Assimalign.Cohesion.Database.Sql.Catalog; project and assembly references in this retained material now describe folders in Assimalign.Cohesion.Database.Sql. The [model component boundaries](DESIGN.md#model-component-boundaries) govern these components.
+The Catalog component is part of `Assimalign.Cohesion.Database.Sql`, with public types in `src/Catalog/` and helpers in `src/Internal/Catalog/`. Its namespaces are unchanged; it is not a separate project or assembly. The [model component boundaries](DESIGN.md#model-component-boundaries) govern its dependencies.
 
-### Catalog: Assimalign.Cohesion.Database.Sql.Catalog — Design
+### Catalog: Sql catalog design
 
 #### Catalog: Fixed-length characters (#1437)
 
@@ -6393,7 +6393,7 @@ over its own file set. So the three collapsed into the sealed class
 private constructor, and the four statics are instance members with the same
 checks and documentation. The internal test helpers (`CreateTableAsync` with
 ownership and constraints, `AddConstraintAsync`) became internal instance members
-the catalog's tests reach through the existing Sql.Catalog → Sql.Catalog.Tests grant.
+the model's tests reach through the owning `Database.Sql` assembly's test-only visibility grant.
 No behavior changed. The `Abstractions/` folder is gone.
 
 #### Catalog: Error model
@@ -6427,7 +6427,7 @@ it atomically. A recreated table gets a fresh ObjectId and starts from START.
 #### Catalog: Non-goals
 
 - General sequences and permissions (permissions are
-  `Sql.Security`'s feature, #177). Virtual system views are engine projections
+  a future SQL engine feature, #177). Virtual system views are engine projections
   of this catalog and require no view records here.
 - Multi-statement DDL atomicity (see self-committing DDL above). The migration
   layer compensates completed reversible statements on failure; an MVCC bracket
@@ -6560,13 +6560,13 @@ catalog dependency on the language assembly.
 
 ## Storage component
 
-The following content moved from Assimalign.Cohesion.Database.Sql.Storage; project and assembly references in this retained material now describe folders in Assimalign.Cohesion.Database.Sql. The [model component boundaries](DESIGN.md#model-component-boundaries) govern these components.
+The Storage component is part of `Assimalign.Cohesion.Database.Sql`, with public types in `src/Storage/` and helpers in `src/Internal/Storage/`. Its namespaces are unchanged; it is not a separate project or assembly. The [model component boundaries](DESIGN.md#model-component-boundaries) govern its dependencies.
 
-### Storage: Assimalign.Cohesion.Database.Sql.Storage — Design
+### Storage: Sql storage design
 
-The SQL model's *storage layout* project (area architecture:
+The SQL model's *storage layout* component (area architecture:
 [docs/resources/Database/DESIGN.md](../../../../docs/resources/Database/DESIGN.md) §3.3 — every model brings a layout,
-never its own paging/WAL). This library is deliberately thin: `SqlStorage` derives
+never its own paging/WAL). This component is deliberately thin: `SqlStorage` derives
 from the kernel's `Storage` base and re-exposes the protected record operations as a
 public row-oriented surface. All hard invariants (write-ahead ordering, recovery
 replay, buffer-pool behavior, per-owner record chains) live in — and are documented
@@ -6576,7 +6576,7 @@ by — `Assimalign.Cohesion.Database.Storage`.
 
 - **A facade, not a layout engine.** SQL rows are "variable-length byte sequences
   addressed by (page, slot)" — exactly the substrate's slotted-page unit — so the
-  SQL layout adds no page format of its own. The project still exists (rather than
+  SQL layout adds no page format of its own. The component exposes a model-specific surface (rather than
   the engine using `Storage` directly) because the base class's record operations
   are `protected` by design: models opt into the record surface they actually
   expose, and `SqlStorage` is where the SQL model does that, plus where a
@@ -6624,7 +6624,7 @@ family. The SQL engine translates at its model boundary per the area error polic
 #### Storage: AOT posture
 
 Inherits the substrate's posture (explicit-layout header overlays, span-based
-codecs); this project adds no reflection and no serialization.
+codecs); this component adds no reflection and no serialization.
 
 #### Storage: Non-goals
 

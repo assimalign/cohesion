@@ -50,8 +50,8 @@ its graph, in memory as on disk (owner decision 33).
 (5 minutes) size the buffer pool and trigger checkpoints (#1254); a failed undo is retried on a
 100 ms backoff (#1226). See DESIGN.md, "Storage operations".
 
-The engine references the area root and Graph.Language, Graph.Catalog and Graph.Storage. The
-storage and catalog compose the shared kernel. It is `net10.0`, AOT compatible, and uses neither
+The engine references the area root and Graph.Language. Its Catalog and Storage components
+live in the same assembly and compose the shared kernel. It is `net10.0`, AOT compatible, and uses neither
 reflection nor `Microsoft.Extensions.*`. `GraphDatabaseServer` dispatches scalar GQL, mutations,
 catalog `SHOW`, and path queries to the same engine. The separate NuGet-only
 [Graph.Client](../../Assimalign.Cohesion.Database.Graph.Client/docs/OVERVIEW.md) package supplies
@@ -91,11 +91,11 @@ GQL linear composition executes LET, FILTER, FOR/UNWIND, RETURN ... NEXT and Cyp
 
 ## Catalog component
 
-The following content moved from Assimalign.Cohesion.Database.Graph.Catalog; project and assembly references in this retained material now describe folders in Assimalign.Cohesion.Database.Graph. The [model component boundaries](DESIGN.md#model-component-boundaries) govern these components.
+The Catalog component is part of `Assimalign.Cohesion.Database.Graph`, with public types in `src/Catalog/` and helpers in `src/Internal/Catalog/`. Its namespaces are unchanged; it is not a separate project or assembly. The [model component boundaries](DESIGN.md#model-component-boundaries) govern its dependencies.
 
 ### Catalog: Graph catalog
 
-`Assimalign.Cohesion.Database.Graph.Catalog` provides durable discovery and definition metadata
+The `src/Catalog/` component provides durable discovery and definition metadata
 for one logical graph database. It records node labels, relationship types, property keys, and
 named node-property indexes. Labels and relationship types carry `DatabaseObjectOwner` and
 an optional owning schema.
@@ -120,11 +120,11 @@ MVCC behavior, and division of responsibilities.
 
 ## Storage component
 
-The following content moved from Assimalign.Cohesion.Database.Graph.Storage; project and assembly references in this retained material now describe folders in Assimalign.Cohesion.Database.Graph. The [model component boundaries](DESIGN.md#model-component-boundaries) govern these components.
+The Storage component is part of `Assimalign.Cohesion.Database.Graph`, with public types in `src/Storage/` and helpers in `src/Internal/Storage/`. Its namespaces are unchanged; it is not a separate project or assembly. The [model component boundaries](DESIGN.md#model-component-boundaries) govern its dependencies.
 
-### Storage: Graph.Storage
+### Storage: Graph storage component
 
-`Assimalign.Cohesion.Database.Graph.Storage` stores property-graph nodes, relationships,
+The `src/Storage/` component stores property-graph nodes, relationships,
 endpoint adjacency and secondary node-property indexes. Filtered incident reads seek by
 node, direction and catalog type GUID before decoding relationships; self-loops appear once. It targets .NET 10, is AOT
 compatible, and uses explicit binary codecs without reflection.
