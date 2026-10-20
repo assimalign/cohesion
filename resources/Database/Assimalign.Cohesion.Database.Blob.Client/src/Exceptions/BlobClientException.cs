@@ -9,7 +9,7 @@ namespace Assimalign.Cohesion.Database.Blob.Client;
 /// <summary>A Blob wire operation failed; the connection is no longer reusable.</summary>
 public sealed class BlobClientException : Exception
 {
-    /// <summary>Gets the complete read-only diagnostic snapshot, ordered by source offset; empty when none were supplied.</summary>
+    /// <summary>Gets the read-only diagnostics collection, which is always empty for this model.</summary>
     public IReadOnlyList<Diagnostic> Diagnostics { get; } = Array.Empty<Diagnostic>();
 
     /// <summary>Creates an exception preserving a server or client-local wire error code.</summary>

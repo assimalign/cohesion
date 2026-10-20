@@ -9,8 +9,10 @@ Direct references are Database.Client, Graph.Protocol, Database.Types, Database.
 `GraphClientException` derives directly from `System.Exception`. It preserves constructors, wire codes, inner exception and connection-usability behavior. Its locally declared Diagnostics is never null: explicit diagnostics are defensively copied into a read-only snapshot, stably ordered by offset with unlocated entries last. SQL and Graph wrappers copy from DatabaseClientException or their own nested client exception. Documents retains its explicit diagnostics parameter and returns an empty collection when none was supplied. Engine-side DatabaseException remains in the area root; catching it intentionally no longer catches remote client failures.
 
 The client follows Sql.Client's shape: a sealed client with a `Create` factory over options, a
-sealed connection, internal exchanges, and an exception that keeps the wire code. It references Database.Graph for its existing model protocol and graph values, and
-Database.Client for the pool, handshake, frame transport, and connection lifetime. It has no
+sealed connection, internal exchanges, and an exception that keeps the wire code. It references
+Graph.Protocol for the model wire contracts and graph values, and Database.Client for the pool,
+handshake, frame transport, and connection lifetime. Its other direct references are Database.Types,
+Database.Protocol and Connections. It has no
 Hosting dependency, reflection, dynamic serialization, or dependency on Microsoft.Extensions.
 
 ```mermaid

@@ -22,7 +22,7 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Client;
 /// </remarks>
 public sealed class KeyValueClientException : Exception
 {
-    /// <summary>Gets the complete read-only diagnostic snapshot, ordered by source offset; empty when none were supplied.</summary>
+    /// <summary>Gets the read-only diagnostics collection, which is always empty for this model.</summary>
     public IReadOnlyList<Diagnostic> Diagnostics { get; } = Array.Empty<Diagnostic>();
 
     /// <summary>

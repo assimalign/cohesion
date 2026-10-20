@@ -6,7 +6,11 @@ Direct references are Database.Client, Blob.Protocol, Database.Types, Database.P
 
 ## Client exception ownership
 
-`BlobClientException` derives directly from `System.Exception`. It preserves constructors, wire codes, inner exception and connection-usability behavior. Its locally declared Diagnostics is never null: explicit diagnostics are defensively copied into a read-only snapshot, stably ordered by offset with unlocated entries last. SQL and Graph wrappers copy from DatabaseClientException or their own nested client exception. Documents retains its explicit diagnostics parameter and returns an empty collection when none was supplied. Engine-side DatabaseException remains in the area root; catching it intentionally no longer catches remote client failures.
+`BlobClientException` derives directly from `System.Exception`. It preserves constructors, wire codes,
+inner exception and connection-usability behavior. Its locally declared `Diagnostics` is always an
+empty, read-only collection: this model does not populate structured diagnostics or copy them from
+an inner exception. Engine-side `DatabaseException` remains in the area root; catching it no longer
+catches remote client failures.
 
 ## Ownership and family
 
@@ -32,9 +36,13 @@ flowchart LR
 | --- | --- |
 | `Assimalign.Cohesion.Database.Blob.Client` | Typed operation APIs, Blob transfer validation, bounded list materialization, client errors |
 | `Assimalign.Cohesion.Database.Client` | Pool leases, transport dialing, startup handshake, framed exchanges, bounded streaming lifetime |
-| `Assimalign.Cohesion.Database.Blob.Protocol | Blob codecs, shared transfer state machine, engine and server |
+| `Assimalign.Cohesion.Database.Blob.Protocol` | Blob wire messages, codecs, family identity, transferred values, and shared transfer state machine |
+| `Assimalign.Cohesion.Database.Blob` | Blob engine, catalog, storage, publication, and server lifecycle |
 | `Assimalign.Cohesion.Database.Protocol` | Family validation, frame envelope, startup and error vocabulary |
 | `Assimalign.Cohesion.Connections` | Transport-neutral connection factory |
+
+`Blob.Protocol` owns only the wire contracts and transfer mechanics. The Blob engine and server
+remain in `Assimalign.Cohesion.Database.Blob`, which this client does not reference.
 
 Public APIs are a sealed client with its `Create` factory, a sealed connection, options, and a typed exception.
 Blob consumes the shared streaming exchange contract without changing its own caller-facing
@@ -146,7 +154,7 @@ closure wakes the server and causes unfinished uploads to roll back. No retry or
 
 A model reader adapter recognizes shared `Error` frames and throws `DatabaseClientException`
 with their original code and message before `BlobProtocolTransfer` can collapse them into
-`ProtocolException`. Preserving diagnostics at that helper boundary remains necessary, but
+`ProtocolException`. Preserving the wire error code and message at that helper boundary remains necessary, but
 the adapter no longer changes the exception type to force pool invalidation. The shared pool
 uses the exchange's completion evidence instead of inspecting the error code. Blob failures
 never certify that the session is reusable: every Blob server error terminates its session,
@@ -156,13 +164,12 @@ The typed operation boundary and the download stream facade translate shared cli
 `BlobClientException` only after shared health processing. This retains the existing Blob error
 surface, original wire code, and sticky read failures. Ordinary Blob operations also retain their
 frame-only adapters for completed transport pipes that report `InvalidOperationException`:
-these preserve existing Blob upload and metadata diagnostics without changing SQL or Key-Value
+these preserve existing Blob upload and metadata error codes and messages without changing SQL or Key-Value
 transport behavior. Downloads use the shared streaming frame adapters for that normalization.
 These adapters do not control connection health or intercept errors from caller-owned streams.
-Blob-specific codecs, transfer validation,
-acknowledgements, publication acknowledgement, metadata shapes, and typed exception mapping
-remain in Blob; producer coordination, content buffering, cancellation, and connection release
-belong to the shared client.
+`Blob.Protocol` owns wire codecs, transfer validation, acknowledgements and metadata shapes.
+`Blob.Client` owns publication-acknowledgement checks and typed exception mapping. Producer
+coordination, content buffering, cancellation, and connection release belong to the shared client.
 
 Delete accepts only an operation completion count of zero or one. Properties accepts a single
 matching item followed by completion(1), or completion(0) for absence. Listings yield metadata

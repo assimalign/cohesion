@@ -5,14 +5,17 @@
 Create the sealed `GraphClient` through `GraphClient.Create`, supplying `GraphClientOptions` with shared
 database settings and a Connections transport factory.
 
+Its only project references are `Database.Client`, `Graph.Protocol`, `Database.Types`,
+`Database.Protocol` and `Connections`. `Graph.Protocol` owns the model wire contracts and graph
+values shared with the engine. The arrows show these project references:
+
 ```mermaid
 flowchart LR
-    Caller --> GraphClient
-    GraphClient --> GraphConnection
-    GraphConnection -->|scalar statements| GraphResultSet
-    GraphConnection -->|streamed entity projections| GraphPath
-    GraphConnection --> Core[Database.Client pool]
-    Core --> Server[GraphDatabaseServer]
+    Client["Database.Graph.Client"] --> Core["Database.Client"]
+    Client --> Wire["Database.Graph.Protocol"]
+    Client --> Types["Database.Types"]
+    Client --> Protocol["Database.Protocol"]
+    Client --> Connections["Connections"]
 ```
 
 `QueryAsync` returns scalar, list and map RETURN expressions (also standalone, DISTINCT/ALL and aliased) and the existing SHOW catalog rows as
