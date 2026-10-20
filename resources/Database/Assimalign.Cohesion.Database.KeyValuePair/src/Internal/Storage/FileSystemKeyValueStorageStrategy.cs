@@ -1,4 +1,5 @@
 using System.IO;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.KeyValuePair.Internal;
 
@@ -76,14 +77,21 @@ internal sealed class FileSystemKeyValueStorageStrategy : KeyValueStorageStrateg
             throw new DatabaseException($"Storage '{GetLabel(databaseName, catalog)}' does not exist.");
         }
 
+        var catalogFiles = DatabaseFileNames.GetFiles(DatabaseFileNames.GetDirectory(_rootPath, databaseName), GetFileSet(catalog: true));
+        if (!File.Exists(files.Journal) || !File.Exists(files.Backup)
+            || (!catalog && (!File.Exists(catalogFiles.Data) || !File.Exists(catalogFiles.Journal) || !File.Exists(catalogFiles.Backup))))
+        {
+            string message = string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CreationSidecarMissing, databaseName);
+            throw new DatabaseException(message, [new Diagnostic { Code = "COHDBK004", Message = message, Severity = DiagnosticSeverity.Error }]);
+        }
         var dataStream = StorageStream.FromFile(files.Data, FileMode.Open, FileShare.Read);
 
         StorageStream? journalStream = null;
         StorageStream? backupStream = null;
         try
         {
-            journalStream = StorageStream.FromFile(files.Journal, FileMode.OpenOrCreate, FileShare.Read);
-            backupStream = StorageStream.FromFile(files.Backup, FileMode.OpenOrCreate, FileShare.Read);
+            journalStream = StorageStream.FromFile(files.Journal, FileMode.Open, FileShare.Read);
+            backupStream = StorageStream.FromFile(files.Backup, FileMode.Open, FileShare.Read);
 
             // Defer the open-time checkpoint: the engine's transaction coordinator
             // analyzes the recovered journal before checkpoint truncates its records.
@@ -105,6 +113,9 @@ internal sealed class FileSystemKeyValueStorageStrategy : KeyValueStorageStrateg
 
         if (Directory.Exists(directory))
         {
+            // The primary data file is the database identity; delete it before either sidecar.
+            File.Delete(DatabaseFileNames.GetFiles(directory, DataFileSet).Data);
+            foreach (string dataFile in Directory.EnumerateFiles(directory, "*.dat")) { File.Delete(dataFile); }
             Directory.Delete(directory, recursive: true);
         }
     }

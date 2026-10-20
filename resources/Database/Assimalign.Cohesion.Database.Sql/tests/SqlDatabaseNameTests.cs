@@ -243,6 +243,41 @@ public sealed class SqlDatabaseNameTests : IDisposable
         database.ShouldBeNull();
     }
 
+    [Theory(DisplayName = "Cohesion Test [Database.Sql] - Partial drop: every subset of removed files refuses unchanged storage (#1158)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task OpenDatabaseAsync_PartialDrop_ShouldNeverReopen(bool populated)
+    {
+        // Arrange: all 63 nonempty subsets, including the legacy sidecar-first deletion states.
+        string[] names = ["sql.dat", "sql.log", "sql.bak", "catalog.dat", "catalog.log", "catalog.bak"];
+        int refused = 0;
+        for (int removed = 1; removed < 64; removed++)
+        {
+            string name = "drop" + removed;
+            await using (var first = CreateEngine(onDisk: true))
+            {
+                var database = await first.CreateDatabaseAsync(name, TestTimeout.Token());
+                if (populated) { await WriteAsync(database, 1); }
+            }
+            string directory = Path.Combine(_rootPath, name);
+            for (int index = 0; index < names.Length; index++)
+            {
+                if ((removed & (1 << index)) != 0) { File.Delete(Path.Combine(directory, names[index])); }
+            }
+            var before = Directory.GetFiles(directory).ToDictionary(path => Path.GetFileName(path)!, File.ReadAllBytes);
+            await using var engine = CreateEngine(onDisk: true);
+
+            // Act
+            await Should.ThrowAsync<DatabaseException>(() => engine.OpenDatabaseAsync(name, TestTimeout.Token()).AsTask());
+
+            // Assert
+            Directory.GetFiles(directory).Select(Path.GetFileName).Order().ShouldBe(before.Keys.Order());
+            foreach (var file in before) { File.ReadAllBytes(Path.Combine(directory, file.Key!)).ShouldBe(file.Value); }
+            refused++;
+        }
+        refused.ShouldBe(63);
+    }
+
     private SqlDatabaseEngine CreateEngine(bool onDisk)
         => SqlDatabaseEngine.Create("names", onDisk ? new SqlDatabaseEngineOptions { RootPath = _rootPath } : new SqlDatabaseEngineOptions());
 

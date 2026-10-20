@@ -11,6 +11,7 @@ using Assimalign.Cohesion.Database.Sql.Schema;
 using Assimalign.Cohesion.Database.Sql.Storage;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Transactions;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql;
 
@@ -307,10 +308,27 @@ public sealed class SqlDatabase : DatabaseInstance
         // synchronously and instance construction is a synchronous path.
         // The marker is the final creation commit: every current-format database must
         // already contain dbo. A crash before it remains an interrupted format-1 creation.
-        _catalog.CreateSchemaAsync(new SqlCatalogNamespace(SqlNamespaces.DefaultName))
+        CompleteCreation(_catalog);
+    }
+
+    internal static void CompleteCreation(SqlCatalog catalog)
+    {
+        if (catalog.Namespaces.Count == 0)
+        {
+            catalog.CreateSchemaAsync(new SqlCatalogNamespace(SqlNamespaces.DefaultName))
+                .AsTask().GetAwaiter().GetResult();
+        }
+        catalog.SetRecordSpaceFormatVersionAsync(SqlRowCodec.RecordSpaceFormatVersion)
             .AsTask().GetAwaiter().GetResult();
-        _catalog.SetRecordSpaceFormatVersionAsync(SqlRowCodec.RecordSpaceFormatVersion)
-            .AsTask().GetAwaiter().GetResult();
+    }
+
+    internal static bool IsEmptyDataStorage(SqlStorage storage)
+    {
+        // A crash can retain the header before the initial empty data page was written.
+        // More pages, or even one record in the shared initial page, are not a new data set.
+        if (storage.PageManager.PageCount > 2) { return false; }
+        using var iterator = storage.GetUnitIterator();
+        return !iterator.MoveNext();
     }
 
     /// <summary>

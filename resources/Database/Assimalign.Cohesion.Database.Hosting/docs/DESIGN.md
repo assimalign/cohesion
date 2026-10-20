@@ -81,7 +81,19 @@ A factory transfers a fresh product, and cleans up partial allocations if it thr
 
 Additional services start in registration order, then servers; shutdown drains servers first and stops services in reverse.
 
+## Command identity (#1421)
+
+The add-database handler validates command keys and tracks the databases it created with
+OrdinalIgnoreCase, matching DatabaseName identity. Replaying or deleting the declaration
+under a different case retains the same ownership; it cannot claim an unrelated existing
+database. The handshake policy for invalid database names is unchanged.
+
 ## Provisioning (B1 of the engine extensibility design)
+
+SQL completes an interrupted empty creation during its engine build and through the
+add-database command (#1158). The model validates the empty data/catalog state and
+finishes dbo and the format marker before publication; Hosting keeps the same model-neutral
+create call and command ownership checks. A catalog with user data and no marker is refused.
 
 Decision 49a defers populated-table work to SQL's engine-owned worker. Hosting reads the root
 `DatabaseInstance.Provisioning` observation without referencing SQL: operation/object,
@@ -260,3 +272,10 @@ standalone admin listener previously accepted remote control-plane requests with
 Use a loopback connection for standalone development or a gateway identity for remote management.
 
 Model server factories supply `IDuplexConnectionListener` instances to their model options. Each server owns accepted `IDuplexConnection` sessions and closes them during its drain; listener disposal does not transfer connection ownership to the hosting module.
+
+## Database command key comparison (#1158)
+
+Command keys and ResolveEngine use OrdinalIgnoreCase for the engine segment, matching the
+existing command ownership dictionary. Database names use the same comparison required by
+the area name rule. An engine selected by a case variant therefore resolves consistently
+with key validation and replay ownership.

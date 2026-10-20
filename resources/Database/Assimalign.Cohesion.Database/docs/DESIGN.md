@@ -1103,3 +1103,9 @@ JSON serialization live in `Database.Sql.Schema`.
 The exception carrier snapshots diagnostics and sorts first by whether Start is absent,
 then by Start. Located diagnostics precede unlocated ones even at int.MaxValue; ordering
 within each equal-start group and among unlocated entries is stable.
+
+## Absence diagnostics (#1158)
+
+DatabaseNotFoundException preserves structured diagnostics from an inner DatabaseException.
+An incomplete file set can therefore keep precise absence semantics for provisioning while
+its allocated model diagnostic remains available through Diagnostics.

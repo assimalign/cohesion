@@ -176,7 +176,7 @@ compiled SqlCatalogSchemaState. Kind 15 stores strict source-generated JSON with
 and OwningSchema. Namespaces join the atomic SqlCatalogSnapshot, so empty namespaces persist
 and appear in SCHEMATA without inferring them from tables. CreateSchemaAsync and DropSchemaAsync
 are instance operations, with declared-script publication overloads and an S: identity. Opening
-the catalog seeds nothing and commits nothing; SqlDatabase.StampNewCatalog alone seeds dbo.
+the catalog seeds nothing and commits nothing; SQL creation completion seeds dbo before its final format marker.
 
 DROP SCHEMA CASCADE serializes its complete mutation under the publication lock in one storage
 transaction: namespace/table/index removal, incoming external-FK replacement, identity-counter
@@ -712,3 +712,14 @@ binds against its retained tables, views and SQL definitions after later drops.
 Historical image entries are weak and stay alive with their retained captures;
 ordinary view reads use a DDL-generation fast path. No snapshot generation API or
 friend grant was added for this purpose.
+
+## Interrupted creation (#1158)
+
+The internal stateless SqlCatalogCreation predicate owns the creation-only record kinds and
+initial counter constraints. SQL compiles it through the existing catalog shared-source link,
+so recovery decisions use catalog vocabulary without a public API or friend-assembly grant.
+Creation commits collation, dbo and the format marker in that order. Completion changes no
+catalog record layout or record-space format 25. SQL requires its sql.create claim only when
+adopting a marker-free interrupted file set; an empty data scan alone is no proof. The predicate
+receives the default namespace from SQL's shared SqlNamespaceNames constant, avoiding a new
+catalog dependency on the language assembly.

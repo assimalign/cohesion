@@ -61,12 +61,12 @@ namespace Assimalign.Cohesion.Database.Sql.Catalog;
 public sealed partial class SqlCatalog
 {
     private const int tableRecordKind = 1;
-    private const int counterRecordKind = 2;
+    private const int counterRecordKind = SqlCatalogCreation.CounterRecordKind;
     private const int indexRegistrationsKind = 3;
     private const int recordSpaceFormatKind = 4;
     private const int indexRecordKind = 5;
     private const int schemaStateRecordKind = 6;
-    private const int defaultCollationRecordKind = 7;
+    private const int defaultCollationRecordKind = SqlCatalogCreation.CollationRecordKind;
     private const int _pendingMigrationRecordKind = 9;
 
     // The record-space format marker from version 4 on (#1099). Catalogs written

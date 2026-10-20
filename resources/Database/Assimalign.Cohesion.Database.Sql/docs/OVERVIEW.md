@@ -190,3 +190,9 @@ and text execution; a foreign-model request fails compilation. `SqlQueryRequest`
 `Statement` and optional `Parameters` over the memberless `DatabaseRequest` root. Results
 use the model-neutral `DatabaseResult` family. Lifecycle and explicit transactions remain
 on `DatabaseSession`.
+
+An interrupted create is adopted only with its durable sql.create claim and initial empty
+data storage. Pre-header files can be restarted through CreateDatabaseAsync or declared
+application Build when no other persisted state conflicts. All catalog sizes are probed read-only
+before a format refusal. SQL remains at format 25; the claim does not change record layouts.
+Missing sidecars and ambiguous lost catalogs are preserved and refused.

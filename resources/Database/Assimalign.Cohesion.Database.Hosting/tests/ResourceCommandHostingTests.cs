@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
@@ -13,7 +14,11 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Database.Client;
+using Assimalign.Cohesion.Database.Hosting.Internal;
 using Assimalign.Cohesion.Database.Sql;
+using Assimalign.Cohesion.Database.Sql.Catalog;
+using Assimalign.Cohesion.Database.Sql.Storage;
+using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Hosting.Resources;
 
@@ -24,6 +29,94 @@ namespace Assimalign.Cohesion.Database.Hosting.Tests;
 
 public sealed class ResourceCommandHostingTests
 {
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Commands: case variants share command ownership and key validation (#1421)")]
+    public async Task ExecuteAsync_CaseVariantKey_ShouldRetainOwnershipAndDelete()
+    {
+        // Arrange
+        var builder = DatabaseApplication.CreateBuilder();
+        builder.AddSql("commands", _ => { });
+        await using var application = builder.Build();
+        var handler = new DatabaseResourceCommandHandler("database.add-database", application.Context);
+        var first = new RuntimeCommand("first", handler.Kind, "appa", "COMMANDS/Sales",
+            Encoding.UTF8.GetBytes("""{"database":"sales","engine":"commands"}"""));
+        var replay = new RuntimeCommand("replay", handler.Kind, "appa", "commands/SALES",
+            Encoding.UTF8.GetBytes("""{"database":"SALES","engine":"COMMANDS"}"""));
+
+        // Act
+        await handler.ExecuteAsync(first, CancellationToken.None);
+        await handler.ExecuteAsync(replay, CancellationToken.None);
+
+        // Assert: another spelling is the same ownership, and deletion clears that ownership.
+        application.Context.Engines[0].TryGetDatabase("sales", out _).ShouldBeTrue();
+        await handler.DeleteAsync(replay, CancellationToken.None);
+        application.Context.Engines[0].TryGetDatabase("sales", out _).ShouldBeFalse();
+        await handler.ExecuteAsync(first, CancellationToken.None);
+        application.Context.Engines[0].TryGetDatabase("sales", out _).ShouldBeTrue();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Hosting] - Commands: add-database completes an interrupted SQL create (#1158)")]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task ExecuteCommandAsync_InterruptedSqlCreate_ShouldCompleteAndOwnDatabase(int step)
+    {
+        // Arrange: the actual file-set and catalog commits preceding SQL's format marker.
+        string root = Path.Combine(Path.GetTempPath(), "cohesion-create-recovery", Guid.NewGuid().ToString("N"));
+        string directory = Path.Combine(root, "sales");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var initialData = new Dictionary<string, byte[]>();
+            using (var data = CreateFileSet("sql", "sales"))
+            {
+                // A crash retains the creation header, before orderly close checkpoints it.
+                foreach (string extension in new[] { "dat", "log", "bak" })
+                {
+                    string path = Path.Combine(directory, "sql." + extension);
+                    using var source = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                    using var copy = new MemoryStream();
+                    source.CopyTo(copy);
+                    initialData[path] = copy.ToArray();
+                }
+            }
+            foreach (var file in initialData) { File.WriteAllBytes(file.Key, file.Value); }
+            File.WriteAllText(Path.Combine(directory, "sql.create"), "COHSQLCREATE1\n");
+            if (step > 0)
+            {
+                using var catalog = CreateFileSet("catalog", "sales/catalog");
+                if (step == 2)
+                {
+                    await SqlCatalog.Open(catalog).CreateSchemaAsync(new SqlCatalogNamespace("dbo"), CancellationToken.None);
+                }
+            }
+            using IDisposable scope = ResourceRuntime.CreateScope(new ResourceContext());
+            var builder = new DatabaseApplicationBuilder(new DatabaseApplicationOptions(), typeof(ResourceCommandHostingTests).Assembly);
+            builder.AddSql("commands", sql => sql.Options.RootPath = root);
+            await using DatabaseApplication application = builder.Build();
+            IResourceControlPlane plane = builder.ControlPlane.ShouldNotBeNull();
+            var command = new RuntimeCommand("recover", "database.add-database", "appa", "sales",
+                Encoding.UTF8.GetBytes("""{"database":"sales"}"""));
+
+            // Act
+            await plane.ExecuteCommandAsync(command, CancellationToken.None);
+
+            // Assert: the recovered database belongs to the command and can be deleted by it.
+            application.Context.Engines[0].TryGetDatabase("SALES", out _).ShouldBeTrue();
+            await plane.DeleteCommandAsync(command, CancellationToken.None);
+            application.Context.Engines[0].TryGetDatabase("sales", out _).ShouldBeFalse();
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+
+        SqlStorage CreateFileSet(string set, string name)
+            => SqlStorage.Create(
+                StorageStream.FromFile(Path.Combine(directory, set + ".dat"), FileMode.CreateNew, FileShare.Read),
+                StorageStream.FromFile(Path.Combine(directory, set + ".log"), FileMode.CreateNew, FileShare.Read),
+                StorageStream.FromFile(Path.Combine(directory, set + ".bak"), FileMode.CreateNew, FileShare.Read), name);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Commands: authenticated admin and direct delivery share engine mutations and ownership")]
     public async Task SendCommandAsync_WithGatewayScopedHost_ShouldApplyRefuseAndDeleteThroughRuntime()
     {

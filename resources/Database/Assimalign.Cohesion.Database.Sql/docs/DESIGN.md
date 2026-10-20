@@ -1703,7 +1703,7 @@ creates a SQL namespace only; a compiled schema's name remains its ownership ide
 selects a namespace. dbo is an Adhoc namespace record seeded only by StampNewCatalog, and SQL
 refuses its removal because provisioning requires it. Creation commits dbo before the final format
 marker, so every crash image accepted as format 24 contains dbo; earlier images retain the
-format-1 interrupted-creation refusal. Opening a database seeds or commits nothing.
+interrupted-create completion path described under the format rule. An open commits only to finish such an empty creation.
 
 Provisioning belongs to this model (owner decisions 49 to 58 of 2026-10-09, B1 of
 `docs/programs/DATABASE_ENGINE_EXTENSIBILITY_DESIGN.md`). It has two entry points over one internal
@@ -2862,33 +2862,54 @@ project reference or InternalsVisibleTo change is required.
   column out of every stored version (#1237; the catalog format change takes no
   upgrade path either, #1152). A format-5 table record (extension version 2)
   still loads, so that the gate below, not a decode error, refuses the database.
-  `CreateDatabaseAsync` writes
-  the format-6 marker as soon as the catalog opens, and first checks that the catalog is new
-  (no marker, no tables): `SqlStorageStrategy.CreateStorage` (internal) must refuse
-  existing storage, and a strategy that reopened it instead would otherwise get
-  an older catalog declared current. `OpenDatabaseAsync` refuses a database on
-  any other version, older or newer, with a `DatabaseException` (the internal
-  `SqlDataStorageFormatException`) that names the database, the version found
-  and the version supported. For an older database it says to export the data
-  with the engine that wrote it, drop the database and create it again (create
-  refuses a name whose storage exists). Version 1 means no marker: every
-  released engine stamped one at creation, so an unmarked catalog is a creation
-  interrupted before the stamp (or a pre-release database), and the message says
-  so. **The gate reads the catalog alone.** `OpenDatabaseAsync` opens the
-  catalog file set, loads the catalog and checks the marker before it opens the
-  data file set, so a refused open never opens the data files: no crash replay
-  into them, no journal or backup file created, no close. A database without a
-  catalog storage (an interrupted creation, or one older than the catalog's own
-  file set) is refused before any file is opened, never adopted with an empty
-  catalog. The catalog file set itself gets only what opening any storage does.
-  Cleanly closed, it is left byte-identical, because a storage closed with
-  nothing written through it writes nothing (Storage DESIGN.md). Crashed, it
-  gets the storage layer's physical redo/undo, which is format-agnostic and
-  idempotent, and keeps its journal. That matters because the old engine must
-  still be able to open the database to export its data, including running its
-  own transaction recovery over journals the refused open did not touch.
+  Creation commits the optional default collation, then dbo, then the format marker.
+  Interrupted creation (#1158) uses the transient sql.create file: exactly UTF-8 COHSQLCREATE1 followed
+  by LF, durably flushed after the data file is claimed and before its first header write.
+  The claim must exist for a complete data header to qualify as interrupted creation. Without
+  it, a lost catalog is indistinguishable from acknowledged catalog-only DDL: data pages and
+  even the data journal can still be empty. Completion checkpoints data, then removes the claim
+  before publishing the database. The checkpoint also fences a stale claim directory entry
+  after a crash. No format bump is needed: the claim is consulted only for marker-free catalogs
+  (RecordSpaceFormatVersion == 1), which carry no format number. Older engines harmlessly
+  ignore the claim, so a bump would fence no interrupted catalog and would unnecessarily
+  refuse every intact format-25 database. Claim-file creation and deletion are not directory-fsynced.
+  A lost create loses the proof and refuses adoption; a lost delete leaves a stale claim fenced
+  by the checkpointed data header. Neither permits adopting committed data as creation.
+  Create and open complete a marker-free catalog only when the catalog-owned internal
+  shared predicate admits creation metadata (the initial object-id counter, optional collation
+  and dbo only), and a read-only probe proves the data set is still empty. The probe reads at
+  most the initial two data pages and runs any necessary WAL recovery on isolated copies.
+  Its header must retain the initial page count, generation and zero LSN/sequence floors;
+  later checkpoints cannot be mistaken for creation. Its journal and backup must still be empty:
+  lifecycle WAL must not be discarded. The durable claim, rather than an empty page scan,
+  distinguishes initialization from a lost catalog after acknowledged empty-table DDL. Missing journals/backups are refused
+  before write access with COHSQLC001, preserving acknowledged commits and partial drops.
+  Transient probe I/O failures surface as retryable inspection failures, never as missing-catalog
+  damage with backup advice. Storage header offsets remain local internal format constants in SQL;
+  the owning storage constants are internal to another assembly, whose boundary is not widened.
+  A sub-header data file with no catalog content, or a sub-header catalog beside initial empty
+  data, is restartable only with empty journal and backup images. Plain open refuses this
+  unfinished claim with COHSQLC001 and names CreateDatabaseAsync as the remedy; create
+  and declared application Build restart it with the requested collation. A short data file beside
+  existing catalog or journal state is instead preserved for investigation: retrying create cannot
+  safely restart it. A creation-only catalog beside non-empty data uses the missing-catalog
+  preserve/restore refusal, with no drop advice. A retried create
+  applies its requested collation to every proven interrupted create, including after dbo;
+  plain open keeps a committed collation or uses the declaration's collation, then Binary.
+  Drop explicitly deletes sql.dat, then other *.dat files, before recursive directory removal.
+  No user data is upgraded. Tables or other user metadata without a marker retain
+  the existing format-1 refusal and remedy. An explicit old marker is always refused.
+  **The format gate reads an existing catalog alone.** An unsupported marker is
+  refused before the data set opens, preserving its files for the engine that wrote
+  them. A populated data set without a catalog, or beside creation-only metadata, is
+  refused by the read-only probe before any data file is opened for write.
+  Every catalog, regardless of size, first opens through read-only source handles with private
+  write overlays. Physical redo and torn-journal truncation affect only the overlays. The header,
+  catalog marker and recorded schema formats are checked before either real file set opens for
+  writing, so every format refusal leaves all original files byte-identical. This lets the engine
+  that wrote them recover and export their data with its original journals.
   `SqlDataStorageFormatTests` pins both cases: clean images stay byte-identical,
-  and a crashed format-3 image keeps its data files and catalog journal and
+  and a crashed format-3 image keeps all of its files and
   still recovers (its uncommitted writer scrubbed) once its own engine opens it.
   **Decision (owner, 2026-10-01): no upgrade path while the line is
   pre-release.** #1099's first implementation rebuilt temporal indexes on open
@@ -3387,8 +3408,8 @@ the invariant lower case of its name:
   catalog used to be the storage named `<name>.catalog`, in the same namespace as
   database names, so a database named `sales.catalog` was the catalog of `sales`. A
   drop deletes the database's directory, both sets at once. A database whose data set
-  exists without its catalog set (an interrupted create) is refused with
-  `SqlDataStorageFormatException`, as before. A directory without the data set, which
+  exists without its catalog set is completed only when it has no allocated user pages;
+  otherwise it is refused with `SqlDataStorageFormatException`. A directory without the data set, which
   an interrupted create or drop leaves, is no database: an open does not find it, a
   create refuses it with a message that names the remedy (a stale catalog set must
   never meet a new data set), and a drop deletes it.
