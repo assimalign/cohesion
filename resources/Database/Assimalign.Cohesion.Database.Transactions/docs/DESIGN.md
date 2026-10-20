@@ -605,7 +605,9 @@ row while the writers' shared grants passed it, the longest 11.3 s and 6.3 s; th
 committed one delete in the two. The review's own probe of that shape saw seven consecutive
 waits of the deleter canceled at 12 s. With the queue no wait reached 1 s. The rule also lets a
 DDL statement's exclusive table lock through a stream of writers' intent locks, which could keep
-it waiting the same way.
+it waiting the same way. The #1163 guard refuses 1,000 later intent requests behind queued DDL;
+SQL's concurrent DDL stress keeps all three writers running through catch-up and counts commits
+during each exclusive table wait: only the already-admitted writers may finish.
 
 **The queue does not make a hot row's cascade succeed, and it costs a hot row throughput.** The
 same probe, run for 60 s in Release without tiered compilation, twice on `a60f850c` and twice
