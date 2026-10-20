@@ -2223,6 +2223,9 @@ keep their O(input × pattern) search. The iterative matcher observes the execut
 statement's cancellation token inside row-time matching and has no data-dependent recursion.
 Binary and case-insensitive search keep only the last `%`; the other collations
 remember visited suffixes in at most tokens × (input length + 1) bits.
+Accent-insensitive literals map normalized ends to original scalar boundaries and
+coalesce ignored-mark continuations. A final linguistic literal compares the complete
+remaining text once, so a long exact match does not spend its budget probing prefixes.
 Constant patterns are cached in the bound node; dynamic patterns compile per
 evaluation. No Regex, reflection or runtime
 expression compilation is used. PostgreSQL anchors: `like_match.c:162-168,428-453,473-476`

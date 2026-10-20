@@ -83,7 +83,7 @@ public sealed class SqlPredicateWireTests
         (await connection.QueryAsync("SELECT id FROM users WHERE id = 1", cancellationToken: SqlClientTestHarness.Timeout())).ShouldHaveSingleItem()[0].ShouldBe(1);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql.Client] - LIKE: disconnect cancels a single-row invariant match")]
+    [Theory(DisplayName = "Cohesion Test [Sql.Client] - LIKE: disconnect cancels an admitted one-row invariant statement")]
     [InlineData(false)]
     [InlineData(true)]
     public async Task QueryAsync_DisconnectedLike_ShouldCancelServerSessionAsync(bool tcp)
@@ -93,15 +93,21 @@ public sealed class SqlPredicateWireTests
         await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
         var serverSession = harness.Server.Sessions.ShouldHaveSingleItem();
         using var rootEvents = new EventSourceRecorder(EventSource.GetSources().Single(source => source.Name == "Assimalign.Cohesion.Database"), EventLevel.Verbose);
+        using var admission = new SqlLikeAdmissionGate(EventSource.GetSources().Single(source => source.Name == "Assimalign.Cohesion.Database"));
         using var sqlEvents = new EventSourceRecorder(EventSource.GetSources().Single(source => source.Name == "Assimalign.Cohesion.Database.Sql"), EventLevel.Verbose);
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
-        // Act: wait for admission, then disconnect while the one-row expression is in flight.
+        // Act: hold admission while disconnecting, so fast budget refusal cannot race
+        // the test. The engine tests independently cancel after the first row is read.
         var command = new SqlCommand("SELECT @input COLLATE invariant LIKE @pattern FROM users WHERE id = 1");
         command.Parameters.Add("input", new string('a', 1_000_000));
-        command.Parameters.Add("pattern", "%" + new string('a', 10_000) + "b");
-        var query = connection.QueryAsync(command, timeout.Token).AsTask();
-        while (!rootEvents.Events.Any(item => item.EventName == "StatementStart")) { await Task.Delay(1, timeout.Token); }
-        await connection.AbortAsync();
+        command.Parameters.Add("pattern", "%" + new string('a', 100_000) + "b");
+        var query = Task.Run(async () => await connection.QueryAsync(command, timeout.Token), timeout.Token);
+        try
+        {
+            await admission.Started.WaitAsync(timeout.Token);
+            await connection.AbortAsync();
+        }
+        finally { admission.Release(); }
         await Should.ThrowAsync<OperationCanceledException>(async () => await query);
         connection.IsOpen.ShouldBeFalse();
         while (harness.Server.Sessions.Count != 0) { await Task.Delay(1, timeout.Token); }

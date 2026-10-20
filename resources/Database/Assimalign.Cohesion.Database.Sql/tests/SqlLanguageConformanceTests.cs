@@ -178,6 +178,7 @@ public sealed class SqlLanguageConformanceTests
     [Theory(DisplayName = "Cohesion Test [Sql] - Conformance: LIKE ESCAPE executes without adding clauses")]
     [InlineData("'a%' LIKE 'a!%' ESCAPE '!'", true)]
     [InlineData("'abc' NOT LIKE 'a!%' ESCAPE '!'", true)]
+    [InlineData("RPAD('a', 200000, 'a') COLLATE invariant LIKE RPAD('a', 200000, 'a')", true)]
     public async Task Execute_LikeEscape_ShouldReturnBooleanAsync(string expression, bool expected)
         => await VerifyPredicateAsync(expression, expected);
 

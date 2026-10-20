@@ -105,10 +105,14 @@ internal sealed class SqlLikePattern
         }
         string normalized = input;
         int[]? offsets = null;
+        int[]? firstBoundaries = null;
         if (collation.IsIndexBacked && !ReferenceEquals(collation, Collation.Binary))
         {
             normalized = collation.Normalize(input);
             offsets = new int[input.Length + 1];
+            firstBoundaries = new int[normalized.Length + 1];
+            Array.Fill(firstBoundaries, -1);
+            firstBoundaries[0] = 0;
             var lengths = new Dictionary<int, int>();
             int offset = 0, mapped = 0;
             for (int index = 0; index < input.Length;)
@@ -124,6 +128,8 @@ internal sealed class SqlLikePattern
                 index += length;
                 offset += foldedLength;
                 offsets[index] = offset;
+                if (firstBoundaries[offset] < 0) { firstBoundaries[offset] = index; }
+                work++;
             }
         }
         else if (!collation.IsIndexBacked)
@@ -172,14 +178,38 @@ internal sealed class SqlLikePattern
             {
                 string token = pattern._normalizedTokens?[index] ?? raw;
                 int normalizedStart = offsets?[start] ?? start;
+                // Only the complete remaining text can satisfy a final literal.
+                // PostgreSQL like_match.c:272-286 uses this same terminal shortcut.
+                // In particular, an ordinary long exact match needs one comparison.
+                if (index + 1 == _tokens.Length)
+                {
+                    if (collation.IsIndexBacked)
+                    {
+                        work += token.Length;
+                        if (normalized.AsSpan(normalizedStart).SequenceEqual(token.AsSpan())) { return true; }
+                    }
+                    else
+                    {
+                        Charge(ref work, Math.Max(1L, (long)input.Length - start + token.Length), limit, collation, cancellationToken);
+                        if (CultureInfo.InvariantCulture.CompareInfo.Compare(input.AsSpan(start), token.AsSpan(), CompareOptions.None) == 0) { return true; }
+                    }
+                    continue;
+                }
                 // The deterministic transform only appends. Compare the complete run
                 // once, then find original boundaries at its normalized end offset.
+                int firstEnd = start;
                 if (collation.IsIndexBacked)
                 {
                     work += token.Length;
                     if (!normalized.AsSpan(normalizedStart).StartsWith(token, StringComparison.Ordinal)) { continue; }
+                    // Ignored scalars can leave many raw starts at the same normalized
+                    // offset. Jump to the first complete original boundary, rather than
+                    // probing that ignored prefix again for each start. A literal cannot
+                    // end halfway through one original scalar's expansion.
+                    firstEnd = token.Length == 0 ? start : firstBoundaries![normalizedStart + token.Length];
+                    if (firstEnd < 0) { continue; }
                 }
-                for (int end = state.End < 0 ? start : state.End; end <= input.Length;)
+                for (int end = state.End < 0 ? firstEnd : state.End; end <= input.Length;)
                 {
                     if ((steps++ & 1023) == 0) { cancellationToken.ThrowIfCancellationRequested(); }
                     Charge(ref work, 1, limit, collation, cancellationToken);
@@ -203,6 +233,11 @@ internal sealed class SqlLikePattern
                     }
                     if (equal)
                     {
+                        // An earlier arrival at this suffix already queued its ignored
+                        // extensions. Coalesce those continuations as well as suffixes,
+                        // so an ignored run cannot be enumerated once per raw start.
+                        if (collation.IsIndexBacked && visited[index + 1] is { } suffixes &&
+                            (suffixes[end >> 5] & (1u << (end & 31))) != 0) { break; }
                         if (end < input.Length)
                         {
                             int next = end + ScalarLength(input, end);

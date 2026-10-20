@@ -256,6 +256,8 @@ internal static class Program
         Check("in process: distinct truth tests and ESCAPE", await RowsAsync(session, predicates), _predicates);
         CheckFailure("in process: invalid ESCAPE", await FailureAsync(() => RowsAsync(session,
             "SELECT Name LIKE 'x!' ESCAPE '!' FROM customers")), "COHSQLE034");
+        CheckFailure("in process: invariant LIKE work limit", await FailureAsync(() => RowsAsync(session,
+            "SELECT RPAD('a', 200000, 'a') COLLATE invariant LIKE '%b' FROM customers WHERE Id = 1")), "COHSQLE040");
         Check("in process: three-way USING and LEFT", await RowsAsync(session, expandedJoin), [[1L, 1L], [2L, null]]);
         Check("in process: comma and CROSS", await RowsAsync(session, crossJoin), [[8L]]);
         Check("in process: set operations", await RowsAsync(session, setOperations), [[2L]]);
@@ -424,6 +426,8 @@ internal static class Program
         Check("over the wire: distinct truth tests and ESCAPE", await RowsAsync(connection, predicates, timeout.Token), _predicates);
         CheckFailure("over the wire: invalid ESCAPE", await FailureAsync(() => RowsAsync(connection,
             "SELECT Name LIKE 'x!' ESCAPE '!' FROM customers", timeout.Token)), "COHSQLE034");
+        CheckFailure("over the wire: invariant LIKE work limit", await FailureAsync(() => RowsAsync(connection,
+            "SELECT RPAD('a', 200000, 'a') COLLATE invariant LIKE '%b' FROM customers WHERE Id = 1", timeout.Token)), "COHSQLE040");
         Check("over the wire: parameter ESCAPE", await RowsAsync(connection,
             "SELECT '50%' LIKE '50!%' ESCAPE @e FROM customers WHERE Id = 1", timeout.Token,
             new Dictionary<string, object?> { ["e"] = "!" }), [[true]]);

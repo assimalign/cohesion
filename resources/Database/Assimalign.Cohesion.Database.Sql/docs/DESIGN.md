@@ -5789,6 +5789,22 @@ and escape diagnostics retain the bound source location. PostgreSQL's backslash 
 scalar rules apply (like_match.c:428-453,473-476); DIALECT.md specifies the ISO differences.
 Format 25 admits the new persisted expression/view syntax and has no upgrade reader.
 
+The #1394 resource regressions use 2,048 `%a` fragments and count search transitions
+and compared UTF-16 units instead of elapsed time. Index-backed search is bounded by
+O(input × pattern); invariant search must refuse within its charged budget. Minimum
+allocation across three rounds pins zero bytes for binary matching and size bounds
+for normalization and visited bits. Literal probes use spans; no suffix string is
+copied during backtracking. The existing small-stack regression covers the iterative
+matcher independently of expression-tree stack guards.
+Accent-insensitive matching maps each normalized end offset to its first original
+scalar boundary and coalesces already reached literal-end continuations. This avoids
+repeatedly scanning an ignored prefix or enumerating an ignored tail for every raw
+start. Wildcards still consume original scalars, and an exhaustive small-input oracle
+pins expansion, decomposition and ignorable-mark behavior.
+The final literal compares the complete remaining span once (PostgreSQL
+`src/backend/utils/adt/like_match.c:272-286`), preserving long exact linguistic
+matches within the linear work budget.
+
 
 ## Catalog component
 
