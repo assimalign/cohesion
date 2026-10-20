@@ -482,6 +482,8 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     /// Both overloads go through the base's creation lifecycle, including its diagnostics.
     /// This overload checks the name and null collation first, then disposal and cancellation,
     /// in the same order as the overload without a collation.
+    /// An interrupted empty creation is completed. A default collation already committed by
+    /// that creation is preserved; otherwise <paramref name="defaultCollation"/> is adopted.
     /// </remarks>
     public async ValueTask<SqlDatabase> CreateDatabaseAsync(DatabaseName name, Collation defaultCollation, CancellationToken cancellationToken = default)
     {
@@ -513,6 +515,8 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     /// A database a holder closed is forgotten once its close ends (owner decision 33, #1289), and
     /// this opens it again, with recovery over its files, in memory as on disk. An open that finds
     /// the close still running waits for it to end first.
+    /// An interrupted creation with empty data and only creation metadata is completed before
+    /// publication. Unmarked catalogs containing user metadata retain the format refusal.
     /// </remarks>
     public new async ValueTask<SqlDatabase> OpenDatabaseAsync(DatabaseName name, CancellationToken cancellationToken = default)
         => (SqlDatabase)await base.OpenDatabaseAsync(name, cancellationToken).ConfigureAwait(false);
@@ -672,7 +676,7 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
                 if (missingCatalog)
                 {
                     storage = _strategy.OpenStorage(name, catalog: false, cancellationToken);
-                    if (storage.PageManager.PageCount != 2)
+                    if (!SqlDatabase.IsEmptyDataStorage(storage))
                     {
                         throw new SqlDataStorageFormatException(
                             $"Database '{name}' has no catalog storage, so it has no data-storage format this engine can open: " +
@@ -737,7 +741,7 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
 
                 if (interrupted)
                 {
-                    if (storage.PageManager.PageCount != 2)
+                    if (!SqlDatabase.IsEmptyDataStorage(storage))
                     {
                         SqlDatabase.ThrowIfFormatIsNotCurrent(name, catalog.RecordSpaceFormatVersion);
                     }

@@ -15,6 +15,38 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed class SqlCreateRecoveryTests
 {
+    [Theory(DisplayName = "Cohesion Test [Database.Sql] - Interrupted create: a record in the initial data page is never adopted (#1158)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task OpenDatabaseAsync_OrphanedDataRecord_ShouldRefuseWithoutStamping(bool catalogExists)
+    {
+        // Arrange: page count alone cannot prove the initial shared data page empty.
+        var strategy = new CrashCaptureSqlStorageStrategy();
+        using var data = strategy.CreateStorage("sales", catalog: false);
+        data.InsertRow([1, 2, 3]);
+        if (catalogExists)
+        {
+            using var catalog = strategy.CreateStorage("sales", catalog: true);
+        }
+        var crashed = strategy.CaptureDurableImages();
+        await using var engine = SqlDatabaseEngine.Create("orphaned", new SqlDatabaseEngineOptions { StorageStrategy = crashed });
+
+        // Act
+        var refusal = await Should.ThrowAsync<DatabaseException>(() => engine.OpenDatabaseAsync("sales", CancellationToken.None).AsTask());
+
+        // Assert
+        refusal.Message.ShouldContain("drop the database (DropDatabaseAsync)", Case.Sensitive);
+        if (catalogExists)
+        {
+            using var catalogStorage = crashed.OpenStorage("sales", catalog: true);
+            SqlCatalog.Open(catalogStorage).RecordSpaceFormatVersion.ShouldBe(1);
+        }
+        else
+        {
+            crashed.StorageExists("sales", catalog: true).ShouldBeFalse();
+        }
+    }
+
     [Theory(DisplayName = "Cohesion Test [Database.Sql] - Interrupted create: a fault after either real file-set creation recovers (#1158)")]
     [InlineData(false)]
     [InlineData(true)]

@@ -347,6 +347,15 @@ public sealed class SqlDatabase : DatabaseInstance
             .AsTask().GetAwaiter().GetResult();
     }
 
+    internal static bool IsEmptyDataStorage(SqlStorage storage)
+    {
+        // A crash can retain the header before the initial empty data page was written.
+        // More pages, or even one record in the shared initial page, are not a new data set.
+        if (storage.PageManager.PageCount > 2) { return false; }
+        using var iterator = storage.GetUnitIterator();
+        return !iterator.MoveNext();
+    }
+
     /// <summary>
     /// Gets the SQL engine that owns this database.
     /// </summary>
