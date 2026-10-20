@@ -246,11 +246,14 @@ public sealed class BlobCheckpointGrowthTests
         }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Checkpoint growth: collecting a deferred lane consumes the new size wake without rechecking due work (#1283)")]
-    public async Task RunIteration_DeferredLaneAndNewSizeWake_ShouldExposeDueWorkLeftUntilThePoll()
+    [Theory(DisplayName = "Cohesion Test [Database.Blob] - Checkpoint growth: collecting a deferred lane rechecks due work in the same pass (#1283)")]
+    [InlineData(true, true)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task RunIteration_DeferredLaneAndNewSizeWake_ShouldRecheckDueWorkInTheCollectionPass(bool retryDue, bool retryFinished)
     {
         // Arrange: use the model's existing internal shared worker through its own test grant.
-        // This control reproduces the notification loss, not the eventual admission-pause/fuzzy fix.
+        // A collected deferral must not consume the size wake without rechecking due work.
         using var ceiling = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         using var signal = new ManualResetEventSlim();
         using var entered = new ManualResetEventSlim();
@@ -264,7 +267,7 @@ public sealed class BlobCheckpointGrowthTests
                 release.Wait(ceiling.Token);
                 return false; // A checkpoint taken over by a statement has this lane outcome.
             }
-            return true;
+            return retryFinished;
         });
         var firstPass = Task.Factory.StartNew(() => worker.RunIteration(ceiling.Token),
             CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
@@ -279,17 +282,17 @@ public sealed class BlobCheckpointGrowthTests
             signal.Reset();
             release.Set();
             signal.Wait(ceiling.Token);
+            worker.Due = retryDue;
+            using var probe = new CheckpointProbe("lane-control", "checkpoint-lane-probe");
             worker.RunIteration(ceiling.Token);
 
-            // Assert: this pass reset the wake but returned after collecting the false outcome,
-            // before IsCheckpointDue. Due work now waits for the time poll despite the size wake.
+            // Assert: collection checks due work once and attempts at most one new checkpoint,
+            // even when that attempt defers again. Unfinished work is reported once per pass.
             signal.IsSet.ShouldBeFalse();
-            Volatile.Read(ref attempts).ShouldBe(1);
-            worker.DueChecks.ShouldBe(1);
-            worker.RunIteration(ceiling.Token); // The next time poll finally sees the due journal.
-            Volatile.Read(ref attempts).ShouldBe(2);
+            Volatile.Read(ref attempts).ShouldBe(retryDue ? 2 : 1);
             worker.DueChecks.ShouldBe(2);
-            _output.WriteLine("new size wake + deferred lane: collection pass made 0 due checks / 0 checkpoint attempts; next poll made 1 / 1");
+            probe.Read().WorkerUnfinished.ShouldBe(1);
+            _output.WriteLine($"new size wake + deferred lane: collection pass made 1 due check / {(retryDue ? 1 : 0)} checkpoint attempts; retry finished={retryFinished}");
         }
         finally
         {
@@ -313,6 +316,7 @@ public sealed class BlobCheckpointGrowthTests
         }
 
         internal int DueChecks => Volatile.Read(ref _dueChecks);
+        internal bool Due { get; set; } = true;
 
         // This unowned test worker has no engine pump. Join its lanes before the test closes
         // their signals; no shipped lifecycle member or friend-assembly boundary is widened.
@@ -327,7 +331,7 @@ public sealed class BlobCheckpointGrowthTests
         protected override bool IsCheckpointDue(object database, TimeSpan interval)
         {
             Interlocked.Increment(ref _dueChecks);
-            return true;
+            return Due;
         }
         protected override bool Checkpoint(object database, TimeSpan interval, CancellationToken cancellationToken)
             => _checkpoint();

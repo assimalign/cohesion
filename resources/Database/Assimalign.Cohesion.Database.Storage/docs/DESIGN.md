@@ -1733,10 +1733,12 @@ statement, a long one lets the others overshoot); the deferral needs no trade.
 writers on up to three CPUs for three counter-driven rounds with and without CPU competition;
 existing events show Blob overshoot with no `BracketOpen` skips, while an outside-bracket control
 verifies that signal on normal, failed and cancelled statement exits. A deterministic lane control
-also exposes a consumed size wake: collecting a deferred lane outcome resets the wake and returns
-before checking whether the journal is due again, leaving new work until the next time poll;
-the model remains a sharp checkpoint with a soft trigger, and choosing a bounded admission pause
-or a fuzzy checkpoint remains a later owner decision.
+now guards the consumed size wake: collecting a deferred lane outcome rechecks whether the journal
+is due in that pass and attempts at most one new checkpoint, while failures and busy-storage
+outcomes retain their retry delay. The observed 544 MB growth remains unattributed and #1283 stays
+open: an outside-gate raw bracket can prevent truncation until it ends, and checkpoint flush time
+is another investigation path. The model remains a sharp checkpoint with a soft trigger; choosing
+a bounded admission pause or a fuzzy checkpoint remains a later owner decision.
 
 **A checkpoint stalls its database.** While it runs, every statement waits for the apply gate,
 and every reader and writer that appends a lifecycle record waits for the coordinator's log gate,
