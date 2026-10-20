@@ -674,6 +674,10 @@ of the owner there. PostgreSQL's `LockReleaseAll` likewise walks the backend's o
 and proc-lock lists, never the shared table (`src/backend/storage/lmgr/lock.c:2338`, `:2377`,
 `:2511-2540`).
 
+The #1250 timing guard releases ten owned locks beside 1,000 versus 100,000 foreign locks.
+It alternates sizes in one non-parallel process, compares the minima of five rounds, and allows
+an eightfold ratio; a whole-table scan grows with the hundredfold increase in foreign entries.
+
 **One sealed type, with an engine mode (#1258).** `LockManager` is a sealed class with an
 internal constructor and `LockManager.Create()`; the `ILockManager` interface and the internal
 `DefaultLockManager` it fronted are gone, so every manager has `AbandonPending` (before, a
