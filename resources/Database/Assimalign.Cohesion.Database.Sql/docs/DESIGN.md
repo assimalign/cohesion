@@ -85,12 +85,21 @@ coerced merged names cannot accidentally share a key slot with different types.
 Execution is left-deep in written order. Only the first INNER pair may swap for an index;
 later steps seek into the added input, and LEFT always preserves its left side. Each LEFT
 step tests its own residual before deciding whether to extend an unmatched row with NULL.
-Deterministic single-binding WHERE conjuncts also filter inputs before pair allocation and
+Proven non-throwing single-binding WHERE conjuncts also filter inputs before pair allocation and
 choose equality/range access through the SELECT selector (#1521). WHERE restrictions on a
 LEFT step's nullable binding remain above the join; right-only ON restrictions may filter
-that input. Volatile calls, subqueries, outer references and deferred failures remain at
-their original level. Application casts have no volatility metadata and conservatively
-remain there too. Complete ON and WHERE residuals still run. Compatible mandatory
+that input. Pushdown admits comparisons, IS [NOT] NULL, BETWEEN, IN and LIKE over
+columns, constants and supplied parameters only when every operand and operation is
+proven unable to raise an evaluation error. Comparisons require compatible types and a
+fixed collation; text comparisons require an index-backed collation. LIKE requires a
+validated constant/parameter pattern and escape. Standard identity and widening numeric
+casts qualify only without target modifiers; narrowing, text-to-number, domain and
+application casts do not. The only admitted calls are text LENGTH/CHAR_LENGTH/
+CHARACTER_LENGTH and the six captured transaction-clock forms. Volatility metadata alone
+never proves error safety. Arithmetic, other calls, row-dependent LIKE patterns/escapes,
+lazy scalar forms without a safety proof, subqueries, outer references and deferred
+failures stay at their original level, preserving short-circuit errors even for rows
+discarded by another input or join key. Complete ON and WHERE residuals still run. Compatible mandatory
 equijoin equalities propagate exact constants transitively across INNER inputs, and only
 from preserved to nullable inputs across LEFT. Floating keys and incompatible text
 collations/types never infer constants. A full unique WHERE seek takes priority when
@@ -773,6 +782,11 @@ statement's clock, never their bind time. Correlated children inherit the statem
 environment. This capture/carrier/reader shape is the reuse point for #1121, #1137
 and #1148. The existing TimeProvider seam remains internal (decision 42); no public
 clock option, interface, reference or visibility grant is added.
+
+NOW(), CURRENT_TIMESTAMP, CURRENT_DATE, CURRENT_TIME, LOCALTIME and LOCALTIMESTAMP
+are therefore stable for the whole statement (and the whole explicit transaction).
+A join input's plan-time seek bound and its run-time filter read that same captured
+instant, even if the engine clock advances between planning and row evaluation.
 
 The environment keeps one immutable clock environment for reuse by statements with
 the same transaction instant. A competing transaction can replace the cache entry;

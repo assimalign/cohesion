@@ -1085,13 +1085,24 @@ remains a residual predicate. Otherwise the added input buffers once. System inp
 take no object lock and have no index path; all inputs share one statement catalog
 image and MVCC snapshot. EXPLAIN shows each step's kind and access, including scans.
 
-Deterministic single-input WHERE conjuncts can select equality/range seeks and filter
+Proven non-throwing single-input WHERE conjuncts can select equality/range seeks and filter
 before joining (#1521). The first INNER pair prefers an input restricted by a full
 unique seek; EXPLAIN shows that driving IndexSeek and its bounds. Compatible mandatory
 equijoin equalities propagate constants across INNER inputs. LEFT keeps nullable-side
 WHERE predicates after null extension; nullable-side ON predicates may filter before it.
-Volatile calls and subquery predicates stay at their original join level. Application
-casts without determinism metadata also stay there. Complete ON/WHERE residuals retain
+Only predicates whose entire evaluation is proven unable to raise an error may move:
+comparisons, IS [NOT] NULL, BETWEEN, IN and LIKE over columns, constants and supplied
+parameters with compatible operand types and fixed collations (index-backed for text).
+LIKE also requires a validated constant/parameter pattern and escape. Standard identity
+and widening numeric casts qualify only without target modifiers; narrowing,
+text-to-number, domain and application casts remain at their original level.
+Text LENGTH/CHAR_LENGTH/CHARACTER_LENGTH and the six captured transaction-clock forms
+are the only admitted calls. Immutable/Stable metadata alone does not prove safety.
+Arithmetic that may overflow or divide by zero, all other unproven calls or scalar
+forms, row-dependent LIKE patterns/escapes, subqueries, outer references and deferred
+failures remain at their original join level. For example, an invalid CAST or zero
+divisor on a row discarded by the join or an earlier WHERE/ON term still raises no error.
+Complete ON/WHERE residuals retain
 NULL, duplicate-key and mixed-numeric comparison semantics, including scan fallback
 when a planned index is detached or replaced.
 
@@ -2850,7 +2861,10 @@ All six clock forms read the instant captured at transaction start: BEGIN or
 BeginTransactionAsync for explicit transactions, statement start for auto-commit.
 Planning a seek and evaluating every row, child query and later statement in the
 transaction use the same instant. COMMIT/ROLLBACK ends that lifetime. The engine's
-existing internal TimeProvider seam remains internal (owner decision 42); DEFAULT
+join pushdown uses this same capture: NOW(), CURRENT_TIMESTAMP and the other four
+clock forms are statement-stable, so a plan-time seek bound agrees with its run-time
+input filter even if the wall clock advances. Its existing internal TimeProvider
+seam remains internal (owner decision 42); DEFAULT
 expression defaults use this carrier for omitted columns, explicit DEFAULT and referential SET DEFAULT (#1121). Stable ADD COLUMN defaults freeze the ALTER instant for missing fields; volatile defaults require an empty table.
 
 Numeric domain errors, nonfinite finite-input results, negative SUBSTRING lengths,

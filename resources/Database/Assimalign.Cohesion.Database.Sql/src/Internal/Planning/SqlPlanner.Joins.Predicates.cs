@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.CompilerServices;
 
+using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Types;
 
@@ -10,7 +11,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 internal sealed partial class SqlPlanner
 {
-    /// <summary>Attaches deterministic singleton restrictions without changing ON/WHERE residuals.</summary>
+    /// <summary>Attaches proven non-throwing singleton restrictions without changing ON/WHERE residuals.</summary>
     private SqlJoinPlan PushJoinPredicates(SqlJoinPlan plan)
     {
         var filters = plan.Bindings.Select(_ => new List<SqlBoundExpression>()).ToArray();
@@ -102,7 +103,7 @@ internal sealed partial class SqlPlanner
         void AddFilter(SqlBoundExpression term, SqlJoinStep? step)
         {
             var columns = new HashSet<int>();
-            if (!JoinRestrictionColumns(term, columns) || columns.Count == 0) { return; }
+            if (!JoinRestrictionColumns(term, columns, plan.Columns) || columns.Count == 0) { return; }
             int binding = BindingOf(columns.First());
             if (columns.Any(ordinal => BindingOf(ordinal) != binding) ||
                 (step?.Kind == SqlJoinType.LeftOuter ? binding != step.Binding : nullable[binding])) { return; }
@@ -128,7 +129,7 @@ internal sealed partial class SqlPlanner
             {
                 if (column is not SqlBoundColumn key || !collation.IsFixed) { return; }
                 var referenced = new HashSet<int>();
-                if (!JoinRestrictionColumns(comparand, referenced) || referenced.Count != 0) { return; }
+                if (!JoinRestrictionColumns(comparand, referenced, plan.Columns) || referenced.Count != 0) { return; }
                 try
                 {
                     TryJoinBound(binding, key.Ordinal - plan.Bindings[binding].Offset, op,
@@ -204,41 +205,123 @@ internal sealed partial class SqlPlanner
         else if (expression is not null) { yield return expression; }
     }
 
-    /// <summary>Rejects volatile calls, subqueries, outer references and deferred failures at any depth.</summary>
-    private static bool JoinRestrictionColumns(SqlBoundExpression expression, HashSet<int> columns)
+    /// <summary>Only expressions proven non-throwing for their operand types may run before a join.</summary>
+    private static bool JoinRestrictionColumns(SqlBoundExpression expression, HashSet<int> columns, IReadOnlyList<SqlCatalogColumn> schema)
+        => JoinRestrictionType(expression, columns, schema) is not null;
+
+    // Volatility alone says nothing about errors. Keep an explicit allowlist, including each
+    // comparison's type compatibility and collation, rather than accepting arbitrary binary
+    // operators, standard casts or immutable application calls.
+    private static DatabaseType? JoinRestrictionType(SqlBoundExpression expression, HashSet<int> columns, IReadOnlyList<SqlCatalogColumn> schema)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
         switch (expression)
         {
-            case SqlBoundColumn column: columns.Add(column.Ordinal); return true;
-            case SqlBoundConstant or SqlBoundParameter: return true;
-            case SqlBoundCall call:
-                return call.Function.Volatility != SqlFunctionVolatility.Volatile && All(call.Arguments);
+            case SqlBoundColumn column:
+                columns.Add(column.Ordinal);
+                return schema[column.Ordinal].Type.Type;
+            case SqlBoundConstant constant: return ValueType(constant.Value);
+            case SqlBoundParameter parameter: return ValueType(parameter.Value);
             case SqlBoundCast cast:
-                // Casts have no volatility declaration. Only standard conversions are known
-                // deterministic; application/domain conversions remain at their original level.
-                return !cast.Target.IsDomain && cast.Casts.All(candidate => candidate is null ||
-                    ReferenceEquals(candidate, SqlFunctionEnvironment.Standard.Types.ResolveCast(null, candidate.Source.Storage.Type, candidate.Target))) &&
-                    JoinRestrictionColumns(cast.Operand, columns);
-            case SqlBoundLogical logical: return All(logical.Operands);
-            case SqlBoundBinary binary: return Visit(binary.Left) && Visit(binary.Right);
-            case SqlBoundUnary unary: return Visit(unary.Operand);
-            case SqlBoundDistinct distinct: return Visit(distinct.Left) && Visit(distinct.Right);
-            case SqlBoundBooleanTest test: return Visit(test.Operand);
-            case SqlBoundIsNull isNull: return Visit(isNull.Operand);
-            case SqlBoundBetween between: return Visit(between.LowOperand) && Visit(between.HighOperand) && Visit(between.Low) && Visit(between.High);
-            case SqlBoundIn member: return Visit(member.Operand) && All(member.Candidates);
-            case SqlBoundLike like: return Visit(like.Operand) && Visit(like.Pattern) && Visit(like.Escape);
-            case SqlBoundSpecialForm form: return All(form.Arguments);
-            case SqlBoundCoalesce coalesce: return All(coalesce.Arguments);
-            case SqlBoundCase choice:
-                return (choice.Input is null || Visit(choice.Input)) &&
-                    choice.Whens.All(when => Visit(when.Condition) && Visit(when.Result)) &&
-                    (choice.ElseResult is null || Visit(choice.ElseResult));
-            default: return false;
+                var source = TypeOf(cast.Operand);
+                var target = cast.Target.Storage;
+                if (source is null || cast.Target.IsDomain || target.MaxLength is not null ||
+                    target.Precision is not null || target.Scale is not null || !Widening(source.Value, target.Type)) { return null; }
+                var conversion = cast.Casts[(int)source.Value];
+                return conversion is null ? source == target.Type || source == DatabaseType.Null ? target.Type : null
+                    : SqlStandardCasts.Contains(conversion) ? target.Type : null;
+            case SqlBoundCall call:
+                // Clock calls retain the statement's captured transaction instant at both
+                // planning and execution. No other Stable/Immutable declaration proves safety.
+                if (call.Function is SqlBuiltinScalarFunction && call.Arguments.Length == 0 && call.TransactionStart is not null &&
+                    call.Function.Name is "CURRENT_DATE" or "CURRENT_TIME" or "CURRENT_TIMESTAMP" or "LOCALTIME" or "LOCALTIMESTAMP" or "NOW")
+                {
+                    return call.Function.ReturnType.Storage.Type;
+                }
+                if ((call.Function is SqlLengthFunction || call.Function is SqlBuiltinScalarFunction { Name: "CHAR_LENGTH" or "CHARACTER_LENGTH" }) &&
+                    call.Arguments.Length == 1 && TextOrNull(TypeOf(call.Arguments[0]))) { return DatabaseType.Int64; }
+                return null;
+            case SqlBoundBinary binary when binary.Operator is SqlBinaryOperator.Equal or SqlBinaryOperator.NotEqual
+                or SqlBinaryOperator.LessThan or SqlBinaryOperator.LessOrEqual or SqlBinaryOperator.GreaterThan or SqlBinaryOperator.GreaterOrEqual:
+                return Comparison(binary.Left, binary.Right, binary.Collation) ? DatabaseType.Boolean : null;
+            case SqlBoundDistinct distinct:
+                return Comparison(distinct.Left, distinct.Right, distinct.Collation) ? DatabaseType.Boolean : null;
+            case SqlBoundIsNull isNull: return TypeOf(isNull.Operand) is not null ? DatabaseType.Boolean : null;
+            case SqlBoundBooleanTest test:
+                return BooleanOrNull(TypeOf(test.Operand)) ? DatabaseType.Boolean : null;
+            case SqlBoundUnary { Operator: SqlUnaryOperator.Not } unary:
+                return BooleanOrNull(TypeOf(unary.Operand)) ? DatabaseType.Boolean : null;
+            case SqlBoundLogical logical:
+                return logical.Operands.All(operand => BooleanOrNull(TypeOf(operand))) ? DatabaseType.Boolean : null;
+            case SqlBoundBetween between:
+                return Comparison(between.LowOperand, between.Low, between.LowCollation) &&
+                    Comparison(between.HighOperand, between.High, between.HighCollation) ? DatabaseType.Boolean : null;
+            case SqlBoundIn member:
+                var operand = TypeOf(member.Operand);
+                return operand is not null && member.Candidates.Select((candidate, i) =>
+                    Comparable(operand, TypeOf(candidate), member.Collations[i])).All(safe => safe) ? DatabaseType.Boolean : null;
+            case SqlBoundLike like:
+                // Row-dependent patterns/escapes can be malformed. Binding validates and
+                // compiles constant/parameter patterns; only those have a safety proof.
+                return like.Compiled is not null && like.Collation.IsFixed && like.Collation.Resolve(null).IsIndexBacked &&
+                    TextOrNull(TypeOf(like.Operand)) && TextOrNull(TypeOf(like.Pattern)) && TextOrNull(TypeOf(like.Escape))
+                    ? DatabaseType.Boolean : null;
+            default: return null;
         }
 
-        bool Visit(SqlBoundExpression child) => JoinRestrictionColumns(child, columns);
-        bool All(IEnumerable<SqlBoundExpression> children) => children.All(Visit);
+        DatabaseType? TypeOf(SqlBoundExpression child) => JoinRestrictionType(child, columns, schema);
+        bool Comparison(SqlBoundExpression left, SqlBoundExpression right, SqlBoundCollation collation)
+            => Comparable(TypeOf(left), TypeOf(right), collation);
+
+        static DatabaseType? ValueType(object? value)
+        {
+            // Parameters need not have a supported CLR type, and malformed UTF-16 must not
+            // raise a collation error earlier merely because its comparison was pushed.
+            try
+            {
+                if (value is string text) { Collation.Binary.Normalize(text); }
+                if (value is SqlCharacter character) { Collation.Binary.Normalize(character.Value); }
+                return value switch
+                {
+                    null => DatabaseType.Null,
+                    SqlCharacter => DatabaseType.Character,
+                    string => DatabaseType.String,
+                    sbyte => DatabaseType.Int8, short => DatabaseType.Int16, int => DatabaseType.Int32, long => DatabaseType.Int64,
+                    float => DatabaseType.Float32, double => DatabaseType.Float64, decimal => DatabaseType.Decimal,
+                    bool => DatabaseType.Boolean, byte[] => DatabaseType.Binary,
+                    DateOnly => DatabaseType.Date, TimeOnly => DatabaseType.Time, DateTime => DatabaseType.DateTime,
+                    DateTimeOffset => DatabaseType.DateTimeOffset, TimeSpan => DatabaseType.TimeSpan, Guid => DatabaseType.Guid,
+                    _ => null,
+                };
+            }
+            catch (DatabaseTypeException) { return null; }
+        }
     }
+
+    private static bool BooleanOrNull(DatabaseType? type) => type is DatabaseType.Boolean or DatabaseType.Null;
+
+    private static bool TextOrNull(DatabaseType? type) => type is DatabaseType.String or DatabaseType.Character or DatabaseType.Json or DatabaseType.Null;
+
+    private static bool Comparable(DatabaseType? left, DatabaseType? right, SqlBoundCollation collation)
+    {
+        if (left is null || right is null || !collation.IsFixed) { return false; }
+        if (TextOrNull(left) && TextOrNull(right)) { return collation.Resolve(null).IsIndexBacked; }
+        if (left == DatabaseType.Null || right == DatabaseType.Null) { return true; }
+        if (SqlFunctionResolver.IsNumeric(left.Value) && SqlFunctionResolver.IsNumeric(right.Value)) { return true; }
+        if (left is DatabaseType.Date or DatabaseType.DateTime or DatabaseType.DateTimeOffset &&
+            right is DatabaseType.Date or DatabaseType.DateTime or DatabaseType.DateTimeOffset) { return true; }
+        return left == right && left is DatabaseType.Boolean or DatabaseType.Binary or DatabaseType.JsonBinary
+            or DatabaseType.Time or DatabaseType.TimeSpan or DatabaseType.Guid;
+    }
+
+    private static bool Widening(DatabaseType source, DatabaseType target)
+        => source == DatabaseType.Null || source == target || source switch
+        {
+            DatabaseType.Int8 => target is DatabaseType.Int16 or DatabaseType.Int32 or DatabaseType.Int64 or DatabaseType.Decimal,
+            DatabaseType.Int16 => target is DatabaseType.Int32 or DatabaseType.Int64 or DatabaseType.Decimal,
+            DatabaseType.Int32 => target is DatabaseType.Int64 or DatabaseType.Decimal,
+            DatabaseType.Int64 => target == DatabaseType.Decimal,
+            DatabaseType.Float32 => target == DatabaseType.Float64,
+            _ => false,
+        };
 }
