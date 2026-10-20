@@ -1,6 +1,6 @@
 using Assimalign.Cohesion.Database.Protocol;
 
-namespace Assimalign.Cohesion.Database.Sql;
+namespace Assimalign.Cohesion.Database.Sql.Protocol;
 
 /// <summary>Message identifiers owned by the Sql endpoint.</summary>
 public enum SqlProtocolMessageType : byte

@@ -7,6 +7,8 @@ using Assimalign.Cohesion.Database.Client;
 using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Types;
 
+using Assimalign.Cohesion.Database.Sql.Protocol;
+
 namespace Assimalign.Cohesion.Database.Sql.Client.Internal;
 
 internal sealed class SqlExecuteExchange : DatabaseProtocolExchange<DatabaseClientResult>

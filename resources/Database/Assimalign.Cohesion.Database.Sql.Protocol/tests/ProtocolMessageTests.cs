@@ -4,7 +4,7 @@ using Assimalign.Cohesion.Database.Protocol;
 using Shouldly;
 using Xunit;
 
-namespace Assimalign.Cohesion.Database.Sql.Tests;
+namespace Assimalign.Cohesion.Database.Sql.Protocol.Tests;
 
 public class ProtocolMessageTests
 {

@@ -5,6 +5,8 @@ using Xunit;
 
 using Assimalign.Cohesion.Database.Protocol;
 
+using Assimalign.Cohesion.Database.Sql.Protocol;
+
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed class SqlReturningProtocolTests

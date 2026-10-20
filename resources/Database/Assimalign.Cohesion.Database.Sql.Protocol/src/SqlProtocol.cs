@@ -1,6 +1,6 @@
 using Assimalign.Cohesion.Database.Protocol;
 
-namespace Assimalign.Cohesion.Database.Sql;
+namespace Assimalign.Cohesion.Database.Sql.Protocol;
 
 /// <summary>The immutable Sql endpoint message family.</summary>
 public static class SqlProtocol

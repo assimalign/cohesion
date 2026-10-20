@@ -8,6 +8,8 @@ using Assimalign.Cohesion.Database.Types;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Database.Sql.Protocol;
+
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 /// <summary>

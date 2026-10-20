@@ -5,6 +5,8 @@ using System.Threading.Tasks;
 using Assimalign.Cohesion.Connections.InMemory;
 using Assimalign.Cohesion.Database.Sql;
 
+using Assimalign.Cohesion.Database.Sql.Protocol;
+
 namespace Assimalign.Cohesion.Database.Client.Tests;
 
 /// <summary>

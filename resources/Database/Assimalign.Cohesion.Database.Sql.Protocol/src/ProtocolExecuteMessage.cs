@@ -3,7 +3,7 @@ using System.Collections.Generic;
 
 using Assimalign.Cohesion.Database.Protocol;
 
-namespace Assimalign.Cohesion.Database.Sql;
+namespace Assimalign.Cohesion.Database.Sql.Protocol;
 
 /// <summary>
 /// The SQL execute request: statement text plus named parameter values.
