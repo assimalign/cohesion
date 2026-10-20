@@ -92,7 +92,9 @@ that input. Pushdown admits comparisons, IS [NOT] NULL, BETWEEN, IN and LIKE ove
 columns, constants and supplied parameters only when every operand and operation is
 proven unable to raise an evaluation error. Comparisons require compatible types and a
 fixed collation; text comparisons require an index-backed collation. LIKE requires a
-validated constant/parameter pattern and escape. Standard identity and widening numeric
+validated constant/parameter pattern and escape. Text predicates over derived outputs
+remain residual because those values lack stored rows' valid-Unicode guarantee; unknown
+column types likewise provide no safety proof. Standard identity and widening numeric
 casts qualify only without target modifiers; narrowing, text-to-number, domain and
 application casts do not. The only admitted calls are text LENGTH/CHAR_LENGTH/
 CHARACTER_LENGTH and the six captured transaction-clock forms. Volatility metadata alone

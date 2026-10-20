@@ -1093,7 +1093,9 @@ WHERE predicates after null extension; nullable-side ON predicates may filter be
 Only predicates whose entire evaluation is proven unable to raise an error may move:
 comparisons, IS [NOT] NULL, BETWEEN, IN and LIKE over columns, constants and supplied
 parameters with compatible operand types and fixed collations (index-backed for text).
-LIKE also requires a validated constant/parameter pattern and escape. Standard identity
+LIKE also requires a validated constant/parameter pattern and escape. Text predicates
+over derived outputs remain residual because those values lack stored rows' valid-Unicode
+guarantee; unknown column types likewise provide no safety proof. Standard identity
 and widening numeric casts qualify only without target modifiers; narrowing,
 text-to-number, domain and application casts remain at their original level.
 Text LENGTH/CHAR_LENGTH/CHARACTER_LENGTH and the six captured transaction-clock forms

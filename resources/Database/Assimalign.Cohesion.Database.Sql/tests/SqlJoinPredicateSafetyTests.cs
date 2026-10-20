@@ -9,6 +9,7 @@ using Xunit;
 
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Sql.Internal;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
@@ -51,6 +52,30 @@ public sealed class SqlJoinPredicateSafetyTests
         await ExecuteAsync(session, "UPDATE b SET kind='n';");
         await ExecuteAsync(session, "INSERT INTO b VALUES (3,'n')");
         await Should.ThrowAsync<DatabaseException>(() => RowsAsync(session, sql));
+    }
+
+    /// <summary>Materialized text retains its deferred collation validation.</summary>
+    /// <returns>A task representing the test.</returns>
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - JOIN: derived text retains deferred Unicode errors (#1521)")]
+    public async Task Join_DerivedText_ShouldValidateOnlyMatchingRows()
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("join-derived-errors", new());
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecuteAsync(session, "CREATE TABLE b (id INT)");
+        await ExecuteAsync(session, "INSERT INTO b VALUES (1)");
+        var parameters = new Dictionary<string, object?> { ["id"] = 2, ["s"] = "\ud800" };
+        const string sql = "SELECT a.id FROM (SELECT @id AS id,@s AS s FROM b) a JOIN b ON a.id=b.id WHERE a.s='ok'";
+
+        // Act
+        var rows = await RowsAsync(session, sql, parameters);
+
+        // Assert
+        rows.ShouldBeEmpty();
+        Plan(database, sql, parameters).Inputs[0].Filter.ShouldBeNull();
+        parameters["id"] = 1;
+        await Should.ThrowAsync<DatabaseTypeException>(() => RowsAsync(session, sql, parameters));
     }
 
     /// <summary>A nullable-side ON division runs only after its key matches.</summary>

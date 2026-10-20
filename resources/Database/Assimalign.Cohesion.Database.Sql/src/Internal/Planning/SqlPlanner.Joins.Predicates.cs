@@ -107,6 +107,10 @@ internal sealed partial class SqlPlanner
             int binding = BindingOf(columns.First());
             if (columns.Any(ordinal => BindingOf(ordinal) != binding) ||
                 (step?.Kind == SqlJoinType.LeftOuter ? binding != step.Binding : nullable[binding])) { return; }
+            // Materialized derived text can come straight from parameters/application calls,
+            // without the stored-row codec's valid-Unicode guarantee. Its collation may throw.
+            if (plan.Bindings[binding].Source.Derived is not null &&
+                columns.Any(ordinal => TextOrNull(plan.Columns[ordinal].Type.Type))) { return; }
             filters[binding].Add(term);
             CollectBounds(term, binding);
         }
@@ -219,7 +223,7 @@ internal sealed partial class SqlPlanner
         {
             case SqlBoundColumn column:
                 columns.Add(column.Ordinal);
-                return schema[column.Ordinal].Type.Type;
+                return schema[column.Ordinal].Type.Type is DatabaseType.Null ? null : schema[column.Ordinal].Type.Type;
             case SqlBoundConstant constant: return ValueType(constant.Value);
             case SqlBoundParameter parameter: return ValueType(parameter.Value);
             case SqlBoundCast cast:
