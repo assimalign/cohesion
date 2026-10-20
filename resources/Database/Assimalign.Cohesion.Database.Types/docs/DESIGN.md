@@ -11,7 +11,7 @@ writer with the resolved collation. The key writer, reader, collation set and In
 not change. SQL's record-space gate advances to 12; there is no legacy-reader or upgrade path.
 
 The shared scalar type system (area architecture:
-[resources/Database/DESIGN.md](../../../../docs/resources/Database/DESIGN.md) §3.2). One rule drives everything
+[docs/resources/Database/DESIGN.md](../../../../docs/resources/Database/DESIGN.md) §3.2). One rule drives everything
 here: **all type intelligence is spent at encoding time so that comparison time is a
 raw unsigned byte compare.** That is the design center `Database.Indexing` documents
 for `IndexKey` (the memcmp-key approach of InnoDB and FoundationDB tuples) — this

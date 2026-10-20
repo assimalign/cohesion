@@ -43,7 +43,7 @@ unchanged. The runtime owns padding, trimming casts and comparison; DIALECT.md s
 PostgreSQL anchors and the dialect differences. Schema and SDK normalization share this identity
 in the [current canonical document](../../Assimalign.Cohesion.Database.Sql.Schema/docs/DESIGN.md#fixed-length-schema-columns-1437).
 
-The SQL front-end (area architecture: [resources/Database/DESIGN.md](../../../../docs/resources/Database/DESIGN.md)
+The SQL front-end (area architecture: [docs/resources/Database/DESIGN.md](../../../../docs/resources/Database/DESIGN.md)
 §3.3). The dialect is deliberately fundamental — basic SQL, declared precisely —
 and structured to be extended without churning what exists (open/closed).
 

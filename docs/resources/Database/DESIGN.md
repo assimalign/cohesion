@@ -97,9 +97,10 @@ These are permanent commitments, not MVP scoping — features that contradict th
 │                    requirement)                                     │
 ├─────────────────────────────────────────────────────────────────────┤
 │ Model engines      Sql · Documents · Graph · Blob · KeyValuePair    │
-│  (per model)       {Model} (engine + {Model}DatabaseServer)         │
-│                    {Model}.Language · {Model}.Storage               │
-│                    {Model}.Catalog · {Model}.Client · {Model}.Security
+│  (per model)       {Model}: engine, server, Catalog, Storage          │
+│                    and future security                              │
+│                    {Model}.Language* · {Model}.Client                │
+│                    Sql.Schema · optional Sql.Tcp                    │
 ├─────────────────────────────────────────────────────────────────────┤
 │ Kernel (shared)    Database (contracts; rolls up the child roots)   │
 │                    Database.Execution · Database.Transactions       │
@@ -146,9 +147,9 @@ Each model root project owns a public engine (`{Model}DatabaseEngine`, with a st
 | Blob | `BlobDatabase` (a sealed `DatabaseInstance` since the concrete-types plan, phase 4) | containers of streamed large objects (`BlobContainer`) + metadata catalog | none (API-driven) |
 | KeyValuePair | `KeyValueDatabase` (a sealed `DatabaseInstance` since the concrete-types plan, phase 4) | ordered key space, point/range ops, TTL | none for MVP (commands ride the wire protocol directly) |
 
-Per-model satellite projects follow one matrix: `.Language` (where a language exists), `.Storage` (model-specific layouts on the shared substrate), `.Catalog` (schema/metadata, constraint enforcement, migration apply for SQL), `.Client` (typed client over the shared client core), `.Security` (model-specific authorization).
+Each model project includes Catalog (schema/metadata and constraint enforcement), Storage (model-specific layouts over the shared kernel), and future model-specific authorization. Public types retain their existing Catalog/Storage namespaces in root feature folders; internal types declare the model RootNamespace plus `.Internal`, under `Internal/Catalog` and `Internal/Storage`. The code dependency direction is engine → Catalog → Storage → shared kernel. Storage must use no Catalog or engine types, and Catalog must use no engine types; every model owns a Roslyn semantic architecture test over its actual compiler inputs. Generated resource accessors and assembly metadata are common infrastructure. `.Language` (where a language exists), `.Client`, SQL `.Schema` and optional `.Tcp` stay separate projects.
 
-**Layout verdict:** the pre-existing matrix layout is kept. It is granular, but the granularity maps 1:1 to the backlog structure and keeps per-model concerns out of the kernel. Deliberate asymmetries: Blob and KeyValuePair have no `.Language` project (Blob is API-driven; KV commands are protocol verbs); `Database.Memory` remains the in-memory storage strategy used by tests and embedded scenarios; `Database.Embedded` is the in-process consumption facade for the platform data layer (R10).
+**Layout verdict (owner-directed model consolidation, 2026-10-20):** Catalog and Storage are components inside their model assembly; the empty model Security projects and Cache Catalog/Storage placeholders are removed. Folder boundaries and semantic tests preserve the former assembly dependency direction. This is an assembly-identity API break for every formerly public satellite type, with no member, namespace, diagnostic, wire or disk-format change. Deliberate asymmetries: Blob and KeyValuePair have no `.Language` project (Blob is API-driven; KV commands are protocol verbs); `Database.Memory` remains the in-memory storage strategy used by tests and embedded scenarios; `Database.Embedded` is the in-process consumption facade for the platform data layer (R10).
 
 #### Database names and their files (#1392)
 
@@ -167,7 +168,7 @@ The rejected alternatives: a directory named from the caller's spelling, found b
 - **`Database.Protocol`** — shared wire mechanism: the bounded big-endian frame envelope (`u32 length + u8 type`), startup/authentication, session lifecycle, errors, version negotiation, and immutable `ProtocolMessageFamily` / `ProtocolChannel` binding. Each model package owns its request and result vocabulary. SQL and Key-Value retain their deployed model message identifiers and payload layouts; Blob owns bounded chunk transfer, Documents owns nested JSON results, and Graph owns path-shaped results alongside its existing catalog exchange. No sockets or model payload policy live in this child root.
 - **The per-model servers** — the network front-end. **Servers are per-model** (2026-07-13): each model ships its own `{Model}DatabaseServer` fronting exactly one engine (`SqlDatabaseServer` in `Database.Sql`, `KeyValueDatabaseServer` in `Database.KeyValuePair`), which is where model-specific wire behavior grows. The **root bases are the only area-wide requirement**: a model server derives from `DatabaseServer` (its `Engine` and `Sessions`), and its sessions from `DatabaseServerSession`, against `Connections` and the protocol child root (via the root's rollup). **Each model package carries its own full copy of the server machinery** — accept loop, session table, the session state machine and frame pump, authentication/idle/session-limit guardrails, two-phase drain — per-model duplication chosen by the owner (2026-07-14) with the second model's extraction evidence in hand: model independence outweighs the duplication/drift cost, and **wire-behavior parity is maintained by the protocol contract plus per-model E2E suites, not by shared code** (see the decision log and the preserved evidence table in §3.10). "Running" lives on the server; engines beneath it are data machines with no lifecycle.
 - **`Database.Client`** — the shared client core: connection settings, pooling, handshake, framing, and a generic model-exchange seam. A pool fixes its message family at composition and rejects an exchange from another family. Per-model `.Client` projects own parameter encoding and result materialization.
-- **`Database.Security`** — the authentication contract (`DatabaseAuthenticator`) the per-model servers drive from their handshake. Authorization (principals, roles, permission checks) arrives with the per-model security projects.
+- **`Database.Security`** — the authentication contract (`DatabaseAuthenticator`) the per-model servers drive from their handshake. Authorization (principals, roles, permission checks) belongs inside each model project when implemented.
 
 #### Request flow when one host runs more than one model
 
@@ -382,7 +383,7 @@ The integration architecture, in the order the work items landed:
   `ResourceContext` are scoped
   per resource invocation, so multiple in-process resource hosts do not share health state.
 - **Backup/restore (#161):** becomes an **engine-level, per-model operation on the data-machine contract** — a data machine that can be snapshotted while running (checkpoint + copy of the file sets; PITR later via WAL archiving per R11), not a host service (embedded consumers need it identically, R10). The storage layer already reserves the backup seams (`.bak` asset naming in the strategy contract). Design note only; the contract lands with #161.
-- **Authorization (#177 family):** `Database.Security` (child root) grows the authorization vocabulary (principals, roles, permission checks — beside the existing `DatabaseAuthenticator` authentication seam), and **per-model enforcement composes in the model packages** (`Sql.Security` enforcing over the SQL catalog's objects), consistent with per-model servers: the server authenticates, the model authorizes. Design note only.
+- **Authorization (#177 family):** `Database.Security` (child root) grows the authorization vocabulary (principals, roles, permission checks — beside the existing `DatabaseAuthenticator` authentication seam), and **per-model enforcement composes in the model packages** (SQL enforcing over its catalog objects), consistent with per-model servers: the server authenticates, the model authorizes. Design note only.
 
 #### Diagnostics: one event source per assembly
 
