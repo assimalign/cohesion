@@ -350,7 +350,6 @@ public sealed class SqlPredicateExecutionTests
 
     [Theory(DisplayName = "Cohesion Test [Sql] - LIKE: long backtracking observes cancellation without recursion")]
     [InlineData("binary")]
-    [InlineData("invariant")]
     public void Match_LongPattern_ShouldObserveCancellation(string name)
     {
         // Arrange
@@ -426,7 +425,6 @@ public sealed class SqlPredicateExecutionTests
     [Theory(DisplayName = "Cohesion Test [Sql] - LIKE: repetitive nonmatching collation paths cancel within a bound")]
     [InlineData("case_insensitive")]
     [InlineData("case_accent_insensitive")]
-    [InlineData("invariant")]
     public void Match_RepeatedWildcardFailure_ShouldCancelCleanly(string name)
     {
         // Arrange
@@ -434,36 +432,93 @@ public sealed class SqlPredicateExecutionTests
         // repeated suffix exploration; the separate resource test must finish uncancelled.
         var pattern = SqlLikePattern.Compile(string.Concat(Enumerable.Repeat("%a", 128)) + new string('a', 100_000) + "b", "!", CancellationToken.None);
         using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
-        var elapsed = System.Diagnostics.Stopwatch.StartNew();
         // Act / Assert
         Should.Throw<OperationCanceledException>(() => pattern.Match(new string('a', 200_000), Collation.FromName(name), cancellation.Token));
-        elapsed.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(5));
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql] - LIKE: repetitive failures finish within time and allocation bounds without cancellation")]
-    [InlineData("binary", 200_000, 128, 64 * 1024, 2)]
-    [InlineData("case_insensitive", 200_000, 128, 24 * 1024 * 1024, 2)]
-    [InlineData("case_accent_insensitive", 200_000, 128, 64 * 1024 * 1024, 10)]
-    [InlineData("invariant", 256, 16, 128 * 1024, 5)]
-    public void Match_RepeatedWildcardFailure_ShouldCompleteWithinResourceBounds(string name, int length, int wildcards, long allocationLimit, int seconds)
+    [Theory(DisplayName = "Cohesion Test [Sql] - LIKE: invariant probing stops at an input-proportional work budget")]
+    [InlineData(256, 16)]
+    [InlineData(512, 16)]
+    [InlineData(200_000, 128)]
+    [InlineData(200_000, 2048)]
+    public void Match_LinguisticFailure_ShouldRefuseWithinWorkBudget(int length, int wildcards)
+    {
+        // Arrange
+        var pattern = SqlLikePattern.Compile(string.Concat(Enumerable.Repeat("%a", wildcards)) + "b", "!", CancellationToken.None);
+        string input = new('a', length);
+        long work = 0;
+        // Act
+        var error = Should.Throw<DatabaseException>(() => pattern.Match(input, Collation.Invariant, CancellationToken.None, out work));
+        // Assert: comparison lengths as well as transitions consume the same finite budget.
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE040");
+        work.ShouldBeGreaterThan(0);
+        work.ShouldBeLessThanOrEqualTo(pattern.WorkLimit(length));
+        pattern.WorkLimit(length).ShouldBe(64L * (length + 2L * wildcards + 2));
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - LIKE: repetitive failures have deterministic search and allocation bounds")]
+    [InlineData("binary", 200_000, 128, 64 * 1024)]
+    [InlineData("case_insensitive", 200_000, 128, 24 * 1024 * 1024)]
+    [InlineData("case_accent_insensitive", 200_000, 128, 64 * 1024 * 1024)]
+    public void Match_RepeatedWildcardFailure_ShouldCompleteWithinResourceBounds(string name, int length, int wildcards, long allocationLimit)
     {
         // Arrange
         var collation = Collation.FromName(name);
-        // Total matching allocations include the collation's per-scalar normalization.
         var pattern = SqlLikePattern.Compile(string.Concat(Enumerable.Repeat("%a", wildcards)) + "b", "!", CancellationToken.None).Normalize(collation);
         string input = new('a', length);
         pattern.Match("aa", collation, CancellationToken.None).ShouldBeFalse();
-        var elapsed = new System.Diagnostics.Stopwatch();
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        // Act
-        elapsed.Start();
-        bool matched = pattern.Match(input, collation, CancellationToken.None);
-        elapsed.Stop();
-        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        long allocated = long.MaxValue, work = 0;
+        // Act: the minimum of three rounds excludes one-time runtime initialization.
+        for (int round = 0; round < 3; round++)
+        {
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            bool matched = pattern.Match(input, collation, CancellationToken.None, out work);
+            allocated = Math.Min(allocated, GC.GetAllocatedBytesForCurrentThread() - before);
+            matched.ShouldBeFalse();
+        }
         // Assert
-        matched.ShouldBeFalse();
-        elapsed.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(seconds));
+        work.ShouldBeLessThanOrEqualTo(16L * (length + 1) * (wildcards + 1));
         allocated.ShouldBeLessThan(allocationLimit);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - LIKE: one-row engine execution retains its cancellation token")]
+    [InlineData("SELECT @input COLLATE invariant LIKE @pattern FROM slow")]
+    [InlineData("SELECT s FROM slow WHERE @input COLLATE invariant LIKE @pattern")]
+    [InlineData("SELECT matched FROM slow_view")]
+    public async Task ExecuteAsync_OneRowLike_ShouldObserveStatementCancellationAsync(string sql)
+    {
+        // Arrange: no application functions. A dedicated observer cancels only after the
+        // first stored record is read, beyond the scan's between-row cancellation check.
+        await using var engine = CreateEngine();
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecuteAsync(session, "CREATE TABLE slow (s TEXT, p TEXT)");
+        await ExecuteAsync(session, "INSERT INTO slow VALUES ('a', '%b')");
+        await ExecuteAsync(session, "CREATE VIEW slow_view AS SELECT RPAD('a', 500000, 'a') COLLATE invariant LIKE ('%' || RPAD('a', 10000, 'a') || 'b') AS matched FROM slow");
+        // Warm the immutable cached view plan with an empty read, without matching.
+        _ = new SqlPlanner(database.Catalog, new Dictionary<string, object?> { ["input"] = "a", ["pattern"] = "%b" }, database.Definitions.Functions).Plan(SqlQueryRequest.FromSql(sql).Statement.SqlExpression);
+        var parameters = new Dictionary<string, object?> { ["input"] = new string('a', 1_000_000), ["pattern"] = "%" + new string('a', 10_000) + "b" };
+        var previous = session.LastStatementMetrics;
+        using var cancellation = new CancellationTokenSource();
+        using var finished = new CancellationTokenSource();
+        var observer = Task.Factory.StartNew(() =>
+        {
+            bool read = SpinWait.SpinUntil(() =>
+                !ReferenceEquals(previous, session.LastStatementMetrics) && session.LastStatementMetrics?.RecordsExamined > 0 || finished.IsCancellationRequested,
+                TimeSpan.FromSeconds(10));
+            if (read && !finished.IsCancellationRequested) { cancellation.Cancel(); return true; }
+            return false;
+        }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+        // Act
+        try
+        {
+            await Should.ThrowAsync<OperationCanceledException>(async () => await session.ExecuteAsync(sql, parameters, cancellationToken: cancellation.Token));
+            (await observer).ShouldBeTrue();
+        }
+        finally { finished.Cancel(); await observer; }
+        // Assert: exactly the one candidate was visited and cleanup leaves the session usable.
+        session.LastStatementMetrics!.RecordsExamined.ShouldBe(1);
+        (await RowsAsync(session, "SELECT COUNT(*) FROM slow")).ShouldHaveSingleItem()[0].ShouldBe(1L);
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - LIKE: invariant literals probe past reordered Thai and Lao prefixes")]

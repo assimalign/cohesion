@@ -181,6 +181,27 @@ public sealed class SqlLanguageConformanceTests
     public async Task Execute_LikeEscape_ShouldReturnBooleanAsync(string expression, bool expected)
         => await VerifyPredicateAsync(expression, expected);
 
+    [Theory(DisplayName = "Cohesion Test [Sql] - Conformance: invariant LIKE budget refusal is located and leaves the session usable")]
+    [InlineData("LIKE")]
+    [InlineData("NOT LIKE")]
+    public async Task ExecuteAsync_LikeWorkLimit_ShouldReturnLocatedErrorAsync(string predicate)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("like-conformance", new());
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        string sql = "SELECT RPAD('a', 200000, 'a') COLLATE invariant " + predicate + " '%b' FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = 'dbo'";
+        // Act
+        var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None));
+        // Assert
+        var diagnostic = error.Diagnostics.ShouldHaveSingleItem();
+        diagnostic.Code.ShouldBe("COHSQLE040");
+        diagnostic.Location.ShouldBe(DiagnosticLocation.Absolute);
+        diagnostic.Start.ShouldNotBeNull();
+        diagnostic.End.ShouldNotBeNull();
+        (await RowsAsync(session, "SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = 'dbo'")).ShouldHaveSingleItem()[0].ShouldBe("dbo");
+    }
+
     private static async Task VerifyPredicateAsync(string expression, bool expected)
     {
         // Arrange

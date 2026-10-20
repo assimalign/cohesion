@@ -1,11 +1,17 @@
+using System;
+using System.Diagnostics.Tracing;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Testing;
+
 namespace Assimalign.Cohesion.Database.Sql.Client.Tests;
 
+[Collection(nameof(SqlClientEventSourceCollection))]
 public sealed class SqlPredicateWireTests
 {
     [Theory(DisplayName = "Cohesion Test [Sql.Client] - Predicates: truth tables and parameter ESCAPE cross both transports")]
@@ -56,5 +62,54 @@ public sealed class SqlPredicateWireTests
         error.ConnectionUsable.ShouldBeTrue();
         var users = await connection.QueryAsync("SELECT id, name, score FROM users ORDER BY id", cancellationToken: SqlClientTestHarness.Timeout());
         users.Select(row => (row[0], row[1], row[2])).ShouldBe(new (object?, object?, object?)[] { (1,"ada",100L),(2,"grace",200L) });
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql.Client] - LIKE: linguistic work refusal keeps both transports usable")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task QueryAsync_LikeWorkLimit_ShouldReturnLocatedReusableFailureAsync(bool tcp)
+    {
+        // Arrange
+        await using var harness = await SqlClientTestHarness.StartAsync(tcp: tcp);
+        await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
+        // Act
+        var error = await Should.ThrowAsync<SqlClientException>(async () => await connection.QueryAsync(
+            "SELECT RPAD('a', 200000, 'a') COLLATE invariant LIKE '%b' FROM users WHERE id = 1", cancellationToken: SqlClientTestHarness.Timeout()));
+        // Assert
+        error.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
+        error.ConnectionUsable.ShouldBeTrue();
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE040");
+        error.Diagnostics[0].Start.ShouldNotBeNull();
+        (await connection.QueryAsync("SELECT id FROM users WHERE id = 1", cancellationToken: SqlClientTestHarness.Timeout())).ShouldHaveSingleItem()[0].ShouldBe(1);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql.Client] - LIKE: disconnect cancels a single-row invariant match")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task QueryAsync_DisconnectedLike_ShouldCancelServerSessionAsync(bool tcp)
+    {
+        // Arrange: no application functions; observe the real server session lifetime.
+        await using var harness = await SqlClientTestHarness.StartAsync(tcp: tcp);
+        await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
+        var serverSession = harness.Server.Sessions.ShouldHaveSingleItem();
+        using var rootEvents = new EventSourceRecorder(EventSource.GetSources().Single(source => source.Name == "Assimalign.Cohesion.Database"), EventLevel.Verbose);
+        using var sqlEvents = new EventSourceRecorder(EventSource.GetSources().Single(source => source.Name == "Assimalign.Cohesion.Database.Sql"), EventLevel.Verbose);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        // Act: wait for admission, then disconnect while the one-row expression is in flight.
+        var command = new SqlCommand("SELECT @input COLLATE invariant LIKE @pattern FROM users WHERE id = 1");
+        command.Parameters.Add("input", new string('a', 1_000_000));
+        command.Parameters.Add("pattern", "%" + new string('a', 10_000) + "b");
+        var query = connection.QueryAsync(command, timeout.Token).AsTask();
+        while (!rootEvents.Events.Any(item => item.EventName == "StatementStart")) { await Task.Delay(1, timeout.Token); }
+        await connection.AbortAsync();
+        await Should.ThrowAsync<OperationCanceledException>(async () => await query);
+        connection.IsOpen.ShouldBeFalse();
+        while (harness.Server.Sessions.Count != 0) { await Task.Delay(1, timeout.Token); }
+        // Assert: the server observed cancellation rather than finishing with a budget error.
+        var closed = sqlEvents.Events.Single(item => item.EventName == "SessionClosed" && Equals(item.Payload![0], serverSession.Id));
+        closed.Payload![1].ShouldBe("TransportFailed");
+        rootEvents.Events.Single(item => item.EventName == "StatementStop").Payload![2].ShouldBe("Cancelled");
+        rootEvents.Events.ShouldNotContain(item => item.EventName == "StatementFailed");
+        sqlEvents.Events.ShouldNotContain(item => item.EventName == "SessionFaulted");
     }
 }

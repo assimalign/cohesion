@@ -13,12 +13,14 @@ internal sealed class SqlLikePattern
 {
     // A null literal is %, an empty literal is _, and a nonempty literal is a literal run.
     private readonly string?[] _tokens;
+    private readonly int _sourceLength;
     private readonly Collation? _normalizedFor;
     private readonly string?[]? _normalizedTokens;
 
-    private SqlLikePattern(string?[] tokens, Collation? normalizedFor = null, string?[]? normalizedTokens = null)
+    private SqlLikePattern(string?[] tokens, int sourceLength, Collation? normalizedFor = null, string?[]? normalizedTokens = null)
     {
         _tokens = tokens;
+        _sourceLength = sourceLength;
         _normalizedFor = normalizedFor;
         _normalizedTokens = normalizedTokens;
     }
@@ -64,7 +66,7 @@ internal sealed class SqlLikePattern
             }
         }
         if (literal.Length > 0) { tokens.Add(literal.ToString()); }
-        return new SqlLikePattern(tokens.ToArray());
+        return new SqlLikePattern(tokens.ToArray(), pattern.Length);
     }
 
     internal SqlLikePattern Normalize(Collation collation)
@@ -76,23 +78,30 @@ internal sealed class SqlLikePattern
             tokens[index] = _tokens[index] is { } literal ? collation.Normalize(literal) : null;
         }
         // Keep raw tokens: a literal reduced to empty is still distinct from '_'.
-        return new SqlLikePattern(_tokens, collation, tokens);
+        return new SqlLikePattern(_tokens, _sourceLength, collation, tokens);
     }
 
     internal bool Match(string input, Collation collation, CancellationToken cancellationToken)
+        => Match(input, collation, cancellationToken, out _);
+
+    // Work counts search transitions and UTF-16 units offered to literal comparisons.
+    // A ref/out counter permits deterministic resource tests without a per-match object.
+    internal bool Match(string input, Collation collation, CancellationToken cancellationToken, out long work)
     {
+        work = 0;
         cancellationToken.ThrowIfCancellationRequested();
+        long limit = WorkLimit(input.Length);
         var pattern = Normalize(collation);
         if (ReferenceEquals(collation, Collation.Binary))
         {
             collation.Normalize(input); // Retain validation of Unicode scalars on the binary fast path.
-            return MatchOrdinal(input, _tokens, cancellationToken);
+            return MatchOrdinal(input, _tokens, cancellationToken, ref work);
         }
         if (ReferenceEquals(collation, Collation.CaseInsensitive))
         {
             // Simple case folding preserves one scalar per input scalar, so wildcard
             // boundaries survive folding and only the last '%' needs to be remembered.
-            return MatchOrdinal(collation.Normalize(input), pattern._normalizedTokens!, cancellationToken);
+            return MatchOrdinal(collation.Normalize(input), pattern._normalizedTokens!, cancellationToken, ref work);
         }
         string normalized = input;
         int[]? offsets = null;
@@ -134,6 +143,7 @@ internal sealed class SqlLikePattern
         while (pending.TryPop(out var state))
         {
             if ((steps++ & 1023) == 0) { cancellationToken.ThrowIfCancellationRequested(); }
+            Charge(ref work, 1, limit, collation, cancellationToken);
             int index = state.Token, start = state.Start;
             if (index == _tokens.Length)
             {
@@ -164,10 +174,15 @@ internal sealed class SqlLikePattern
                 int normalizedStart = offsets?[start] ?? start;
                 // The deterministic transform only appends. Compare the complete run
                 // once, then find original boundaries at its normalized end offset.
-                if (collation.IsIndexBacked && !normalized.AsSpan(normalizedStart).StartsWith(token, StringComparison.Ordinal)) { continue; }
+                if (collation.IsIndexBacked)
+                {
+                    work += token.Length;
+                    if (!normalized.AsSpan(normalizedStart).StartsWith(token, StringComparison.Ordinal)) { continue; }
+                }
                 for (int end = state.End < 0 ? start : state.End; end <= input.Length;)
                 {
                     if ((steps++ & 1023) == 0) { cancellationToken.ThrowIfCancellationRequested(); }
+                    Charge(ref work, 1, limit, collation, cancellationToken);
                     bool equal;
                     if (collation.IsIndexBacked)
                     {
@@ -177,6 +192,9 @@ internal sealed class SqlLikePattern
                     }
                     else
                     {
+                        // Charge comparison lengths, not just probes: CompareInfo may scan
+                        // the complete prefix and literal, even though no string is copied.
+                        Charge(ref work, Math.Max(1L, (long)end - start + token.Length), limit, collation, cancellationToken);
                         var prefix = input.AsSpan(start, end - start);
                         var compare = CultureInfo.InvariantCulture.CompareInfo;
                         // Linguistic prefixes can reorder (for example Thai/Lao).
@@ -202,13 +220,29 @@ internal sealed class SqlLikePattern
         return false;
     }
 
-    private static bool MatchOrdinal(string input, string?[] tokens, CancellationToken cancellationToken)
+    // The budget includes pattern compilation's input size and uses 64-bit arithmetic.
+    // Index-backed paths keep their O(text * pattern) search; only linguistic probing
+    // can exhaust this budget. Cancellation takes precedence over budget refusal.
+    internal long WorkLimit(int inputLength) => 64L * ((long)inputLength + _sourceLength + 1);
+
+    private static void Charge(ref long work, long amount, long limit, Collation collation, CancellationToken cancellationToken)
+    {
+        if (!collation.IsIndexBacked && amount > limit - work)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            throw new SqlPlanningException("COHSQLE040", ErrorMessages.LikeWorkLimit);
+        }
+        work += amount;
+    }
+
+    private static bool MatchOrdinal(string input, string?[] tokens, CancellationToken cancellationToken, ref long work)
     {
         int position = 0, tokenIndex = 0, star = -1, retry = 0, steps = 0;
         // Iterative backtracking to the last %, bounded stack even for long dynamic patterns.
         while (true)
         {
             if ((steps++ & 1023) == 0) { cancellationToken.ThrowIfCancellationRequested(); }
+            work++;
             if (tokenIndex == tokens.Length && position == input.Length) { return true; }
             if (tokenIndex < tokens.Length)
             {
@@ -226,6 +260,7 @@ internal sealed class SqlLikePattern
                     tokenIndex++;
                     continue;
                 }
+                work += token.Length;
                 if (token.Length > 0 && input.AsSpan(position).StartsWith(token, StringComparison.Ordinal))
                 {
                     position += token.Length;

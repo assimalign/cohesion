@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Language;
@@ -23,4 +24,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// predicate is bound as unresolved (owner decision 65); null for a predicate that binds.
 /// </param>
 internal sealed record SqlBoundCheck(SqlCatalogConstraint Constraint, SqlExpression Predicate, IReadOnlyList<int> ColumnOrdinals,
-    SqlBoundExpression Bound, SqlUnresolvedDefinition? Unresolved = null);
+    SqlBoundExpression Bound, SqlUnresolvedDefinition? Unresolved = null)
+{
+    internal bool ContainsLike { get; } = SqlViewQuery.Nodes(Predicate).Any(node => node is SqlLikeExpression);
+}

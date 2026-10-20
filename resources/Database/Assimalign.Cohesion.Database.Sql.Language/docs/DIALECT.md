@@ -2213,7 +2213,14 @@ change an escape into a wildcard or erase it. All four collations support scalar
 escapes and scalar `_`; CHAR left operands keep their stored padding while CHAR
 patterns use their text conversion. Invariant linguistic literals compare every
 original scalar boundary, including reordered Thai/Lao prefixes (like_match.c:289-311).
-The iterative matcher observes cancellation and has no data-dependent recursion.
+Invariant matching has a work budget of 64 × (input UTF-16 length + raw pattern
+UTF-16 length + 1). Each search transition and boundary probe costs one unit; each
+linguistic comparison additionally costs the sum of its two span lengths (at least
+one unit). Exhaustion raises located COHSQLE040 as an ExecutionFailure and leaves
+the connection usable; LIKE and NOT LIKE both fail rather than returning an estimate.
+This is a deliberate resource limit on linguistic matching (#1166). Other collations
+keep their O(input × pattern) search. The iterative matcher observes the executing
+statement's cancellation token inside row-time matching and has no data-dependent recursion.
 Binary and case-insensitive search keep only the last `%`; the other collations
 remember visited suffixes in at most tokens × (input length + 1) bits.
 Constant patterns are cached in the bound node; dynamic patterns compile per
@@ -3025,6 +3032,7 @@ pin in the same change.
 | `COHSQLE031` | Error | DROP SCHEMA targets dbo, which code-first provisioning requires |
 | `COHSQLE032` | Error | DISTINCT/ALL/input ORDER BY on a scalar function, or DISTINCT input ordering whose keys are absent from the arguments (PostgreSQL 42809 / 42P10) |
 | `COHSQLE033` | Error | Invalid persisted view declaration/replacement, changed recorded column identity, oversized view record, or otherwise uncoded stored-body binding failure |
+| `COHSQLE040` | Error | Invariant LIKE or NOT LIKE exceeded its input-proportional work budget; located ExecutionFailure leaves the connection usable (#1166) |
 | `COHSQLE034` | Error | Invalid LIKE ESCAPE: escape is neither empty nor one Unicode scalar, or a pattern ends with the escape character (SQLSTATE 22025); ExecutionFailure leaves the connection usable |
 | `COHSQLE035` | Error | ON CONFLICT has no matching unique arbiter, a named target is not a unique index, or DO UPDATE omitted its target (PostgreSQL 42P10) |
 | `COHSQLE036` | Error | ON CONFLICT DO UPDATE cannot affect a row a second time (PostgreSQL 21000) |

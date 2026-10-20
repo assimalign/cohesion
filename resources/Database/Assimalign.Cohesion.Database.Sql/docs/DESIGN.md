@@ -5748,7 +5748,7 @@ COHDBP001 with exact retained/omitted counts; the original Error category/messag
 successful result is preserved and the session stays reusable. Both the 4,096-entry
 and 1 MiB bounds include the notice. See [wire policy](WIRE-PROTOCOL.md#negotiated-statement-diagnostics-1105).
 
-## Predicate execution (#1111)
+## Predicate execution (#1111, #1166)
 
 Dedicated E1 distinct and Boolean-test nodes avoid binary null propagation and seek
 extraction. The distinct predicate uses the existing comparer, collation and CHAR
@@ -5773,7 +5773,18 @@ can no longer match. Linguistic probes compare spans at every original scalar
 boundary, including Thai/Lao reordered prefixes (like_match.c:289-311); a prefix
 test cannot safely prune these comparisons. Explicit continuations avoid recursion;
 visited suffixes use at most one bit per token/input boundary, allocated by token
-as reached. Every path observes statement cancellation. Runtime distinct, truth-test
+as reached. Invariant search charges every transition and boundary probe, plus both
+UTF-16 span lengths before each linguistic comparison, to a per-match budget of
+64 × (input UTF-16 length + raw pattern UTF-16 length + 1). Exhaustion raises located
+COHSQLE040; it never returns a guessed Boolean. This bounds comparison work even when
+a single probe scans a long equal prefix, while preserving reordered and ignorable
+scalar semantics for admitted matches (#1166). Cancellation wins over budget refusal.
+The planner marks LIKE-bearing plans during its existing expression walk, including
+CTEs and subqueries; cached view bodies retain the flag, never a token. The executor
+passes the current statement token to their row evaluator, and persisted CHECKs carry
+the same flag. DEFAULT and SQL-function evaluation already forward the current token.
+Plans without LIKE or application code retain the allocation-free shared evaluator.
+Every path observes statement cancellation. Runtime distinct, truth-test
 and escape diagnostics retain the bound source location. PostgreSQL's backslash default, empty escape and unrestricted quoted
 scalar rules apply (like_match.c:428-453,473-476); DIALECT.md specifies the ISO differences.
 Format 25 admits the new persisted expression/view syntax and has no upgrade reader.

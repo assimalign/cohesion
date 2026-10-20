@@ -36,6 +36,7 @@
   <data name="CastDomainViolation" xml:space="preserve"><value>CAST to {0} failed: the value violates the check of domain '{1}' ({2}).</value></data>
   <data name="ColumnNullabilityConflict" xml:space="preserve"><value>Conflicting NULL/NOT NULL declarations for column '{0}'.</value></data>
   <data name="BooleanTestOperand" xml:space="preserve"><value>IS TRUE, FALSE or UNKNOWN requires a BOOLEAN operand.</value></data>
+  <data name="LikeWorkLimit" xml:space="preserve"><value>LIKE with invariant collation exceeded its input-proportional work limit. Simplify the pattern or use an index-backed collation.</value></data>
   <data name="LikeEscapeInvalid" xml:space="preserve"><value>Invalid LIKE ESCAPE sequence: ESCAPE must be empty or one Unicode scalar, and a pattern must not end with the escape character.</value></data>
   <data name="StatementStackInsufficient" xml:space="preserve"><value>Statement too complex: running it needs more stack than the executing thread has left. Reduce the nesting of its expressions or run it on a thread with a larger stack.</value></data>
   <data name="CastIntervalTimeRange" xml:space="preserve">
