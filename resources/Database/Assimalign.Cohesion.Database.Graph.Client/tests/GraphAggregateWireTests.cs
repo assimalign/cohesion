@@ -31,7 +31,7 @@ public sealed class GraphAggregateWireTests
         var row = result.ShouldHaveSingleItem();
         row[0].ShouldBeOfType<long>().ShouldBe(3L); row[1].ShouldBeOfType<long>().ShouldBe(3L); row[2].ShouldBeOfType<long>().ShouldBe(2L);
         row[3].ShouldBeOfType<long>().ShouldBe(89L); row[4].ShouldBeOfType<double>().ShouldBe(89d / 3, 1e-12);
-        row[5].ShouldBeOfType<object?[]>().ShouldBe(new object?[] { true, false });
+        row[5].ShouldBeOfType<object?[]>().ShouldBe(new object?[] { true, false }, ignoreOrder: true);
         var decimals = await connection.QueryAsync("MATCH (a:Person) RETURN sum($d) AS total, avg($d) AS mean", new Dictionary<string, object?> { ["d"] = 0.1m }, harness.Token);
         decimals.ShouldHaveSingleItem()[0].ShouldBeOfType<decimal>().ShouldBe(0.3m);
         ((decimal.GetBits((decimal)decimals[0][0]!)[3] >> 16) & 0xff).ShouldBe(1);

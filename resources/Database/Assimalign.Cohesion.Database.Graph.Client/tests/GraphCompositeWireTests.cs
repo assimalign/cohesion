@@ -138,7 +138,7 @@ public sealed class GraphCompositeWireTests
         await connection.ExecuteAsync("INSERT (:Person {name:'Alice'}), (:Person {name:'Bob'})", cancellationToken: harness.Token);
         // Act / Assert
         var rows = await connection.QueryAsync("MATCH (a:Person) OPTIONAL MATCH (a)->(b) RETURN (a).name, COALESCE(b,a).name, a['name']", cancellationToken: harness.Token);
-        rows.Select(row => row[0]).ShouldBe(new object?[] { "Alice", "Bob" });
+        rows.Select(row => row[0]).ShouldBe(new object?[] { "Alice", "Bob" }, ignoreOrder: true);
         foreach (var row in rows) { row[1].ShouldBe(row[0]); row[2].ShouldBe(row[0]); }
         await connection.ExecuteAsync("INSERT (:P)-[:T {name:'edge'}]->(:P)", cancellationToken: harness.Token);
         var edge = (await connection.QueryAsync("MATCH (a)-[r:T]->(b) RETURN (r).name, r['name']", cancellationToken: harness.Token)).ShouldHaveSingleItem();

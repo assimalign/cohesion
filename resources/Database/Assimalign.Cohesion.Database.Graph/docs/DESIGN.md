@@ -839,6 +839,8 @@ Aggregate syntax adds no catalog data or on-disk format; no catalog version chan
 
 Queries without ORDER BY have no guaranteed row order. Choosing a later-position anchor can
 change their result row order, even though each matched path retains its source-ordered elements.
+Tests compare unordered results with multiplicity preserved, including complete row tuples when
+columns are related; tests that assert a row sequence specify ORDER BY explicitly.
 
 GraphPlanner binds sort keys against projected names and source bindings. DISTINCT admits only
 projected values, including a projected entity under any alias. Structural expression matching

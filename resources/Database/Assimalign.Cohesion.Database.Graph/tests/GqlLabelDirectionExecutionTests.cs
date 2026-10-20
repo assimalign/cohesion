@@ -30,7 +30,7 @@ public sealed class GqlLabelDirectionExecutionTests
         "(a)-[:T {name: 't'}]->(b), (b)-[:U {name: 'u1'}]->(c)";
 
     /// <param name="gql">A read over the seeded graph.</param>
-    /// <param name="expected">The comma-separated names it returns, in node-identity order.</param>
+    /// <param name="expected">The comma-separated names it returns, regardless of row order.</param>
     [Theory(DisplayName = "Cohesion Test [Graph] - Label expressions: |, &, !, % and IS select exactly the expected nodes")]
     [InlineData("MATCH (n:A|B) RETURN n.name", "a,b,ab")]
     [InlineData("MATCH (n:A&B) RETURN n.name", "ab")]
@@ -56,7 +56,7 @@ public sealed class GqlLabelDirectionExecutionTests
         var names = await ColumnAsync(session, gql);
 
         // Assert
-        names.ShouldBe(expected.Split(','));
+        names.ShouldBe(expected.Split(','), ignoreOrder: true);
     }
 
     /// <param name="gql">A relationship read over the seeded graph.</param>
@@ -80,7 +80,7 @@ public sealed class GqlLabelDirectionExecutionTests
         var names = await ColumnAsync(session, gql);
 
         // Assert
-        names.ShouldBe(expected.Length == 0 ? [] : expected.Split(','));
+        names.ShouldBe(expected.Length == 0 ? [] : expected.Split(','), ignoreOrder: true);
     }
 
     /// <summary>
@@ -107,7 +107,7 @@ public sealed class GqlLabelDirectionExecutionTests
         var loops = await RowsAsync(loop, $"MATCH (x){edge}(y) RETURN x.name, y.name");
 
         // Assert
-        pairs.Select(row => $"{row[0]}>{row[1]}").ShouldBe(["A>B", "B>A"]);
+        pairs.Select(row => $"{row[0]}>{row[1]}").ShouldBe(["A>B", "B>A"], ignoreOrder: true);
         loops.Select(row => $"{row[0]}>{row[1]}").ShouldBe(["S>S"]);
     }
 
@@ -156,10 +156,10 @@ public sealed class GqlLabelDirectionExecutionTests
         // Assert
         disjunction.Property.ShouldBeNull();
         disjunction.Label.ShouldBeNull();
-        (await ColumnAsync(session, "MATCH (n:A|B {k: 1}) RETURN n.name")).ShouldBe(["a1", "b1", "ab1"]);
+        (await ColumnAsync(session, "MATCH (n:A|B {k: 1}) RETURN n.name")).ShouldBe(["a1", "b1", "ab1"], ignoreOrder: true);
         negation.Property.ShouldBeNull();
         negation.Label.ShouldBeNull();
-        (await ColumnAsync(session, "MATCH (n:!A {k: 1}) RETURN n.name")).ShouldBe(["b1", "c1", "u1"]);
+        (await ColumnAsync(session, "MATCH (n:!A {k: 1}) RETURN n.name")).ShouldBe(["b1", "c1", "u1"], ignoreOrder: true);
         conjunction.Label.ShouldBe("A");
         conjunction.Property.ShouldBe("k");
         conjunction.Value.ShouldBe(1L);
@@ -167,7 +167,7 @@ public sealed class GqlLabelDirectionExecutionTests
         predicate.Label.ShouldBe("A");
         predicate.Property.ShouldBe("k");
         predicate.Value.ShouldBe(1L);
-        (await ColumnAsync(session, "MATCH (n) WHERE n:A AND n.k = 1 RETURN n.name")).ShouldBe(["a1", "ab1"]);
+        (await ColumnAsync(session, "MATCH (n) WHERE n:A AND n.k = 1 RETURN n.name")).ShouldBe(["a1", "ab1"], ignoreOrder: true);
     }
 
     [Fact(DisplayName = "Cohesion Test [Graph] - Insertion: :A&B and :A:B create one node carrying both labels")]
@@ -262,7 +262,7 @@ public sealed class GqlLabelDirectionExecutionTests
     /// label, so <c>r:A</c> and <c>n:T</c> name unknown tokens of their variable's kind.
     /// </summary>
     /// <param name="gql">A read naming a label or type the catalog does not define.</param>
-    /// <param name="expected">The comma-separated names it returns in identity order, or empty.</param>
+    /// <param name="expected">The comma-separated names it returns, regardless of row order, or empty.</param>
     /// <param name="code">The warning's code: COHDBG010 for a label, COHDBG011 for a relationship type.</param>
     /// <param name="name">The unknown name the warning quotes.</param>
     [Theory(DisplayName = "Cohesion Test [Graph] - Label expressions: an unknown name anywhere in MATCH matches nothing and warns")]
@@ -291,7 +291,7 @@ public sealed class GqlLabelDirectionExecutionTests
         await foreach (var row in result.GetRowsAsync(CancellationToken.None)) { names.Add(row.GetString(0)); }
 
         // Assert
-        names.ShouldBe(expected.Length == 0 ? [] : expected.Split(','));
+        names.ShouldBe(expected.Length == 0 ? [] : expected.Split(','), ignoreOrder: true);
         var warning = result.Diagnostics.ShouldNotBeNull().ShouldHaveSingleItem();
         warning.Code.ShouldBe(code);
         warning.Severity.ShouldBe(DiagnosticSeverity.Warning);
@@ -315,10 +315,10 @@ public sealed class GqlLabelDirectionExecutionTests
         var combined = await ColumnAsync(session, "MATCH (x)-[r]->(y) WHERE x:A AND y IS LABELED B AND r:% RETURN r.name");
 
         // Assert
-        pattern.ShouldBe(["a", "b", "ab"]);
-        labeled.ShouldBe(pattern);
-        colon.ShouldBe(pattern);
-        notA.ShouldBe(["b", "c", "u"]);
+        pattern.ShouldBe(["a", "b", "ab"], ignoreOrder: true);
+        labeled.ShouldBe(pattern, ignoreOrder: true);
+        colon.ShouldBe(pattern, ignoreOrder: true);
+        notA.ShouldBe(["b", "c", "u"], ignoreOrder: true);
         typed.ShouldBe(["t"]);
         notTyped.ShouldBe(["u1"]);
         combined.ShouldBe(["t"]);
@@ -386,7 +386,7 @@ public sealed class GqlLabelDirectionExecutionTests
             text.Message.ShouldStartWith("GQL parse error GQL0008: ", Case.Sensitive);
             typed.Message.ShouldBe(text.Message);
         }
-        (await ColumnAsync(session, "MATCH (n:Person) RETURN n.name")).ShouldBe(["Alice", "Bob"]);
+        (await ColumnAsync(session, "MATCH (n:Person) RETURN n.name")).ShouldBe(["Alice", "Bob"], ignoreOrder: true);
         (await ColumnAsync(session, "MATCH (n:P) RETURN n.name")).ShouldBe(["p"]);
         (await RowsAsync(session, "MATCH ()-[r:KNOWS]->() RETURN r")).Count.ShouldBe(1);
     }
@@ -415,7 +415,7 @@ public sealed class GqlLabelDirectionExecutionTests
 
         // Assert
         error.Message.ShouldStartWith($"GQL parse error {code}: ", Case.Sensitive);
-        (await ColumnAsync(session, "MATCH (n:Person) RETURN n.name")).ShouldBe(["Alice", "Bob"]);
+        (await ColumnAsync(session, "MATCH (n:Person) RETURN n.name")).ShouldBe(["Alice", "Bob"], ignoreOrder: true);
     }
 
     private static async Task<GraphDatabaseSession> SeedAsync(GraphDatabaseEngine engine, string seed)

@@ -26,9 +26,8 @@ public sealed class GraphOptionalMatchWireTests
         var unknown = await connection.QueryAsync("OPTIONAL MATCH (n:Missing) RETURN n.name", cancellationToken: harness.Token);
         // Assert
         result.Count.ShouldBe(3);
-        result[0].ToArray().ShouldBe(new object?[] { "Alice", "Bob" });
-        result[1].ToArray().ShouldBe(new object?[] { "Bob", null });
-        result[2].ToArray().ShouldBe(new object?[] { "Isolated", null });
+        result.Select(row => (row[0], row[1]))
+            .ShouldBe(new (object?, object?)[] { ("Alice", "Bob"), ("Bob", null), ("Isolated", null) }, ignoreOrder: true);
         unknown.ShouldHaveSingleItem()[0].ShouldBeNull();
         unknown.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG010");
     }

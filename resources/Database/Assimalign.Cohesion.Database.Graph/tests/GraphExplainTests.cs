@@ -62,9 +62,9 @@ public sealed class GraphExplainTests
         }
         if (transaction is not null) { await transaction.CommitAsync(CancellationToken.None); await transaction.DisposeAsync(); }
         // Assert
-        (await RowsAsync(session, "MATCH (n) RETURN n.name")).Select(row => row[0]).ShouldBe(beforeNodes.Select(row => row[0]));
+        (await RowsAsync(session, "MATCH (n) RETURN n.name")).Select(row => row[0]).ShouldBe(beforeNodes.Select(row => row[0]), ignoreOrder: true);
         (await RowsAsync(session, "MATCH (a)-[r]->(b) RETURN a.name, b.name")).Select(row => string.Join(",", row))
-            .ShouldBe(beforeEdges.Select(row => string.Join(",", row)));
+            .ShouldBe(beforeEdges.Select(row => string.Join(",", row)), ignoreOrder: true);
     }
 
     [Fact(DisplayName = "Cohesion Test [Graph] - EXPLAIN: every graph plan record has a closed description mapping")]

@@ -126,7 +126,7 @@ public sealed class GqlWhereExpressionTests
 
         // Assert
         plan.MatchClauses.Single().Paths.Single().Anchor.Property.ShouldBe(property);
-        rows.ShouldBe(expected.Split(',').Cast<object?>());
+        rows.ShouldBe(expected.Split(',').Cast<object?>(), ignoreOrder: true);
     }
 
     [Theory(DisplayName = "Cohesion Test [Graph] - WHERE: every recursive node keeps the evaluator stack guard")]

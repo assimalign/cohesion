@@ -124,6 +124,10 @@ over InMemory and TCP.
 
 ## Ordering and paging (#1142)
 
+Without ORDER BY, wire rows and paths have no guaranteed enumeration order. Tests compare
+complete result membership with multiplicity preserved while retaining ordered assertions for
+each path's nodes and relationships. Row-sequence assertions use an explicit ORDER BY.
+
 QueryAsync and QueryPathsAsync preserve the engine's ORDER BY, OFFSET/SKIP and LIMIT sequence,
 including RETURN aliases and paging parameters with either named sigil. The server validates
 counts before emitting rows or paths; invalid graph counts retain COHDBG013, while non-finite

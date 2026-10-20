@@ -96,7 +96,7 @@ public sealed class GraphReturnTests
 
         // Assert
         result.Rows.Select(row => row[0]).ShouldBe(new object?[]
-        { null, (byte)1, 0, 9007199254740992L, 9007199254740993L, double.Epsilon, 0.1m, 0.1d, decimal.MaxValue, ulong.MaxValue, "A", "a" });
+        { null, (byte)1, 0, 9007199254740992L, 9007199254740993L, double.Epsilon, 0.1m, 0.1d, decimal.MaxValue, ulong.MaxValue, "A", "a" }, ignoreOrder: true);
     }
 
     [Fact(DisplayName = "Cohesion Test [Graph] - RETURN: DISTINCT follows every mutation and empty matches retain column metadata")]
@@ -134,7 +134,7 @@ public sealed class GraphReturnTests
 
         // Assert
         result.Rows.Count.ShouldBe(3);
-        result.Rows.Select(row => row[0]).ShouldBe(new object?[] { "Alice", "Bob", "Carol" });
+        result.Rows.Select(row => row[0]).ShouldBe(new object?[] { "Alice", "Bob", "Carol" }, ignoreOrder: true);
         result.Rows.ShouldAllBe(row => Equals(row[1], true));
     }
 

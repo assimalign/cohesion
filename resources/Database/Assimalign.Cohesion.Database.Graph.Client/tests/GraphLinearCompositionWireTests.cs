@@ -22,7 +22,7 @@ public sealed class GraphLinearCompositionWireTests
         // Act / Assert
         var scalar = await connection.QueryAsync("LET n = $value FILTER n > 0 RETURN n NEXT LET y = n + 1 RETURN y", parameters, harness.Token);
         scalar.ShouldHaveSingleItem().ToArray().ShouldBe(new object?[] { 2L });
-        foreach (string source in new[] { "FOR x IN $xs RETURN x", "FOR x IN [1,2] RETURN x", "UNWIND [1,2] AS x WITH ALL x RETURN x" })
+        foreach (string source in new[] { "FOR x IN $xs RETURN x ORDER BY x", "FOR x IN [1,2] RETURN x ORDER BY x", "UNWIND [1,2] AS x WITH ALL x RETURN x ORDER BY x" })
         { (await connection.QueryAsync(source, parameters, harness.Token)).Select(row => row[0]).ShouldBe(new object?[] { 1L, 2L }); }
         (await connection.ExecuteAsync("FOR x IN $xs INSERT (:P {k:x})", parameters, harness.Token)).ShouldBe(2);
         var count = await connection.QueryAsync("MATCH (a:P) WITH count(a) AS c RETURN c", cancellationToken: harness.Token);
