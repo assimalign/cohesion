@@ -82,6 +82,11 @@ internal sealed partial class SqlExpressionEvaluator
     /// <summary>The executing statement's cancellation token, which a called function's context carries.</summary>
     private readonly CancellationToken _cancellationToken;
 
+    // Test-only seam, captured once per evaluator rather than kept
+    // on an immutable cached pattern. No application function registration is needed.
+    internal static Action? BeforeLikeMatch;
+    private readonly Action? _beforeLikeMatch;
+
     // Catalog DEFAULT binding resolves calls without executing application code.
     private readonly bool _foldConstants;
 
@@ -121,6 +126,7 @@ internal sealed partial class SqlExpressionEvaluator
         _sharedColumns = sharedColumns;
         _functions = functions ?? SqlFunctionEnvironment.Standard;
         _cancellationToken = cancellationToken;
+        _beforeLikeMatch = Volatile.Read(ref BeforeLikeMatch);
         _foldConstants = foldConstants && !_functions.IsView;
         _typing = slotScope is null && outerScope is null ? null : new SqlTypingMemory(slotScope)
         {
@@ -142,7 +148,7 @@ internal sealed partial class SqlExpressionEvaluator
     /// </returns>
     internal static SqlExpressionEvaluator ForExecution(SqlSubqueryValues? subqueryValues, CancellationToken cancellationToken = default,
         bool[]? sharedColumns = null, DateTimeOffset? transactionStart = null)
-        => subqueryValues is null && !cancellationToken.CanBeCanceled && sharedColumns is null && transactionStart is null
+        => subqueryValues is null && !cancellationToken.CanBeCanceled && sharedColumns is null && transactionStart is null && Volatile.Read(ref BeforeLikeMatch) is null
             ? RowEvaluator
             : new SqlExpressionEvaluator(Array.Empty<SqlCatalogColumn>(), null, subqueryValues: subqueryValues,
                 cancellationToken: cancellationToken, sharedColumns: sharedColumns,
@@ -1048,7 +1054,7 @@ internal sealed partial class SqlExpressionEvaluator
         try
         {
             var compiled = expression.Compiled ?? SqlLikePattern.Compile(LikeText(pattern), LikeText(escape), _cancellationToken);
-            bool matches = compiled.Match(LikeText(SqlCharacter.Output(value)), collation, _cancellationToken);
+            bool matches = compiled.Match(LikeText(SqlCharacter.Output(value)), collation, _cancellationToken, out _, _beforeLikeMatch);
             return Box(matches != expression.IsNegated);
         }
         catch (SqlPlanningException exception) when (exception.Diagnostics[0].Start is null && expression.Location is not null)

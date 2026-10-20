@@ -436,16 +436,16 @@ public sealed class SqlPredicateExecutionTests
         Should.Throw<OperationCanceledException>(() => pattern.Match(new string('a', 200_000), Collation.FromName(name), cancellation.Token));
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql] - LIKE: invariant probing stops at an input-proportional work budget")]
-    [InlineData(256, 16)]
-    [InlineData(512, 16)]
-    [InlineData(200_000, 128)]
-    [InlineData(200_000, 2048)]
-    public void Match_LinguisticFailure_ShouldRefuseWithinWorkBudget(int length, int wildcards)
+    [Theory(DisplayName = "Cohesion Test [Sql] - LIKE: a pathological invariant pattern stops at a polynomial work budget")]
+    [InlineData(256)]
+    [InlineData(512)]
+    [InlineData(1024)]
+    public void Match_LinguisticFailure_ShouldRefuseWithinWorkBudget(int length)
     {
         // Arrange
+        const int wildcards = 128;
         var pattern = SqlLikePattern.Compile(string.Concat(Enumerable.Repeat("%a", wildcards)) + "b", "!", CancellationToken.None);
-        string input = new('a', length);
+        string input = string.Concat(Enumerable.Repeat("á", length / 2));
         long work = 0;
         // Act
         var error = Should.Throw<DatabaseException>(() => pattern.Match(input, Collation.Invariant, CancellationToken.None, out work));
@@ -453,7 +453,7 @@ public sealed class SqlPredicateExecutionTests
         error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE040");
         work.ShouldBeGreaterThan(0);
         work.ShouldBeLessThanOrEqualTo(pattern.WorkLimit(length));
-        pattern.WorkLimit(length).ShouldBe(64L * (length + 2L * wildcards + 2));
+        pattern.WorkLimit(length).ShouldBe(64L * (length + 1) * (2 * wildcards + 2));
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - LIKE: repetitive failures have deterministic search and allocation bounds")]
@@ -505,7 +505,7 @@ public sealed class SqlPredicateExecutionTests
             catch (SqlPlanningException exception) { code = exception.Diagnostics[0].Code; }
             allocated = Math.Min(allocated, GC.GetAllocatedBytesForCurrentThread() - before);
             matched.ShouldBeFalse();
-            code.ShouldBe(collation.IsIndexBacked ? null : "COHSQLE040");
+            code.ShouldBeNull();
         }
         // Assert: ordinal matching allocates nothing; normalization and the visited-bit
         // matrix have size budgets, independent of the number of backtracking steps.
@@ -573,6 +573,100 @@ public sealed class SqlPredicateExecutionTests
         comparisons.ShouldBe(2800);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Sql] - LIKE: ordinary invariant patterns succeed through 200000 characters")]
+    [InlineData(128)]
+    [InlineData(1024)]
+    [InlineData(65536)]
+    [InlineData(200000)]
+    public async Task Execute_CommonInvariantPatterns_ShouldSucceedAtOrdinarySizesAsync(int length)
+    {
+        // Arrange
+        await using var engine = CreateEngine();
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        string a = $"RPAD('a', {length}, 'a')";
+        string middle = $"RPAD('z', {length - 3}, 'z') || 'abc'";
+        string email = $"RPAD('a', {length - 12}, 'a') || '@example.com'";
+        string prefix = $"'abc' || RPAD('z', {length - 3}, 'z')";
+        string[] expressions =
+        [
+            $"{a} COLLATE invariant LIKE '%a'",
+            $"({middle}) COLLATE invariant LIKE '%abc%'",
+            $"({email}) COLLATE invariant LIKE '%@example.com'",
+            $"({prefix}) COLLATE invariant LIKE 'abc%'",
+            $"{a} COLLATE invariant LIKE 'abc%'",
+            $"{a} COLLATE invariant NOT LIKE '%b'",
+            $"{a} COLLATE invariant NOT LIKE '%a'",
+            $"{a} COLLATE invariant LIKE '%abc%'",
+        ];
+        object?[] expected = [true, true, true, true, false, true, false, false];
+        string projections = string.Join(", ", expressions.Select((expression, index) => expression + " AS c" + index));
+        await ExecuteAsync(session, $"CREATE TABLE checked_common (s TEXT CHECK (RPAD(s, {length}, 'x') COLLATE invariant LIKE '%x%'))");
+        await ExecuteAsync(session, "CREATE VIEW common_view AS SELECT " + projections + oneRow);
+        // Act / Assert: direct expressions, cached view expressions and a stored CHECK.
+        (await RowsAsync(session, "SELECT " + projections + oneRow)).ShouldHaveSingleItem().ShouldBe(expected);
+        (await RowsAsync(session, "SELECT * FROM common_view")).ShouldHaveSingleItem().ShouldBe(expected);
+        // Physical rows have an 8092-byte limit; the persisted CHECK constructs
+        // the requested matcher input while the stored seed stays within that limit.
+        await ExecuteAsync(session, "INSERT INTO checked_common VALUES ('x')");
+        (await RowsAsync(session, $"SELECT LENGTH(RPAD(s, {length}, 'x')) FROM checked_common")).ShouldHaveSingleItem()[0].ShouldBe((long)length);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - LIKE: ordinary invariant searches have linear work")]
+    [InlineData(128)]
+    [InlineData(1024)]
+    [InlineData(65536)]
+    [InlineData(200000)]
+    public void Match_CommonInvariantPatterns_ShouldUseLinearWork(int length)
+    {
+        // Arrange
+        (string Text, string Input, bool Expected)[] cases =
+        [
+            ("%a", new string('a', length), true),
+            ("%abc%", new string('z', length - 3) + "abc", true),
+            ("%@example.com", new string('a', length - 12) + "@example.com", true),
+            ("abc%", "abc" + new string('a', length - 3), true),
+            ("abc%", new string('z', length), false),
+            ("%abc%", new string('a', length), false),
+            ("%b", new string('a', length), false),
+            ("%a_bc", new string('a', length - 2) + "bc", true),
+            ("%a", new string('é', length - 1) + "a", true),
+            ("%abc%", new string('中', length - 3) + "abc", true),
+            ("%@example.com", new string('é', length - 12) + "@example.com", true),
+            ("abc%", "abc" + new string('é', length - 3), true),
+            ("abc%", new string('中', length), false),
+            ("%a", new string('\0', length - 1) + "a", true),
+            ("%a", "a" + new string('\u00ad', length - 1), true),
+        ];
+        // Act / Assert
+        foreach (var (text, input, expected) in cases)
+        {
+            var pattern = SqlLikePattern.Compile(text, "!", CancellationToken.None);
+            pattern.Match(input, Collation.Invariant, CancellationToken.None, out long work).ShouldBe(expected);
+            work.ShouldBeLessThanOrEqualTo((text == "%a_bc" ? 16L : 4L) * (length + text.Length + 1));
+        }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - LIKE: invariant anchors preserve ignored scalar ends")]
+    [InlineData("a\0", "%a", true)]
+    [InlineData("\0a\0", "%a", true)]
+    [InlineData("\0a\0", "%a_", true)]
+    [InlineData("a\0b", "a_b", true)]
+    [InlineData("\0a", "\0_a", true)]
+    [InlineData("", "%\0", true)]
+    [InlineData("a\u0001b", "a_", true)]
+    [InlineData("a\u0640b", "a_", true)]
+    [InlineData("a\u07fab", "a_", true)]
+    [InlineData("a\u0824b", "a%", true)]
+    [InlineData("a\u0828b", "a_b", true)]
+    public void Match_InvariantAnchors_ShouldPreserveIgnorableScalars(string input, string text, bool expected)
+    {
+        // Arrange
+        var pattern = SqlLikePattern.Compile(text, "!", CancellationToken.None);
+        // Act / Assert
+        pattern.Match(input, Collation.Invariant, CancellationToken.None).ShouldBe(expected);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Sql] - LIKE: a long invariant terminal literal compares its complete suffix once (#1394)")]
     public void Match_LongLinguisticLiteral_ShouldStayWithinLinearWork()
     {
@@ -613,8 +707,8 @@ public sealed class SqlPredicateExecutionTests
     [InlineData("UPDATE checked_values SET s = 'aaa' WHERE id = 1", false)]
     public async Task ExecuteAsync_OneRowLike_ShouldObserveStatementCancellationAsync(string sql, bool view)
     {
-        // Arrange: cached patterns are bound with no cancellation token. A per-pattern
-        // owning-assembly hook cancels at Match entry, after operand evaluation, without
+        // Arrange: cached patterns are bound with no cancellation token. An evaluator
+        // hook cancels at Match entry, after operand evaluation, without
         // registering application code or racing a faster work-budget refusal.
         await using var engine = CreateEngine();
         var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
@@ -637,17 +731,17 @@ public sealed class SqlPredicateExecutionTests
             database.Catalog.TryGetTable("dbo", "checked_values", out var table).ShouldBeTrue();
             like = database.Definitions.Get(table!).Checks[0].Bound.ShouldBeOfType<SqlBoundLike>();
         }
-        var compiled = like.Compiled.ShouldNotBeNull();
+        like.Compiled.ShouldNotBeNull();
         using var cancellation = new CancellationTokenSource();
         int entered = 0;
-        compiled.BeforeMatch = () => { entered++; cancellation.Cancel(); };
+        SqlExpressionEvaluator.BeforeLikeMatch = () => { entered++; cancellation.Cancel(); };
         database.Definitions.Functions.RunsApplicationCode.ShouldBeFalse();
         // Act
         try
         {
             await Should.ThrowAsync<OperationCanceledException>(async () => await session.ExecuteAsync(sql, cancellationToken: cancellation.Token));
         }
-        finally { compiled.BeforeMatch = null; }
+        finally { SqlExpressionEvaluator.BeforeLikeMatch = null; }
         // Assert: the matcher was reached, cancellation escaped, and writes rolled back.
         entered.ShouldBe(1);
         if (view) { session.LastStatementMetrics!.RecordsExamined.ShouldBe(1); }

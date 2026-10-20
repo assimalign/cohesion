@@ -28,6 +28,7 @@ internal sealed class SqlBoundTable
     {
         Table = table;
         _checks = checks;
+        foreach (var check in checks) { ChecksContainLike |= check.ContainsLike; }
         DefaultValues = defaultValues;
         MissingValues = missingValues ?? new SqlBoundExpression?[table.Columns.Count];
         Domains = domains ?? [];
@@ -57,6 +58,8 @@ internal sealed class SqlBoundTable
 
     /// <summary>Gets the bound CHECK constraints, in declaration order.</summary>
     internal IReadOnlyList<SqlBoundCheck> Checks => _checks;
+
+    internal bool ChecksContainLike { get; }
 
     /// <summary>
     /// Gets each column's DEFAULT by ordinal, bound once

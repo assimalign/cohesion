@@ -1,4 +1,5 @@
 using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
@@ -14,15 +15,23 @@ internal sealed class SqlLikePattern
     // A null literal is %, an empty literal is _, and a nonempty literal is a literal run.
     private readonly string?[] _tokens;
     private readonly int _sourceLength;
+    private readonly bool _requiresBoundaryProbing;
+    private readonly bool _hasIgnorables;
     private readonly Collation? _normalizedFor;
     private readonly string?[]? _normalizedTokens;
-
-    // Owning-assembly test seam: cancellation at row-time entry of a cached pattern.
-    internal Action? BeforeMatch { get; set; }
 
     private SqlLikePattern(string?[] tokens, int sourceLength, Collation? normalizedFor = null, string?[]? normalizedTokens = null)
     {
         _tokens = tokens;
+        foreach (string? literal in tokens)
+        {
+            if (literal is null) { continue; }
+            for (int position = 0; position < literal.Length; position += ScalarLength(literal, position))
+            {
+                if (MayBeIgnorable(literal, position)) { _hasIgnorables = true; }
+                if (NeedsBoundaryProbing(literal, position)) { _requiresBoundaryProbing = true; }
+            }
+        }
         _sourceLength = sourceLength;
         _normalizedFor = normalizedFor;
         _normalizedTokens = normalizedTokens;
@@ -89,10 +98,10 @@ internal sealed class SqlLikePattern
 
     // Work counts search transitions and UTF-16 units offered to literal comparisons.
     // A ref/out counter permits deterministic resource tests without a per-match object.
-    internal bool Match(string input, Collation collation, CancellationToken cancellationToken, out long work)
+    internal bool Match(string input, Collation collation, CancellationToken cancellationToken, out long work, Action? beforeMatch = null)
     {
         work = 0;
-        BeforeMatch?.Invoke();
+        beforeMatch?.Invoke();
         cancellationToken.ThrowIfCancellationRequested();
         long limit = WorkLimit(input.Length);
         var pattern = Normalize(collation);
@@ -110,178 +119,246 @@ internal sealed class SqlLikePattern
         string normalized = input;
         int[]? offsets = null;
         int[]? firstBoundaries = null;
-        if (collation.IsIndexBacked && !ReferenceEquals(collation, Collation.Binary))
+        bool probeBoundaries = _requiresBoundaryProbing;
+        bool hasIgnorables = _hasIgnorables;
+        try
         {
-            normalized = collation.Normalize(input);
-            offsets = new int[input.Length + 1];
-            firstBoundaries = new int[normalized.Length + 1];
-            Array.Fill(firstBoundaries, -1);
-            firstBoundaries[0] = 0;
-            var lengths = new Dictionary<int, int>();
-            int offset = 0, mapped = 0;
-            for (int index = 0; index < input.Length;)
+            if (collation.IsIndexBacked && !ReferenceEquals(collation, Collation.Binary))
             {
-                if ((mapped++ & 1023) == 0) { cancellationToken.ThrowIfCancellationRequested(); }
-                int scalar = char.ConvertToUtf32(input, index);
-                int length = ScalarLength(input, index);
-                if (!lengths.TryGetValue(scalar, out int foldedLength))
+                normalized = collation.Normalize(input);
+                offsets = ArrayPool<int>.Shared.Rent(checked(input.Length + 1));
+                offsets[0] = 0;
+                firstBoundaries = ArrayPool<int>.Shared.Rent(checked(normalized.Length + 1));
+                firstBoundaries.AsSpan(0, normalized.Length + 1).Fill(-1);
+                firstBoundaries[0] = 0;
+                var lengths = new Dictionary<int, int>();
+                int offset = 0, mapped = 0;
+                for (int index = 0; index < input.Length;)
                 {
-                    foldedLength = collation.Normalize(new Rune(scalar).ToString()).Length;
-                    lengths.Add(scalar, foldedLength);
+                    if ((mapped++ & 1023) == 0) { cancellationToken.ThrowIfCancellationRequested(); }
+                    int scalar = char.ConvertToUtf32(input, index);
+                    int length = ScalarLength(input, index);
+                    if (!lengths.TryGetValue(scalar, out int foldedLength))
+                    {
+                        foldedLength = collation.Normalize(new Rune(scalar).ToString()).Length;
+                        lengths.Add(scalar, foldedLength);
+                    }
+                    index += length;
+                    offset += foldedLength;
+                    offsets[index] = offset;
+                    if (firstBoundaries[offset] < 0) { firstBoundaries[offset] = index; }
+                    work++;
                 }
-                index += length;
-                offset += foldedLength;
-                offsets[index] = offset;
-                if (firstBoundaries[offset] < 0) { firstBoundaries[offset] = index; }
-                work++;
             }
-        }
-        else if (!collation.IsIndexBacked)
-        {
-            // Preserve Collation's explicit refusal under invariant globalization.
-            collation.Compare(string.Empty, string.Empty);
-        }
+            else if (!collation.IsIndexBacked)
+            {
+                // Preserve Collation's explicit refusal under invariant globalization.
+                collation.Compare(string.Empty, string.Empty);
+                // Search APIs see surrounding collation elements. Combining text and
+                // scripts with contextual ordering retain exhaustive scalar probing;
+                // independent scripts can use match lengths from collation searches.
+                for (int position = 0; !probeBoundaries && _tokens.Length > 1 && position < input.Length; position += ScalarLength(input, position))
+                {
+                    if ((position & 1023) == 0) { cancellationToken.ThrowIfCancellationRequested(); }
+                    Charge(ref work, 1, limit, collation, cancellationToken);
+                    hasIgnorables |= MayBeIgnorable(input, position);
+                    probeBoundaries = NeedsBoundaryProbing(input, position);
+                }
+            }
 
-        // PostgreSQL like_match.c:193-221 advances wildcards over original characters,
-        // comparing literal runs separately. Frames and failed suffixes bound repeated work.
-        var pending = new Stack<(int Token, int Start, int End)>();
-        // Allocate rows lazily: at most one bit per token/input boundary, rather
-        // than one hash entry per state on repetitive nonmatching input.
-        var visited = new uint[_tokens.Length][];
-        var firstVisited = new int[_tokens.Length];
-        Array.Fill(firstVisited, -1);
-        pending.Push((0, 0, -1));
-        int steps = 0;
-        while (pending.TryPop(out var state))
-        {
-            if ((steps++ & 1023) == 0) { cancellationToken.ThrowIfCancellationRequested(); }
-            Charge(ref work, 1, limit, collation, cancellationToken);
-            int index = state.Token, start = state.Start;
-            if (index == _tokens.Length)
+            if (!collation.IsIndexBacked && !probeBoundaries && !hasIgnorables && _tokens.Length > 1)
             {
-                if (start == input.Length) { return true; }
-                continue;
+                return MatchAnchored(input, cancellationToken, limit, ref work);
             }
-            if (state.End < 0)
+
+            // PostgreSQL like_match.c:193-221 advances wildcards over original characters,
+            // comparing literal runs separately. Frames and failed suffixes bound repeated work.
+            var pending = new Stack<(int Token, int Start, int End)>();
+            // Allocate rows lazily: at most one bit per token/input boundary, rather
+            // than one hash entry per state on repetitive nonmatching input.
+            var visited = new uint[_tokens.Length][];
+            var firstVisited = new int[_tokens.Length];
+            Array.Fill(firstVisited, -1);
+            pending.Push((0, 0, -1));
+            int steps = 0;
+            while (pending.TryPop(out var state))
             {
-                int first = firstVisited[index];
-                if (first == start) { continue; }
-                if (first < 0) { firstVisited[index] = start; }
+                if ((steps++ & 1023) == 0) { cancellationToken.ThrowIfCancellationRequested(); }
+                Charge(ref work, 1, limit, collation, cancellationToken);
+                int index = state.Token, start = state.Start;
+                if (index == _tokens.Length)
+                {
+                    if (start == input.Length) { return true; }
+                    continue;
+                }
+                if (state.End < 0)
+                {
+                    int first = firstVisited[index];
+                    if (first == start) { continue; }
+                    if (first < 0) { firstVisited[index] = start; }
+                    else
+                    {
+                        var row = visited[index];
+                        if (row is null)
+                        {
+                            int words = (int)(((long)input.Length + 32) / 32);
+                            // One boundary needs only an inline slot. Charge expansion before
+                            // allocating, so a simple successful path stays cheap while many
+                            // alternative starts cannot bypass the linguistic work budget.
+                            Charge(ref work, words, limit, collation, cancellationToken);
+                            visited[index] = row = new uint[words];
+                            row[first >> 5] |= 1u << (first & 31);
+                        }
+                        uint mask = 1u << (start & 31);
+                        if ((row[start >> 5] & mask) != 0) { continue; }
+                        row[start >> 5] |= mask;
+                    }
+                }
+                string? raw = _tokens[index];
+                if (raw is null)
+                {
+                    if (index + 1 == _tokens.Length) { return true; }
+                    if (!collation.IsIndexBacked && !probeBoundaries && _tokens[index + 1] is { Length: > 0 } anchor)
+                    {
+                        var remaining = input.AsSpan(start);
+                        var compare = CultureInfo.InvariantCulture.CompareInfo;
+                        cancellationToken.ThrowIfCancellationRequested();
+                        if (index + 2 == _tokens.Length)
+                        {
+                            // The terminal literal must cover the remaining suffix, as in
+                            // PostgreSQL like_match.c:272-286; % supplies its starting boundary.
+                            Charge(ref work, Math.Max(1L, (long)remaining.Length + anchor.Length), limit, collation, cancellationToken);
+                            bool suffix = compare.IsSuffix(remaining, anchor, CompareOptions.None);
+                            cancellationToken.ThrowIfCancellationRequested();
+                            if (suffix) { return true; }
+                            continue;
+                        }
+                        int found = compare.IndexOf(remaining, anchor, CompareOptions.None, out int matchLength);
+                        Charge(ref work, Math.Max(1L, (long)(found < 0 ? remaining.Length : found + matchLength) + anchor.Length), limit, collation, cancellationToken);
+                        cancellationToken.ThrowIfCancellationRequested();
+                        if (found < 0) { continue; }
+                        start += found;
+                        if (start < input.Length) { pending.Push((index, start + ScalarLength(input, start), -1)); }
+                        pending.Push((index + 1, start, -1));
+                        continue;
+                    }
+                    if (start < input.Length) { pending.Push((index, start + ScalarLength(input, start), -1)); }
+                    pending.Push((index + 1, start, -1));
+                }
+                else if (raw.Length == 0)
+                {
+                    if (start < input.Length) { pending.Push((index + 1, start + ScalarLength(input, start), -1)); }
+                }
                 else
                 {
-                    var row = visited[index];
-                    if (row is null)
+                    string token = pattern._normalizedTokens?[index] ?? raw;
+                    int normalizedStart = offsets?[start] ?? start;
+                    // Only the complete remaining text can satisfy a final literal.
+                    // PostgreSQL like_match.c:272-286 uses this same terminal shortcut.
+                    // In particular, an ordinary long exact match needs one comparison.
+                    if (index + 1 == _tokens.Length)
                     {
-                        int words = (int)(((long)input.Length + 32) / 32);
-                        // One boundary needs only an inline slot. Charge expansion before
-                        // allocating, so a simple successful path stays cheap while many
-                        // alternative starts cannot bypass the linguistic work budget.
-                        Charge(ref work, words, limit, collation, cancellationToken);
-                        visited[index] = row = new uint[words];
-                        row[first >> 5] |= 1u << (first & 31);
+                        if (collation.IsIndexBacked)
+                        {
+                            work += token.Length;
+                            if (normalized.AsSpan(normalizedStart).SequenceEqual(token.AsSpan())) { return true; }
+                        }
+                        else
+                        {
+                            Charge(ref work, Math.Max(1L, (long)input.Length - start + token.Length), limit, collation, cancellationToken);
+                            if (CultureInfo.InvariantCulture.CompareInfo.Compare(input.AsSpan(start), token.AsSpan(), CompareOptions.None) == 0) { return true; }
+                        }
+                        continue;
                     }
-                    uint mask = 1u << (start & 31);
-                    if ((row[start >> 5] & mask) != 0) { continue; }
-                    row[start >> 5] |= mask;
-                }
-            }
-            string? raw = _tokens[index];
-            if (raw is null)
-            {
-                if (index + 1 == _tokens.Length) { return true; }
-                if (start < input.Length) { pending.Push((index, start + ScalarLength(input, start), -1)); }
-                pending.Push((index + 1, start, -1));
-            }
-            else if (raw.Length == 0)
-            {
-                if (start < input.Length) { pending.Push((index + 1, start + ScalarLength(input, start), -1)); }
-            }
-            else
-            {
-                string token = pattern._normalizedTokens?[index] ?? raw;
-                int normalizedStart = offsets?[start] ?? start;
-                // Only the complete remaining text can satisfy a final literal.
-                // PostgreSQL like_match.c:272-286 uses this same terminal shortcut.
-                // In particular, an ordinary long exact match needs one comparison.
-                if (index + 1 == _tokens.Length)
-                {
+                    // The deterministic transform only appends. Compare the complete run
+                    // once, then find original boundaries at its normalized end offset.
+                    int firstEnd = start;
+                    if (!collation.IsIndexBacked && !probeBoundaries)
+                    {
+                        var compare = CultureInfo.InvariantCulture.CompareInfo;
+                        cancellationToken.ThrowIfCancellationRequested();
+                        bool prefix = compare.IsPrefix(input.AsSpan(start), token, CompareOptions.None, out int matchLength);
+                        Charge(ref work, Math.Max(1L, (long)(prefix ? matchLength : input.Length - start) + token.Length), limit, collation, cancellationToken);
+                        cancellationToken.ThrowIfCancellationRequested();
+                        if (!prefix) { continue; }
+                        firstEnd = start + matchLength;
+                    }
                     if (collation.IsIndexBacked)
                     {
                         work += token.Length;
-                        if (normalized.AsSpan(normalizedStart).SequenceEqual(token.AsSpan())) { return true; }
+                        if (!normalized.AsSpan(normalizedStart).StartsWith(token, StringComparison.Ordinal)) { continue; }
+                        // Ignored scalars can leave many raw starts at the same normalized
+                        // offset. Jump to the first complete original boundary, rather than
+                        // probing that ignored prefix again for each start. A literal cannot
+                        // end halfway through one original scalar's expansion.
+                        firstEnd = token.Length == 0 ? start : firstBoundaries![normalizedStart + token.Length];
+                        if (firstEnd < 0) { continue; }
                     }
-                    else
+                    for (int end = state.End < 0 ? firstEnd : state.End; end <= input.Length;)
                     {
-                        Charge(ref work, Math.Max(1L, (long)input.Length - start + token.Length), limit, collation, cancellationToken);
-                        if (CultureInfo.InvariantCulture.CompareInfo.Compare(input.AsSpan(start), token.AsSpan(), CompareOptions.None) == 0) { return true; }
-                    }
-                    continue;
-                }
-                // The deterministic transform only appends. Compare the complete run
-                // once, then find original boundaries at its normalized end offset.
-                int firstEnd = start;
-                if (collation.IsIndexBacked)
-                {
-                    work += token.Length;
-                    if (!normalized.AsSpan(normalizedStart).StartsWith(token, StringComparison.Ordinal)) { continue; }
-                    // Ignored scalars can leave many raw starts at the same normalized
-                    // offset. Jump to the first complete original boundary, rather than
-                    // probing that ignored prefix again for each start. A literal cannot
-                    // end halfway through one original scalar's expansion.
-                    firstEnd = token.Length == 0 ? start : firstBoundaries![normalizedStart + token.Length];
-                    if (firstEnd < 0) { continue; }
-                }
-                for (int end = state.End < 0 ? firstEnd : state.End; end <= input.Length;)
-                {
-                    if ((steps++ & 1023) == 0) { cancellationToken.ThrowIfCancellationRequested(); }
-                    Charge(ref work, 1, limit, collation, cancellationToken);
-                    bool equal;
-                    if (collation.IsIndexBacked)
-                    {
-                        int length = offsets![end] - normalizedStart;
-                        if (length > token.Length) { break; }
-                        equal = length == token.Length;
-                    }
-                    else
-                    {
-                        // Charge comparison lengths, not just probes: CompareInfo may scan
-                        // the complete prefix and literal, even though no string is copied.
-                        Charge(ref work, Math.Max(1L, (long)end - start + token.Length), limit, collation, cancellationToken);
-                        var prefix = input.AsSpan(start, end - start);
-                        var compare = CultureInfo.InvariantCulture.CompareInfo;
-                        // Linguistic prefixes can reorder (for example Thai/Lao).
-                        // Probe every scalar boundary, as like_match.c:289-311 does.
-                        equal = compare.Compare(prefix, token.AsSpan(), CompareOptions.None) == 0;
-                    }
-                    if (equal)
-                    {
-                        // An earlier arrival at this suffix already queued its ignored
-                        // extensions. Coalesce those continuations as well as suffixes,
-                        // so an ignored run cannot be enumerated once per raw start.
-                        if (collation.IsIndexBacked && (firstVisited[index + 1] == end ||
-                            visited[index + 1] is { } suffixes &&
-                            (suffixes[end >> 5] & (1u << (end & 31))) != 0)) { break; }
-                        if (end < input.Length)
+                        if ((steps++ & 1023) == 0) { cancellationToken.ThrowIfCancellationRequested(); }
+                        Charge(ref work, 1, limit, collation, cancellationToken);
+                        bool equal;
+                        if (collation.IsIndexBacked)
                         {
-                            int next = end + ScalarLength(input, end);
-                            // Only ignored scalars can extend an equal normalized literal.
-                            if (!collation.IsIndexBacked || offsets![next] == offsets[end]) { pending.Push((index, start, next)); }
+                            int length = offsets![end] - normalizedStart;
+                            if (length > token.Length) { break; }
+                            equal = length == token.Length;
                         }
-                        pending.Push((index + 1, end, -1));
-                        break;
+                        else if (!probeBoundaries)
+                        {
+                            // IsPrefix supplies the first candidate end. Only ignored
+                            // scalars can extend it without changing equality.
+                            int previous = end > 1 && char.IsLowSurrogate(input[end - 1]) && char.IsHighSurrogate(input[end - 2]) ? end - 2 : end - 1;
+                            equal = end == firstEnd || CultureInfo.InvariantCulture.CompareInfo.Compare(input.AsSpan(previous, end - previous), ReadOnlySpan<char>.Empty, CompareOptions.None) == 0;
+                            if (!equal) { break; }
+                        }
+                        else
+                        {
+                            // Charge comparison lengths, not just probes: CompareInfo may scan
+                            // the complete prefix and literal, even though no string is copied.
+                            Charge(ref work, Math.Max(1L, (long)end - start + token.Length), limit, collation, cancellationToken);
+                            var prefix = input.AsSpan(start, end - start);
+                            var compare = CultureInfo.InvariantCulture.CompareInfo;
+                            // Linguistic prefixes can reorder (for example Thai/Lao).
+                            // Probe every scalar boundary, as like_match.c:289-311 does.
+                            equal = compare.Compare(prefix, token.AsSpan(), CompareOptions.None) == 0;
+                        }
+                        if (equal)
+                        {
+                            // An earlier arrival at this suffix already queued its ignored
+                            // extensions. Coalesce those continuations as well as suffixes,
+                            // so an ignored run cannot be enumerated once per raw start.
+                            if ((collation.IsIndexBacked || !probeBoundaries) && (firstVisited[index + 1] == end ||
+                                visited[index + 1] is { } suffixes &&
+                                (suffixes[end >> 5] & (1u << (end & 31))) != 0)) { break; }
+                            if (end < input.Length)
+                            {
+                                int next = end + ScalarLength(input, end);
+                                // Only ignored scalars can extend an equal normalized literal.
+                                if (!collation.IsIndexBacked || offsets![next] == offsets[end]) { pending.Push((index, start, next)); }
+                            }
+                            pending.Push((index + 1, end, -1));
+                            break;
+                        }
+                        if (end == input.Length) { break; }
+                        end += ScalarLength(input, end);
                     }
-                    if (end == input.Length) { break; }
-                    end += ScalarLength(input, end);
                 }
             }
+            return false;
         }
-        return false;
+        finally
+        {
+            if (firstBoundaries is not null) { ArrayPool<int>.Shared.Return(firstBoundaries); }
+            if (offsets is not null) { ArrayPool<int>.Shared.Return(offsets); }
+        }
     }
 
     // The budget includes pattern compilation's input size and uses 64-bit arithmetic.
     // Index-backed paths keep their O(text * pattern) search; only linguistic probing
     // can exhaust this budget. Cancellation takes precedence over budget refusal.
-    internal long WorkLimit(int inputLength) => 64L * ((long)inputLength + _sourceLength + 1);
+    internal long WorkLimit(int inputLength) => checked(64L * (inputLength + 1L) * (_sourceLength + 1L));
 
     private static void Charge(ref long work, long amount, long limit, Collation collation, CancellationToken cancellationToken)
     {
@@ -331,6 +408,102 @@ internal sealed class SqlLikePattern
             position = retry;
             tokenIndex = star + 1;
         }
+    }
+
+    // Independent scalar ends without ignorables give each literal one candidate
+    // end. Last-% backtracking then needs no visited matrix or pending frames.
+    private bool MatchAnchored(string input, CancellationToken cancellationToken, long limit, ref long work)
+    {
+        var compare = CultureInfo.InvariantCulture.CompareInfo;
+        int position = 0, index = 0, star = -1, retry = 0;
+        if (_tokens[^1] is { Length: > 0 } terminal)
+        {
+            Charge(ref work, Math.Max(1L, (long)input.Length + terminal.Length), limit, Collation.Invariant, cancellationToken);
+            bool suffix = compare.IsSuffix(input, terminal, CompareOptions.None);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!suffix) { return false; }
+            if (_tokens.Length == 2 && _tokens[0] is null) { return true; }
+        }
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Charge(ref work, 1, limit, Collation.Invariant, cancellationToken);
+            if (index == _tokens.Length && position == input.Length) { return true; }
+            if (index < _tokens.Length)
+            {
+                string? literal = _tokens[index];
+                if (literal is null)
+                {
+                    if (index + 1 == _tokens.Length) { return true; }
+                    star = index++;
+                    retry = position;
+                    continue;
+                }
+                if (literal.Length == 0 && position < input.Length)
+                {
+                    position += ScalarLength(input, position);
+                    index++;
+                    continue;
+                }
+                if (literal.Length > 0)
+                {
+                    bool prefix;
+                    int matchLength;
+                    if (star >= 0 && index == star + 1)
+                    {
+                        int found = compare.IndexOf(input.AsSpan(position), literal, CompareOptions.None, out matchLength);
+                        Charge(ref work, Math.Max(1L, (long)(found < 0 ? input.Length - position : found + matchLength) + literal.Length), limit, Collation.Invariant, cancellationToken);
+                        cancellationToken.ThrowIfCancellationRequested();
+                        if (found < 0) { return false; }
+                        position += found;
+                        retry = position;
+                        prefix = true;
+                    }
+                    else
+                    {
+                        prefix = compare.IsPrefix(input.AsSpan(position), literal, CompareOptions.None, out matchLength);
+                        // Independent ends without ignored scalars let a failed prefix
+                        // stop within the literal's extent, unlike a substring search.
+                        Charge(ref work, Math.Max(1L, (long)(prefix ? matchLength : Math.Min(input.Length - position, literal.Length)) + literal.Length), limit, Collation.Invariant, cancellationToken);
+                        cancellationToken.ThrowIfCancellationRequested();
+                    }
+                    if (prefix)
+                    {
+                        position += matchLength;
+                        index++;
+                        continue;
+                    }
+                }
+            }
+            if (star < 0 || retry == input.Length) { return false; }
+            retry += ScalarLength(input, retry);
+            position = retry;
+            index = star + 1;
+        }
+    }
+
+    private static bool MayBeIgnorable(string text, int position)
+        => text[position] <= 0x7f ? char.IsControl(text[position]) :
+            Rune.TryGetRuneAt(text, position, out var scalar) &&
+            Rune.GetUnicodeCategory(scalar) is UnicodeCategory.Control or UnicodeCategory.Format;
+
+    private static bool NeedsBoundaryProbing(string text, int position)
+    {
+        if (text[position] <= 0x7f) { return false; }
+        if (!Rune.TryGetRuneAt(text, position, out var scalar)) { return true; }
+        // Even in otherwise independent scripts, a mark can change whether a
+        // prefix of the whole text compares like the same isolated scalar span.
+        if (Rune.GetUnicodeCategory(scalar) is UnicodeCategory.NonSpacingMark or
+            UnicodeCategory.SpacingCombiningMark or UnicodeCategory.EnclosingMark or UnicodeCategory.ModifierLetter) { return true; }
+        // Keep contextual scripts (including Thai/Lao reordering, Indic
+        // contractions and Hangul Jamo composition) on the scalar-boundary path.
+        // Latin, Greek, Cyrillic, Hebrew/Arabic letters, symbols, ideographs,
+        // complete Hangul syllables, Deseret and emoji have independent ends.
+        int value = scalar.Value;
+        return value is not (<= 0x02ff or >= 0x0370 and <= 0x08ff or
+            >= 0x1e00 and <= 0x2bff or >= 0x3400 and <= 0x9fff or
+            >= 0xac00 and <= 0xd7a3 or >= 0x10400 and <= 0x1044f or
+            >= 0x1f000 and <= 0x1faff or >= 0x20000 and <= 0x323af);
     }
 
     private static int ScalarLength(string text, int position)

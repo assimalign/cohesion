@@ -488,4 +488,8 @@ execution-time COHSQLE004 over the wire, including a reusable connection.
 Invariant LIKE work exhaustion uses the existing located ExecutionFailure diagnostic
 COHSQLE040 and leaves the connection reusable (#1166). The real session lifetime token
 reaches row-time LIKE without an application function; disconnect cancellation closes
-the session on both InMemory and TCP. No client API or protocol format changes are needed.
+the session on both InMemory and TCP. Its regression holds a hook inside Match,
+asserts entry, waits for the server lifetime token after disconnect, then releases
+matching. Reverting LIKE token routing must produce StatementStop Error instead of
+Cancelled. The test uses AOT-compatible UnsafeAccessor seams without a public API
+or friend-assembly grant. No client API or protocol format changes are needed.

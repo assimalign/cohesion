@@ -74,7 +74,7 @@ public sealed class SqlPredicateWireTests
         await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
         // Act
         var error = await Should.ThrowAsync<SqlClientException>(async () => await connection.QueryAsync(
-            "SELECT RPAD('a', 200000, 'a') COLLATE invariant LIKE '%b' FROM users WHERE id = 1", cancellationToken: SqlClientTestHarness.Timeout()));
+            "SELECT RPAD('á', 1024, 'á') COLLATE invariant LIKE RPAD('%a', 256, '%a') || 'b' FROM users WHERE id = 1", cancellationToken: SqlClientTestHarness.Timeout()));
         // Assert
         error.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
         error.ConnectionUsable.ShouldBeTrue();
@@ -83,7 +83,7 @@ public sealed class SqlPredicateWireTests
         (await connection.QueryAsync("SELECT id FROM users WHERE id = 1", cancellationToken: SqlClientTestHarness.Timeout())).ShouldHaveSingleItem()[0].ShouldBe(1);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql.Client] - LIKE: disconnect cancels an admitted one-row invariant statement")]
+    [Theory(DisplayName = "Cohesion Test [Sql.Client] - LIKE: disconnect cancels an entered row-time invariant matcher")]
     [InlineData(false)]
     [InlineData(true)]
     public async Task QueryAsync_DisconnectedLike_ShouldCancelServerSessionAsync(bool tcp)
@@ -93,25 +93,28 @@ public sealed class SqlPredicateWireTests
         await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
         var serverSession = harness.Server.Sessions.ShouldHaveSingleItem();
         using var rootEvents = new EventSourceRecorder(EventSource.GetSources().Single(source => source.Name == "Assimalign.Cohesion.Database"), EventLevel.Verbose);
-        using var admission = new SqlLikeAdmissionGate(EventSource.GetSources().Single(source => source.Name == "Assimalign.Cohesion.Database"));
+        using var admission = new SqlLikeAdmissionGate(serverSession);
         using var sqlEvents = new EventSourceRecorder(EventSource.GetSources().Single(source => source.Name == "Assimalign.Cohesion.Database.Sql"), EventLevel.Verbose);
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
-        // Act: hold admission while disconnecting, so fast budget refusal cannot race
-        // the test. The engine tests independently cancel after the first row is read.
+        // Act: disconnect only after the row-time matcher entered. Keep it held until
+        // the server lifetime token is canceled, so transport notification cannot race refusal.
         var command = new SqlCommand("SELECT @input COLLATE invariant LIKE @pattern FROM users WHERE id = 1");
-        command.Parameters.Add("input", new string('a', 1_000_000));
-        command.Parameters.Add("pattern", "%" + new string('a', 100_000) + "b");
+        command.Parameters.Add("input", new string('́', 1024));
+        command.Parameters.Add("pattern", "%b%");
         var query = Task.Run(async () => await connection.QueryAsync(command, timeout.Token), timeout.Token);
         try
         {
             await admission.Started.WaitAsync(timeout.Token);
+            admission.Entries.ShouldBe(1);
             await connection.AbortAsync();
+            await admission.Disconnected.WaitAsync(timeout.Token);
         }
         finally { admission.Release(); }
         await Should.ThrowAsync<OperationCanceledException>(async () => await query);
         connection.IsOpen.ShouldBeFalse();
         while (harness.Server.Sessions.Count != 0) { await Task.Delay(1, timeout.Token); }
-        // Assert: the server observed cancellation rather than finishing with a budget error.
+        // Assert: the matcher entered and the server observed cancellation.
+        admission.Entries.ShouldBe(1);
         var closed = sqlEvents.Events.Single(item => item.EventName == "SessionClosed" && Equals(item.Payload![0], serverSession.Id));
         closed.Payload![1].ShouldBe("TransportFailed");
         rootEvents.Events.Single(item => item.EventName == "StatementStop").Payload![2].ShouldBe("Cancelled");

@@ -5769,13 +5769,20 @@ a scalar-to-normalized-offset map preserves boundaries across expansions and ign
 marks. Binary and simple case-insensitive matching use last-`%` backtracking with
 constant search state; simple folding preserves one scalar per original scalar.
 Accent-insensitive literal probes compare normalized spans and stop once a prefix
-can no longer match. Linguistic probes compare spans at every original scalar
-boundary, including Thai/Lao reordered prefixes (like_match.c:289-311); a prefix
-test cannot safely prune these comparisons. Explicit continuations avoid recursion;
+can no longer match. Invariant literals use CompareInfo.IsSuffix for terminal
+suffixes, IsPrefix with match lengths for anchors and IndexOf with match lengths
+for middle runs. Independent scalar ends without ignorables use constant-state
+last-% backtracking; combining sequences and contextual scripts (including Thai/Lao
+reordering and contractions) retain exhaustive scalar probes (like_match.c:289-311).
+Ignored scalars retain all candidate ends. Explicit continuations avoid recursion;
 visited suffixes keep one boundary inline per token and expand to at most one bit
 per token/input boundary when another start arrives. Invariant search charges every transition and boundary probe, plus both
-UTF-16 span lengths before each linguistic comparison, to a per-match budget of
-64 × (input UTF-16 length + raw pattern UTF-16 length + 1). Each zero-initialized
+UTF-16 comparison/search lengths, to a per-match budget of
+64 × (input UTF-16 length + 1) × (raw pattern UTF-16 length + 1), with checked
+64-bit arithmetic. Successful prefix/middle searches charge through the match;
+failed substring searches charge the full offered span, while independent prefix
+failures charge the literal extent. Ordinary anchors therefore stay
+linear in input length, leaving the polynomial budget as a backstop. Each zero-initialized
 32-bit visited-state word also costs one unit, charged before allocating its row;
 many literal tokens therefore cannot bypass the budget through state initialization.
 Exhaustion raises located
@@ -5785,7 +5792,7 @@ scalar semantics for admitted matches (#1166). Cancellation wins over budget ref
 The planner marks LIKE-bearing plans during its existing expression walk, including
 CTEs and subqueries; cached view bodies retain the flag, never a token. The executor
 passes the current statement token to their row evaluator, and persisted CHECKs carry
-the same flag. DEFAULT and SQL-function evaluation already forward the current token.
+the same flag, aggregated once on SqlBoundTable. DEFAULT and SQL-function evaluation already forward the current token.
 Plans without LIKE or application code retain the allocation-free shared evaluator.
 Every path observes statement cancellation. Runtime distinct, truth-test
 and escape diagnostics retain the bound source location. PostgreSQL's backslash default, empty escape and unrestricted quoted
@@ -5806,7 +5813,11 @@ start. Wildcards still consume original scalars, and an exhaustive small-input o
 pins expansion, decomposition and ignorable-mark behavior.
 The final literal compares the complete remaining span once (PostgreSQL
 `src/backend/utils/adt/like_match.c:272-286`), preserving long exact linguistic
-matches within the linear work budget.
+matches within the work budget. Scalar-offset and first-boundary arrays rent from
+ArrayPool and return in a finally block, including on cancellation or refusal.
+The test hook is captured per evaluator and supplied to Match, leaving cached
+patterns immutable. A single delegate check remains at match entry; there is no
+mutable test-hook field on the shared pattern.
 
 
 ## Catalog component

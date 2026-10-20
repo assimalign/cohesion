@@ -191,7 +191,7 @@ public sealed class SqlLanguageConformanceTests
         await using var engine = SqlDatabaseEngine.Create("like-conformance", new());
         var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
-        string sql = "SELECT RPAD('a', 200000, 'a') COLLATE invariant " + predicate + " '%b' FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = 'dbo'";
+        string sql = "SELECT RPAD('á', 1024, 'á') COLLATE invariant " + predicate + " RPAD('%a', 256, '%a') || 'b' FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = 'dbo'";
         // Act
         var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None));
         // Assert
