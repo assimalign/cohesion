@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.Database.Sql.Schema.Internal;
@@ -21,65 +20,3 @@ internal sealed record SqlSchemaDeclaration(
     IReadOnlyList<SqlSchemaTable> Tables,
     IReadOnlyList<SqlSchemaPrincipal> Principals,
     string Name);
-
-/// <summary>A custom type declaration.</summary>
-/// <param name="ClrType">The represented CLR type.</param>
-/// <param name="Precision">The decimal precision, when configured.</param>
-/// <param name="Scale">The decimal scale, when configured.</param>
-internal sealed record SqlSchemaType(
-    Type ClrType,
-    int? Precision,
-    int? Scale);
-
-/// <summary>A table declaration.</summary>
-/// <param name="Name">The stable table name.</param>
-/// <param name="RowType">The table row type whose complete shape the compiler inspects.</param>
-/// <param name="Columns">The row members explicitly mentioned by column, key, index, or reference declarations.</param>
-/// <param name="ColumnDefinitions">The typed column declarations.</param>
-/// <param name="PrimaryKey">The primary-key member name.</param>
-/// <param name="Indexes">The indexed member names.</param>
-/// <param name="References">The declared references.</param>
-/// <param name="Checks">The declared CHECK constraints, in declaration order.</param>
-internal sealed record SqlSchemaTable(
-    string Name,
-    Type RowType,
-    IReadOnlyList<string> Columns,
-    IReadOnlyList<SqlSchemaColumn> ColumnDefinitions,
-    string? PrimaryKey,
-    IReadOnlyList<string> Indexes,
-    IReadOnlyList<SqlSchemaReference> References,
-    IReadOnlyList<SqlSchemaCheck> Checks);
-
-/// <summary>A table reference.</summary>
-/// <param name="Member">The foreign-key member name.</param>
-/// <param name="TargetType">The referenced table row type.</param>
-internal sealed record SqlSchemaReference(string Member, Type TargetType);
-
-/// <summary>A CHECK constraint, its predicate SQL text as the author wrote it.</summary>
-/// <param name="Name">The constraint name.</param>
-/// <param name="Sql">The predicate's SQL text.</param>
-internal sealed record SqlSchemaCheck(string Name, string Sql);
-
-/// <summary>A typed column selected from a schema row type.</summary>
-/// <param name="Name">The column name.</param>
-/// <param name="ClrType">The declared CLR value type.</param>
-/// <param name="IsNullable">Whether null values are permitted.</param>
-/// <param name="SqlType">
-/// The SQL type the column is declared with (<c>table.Column(selector, sqlType)</c>): a domain's name,
-/// or a built-in type name with its arguments; null when the type follows from the CLR type.
-/// </param>
-/// <param name="DefaultLiteral">The rendered typed default or raw DefaultSql literal, or null when no default is declared.</param>
-internal sealed record SqlSchemaColumn(string Name, Type ClrType, bool IsNullable, string? SqlType = null,
-    string? DefaultLiteral = null);
-
-/// <summary>A database principal declaration.</summary>
-/// <param name="Name">The principal name.</param>
-/// <param name="Grants">The principal's grants.</param>
-internal sealed record SqlSchemaPrincipal(
-    string Name,
-    IReadOnlyList<SqlSchemaGrant> Grants);
-
-/// <summary>One permission grant.</summary>
-/// <param name="Permission">The granted permission.</param>
-/// <param name="Objects">The schema object names covered by the grant.</param>
-internal sealed record SqlSchemaGrant(SqlPermission Permission, IReadOnlyList<string> Objects);

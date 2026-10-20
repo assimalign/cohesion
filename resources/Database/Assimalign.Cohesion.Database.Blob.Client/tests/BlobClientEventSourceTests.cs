@@ -20,14 +20,6 @@ using Assimalign.Cohesion.Database.Protocol;
 namespace Assimalign.Cohesion.Database.Blob.Client.Tests;
 
 /// <summary>
-/// Serializes the tests that observe the Blob client's event source: the source is process-wide.
-/// </summary>
-[CollectionDefinition(nameof(BlobClientEventSourceCollection), DisableParallelization = true)]
-public class BlobClientEventSourceCollection
-{
-}
-
-/// <summary>
 /// The Blob client's event source against the repository's EventSource convention: each transfer
 /// of each public member starts and stops, or fails, once; a download stops when its last chunk is
 /// verified; a listing failure its consumer never saw is reported once by the cleanup; and no blob

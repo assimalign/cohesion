@@ -10,9 +10,6 @@ using Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
-[CollectionDefinition("SQL namespace DDL interlock", DisableParallelization = true)]
-public sealed class SqlSchemaDdlInterlockCollection;
-
 [Collection("SQL namespace DDL interlock")]
 public sealed class SqlSchemaDdlInterlockTests
 {

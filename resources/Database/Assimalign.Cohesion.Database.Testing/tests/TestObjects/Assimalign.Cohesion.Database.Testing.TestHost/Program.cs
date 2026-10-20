@@ -1,9 +1,6 @@
-using System.Runtime.CompilerServices;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Hosting;
-using Assimalign.Cohesion.Hosting;
-using Assimalign.Cohesion.Hosting.Resources;
 
 namespace Assimalign.Cohesion.Database.Testing.TestHost;
 
@@ -21,17 +18,5 @@ public sealed class Program
         DatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder(args);
         await using DatabaseApplication application = builder.Build();
         await application.RunAsync();
-    }
-}
-
-internal static class TestResourceControlPlaneRegistration
-{
-    [ModuleInitializer]
-    internal static void Register()
-    {
-        ResourceRuntime.RegisterEntry(typeof(Program).Assembly);
-        ResourceRuntime.RegisterControlPlane(
-            typeof(Program).Assembly,
-            static () => ResourceControlPlane.Create());
     }
 }

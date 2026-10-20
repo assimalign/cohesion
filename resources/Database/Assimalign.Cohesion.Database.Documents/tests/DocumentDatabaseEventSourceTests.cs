@@ -16,15 +16,6 @@ using Assimalign.Cohesion.Database.Storage;
 namespace Assimalign.Cohesion.Database.Documents.Tests;
 
 /// <summary>
-/// Serializes the tests that observe the document model's event source: the source is
-/// process-wide.
-/// </summary>
-[CollectionDefinition(nameof(DocumentDatabaseEventSourceCollection), DisableParallelization = true)]
-public class DocumentDatabaseEventSourceCollection
-{
-}
-
-/// <summary>
 /// The document model's event source against the repository's EventSource convention, and the
 /// index recovery a reopened database reports (database event-sources plan, section 4.10). The
 /// source declares no counters.

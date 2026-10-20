@@ -1,11 +1,8 @@
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Diagnostics.Tracing;
 using System.Globalization;
 using System.IO;
 using System.Linq;
-using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Execution;
@@ -17,20 +14,6 @@ using Xunit;
 using Xunit.Abstractions;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
-
-/// <summary>
-/// Runs the lock-wait tests alone: the stress probe keeps eight sessions and a purge thread busy,
-/// and both tests enable the transaction kernel's event source, which every database in the
-/// process writes to.
-/// </summary>
-[CollectionDefinition(Name, DisableParallelization = true)]
-public sealed class SqlLockWaitCollection
-{
-    /// <summary>
-    /// The collection name.
-    /// </summary>
-    public const string Name = "SQL lock waits";
-}
 
 /// <summary>
 /// Lock waits under the SQL engine's referential locking (#1390). A cascading delete locks a parent

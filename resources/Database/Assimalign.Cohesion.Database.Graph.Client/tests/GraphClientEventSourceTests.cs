@@ -14,14 +14,6 @@ using Assimalign.Cohesion.Database.Graph.Client.Internal;
 namespace Assimalign.Cohesion.Database.Graph.Client.Tests;
 
 /// <summary>
-/// Serializes the tests that observe the graph client's event source: the source is process-wide.
-/// </summary>
-[CollectionDefinition(nameof(GraphClientEventSourceCollection), DisableParallelization = true)]
-public class GraphClientEventSourceCollection
-{
-}
-
-/// <summary>
 /// The graph client's event source against the repository's EventSource convention: each query of
 /// each public member starts and stops, or fails, once, and no statement text is written.
 /// </summary>

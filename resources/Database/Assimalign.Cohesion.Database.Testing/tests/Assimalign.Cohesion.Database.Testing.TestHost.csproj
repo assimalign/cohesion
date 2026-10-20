@@ -7,6 +7,7 @@
 	</PropertyGroup>
 	<ItemGroup>
 		<Compile Include="TestObjects\Assimalign.Cohesion.Database.Testing.TestHost\Program.cs" />
+		<Compile Include="TestObjects\Assimalign.Cohesion.Database.Testing.TestHost\TestResourceControlPlaneRegistration.cs" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Hosting" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Resources" />

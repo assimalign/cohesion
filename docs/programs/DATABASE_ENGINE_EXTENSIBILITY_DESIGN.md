@@ -114,7 +114,7 @@ flowchart LR
 ```
 
 `Sql.Schema` keeps its root reference for `DatabaseException` and `DatabaseObjectOwner` only
-(`CompiledSchemaTable.Owner`, `Sql.Schema/src/SqlCompiledSchema.cs:149`). The SDK task references
+(`CompiledSchemaTable.Owner`, `Sql.Schema/src/CompiledSchemaTable.cs:49`). The SDK task references
 `Sql.Schema` and, for validated migration DEFAULT literals, `Sql.Language` (the same-area
 COHLIB001 exception); it takes no engine or storage dependency.
 
@@ -898,7 +898,7 @@ them.
 - **`Database.Sql.Schema`** owns the declaration (`SqlSchema`, `SqlSchemaBuilder` and its builders),
   compilation, the canonical document and its SHA-256, the migration planner and
   `SqlSchemaMigrationResult` (the root's `SchemaMigrationResult`, moved). `SqlCompiledSchema`
-  becomes standalone: it stops deriving `CompiledSchema` (`Sql.Schema/src/SqlCompiledSchema.cs:11`),
+  becomes standalone: it stops deriving `CompiledSchema` (`Sql.Schema/src/SqlCompiledSchema.cs:52`),
   drops `Model`, and computes `CanonicalDocument` and `Hash` once. [Certain] Today both are
   recomputed on every access (`SqlCompiledSchema.cs:71`; `Database/src/Provisioning/CompiledSchema.cs:49`),
   and one apply reads each twice (`SqlSchemaProvisioner.cs:46-47`, `:113-114`).

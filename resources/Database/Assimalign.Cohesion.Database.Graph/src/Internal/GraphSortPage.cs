@@ -6,9 +6,6 @@ using Assimalign.Cohesion.Database.Graph.Language;
 
 namespace Assimalign.Cohesion.Database.Graph.Internal;
 
-/// <summary>One materialized projection and its pre-evaluated ordering keys.</summary>
-internal sealed record GraphOrderedRow(object?[] Values, object?[] Keys, int Ordinal);
-
 internal static class GraphSortPage
 {
     internal static object?[] Keys(GraphPlan plan, Dictionary<string, object?> binding, object?[] row, GraphEvaluationContext context, CancellationToken token)

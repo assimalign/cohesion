@@ -4,7 +4,6 @@ using Assimalign.Cohesion.Database.Hosting;
 using Assimalign.Cohesion.Database.SampleHost;
 using Assimalign.Cohesion.Database.Sql;
 using Assimalign.Cohesion.Database.Storage;
-using Assimalign.Cohesion.Hosting;
 
 DatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder(args);
 
@@ -35,5 +34,3 @@ await application.RunAsync();
 /// Exposes the compiler-generated top-level entry point to in-process test factories.
 /// </summary>
 public partial class Program;
-
-internal sealed record Order(long Id, string Item);

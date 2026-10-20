@@ -1,5 +1,3 @@
-using System;
-
 namespace Assimalign.Cohesion.Database.Transactions;
 
 /// <summary>
@@ -30,19 +28,4 @@ public readonly record struct LockResource(LockResourceKind Kind, ulong ObjectId
     /// <param name="entryId">The identity of the entry within the object.</param>
     /// <returns>The entry-level lock resource.</returns>
     public static LockResource Entry(ulong objectId, ulong entryId) => new(LockResourceKind.Entry, objectId, entryId);
-}
-
-/// <summary>
-/// The level of a <see cref="LockResource"/> in the lock hierarchy.
-/// </summary>
-public enum LockResourceKind : byte
-{
-    /// <summary>The whole logical database.</summary>
-    Database = 0,
-
-    /// <summary>A container object: table, collection, container, or index.</summary>
-    Object,
-
-    /// <summary>A single entry: row, document, key, node, relationship, or blob.</summary>
-    Entry,
 }

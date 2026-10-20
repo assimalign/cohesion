@@ -23,10 +23,3 @@ internal readonly struct SqlRelationSource
     internal string Name => Table?.Name ?? View?.Name ?? Derived!.Name;
     internal IReadOnlyList<SqlCatalogColumn> Columns => Table?.Columns ?? View?.Columns ?? Derived!.Columns;
 }
-
-/// <summary>A child query's output schema and plan, without a storage identity.</summary>
-internal sealed record SqlDerivedRelation(string Name, SqlPlan Query, IReadOnlyList<SqlCatalogColumn> Columns, bool IsCorrelated = false)
-{
-    internal bool IsCommonTable { get; init; }
-    internal SqlCatalogView? CatalogView { get; init; }
-}

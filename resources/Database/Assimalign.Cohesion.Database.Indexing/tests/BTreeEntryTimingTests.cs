@@ -12,19 +12,6 @@ using Assimalign.Cohesion.Database.Indexing.Tests.TestObjects;
 namespace Assimalign.Cohesion.Database.Indexing.Tests;
 
 /// <summary>
-/// Runs timing tests alone, so other suites do not compete for the CPU while they
-/// measure.
-/// </summary>
-[CollectionDefinition(Name, DisableParallelization = true)]
-public sealed class TimingCollection
-{
-    /// <summary>
-    /// The collection name.
-    /// </summary>
-    public const string Name = "Indexing timing";
-}
-
-/// <summary>
 /// Timing guards for #1194's acceptance: an operation that targets one entry of a key
 /// descends to it, so its cost does not grow with the length of the key's run. Each
 /// guard compares the cost per operation inside a 40,000-entry run with the cost inside

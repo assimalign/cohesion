@@ -24,15 +24,6 @@ using Assimalign.Cohesion.Database.Types;
 namespace Assimalign.Cohesion.Database.Tests;
 
 /// <summary>
-/// Serializes the tests that observe the Database event source: the source is process-wide, so the
-/// collection runs alone, after every parallel collection.
-/// </summary>
-[CollectionDefinition(nameof(DatabaseEventSourceCollection), DisableParallelization = true)]
-public class DatabaseEventSourceCollection
-{
-}
-
-/// <summary>
 /// The Database root's event source against the repository's EventSource convention: its name and
 /// manifest, the engine, database, server, session, statement and explicit-transaction lifecycle it
 /// reports over real in-memory engines and the root's test doubles, the worker failures and

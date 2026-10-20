@@ -5,7 +5,6 @@ using System.Diagnostics;
 using System.Diagnostics.Tracing;
 using System.Globalization;
 using System.Linq;
-using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
@@ -587,72 +586,5 @@ internal sealed class SqlLockWaitProbe
                     break;
             }
         }
-    }
-}
-
-/// <summary>A lock wait the probe recorded: one that lasted at least <see cref="SqlLockWaitProbe.SlowWait"/>.</summary>
-/// <param name="Started">When the wait began, from the start of the run.</param>
-/// <param name="Sequence">The waiting transaction.</param>
-/// <param name="Resource">The resource it waited for, by kind and object.</param>
-/// <param name="Mode">The mode it requested.</param>
-/// <param name="Milliseconds">How long it waited.</param>
-/// <param name="Outcome">How the wait ended.</param>
-/// <param name="Worker">What the waiting worker was doing.</param>
-/// <param name="Blockers">What the kernel reported blocking the wait while it waited, if it did.</param>
-/// <param name="BlockerWorkers">What the workers of the blocking transactions were doing.</param>
-internal sealed record SqlLockWait(TimeSpan Started, long Sequence, string Resource, string Mode, double Milliseconds, string Outcome,
-    string Worker, string? Blockers, string? BlockerWorkers)
-{
-    public override string ToString()
-        => string.Create(CultureInfo.InvariantCulture,
-            $"at {Started.TotalSeconds:F2} s transaction {Sequence} waited {Milliseconds:F0} ms for {Mode} on {Resource} ({Outcome}); {Worker}") +
-            (Blockers is null ? "" : $"{Environment.NewLine}    blocked by {Blockers}{Environment.NewLine}    blockers: {BlockerWorkers}");
-}
-
-/// <summary>What one probe run saw.</summary>
-/// <param name="Ran">How long the workers ran before the run stopped starting statements.</param>
-/// <param name="Statements">The statements that completed.</param>
-/// <param name="Commits">The transactions that committed, auto-commit statements included.</param>
-/// <param name="Deadlocks">The statements chosen as deadlock victims.</param>
-/// <param name="Conflicts">The statements and commits that failed a write conflict.</param>
-/// <param name="Violations">The statements a constraint refused.</param>
-/// <param name="Waits">The lock requests that waited.</param>
-/// <param name="ParentDeletes">The cascading parent deletes that committed: whether the deleters made progress.</param>
-/// <param name="SlowWaits">The waits that lasted at least <see cref="SqlLockWaitProbe.SlowWait"/>.</param>
-/// <param name="Unexpected">Every other failure, by type and message.</param>
-internal sealed record SqlLockWaitProbeResult(
-    TimeSpan Ran,
-    long Statements,
-    long Commits,
-    long Deadlocks,
-    long Conflicts,
-    long Violations,
-    long Waits,
-    long ParentDeletes,
-    IReadOnlyList<SqlLockWait> SlowWaits,
-    IReadOnlyDictionary<string, int> Unexpected)
-{
-    /// <summary>The recorded waits that lasted at least <paramref name="bound"/>.</summary>
-    public IReadOnlyList<SqlLockWait> WaitsOf(TimeSpan bound) => SlowWaits.Where(wait => wait.Milliseconds >= bound.TotalMilliseconds).ToArray();
-
-    public override string ToString()
-    {
-        var text = new StringBuilder();
-        text.Append(CultureInfo.InvariantCulture, $"ran {Ran.TotalSeconds:F1} s: {Statements} statements, {Commits} commits, {Deadlocks} deadlock victims, ")
-            .Append(CultureInfo.InvariantCulture, $"{Conflicts} conflicts, {Violations} constraint violations, {Waits} lock waits, ")
-            .Append(CultureInfo.InvariantCulture, $"{ParentDeletes} parent deletes committed; ")
-            .Append(CultureInfo.InvariantCulture, $"waits of {SqlLockWaitProbe.SlowWait.TotalSeconds} s or more: {SlowWaits.Count}, ")
-            .Append(CultureInfo.InvariantCulture, $"of {SqlLockWaitProbe.LongWait.TotalSeconds} s or more: {WaitsOf(SqlLockWaitProbe.LongWait).Count}");
-        foreach (var wait in SlowWaits)
-        {
-            text.AppendLine().Append("  ").Append(wait);
-        }
-
-        foreach (var (error, count) in Unexpected)
-        {
-            text.AppendLine().Append(CultureInfo.InvariantCulture, $"  unexpected x{count}: {error}");
-        }
-
-        return text.ToString();
     }
 }

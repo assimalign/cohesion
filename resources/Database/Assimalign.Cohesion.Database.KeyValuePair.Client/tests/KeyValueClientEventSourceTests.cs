@@ -16,14 +16,6 @@ using Assimalign.Cohesion.Database.KeyValuePair.Client.Internal;
 namespace Assimalign.Cohesion.Database.KeyValuePair.Client.Tests;
 
 /// <summary>
-/// Serializes the tests that observe the key-value client's event source: the source is process-wide.
-/// </summary>
-[CollectionDefinition(nameof(KeyValueClientEventSourceCollection), DisableParallelization = true)]
-public class KeyValueClientEventSourceCollection
-{
-}
-
-/// <summary>
 /// The key-value client's event source against the repository's EventSource convention: each
 /// command starts and stops, or fails, once; an observer hook that throws is reported once; and no
 /// key or value is written, not even the key a write-write conflict's server message names.

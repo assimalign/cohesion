@@ -1,7 +1,6 @@
 using System.Collections.Generic;
 using System.Globalization;
 
-using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Language;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
@@ -65,5 +64,3 @@ internal sealed class SqlCorrelationScope
         return new SqlOuterReference(Id, value, Local.ColumnMetadata(column));
     }
 }
-
-internal sealed record SqlOuterReference(int Scope, SqlBoundExpression Value, SqlCatalogColumn Column);

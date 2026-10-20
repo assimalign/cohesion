@@ -7,8 +7,6 @@ using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
-internal sealed record SqlSystemViewDefinition(string Schema, string Name, IReadOnlyList<SqlCatalogColumn> Columns);
-
 /// <summary>Reserved virtual relations and their typed, ordered column contracts.</summary>
 internal static class SqlSystemViews
 {

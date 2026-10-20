@@ -9,63 +9,6 @@ using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Graph.Internal;
 
-internal sealed record GraphAnchor(int NodeIndex, string? Label, string? Property, object? Value);
-internal sealed record GraphPathPlan(GqlPathPattern Pattern, GraphAnchor Anchor)
-{
-    internal GraphPathShape? Shape { get; init; }
-}
-internal sealed record GraphMatchClausePlan(IReadOnlyList<GraphPathPlan> Paths, GqlExpression? Predicate,
-    bool Optional, IReadOnlyList<string> NewVariables, bool MatchesNothing);
-internal enum GraphProjectionKind { Scalar, Node, Relationship, Path, EntityValue }
-internal sealed record GraphProjectionPlan(GqlExpression Expression, string Name, GraphProjectionKind Kind)
-{
-    internal string? BindingName { get; init; }
-    internal bool MayBeComposite { get; init; }
-    internal DatabaseType Type { get; init; }
-    internal bool Optional { get; init; }
-}
-internal sealed record GraphStagePlan(GqlStage Stage, GraphPlan Plan)
-{
-    internal GraphProjectionKind ElementKind { get; init; }
-}
-internal readonly record struct GraphEntityShape(GraphProjectionKind Kind, bool Optional);
-internal sealed record GraphBindingShape(bool[] Entities, bool[] Composites, bool[] Scalars, GraphEntityShape[] EntityKinds, DatabaseType Type)
-{
-    internal bool[] Groups { get; init; } = [];
-    internal bool Group => Groups.Length > 0 && Groups[0];
-    internal GraphFunctionKind ValueKind { get; init; }
-}
-internal sealed record GraphDistinctPlan(IReadOnlyList<GraphProjectionPlan> Keys);
-internal sealed record GraphGroupingPlan(IReadOnlyList<GqlExpression> Keys, IReadOnlyList<GqlAggregateExpression> Aggregates, GraphGroupingScope Scope);
-internal sealed record GraphSortKeyPlan(GqlSortItem Item, int ProjectionIndex);
-internal sealed record GraphSortPagePlan(IReadOnlyList<GraphSortKeyPlan> Keys, long Offset, long? Limit,
-    IReadOnlySet<GqlExpression>? GroupedExpressions = null);
-
-/// <summary>A validated statement with each MATCH pattern's anchor.</summary>
-/// <param name="Query">The validated statement.</param>
-/// <param name="MatchClauses">The clause-ordered joins, filters and null-extension bindings.</param>
-internal sealed record GraphPlan(GqlQueryExpression Query, IReadOnlyList<GraphMatchClausePlan> MatchClauses)
-{
-    internal IReadOnlyList<GraphProjectionPlan> Projections { get; init; } = [];
-    internal IReadOnlyList<GraphStagePlan> Stages { get; init; } = [];
-    internal bool Writes { get; init; }
-    internal GraphDistinctPlan? Distinct { get; init; }
-    internal GraphGroupingPlan? Grouping { get; init; }
-    internal GraphSortPagePlan? SortPage { get; init; }
-    /// <summary>Gets whether any mandatory MATCH stage is statically unsatisfiable. Execution uses the per-clause flags.</summary>
-    internal bool MatchesNothing { get; init; }
-
-    /// <summary>The normalized, execution-local snapshot of named scalar bindings.</summary>
-    internal IReadOnlyDictionary<string, object?>? Parameters { get; init; }
-
-    /// <summary>
-    /// Gets the <c>COHDBG010</c>/<c>COHDBG011</c> warnings of a read-only statement that names a
-    /// label or relationship type the database does not have, in first-mention order; empty for a
-    /// statement that writes (#1228).
-    /// </summary>
-    internal IReadOnlyList<Diagnostic> Warnings { get; init; } = [];
-}
-
 internal sealed partial class GraphPlanner
 {
     private readonly GraphDatabase _database;

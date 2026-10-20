@@ -1,0 +1,7 @@
+using System.Collections.Generic;
+using Assimalign.Cohesion.Database.Graph.Language;
+
+namespace Assimalign.Cohesion.Database.Graph.Internal;
+
+internal sealed record GraphSortPagePlan(IReadOnlyList<GraphSortKeyPlan> Keys, long Offset, long? Limit,
+    IReadOnlySet<GqlExpression>? GroupedExpressions = null);
