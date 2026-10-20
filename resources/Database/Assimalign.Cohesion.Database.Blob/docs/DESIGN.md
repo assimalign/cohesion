@@ -29,7 +29,7 @@ from Key-Value's separate catalog file because a blob's head pointer must have t
 decision as its chunk chain. All paging, CRC checks, page allocation, WAL records, recovery,
 transaction coordination, locks, and version reclamation come from the shared kernels.
 
-The model client depends on the engine-owned message family and the shared connection client;
+The model client depends on the Blob.Protocol-owned message family and the shared connection client;
 the engine server depends only on transport abstractions. These are reference directions.
 
 ```mermaid
@@ -479,7 +479,7 @@ the committed object and hides both unfinished writes.
 
 ## Blob wire family
 
-The model package owns the Blob message family; `Database.Protocol` supplies framing and the
+Blob.Protocol owns the Blob message family; `Database.Protocol` supplies framing and the
 immutable family seam. `BlobProtocol.Family` binds one `ProtocolChannel` to Blob for its entire
 lifetime. The listener endpoint selects this family before reading startup; no model discriminator
 is added to the handshake. All family identifiers below are model-scoped: another model may use

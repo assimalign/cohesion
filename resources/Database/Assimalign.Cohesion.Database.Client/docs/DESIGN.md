@@ -1,5 +1,21 @@
 # Assimalign.Cohesion.Database.Client — Design
 
+## Engine dependency guard
+
+COHDBCLIENT001 checks every project whose project name or evaluated AssemblyName is the shared
+Database.Client or matches Database.*.Client, case-insensitively with exact suffix boundaries.
+Only complete tests/examples/samples/fixtures segments below CohesionRepositoryDirectory exempt
+harnesses; checkout ancestors and exemption properties do not. Embedded and Studio are outside scope.
+
+Before ResolveAssemblyReferences and CoreCompile the guard rejects all evaluated engine
+ProjectReference items, including name-only/private, transitive and ReferenceOutputAssembly=false
+references. After ResolveAssemblyReferences, GetAssemblyIdentity checks every ReferencePath asset's
+actual simple name, so packages, framework members, HintPath and renamed DLLs receive the same rule.
+Both layers reject model roots and Catalog/Storage/Security/Tcp implementation families (including
+retired identities), plus Database root and shared Storage/Transactions/Indexing/Memory/Embedded/Hosting.
+Shared Types/Execution/Language/Protocol/Security and model Protocol contracts are independently named.
+The implementation uses Framework MSBuild-compatible path normalization and has no opt-out.
+
 ## Contract-only dependencies
 
 Direct references are Database.Protocol, Database.Types and Connections. Wire contracts live in each model Protocol assembly, shared by client and engine. This client has no engine, area-root, storage, transaction, indexing, model parser or schema reference. Cache.Client remains an empty placeholder. Engine-free trimming and NativeAOT coverage lives in Database.Client/samples/Assimalign.Cohesion.Database.Client.AotSample.

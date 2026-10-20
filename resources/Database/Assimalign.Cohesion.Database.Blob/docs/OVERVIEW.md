@@ -84,7 +84,7 @@ refused for that reason releases the listener and leaves the server stopped for 
 decision 42). A refused exchange, like every wire failure, ends the connection and aborts a
 host-opened transaction first.
 
-The package owns the Blob wire message family. Bind a `ProtocolChannel` to `BlobProtocol.Family`
+Blob.Protocol owns the Blob wire message family. Bind a `ProtocolChannel` to `BlobProtocol.Family`
 at the Blob endpoint. `BlobReadMessage` and `BlobWriteMessage` identify an object;
 `BlobProtocolTransfer.SendAsync` and `ReceiveAsync` copy its content using at most one 64 KiB
 chunk in flight, with a receiver acknowledgement after each destination write. The helpers

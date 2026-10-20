@@ -21,7 +21,7 @@
       <Output TaskParameter="Assemblies" ItemName="_ClientCanaryIdentity" />
     </GetAssemblyIdentity>
     <WriteLinesToFile File="$(IntermediateOutputPath)client-reference-closure.txt"
-                      Lines="@(_ClientCanaryIdentity->'%(Name)|%(Identity)')" Overwrite="true" />
+                      Lines="@(_ClientCanaryIdentity->'%(Name)|%(OriginalItemSpec)')" Overwrite="true" />
     <ItemGroup>
       <_ClientCanaryEngine Include="@(_ClientCanaryIdentity)"
           Condition="$([System.Text.RegularExpressions.Regex]::IsMatch('%(Name)', '(?i)^Assimalign\.Cohesion\.Database(?:$|\.(?:Sql|Graph|Documents|KeyValuePair|Blob|Cache)$|\.(?:Storage|Transactions|Indexing|Memory|Embedded|Hosting)(?:$|\.)|\.(?:Sql|Graph|Documents|KeyValuePair|Blob|Cache)\.(?:Catalog|Storage|Security|Tcp)(?:$|\.))'))" />

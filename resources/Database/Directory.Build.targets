@@ -1,4 +1,52 @@
 <Project>
 	<Import Project="ModelArchitecture.targets" />
 	<Import Project="..\Directory.Build.targets" />
+
+	<!-- COHDBCLIENT001 is Database-owned. Compute scope at execution time, after both
+	     project and assembly names have been evaluated. Harness exemptions are relative
+	     to the repository, never to an ancestor checkout directory named tests. -->
+	<Target Name="InitializeCohesionDatabaseClientGuard">
+		<PropertyGroup>
+			<_CohesionDatabaseClientRepository>$([MSBuild]::NormalizeDirectory('$(CohesionRepositoryDirectory)').Replace('\', '/'))</_CohesionDatabaseClientRepository>
+			<_CohesionDatabaseClientDirectory>$([MSBuild]::NormalizeDirectory('$(MSBuildProjectDirectory)').Replace('\', '/'))</_CohesionDatabaseClientDirectory>
+			<_CohesionDatabaseClientRelativeDirectory></_CohesionDatabaseClientRelativeDirectory>
+			<_CohesionDatabaseClientRelativeDirectory Condition="$(_CohesionDatabaseClientDirectory.ToLowerInvariant().StartsWith('$(_CohesionDatabaseClientRepository.ToLowerInvariant())'))">$(_CohesionDatabaseClientDirectory.Substring($(_CohesionDatabaseClientRepository.Length)))</_CohesionDatabaseClientRelativeDirectory>
+			<_CohesionDatabaseClientNamePattern>(?i)^Assimalign\.Cohesion\.Database(?:\.Client|\..+\.Client)$</_CohesionDatabaseClientNamePattern>
+			<_CohesionDatabaseClientForbiddenPattern>(?i)^Assimalign\.Cohesion\.Database(?:$|\.(?:Sql|Graph|Documents|KeyValuePair|Blob|Cache)(?:$|\.(?:Catalog|Storage|Security|Tcp)(?:\.|$))|\.(?:Storage|Transactions|Indexing|Memory|Embedded|Hosting)(?:$|\.))</_CohesionDatabaseClientForbiddenPattern>
+			<_CohesionDatabaseClientGuardApplies>false</_CohesionDatabaseClientGuardApplies>
+			<_CohesionDatabaseClientGuardApplies Condition="($([System.Text.RegularExpressions.Regex]::IsMatch('$(MSBuildProjectName)', '$(_CohesionDatabaseClientNamePattern)')) OR $([System.Text.RegularExpressions.Regex]::IsMatch('$(AssemblyName)', '$(_CohesionDatabaseClientNamePattern)')))
+			    AND !$([System.Text.RegularExpressions.Regex]::IsMatch('$(_CohesionDatabaseClientRelativeDirectory)', '(?i)(^|/)(tests|examples|samples|fixtures)(/|$)'))">true</_CohesionDatabaseClientGuardApplies>
+		</PropertyGroup>
+	</Target>
+
+	<Target Name="ValidateCohesionDatabaseClientProjectReferences"
+	        DependsOnTargets="InitializeCohesionDatabaseClientGuard"
+	        BeforeTargets="ResolveAssemblyReferences;CoreCompile">
+		<ItemGroup Condition="'$(_CohesionDatabaseClientGuardApplies)' == 'true'">
+			<!-- ReferenceOutputAssembly=false is intentionally included: engine build-order
+			     coupling is also forbidden. Name-only/private and transitive items have
+			     already become evaluated ProjectReference items at this point. -->
+			<_CohesionDatabaseClientForbiddenProject Include="@(ProjectReference)"
+			    Condition="$([System.Text.RegularExpressions.Regex]::IsMatch('%(Filename)', '$(_CohesionDatabaseClientForbiddenPattern)'))" />
+		</ItemGroup>
+		<Error Code="COHDBCLIENT001" Condition="'@(_CohesionDatabaseClientForbiddenProject)' != ''"
+		       Text="Database client '$(MSBuildProjectName)' (assembly '$(AssemblyName)', project '$(MSBuildProjectFullPath)') must not reference model or shared engines, including retired satellites and build-order references. Offending projects: @(_CohesionDatabaseClientForbiddenProject->'%(Filename) [%(FullPath)]', ', '). Reference its model Protocol and shared client contracts instead." />
+	</Target>
+
+	<Target Name="ValidateCohesionDatabaseClientResolvedReferences"
+	        DependsOnTargets="InitializeCohesionDatabaseClientGuard"
+	        AfterTargets="ResolveAssemblyReferences">
+		<!-- Read actual identities, including renamed DLLs, package assets and framework
+		     members. Filenames and package IDs are not authoritative assembly names. -->
+		<GetAssemblyIdentity AssemblyFiles="@(ReferencePath)"
+		                     Condition="'$(_CohesionDatabaseClientGuardApplies)' == 'true' AND '@(ReferencePath)' != ''">
+			<Output TaskParameter="Assemblies" ItemName="_CohesionDatabaseClientResolvedAssembly" />
+		</GetAssemblyIdentity>
+		<ItemGroup Condition="'$(_CohesionDatabaseClientGuardApplies)' == 'true'">
+			<_CohesionDatabaseClientForbiddenAssembly Include="@(_CohesionDatabaseClientResolvedAssembly)"
+			    Condition="$([System.Text.RegularExpressions.Regex]::IsMatch('%(Name)', '$(_CohesionDatabaseClientForbiddenPattern)'))" />
+		</ItemGroup>
+		<Error Code="COHDBCLIENT001" Condition="'@(_CohesionDatabaseClientForbiddenAssembly)' != ''"
+		       Text="Database client '$(MSBuildProjectName)' (assembly '$(AssemblyName)', project '$(MSBuildProjectFullPath)') resolved forbidden model or shared engines: @(_CohesionDatabaseClientForbiddenAssembly->'%(Name) [%(OriginalItemSpec)]', ', '). Remove the direct/transitive project, package, framework or Reference/HintPath route and depend on model Protocol and shared client contracts instead." />
+	</Target>
 </Project>

@@ -1,5 +1,9 @@
 # Graph public API
 
+Transferred `GraphNode`, `GraphRelationship`, `GraphPath` and their identity values, together with
+`GraphValueCodec` and the model wire messages, are defined in
+`Assimalign.Cohesion.Database.Graph.Protocol`. Engine signatures use those shared values directly.
+
 - `GraphDatabaseEngine.Create(name, options)` creates an operational engine, a sealed leaf of the root
   `DatabaseEngine`, whose lifecycle the base defines; `Workers` exposes the four maintenance
   duties. Dispose the engine to flush and release all databases. `CreateDatabaseAsync`,
