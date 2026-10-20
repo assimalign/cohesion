@@ -203,7 +203,7 @@ database. Preserve ambiguous files and restore a complete backup. This follows N
 missing-log refusal (community/configuration/src/main/java/org/neo4j/configuration/GraphDatabaseSettings.java:697-698;
 community/kernel/src/main/java/org/neo4j/kernel/recovery/Recovery.java:1146-1153).
 Drop explicitly deletes the data file before recursively removing the remaining files.
-Only files shorter than the header are rejected by length. A partial final data page proceeds
+Only files no larger than the header are rejected by length. A partial final data page proceeds
 through WAL recovery; a genuine recovery failure becomes the same structured refusal and
 never recommends dropping a file containing data. No record or storage format changes.
 
