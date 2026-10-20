@@ -1831,6 +1831,8 @@ If cancellation interrupts the handoff after cheap-step locks were released, com
 fresh transaction. An ended reservation is never reused to acquire compensation locks.
 Hosting's existing offline-reopen policy still applies, including its backoff when the same
 database fails again. The provisioning worker itself makes one attempt per scheduled migration.
+The invalid-row test observes the original instance through the storage's offline hook: opening
+it after Build can reopen the crash fixture's seed image and lose the migration under test.
 
 Build probes each affected table's physical allocation through `Storage.HasOwnerPages`, a
 constant-time query that does not copy the owner page directory. It runs creation, nullable column

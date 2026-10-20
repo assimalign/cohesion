@@ -227,16 +227,31 @@ public sealed partial class SqlDeferredProvisioningTests
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         SqlSchema desired = Desired(failing: true);
         var storage = await SeedAsync(new CrashCaptureSqlStorageStrategy(), null, desired, timeout.Token);
+        var offline = new TaskCompletionSource<SqlDatabase>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var builder = Builder(storage);
+        builder.AddWorker(owner =>
+        {
+            owner.BeforeProvisioning = database =>
+            {
+                if (database.Name != "pending") { return; }
+                var onOffline = database.DataStorage.OnOffline;
+                database.DataStorage.OnOffline = error =>
+                {
+                    onOffline?.Invoke(error);
+                    offline.TrySetResult(database);
+                };
+            };
+            return new RecordingWorker(owner);
+        });
 
         // Act
-        await using var engine = await Builder(storage).AddDatabase(desired).AddDatabase("healthy").BuildAsync(timeout.Token);
-        var database = await engine.OpenDatabaseAsync("pending", timeout.Token);
-        while (!database.IsOffline)
-        {
-            await Task.Delay(1, timeout.Token);
-        }
+        await using var engine = await builder.AddDatabase(desired).AddDatabase("healthy").BuildAsync(timeout.Token);
+        // Observe the instance that failed. Opening it here can reopen the crash fixture's
+        // original seed image, which has no pending migration and never goes offline.
+        var database = await offline.Task.WaitAsync(timeout.Token);
 
         // Assert: the code and durable intent survive, and the engine still serves another database.
+        database.IsOffline.ShouldBeTrue();
         database.OfflineError.ShouldNotBeNull().Message.ShouldContain("COHSQLP004");
         database.Provisioning.ShouldNotBeNull().FailureCode.ShouldBe("COHSQLP004");
         var healthy = await engine.OpenDatabaseAsync("healthy", timeout.Token);
