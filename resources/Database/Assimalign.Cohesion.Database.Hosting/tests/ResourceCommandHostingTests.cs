@@ -40,7 +40,7 @@ public sealed class ResourceCommandHostingTests
         var first = new RuntimeCommand("first", handler.Kind, "appa", "COMMANDS/Sales",
             Encoding.UTF8.GetBytes("""{"database":"sales","engine":"commands"}"""));
         var replay = new RuntimeCommand("replay", handler.Kind, "appa", "commands/SALES",
-            Encoding.UTF8.GetBytes("""{"database":"SALES","engine":"commands"}"""));
+            Encoding.UTF8.GetBytes("""{"database":"SALES","engine":"COMMANDS"}"""));
 
         // Act
         await handler.ExecuteAsync(first, CancellationToken.None);
@@ -66,7 +66,21 @@ public sealed class ResourceCommandHostingTests
         Directory.CreateDirectory(directory);
         try
         {
-            using (var data = CreateFileSet("sql", "sales")) { }
+            var initialData = new Dictionary<string, byte[]>();
+            using (var data = CreateFileSet("sql", "sales"))
+            {
+                // A crash retains the creation header, before orderly close checkpoints it.
+                foreach (string extension in new[] { "dat", "log", "bak" })
+                {
+                    string path = Path.Combine(directory, "sql." + extension);
+                    using var source = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                    using var copy = new MemoryStream();
+                    source.CopyTo(copy);
+                    initialData[path] = copy.ToArray();
+                }
+            }
+            foreach (var file in initialData) { File.WriteAllBytes(file.Key, file.Value); }
+            File.WriteAllText(Path.Combine(directory, "sql.create"), "COHSQLCREATE1\n");
             if (step > 0)
             {
                 using var catalog = CreateFileSet("catalog", "sales/catalog");

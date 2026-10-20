@@ -268,3 +268,10 @@ standalone admin listener previously accepted remote control-plane requests with
 Use a loopback connection for standalone development or a gateway identity for remote management.
 
 Model server factories supply `IDuplexConnectionListener` instances to their model options. Each server owns accepted `IDuplexConnection` sessions and closes them during its drain; listener disposal does not transfer connection ownership to the hosting module.
+
+## Database command key comparison (#1158)
+
+Command keys and ResolveEngine use OrdinalIgnoreCase for the engine segment, matching the
+existing command ownership dictionary. Database names use the same comparison required by
+the area name rule. An engine selected by a case variant therefore resolves consistently
+with key validation and replay ownership.

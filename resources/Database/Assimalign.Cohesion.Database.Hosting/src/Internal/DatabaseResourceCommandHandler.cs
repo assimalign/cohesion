@@ -158,7 +158,7 @@ internal sealed class DatabaseResourceCommandHandler : IResourceCommandHandler
         }
         string? name = payload.TryGetProperty("engine", out JsonElement configured) && configured.ValueKind is not JsonValueKind.Null
             ? Required(payload, "engine") : null;
-        DatabaseEngine[] candidates = engines.Where(engine => name is null || engine.Name == name).ToArray();
+        DatabaseEngine[] candidates = engines.Where(engine => name is null || string.Equals(engine.Name, name, StringComparison.OrdinalIgnoreCase)).ToArray();
         return candidates.Length == 1 ? candidates[0] : throw new ResourceCommandRejectedException(
             $"database.add-database requires exactly one matching engine; engine '{name ?? "(unspecified)"}' matched {candidates.Length}. Specify a registered engine name.");
     }
