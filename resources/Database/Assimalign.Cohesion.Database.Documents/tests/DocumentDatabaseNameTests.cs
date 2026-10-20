@@ -378,7 +378,7 @@ public sealed class DocumentDatabaseNameTests : IDisposable
         var refusal = await Should.ThrowAsync<DatabaseCorruptionException>(() => engine.OpenDatabaseAsync("sales", CancellationToken.None).AsTask());
 
         // Assert
-        refusal.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBS003");
+        refusal.Diagnostics.Select(diagnostic => diagnostic.Code).ShouldBe(["COHDBS003", "COHDBD003"]);
         refusal.Database.ShouldBe((DatabaseName)"sales");
         refusal.PageId.ShouldBe((PageId)1L);
         refusal.InnerException.ShouldBeOfType<StorageCorruptionException>().PageId.ShouldBe((PageId)1L);

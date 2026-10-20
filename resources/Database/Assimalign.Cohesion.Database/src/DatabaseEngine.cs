@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Tracing;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -11,6 +12,7 @@ using System.Threading.Tasks;
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Internal;
 using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database;
 
@@ -1473,9 +1475,8 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
             var pending = CreateDatabaseCoreAsync(name, creationState, cancellationToken);
             return pending.IsCompletedSuccessfully ? pending : CompleteCheckedAsync(pending, name);
         }
-        catch (StorageCorruptionException corruption) { throw DatabaseCorruptionException.Create(name, corruption); }
-        catch (DatabaseException error) when (error.Diagnostics.Count == 0 && error.InnerException is StorageCorruptionException)
-        { throw DatabaseCorruptionException.Create(name, (StorageCorruptionException)error.InnerException); }
+        catch (Exception error) when (error is not DatabaseCorruptionException && StorageCorruptionException.Find(error) is { } corruption)
+        { throw DatabaseCorruptionException.Create(name, corruption, GetCorruptionDiagnostics(error)); }
     }
 
     private ValueTask<DatabaseInstance> OpenCheckedAsync(DatabaseName name, CancellationToken cancellationToken)
@@ -1485,18 +1486,21 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
             var pending = OpenDatabaseCoreAsync(name, cancellationToken);
             return pending.IsCompletedSuccessfully ? pending : CompleteCheckedAsync(pending, name);
         }
-        catch (StorageCorruptionException corruption) { throw DatabaseCorruptionException.Create(name, corruption); }
-        catch (DatabaseException error) when (error.Diagnostics.Count == 0 && error.InnerException is StorageCorruptionException)
-        { throw DatabaseCorruptionException.Create(name, (StorageCorruptionException)error.InnerException); }
+        catch (Exception error) when (error is not DatabaseCorruptionException && StorageCorruptionException.Find(error) is { } corruption)
+        { throw DatabaseCorruptionException.Create(name, corruption, GetCorruptionDiagnostics(error)); }
     }
 
     private static async ValueTask<DatabaseInstance> CompleteCheckedAsync(ValueTask<DatabaseInstance> pending, DatabaseName name)
     {
         try { return await pending.ConfigureAwait(false); }
-        catch (StorageCorruptionException corruption) { throw DatabaseCorruptionException.Create(name, corruption); }
-        catch (DatabaseException error) when (error.Diagnostics.Count == 0 && error.InnerException is StorageCorruptionException)
-        { throw DatabaseCorruptionException.Create(name, (StorageCorruptionException)error.InnerException); }
+        catch (Exception error) when (error is not DatabaseCorruptionException && StorageCorruptionException.Find(error) is { } corruption)
+        { throw DatabaseCorruptionException.Create(name, corruption, GetCorruptionDiagnostics(error)); }
     }
+
+    private static IEnumerable<Diagnostic> GetCorruptionDiagnostics(Exception error)
+        => error is AggregateException aggregate
+            ? aggregate.Flatten().InnerExceptions.OfType<DatabaseException>().SelectMany(failure => failure.Diagnostics)
+            : (error as DatabaseException)?.Diagnostics ?? [];
 
     private void ThrowIfComposed()
     {

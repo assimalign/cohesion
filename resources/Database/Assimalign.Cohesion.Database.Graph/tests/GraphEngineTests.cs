@@ -185,14 +185,15 @@ public sealed class GraphEngineTests
 
             // Act
             await using var reopened = GraphDatabaseEngine.Create("graph-engine", new() { RootPath = root });
-            var failure = await Should.ThrowAsync<DatabaseException>(async () => await reopened.OpenDatabaseAsync("legacy", timeout.Token));
+            var failure = await Should.ThrowAsync<DatabaseCorruptionException>(async () => await reopened.OpenDatabaseAsync("legacy", timeout.Token));
 
             // Assert
-            var diagnostic = failure.Diagnostics.ShouldHaveSingleItem();
-            diagnostic.Code.ShouldBe("COHDBG017");
-            diagnostic.Severity.ShouldBe(DiagnosticSeverity.Error);
-            diagnostic.Message.ShouldBe(failure.Message);
-            failure.Message.ShouldStartWith("Database 'legacy' cannot be opened. ", Case.Sensitive);
+            // EnsureIndexFormat wraps the storage failure in a coded engine exception.
+            failure.Code.ShouldBe("COHDBS003");
+            failure.Diagnostics.Select(diagnostic => diagnostic.Code).ShouldBe(["COHDBS003", "COHDBG018", "COHDBG017"]);
+            failure.Diagnostics.ShouldAllBe(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
+            failure.Diagnostics[0].Message.ShouldBe(failure.Message);
+            failure.Diagnostics[2].Message.ShouldStartWith("Database 'legacy' cannot be opened. ", Case.Sensitive);
             failure.Message.ShouldContain("recreate the database", Case.Sensitive);
             failure.InnerException.ShouldBeOfType<StorageCorruptionException>().Message.ShouldStartWith("COHDBG017: ", Case.Sensitive);
             reopened.TryGetDatabase("legacy", out _).ShouldBeFalse();

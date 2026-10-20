@@ -212,7 +212,9 @@ public sealed partial class GraphDatabase : DatabaseInstance
     /// <returns>The translated failure, or <paramref name="error"/> itself.</returns>
     internal Exception TranslateOffline(Exception error)
     {
-        if (error is Assimalign.Cohesion.Database.Storage.StorageCorruptionException corruption)
+        if (error is DatabaseCorruptionException) { return error; }
+
+        if (Assimalign.Cohesion.Database.Storage.StorageCorruptionException.Find(error) is { } corruption)
         {
             return DatabaseCorruptionException.Create(Name, corruption);
         }

@@ -15,6 +15,7 @@ using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Sql.Protocol;
 using Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Types;
 
 /// <summary>
 /// The rows an index seek fetches (#1342). An entry whose row was reclaimed beneath it (its slot
@@ -66,9 +67,11 @@ public sealed class SqlIndexReadIntegrityTests
     }
 
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Conformance: corrupt pages fail scans and seeks with the database and page (#1160)")]
-    [InlineData(Seek)]
-    [InlineData("SELECT id FROM t")]
-    public async Task Select_ReadsRottenRowPage_ShouldFailWithCodedDatabaseCorruption(string statement)
+    [InlineData(Seek, 0)]
+    [InlineData("SELECT id FROM t", 0)]
+    [InlineData(Seek, 1)]
+    [InlineData(Seek, 2)]
+    public async Task Select_ReadsRottenRowPage_ShouldFailWithCodedDatabaseCorruption(string statement, int wrapper)
     {
         // Arrange: three rows on one page behind an index, read once through the seek, then the
         // page evicted so the next seek reads it from the data file.
@@ -87,6 +90,15 @@ public sealed class SqlIndexReadIntegrityTests
         // Act: the page decays on the device.
         var faults = strategy.Faults("rot-db");
         faults.RottenPage = rowPage;
+        if (wrapper != 0)
+        {
+            faults.WrapCorruption = corruption =>
+            {
+                var coded = new DatabaseException("Storage read failed.", [new Diagnostic
+                { Code = "COHSQLT004", Message = "Storage read failed.", Severity = DiagnosticSeverity.Error }], corruption);
+                return wrapper == 1 ? coded : new AggregateException(new InvalidOperationException("Cleanup failed."), coded);
+            };
+        }
         var failure = await Should.ThrowAsync<DatabaseCorruptionException>(() => Ids(session, statement));
         long rottenReads = faults.RottenPageReads;
         faults.RottenPage = null;

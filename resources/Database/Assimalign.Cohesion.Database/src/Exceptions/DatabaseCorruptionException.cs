@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 
 using Assimalign.Cohesion.Database.Storage;
@@ -12,8 +13,9 @@ namespace Assimalign.Cohesion.Database;
 /// </summary>
 public sealed class DatabaseCorruptionException : DatabaseException
 {
-    private DatabaseCorruptionException(DatabaseName database, StorageCorruptionException cause, string message)
-        : base(message, [new Diagnostic { Code = StorageCorruptionException.ErrorCode, Message = message, Severity = DiagnosticSeverity.Error }], cause)
+    private DatabaseCorruptionException(DatabaseName database, StorageCorruptionException cause, string message, IEnumerable<Diagnostic>? additionalDiagnostics)
+        : base(message, [new Diagnostic { Code = StorageCorruptionException.ErrorCode, Message = message, Severity = DiagnosticSeverity.Error },
+            .. additionalDiagnostics ?? []], cause)
     {
         Database = database;
         PageId = cause.PageId;
@@ -31,16 +33,17 @@ public sealed class DatabaseCorruptionException : DatabaseException
     /// <summary>Creates the engine's actionable report of a storage integrity violation.</summary>
     /// <param name="database">The affected database.</param>
     /// <param name="cause">The storage integrity violation, retained as the inner exception.</param>
+    /// <param name="additionalDiagnostics">Additional engine diagnostics, including its model code when open is refused.</param>
     /// <returns>The coded database failure.</returns>
     /// <exception cref="ArgumentException"><paramref name="database"/> is empty.</exception>
     /// <exception cref="ArgumentNullException"><paramref name="cause"/> is null.</exception>
-    public static DatabaseCorruptionException Create(DatabaseName database, StorageCorruptionException cause)
+    public static DatabaseCorruptionException Create(DatabaseName database, StorageCorruptionException cause, IEnumerable<Diagnostic>? additionalDiagnostics = null)
     {
         ArgumentException.ThrowIfNullOrEmpty(database);
         ArgumentNullException.ThrowIfNull(cause);
         string message = string.Format(CultureInfo.CurrentCulture,
             cause.PageId is null ? ErrorMessages.StorageCorrupt : ErrorMessages.StoragePageCorrupt,
             database, cause.PageId, cause.Message);
-        return new DatabaseCorruptionException(database, cause, message);
+        return new DatabaseCorruptionException(database, cause, message, additionalDiagnostics);
     }
 }

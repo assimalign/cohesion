@@ -232,6 +232,9 @@ that the whole block is empty. `StoragePageIntegrityTests` covers a zeroed first
 a missing checksum, a false free header with a matching checksum, legitimate reclamation
 and an all-zero extension page. `StorageCorruptionException.Code` is `COHDBS003` and its
 `PageId` identifies page-scoped damage; engines translate it to the database boundary.
+`StorageCorruptionException.Find` searches inner chains and all aggregate branches with an
+iterative, cycle-safe walk, so deeply wrapped integrity failures and shared aggregate branches
+receive the same engine translation as direct failures.
 
 ### Storage format 3 (#1253)
 

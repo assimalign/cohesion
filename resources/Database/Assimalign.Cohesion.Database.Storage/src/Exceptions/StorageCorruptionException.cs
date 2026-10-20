@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.Database.Storage;
 
@@ -38,4 +39,33 @@ public sealed class StorageCorruptionException : StorageException
     /// Gets the identifier of the corrupted page, when the corruption is page-scoped.
     /// </summary>
     public PageId? PageId { get; }
+
+    /// <summary>Finds storage corruption in an exception, its inner chain, or an aggregate.</summary>
+    /// <param name="error">The failure to search, or null.</param>
+    /// <returns>The first storage corruption found, or null when none is found.</returns>
+    public static StorageCorruptionException? Find(Exception? error)
+    {
+        if (error is StorageCorruptionException found) { return found; }
+        if (error is null || (error.InnerException is null && error is not AggregateException)) { return null; }
+        var pending = new Stack<Exception>();
+        var visited = new HashSet<Exception>(ReferenceEqualityComparer.Instance);
+        pending.Push(error);
+        while (pending.TryPop(out var next))
+        {
+            if (!visited.Add(next)) { continue; }
+            if (next is StorageCorruptionException corruption) { return corruption; }
+            if (next is AggregateException aggregate)
+            {
+                for (int index = aggregate.InnerExceptions.Count - 1; index >= 0; index--)
+                {
+                    pending.Push(aggregate.InnerExceptions[index]);
+                }
+            }
+            else if (next.InnerException is { } inner)
+            {
+                pending.Push(inner);
+            }
+        }
+        return null;
+    }
 }

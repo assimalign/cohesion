@@ -10,6 +10,7 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Tests;
 
 using Assimalign.Cohesion.Database.KeyValuePair.Internal;
 using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Types;
 using Assimalign.Cohesion.Database.Storage.Units;
 
 using static KeyValueTestHarness;
@@ -23,8 +24,11 @@ using static KeyValueTestHarness;
 /// </summary>
 public sealed class KeyValueIndexReadIntegrityTests
 {
-    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Index reads: a Get over an entry page that fails its checksum fails instead of reading the key as missing (#1342)")]
-    public async Task Get_EntryPageRotten_ShouldFailWithStorageCorruption()
+    [Theory(DisplayName = "Cohesion Test [Database.KeyValuePair] - Index reads: a Get over an entry page that fails its checksum fails instead of reading the key as missing (#1342)")]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task Get_EntryPageRotten_ShouldFailWithStorageCorruption(int wrapper)
     {
         // Arrange: the entry page, read once, then evicted so the next read goes to the data file.
         var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
@@ -39,6 +43,15 @@ public sealed class KeyValueIndexReadIntegrityTests
         // Act: the page decays on the device.
         var faults = strategy.Faults(DatabaseName);
         faults.RottenPage = entryPage;
+        if (wrapper != 0)
+        {
+            faults.WrapCorruption = corruption =>
+            {
+                var coded = new DatabaseException("Storage read failed.", [new Diagnostic
+                { Code = "COHDBK002", Message = "Storage read failed.", Severity = DiagnosticSeverity.Error }], corruption);
+                return wrapper == 1 ? coded : new AggregateException(new InvalidOperationException("Cleanup failed."), coded);
+            };
+        }
         var failure = await Should.ThrowAsync<DatabaseCorruptionException>(() => database.GetAsync(session, Bytes("bravo"), TestTimeout.Token()).AsTask());
         long rottenReads = faults.RottenPageReads;
         faults.RottenPage = null;

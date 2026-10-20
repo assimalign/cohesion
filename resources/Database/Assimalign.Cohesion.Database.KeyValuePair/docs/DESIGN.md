@@ -709,6 +709,15 @@ reclamation still reads as absence. Create/open failures receive the same transl
 from the root lifecycle after the model has released its resources. Storage format 4
 reserves zero headers for entirely zero pages and identifies reclaimed pages separately.
 
+Corruption translation searches coded inner exceptions and every aggregate branch with
+`StorageCorruptionException.Find`; an existing `DatabaseCorruptionException` is retained.
+This applies to read/statement and transaction failures as well as synchronous and deferred
+create/open failures. A refused open retains any existing model diagnostics in addition to the
+outer `COHDBS003`; Graph, Documents and Blob also carry their unrecoverable-files diagnostic
+(`COHDBG018`, `COHDBD003` and `COHDBB004` respectively). The original storage exception remains
+the inner cause, preserving its page context. Graph abort messages prefix a cause's code only
+when the message does not already contain that prefix.
+
 `DatabaseException` (area root) for misuse and model errors;
 `DatabaseNotFoundException` for an open request whose storage does not exist;
 `DatabaseParseException` for grammar violations (→ `ParseFailure` on the wire);
