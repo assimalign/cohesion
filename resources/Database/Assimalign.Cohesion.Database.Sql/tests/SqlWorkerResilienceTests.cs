@@ -28,11 +28,88 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 /// failure ended the checkpoint worker for good, and a failed header write left the database
 /// accepting commits whose journal no checkpoint could truncate.
 /// </summary>
+[CollectionDefinition(nameof(SqlWorkerResilienceTests), DisableParallelization = true)]
+[Collection(nameof(SqlWorkerResilienceTests))]
 public sealed class SqlWorkerResilienceTests
 {
     private const string Failing = "failing";
     private const string Healthy = "healthy";
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(30);
+
+    [Theory(DisplayName = "Cohesion Test [Database.Sql] - Workers: failed provisional flushes reach construction without faulting the worker")]
+    [InlineData(DeviceFault.JournalWrite)]
+    [InlineData(DeviceFault.JournalFlush)]
+    public async Task WriteAheadFlushWorker_ProvisionalFlushFails_ShouldKeepServingAfterFailedConstruction(DeviceFault fault)
+    {
+        // Arrange
+        var strategy = new FaultInjectingJournalSqlStorageStrategy(durable: true);
+        var options = Options(strategy);
+        options.Durability = StorageCommitDurability.Grouped;
+        options.GroupCommitWindow = TimeSpan.FromSeconds(2);
+        await using var engine = SqlDatabaseEngine.Create("provisional-engine", options);
+        var worker = WorkerOf(engine, DatabaseEngineWorkerKind.WriteAheadFlush);
+        var faults = strategy.Faults(Failing, catalog: true);
+        faults.SwitchOn(fault);
+
+        // Act: the constructor receives the failed flush and disposes the provisional file sets.
+        try
+        {
+            var failure = await Record.ExceptionAsync(async () => await engine.CreateDatabaseAsync(Failing));
+            StorageOfflineException.Find(failure.ShouldNotBeNull()).ShouldNotBeNull();
+        }
+        finally
+        {
+            faults.Clear();
+        }
+        var latency = Stopwatch.StartNew();
+        await engine.CreateDatabaseAsync(Healthy);
+
+        // Assert: the worker survives the stale snapshot and serves the next construction.
+        latency.Elapsed.ShouldBeLessThan(options.GroupCommitWindow / 2);
+        worker.FailureCount.ShouldBe(0);
+        worker.Fault.ShouldBeNull();
+        engine.GetStorageSnapshot().Length.ShouldBe(2);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Workers: grouped create and reopen commits are flushed before publication")]
+    public async Task WriteAheadFlushWorker_ProvisionalDatabases_ShouldFlushCreateAndOpenBeforeSelfHelp()
+    {
+        // Arrange: construction holds the engine lock and cannot publish until its commits finish.
+        var strategy = new FaultInjectingJournalSqlStorageStrategy(durable: true);
+        var options = Options(strategy);
+        options.Durability = StorageCommitDurability.Grouped;
+        options.GroupCommitWindow = TimeSpan.FromSeconds(2);
+        await using var engine = SqlDatabaseEngine.Create("provisional-engine", options);
+        var worker = WorkerOf(engine, DatabaseEngineWorkerKind.WriteAheadFlush);
+        var duration = Stopwatch.StartNew();
+        int creates = 0;
+        int opens = 0;
+
+        // Act: repeat until both publication races have run, for at least a quarter second.
+        do
+        {
+            string name = "provisional" + creates;
+            var latency = Stopwatch.StartNew();
+            var database = await engine.CreateDatabaseAsync(name);
+            latency.Elapsed.ShouldBeLessThan(options.GroupCommitWindow / 2, "create must be served before the self-help window");
+            creates++;
+            await database.DisposeAsync();
+            latency.Restart();
+            var reopened = await engine.OpenDatabaseAsync(name);
+            latency.Elapsed.ShouldBeLessThan(options.GroupCommitWindow / 2, "open must be served before the self-help window");
+            opens++;
+            await reopened.DisposeAsync();
+        }
+        while ((duration.Elapsed < TimeSpan.FromMilliseconds(250) || creates < 3 || opens < 3)
+            && duration.Elapsed < Timeout);
+
+        // Assert
+        creates.ShouldBeGreaterThanOrEqualTo(3);
+        opens.ShouldBe(creates);
+        worker.FailureCount.ShouldBe(0);
+        worker.Fault.ShouldBeNull();
+        engine.GetStorageSnapshot().ShouldBeEmpty();
+    }
 
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Workers: a checkpoint whose page writes fail is retried after a backoff, and recovers when the fault clears")]
     public async Task CheckpointWorker_PageWritesFail_ShouldRetryAndRecoverWhileOtherDatabasesCheckpoint()

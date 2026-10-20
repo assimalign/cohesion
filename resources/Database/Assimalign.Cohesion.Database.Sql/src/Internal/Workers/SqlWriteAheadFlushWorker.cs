@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
@@ -63,7 +64,19 @@ internal sealed class SqlWriteAheadFlushWorker : DatabaseEngineWorker
         // again and is picked up by the next pass instead of being lost.
         _commitPending.Reset();
 
-        foreach (SqlDatabase database in _engine.GetInstanceSnapshot())
+        // Take the storage snapshot before the instance snapshot: publication writes them in
+        // that order. Never take the engine lock while flushing: create/open holds it while
+        // waiting for the storage durability gate, which this worker must be able to release.
+        var storages = _engine.GetStorageSnapshot();
+        var databases = _engine.GetInstanceSnapshot();
+        var published = new HashSet<SqlStorage>();
+        foreach (var database in databases)
+        {
+            published.Add(database.DataStorage);
+            published.Add(database.CatalogStorage);
+        }
+
+        foreach (SqlDatabase database in databases)
         {
             if (cancellationToken.IsCancellationRequested)
             {
@@ -81,6 +94,33 @@ internal sealed class SqlWriteAheadFlushWorker : DatabaseEngineWorker
 
             FlushPending(database, database.DataStorage);
             FlushPending(database, database.CatalogStorage);
+        }
+
+        foreach (var storage in storages)
+        {
+            if (cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
+
+            if (published.Contains(storage) || storage.IsOffline)
+            {
+                continue;
+            }
+
+            try
+            {
+                storage.FlushPendingCommits();
+            }
+            catch (ObjectDisposedException)
+            {
+                // A failed create/open disposed a storage from this older snapshot.
+            }
+            catch (Exception exception) when (exception is not OutOfMemoryException)
+            {
+                // The constructing commit receives its own flush failure. There is no
+                // published database to report or back off; keep serving the other file sets.
+            }
         }
     }
 

@@ -418,6 +418,15 @@ failed to close."), as it ignored the `DatabaseException` before.
 
 ## Engine-owned background workers
 
+The group-commit flusher serves both published databases and provisional file sets (#1275).
+It captures the storage snapshot before the instance snapshot, then flushes uncovered storages
+without taking the engine lock: create/open holds that lock while its construction commits wait
+on the durability gate. Published instances retain per-database failure/backoff handling.
+Provisional offline storages are skipped, disposed storages from failed construction are tolerated,
+and other provisional flush errors reach the constructing commit without a worker failure record.
+Only SQL and Key-Value use this provisional pass; Documents, Blob and Graph retain self-help
+while opening.
+
 The same five-worker inventory as the SQL engine, spawned at creation on
 engine-owned threads, quiesced on dispose (engines are data machines; R10):
 group-commit WAL flusher (signal-driven), paced page write-back, checkpointer

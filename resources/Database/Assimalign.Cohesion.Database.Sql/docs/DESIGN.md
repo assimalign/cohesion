@@ -3572,6 +3572,15 @@ description + exported registrations), the engine binds them.
 
 ## Engine-owned background workers
 
+The group-commit flusher serves both published databases and provisional file sets (#1275).
+It captures the storage snapshot before the instance snapshot, then flushes uncovered storages
+without taking the engine lock: create/open holds that lock while its construction commits wait
+on the durability gate. Published instances retain per-database failure/backoff handling.
+Provisional offline storages are skipped, disposed storages from failed construction are tolerated,
+and other provisional flush errors reach the constructing commit without a worker failure record.
+Only SQL and Key-Value use this provisional pass; Documents, Blob and Graph retain self-help
+while opening.
+
 The engine is a **data machine**: `Create(name, options)` returns it operational, with
 the six-worker inventory already pumping — one dedicated background thread per
 worker, spawned by the constructor and joined on dispose. Nothing outside the
@@ -3582,9 +3591,9 @@ the concrete-types plan the engine is a leaf of the root `DatabaseEngine`: its c
 attaches the six built-in workers through the base's `AttachWorker`, which starts each pump on a
 thread named for the worker, and the base stops the pumps and releases the workers on disposal
 (the checkpointer's lanes end in its release hook, `DisposeAsyncCore`).
-Each worker iterates a lock-free snapshot of every open storage file set (data +
-catalog per database, rebuilt when databases open/close; passes tolerate racing
-a drop):
+Workers iterate lock-free snapshots of published databases, rebuilt when databases
+open or close; passes tolerate racing a drop. The group-commit flusher also serves
+the provisional storage snapshot described above:
 
 - **`SqlWriteAheadFlushWorker`** — signal-driven group-commit flusher. Every open
   storage's `OnCommitPending` hook sets one engine-level event; a pass resets the
