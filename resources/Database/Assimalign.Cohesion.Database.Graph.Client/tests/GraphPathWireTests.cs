@@ -209,6 +209,41 @@ public sealed class GraphPathWireTests
         harness.Server.Sessions.ShouldHaveSingleItem().Id.ShouldBe(sessionId);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Graph.Client] - Paths: COHDBG008 before output keeps the exact connection and pooled session (#1230)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task QueryPathsAsync_NestingPastTheServerStack_ShouldRetainConnectionAndSession(bool tcp)
+    {
+        // Arrange: also defeats the 8 MB Linux thread-pool stack, within the 16 MB frame limit.
+        const int depth = 500_000;
+        string statement = "MATCH (n:" + string.Concat(Enumerable.Repeat("!(", depth)) + "Keep"
+            + new string(')', depth) + ") RETURN n";
+        await using var harness = await GraphClientTestHarness.StartAsync(tcp);
+        Guid sessionId;
+        await using (var connection = await harness.Client.ConnectAsync(harness.Token))
+        {
+            await connection.ExecuteAsync("INSERT (:Keep {name: 'retained'})", cancellationToken: harness.Token);
+            sessionId = harness.Server.Sessions.ShouldHaveSingleItem().Id;
+
+            // Act
+            var error = await Should.ThrowAsync<GraphClientException>(async () =>
+                await CollectAsync(connection.QueryPathsAsync(statement, cancellationToken: harness.Token)));
+
+            // Assert: the terminal rejection drained cleanly; the rental itself still works.
+            error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
+            error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHDBG008");
+            error.Message.ShouldContain("COHDBG008", Case.Sensitive);
+            connection.IsOpen.ShouldBeTrue();
+            (await connection.QueryAsync("MATCH (n:Keep) RETURN n.name", cancellationToken: harness.Token))
+                .ShouldHaveSingleItem()[0].ShouldBe("retained");
+            harness.Server.Sessions.ShouldHaveSingleItem().Id.ShouldBe(sessionId);
+        }
+
+        await using var reused = await harness.Client.ConnectAsync(harness.Token);
+        (await reused.QueryAsync("SHOW LABELS", cancellationToken: harness.Token)).ShouldHaveSingleItem()[2].ShouldBe("Keep");
+        harness.Server.Sessions.ShouldHaveSingleItem().Id.ShouldBe(sessionId);
+    }
+
     /// <summary>Abandoning a response larger than the bounded handoff cancels and discards its session.</summary>
     [Fact(DisplayName = "Cohesion Test [Graph.Client] - Abandoned path streams discard their connection")]
     public async Task QueryPathsAsync_AbandonedEnumeration_ShouldDiscardAndPermitNewRental()
