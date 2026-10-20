@@ -85,7 +85,22 @@ coerced merged names cannot accidentally share a key slot with different types.
 Execution is left-deep in written order. Only the first INNER pair may swap for an index;
 later steps seek into the added input, and LEFT always preserves its left side. Each LEFT
 step tests its own residual before deciding whether to extend an unmatched row with NULL.
-WHERE filters after the complete join. Catalog inputs use #1106's one captured image and
+Deterministic single-binding WHERE conjuncts also filter inputs before pair allocation and
+choose equality/range access through the SELECT selector (#1521). WHERE restrictions on a
+LEFT step's nullable binding remain above the join; right-only ON restrictions may filter
+that input. Volatile calls, subqueries, outer references and deferred failures remain at
+their original level. Application casts have no volatility metadata and conservatively
+remain there too. Complete ON and WHERE residuals still run. Compatible mandatory
+equijoin equalities propagate exact constants transitively across INNER inputs, and only
+from preserved to nullable inputs across LEFT. Floating keys and incompatible text
+collations/types never infer constants. A full unique WHERE seek takes priority when
+choosing the first INNER pair's driver. Each input filter uses one scratch ordinal frame,
+without the correlated-expression cache. Both constant and correlated seeks verify the
+planned catalog index identity; a detached or same-name replacement tree scans instead.
+EXPLAIN includes the driving input's IndexSeek and bounds. This follows PostgreSQL's
+singleton restriction placement (optimizer/plan/initsplan.c:3261-3315), volatility boundary
+(initsplan.c:2952-2981), and outer-join reduction boundary
+(optimizer/prep/prepjointree.c:3266-3290). Catalog inputs use #1106's one captured image and
 never take object locks or index paths. Stored inputs lock once each in ObjectId order.
 Metrics retain ordered JoinAccessPaths (AccessPath renders them separated by semicolons),
 even when empty inputs skip enumeration. A single backing slot holds a scalar or join paths,

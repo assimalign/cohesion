@@ -203,11 +203,12 @@ internal sealed partial class SqlPlanner
     /// <summary>Seeks into the added input; only the first INNER pair may reverse direction.</summary>
     private SqlJoinIndexPath? SelectJoinAccessPath(IReadOnlyList<SqlRelationBinding> bindings,
         IReadOnlyList<SqlCatalogColumn> columns, List<(int Left, int Right, Collation Collation)> equalities,
-        int added, bool maySwap)
+        int added, bool maySwap, int? firstBinding = null)
     {
         if (ViewDefinitionBinding is not null) { return null; }
         SqlJoinIndexPath? best = null;
-        foreach (int inner in maySwap ? new[] { added, 0 } : new[] { added })
+        foreach (int inner in firstBinding is int driver ? new[] { driver == 1 ? 0 : added }
+            : maySwap ? new[] { added, 0 } : new[] { added })
         {
             var innerBinding = bindings[inner];
             if (innerBinding.Source.Table is not { } table) { continue; }

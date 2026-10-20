@@ -1085,6 +1085,16 @@ remains a residual predicate. Otherwise the added input buffers once. System inp
 take no object lock and have no index path; all inputs share one statement catalog
 image and MVCC snapshot. EXPLAIN shows each step's kind and access, including scans.
 
+Deterministic single-input WHERE conjuncts can select equality/range seeks and filter
+before joining (#1521). The first INNER pair prefers an input restricted by a full
+unique seek; EXPLAIN shows that driving IndexSeek and its bounds. Compatible mandatory
+equijoin equalities propagate constants across INNER inputs. LEFT keeps nullable-side
+WHERE predicates after null extension; nullable-side ON predicates may filter before it.
+Volatile calls and subquery predicates stay at their original join level. Application
+casts without determinism metadata also stay there. Complete ON/WHERE residuals retain
+NULL, duplicate-key and mixed-numeric comparison semantics, including scan fallback
+when a planned index is detached or replaced.
+
 Only TRUE matches ON or the implicit USING equalities; FALSE and UNKNOWN do not.
 LEFT supplies NULL for every right column when no candidate matches. A predicate in
 ON preserves unmatched left rows; the same predicate in WHERE can remove them.

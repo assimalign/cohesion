@@ -79,7 +79,7 @@ internal sealed partial class SqlPlanner
         var source = columns.Select((column, index) => PassThrough(column.Name, index, columns, sourceScope)).ToArray();
         var where = select.Where is null ? null : evaluator.Bind(select.Where);
         SqlPlan input = bindings is not null
-            ? new SqlJoinPlan(bindings, columns, steps, source, where, [], null, null, false)
+            ? PushJoinPredicates(new SqlJoinPlan(bindings, columns, steps, source, where, [], null, null, false))
             : view is not null
                 ? new SqlSystemViewPlan(view, source, where, [], null, null, false)
                 : table is null

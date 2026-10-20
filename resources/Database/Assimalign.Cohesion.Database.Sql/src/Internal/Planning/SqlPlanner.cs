@@ -200,10 +200,10 @@ internal sealed partial class SqlPlanner
 
         if (bindings is not null)
         {
-            return new SqlJoinPlan(bindings, columns, steps, projections,
+            return PushJoinPredicates(new SqlJoinPlan(bindings, columns, steps, projections,
                 where, ordering, BindCount(select.Limit, LimitClause(select)),
                 BindCount(select.Offset, "OFFSET"), select.IsDistinct,
-                orderByProjections);
+                orderByProjections));
         }
 
         if (systemView is not null)
@@ -362,6 +362,18 @@ internal sealed partial class SqlPlanner
             return SqlScanPath.Instance;
         }
 
+        return SelectAccessPath(table, predicates, indexes);
+    }
+
+    /// <summary>Shares seek ranking with join inputs whose restrictions are already bound.</summary>
+    private SqlAccessPath SelectAccessPath(SqlCatalogTable table,
+        Dictionary<int, List<(SqlBinaryOperator Op, object? Value)>> predicates, IReadOnlyList<SqlCatalogIndex>? indexes = null)
+    {
+        if (ViewDefinitionBinding is not null || predicates.Count == 0 || _commonTableState?.BindingUnused == true)
+        {
+            return SqlScanPath.Instance;
+        }
+        indexes ??= _catalog.GetIndexes(table.ObjectId);
         SqlIndexSeekPath? best = null;
         int bestPrefix = -1;
         bool bestHasRange = false;

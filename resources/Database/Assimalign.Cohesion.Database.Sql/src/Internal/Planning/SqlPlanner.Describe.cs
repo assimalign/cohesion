@@ -119,11 +119,12 @@ internal sealed partial class SqlPlanner
                     Access(select.Table, select.Access, id);
                     break;
                 case SqlJoinPlan join:
-                    bool swapped = join.Steps.Count > 0 && join.Steps[0].Access?.InnerBinding == 0;
-                    RelationScan(join.Bindings[swapped ? 1 : 0].Source, id);
+                    int first = join.FirstBinding;
+                    JoinInput(first, id);
                     foreach (var step in join.Steps)
                     {
-                        var binding = join.Bindings[step.Access?.InnerBinding ?? step.Binding];
+                        int inner = ReferenceEquals(step, join.Steps[0]) && first == 1 ? 0 : step.Binding;
+                        var binding = join.Bindings[inner];
                         int stepId = nodes.Count;
                         Add("JoinStep", id, Target(join.Bindings[step.Binding].Source), detail: step.Kind.ToString());
                         if (step.Access is { } seek)
@@ -132,9 +133,16 @@ internal sealed partial class SqlPlanner
                                 $"{column.Name} = {JoinProbeReference(join.Bindings, seek.OuterOrdinals[i])}"));
                             Add("IndexSeek", stepId, Target(binding.Source), seek.Index.Name, bounds);
                         }
-                        else { RelationScan(binding.Source, stepId); }
+                        else { JoinInput(inner, stepId); }
                     }
                     break;
+
+                    void JoinInput(int binding, int parentId)
+                    {
+                        var source = join.Bindings[binding].Source;
+                        if (source.Table is { } table && join.Inputs.Count > 0) { Access(table, join.Inputs[binding].Access, parentId); }
+                        else { RelationScan(source, parentId); }
+                    }
                 case SqlGroupPlan group:
                     Visit(group.Input, id);
                     break;
