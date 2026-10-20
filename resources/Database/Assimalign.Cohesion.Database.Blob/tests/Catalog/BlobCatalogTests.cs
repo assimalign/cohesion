@@ -189,6 +189,51 @@ public sealed class BlobCatalogTests
         await database.Coordinator.RollbackAsync(reader);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Database.Blob.Catalog] - Reclaimed versions: 120 overwrite and rollback rounds skip freed metadata pages (#1287)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FindBlob_RepeatedPageReclamation_ShouldKeepCorrectMetadata(bool rollback)
+    {
+        // Arrange: each version requires its own page; the catalog keeps its cached references.
+        await using var database = new TestDatabase();
+        var container = new BlobContainerMetadata(Guid.NewGuid(), "files");
+        var original = Entry(container.Id, new string('b', 6_000)) with { ETag = 1 };
+        var create = await database.Coordinator.BeginAsync(IsolationLevel.Snapshot);
+        await database.Catalog.SaveContainerAsync(container, create);
+        await database.Catalog.SaveBlobAsync(Entry(container.Id, new string('p', 4_000)), create);
+        await database.Catalog.SaveBlobAsync(original, create);
+        await database.Coordinator.CommitAsync(create);
+        int freed = 0;
+        for (int round = 1; round <= 120; round++)
+        {
+            var before = database.Storage.GetOwnerPages(0).ToArray();
+            var writer = await database.Coordinator.BeginAsync(IsolationLevel.Snapshot);
+            var current = original with { ETag = (ulong)round + 1 };
+            await database.Catalog.SaveBlobAsync(current, writer);
+            var allocated = database.Storage.GetOwnerPages(0).Except(before).ShouldHaveSingleItem();
+
+            // Act
+            if (rollback) { await database.Coordinator.RollbackAsync(writer); }
+            else
+            {
+                await database.Coordinator.CommitAsync(writer);
+                database.Coordinator.RunVersionPurgePass(default).ShouldBeGreaterThan(0);
+            }
+            if (rollback) { database.Storage.FreeSpaceMap.IsAllocated(allocated).ShouldBeFalse(); }
+            else { before.Count(page => !database.Storage.FreeSpaceMap.IsAllocated(page)).ShouldBe(1); }
+            freed++;
+
+            // Assert: a freed page behind the cached reference cannot hide the committed value.
+            var reader = await database.Coordinator.BeginAsync(IsolationLevel.Snapshot);
+            var expected = rollback ? original : current;
+            database.Catalog.FindBlob(container.Id, original.Name, reader.Snapshot).ShouldBe(expected);
+            database.Catalog.GetBlobs(container.Id, null, reader.Snapshot).Where(blob => blob.Name == original.Name)
+                .ShouldHaveSingleItem().ShouldBe(expected);
+            await database.Coordinator.CommitAsync(reader);
+        }
+        freed.ShouldBe(120);
+    }
+
     /// <summary>
     /// A metadata page that cannot be read is not a reclaimed one: the lookup fails instead of
     /// reading the blob as absent (#1342).

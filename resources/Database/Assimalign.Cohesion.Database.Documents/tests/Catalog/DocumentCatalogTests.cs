@@ -78,6 +78,47 @@ public sealed partial class DocumentCatalogTests
         await fixture.Coordinator.CommitAsync(reader);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Database.Documents.Catalog] - Reclaimed versions: 120 overwrite and rollback rounds skip freed metadata pages (#1287)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FindDocument_RepeatedPageReclamation_ShouldKeepCorrectContent(bool rollback)
+    {
+        // Arrange: each metadata record occupies more than half a page, so every new version
+        // gets another page. Retain the same catalog instance and its cached version references.
+        await using var fixture = await Fixture.Create();
+        string name = new('d', 6_000);
+        await fixture.Write(new string('p', 4_000), "{}");
+        await fixture.Write(name, "{\"v\":0}");
+        int freed = 0;
+        for (int round = 1; round <= 120; round++)
+        {
+            var before = fixture.Storage.GetOwnerPages(0).ToArray();
+            var writer = await fixture.Coordinator.BeginAsync(IsolationLevel.Snapshot);
+            await fixture.WriteIn(writer, name, "{\"v\":" + round + "}");
+            var allocated = fixture.Storage.GetOwnerPages(0).Except(before).ShouldHaveSingleItem();
+
+            // Act: undo the newest version, or purge the superseded committed one.
+            if (rollback) { await fixture.Coordinator.RollbackAsync(writer); }
+            else
+            {
+                await fixture.Coordinator.CommitAsync(writer);
+                fixture.Coordinator.RunVersionPurgePass(default).ShouldBeGreaterThan(0);
+            }
+            if (rollback) { fixture.Storage.FreeSpaceMap.IsAllocated(allocated).ShouldBeFalse(); }
+            else { before.Count(page => !fixture.Storage.FreeSpaceMap.IsAllocated(page)).ShouldBe(1); }
+            freed++;
+
+            // Assert: lookup must cross the stale reference; the live value remains readable.
+            var reader = await fixture.Coordinator.BeginAsync(IsolationLevel.Snapshot);
+            var document = fixture.Catalog.FindDocument(fixture.Collection.Id, name, reader.Snapshot).ShouldNotBeNull();
+            document.Version.ShouldBe(rollback ? 1UL : (ulong)round + 1);
+            Encoding.UTF8.GetString(fixture.Storage.ReadContent(Content(document)).Span)
+                .ShouldBe("{\"v\":" + (rollback ? 0 : round) + "}");
+            await fixture.Coordinator.CommitAsync(reader);
+        }
+        freed.ShouldBe(120);
+    }
+
     /// <summary>
     /// A metadata page that cannot be read is not a reclaimed one: the lookup fails instead of
     /// reading the document as absent (#1342).

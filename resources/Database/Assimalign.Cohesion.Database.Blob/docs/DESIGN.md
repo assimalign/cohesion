@@ -1199,7 +1199,10 @@ index node. A page that fails its CRC or cannot be read throws instead (#1342). 
 reread caught only the slot exceptions, so a reference into a freed metadata page failed the
 lookup with "Page N is not allocated" (250 versions of one blob's metadata and a purge pass).
 Live malformed records raise a catalog error; a checksum-valid but malformed record is not
-treated as missing.
+treated as missing. The #1287 regression repeats both committed overwrite/purge and explicit
+rollback for 120 rounds, forcing one metadata version per page and asserting each reclamation
+before lookup and listing through the same catalog. Purge is driven directly instead of relying
+on a 100 ms worker schedule.
 
 Writers acquire model locks in the engine before reaching the catalog. A save tombstones the
 snapshot-visible old metadata record and inserts the new version in one coordinator physical
