@@ -6,6 +6,8 @@ using System.Linq;
 using System.Text;
 using Assimalign.Cohesion.Database.Graph.Language;
 
+using Assimalign.Cohesion.Database.Graph.Protocol;
+
 namespace Assimalign.Cohesion.Database.Graph.Internal;
 
 internal static partial class GraphExpressionEvaluator
@@ -128,7 +130,7 @@ internal static partial class GraphExpressionEvaluator
             // Neo4j StringValue.java:197 delegates to Java String.replace: insert at
             // every UTF-16 boundary, including before and after the input.
             if (replacement.Length == 0) { return text; }
-            long expanded = GraphValueCodec.ScalarLength(text) + 5L + (text.Length + 1L) * (GraphValueCodec.ScalarLength(replacement) - 4L);
+            long expanded = GraphCompositeEncoding.ScalarLength(text) + 5L + (text.Length + 1L) * (GraphCompositeEncoding.ScalarLength(replacement) - 4L);
             long characters = text.Length + (text.Length + 1L) * replacement.Length;
             if (expanded > GraphValueCodec.MaxPayloadLength || characters > GraphValueCodec.MaxPayloadLength)
             { throw new ArithmeticException(ErrorMessages.CompositeLimit); }
@@ -137,8 +139,8 @@ internal static partial class GraphExpressionEvaluator
             foreach (char character in text) { result.Append(character).Append(replacement); }
             return result.ToString();
         }
-        long bytes = GraphValueCodec.ScalarLength(text) + 5L;
-        long growth = GraphValueCodec.ScalarLength(replacement) - (long)GraphValueCodec.ScalarLength(search);
+        long bytes = GraphCompositeEncoding.ScalarLength(text) + 5L;
+        long growth = GraphCompositeEncoding.ScalarLength(replacement) - (long)GraphCompositeEncoding.ScalarLength(search);
         if (growth > 0)
         {
             int offset = 0;

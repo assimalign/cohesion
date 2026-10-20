@@ -3,11 +3,11 @@ using System.Collections.Generic;
 using System.Linq;
 using Shouldly;
 using Xunit;
-using Assimalign.Cohesion.Database.Graph.Internal;
+using Assimalign.Cohesion.Database.Graph.Protocol.Internal;
 using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Types;
 
-namespace Assimalign.Cohesion.Database.Graph.Tests;
+namespace Assimalign.Cohesion.Database.Graph.Protocol.Tests;
 
 public sealed class GraphValueCodecTests
 {
@@ -75,7 +75,7 @@ public sealed class GraphValueCodecTests
             0.1f, 0.1d, 0m, 1000.000m, -0.000001m, decimal.MinValue, "é\0", new byte[] { 0, 1 },
             DateOnly.MinValue, TimeOnly.MinValue, DateTime.UnixEpoch, DateTimeOffset.UnixEpoch, TimeSpan.Zero, Guid.Empty];
         // Act / Assert
-        foreach (var value in values) { GraphValueCodec.Measure(value).ShouldBe(GraphValueCodec.Encode(value).Length); }
+        foreach (var value in values) { GraphValueEncoding.Measure(value, new(ErrorMessages.CompositeLimit, ErrorMessages.CompositeMalformed, ErrorMessages.CompositeRequired)).ShouldBe(GraphValueCodec.Encode(value).Length); }
     }
 
     [Theory(DisplayName = "Cohesion Test [Graph] - Composite codec: encoded string bytes include framing and zero escaping")]

@@ -2,6 +2,8 @@ using System.Collections.Generic;
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Types;
 
+using Assimalign.Cohesion.Database.Graph.Protocol;
+
 namespace Assimalign.Cohesion.Database.Graph;
 
 /// <summary>The materialized paths projected by a graph MATCH statement.</summary>

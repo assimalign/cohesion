@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 
-namespace Assimalign.Cohesion.Database.Graph;
+namespace Assimalign.Cohesion.Database.Graph.Protocol;
 
 /// <summary>
 /// A typed, directed relationship between two nodes in a property graph.

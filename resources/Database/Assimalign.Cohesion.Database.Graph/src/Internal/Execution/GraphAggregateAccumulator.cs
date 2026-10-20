@@ -6,6 +6,8 @@ using System.Threading;
 using Assimalign.Cohesion.Database.Graph.Language;
 using Assimalign.Cohesion.Database.Types;
 
+using Assimalign.Cohesion.Database.Graph.Protocol;
+
 namespace Assimalign.Cohesion.Database.Graph.Internal;
 
 /// <summary>Bounded, statically typed aggregate state; numeric promotion considers every retained input.</summary>
@@ -163,7 +165,7 @@ internal sealed class GraphAggregateAccumulator
 
     private void AddList(object value, CancellationToken token)
     {
-        _listBytes += GraphValueCodec.Measure(value);
+        _listBytes += GraphCompositeEncoding.Measure(value);
         var pending = new Stack<(object? Value, int Depth)>();
         pending.Push((value, 1));
         while (pending.TryPop(out var item))

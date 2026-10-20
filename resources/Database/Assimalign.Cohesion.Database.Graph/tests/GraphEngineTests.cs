@@ -15,6 +15,8 @@ using Assimalign.Cohesion.Database.Types;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Database.Graph.Protocol;
+
 namespace Assimalign.Cohesion.Database.Graph.Tests;
 
 public sealed class GraphEngineTests

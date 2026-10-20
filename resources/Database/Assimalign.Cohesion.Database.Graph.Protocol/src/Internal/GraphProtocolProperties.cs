@@ -3,7 +3,7 @@ using System.Collections.Generic;
 
 using Assimalign.Cohesion.Database.Protocol;
 
-namespace Assimalign.Cohesion.Database.Graph.Internal;
+namespace Assimalign.Cohesion.Database.Graph.Protocol.Internal;
 
 internal static class GraphProtocolProperties
 {

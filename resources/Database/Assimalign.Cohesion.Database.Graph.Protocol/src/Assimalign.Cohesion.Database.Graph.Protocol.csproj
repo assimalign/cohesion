@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <PropertyGroup>
+        <RootNamespace>Assimalign.Cohesion.Database.Graph.Protocol</RootNamespace>
+    </PropertyGroup>
+    <ItemGroup>
+        <CohesionProjectReference Include="Assimalign.Cohesion.Database.Protocol" />
+        <CohesionProjectReference Include="Assimalign.Cohesion.Database.Types" />
+        <CohesionSharedSource Include="Assimalign.Cohesion.Database.Graph.Protocol" />
+    </ItemGroup>
+</Project>

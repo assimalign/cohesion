@@ -3,7 +3,7 @@ using System.Collections.Generic;
 
 using Assimalign.Cohesion.Database.Protocol;
 
-namespace Assimalign.Cohesion.Database.Graph;
+namespace Assimalign.Cohesion.Database.Graph.Protocol;
 
 /// <summary>
 /// A graph request carrying GQL text and named parameters. Execute and ExecutePaths use

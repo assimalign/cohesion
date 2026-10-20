@@ -1,10 +1,10 @@
 using System;
 using System.Collections.Generic;
 
-using Assimalign.Cohesion.Database.Graph.Internal;
+using Assimalign.Cohesion.Database.Graph.Protocol.Internal;
 using Assimalign.Cohesion.Database.Protocol;
 
-namespace Assimalign.Cohesion.Database.Graph;
+namespace Assimalign.Cohesion.Database.Graph.Protocol;
 
 /// <summary>An ordered path retaining node identities, labels, properties, and directed relationships.</summary>
 /// <param name="Nodes">The nodes in traversal order, including both endpoints.</param>

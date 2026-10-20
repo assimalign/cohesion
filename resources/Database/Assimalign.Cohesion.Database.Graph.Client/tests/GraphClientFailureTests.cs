@@ -11,6 +11,8 @@ using Assimalign.Cohesion.Database.Client;
 using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Types;
 
+using Assimalign.Cohesion.Database.Graph.Protocol;
+
 namespace Assimalign.Cohesion.Database.Graph.Client.Tests;
 
 /// <summary>Malformed peers must never turn a failed graph exchange into a successful response or reusable lease.</summary>

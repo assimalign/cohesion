@@ -5,6 +5,8 @@ using System.Linq;
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Types;
 
+using Assimalign.Cohesion.Database.Graph.Protocol;
+
 namespace Assimalign.Cohesion.Database.Graph.Internal;
 
 // Scalar results retain the tuple codec's one array allocation per row. Composite columns
@@ -42,7 +44,7 @@ internal sealed class GraphResultRowEncoder : IDisposable
                 _writer!.Write((byte)1);
                 long lengthOffset = _stream.Position; _writer.Write(0);
                 int count = 0;
-                GraphValueCodec.Write(_writer, value, 0, ref count, _scalarWriter);
+                GraphCompositeEncoding.Write(_writer, value, 0, ref count, _scalarWriter);
                 long end = _stream.Position;
                 _stream.Position = lengthOffset; _writer.Write(checked((int)(end - lengthOffset - 4))); _stream.Position = end;
             }
@@ -65,7 +67,7 @@ internal sealed class GraphResultRowEncoder : IDisposable
             {
                 var value = row[i];
                 size += compositeColumns[i] && (GraphCompositeValues.IsComposite(value) || value is byte or ushort or uint or ulong or decimal)
-                    ? 5L + GraphValueCodec.Measure(value) : GraphValueCodec.ScalarLength(value) + (compositeColumns[i] ? 1L : 0);
+                    ? 5L + GraphCompositeEncoding.Measure(value) : GraphCompositeEncoding.ScalarLength(value) + (compositeColumns[i] ? 1L : 0);
             }
             if (size > GraphValueCodec.MaxPayloadLength) { throw new DatabaseTypeException(ErrorMessages.CompositeLimit); }
         }

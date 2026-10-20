@@ -1,6 +1,6 @@
 using Assimalign.Cohesion.Database.Protocol;
 
-namespace Assimalign.Cohesion.Database.Graph;
+namespace Assimalign.Cohesion.Database.Graph.Protocol;
 
 /// <summary>The graph endpoint's immutable protocol family.</summary>
 public static class GraphProtocol

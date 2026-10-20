@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 
-namespace Assimalign.Cohesion.Database.Graph;
+namespace Assimalign.Cohesion.Database.Graph.Protocol;
 
 /// <summary>A matched path containing ordered graph entities from one statement snapshot.</summary>
 /// <param name="Nodes">The nodes in traversal order, including repeated nodes.</param>

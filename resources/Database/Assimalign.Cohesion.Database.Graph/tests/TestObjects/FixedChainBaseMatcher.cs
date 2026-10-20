@@ -8,6 +8,8 @@ using Assimalign.Cohesion.Database.Graph.Internal;
 using Assimalign.Cohesion.Database.Graph.Language;
 using Assimalign.Cohesion.Database.Graph.Storage;
 
+using Assimalign.Cohesion.Database.Graph.Protocol;
+
 namespace Assimalign.Cohesion.Database.Graph.Tests.TestObjects;
 
 // Frozen pre-quantifier matcher from e6a3da768, GraphPlanExecutor.cs:332-436,455-471.

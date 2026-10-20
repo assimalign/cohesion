@@ -1,6 +1,6 @@
 using System;
 
-namespace Assimalign.Cohesion.Database.Graph;
+namespace Assimalign.Cohesion.Database.Graph.Protocol;
 
 /// <summary>
 /// A strongly-typed node identity, unique within a graph database.

@@ -14,6 +14,8 @@ using Assimalign.Cohesion.Database.Graph.Client;
 using Assimalign.Cohesion.Database.Graph.Language;
 using Assimalign.Cohesion.Database.Language;
 
+using Assimalign.Cohesion.Database.Graph.Protocol;
+
 namespace Assimalign.Cohesion.Database.Studio;
 
 /// <summary>Graph (GQL): embedded session or <c>Graph.Client</c>, with row and path dispatch.</summary>

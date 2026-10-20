@@ -1,4 +1,4 @@
-namespace Assimalign.Cohesion.Database.Graph;
+namespace Assimalign.Cohesion.Database.Graph.Protocol;
 
 /// <summary>Message identifiers scoped to graph endpoints.</summary>
 public enum GraphProtocolMessageType : byte

@@ -8,6 +8,8 @@ using Assimalign.Cohesion.Connections;
 using Assimalign.Cohesion.Database.Graph.Client.Internal;
 using Assimalign.Cohesion.Database.Protocol;
 
+using Assimalign.Cohesion.Database.Graph.Protocol;
+
 namespace Assimalign.Cohesion.Database.Graph.Client.Tests;
 
 public sealed class GraphCompositeWireTests
