@@ -601,15 +601,17 @@ public sealed class SqlPredicateExecutionTests
         ];
         object?[] expected = [true, true, true, true, false, true, false, false];
         string projections = string.Join(", ", expressions.Select((expression, index) => expression + " AS c" + index));
-        await ExecuteAsync(session, $"CREATE TABLE checked_common (s TEXT CHECK (RPAD(s, {length}, 'x') COLLATE invariant LIKE '%x%'))");
+        string checkedValue = length <= 1024 ? "s" : $"RPAD(s, {length}, 'x')";
+        await ExecuteAsync(session, $"CREATE TABLE checked_common (s TEXT CHECK ({checkedValue} COLLATE invariant LIKE '%x%'))");
         await ExecuteAsync(session, "CREATE VIEW common_view AS SELECT " + projections + oneRow);
         // Act / Assert: direct expressions, cached view expressions and a stored CHECK.
         (await RowsAsync(session, "SELECT " + projections + oneRow)).ShouldHaveSingleItem().ShouldBe(expected);
         (await RowsAsync(session, "SELECT * FROM common_view")).ShouldHaveSingleItem().ShouldBe(expected);
-        // Physical rows have an 8092-byte limit; the persisted CHECK constructs
-        // the requested matcher input while the stored seed stays within that limit.
-        await ExecuteAsync(session, "INSERT INTO checked_common VALUES ('x')");
-        (await RowsAsync(session, $"SELECT LENGTH(RPAD(s, {length}, 'x')) FROM checked_common")).ShouldHaveSingleItem()[0].ShouldBe((long)length);
+        // Physical rows have an 8092-byte limit. Small values use the original
+        // column CHECK; large CHECK inputs are constructed from a stored seed.
+        string storedValue = length <= 1024 ? $"RPAD('x', {length}, 'x')" : "'x'";
+        await ExecuteAsync(session, $"INSERT INTO checked_common VALUES ({storedValue})");
+        (await RowsAsync(session, $"SELECT LENGTH({checkedValue}) FROM checked_common")).ShouldHaveSingleItem()[0].ShouldBe((long)length);
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - LIKE: ordinary invariant searches have linear work")]
