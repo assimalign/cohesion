@@ -392,7 +392,7 @@ public sealed class SqlAlterTableRecoveryTests
         Exception? failure = null;
         try
         {
-            gate.WaitUntilEntered().ShouldBeTrue();
+            await gate.WaitUntilEnteredAsync();
 
             // Act: the first plan now holds old columns and will read renamed index metadata.
             await SqlAlterTableExecutionTests.ExecuteAsync(ddl, "ALTER TABLE t RENAME u TO v");

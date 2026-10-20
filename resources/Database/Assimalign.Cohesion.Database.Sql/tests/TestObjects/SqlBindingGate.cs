@@ -1,11 +1,12 @@
 using System;
 using System.Threading;
+using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
 
 internal sealed class SqlBindingGate : IDisposable
 {
-    private readonly ManualResetEventSlim _entered = new();
+    private readonly TaskCompletionSource _entered = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly ManualResetEventSlim _release = new();
     private int _armed;
     private int _calls;
@@ -24,19 +25,18 @@ internal sealed class SqlBindingGate : IDisposable
         Interlocked.Increment(ref _calls);
         if (Interlocked.Exchange(ref _armed, 0) != 0)
         {
-            _entered.Set();
-            if (!_release.Wait(TimeSpan.FromSeconds(15))) { throw new TimeoutException("Binding callback was not released."); }
+            _entered.TrySetResult();
+            if (!_release.Wait(TimeSpan.FromSeconds(30))) { throw new TimeoutException("Binding callback was not released."); }
             AfterRelease?.Invoke();
         }
         return value;
     }
 
-    internal bool WaitUntilEntered() => _entered.Wait(TimeSpan.FromSeconds(5));
+    internal Task WaitUntilEnteredAsync() => _entered.Task.WaitAsync(TimeSpan.FromSeconds(30));
     internal void Release() => _release.Set();
 
     public void Dispose()
     {
-        _entered.Dispose();
         _release.Dispose();
     }
 }

@@ -198,7 +198,8 @@ extra inventory pass, semaphore, timer or async wrapper. A paired allocation tes
 real public check and that same core against a real SQL engine, taking the minimum of three
 warmed 100-call rounds and requiring zero added bytes in Debug and Release. The transition
 tests pause a real deferred CHECK, race health polls for at least 150 ms and 32 completed calls,
-assert exact payloads and no event 0, reenter from a listener, then test completion, failure
+assert exact payloads and no event 0, reenter from a listener, capture the gated database before
+releasing the worker (an open after failure schedules another attempt), then test completion, failure
 and offline/reopen transitions. Review coverage also checks disposal, empty and late cancellation,
 exception identity, same-name replacements, reentrant batches and overlapping observations.
 An identical public-path probe against archived `95d3a7d56` covers empty, healthy and offline
@@ -232,7 +233,10 @@ silent. Disabled lifecycle, command and admin hooks allocate zero bytes and read
 
 No counters: the attempts are on the health contribution. The engine's own events (a worker's failures, the database it took offline) are on the root's `Assimalign.Cohesion.Database` source. `DatabaseHostingEventSourceTests` checks the name, strict manifest, real reopen and application transitions, commands, disposal and admin bind failure, exact payloads, and disabled-write allocations. The disabled-cost checks also drive real Execute
 and Delete command dispatch against an in-memory SQL engine, comparing each warmed path with its
-unchanged core baseline using the minimum of three allocation rounds. The internal handler exposes
+unchanged core baseline using the minimum of three allocation rounds. The test project disables
+tiered compilation in Debug and Release so paired measurements use one JIT tier under
+CPU pressure; time-based warmup cannot ensure the background compiler has finished.
+The internal handler exposes
 those cores only within its assembly and to its owning tests; no public diagnostics seam is added.
 
 The public static `CreateBuilder(name)` on each model engine provides deferred standalone composition and the bridge for hosting-aware engine factories that also need nested servers. It returns the model's sealed engine builder (`SqlDatabaseEngineBuilder`, …), whose `AddServer` and `AddWorker` factories receive the model's engine typed, since phase 4 of the concrete-types plan, and whose `Options` and `AddDatabase` are the same on every model since B3. Configuration and service reads still occur in the hosting callback, outside the model package.

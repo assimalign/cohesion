@@ -1831,6 +1831,8 @@ If cancellation interrupts the handoff after cheap-step locks were released, com
 fresh transaction. An ended reservation is never reused to acquire compensation locks.
 Hosting's existing offline-reopen policy still applies, including its backoff when the same
 database fails again. The provisioning worker itself makes one attempt per scheduled migration.
+The invalid-row test observes the original instance through the storage's offline hook: opening
+it after Build can reopen the crash fixture's seed image and lose the migration under test.
 
 Build probes each affected table's physical allocation through `Storage.HasOwnerPages`, a
 constant-time query that does not copy the owner page directory. It runs creation, nullable column
@@ -4881,6 +4883,8 @@ callbacks run outside it. A successful tree is published after checking the prod
 An attempt that throws or is canceled publishes nothing, and a remaining or later caller retries
 with its own token. Ordinary folding faults still retain the call for evaluation under the
 existing deferral rule; they are a successful binding, not a cached compilation exception.
+Concurrency tests observe managed-wait entry through a test-only synchronization context and
+callback entry through a completion source; timeouts only bound a missing signal or completion.
 
 Definition refresh first resolves and validates immutable metadata without executing callbacks,
 then publishes that environment and its empty table cache together. Open and definition DDL

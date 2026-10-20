@@ -380,6 +380,8 @@ public sealed partial class DatabaseHostingEventSourceTests
         Func<ValueTask<ReadOnlyMemory<byte>>> dispatch = delete
             ? () => handler.DeleteAsync(command, CancellationToken.None)
             : () => handler.ExecuteAsync(command, CancellationToken.None);
+        // The test host disables tiering so a paired measurement cannot straddle
+        // JIT promotion, even when CPU pressure delays the background compiler.
         Measure(core, 100);
         Measure(dispatch, 100);
         const int iterations = 10_000;
