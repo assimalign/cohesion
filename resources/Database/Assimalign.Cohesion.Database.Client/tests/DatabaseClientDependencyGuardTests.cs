@@ -231,6 +231,116 @@ public sealed class DatabaseClientDependencyGuardTests
         result.Output.ShouldContain("Assimalign.Cohesion.Database.Sql", Case.Sensitive);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Database.Client] - Shared source identities cannot import model or shared engines")]
+    [MemberData(nameof(ForbiddenProjects))]
+    public async Task SharedSources_EngineIdentity_ShouldReject(string identity)
+    {
+        // Arrange
+        using var probe = new GuardProbe();
+        // Act
+        var result = await probe.ThinAsync($"<CohesionSharedSource Include=\"{identity}\" />");
+        // Assert
+        result.ExitCode.ShouldNotBe(0);
+        result.Output.ShouldContain("COHDBCLIENT001", Case.Sensitive);
+        result.Output.ShouldContain(identity, Case.Sensitive);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Client] - Compile links cannot import files from engine project directories")]
+    [MemberData(nameof(ForbiddenProjects))]
+    public async Task Compile_EngineDirectory_ShouldReject(string identity)
+    {
+        // Arrange
+        using var probe = new GuardProbe();
+        string source = Path.Combine(probe.DirectoryPath, "resources", "Database", identity, "shared", "Helper.cs");
+        // Act
+        var result = await probe.ThinAsync($"<Compile Include=\"{GuardProbe.Escape(source)}\" Link=\"Safe.cs\" />", target: "CoreCompile");
+        // Assert
+        result.ExitCode.ShouldNotBe(0);
+        result.Output.ShouldContain("COHDBCLIENT001", Case.Sensitive);
+        result.Output.ShouldContain(source, Case.Sensitive);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Client] - Source guards retain allowed contracts and exact directory boundaries")]
+    [MemberData(nameof(AllowedProjects))]
+    public async Task Sources_ContractOrNonmatchingBoundary_ShouldAllow(string identity)
+    {
+        // Arrange
+        using var probe = new GuardProbe();
+        string source = Path.Combine(probe.DirectoryPath, "resources", "Database", identity, "shared", "Assimalign.Cohesion.Database.Storage.cs");
+        // Act
+        var shared = await probe.ThinAsync($"<CohesionSharedSource Include=\"{identity}\" />");
+        var compile = await probe.ThinAsync($"<Compile Include=\"{GuardProbe.Escape(source)}\" />", target: "CoreCompile");
+        // Assert
+        shared.ExitCode.ShouldBe(0, shared.Output);
+        compile.ExitCode.ShouldBe(0, compile.Output);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Client] - Compile guard checks files added during shared-source expansion")]
+    public async Task Compile_ExpandedSharedSource_ShouldReject()
+    {
+        // Arrange
+        using var probe = new GuardProbe();
+        string source = Path.Combine(probe.DirectoryPath, "resources", "Database",
+            "Assimalign.Cohesion.Database.Graph", "shared", "Helper.cs");
+        // Act
+        var result = await probe.ThinAsync("", target: "ResolveCohesionSharedSource",
+            expandedSources: $"<Compile Include=\"{GuardProbe.Escape(source)}\" Link=\"Safe.cs\" />");
+        // Assert
+        result.ExitCode.ShouldNotBe(0);
+        result.Output.ShouldContain("COHDBCLIENT001", Case.Sensitive);
+        result.Output.ShouldContain(source, Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Client] - Empty compiler inputs do not evaluate empty paths")]
+    public async Task Compile_EmptyInput_ShouldAllow()
+    {
+        // Arrange
+        using var probe = new GuardProbe();
+        // Act
+        var result = await probe.ThinAsync("", target: "CoreCompile");
+        // Assert
+        result.ExitCode.ShouldBe(0, result.Output);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Client] - Compile paths are normalized and matched without case or Link metadata escapes")]
+    public async Task Compile_RelativeEngineSourceWithTraversal_ShouldReject()
+    {
+        // Arrange
+        using var probe = new GuardProbe();
+        string source = "../resources/Database/ASSIMALIGN.COHESION.DATABASE.GRAPH/src/unused/../Helper.cs";
+        // Act
+        var result = await probe.ThinAsync($"<Compile Include=\"{source}\" Link=\"Contracts/Helper.cs\" />", target: "CoreCompile");
+        // Assert
+        result.ExitCode.ShouldNotBe(0);
+        result.Output.ShouldContain("COHDBCLIENT001", Case.Sensitive);
+        result.Output.ShouldContain("ASSIMALIGN.COHESION.DATABASE.GRAPH", Case.Sensitive);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Client] - Design-time references skip missing files while checking existing identities")]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task ResolvedReferences_MissingDesignTimeAsset_ShouldCheckOnlyExistingFiles(bool engine, bool includeExisting)
+    {
+        // Arrange
+        using var probe = new GuardProbe();
+        string missing = Path.Combine(probe.DirectoryPath, "Not.Built.Yet.dll");
+        string existing = engine ? probe.CopyEngine("Safe.Name.dll") :
+            Path.Combine(AppContext.BaseDirectory, "Assimalign.Cohesion.Database.Protocol.dll");
+        // Act
+        var result = await probe.ThinAsync("", designTimeBuild: true,
+            referencePaths: $"<ReferencePath Include=\"{GuardProbe.Escape(missing)}{(includeExisting ? ";" + GuardProbe.Escape(existing) : "")}\" />");
+        // Assert
+        result.Output.ShouldNotContain("MSB3441", Case.Sensitive);
+        if (engine)
+        {
+            result.ExitCode.ShouldNotBe(0);
+            result.Output.ShouldContain("COHDBCLIENT001", Case.Sensitive);
+            result.Output.ShouldContain("Assimalign.Cohesion.Database.Sql", Case.Sensitive);
+        }
+        else { result.ExitCode.ShouldBe(0, result.Output); }
+    }
+
     private sealed class GuardProbe : IDisposable
     {
         private readonly string _repository;
@@ -267,7 +377,7 @@ public sealed class DatabaseClientDependencyGuardTests
 
         internal async Task<ProbeResult> ThinAsync(string items, string projectName = "Assimalign.Cohesion.Database.Sql.Client",
             string assemblyName = "Assimalign.Cohesion.Database.Sql.Client", string target = "ResolveAssemblyReferences",
-            string subdirectory = "shipping", string? repository = null, string referencePaths = "")
+            string subdirectory = "shipping", string? repository = null, string referencePaths = "", bool designTimeBuild = false, string expandedSources = "")
         {
             string directory = Path.Combine(DirectoryPath, subdirectory);
             Directory.CreateDirectory(directory);
@@ -277,6 +387,7 @@ public sealed class DatabaseClientDependencyGuardTests
                   <PropertyGroup>
                     <CohesionRepositoryDirectory>{Escape((repository ?? DirectoryPath) + Path.DirectorySeparatorChar)}</CohesionRepositoryDirectory>
                     <Configuration>{_configuration}</Configuration><TargetFramework>net10.0</TargetFramework>
+                    <DesignTimeBuild>{designTimeBuild}</DesignTimeBuild>
                     <RootNamespace>{Escape(projectName)}</RootNamespace>
                   </PropertyGroup>
                   <ItemGroup>{items}</ItemGroup>
@@ -284,6 +395,7 @@ public sealed class DatabaseClientDependencyGuardTests
                   <PropertyGroup><AssemblyName>{Escape(assemblyName)}</AssemblyName></PropertyGroup>
                   <Target Name="ResolveAssemblyReferences"><ItemGroup>{referencePaths}</ItemGroup></Target>
                   <Target Name="CoreCompile" />
+                  <Target Name="ResolveCohesionSharedSource"><ItemGroup>{expandedSources}</ItemGroup></Target>
                 </Project>
                 """);
             return await RunAsync(path, "-t:" + target);

@@ -9,9 +9,13 @@ harnesses; checkout ancestors and exemption properties do not. Embedded and Stud
 
 Before ResolveAssemblyReferences and CoreCompile the guard rejects all evaluated engine
 ProjectReference items, including name-only/private, transitive and ReferenceOutputAssembly=false
-references. After ResolveAssemblyReferences, GetAssemblyIdentity checks every ReferencePath asset's
-actual simple name, so packages, framework members, HintPath and renamed DLLs receive the same rule.
-Both layers reject model roots and Catalog/Storage/Security/Tcp implementation families (including
+references. After ResolveAssemblyReferences, GetAssemblyIdentity checks each existing ReferencePath
+asset's actual simple name, so packages, framework members, HintPath and renamed DLLs receive the
+same rule. Both this guard and the canary's closure check filter missing design-time outputs before
+identity inspection. A third layer rejects
+forbidden CohesionSharedSource identities before expansion and Compile inputs under engine project
+directories after shared-source expansion and before CoreCompile, regardless of Link metadata.
+All three layers reject model roots and Catalog/Storage/Security/Tcp implementation families (including
 retired identities), plus Database root and shared Storage/Transactions/Indexing/Memory/Embedded/Hosting.
 Shared Types/Execution/Language/Protocol/Security and model Protocol contracts are independently named.
 The implementation uses Framework MSBuild-compatible path normalization and has no opt-out.

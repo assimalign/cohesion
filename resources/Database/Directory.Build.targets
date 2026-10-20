@@ -13,6 +13,7 @@
 			<_CohesionDatabaseClientRelativeDirectory Condition="$(_CohesionDatabaseClientDirectory.ToLowerInvariant().StartsWith('$(_CohesionDatabaseClientRepository.ToLowerInvariant())'))">$(_CohesionDatabaseClientDirectory.Substring($(_CohesionDatabaseClientRepository.Length)))</_CohesionDatabaseClientRelativeDirectory>
 			<_CohesionDatabaseClientNamePattern>(?i)^Assimalign\.Cohesion\.Database(?:\.Client|\..+\.Client)$</_CohesionDatabaseClientNamePattern>
 			<_CohesionDatabaseClientForbiddenPattern>(?i)^Assimalign\.Cohesion\.Database(?:$|\.(?:Sql|Graph|Documents|KeyValuePair|Blob|Cache)(?:$|\.(?:Catalog|Storage|Security|Tcp)(?:\.|$))|\.(?:Storage|Transactions|Indexing|Memory|Embedded|Hosting)(?:$|\.))</_CohesionDatabaseClientForbiddenPattern>
+			<_CohesionDatabaseClientForbiddenDirectoryPattern>$(_CohesionDatabaseClientForbiddenPattern.Replace('^', '(^|/)').Replace('$', '(/|$)'))</_CohesionDatabaseClientForbiddenDirectoryPattern>
 			<_CohesionDatabaseClientGuardApplies>false</_CohesionDatabaseClientGuardApplies>
 			<_CohesionDatabaseClientGuardApplies Condition="($([System.Text.RegularExpressions.Regex]::IsMatch('$(MSBuildProjectName)', '$(_CohesionDatabaseClientNamePattern)')) OR $([System.Text.RegularExpressions.Regex]::IsMatch('$(AssemblyName)', '$(_CohesionDatabaseClientNamePattern)')))
 			    AND !$([System.Text.RegularExpressions.Regex]::IsMatch('$(_CohesionDatabaseClientRelativeDirectory)', '(?i)(^|/)(tests|examples|samples|fixtures)(/|$)'))">true</_CohesionDatabaseClientGuardApplies>
@@ -38,8 +39,11 @@
 	        AfterTargets="ResolveAssemblyReferences">
 		<!-- Read actual identities, including renamed DLLs, package assets and framework
 		     members. Filenames and package IDs are not authoritative assembly names. -->
-		<GetAssemblyIdentity AssemblyFiles="@(ReferencePath)"
-		                     Condition="'$(_CohesionDatabaseClientGuardApplies)' == 'true' AND '@(ReferencePath)' != ''">
+		<ItemGroup Condition="'$(_CohesionDatabaseClientGuardApplies)' == 'true'">
+			<_CohesionDatabaseClientExistingReference Include="@(ReferencePath)" Condition="Exists('%(FullPath)')" />
+		</ItemGroup>
+		<GetAssemblyIdentity AssemblyFiles="@(_CohesionDatabaseClientExistingReference)"
+		                     Condition="'@(_CohesionDatabaseClientExistingReference)' != ''">
 			<Output TaskParameter="Assemblies" ItemName="_CohesionDatabaseClientResolvedAssembly" />
 		</GetAssemblyIdentity>
 		<ItemGroup Condition="'$(_CohesionDatabaseClientGuardApplies)' == 'true'">
@@ -48,5 +52,33 @@
 		</ItemGroup>
 		<Error Code="COHDBCLIENT001" Condition="'@(_CohesionDatabaseClientForbiddenAssembly)' != ''"
 		       Text="Database client '$(MSBuildProjectName)' (assembly '$(AssemblyName)', project '$(MSBuildProjectFullPath)') resolved forbidden model or shared engines: @(_CohesionDatabaseClientForbiddenAssembly->'%(Name) [%(OriginalItemSpec)]', ', '). Remove the direct/transitive project, package, framework or Reference/HintPath route and depend on model Protocol and shared client contracts instead." />
+	</Target>
+
+	<!-- Source dependencies carry the same boundary as assembly dependencies. Check
+	     identities before expansion, then physical compiler paths after expansion. -->
+	<Target Name="ValidateCohesionDatabaseClientSharedSources"
+	        DependsOnTargets="InitializeCohesionDatabaseClientGuard"
+	        BeforeTargets="ResolveAssemblyReferences;ResolveCohesionSharedSource;CoreCompile">
+		<ItemGroup Condition="'$(_CohesionDatabaseClientGuardApplies)' == 'true'">
+			<_CohesionDatabaseClientForbiddenSharedSource Include="@(CohesionSharedSource)"
+			    Condition="$([System.Text.RegularExpressions.Regex]::IsMatch('%(Identity)', '$(_CohesionDatabaseClientForbiddenPattern)'))" />
+		</ItemGroup>
+		<Error Code="COHDBCLIENT001" Condition="'@(_CohesionDatabaseClientForbiddenSharedSource)' != ''"
+		       Text="Database client '$(MSBuildProjectName)' (assembly '$(AssemblyName)', project '$(MSBuildProjectFullPath)') must not compile shared source from model or shared engines. Offending CohesionSharedSource identities: @(_CohesionDatabaseClientForbiddenSharedSource, ', '). Depend on model Protocol and shared client contracts instead." />
+	</Target>
+
+	<Target Name="ValidateCohesionDatabaseClientCompileItems"
+	        DependsOnTargets="InitializeCohesionDatabaseClientGuard"
+	        AfterTargets="ResolveCohesionSharedSource"
+	        BeforeTargets="CoreCompile">
+		<ItemGroup Condition="'$(_CohesionDatabaseClientGuardApplies)' == 'true' AND '@(Compile)' != ''">
+			<_CohesionDatabaseClientCompile Include="@(Compile)">
+				<GuardDirectory>$([System.IO.Path]::GetDirectoryName('%(FullPath)').Replace('\', '/'))</GuardDirectory>
+			</_CohesionDatabaseClientCompile>
+			<_CohesionDatabaseClientForbiddenCompile Include="@(_CohesionDatabaseClientCompile)"
+			    Condition="$([System.Text.RegularExpressions.Regex]::IsMatch('%(GuardDirectory)', '$(_CohesionDatabaseClientForbiddenDirectoryPattern)'))" />
+		</ItemGroup>
+		<Error Code="COHDBCLIENT001" Condition="'@(_CohesionDatabaseClientForbiddenCompile)' != ''"
+		       Text="Database client '$(MSBuildProjectName)' (assembly '$(AssemblyName)', project '$(MSBuildProjectFullPath)') must not compile files under model or shared engine directories. Offending compiler inputs: @(_CohesionDatabaseClientForbiddenCompile->'%(FullPath)', ', '). Depend on model Protocol and shared client contracts instead." />
 	</Target>
 </Project>
