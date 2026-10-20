@@ -3572,6 +3572,11 @@ description + exported registrations), the engine binds them.
 
 ## Engine-owned background workers
 
+The worker resilience tests observe Storage event 8 (PendingCommitsFlushed) for each create
+and reopen and require no event 9 (GroupCommitWindowMissed). This proves the worker served
+construction without a wall-clock latency assertion. Reopen receives an unproven writer so its
+recovery scrub must commit; an unchanged clean open may require no grouped flush.
+
 The group-commit flusher serves both published databases and provisional file sets (#1275).
 It captures the storage snapshot before the instance snapshot, then flushes uncovered storages
 without taking the engine lock: create/open holds that lock while its construction commits wait

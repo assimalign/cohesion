@@ -49,7 +49,8 @@ public sealed class KeyValueWorkerResilienceTests
         var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
         var options = Options(strategy);
         options.Durability = StorageCommitDurability.Grouped;
-        options.GroupCommitWindow = TimeSpan.FromSeconds(2);
+        options.GroupCommitWindow = TimeSpan.FromSeconds(10);
+        using var commits = new GroupCommitRecorder();
         await using var engine = KeyValueDatabaseEngine.Create("provisional-engine", options);
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.WriteAheadFlush);
         var faults = strategy.Faults(Failing, catalog: true);
@@ -65,11 +66,11 @@ public sealed class KeyValueWorkerResilienceTests
         {
             faults.Clear();
         }
-        var latency = Stopwatch.StartNew();
         await engine.CreateDatabaseAsync(Healthy);
 
         // Assert: the worker survives the stale snapshot and serves the next construction.
-        latency.Elapsed.ShouldBeLessThan(options.GroupCommitWindow / 2);
+        (await Eventually(() => commits.FlushCount(Healthy) > 0)).ShouldBeTrue();
+        commits.MissedCount(Healthy).ShouldBe(0);
         worker.FailureCount.ShouldBe(0);
         worker.Fault.ShouldBeNull();
         engine.GetStorageSnapshot().Length.ShouldBe(2);
@@ -82,7 +83,8 @@ public sealed class KeyValueWorkerResilienceTests
         var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
         var options = Options(strategy);
         options.Durability = StorageCommitDurability.Grouped;
-        options.GroupCommitWindow = TimeSpan.FromSeconds(2);
+        options.GroupCommitWindow = TimeSpan.FromSeconds(10);
+        using var commits = new GroupCommitRecorder();
         await using var engine = KeyValueDatabaseEngine.Create("provisional-engine", options);
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.WriteAheadFlush);
         var duration = Stopwatch.StartNew();
@@ -93,14 +95,22 @@ public sealed class KeyValueWorkerResilienceTests
         do
         {
             string name = "provisional" + creates;
-            var latency = Stopwatch.StartNew();
             var database = await engine.CreateDatabaseAsync(name);
-            latency.Elapsed.ShouldBeLessThan(options.GroupCommitWindow / 2, "create must be served before the self-help window");
+            (await Eventually(() => commits.FlushCount(name) > 0)).ShouldBeTrue();
             creates++;
+
+            // Leave an unproven logical writer, so reopen must commit a recovery scrub.
+            // A clean reopen may need no grouped commit and would prove nothing about the worker.
+            var storage = database.DataStorage;
+            storage.WriteAheadJournal.AppendBegin(storage.ReserveTransactionSequence());
+            storage.WriteAheadJournal.Flush(forceDurable: true);
+            storage.TakeOffline(StorageOfflineCause.RecoveryInterrupted,
+                "Simulated power loss before transaction end.", new IOException("Simulated unfinished writer."));
             await database.DisposeAsync();
-            latency.Restart();
+            int beforeOpen = commits.FlushCount(name);
             var reopened = await engine.OpenDatabaseAsync(name);
-            latency.Elapsed.ShouldBeLessThan(options.GroupCommitWindow / 2, "open must be served before the self-help window");
+            (await Eventually(() => commits.FlushCount(name) > beforeOpen)).ShouldBeTrue();
+            commits.MissedCount(name).ShouldBe(0);
             opens++;
             await reopened.DisposeAsync();
         }
