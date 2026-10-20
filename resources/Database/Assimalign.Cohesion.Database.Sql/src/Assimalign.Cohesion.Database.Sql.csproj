@@ -5,7 +5,6 @@
 	<ItemGroup>
 		<CohesionSharedSource Include="Assimalign.Cohesion.Database.Execution" />
 		<CohesionSharedSource Include="Assimalign.Cohesion.Database.Sql.Language" />
-		<CohesionSharedSource Include="Assimalign.Cohesion.Database.Sql.Catalog" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database" />
         <CohesionSharedSource Include="Assimalign.Cohesion.Database" />
 		<!-- Transport listeners/connections for the SQL model's wire-protocol server
@@ -14,14 +13,11 @@
 		     2026-07-14; the root contract is the only area-wide requirement. Protocol
 		     and Security arrive transitively through the root's child-root rollup). -->
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Storage" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Language" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Catalog" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Schema" />
-		<!-- Direct (not just transitive via Sql.Storage): the engine's public options
-		     surface exposes StorageCommitDurability and its workers drive the Storage
-		     worker seams. -->
+		<!-- The public options expose kernel durability and workers use the kernel Storage seams. -->
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Storage" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Types" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Indexing" />
 	</ItemGroup>
 </Project>

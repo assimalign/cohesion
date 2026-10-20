@@ -17,7 +17,7 @@ The explicit interface Build forwards to the concrete member with no token, so i
 observe `CancellationToken.None`. There is no added interface, model-shaped root member, or
 default interface implementation.
 
-The area root (architecture: [resources/Database/DESIGN.md](../../../../docs/resources/Database/DESIGN.md)).
+The area root (architecture: [docs/resources/Database/DESIGN.md](../../../../docs/resources/Database/DESIGN.md)).
 The lifecycle and composition bases serve all five data models. Execution capability
 bases serve their real variant sets: four typed models and three language models.
 Model requests, parsers and servers belong in their model packages. Hosting composes
@@ -1109,3 +1109,8 @@ within each equal-start group and among unlocated entries is stable.
 DatabaseNotFoundException preserves structured diagnostics from an inner DatabaseException.
 An incomplete file set can therefore keep precise absence semantics for provisioning while
 its allocated model diagnostic remains available through Diagnostics.
+
+
+## Model architecture test support
+
+The root test project owns the stateless ModelArchitecture helper, linked into each model test assembly by the Database-scoped ModelArchitecture.targets. Each model owns its own test. The model build exports actual compiler inputs, including generated sources, references and conditional symbols; the test reconstructs a complete Roslyn compilation and rejects Storage-to-Catalog/engine and Catalog-to-engine symbol references by source folder. Engine-owned persistence composition lives under Internal/Engine/Storage; resource accessors and assembly metadata are common infrastructure. Negative probes cover aliases, generic arguments, inheritance and member calls. This is test-only support and adds no model dependency to the shipped root assembly.

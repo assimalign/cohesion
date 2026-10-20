@@ -41,10 +41,10 @@ internal sealed partial class SqlPlanExecutor
         var schema = snapshot.Namespaces.FirstOrDefault(value => value.Name.Equals(plan.Name, StringComparison.OrdinalIgnoreCase));
         var contents = ObjectsInNamespace(snapshot, plan.Name);
         if (!plan.Cascade && contents.Views.Length != 0)
-        { throw new SqlPlanningException("COHSQLD002", string.Format(CultureInfo.CurrentCulture, ErrorMessages.ViewDropDependent, plan.Name, contents.Views[0].Schema, contents.Views[0].Name)); }
+        { throw new SqlPlanningException("COHSQLD002", string.Format(CultureInfo.CurrentCulture, ErrorMessages.EngineViewDropDependent, plan.Name, contents.Views[0].Schema, contents.Views[0].Name)); }
         if (!plan.Cascade && contents.Tables.Length != 0)
         {
-            throw new SqlPlanningException("COHSQLE030", string.Format(CultureInfo.CurrentCulture, ErrorMessages.NamespaceDependentObjects, plan.Name));
+            throw new SqlPlanningException("COHSQLE030", string.Format(CultureInfo.CurrentCulture, ErrorMessages.EngineNamespaceDependentObjects, plan.Name));
         }
         // Definition DDL must never wait for transaction locks under its metadata lease:
         // a deferred migration owns table reservations and waits for that lease between steps.

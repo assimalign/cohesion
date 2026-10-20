@@ -26,5 +26,5 @@ internal static class SqlNamespaces
 
     internal static SqlCatalogNamespace Require(SqlCatalog catalog, string name)
         => Find(catalog, name) ?? throw new SqlPlanningException("COHSQLE028",
-            string.Format(CultureInfo.CurrentCulture, ErrorMessages.NamespaceMissing, name));
+            string.Format(CultureInfo.CurrentCulture, ErrorMessages.EngineNamespaceMissing, name));
 }

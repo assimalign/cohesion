@@ -13,7 +13,7 @@ internal sealed partial class SqlPlanner
         if (definition.Identity is not { } identity) { return null; }
         if (type.Type is not (DatabaseType.Int8 or DatabaseType.Int16 or DatabaseType.Int32 or DatabaseType.Int64) || definition.ResolvedType is null)
         {
-            throw SqlPlanningException.IdentityViolation(definition.ColumnName, ErrorMessages.IdentityIntegerRequired);
+            throw SqlPlanningException.IdentityViolation(definition.ColumnName, ErrorMessages.EngineIdentityIntegerRequired);
         }
         if (hasIdentity) { throw SqlPlanningException.IdentityViolation(definition.ColumnName, ErrorMessages.IdentityAlreadyDeclared); }
         if (identity.Increment == 0) { throw SqlPlanningException.IdentityViolation(definition.ColumnName, ErrorMessages.IdentityZeroIncrement); }

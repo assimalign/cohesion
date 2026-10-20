@@ -7,7 +7,7 @@ using System.Threading;
 
 using Assimalign.Cohesion.Database.Language;
 using Assimalign.Cohesion.Database.Sql.Catalog;
-using Assimalign.Cohesion.Database.Sql.Catalog.Internal;
+using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Types;
 

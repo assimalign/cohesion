@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Sql.Catalog;
-using Assimalign.Cohesion.Database.Sql.Catalog.Internal;
+using Assimalign.Cohesion.Database.Sql.Internal;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
@@ -49,8 +49,8 @@ internal sealed partial class SqlPlanExecutor
         var dependent = _catalog.Views.FirstOrDefault(view => column is null ? view.TableDependencies.Contains(table.ObjectId)
             : view.Dependencies.Contains(SqlObjectIdentity.Column(table.ObjectId, column), StringComparer.OrdinalIgnoreCase));
         if (dependent is not null)
-        { throw new SqlPlanningException("COHSQLD002", rename ? string.Format(CultureInfo.CurrentCulture, ErrorMessages.ViewDependent, dependent.Schema, dependent.Name)
-            : string.Format(CultureInfo.CurrentCulture, ErrorMessages.ViewDropDependent, table.Schema + "." + table.Name + (column is null ? "" : "." + column), dependent.Schema, dependent.Name)); }
+        { throw new SqlPlanningException("COHSQLD002", rename ? string.Format(CultureInfo.CurrentCulture, ErrorMessages.EngineViewDependent, dependent.Schema, dependent.Name)
+            : string.Format(CultureInfo.CurrentCulture, ErrorMessages.EngineViewDropDependent, table.Schema + "." + table.Name + (column is null ? "" : "." + column), dependent.Schema, dependent.Name)); }
     }
 
     private static SqlCatalogView[] DependentViews(SqlCatalogSnapshot snapshot, IEnumerable<SqlCatalogView> roots, IEnumerable<ulong> tables)
