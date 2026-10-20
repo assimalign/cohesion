@@ -411,4 +411,59 @@
 	<Folder Name="/Database/analyzers/Assimalign.Cohesion.SourceGeneration.Database/tests/">
 		<Project Path="../../analyzers/Assimalign.Cohesion.SourceGeneration.Database/tests/Assimalign.Cohesion.SourceGeneration.Database.Tests.csproj" />
 	</Folder>
+    <Folder Name="/Database/Models/Sql/Assimalign.Cohesion.Database.Sql.Protocol/" />
+    <Folder Name="/Database/Models/Sql/Assimalign.Cohesion.Database.Sql.Protocol/docs/">
+        <File Path="Assimalign.Cohesion.Database.Sql.Protocol/docs/DESIGN.md" />
+        <File Path="Assimalign.Cohesion.Database.Sql.Protocol/docs/OVERVIEW.md" />
+    </Folder>
+    <Folder Name="/Database/Models/Sql/Assimalign.Cohesion.Database.Sql.Protocol/src/">
+        <Project Path="Assimalign.Cohesion.Database.Sql.Protocol/src/Assimalign.Cohesion.Database.Sql.Protocol.csproj" />
+    </Folder>
+    <Folder Name="/Database/Models/Sql/Assimalign.Cohesion.Database.Sql.Protocol/tests/">
+        <Project Path="Assimalign.Cohesion.Database.Sql.Protocol/tests/Assimalign.Cohesion.Database.Sql.Protocol.Tests.csproj" />
+    </Folder>
+    <Folder Name="/Database/Models/Graph/Assimalign.Cohesion.Database.Graph.Protocol/" />
+    <Folder Name="/Database/Models/Graph/Assimalign.Cohesion.Database.Graph.Protocol/docs/">
+        <File Path="Assimalign.Cohesion.Database.Graph.Protocol/docs/DESIGN.md" />
+        <File Path="Assimalign.Cohesion.Database.Graph.Protocol/docs/OVERVIEW.md" />
+    </Folder>
+    <Folder Name="/Database/Models/Graph/Assimalign.Cohesion.Database.Graph.Protocol/src/">
+        <Project Path="Assimalign.Cohesion.Database.Graph.Protocol/src/Assimalign.Cohesion.Database.Graph.Protocol.csproj" />
+    </Folder>
+    <Folder Name="/Database/Models/Graph/Assimalign.Cohesion.Database.Graph.Protocol/tests/">
+        <Project Path="Assimalign.Cohesion.Database.Graph.Protocol/tests/Assimalign.Cohesion.Database.Graph.Protocol.Tests.csproj" />
+    </Folder>
+    <Folder Name="/Database/Models/Documents/Assimalign.Cohesion.Database.Documents.Protocol/" />
+    <Folder Name="/Database/Models/Documents/Assimalign.Cohesion.Database.Documents.Protocol/docs/">
+        <File Path="Assimalign.Cohesion.Database.Documents.Protocol/docs/DESIGN.md" />
+        <File Path="Assimalign.Cohesion.Database.Documents.Protocol/docs/OVERVIEW.md" />
+    </Folder>
+    <Folder Name="/Database/Models/Documents/Assimalign.Cohesion.Database.Documents.Protocol/src/">
+        <Project Path="Assimalign.Cohesion.Database.Documents.Protocol/src/Assimalign.Cohesion.Database.Documents.Protocol.csproj" />
+    </Folder>
+    <Folder Name="/Database/Models/Documents/Assimalign.Cohesion.Database.Documents.Protocol/tests/">
+        <Project Path="Assimalign.Cohesion.Database.Documents.Protocol/tests/Assimalign.Cohesion.Database.Documents.Protocol.Tests.csproj" />
+    </Folder>
+    <Folder Name="/Database/Models/KeyValuePair/Assimalign.Cohesion.Database.KeyValuePair.Protocol/" />
+    <Folder Name="/Database/Models/KeyValuePair/Assimalign.Cohesion.Database.KeyValuePair.Protocol/docs/">
+        <File Path="Assimalign.Cohesion.Database.KeyValuePair.Protocol/docs/DESIGN.md" />
+        <File Path="Assimalign.Cohesion.Database.KeyValuePair.Protocol/docs/OVERVIEW.md" />
+    </Folder>
+    <Folder Name="/Database/Models/KeyValuePair/Assimalign.Cohesion.Database.KeyValuePair.Protocol/src/">
+        <Project Path="Assimalign.Cohesion.Database.KeyValuePair.Protocol/src/Assimalign.Cohesion.Database.KeyValuePair.Protocol.csproj" />
+    </Folder>
+    <Folder Name="/Database/Models/KeyValuePair/Assimalign.Cohesion.Database.KeyValuePair.Protocol/tests/">
+        <Project Path="Assimalign.Cohesion.Database.KeyValuePair.Protocol/tests/Assimalign.Cohesion.Database.KeyValuePair.Protocol.Tests.csproj" />
+    </Folder>
+    <Folder Name="/Database/Models/Blob/Assimalign.Cohesion.Database.Blob.Protocol/" />
+    <Folder Name="/Database/Models/Blob/Assimalign.Cohesion.Database.Blob.Protocol/docs/">
+        <File Path="Assimalign.Cohesion.Database.Blob.Protocol/docs/DESIGN.md" />
+        <File Path="Assimalign.Cohesion.Database.Blob.Protocol/docs/OVERVIEW.md" />
+    </Folder>
+    <Folder Name="/Database/Models/Blob/Assimalign.Cohesion.Database.Blob.Protocol/src/">
+        <Project Path="Assimalign.Cohesion.Database.Blob.Protocol/src/Assimalign.Cohesion.Database.Blob.Protocol.csproj" />
+    </Folder>
+    <Folder Name="/Database/Models/Blob/Assimalign.Cohesion.Database.Blob.Protocol/tests/">
+        <Project Path="Assimalign.Cohesion.Database.Blob.Protocol/tests/Assimalign.Cohesion.Database.Blob.Protocol.Tests.csproj" />
+    </Folder>
 </Solution>

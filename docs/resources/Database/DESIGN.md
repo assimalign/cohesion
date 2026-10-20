@@ -1,5 +1,44 @@
 # Cohesion Data Platform — Area Design
 
+## Remote client and model wire ownership
+
+The five independently consumable Database.Sql.Protocol, Graph.Protocol, Documents.Protocol,
+KeyValuePair.Protocol and Blob.Protocol assemblies own the model messages, family singletons,
+codecs and transferred values. SQL and KeyValuePair move five public types each, Graph thirteen,
+Documents fourteen and Blob fifteen. Each engine references its Protocol sibling; each remote
+client references that sibling plus shared Database.Client, Protocol, Types and Connections.
+Documents.Client additionally references model-neutral Execution. Database.Client itself
+references Protocol, Types and Connections. Cache.Client remains an empty placeholder.
+
+The arrows show the contract ownership shared by the two peers:
+
+```mermaid
+flowchart LR
+    Engine["Model engine"] --> Wire["Model.Protocol"]
+    Client["Model.Client"] --> Wire
+    Client --> Core["Database.Client"]
+    Core --> Shared["Database.Protocol / Types"]
+    Wire --> Shared
+```
+
+Graph's public GraphValueCodec facade lives only in Graph.Protocol. Its stateless internal
+encoding algorithm is linked explicitly into both assemblies, with local immutable resource
+messages and no linked family singleton or event source. Documents' JSON/wire helpers and Blob's
+payload helper live with their codecs. Catalog, storage, requests, planners and servers remain engines.
+
+All six client exceptions derive directly from System.Exception. Their locally owned Diagnostics
+remain non-null read-only snapshots, stably ordered by source offset with unlocated entries last;
+SQL/Graph copy the actual shared-client inner exception. Catching DatabaseException no longer
+catches remote failures. All 52 moved public types intentionally change namespace and assembly
+identity, including engine/client signatures. No forwarders, duplicate DTOs or disk/wire format
+changes accompany the move.
+
+COHDBCLIENT001 rejects model and shared engine dependencies from every shipped Database client,
+first by evaluated project references (including build-order-only references), then by actual
+resolved assembly identity. Only repository-relative tests/examples/samples/fixtures path segments
+exempt harnesses. Embedded and Studio intentionally compose engines and lie outside the rule's
+client-name scope. The client-only sample checks the reference closure before trim/AOT publishing.
+
 **Status:** scaffold-complete, engines in build-out · **Owner:** Chase Crawford · **Scope:** everything under `resources/Database/`, plus the `Assimalign.Cohesion.Sdk.Database` build tooling under `sdks/` and the `App.Database` framework family.
 
 This document is the durable architecture record for the multi-model OLTP database engine. It captures the requirements, the project decomposition, the dependency directions, and the reasoning behind them. Sequencing and work-item tracking live in [docs/programs/DATABASE_PROGRAM_PLAN.md](../../programs/DATABASE_PROGRAM_PLAN.md) (temporary program scaffolding); this file is what survives after the backlog drains.

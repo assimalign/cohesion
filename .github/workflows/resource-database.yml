@@ -5,6 +5,7 @@ on:
       # Covers Database.Testing/fixtures/Assimalign.Cohesion.Database.SampleHost, the area's
       # acceptance fixture, and the engine/wire streaming fixtures under Blob and Blob.Client.
       # Fixtures sit inside the projects whose tests drive them.
+      # Includes the five model Protocol src/tests/shared trees and the client-only AOT canary.
       - 'resources/Database/**'
       - '!resources/Database/**/*.slnx'
       - '!resources/Database/**/*.md'
@@ -75,25 +76,30 @@ jobs:
             'Assimalign.Cohesion.Database.ApplicationModel',
             'Assimalign.Cohesion.Database.Blob',
             'Assimalign.Cohesion.Database.Blob.Client',
+            'Assimalign.Cohesion.Database.Blob.Protocol',
             'Assimalign.Cohesion.Database.Client',
             'Assimalign.Cohesion.Database.Documents',
             'Assimalign.Cohesion.Database.Documents.Client',
             'Assimalign.Cohesion.Database.Documents.Language',
+            'Assimalign.Cohesion.Database.Documents.Protocol',
             'Assimalign.Cohesion.Database.Embedded',
             'Assimalign.Cohesion.Database.Execution',
             'Assimalign.Cohesion.Database.Graph',
             'Assimalign.Cohesion.Database.Graph.Client',
             'Assimalign.Cohesion.Database.Graph.Language',
+            'Assimalign.Cohesion.Database.Graph.Protocol',
             'Assimalign.Cohesion.Database.Hosting',
             'Assimalign.Cohesion.Database.Indexing',
             'Assimalign.Cohesion.Database.KeyValuePair',
             'Assimalign.Cohesion.Database.KeyValuePair.Client',
+            'Assimalign.Cohesion.Database.KeyValuePair.Protocol',
             'Assimalign.Cohesion.Database.Language',
             'Assimalign.Cohesion.Database.Protocol',
             'Assimalign.Cohesion.Database.Security',
             'Assimalign.Cohesion.Database.Sql',
             'Assimalign.Cohesion.Database.Sql.Client',
             'Assimalign.Cohesion.Database.Sql.Language',
+            'Assimalign.Cohesion.Database.Sql.Protocol',
             'Assimalign.Cohesion.Database.Sql.Schema',
             'Assimalign.Cohesion.Database.Sql.Tcp',
             'Assimalign.Cohesion.Database.Storage',

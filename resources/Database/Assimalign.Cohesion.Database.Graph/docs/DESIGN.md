@@ -37,7 +37,7 @@ shared Storage, Transactions and Indexing rather than another pager, journal or 
 | Component or package | Responsibility |
 | --- | --- |
 | `Database.Graph` | Engine, sessions, typed operations, planning, scalar/path execution, and graph protocol server |
-| `Database.Graph.Client` | NuGet-only scalar and path client over the shared connection pool; references Graph and Database.Client |
+| `Database.Graph.Client` | NuGet-only scalar and path client over the shared connection pool; references Graph.Protocol and Database.Client |
 | `Database.Graph.Language` | ISO GQL subset, AST and syntax/capability diagnostics |
 | `Catalog/` in Database.Graph | Snapshot-visible labels, types, property keys, index metadata and ownership |
 | `Storage/` in Database.Graph | Record encoding, kernel adapter, adjacency and property B+Trees |
@@ -52,7 +52,8 @@ flowchart LR
     Engine --> Language["Graph.Language"]
     Engine --> Catalog["Graph Catalog component"]
     Engine --> Storage["Graph Storage component"]
-    Client["Graph.Client"] --> Engine
+    Client["Graph.Client"] --> Wire["Graph.Protocol"]
+    Engine --> Wire
     Client --> SharedClient["Database.Client"]
 ```
 

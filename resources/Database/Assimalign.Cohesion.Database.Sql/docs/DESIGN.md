@@ -5203,7 +5203,7 @@ scalars at this layer; span-based row codecs below.
 
 ## Model-owned wire family (#1015)
 
-This package owns the Sql request and tabular result codecs; the shared protocol
+Sql.Protocol owns the Sql request and tabular result codecs; the shared protocol
 contains only mechanism. [Wire format](WIRE-PROTOCOL.md) specifies every message and
 scalar component for independent clients. The server binds SqlProtocol.Family
 once on accept and retains its existing model payloads. The shared startup version advances
