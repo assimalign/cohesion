@@ -120,8 +120,10 @@ flowchart LR
 A filtered incident lookup costs O(t log E + r) index work for t selected type/direction ranges
 and r retained entries in them, decoding k visible references; deterministic identity ordering adds O(k log k) CPU work. Direct
 traversal uses these same selections and ordering with O(Vvisited) visited state. A label scan
-examines node records and sorts its matches. A property equality anchor instead seeks its
-shared B+Tree in `O(log N + candidates)` after locating index metadata, then sorts its matches.
+still decodes every node record and filters by label in `GraphStore.GetNodes(label, snapshot)`
+(`src/Storage/GraphStore.cs:150-154`), then sorts its matches. There is no label index yet;
+reducing label-scan decoding through a label index belongs to #1534. A property equality anchor
+instead seeks its shared B+Tree in `O(log N + candidates)` after locating index metadata, then sorts its matches.
 Index numeric keys normalize
 integral, decimal and finite floating point values through double conversion. Full scalar comparisons
 filter index candidates using exact reduced numeric fractions across all numeric types, including
@@ -532,14 +534,17 @@ Label expressions (#1139, #1245) supply required labels from a pattern's pure co
 whose label expression is a pure conjunction (`WHERE n:Keep`, `n IS LABELED Keep&Tagged`).
 Pattern labels precede WHERE labels in source order. Every required label participates in property
 index selection with inline or WHERE equality values. Bound entities still take precedence;
-without a seek, the first required label at any node position anchors a label scan. Thus
+without a seek, the first required label by node position anchors a label scan. This choice is
+positional, not cardinality-based; choosing by cardinality waits for label counts. Thus
 `(a)->(b:Keep)` and `(a)->(b) WHERE b:Keep` can both start at `b`, expanding right then left.
 EXPLAIN reports the actual LabelScan or IndexSeek label and node ordinal. Every candidate still
 passes the full pattern and WHERE residual, including other required labels.
-A disjunction (`:A|B`), negation (`:!A`) or
-wildcard (`:%`) leaves `Labels` empty, so `(n:A|B {k: 1})` and `(n:!A {k: 1})` plan an anchor with
-no label and no property and scan every node; anchoring on `A`'s index would silently drop the `B`
-or non-`A` rows. Predicates under OR, XOR, NOT or truth tests, and label expressions using
+A disjunction (`:A|B`), negation (`:!A`) or wildcard (`:%`) leaves that node's `Labels` empty.
+When the path has no required label and no bound entity takes precedence,
+`(n:A|B {k: 1})` and `(n:!A {k: 1})` plan an anchor with no label and no property and scan every
+node. Another node's required label can still anchor the path: `(n:A|B)->(m:C)` anchors at `m`.
+Anchoring the disjunction or negation on `A`'s index would silently drop the `B` or non-`A` rows.
+Predicates under OR, XOR, NOT or truth tests, and label expressions using
 disjunction, negation or wildcard, supply no required labels. Collection is clause-local and
 only node variables can supply node anchors; a relationship's labeled predicate tests its type. The
 executor evaluates the expression on every candidate node, and a relationship pattern's expression
@@ -575,9 +580,11 @@ planner likewise groups predicates once and visits only each label's own index d
 (`NodeIndexLeafPlanner.scala`:184, :201, :248-296). Selection agrees with a per-pair search: the
 first label with an index on a key the node has a value for, then that label's key whose value comes
 first, inline properties before `WHERE` equalities. A node carrying more than 16 labels is tested
-through a hash set built once per evaluation. Label scans still decode the store's node records;
-filtering by the anchor label occurs before charging expansion work. A deterministic 2,010-node
-fixture with ten Keep nodes charges ten candidates for the WHERE label scan, as for its pattern form.
+through a hash set built once per evaluation. Label scans still decode every node record;
+filtering by the anchor label occurs before charging expansion work. #1245 reduces the expansion
+budget charge and the expansion work after that scan, not the scan's decoding cost. A deterministic
+2,010-node fixture with ten Keep nodes still decodes all 2,010 nodes but charges ten anchor
+candidates for the WHERE label scan, as for its pattern form. Label-index decoding is #1534.
 Neo4j likewise builds label scans from selections' HasLabels predicates for any pattern node
 (`community/cypher/cypher-planner/src/main/scala/org/neo4j/cypher/internal/compiler/planner/logical/steps/leafplanner/labelScanLeafPlanner.scala:45-46, :73-78`,
 relative to C:/Source/repos/neo4j/neo4j; behavior consulted, no code copied).
@@ -825,6 +832,9 @@ before any result header, so failures roll back mutations and preserve pooled-se
 Aggregate syntax adds no catalog data or on-disk format; no catalog version changes.
 
 ### Ordering and paging (#1142)
+
+Queries without ORDER BY have no guaranteed row order. Choosing a later-position anchor can
+change their result row order, even though each matched path retains its source-ordered elements.
 
 GraphPlanner binds sort keys against projected names and source bindings. DISTINCT admits only
 projected values, including a projected entity under any alias. Structural expression matching
