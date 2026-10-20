@@ -12,13 +12,11 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Graph.Language" />
 	</ItemGroup>
 	<ItemGroup>
-        <CohesionSharedSource Include="Assimalign.Cohesion.Database.Graph.Protocol" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Storage" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Transactions" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Types" />
 	</ItemGroup>
 	<ItemGroup>
-        <CohesionSharedSource Include="Assimalign.Cohesion.Database.Graph.Protocol" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Indexing" />
 	</ItemGroup>
 </Project>

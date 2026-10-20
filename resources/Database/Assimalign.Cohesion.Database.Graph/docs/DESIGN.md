@@ -1317,9 +1317,11 @@ failing gives up at about 101 s, like the other workers.
 
 ## Composite values and wire framing (#1146)
 
-Graph owns the public GraphValueCodec in src/Protocol, shared by the server and Graph.Client
-through their existing reference. This takes the issue's public codec option; no internal
-type was promoted, interface, friend grant or project reference added. Both expressions and
+Graph.Protocol owns the public GraphValueCodec, consumed by the server and Graph.Client.
+The engine links its stateless GraphValueEncoding helper and supplies an internal struct with
+static abstract message getters, so successful measurement and writes perform no resource
+lookups. Only throw paths read the engine's resources under the culture active at failure;
+no message strings are cached or public interfaces added. Both expressions and
 wire ship together because #1105 has landed. GraphProtocol.CompositeValues registers one
 capability, graph.composite-values, alongside diagnostics, with no protocol version bump.
 GraphPathResult and Path frames are unchanged. No catalog/storage format changes occur:

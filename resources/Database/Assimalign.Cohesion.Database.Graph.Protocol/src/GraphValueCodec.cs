@@ -22,14 +22,12 @@ public static class GraphValueCodec
     /// <param name="value">The value to encode.</param>
     /// <returns>The complete encoded value.</returns>
     /// <exception cref="DatabaseTypeException">A type or format bound is unsupported.</exception>
-    public static byte[] Encode(object? value) => GraphValueEncoding.Encode(value, Messages);
+    public static byte[] Encode(object? value) => GraphValueEncoding.Encode<GraphEncodingMessages>(value);
 
     /// <summary>Decodes one bounded composite component.</summary>
     /// <param name="payload">The complete component.</param>
     /// <returns>The decoded value with scalar runtime types preserved.</returns>
     /// <exception cref="ProtocolException">The component is malformed or exceeds a bound.</exception>
-    public static object? Decode(ReadOnlySpan<byte> payload) => GraphValueEncoding.Decode(payload, Messages);
+    public static object? Decode(ReadOnlySpan<byte> payload) => GraphValueEncoding.Decode<GraphEncodingMessages>(payload);
 
-    private static GraphValueEncoding.Messages Messages => new(
-        ErrorMessages.CompositeLimit, ErrorMessages.CompositeMalformed, ErrorMessages.CompositeRequired);
 }
