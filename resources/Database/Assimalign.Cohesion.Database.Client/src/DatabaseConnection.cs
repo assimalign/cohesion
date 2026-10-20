@@ -17,11 +17,17 @@ namespace Assimalign.Cohesion.Database.Client;
 /// <para>
 /// Each <see cref="DatabaseClient.RentAsync(CancellationToken)"/> returns a new lease. Disposing it
 /// returns its healthy session to the pool and permanently ends this lease. A stale reference can
-/// never use, abort or return a later rental of the session. Repeated disposal awaits the same return.
+/// never use, abort or return a later rental of the session. Repeated disposal or abort awaits the same return.
+/// <see cref="IsOpen"/> is the one state or metadata member that does not throw after disposal:
+/// it returns <see langword="false"/>. Operations and other metadata members reject this lease permanently.
 /// </para>
 /// <para>
 /// Connections allow one exchange at a time. Disposal cancels and joins an admitted exchange before
 /// returning its session, and an overlapping exchange is rejected before it writes any frame.
+/// </para>
+/// <para>
+/// End or roll back an explicit transaction before disposing a connection. The pool does not yet
+/// reset transaction state on return; server-reported status and pool rollback are tracked by #1540.
 /// </para>
 /// </remarks>
 public sealed class DatabaseConnection : IAsyncDisposable
@@ -88,7 +94,8 @@ public sealed class DatabaseConnection : IAsyncDisposable
 
     /// <summary>Gets whether this lease is undisposed and its session is open and usable.</summary>
     /// <remarks>A complete statement failure preserves health. An unfinished response, transport
-    /// failure, cancellation or abort breaks the session. A disposed lease always reports false.</remarks>
+    /// failure, cancellation or abort breaks the session. This is the one state or metadata member
+    /// that does not throw after disposal; a disposed lease always reports false.</remarks>
     public bool IsOpen
     {
         get
@@ -209,8 +216,8 @@ public sealed class DatabaseConnection : IAsyncDisposable
 
     /// <summary>Discards this lease and closes its session instead of pooling it.</summary>
     /// <returns>The noncancellable asynchronous teardown operation.</returns>
-    /// <exception cref="ObjectDisposedException">The lease is disposed.</exception>
-    /// <remarks>Cancels and joins an active exchange. This cannot undo a committed transaction or
+    /// <remarks>Cancels and joins an active exchange. On an already-returned lease, awaits the
+    /// original return without touching the session. This cannot undo a committed transaction or
     /// establish an unacknowledged command's outcome.</remarks>
     public ValueTask AbortAsync() => ReturnAsync(abort: true);
 
@@ -226,14 +233,13 @@ public sealed class DatabaseConnection : IAsyncDisposable
         Task? exchangeCompletion;
         lock (_exchangeLock)
         {
-            if (abort)
-            {
-                ObjectDisposedException.ThrowIf(_disposed, this);
-                _connector.Invalidate();
-            }
             if (_returnTask is not null)
             {
                 return new ValueTask(_returnTask);
+            }
+            if (abort)
+            {
+                _connector.Invalidate();
             }
             _disposed = true;
             DatabaseClientEventSource.Log.RentalEnded();

@@ -25,7 +25,7 @@ public static partial class SqlProtocolConnectionExtensions
         /// <exception cref="ArgumentNullException">The connection is null.</exception>
         /// <exception cref="ArgumentException">The statement is empty or the connection belongs to another family.</exception>
         /// <exception cref="InvalidOperationException">Another exchange is active.</exception>
-        /// <exception cref="ObjectDisposedException">The rental has been returned and the pool has not rented this instance again.</exception>
+        /// <exception cref="ObjectDisposedException">The lease is disposed and rejects calls permanently, even if its session is rented again.</exception>
         /// <exception cref="OperationCanceledException">The exchange is canceled, which marks the connection broken.</exception>
         /// <exception cref="DatabaseClientException">The server rejects the statement or the connection fails.</exception>
         public ValueTask<DatabaseClientResult> ExecuteAsync(

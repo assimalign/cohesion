@@ -242,6 +242,13 @@ exceptions do not promise that a failed COMMIT left no writes. The SQL mapper
 documents and enforces this boundary by faulting its scope/store and refusing replay;
 see its [reconciliation contract](../../Assimalign.Cohesion.Database.Sql.Mapping/docs/DESIGN.md#commit-outcome-and-reconciliation).
 
+**Known gap (#1540):** end or roll back an explicit transaction before disposing a connection.
+The pool currently preserves unfinished transaction state, which the next renter can inherit.
+Server-reported transaction status and rollback on pool return belong to #1540 (and P8 #1264).
+The skipped `DisposeAsync_WithExplicitTransaction_ShouldRollbackBeforeNextRental` regression
+records that required behavior. A disposed core lease rejects SQL extension calls permanently,
+even when its authenticated session is rented again.
+
 In-process sessions carry engine codes in `DatabaseException.Diagnostics` (#1103).
 The SQL server preserves the existing `CODE: message` Error text. On a negotiated 2.1 diagnostics session, client exceptions also retain the complete structured carrier. Cancellation tests that execute sessions directly
 assert structured codes, while their wire counterparts keep their original text assertions.

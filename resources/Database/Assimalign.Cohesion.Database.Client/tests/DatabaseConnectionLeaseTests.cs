@@ -55,7 +55,8 @@ public sealed class DatabaseConnectionLeaseTests
             await stale.ExecuteAsync<bool>(null!, timeout.Token));
         await Should.ThrowAsync<ObjectDisposedException>(async () =>
             await stale.ExecuteStreamingAsync(StreamingClientTestHarness.CreateExchange(), timeout.Token));
-        await Should.ThrowAsync<ObjectDisposedException>(async () => await stale.AbortAsync());
+        stale.AbortAsync().AsTask().ShouldBeSameAs(returned);
+        await stale.AbortAsync();
         stale.DisposeAsync().AsTask().ShouldBeSameAs(returned);
         await stale.DisposeAsync();
 
@@ -115,6 +116,7 @@ public sealed class DatabaseConnectionLeaseTests
             await exchange.Cancelled.Task.WaitAsync(timeout.Token);
             returned.IsCompleted.ShouldBeFalse();
             original.DisposeAsync().AsTask().ShouldBeSameAs(returned);
+            original.AbortAsync().AsTask().ShouldBeSameAs(returned);
             Task<DatabaseConnection> pending = harness.Client.RentAsync(timeout.Token).AsTask();
             pending.IsCompleted.ShouldBeFalse();
             exchange.Continue.TrySetResult();
@@ -153,11 +155,13 @@ public sealed class DatabaseConnectionLeaseTests
         int cancellationInspections = 0;
         int callerCancellationInspections = 0;
         int staleRefused = 0;
-        int rounds = 0;
+        const int rounds = 256;
         var elapsed = Stopwatch.StartNew();
 
-        // Act: continue beyond the minimum until both sides of admission have actually won.
-        do
+        // Deviates from the repo duration-based race rule per #1313 owner ruling: use fixed
+        // rounds and verify each round; scheduler-dependent winner counts are reported only.
+        // Act
+        for (int round = 0; round < rounds; round++)
         {
             var original = await harness.Client.RentAsync(timeout.Token);
             using var callerCancellation = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token);
@@ -171,7 +175,7 @@ public sealed class DatabaseConnectionLeaseTests
                 }
             });
             var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            bool delayExecution = (rounds & 1) == 0;
+            bool delayExecution = (round & 1) == 0;
             Task executing = Task.Run(async () =>
             {
                 await start.Task.WaitAsync(timeout.Token);
@@ -216,7 +220,7 @@ public sealed class DatabaseConnectionLeaseTests
             Task stale = Task.Run(async () =>
             {
                 await original.DisposeAsync();
-                await Should.ThrowAsync<ObjectDisposedException>(async () => await original.AbortAsync());
+                await original.AbortAsync();
                 var probe = new CancellationExchange();
                 await Should.ThrowAsync<ObjectDisposedException>(async () => await original.ExecuteAsync(probe, timeout.Token));
                 probe.Entered.ShouldBeFalse();
@@ -224,19 +228,19 @@ public sealed class DatabaseConnectionLeaseTests
             }, timeout.Token);
             (await next.ExecuteAsync(StreamingClientTestHarness.CreatePing(), timeout.Token)).ShouldBe(ProtocolMessageType.Pong);
             await stale;
+            original.IsOpen.ShouldBeFalse();
+            next.IsOpen.ShouldBeTrue();
+            admitted.ShouldBe(cancelled);
+            cancellationInspections.ShouldBe(admitted);
+            (admitted + refused).ShouldBe(round + 1);
+            staleRefused.ShouldBe(round + 1);
             DatabaseClientEventSource.Log.CurrentRentedConnections.ShouldBe(rentedBefore + 1);
-            rounds++;
         }
-        while (elapsed.Elapsed < TimeSpan.FromSeconds(20) &&
-            (elapsed.Elapsed < TimeSpan.FromSeconds(1) || admitted < 10 || refused < 10 || callerCancellationInspections < 10));
 
         // Assert: no duplicate return, missed release or stale execution can hide behind scheduling.
         _output.WriteLine($"Rounds={rounds}, admitted={admitted}, refused={refused}, cancelled={cancelled}, staleRefused={staleRefused}, cancellationInspections={cancellationInspections}, callerCancellationInspections={callerCancellationInspections}, elapsed={elapsed.Elapsed}.");
-        admitted.ShouldBeGreaterThanOrEqualTo(10);
-        refused.ShouldBeGreaterThanOrEqualTo(10);
         cancelled.ShouldBe(admitted);
         cancellationInspections.ShouldBe(admitted);
-        callerCancellationInspections.ShouldBeGreaterThanOrEqualTo(10);
         staleRefused.ShouldBe(rounds);
         rounds.ShouldBe(admitted + refused);
         DatabaseClientEventSource.Log.CurrentRentedConnections.ShouldBe(rentedBefore);

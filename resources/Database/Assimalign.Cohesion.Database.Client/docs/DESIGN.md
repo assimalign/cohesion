@@ -157,9 +157,17 @@ pool. Disposal and failure release each rental exactly once.
 `DatabaseConnection.AbortAsync` explicitly discards a rental when a model cannot
 reset its application-level session state. It marks the connection unusable before
 cancelling/joining any active exchange and disposing the rental, so the pool closes
-its transport instead of reusing the session. This is non-cancellable; a disposed lease
-refuses abort. It makes no claim about whether the server completed an
+its transport instead of reusing the session. This is non-cancellable; abort on an already-returned
+lease joins the same return task as repeated disposal, without touching the connector. It makes no claim about whether the server completed an
 unacknowledged command; transaction outcome and reconciliation remain model concerns.
+
+### Known gap: transaction reset (#1540)
+
+End or roll back an explicit transaction before disposing a connection. The pool currently
+returns a healthy session with its transaction state intact, so a later renter can inherit an
+unfinished transaction. #1540 (with P8 #1264) owns server-reported transaction status and pool
+rollback on return; #1313 does not infer transaction state from commands. The SQL client carries
+a skipped regression test naming #1540 until that design is implemented.
 
 ## Streaming exchange and ownership
 
@@ -364,8 +372,9 @@ The client core has no public interface left and no `Abstractions/` folder
 - **Each returned `DatabaseConnection` is a lease (#1313).** The idle pool holds internal
   `DatabaseConnector` instances with their transport, frame reader/writer, handshake agreement
   and health. Every rent creates a new public lease with its own final disposed flag and active
-  exchange state. A stale lease rejects operations, abort and metadata access, reports
-  `IsOpen == false`, and repeated disposal awaits its original return without touching the
+  exchange state. A stale lease rejects operations and metadata access; `IsOpen` is the one
+  state/metadata member that does not throw and reports `false` after disposal, following the .NET
+  disposed-state convention. Repeated disposal and abort await its original return without touching the
   connector. Reuse is observed by the server session id or the `ConnectionRented.reused` event,
   never by public object identity. This lands independently of P8 (#1264).
 - **Dial failures are wrapped (resolved).** The P5 review found that `RentAsync` wrapped

@@ -137,6 +137,50 @@ public sealed class GraphClientEventSourceTests
         events[1].Payload!.Take(4).ShouldBe(["graph", "QueryPaths", "Cancelled", 1L]);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Database.Graph.Client] - Released paths: subsequent queries report failures and abort joins the original return")]
+    public async Task AbortAsync_AfterAbandonedPaths_ShouldJoinReturnAndPreserveQueryTelemetry()
+    {
+        // Arrange: four paths need eight handoff writes, so the single-slot queue cannot let
+        // the producer complete while the consumer reads only the first path's two chunks.
+        await using var harness = await GraphClientTestHarness.StartAsync();
+        await using var connection = await harness.Client.ConnectAsync(harness.Token);
+        var parameters = new Dictionary<string, object?> { ["name"] = new string('x', 512) };
+        await connection.ExecuteAsync(
+            "CREATE (:Person {name: $name}), (:Person {name: $name}), (:Person {name: $name}), (:Person {name: $name})",
+            parameters, harness.Token);
+        await foreach (GraphPath path in connection.QueryPathsAsync("MATCH (a:Person) RETURN a", cancellationToken: harness.Token))
+        {
+            break;
+        }
+        connection.IsOpen.ShouldBeFalse();
+        await using var next = await harness.Client.ConnectAsync(harness.Token);
+        using var recorder = new GraphClientEventRecorder();
+
+        // Act: the typed wrapper is alive, but its failed stream has already returned its lease.
+        await Should.ThrowAsync<ObjectDisposedException>(async () =>
+            await connection.QueryAsync("RETURN 1 AS n", cancellationToken: harness.Token));
+        await Should.ThrowAsync<ObjectDisposedException>(async () =>
+            await connection.ExecuteAsync("RETURN 1 AS n", cancellationToken: harness.Token));
+        await Should.ThrowAsync<ObjectDisposedException>(async () =>
+        {
+            await foreach (GraphPath path in connection.QueryPathsAsync("MATCH (a:Person) RETURN a", cancellationToken: harness.Token)) { }
+        });
+        await connection.AbortAsync();
+        await connection.AbortAsync();
+
+        // Assert: capability reads cannot bypass telemetry or make abort reach the next rental.
+        recorder.Events.ShouldNotContain(e => e.EventId == 0);
+        recorder.Events.Select(e => (e.EventName, Operation: (string)e.Payload![1]!)).ShouldBe(
+        [
+            ("QueryStart", "Query"), ("QueryFailed", "Query"), ("QueryStop", "Query"),
+            ("QueryStart", "Execute"), ("QueryFailed", "Execute"), ("QueryStop", "Execute"),
+            ("QueryStart", "QueryPaths"), ("QueryFailed", "QueryPaths"), ("QueryStop", "QueryPaths"),
+        ]);
+        recorder.Events.Where(e => e.EventId == 2).ShouldAllBe(e => Equals(e.Payload![2], "Error"));
+        next.IsOpen.ShouldBeTrue();
+        (await next.QueryAsync("RETURN 1 AS n", cancellationToken: harness.Token)).Count.ShouldBe(1);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database.Graph.Client] - GraphClientEventSource: Should close a cancelled query with a Cancelled stop and no failure")]
     public async Task QueryAsync_Cancelled_ShouldWriteACancelledStop()
     {
