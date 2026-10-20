@@ -53,6 +53,15 @@ Disposing a healthy rental returns it to an idle stack; `MaxPoolSize` bounds
 rentals and exhausted rents wait. Disposing the client closes idle connections;
 outstanding rentals close when returned. Closure sends best-effort `Terminate`.
 
+Shutdown publishes an interlocked disposed flag and cancels linked semaphore waits, which
+surface `ObjectDisposedException` without waiting for outstanding rentals. A pool lock coordinates
+semaphore entry/release/disposal and idle-stack changes. Return rechecks shutdown after pushing
+and removes and closes its connector if shutdown won, including from the synchronous
+`ConnectionReturned` event. Neither event listeners nor I/O run under the pool lock. A dial that
+finishes after shutdown closes its connector instead of creating a lease.
+Shutdown joins admitted semaphore waits before disposing the semaphore: token cancellation
+unlinks waiters asynchronously, so cancellation alone is insufficient to make disposal safe.
+
 The pool does not infer connection health from an error code. On failure, the
 exchange's completion evidence certifies that it consumed the entire response and
 left the server session ready for another request. The base owns that evidence: its

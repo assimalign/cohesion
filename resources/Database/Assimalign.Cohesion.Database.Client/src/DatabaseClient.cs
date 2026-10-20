@@ -33,7 +33,13 @@ public sealed class DatabaseClient : IAsyncDisposable
     private readonly ProtocolMessageFamily _family;
     private readonly ConcurrentStack<DatabaseConnector> _idle = new();
     private readonly SemaphoreSlim _slots;
-    private bool _isDisposed;
+    // Serializes semaphore entry/release/disposal and idle-stack admission/removal. Never held
+    // across frame I/O, cancellation callbacks or EventSource writes (listeners may dispose us).
+    private readonly object _poolLock = new();
+    private readonly CancellationTokenSource _disposeCancellation = new();
+    private int _waitingRents;
+    private TaskCompletionSource? _waitersCompletion;
+    private int _isDisposed;
 
     private DatabaseClient(DatabaseConnectionSettings settings, IDuplexConnectionFactory connectionFactory, ProtocolMessageFamily family)
     {
@@ -101,11 +107,36 @@ public sealed class DatabaseClient : IAsyncDisposable
     /// <exception cref="DatabaseClientException">Thrown when the dial fails, with <see cref="ProtocolErrorCode.ConnectionFailure"/>, the endpoint in the message and the transport's exception (for example a <see cref="System.Net.Sockets.SocketException"/>, a TLS handshake failure or a connect timeout) as the inner exception; when the transport breaks during the handshake (the peer resets or closes the connection), with <see cref="ProtocolErrorCode.Internal"/> and the transport's exception, if any, as the inner exception; or when the server rejects the handshake, with the server's wire code, or breaks the protocol, with <see cref="ProtocolErrorCode.ProtocolViolation"/>.</exception>
     public async ValueTask<DatabaseConnection> RentAsync(CancellationToken cancellationToken = default)
     {
-        ObjectDisposedException.ThrowIf(_isDisposed, this);
-
         long waitStartTimestamp = DatabaseClientEventSource.Log.GetPoolTimestamp();
 
-        await _slots.WaitAsync(cancellationToken).ConfigureAwait(false);
+        CancellationTokenSource waiting;
+        Task slot;
+        lock (_poolLock)
+        {
+            ObjectDisposedException.ThrowIf(Volatile.Read(ref _isDisposed) != 0, this);
+            waiting = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _disposeCancellation.Token);
+            slot = _slots.WaitAsync(waiting.Token);
+            _waitingRents++;
+        }
+        try
+        {
+            await slot.ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (Volatile.Read(ref _isDisposed) != 0)
+        {
+            throw new ObjectDisposedException(nameof(DatabaseClient));
+        }
+        finally
+        {
+            waiting.Dispose();
+            lock (_poolLock)
+            {
+                if (--_waitingRents == 0)
+                {
+                    _waitersCompletion?.TrySetResult();
+                }
+            }
+        }
 
         long waitEndTimestamp = waitStartTimestamp == 0 ? 0 : Stopwatch.GetTimestamp();
 
@@ -113,8 +144,17 @@ public sealed class DatabaseClient : IAsyncDisposable
         {
             // Prefer an idle, still-healthy connection — this is the session
             // reuse the pool exists for.
-            while (_idle.TryPop(out DatabaseConnector? idle))
+            while (true)
             {
+                DatabaseConnector? idle;
+                lock (_poolLock)
+                {
+                    ObjectDisposedException.ThrowIf(Volatile.Read(ref _isDisposed) != 0, this);
+                    if (!_idle.TryPop(out idle))
+                    {
+                        break;
+                    }
+                }
                 if (idle.IsOpen)
                 {
                     var rental = new DatabaseConnection(this, idle);
@@ -130,6 +170,8 @@ public sealed class DatabaseClient : IAsyncDisposable
             try
             {
                 await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+                // A dial admitted before shutdown may finish after the idle pool was drained.
+                ObjectDisposedException.ThrowIf(Volatile.Read(ref _isDisposed) != 0, this);
             }
             catch
             {
@@ -143,7 +185,7 @@ public sealed class DatabaseClient : IAsyncDisposable
         }
         catch
         {
-            _slots.Release();
+            ReleaseSlot();
             throw;
         }
     }
@@ -186,51 +228,82 @@ public sealed class DatabaseClient : IAsyncDisposable
     {
         try
         {
-            if (!_isDisposed && connection.IsOpen)
+            if (Volatile.Read(ref _isDisposed) == 0 && connection.IsOpen)
             {
                 // Written before the push, so a rental of the pooled connection is never traced first.
                 DatabaseClientEventSource.Log.ConnectionReturned(connection, pooled: true);
-                _idle.Push(connection);
+                lock (_poolLock)
+                {
+                    _idle.Push(connection);
+                    if (Volatile.Read(ref _isDisposed) == 0)
+                    {
+                        return;
+                    }
+                    // Shutdown can win after the initial check, including from the synchronous
+                    // return event. Rent and shutdown cannot pop this connector under this lock.
+                    _idle.TryPop(out _);
+                }
             }
             else
             {
                 DatabaseClientEventSource.Log.ConnectionReturned(connection, pooled: false);
-                await connection.CloseAsync().ConfigureAwait(false);
             }
+            await connection.CloseAsync().ConfigureAwait(false);
         }
         finally
         {
-            try
+            ReleaseSlot();
+        }
+    }
+
+    private void ReleaseSlot()
+    {
+        lock (_poolLock)
+        {
+            if (Volatile.Read(ref _isDisposed) == 0)
             {
                 _slots.Release();
-            }
-            catch (ObjectDisposedException)
-            {
-                // The client was disposed while this connection was rented; nothing
-                // waits on the slot anymore.
             }
         }
     }
 
     /// <summary>
     /// Closes every idle pooled connection. Outstanding rentals close when they are returned.
-    /// Idempotent.
+    /// Pending rents end with <see cref="ObjectDisposedException"/>. Idempotent.
     /// </summary>
     /// <returns>A task that completes when the idle connections are closed.</returns>
     public async ValueTask DisposeAsync()
     {
-        if (_isDisposed)
+        if (Interlocked.Exchange(ref _isDisposed, 1) != 0)
         {
             return;
         }
 
-        _isDisposed = true;
-
-        while (_idle.TryPop(out DatabaseConnector? idle))
+        // Only semaphore waits link this token; no model or transport callback runs here.
+        // Cancel before disposing the semaphore, which does not itself complete pending waits.
+        _disposeCancellation.Cancel();
+        Task waiters;
+        lock (_poolLock)
         {
+            waiters = _waitingRents == 0 ? Task.CompletedTask :
+                (_waitersCompletion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)).Task;
+        }
+        // Semaphore cancellation unlinks waiters asynchronously. Disposing it before they finish
+        // can erase its waiter list and strand a second waiter even though its token was canceled.
+        await waiters.ConfigureAwait(false);
+        while (true)
+        {
+            DatabaseConnector? idle;
+            lock (_poolLock)
+            {
+                if (!_idle.TryPop(out idle))
+                {
+                    _slots.Dispose();
+                    _disposeCancellation.Dispose();
+                    break;
+                }
+            }
             await idle.CloseAsync().ConfigureAwait(false);
         }
-
-        _slots.Dispose();
     }
 }
