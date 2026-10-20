@@ -58,6 +58,7 @@ internal static class SqlRowCodec
     /// 22 quotes STRING_AGG and LISTAGG identifiers in persisted SQL (#1115);
     /// 21 adds first-class SQL namespaces (catalog kind 15, #1030);
     /// 20 admits the three additional persisted referential delete actions (#1121);
+    /// 26 fences completion of interrupted empty creations (#1158);
     /// 19 quotes PERCENT and TIES identifiers in persisted canonical SQL (#1107);
     /// 18 quotes newly executable T1 function names and BOTH/LEADING/TRAILING in persisted canonical SQL (#1120);
     /// 17 freezes ADD COLUMN missing values separately from insert defaults (table extension 6, #1122);
@@ -84,7 +85,7 @@ internal static class SqlRowCodec
     /// There is no upgrade path (owner decisions of 2026-10-01 and 2026-10-02;
     /// upgrades are #1152).
     /// </summary>
-    internal const int RecordSpaceFormatVersion = 25;
+    internal const int RecordSpaceFormatVersion = 26;
 
     /// <summary>
     /// The size of the fixed version-stamp header preceding the tuple payload.

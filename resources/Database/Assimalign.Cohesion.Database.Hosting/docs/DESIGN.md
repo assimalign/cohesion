@@ -83,6 +83,11 @@ Additional services start in registration order, then servers; shutdown drains s
 
 ## Provisioning (B1 of the engine extensibility design)
 
+SQL completes an interrupted empty creation during its engine build and through the
+add-database command (#1158). The model validates the empty data/catalog state and
+finishes dbo and the format marker before publication; Hosting keeps the same model-neutral
+create call and command ownership checks. A catalog with user data and no marker is refused.
+
 Decision 49a defers populated-table work to SQL's engine-owned worker. Hosting reads the root
 `DatabaseInstance.Provisioning` observation without referencing SQL: operation/object,
 one-based position and total, pending/running, rows processed/total when known, and failure code.

@@ -11,6 +11,7 @@ using Assimalign.Cohesion.Database.Sql.Schema;
 using Assimalign.Cohesion.Database.Sql.Storage;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Transactions;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql;
 
@@ -307,9 +308,42 @@ public sealed class SqlDatabase : DatabaseInstance
         // synchronously and instance construction is a synchronous path.
         // The marker is the final creation commit: every current-format database must
         // already contain dbo. A crash before it remains an interrupted format-1 creation.
-        _catalog.CreateSchemaAsync(new SqlCatalogNamespace(SqlNamespaces.DefaultName))
-            .AsTask().GetAwaiter().GetResult();
-        _catalog.SetRecordSpaceFormatVersionAsync(SqlRowCodec.RecordSpaceFormatVersion)
+        CompleteCreation(_catalog);
+    }
+
+    // Admit only records creation itself can commit before its marker: collation,
+    // the initial counter, and dbo. An explicit format-1 marker is not an interruption.
+    internal static bool IsInterruptedCreation(SqlStorage storage, SqlCatalog catalog)
+    {
+        if (catalog.RecordSpaceFormatVersion != 1 || catalog.Namespaces.Any(schema => schema.Name != SqlNamespaces.DefaultName))
+        {
+            return false;
+        }
+        using var iterator = storage.GetUnitIterator();
+        while (iterator.MoveNext())
+        {
+            var reader = new DatabaseKeyReader(iterator.Current.Data.Span);
+            int kind = reader.ReadInt32();
+            if (kind == 2)
+            {
+                if (reader.ReadInt64() != 1 || reader.ReadInt64() > 2) { return false; }
+            }
+            else if (kind is not (7 or 15))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    internal static void CompleteCreation(SqlCatalog catalog)
+    {
+        if (catalog.Namespaces.Count == 0)
+        {
+            catalog.CreateSchemaAsync(new SqlCatalogNamespace(SqlNamespaces.DefaultName))
+                .AsTask().GetAwaiter().GetResult();
+        }
+        catalog.SetRecordSpaceFormatVersionAsync(SqlRowCodec.RecordSpaceFormatVersion)
             .AsTask().GetAwaiter().GetResult();
     }
 

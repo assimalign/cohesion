@@ -560,10 +560,10 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     protected override ValueTask<DatabaseInstance> CreateDatabaseCoreAsync(DatabaseName name, object? creationState, CancellationToken cancellationToken)
     {
         Collation collation = (Collation?)creationState ?? Collation.Binary;
-        return CreateDatabaseWithCollationAsync(name, collation);
+        return CreateDatabaseWithCollationAsync(name, collation, cancellationToken);
     }
 
-    private ValueTask<DatabaseInstance> CreateDatabaseWithCollationAsync(DatabaseName name, Collation defaultCollation)
+    private ValueTask<DatabaseInstance> CreateDatabaseWithCollationAsync(DatabaseName name, Collation defaultCollation, CancellationToken cancellationToken)
     {
         ValidateName(name);
         lock (_syncRoot)
@@ -574,6 +574,11 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
             if (_databases.ContainsKey(name))
             {
                 throw new DatabaseException($"A database with name '{name}' already exists.");
+            }
+
+            if (_strategy.StorageExists(name, catalog: false))
+            {
+                return OpenDatabaseInternal(name, cancellationToken, creating: true, defaultCollation);
             }
 
             // The data set claims the database: the strategy refuses it when the database exists in
@@ -618,6 +623,10 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
 
     /// <inheritdoc />
     protected override ValueTask<DatabaseInstance> OpenDatabaseCoreAsync(DatabaseName name, CancellationToken cancellationToken)
+        => OpenDatabaseInternal(name, cancellationToken);
+
+    private ValueTask<DatabaseInstance> OpenDatabaseInternal(DatabaseName name, CancellationToken cancellationToken,
+        bool creating = false, Collation? defaultCollation = null)
     {
         ValidateName(name);
         lock (_syncRoot)
@@ -647,36 +656,9 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
                 throw new DatabaseNotFoundException($"Database '{name}' does not exist.");
             }
 
-            // The catalog holds the data-storage format marker. Without it the
-            // database cannot pass the format gate, and this engine neither
-            // upgrades nor repairs databases, so refuse before opening (or
-            // creating) any file.
             string catalogLabel = SqlStorageStrategy.GetLabel(name, catalog: true);
-            if (!_strategy.StorageExists(name, catalog: true))
-            {
-                throw new SqlDataStorageFormatException(
-                    $"Database '{name}' has no catalog storage, so it has no data-storage format this engine can open: " +
-                    "its creation was interrupted, or it was written before the catalog had its own file set. " +
-                    "This engine does not upgrade or repair databases: drop the database (DropDatabaseAsync) and " +
-                    "create it again (on-disk format upgrades are tracked by assimalign/cohesion#1152).");
-            }
-
-            // The catalog file set opens first and alone: the format gate reads
-            // only the catalog, so a refused database's data file set is never
-            // opened — no recovery replay, no created journal or backup file, no
-            // close. Opening the catalog writes nothing beyond what opening any
-            // storage does (crash recovery of the catalog file set itself), and
-            // an untouched storage closes without writing.
-            SqlStorage catalogStorage;
-            try
-            {
-                catalogStorage = _strategy.OpenStorage(name, catalog: true, cancellationToken);
-            }
-            catch (StorageFormatException exception)
-            {
-                throw RefuseStorageFormat(name, "catalog", catalogLabel, exception);
-            }
-
+            bool missingCatalog = !_strategy.StorageExists(name, catalog: true);
+            SqlStorage? catalogStorage = null;
             SqlStorage? storage = null;
 
             // See CreateDatabaseWithCollationAsync: instance construction commits (recovery
@@ -685,6 +667,33 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
             // the snapshot is published.
             try
             {
+                // Only a data set with no allocated user pages can meet a new catalog.
+                // Existing catalogs still pass the format gate before the data set opens.
+                if (missingCatalog)
+                {
+                    storage = _strategy.OpenStorage(name, catalog: false, cancellationToken);
+                    if (storage.PageManager.PageCount != 2)
+                    {
+                        throw new SqlDataStorageFormatException(
+                            $"Database '{name}' has no catalog storage, so it has no data-storage format this engine can open: " +
+                            "its creation was interrupted, or it was written before the catalog had its own file set. " +
+                            "This engine does not upgrade or repair databases: drop the database (DropDatabaseAsync) and " +
+                            "create it again (on-disk format upgrades are tracked by assimalign/cohesion#1152).");
+                    }
+                    ConfigureStorage(storage, name, catalog: false);
+                    catalogStorage = _strategy.CreateStorage(name, catalog: true);
+                }
+                else
+                {
+                    try
+                    {
+                        catalogStorage = _strategy.OpenStorage(name, catalog: true, cancellationToken);
+                    }
+                    catch (StorageFormatException exception)
+                    {
+                        throw RefuseStorageFormat(name, "catalog", catalogLabel, exception);
+                    }
+                }
                 ConfigureStorage(catalogStorage, catalogLabel, catalog: true);
                 SqlCatalog catalog;
                 try
@@ -703,12 +712,20 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
                     }
                     throw;
                 }
-                SqlDatabase.ThrowIfFormatIsNotCurrent(name, catalog.RecordSpaceFormatVersion);
-                SqlSchemaProvisioner.ValidateRecordedFormats(catalog);
+                bool interrupted = SqlDatabase.IsInterruptedCreation(catalogStorage, catalog);
+                if (!interrupted)
+                {
+                    SqlDatabase.ThrowIfFormatIsNotCurrent(name, catalog.RecordSpaceFormatVersion);
+                    if (creating)
+                    {
+                        throw new DatabaseException($"A database with name '{name}' already exists.");
+                    }
+                    SqlSchemaProvisioner.ValidateRecordedFormats(catalog);
+                }
 
                 try
                 {
-                    storage = _strategy.OpenStorage(name, catalog: false, cancellationToken);
+                    storage ??= _strategy.OpenStorage(name, catalog: false, cancellationToken);
                 }
                 catch (StorageFormatException exception)
                 {
@@ -717,6 +734,19 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
 
                 ConfigureStorage(storage, name, catalog: false);
                 PublishStorageSnapshotLocked(storage, catalogStorage);
+
+                if (interrupted)
+                {
+                    if (storage.PageManager.PageCount != 2)
+                    {
+                        SqlDatabase.ThrowIfFormatIsNotCurrent(name, catalog.RecordSpaceFormatVersion);
+                    }
+                    if (missingCatalog || catalog.DdlGeneration == 0)
+                    {
+                        catalog = SqlCatalog.Open(catalogStorage, defaultCollation ?? FindDeclaration(name)?.Collation ?? Collation.Binary);
+                    }
+                    SqlDatabase.CompleteCreation(catalog);
+                }
 
                 // The spelling the database was created with, which its data set's header kept,
                 // whatever spelling opened it (#1392).
@@ -741,7 +771,7 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
                 }
                 finally
                 {
-                    catalogStorage.Dispose();
+                    catalogStorage?.Dispose();
                 }
                 throw;
             }

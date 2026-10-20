@@ -103,6 +103,7 @@ internal sealed class CrashCaptureSqlStorageStrategy : SqlStorageStrategy
     internal Action? DurableChanged { get; set; }
     internal Action<bool>? DurableStorageChanged { get; set; }
     internal Action<bool>? StorageWriteStarting { get; set; }
+    internal Action<bool>? StorageCreated { get; set; }
 
     private void OnWriteStarting(bool catalog)
     {
@@ -236,9 +237,19 @@ internal sealed class CrashCaptureSqlStorageStrategy : SqlStorageStrategy
                 Journal: new GatedStream(writeThrough: _durability == StorageCommitDurability.None, changed, writing),
                 Backup: new GatedStream(writeThrough: true, changed, writing));
             _live[key] = streams;
-            return SqlStorage.Create(new StorageStream(new SimulatedDurableFileHandle(streams.Data)),
+            var storage = SqlStorage.Create(new StorageStream(new SimulatedDurableFileHandle(streams.Data)),
                 new StorageStream(new SimulatedDurableFileHandle(streams.Journal)),
                 new StorageStream(new SimulatedDurableFileHandle(streams.Backup)), GetLabel(databaseName, catalog), _durability);
+            try
+            {
+                StorageCreated?.Invoke(catalog);
+                return storage;
+            }
+            catch
+            {
+                storage.Dispose();
+                throw;
+            }
         }
     }
 

@@ -1672,7 +1672,7 @@ creates a SQL namespace only; a compiled schema's name remains its ownership ide
 selects a namespace. dbo is an Adhoc namespace record seeded only by StampNewCatalog, and SQL
 refuses its removal because provisioning requires it. Creation commits dbo before the final format
 marker, so every crash image accepted as format 24 contains dbo; earlier images retain the
-format-1 interrupted-creation refusal. Opening a database seeds or commits nothing.
+interrupted-create completion path described under the format rule. An open commits only to finish such an empty creation.
 
 Provisioning belongs to this model (owner decisions 49 to 58 of 2026-10-09, B1 of
 `docs/programs/DATABASE_ENGINE_EXTENSIBILITY_DESIGN.md`). It has two entry points over one internal
@@ -2813,7 +2813,7 @@ project reference or InternalsVisibleTo change is required.
   format, no upgrade path.** The catalog stores the format version of the whole
   data file set, rows and the index trees that ride it (a kind-4 record for
   versions 1–3, a kind-8 record from version 4). The engine reads and writes
-  format 25 only: format 6's stamped rows in per-object page chains whose index keys use the
+  format 26 only: format 6's stamped rows in per-object page chains whose index keys use the
   temporal identity encoding (#1099, below), in index trees of B-tree page format
   2, which order entries by key, entry reference and writer (#1194,
   `Database.Indexing` DESIGN), decoded through each table's physical column
@@ -2829,25 +2829,21 @@ project reference or InternalsVisibleTo change is required.
   column out of every stored version (#1237; the catalog format change takes no
   upgrade path either, #1152). A format-5 table record (extension version 2)
   still loads, so that the gate below, not a decode error, refuses the database.
-  `CreateDatabaseAsync` writes
-  the format-6 marker as soon as the catalog opens, and first checks that the catalog is new
-  (no marker, no tables): `SqlStorageStrategy.CreateStorage` (internal) must refuse
-  existing storage, and a strategy that reopened it instead would otherwise get
-  an older catalog declared current. `OpenDatabaseAsync` refuses a database on
-  any other version, older or newer, with a `DatabaseException` (the internal
-  `SqlDataStorageFormatException`) that names the database, the version found
-  and the version supported. For an older database it says to export the data
-  with the engine that wrote it, drop the database and create it again (create
-  refuses a name whose storage exists). Version 1 means no marker: every
-  released engine stamped one at creation, so an unmarked catalog is a creation
-  interrupted before the stamp (or a pre-release database), and the message says
-  so. **The gate reads the catalog alone.** `OpenDatabaseAsync` opens the
-  catalog file set, loads the catalog and checks the marker before it opens the
-  data file set, so a refused open never opens the data files: no crash replay
-  into them, no journal or backup file created, no close. A database without a
-  catalog storage (an interrupted creation, or one older than the catalog's own
-  file set) is refused before any file is opened, never adopted with an empty
-  catalog. The catalog file set itself gets only what opening any storage does.
+  Creation commits the optional default collation, then dbo, then the format marker.
+  Format 26 records the interrupted-creation completion contract (#1158), without an
+  upgrade path. Create and open complete a marker-free catalog only when it contains
+  creation metadata (the initial object-id counter, optional collation and dbo only),
+  and the data set has no allocated user pages. An empty data set without a catalog
+  is completed the same way. A committed collation is preserved; an empty catalog
+  adopts the create call's or engine declaration's collation. This is also the path
+  used during DatabaseApplication Build and by the add-database control-plane command.
+  No user data is upgraded. Tables or other user metadata without a marker retain
+  the existing format-1 refusal and remedy. An explicit old marker is always refused.
+  **The format gate reads an existing catalog alone.** An unsupported marker is
+  refused before the data set opens, preserving its files for the engine that wrote
+  them. Proving an interrupted creation empty requires opening its data set; a
+  populated data set without a catalog is refused without creating a replacement.
+  The catalog file set itself gets only what opening any storage does.
   Cleanly closed, it is left byte-identical, because a storage closed with
   nothing written through it writes nothing (Storage DESIGN.md). Crashed, it
   gets the storage layer's physical redo/undo, which is format-agnostic and
@@ -3354,8 +3350,8 @@ the invariant lower case of its name:
   catalog used to be the storage named `<name>.catalog`, in the same namespace as
   database names, so a database named `sales.catalog` was the catalog of `sales`. A
   drop deletes the database's directory, both sets at once. A database whose data set
-  exists without its catalog set (an interrupted create) is refused with
-  `SqlDataStorageFormatException`, as before. A directory without the data set, which
+  exists without its catalog set is completed only when it has no allocated user pages;
+  otherwise it is refused with `SqlDataStorageFormatException`. A directory without the data set, which
   an interrupted create or drop leaves, is no database: an open does not find it, a
   create refuses it with a message that names the remedy (a stale catalog set must
   never meet a new data set), and a drop deletes it.
