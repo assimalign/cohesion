@@ -87,13 +87,11 @@ transaction coordinator's internal test hooks), never protected surface on `Stor
   checksum (16), flags (20), type (21), slot count (22), free-data end (24), overflow
   size (28), reserved nonce/MAC space for encryption at rest (32–63), then the
   owner tag (64) driving per-owner record chains (72–95 reserved).
-- **`PageType.Free` is zero — deliberately.** A zero-initialized page reads as free,
-  and `FreePage` re-stamps freed pages with `Free`, which is what lets the free-space
-  map be *reconstructed from page headers* on open instead of being persisted as a
-  separate structure that could drift from reality. The trade-off: a page freed but not
-  yet flushed at process exit reappears as allocated after reopen — a safe leak, never
-  corruption. (A bitmap FSM page type is reserved for when file sizes make the open-time
-  scan matter.)
+- **Free and reclaimed pages (format 4, #1160).** `PageType.Free` is zero and only an
+  entirely zero-filled page may carry it. Freed pages use `PageType.Reclaimed` (10), retain
+  checksummed metadata and rebuild the free-space map at open. Before classifying either
+  kind as reusable, open reads the whole page and validates it: a zeroed first sector of a
+  live page cannot silently remove that page from its owner or expose it to allocation.
 - **Page LSN.** Every page carries the LSN of the journal record that last modified it
   (since storage format 3: its full page image or its last committed delta, a bracket's
   uncommitted changes carrying none). This is the hook for the write-ahead rule (a page may
@@ -103,9 +101,9 @@ transaction coordinator's internal test hooks), never protected surface on `Stor
 - **Checksums on every read path.** CRC-32C over the full page with the checksum field
   zeroed (storage format 2, "Checksums" below). Stamped centrally in the buffer pool's
   write-back (the only path to the data stream), verified centrally in the buffer pool's
-  load (the only path from it). A stored checksum of zero means "never stamped" and skips
-  verification — accepted because the alternative (a validity bit elsewhere) buys nothing
-  against the ~2⁻³² false-negative rate this already carries.
+  load (the only path from it). A stored checksum of zero is accepted only for an entirely
+  zero page. A computed CRC of zero is stored as `0xFFFFFFFF`, reserving zero for
+  uninitialized pages; page 0 is outside the pool and retains its separate checksums.
 
 ### Page 0: the identity block and two alternating header slots
 
@@ -222,9 +220,22 @@ never misread.
   such a file set before its journal is read, which makes the page-0 fence the one that
   covers the polynomial change, and the frame version the one for later bumps that keep it.
 
+### Storage format 4 (#1160)
+
+Format 4 separates checksummed reclaimed pages from zero-only uninitialized pages and
+requires a checksum on every nonzero pooled page. The format fence rejects format 3 and
+older; no upgrade or legacy reader is provided. The open scan checks the full bytes of
+free/reclaimed pages and pages whose stored checksum is zero before trusting their header.
+This follows PostgreSQL's `PageIsVerified` all-zero exception
+(`src/backend/storage/page/bufpage.c:148-152`): an apparently new header alone cannot prove
+that the whole block is empty. `StoragePageIntegrityTests` covers a zeroed first sector,
+a missing checksum, a false free header with a matching checksum, legitimate reclamation
+and an all-zero extension page. `StorageCorruptionException.Code` is `COHDBS003` and its
+`PageId` identifies page-scoped damage; engines translate it to the database boundary.
+
 ### Storage format 3 (#1253)
 
-`StorageFileHeader.CurrentFormatVersion` is 3 since #1253, which changed what the journal's page
+Storage format 3 (#1253), superseded by format 4 above, changed what the journal's page
 records mean: a full page image once per checkpoint interval and byte-range deltas at commit,
 replayed in order ("Write ordering rules", "Page records", "Recovery replay rules"). The page and
 page-0 layouts are format 2's. Journal frames are version 4. The bump goes through #1251's fence
@@ -2400,7 +2411,7 @@ the others) stay as they were; the counters are their process-wide totals for to
 
 `StorageException` is the area root for this library. `StorageIOException` (stream and
 allocation failures), `SlottedPageException` (record layout violations),
-`StorageCorruptionException` (checksum/header integrity failures, and since #1253 a gap
+`StorageCorruptionException` (`COHDBS003`, checksum/header integrity failures, and since #1253 a gap
 in a page's chain of journal records found by recovery, naming both LSNs — carries the
 `PageId`), `StorageFormatException` (a file set in another on-disk format, coded
 `COHDBS001`, carrying the found and supported versions), `StorageOfflineException` (a

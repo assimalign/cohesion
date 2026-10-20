@@ -4859,6 +4859,15 @@ for every declared name and rejects evidence for undeclared names. OQL's
 
 ## Error model
 
+Storage corruption is `COHDBS003` (#1160). The engine translates a
+`StorageCorruptionException` into `DatabaseCorruptionException`, retaining the storage
+cause and page id, naming the database and page, and advising restoration from a verified
+backup. Its structured diagnostic crosses the existing wire execution-failure path; a
+failed read never becomes an absent row, document, node, key or blob. Legitimate slot
+reclamation still reads as absence. Create/open failures receive the same translation
+from the root lifecycle after the model has released its resources. Storage format 4
+reserves zero headers for entirely zero pages and identifies reclaimed pages separately.
+
 `DatabaseException` (area root) for everything user-facing: plan-time
 validation and execution errors. Named integrity violations use
 `SqlConstraintViolationException`, a `DatabaseException` carrying the constraint,
@@ -4985,9 +4994,9 @@ from the row fetch as "the row was reclaimed beneath its entry" and dropped the
 row. Only a reclaimed row is skipped now, through the positive check
 `Storage.TryReadRecord` makes (see "Seek execution is snapshot-anchored"), as
 PostgreSQL's heap fetch returns "not found" for a dead line pointer and raises
-`ERRCODE_DATA_CORRUPTED` for an invalid page. The engine does not wrap these
-storage errors in a `DatabaseException` yet, so over the wire one reaches the
-client as `Internal` and closes the session ("Session state machine", above).
+`ERRCODE_DATA_CORRUPTED` for an invalid page. Corruption is translated to `DatabaseCorruptionException` (`COHDBS003`), naming the
+database and page, and reaches the wire as `ExecutionFailure` without closing the session.
+Other I/O failures retain their existing handling.
 The scan had the opposite defect: the version purge deleting a slot, or freeing
 a page, while a statement scanned the table (an `UPDATE` or `DELETE` target scan,
 a `SELECT` without a seek) failed the statement with "Cannot read a deleted

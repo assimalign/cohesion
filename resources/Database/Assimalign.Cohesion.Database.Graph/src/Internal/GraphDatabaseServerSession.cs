@@ -459,7 +459,7 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
         catch (DatabaseException exception)
         {
             var diagnostic = exception.Diagnostics.FirstOrDefault(item => item.Severity == DiagnosticSeverity.Error);
-            string errorText = diagnostic?.Code is { } code ? $"{code}: {exception.Message}" : exception.Message;
+            string errorText = diagnostic?.Code is { } code && !exception.Message.StartsWith(code + ":", StringComparison.Ordinal) ? $"{code}: {exception.Message}" : exception.Message;
             await WriteDiagnosticsAsync(PrepareDiagnostics(exception.Diagnostics), cancellationToken).ConfigureAwait(false);
             await WriteErrorAsync(ProtocolErrorCode.ExecutionFailure, errorText, cancellationToken).ConfigureAwait(false);
             return;

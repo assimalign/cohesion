@@ -39,7 +39,7 @@ public sealed class KeyValueIndexReadIntegrityTests
         // Act: the page decays on the device.
         var faults = strategy.Faults(DatabaseName);
         faults.RottenPage = entryPage;
-        var failure = await Should.ThrowAsync<StorageCorruptionException>(() => database.GetAsync(session, Bytes("bravo"), TestTimeout.Token()).AsTask());
+        var failure = await Should.ThrowAsync<DatabaseCorruptionException>(() => database.GetAsync(session, Bytes("bravo"), TestTimeout.Token()).AsTask());
         long rottenReads = faults.RottenPageReads;
         faults.RottenPage = null;
         var healed = await database.GetAsync(session, Bytes("bravo"), TestTimeout.Token());
@@ -75,7 +75,7 @@ public sealed class KeyValueIndexReadIntegrityTests
         // Act
         var faults = strategy.Faults(DatabaseName);
         faults.RottenPage = entryPage;
-        await Should.ThrowAsync<StorageCorruptionException>(() => database.PutAsync(session, Bytes("alpha"), Bytes("replaced"), cancellationToken: TestTimeout.Token()).AsTask());
+        await Should.ThrowAsync<DatabaseCorruptionException>(() => database.PutAsync(session, Bytes("alpha"), Bytes("replaced"), cancellationToken: TestTimeout.Token()).AsTask());
         faults.RottenPage = null;
         var entry = await database.GetAsync(session, Bytes("alpha"), TestTimeout.Token());
 
@@ -136,7 +136,7 @@ public sealed class KeyValueIndexReadIntegrityTests
         }
 
         // Act
-        var failure = await Should.ThrowAsync<StorageCorruptionException>(() => database.GetAsync(session, Bytes("alpha"), TestTimeout.Token()).AsTask());
+        var failure = await Should.ThrowAsync<DatabaseCorruptionException>(() => database.GetAsync(session, Bytes("alpha"), TestTimeout.Token()).AsTask());
         var bravo = await database.GetAsync(session, Bytes("bravo"), TestTimeout.Token());
 
         // Assert

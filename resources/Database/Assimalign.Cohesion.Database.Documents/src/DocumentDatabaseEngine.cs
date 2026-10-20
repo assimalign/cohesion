@@ -661,18 +661,18 @@ public sealed class DocumentDatabaseEngine : DatabaseEngine
             }
             catch (StorageCorruptionException exception)
             {
-                var refusal = RefuseInterruptedCreation(name, preserve: true);
+                var refusal = DatabaseCorruptionException.Create(name, exception);
                 storage?.TakeOffline(StorageOfflineCause.RecoveryInterrupted, refusal.Message, exception);
                 storage?.Dispose();
-                throw new DatabaseException(refusal.Message, refusal.Diagnostics, exception);
+                throw refusal;
             }
             catch (DatabaseException exception) when (exception.Diagnostics.Count == 0
                 && exception.InnerException is StorageCorruptionException)
             {
-                var refusal = RefuseInterruptedCreation(name, preserve: true);
+                var refusal = DatabaseCorruptionException.Create(name, (StorageCorruptionException)exception.InnerException!);
                 storage?.TakeOffline(StorageOfflineCause.RecoveryInterrupted, refusal.Message, exception);
                 storage?.Dispose();
-                throw new DatabaseException(refusal.Message, refusal.Diagnostics, exception);
+                throw refusal;
             }
             catch (Exception exception) when (exception is StorageIOException or IOException
                 || exception is DatabaseException { InnerException: StorageIOException or IOException })

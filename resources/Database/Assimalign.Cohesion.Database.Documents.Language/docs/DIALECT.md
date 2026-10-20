@@ -1,5 +1,13 @@
 # OQL SQL++ dialect
 
+## Storage integrity errors (#1160)
+
+A read that detects storage corruption fails with `COHDBS003`, naming the database and
+page and recommending a verified backup. It never succeeds with the damaged data omitted.
+The error is an execution failure over the wire; the connection remains usable. A
+legitimately reclaimed location retains its existing absence semantics. The engine's
+storage-integrity conformance tests cover corrupted media through the executing language.
+
 OQL retains its name and follows the executable SQL++ subset recorded in
 [DESIGN.md](DESIGN.md#supported-clause-matrix). It uses the owner-selected Couchbase
 MISSING truth table, distinct from NULL. The complete Boolean/predicate tables, null-path

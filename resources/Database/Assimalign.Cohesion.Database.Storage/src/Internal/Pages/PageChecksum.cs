@@ -22,7 +22,10 @@ internal static class PageChecksum
         state = Crc32C.Append(state, page[..Page.ChecksumFieldOffset]);
         state = Crc32C.AppendZeros(state, sizeof(uint));
         state = Crc32C.Append(state, page[(Page.ChecksumFieldOffset + sizeof(uint))..]);
-        return Crc32C.Finalize(state);
+        uint checksum = Crc32C.Finalize(state);
+        // Zero is reserved for wholly zero pages in storage format 4. Escape a real
+        // CRC of zero so a legitimate nonzero page always has a stored checksum.
+        return checksum == 0 ? uint.MaxValue : checksum;
     }
 
     /// <summary>
@@ -41,8 +44,8 @@ internal static class PageChecksum
     /// <param name="pageId">The page identifier, for the exception message.</param>
     /// <exception cref="StorageCorruptionException">The stored checksum does not match the page content.</exception>
     /// <remarks>
-    /// A stored checksum of zero means the page was never stamped (a freshly allocated
-    /// page written before checksumming existed for it) and is not verified.
+    /// A stored checksum of zero is accepted only for an entirely zero-filled page.
+    /// Every nonzero page must carry its checksum.
     /// </remarks>
     internal static void Verify(ReadOnlySpan<byte> page, PageId pageId)
     {
@@ -56,13 +59,13 @@ internal static class PageChecksum
 
     /// <summary>
     /// Verifies the checksum stored in the page buffer against its content without
-    /// throwing: true when the checksum matches or was never stamped.
+    /// throwing: true when the checksum matches or the entire page is zero.
     /// </summary>
     internal static bool TryVerify(ReadOnlySpan<byte> page, out uint stored, out uint computed)
     {
         stored = BinaryPrimitives.ReadUInt32LittleEndian(page.Slice(Page.ChecksumFieldOffset, sizeof(uint)));
         computed = 0;
-        if (stored == 0)
+        if (stored == 0 && page.IndexOfAnyExcept((byte)0) < 0)
         {
             return true;
         }

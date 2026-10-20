@@ -20,6 +20,41 @@ using Assimalign.Cohesion.Database.Storage.Units;
 /// </summary>
 public class RecordSpaceVersionStoreTests
 {
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - MVCC: a version page that fails its checksum fails lookup with its page and code (#1160)")]
+    public async Task GetVisibleVersionAsync_CorruptPage_ShouldThrowInsteadOfReturningAbsence()
+    {
+        // Arrange: keep the media accessible so the corruption happens after write-back.
+        using var media = new MemoryStream();
+        using var storage = new RecordStorage(media);
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
+        (PageId PageId, int SlotIndex) location;
+        PageId other;
+        using (var bracket = storage.BeginTransaction())
+        {
+            location = storage.Insert(bracket, new byte[7000]);
+            other = storage.Insert(bracket, new byte[7000]).PageId;
+            bracket.Commit();
+        }
+        storage.BufferPoolCapacity = 1;
+        using (storage.PageManager.GetPage(other)) { }
+        int offset = checked((int)((long)location.PageId * Page.Size + Page.HeaderSize + 100));
+        media.GetBuffer()[offset] ^= 0x80;
+        var reader = await coordinator.BeginAsync(IsolationLevel.Snapshot, CancellationToken.None);
+
+        // Act
+        var failure = await Should.ThrowAsync<StorageCorruptionException>(async () =>
+            await coordinator.VersionStore.GetVisibleVersionAsync(0,
+                storage.PackLocation(location.PageId, location.SlotIndex), reader.Snapshot, CancellationToken.None));
+
+        // Assert: failed loads never enter the cache; a repaired device returns the version.
+        failure.PageId.ShouldBe(location.PageId);
+        failure.Code.ShouldBe("COHDBS003");
+        media.GetBuffer()[offset] ^= 0x80;
+        (await coordinator.VersionStore.GetVisibleVersionAsync(0,
+            storage.PackLocation(location.PageId, location.SlotIndex), reader.Snapshot, CancellationToken.None)).HasValue.ShouldBeTrue();
+        await coordinator.RollbackAsync(reader, CancellationToken.None);
+    }
+
     [Fact]
     public async Task PurgeWriter_FailureAfterCommittedBatches_RetriesIdempotently()
     {
@@ -487,8 +522,8 @@ public class RecordSpaceVersionStoreTests
     // Only the model's record access is adapted; WAL brackets and slotted records are real.
     private sealed class RecordStorage : Assimalign.Cohesion.Database.Storage.Storage
     {
-        internal RecordStorage()
-            : base(StorageModel.Custom, new StorageStream(new SimulatedDurableFileHandle()), new StorageStream(new SimulatedDurableFileHandle()), StorageStream.FromInMemory())
+        internal RecordStorage(Stream? media = null)
+            : base(StorageModel.Custom, new StorageStream(new SimulatedDurableFileHandle(media ?? new MemoryStream())), new StorageStream(new SimulatedDurableFileHandle()), StorageStream.FromInMemory())
         {
             InitializeNew((Name)"record-version-test");
         }

@@ -9,8 +9,10 @@ using Xunit;
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 using Assimalign.Cohesion.Database.Execution;
+using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Internal;
+using Assimalign.Cohesion.Database.Sql.Protocol;
 using Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Storage;
 
@@ -26,8 +28,47 @@ public sealed class SqlIndexReadIntegrityTests
 {
     private const string Seek = "SELECT id FROM t WHERE val = 20";
 
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Index reads: a row page that fails its checksum fails the seek instead of dropping its rows (#1342)")]
-    public async Task Select_IndexSeekReadsRottenRowPage_ShouldFailWithStorageCorruption()
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Conformance: corruption crosses the wire as a coded execution failure (#1160)")]
+    public async Task Execute_CorruptScanOverWire_ShouldReportExecutionFailureAndKeepSessionUsable()
+    {
+        // Arrange
+        var strategy = new FaultInjectingJournalSqlStorageStrategy(durable: true);
+        await using var harness = await ServerTestHarness.StartAsync(configureEngine: options => options.StorageStrategy = strategy);
+        await using var client = await harness.DialAsync();
+        await client.HandshakeAsync();
+        harness.Engine.TryGetDatabase(ServerTestHarness.DatabaseName, out var database).ShouldBeTrue();
+        var pageId = database!.DataStorage.GetOwnerPages(Table(database, "users").ObjectId).ShouldHaveSingleItem();
+        Evict(database, pageId);
+        var faults = strategy.Faults(ServerTestHarness.DatabaseName);
+        faults.RottenPage = pageId;
+
+        try
+        {
+            // Act
+            await client.SendAsync(ProtocolMessageType.Execute, ProtocolExecuteMessage.Create("SELECT id FROM users").Encode());
+            var frame = await client.ExpectAsync(ProtocolMessageType.Error);
+            var error = ProtocolErrorMessage.Decode(frame.Payload.Span);
+
+            // Assert
+            error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
+            error.Message.ShouldStartWith("COHDBS003: ", Case.Sensitive);
+            error.Message.ShouldNotContain("COHDBS003: COHDBS003:", Case.Sensitive);
+            error.Message.ShouldContain("page " + (long)pageId, Case.Sensitive);
+            error.Message.ShouldContain(ServerTestHarness.DatabaseName, Case.Sensitive);
+        }
+        finally { faults.Clear(); }
+
+        await client.SendAsync(ProtocolMessageType.Execute, ProtocolExecuteMessage.Create("SELECT id FROM users").Encode());
+        await client.ExpectAsync(ProtocolMessageType.ResultHeader);
+        await client.ExpectAsync(ProtocolMessageType.ResultRow);
+        await client.ExpectAsync(ProtocolMessageType.ResultRow);
+        await client.ExpectAsync(ProtocolMessageType.ResultComplete);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Conformance: corrupt pages fail scans and seeks with the database and page (#1160)")]
+    [InlineData(Seek)]
+    [InlineData("SELECT id FROM t")]
+    public async Task Select_ReadsRottenRowPage_ShouldFailWithCodedDatabaseCorruption(string statement)
     {
         // Arrange: three rows on one page behind an index, read once through the seek, then the
         // page evicted so the next seek reads it from the data file.
@@ -46,7 +87,7 @@ public sealed class SqlIndexReadIntegrityTests
         // Act: the page decays on the device.
         var faults = strategy.Faults("rot-db");
         faults.RottenPage = rowPage;
-        var failure = await Should.ThrowAsync<StorageCorruptionException>(() => session.ExecuteAsync(Seek).AsTask());
+        var failure = await Should.ThrowAsync<DatabaseCorruptionException>(() => Ids(session, statement));
         long rottenReads = faults.RottenPageReads;
         faults.RottenPage = null;
         await using var next = await database.CreateSessionAsync();
@@ -55,6 +96,13 @@ public sealed class SqlIndexReadIntegrityTests
         // Assert: the statement failed with the page's checksum error. The failed read was not
         // cached, so once the device returns the page whole the same seek finds its row.
         failure.PageId.ShouldBe(rowPage);
+        failure.Database.ShouldBe((DatabaseName)"rot-db");
+        failure.Code.ShouldBe("COHDBS003");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(failure.Code);
+        failure.InnerException.ShouldBeOfType<StorageCorruptionException>().PageId.ShouldBe(rowPage);
+        failure.Message.ShouldContain("rot-db", Case.Sensitive);
+        failure.Message.ShouldContain("page " + (long)rowPage, Case.Sensitive);
+        failure.Message.ShouldContain("verified backup", Case.Sensitive);
         failure.Message.ShouldContain("failed checksum verification", Case.Sensitive);
         rottenReads.ShouldBeGreaterThan(0);
         healed.ShouldBe([2]);

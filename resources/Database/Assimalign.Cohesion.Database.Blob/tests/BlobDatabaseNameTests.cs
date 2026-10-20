@@ -373,10 +373,14 @@ public sealed class BlobDatabaseNameTests : IDisposable
         await using var engine = CreateEngine(onDisk: true);
 
         // Act
-        var refusal = await Should.ThrowAsync<DatabaseException>(() => engine.OpenDatabaseAsync("sales", CancellationToken.None).AsTask());
+        var refusal = await Should.ThrowAsync<DatabaseCorruptionException>(() => engine.OpenDatabaseAsync("sales", CancellationToken.None).AsTask());
 
         // Assert
-        refusal.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBB004");
+        refusal.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBS003");
+        refusal.Database.ShouldBe((DatabaseName)"sales");
+        refusal.PageId.ShouldBe((PageId)1L);
+        refusal.InnerException.ShouldBeOfType<StorageCorruptionException>().PageId.ShouldBe((PageId)1L);
+        refusal.Message.ShouldContain("page 1", Case.Sensitive);
         refusal.Message.ShouldNotContain("DropDatabaseAsync", Case.Sensitive);
         File.ReadAllBytes(path).ShouldBe(before);
     }

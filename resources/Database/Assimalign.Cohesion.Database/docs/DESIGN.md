@@ -1,5 +1,20 @@
 # Assimalign.Cohesion.Database — Design
 
+## Storage corruption (#1160)
+
+Storage corruption is `COHDBS003` (#1160). The engine translates a
+`StorageCorruptionException` into `DatabaseCorruptionException`, retaining the storage
+cause and page id, naming the database and page, and advising restoration from a verified
+backup. Its structured diagnostic crosses the existing wire execution-failure path; a
+failed read never becomes an absent row, document, node, key or blob. Legitimate slot
+reclamation still reads as absence. Create/open failures receive the same translation
+from the root lifecycle after the model has released its resources. Storage format 4
+reserves zero headers for entirely zero pages and identifies reclaimed pages separately.
+
+Lifecycle integrity translation preserves synchronous core throws and returns successful
+completed value tasks unchanged. Only a pending or faulted operation uses the async
+translation continuation; the existing zero-allocation creation contract stays intact.
+
 ## Provisioning observations and construction cancellation (49a)
 
 The root base instance exposes a nullable immutable `DatabaseProvisioningProgress` through

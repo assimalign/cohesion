@@ -700,6 +700,15 @@ leak), repaired by re-bootstrapping on the next open.
 
 ## Error model
 
+Storage corruption is `COHDBS003` (#1160). The engine translates a
+`StorageCorruptionException` into `DatabaseCorruptionException`, retaining the storage
+cause and page id, naming the database and page, and advising restoration from a verified
+backup. Its structured diagnostic crosses the existing wire execution-failure path; a
+failed read never becomes an absent row, document, node, key or blob. Legitimate slot
+reclamation still reads as absence. Create/open failures receive the same translation
+from the root lifecycle after the model has released its resources. Storage format 4
+reserves zero headers for entirely zero pages and identifies reclaimed pages separately.
+
 `DatabaseException` (area root) for misuse and model errors;
 `DatabaseNotFoundException` for an open request whose storage does not exist;
 `DatabaseParseException` for grammar violations (→ `ParseFailure` on the wire);
@@ -714,7 +723,7 @@ An entry page the command cannot read fails the command with the storage library
 error: `StorageCorruptionException` (carrying the page id) for a page that fails its
 checksum or whose slot geometry is malformed, `StorageIOException` for a page cut short or
 a pool with every frame pinned, and the device's `IOException`. The engine does not wrap
-them yet. Every command resolves its key by a primary-index seek, and the seek fetches the
+I/O failures yet; corruption is translated to `DatabaseCorruptionException` (`COHDBS003`). Every command resolves its key by a primary-index seek, and the seek fetches the
 entry record with `Storage.TryReadRecord` and the key space's owner id (#1342): an index
 entry whose record was reclaimed beneath it (its slot deleted or reverted, its page freed
 or reallocated) reads as absence, and anything else that stops the read fails the command.

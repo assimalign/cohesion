@@ -148,12 +148,19 @@ internal sealed class TestEngine : DatabaseEngine
     /// <summary>A fixed create result for measuring the root lifecycle without storage allocations.</summary>
     public DatabaseInstance? CreateResult { get; set; }
 
+    /// <summary>A failing or deferred core operation for the lifecycle integrity contract.</summary>
+    public Func<ValueTask<DatabaseInstance>>? CreateOperation { get; set; }
+
     public ValueTask<DatabaseInstance> CreateCoreDirectly(DatabaseName name)
         => CreateDatabaseCoreAsync(name, null, CancellationToken.None);
 
     protected override ValueTask<DatabaseInstance> CreateDatabaseCoreAsync(DatabaseName name, object? creationState, CancellationToken cancellationToken)
     {
         Interlocked.Increment(ref _coreCalls);
+        if (CreateOperation is { } operation)
+        {
+            return operation();
+        }
         if (CreateResult is { } result)
         {
             return new ValueTask<DatabaseInstance>(result);

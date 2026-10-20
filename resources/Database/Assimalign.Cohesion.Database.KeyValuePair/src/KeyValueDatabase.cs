@@ -433,6 +433,11 @@ public sealed class KeyValueDatabase : DatabaseInstance
     /// <returns>The translated failure, or <paramref name="error"/> itself.</returns>
     internal Exception TranslateOffline(Exception error)
     {
+        if (error is Assimalign.Cohesion.Database.Storage.StorageCorruptionException corruption)
+        {
+            return DatabaseCorruptionException.Create(Name, corruption);
+        }
+
         if (error is DatabaseOfflineException or DatabaseTransactionCommitUnconfirmedException or TransactionCommitUnconfirmedException
             || StorageOfflineException.Find(error) is not { } offline)
         {

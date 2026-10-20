@@ -57,13 +57,13 @@ public sealed class KeyValueRecordDecodeIntegrityTests
         Damage(database, damaged, damage);
 
         // Act
-        var failure = await Should.ThrowAsync<StorageCorruptionException>(
+        var failure = await Should.ThrowAsync<DatabaseCorruptionException>(
             () => database.GetAsync(session, Bytes("bravo"), TestTimeout.Token()).AsTask());
         var neighbour = await database.GetAsync(session, Bytes("alpha"), TestTimeout.Token());
 
         // Assert: the failure names the record; the page itself reads, so the key beside it does.
         failure.PageId.ShouldBe(damaged.PageId);
-        failure.Message.ShouldStartWith(
+        failure.InnerException.ShouldBeOfType<StorageCorruptionException>().Message.ShouldStartWith(
             $"The key-value entry record in slot {damaged.SlotIndex} of page {(long)damaged.PageId} does not decode: ", Case.Sensitive);
         Text(neighbour.ShouldNotBeNull().Value).ShouldBe("value-alpha");
     }
@@ -84,7 +84,7 @@ public sealed class KeyValueRecordDecodeIntegrityTests
         Damage(database, damaged, damage);
 
         // Act
-        var failure = await Should.ThrowAsync<StorageCorruptionException>(() => ScanAsync(database, session));
+        var failure = await Should.ThrowAsync<DatabaseCorruptionException>(() => ScanAsync(database, session));
         var beforeTheDamage = await ScanAsync(database, session, new KeyValueScanOptions { End = Bytes("bravo") });
 
         // Assert: a range that stops short of the damaged key still reads.

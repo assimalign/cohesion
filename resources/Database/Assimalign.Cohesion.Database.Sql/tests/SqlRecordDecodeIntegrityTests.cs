@@ -57,7 +57,7 @@ public sealed class SqlRecordDecodeIntegrityTests
         Damage(database, damaged, damage);
 
         // Act / Assert
-        var failure = await Should.ThrowAsync<StorageCorruptionException>(async () => await session.ExecuteAsync(
+        var failure = await Should.ThrowAsync<DatabaseCorruptionException>(async () => await session.ExecuteAsync(
             "INSERT INTO t VALUES (1,20) ON CONFLICT(id) DO UPDATE SET val = EXCLUDED.val"));
         failure.PageId.ShouldBe(damaged.PageId);
     }
@@ -100,12 +100,12 @@ public sealed class SqlRecordDecodeIntegrityTests
         Damage(database, damaged, damage);
 
         // Act
-        var failure = await Should.ThrowAsync<StorageCorruptionException>(() => Ids(session, Seek));
+        var failure = await Should.ThrowAsync<DatabaseCorruptionException>(() => Ids(session, Seek));
         var neighbour = await Ids(session, "SELECT id FROM t WHERE val = 10");
 
         // Assert: the failure names the record; the page itself reads, so the row beside it does.
         failure.PageId.ShouldBe(damaged.PageId);
-        failure.Message.ShouldStartWith(
+        failure.InnerException.ShouldBeOfType<StorageCorruptionException>().Message.ShouldStartWith(
             $"The row record in slot {damaged.SlotIndex} of page {(long)damaged.PageId} of table 'dbo.t' (object {Table(database).ObjectId}) does not decode: ",
             Case.Sensitive);
         neighbour.ShouldBe([1]);
@@ -132,7 +132,7 @@ public sealed class SqlRecordDecodeIntegrityTests
         Damage(database, damaged, damage);
 
         // Act
-        var failure = await Should.ThrowAsync<StorageCorruptionException>(() => Ids(session, "SELECT id FROM t"));
+        var failure = await Should.ThrowAsync<DatabaseCorruptionException>(() => Ids(session, "SELECT id FROM t"));
 
         // Assert
         failure.PageId.ShouldBe(damaged.PageId);
@@ -153,9 +153,9 @@ public sealed class SqlRecordDecodeIntegrityTests
         byte[] original = Damage(database, damaged, RecordDamage.OtherObject);
 
         // Act
-        var update = await Should.ThrowAsync<StorageCorruptionException>(
+        var update = await Should.ThrowAsync<DatabaseCorruptionException>(
             () => session.ExecuteAsync("UPDATE t SET val = val + 1").AsTask());
-        var build = await Should.ThrowAsync<StorageCorruptionException>(
+        var build = await Should.ThrowAsync<DatabaseCorruptionException>(
             () => session.ExecuteAsync("CREATE INDEX ix_val ON t (val)").AsTask());
         Rewrite(database, damaged, original);
         var values = await Ids(session, "SELECT val FROM t");
@@ -258,14 +258,14 @@ public sealed class SqlRecordDecodeIntegrityTests
         // the waiter takes the lock.
         byte[] original = Damage(database, target, RecordDamage.ShorterThanStamps);
         await transaction.CommitAsync();
-        var failure = await Should.ThrowAsync<StorageCorruptionException>(() => waiting);
+        var failure = await Should.ThrowAsync<DatabaseCorruptionException>(() => waiting);
         Rewrite(database, target, original);
         var values = await Ids(holder, "SELECT val FROM t");
 
         // Assert: the latest-version check reported it, not the decode; the waiter's statement
         // rolled back its change to row 1.
         failure.PageId.ShouldBe(target.PageId);
-        failure.Message.ShouldBe(
+        failure.InnerException.ShouldBeOfType<StorageCorruptionException>().Message.ShouldBe(
             $"The row record in slot {target.SlotIndex} of page {(long)target.PageId} of table 'dbo.t' holds 8 bytes, " +
             $"fewer than its {SqlRowCodec.StampHeaderSize}-byte version-stamp header.");
         values.Order().ShouldBe([10, 21]);

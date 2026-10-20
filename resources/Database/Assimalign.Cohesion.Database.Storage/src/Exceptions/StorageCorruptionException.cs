@@ -8,6 +8,12 @@ namespace Assimalign.Cohesion.Database.Storage;
 /// </summary>
 public sealed class StorageCorruptionException : StorageException
 {
+    /// <summary>Identifies a detected storage integrity violation.</summary>
+    public const string ErrorCode = "COHDBS003";
+
+    /// <summary>Gets the stable diagnostic code for storage corruption.</summary>
+    public string Code => ErrorCode;
+
     /// <summary>
     /// Initializes a new <see cref="StorageCorruptionException"/> with the specified message.
     /// </summary>

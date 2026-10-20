@@ -492,6 +492,7 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
     /// <exception cref="ObjectDisposedException">The engine has been disposed.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the core ran.</exception>
     /// <exception cref="DatabaseException">A database with the same name already exists.</exception>
+    /// <exception cref="DatabaseCorruptionException">Storage integrity validation failed (COHDBS003), naming the database and affected page.</exception>
     public ValueTask<DatabaseInstance> CreateDatabaseAsync(DatabaseName name, CancellationToken cancellationToken = default)
         => CreateDatabaseAsync(name, creationState: null, cancellationToken);
 
@@ -506,6 +507,7 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
     /// <exception cref="ObjectDisposedException">The engine has been disposed.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the core ran.</exception>
     /// <exception cref="DatabaseException">A database with the same name already exists.</exception>
+    /// <exception cref="DatabaseCorruptionException">Storage integrity validation failed (COHDBS003), naming the database and affected page.</exception>
     /// <remarks>
     /// The model validates its state before calling this member. The root owns the common guards
     /// and telemetry; it neither inspects nor stores the state. The default create passes null
@@ -517,11 +519,11 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
         ThrowIfDisposed();
         cancellationToken.ThrowIfCancellationRequested();
 
-        // The core is returned as it is while nobody listens; only an enabled source pays for the
-        // timing (event-sources plan, D5 a).
+        // Integrity translation applies with or without tracing; only an enabled source pays
+        // for the timing (event-sources plan, D5 a).
         if (!DatabaseEventSource.Log.IsEnabled(EventLevel.Error, EventKeywords.None))
         {
-            return CreateDatabaseCoreAsync(name, creationState, cancellationToken);
+            return CreateCheckedAsync(name, creationState, cancellationToken);
         }
 
         return CreateDatabaseTraced(name, creationState, cancellationToken);
@@ -542,6 +544,7 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
     /// <exception cref="ObjectDisposedException">The engine has been disposed.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the core ran, or while the open waited for a close.</exception>
     /// <exception cref="DatabaseNotFoundException">The database does not exist.</exception>
+    /// <exception cref="DatabaseCorruptionException">Storage integrity validation failed (COHDBS003), naming the database and affected page.</exception>
     /// <remarks>
     /// A holder may close the database while the open runs. When the leaf's core hands back an
     /// instance whose close has started, the open waits for that close to end, after which the
@@ -1252,7 +1255,7 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
         Exception? thrown = null;
         try
         {
-            pending = CreateDatabaseCoreAsync(name, creationState, cancellationToken);
+            pending = CreateCheckedAsync(name, creationState, cancellationToken);
         }
         catch (Exception exception) when (DatabaseEventSource.CaptureFailure(exception, out thrown))
         {
@@ -1436,7 +1439,7 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
     // open passes a box that learns whether the open waited for a close; an untraced one passes null.
     private async ValueTask<DatabaseInstance> OpenUnclosedAsync(DatabaseName name, StrongBox<bool>? waitedForClose, CancellationToken cancellationToken)
     {
-        var database = await OpenDatabaseCoreAsync(name, cancellationToken).ConfigureAwait(false);
+        var database = await OpenCheckedAsync(name, cancellationToken).ConfigureAwait(false);
         while (database.IsClosing)
         {
             if (waitedForClose is not null)
@@ -1447,7 +1450,7 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
             var closing = database;
             await closing.Closure.WaitAsync(cancellationToken).ConfigureAwait(false);
             ThrowIfDisposed();
-            database = await OpenDatabaseCoreAsync(name, cancellationToken).ConfigureAwait(false);
+            database = await OpenCheckedAsync(name, cancellationToken).ConfigureAwait(false);
             if (ReferenceEquals(database, closing))
             {
                 // The leaf still tracks a database whose close ended: a leaf defect, reported
@@ -1458,6 +1461,41 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
         }
 
         return database;
+    }
+
+    // Translation belongs above every model's cleanup, including failures before publication.
+    private ValueTask<DatabaseInstance> CreateCheckedAsync(DatabaseName name, object? creationState, CancellationToken cancellationToken)
+    {
+        try
+        {
+            // Preserve synchronous core throws and the allocation-free completed path. Only
+            // an incomplete/faulted operation needs an async integrity-translation boundary.
+            var pending = CreateDatabaseCoreAsync(name, creationState, cancellationToken);
+            return pending.IsCompletedSuccessfully ? pending : CompleteCheckedAsync(pending, name);
+        }
+        catch (StorageCorruptionException corruption) { throw DatabaseCorruptionException.Create(name, corruption); }
+        catch (DatabaseException error) when (error.Diagnostics.Count == 0 && error.InnerException is StorageCorruptionException)
+        { throw DatabaseCorruptionException.Create(name, (StorageCorruptionException)error.InnerException); }
+    }
+
+    private ValueTask<DatabaseInstance> OpenCheckedAsync(DatabaseName name, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var pending = OpenDatabaseCoreAsync(name, cancellationToken);
+            return pending.IsCompletedSuccessfully ? pending : CompleteCheckedAsync(pending, name);
+        }
+        catch (StorageCorruptionException corruption) { throw DatabaseCorruptionException.Create(name, corruption); }
+        catch (DatabaseException error) when (error.Diagnostics.Count == 0 && error.InnerException is StorageCorruptionException)
+        { throw DatabaseCorruptionException.Create(name, (StorageCorruptionException)error.InnerException); }
+    }
+
+    private static async ValueTask<DatabaseInstance> CompleteCheckedAsync(ValueTask<DatabaseInstance> pending, DatabaseName name)
+    {
+        try { return await pending.ConfigureAwait(false); }
+        catch (StorageCorruptionException corruption) { throw DatabaseCorruptionException.Create(name, corruption); }
+        catch (DatabaseException error) when (error.Diagnostics.Count == 0 && error.InnerException is StorageCorruptionException)
+        { throw DatabaseCorruptionException.Create(name, (StorageCorruptionException)error.InnerException); }
     }
 
     private void ThrowIfComposed()

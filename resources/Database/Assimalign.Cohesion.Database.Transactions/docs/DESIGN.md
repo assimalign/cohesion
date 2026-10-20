@@ -74,6 +74,14 @@ complete: SQL marks an interrupted open `RecoveryInterrupted` before closing the
 storage, preventing its normal shutdown checkpoint. The next open reclassifies and finishes
 scrubbing instead of treating the remaining abandoned stamps as committed.
 
+## Version lookup integrity (#1160)
+
+`VersionStore.GetVisibleVersionAsync` returns absence only for a reclaimed location or an
+invisible version. A checksum failure propagates `StorageCorruptionException` with
+`COHDBS003` and the page id; the record-space test corrupts media after eviction and proves
+both failure and a successful lookup after repair. Engines translate the storage failure
+at their own boundary. The short-record rule is tracked separately by #1372.
+
 ## Identity vs. ordering: `TransactionId` vs. `TransactionSequence`
 
 `TransactionId` is a GUID — a good *external* identity for sessions, diagnostics, and the wire protocol, but unordered. Visibility decisions need a total order, so this project also has `TransactionSequence`, a monotonically increasing `ulong` assigned at begin. Readers and writers both keep storage-counter sequences; no virtual identifier is introduced, and the public session surface remains free of MVCC mechanics.

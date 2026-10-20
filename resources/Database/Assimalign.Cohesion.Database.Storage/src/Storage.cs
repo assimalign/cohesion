@@ -1190,11 +1190,27 @@ public abstract class Storage : IAsyncDisposable, IDisposable
                     pageLsn = ((Page.Header*)headerPtr)->Lsn;
                 }
 
+                // Type zero is reserved for wholly zero, never-initialized pages (format 4).
+                // Validate reclaimable pages before trusting their headers: a zeroed first
+                // sector must not turn a live page into reusable space. Reclaimed pages use a
+                // distinct nonzero type and retain a checksum over their metadata and body.
+                if (type is PageType.Free or PageType.Reclaimed
+                    || System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(pageHeader.AsSpan(Page.ChecksumFieldOffset)) == 0)
+                {
+                    pageBuffer ??= new byte[Page.Size];
+                    Data.ReadPage((PageId)i, pageBuffer);
+                    PageChecksum.Verify(pageBuffer, (PageId)i);
+                    if (type == PageType.Free && pageBuffer.AsSpan().IndexOfAnyExcept((byte)0) >= 0)
+                    {
+                        throw new StorageCorruptionException((PageId)i, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.FreePageNonzero, i));
+                    }
+                }
+
                 // An anchor page off the newest generation's chain is the other slot's (whose
                 // generation the next header write replaces) or a leftover of a crashed header
                 // write: free. Its on-disk bytes are never read again — allocation overwrites
                 // without reading.
-                if (type == PageType.Free || (type == PageType.CheckpointAnchor && !protectedPages.Contains(i)))
+                if (type is PageType.Free or PageType.Reclaimed || (type == PageType.CheckpointAnchor && !protectedPages.Contains(i)))
                 {
                     _freeSpaceMap.MarkFree((PageId)i);
                 }
@@ -1221,7 +1237,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
                     // copy does the same. Its LSN is taken only from a page whose stamped checksum
                     // verifies, as every write-back leaves it: a damaged header must not move LSNs (the
                     // page fails its checksum when it is read), and neither may a page whose checksum
-                    // field reads zero, which is never verified.
+                    // field reads zero, which must be entirely zero-filled as checked above.
                     if (pageLsn > redoLsn && pageLsn > strayLsn && !recovery.RebuiltPages.Contains(i))
                     {
                         pageBuffer ??= new byte[Page.Size];
@@ -1977,7 +1993,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         var page = handle.Page;
         ulong pageOwner = page.OwnerId;
         ClearBody(page);
-        page.Type = PageType.Free;
+        page.Type = PageType.Reclaimed;
         page.OwnerId = 0;
         slotted.Initialize();
         owner.RegisterPendingFree((long)pageId, pageOwner);
@@ -2112,7 +2128,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
 
     /// <summary>
     /// Releases a bounded batch of the specified owner's data and index pages inside a
-    /// transaction: each page is retyped <see cref="PageType.Free"/> under the
+    /// transaction: each page is retyped <see cref="PageType.Reclaimed"/> under the
     /// write-ahead log (a rollback restores the chain from the pre-image), and
     /// the pages return to the free-space map when the transaction commits, never
     /// before, so an in-flight release can never be reallocated.
@@ -2162,7 +2178,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
             using var handle = TouchPage(owner, (PageId)pageId);
             var page = handle.Page;
             ClearBody(page);
-            page.Type = PageType.Free;
+            page.Type = PageType.Reclaimed;
             page.OwnerId = 0;
 
             var slotted = new SlottedPage(page);
@@ -3385,7 +3401,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Returns an anchor page to the allocator: retyped <see cref="PageType.Free"/> in the
+    /// Returns an anchor page to the allocator: retyped <see cref="PageType.Reclaimed"/> in the
     /// pool (the next flush writes it) and freed in the free-space map. Anchor pages are
     /// unjournaled, so nothing else needs to know.
     /// </summary>
@@ -3397,7 +3413,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
             var page = handle.Page;
             new Span<byte>(page.Pointer, Page.Size).Clear();
             page.Id = pageId;
-            page.Type = PageType.Free;
+            page.Type = PageType.Reclaimed;
             handle.MarkDirty();
         }
 

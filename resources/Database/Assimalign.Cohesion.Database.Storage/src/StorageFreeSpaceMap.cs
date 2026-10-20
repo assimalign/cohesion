@@ -11,7 +11,7 @@ namespace Assimalign.Cohesion.Database.Storage;
 /// <remarks>
 /// <para>
 /// The map is rebuilt when a storage file is opened by scanning page headers: pages
-/// stamped <see cref="PageType.Free"/> return to the free list. A page freed but not
+/// stamped <see cref="PageType.Reclaimed"/> return to the free list. A page freed but not
 /// yet flushed when the process stops therefore reappears as allocated after reopen —
 /// a safe leak (the page is unreachable but never handed out twice), never corruption.
 /// </para>
@@ -163,7 +163,7 @@ public sealed class StorageFreeSpaceMap
 
     /// <summary>
     /// Marks a page as free during storage initialization (a page whose header is
-    /// stamped <see cref="PageType.Free"/> on disk).
+    /// stamped <see cref="PageType.Reclaimed"/> on disk).
     /// </summary>
     /// <param name="pageId">The page to mark as free.</param>
     internal void MarkFree(PageId pageId)
