@@ -195,16 +195,17 @@ folds case, as on Linux.
 
 ### Interrupted creation (#1421)
 
-An initialized data file opens with OpenOrCreate for its journal and backup, completing
-creation interrupted before either sidecar existed. Declared provisioning uses this same
-open path. Create refuses an existing incomplete file set with COHDBG018 in
-DatabaseException.Diagnostics and an OpenDatabaseAsync recovery instruction. A leftover
-directory without a data file retains DatabaseNotFoundException on open, with COHDBG018
-and a drop/recreate remedy; create and declared provisioning return the structured error.
-A truncated data file receives the same coded refusal before any sidecar is created.
-Ambiguous files are preserved for diagnosis instead of silently erased. Storage's own
-format refusal still handles an initialized header in an unsupported format. This changes
-file opening and error reporting, not record encoding or the model format.
+Missing journals and backups are refused with COHDBG018 in DatabaseException.Diagnostics,
+including the DatabaseNotFoundException for a directory without its data file. A complete
+header proves sidecars existed at creation; their absence can mean an interrupted drop or
+lost acknowledged commits. No sidecar is silently recreated, even beside an empty closed
+database. Preserve ambiguous files and restore a complete backup. This follows Neo4j's
+missing-log refusal (community/configuration/src/main/java/org/neo4j/configuration/GraphDatabaseSettings.java:697-698;
+community/kernel/src/main/java/org/neo4j/kernel/recovery/Recovery.java:1146-1153).
+Drop explicitly deletes the data file before recursively removing the remaining files.
+Only files shorter than the header are rejected by length. A partial final data page proceeds
+through WAL recovery; a genuine recovery failure becomes the same structured refusal and
+never recommends dropping a file containing data. No record or storage format changes.
 
 ## Transactions, atomicity and recovery
 
@@ -1069,7 +1070,7 @@ to exercise that enforcement path; compiled provisioning is not included.
 | `COHDBG015` | Duplicate final result column name, implicit or explicit, under ordinal case-sensitive comparison; rejected during planning before execution |
 | `COHDBG016` | A composite result requires graph.composite-values; ExecutionFailure before ResultHeader, preserving the authenticated session |
 | `COHDBG017` | Unsupported graph record or tree-registration format, including format 2: opening is refused before logical recovery scrub with the remedy to recreate the database. Graph.Storage carries the code on StorageCorruptionException; the engine preserves it as an Error in DatabaseException.Diagnostics with a code-free Message. No upgrade path exists |
-| `COHDBG018` | Interrupted creation left missing or truncated files; open completes missing sidecars, otherwise preserve files for diagnosis and drop/recreate |
+| `COHDBG018` | Missing or unrecoverable files; preserve the complete file set for recovery and restore missing sidecars from backup |
 | `COHDBI001` | `Database.Indexing`'s code, carried unchanged: opening a database whose property-index pages are in a B-tree page format this engine does not read (format 1, written before #1194) fails with "Database 'x' cannot be opened. COHDBI001: …", checked before recovery's scrub, so a cleanly closed database's files stay as they were (a crashed one has had only the storage layer's journal redo and undo, and keeps its journal) |
 | `COHDBS001` | `Database.Storage`'s code, carried unchanged: opening a database whose file set is in another storage format (#1251) fails with "Database 'x' cannot be opened. COHDBS001: …", the storage's `StorageFormatException` as its inner exception, refused before its journal is read, so the files stay as they were |
 

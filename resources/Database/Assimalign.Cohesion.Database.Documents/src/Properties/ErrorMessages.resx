@@ -4,8 +4,7 @@
 <resheader name="version"><value>2.0</value></resheader>
 <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
 <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
-  <data name="DatabaseFilesAbsent" xml:space="preserve"><value>{0}: {1}</value></data>
-  <data name="DatabaseFilesIncomplete" xml:space="preserve"><value>Database '{0}' has incomplete files after an interrupted create or drop. Call OpenDatabaseAsync to recover an initialized data file with a missing journal or backup. If its directory is present without a database in it, or its data file is incomplete, preserve the files for diagnosis, call DropDatabaseAsync and create the database again.</value></data>
+  <data name="DatabaseFilesIncomplete" xml:space="preserve"><value>Database '{0}' has a directory without a database in it, or creation stopped before a complete data header. Preserve all files and restore the complete file set from backup. OpenDatabaseAsync requires the original journal and backup; it cannot safely replace a missing sidecar. Only a directory with no complete data header may be cleared with DropDatabaseAsync and created again.</value></data>
   <data name="JsonScalarInvalid" xml:space="preserve"><value>OQL values must be JSON scalars or JsonElement values; numbers must fit System.Decimal.</value></data>
   <data name="ParameterNameDuplicate" xml:space="preserve"><value>Duplicate document parameter name.</value></data>
   <data name="StatementInvalid" xml:space="preserve"><value>The OQL statement has error diagnostics.</value></data>
@@ -83,4 +82,5 @@
   <data name="IndexPathsDuplicate" xml:space="preserve"><value>Index key paths must be distinct.</value></data>
   <data name="BindingNameMissing" xml:space="preserve"><value>An OQL binding variable requires a nonempty name.</value></data>
   <data name="BindingNameDuplicate" xml:space="preserve"><value>An OQL binding list cannot repeat a variable name.</value></data>
+  <data name="DatabaseFilesUnrecoverable" xml:space="preserve"><value>Database '{0}' has missing or unrecoverable storage files. Preserve all files and restore the complete file set from backup. OpenDatabaseAsync requires the original journal and backup; replacing a missing sidecar could discard acknowledged commits or reopen a partially dropped database.</value></data>
 </root>

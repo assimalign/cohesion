@@ -458,6 +458,8 @@ public sealed class BlobDatabaseEngine : DatabaseEngine
             {
                 if (Directory.Exists(directory))
                 {
+                    // Remove the database identity before deleting sidecars: no partial drop may reopen.
+                    File.Delete(DatabaseFileNames.GetFiles(directory, DataFileSet).Data);
                     Directory.Delete(directory, recursive: true);
                 }
             }
@@ -618,16 +620,15 @@ public sealed class BlobDatabaseEngine : DatabaseEngine
                     if (!create)
                     {
                         // Preserve absence semantics for a directory without its data file.
-                        throw new DatabaseNotFoundException(string.Format(CultureInfo.CurrentCulture,
-                            ErrorMessages.DatabaseFilesAbsent, interruptedCreationCode, refusal.Message));
+                        throw new DatabaseNotFoundException(refusal.Message, refusal);
                     }
                     throw refusal;
                 }
                 long dataLength = new FileInfo(files.Data).Length;
-                if ((create && (!File.Exists(files.Journal) || !File.Exists(files.Backup)))
-                    || dataLength < Page.Size || dataLength % Page.Size != 0)
+                if (!File.Exists(files.Journal) || !File.Exists(files.Backup)
+                    || dataLength <= Page.Size)
                 {
-                    throw RefuseInterruptedCreation(name);
+                    throw RefuseInterruptedCreation(name, preserve: dataLength >= Page.Size);
                 }
             }
             if (create && StorageExists(name, directory))
@@ -654,6 +655,14 @@ public sealed class BlobDatabaseEngine : DatabaseEngine
                 {
                     throw new InvalidOperationException("The storage strategy returned null.");
                 }
+                // Physical WAL recovery has run. Refuse a tail it could not reconstruct,
+                // before model initialization can publish or checkpoint an incomplete file.
+                if (storage.Data.Length % Page.Size != 0)
+                {
+                    var refusal = RefuseInterruptedCreation(name, preserve: true);
+                    storage.TakeOffline(StorageOfflineCause.RecoveryInterrupted, refusal.Message, refusal);
+                    throw refusal;
+                }
                 storage.GroupCommitWindow = _options.GroupCommitWindow;
                 storage.OnCommitPending = _commitPending.Set;
 
@@ -668,6 +677,21 @@ public sealed class BlobDatabaseEngine : DatabaseEngine
                 var database = new BlobDatabase(create ? name : DatabaseFileNames.GetOpenedName(name, storage.Name), this, storage, recover: !create);
                 _databases.Add(name, database);
                 return new ValueTask<DatabaseInstance>(database);
+            }
+            catch (StorageException exception) when (exception is StorageCorruptionException or StorageIOException)
+            {
+                var refusal = RefuseInterruptedCreation(name, preserve: true);
+                storage?.TakeOffline(StorageOfflineCause.RecoveryInterrupted, refusal.Message, exception);
+                storage?.Dispose();
+                throw new DatabaseException(refusal.Message, refusal.Diagnostics, exception);
+            }
+            catch (DatabaseException exception) when (exception.Diagnostics.Count == 0
+                && exception.InnerException is StorageCorruptionException or StorageIOException)
+            {
+                var refusal = RefuseInterruptedCreation(name, preserve: true);
+                storage?.TakeOffline(StorageOfflineCause.RecoveryInterrupted, refusal.Message, exception);
+                storage?.Dispose();
+                throw new DatabaseException(refusal.Message, refusal.Diagnostics, exception);
             }
             catch (StorageFormatException exception)
             {
@@ -709,8 +733,8 @@ public sealed class BlobDatabaseEngine : DatabaseEngine
                 var mode = create ? FileMode.CreateNew : FileMode.Open;
                 var files = DatabaseFileNames.GetFiles(directory, DataFileSet);
                 data = StorageStream.FromFile(files.Data, mode, FileShare.Read);
-                journal = StorageStream.FromFile(files.Journal, create ? FileMode.CreateNew : FileMode.OpenOrCreate, FileShare.Read);
-                backup = StorageStream.FromFile(files.Backup, create ? FileMode.CreateNew : FileMode.OpenOrCreate, FileShare.Read);
+                journal = StorageStream.FromFile(files.Journal, create ? FileMode.CreateNew : FileMode.Open, FileShare.Read);
+                backup = StorageStream.FromFile(files.Backup, create ? FileMode.CreateNew : FileMode.Open, FileShare.Read);
             }
 
             return create ? BlobStorage.Create(data!, journal!, backup!, name, durability) : BlobStorage.Open(data!, journal!, backup!, checkpointOnOpen: false, durability);
@@ -718,9 +742,9 @@ public sealed class BlobDatabaseEngine : DatabaseEngine
         catch { data?.Dispose(); journal?.Dispose(); backup?.Dispose(); throw; }
     }
 
-    private static DatabaseException RefuseInterruptedCreation(string name)
+    private static DatabaseException RefuseInterruptedCreation(string name, bool preserve = false)
     {
-        string message = string.Format(CultureInfo.CurrentCulture, ErrorMessages.DatabaseFilesIncomplete, name);
+        string message = string.Format(CultureInfo.CurrentCulture, preserve ? ErrorMessages.DatabaseFilesUnrecoverable : ErrorMessages.DatabaseFilesIncomplete, name);
         return new DatabaseException(message, [new Diagnostic { Code = interruptedCreationCode, Message = message, Severity = DiagnosticSeverity.Error }]);
     }
 

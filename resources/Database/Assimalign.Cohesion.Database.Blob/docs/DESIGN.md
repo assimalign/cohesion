@@ -184,16 +184,17 @@ storage's `StorageFormatException` as its inner exception, the files byte-identi
 
 ### Interrupted creation (#1421)
 
-An initialized data file opens with OpenOrCreate for its journal and backup, completing
-creation interrupted before either sidecar existed. Declared provisioning uses this same
-open path. Create refuses an existing incomplete file set with COHDBB004 in
-DatabaseException.Diagnostics and an OpenDatabaseAsync recovery instruction. A leftover
-directory without a data file retains DatabaseNotFoundException on open, with COHDBB004
-and a drop/recreate remedy; create and declared provisioning return the structured error.
-A truncated data file receives the same coded refusal before any sidecar is created.
-Ambiguous files are preserved for diagnosis instead of silently erased. Storage's own
-format refusal still handles an initialized header in an unsupported format. This changes
-file opening and error reporting, not record encoding or the model format.
+Missing journals and backups are refused with COHDBB004 in DatabaseException.Diagnostics,
+including the DatabaseNotFoundException for a directory without its data file. A complete
+header proves sidecars existed at creation; their absence can mean an interrupted drop or
+lost acknowledged commits. No sidecar is silently recreated, even beside an empty closed
+database. Preserve ambiguous files and restore a complete backup. This follows Neo4j's
+missing-log refusal (community/configuration/src/main/java/org/neo4j/configuration/GraphDatabaseSettings.java:697-698;
+community/kernel/src/main/java/org/neo4j/kernel/recovery/Recovery.java:1146-1153).
+Drop explicitly deletes the data file before recursively removing the remaining files.
+Only files shorter than the header are rejected by length. A partial final data page proceeds
+through WAL recovery; a genuine recovery failure becomes the same structured refusal and
+never recommends dropping a file containing data. No record or storage format changes.
 
 ## Chunk chain and disk compatibility
 
@@ -977,6 +978,10 @@ behind its `Open` factory.
   which a disposal through the engine now awaits asynchronously.
 
 ## Diagnostics
+
+| Code | Meaning |
+| --- | --- |
+| `COHDBB004` | Missing or unrecoverable database files; preserve files and restore the complete file set from backup |
 
 The create core accepts the root's explicit `object? creationState` parameter (#1349 review).
 This model's public create uses null/defaults; the root continues to own validation and

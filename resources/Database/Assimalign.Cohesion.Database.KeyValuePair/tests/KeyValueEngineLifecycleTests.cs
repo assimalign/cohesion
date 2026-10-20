@@ -9,6 +9,7 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Database.Indexing;
+using Assimalign.Cohesion.Database.KeyValuePair.Storage;
 using Assimalign.Cohesion.Database.Indexing.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
@@ -356,17 +357,17 @@ public sealed class KeyValueEngineLifecycleTests : IDisposable
     [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Format: A database whose catalog registers no primary index (an interrupted creation) opens on entry-space format 2")]
     public async Task Open_CatalogWithoutRegistration_ShouldBootstrapOnCurrentFormat()
     {
-        // Arrange: a database whose creation stopped before its catalog held anything —
-        // modelled by a created, empty database whose catalog file set is gone. The
-        // reopened catalog reads as format 1 with no registration.
-        await using (var engine = KeyValueDatabaseEngine.Create("keyvalue-engine", new KeyValueDatabaseEngineOptions { RootPath = _rootPath }))
+        // Arrange: both initial file sets exist, but no primary index was registered.
+        // Deleting the catalog of a finished database instead models a lost catalog or drop.
+        string directory = Path.Combine(_rootPath, "kv");
+        Directory.CreateDirectory(directory);
+        foreach (string set in new[] { "keyvalue", "catalog" })
         {
-            await engine.CreateDatabaseAsync("kv", TestTimeout.Token());
-        }
-
-        foreach (string extension in new[] { ".dat", ".log", ".bak" })
-        {
-            File.Delete(Path.Combine(_rootPath, "kv", "catalog" + extension));
+            using var initial = KeyValueStorage.Create(
+                StorageStream.FromFile(Path.Combine(directory, set + ".dat"), FileMode.CreateNew, FileShare.Read),
+                StorageStream.FromFile(Path.Combine(directory, set + ".log"), FileMode.CreateNew, FileShare.Read),
+                StorageStream.FromFile(Path.Combine(directory, set + ".bak"), FileMode.CreateNew, FileShare.Read),
+                set == "catalog" ? "kv/catalog" : "kv");
         }
 
         // Act

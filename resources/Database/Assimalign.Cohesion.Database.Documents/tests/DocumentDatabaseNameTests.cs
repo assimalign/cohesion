@@ -167,7 +167,7 @@ public sealed class DocumentDatabaseNameTests : IDisposable
         var created = await engine.CreateDatabaseAsync("Sales", Token());
 
         // Assert: not found rather than a missing file, refused with the remedy, then cleared.
-        open.Message.ShouldStartWith("COHDBD003: ", Case.Sensitive);
+        open.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBD003");
         open.Message.ShouldContain("DropDatabaseAsync", Case.Sensitive);
         listed.ShouldBeEmpty();
         create.ShouldNotBeOfType<DatabaseNotFoundException>();
@@ -196,14 +196,14 @@ public sealed class DocumentDatabaseNameTests : IDisposable
         database.ShouldBeNull();
     }
 
-    [Theory(DisplayName = "Cohesion Test [Database.Documents] - Interrupted create: open and declared provisioning recreate missing journal and backup files (#1421)")]
+    [Theory(DisplayName = "Cohesion Test [Database.Documents] - Missing sidecars: open and declared provisioning refuse unchanged files (#1158)")]
     [InlineData(1, false)]
     [InlineData(2, false)]
     [InlineData(3, false)]
     [InlineData(1, true)]
     [InlineData(2, true)]
     [InlineData(3, true)]
-    public async Task OpenDatabaseAsync_MissingSidecars_ShouldRecoverAndReopen(int missing, bool declared)
+    public async Task OpenDatabaseAsync_MissingSidecars_ShouldRefuseWithoutWriting(int missing, bool declared)
     {
         // Arrange
         await using (var first = CreateEngine(onDisk: true))
@@ -213,22 +213,22 @@ public sealed class DocumentDatabaseNameTests : IDisposable
         string directory = Path.Combine(_rootPath, "sales");
         if ((missing & 1) != 0) { File.Delete(Path.Combine(directory, "document.log")); }
         if ((missing & 2) != 0) { File.Delete(Path.Combine(directory, "document.bak")); }
+        var before = Directory.GetFiles(directory).ToDictionary(path => Path.GetFileName(path)!, ReadFile);
         var builder = DocumentDatabaseEngine.CreateBuilder("recovery");
         builder.Options.RootPath = _rootPath;
         if (declared) { builder.AddDatabase("SALES"); }
 
         // Act
-        await using (var recovered = await builder.BuildAsync(CancellationToken.None))
+        var refusal = await Should.ThrowAsync<DatabaseException>(async () =>
         {
-            var database = await recovered.OpenDatabaseAsync("SALES", CancellationToken.None);
+            await using var recovered = await builder.BuildAsync(CancellationToken.None);
+            await recovered.OpenDatabaseAsync("SALES", CancellationToken.None);
+        });
 
-            // Assert
-            database.Name.ToString().ShouldBe("Sales");
-            File.Exists(Path.Combine(directory, "document.log")).ShouldBeTrue();
-            File.Exists(Path.Combine(directory, "document.bak")).ShouldBeTrue();
-        }
-        await using var next = CreateEngine(onDisk: true);
-        (await next.OpenDatabaseAsync("sales", CancellationToken.None)).Name.ToString().ShouldBe("Sales");
+        // Assert
+        refusal.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBD003");
+        Directory.GetFiles(directory).Select(Path.GetFileName).Order().ShouldBe(before.Keys.Order());
+        foreach (var file in before) { File.ReadAllBytes(Path.Combine(directory, file.Key!)).ShouldBe(file.Value); }
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Documents] - Interrupted create: explicit create reports the recovery action without claiming existing files (#1421)")]
@@ -253,7 +253,8 @@ public sealed class DocumentDatabaseNameTests : IDisposable
         refusal.Message.ShouldContain("OpenDatabaseAsync", Case.Sensitive);
         (await File.ReadAllBytesAsync(data, CancellationToken.None)).ShouldBe(before);
         File.Exists(Path.Combine(directory, "document.log")).ShouldBeFalse();
-        (await engine.OpenDatabaseAsync("sales", CancellationToken.None)).Name.ToString().ShouldBe("Sales");
+        (await Should.ThrowAsync<DatabaseException>(() => engine.OpenDatabaseAsync("sales", CancellationToken.None).AsTask()))
+            .Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBD003");
     }
 
     [Theory(DisplayName = "Cohesion Test [Database.Documents] - Interrupted create: truncated data and leftover directories have coded, actionable refusals (#1421)")]
@@ -285,8 +286,102 @@ public sealed class DocumentDatabaseNameTests : IDisposable
         else
         {
             var open = await Should.ThrowAsync<DatabaseNotFoundException>(() => engine.OpenDatabaseAsync("sales", CancellationToken.None).AsTask());
-            open.Message.ShouldStartWith("COHDBD003: ", Case.Sensitive);
+            open.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBD003");
         }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Documents] - Partial drop: no subset of removed files can reopen (#1158)")]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    [InlineData(5)]
+    [InlineData(6)]
+    [InlineData(7)]
+    public async Task OpenDatabaseAsync_PartialDrop_ShouldNeverReopen(int removed)
+    {
+        // Arrange
+        await using (var first = CreateEngine(onDisk: true)) { await first.CreateDatabaseAsync("sales", CancellationToken.None); }
+        string directory = Path.Combine(_rootPath, "sales");
+        string[] extensions = ["dat", "log", "bak"];
+        for (int index = 0; index < extensions.Length; index++)
+        {
+            if ((removed & (1 << index)) != 0) { File.Delete(Path.Combine(directory, "document." + extensions[index])); }
+        }
+        var before = Directory.GetFiles(directory).ToDictionary(path => Path.GetFileName(path)!, ReadFile);
+        await using var engine = CreateEngine(onDisk: true);
+
+        // Act
+        await Should.ThrowAsync<DatabaseException>(() => engine.OpenDatabaseAsync("sales", CancellationToken.None).AsTask());
+
+        // Assert
+        Directory.GetFiles(directory).Select(Path.GetFileName).Order().ShouldBe(before.Keys.Order());
+        foreach (var file in before) { File.ReadAllBytes(Path.Combine(directory, file.Key!)).ShouldBe(file.Value); }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Documents] - Crash after a checkpoint: a lost journal is refused, a torn page recovers acknowledged data (#1158)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task OpenDatabaseAsync_CommittedCrashImage_ShouldPreserveAcknowledgedData(bool loseJournal)
+    {
+        // Arrange: retain files before orderly close can checkpoint the acknowledged write.
+        await using var first = CreateEngine(onDisk: true);
+        var database = await first.CreateDatabaseAsync("sales", CancellationToken.None);
+        database.DataStorage.Checkpoint();
+        var identity = await WriteAsync(database, "acknowledged");
+        string directory = Path.Combine(_rootPath, "sales");
+        var crash = Directory.GetFiles(directory).ToDictionary(path => Path.GetFileName(path)!, ReadFile);
+        await first.DisposeAsync();
+        foreach (var file in crash) { File.WriteAllBytes(Path.Combine(directory, file.Key!), file.Value); }
+        if (loseJournal) { File.Delete(Path.Combine(directory, "document.log")); }
+        else
+        {
+            using var data = new FileStream(Path.Combine(directory, "document.dat"), FileMode.Open, FileAccess.Write);
+            data.SetLength(data.Length - 1);
+        }
+        await using var reopened = CreateEngine(onDisk: true);
+
+        // Act / Assert
+        if (loseJournal)
+        {
+            var before = File.ReadAllBytes(Path.Combine(directory, "document.dat"));
+            var refusal = await Should.ThrowAsync<DatabaseException>(() => reopened.OpenDatabaseAsync("sales", CancellationToken.None).AsTask());
+            refusal.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBD003");
+            File.ReadAllBytes(Path.Combine(directory, "document.dat")).ShouldBe(before);
+            File.Exists(Path.Combine(directory, "document.log")).ShouldBeFalse();
+        }
+        else
+        {
+            (await ReadAsync(await reopened.OpenDatabaseAsync("sales", CancellationToken.None), identity)).ShouldBe("acknowledged");
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Documents] - Unrecoverable data: the coded refusal preserves files and never advises dropping data (#1158)")]
+    public async Task OpenDatabaseAsync_UnrecoverableTail_ShouldRefuseWithoutDropAdvice()
+    {
+        // Arrange
+        await using (var first = CreateEngine(onDisk: true)) { await first.CreateDatabaseAsync("sales", CancellationToken.None); }
+        string directory = Path.Combine(_rootPath, "sales");
+        string path = Path.Combine(directory, "document.dat");
+        using (var data = new FileStream(path, FileMode.Open, FileAccess.Write)) { data.SetLength(8193); }
+        var before = File.ReadAllBytes(path);
+        await using var engine = CreateEngine(onDisk: true);
+
+        // Act
+        var refusal = await Should.ThrowAsync<DatabaseException>(() => engine.OpenDatabaseAsync("sales", CancellationToken.None).AsTask());
+
+        // Assert
+        refusal.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBD003");
+        refusal.Message.ShouldNotContain("DropDatabaseAsync", Case.Sensitive);
+        File.ReadAllBytes(path).ShouldBe(before);
+    }
+
+    private static byte[] ReadFile(string path)
+    {
+        using var input = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        using var copy = new MemoryStream();
+        input.CopyTo(copy);
+        return copy.ToArray();
     }
 
     private DocumentDatabaseEngine CreateEngine(bool onDisk)
