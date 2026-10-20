@@ -378,14 +378,14 @@ interface is deleted in P6.
 | 90 | `ISqlPrincipalBuilder` | Sql.Schema `:6` | model child | sealed | `public sealed class SqlPrincipalBuilder`, with the SDK constant at `:23`. **At P4 (landed):** `src/SqlPrincipalBuilder.cs`. | P4 |
 | 91 | `ISqlTriggerContext` | Sql.Schema `:6` | model child | sealed | `public sealed class SqlTriggerContext`, with a private constructor. It is a phantom that appears only inside trigger expression trees. The canonicalizer string (`CSharpExpressionCanonicalizer.cs:480`) changes in lockstep. **At P4 (landed):** `src/SqlTriggerContext.cs`; its `Audit<TValue>` throws `NotSupportedException`, never reached, because no instance exists. The runtime canonicalizer's allow-list (`SqlSchemaCompiler.cs`) and the SDK's (`CSharpExpressionCanonicalizer.cs:480`) moved together. The type identity is in a trigger's canonical text, so the hash of a schema that declares a trigger changed (§6.7). | P4 |
 | 92 | `ISqlSchema` | Sql.Schema `:9` | model child | sealed | An opaque `public sealed class SqlSchema` that exposes `Name` and `Compile()` (§6.7). **At P4 (landed):** as planned (§6.7). | P4 |
-| 93 | `ISqlSchemaTable` | Sql.Schema `:7` | model child | delete | The internal record (`Internal/SqlSchemaBuilder.cs:228`) stays internal behind `SqlSchema`. **At P4:** landed; the records live in `Internal/SqlSchemaTable.cs` (split from `Internal/SqlSchemaDeclaration.cs`, the renamed `Internal/SqlSchemaBuilder.cs`), beside `SqlSchemaDeclaration`, the former `SqlSchemaModel`. | P4 |
-| 94 | `ISqlSchemaType` | Sql.Schema `:6` | model child | delete | The internal record (`:148`) stays internal. **At P4:** landed; the records live in `Internal/SqlSchemaType.cs` (split from `Internal/SqlSchemaDeclaration.cs`, the renamed `Internal/SqlSchemaBuilder.cs`), beside `SqlSchemaDeclaration`, the former `SqlSchemaModel`. | P4 |
-| 95 | `ISqlSchemaColumn` | Sql.Schema `:6` | model child | delete | The internal record (`:239`) stays internal. **At P4:** landed; the records live in `Internal/SqlSchemaColumn.cs` (split from `Internal/SqlSchemaDeclaration.cs`, the renamed `Internal/SqlSchemaBuilder.cs`), beside `SqlSchemaDeclaration`, the former `SqlSchemaModel`. | P4 |
+| 93 | `ISqlSchemaTable` | Sql.Schema `:7` | model child | delete | The internal record (`Internal/SqlSchemaBuilder.cs:228`) stays internal behind `SqlSchema`. **At P4:** landed; the records live in `Internal/SqlSchemaDeclaration.cs` (the renamed `Internal/SqlSchemaBuilder.cs`), beside `SqlSchemaDeclaration`, the former `SqlSchemaModel`. | P4 |
+| 94 | `ISqlSchemaType` | Sql.Schema `:6` | model child | delete | The internal record (`:148`) stays internal. **At P4:** landed; the records live in `Internal/SqlSchemaDeclaration.cs` (the renamed `Internal/SqlSchemaBuilder.cs`), beside `SqlSchemaDeclaration`, the former `SqlSchemaModel`. | P4 |
+| 95 | `ISqlSchemaColumn` | Sql.Schema `:6` | model child | delete | The internal record (`:239`) stays internal. **At P4:** landed; the records live in `Internal/SqlSchemaDeclaration.cs` (the renamed `Internal/SqlSchemaBuilder.cs`), beside `SqlSchemaDeclaration`, the former `SqlSchemaModel`. | P4 |
 | 96 | `ISqlSchemaExtension` | Sql.Schema `:4` | model child | delete | The internal record (`:241`) stays internal. **At P4:** landed; the records live in `Internal/SqlSchemaDeclaration.cs` (the renamed `Internal/SqlSchemaBuilder.cs`), beside `SqlSchemaDeclaration`, the former `SqlSchemaModel`. | P4 |
 | 97 | `ISqlSchemaFunction` | Sql.Schema `:6` | model child | delete | The internal record (`:243`) stays internal. **At P4:** landed; the records live in `Internal/SqlSchemaDeclaration.cs` (the renamed `Internal/SqlSchemaBuilder.cs`), beside `SqlSchemaDeclaration`, the former `SqlSchemaModel`. | P4 |
-| 98 | `ISqlSchemaGrant` | Sql.Schema `:6` | model child | delete | The internal record (`:289`) stays internal. **At P4:** landed; the records live in `Internal/SqlSchemaGrant.cs` (split from `Internal/SqlSchemaDeclaration.cs`, the renamed `Internal/SqlSchemaBuilder.cs`), beside `SqlSchemaDeclaration`, the former `SqlSchemaModel`. | P4 |
-| 99 | `ISqlSchemaPrincipal` | Sql.Schema `:6` | model child | delete | The internal record (`:285`) stays internal. **At P4:** landed; the records live in `Internal/SqlSchemaPrincipal.cs` (split from `Internal/SqlSchemaDeclaration.cs`, the renamed `Internal/SqlSchemaBuilder.cs`), beside `SqlSchemaDeclaration`, the former `SqlSchemaModel`. | P4 |
-| 100 | `ISqlSchemaReference` | Sql.Schema `:6` | model child | delete | The internal record (`:237`) stays internal. **At P4:** landed; the records live in `Internal/SqlSchemaReference.cs` (split from `Internal/SqlSchemaDeclaration.cs`, the renamed `Internal/SqlSchemaBuilder.cs`), beside `SqlSchemaDeclaration`, the former `SqlSchemaModel`. | P4 |
+| 98 | `ISqlSchemaGrant` | Sql.Schema `:6` | model child | delete | The internal record (`:289`) stays internal. **At P4:** landed; the records live in `Internal/SqlSchemaDeclaration.cs` (the renamed `Internal/SqlSchemaBuilder.cs`), beside `SqlSchemaDeclaration`, the former `SqlSchemaModel`. | P4 |
+| 99 | `ISqlSchemaPrincipal` | Sql.Schema `:6` | model child | delete | The internal record (`:285`) stays internal. **At P4:** landed; the records live in `Internal/SqlSchemaDeclaration.cs` (the renamed `Internal/SqlSchemaBuilder.cs`), beside `SqlSchemaDeclaration`, the former `SqlSchemaModel`. | P4 |
+| 100 | `ISqlSchemaReference` | Sql.Schema `:6` | model child | delete | The internal record (`:237`) stays internal. **At P4:** landed; the records live in `Internal/SqlSchemaDeclaration.cs` (the renamed `Internal/SqlSchemaBuilder.cs`), beside `SqlSchemaDeclaration`, the former `SqlSchemaModel`. | P4 |
 | 101 | `ISqlSchemaTrigger` | Sql.Schema `:7` | model child | delete | The internal record (`:245`) stays internal. **At P4:** landed; the records live in `Internal/SqlSchemaDeclaration.cs` (the renamed `Internal/SqlSchemaBuilder.cs`), beside `SqlSchemaDeclaration`, the former `SqlSchemaModel`. | P4 |
 | 102 | `ISqlClient` | Sql.Client `:19` | client | sealed | `public sealed class SqlClient`. It absorbs the static class (`SqlClient.cs:11`). **At P5 (re-verified):** landed as planned, with the internal `DefaultSqlClient` folded in behind a private constructor. The Sdk.ApplicationModel `EnabledWeb` fixture, Studio's SQL workspace, and Sql.Tests' and Database.Testing's wire tests were retyped. | P5 |
 | 103 | `ISqlClientObserver` | Sql.Client `:16` | client | abstract | `public abstract class SqlClientObserver`, with a protected constructor and `protected internal virtual` hooks with empty bodies. **At P5 (re-verified):** landed as planned, on row 79's terms. | P5 |
@@ -1760,9 +1760,7 @@ that option B left are gone:
 - *The builders' file.* The four builders, their records and `SqlSchemaModel` shared
   `Internal/SqlSchemaBuilder.cs`. The builders moved to their own files in the `RootNamespace`
   (`SqlSchemaBuilder.cs`, `SqlTableBuilder.cs`, `SqlTypeBuilder.cs`, `SqlPrincipalBuilder.cs`,
-  `SqlTriggerContext.cs`); the records now occupy `Internal/SqlSchemaDeclaration.cs`, `Internal/SqlSchemaType.cs`,
-  `Internal/SqlSchemaTable.cs`, `Internal/SqlSchemaReference.cs`, `Internal/SqlSchemaCheck.cs`,
-  `Internal/SqlSchemaColumn.cs`, `Internal/SqlSchemaPrincipal.cs`, and `Internal/SqlSchemaGrant.cs`,
+  `SqlTriggerContext.cs`); the records stayed, in the renamed `Internal/SqlSchemaDeclaration.cs`,
   with `SqlSchemaModel` renamed `SqlSchemaDeclaration` so "model" means only `EngineModel`. The
   builder classes had been the internal implementations: `SqlSchemaTableBuilder<TRow>` became
   `SqlTableBuilder<TRow>`, `SqlSchemaTypeBuilder` `SqlTypeBuilder` and
@@ -1939,7 +1937,7 @@ Documents.Language, Blob and Hosting.
   - Database.Client `StreamingClientTestHarness.cs:184` and `:254`;
   - `DatabaseProtocolExchangeTests.cs:58` and `:82`;
   - `DatabaseExchangeHealthTests.cs:85` and `:107`;
-  - Graph `TestObjects/GraphCatalogTestExchange.cs:12`.
+  - Graph `TestObjects/GraphCatalogTestExchange.cs:23`.
 
   **Landed at P5:** all seven, at the lines named. Each passes its family to the base
   constructor and overrides the protected core (`ExecuteCoreAsync`, or `OpenCoreAsync` and
@@ -2030,7 +2028,7 @@ Documents.Language, Blob and Hosting.
   - `RecordingEngine.cs:12`, `ProvisioningEngine.cs:8` and `ProvisioningDatabase` (`:101`);
   - `RecordingServer.cs:12` and `RecordingEngineWorker.cs:6`;
   - `DatabaseApplicationTests.cs:204`, `DatabaseCompositionTests.cs:391` and
-    `ResourceControlPlaneHostingTests.cs:374`;
+    `ResourceControlPlaneHostingTests.cs:375`;
   - `EmbeddedDatabaseTests.cs:74`.
   - **At P3:** unchanged, as scheduled: Hosting and Embedded still compose engines through the
     interfaces the bases keep implementing, so their suites run unchanged and are P3's evidence
