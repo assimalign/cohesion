@@ -13,7 +13,7 @@ The 2026-07-14 decision reused the existing Execute frame and then-shared server
 Per-model servers later replaced that pump. The owner decision of 2026-10-16 keeps the
 wire encoding and removes the inherited public text capability (#1576).
 
-Update `Internal/KeyValueCommandParser.cs`, this document, and the command/introspection
+Update `Internal/Execution/KeyValueCommandParser.cs`, this document, and the command/introspection
 corpus tests together whenever the grammar changes.
 
 ## Validation and reporting order

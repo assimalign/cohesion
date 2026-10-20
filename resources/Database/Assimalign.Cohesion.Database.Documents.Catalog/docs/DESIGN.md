@@ -143,7 +143,7 @@ NULLS DISTINCT and arbitration. Kind 4 and kind 5 retain the UNIQUE flag across 
 An immediate multi-row key swap fails, and the engine's transaction boundary undoes the statement.
 
 `SearchIndexAsync` accepts leading scalar equality values plus lower/upper bounds on the
-next component. It uses SQL's prefix-successor ranges (`SqlPlanExecutor.cs:1407-1490`):
+next component. It uses SQL's prefix-successor ranges (`resources/Database/Assimalign.Cohesion.Database.Sql/src/Internal/Execution/SqlPlanExecutor.cs:1407-1490`):
 equality is [P, successor(P)); an exclusive lower uses successor(P+v), and an inclusive
 upper uses successor(P+v) exclusively. A successor increments the last non-FF byte and
 truncates after it. Every component tag is below FF, so every nonempty prefix has a successor.

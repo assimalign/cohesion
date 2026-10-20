@@ -723,7 +723,7 @@ and zero-based Cypher substring, invariant casing, and bounded ordinal replaceme
 replacement inserts at every boundary, including both ends, as Neo4j StringValue.java:197
 does; the expanded size is checked before allocation. CAST shares
 SQL's fractional rejection, nonzero floating underflow checks (SqlStandardCasts.cs:206-249),
-direct decimal-text REAL conversion (:161) and optional timestamp fraction (SqlCastText.cs:27); Cypher conversions truncate and return NULL for unparsable text.
+direct decimal-text REAL conversion (:161) and optional timestamp fraction (resources/Database/Assimalign.Cohesion.Database.Sql/src/Internal/Types/SqlCastText.cs:27); Cypher conversions truncate and return NULL for unparsable text.
 DateOnly and DateTimeOffset gain predicate and total ordering; total order places zoned timestamps then
 dates between paths and strings (Neo4j storable/ValueGroup.java:56-65). PropertyScalar checks storage admissibility, so computed
 dynamic temporal properties raise COHDBG013 inside the transaction rather than a storage ArgumentException.

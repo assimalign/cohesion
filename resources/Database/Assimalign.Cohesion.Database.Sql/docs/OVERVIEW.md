@@ -2,7 +2,7 @@
 
 The SQL model engine of the Cohesion Data Platform: `SqlDatabaseEngine` manages
 database lifecycles; sessions execute real SQL through the planner
-(`Internal/SqlPlanner`) and plan executor (`Internal/SqlPlanExecutor`) against
+(`Internal/Planning/SqlPlanner`) and plan executor (`Internal/Execution/SqlPlanExecutor`) against
 shared storage, with DDL flowing through the relational catalog
 (`Database.Sql.Catalog`) and transactions riding the storage write-ahead log.
 

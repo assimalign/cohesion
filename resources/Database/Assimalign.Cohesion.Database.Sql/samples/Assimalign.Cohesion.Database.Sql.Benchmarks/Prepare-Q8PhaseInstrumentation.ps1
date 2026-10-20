@@ -22,7 +22,7 @@ if (!$archiveRoot.StartsWith($instrumentationRoot + [System.IO.Path]::DirectoryS
 if (Test-Path -LiteralPath (Join-Path $archiveRoot '.git')) {
     throw "TreeRoot must be an extracted source archive without .git: $archiveRoot"
 }
-$sourceRelative = 'resources/Database/Assimalign.Cohesion.Database.Sql/src/Internal/SqlDeclaredDatabase.cs'
+$sourceRelative = 'resources/Database/Assimalign.Cohesion.Database.Sql/src/Internal/Provisioning/SqlDeclaredDatabase.cs'
 $benchmarkRelative = 'resources/Database/Assimalign.Cohesion.Database.Sql/samples/Assimalign.Cohesion.Database.Sql.Benchmarks'
 $sourcePath = Join-Path $archiveRoot $sourceRelative
 $source = [System.IO.File]::ReadAllText($sourcePath).Replace("`r`n", "`n")
