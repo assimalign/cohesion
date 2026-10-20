@@ -22,7 +22,7 @@ The implementation uses Framework MSBuild-compatible path normalization and has 
 
 ## Contract-only dependencies
 
-Direct references are Database.Protocol, Database.Types and Connections. Wire contracts live in each model Protocol assembly, shared by client and engine. This client has no engine, area-root, storage, transaction, indexing, model parser or schema reference. Cache.Client remains an empty placeholder. Engine-free trimming and NativeAOT coverage lives in Database.Client/samples/Assimalign.Cohesion.Database.Client.AotSample.
+Direct references are Database.Protocol, Database.Types and Connections. Wire contracts live in each model Protocol assembly, shared by client and engine. This client has no engine, area-root, storage, transaction, indexing, model parser or schema reference. Cache.Client remains an empty placeholder. Engine-free trimming and NativeAOT coverage lives in Database.Client/samples/Assimalign.Cohesion.Database.Client.AotSample. The resource-database workflow publishes and runs it in the NativeAOT job, rejects IL2xxx/IL3xxx warnings, and executes its pre-trim compiler-closure guard during publish.
 
 ## Client exception ownership
 

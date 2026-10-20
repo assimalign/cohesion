@@ -184,6 +184,31 @@ jobs:
             throw "Database.Sql.AotSample reported a failed check (exit code $LASTEXITCODE)."
           }
 
+      - name: Publish and run the engine-free client NativeAOT canary
+        shell: pwsh
+        env:
+          MSBUILDDISABLENODEREUSE: '1'
+        run: |
+          $output = Join-Path $env:RUNNER_TEMP "client-aot-sample"
+          # WriteClientCanaryClosure checks compiler references before trimming and fails on engines.
+          $log = dotnet publish "./resources/Database/Assimalign.Cohesion.Database.Client/samples/Assimalign.Cohesion.Database.Client.AotSample/Assimalign.Cohesion.Database.Client.AotSample.csproj" `
+              --configuration Release `
+              --runtime linux-x64 `
+              --output $output `
+              --nologo 2>&1
+          $log | Write-Host
+          if ($LASTEXITCODE -ne 0) {
+            throw "NativeAOT publish of Database.Client.AotSample failed with exit code $LASTEXITCODE."
+          }
+          if ($log -match "warning IL[23][0-9]{3}") {
+            throw "NativeAOT publish of Database.Client.AotSample reported IL2xxx/IL3xxx warnings."
+          }
+
+          & (Join-Path $output "Assimalign.Cohesion.Database.Client.AotSample")
+          if ($LASTEXITCODE -ne 0) {
+            throw "Database.Client.AotSample reported a failed check (exit code $LASTEXITCODE)."
+          }
+
       - name: Publish and run the Documents client NativeAOT guard
         shell: pwsh
         run: |
