@@ -1,5 +1,9 @@
 # Assimalign.Cohesion.Database.Client — Design
 
+## Client exception ownership
+
+`DatabaseClientException` derives directly from `System.Exception`. It preserves constructors, wire codes, inner exception and connection-usability behavior. Its locally declared Diagnostics is never null: explicit diagnostics are defensively copied into a read-only snapshot, stably ordered by offset with unlocated entries last. SQL and Graph wrappers copy from DatabaseClientException or their own nested client exception. Documents retains its explicit diagnostics parameter and returns an empty collection when none was supplied. Engine-side DatabaseException remains in the area root; catching it intentionally no longer catches remote client failures.
+
 The shared client owns transport dialing, startup/authentication, framing, pooling,
 and connection health. Model clients own request encoding, response validation, and
 result materialization. The shared client references no model package and imposes
@@ -440,4 +444,4 @@ Information, including SQL0100, is never sent. Error and result payloads are unc
 Statement failures leave the server session ready. Model clients validate diagnostic
 ordering and preserve every code, severity, message, nullable offset and source line.
 
-DatabaseConnection.ServerVersion and Capabilities expose the actual agreement. An empty Ready reports 2.0 rather than assuming Current. DatabaseClientException retains structured diagnostics through the existing inherited DatabaseException.Diagnostics API.
+DatabaseConnection.ServerVersion and Capabilities expose the actual agreement. An empty Ready reports 2.0 rather than assuming Current. DatabaseClientException retains structured diagnostics through its locally declared read-only Diagnostics snapshot.

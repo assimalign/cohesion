@@ -1,5 +1,9 @@
 # Assimalign.Cohesion.Database.KeyValuePair.Client — Design
 
+## Client exception ownership
+
+`KeyValueClientException` derives directly from `System.Exception`. It preserves constructors, wire codes, inner exception and connection-usability behavior. Its locally declared Diagnostics is never null: explicit diagnostics are defensively copied into a read-only snapshot, stably ordered by offset with unlocated entries last. SQL and Graph wrappers copy from DatabaseClientException or their own nested client exception. Documents retains its explicit diagnostics parameter and returns an empty collection when none was supplied. Engine-side DatabaseException remains in the area root; catching it intentionally no longer catches remote client failures.
+
 The key-value client owns command construction, parameter encoding, result
 materialization, typed outcomes, error mapping, and telemetry. The shared client
 owns pooling, handshake, framing, and exchange lifetime.

@@ -3,6 +3,8 @@
 		<RootNamespace>Assimalign.Cohesion.Database.Client</RootNamespace>
 	</PropertyGroup>
 	<ItemGroup>
+        <CohesionProjectReference Include="Assimalign.Cohesion.Database.Types" />
+        <CohesionSharedSource Include="Assimalign.Cohesion.Database.Client" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Protocol" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections" />

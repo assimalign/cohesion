@@ -1,5 +1,9 @@
 # Documents client design
 
+## Client exception ownership
+
+`DocumentClientException` derives directly from `System.Exception`. It preserves constructors, wire codes, inner exception and connection-usability behavior. Its locally declared Diagnostics is never null: explicit diagnostics are defensively copied into a read-only snapshot, stably ordered by offset with unlocated entries last. SQL and Graph wrappers copy from DatabaseClientException or their own nested client exception. Documents retains its explicit diagnostics parameter and returns an empty collection when none was supplied. Engine-side DatabaseException remains in the area root; catching it intentionally no longer catches remote client failures.
+
 ## Intent and dependencies
 
 The client makes the existing database-bound document session available over its model protocol.
@@ -179,7 +183,7 @@ with COHDOC007 before normalization, including underflow and excess fractional p
 VALUES and computed SELECT inputs preserve the collection on failure over both InMemory and
 TCP; the diagnostic span and the reusable session survive the wire unchanged.
 
-`DocumentClientException` is a sealed `DatabaseException` leaf, like Graph's model exception.
+`DocumentClientException` is a sealed `System.Exception` leaf, like Graph's model exception.
 It uses the inherited diagnostic carrier, so callers catching the area root see the same diagnostics.
 Before #1103 it derived from `DatabaseClientException` and owned a separate diagnostic list; keeping
 that shape would hide the root carrier or require widening the shared client's constructors just for

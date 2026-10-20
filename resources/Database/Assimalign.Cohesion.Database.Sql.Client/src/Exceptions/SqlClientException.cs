@@ -1,7 +1,12 @@
 using System;
+using System.Collections.Generic;
 
 using Assimalign.Cohesion.Database.Client;
 using Assimalign.Cohesion.Database.Protocol;
+
+using Assimalign.Cohesion.Database.Types;
+
+using Assimalign.Cohesion.Database.Client.Internal;
 
 namespace Assimalign.Cohesion.Database.Sql.Client;
 
@@ -10,8 +15,11 @@ namespace Assimalign.Cohesion.Database.Sql.Client;
 /// failures onto a SQL-scoped <see cref="SqlClientErrorKind"/> taxonomy while
 /// preserving the underlying <see cref="ProtocolErrorCode"/>.
 /// </summary>
-public sealed class SqlClientException : DatabaseException
+public sealed class SqlClientException : Exception
 {
+    /// <summary>Gets the complete read-only diagnostic snapshot, ordered by source offset; empty when none were supplied.</summary>
+    public IReadOnlyList<Diagnostic> Diagnostics { get; } = Array.Empty<Diagnostic>();
+
     /// <summary>
     /// Initializes a new <see cref="SqlClientException"/>.
     /// </summary>
@@ -33,10 +41,16 @@ public sealed class SqlClientException : DatabaseException
     /// <param name="message">The error message.</param>
     /// <param name="innerException">The underlying cause.</param>
     public SqlClientException(SqlClientErrorKind kind, ProtocolErrorCode code, string message, Exception? innerException)
-        : base(message, (innerException as DatabaseException)?.Diagnostics ?? [], innerException)
+        : base(message, innerException)
     {
         Kind = kind;
         Code = code;
+        Diagnostics = ClientDiagnostics.Snapshot(innerException switch
+        {
+            DatabaseClientException shared => shared.Diagnostics,
+            SqlClientException nested => nested.Diagnostics,
+            _ => Array.Empty<Diagnostic>(),
+        });
     }
 
     /// <summary>

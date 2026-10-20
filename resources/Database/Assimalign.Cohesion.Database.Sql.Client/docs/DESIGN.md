@@ -1,5 +1,9 @@
 # Database.Sql.Client — Design
 
+## Client exception ownership
+
+`SqlClientException` derives directly from `System.Exception`. It preserves constructors, wire codes, inner exception and connection-usability behavior. Its locally declared Diagnostics is never null: explicit diagnostics are defensively copied into a read-only snapshot, stably ordered by offset with unlocated entries last. SQL and Graph wrappers copy from DatabaseClientException or their own nested client exception. Documents retains its explicit diagnostics parameter and returns an empty collection when none was supplied. Engine-side DatabaseException remains in the area root; catching it intentionally no longer catches remote client failures.
+
 CREATE/DROP SCHEMA (#1030) travel through the existing execute exchange. Wire coverage pins
 cross-connection namespace visibility, RESTRICT failure, CASCADE's retained external table,
 and stable missing/reserved/protected namespace and unsupported-syntax diagnostics. Errors
@@ -267,7 +271,7 @@ VALUES, DEFAULT items and UPDATE DEFAULT use that same contract. SqlInsertValues
 covers success, syntax rejection and constraint rejection over InMemory and loopback TCP,
 then queries and writes on the same connection to verify it remains usable.
 
-`SqlClientException : DatabaseException` maps stable wire codes to SQL error kinds
+`SqlClientException : Exception` maps stable wire codes to SQL error kinds
 and retains the original code. The shared pool invalidates incomplete exchanges,
 including cancellation and decoder failure. Completed parse/execution failures
 keep the connection reusable.

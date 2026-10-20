@@ -6,6 +6,8 @@ using Assimalign.Cohesion.Database.Types;
 
 using Assimalign.Cohesion.Database.Protocol;
 
+using Assimalign.Cohesion.Database.Client.Internal;
+
 namespace Assimalign.Cohesion.Database.Client;
 
 /// <summary>
@@ -23,8 +25,11 @@ namespace Assimalign.Cohesion.Database.Client;
 /// exception too. No server sends <see cref="ProtocolErrorCode.ConnectionFailure"/>: an error
 /// frame that carries it is a <see cref="ProtocolErrorCode.ProtocolViolation"/>.
 /// </remarks>
-public class DatabaseClientException : DatabaseException
+public class DatabaseClientException : Exception
 {
+    /// <summary>Gets the complete read-only diagnostic snapshot, ordered by source offset; empty when none were supplied.</summary>
+    public IReadOnlyList<Diagnostic> Diagnostics { get; } = Array.Empty<Diagnostic>();
+
     /// <summary>
     /// Initializes a new <see cref="DatabaseClientException"/>.
     /// </summary>
@@ -54,15 +59,16 @@ public class DatabaseClientException : DatabaseException
     /// <param name="diagnostics">The complete wire diagnostics.</param>
     /// <param name="innerException">The underlying cause, when available.</param>
     public DatabaseClientException(ProtocolErrorCode code, string message, IReadOnlyList<ProtocolDiagnostic> diagnostics, Exception? innerException)
-        : base(message, diagnostics.Select(entry => new Diagnostic
+        : base(message, innerException)
+    {
+        Code = code;
+        Diagnostics = ClientDiagnostics.Snapshot(diagnostics.Select(entry => new Diagnostic
         {
             Code = entry.Code, Message = entry.Message,
             Severity = entry.Severity == ProtocolDiagnosticSeverity.Warning ? DiagnosticSeverity.Warning : DiagnosticSeverity.Error,
             Start = entry.Start, End = entry.End, Line = entry.Line,
             Location = entry.Start.HasValue ? DiagnosticLocation.Absolute : null,
-        }), innerException)
-    {
-        Code = code;
+        }));
     }
 
     /// <summary>

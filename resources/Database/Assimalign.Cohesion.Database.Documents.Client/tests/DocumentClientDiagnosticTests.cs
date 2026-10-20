@@ -53,7 +53,7 @@ public sealed class DocumentClientDiagnosticTests
             // Assert
             failure.Code.ShouldBe(classification);
             failure.Diagnostics.Select(Value).ShouldBe(original.Diagnostics.Select(Value));
-            ((DatabaseException)failure).Diagnostics.ShouldBeSameAs(failure.Diagnostics);
+            failure.ShouldBeAssignableTo<Exception>();
             var diagnostic = failure.Diagnostics.ShouldHaveSingleItem();
             diagnostic.Code.ShouldBe(code);
             diagnostic.Start.ShouldBe(statement.IndexOf(span, StringComparison.Ordinal));

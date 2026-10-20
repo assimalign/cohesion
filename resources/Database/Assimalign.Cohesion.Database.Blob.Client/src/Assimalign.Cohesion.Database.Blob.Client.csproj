@@ -5,6 +5,7 @@
     <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
   <ItemGroup>
+        <CohesionProjectReference Include="Assimalign.Cohesion.Database.Types" />
     <CohesionProjectReference Include="Assimalign.Cohesion.Database" />
     <CohesionProjectReference Include="Assimalign.Cohesion.Database.Client" />
     <CohesionProjectReference Include="Assimalign.Cohesion.Database.Blob" />
