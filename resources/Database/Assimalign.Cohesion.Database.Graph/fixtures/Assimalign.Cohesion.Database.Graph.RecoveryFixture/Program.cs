@@ -4,6 +4,7 @@ using System.Threading;
 using Assimalign.Cohesion.Database;
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Graph;
+using Assimalign.Cohesion.Database.Graph.Protocol;
 using Assimalign.Cohesion.Database.Graph.RecoveryFixture;
 
 if (args.Length != 2) { throw new ArgumentException("Usage: seed|verify directory"); }
