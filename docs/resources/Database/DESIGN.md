@@ -648,7 +648,7 @@ What existed before this scaffold vs. what a real multi-model OLTP engine needs.
 | Code-first resource schema had no retained model | schema compile/migrations #857–#859 | #973 added the root declaration vocabulary; #859 lowers it to a validated, dialect-bound `CompiledSchema` with canonical JSON/hash; #857 adds deterministic table/collection diff and the shipped SQL statement/apply path |
 | SDK build tooling — `Migration.targets` and the Tasks project were empty shells | #176 covers migration *workflows* as engine behavior only | #858 adds explicit per-model target loading, static C# schema compilation for SQL/KV, and ordinal SQL migration/baseline generation |
 | Shared type system — `Database.Types` skeletal, no collation/encoding story | #173 covers SQL type coercion only | Fleshed out via new feature under #31; `IndexKey` encoding depends on it |
-| `Sql.Replication` missing (matrix asymmetry) | — | Project added |
+| `Sql.Replication` missing (matrix asymmetry) | — | Project added during scaffolding, then retired with the other empty Replication projects in #1257; replication returns with its implementation design. |
 | Structural defects: `KeyValuePair.Cataalog.csproj` filename typo; `KeyValuePair.Security` test project living under `src/`; stray `using Assimalign.Cohesion.Web` in a root abstraction | — | Fixed in the scaffold PR |
 | Graph query standard undecided | #193 (evaluate candidates) | Unchanged — remains the gating decision for Graph language work; ISO GQL recommended |
 | Encryption at rest — no coverage anywhere in the L03.02 tree | #807 covers only the Security area's key documents | New feature #861 under #31: page/WAL/backup encryption consuming the `Security.DataProtection` key ring |
@@ -664,7 +664,7 @@ Everything under `resources/Database/` builds with `IsAotCompatible=true` (area 
 
 | Decision | Why |
 |---|---|
-| Keep the pre-existing project matrix | It matches the backlog 1:1, keeps model semantics out of the kernel, and the owner confirmed the layout intent. Consolidation would churn 50 projects for aesthetic gain. |
+| Consolidate each model's Catalog, Storage and empty Security satellites into its engine (2026-10-20) | Supersedes the original decision to retain the scaffold matrix. Public Catalog/Storage namespaces and members stay intact; Roslyn architecture tests enforce the component direction and external-assembly limits. Language, Protocol, Client, SQL Schema and optional Tcp remain separate projects. |
 | Transactions as its own kernel project (not inside Storage or Execution) | ACID is the platform's defining requirement (R1); the MVCC/lock/snapshot machinery has consumers in every engine and a different change cadence than page I/O. |
 | One shared wire protocol, model-agnostic server | Five per-model servers would quintuple the security surface. Model semantics live in message payloads (and per-model clients), not in transport framing. |
 | Protocol project split from the server runtime | The client core must speak the protocol without referencing server internals; value-object frames are testable without sockets. |

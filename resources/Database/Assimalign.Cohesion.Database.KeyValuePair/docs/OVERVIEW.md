@@ -70,12 +70,12 @@ keys order by unsigned lexicographic byte comparison.
 ## Dependencies
 
 - `Assimalign.Cohesion.Database` — the area root (contracts + child-root rollup).
-- `Assimalign.Cohesion.Database.KeyValuePair.Storage` — the model's storage
-  binding (`KeyValueStorage`).
-- `Assimalign.Cohesion.Database.KeyValuePair.Catalog` — index registrations +
-  entry-space format marker.
-- `Assimalign.Cohesion.Database.Storage` / `.Types` — durability options surface
-  and the shared tuple codec (direct references; the rest of the kernel arrives
+- `Assimalign.Cohesion.Database.KeyValuePair.Protocol` — independently shared wire contracts.
+- `Assimalign.Cohesion.Connections` — the transport abstraction for the model server.
+- Storage and Catalog are components in this assembly (`src/Storage/` and `src/Catalog/`):
+  the `KeyValueStorage` binding, index registrations and entry-space format marker.
+- `Assimalign.Cohesion.Database.Storage` / `.Types` / `.Indexing` — durability options,
+  the shared tuple codec and B+Tree (direct references; the rest of the kernel arrives
   through the root).
 - `Assimalign.Cohesion.Connections` — the transport listeners the model's
   wire-protocol server binds and accepts from (the server owns listener

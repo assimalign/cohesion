@@ -6579,8 +6579,8 @@ codecs); this project adds no reflection and no serialization.
 
 #### Storage: Non-goals
 
-- No SQL semantics (types, visibility, catalogs) — those live in `Database.Sql`,
-  `Database.Sql.Catalog`, and the row codec inside the engine.
+- SQL semantics (types, visibility, catalogs) belong to this assembly's engine and Catalog
+  components (`src/Catalog/`), with row codecs under `src/Internal/Engine/Storage/`.
 - No bespoke page formats until a measured need exists; the slotted layout is the
   layout.
 
