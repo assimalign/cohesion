@@ -17,6 +17,38 @@ public class LockManagerTests
     private static readonly TransactionSequence _t2 = new(2);
     private static readonly TransactionSequence _t3 = new(3);
 
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Locks: a queued DDL exclusive request stops a stream of new intent writers (#1163)")]
+    public async Task AcquireAsync_ExclusiveBehindIntentWriter_ShouldBlockEveryLaterWriter()
+    {
+        // Arrange: an admitted writer keeps DDL queued while new writers arrive.
+        var locks = LockManager.Create();
+        var table = LockResource.Object(1163);
+        locks.TryAcquire(_t1, table, LockMode.IntentExclusive).ShouldBeTrue();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var ddl = locks.AcquireAsync(_t2, table, LockMode.Exclusive, timeout.Token).AsTask();
+        ddl.IsCompleted.ShouldBeFalse();
+
+        // Act: compatibility with the holder must not let even one newcomer pass DDL.
+        int refused = 0;
+        for (ulong sequence = 3; sequence < 1_003; sequence++)
+        {
+            var writer = new TransactionSequence(sequence);
+            if (!locks.TryAcquire(writer, table, LockMode.IntentExclusive)) { refused++; }
+            locks.ReleaseAll(writer);
+        }
+        refused.ShouldBe(1_000);
+        var later = locks.AcquireAsync(_t3, table, LockMode.IntentExclusive, timeout.Token).AsTask();
+        later.IsCompleted.ShouldBeFalse();
+        locks.ReleaseAll(_t1);
+        await ddl.WaitAsync(timeout.Token);
+
+        // Assert: DDL is granted first, and its release admits the queued writer.
+        later.IsCompleted.ShouldBeFalse();
+        locks.ReleaseAll(_t2);
+        await later.WaitAsync(timeout.Token);
+        locks.ReleaseAll(_t3);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Locks: Shared locks are mutually compatible")]
     public async Task AcquireAsync_SharedWithShared_ShouldGrantImmediately()
     {

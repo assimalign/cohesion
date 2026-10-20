@@ -605,7 +605,9 @@ row while the writers' shared grants passed it, the longest 11.3 s and 6.3 s; th
 committed one delete in the two. The review's own probe of that shape saw seven consecutive
 waits of the deleter canceled at 12 s. With the queue no wait reached 1 s. The rule also lets a
 DDL statement's exclusive table lock through a stream of writers' intent locks, which could keep
-it waiting the same way.
+it waiting the same way. The #1163 guard refuses 1,000 later intent requests behind queued DDL;
+SQL's concurrent DDL stress keeps all three writers running through catch-up and counts commits
+during each exclusive table wait: only the already-admitted writers may finish.
 
 **The queue does not make a hot row's cascade succeed, and it costs a hot row throughput.** The
 same probe, run for 60 s in Release without tiered compilation, twice on `a60f850c` and twice
@@ -671,6 +673,10 @@ listed after the owner's wait for it was canceled; the release then finds no gra
 of the owner there. PostgreSQL's `LockReleaseAll` likewise walks the backend's own lock table
 and proc-lock lists, never the shared table (`src/backend/storage/lmgr/lock.c:2338`, `:2377`,
 `:2511-2540`).
+
+The #1250 timing guard releases ten owned locks beside 1,000 versus 100,000 foreign locks.
+It alternates sizes in one non-parallel process, compares the minima of five rounds, and allows
+an eightfold ratio; a whole-table scan grows with the hundredfold increase in foreign entries.
 
 **One sealed type, with an engine mode (#1258).** `LockManager` is a sealed class with an
 internal constructor and `LockManager.Create()`; the `ILockManager` interface and the internal

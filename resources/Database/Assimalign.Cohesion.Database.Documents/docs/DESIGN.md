@@ -1772,7 +1772,10 @@ propagate. Until #1342 the lookup caught only the slot exceptions, so once the p
 metadata page every lookup that reached one of its references failed with "Page N is not
 allocated": 250 versions of one document and a purge pass were enough. Reads choose the newest visible writer whose
 deleter is not visible. Enumeration is ordinal name/identity order, independent of insertion,
-page allocation, or B+Tree scan order.
+page allocation, or B+Tree scan order. The #1287 regression repeats both committed overwrite/purge
+and explicit rollback for 120 rounds, forcing one metadata version per page and asserting each
+reclamation before looking through the same catalog's cached references. Purge is driven directly
+instead of relying on a 100 ms worker schedule.
 
 `SearchIndexAsync` fetches the catalog record behind each visible index entry the same way:
 `TryReadRecord` with owner zero skips an entry whose record was reclaimed beneath it, the

@@ -9,10 +9,12 @@ using System.Threading.Tasks;
 
 using Shouldly;
 using Xunit;
+using Xunit.Abstractions;
 
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Units;
+using Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
@@ -43,16 +45,16 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 /// duration until <see cref="minimumAdds"/> ADD statements have succeeded and a writer has
 /// committed at least one row, so even a slow file-backed run crosses that state that many
 /// times and a slow CI runner still proves inserts land; until a row commits, the DDL
-/// pauses, and the assertion names the commonest INSERT failures. While it catches up, new
-/// inserts wait for each running ALTER: the lock manager lets compatible requests pass a
-/// waiting exclusive one, and sustained file-backed inserts can otherwise starve DDL for
-/// tens of seconds.
+/// pauses, and the assertion names the commonest INSERT failures. Writers keep arriving
+/// throughout catch-up: the lock queue must admit waiting DDL ahead of new intent writers.
+/// Each ALTER's elapsed time and each queued exclusive table-lock wait are recorded.
 /// </para>
 /// <para>
 /// The deterministic cases need no concurrency at all: a few dozen ALTER cycles of an
 /// ordinary table fill the catalog page, which is where the defect lived.
 /// </para>
 /// </remarks>
+[Collection(SqlLockWaitCollection.Name)]
 public sealed class SqlConcurrentDdlStressTests : IDisposable
 {
     private const string durationVariable = "COHESION_SQL_STRESS_SECONDS";
@@ -62,6 +64,12 @@ public sealed class SqlConcurrentDdlStressTests : IDisposable
     private const int paddingLength = 4300;
     private static readonly TimeSpan catchUpLimit = TimeSpan.FromMinutes(2);
     private readonly string _rootPath = Path.Combine(Path.GetTempPath(), "cohesion-sql-ddl-stress", Guid.NewGuid().ToString("N"));
+    private readonly ITestOutputHelper _output;
+
+    public SqlConcurrentDdlStressTests(ITestOutputHelper output)
+    {
+        _output = output;
+    }
 
     public void Dispose()
     {
@@ -106,7 +114,28 @@ public sealed class SqlConcurrentDdlStressTests : IDisposable
         int alterCycles = 0;
         int addsSucceeded = 0;
         int positiveCommits = 0;
+        int writerCommits = 0;
         var duration = StressDuration;
+        var alterTimes = new List<double>();
+        var waits = new ConcurrentBag<double>();
+        var exclusiveTables = new ConcurrentDictionary<long, int>();
+        var commitsDuringWait = new ConcurrentBag<int>();
+        using var listener = new LockWaitListener("db");
+        listener.Observed = written =>
+        {
+            var payload = written.Payload!;
+            long sequence = (long)payload[1]!;
+            if (written.EventName == "LockWaitStart" && Equals(payload[3], "Exclusive")
+                && ((string)payload[2]!).StartsWith("Object:", StringComparison.Ordinal))
+            {
+                exclusiveTables[sequence] = Volatile.Read(ref writerCommits);
+            }
+            else if (written.EventName == "LockWaitStop" && exclusiveTables.TryRemove(sequence, out int before))
+            {
+                waits.Add((double)payload[3]!);
+                commitsDuringWait.Add(Volatile.Read(ref writerCommits) - before);
+            }
+        };
 
         await using (var engine = SqlDatabaseEngine.Create("ddl-stress", NewOptions(fileBacked)))
         {
@@ -119,9 +148,9 @@ public sealed class SqlConcurrentDdlStressTests : IDisposable
                     $"CREATE TABLE t (id INT, qty INT, CONSTRAINT pad CHECK (qty >= 0 OR '{new string('p', paddingLength)}' <> ''))");
             }
 
+            using var deadline = new CancellationTokenSource(duration + catchUpLimit);
             using var stop = new CancellationTokenSource();
             var elapsed = Stopwatch.StartNew();
-            int holdWriters = 0;
 
             // Act: the #1157 reproducer — three writers and one ALTER session.
             var writers = Enumerable.Range(1, writerCount).Select(writer => Task.Run(async () =>
@@ -130,17 +159,13 @@ public sealed class SqlConcurrentDdlStressTests : IDisposable
                 await using var session = await database.CreateSessionAsync();
                 for (int i = 1; !stop.IsCancellationRequested; i++)
                 {
-                    while (Volatile.Read(ref holdWriters) != 0 && !stop.IsCancellationRequested)
-                    {
-                        await Task.Delay(1);
-                    }
-
                     // Every 50th id is negative, so a CHECK (id > 0) backfill meets rows to refuse.
                     int id = (i % 50 == 0 ? -1 : 1) * ((writer * 10_000_000) + i);
                     attempted[id] = 0;
-                    if (await TryExecuteAsync(session, $"INSERT INTO t (id, qty) VALUES ({id}, {Quantity(id)})", insertFailures))
+                    if (await TryExecuteAsync(session, $"INSERT INTO t (id, qty) VALUES ({id}, {Quantity(id)})", insertFailures, deadline.Token))
                     {
                         committed[id] = 0;
+                        Interlocked.Increment(ref writerCommits);
                         if (id > 0)
                         {
                             Interlocked.Increment(ref positiveCommits);
@@ -161,22 +186,20 @@ public sealed class SqlConcurrentDdlStressTests : IDisposable
                     var random = new Random(seed);
                     await using var session = await database.CreateSessionAsync();
 
-                    // Past its duration a case only catches up on ADDs. The lock manager
-                    // grants a compatible request even while an exclusive one waits, so a
-                    // stream of file-backed inserts can starve an ALTER for tens of
-                    // seconds; while catching up, new inserts wait for the running ALTER
-                    // the way a fair lock queue would make them, and in-flight ones finish.
+                    // No writer hold-back: catch-up exercises the same queue as steady load.
                     async Task<bool> AlterAsync(string sql, ConcurrentDictionary<string, int>? failures = null)
                     {
-                        bool catchingUp = elapsed.Elapsed >= duration;
-                        Volatile.Write(ref holdWriters, catchingUp ? 1 : 0);
+                        long started = Stopwatch.GetTimestamp();
                         try
                         {
-                            return await TryExecuteAsync(session, sql, failures);
+                            return await TryExecuteAsync(session, sql, failures, deadline.Token);
                         }
                         finally
                         {
-                            Volatile.Write(ref holdWriters, 0);
+                            if (sql.StartsWith("ALTER", StringComparison.Ordinal))
+                            {
+                                alterTimes.Add(Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+                            }
                         }
                     }
 
@@ -185,7 +208,7 @@ public sealed class SqlConcurrentDdlStressTests : IDisposable
                     // limit. On a slow CI runner two seconds of DDL churn can pass before any
                     // insert lands; past the duration the DDL pauses until one does.
                     while (elapsed.Elapsed < duration
-                        || ((Volatile.Read(ref addsSucceeded) < minimumAdds || Volatile.Read(ref positiveCommits) == 0)
+                        || ((Volatile.Read(ref addsSucceeded) < minimumAdds || Volatile.Read(ref positiveCommits) == 0 || waits.IsEmpty)
                             && elapsed.Elapsed < duration + catchUpLimit))
                     {
                         if (elapsed.Elapsed >= duration && Volatile.Read(ref positiveCommits) == 0)
@@ -234,9 +257,17 @@ public sealed class SqlConcurrentDdlStressTests : IDisposable
 
             await Task.WhenAll(writers.Append(alter));
 
+            _output.WriteLine($"{ddl}, disk={fileBacked}: {alterTimes.Count} ALTERs, max {alterTimes.Max():F3} ms; "
+                + $"{waits.Count} exclusive table waits, max {waits.DefaultIfEmpty().Max():F3} ms; {committed.Count} writer commits");
+
             // Assert: the DDL really ran — enough ADDs succeeded to fill catalog pages past
             // the old overflow point — and every committed row is intact.
             alterCycles.ShouldBeGreaterThan(0);
+            waits.ShouldNotBeEmpty("the stress must exercise queued exclusive table locks under continuous writers");
+            // Once X queues, only the three already-admitted writers can still finish.
+            // Count work that passes DDL instead of imposing a machine-dependent deadline.
+            commitsDuringWait.Max().ShouldBeLessThanOrEqualTo(writerCount,
+                "new compatible writers must queue behind DDL; only in-flight writers may finish during its wait");
             addsSucceeded.ShouldBeGreaterThanOrEqualTo(minimumAdds,
                 $"only {addsSucceeded} ADDs succeeded in {alterCycles} ALTER cycles; ADDs that every row satisfies failed with: "
                 + string.Join("; ", addFailures.OrderByDescending(failure => failure.Value).Take(3).Select(failure => $"{failure.Value}x {failure.Key}")));
@@ -468,11 +499,12 @@ public sealed class SqlConcurrentDdlStressTests : IDisposable
     /// <param name="session">The session to run the statement on.</param>
     /// <param name="sql">The statement.</param>
     /// <param name="failures">When given, counts each lost race by message.</param>
-    private static async Task<bool> TryExecuteAsync(SqlDatabaseSession session, string sql, ConcurrentDictionary<string, int>? failures = null)
+    private static async Task<bool> TryExecuteAsync(SqlDatabaseSession session, string sql, ConcurrentDictionary<string, int>? failures = null,
+        CancellationToken cancellationToken = default)
     {
         try
         {
-            var result = await session.ExecuteAsync(sql);
+            var result = await session.ExecuteAsync(sql, cancellationToken: cancellationToken);
             if (result is DatabaseResultSet set)
             {
                 await set.DisposeAsync();

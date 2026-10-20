@@ -324,6 +324,9 @@ Statement failures leave the server session ready. Model clients validate diagno
 ordering and preserve every code, severity, message, nullable offset and source line.
 
 GraphClientException copies the underlying database diagnostics carrier; GraphResultSet.Diagnostics exposes negotiated ProtocolDiagnostic values. GraphPathResult.Diagnostics exposes path completion warnings. Terminal path statement rejections before path output retain the connection after EOF; later failures discard it.
+The #1230 wire regression sends 500,000 nested label negations through QueryPathsAsync over
+InMemory and TCP, checks ExecutionFailure/COHDBG008, then queries on the same rental and rents
+again, verifying the exact server session survives both.
 
 Path completion diagnostics follow Neo4j's completion metadata model
 (community/bolt/src/main/java/org/neo4j/bolt/protocol/common/fsm/response/metadata/DefaultMetadataHandler.java:206).
