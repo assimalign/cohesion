@@ -3245,7 +3245,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
 
             int inline = Math.Min(anchor.Length, StorageHeaderPage.InlineAnchorCapacity);
             var overflow = anchor[inline..];
-            ResizeAnchorChain(target, (overflow.Length + StorageHeaderPage.AnchorPageCapacity - 1) / StorageHeaderPage.AnchorPageCapacity);
+            var retired = ResizeAnchorChain(target, (overflow.Length + StorageHeaderPage.AnchorPageCapacity - 1) / StorageHeaderPage.AnchorPageCapacity);
 
             // Read after the chain's allocations: every free that returned one of its pages to
             // the allocator appended its commit record before it did.
@@ -3328,20 +3328,33 @@ public abstract class Storage : IAsyncDisposable, IDisposable
             _sequenceFloor = sequenceFloor;
             _identityNeedsRepair &= !repair;
             Volatile.Write(ref _checkpointActives, anchor.ToArray());
+
+            // Until the target slot is durable its old chain still belongs to a valid header.
+            // Flush and non-idle shutdown do not hold the transaction lock: an early free could
+            // be allocated and committed while recovery would still exclude that page as an anchor.
+            // A failed header write deliberately leaves these pages allocated until reopen.
+            if (retired is not null)
+            {
+                foreach (long pageId in retired)
+                {
+                    FreeAnchorPage(pageId);
+                }
+            }
         }
     }
 
     /// <summary>
-    /// Sizes a slot's chain of anchor pages: frees the pages it no longer needs, then grows
-    /// it from the free-space map.
+    /// Sizes a slot's chain of anchor pages, collecting retired pages for release only after
+    /// the replacement header slot is durable, and growing it from the free-space map.
     /// </summary>
-    private unsafe void ResizeAnchorChain(int slot, int pagesNeeded)
+    private unsafe List<long>? ResizeAnchorChain(int slot, int pagesNeeded)
     {
         var chain = _anchorChains[slot];
+        List<long>? retired = null;
 
         while (chain.Count > pagesNeeded)
         {
-            FreeAnchorPage(chain[^1]);
+            (retired ??= []).Add(chain[^1]);
             chain.RemoveAt(chain.Count - 1);
         }
 
@@ -3355,9 +3368,10 @@ public abstract class Storage : IAsyncDisposable, IDisposable
             // write-back can tear its conversion from Free/Reclaimed. In particular, a write
             // whose second half lands first still has its old non-anchor header. Recovery must
             // repair it rather than exempt an arbitrary damaged free page from verification.
-            byte[] scratch = ArrayPool<byte>.Shared.Rent(PageImageCodec.MaximumRunsLength);
+            byte[]? scratch = null;
             try
             {
+                scratch = ArrayPool<byte>.Shared.Rent(PageImageCodec.MaximumRunsLength);
                 var page = allocated.Page;
                 int length = PageImageCodec.EncodeImage(new ReadOnlySpan<byte>(page.Pointer, Page.Size), scratch);
                 page.Lsn = _journal!.AppendPageRecord(0, allocated.Id, JournalRecordType.FullPageImage,
@@ -3365,11 +3379,23 @@ public abstract class Storage : IAsyncDisposable, IDisposable
                 allocated.MarkDirty();
                 chain.Add((long)allocated.Id);
             }
+            catch
+            {
+                // The initialized page never joined the chain when its repair image failed.
+                // Leave its anchor bytes intact, as for ordinary retirement, but return the id.
+                FreeAnchorPage((long)allocated.Id);
+                throw;
+            }
             finally
             {
-                ArrayPool<byte>.Shared.Return(scratch);
+                if (scratch is not null)
+                {
+                    ArrayPool<byte>.Shared.Return(scratch);
+                }
             }
         }
+
+        return retired;
     }
 
     /// <summary>

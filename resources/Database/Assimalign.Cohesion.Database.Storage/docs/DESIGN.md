@@ -1583,8 +1583,13 @@ the page a non-durable bracket freed, and power is lost before the truncation or
 tail that is not yet durable; a checkpoint with any dirty data page flushed it through the
 gate before.
 
-**Retired anchors and torn initialization (#1160, #1251).** Retirement returns a page only to
-the in-memory allocator and leaves its `CheckpointAnchor` bytes unchanged. An unjournaled
+**Retired anchors and torn initialization (#1160, #1251).** A header write collects retired
+pages and returns them to the in-memory allocator only after the target slot write and its
+data flush succeed, when that slot becomes the newest durable generation. A failed header
+write leaves them allocated until reopen. `Flush` and non-idle shutdown hold no transaction
+lock, so freeing sooner could let a concurrent transaction allocate and commit a page still
+protected as the older slot's anchor at recovery; replay would then skip committed user data.
+Retirement leaves the page's `CheckpointAnchor` bytes unchanged. An unjournaled
 conversion to `Reclaimed` could tear after the header sector and make a harmless obsolete anchor
 fail the mandatory free-page checksum check. Open preserves the complete, verified chains of
 both header slots in the allocator and excludes them from recovery replay. The newest slot's
@@ -1595,7 +1600,8 @@ including a missing checksum. Ordinary `Free` and `Reclaimed` pages still requir
 verification and are never excused merely because their bytes could resemble an anchor tear.
 
 A newly allocated anchor receives a journal full-page image of its initialized anchor header
-while still pinned. Its image LSN gates every write-back; the final chain write retains the
+while still pinned; failure before it joins the chain releases its allocation. Its image LSN
+gates every write-back; the final chain write retains the
 journal's latest LSN as before. If only the second half of a new anchor write lands, its old
 `Free` or `Reclaimed` header cannot identify it as an anchor: recovery restores this image before
 the open scan. The image cannot be truncated until the chain and its new header slot are
@@ -1603,6 +1609,10 @@ durable. Subsequent unjournaled rewrites and retirement therefore always leave a
 or a journal image that repairs the transition. `StorageAnchorReclamationTests` covers the
 acknowledged-record/two-1,200-writer-checkpoints/shrink reproduction, out-of-order writes onto
 zero and reclaimed pages, both live chains, missing anchor checksums, and torn non-anchor pages.
+`StorageAnchorDurabilityTests` forces a concurrent allocation and durable commit during a
+shrinking `Flush`, interrupts before the slot write, and verifies the record through recovery
+and a later checkpoint. It also checks release after a successful slot flush, retention after
+a failed slot flush, and allocation cleanup when the initialization image append fails.
 
 **A header write that fails after its slot write was issued takes the storage offline
 (#1268).** A failed write or fsync after the slot write leaves that slot either the previous
