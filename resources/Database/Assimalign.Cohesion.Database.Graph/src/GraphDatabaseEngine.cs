@@ -347,7 +347,7 @@ public sealed class GraphDatabaseEngine : DatabaseEngine
     /// this opens it again, with recovery over its files, in memory as on disk. An open that finds
     /// the close still running waits for it to end first. Until that decision the engine refused
     /// the reopen with <see cref="ObjectDisposedException"/> until the database was dropped.
-    /// Missing journal and backup files are recreated. Incomplete data files receive a coded
+    /// A missing journal or backup file is refused with a coded error and is never recreated. Incomplete data files receive a coded
     /// refusal with recovery instructions; a directory without its data file remains not found.
     /// </remarks>
     public new async ValueTask<GraphDatabase> OpenDatabaseAsync(DatabaseName name, CancellationToken cancellationToken = default)
