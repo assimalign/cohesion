@@ -3,7 +3,7 @@ using Assimalign.Cohesion.Database.Protocol;
 using Shouldly;
 using Xunit;
 
-namespace Assimalign.Cohesion.Database.KeyValuePair.Tests;
+namespace Assimalign.Cohesion.Database.KeyValuePair.Protocol.Tests;
 
 public class ProtocolMessageTests
 {

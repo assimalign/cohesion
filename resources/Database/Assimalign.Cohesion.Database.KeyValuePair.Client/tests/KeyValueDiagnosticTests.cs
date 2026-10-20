@@ -8,6 +8,8 @@ using Assimalign.Cohesion.Database.Client;
 using Assimalign.Cohesion.Database.KeyValuePair.Client.Internal;
 using Assimalign.Cohesion.Database.Protocol;
 
+using Assimalign.Cohesion.Database.KeyValuePair.Protocol;
+
 namespace Assimalign.Cohesion.Database.KeyValuePair.Client.Tests;
 
 public sealed class KeyValueDiagnosticTests

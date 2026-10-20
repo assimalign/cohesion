@@ -3,7 +3,7 @@ using System.Collections.Generic;
 
 using Assimalign.Cohesion.Database.Protocol;
 
-namespace Assimalign.Cohesion.Database.KeyValuePair;
+namespace Assimalign.Cohesion.Database.KeyValuePair.Protocol;
 
 /// <summary>
 /// Closes an execute exchange: how many records the statement affected

@@ -1,5 +1,10 @@
 # Assimalign.Cohesion.Database.KeyValuePair — Overview
 
+## Wire contract ownership
+
+`Assimalign.Cohesion.Database.KeyValuePair.Protocol` owns this model's wire messages, codecs, family singleton and transferred value shapes (5 public types). Both engine and remote client reference that one assembly. Its public namespace and RootNamespace equal its project name. Engine requests, planning, catalog, storage and server lifecycle stay in `Assimalign.Cohesion.Database.KeyValuePair`. This extraction preserves wire bytes and validation; moved public types intentionally change namespace and assembly identity with no forwarders.
+
+
 The key-value model engine: `KeyValueDatabaseEngine`, an ordered key space with
 point operations (get/put/delete/exists), ordered range scans, and per-entry
 etags for conditional writes — the second model engine on the shared database

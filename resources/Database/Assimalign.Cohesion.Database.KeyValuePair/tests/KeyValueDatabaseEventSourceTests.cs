@@ -18,6 +18,8 @@ using Assimalign.Cohesion.Database.KeyValuePair.Internal;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Testing;
 
+using Assimalign.Cohesion.Database.KeyValuePair.Protocol;
+
 namespace Assimalign.Cohesion.Database.KeyValuePair.Tests;
 
 /// <summary>

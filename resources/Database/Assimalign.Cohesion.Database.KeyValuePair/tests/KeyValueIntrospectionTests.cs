@@ -9,6 +9,8 @@ using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Types;
 
+using Assimalign.Cohesion.Database.KeyValuePair.Protocol;
+
 namespace Assimalign.Cohesion.Database.KeyValuePair.Tests;
 
 /// <summary>

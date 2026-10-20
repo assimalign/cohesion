@@ -3,7 +3,7 @@ using System.Collections.Generic;
 
 using Assimalign.Cohesion.Database.Protocol;
 
-namespace Assimalign.Cohesion.Database.KeyValuePair;
+namespace Assimalign.Cohesion.Database.KeyValuePair.Protocol;
 
 /// <summary>
 /// Opens a streamed result: the column names and type identifiers of the rows that

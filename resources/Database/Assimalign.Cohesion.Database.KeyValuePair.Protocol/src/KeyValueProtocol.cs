@@ -1,6 +1,6 @@
 using Assimalign.Cohesion.Database.Protocol;
 
-namespace Assimalign.Cohesion.Database.KeyValuePair;
+namespace Assimalign.Cohesion.Database.KeyValuePair.Protocol;
 
 /// <summary>The immutable KeyValuePair endpoint message family.</summary>
 public static class KeyValueProtocol

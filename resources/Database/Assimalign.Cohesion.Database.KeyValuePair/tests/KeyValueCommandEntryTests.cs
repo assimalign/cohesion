@@ -15,6 +15,8 @@ using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Types;
 using Assimalign.Cohesion.Testing;
 
+using Assimalign.Cohesion.Database.KeyValuePair.Protocol;
+
 namespace Assimalign.Cohesion.Database.KeyValuePair.Tests;
 
 [Collection(nameof(KeyValueDatabaseEventSourceCollection))]

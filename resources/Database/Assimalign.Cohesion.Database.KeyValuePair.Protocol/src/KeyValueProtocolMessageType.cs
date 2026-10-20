@@ -1,6 +1,6 @@
 using Assimalign.Cohesion.Database.Protocol;
 
-namespace Assimalign.Cohesion.Database.KeyValuePair;
+namespace Assimalign.Cohesion.Database.KeyValuePair.Protocol;
 
 /// <summary>Message identifiers owned by the KeyValuePair endpoint.</summary>
 public enum KeyValueProtocolMessageType : byte
