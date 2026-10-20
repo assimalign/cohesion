@@ -33,8 +33,8 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 [Collection(nameof(SqlWorkerResilienceTests))]
 public sealed class SqlWorkerResilienceTests
 {
-    private const string Failing = "failing";
-    private const string Healthy = "healthy";
+    private const string Failing = "sql-worker-resilience-failing";
+    private const string Healthy = "sql-worker-resilience-healthy";
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(30);
 
     [Theory(DisplayName = "Cohesion Test [Database.Sql] - Workers: failed provisional flushes reach construction without faulting the worker")]
@@ -91,7 +91,7 @@ public sealed class SqlWorkerResilienceTests
         // Act: repeat until both publication races have run, for at least a quarter second.
         do
         {
-            string name = "provisional" + creates;
+            string name = "sql-worker-resilience-provisional-" + creates;
             var database = await engine.CreateDatabaseAsync(name);
             (await Eventually(() => commits.FlushCount(name) > 0)).ShouldBeTrue();
             creates++;

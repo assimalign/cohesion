@@ -19,22 +19,32 @@ public sealed class DatabaseCorruptionTests
     [InlineData(false, 2)]
     [InlineData(false, 3)]
     [InlineData(false, 4)]
+    [InlineData(false, 5)]
+    [InlineData(false, 6)]
     [InlineData(true, 0)]
     [InlineData(true, 1)]
     [InlineData(true, 2)]
     [InlineData(true, 3)]
     [InlineData(true, 4)]
+    [InlineData(true, 5)]
+    [InlineData(true, 6)]
     public async Task CreateDatabaseAsync_Corruption_ShouldRetainCodePageAndCoreCompletion(bool deferred, int wrapper)
     {
         // Arrange
         await using var engine = new TestEngine();
         var cause = new StorageCorruptionException((PageId)9L, "Page 9 failed checksum verification.");
-        var coded = new DatabaseException("Open failed.", [new Diagnostic
-        { Code = "COHDBG018", Message = "Open failed.", Severity = DiagnosticSeverity.Error }], cause);
+        Diagnostic[] diagnostics = [new Diagnostic
+        { Code = "COHDBG018", Message = "Open failed.", Severity = DiagnosticSeverity.Error }];
+        if (wrapper >= 5)
+        {
+            diagnostics = [new Diagnostic
+            { Code = "COHDBS003", Message = "Already reported corruption.", Severity = DiagnosticSeverity.Error }, .. diagnostics];
+        }
+        var coded = new DatabaseException("Open failed.", diagnostics, cause);
         Exception error = wrapper switch
         {
-            1 => coded,
-            2 => new AggregateException(new InvalidOperationException("Cleanup failed."), coded),
+            1 or 5 => coded,
+            2 or 6 => new AggregateException(new InvalidOperationException("Cleanup failed."), coded),
             _ => cause,
         };
         if (wrapper == 3)

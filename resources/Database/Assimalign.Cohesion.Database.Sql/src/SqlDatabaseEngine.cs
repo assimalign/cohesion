@@ -867,7 +867,7 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
         {
             throw RefuseStorageFormat(name, "data", name, exception);
         }
-        catch (StorageCorruptionException)
+        catch (Exception exception) when (StorageCorruptionException.Find(exception) is not null)
         {
             return false;
         }

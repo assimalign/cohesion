@@ -1498,9 +1498,10 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
     }
 
     private static IEnumerable<Diagnostic> GetCorruptionDiagnostics(Exception error)
-        => error is AggregateException aggregate
+        => (error is AggregateException aggregate
             ? aggregate.Flatten().InnerExceptions.OfType<DatabaseException>().SelectMany(failure => failure.Diagnostics)
-            : (error as DatabaseException)?.Diagnostics ?? [];
+            : (error as DatabaseException)?.Diagnostics ?? [])
+            .Where(diagnostic => diagnostic.Code != StorageCorruptionException.ErrorCode);
 
     private void ThrowIfComposed()
     {

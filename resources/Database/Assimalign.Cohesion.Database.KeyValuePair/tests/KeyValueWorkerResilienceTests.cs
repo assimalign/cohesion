@@ -36,8 +36,8 @@ using static KeyValueTestHarness;
 [Collection(nameof(KeyValueWorkerResilienceTests))]
 public sealed class KeyValueWorkerResilienceTests
 {
-    private const string Failing = "failing";
-    private const string Healthy = "healthy";
+    private const string Failing = "kv-worker-resilience-failing";
+    private const string Healthy = "kv-worker-resilience-healthy";
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(30);
 
     [Theory(DisplayName = "Cohesion Test [Database.KeyValuePair] - Workers: failed provisional flushes reach construction without faulting the worker")]
@@ -94,7 +94,7 @@ public sealed class KeyValueWorkerResilienceTests
         // Act: repeat until both publication races have run, for at least a quarter second.
         do
         {
-            string name = "provisional" + creates;
+            string name = "kv-worker-resilience-provisional-" + creates;
             var database = await engine.CreateDatabaseAsync(name);
             (await Eventually(() => commits.FlushCount(name) > 0)).ShouldBeTrue();
             creates++;

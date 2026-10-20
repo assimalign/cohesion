@@ -3576,6 +3576,8 @@ The worker resilience tests observe Storage event 8 (PendingCommitsFlushed) for 
 and reopen and require no event 9 (GroupCommitWindowMissed). This proves the worker served
 construction without a wall-clock latency assertion. Reopen receives an unproven writer so its
 recovery scrub must commit; an unchanged clean open may require no grouped flush.
+The listener filters process-wide events by names reserved to the SQL worker resilience
+suite, including its failing, healthy and provisional databases, to prevent cross-test matches.
 
 The group-commit flusher serves both published databases and provisional file sets (#1275).
 It captures the storage snapshot before the instance snapshot, then flushes uncovered storages
@@ -5011,6 +5013,8 @@ PostgreSQL's heap fetch returns "not found" for a dead line pointer and raises
 `ERRCODE_DATA_CORRUPTED` for an invalid page. Corruption is translated to `DatabaseCorruptionException` (`COHDBS003`), naming the
 database and page, and reaches the wire as `ExecutionFailure` without closing the session.
 Other I/O failures retain their existing handling.
+The read-only creation emptiness probe uses the same wrapped-corruption search before its
+I/O catch, so direct, coded and aggregate corruption all refuse adoption of incomplete files.
 The scan had the opposite defect: the version purge deleting a slot, or freeing
 a page, while a statement scanned the table (an `UPDATE` or `DELETE` target scan,
 a `SELECT` without a seek) failed the statement with "Cannot read a deleted

@@ -343,6 +343,36 @@ public sealed class SqlCreateRecoveryTests
         recovered.Catalog.RecordSpaceFormatVersion.ShouldBe(SqlRowCodec.RecordSpaceFormatVersion);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Database.Sql] - Creation probe: wrapped corruption refuses adoption consistently")]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    public async Task OpenDatabaseAsync_DataProbeCorruptionWrapped_ShouldRefuseIncompleteCreation(int wrapper)
+    {
+        // Arrange
+        var image = await CaptureCreationAsync(3);
+        var corruption = new Assimalign.Cohesion.Database.Storage.StorageCorruptionException((Assimalign.Cohesion.Database.Storage.PageId)1L, "Damaged data probe.");
+        image.DataProbeFailure = wrapper switch
+        {
+            1 => new DatabaseException("Coded probe failure.", corruption),
+            2 => new AggregateException(new InvalidOperationException("Cleanup failed."), corruption),
+            3 => new IOException("Read failed.", corruption),
+            _ => corruption,
+        };
+        await using var engine = SqlDatabaseEngine.Create("corrupt-probe", new() { StorageStrategy = image });
+
+        // Act
+        var refusal = await Should.ThrowAsync<SqlDataStorageFormatException>(() => engine.OpenDatabaseAsync("sales", CancellationToken.None).AsTask());
+        image.DataProbeFailure = null;
+        var recovered = await engine.OpenDatabaseAsync("sales", CancellationToken.None);
+
+        // Assert
+        refusal.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLC001");
+        refusal.Message.ShouldContain("restore the complete database", Case.Sensitive);
+        recovered.Catalog.RecordSpaceFormatVersion.ShouldBe(SqlRowCodec.RecordSpaceFormatVersion);
+    }
+
     private static async Task<CrashCaptureSqlStorageStrategy> CaptureCreationAsync(int step, Collation? collation = null)
     {
         var strategy = new CrashCaptureSqlStorageStrategy();

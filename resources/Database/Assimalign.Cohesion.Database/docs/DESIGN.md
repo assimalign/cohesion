@@ -19,6 +19,8 @@ outer `COHDBS003`; Graph, Documents and Blob also carry their unrecoverable-file
 (`COHDBG018`, `COHDBD003` and `COHDBB004` respectively). The original storage exception remains
 the inner cause, preserving its page context. Graph abort messages prefix a cause's code only
 when the message does not already contain that prefix.
+Lifecycle translation removes an existing `COHDBS003` from the carried diagnostics before
+adding the common corruption diagnostic, so coded and aggregate wrappers report it once.
 
 Lifecycle integrity translation preserves synchronous core throws and returns successful
 completed value tasks unchanged. Only a pending or faulted operation uses the async
