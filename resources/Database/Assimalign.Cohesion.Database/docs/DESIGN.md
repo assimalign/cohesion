@@ -459,6 +459,14 @@ carried: `DatabaseEngine` and `DatabaseInstance` are `IAsyncDisposable` and `IDi
   and PostgreSQL from one checkpointer per cluster and WAL
   (`src/backend/postmaster/checkpointer.c:5`). The page write-back, flush and purge
   workers still visit their databases on their own thread (follow-up).
+- **Collecting a deferred checkpoint rechecks due work in the same pass (#1283).** A lane
+  that ended without finishing no longer consumes a size wake and leaves the due journal until
+  the next poll: after settling it, the worker checks the backoff and due state, and attempts at
+  most one new checkpoint. Failures still return for their retry delay, cancellation and shutdown
+  retain their lane ownership, and busy storage still waits for the next pass. Unfinished work
+  is reported once per database per pass. This closes the consumed-wake gap; the observed 544 MB
+  growth remains unattributed, and #1283 stays open while outside-gate storage brackets and
+  checkpoint flush duration are investigated.
 - **A failure that persists takes its database offline (owner decision 25 of 2026-10-06).**
   Until the decision a page write the checkpoint could never make was retried every second
   for as long as the process ran, its database's journal grew until the fault cleared or the
