@@ -1,7 +1,7 @@
 using System;
 using Assimalign.Cohesion.Database.Protocol;
 
-namespace Assimalign.Cohesion.Database.Blob;
+namespace Assimalign.Cohesion.Database.Blob.Protocol;
 
 /// <summary>Completes a metadata operation with a nonnegative result count.</summary>
 /// <param name="Count">Zero or one for delete/property read, or the number of listed objects.</param>

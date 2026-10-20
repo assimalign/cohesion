@@ -3,6 +3,7 @@
 		<RootNamespace>Assimalign.Cohesion.Database.Blob</RootNamespace>
 	</PropertyGroup>
 	<ItemGroup>
+        <CohesionProjectReference Include="Assimalign.Cohesion.Database.Blob.Protocol" />
 		<CohesionSharedSource Include="Assimalign.Cohesion.Database" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections" />

@@ -1,9 +1,9 @@
 using System;
 using System.Collections.Generic;
-using Assimalign.Cohesion.Database.Blob.Internal;
+using Assimalign.Cohesion.Database.Blob.Protocol.Internal;
 using Assimalign.Cohesion.Database.Protocol;
 
-namespace Assimalign.Cohesion.Database.Blob;
+namespace Assimalign.Cohesion.Database.Blob.Protocol;
 
 /// <summary>Requests an ordinal prefix listing in the handshake-selected database.</summary>
 /// <param name="Container">The ordinal, case-sensitive container name.</param>

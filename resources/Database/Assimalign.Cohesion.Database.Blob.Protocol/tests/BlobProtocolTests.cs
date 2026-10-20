@@ -8,7 +8,7 @@ using Assimalign.Cohesion.Database.Protocol;
 using Shouldly;
 using Xunit;
 
-namespace Assimalign.Cohesion.Database.Blob.Tests;
+namespace Assimalign.Cohesion.Database.Blob.Protocol.Tests;
 
 public sealed class BlobProtocolTests
 {

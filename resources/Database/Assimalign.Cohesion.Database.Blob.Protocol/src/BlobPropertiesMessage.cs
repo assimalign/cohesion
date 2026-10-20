@@ -1,10 +1,10 @@
 using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
-using Assimalign.Cohesion.Database.Blob.Internal;
+using Assimalign.Cohesion.Database.Blob.Protocol.Internal;
 using Assimalign.Cohesion.Database.Protocol;
 
-namespace Assimalign.Cohesion.Database.Blob;
+namespace Assimalign.Cohesion.Database.Blob.Protocol;
 
 /// <summary>Carries one object's complete catalog properties.</summary>
 /// <param name="Properties">The object's properties, with timestamps normalized to UTC.</param>

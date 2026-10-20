@@ -1,9 +1,9 @@
 using System;
 using System.Buffers.Binary;
-using Assimalign.Cohesion.Database.Blob.Internal;
+using Assimalign.Cohesion.Database.Blob.Protocol.Internal;
 using Assimalign.Cohesion.Database.Protocol;
 
-namespace Assimalign.Cohesion.Database.Blob;
+namespace Assimalign.Cohesion.Database.Blob.Protocol;
 
 /// <summary>Ends a transfer with the actual byte count, or acknowledges a published upload.</summary>
 /// <param name="Length">The actual number of content bytes transferred.</param>

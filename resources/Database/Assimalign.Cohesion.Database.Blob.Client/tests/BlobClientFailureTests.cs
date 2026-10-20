@@ -9,6 +9,8 @@ using Assimalign.Cohesion.Database.Protocol;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Database.Blob.Protocol;
+
 namespace Assimalign.Cohesion.Database.Blob.Client.Tests;
 
 /// <summary>Peer failures after content has crossed the wire must remain visible to callers.</summary>

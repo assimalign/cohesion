@@ -1,9 +1,9 @@
 using System;
 using System.Collections.Generic;
-using Assimalign.Cohesion.Database.Blob.Internal;
+using Assimalign.Cohesion.Database.Blob.Protocol.Internal;
 using Assimalign.Cohesion.Database.Protocol;
 
-namespace Assimalign.Cohesion.Database.Blob;
+namespace Assimalign.Cohesion.Database.Blob.Protocol;
 
 /// <summary>Begins an upload or download without requiring a known content length.</summary>
 /// <param name="Length">The expected byte count, or -1 when unknown until completion.</param>

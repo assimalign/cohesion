@@ -1,17 +1,16 @@
 using System;
 using System.Collections.Generic;
-using Assimalign.Cohesion.Database.Blob.Internal;
+using Assimalign.Cohesion.Database.Blob.Protocol.Internal;
 using Assimalign.Cohesion.Database.Protocol;
 
-namespace Assimalign.Cohesion.Database.Blob;
+namespace Assimalign.Cohesion.Database.Blob.Protocol;
 
-/// <summary>Requests an upload to a container in the handshake-selected database.</summary>
+/// <summary>Requests a download from a container in the handshake-selected database.</summary>
 /// <param name="Container">The ordinal, case-sensitive container name.</param>
 /// <param name="Name">The ordinal, case-sensitive object name.</param>
-/// <param name="Overwrite">Whether an existing object may be replaced.</param>
-public sealed record BlobWriteMessage(string Container, string Name, bool Overwrite = true)
+public sealed record BlobReadMessage(string Container, string Name)
 {
-    /// <summary>Encodes a Blob Write payload.</summary>
+    /// <summary>Encodes a Blob Read payload.</summary>
     /// <returns>The payload bytes.</returns>
     /// <exception cref="ProtocolException">A name is empty, null, oversized, or invalid Unicode.</exception>
     public byte[] Encode()
@@ -19,23 +18,19 @@ public sealed record BlobWriteMessage(string Container, string Name, bool Overwr
         var buffer = new List<byte>();
         BlobProtocolPayload.WriteString(buffer, Container, allowEmpty: false);
         BlobProtocolPayload.WriteString(buffer, Name, allowEmpty: false);
-        buffer.Add(Overwrite ? (byte)1 : (byte)0);
         return buffer.ToArray();
     }
 
-    /// <summary>Decodes a Blob Write payload.</summary>
+    /// <summary>Decodes a Blob Read payload.</summary>
     /// <param name="payload">The complete frame payload.</param>
-    /// <returns>The upload request.</returns>
+    /// <returns>The requested object identity.</returns>
     /// <exception cref="ProtocolException">The payload is malformed.</exception>
-    public static BlobWriteMessage Decode(ReadOnlySpan<byte> payload)
+    public static BlobReadMessage Decode(ReadOnlySpan<byte> payload)
     {
         int position = 0;
         string container = BlobProtocolPayload.ReadString(payload, ref position, allowEmpty: false);
         string name = BlobProtocolPayload.ReadString(payload, ref position, allowEmpty: false);
-        if (payload.Length - position != 1 || payload[position] > 1)
-        {
-            throw new ProtocolException("Malformed Blob Write overwrite flag.");
-        }
-        return new(container, name, payload[position] == 1);
+        BlobProtocolPayload.RequireEnd(payload, position);
+        return new(container, name);
     }
 }

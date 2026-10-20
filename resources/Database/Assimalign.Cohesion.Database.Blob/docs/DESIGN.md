@@ -1,5 +1,10 @@
 # Blob engine design
 
+## Wire contract ownership
+
+`Assimalign.Cohesion.Database.Blob.Protocol` owns this model's wire messages, codecs, family singleton and transferred value shapes (15 public types). Both engine and remote client reference that one assembly. Its public namespace and RootNamespace equal its project name. Engine requests, planning, catalog, storage and server lifecycle stay in `Assimalign.Cohesion.Database.Blob`. This extraction preserves wire bytes and validation; moved public types intentionally change namespace and assembly identity with no forwarders.
+
+
 ## Model component boundaries
 
 Catalog, Storage and the empty Security satellite projects are consolidated into Assimalign.Cohesion.Database.Blob. Public Catalog and Storage types keep their existing namespaces and live under src/Catalog and src/Storage; their assembly identity is now Assimalign.Cohesion.Database.Blob. Internal component types live under src/Internal/Catalog and src/Internal/Storage and declare Assimalign.Cohesion.Database.Blob.Internal.

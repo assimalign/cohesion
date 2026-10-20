@@ -1,6 +1,6 @@
 using Assimalign.Cohesion.Database.Protocol;
 
-namespace Assimalign.Cohesion.Database.Blob;
+namespace Assimalign.Cohesion.Database.Blob.Protocol;
 
 /// <summary>Defines the Blob message family and its bounded content payload size.</summary>
 public static class BlobProtocol

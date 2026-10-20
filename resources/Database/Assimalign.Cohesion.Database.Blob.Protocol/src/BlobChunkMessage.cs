@@ -1,7 +1,7 @@
 using System;
 using Assimalign.Cohesion.Database.Protocol;
 
-namespace Assimalign.Cohesion.Database.Blob;
+namespace Assimalign.Cohesion.Database.Blob.Protocol;
 
 /// <summary>A nonempty content chunk, retaining its caller-owned buffer without copying.</summary>
 /// <param name="Content">The bytes, whose lifetime must cover the awaited frame write.</param>

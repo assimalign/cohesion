@@ -1,4 +1,4 @@
-namespace Assimalign.Cohesion.Database.Blob;
+namespace Assimalign.Cohesion.Database.Blob.Protocol;
 
 /// <summary>Message identifiers scoped to a Blob endpoint after the shared handshake.</summary>
 public enum BlobProtocolMessageType : byte

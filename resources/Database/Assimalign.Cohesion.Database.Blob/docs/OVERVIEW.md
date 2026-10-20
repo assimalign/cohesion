@@ -1,5 +1,10 @@
 # Blob database engine
 
+## Wire contract ownership
+
+`Assimalign.Cohesion.Database.Blob.Protocol` owns this model's wire messages, codecs, family singleton and transferred value shapes (15 public types). Both engine and remote client reference that one assembly. Its public namespace and RootNamespace equal its project name. Engine requests, planning, catalog, storage and server lifecycle stay in `Assimalign.Cohesion.Database.Blob`. This extraction preserves wire bytes and validation; moved public types intentionally change namespace and assembly identity with no forwarders.
+
+
 `Assimalign.Cohesion.Database.Blob` implements named databases, containers, and streamed
 objects. Create an engine with `BlobDatabaseEngine.Create(name, options)`; a null `RootPath` selects memory,
 and a path selects durable files. `AddBlob(name, engine => ...)` captures

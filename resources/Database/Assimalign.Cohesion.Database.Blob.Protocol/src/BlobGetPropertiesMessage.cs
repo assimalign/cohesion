@@ -1,7 +1,7 @@
 using System;
 using Assimalign.Cohesion.Database.Protocol;
 
-namespace Assimalign.Cohesion.Database.Blob;
+namespace Assimalign.Cohesion.Database.Blob.Protocol;
 
 /// <summary>Requests object properties in the handshake-selected database.</summary>
 /// <param name="Container">The ordinal, case-sensitive container name.</param>

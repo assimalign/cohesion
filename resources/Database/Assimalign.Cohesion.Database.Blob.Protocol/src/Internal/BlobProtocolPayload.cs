@@ -4,7 +4,7 @@ using System.Collections.Generic;
 using System.Text;
 using Assimalign.Cohesion.Database.Protocol;
 
-namespace Assimalign.Cohesion.Database.Blob.Internal;
+namespace Assimalign.Cohesion.Database.Blob.Protocol.Internal;
 
 internal static class BlobProtocolPayload
 {

@@ -4,7 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Assimalign.Cohesion.Database.Protocol;
 
-namespace Assimalign.Cohesion.Database.Blob;
+namespace Assimalign.Cohesion.Database.Blob.Protocol;
 
 /// <summary>Transfers Blob content between caller-owned streams and a Blob protocol channel.</summary>
 /// <remarks>

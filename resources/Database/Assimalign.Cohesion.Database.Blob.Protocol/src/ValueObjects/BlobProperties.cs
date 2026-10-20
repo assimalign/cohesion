@@ -1,6 +1,6 @@
 using System;
 
-namespace Assimalign.Cohesion.Database.Blob;
+namespace Assimalign.Cohesion.Database.Blob.Protocol;
 
 /// <summary>
 /// The catalog metadata of a stored blob.

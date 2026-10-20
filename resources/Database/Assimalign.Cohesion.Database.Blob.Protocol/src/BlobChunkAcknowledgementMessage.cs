@@ -1,7 +1,7 @@
 using System;
 using Assimalign.Cohesion.Database.Protocol;
 
-namespace Assimalign.Cohesion.Database.Blob;
+namespace Assimalign.Cohesion.Database.Blob.Protocol;
 
 /// <summary>Acknowledges one chunk after the receiver has written it to its destination.</summary>
 /// <param name="Length">The cumulative number of accepted content bytes.</param>

@@ -7,6 +7,8 @@ using System.Threading.Tasks;
 using Assimalign.Cohesion.Connections.InMemory;
 using Assimalign.Cohesion.Database.Client;
 
+using Assimalign.Cohesion.Database.Blob.Protocol;
+
 namespace Assimalign.Cohesion.Database.Blob.Client.StreamingFixture;
 
 internal static class Program
