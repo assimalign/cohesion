@@ -4883,6 +4883,8 @@ callbacks run outside it. A successful tree is published after checking the prod
 An attempt that throws or is canceled publishes nothing, and a remaining or later caller retries
 with its own token. Ordinary folding faults still retain the call for evaluation under the
 existing deferral rule; they are a successful binding, not a cached compilation exception.
+Concurrency tests observe managed-wait entry through a test-only synchronization context and
+callback entry through a completion source; timeouts only bound a missing signal or completion.
 
 Definition refresh first resolves and validates immutable metadata without executing callbacks,
 then publishes that environment and its empty table cache together. Open and definition DDL
