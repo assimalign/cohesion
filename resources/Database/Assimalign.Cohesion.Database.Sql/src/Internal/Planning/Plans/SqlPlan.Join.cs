@@ -21,6 +21,12 @@ internal sealed record SqlJoinPlan(
     bool IsDistinct,
     IReadOnlyDictionary<SqlExpression, int>? OrderByProjections = null) : SqlRelationPlan
 {
+    /// <summary>Restrictions evaluated before this binding contributes a candidate pair.</summary>
+    internal IReadOnlyList<SqlJoinInput> Inputs { get; init; } = [];
+
+    /// <summary>The driving input of the first pair, independent of runtime index attachment.</summary>
+    internal int FirstBinding { get; init; }
+
     internal override IReadOnlyList<SqlProjection> OutputProjections => Projections;
     internal override IReadOnlyList<SqlCatalogColumn> OutputColumns => Columns;
     internal override IReadOnlyList<SqlRelationBinding>? OutputBindings => Bindings;

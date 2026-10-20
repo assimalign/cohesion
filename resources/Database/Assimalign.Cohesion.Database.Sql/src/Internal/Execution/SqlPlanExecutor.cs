@@ -1385,9 +1385,7 @@ internal sealed partial class SqlPlanExecutor
         SqlStatementContext statement,
         CancellationToken cancellationToken)
     {
-        if (access is SqlIndexSeekPath seek &&
-            _indexManager.TryGetIndex(table.ObjectId, seek.Index.Name, out var index) &&
-            _catalog.TryGetIndex(table.ObjectId, seek.Index.Name, out var current) && ReferenceEquals(current, seek.Index))
+        if (access is SqlIndexSeekPath seek && TryResolveSeekTree(table, seek.Index, out var index))
         {
             // DML's IX object lock stabilizes these lookups against DDL's X lock.
             // SELECT takes no object lock: DROP removes catalog metadata before detaching
@@ -1400,6 +1398,11 @@ internal sealed partial class SqlPlanExecutor
         statement.Metrics.AccessPath = "scan";
         return Scan(table, statement, cancellationToken);
     }
+
+    /// <summary>Never applies a planned key shape to a detached or same-name replacement tree.</summary>
+    private bool TryResolveSeekTree(SqlCatalogTable table, SqlCatalogIndex planned, out BTreeIndex index)
+        => _indexManager.TryGetIndex(table.ObjectId, planned.Name, out index!) &&
+            _catalog.TryGetIndex(table.ObjectId, planned.Name, out var current) && ReferenceEquals(current, planned);
 
     /// <summary>
     /// Drives an index seek: materializes the visible entries in the seek's key
