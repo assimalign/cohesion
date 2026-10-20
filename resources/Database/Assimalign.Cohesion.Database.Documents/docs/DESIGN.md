@@ -1189,6 +1189,19 @@ the database: "Database 'x' cannot be opened. COHDBS001: …", the storage's
 acknowledge commits only after the journal is durable. Memory-backed databases
 use the identical storage/transaction implementation over in-memory streams.
 
+### Interrupted creation (#1421)
+
+An initialized data file opens with OpenOrCreate for its journal and backup, completing
+creation interrupted before either sidecar existed. Declared provisioning uses this same
+open path. Create refuses an existing incomplete file set with COHDBD003 in
+DatabaseException.Diagnostics and an OpenDatabaseAsync recovery instruction. A leftover
+directory without a data file retains DatabaseNotFoundException on open, with COHDBD003
+and a drop/recreate remedy; create and declared provisioning return the structured error.
+A truncated data file receives the same coded refusal before any sidecar is created.
+Ambiguous files are preserved for diagnosis instead of silently erased. Storage's own
+format refusal still handles an initialized header in an unsupported format. This changes
+file opening and error reporting, not record encoding or the model format.
+
 ## Storage operations (#1243, #1254, #1226)
 
 **A failed fsync takes the database offline (#1243).** When a durable flush of the

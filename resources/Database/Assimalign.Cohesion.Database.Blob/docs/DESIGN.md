@@ -182,6 +182,19 @@ read, and the engine names the database: "Database 'x' cannot be opened. COHDBS0
 storage's `StorageFormatException` as its inner exception, the files byte-identical
 (`BlobEngineTests`).
 
+### Interrupted creation (#1421)
+
+An initialized data file opens with OpenOrCreate for its journal and backup, completing
+creation interrupted before either sidecar existed. Declared provisioning uses this same
+open path. Create refuses an existing incomplete file set with COHDBB004 in
+DatabaseException.Diagnostics and an OpenDatabaseAsync recovery instruction. A leftover
+directory without a data file retains DatabaseNotFoundException on open, with COHDBB004
+and a drop/recreate remedy; create and declared provisioning return the structured error.
+A truncated data file receives the same coded refusal before any sidecar is created.
+Ambiguous files are preserved for diagnosis instead of silently erased. Storage's own
+format refusal still handles an initialized header in an unsupported format. This changes
+file opening and error reporting, not record encoding or the model format.
+
 ## Chunk chain and disk compatibility
 
 A visible catalog metadata version references the head of an immutable content chain. Each

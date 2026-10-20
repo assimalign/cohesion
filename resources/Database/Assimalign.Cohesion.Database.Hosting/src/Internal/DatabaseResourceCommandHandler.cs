@@ -14,7 +14,7 @@ namespace Assimalign.Cohesion.Database.Hosting.Internal;
 internal sealed class DatabaseResourceCommandHandler : IResourceCommandHandler
 {
     private readonly IDatabaseApplicationContext _context;
-    private readonly Dictionary<string, DatabaseEngine> _createdDatabases = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, DatabaseEngine> _createdDatabases = new(StringComparer.OrdinalIgnoreCase);
 
     internal DatabaseResourceCommandHandler(string kind, IDatabaseApplicationContext context)
     {
@@ -64,7 +64,7 @@ internal sealed class DatabaseResourceCommandHandler : IResourceCommandHandler
         }
         string expectedKey = payload.TryGetProperty("engine", out JsonElement engineName) && engineName.ValueKind is not JsonValueKind.Null
             ? Required(payload, "engine") + "/" + database : database;
-        if (command.Key != expectedKey)
+        if (!string.Equals(command.Key, expectedKey, StringComparison.OrdinalIgnoreCase))
         {
             throw new ResourceCommandRejectedException($"database.add-database key '{command.Key}' must match database key '{expectedKey}'.");
         }

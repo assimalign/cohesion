@@ -14,6 +14,7 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Database.Client;
+using Assimalign.Cohesion.Database.Hosting.Internal;
 using Assimalign.Cohesion.Database.Sql;
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Storage;
@@ -28,6 +29,31 @@ namespace Assimalign.Cohesion.Database.Hosting.Tests;
 
 public sealed class ResourceCommandHostingTests
 {
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Commands: case variants share command ownership and key validation (#1421)")]
+    public async Task ExecuteAsync_CaseVariantKey_ShouldRetainOwnershipAndDelete()
+    {
+        // Arrange
+        var builder = DatabaseApplication.CreateBuilder();
+        builder.AddSql("commands", _ => { });
+        await using var application = builder.Build();
+        var handler = new DatabaseResourceCommandHandler("database.add-database", application.Context);
+        var first = new RuntimeCommand("first", handler.Kind, "appa", "COMMANDS/Sales",
+            Encoding.UTF8.GetBytes("""{"database":"sales","engine":"commands"}"""));
+        var replay = new RuntimeCommand("replay", handler.Kind, "appa", "commands/SALES",
+            Encoding.UTF8.GetBytes("""{"database":"SALES","engine":"commands"}"""));
+
+        // Act
+        await handler.ExecuteAsync(first, CancellationToken.None);
+        await handler.ExecuteAsync(replay, CancellationToken.None);
+
+        // Assert: another spelling is the same ownership, and deletion clears that ownership.
+        application.Context.Engines[0].TryGetDatabase("sales", out _).ShouldBeTrue();
+        await handler.DeleteAsync(replay, CancellationToken.None);
+        application.Context.Engines[0].TryGetDatabase("sales", out _).ShouldBeFalse();
+        await handler.ExecuteAsync(first, CancellationToken.None);
+        application.Context.Engines[0].TryGetDatabase("sales", out _).ShouldBeTrue();
+    }
+
     [Theory(DisplayName = "Cohesion Test [Database.Hosting] - Commands: add-database completes an interrupted SQL create (#1158)")]
     [InlineData(0)]
     [InlineData(1)]

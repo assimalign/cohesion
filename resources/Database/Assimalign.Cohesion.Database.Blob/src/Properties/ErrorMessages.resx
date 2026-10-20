@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
+  <data name="DatabaseFilesAbsent" xml:space="preserve"><value>{0}: {1}</value></data>
+  <data name="DatabaseFilesIncomplete" xml:space="preserve"><value>Database '{0}' has incomplete files after an interrupted create or drop. Call OpenDatabaseAsync to recover an initialized data file with a missing journal or backup. If its directory is present without a database in it, or its data file is incomplete, preserve the files for diagnosis, call DropDatabaseAsync and create the database again.</value></data>
+</root>

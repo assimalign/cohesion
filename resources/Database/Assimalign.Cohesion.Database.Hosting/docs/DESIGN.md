@@ -81,6 +81,13 @@ A factory transfers a fresh product, and cleans up partial allocations if it thr
 
 Additional services start in registration order, then servers; shutdown drains servers first and stops services in reverse.
 
+## Command identity (#1421)
+
+The add-database handler validates command keys and tracks the databases it created with
+OrdinalIgnoreCase, matching DatabaseName identity. Replaying or deleting the declaration
+under a different case retains the same ownership; it cannot claim an unrelated existing
+database. The handshake policy for invalid database names is unchanged.
+
 ## Provisioning (B1 of the engine extensibility design)
 
 SQL completes an interrupted empty creation during its engine build and through the
